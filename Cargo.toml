@@ -9,45 +9,46 @@
 [workspace]
 resolver = "2"
 members = [
-    # ── core framework ────────────────────────────────────────────────
-    "architect",
-    "atom",
-    "form",
-    "permissions",
-    "permissions/proto",
+    # ── the umbrella crate ────────────────────────────────────────────
+    "crates/architect",
+    # ── core features ─────────────────────────────────────────────────
+    "features/atom",
+    "features/form",
+    "features/permissions",
+    "features/permissions/proto",
     # ── proc-macros ───────────────────────────────────────────────────
-    "macros/architect-derive",
-    "macros/architect-rpc-derive",
-    "macros/architect-action-derive",
+    "features/macros/architect-derive",
+    "features/macros/architect-rpc-derive",
+    "features/macros/architect-action-derive",
     # ── auth ──────────────────────────────────────────────────────────
-    "auth/architect-auth",
-    "auth/auth",
-    "auth/auth-proto",
-    "auth/auth-db",
-    "auth/auth-client",
-    "auth/tests/native",
+    "features/auth/architect-auth",
+    "features/auth/auth",
+    "features/auth/auth-proto",
+    "features/auth/auth-db",
+    "features/auth/auth-client",
+    "features/auth/tests/native",
     # ── crdt ──────────────────────────────────────────────────────────
-    "crdt/crdt",
-    "crdt/crdt-derive",
-    "crdt/crdt-seaorm",
+    "features/crdt/crdt",
+    "features/crdt/crdt-derive",
+    "features/crdt/crdt-seaorm",
     # ── ui ────────────────────────────────────────────────────────────
-    "ui/architect-ui",
-    "ui/showcase",
-    "ui/ui-snapshot",
+    "features/ui/architect-ui",
+    "features/ui/showcase",
+    "features/ui/ui-snapshot",
     # ── story (component workbench) ───────────────────────────────────
-    "story/architect-story-core",
-    "story/architect-story-macros",
-    "story/architect-story-runtime",
-    "story/architect-story-shell",
-    "story/architect-story-snapshots",
-    "story/architect-story-parity",
-    "story/architect-story-fuzz",
+    "features/story/architect-story-core",
+    "features/story/architect-story-macros",
+    "features/story/architect-story-runtime",
+    "features/story/architect-story-shell",
+    "features/story/architect-story-snapshots",
+    "features/story/architect-story-parity",
+    "features/story/architect-story-fuzz",
     # ── telemetry ─────────────────────────────────────────────────────
-    "telemetry",
+    "features/telemetry",
     # ── launcher ──────────────────────────────────────────────────────
-    "launcher/architect-launcher-core",
-    "launcher/architect-launcher-ui",
-    "launcher/architect-launcher-providers",
+    "features/launcher/architect-launcher-core",
+    "features/launcher/architect-launcher-ui",
+    "features/launcher/architect-launcher-providers",
 ]
 
 [workspace.package]
@@ -60,44 +61,44 @@ repository = "https://github.com/FastTrackStudios/architect"
 
 [workspace.dependencies]
 # ── Internal — every crate in this repo, path declared ONCE ───────────
-architect = { path = "architect" }
-architect-atom = { path = "atom" }
-architect-form = { path = "form" }
-architect-permissions = { path = "permissions" }
-architect-permissions-proto = { path = "permissions/proto" }
-architect-derive = { path = "macros/architect-derive" }
-architect-rpc-derive = { path = "macros/architect-rpc-derive" }
-architect-action-derive = { path = "macros/architect-action-derive" }
-architect-auth = { path = "auth/architect-auth" }
-auth = { path = "auth/auth" }
-auth-proto = { path = "auth/auth-proto" }
-auth-db = { path = "auth/auth-db" }
-auth-client = { path = "auth/auth-client" }
-crdt = { path = "crdt/crdt" }
-crdt-derive = { path = "crdt/crdt-derive" }
-crdt-seaorm = { path = "crdt/crdt-seaorm" }
+architect = { path = "crates/architect" }
+architect-atom = { path = "features/atom" }
+architect-form = { path = "features/form" }
+architect-permissions = { path = "features/permissions" }
+architect-permissions-proto = { path = "features/permissions/proto" }
+architect-derive = { path = "features/macros/architect-derive" }
+architect-rpc-derive = { path = "features/macros/architect-rpc-derive" }
+architect-action-derive = { path = "features/macros/architect-action-derive" }
+architect-auth = { path = "features/auth/architect-auth" }
+auth = { path = "features/auth/auth" }
+auth-proto = { path = "features/auth/auth-proto" }
+auth-db = { path = "features/auth/auth-db" }
+auth-client = { path = "features/auth/auth-client" }
+crdt = { path = "features/crdt/crdt" }
+crdt-derive = { path = "features/crdt/crdt-derive" }
+crdt-seaorm = { path = "features/crdt/crdt-seaorm" }
 # Renamed on extraction (member manifests + their consumers renamed to
 # match): fts-ui → architect-ui, fts-story-* → architect-story-*,
 # task-telemetry → architect-telemetry.
-architect-ui = { path = "ui/architect-ui" }
-architect-telemetry = { path = "telemetry" }
-architect-ui-showcase = { path = "ui/showcase" }
-ui-snapshot = { path = "ui/ui-snapshot" }
+architect-ui = { path = "features/ui/architect-ui" }
+architect-telemetry = { path = "features/telemetry" }
+architect-ui-showcase = { path = "features/ui/showcase" }
+ui-snapshot = { path = "features/ui/ui-snapshot" }
 # story — the component workbench (stories, snapshots, parity, fuzz).
-architect-story-core = { path = "story/architect-story-core" }
-architect-story-macros = { path = "story/architect-story-macros" }
-architect-story-runtime = { path = "story/architect-story-runtime" }
-architect-story-shell = { path = "story/architect-story-shell" }
-architect-story-snapshots = { path = "story/architect-story-snapshots" }
-architect-story-parity = { path = "story/architect-story-parity" }
-architect-story-fuzz = { path = "story/architect-story-fuzz" }
+architect-story-core = { path = "features/story/architect-story-core" }
+architect-story-macros = { path = "features/story/architect-story-macros" }
+architect-story-runtime = { path = "features/story/architect-story-runtime" }
+architect-story-shell = { path = "features/story/architect-story-shell" }
+architect-story-snapshots = { path = "features/story/architect-story-snapshots" }
+architect-story-parity = { path = "features/story/architect-story-parity" }
+architect-story-fuzz = { path = "features/story/architect-story-fuzz" }
 # launcher — the app launcher (core engine, providers, dioxus UI).
 # Renamed on vendoring: launcher-core → architect-launcher-core,
 # launcher-ui → architect-launcher-ui, providers →
 # architect-launcher-providers.
-architect-launcher-core = { path = "launcher/architect-launcher-core" }
-architect-launcher-ui = { path = "launcher/architect-launcher-ui" }
-architect-launcher-providers = { path = "launcher/architect-launcher-providers" }
+architect-launcher-core = { path = "features/launcher/architect-launcher-core" }
+architect-launcher-ui = { path = "features/launcher/architect-launcher-ui" }
+architect-launcher-providers = { path = "features/launcher/architect-launcher-providers" }
 
 # ── Facet reflection + vox RPC — the rc.5 fleet pins ──────────────────
 facet = { version = "0.50.0-rc.5", features = ["reflect", "chrono", "uuid"] }
@@ -147,13 +148,13 @@ nucleo-matcher = "0.3"
 palette = "0.7.6"
 linkme = "0.3"
 
-# ── Plugin framework (ui/fts-plug-ui) ─────────────────────────────────
+# ── Plugin framework (features/ui) ────────────────────────────────────
 # The ONE sanctioned non-path exception in the monorepo; carried verbatim.
 nice-plug = { git = "https://github.com/FastTrackStudios/nice-plug.git", branch = "fts-baseview-03" }
 nice-plug-dioxus = { git = "https://github.com/FastTrackStudios/nice-plug.git", branch = "fts-baseview-03" }
 atomic_float = "1.1"
 
-# ── Rendering / snapshot gate (ui/ui-snapshot) ────────────────────────
+# ── Rendering / snapshot gate (features/ui/ui-snapshot) ───────────────
 anyrender_vello_cpu = "0.14"
 peniko = "0.6"
 kurbo = "0.13"

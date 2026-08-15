@@ -42,7 +42,7 @@ fn tailwind_css() -> &'static str {
     SHEET.get_or_init(|| {
         let path = concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../../apps/task/desktop/assets/tailwind.css"
+            "/../../../../apps/task/desktop/assets/tailwind.css"
         );
         std::fs::read_to_string(path).unwrap_or_else(|e| {
             panic!(
@@ -64,10 +64,11 @@ fn theme_wrap(child: Element) -> Element {
 }
 
 fn binary_path() -> PathBuf {
-    // CARGO_MANIFEST_DIR points at crates/architect-ui; walk up to the
-    // workspace root, then into target/release.
+    // CARGO_MANIFEST_DIR points at features/ui/architect-ui; walk up to
+    // the workspace root, then into target/release.
     let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    p.pop(); // crates
+    p.pop(); // features/ui
+    p.pop(); // features
     p.pop(); // workspace root
     p.join("target/release/architect-ui-showcase-desktop")
 }

@@ -62,7 +62,11 @@ fn reference_path(name: &str) -> PathBuf {
 }
 
 fn output_path(name: &str) -> PathBuf {
+    // CARGO_MANIFEST_DIR is features/ui/ui-snapshot — three levels below
+    // the workspace root.
     let ws = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
         .parent()
         .unwrap()
         .parent()
