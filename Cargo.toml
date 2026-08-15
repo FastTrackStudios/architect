@@ -44,6 +44,10 @@ members = [
     "story/architect-story-fuzz",
     # ── telemetry ─────────────────────────────────────────────────────
     "telemetry",
+    # ── launcher ──────────────────────────────────────────────────────
+    "launcher/architect-launcher-core",
+    "launcher/architect-launcher-ui",
+    "launcher/architect-launcher-providers",
 ]
 
 [workspace.package]
@@ -87,12 +91,21 @@ architect-story-shell = { path = "story/architect-story-shell" }
 architect-story-snapshots = { path = "story/architect-story-snapshots" }
 architect-story-parity = { path = "story/architect-story-parity" }
 architect-story-fuzz = { path = "story/architect-story-fuzz" }
+# launcher — the app launcher (core engine, providers, dioxus UI).
+# Renamed on vendoring: launcher-core → architect-launcher-core,
+# launcher-ui → architect-launcher-ui, providers →
+# architect-launcher-providers.
+architect-launcher-core = { path = "launcher/architect-launcher-core" }
+architect-launcher-ui = { path = "launcher/architect-launcher-ui" }
+architect-launcher-providers = { path = "launcher/architect-launcher-providers" }
 
 # ── Facet reflection + vox RPC — the rc.5 fleet pins ──────────────────
 facet = { version = "0.50.0-rc.5", features = ["reflect", "chrono", "uuid"] }
 vox = { version = "0.10.0-rc.5", default-features = false, features = ["runtime"] }
 vox-types = { version = "0.10.0-rc.5" }
 vox-core = { version = "0.10.0-rc.5" }
+# Styx config language (facet-backed) — pinned to the FTS fleet version.
+facet-styx = { version = "5.0.0-rc.5" }
 iroh = { version = "1" }
 
 # ── Server / storage ──────────────────────────────────────────────────
@@ -161,6 +174,7 @@ tokio = { version = "1.48", features = ["full"] }
 # ── Serialization ─────────────────────────────────────────────────────
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+toml = "0.8"
 thiserror = "2.0"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std", "wasmbind"] }
 fake = { version = "4", features = ["derive", "uuid", "chrono"] }

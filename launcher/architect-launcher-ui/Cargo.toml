@@ -1,0 +1,14 @@
+[package]
+name = "architect-launcher-ui"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+architect-launcher-core = { workspace = true }
+architect-ui = { workspace = true }
+dioxus = { workspace = true }
+lucide-dioxus = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true
