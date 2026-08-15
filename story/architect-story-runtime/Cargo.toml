@@ -1,0 +1,19 @@
+[package]
+name = "architect-story-runtime"
+version.workspace = true
+edition = "2021"          # kept on 2021 — pre-move workspace edition; migrate deliberately
+license.workspace = true
+repository.workspace = true
+description = "Dioxus runtime layer for architect-story: typed knobs, render thunks, interaction execution."
+
+[dependencies]
+architect-story-core = { workspace = true }
+architect-story-macros = { workspace = true }
+dioxus = { workspace = true }
+# Re-exported as `architect_story_runtime::linkme` so consumers using
+# `#[story]` don't need a direct `linkme` dep — the macro emits
+# `::architect_story_runtime::linkme::distributed_slice` and resolves through us.
+linkme = { workspace = true }
+
+[lints]
+workspace = true

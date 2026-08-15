@@ -1,0 +1,40 @@
+[package]
+name = "architect-story-snapshots"
+version.workspace = true
+edition = "2021"          # kept on 2021 — pre-move workspace edition; migrate deliberately
+license.workspace = true
+repository.workspace = true
+description = "Headless Blitz-based visual regression runner for architect-story."
+
+[dependencies]
+architect-story-core    = { workspace = true }
+architect-story-runtime = { workspace = true }
+# Snapshot path uses the same `Lookbook { chrome: false, ... }`
+# entry as `apps/desktop/src/main.rs::SnapshotApp` so both renderers
+# follow the same code path. Without this Blitz would render the bare
+# story render fn while wry rendered through the Lookbook host,
+# producing dissimilar layouts even when the story itself is identical.
+architect-story-shell   = { workspace = true }
+dioxus            = { workspace = true }
+dssim-core = { workspace = true }
+png        = { workspace = true }
+thiserror  = { workspace = true }
+
+# Pin every Blitz crate to our patched fork. Carries the RefCell-borrow
+# fix and any follow-on fixes; bumped via `cargo update -p dioxus-native`.
+dioxus-native     = { workspace = true }
+dioxus-native-dom = { workspace = true }
+blitz-dom         = { workspace = true }
+blitz-paint       = { workspace = true }
+blitz-traits      = { workspace = true }
+
+# Vello CPU rasteriser — matches what blitz's `examples/screenshot.rs`
+# uses. CPU only so snapshots don't need a GPU in CI.
+anyrender           = "0.11"
+anyrender_vello_cpu = "0.14"
+futures-util        = "0.3"
+peniko              = "0.6"
+rgb                 = "0.8"
+
+[lints]
+workspace = true

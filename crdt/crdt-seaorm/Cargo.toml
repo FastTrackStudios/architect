@@ -1,0 +1,37 @@
+[package]
+name = "crdt-seaorm"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
+# SeaORM-backed `Persistence` impl for `features/crdt/crdt`.
+#
+# Owns two tables, generic across every feature in the workspace:
+#
+#   crdt_doc(doc_id, snapshot, updated_at)
+#   crdt_update(doc_id, seq, bytes, created_at)
+#
+# Snapshot bytes are full LoroDoc snapshots; update bytes are emitted
+# by Loro's local-update subscription on every commit. `compact`
+# folds the update log into a fresh snapshot atomically.
+#
+# Server-side only — pulls sea-orm. Wasm clients use a different
+# Persistence impl.
+
+[dependencies]
+crdt.workspace = true
+sea-orm.workspace = true
+sea-orm-migration.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+
+[lib]
+test = false
+doctest = false

@@ -1,0 +1,18 @@
+[package]
+name = "architect-story-shell"
+version.workspace = true
+edition = "2021"          # kept on 2021 — pre-move workspace edition; migrate deliberately
+license.workspace = true
+repository.workspace = true
+description = "Interactive Lookbook-style shell for architect-story."
+
+[dependencies]
+architect-story-core    = { workspace = true }
+architect-story-runtime = { workspace = true }
+# `router` feature enables `Router`, `Routable`, `use_navigator`, etc. —
+# the shell uses this for URL-based component selection so that
+# refresh / share-link / back-button preserve the selected component.
+dioxus = { workspace = true, features = ["router"] }
+
+[lints]
+workspace = true

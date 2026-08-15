@@ -1,0 +1,41 @@
+[package]
+name = "architect-auth"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
+[dependencies]
+auth.workspace = true
+auth-proto.workspace = true
+auth-db = { workspace = true, optional = true }
+auth-client = { workspace = true, optional = true }
+
+[dev-dependencies]
+axum.workspace = true
+sea-orm.workspace = true
+sea-orm-migration.workspace = true
+tokio.workspace = true
+vox.workspace = true
+
+[features]
+default = []
+db = ["dep:auth-db", "auth/backend-db"]
+axum = ["auth/axum"]
+vox = ["auth/vox", "auth-proto/vox"]
+client = ["dep:auth-client"]
+full = ["db", "axum", "vox", "client", "auth/full"]
+
+[[example]]
+name = "axum_http"
+required-features = ["full"]
+
+[[example]]
+name = "vox_rpc"
+required-features = ["full"]

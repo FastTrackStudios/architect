@@ -1,0 +1,27 @@
+[package]
+name = "auth-client"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Client-side session kit for architect-auth: persistent token storage plus vox call decoration."
+
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
+# Deliberately tiny and wasm-clean: no auth-proto / architect dependency
+# (auth-proto's uuid `v4` feature pulls getrandom, which doesn't build on
+# wasm32-unknown-unknown). The only auth coupling is the wire format —
+# the `authorization: Bearer <token>` metadata entry — which the native
+# integration tests round-trip against `AuthServerMiddleware`.
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+vox.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

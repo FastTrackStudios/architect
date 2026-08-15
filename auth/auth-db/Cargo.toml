@@ -1,0 +1,20 @@
+[package]
+name = "auth-db"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
+[dependencies]
+auth-proto = { workspace = true, features = ["server"] }
+sea-orm.workspace = true
+sea-orm-migration.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

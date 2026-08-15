@@ -1,0 +1,314 @@
+# architect — the entity/RPC framework, extracted from the FastTrackStudio
+# monorepo into its own repo. ONE workspace, one lockfile, one target/.
+#
+# Every intra-repo dependency is declared once below as a path dep and
+# consumed as `x.workspace = true`. External pins are copied verbatim from
+# the FastTrackStudio root workspace so the two trees stay on the same
+# facet/vox/dioxus fleet.
+
+[workspace]
+resolver = "2"
+members = [
+    # ── core framework ────────────────────────────────────────────────
+    "architect",
+    "atom",
+    "form",
+    "permissions",
+    "permissions/proto",
+    # ── proc-macros ───────────────────────────────────────────────────
+    "macros/architect-derive",
+    "macros/architect-rpc-derive",
+    "macros/architect-action-derive",
+    # ── auth ──────────────────────────────────────────────────────────
+    "auth/architect-auth",
+    "auth/auth",
+    "auth/auth-proto",
+    "auth/auth-db",
+    "auth/auth-client",
+    "auth/tests/native",
+    # ── crdt ──────────────────────────────────────────────────────────
+    "crdt/crdt",
+    "crdt/crdt-derive",
+    "crdt/crdt-seaorm",
+    # ── ui ────────────────────────────────────────────────────────────
+    "ui/architect-ui",
+    "ui/showcase",
+    "ui/ui-snapshot",
+    # ── story (component workbench) ───────────────────────────────────
+    "story/architect-story-core",
+    "story/architect-story-macros",
+    "story/architect-story-runtime",
+    "story/architect-story-shell",
+    "story/architect-story-snapshots",
+    "story/architect-story-parity",
+    "story/architect-story-fuzz",
+    # ── telemetry ─────────────────────────────────────────────────────
+    "telemetry",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.87"
+authors = ["FastTrack Studio"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/FastTrackStudios/architect"
+
+[workspace.dependencies]
+# ── Internal — every crate in this repo, path declared ONCE ───────────
+architect = { path = "architect" }
+architect-atom = { path = "atom" }
+architect-form = { path = "form" }
+architect-permissions = { path = "permissions" }
+architect-permissions-proto = { path = "permissions/proto" }
+architect-derive = { path = "macros/architect-derive" }
+architect-rpc-derive = { path = "macros/architect-rpc-derive" }
+architect-action-derive = { path = "macros/architect-action-derive" }
+architect-auth = { path = "auth/architect-auth" }
+auth = { path = "auth/auth" }
+auth-proto = { path = "auth/auth-proto" }
+auth-db = { path = "auth/auth-db" }
+auth-client = { path = "auth/auth-client" }
+crdt = { path = "crdt/crdt" }
+crdt-derive = { path = "crdt/crdt-derive" }
+crdt-seaorm = { path = "crdt/crdt-seaorm" }
+# Renamed on extraction (member manifests + their consumers renamed to
+# match): fts-ui → architect-ui, fts-story-* → architect-story-*,
+# task-telemetry → architect-telemetry.
+architect-ui = { path = "ui/architect-ui" }
+architect-telemetry = { path = "telemetry" }
+architect-ui-showcase = { path = "ui/showcase" }
+ui-snapshot = { path = "ui/ui-snapshot" }
+# story — the component workbench (stories, snapshots, parity, fuzz).
+architect-story-core = { path = "story/architect-story-core" }
+architect-story-macros = { path = "story/architect-story-macros" }
+architect-story-runtime = { path = "story/architect-story-runtime" }
+architect-story-shell = { path = "story/architect-story-shell" }
+architect-story-snapshots = { path = "story/architect-story-snapshots" }
+architect-story-parity = { path = "story/architect-story-parity" }
+architect-story-fuzz = { path = "story/architect-story-fuzz" }
+
+# ── Facet reflection + vox RPC — the rc.5 fleet pins ──────────────────
+facet = { version = "0.50.0-rc.5", features = ["reflect", "chrono", "uuid"] }
+vox = { version = "0.10.0-rc.5", default-features = false, features = ["runtime"] }
+vox-types = { version = "0.10.0-rc.5" }
+vox-core = { version = "0.10.0-rc.5" }
+iroh = { version = "1" }
+
+# ── Server / storage ──────────────────────────────────────────────────
+axum = { version = "0.8", features = ["ws"] }
+tower-http = { version = "0.6", features = ["fs"] }
+include_dir = "0.7"
+sea-orm = { version = "1", features = ["sqlx-sqlite", "runtime-tokio-rustls", "macros", "with-uuid", "with-chrono"] }
+sea-orm-migration = { version = "1", features = ["sqlx-sqlite", "runtime-tokio-rustls"] }
+async-trait = "0.1"
+loro = { version = "1.12", default-features = false }
+
+# ── Auth primitives ───────────────────────────────────────────────────
+argon2 = "0.5"
+base64 = "0.22"
+chacha20poly1305 = "0.10"
+cookie = "0.18"
+hkdf = "0.12"
+jsonwebtoken = "9"
+rand = "0.8"
+sha1 = "0.10"
+sha2 = "0.10"
+totp-rs = { version = "5", features = ["gen_secret", "otpauth"] }
+
+# ── UI framework ──────────────────────────────────────────────────────
+# dioxus 0.8 line — git rev pinned; it must stay in lockstep across every
+# dioxus-* entry AND the FTS fork branches of primitives/lucide, which pin
+# the same rev.
+dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a522d078b70bb4b4d62a5f9a99ddfc", default-features = false, features = ["lib"] }
+dioxus-native = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a522d078b70bb4b4d62a5f9a99ddfc", features = ["prelude", "system-fonts", "svg", "autofocus", "incremental", "data-uri"] }
+dioxus-native-dom = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a522d078b70bb4b4d62a5f9a99ddfc" }
+blitz-dom = "=0.3.0-beta.1"
+blitz-paint = "=0.3.0-beta.1"
+blitz-traits = "=0.3.0-beta.1"
+dioxus-primitives = { git = "https://github.com/FastTrackStudios/dioxus-components", package = "dioxus-primitives", branch = "main", default-features = false }
+lucide-dioxus = { git = "https://github.com/FastTrackStudios/lucide", branch = "main", features = ["all-icons"] }
+clsx = "0.1.1"
+tw_merge = "0.1.21"
+nucleo-matcher = "0.3"
+palette = "0.7.6"
+linkme = "0.3"
+
+# ── Plugin framework (ui/fts-plug-ui) ─────────────────────────────────
+# The ONE sanctioned non-path exception in the monorepo; carried verbatim.
+nice-plug = { git = "https://github.com/FastTrackStudios/nice-plug.git", branch = "fts-baseview-03" }
+nice-plug-dioxus = { git = "https://github.com/FastTrackStudios/nice-plug.git", branch = "fts-baseview-03" }
+atomic_float = "1.1"
+
+# ── Rendering / snapshot gate (ui/ui-snapshot) ────────────────────────
+anyrender_vello_cpu = "0.14"
+peniko = "0.6"
+kurbo = "0.13"
+png = "0.17"
+image = { version = "0.25", default-features = false, features = ["png"] }
+dify = "0.8"
+# Perceptual image diff — the story snapshot/parity gates score with it.
+dssim-core = "3"
+
+# ── Proc-macro toolkit ────────────────────────────────────────────────
+syn = { version = "2", features = ["full", "extra-traits"] }
+quote = "1"
+proc-macro2 = "1"
+
+# ── Async runtime ─────────────────────────────────────────────────────
+tokio = { version = "1.48", features = ["full"] }
+
+# ── Serialization ─────────────────────────────────────────────────────
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "wasmbind"] }
+fake = { version = "4", features = ["derive", "uuid", "chrono"] }
+
+# ── Observability ─────────────────────────────────────────────────────
+tracing = { version = "0.1", features = ["std"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+opentelemetry = "0.30"
+opentelemetry_sdk = { version = "0.30", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.30", default-features = false, features = [
+  "http-proto",
+  # BLOCKING is deliberate: the SDK's batch processors run on their own
+  # dedicated OS threads, which have no Tokio reactor — the async client
+  # panics them with "there is no reactor running" on first flush.
+  "reqwest-blocking-client",
+  "reqwest-rustls",
+  "trace",
+  "logs",
+  "metrics",
+] }
+opentelemetry-appender-tracing = "0.30"
+tracing-opentelemetry = "0.31"
+# Sentry error/crash telemetry — rustls (not native-tls) for iOS.
+sentry = { version = "0.44", default-features = false, features = ["backtrace", "contexts", "panic", "reqwest", "rustls"] }
+sentry-tracing = "0.44"
+
+# ── Utilities ─────────────────────────────────────────────────────────
+eyre = "0.6"
+uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
+clap = { version = "4", features = ["derive"] }
+proptest = "1"
+
+# ── Patches ───────────────────────────────────────────────────────────
+[patch.crates-io]
+# Blitz from the FTS fork (0.3.0-beta.1 line, upstream 02523b83 +
+# fts-focus: focus-follows-pointerdown for all focusable content).
+# dioxus git pins `=0.3.0-beta.1`. One rev across all blitz crates.
+blitz-dom = { git = "https://github.com/FastTrackStudios/blitz", rev = "c82dd238000515c44c758845b9a17e9b48eb0087" }
+blitz-traits = { git = "https://github.com/FastTrackStudios/blitz", rev = "c82dd238000515c44c758845b9a17e9b48eb0087" }
+blitz-paint = { git = "https://github.com/FastTrackStudios/blitz", rev = "c82dd238000515c44c758845b9a17e9b48eb0087" }
+blitz-shell = { git = "https://github.com/FastTrackStudios/blitz", rev = "c82dd238000515c44c758845b9a17e9b48eb0087" }
+blitz-net = { git = "https://github.com/FastTrackStudios/blitz", rev = "c82dd238000515c44c758845b9a17e9b48eb0087" }
+blitz-html = { git = "https://github.com/FastTrackStudios/blitz", rev = "c82dd238000515c44c758845b9a17e9b48eb0087" }
+# Vendored one-line fix: quote scalars containing `<`/`>` — upstream
+# styx-format emits them bare but styx-parse rejects them.
+styx-format = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.1.0" }
+# Vendored phon rc.5 + derive support for parse/display opaque scalars
+# (Uuid, chrono DateTime/NaiveDate, url, …). Upstream rc.5 PANICS the first
+# time a vox RPC reply contains such a field.
+phon = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.1.0" }
+# Vendored phon-jit rc.5 with a one-line build.rs fix: force the stable,
+# call-based stencils (upstream's nightly detection misfires on the pinned
+# stable toolchain → E0658 on `become`).
+phon-jit = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.1.0" }
+
+# ── Lints ─────────────────────────────────────────────────────────────
+[workspace.lints.rust]
+dead_code = "warn"
+unused = "warn"
+unused_unsafe = "warn"
+
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "allow"
+private_intra_doc_links = "allow"
+redundant_explicit_links = "allow"
+
+[workspace.lints.clippy]
+field_reassign_with_default = "allow"
+redundant_closure = "allow"
+nonminimal_bool = "allow"
+clone_on_copy = "allow"
+useless_vec = "allow"
+type_complexity = "allow"
+manual_clamp = "allow"
+needless_range_loop = "allow"
+not_unsafe_ptr_arg_deref = "allow"
+only_used_in_recursion = "allow"
+unnecessary_sort_by = "allow"
+unusual_byte_groupings = "allow"
+manual_c_str_literals = "allow"
+branches_sharing_code = "allow"
+needless_borrow = "allow"
+needless_borrows_for_generic_args = "allow"
+collapsible_if = "allow"
+map_clone = "allow"
+unnecessary_map_or = "allow"
+if_same_then_else = "allow"
+redundant_locals = "allow"
+large_enum_variant = "allow"
+explicit_counter_loop = "allow"
+manual_strip = "allow"
+too_many_arguments = "allow"
+double_must_use = "allow"
+vec_init_then_push = "allow"
+collapsible_match = "allow"
+filter_next = "allow"
+
+# ── Profiles ──────────────────────────────────────────────────────────
+[profile.dev]
+opt-level = 1
+
+# Debuginfo discipline. Full DWARF was the single biggest cost in the
+# monorepo: a `debug` test binary measured 1.62 GB, of which 98% was
+# `.debug_*` sections, copied into every artifact on every relink.
+#
+#   line-tables-only  keeps file:line in backtraces + profiler symbols
+#                     (samply/perf still work); drops variable/type DWARF,
+#                     so a *debugger* can't inspect locals.
+#   unpacked          leaves the remaining DWARF in the .o files under
+#                     deps/ instead of copying it into each artifact.
+#
+# Need a real debugger session? Build with `--profile dev-dbg`.
+debug = "line-tables-only"
+split-debuginfo = "unpacked"
+
+# Escape hatch: full DWARF for stepping in gdb/lldb.
+[profile.dev-dbg]
+inherits = "dev"
+debug = 2
+split-debuginfo = "packed"
+
+# dx web builds: native debuginfo in the wasm module blows past Chrome's
+# 1 GiB WebAssembly module cap. Wasm dev builds don't need it.
+[profile.wasm-dev]
+inherits = "dev"
+debug = false
+strip = "debuginfo"
+
+[profile.wasm-dev.package."*"]
+opt-level = 3
+
+# Dependencies at opt-level 1: gets rid of the pathological O0 debug
+# codegen at a fraction of the compile cost. Applies to dependencies only
+# — workspace members are governed by profile.dev's base opt-level.
+[profile.dev.package."*"]
+opt-level = 1
+
+# phon's JIT engine — generates and runs the DSP graph itself. Reaches
+# this tree transitively through vox.
+[profile.dev.package.phon]
+opt-level = 3
+[profile.dev.package.phon-jit]
+opt-level = 3
+
+# Build scripts + proc macros and their deps. `package."*"` does NOT cover
+# these — cargo routes them through build-override, where they land at
+# opt-level 0 with full debuginfo. This tree IS proc-macros (facet,
+# architect, dioxus rsx), executed thousands of times per build.
+[profile.dev.build-override]
+opt-level = 3
+debug = false

@@ -1,0 +1,38 @@
+[package]
+name = "architect-ui"
+description = "FastTrack Studio design system"
+version.workspace = true
+edition = "2021"          # kept on 2021 — pre-move workspace edition; migrate deliberately
+
+[dependencies]
+chrono = "0.4"
+time = "0.3"
+clsx = { workspace = true }
+dioxus = { workspace = true }
+dioxus-primitives = { workspace = true }
+lucide-dioxus = { workspace = true }
+tracing = { workspace = true }
+tw_merge = { workspace = true }
+nucleo-matcher = { workspace = true }
+palette = { workspace = true }
+
+# Story registration. Always on — every component declares its stories
+# inline next to its implementation, and the `#[story]` macro auto-
+# registers them via `linkme`. `linkme` MUST be a direct consumer dep:
+# attribute-macro paths cannot resolve through `pub use` re-exports, so
+# the `#[story]` macro emits `#[linkme::distributed_slice(...)]` directly.
+architect-story-runtime = { workspace = true }
+linkme = { workspace = true }
+
+[features]
+default = []
+router = ["dioxus/router", "dioxus-primitives/router"]
+
+[dev-dependencies]
+# Always available to tests/ — heavy (pulls Blitz CPU rasteriser) but
+# `cargo build` never compiles dev-deps so the lib build stays light.
+architect-story-snapshots = { workspace = true }
+architect-story-parity    = { workspace = true }
+
+[lints]
+workspace = true

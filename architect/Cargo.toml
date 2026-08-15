@@ -1,0 +1,288 @@
+[package]
+name = "architect"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Facet-native, vox-friendly entity framework. One #[derive(Entity)] → wire types + SeaORM Model + auto-generated repo trait, all in one source struct."
+repository.workspace = true
+
+# `architect` is the user-facing crate. It re-exports the derive macro
+# from `architect-derive`, and provides the runtime traits / helper
+# types the macro's output references (`RepoError`, `CrudStorage`, etc).
+#
+# Wasm-clean by default. The `server` feature pulls in sea-orm + the
+# server-side storage glue so the same `#[derive(Entity)]` user struct
+# also gets a full ORM-backed repository implementation.
+
+[features]
+# architect itself stays minimal. Feature crates (e.g. example-proto)
+# pull `architect/vox` when they want the RPC stack so the choice
+# happens at the contract crate's level, not by accident.
+default = []
+vox = ["dep:vox"]
+
+# Client-side optimistic / stale-while-revalidate state for Dioxus,
+# re-exported as `architect::atom`. Pulls Dioxus (via architect-atom), so
+# it's off by default and left out of `full` — server builds never see it.
+# UI crates may also depend on `architect-atom` directly. See
+# `docs/content/architecture/optimistic.md`.
+atom = ["dep:architect-atom"]
+
+# Typed, validated form state for Dioxus, re-exported as `architect::form`
+# (effect-form analog). Pulls Dioxus via architect-form + architect-atom;
+# off by default, left out of `full`. See
+# `docs/content/architecture/forms.md`.
+form = ["dep:architect-form", "atom"]
+
+# Adds #[derive(fake::Dummy)] to every architect-emitted struct
+# (Create/Update/List/Model). Pure test-data scaffolding; enable it
+# in your proto crate and the wire structs become trivially seedable.
+fake = ["dep:fake"]
+
+# `full` enables every architect optional — vox, SeaORM bridge, axum
+# adapter, fake. Matches tokio's `full` convention: when you just want
+# everything turned on for development or a single-binary build.
+full = ["vox", "server-seaorm", "server-axum", "fake", "platform", "schedule", "rt"]
+
+# Platform layer (`architect::platform`): a `Clock` (async `sleep` + `now`)
+# and task `spawn`, abstracted native (tokio) <-> wasm (browser timers).
+# Centralizes the cfg-split scattered across resource/local/axum_ws and
+# ships a deterministic `TestClock` for testable scheduled code.
+#
+#   native  tokio::time / tokio::task::spawn (needs a running tokio rt)
+#   wasm    gloo-timers TimeoutFuture / wasm_bindgen_futures::spawn_local
+#
+# `web-time` provides a monotonic `Instant` on both targets.
+platform = ["dep:web-time", "dep:async-channel", "tokio/time", "tokio/rt", "dep:gloo-timers", "dep:wasm-bindgen-futures", "dep:tracing"]
+
+# Schedule layer (`architect::schedule`): composable retry/repeat policies
+# (exponential backoff, jitter, caps, recurrence limits) + drivers that run
+# a plain `async FnMut() -> Result` under them. Implies `platform` (it sleeps
+# between attempts through a `Clock`).
+schedule = ["platform"]
+
+# Two server-side features, deliberately independent so a binary can
+# pick storage and transport à la carte:
+#
+#   server-seaorm   the SeaORM bridge — pulls sea-orm + async-trait,
+#                   exposes `architect::storage::DbConn`, and lets the
+#                   derive emit `<T>RepoStorage<C>`.
+#
+#   server-axum     the axum WebSocket adapter — pulls axum + tokio +
+#                   futures + tracing + vox-core + vox-types, exposes
+#                   `architect::axum_ws::{AxumWsLink, serve, ...}`.
+#
+# A consumer that brings its own repo impl (or fronts a remote API)
+# enables `server-axum` only and never compiles sea-orm.
+
+# Rig-backend glue (`architect::rig`): the `RigBackend` trait — provided
+# `router()`, the sliding event hub, and the shared meter/status pump
+# (interval + once-guard + running-edge + MIDI hot-plug rescan) that every
+# instrument-rig backend serves through. Native only (the pump is an OS
+# thread).
+rig = ["vox", "dep:tracing"]
+
+# In-process transport (`architect::local`): serve a `LayerRouter` over a
+# vox in-memory link so a typed client consumes a local backend with no
+# server/socket. Native serves over `vox_core::memory_link_pair`; wasm over
+# architect's own `memory_link` (vox's `MemoryLink` is `#[cfg(not(wasm))]`),
+# with the server task on `platform::spawn` (spawn_local). Pulls `platform`
+# + vox-types (for the wasm `Link` impl).
+local = ["vox", "dep:vox-core", "dep:vox-types", "dep:tracing", "tokio/rt", "platform"]
+
+# iroh p2p transport (`architect::iroh_link`): serve/consume a vox
+# router over an iroh QUIC endpoint — same acceptor dance as `server-axum`,
+# but the "socket" is a bi-directional QUIC stream reachable by bare
+# EndpointId across networks (n0 relays + address lookup). The client
+# side (connect / IrohLink / iroh_link_source) also compiles on wasm32 —
+# browsers dial relay-only over WebSockets; serving is native only.
+# `tokio/rt` (not rt-multi-thread) so the wasm build stays legal; the
+# native server fns spawn onto whatever runtime the consumer provides.
+iroh = [
+    "vox",
+    "dep:iroh",
+    "tokio/rt",
+    "dep:tracing",
+    "dep:vox-core",
+    "dep:vox-types",
+]
+
+server-seaorm = ["dep:sea-orm", "dep:async-trait"]
+server-axum = [
+    "dep:axum",
+    "tokio/rt-multi-thread",
+    "tokio/macros",
+    "dep:futures",
+    "dep:tracing",
+    "dep:vox-core",
+    "dep:vox-types",
+    "telemetry",
+]
+
+# One `tracing` span per dispatched RPC call, at the LayerRouter choke
+# point (see `LayerRouter::call_span`). Without it a served WebSocket is
+# one opaque span and the calls inside it are invisible; with it every
+# call is named, timed, and correlatable with the logs it emits.
+#
+# Implied by `server-axum` — anything serving RPC over the network wants
+# this, and that feature already pulls `tracing`. Separate so an
+# in-process router (a DAW dispatcher, a wasm LocalServer) can opt in or
+# stay out. Costs a disabled-span check per call when no subscriber is
+# installed.
+telemetry = ["vox", "dep:tracing"]
+
+# ── Umbrella features — the two common consumer profiles ─────────────
+#
+# À la carte features stay for fine-grained builds; these are the
+# one-liners an app crate reaches for. See
+# docs/content/architecture/features.md for the full matrix.
+#
+#   client   what a UI (wasm or desktop shell) crate wants: typed RPC
+#            clients (vox) + optimistic store hooks (atom) + validated
+#            form state (form). Wasm-clean.
+#
+#   server   what a native server binary wants: RPC (vox) + the SeaORM
+#            storage bridge + the axum WS transport + the tokio
+#            blocking dispatcher. Strict superset of the old
+#            `server = ["server-seaorm"]` back-compat alias, so
+#            consumers that wrote `features = ["server"]` keep working.
+client = ["vox", "atom", "form"]
+server = ["vox", "server-seaorm", "server-axum", "dispatch-tokio"]
+
+# `architect::host` — assemble a headless vox engine binary from a router:
+# the multi-thread runtime, tracing + panic-logger bootstrap, and an
+# `EngineHost` that serves a `LayerRouter` over `/vox` (+ `/health`, optional
+# iroh, optional static SPA bundle). Native only — folds the boilerplate every
+# engine binary otherwise repeats. Add `iroh` alongside for p2p serving.
+host = [
+    "server-axum",
+    "dep:tracing-subscriber",
+    "dep:tower-http",
+    "dep:include_dir",
+]
+
+# Dispatcher impls (see `architect::dispatch`). The current-thread
+# dispatcher is always available; runtime-specific impls are gated.
+#
+#   dispatch-tokio   spawn_blocking-backed dispatcher. Right for
+#                    server-side binaries wrapping sync work behind an
+#                    async service.
+dispatch-tokio = ["tokio/rt-multi-thread"]
+
+# Real-time publisher bridge (`architect::rt`): a wait-free SPSC ring
+# (rtrb) for handing events from a real-time thread (audio callback,
+# device ISR) to a normal thread that fans them out via `PubSub`.
+# `PubSub::publish` itself takes a mutex and must NEVER run on a
+# real-time thread — this feature is the sanctioned escape hatch.
+rt = ["dep:rtrb"]
+
+# Blocking client facade (`architect::sync_client` + the emitted
+# `<Trait>SyncClient`s): drive the async vox client from sync code over
+# a background tokio runtime. Native only — wasm has no blocking.
+sync-client = ["vox", "tokio/rt"]
+
+[dependencies]
+architect-derive.workspace = true
+architect-permissions.workspace = true
+architect-rpc-derive.workspace = true
+architect-action-derive.workspace = true
+facet.workspace = true
+thiserror.workspace = true
+# Resource handles (`architect::handle`): the id behind `RawHandle`.
+# Wasm-clean (v4 generation needs the consumer to wire getrandom's js
+# backend on wasm32, same as every other uuid-minting wire crate here).
+uuid = { workspace = true, features = ["js"] }
+
+# Optional client-state primitive, re-exported as `architect::atom` under
+# the `atom` feature. Pulls Dioxus, so it stays optional + off by default.
+architect-atom = { workspace = true, optional = true }
+# Optional form-state primitive, re-exported as `architect::form` under the
+# `form` feature.
+architect-form = { workspace = true, optional = true }
+
+# Construction layer (`architect::resource`): the default error type for
+# `Resource<T, E = eyre::Report>`, and a `sync`-only tokio for the async
+# `OnceCell` that backs memoization. `sync` is wasm-safe; the runtime
+# features (rt-multi-thread/macros) are added by `server-axum` /
+# `dispatch-tokio` so the wasm client never pulls a non-wasm runtime.
+eyre.workspace = true
+# Direct (not workspace) so we get sync-only — the workspace tokio pins
+# rt-multi-thread, which doesn't build on wasm32. server-axum /
+# dispatch-tokio add the runtime features on top for native builds.
+tokio = { version = "1", default-features = false, features = ["sync"] }
+
+# Vox RPC stack — optional. When the `vox` feature is off, the macro
+# emits a plain async trait instead of a `#[vox::service]`-decorated one,
+# and the dispatcher/client types simply don't exist.
+vox = { workspace = true, optional = true }
+fake = { workspace = true, optional = true }
+
+# Wait-free SPSC ring backing `architect::rt` — the audio-world standard
+# (powers cpal-adjacent stacks). Optional; only the `rt` feature pulls it.
+rtrb = { version = "0.3", optional = true }
+
+# Platform layer. `web-time` gives a monotonic `Instant` that works on
+# both native and wasm (std on native, performance.now() on wasm). The
+# native timer/spawn path rides the base `tokio` dep (the `platform`
+# feature adds `tokio/time` + `tokio/rt`); the wasm path uses the
+# target-cfg deps below.
+web-time = { version = "1", optional = true }
+# Runtime-agnostic MPMC channel backing `platform::Queue` — wasm-clean
+# (no executor assumptions), unlike tokio's single-consumer mpsc. The
+# rest of `platform`'s primitives (Deferred/Semaphore/CancellationToken)
+# ride tokio's `sync` (already in the base dep).
+async-channel = { version = "2", optional = true }
+
+# Server-side only — sea-orm + async-trait are gated.
+sea-orm = { workspace = true, optional = true }
+async-trait = { version = "0.1", optional = true }
+
+# server-axum bundle. All optional; only pulled when the feature is on.
+axum = { workspace = true, optional = true }
+futures = { version = "0.3", optional = true }
+tracing = { workspace = true, optional = true }
+
+# `host` bundle — the engine-binary bootstrap. All optional; only the `host`
+# feature (native engine binaries) pulls them, so the wasm client never sees
+# a global subscriber init or a static-file server.
+tracing-subscriber = { workspace = true, optional = true }
+tower-http = { workspace = true, optional = true }
+include_dir = { workspace = true, optional = true }
+vox-core = { workspace = true, optional = true }
+vox-types = { workspace = true, optional = true }
+
+# iroh p2p bundle. Only pulled by the `iroh` feature. Target-split
+# because iroh's defaults (portmapper etc.) don't build on wasm32: the
+# native side rides the workspace dep, the wasm side takes the same
+# version with defaults off + a TLS provider (relay-only in browsers).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+iroh = { workspace = true, optional = true }
+
+# Wasm-only platform deps. Browser timers (gloo-timers' `TimeoutFuture`
+# is a real async sleep backed by setTimeout) and `spawn_local` for the
+# `spawn` primitive. Both optional, pulled by the `platform` feature.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+gloo-timers = { version = "0.3", default-features = false, features = ["futures"], optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+iroh = { version = "1", default-features = false, features = ["tls-ring"], optional = true }
+
+[dev-dependencies]
+futures-lite = "2"
+# The reconnect-supervisor integration test mounts a headless VirtualDom
+# over the in-process vox transport (LocalServer) and kills/recreates the
+# server side. Same minimal dioxus profile as architect-atom.
+dioxus = { workspace = true }
+vox-core = { workspace = true }
+vox-types = { workspace = true }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+# rpc_spans.rs installs a capturing subscriber to assert the dispatch span.
+tracing-subscriber = { workspace = true }
+
+[[test]]
+name = "reconnect_supervisor"
+required-features = ["atom", "platform", "local"]
+
+[[test]]
+name = "iroh_link"
+required-features = ["iroh"]

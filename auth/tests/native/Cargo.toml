@@ -1,0 +1,16 @@
+[package]
+name = "auth-native-tests"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+architect = { workspace = true, features = ["vox", "local"] }
+architect-permissions.workspace = true
+auth = { workspace = true, features = ["backend-db", "vox"] }
+auth-client.workspace = true
+chrono.workspace = true
+sea-orm.workspace = true
+sea-orm-migration.workspace = true
+tokio.workspace = true
+vox.workspace = true

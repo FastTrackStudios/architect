@@ -1,0 +1,23 @@
+@import "tailwindcss";
+@import "../architect-ui/assets/fts-theme.css";
+
+@source "./src/**/*.{rs,html,css}";
+@source "../architect-ui/src/**/*.rs";
+
+@layer base {
+    html {
+        color-scheme: dark;
+    }
+}
+
+/*
+ * Safelist — dynamically constructed classes.
+ * gap-0.5 gap-1 gap-1.5 gap-2 gap-2.5 gap-3 gap-3.5 gap-4 gap-5 gap-6 gap-8 gap-10 gap-12
+ * py-2.5 mt-0.5 rounded-[6px] size-3 size-3.5
+ * opacity-40 hover:bg-muted/50 hover:bg-accent/50 hover:bg-destructive/10
+ * divide-y divide-border
+ * text-[10px] text-[8px]
+ * animate-pulse animate-spin
+ * data-[state=checked]:bg-primary data-[state=checked]:border-primary
+ * translate-x-4 translate-x-0
+ */

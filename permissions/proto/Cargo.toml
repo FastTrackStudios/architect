@@ -1,0 +1,22 @@
+[package]
+name = "architect-permissions-proto"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Wire types + the PermissionsService RPC surface for architect-permissions"
+
+[dependencies]
+architect.workspace = true
+architect-permissions.workspace = true
+facet.workspace = true
+thiserror.workspace = true
+vox = { workspace = true, optional = true }
+
+[features]
+default = ["vox"]
+vox = ["dep:vox", "architect/vox"]
+
+[lints]
+workspace = true

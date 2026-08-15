@@ -1,0 +1,63 @@
+[package]
+name = "architect-rpc-derive"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Proc-macro for #[architect::rpc] — turns a sync trait into a sync API + async vox client + server-side host."
+repository.workspace = true
+
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
+# `architect-rpc-derive` is the proc-macro half of `#[architect::rpc]`.
+# The runtime support (`Dispatcher`, the bridge helpers, error mapping)
+# lives in the `architect` runtime crate so the emitted code can refer
+# to it via `::architect::dispatch::*`.
+#
+# Kept separate from `architect-derive` because the two macros are
+# independently useful — a project might want only the RPC primitive
+# (no Entity story) or only the Entity derive (no RPC). Splitting the
+# proc-macro crates keeps both compile-cost paths surgical.
+
+[lib]
+proc-macro = true
+test = false
+doctest = false
+
+[features]
+# Mirrors the consumer-crate convention: enabling `vox` in the
+# consumer crate flips on the macro-emitted
+# `#[cfg_attr(feature = "vox", ::architect::vox::service)]` decoration
+# and the `<T>Client` type alias. The proc-macro crate doesn't ship
+# vox itself — consumers wire it in alongside their own `vox` direct
+# dep, the same way `example-proto` does today. This feature exists
+# here only as a stable name in case future codegen needs cfg gating.
+default = []
+vox = []
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full", "extra-traits"] }
+
+[dev-dependencies]
+# The runtime crate re-exports the macro as `architect::rpc`. Tests
+# consume it that way so the smoke surface matches the user-facing
+# import path. `vox` feature on so `--all-features` builds resolve
+# the `::vox::service` paths the macro emits — workspace feature
+# unification turns vox on transitively under that flag.
+architect = { workspace = true, features = ["vox", "sync-client"] }
+# The facet derive expands to `::facet::…` paths — the crate itself must
+# be in the test crate's extern prelude for vox-enabled smoke builds.
+facet.workspace = true
+# Direct `vox` dep: the `#[rpc]` macro emits `::vox::service` paths, so
+# the smoke test needs `vox` in its crate root. cargo-shear can't see
+# this (it's macro-generated), hence the ignore below.
+vox.workspace = true
+futures-lite = "2"
+
+[package.metadata.cargo-shear]
+ignored = ["vox"]

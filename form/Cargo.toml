@@ -1,0 +1,27 @@
+[package]
+name = "architect-form"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
+# architect-form — typed, validated form state for Dioxus, modelled on
+# lucas-barake/effect-form (https://github.com/lucas-barake/effect-form):
+# each field carries a string-encoded value plus a parser that both
+# validates and decodes into a typed `T`, with error / touched / dirty
+# tracking; a `Form` controller coordinates validation mode and submit,
+# folding the submit outcome into an `architect_atom::AtomResult`.
+#
+# wasm-safe: Dioxus core + architect-atom only.
+
+[dependencies]
+dioxus = { workspace = true }
+architect-atom = { workspace = true }
+
+[lib]
+doctest = false

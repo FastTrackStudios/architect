@@ -1,0 +1,19 @@
+[package]
+name = "architect-story-macros"
+version.workspace = true
+edition = "2021"          # kept on 2021 — pre-move workspace edition; migrate deliberately
+license.workspace = true
+repository.workspace = true
+description = "Proc-macros for architect-story: #[story], #[story_test], #[states]."
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { workspace = true }
+quote = { workspace = true }
+proc-macro2 = { workspace = true }
+heck = "0.5"
+
+[lints]
+workspace = true

@@ -1,0 +1,26 @@
+[package]
+name = "architect-derive"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Procedural macros for architect — emits wasm-safe wire structs + cfg-gated SeaORM entities from one declaration"
+
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
+[lib]
+proc-macro = true
+# Unit tests drive `expand()` directly (parse_quote → assert on the
+# Ok/Err shape) — the derive-time validation errors are tested here;
+# the emitted code's *behavior* is covered by the example app's test
+# crates (example-tests-native, app-tests-e2e).
+doctest = false
+
+[dependencies]
+syn = { version = "2", features = ["full", "extra-traits"] }
+quote = "1"
+proc-macro2 = "1"
+heck = "0.5"

@@ -1,0 +1,47 @@
+[package]
+name = "architect-action-derive"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Proc-macro for #[architect::actions] — named-command traits with description/category/group metadata, backend-agnostic registration."
+repository.workspace = true
+
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
+# `architect-action-derive` is the proc-macro half of `#[architect::actions]`.
+# The runtime support (`ActionMeta`, `ActionBackend`) lives in the `architect`
+# runtime crate so the emitted code can refer to it via
+# `::architect::action::*` — same split rationale as `architect-rpc-derive`:
+# a project that only wants the RPC primitive (or only Entity) doesn't pay
+# this macro's compile cost.
+
+[lib]
+proc-macro = true
+test = false
+doctest = false
+
+[features]
+# Test-only — lets tests/cfg_gating.rs exercise both states of a
+# #[cfg(feature = "test-gated")]-decorated #[action] method (run
+# `cargo test` both with and without `--features test-gated`).
+test-gated = []
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full", "extra-traits"] }
+
+[dev-dependencies]
+# The runtime crate re-exports the macro as `architect::actions`. Tests
+# consume it that way so the smoke surface matches the user-facing import
+# path.
+architect = { workspace = true }
+# Dev-only: proves `ActionMeta::all()` is enough to mechanically build a
+# `clap::Command` tree, and that the tree composes (standalone vs. mounted
+# under a parent command) without architect itself depending on clap. See
+# `tests/smoke.rs`'s nesting test.
+clap = { version = "4", features = ["derive"] }

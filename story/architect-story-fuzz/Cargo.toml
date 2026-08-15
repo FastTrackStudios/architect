@@ -1,0 +1,16 @@
+[package]
+name = "architect-story-fuzz"
+version.workspace = true
+edition = "2021"          # kept on 2021 — pre-move workspace edition; migrate deliberately
+license.workspace = true
+repository.workspace = true
+description = "Interaction fuzzing for architect-story."
+
+[dependencies]
+architect-story-core    = { workspace = true }
+architect-story-runtime = { workspace = true }
+architect-story-snapshots     = { workspace = true }
+proptest = { workspace = true }
+
+[lints]
+workspace = true

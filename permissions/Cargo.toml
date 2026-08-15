@@ -1,0 +1,13 @@
+[package]
+name = "architect-permissions"
+version.workspace = true
+edition.workspace = true
+description = "Framework-level authorization: Principal × Resource × Action → Decision engines"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true

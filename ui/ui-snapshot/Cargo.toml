@@ -1,0 +1,38 @@
+[package]
+name = "ui-snapshot"
+version.workspace = true
+edition.workspace = true
+description = "Headless rendering + fuzzy PNG diffing for architect-ui components (Blitz regression gate)"
+
+[[bin]]
+name = "ui-snapshot"
+path = "src/main.rs"
+
+[dependencies]
+# Dioxus VDom + Blitz DOM/paint stack — workspace-pinned blitz rev (one
+# blitz tree-wide).
+dioxus-native.workspace = true
+blitz-dom.workspace = true
+blitz-paint.workspace = true
+blitz-traits.workspace = true
+
+# Deterministic (CPU) image rendering — no GPU dependency, reproducible
+# pixel output across machines.
+anyrender = "0.11"
+anyrender_vello_cpu.workspace = true
+peniko.workspace = true
+kurbo.workspace = true
+
+# Component under test + dioxus for VirtualDom driving.
+architect-ui = { workspace = true }
+dioxus.workspace = true
+
+# Image IO + fuzzy pixel diffing (same lib Blitz's WPT runner uses).
+png.workspace = true
+image.workspace = true
+dify.workspace = true
+
+clap.workspace = true
+
+[lints]
+workspace = true

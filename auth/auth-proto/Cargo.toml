@@ -1,0 +1,30 @@
+[package]
+name = "auth-proto"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
+[dependencies]
+architect.workspace = true
+chrono.workspace = true
+facet.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+vox = { workspace = true, optional = true }
+sea-orm = { workspace = true, optional = true }
+fake = { workspace = true, optional = true }
+
+[features]
+default = ["vox"]
+vox = ["dep:vox", "architect/vox"]
+sea-orm = ["dep:sea-orm"]
+server = ["architect/server-seaorm", "sea-orm"]
+fake = ["dep:fake", "architect/fake"]
+full = ["vox", "server", "fake"]

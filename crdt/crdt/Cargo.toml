@@ -1,0 +1,94 @@
+[package]
+name = "crdt"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
+# Local-first source-of-truth layer. Wraps a LoroDoc with a typed
+# per-entity view (`LoroRepo<E>`) and a pluggable `Persistence` trait.
+#
+# - One `CrdtDoc` per collaboration boundary (a project, a workspace).
+#   It owns the LoroDoc + persistence handle, and exposes typed sub-
+#   repos for each entity type living in the doc.
+# - `LoroRepo<E>` implements the architect-style get/list/create/
+#   update/delete surface; the per-entity glue (what root map, how to
+#   encode the wire struct as a LoroMap, etc.) is supplied by the
+#   `EntityCrdt` trait the feature crate implements.
+# - `Persistence` is object-safe (async-trait) so a CrdtDoc can be
+#   constructed against any backend at runtime — SeaORM, IndexedDB,
+#   the bundled in-memory store, anything.
+#
+# Wasm-clean by construction. No DB deps, no transport deps.
+
+[features]
+default = []
+# The real-time sync transport (`crdt::sync`): the DocSync vox service,
+# the server host (canonical doc + fan-out), the SyncedDoc client
+# driver, and the presence channel. Pulls vox + architect's PubSub.
+vox = ["dep:vox", "dep:facet", "architect/vox"]
+# Dioxus hooks (`crdt::hooks`): use_synced_doc / use_crdt_list /
+# use_crdt_entry / use_presence_channel — the client-side bridge from a
+# syncing replica to AtomResult phase rendering. Implies the sync
+# transport; pulls Dioxus through architect's atom feature (+ platform
+# for the retry sleeps). UI crates only.
+dioxus = ["vox", "architect/atom", "architect/platform"]
+# IndexedDB-backed `Persistence` for the browser (wasm only): the
+# replica itself survives restarts offline.
+indexeddb = ["dep:idb", "dep:wasm-bindgen", "dep:js-sys"]
+
+[dependencies]
+architect.workspace = true
+vox = { workspace = true, optional = true }
+facet = { workspace = true, optional = true }
+loro.workspace = true
+# Pin to the same minor as `loro` — type identities in
+# `EphemeralStore` ride the loro-internal crate version.
+loro-internal = { version = "1.12", default-features = false }
+async-trait.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+crdt-derive.workspace = true
+
+# Declare tokio independently of the workspace dep so wasm32 builds
+# (which can't pull mio / rt-multi-thread) stay clean. `macros` powers
+# the `tokio::select!` in the sync/presence drivers (proc-macro —
+# target-agnostic). On native we additionally enable `rt` for the
+# `tokio::spawn` inside `CrdtDoc::open`'s persistence-writer task.
+tokio = { version = "1", default-features = false, features = ["sync", "macros"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# `rt` for the `tokio::spawn` inside `CrdtDoc::open`'s persistence-writer
+# task; `time` for the `DocRegistry` idle-eviction sweeper's timer.
+tokio = { version = "1", default-features = false, features = ["rt", "time"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# `CrdtDoc::open`'s persistence-writer task on the browser's
+# single-threaded executor.
+wasm-bindgen-futures = "0.4"
+# Uuid v4 needs a browser randomness source on wasm.
+uuid = { workspace = true, features = ["js"] }
+# IndexedDB bindings (futures-wrapped), behind the `indexeddb` feature.
+idb = { version = "0.6", optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+js-sys = { version = "0.3", optional = true }
+
+[lib]
+doctest = false
+
+[dev-dependencies]
+# Self-dep so the test targets always see the sync module (cargo enables
+# the feature for tests without making it a default).
+crdt = { path = ".", features = ["vox"] }
+# The sync convergence test serves DocSyncHost over the in-process vox
+# transport and runs replicas under tokio.
+architect = { workspace = true, features = ["vox", "local"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+tempfile = "3"

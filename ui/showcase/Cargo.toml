@@ -1,0 +1,16 @@
+[package]
+name = "architect-ui-showcase"
+version.workspace = true
+edition = "2021"          # kept on 2021 — pre-move workspace edition; migrate deliberately
+
+[features]
+default = ["desktop"]
+desktop = ["dioxus/desktop"]
+
+[dependencies]
+dioxus = { workspace = true, features = ["router"] }
+architect-ui.workspace = true
+chrono = "0.4"
+
+[lints]
+workspace = true

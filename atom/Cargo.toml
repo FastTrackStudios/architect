@@ -1,0 +1,27 @@
+[package]
+name = "architect-atom"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
+# architect-atom — optimistic, stale-while-revalidate client state for
+# Dioxus. The client-side twin of architect's server-side Layer/Resource
+# DI: it borrows effect-atom's `Result` + writable optimistic atoms
+# (https://github.com/tim-smart/effect-atom) WITHOUT the `Effect<A,E,R>`
+# monad — expressed as plain Dioxus `Signal`s.
+#
+# Entity-agnostic and wasm-safe: the only dependency is Dioxus core
+# (`lib` feature). It knows nothing about vox, tokio, or any concrete
+# entity — consumers implement `StoreEntity` for their own types.
+
+[dependencies]
+dioxus = { workspace = true }
+
+[lib]
+doctest = false

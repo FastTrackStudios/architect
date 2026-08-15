@@ -1,0 +1,18 @@
+[package]
+name = "architect-story-core"
+version.workspace = true
+edition = "2021"          # kept on 2021 — pre-move workspace edition; migrate deliberately
+license.workspace = true
+repository.workspace = true
+description = "Core types for architect-story: stories, knobs, interactions, registry."
+
+[dependencies]
+linkme = { workspace = true }
+serde = { workspace = true, optional = true }
+
+[features]
+default = []
+serde = ["dep:serde"]
+
+[lints]
+workspace = true
