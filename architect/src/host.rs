@@ -12,10 +12,10 @@
 use std::future::Future;
 use std::path::PathBuf;
 
+use axum::Router;
 use axum::extract::WebSocketUpgrade;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use axum::Router;
 
 use crate::LayerRouter;
 
@@ -41,7 +41,8 @@ pub fn init_tracing(default_filter: &str) {
     let default = default_filter.to_string();
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| default.into()),
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| default.into()),
         )
         .init();
 }
@@ -140,16 +141,18 @@ impl EngineHost {
         }
 
         let vox_router = router;
-        let mut app = Router::new().route("/health", get(|| async { "ok" })).route(
-            "/vox",
-            get(move |ws: WebSocketUpgrade| {
-                let router = vox_router.clone();
-                async move {
-                    ws.on_upgrade(move |socket| crate::axum_ws::serve_router(socket, router))
-                        .into_response()
-                }
-            }),
-        );
+        let mut app = Router::new()
+            .route("/health", get(|| async { "ok" }))
+            .route(
+                "/vox",
+                get(move |ws: WebSocketUpgrade| {
+                    let router = vox_router.clone();
+                    async move {
+                        ws.on_upgrade(move |socket| crate::axum_ws::serve_router(socket, router))
+                            .into_response()
+                    }
+                }),
+            );
 
         if let Some(extra) = self.extra {
             app = app.merge(extra);
@@ -216,7 +219,10 @@ fn embedded_asset(dir: &'static include_dir::Dir<'static>, uri: axum::http::Uri)
         _ => match dir.get_file("index.html") {
             Some(f) => ("index.html", f),
             None => {
-                return (axum::http::StatusCode::NOT_FOUND, "no index.html in embedded bundle")
+                return (
+                    axum::http::StatusCode::NOT_FOUND,
+                    "no index.html in embedded bundle",
+                )
                     .into_response();
             }
         },

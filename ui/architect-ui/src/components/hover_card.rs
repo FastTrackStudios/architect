@@ -1,5 +1,6 @@
 //! HoverCard — primitive-backed hover/focus card.
 
+use architect_story_runtime::story;
 use dioxus::prelude::*;
 use dioxus_primitives::{
     hover_card::{
@@ -8,7 +9,6 @@ use dioxus_primitives::{
     },
     ContentAlign, ContentSide,
 };
-use architect_story_runtime::story;
 
 /// Which side the hover card appears on.
 #[derive(Clone, Copy, PartialEq, Default)]

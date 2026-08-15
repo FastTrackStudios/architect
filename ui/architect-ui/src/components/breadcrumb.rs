@@ -1,7 +1,7 @@
 //! Breadcrumb — shadcn v4 maia style breadcrumb navigation.
 
-use dioxus::prelude::*;
 use architect_story_runtime::story;
+use dioxus::prelude::*;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct BreadcrumbProps {

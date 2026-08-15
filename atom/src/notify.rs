@@ -163,9 +163,7 @@ impl Notifications {
     /// after the timer was armed survives until its NEW timer fires.
     pub fn dismiss_if(&self, id: u64, count: u32) {
         let mut items = self.items;
-        items
-            .write()
-            .retain(|n| n.id != id || n.count != count);
+        items.write().retain(|n| n.id != id || n.count != count);
     }
 
     /// Remove everything.

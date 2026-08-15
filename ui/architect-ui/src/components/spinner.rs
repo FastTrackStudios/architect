@@ -1,7 +1,7 @@
 //! Spinner — loading indicator, shadcn v4 maia style.
 
-use dioxus::prelude::*;
 use architect_story_runtime::story;
+use dioxus::prelude::*;
 
 /// Spinner size variants.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]

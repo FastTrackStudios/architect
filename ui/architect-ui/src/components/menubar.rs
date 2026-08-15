@@ -1,12 +1,12 @@
 //! Menubar — primitive-backed horizontal menu bar.
 
+use architect_story_runtime::story;
 use dioxus::prelude::*;
 use dioxus_primitives::menubar::{
     Menubar as PrimitiveMenubar, MenubarContent as PrimitiveMenubarContent,
     MenubarItem as PrimitiveMenubarItem, MenubarMenu as PrimitiveMenubarMenu,
     MenubarTrigger as PrimitiveMenubarTrigger,
 };
-use architect_story_runtime::story;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct MenubarProps {

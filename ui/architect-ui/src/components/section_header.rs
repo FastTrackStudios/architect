@@ -2,8 +2,8 @@
 //!
 //! Used to label groups of content in sidebars, panels, and lists.
 
-use dioxus::prelude::*;
 use architect_story_runtime::story;
+use dioxus::prelude::*;
 
 /// Size variants for the section header.
 #[derive(Clone, Copy, PartialEq, Default)]

@@ -1,8 +1,8 @@
 //! AspectRatio — shadcn v4 maia style CSS aspect-ratio wrapper.
 
+use architect_story_runtime::story;
 use dioxus::prelude::*;
 use dioxus_primitives::aspect_ratio::AspectRatio as PrimitiveAspectRatio;
-use architect_story_runtime::story;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct AspectRatioProps {

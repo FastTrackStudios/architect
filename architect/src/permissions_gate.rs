@@ -36,8 +36,7 @@ use architect_permissions::{
     Resource, ServicePermits,
 };
 use vox::{
-    DriverReplySink, Handler, MethodId, RequestCall, SchemaRecvTracker, SelfRef,
-    ServiceDescriptor,
+    DriverReplySink, Handler, MethodId, RequestCall, SchemaRecvTracker, SelfRef, ServiceDescriptor,
 };
 
 use crate::layer::LayerRouter;
@@ -86,10 +85,7 @@ pub struct PermissionsGate {
 }
 
 impl PermissionsGate {
-    pub fn new(
-        engine: Arc<dyn PermissionEngine>,
-        identity: Arc<dyn IdentityResolver>,
-    ) -> Self {
+    pub fn new(engine: Arc<dyn PermissionEngine>, identity: Arc<dyn IdentityResolver>) -> Self {
         Self {
             engine,
             identity,
@@ -264,12 +260,13 @@ impl PermissionsGate {
                         allowed: false,
                         reason: Some("service not mounted for this lane".into()),
                     });
-                    GateOutcome::Deny("permission denied: service not available on this lane".into())
+                    GateOutcome::Deny(
+                        "permission denied: service not available on this lane".into(),
+                    )
                 }
             }
         }
     }
-
 }
 
 enum GateOutcome {
@@ -343,11 +340,10 @@ where
             // indistinguishable bucket, which is the same readability
             // failure the per-method naming in `LayerRouter` exists to
             // avoid. The permit table already knows the names.
-            let name = self
-                .gate
-                .rules
-                .get(&method_id)
-                .map_or_else(|| "rpc".to_owned(), |r| format!("{}/{}", r.service, r.method));
+            let name = self.gate.rules.get(&method_id).map_or_else(
+                || "rpc".to_owned(),
+                |r| format!("{}/{}", r.service, r.method),
+            );
             self.dispatch(method_id, token, call, reply, schemas)
                 .instrument(tracing::info_span!("rpc.gated", otel.name = name))
                 .await;
@@ -398,11 +394,7 @@ where
 /// decodes `VoxError::InvalidPayload(reason)` cleanly. Falls back to the
 /// type-erased `send_error` when the shape is unknown or reflective
 /// construction fails.
-async fn deny_reply(
-    reply: DriverReplySink,
-    shape: Option<&'static facet::Shape>,
-    reason: String,
-) {
+async fn deny_reply(reply: DriverReplySink, shape: Option<&'static facet::Shape>, reason: String) {
     use vox::ReplySink as _;
     // Keep the built value alive across the send. `HeapValue` is
     // conservatively `!Send` (raw pointers); the built response is plain
@@ -433,7 +425,9 @@ async fn deny_reply(
         tracing_warn_fallback(&reason);
     }
     reply
-        .send_error(vox::VoxError::<core::convert::Infallible>::InvalidPayload(reason))
+        .send_error(vox::VoxError::<core::convert::Infallible>::InvalidPayload(
+            reason,
+        ))
         .await;
 }
 
@@ -441,7 +435,9 @@ fn tracing_warn_fallback(reason: &str) {
     // Kept out of the async fn so the gate has zero tracing spans on the
     // happy path.
     #[cfg(debug_assertions)]
-    eprintln!("permissions gate: shaped deny construction failed, sending type-erased deny ({reason})");
+    eprintln!(
+        "permissions gate: shaped deny construction failed, sending type-erased deny ({reason})"
+    );
     let _ = reason;
 }
 

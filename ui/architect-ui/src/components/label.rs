@@ -1,8 +1,8 @@
 //! Label — shadcn v4 maia style, standalone (no lumen-blocks).
 
+use architect_story_runtime::story;
 use dioxus::prelude::*;
 use dioxus_primitives::label::Label as PrimitiveLabel;
-use architect_story_runtime::story;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct LabelProps {

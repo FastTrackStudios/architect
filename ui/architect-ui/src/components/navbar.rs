@@ -1,12 +1,12 @@
 //! Navbar — router-gated primitive-backed navigation menu.
 
+use architect_story_runtime::story;
 use dioxus::prelude::*;
 use dioxus_primitives::navbar::{
     Navbar as PrimitiveNavbar, NavbarContent as PrimitiveNavbarContent,
     NavbarItem as PrimitiveNavbarItem, NavbarNav as PrimitiveNavbarNav,
     NavbarTrigger as PrimitiveNavbarTrigger,
 };
-use architect_story_runtime::story;
 
 #[component]
 pub fn Navbar(

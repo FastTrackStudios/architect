@@ -37,9 +37,7 @@ pub mod admin {
         let mut seen_name = std::collections::HashSet::new();
         members
             .into_iter()
-            .filter(|m| {
-                seen_id.insert(m.user_id) && seen_name.insert(m.name.to_ascii_lowercase())
-            })
+            .filter(|m| seen_id.insert(m.user_id) && seen_name.insert(m.name.to_ascii_lowercase()))
             .collect()
     }
 
@@ -107,28 +105,28 @@ pub mod admin {
             };
             // Precise path: valid session for THIS org + real membership rows.
             if let Some(org_id) = bundle.session.active_organization_id {
-                        let members = self.storage.list_members_by_organization(org_id).await?;
-                        if !members.is_empty() {
-                            let mut out = Vec::with_capacity(members.len());
-                            for member in members {
-                                let user = self.storage.find_user_by_id(member.user_id).await?;
-                                let (name, email) = match &user {
-                                    Some(user) => display(user),
-                                    None => (short_id(member.user_id), String::new()),
-                                };
-                                if member_excluded(&name, &email) {
-                                    continue;
-                                }
-                                out.push(OrgMember {
-                                    user_id: member.user_id,
-                                    name,
-                                    email,
-                                    role: member.role,
-                                });
-                            }
-                            return Ok(dedupe_members(out));
+                let members = self.storage.list_members_by_organization(org_id).await?;
+                if !members.is_empty() {
+                    let mut out = Vec::with_capacity(members.len());
+                    for member in members {
+                        let user = self.storage.find_user_by_id(member.user_id).await?;
+                        let (name, email) = match &user {
+                            Some(user) => display(user),
+                            None => (short_id(member.user_id), String::new()),
+                        };
+                        if member_excluded(&name, &email) {
+                            continue;
                         }
+                        out.push(OrgMember {
+                            user_id: member.user_id,
+                            name,
+                            email,
+                            role: member.role,
+                        });
                     }
+                    return Ok(dedupe_members(out));
+                }
+            }
 
             // Fallback: a validated session, but this org keeps no
             // membership rows — enumerate its users. Anonymous callers
@@ -2066,7 +2064,10 @@ pub mod email_password {
             email: &str,
         ) -> Result<Option<auth_proto::AuthUser>, AuthFlowError> {
             let canonical = normalize_email(email)?;
-            let Some(user_id) = self.storage.find_user_id_by_previous_email(&canonical).await?
+            let Some(user_id) = self
+                .storage
+                .find_user_id_by_previous_email(&canonical)
+                .await?
             else {
                 return Ok(None);
             };
@@ -2365,7 +2366,6 @@ pub mod email_password {
             BeginOAuthAuthorization, BeginOAuthProxyAuthorization, BeginPasskeyAuthentication,
             BeginPasskeyRegistration, BreachedPasswordFailurePolicy, BreachedPasswordProvider,
             CaptchaFlow, ChangeEmail, ChangePassword, CheckPasswordBreach, CleanupAnonymousUsers,
-            MigrateUserEmail,
             ClearLastLoginMethod, CompletePasskeyAuthentication, CompletePasskeyRegistration,
             CompletePasswordReset, ConfirmTwoFactor, ConsumeOAuthProxyCallback, CreateApiKey,
             CreateDeviceAuthorization, CreateEmailPasswordUser, CreateInvitation,
@@ -2376,18 +2376,19 @@ pub mod email_password {
             GetOAuthAccessToken, GetOidcUserInfo, ImpersonateUser, IssueJwt,
             LinkAnonymousEmailPassword, LinkOAuthAccount, LinkSiweAddress, ListAccounts,
             ListApiKeys, ListDeviceSessions, ListPasskeys, ListSessions, ListTeamMembers,
-            ListTeams, ListUserSessions, ListUsers, OidcClientConfig, OneTapCallback,
-            PollDeviceToken, RefreshOAuthToken, RegisterOidcClient, RemoveTeamMember, RemoveUser,
-            RequestEmailVerification, RequestPasswordReset, RequireOrganizationRole, RevokeApiKey,
-            RevokeDeviceSession, RevokeOneTimeToken, RevokeOtherSessions, RevokeSession,
-            RevokeUserSession, RevokeUserSessions, SendEmailOtp, SendMagicLink, SendPhoneNumberOtp,
-            SetActiveDeviceSession, SetActiveOrganization, SetMemberRole, SetUserRole,
-            SignInAnonymous, SignInEmailPassword, SignInOAuthAccount, SignInUsername, SignOut,
-            SmsProvider, StartTwoFactorSetup, StopImpersonating, UnbanUser, UnlinkOAuthAccount,
-            UpdateApiKey, UpdatePhoneNumber, UpdateTeam, UpdateUsername, VerifyApiKey,
-            VerifyCaptcha, VerifyDeviceCode, VerifyEmail, VerifyEmailOtp, VerifyJwt,
-            VerifyMagicLink, VerifyOAuthState, VerifyOneTimeToken, VerifyPhoneNumberOtp,
-            VerifySiweMessage, VerifyTwoFactor,
+            ListTeams, ListUserSessions, ListUsers, MigrateUserEmail, OidcClientConfig,
+            OneTapCallback, PollDeviceToken, RefreshOAuthToken, RegisterOidcClient,
+            RemoveTeamMember, RemoveUser, RequestEmailVerification, RequestPasswordReset,
+            RequireOrganizationRole, RevokeApiKey, RevokeDeviceSession, RevokeOneTimeToken,
+            RevokeOtherSessions, RevokeSession, RevokeUserSession, RevokeUserSessions,
+            SendEmailOtp, SendMagicLink, SendPhoneNumberOtp, SetActiveDeviceSession,
+            SetActiveOrganization, SetMemberRole, SetUserRole, SignInAnonymous,
+            SignInEmailPassword, SignInOAuthAccount, SignInUsername, SignOut, SmsProvider,
+            StartTwoFactorSetup, StopImpersonating, UnbanUser, UnlinkOAuthAccount, UpdateApiKey,
+            UpdatePhoneNumber, UpdateTeam, UpdateUsername, VerifyApiKey, VerifyCaptcha,
+            VerifyDeviceCode, VerifyEmail, VerifyEmailOtp, VerifyJwt, VerifyMagicLink,
+            VerifyOAuthState, VerifyOneTimeToken, VerifyPhoneNumberOtp, VerifySiweMessage,
+            VerifyTwoFactor,
         };
 
         #[derive(Clone, Default)]
@@ -4871,10 +4872,16 @@ pub mod email_password {
             assert_eq!(history.len(), 2, "one row per change: {history:?}");
             // Oldest first, and each row links the pair it moved between,
             // so the chain reads end to end.
-            assert_eq!(history[0].previous_email.as_deref(), Some("first@example.com"));
+            assert_eq!(
+                history[0].previous_email.as_deref(),
+                Some("first@example.com")
+            );
             assert_eq!(history[0].new_email, "second@example.com");
             assert_eq!(history[0].reason.as_deref(), Some("domain move"));
-            assert_eq!(history[1].previous_email.as_deref(), Some("second@example.com"));
+            assert_eq!(
+                history[1].previous_email.as_deref(),
+                Some("second@example.com")
+            );
             assert_eq!(history[1].new_email, "third@example.com");
         }
 
@@ -4925,9 +4932,15 @@ pub mod email_password {
                     reason: None,
                 })
                 .await;
-            assert!(clash.is_err(), "must not collide two accounts onto one address");
             assert!(
-                auth.list_email_history(id).await.expect("history").is_empty(),
+                clash.is_err(),
+                "must not collide two accounts onto one address"
+            );
+            assert!(
+                auth.list_email_history(id)
+                    .await
+                    .expect("history")
+                    .is_empty(),
                 "a refused migration must not leave a row in the trail"
             );
         }
@@ -4947,7 +4960,12 @@ pub mod email_password {
                 .await
                 .expect("no-op migrate");
             assert_eq!(again.id, id);
-            assert!(auth.list_email_history(id).await.expect("history").is_empty());
+            assert!(
+                auth.list_email_history(id)
+                    .await
+                    .expect("history")
+                    .is_empty()
+            );
         }
 
         #[tokio::test]
@@ -4991,7 +5009,10 @@ pub mod email_password {
 
             let history = auth.list_email_history(id).await.expect("history");
             assert_eq!(history.len(), 1);
-            assert_eq!(history[0].previous_email.as_deref(), Some("self@example.com"));
+            assert_eq!(
+                history[0].previous_email.as_deref(),
+                Some("self@example.com")
+            );
             assert_eq!(
                 history[0].changed_by, None,
                 "self-service changes record no operator"

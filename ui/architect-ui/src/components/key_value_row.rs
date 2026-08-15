@@ -2,8 +2,8 @@
 //!
 //! Used in info popovers, latency panels, and settings displays.
 
-use dioxus::prelude::*;
 use architect_story_runtime::story;
+use dioxus::prelude::*;
 
 /// A horizontal row with a label on the left and a value on the right.
 ///

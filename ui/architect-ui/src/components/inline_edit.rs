@@ -3,8 +3,8 @@
 //! Switches between a display button and a text input. Commits on Enter or
 //! blur, cancels on Escape. Used for renaming scenes, presets, songs, etc.
 
-use dioxus::prelude::*;
 use architect_story_runtime::story;
+use dioxus::prelude::*;
 
 /// A text element that switches to an input on double-click for inline renaming.
 ///

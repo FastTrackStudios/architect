@@ -16,8 +16,8 @@ mod echo_proto {
     }
 }
 
-use echo_proto::prelude::EchoService;
 use echo_proto::EchoClient;
+use echo_proto::prelude::EchoService;
 
 #[derive(Clone, architect::HasDispatcher)]
 #[dispatch(architect::dispatch::CurrentThreadDispatcher)]
@@ -127,10 +127,20 @@ mod scoped_views {
 
     impl Store for MemStore {
         fn count(&self, region: String) -> u32 {
-            self.data.lock().unwrap().keys().filter(|(r, _)| *r == region).count() as u32
+            self.data
+                .lock()
+                .unwrap()
+                .keys()
+                .filter(|(r, _)| *r == region)
+                .count() as u32
         }
         fn read(&self, region: String, key: u32) -> String {
-            self.data.lock().unwrap().get(&(region, key)).cloned().unwrap_or_default()
+            self.data
+                .lock()
+                .unwrap()
+                .get(&(region, key))
+                .cloned()
+                .unwrap_or_default()
         }
         fn write(&self, region: String, key: u32, value: String) {
             self.data.lock().unwrap().insert((region, key), value);

@@ -1,7 +1,7 @@
 //! Command palette — shadcn v4 maia style (Cmd+K dialog).
 
-use dioxus::prelude::*;
 use architect_story_runtime::story;
+use dioxus::prelude::*;
 
 // ── Context ──────────────────────────────────────────────────────────────────
 

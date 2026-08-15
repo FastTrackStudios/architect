@@ -20,9 +20,9 @@ use std::time::{Duration, Instant};
 
 use architect_permissions::{BoxIdentityFuture, IdentityResolver, Principal};
 
+use crate::ArchitectAuth;
 use crate::commands::CurrentSession;
 use crate::storage::AuthStorage;
-use crate::ArchitectAuth;
 
 /// Resolve bearer tokens against an org's [`ArchitectAuth`] engine.
 pub struct SessionIdentityResolver<S> {

@@ -1,7 +1,7 @@
 //! Text — body text with semantic variants.
 
-use dioxus::prelude::*;
 use architect_story_runtime::story;
+use dioxus::prelude::*;
 
 /// Text style variant.
 #[derive(Clone, Copy, PartialEq, Default)]

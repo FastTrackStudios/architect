@@ -3,10 +3,10 @@
 //! CSS-only approach using Tailwind scrollbar utilities where available,
 //! falling back to native OS scrollbars otherwise.
 
+use architect_story_runtime::story;
 use dioxus::prelude::*;
 use dioxus_primitives::scroll_area::ScrollArea as PrimitiveScrollArea;
 pub use dioxus_primitives::scroll_area::{ScrollDirection, ScrollType};
-use architect_story_runtime::story;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct ScrollAreaProps {

@@ -1,7 +1,7 @@
 //! Native select — platform select control with architect-ui styling.
 
-use dioxus::prelude::*;
 use architect_story_runtime::story;
+use dioxus::prelude::*;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct NativeSelectProps {

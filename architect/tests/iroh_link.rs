@@ -44,13 +44,17 @@ async fn frames_roundtrip_and_close() {
             let link = IrohLink::new(connection, send, recv);
             let (tx, mut rx) = link.split();
             while let Some(frame) = rx.recv().await.expect("server recv") {
-                tx.send(frame.as_bytes().to_vec()).await.expect("server send");
+                tx.send(frame.as_bytes().to_vec())
+                    .await
+                    .expect("server send");
             }
             tx.close().await.expect("server close");
         }
     });
 
-    let link = iroh_link::connect(&client, server_addr).await.expect("connect");
+    let link = iroh_link::connect(&client, server_addr)
+        .await
+        .expect("connect");
     let (tx, mut rx) = link.split();
 
     // The client writes first, which is also what un-lazies the QUIC
@@ -89,7 +93,9 @@ async fn vox_connection_over_iroh() {
         }
     });
 
-    let link = iroh_link::connect(&client, server_addr).await.expect("connect");
+    let link = iroh_link::connect(&client, server_addr)
+        .await
+        .expect("connect");
     let connection = vox_core::initiator_on(link)
         .establish_connection()
         .await

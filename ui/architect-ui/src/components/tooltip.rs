@@ -1,5 +1,6 @@
 //! Tooltip — shadcn v4 maia style CSS-only tooltip.
 
+use architect_story_runtime::story;
 use dioxus::prelude::*;
 use dioxus_primitives::{
     tooltip::{
@@ -8,7 +9,6 @@ use dioxus_primitives::{
     },
     ContentAlign, ContentSide,
 };
-use architect_story_runtime::story;
 
 // ---------------------------------------------------------------------------
 // TooltipSide

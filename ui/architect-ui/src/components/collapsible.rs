@@ -1,11 +1,11 @@
 //! Collapsible — accessible primitive-backed open/close container.
 
+use architect_story_runtime::story;
 use dioxus::prelude::*;
 use dioxus_primitives::collapsible::{
     Collapsible as PrimitiveCollapsible, CollapsibleContent as PrimitiveCollapsibleContent,
     CollapsibleTrigger as PrimitiveCollapsibleTrigger,
 };
-use architect_story_runtime::story;
 
 // ---------------------------------------------------------------------------
 // Collapsible (root)

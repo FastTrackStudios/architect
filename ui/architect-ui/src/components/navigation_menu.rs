@@ -1,7 +1,7 @@
 //! NavigationMenu — shadcn v4 maia style top-level navigation with mega-menu dropdowns.
 
-use dioxus::prelude::*;
 use architect_story_runtime::story;
+use dioxus::prelude::*;
 
 // ── Context ──────────────────────────────────────────────────────────────────
 

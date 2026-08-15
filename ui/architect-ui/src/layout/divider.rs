@@ -1,8 +1,8 @@
 //! Divider — shadcn v4 maia separator style.
 
+use architect_story_runtime::story;
 use dioxus::prelude::*;
 use dioxus_primitives::separator::Separator;
-use architect_story_runtime::story;
 
 /// Orientation of the divider.
 #[derive(Clone, Copy, PartialEq, Default)]

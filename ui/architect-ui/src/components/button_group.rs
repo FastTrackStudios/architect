@@ -1,7 +1,7 @@
 //! Button group — shadcn-style grouped actions.
 
-use dioxus::prelude::*;
 use architect_story_runtime::story;
+use dioxus::prelude::*;
 
 /// Button group axis.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]

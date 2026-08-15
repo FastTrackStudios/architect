@@ -1,7 +1,7 @@
 //! Heading — H1 through H6 with consistent typography styles.
 
-use dioxus::prelude::*;
 use architect_story_runtime::story;
+use dioxus::prelude::*;
 
 /// Heading level.
 #[derive(Clone, Copy, PartialEq, Default)]

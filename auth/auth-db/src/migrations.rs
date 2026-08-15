@@ -876,7 +876,11 @@ mod m20260809_000001_create_email_history {
                                 .not_null()
                                 .primary_key(),
                         )
-                        .col(ColumnDef::new(AuthUserEmailHistory::UserId).uuid().not_null())
+                        .col(
+                            ColumnDef::new(AuthUserEmailHistory::UserId)
+                                .uuid()
+                                .not_null(),
+                        )
                         // Nullable: `auth_users.email` is nullable, so an
                         // account can genuinely have had no address before.
                         .col(ColumnDef::new(AuthUserEmailHistory::PreviousEmail).string())

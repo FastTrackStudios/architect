@@ -1,11 +1,11 @@
 //! Accordion — shadcn v4 maia style collapsible sections (single-open mode).
 
+use architect_story_runtime::story;
 use dioxus::prelude::*;
 use dioxus_primitives::accordion::{
     Accordion as PrimitiveAccordion, AccordionContent as PrimitiveAccordionContent,
     AccordionItem as PrimitiveAccordionItem, AccordionTrigger as PrimitiveAccordionTrigger,
 };
-use architect_story_runtime::story;
 
 // ---------------------------------------------------------------------------
 // Accordion (container)

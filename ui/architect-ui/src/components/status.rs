@@ -3,8 +3,8 @@
 //! `StatusDot` — small colored circle used as a leading indicator in lists.
 //! `StatusBadge` — pill with tinted background, icon, and label text.
 
-use dioxus::prelude::*;
 use architect_story_runtime::story;
+use dioxus::prelude::*;
 
 // ---------------------------------------------------------------------------
 // StatusDot

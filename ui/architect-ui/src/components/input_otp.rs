@@ -1,7 +1,7 @@
 //! InputOtp — shadcn v4 maia style one-time password input.
 
-use dioxus::prelude::*;
 use architect_story_runtime::story;
+use dioxus::prelude::*;
 
 // ---------------------------------------------------------------------------
 // Context

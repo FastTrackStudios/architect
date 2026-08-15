@@ -255,7 +255,9 @@ impl Rule {
     }
 
     pub fn permits(&self, what: &Resource, action: &Action) -> bool {
-        self.actions.iter().any(|a| a == action.as_str() || a == "*")
+        self.actions
+            .iter()
+            .any(|a| a == action.as_str() || a == "*")
             && glob_matches(&self.resource, what.as_str())
     }
 }
@@ -345,7 +347,12 @@ impl RoleEngine {
             "member".into(),
             vec![Rule::new(
                 "**",
-                &[Action::READ, Action::WRITE, Action::COMMENT, Action::DOWNLOAD],
+                &[
+                    Action::READ,
+                    Action::WRITE,
+                    Action::COMMENT,
+                    Action::DOWNLOAD,
+                ],
             )],
         );
         m.insert("guest".into(), Vec::new());
@@ -581,9 +588,7 @@ mod tests {
     use super::*;
 
     fn user(id: &str) -> Principal {
-        Principal::User {
-            user_id: id.into(),
-        }
+        Principal::User { user_id: id.into() }
     }
 
     #[test]
@@ -613,18 +618,34 @@ mod tests {
             link_id: "l1".into(),
             display: None,
         };
-        assert!(e
-            .check(&p, &"vault/Setlists/Sunday Worship.md".into(), &Action::read())
-            .allowed());
-        assert!(e
-            .check(&p, &"resources/songs/praise/stems/01.ogg".into(), &Action::read())
-            .allowed());
-        assert!(!e
-            .check(&p, &"vault/Finance/Q3.md".into(), &Action::read())
-            .allowed());
-        assert!(!e
-            .check(&p, &"resources/songs/praise/stems/01.ogg".into(), &Action::write())
-            .allowed());
+        assert!(
+            e.check(
+                &p,
+                &"vault/Setlists/Sunday Worship.md".into(),
+                &Action::read()
+            )
+            .allowed()
+        );
+        assert!(
+            e.check(
+                &p,
+                &"resources/songs/praise/stems/01.ogg".into(),
+                &Action::read()
+            )
+            .allowed()
+        );
+        assert!(
+            !e.check(&p, &"vault/Finance/Q3.md".into(), &Action::read())
+                .allowed()
+        );
+        assert!(
+            !e.check(
+                &p,
+                &"resources/songs/praise/stems/01.ogg".into(),
+                &Action::write()
+            )
+            .allowed()
+        );
     }
 
     #[test]
@@ -634,21 +655,40 @@ mod tests {
         e.set_member("bob", "member");
         e.set_member("visitor", "guest");
 
-        assert!(e.check(&user("alice"), &"vault/x".into(), &Action::admin()).allowed());
-        assert!(e.check(&user("bob"), &"vault/x".into(), &Action::write()).allowed());
-        assert!(!e.check(&user("bob"), &"vault/x".into(), &Action::admin()).allowed());
-        assert!(!e.check(&user("visitor"), &"vault/x".into(), &Action::read()).allowed());
-        assert!(!e.check(&user("nobody"), &"vault/x".into(), &Action::read()).allowed());
-        assert!(!e
-            .check(&Principal::Anonymous, &"vault/x".into(), &Action::read())
-            .allowed());
-        assert!(e
-            .check(
-                &Principal::Service { name: "engine".into() },
+        assert!(
+            e.check(&user("alice"), &"vault/x".into(), &Action::admin())
+                .allowed()
+        );
+        assert!(
+            e.check(&user("bob"), &"vault/x".into(), &Action::write())
+                .allowed()
+        );
+        assert!(
+            !e.check(&user("bob"), &"vault/x".into(), &Action::admin())
+                .allowed()
+        );
+        assert!(
+            !e.check(&user("visitor"), &"vault/x".into(), &Action::read())
+                .allowed()
+        );
+        assert!(
+            !e.check(&user("nobody"), &"vault/x".into(), &Action::read())
+                .allowed()
+        );
+        assert!(
+            !e.check(&Principal::Anonymous, &"vault/x".into(), &Action::read())
+                .allowed()
+        );
+        assert!(
+            e.check(
+                &Principal::Service {
+                    name: "engine".into()
+                },
                 &"vault/x".into(),
                 &Action::write()
             )
-            .allowed());
+            .allowed()
+        );
     }
 
     #[test]
@@ -656,13 +696,20 @@ mod tests {
         let mut e = RoleEngine::new().with_default_user_role("member");
         e.set_member("visitor", "guest");
         // Unknown-but-validated user falls back to member…
-        assert!(e.check(&user("someone"), &"vault/x".into(), &Action::write()).allowed());
+        assert!(
+            e.check(&user("someone"), &"vault/x".into(), &Action::write())
+                .allowed()
+        );
         // …explicit rows still win…
-        assert!(!e.check(&user("visitor"), &"vault/x".into(), &Action::read()).allowed());
+        assert!(
+            !e.check(&user("visitor"), &"vault/x".into(), &Action::read())
+                .allowed()
+        );
         // …and anonymous stays denied.
-        assert!(!e
-            .check(&Principal::Anonymous, &"vault/x".into(), &Action::read())
-            .allowed());
+        assert!(
+            !e.check(&Principal::Anonymous, &"vault/x".into(), &Action::read())
+                .allowed()
+        );
     }
 
     #[test]
@@ -675,17 +722,26 @@ mod tests {
         )
         .unwrap();
         e.set_member("kim", "librarian");
-        assert!(e
-            .check(&user("kim"), &"vault/Songs/Time.md".into(), &Action::write())
-            .allowed());
-        assert!(e
-            .check(
+        assert!(
+            e.check(
+                &user("kim"),
+                &"vault/Songs/Time.md".into(),
+                &Action::write()
+            )
+            .allowed()
+        );
+        assert!(
+            e.check(
                 &user("kim"),
                 &"resources/scores/time/score.musicxml".into(),
                 &Action::new("download")
             )
-            .allowed());
-        assert!(!e.check(&user("kim"), &"vault/Finance/x".into(), &Action::read()).allowed());
+            .allowed()
+        );
+        assert!(
+            !e.check(&user("kim"), &"vault/Finance/x".into(), &Action::read())
+                .allowed()
+        );
     }
 
     #[test]
@@ -693,22 +749,31 @@ mod tests {
         let scope = Arc::new(ScopeEngine::new(vec![Rule::new("vault/a", &["read"])]));
         let mut roles = RoleEngine::new();
         roles.set_member("alice", "member");
-        let composite = CompositeEngine::new()
-            .push(Arc::new(roles))
-            .push(scope);
+        let composite = CompositeEngine::new().push(Arc::new(roles)).push(scope);
         // member → allowed by roles even though scope would deny
-        assert!(composite
-            .check(&user("alice"), &"vault/zzz".into(), &Action::read())
-            .allowed());
+        assert!(
+            composite
+                .check(&user("alice"), &"vault/zzz".into(), &Action::read())
+                .allowed()
+        );
         // guest → roles deny, scope allows vault/a
-        let g = Principal::Guest { link_id: "l".into(), display: None };
-        assert!(composite.check(&g, &"vault/a".into(), &Action::read()).allowed());
+        let g = Principal::Guest {
+            link_id: "l".into(),
+            display: None,
+        };
+        assert!(
+            composite
+                .check(&g, &"vault/a".into(), &Action::read())
+                .allowed()
+        );
         let d = composite.check(&g, &"vault/b".into(), &Action::read());
         assert!(!d.allowed());
         // empty composite denies
-        assert!(!CompositeEngine::new()
-            .check(&Principal::Anonymous, &"x".into(), &Action::read())
-            .allowed());
+        assert!(
+            !CompositeEngine::new()
+                .check(&Principal::Anonymous, &"x".into(), &Action::read())
+                .allowed()
+        );
     }
 
     #[test]

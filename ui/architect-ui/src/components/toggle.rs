@@ -1,8 +1,8 @@
 //! Toggle — shadcn v4 maia style.
 
+use architect_story_runtime::story;
 use dioxus::prelude::*;
 use dioxus_primitives::toggle::Toggle as PrimitiveToggle;
-use architect_story_runtime::story;
 
 /// Variant for the toggle button.
 #[derive(Clone, Copy, PartialEq, Default)]

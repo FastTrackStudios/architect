@@ -3,8 +3,8 @@
 //! Replaces the repeated pattern of `div { class: "bg-zinc-800/50 rounded ..." }`
 //! with toggle buttons inside. Supports multiple sizes for different density needs.
 
-use dioxus::prelude::*;
 use architect_story_runtime::story;
+use dioxus::prelude::*;
 
 // ---------------------------------------------------------------------------
 // Size

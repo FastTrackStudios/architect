@@ -36,7 +36,9 @@ pub struct ScopeMiddleware {
 
 impl ScopeMiddleware {
     pub fn new(scope: impl Into<String>) -> Self {
-        Self { scope: scope.into() }
+        Self {
+            scope: scope.into(),
+        }
     }
 }
 

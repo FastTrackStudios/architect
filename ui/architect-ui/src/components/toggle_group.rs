@@ -1,10 +1,10 @@
 //! Toggle group — shadcn v4 maia style.
 
+use architect_story_runtime::story;
 use dioxus::prelude::*;
 use dioxus_primitives::toggle_group::{
     ToggleGroup as PrimitiveToggleGroup, ToggleItem as PrimitiveToggleItem,
 };
-use architect_story_runtime::story;
 use std::collections::HashSet;
 
 #[derive(Props, Clone, PartialEq)]

@@ -1,10 +1,10 @@
 //! Progress — shadcn v4 maia style, standalone (no lumen-blocks).
 
+use architect_story_runtime::story;
 use dioxus::prelude::*;
 use dioxus_primitives::progress::{
     Progress as PrimitiveProgress, ProgressIndicator as PrimitiveProgressIndicator,
 };
-use architect_story_runtime::story;
 
 /// Visual variant for the progress bar fill.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]

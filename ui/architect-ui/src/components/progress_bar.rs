@@ -7,8 +7,8 @@
 //! This is distinct from the lumen-blocks `Progress` re-export, which is a plain
 //! semantic `<progress>` element.
 
-use dioxus::prelude::*;
 use architect_story_runtime::story;
+use dioxus::prelude::*;
 
 /// Orientation for the progress bar.
 #[derive(Clone, Copy, PartialEq, Default)]

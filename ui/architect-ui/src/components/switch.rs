@@ -1,8 +1,8 @@
 //! Switch — shadcn v4 maia style, standalone (no lumen-blocks).
 
+use architect_story_runtime::story;
 use dioxus::prelude::*;
 use dioxus_primitives::switch::{Switch as PrimitiveSwitch, SwitchThumb};
-use architect_story_runtime::story;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct SwitchProps {

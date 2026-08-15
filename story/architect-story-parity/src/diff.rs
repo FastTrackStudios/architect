@@ -1,7 +1,7 @@
 //! Cross-renderer DSSIM diff + side-by-side composite.
 
-use dssim_core::Dssim;
 use architect_story_snapshots::{compare, DiffError};
+use dssim_core::Dssim;
 
 #[derive(Debug, Clone)]
 pub struct ParityReport {

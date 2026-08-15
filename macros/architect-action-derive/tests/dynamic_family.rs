@@ -11,7 +11,10 @@ use std::sync::{Arc, Mutex};
 
 use architect::action::{ActionBackend, ActionMeta, DynamicActionMeta};
 
-type RegisteredAction = (&'static ActionMeta, Arc<dyn Fn() -> Result<(), String> + Send + Sync>);
+type RegisteredAction = (
+    &'static ActionMeta,
+    Arc<dyn Fn() -> Result<(), String> + Send + Sync>,
+);
 
 #[derive(Default)]
 struct InMemoryActionBackend {
@@ -19,7 +22,11 @@ struct InMemoryActionBackend {
 }
 
 impl ActionBackend for InMemoryActionBackend {
-    fn register(&self, meta: &'static ActionMeta, handler: Arc<dyn Fn() -> Result<(), String> + Send + Sync>) {
+    fn register(
+        &self,
+        meta: &'static ActionMeta,
+        handler: Arc<dyn Fn() -> Result<(), String> + Send + Sync>,
+    ) {
         self.registered.lock().unwrap().push((meta, handler));
     }
 }

@@ -1,11 +1,11 @@
 //! Tabs — shadcn v4 maia style accessible tabbed interface.
 
+use architect_story_runtime::story;
 use dioxus::prelude::*;
 use dioxus_primitives::tabs::{
     TabContent as PrimitiveTabContent, TabList as PrimitiveTabList,
     TabTrigger as PrimitiveTabTrigger, Tabs as PrimitiveTabs,
 };
-use architect_story_runtime::story;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct TabsProps {

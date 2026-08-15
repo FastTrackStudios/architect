@@ -1,11 +1,11 @@
 //! Dialog — shadcn v4 maia style modal overlay.
 
+use architect_story_runtime::story;
 use dioxus::prelude::*;
 use dioxus_primitives::dialog::{
     DialogContent as PrimitiveDialogContent, DialogDescription as PrimitiveDialogDescription,
     DialogRoot as PrimitiveDialog, DialogTitle as PrimitiveDialogTitle,
 };
-use architect_story_runtime::story;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct DialogProps {

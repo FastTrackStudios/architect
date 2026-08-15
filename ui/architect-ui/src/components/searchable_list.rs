@@ -4,8 +4,8 @@
 //! filter your data, and render the results as `children`. The component
 //! provides the search input, scrollable container, and empty-state fallback.
 
-use dioxus::prelude::*;
 use architect_story_runtime::story;
+use dioxus::prelude::*;
 
 // ---------------------------------------------------------------------------
 // SearchableList

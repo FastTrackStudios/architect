@@ -4,8 +4,8 @@
 //! Unlike `Tabs` (context-based content switcher) or `SegmentedControl` (grouped toggle),
 //! NavTab is a standalone button meant for top-level route navigation.
 
-use dioxus::prelude::*;
 use architect_story_runtime::story;
+use dioxus::prelude::*;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct NavTabProps {

@@ -1,5 +1,6 @@
 //! AlertDialog — primitive-backed confirmation dialog for destructive actions.
 
+use architect_story_runtime::story;
 use dioxus::prelude::*;
 use dioxus_primitives::alert_dialog::{
     AlertDialogAction as PrimitiveAlertDialogAction,
@@ -8,7 +9,6 @@ use dioxus_primitives::alert_dialog::{
     AlertDialogDescription as PrimitiveAlertDialogDescription,
     AlertDialogRoot as PrimitiveAlertDialog, AlertDialogTitle as PrimitiveAlertDialogTitle,
 };
-use architect_story_runtime::story;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct AlertDialogProps {

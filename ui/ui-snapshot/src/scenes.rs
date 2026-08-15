@@ -1,8 +1,8 @@
 //! Scenes — one Dioxus component per snapshot. Keep them self-contained and
 //! deterministic (no time, no randomness, no animated content).
 
-use dioxus::prelude::*;
 use architect_ui::lucide_dioxus;
+use dioxus::prelude::*;
 
 /// Grid of solid-color probes at fixed pixel positions. Paired with
 /// `tests/pixel_probes.rs`, which renders this scene and asserts exact RGB

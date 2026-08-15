@@ -1,7 +1,7 @@
 //! Alert — shadcn v4 maia style.
 
-use dioxus::prelude::*;
 use architect_story_runtime::story;
+use dioxus::prelude::*;
 
 /// Alert visual variant.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]

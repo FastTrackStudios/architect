@@ -78,9 +78,15 @@ pub fn assert_snapshot(story: &'static Story, cfg: &SnapshotConfig) {
         }
         std::fs::write(&baseline_path, &png).expect("write baseline");
         if force_update {
-            eprintln!("architect-story-snapshots: refreshed {}", baseline_path.display());
+            eprintln!(
+                "architect-story-snapshots: refreshed {}",
+                baseline_path.display()
+            );
         } else {
-            eprintln!("architect-story-snapshots: created {}", baseline_path.display());
+            eprintln!(
+                "architect-story-snapshots: created {}",
+                baseline_path.display()
+            );
         }
         return;
     }

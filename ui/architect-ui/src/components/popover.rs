@@ -1,5 +1,6 @@
 //! Popover — shadcn v4 maia style positioned floating panel.
 
+use architect_story_runtime::story;
 use dioxus::prelude::*;
 use dioxus_primitives::{
     popover::{
@@ -8,7 +9,6 @@ use dioxus_primitives::{
     },
     ContentAlign, ContentSide,
 };
-use architect_story_runtime::story;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct PopoverProps {

@@ -1,7 +1,7 @@
 //! Skeleton — loading placeholder, shadcn v4 maia style.
 
-use dioxus::prelude::*;
 use architect_story_runtime::story;
+use dioxus::prelude::*;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct SkeletonProps {

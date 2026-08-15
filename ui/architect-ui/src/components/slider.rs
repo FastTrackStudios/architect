@@ -1,11 +1,11 @@
 //! Slider — shadcn v4 maia style range slider.
 
+use architect_story_runtime::story;
 use dioxus::prelude::*;
 use dioxus_primitives::slider::{
     RangeSlider as PrimitiveRangeSlider, Slider as PrimitiveSlider, SliderRange, SliderThumb,
     SliderTrack,
 };
-use architect_story_runtime::story;
 use std::ops::Range;
 
 // ---------------------------------------------------------------------------

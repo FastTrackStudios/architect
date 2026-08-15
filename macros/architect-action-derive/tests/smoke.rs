@@ -61,7 +61,10 @@ impl SetlistActions for FakeSession {
 
 /// One registered (metadata, handler) pair — factored out purely to
 /// satisfy clippy's `type_complexity` lint on the field below.
-type RegisteredAction = (&'static ActionMeta, Arc<dyn Fn() -> Result<(), String> + Send + Sync>);
+type RegisteredAction = (
+    &'static ActionMeta,
+    Arc<dyn Fn() -> Result<(), String> + Send + Sync>,
+);
 
 /// Stand-in for a real host (REAPER named-command table, a CLI
 /// dispatcher). Stores `(meta, handler)` and invokes by id — exactly
@@ -73,7 +76,11 @@ struct InMemoryActionBackend {
 }
 
 impl ActionBackend for InMemoryActionBackend {
-    fn register(&self, meta: &'static ActionMeta, handler: Arc<dyn Fn() -> Result<(), String> + Send + Sync>) {
+    fn register(
+        &self,
+        meta: &'static ActionMeta,
+        handler: Arc<dyn Fn() -> Result<(), String> + Send + Sync>,
+    ) {
         self.registered.lock().unwrap().push((meta, handler));
     }
 }

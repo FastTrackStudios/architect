@@ -1,11 +1,11 @@
 //! Avatar — shadcn v4 maia style.
 
+use architect_story_runtime::story;
 use dioxus::prelude::*;
 use dioxus_primitives::avatar::{
     Avatar as PrimitiveAvatar, AvatarFallback as PrimitiveAvatarFallback,
     AvatarImage as PrimitiveAvatarImage, AvatarState,
 };
-use architect_story_runtime::story;
 
 /// Size variant for the avatar.
 #[derive(Clone, Copy, PartialEq, Default)]

@@ -1,7 +1,7 @@
 //! Input — shadcn v4 maia style, replaces lumen-blocks wrapper.
 
-use dioxus::prelude::*;
 use architect_story_runtime::story;
+use dioxus::prelude::*;
 
 /// Input size variants.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]

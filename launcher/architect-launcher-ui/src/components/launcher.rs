@@ -1,7 +1,7 @@
 //! Launcher UI — composed from architect-ui primitives.
 
-use dioxus::prelude::*;
 use architect_ui::prelude::*;
+use dioxus::prelude::*;
 use lucide_dioxus::{Search, Star, X};
 
 use crate::state::LauncherState;

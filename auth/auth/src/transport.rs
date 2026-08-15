@@ -771,9 +771,9 @@ pub mod axum {
 pub mod vox {
     use super::CustomSessionTransport;
     use crate::{
-        ArchitectAuth, AuthStorage, CreateEmailPasswordUser, CurrentSession, CustomSessionBundle,
-        ChangeEmail, ChangePassword, MigrateUserEmail, RefreshSession, SignOut, UpdateProfile,
-        flows::bearer_tokens,
+        ArchitectAuth, AuthStorage, ChangeEmail, ChangePassword, CreateEmailPasswordUser,
+        CurrentSession, CustomSessionBundle, MigrateUserEmail, RefreshSession, SignOut,
+        UpdateProfile, flows::bearer_tokens,
     };
     use auth_proto::{
         AuthFlowError, AuthService, AuthSessionBundle, AuthUser, OrgMember, SignInEmailPassword,

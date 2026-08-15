@@ -1,7 +1,7 @@
 //! Carousel — shadcn v4 maia style horizontal swipeable carousel.
 
-use dioxus::prelude::*;
 use architect_story_runtime::story;
+use dioxus::prelude::*;
 
 // ---------------------------------------------------------------------------
 // Context

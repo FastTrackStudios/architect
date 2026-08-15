@@ -18,8 +18,8 @@ use crate::{
     AuthAuditEvent, AuthStorage, AuthStorageCapabilities, AuthStorageClock,
     backend_db::{
         AuthAccountActiveModel, AuthAccountColumn, AuthAccountEntity, AuthApiKeyActiveModel,
-        AuthEmailChange, AuthEmailChangeActiveModel, AuthEmailChangeColumn, AuthEmailChangeEntity,
-        AuthApiKeyColumn, AuthApiKeyEntity, AuthAuditEventRecordActiveModel,
+        AuthApiKeyColumn, AuthApiKeyEntity, AuthAuditEventRecordActiveModel, AuthEmailChange,
+        AuthEmailChangeActiveModel, AuthEmailChangeColumn, AuthEmailChangeEntity,
         AuthInvitationActiveModel, AuthInvitationEntity, AuthMemberActiveModel, AuthMemberColumn,
         AuthMemberEntity, AuthOrganizationActiveModel, AuthOrganizationColumn,
         AuthOrganizationEntity, AuthOrganizationRoleActiveModel, AuthOrganizationRoleColumn,
@@ -314,7 +314,10 @@ impl AuthStorage for AuthSeaOrmStorage {
             .map_err(map_db_err)
     }
 
-    async fn list_email_history(&self, user_id: Uuid) -> Result<Vec<AuthEmailChange>, AuthFlowError> {
+    async fn list_email_history(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<AuthEmailChange>, AuthFlowError> {
         AuthEmailChangeEntity::find()
             .filter(AuthEmailChangeColumn::UserId.eq(user_id))
             // Oldest first: the trail reads as the chain of addresses in

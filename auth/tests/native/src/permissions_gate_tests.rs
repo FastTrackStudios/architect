@@ -7,9 +7,11 @@ use std::sync::Arc;
 
 use architect::layer::{LayerRouter, handler_acceptor};
 use architect::permissions_gate::{PermissionsGate, UnlistedPolicy};
-use architect_permissions::{Action, PermissionEngine, Principal, Resource, RoleEngine, Rule, ScopeEngine, StaticPrincipal};
-use auth::identity::SessionIdentityResolver;
+use architect_permissions::{
+    Action, PermissionEngine, Principal, Resource, RoleEngine, Rule, ScopeEngine, StaticPrincipal,
+};
 use auth::AuthService as _;
+use auth::identity::SessionIdentityResolver;
 use auth::transport::vox::AuthClientMiddleware;
 
 mod gate_probe {
@@ -40,16 +42,19 @@ mod gate_probe {
     }
 }
 
-use gate_probe::{GateProbeClient, GateProbeDispatcher, GateProbeService, gate_probe_service_descriptor};
-
-const PROBE_PERMITS: architect_permissions::ServicePermits = architect_permissions::ServicePermits {
-    service: "gate-probe",
-    methods: &[
-        architect_permissions::MethodPermit::new("read_thing", "read", "probe/**"),
-        architect_permissions::MethodPermit::new("write_thing", "write", "probe/**"),
-        // secret_thing intentionally unlisted → fail-closed deny.
-    ],
+use gate_probe::{
+    GateProbeClient, GateProbeDispatcher, GateProbeService, gate_probe_service_descriptor,
 };
+
+const PROBE_PERMITS: architect_permissions::ServicePermits =
+    architect_permissions::ServicePermits {
+        service: "gate-probe",
+        methods: &[
+            architect_permissions::MethodPermit::new("read_thing", "read", "probe/**"),
+            architect_permissions::MethodPermit::new("write_thing", "write", "probe/**"),
+            // secret_thing intentionally unlisted → fail-closed deny.
+        ],
+    };
 
 async fn open_auth() -> auth::ArchitectAuth<auth::backend_db::AuthSeaOrmStorage> {
     use auth::backend_db::{AuthSeaOrmStorage, Migrator};
@@ -134,13 +139,19 @@ async fn gate_enforces_roles_over_validated_sessions() {
 
     // Anonymous (no token): denied.
     let anon: GateProbeClient = establish_gated(gated.clone()).await;
-    assert!(is_denied(&anon.read_thing().await), "anonymous read must be denied");
+    assert!(
+        is_denied(&anon.read_thing().await),
+        "anonymous read must be denied"
+    );
 
     // Alice with her real token: read + write pass, unlisted method fails closed.
     let authed: GateProbeClient = establish_gated(gated.clone()).await;
     let authed = authed.with_middleware(AuthClientMiddleware::bearer(alice.token.clone()));
     assert_eq!(authed.read_thing().await.expect("alice reads"), "read-ok");
-    assert_eq!(authed.write_thing().await.expect("alice writes"), "write-ok");
+    assert_eq!(
+        authed.write_thing().await.expect("alice writes"),
+        "write-ok"
+    );
     assert!(
         is_denied(&authed.secret_thing().await),
         "unlisted method must fail closed even for members"
@@ -149,7 +160,10 @@ async fn gate_enforces_roles_over_validated_sessions() {
     // A garbage token resolves to Anonymous → denied.
     let forged: GateProbeClient = establish_gated(gated).await;
     let forged = forged.with_middleware(AuthClientMiddleware::bearer("not-a-real-token"));
-    assert!(is_denied(&forged.read_thing().await), "forged token must be denied");
+    assert!(
+        is_denied(&forged.read_thing().await),
+        "forged token must be denied"
+    );
 }
 
 #[tokio::test]
@@ -203,18 +217,32 @@ async fn observe_only_lets_denies_through() {
     );
     let client: GateProbeClient = establish_gated(router.with_permissions(gate)).await;
     // Would be denied — observe-only audits and passes.
-    assert_eq!(client.read_thing().await.expect("observe-only passes"), "read-ok");
+    assert_eq!(
+        client.read_thing().await.expect("observe-only passes"),
+        "read-ok"
+    );
 }
 
 #[test]
 fn engines_answer_direct_checks_for_handler_level_use() {
     // The in-handler fine-grained path: same engine, finer resource.
     let scope = ScopeEngine::new(vec![Rule::new("vault/Setlists/", &["read"])]);
-    let g = Principal::Guest { link_id: "l".into(), display: None };
-    assert!(scope
-        .check(&g, &Resource::new("vault/Setlists/Sunday Worship.md"), &Action::read())
-        .allowed());
-    assert!(!scope
-        .check(&g, &Resource::new("vault/Finance/q3.md"), &Action::read())
-        .allowed());
+    let g = Principal::Guest {
+        link_id: "l".into(),
+        display: None,
+    };
+    assert!(
+        scope
+            .check(
+                &g,
+                &Resource::new("vault/Setlists/Sunday Worship.md"),
+                &Action::read()
+            )
+            .allowed()
+    );
+    assert!(
+        !scope
+            .check(&g, &Resource::new("vault/Finance/q3.md"), &Action::read())
+            .allowed()
+    );
 }

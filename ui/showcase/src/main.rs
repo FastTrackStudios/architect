@@ -1,9 +1,9 @@
 //! architect-ui Showcase — visual verification of all components.
 //! Run: `dx serve --platform desktop`
 
+use architect_ui::showcase::Showcase;
 use dioxus::desktop::{tao::window::WindowBuilder, Config};
 use dioxus::prelude::*;
-use architect_ui::showcase::Showcase;
 
 fn main() {
     unsafe {

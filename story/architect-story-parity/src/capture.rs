@@ -201,7 +201,8 @@ fn wait_for_window(
 
 fn screenshot_window(display: &str, window_id: &str) -> Result<Vec<u8>, WryCaptureError> {
     // ImageMagick `import` writes to a path; pipe via /tmp.
-    let tmp = std::env::temp_dir().join(format!("architect-story-parity-{}.png", std::process::id()));
+    let tmp =
+        std::env::temp_dir().join(format!("architect-story-parity-{}.png", std::process::id()));
     let out = Command::new("import")
         .arg("-window")
         .arg(window_id)

@@ -1,11 +1,11 @@
 //! Toolbar — primitive-backed grouped controls.
 
+use architect_story_runtime::story;
 use dioxus::prelude::*;
 use dioxus_primitives::toolbar::{
     Toolbar as PrimitiveToolbar, ToolbarButton as PrimitiveToolbarButton,
     ToolbarSeparator as PrimitiveToolbarSeparator,
 };
-use architect_story_runtime::story;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct ToolbarProps {

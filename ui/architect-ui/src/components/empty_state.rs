@@ -2,8 +2,8 @@
 //!
 //! Used when a list, panel, or section has no content to display.
 
-use dioxus::prelude::*;
 use architect_story_runtime::story;
+use dioxus::prelude::*;
 
 /// A dashed-border container with centered placeholder text.
 ///

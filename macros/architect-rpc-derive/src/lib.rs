@@ -549,9 +549,7 @@ fn emit_direct_view(
     let direct_doc = format!(
         "Collision-free inherent-method view over a local `{trait_name}`          backend — the in-process twin of the generated client. Obtain via          [`{ext_name}::{accessor}`]."
     );
-    let ext_doc = format!(
-        "Blanket accessor: `backend.{accessor}()` → [`{direct_name}`]."
-    );
+    let ext_doc = format!("Blanket accessor: `backend.{accessor}()` → [`{direct_name}`].");
     quote! {
         #[doc = #direct_doc]
         #vis struct #direct_name<'a, B: #trait_name + ?Sized>(#vis &'a B);
@@ -673,8 +671,7 @@ fn emit_scope_views(
                  identifiers",
             ));
         }
-        let scope_field_names: Vec<&syn::Ident> =
-            scopes[..depth].iter().map(|s| &s.name).collect();
+        let scope_field_names: Vec<&syn::Ident> = scopes[..depth].iter().map(|s| &s.name).collect();
         let ret = &f.sig.output;
         per_level[level].push(quote! {
             #(#docs)*
