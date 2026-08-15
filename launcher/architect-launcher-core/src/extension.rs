@@ -192,6 +192,10 @@ pub enum CommandMode {
 }
 
 impl CommandMode {
+    // Not `FromStr`: that trait returns Result, and this parse is
+    // deliberately infallible — an unrecognised mode is NoView rather than
+    // an error, so a malformed extension manifest still loads.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "view" => Self::View,
