@@ -44,14 +44,16 @@ features/
       web/                     wasm-bindgen browser tests against a server.
 ```
 
-There is no top-level `macros/` or `libs/` directory. Proc-macro crates
-(`architect-derive`, `architect-rpc-derive`, `architect-action-derive`)
-live under `features/macros/` — they're cross-cutting rather than
-scoped to one feature, but they're still consumable capabilities other
-crates pull in, so they get a `features/` home rather than an
-exception. A proc-macro scoped to a *single* feature nests inside that
-feature instead — `crdt-derive` lives at `features/crdt/crdt-derive`,
-next to `crdt` and `crdt-seaorm`.
+There is no top-level `macros/` or `libs/` directory. The proc-macro
+crates that the `architect` crate itself is built out of —
+`architect-derive`, `architect-rpc-derive`, `architect-action-derive` —
+live in `crates/`, beside `crates/architect`. They are not optional
+capabilities you opt into; `#[architect::rpc]` and friends are the crate,
+so they belong with it rather than in `features/`.
+
+A proc-macro scoped to a *single* feature nests inside that feature
+instead — `crdt-derive` lives at `features/crdt/crdt-derive`, next to
+`crdt` and `crdt-seaorm`.
 
 The architect repo itself follows the same convention for its **built-in
 features**: `features/atom` and `features/form` (the Dioxus client-state

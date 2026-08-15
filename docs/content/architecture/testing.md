@@ -56,7 +56,7 @@ marshaling work" — borrowed-arg rewrites (`&str` → `String`),
 dispatcher round-trips — construct the hidden bridge the macro emits
 and call the async mirror directly. It's `#[doc(hidden)]` and not for
 production use, but it's exactly how `architect-rpc-derive`'s own smoke
-tests (`features/macros/architect-rpc-derive/tests/smoke.rs`) exercise the
+tests (`crates/architect-rpc-derive/tests/smoke.rs`) exercise the
 bridge body without vox in the build:
 
 ```rust,ignore

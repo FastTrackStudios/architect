@@ -10,7 +10,7 @@ yields a wasm-clean wire type, an auto-generated vox repository trait,
 and (under `--features server`) a SeaORM-backed implementation.
 
 The repo doubles as a working **reference monorepo**: the facade crate
-lives in `crates/architect`, its proc-macros in `features/macros/`, and
+lives in `crates/architect`, its proc-macros in `crates/`, and
 `examples/app/` (a full-stack demo with `features/` + Dioxus
 web/desktop apps) shows the layout and testing patterns a real project
 would copy.

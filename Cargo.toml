@@ -17,9 +17,9 @@ members = [
     "features/permissions",
     "features/permissions/proto",
     # ── proc-macros ───────────────────────────────────────────────────
-    "features/macros/architect-derive",
-    "features/macros/architect-rpc-derive",
-    "features/macros/architect-action-derive",
+    "crates/architect-derive",
+    "crates/architect-rpc-derive",
+    "crates/architect-action-derive",
     # ── auth ──────────────────────────────────────────────────────────
     "features/auth/architect-auth",
     "features/auth/auth",
@@ -66,9 +66,9 @@ architect-atom = { path = "features/atom" }
 architect-form = { path = "features/form" }
 architect-permissions = { path = "features/permissions" }
 architect-permissions-proto = { path = "features/permissions/proto" }
-architect-derive = { path = "features/macros/architect-derive" }
-architect-rpc-derive = { path = "features/macros/architect-rpc-derive" }
-architect-action-derive = { path = "features/macros/architect-action-derive" }
+architect-derive = { path = "crates/architect-derive" }
+architect-rpc-derive = { path = "crates/architect-rpc-derive" }
+architect-action-derive = { path = "crates/architect-action-derive" }
 architect-auth = { path = "features/auth/architect-auth" }
 auth = { path = "features/auth/auth" }
 auth-proto = { path = "features/auth/auth-proto" }
