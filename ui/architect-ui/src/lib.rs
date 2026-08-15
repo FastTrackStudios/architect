@@ -9,6 +9,15 @@
 //! use architect_ui::prelude::*;
 //! ```
 
+/// The canonical FTS theme stylesheet, embedded as a string.
+///
+/// Consumers in other repositories cannot `include_str!` this out of the
+/// crate's `assets/` directory — a git dependency has no stable path on
+/// disk — so the bytes are embedded here instead. Use this anywhere the
+/// old `include_str!(".../libs/fts-ui/fts-ui/assets/fts-theme.css")` was
+/// used before the monorepo split.
+pub const THEME_CSS: &str = include_str!("../assets/fts-theme.css");
+
 pub mod cn;
 pub mod components;
 pub mod layout;
