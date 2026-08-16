@@ -18,6 +18,25 @@
 /// used before the monorepo split.
 pub const THEME_CSS: &str = include_str!("../assets/fts-theme.css");
 
+/// The compiled Tailwind utilities this crate's components actually use.
+///
+/// Consumers cannot generate these themselves. Tailwind's `@source` resolves
+/// on the filesystem, and a git dependency has no stable path — so a
+/// downstream sheet silently omits every class used only inside architect-ui
+/// (Button/Sheet/Badge variants and the rest). Silently is the operative
+/// word: a `@source` matching nothing does not error, it just yields fewer
+/// classes and an element that renders unstyled.
+///
+/// Inject this alongside [`THEME_CSS`]:
+///
+/// ```rust,ignore
+/// document::Style { {architect_ui::THEME_CSS} }
+/// document::Style { {architect_ui::UTILITIES_CSS} }
+/// ```
+///
+/// Regenerate with `just ui-css` after adding classes to a component.
+pub const UTILITIES_CSS: &str = include_str!("../assets/utilities.css");
+
 pub mod cn;
 pub mod components;
 pub mod layout;

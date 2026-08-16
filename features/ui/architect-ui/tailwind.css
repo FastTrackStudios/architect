@@ -1,0 +1,21 @@
+/*
+ * architect-ui's OWN utility sheet — the classes its components use.
+ *
+ * Why this exists: a consumer in another repo cannot scan our sources.
+ * Tailwind's `@source` resolves on the filesystem, and a git dependency has
+ * no stable path, so downstream sheets silently omit every class used only
+ * inside architect-ui — Button/Sheet/Badge variants and friends. Silently:
+ * a `@source` that matches nothing does not error, it just yields fewer
+ * classes and an element renders unstyled.
+ *
+ * So we compile our own utilities here and embed the result in the crate as
+ * `architect_ui::UTILITIES_CSS`. Consumers inject that string (alongside
+ * `THEME_CSS`) instead of trying to scan us.
+ *
+ * Rebuild with `just ui-css` after adding classes to any component.
+ */
+@import "tailwindcss";
+@import "./assets/fts-theme.css";
+
+/* Only our own sources — a consumer scans its own. */
+@source "./src/**/*.rs";
