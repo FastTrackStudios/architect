@@ -49,6 +49,27 @@ pub enum Principal {
     },
     /// A trusted in-process / service caller.
     Service { name: String },
+    /// A peer server admitted to host this tenant, identified by the
+    /// endpoint the transport authenticated.
+    ///
+    /// Distinct from every variant above, and each for its own reason.
+    /// Not [`Self::User`]: a machine has no membership and must not
+    /// inherit a default member role. Not [`Self::Service`]: that is a
+    /// trusted in-process caller and engines may wave it through, which
+    /// is the opposite of what a remote machine should get. Not
+    /// [`Self::Guest`]: a guest's credential is a link somebody minted,
+    /// and this one is the peer's own identity, proved by the transport
+    /// rather than presented to it.
+    ///
+    /// `endpoint` is a public key, not a secret — the credential is that
+    /// the connection was established with it at all. A resolver must
+    /// take it from the authenticated connection and never from
+    /// caller-supplied metadata, or it is a claim rather than a proof.
+    ///
+    /// Carries no rights on its own: [`RoleEngine`] has no rules for it,
+    /// so a deployment grants what a peer may do with an engine of its
+    /// own. Adding a host must not be a way to hand out a login.
+    Host { endpoint: String },
     /// No (valid) credential presented.
     Anonymous,
 }
@@ -60,6 +81,7 @@ impl Principal {
             Principal::User { user_id } => format!("user:{user_id}"),
             Principal::Guest { link_id, .. } => format!("guest:{link_id}"),
             Principal::Service { name } => format!("service:{name}"),
+            Principal::Host { endpoint } => format!("host:{endpoint}"),
             Principal::Anonymous => "anonymous".to_string(),
         }
     }
@@ -689,6 +711,61 @@ mod tests {
             )
             .allowed()
         );
+    }
+
+    fn host(endpoint: &str) -> Principal {
+        Principal::Host {
+            endpoint: endpoint.into(),
+        }
+    }
+
+    /// A host holds nothing until a deployment says otherwise.
+    ///
+    /// The point of the variant is that admitting a peer server is not a
+    /// way to issue it a login. If `RoleEngine` ever grows a rule for
+    /// `Host` — or if `Host` is folded into `User` and picks up
+    /// `default_user_role` — every admitted machine silently becomes a
+    /// member, which is the failure this exists to prevent.
+    #[test]
+    fn a_host_gets_nothing_from_the_role_engine() {
+        let e = RoleEngine::new().with_default_user_role("member");
+        assert!(
+            !e.check(&host("k51qzi5uqu5d"), &"vault/x".into(), &Action::read())
+                .allowed(),
+            "a host inherited the default user role"
+        );
+        assert!(
+            !e.check(&host("k51qzi5uqu5d"), &"vault/x".into(), &Action::write())
+                .allowed()
+        );
+        assert!(e.survey(&host("k51qzi5uqu5d"), &"".into()).is_empty());
+    }
+
+    /// `allow_services` waves service callers through; a host is not one.
+    #[test]
+    fn a_host_does_not_ride_the_service_bypass() {
+        let e = RoleEngine::new();
+        assert!(
+            e.check(
+                &Principal::Service {
+                    name: "engine".into()
+                },
+                &"vault/x".into(),
+                &Action::write()
+            )
+            .allowed(),
+            "fixture: services are waved through"
+        );
+        assert!(
+            !e.check(&host("k51qzi5uqu5d"), &"vault/x".into(), &Action::write())
+                .allowed(),
+            "a host was treated as a trusted in-process caller"
+        );
+    }
+
+    #[test]
+    fn a_host_describes_itself_by_endpoint() {
+        assert_eq!(host("k51qzi5uqu5d").describe(), "host:k51qzi5uqu5d");
     }
 
     #[test]
