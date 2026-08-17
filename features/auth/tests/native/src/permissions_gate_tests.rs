@@ -24,6 +24,9 @@ mod gate_probe {
         async fn write_thing(&self) -> String;
         /// Deliberately NOT in the permit table — must be denied.
         async fn secret_thing(&self) -> String;
+        /// Reports the caller the gate resolved, as `describe()` renders
+        /// it — or `"none"` when nothing did.
+        async fn who_am_i(&self) -> String;
     }
 
     #[derive(Clone)]
@@ -39,6 +42,10 @@ mod gate_probe {
         async fn secret_thing(&self) -> String {
             "secret".into()
         }
+        async fn who_am_i(&self) -> String {
+            architect::permissions_gate::caller()
+                .map_or_else(|| "none".to_string(), |who| who.describe())
+        }
     }
 }
 
@@ -52,6 +59,7 @@ const PROBE_PERMITS: architect_permissions::ServicePermits =
         methods: &[
             architect_permissions::MethodPermit::new("read_thing", "read", "probe/**"),
             architect_permissions::MethodPermit::new("write_thing", "write", "probe/**"),
+            architect_permissions::MethodPermit::new("who_am_i", "read", "probe/**"),
             // secret_thing intentionally unlisted → fail-closed deny.
         ],
     };
@@ -244,5 +252,65 @@ fn engines_answer_direct_checks_for_handler_level_use() {
         !scope
             .check(&g, &Resource::new("vault/Finance/q3.md"), &Action::read())
             .allowed()
+    );
+}
+
+
+/// The gate resolves an identity for every call it passes; a handler can
+/// read it.
+///
+/// This is what lets a method answer differently per person. Without it a
+/// caller-sensitive method has two options, and both are wrong: resolve
+/// the token itself, which it cannot — the metadata borrow does not
+/// outlive dispatch — or answer for a process-wide default, which is how
+/// an owner shortcut becomes everyone's.
+#[tokio::test]
+async fn a_handler_sees_the_caller_the_gate_resolved() {
+    let auth_engine = open_auth().await;
+    let alice = auth_engine
+        .sign_up_email_password(auth::SignUpEmailPassword {
+            email: "caller@example.com".into(),
+            password: "correct horse battery staple".into(),
+            name: Some("Alice".into()),
+            username: None,
+            image: None,
+            metadata_json: None,
+            ip_address: None,
+            user_agent: None,
+        })
+        .await
+        .expect("sign up");
+
+    let mut roles = RoleEngine::new();
+    roles.set_member(alice.user.id.to_string(), "member");
+    let gate = PermissionsGate::new(
+        Arc::new(roles),
+        Arc::new(SessionIdentityResolver::new(auth_engine.clone())),
+    )
+    .unlisted(UnlistedPolicy::Allow)
+    .permit(gate_probe_service_descriptor(), PROBE_PERMITS);
+    let gated = LayerRouter::new()
+        .with(
+            gate_probe_service_descriptor(),
+            GateProbeDispatcher::new(GateProbeService),
+        )
+        .with_permissions(gate);
+
+    let signed: GateProbeClient = establish_gated(gated.clone()).await;
+    let signed = signed.with_middleware(AuthClientMiddleware::bearer(alice.token.clone()));
+    assert_eq!(
+        signed.who_am_i().await.expect("signed-in call"),
+        format!("user:{}", alice.user.id),
+        "the handler saw a different principal than the gate resolved"
+    );
+
+    // The negative half. `who_am_i` is a `read` on `probe/**`, which an
+    // anonymous caller cannot have — so what this proves is that the
+    // identity is per-call rather than sticky from the signed-in client
+    // above, which shares the router.
+    let anon: GateProbeClient = establish_gated(gated).await;
+    assert!(
+        is_denied(&anon.who_am_i().await),
+        "an anonymous caller reached a member-only method"
     );
 }

@@ -43,6 +43,7 @@ use crate::layer::LayerRouter;
 
 #[cfg(feature = "telemetry")]
 use tracing::Instrument as _;
+use architect_permissions::Principal;
 
 /// Metadata key carrying `Bearer <token>` (mirrors auth-proto's
 /// `AUTHORIZATION_METADATA_KEY`; duplicated here so architect does not
@@ -230,7 +231,7 @@ impl PermissionsGate {
                 });
             }
             match decision {
-                Decision::Allow => GateOutcome::Pass,
+                Decision::Allow => GateOutcome::Pass(who),
                 Decision::Deny { reason } => GateOutcome::Deny(format!(
                     "permission denied: {reason} ({}/{})",
                     rule.service, rule.method
@@ -250,7 +251,15 @@ impl PermissionsGate {
             ))
         } else {
             match self.unlisted {
-                UnlistedPolicy::Allow => GateOutcome::Pass,
+                // Unlisted-but-allowed still resolves, so a handler on an
+                // ungated method sees the same identity it would on a
+                // gated one. Skipping the resolve here would make
+                // `caller()` depend on whether a permit row happens to
+                // exist, which is not a distinction a method can reason
+                // about.
+                UnlistedPolicy::Allow => {
+                    GateOutcome::Pass(self.identity.resolve(token.as_deref()).await)
+                }
                 UnlistedPolicy::Deny => {
                     let who = self.identity.resolve(token.as_deref()).await.describe();
                     self.audit.record(AuditEvent {
@@ -270,8 +279,37 @@ impl PermissionsGate {
 }
 
 enum GateOutcome {
-    Pass,
+    /// Allowed, and by whom. The principal rides along because the gate
+    /// is the only place on the request path that resolves one, and a
+    /// handler that needs to know *who* asked would otherwise have to
+    /// resolve it a second time — from a token it cannot see, since the
+    /// metadata borrow does not outlive dispatch.
+    Pass(Principal),
     Deny(String),
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+tokio::task_local! {
+    /// The principal the gate resolved for the call running on this task.
+    static CALLER: Principal;
+}
+
+/// WHO is asking, inside a handler the gate dispatched.
+///
+/// `None` when nothing resolved a principal for this call: a transport
+/// with no gate in front of it, a handler reached some other way, or code
+/// running off the request task. A caller-sensitive method must treat
+/// that as "no identity" and refuse rather than fall back to a default —
+/// the whole point of asking is that the answer differs per person, and a
+/// default that happens to be permissive is how an owner shortcut
+/// silently becomes everyone's.
+///
+/// Set by [`PermissionedRouter`] around the inner handler, so it is
+/// available for the whole of a method's execution and gone afterwards.
+#[cfg(not(target_arch = "wasm32"))]
+#[must_use]
+pub fn caller() -> Option<Principal> {
+    CALLER.try_with(Clone::clone).ok()
 }
 
 /// Any handler behind a [`PermissionsGate`] — a bare [`LayerRouter`] or an
@@ -367,9 +405,16 @@ where
         reply: DriverReplySink,
         schemas: Arc<SchemaRecvTracker>,
     ) {
+        // Kept for the observe-only arm below, which has to resolve the
+        // same identity `decide` did.
+        let presented = token.clone();
         let outcome = self.gate.decide(method_id, token).await;
         match outcome {
-            GateOutcome::Pass => self.inner.handle(call, reply, schemas).await,
+            GateOutcome::Pass(who) => {
+                CALLER
+                    .scope(who, self.inner.handle(call, reply, schemas))
+                    .await;
+            }
             GateOutcome::Deny(reason) if self.gate.observe_only => {
                 // Observe-only: the deny was already audited by decide();
                 // note it and let the call through.
@@ -380,7 +425,14 @@ where
                     allowed: true,
                     reason: Some(reason),
                 });
-                self.inner.handle(call, reply, schemas).await;
+                // Observe-only must not change what a handler sees
+                // either: a method that reads `caller()` has to behave
+                // the same whether enforcement is on, or turning it on
+                // becomes a behaviour change rather than a refusal.
+                let who = self.gate.identity.resolve(presented.as_deref()).await;
+                CALLER
+                    .scope(who, self.inner.handle(call, reply, schemas))
+                    .await;
             }
             GateOutcome::Deny(reason) => {
                 let shape = self.inner.response_wire_shape(method_id);
