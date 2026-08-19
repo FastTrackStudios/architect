@@ -1033,6 +1033,22 @@ pub mod action {
         /// tree can group-by directly without an `unwrap_or_default`.
         pub category: &'static str,
         pub group: &'static str,
+        /// How this action is reached, for **display only** — `"Ctrl+S"`,
+        /// `"g q"`, `"hold z"`. Set by `#[action(shortcut = "...")]`.
+        ///
+        /// Deliberately not a binding. The keymap is configuration and
+        /// lives with the host: architect has no idea what a chord is,
+        /// and an action that carried its own binding would be a second
+        /// authority on a question the keymap already answers. What this
+        /// is for is the *other* direction — a menu, a command palette,
+        /// or a which-key overlay that has to tell you how to reach the
+        /// thing it is offering. Without it every such surface keeps a
+        /// parallel table of labels beside the action list, and the two
+        /// drift.
+        ///
+        /// Empty when unset, for the reason `category` is: a caller
+        /// building a menu row should not need an `unwrap_or_default`.
+        pub shortcut: &'static str,
         pub toggleable: bool,
         /// This action mutates project state and should run inside a
         /// host undo block labelled after the action. Set by
@@ -1071,6 +1087,8 @@ pub mod action {
         pub description: String,
         pub category: &'static str,
         pub group: &'static str,
+        /// See [`ActionMeta::shortcut`]. Owned here, `&'static` there.
+        pub shortcut: String,
         pub toggleable: bool,
         pub undo: bool,
     }
@@ -1088,6 +1106,7 @@ pub mod action {
                 description: Box::leak(self.description.into_boxed_str()),
                 category: self.category,
                 group: self.group,
+                shortcut: Box::leak(self.shortcut.into_boxed_str()),
                 toggleable: self.toggleable,
                 undo: self.undo,
             };
@@ -1182,6 +1201,7 @@ pub mod action {
                 description: meta.description.to_string(),
                 category: self.scope_category,
                 group: meta.group,
+                shortcut: meta.shortcut.to_string(),
                 toggleable: meta.toggleable,
                 undo: meta.undo,
             }

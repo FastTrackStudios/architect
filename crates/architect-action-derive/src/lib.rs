@@ -99,6 +99,9 @@ struct ActionAttr {
     toggleable: bool,
     undo: bool,
     display_name: Option<String>,
+    /// How the action is reached, for display only. See
+    /// `architect::action::ActionMeta::shortcut`.
+    shortcut: Option<String>,
 }
 
 /// A bare-word flag (`undo`) or an explicit `undo = true/false`.
@@ -142,6 +145,7 @@ fn parse_action_attr(attr: &Attribute) -> syn::Result<ActionAttr> {
     let mut toggleable = false;
     let mut undo = false;
     let mut display_name = None;
+    let mut shortcut = None;
 
     // Name-value pairs (`description = "..."`) mixed with bare flags
     // (`toggleable`, `undo`) — parse the attribute's meta list directly
@@ -158,6 +162,8 @@ fn parse_action_attr(attr: &Attribute) -> syn::Result<ActionAttr> {
             group = Some(lit_str_value(meta)?);
         } else if meta.path().is_ident("display_name") {
             display_name = Some(lit_str_value(meta)?);
+        } else if meta.path().is_ident("shortcut") {
+            shortcut = Some(lit_str_value(meta)?);
         } else if meta.path().is_ident("toggleable") {
             toggleable = flag_value(meta, "toggleable")?;
         } else if meta.path().is_ident("undo") {
@@ -165,7 +171,7 @@ fn parse_action_attr(attr: &Attribute) -> syn::Result<ActionAttr> {
         } else {
             return Err(syn::Error::new_spanned(
                 meta,
-                "unknown #[action(...)] argument (expected description/category/group/display_name/toggleable/undo)",
+                "unknown #[action(...)] argument (expected description/category/group/display_name/shortcut/toggleable/undo)",
             ));
         }
     }
@@ -179,6 +185,7 @@ fn parse_action_attr(attr: &Attribute) -> syn::Result<ActionAttr> {
         toggleable,
         undo,
         display_name,
+        shortcut,
     })
 }
 
@@ -272,6 +279,9 @@ fn expand(mut trait_item: ItemTrait, args: ActionsArgs) -> syn::Result<TokenStre
         let category = parsed.category.as_ref().unwrap_or(&default_category);
         let group = parsed.group.as_ref().unwrap_or(&default_group);
         let toggleable = parsed.toggleable;
+        // Empty rather than `Option`, matching `category`: a menu row
+        // should not need an `unwrap_or_default` to render.
+        let shortcut = parsed.shortcut.clone().unwrap_or_default();
         let undo = parsed.undo;
 
         const_defs.push(quote! {
@@ -284,6 +294,7 @@ fn expand(mut trait_item: ItemTrait, args: ActionsArgs) -> syn::Result<TokenStre
                 description: #description,
                 category: #category,
                 group: #group,
+                shortcut: #shortcut,
                 toggleable: #toggleable,
                 undo: #undo,
             };

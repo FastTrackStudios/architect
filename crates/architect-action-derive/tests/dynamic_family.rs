@@ -59,6 +59,9 @@ fn register_time_signature_family(backend: &dyn ActionBackend, hits: Arc<AtomicU
             description: format!("Set the project time signature to {num}/{den}"),
             category: "Tempo",
             group: "Time Signatures",
+            // A runtime family has no static chord to advertise; the
+            // empty string is what "no hint" looks like.
+            shortcut: String::new(),
             toggleable: false,
             undo: false,
         }

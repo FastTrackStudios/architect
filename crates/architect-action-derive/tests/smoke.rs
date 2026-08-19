@@ -21,7 +21,8 @@ pub trait SetlistActions {
     #[action(
         description = "Scan every open REAPER project tab and rebuild the setlist",
         category = "Setlist",
-        group = "Build"
+        group = "Build",
+        shortcut = "Ctrl+Shift+B"
     )]
     fn build_setlist(&self);
 
@@ -119,10 +120,23 @@ fn actions_all_reports_every_decorated_method() {
         .unwrap();
     assert_eq!(build.display_name, "Build Setlist");
     assert_eq!(build.category, "Setlist");
+    assert_eq!(
+        build.shortcut, "Ctrl+Shift+B",
+        "the shortcut hint did not reach the metadata",
+    );
     assert_eq!(build.group, "Build");
     assert!(!build.toggleable);
     assert_eq!(build.trait_name, "SetlistActions");
     assert_eq!(build.method_name, "build_setlist");
+
+    // Absent means empty, not `None` — a menu row should not need an
+    // `unwrap_or_default` to render, which is the rule `category`
+    // already follows.
+    let demo = all
+        .iter()
+        .find(|m| m.id != "SESSION_BUILD_SETLIST")
+        .expect("more than one action");
+    assert_eq!(demo.shortcut, "", "an action with no hint should be empty");
 }
 
 #[test]
