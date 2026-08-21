@@ -129,6 +129,7 @@ pub fn spawn_meter_pump<S: RigBackend>(name: &'static str, source: S) {
         .spawn(move || {
             let mut last_running = false;
             let mut known_ports = sorted(source.midi_ports());
+            let mut ports_were_gone = false;
             let mut tick_no: u32 = 0;
             let mut tick = S::Tick::default();
             loop {
@@ -152,8 +153,18 @@ pub fn spawn_meter_pump<S: RigBackend>(name: &'static str, source: S) {
                         // resolves — the dead stream re-attaches on the next
                         // non-empty scan.
                         let transient = now.is_empty() && !known_ports.is_empty();
-                        if !transient && now != known_ports {
+                        if transient {
+                            // Remember the episode: the scan going empty is
+                            // how a MIDI-bridge restart (PipeWire graph
+                            // reconfiguration) looks from here, and it kills
+                            // the rig's open connections even though the
+                            // port set comes back IDENTICAL. Comparing names
+                            // alone would call that "no change" and leave the
+                            // rig deaf forever.
+                            ports_were_gone = true;
+                        } else if now != known_ports || (ports_were_gone && !now.is_empty()) {
                             known_ports = now;
+                            ports_were_gone = false;
                             if running {
                                 source.on_midi_ports_changed(&known_ports);
                             }
