@@ -80,6 +80,7 @@ pub struct EngineHost {
     addr: String,
     web: Option<WebBundle>,
     extra: Option<Router>,
+    cross_origin_isolated: bool,
     #[cfg(feature = "iroh")]
     iroh: Option<IrohConfig>,
 }
@@ -96,6 +97,7 @@ impl EngineHost {
         Self {
             router,
             addr: addr.into(),
+            cross_origin_isolated: false,
             web: None,
             extra: None,
             #[cfg(feature = "iroh")]
@@ -128,6 +130,27 @@ impl EngineHost {
     /// the host headless (only `/health` + `/vox`).
     pub fn web(mut self, bundle: Option<WebBundle>) -> Self {
         self.web = bundle;
+        self
+    }
+
+    /// Serve every response with the two headers that make the page
+    /// **cross-origin isolated**:
+    ///
+    /// ```text
+    /// Cross-Origin-Opener-Policy:   same-origin
+    /// Cross-Origin-Embedder-Policy: require-corp
+    /// ```
+    ///
+    /// That is the browser's precondition for `SharedArrayBuffer`, and so
+    /// for shared wasm memory and wasm threads — an audio engine cannot
+    /// have a real streamer thread pool in the browser without it.
+    ///
+    /// The cost is that EVERY subresource must be same-origin or carry
+    /// CORP/CORS. Turn it on only for a host whose assets it owns (the
+    /// engine serves its own bundle, so it qualifies); a host embedding
+    /// third-party iframes or CDN assets must not.
+    pub fn cross_origin_isolated(mut self, on: bool) -> Self {
+        self.cross_origin_isolated = on;
         self
     }
 
@@ -174,6 +197,34 @@ impl EngineHost {
             None => {
                 tracing::warn!("no web bundle — serving /health + /vox only");
             }
+        }
+
+        if self.cross_origin_isolated {
+            use axum::http::{HeaderName, HeaderValue};
+            use tower_http::set_header::SetResponseHeaderLayer;
+            // `http` has no constants for these three, so name them here.
+            const COOP: HeaderName = HeaderName::from_static("cross-origin-opener-policy");
+            const COEP: HeaderName = HeaderName::from_static("cross-origin-embedder-policy");
+            const CORP: HeaderName = HeaderName::from_static("cross-origin-resource-policy");
+            // `overriding` (not `if_not_present`): isolation is all-or-
+            // nothing — one response without the pair and the whole page
+            // loses `crossOriginIsolated`, taking shared memory with it.
+            // CORP same-origin rides along so the bundle's own assets stay
+            // loadable under require-corp.
+            app = app
+                .layer(SetResponseHeaderLayer::overriding(
+                    COOP,
+                    HeaderValue::from_static("same-origin"),
+                ))
+                .layer(SetResponseHeaderLayer::overriding(
+                    COEP,
+                    HeaderValue::from_static("require-corp"),
+                ))
+                .layer(SetResponseHeaderLayer::overriding(
+                    CORP,
+                    HeaderValue::from_static("same-origin"),
+                ));
+            tracing::info!("cross-origin isolated (COOP/COEP): SharedArrayBuffer enabled");
         }
 
         let listener = tokio::net::TcpListener::bind(&self.addr)

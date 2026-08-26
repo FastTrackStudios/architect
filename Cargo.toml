@@ -111,7 +111,10 @@ iroh = { version = "1" }
 
 # ── Server / storage ──────────────────────────────────────────────────
 axum = { version = "0.8", features = ["ws"] }
-tower-http = { version = "0.6", features = ["fs"] }
+# `set-header`: the COOP/COEP pair that makes a served page
+# cross-origin isolated (EngineHost::cross_origin_isolated) —
+# SharedArrayBuffer, and so wasm threads, depend on it.
+tower-http = { version = "0.6", features = ["fs", "set-header"] }
 include_dir = "0.7"
 sea-orm = { version = "1", features = ["sqlx-sqlite", "runtime-tokio-rustls", "macros", "with-uuid", "with-chrono"] }
 sea-orm-migration = { version = "1", features = ["sqlx-sqlite", "runtime-tokio-rustls"] }
@@ -177,7 +180,12 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.8"
 thiserror = "2.0"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std", "wasmbind"] }
+# `serde` because architect-launcher-core derives Serialize/Deserialize on
+# `DateTime<Utc>` (history.rs, userdata.rs). Without it that crate only
+# compiles when some other crate in the graph happens to turn the feature
+# on — so it built in the full workspace and failed the moment anything
+# depended on it in a narrower graph.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "wasmbind", "serde"] }
 fake = { version = "4", features = ["derive", "uuid", "chrono"] }
 
 # ── Observability ─────────────────────────────────────────────────────
