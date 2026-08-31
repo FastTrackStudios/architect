@@ -12,12 +12,13 @@ use architect_auth::{
 use axum::{
     Router,
     extract::ws::WebSocketUpgrade,
+    http::{HeaderValue, Method, header},
     response::IntoResponse,
     routing::get,
 };
 use sea_orm::{Database, DatabaseConnection};
 use sea_orm_migration::MigratorTrait;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
 use crate::config::ServerConfig;
@@ -155,20 +156,26 @@ fn cookie_config(config: &ServerConfig) -> AuthCookieConfig {
 /// With no configured origins the layer allows none — a same-origin
 /// deployment needs no CORS, and defaulting to `Any` on an endpoint that
 /// sets session cookies would be a real hole.
+///
+/// Methods and headers are enumerated rather than `Any`: the spec
+/// forbids combining a wildcard with
+/// `Access-Control-Allow-Credentials: true`, and tower-http enforces
+/// that by panicking when the layer is built. Credentials are needed so
+/// the session cookie can ride cross-origin requests from a browser
+/// front-end on a different host.
 fn cors_layer(config: &ServerConfig) -> CorsLayer {
     if config.cors_origins.is_empty() {
         return CorsLayer::new();
     }
-    let origins: Vec<_> = config
+    let origins: Vec<HeaderValue> = config
         .cors_origins
         .iter()
         .filter_map(|origin| origin.parse().ok())
         .collect();
     CorsLayer::new()
         .allow_origin(origins)
-        .allow_methods(Any)
-        .allow_headers(Any)
-        // Required for the session cookie to ride cross-origin requests.
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE])
         .allow_credentials(true)
 }
 

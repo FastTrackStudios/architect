@@ -30,6 +30,18 @@ fn test_config() -> ServerConfig {
     }
 }
 
+/// Build the app with a config the caller can adjust first.
+async fn app_with(mutate: impl FnOnce(&mut ServerConfig)) -> axum::Router {
+    let db = Database::connect("sqlite::memory:")
+        .await
+        .expect("connect in-memory sqlite");
+    Migrator::up(&db, None).await.expect("migrate");
+    let mut config = test_config();
+    mutate(&mut config);
+    let auth = server::build_engine(&config, AuthSeaOrmStorage::new(db)).expect("build engine");
+    server::app_router(&config, auth)
+}
+
 async fn app() -> axum::Router {
     let db = Database::connect("sqlite::memory:")
         .await
@@ -239,4 +251,74 @@ async fn health_probes_answer() {
             .expect("probe");
         assert_eq!(response.status(), StatusCode::OK, "{path}");
     }
+}
+
+#[tokio::test]
+async fn configuring_cors_origins_does_not_panic_and_echoes_the_origin() {
+    // Regression: the layer combined `allow_credentials(true)` with
+    // wildcard methods/headers. That is forbidden, and tower-http
+    // enforces it by panicking *when the router is built* — so the
+    // server started fine with no origins configured and died on boot
+    // the moment a deployment set AUTH_CORS_ORIGINS, which every real
+    // deployment does.
+    let app = app_with(|config| {
+        config.cors_origins = vec!["https://keyflow.fasttrackstudio.app".into()];
+    })
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("OPTIONS")
+                .uri("/auth/sign-in/email")
+                .header(header::ORIGIN, "https://keyflow.fasttrackstudio.app")
+                .header("access-control-request-method", "POST")
+                .header("access-control-request-headers", "content-type")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .expect("preflight");
+
+    let headers = response.headers();
+    assert_eq!(
+        headers
+            .get("access-control-allow-origin")
+            .and_then(|value| value.to_str().ok()),
+        Some("https://keyflow.fasttrackstudio.app")
+    );
+    // Credentials must stay on, so a session cookie can ride a
+    // cross-origin request from a front-end on another host.
+    assert_eq!(
+        headers
+            .get("access-control-allow-credentials")
+            .and_then(|value| value.to_str().ok()),
+        Some("true")
+    );
+}
+
+#[tokio::test]
+async fn an_unlisted_origin_is_not_granted_cors_access() {
+    let app = app_with(|config| {
+        config.cors_origins = vec!["https://keyflow.fasttrackstudio.app".into()];
+    })
+    .await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("OPTIONS")
+                .uri("/auth/sign-in/email")
+                .header(header::ORIGIN, "https://evil.example")
+                .header("access-control-request-method", "POST")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .expect("preflight");
+
+    assert!(
+        response.headers().get("access-control-allow-origin").is_none(),
+        "an unlisted origin must not be echoed back"
+    );
 }
