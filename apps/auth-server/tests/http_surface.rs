@@ -5,8 +5,8 @@
 //! extraction, cookie shaping and error mapping together — the parts a
 //! compile check cannot vouch for.
 
-use auth_server::{ServerConfig, server};
 use architect_auth::db::{AuthSeaOrmStorage, Migrator};
+use auth_server::{ServerConfig, server};
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use sea_orm::Database;
@@ -133,7 +133,10 @@ async fn sign_up_then_session_round_trips_a_bearer_token() {
         .expect("cookie is ascii")
         .to_owned();
     assert!(cookie.contains("architect-auth.session="));
-    assert!(cookie.contains("HttpOnly"), "session cookie must be HttpOnly");
+    assert!(
+        cookie.contains("HttpOnly"),
+        "session cookie must be HttpOnly"
+    );
     assert!(
         cookie.contains("Secure"),
         "an https base_url must yield a Secure cookie"
@@ -318,7 +321,10 @@ async fn an_unlisted_origin_is_not_granted_cors_access() {
         .expect("preflight");
 
     assert!(
-        response.headers().get("access-control-allow-origin").is_none(),
+        response
+            .headers()
+            .get("access-control-allow-origin")
+            .is_none(),
         "an unlisted origin must not be echoed back"
     );
 }

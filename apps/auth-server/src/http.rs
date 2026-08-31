@@ -28,7 +28,7 @@
 //! one needs a hand-written extractor — see `docs` in the crate root.
 
 use architect_auth::{
-    ArchitectAuth, AuthStorage, AuthorizeOidc, CurrentSession, CreateEmailPasswordUser,
+    ArchitectAuth, AuthStorage, AuthorizeOidc, CreateEmailPasswordUser, CurrentSession,
     ExchangeOidcToken, GetOidcUserInfo, RefreshSession, SignOut,
     transport::{AuthCookieConfig, axum::session_token_from_headers, map_auth_error},
 };
@@ -76,7 +76,10 @@ where
         // several client libraries guess it.
         .route("/auth/jwt/jwks", get(jwks::<S>))
         .route("/oauth2/jwks.json", get(jwks::<S>))
-        .route("/oauth2/authorize", get(authorize::<S>).post(authorize::<S>))
+        .route(
+            "/oauth2/authorize",
+            get(authorize::<S>).post(authorize::<S>),
+        )
         .route("/oauth2/token", post(token::<S>))
         .route("/oauth2/userinfo", get(userinfo::<S>).post(userinfo::<S>))
         // ── Core session JSON ────────────────────────────────────────
@@ -170,9 +173,7 @@ where
             session_token,
             client_id: params.client_id,
             redirect_uri: params.redirect_uri,
-            response_type: params
-                .response_type
-                .unwrap_or_else(|| "code".into()),
+            response_type: params.response_type.unwrap_or_else(|| "code".into()),
             scope: params.scope,
             state: params.state,
             nonce: params.nonce,
@@ -292,7 +293,11 @@ where
             user_agent: user_agent(&headers),
         })
         .await?;
-    Ok(session_response(&state.cookie, &bundle, StatusCode::CREATED))
+    Ok(session_response(
+        &state.cookie,
+        &bundle,
+        StatusCode::CREATED,
+    ))
 }
 
 #[derive(Debug, serde::Deserialize)]

@@ -72,7 +72,9 @@ pub enum ConfigError {
     },
     #[error("AUTH_OIDC_CLIENTS is not valid JSON: {0}")]
     OidcClients(#[source] serde_json::Error),
-    #[error("AUTH_SECRET must be at least 32 bytes (got {0}) — architect-auth refuses shorter keys")]
+    #[error(
+        "AUTH_SECRET must be at least 32 bytes (got {0}) — architect-auth refuses shorter keys"
+    )]
     SecretTooShort(usize),
 }
 

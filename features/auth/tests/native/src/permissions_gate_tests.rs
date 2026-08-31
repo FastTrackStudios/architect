@@ -255,7 +255,6 @@ fn engines_answer_direct_checks_for_handler_level_use() {
     );
 }
 
-
 /// The gate resolves an identity for every call it passes; a handler can
 /// read it.
 ///

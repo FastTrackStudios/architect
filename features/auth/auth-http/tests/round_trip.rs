@@ -99,8 +99,7 @@ async fn sign_up_session_refresh_and_sign_out_round_trip() {
 #[tokio::test]
 async fn signing_in_again_restores_a_working_session() {
     let base = spawn_server().await;
-    let client =
-        AuthHttpClient::new(&base).with_store(Arc::new(MemoryTokenStore::new()));
+    let client = AuthHttpClient::new(&base).with_store(Arc::new(MemoryTokenStore::new()));
 
     client
         .sign_up(&SignUpRequest::new(
@@ -125,8 +124,7 @@ async fn signing_in_again_restores_a_working_session() {
 #[tokio::test]
 async fn wrong_password_surfaces_as_an_unauthenticated_api_error() {
     let base = spawn_server().await;
-    let client =
-        AuthHttpClient::new(&base).with_store(Arc::new(MemoryTokenStore::new()));
+    let client = AuthHttpClient::new(&base).with_store(Arc::new(MemoryTokenStore::new()));
 
     client
         .sign_up(&SignUpRequest::new(
