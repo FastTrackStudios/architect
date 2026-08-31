@@ -41,9 +41,9 @@ use vox::{
 
 use crate::layer::LayerRouter;
 
+use architect_permissions::Principal;
 #[cfg(feature = "telemetry")]
 use tracing::Instrument as _;
-use architect_permissions::Principal;
 
 /// Metadata key carrying `Bearer <token>` (mirrors auth-proto's
 /// `AUTHORIZATION_METADATA_KEY`; duplicated here so architect does not

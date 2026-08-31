@@ -36,9 +36,12 @@ pub const AUTH_DATABASE_SUPPORT_MATRIX: &[AuthDatabaseSupport] = &[
     },
     AuthDatabaseSupport {
         kind: AuthDatabaseKind::Postgres,
-        status: "planned",
+        status: "supported",
         ci_required: false,
-        notes: "Requires enabling sqlx-postgres SeaORM features and a CI service database.",
+        notes: "sqlx-postgres is enabled workspace-wide. Migrations apply idempotently and \
+                the session flow round-trips against a real server; covered by \
+                `apps/auth-server/tests/postgres.rs`, which is skipped unless \
+                AUTH_TEST_POSTGRES_URL is set. Not yet a required CI gate.",
     },
     AuthDatabaseSupport {
         kind: AuthDatabaseKind::MySql,
@@ -195,9 +198,13 @@ mod tests {
                 && entry.status == "supported"
                 && entry.ci_required
         }));
+        // Postgres is exercised by `apps/auth-server/tests/postgres.rs`
+        // (migrations + a full session round-trip against a real
+        // server), so it is supported — but those tests are skipped
+        // without AUTH_TEST_POSTGRES_URL, so it is not yet a CI gate.
         assert!(matrix.iter().any(|entry| {
             entry.kind == AuthDatabaseKind::Postgres
-                && entry.status == "planned"
+                && entry.status == "supported"
                 && !entry.ci_required
         }));
         assert!(matrix.iter().any(|entry| {

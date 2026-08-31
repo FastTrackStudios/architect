@@ -20,12 +20,15 @@ members = [
     "crates/architect-derive",
     "crates/architect-rpc-derive",
     "crates/architect-action-derive",
+    # ── apps ──────────────────────────────────────────────────────────
+    "apps/auth-server",
     # ── auth ──────────────────────────────────────────────────────────
     "features/auth/architect-auth",
     "features/auth/auth",
     "features/auth/auth-proto",
     "features/auth/auth-db",
     "features/auth/auth-client",
+    "features/auth/auth-http",
     "features/auth/tests/native",
     # ── crdt ──────────────────────────────────────────────────────────
     "features/crdt/crdt",
@@ -70,10 +73,12 @@ architect-derive = { path = "crates/architect-derive" }
 architect-rpc-derive = { path = "crates/architect-rpc-derive" }
 architect-action-derive = { path = "crates/architect-action-derive" }
 architect-auth = { path = "features/auth/architect-auth" }
+auth-server = { path = "apps/auth-server" }
 auth = { path = "features/auth/auth" }
 auth-proto = { path = "features/auth/auth-proto" }
 auth-db = { path = "features/auth/auth-db" }
 auth-client = { path = "features/auth/auth-client" }
+auth-http = { path = "features/auth/auth-http" }
 crdt = { path = "features/crdt/crdt" }
 crdt-derive = { path = "features/crdt/crdt-derive" }
 crdt-seaorm = { path = "features/crdt/crdt-seaorm" }
@@ -116,8 +121,8 @@ axum = { version = "0.8", features = ["ws"] }
 # SharedArrayBuffer, and so wasm threads, depend on it.
 tower-http = { version = "0.6", features = ["fs", "set-header"] }
 include_dir = "0.7"
-sea-orm = { version = "1", features = ["sqlx-sqlite", "runtime-tokio-rustls", "macros", "with-uuid", "with-chrono"] }
-sea-orm-migration = { version = "1", features = ["sqlx-sqlite", "runtime-tokio-rustls"] }
+sea-orm = { version = "1", features = ["sqlx-sqlite", "sqlx-postgres", "runtime-tokio-rustls", "macros", "with-uuid", "with-chrono"] }
+sea-orm-migration = { version = "1", features = ["sqlx-sqlite", "sqlx-postgres", "runtime-tokio-rustls"] }
 async-trait = "0.1"
 loro = { version = "1.12", default-features = false }
 

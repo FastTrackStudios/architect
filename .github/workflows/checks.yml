@@ -26,7 +26,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev \
-            libasound2-dev libudev-dev pkg-config
+            libasound2-dev libudev-dev pkg-config \
+            libxdo-dev libayatana-appindicator3-dev
+          # libxdo / appindicator are dioxus-desktop's (global-hotkey, muda,
+          # tray-icon). `cargo check` does not link, so they only bite at the
+          # `test` step — which never ran until fmt started passing.
 
       # rust-toolchain.toml drives the version; this action honours it.
       - uses: dtolnay/rust-toolchain@stable
@@ -60,4 +64,9 @@ jobs:
           cargo check --target wasm32-unknown-unknown \
             -p architect -p architect-atom -p architect-form \
             -p architect-permissions -p architect-permissions-proto \
-            -p auth-proto -p crdt
+            -p auth-proto -p auth-client -p crdt
+          # auth-http is what a browser app signs in through (Keyflow does),
+          # so its wasm build is load-bearing — with the `browser` feature,
+          # which is the localStorage token store a web app actually uses.
+          cargo check --target wasm32-unknown-unknown \
+            -p auth-http --features auth-http/browser
