@@ -1,0 +1,42 @@
+[package]
+name = "auth-server"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Standalone FastTrackStudio identity server: architect-auth as a deployable service (vox RPC + OIDC provider + session HTTP)."
+
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
+[lib]
+name = "auth_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "auth-server"
+path = "src/main.rs"
+
+[dependencies]
+architect = { workspace = true, features = ["server", "host"] }
+architect-auth = { workspace = true, features = ["full"] }
+auth-proto = { workspace = true, features = ["vox"] }
+axum.workspace = true
+chrono.workspace = true
+eyre.workspace = true
+sea-orm.workspace = true
+sea-orm-migration.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tower-http = { workspace = true, features = ["cors", "trace"] }
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+tower = { version = "0.5", features = ["util"] }

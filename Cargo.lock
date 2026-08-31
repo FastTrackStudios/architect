@@ -979,6 +979,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "auth-server"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-auth",
+ "auth-proto",
+ "axum",
+ "chrono",
+ "eyre",
+ "sea-orm",
+ "sea-orm-migration",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tower",
+ "tower-http",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11533,6 +11555,7 @@ dependencies = [
  "tower",
  "tower-layer",
  "tower-service",
+ "tracing",
  "url",
 ]
 

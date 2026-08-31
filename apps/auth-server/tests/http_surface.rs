@@ -1,0 +1,242 @@
+//! End-to-end coverage of the HTTP surface against a real engine over
+//! in-memory SQLite.
+//!
+//! These drive the actual `app_router`, so they exercise routing,
+//! extraction, cookie shaping and error mapping together — the parts a
+//! compile check cannot vouch for.
+
+use auth_server::{ServerConfig, server};
+use architect_auth::db::{AuthSeaOrmStorage, Migrator};
+use axum::body::Body;
+use axum::http::{Request, StatusCode, header};
+use sea_orm::Database;
+use sea_orm_migration::MigratorTrait;
+use tower::ServiceExt;
+
+fn test_config() -> ServerConfig {
+    ServerConfig {
+        bind_addr: "127.0.0.1:0".into(),
+        database_url: "sqlite::memory:".into(),
+        secret: "a-secret-at-least-32-bytes-long!!".into(),
+        base_url: "https://auth.fasttrackstudio.app".into(),
+        oidc_issuer: None,
+        session_ttl_seconds: 3600,
+        require_email_verification: false,
+        passkey_rp_id: None,
+        cors_origins: Vec::new(),
+        oidc_clients: Vec::new(),
+        oidc_allow_dynamic_client_registration: false,
+        run_migrations: true,
+    }
+}
+
+async fn app() -> axum::Router {
+    let db = Database::connect("sqlite::memory:")
+        .await
+        .expect("connect in-memory sqlite");
+    Migrator::up(&db, None).await.expect("migrate");
+    let config = test_config();
+    let auth = server::build_engine(&config, AuthSeaOrmStorage::new(db)).expect("build engine");
+    server::app_router(&config, auth)
+}
+
+async fn json_body(response: axum::response::Response) -> serde_json::Value {
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read body");
+    serde_json::from_slice(&bytes).expect("body is json")
+}
+
+#[tokio::test]
+async fn discovery_advertises_the_configured_issuer() {
+    let response = app()
+        .await
+        .oneshot(
+            Request::get("/.well-known/openid-configuration")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .expect("request");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    assert_eq!(body["issuer"], "https://auth.fasttrackstudio.app");
+    assert_eq!(
+        body["token_endpoint"],
+        "https://auth.fasttrackstudio.app/oauth2/token"
+    );
+    // The advertised jwks_uri must be a path this server actually
+    // mounts, or every RP's discovery step dead-ends on a 404.
+    assert_eq!(
+        body["jwks_uri"],
+        "https://auth.fasttrackstudio.app/auth/jwt/jwks"
+    );
+}
+
+#[tokio::test]
+async fn advertised_jwks_uri_is_routed_and_leaks_no_key_material() {
+    let response = app()
+        .await
+        .oneshot(Request::get("/auth/jwt/jwks").body(Body::empty()).unwrap())
+        .await
+        .expect("request");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    // HS256 means the "public" key is the signing secret. An empty set
+    // is correct; a populated one would be a disclosure.
+    assert_eq!(body["keys"].as_array().expect("keys array").len(), 0);
+    let serialized = body.to_string();
+    assert!(
+        !serialized.contains("a-secret-at-least-32-bytes-long"),
+        "jwks must never contain the signing secret"
+    );
+}
+
+#[tokio::test]
+async fn sign_up_then_session_round_trips_a_bearer_token() {
+    let app = app().await;
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::post("/auth/sign-up/email")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{"email":"cody@fasttrackstudio.app","password":"correct-horse-battery-staple"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .expect("sign up");
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+    // The browser path: a session cookie is set on the response.
+    let cookie = response
+        .headers()
+        .get(header::SET_COOKIE)
+        .expect("session cookie is set")
+        .to_str()
+        .expect("cookie is ascii")
+        .to_owned();
+    assert!(cookie.contains("architect-auth.session="));
+    assert!(cookie.contains("HttpOnly"), "session cookie must be HttpOnly");
+    assert!(
+        cookie.contains("Secure"),
+        "an https base_url must yield a Secure cookie"
+    );
+
+    let body = json_body(response).await;
+    let token = body["token"].as_str().expect("token in body").to_owned();
+    assert_eq!(body["user"]["email"], "cody@fasttrackstudio.app");
+    // The stored verifier must never be serialized.
+    assert!(body["session"].get("token_hash").is_none());
+
+    // The native path: the same token as a bearer resolves the session.
+    let response = app
+        .oneshot(
+            Request::get("/auth/session")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .expect("session");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    assert_eq!(body["user"]["email"], "cody@fasttrackstudio.app");
+}
+
+#[tokio::test]
+async fn session_without_credentials_is_401_not_500() {
+    let response = app()
+        .await
+        .oneshot(Request::get("/auth/session").body(Body::empty()).unwrap())
+        .await
+        .expect("request");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn wrong_password_is_indistinguishable_from_unknown_account() {
+    let app = app().await;
+
+    app.clone()
+        .oneshot(
+            Request::post("/auth/sign-up/email")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{"email":"real@fasttrackstudio.app","password":"correct-horse-battery-staple"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .expect("sign up");
+
+    let wrong_password = app
+        .clone()
+        .oneshot(
+            Request::post("/auth/sign-in/email")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{"email":"real@fasttrackstudio.app","password":"not-the-password"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .expect("sign in");
+
+    let unknown_account = app
+        .oneshot(
+            Request::post("/auth/sign-in/email")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    r#"{"email":"ghost@fasttrackstudio.app","password":"not-the-password"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .expect("sign in");
+
+    assert_eq!(wrong_password.status(), unknown_account.status());
+    assert_eq!(
+        json_body(wrong_password).await,
+        json_body(unknown_account).await,
+        "a differing response would let an attacker enumerate accounts"
+    );
+}
+
+#[tokio::test]
+async fn sign_out_is_idempotent_and_clears_the_cookie() {
+    let response = app()
+        .await
+        .oneshot(Request::post("/auth/sign-out").body(Body::empty()).unwrap())
+        .await
+        .expect("request");
+
+    // No token supplied: already signed out, so this is a success.
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    let cookie = response
+        .headers()
+        .get(header::SET_COOKIE)
+        .expect("cookie cleared")
+        .to_str()
+        .unwrap();
+    assert!(cookie.contains("architect-auth.session="));
+}
+
+#[tokio::test]
+async fn health_probes_answer() {
+    let app = app().await;
+    for path in ["/healthz", "/readyz"] {
+        let response = app
+            .clone()
+            .oneshot(Request::get(path).body(Body::empty()).unwrap())
+            .await
+            .expect("probe");
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+    }
+}
