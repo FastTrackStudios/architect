@@ -950,6 +950,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "auth-http"
+version = "0.1.0"
+dependencies = [
+ "architect-auth",
+ "auth-client",
+ "auth-server",
+ "axum",
+ "reqwest 0.12.28",
+ "sea-orm",
+ "sea-orm-migration",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "web-sys",
+]
+
+[[package]]
 name = "auth-native-tests"
 version = "0.1.0"
 dependencies = [

@@ -28,6 +28,7 @@ members = [
     "features/auth/auth-proto",
     "features/auth/auth-db",
     "features/auth/auth-client",
+    "features/auth/auth-http",
     "features/auth/tests/native",
     # ── crdt ──────────────────────────────────────────────────────────
     "features/crdt/crdt",
@@ -77,6 +78,7 @@ auth = { path = "features/auth/auth" }
 auth-proto = { path = "features/auth/auth-proto" }
 auth-db = { path = "features/auth/auth-db" }
 auth-client = { path = "features/auth/auth-client" }
+auth-http = { path = "features/auth/auth-http" }
 crdt = { path = "features/crdt/crdt" }
 crdt-derive = { path = "features/crdt/crdt-derive" }
 crdt-seaorm = { path = "features/crdt/crdt-seaorm" }

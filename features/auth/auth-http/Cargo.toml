@@ -1,0 +1,46 @@
+[package]
+name = "auth-http"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Portable client for the architect-auth server's session JSON API — native and wasm."
+
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
+[dependencies]
+auth-client.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+# `default-features = false` keeps the wasm build free of the native TLS
+# and blocking stacks; the browser target goes through `fetch` anyway.
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { version = "0.3", features = ["Window", "Storage"], optional = true }
+
+[features]
+default = []
+# A `TokenStore` backed by the browser's localStorage, so a signed-in
+# session survives a reload.
+browser = ["dep:web-sys"]
+
+[dev-dependencies]
+# The round-trip test drives this client against a real `auth-server`
+# over a real socket. `auth-server` does not depend on `auth-http`, so
+# there is no cycle.
+architect-auth = { workspace = true, features = ["full"] }
+auth-server = { workspace = true }
+axum.workspace = true
+sea-orm.workspace = true
+sea-orm-migration.workspace = true
+tokio = { workspace = true }
