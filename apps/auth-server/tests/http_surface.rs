@@ -328,3 +328,101 @@ async fn an_unlisted_origin_is_not_granted_cors_access() {
         "an unlisted origin must not be echoed back"
     );
 }
+
+// ── The browser redirect flow ────────────────────────────────────────
+
+/// The change that makes `/oauth2/authorize` usable from a browser at
+/// all. It used to answer 401 for everyone, so an app that sent someone
+/// here to sign in handed them a JSON error instead of a login page.
+#[tokio::test]
+async fn authorize_without_a_session_sends_a_browser_to_the_login_page() {
+    let response = app()
+        .await
+        .oneshot(
+            Request::get(
+                "/oauth2/authorize?client_id=task\
+                 &redirect_uri=https://task.fasttrackstudio.app/auth/callback\
+                 &response_type=code&scope=openid&state=xyz",
+            )
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .expect("request");
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let location = response
+        .headers()
+        .get(header::LOCATION)
+        .expect("a Location header")
+        .to_str()
+        .expect("ascii");
+    assert!(
+        location.starts_with("/login?return_to="),
+        "expected the login page, got {location}"
+    );
+    // The whole original request has to survive the round trip, or
+    // signing in resumes a request that has lost its parameters. The
+    // `&` separators must be encoded, or `return_to` ends at the first
+    // one and everything after client_id is silently dropped.
+    assert!(
+        location.contains("%26response_type%3Dcode"),
+        "the authorize query must be encoded into return_to, got {location}"
+    );
+    assert!(
+        location.contains("state%3Dxyz"),
+        "the tail of the query must survive, got {location}"
+    );
+}
+
+/// A program is not a person: it cannot render a login page, and a 303
+/// to HTML would read as a baffling success. Bearer callers keep the
+/// old 401.
+#[tokio::test]
+async fn authorize_with_a_bearer_token_still_gets_401() {
+    let response = app()
+        .await
+        .oneshot(
+            // The same complete query as the browser case — an
+            // incomplete one is rejected by extraction with a 400 before
+            // the handler runs, which would make this test pass for the
+            // wrong reason.
+            Request::get(
+                "/oauth2/authorize?client_id=task\
+                 &redirect_uri=https://task.fasttrackstudio.app/auth/callback\
+                 &response_type=code&scope=openid&state=xyz",
+            )
+            .header(header::AUTHORIZATION, "Bearer not-a-real-token")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .expect("request");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+/// The pages have to actually be mounted — the whole redirect is a dead
+/// end if `/login` 404s.
+#[tokio::test]
+async fn the_sign_in_and_sign_up_pages_are_served() {
+    for path in ["/login", "/sign-up"] {
+        let response = app()
+            .await
+            .oneshot(Request::get(path).body(Body::empty()).unwrap())
+            .await
+            .expect("request");
+
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+        let content_type = response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_owned();
+        assert!(
+            content_type.starts_with("text/html"),
+            "{path} should serve HTML, got {content_type}"
+        );
+    }
+}

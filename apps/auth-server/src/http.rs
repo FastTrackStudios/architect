@@ -36,7 +36,7 @@ use auth_proto::{AuthFlowError, AuthSessionBundle, AuthUser, SignInEmailPassword
 use axum::{
     Json, Router,
     extract::{Query, State},
-    http::{HeaderMap, StatusCode, header},
+    http::{HeaderMap, StatusCode, Uri, header},
     response::{IntoResponse, Redirect, Response},
     routing::{get, post},
 };
@@ -152,20 +152,36 @@ where
 
 /// The authorization endpoint.
 ///
-/// Requires an already-authenticated user: the session comes from the
-/// cookie (browser) or a bearer header (native app that already signed
-/// in). There is no login form here — a front-end owns that, and
-/// redirects back once it holds a session.
+/// The session comes from the cookie (browser) or a bearer header (a
+/// native app that already signed in).
+///
+/// # When there is no session
+///
+/// A browser is sent to the sign-in page with the whole original request
+/// as `return_to`, so signing in resumes the flow instead of ending it.
+/// This used to answer `401` regardless, which made the redirect flow
+/// unusable from a browser: the app would send someone here to log in
+/// and they would receive a JSON error.
+///
+/// A request that carried an `Authorization` header is answered with
+/// `401` as before — it is a program, not a person, and a login page is
+/// not something it can render.
 async fn authorize<S>(
     State(state): State<HttpState<S>>,
+    uri: Uri,
     headers: HeaderMap,
     Query(params): Query<AuthorizeParams>,
 ) -> Result<Response, ApiError>
 where
     S: AuthStorage,
 {
-    let session_token = session_token_from_headers(&headers, &state.cookie)
-        .ok_or(ApiError::from(AuthFlowError::InvalidCredentials))?;
+    let session_token = match session_token_from_headers(&headers, &state.cookie) {
+        Some(token) => token,
+        None if headers.contains_key(header::AUTHORIZATION) => {
+            return Err(ApiError::from(AuthFlowError::InvalidCredentials));
+        }
+        None => return Ok(Redirect::to(&sign_in_url(&uri)).into_response()),
+    };
 
     let authorization = state
         .auth
@@ -463,7 +479,39 @@ fn bearer(headers: &HeaderMap) -> Option<String> {
 /// The originating address, trusting `x-forwarded-for` because this
 /// server always sits behind the cluster ingress. It is recorded on
 /// sessions for the audit trail, never used for authorization.
-fn client_ip(headers: &HeaderMap) -> Option<String> {
+/// Where to send a browser that reached `/oauth2/authorize` with no
+/// session: the sign-in page, carrying this whole request as the place
+/// to come back to.
+///
+/// Percent-encoded, because the authorize URL is itself full of query
+/// parameters — unencoded, its first `&` would terminate `return_to`
+/// and the resumed request would be missing everything after
+/// `client_id`, which surfaces much later as an unrelated-looking OIDC
+/// error.
+fn sign_in_url(uri: &Uri) -> String {
+    let original = uri.path_and_query().map_or("/", |pq| pq.as_str());
+    format!("/login?return_to={}", percent_encode_query(original))
+}
+
+/// Percent-encode for use as a query-string *value*.
+///
+/// Hand-rolled to avoid a dependency for one call site. Unreserved
+/// characters per RFC 3986 pass through; everything else, `&` `=` `?`
+/// `/` `#` included, is escaped.
+fn percent_encode_query(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len() + raw.len() / 2);
+    for byte in raw.as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(*byte as char);
+            }
+            other => out.push_str(&format!("%{other:02X}")),
+        }
+    }
+    out
+}
+
+pub(crate) fn client_ip(headers: &HeaderMap) -> Option<String> {
     headers
         .get("x-forwarded-for")
         .and_then(|value| value.to_str().ok())
@@ -473,7 +521,7 @@ fn client_ip(headers: &HeaderMap) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
-fn user_agent(headers: &HeaderMap) -> Option<String> {
+pub(crate) fn user_agent(headers: &HeaderMap) -> Option<String> {
     headers
         .get(header::USER_AGENT)
         .and_then(|value| value.to_str().ok())

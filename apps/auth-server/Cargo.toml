@@ -26,6 +26,8 @@ architect-auth = { workspace = true, features = ["full"] }
 auth-proto = { workspace = true, features = ["vox"] }
 axum.workspace = true
 chrono.workspace = true
+dioxus.workspace = true
+dioxus-ssr.workspace = true
 eyre.workspace = true
 sea-orm.workspace = true
 sea-orm-migration.workspace = true

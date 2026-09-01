@@ -47,6 +47,7 @@
 pub mod config;
 pub mod http;
 pub mod server;
+pub mod ui;
 
 pub use config::{ConfigError, ServerConfig};
 pub use server::{AuthServer, VOX_SUBPROTOCOL, app_router, build, build_engine, serve};

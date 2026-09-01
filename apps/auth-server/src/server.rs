@@ -23,6 +23,7 @@ use tower_http::trace::TraceLayer;
 
 use crate::config::ServerConfig;
 use crate::http::{self, HttpState};
+use crate::ui;
 
 /// The vox WebSocket subprotocol. A browser client that offers a
 /// subprotocol gets no connection at all unless the server echoes it
@@ -133,7 +134,14 @@ where
         // database that has gone away surfaces as a 5xx on real traffic.
         .route("/healthz", get(|| async { "ok" }))
         .route("/readyz", get(|| async { "ok" }))
-        .merge(http::router(HttpState::new(auth, cookie)))
+        .merge(http::router(HttpState::new(
+            auth.clone(),
+            cookie.clone(),
+        )))
+        // The sign-in and sign-up pages. Merged separately from the API
+        // so an embedder that already has its own login screen can take
+        // `http::router` alone — see `ui::router`.
+        .merge(ui::router(HttpState::new(auth, cookie)))
         .layer(cors_layer(config))
         .layer(TraceLayer::new_for_http())
 }
