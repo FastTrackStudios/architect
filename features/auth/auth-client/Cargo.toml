@@ -18,6 +18,11 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 # the `authorization: Bearer <token>` metadata entry — which the native
 # integration tests round-trip against `AuthServerMiddleware`.
 [dependencies]
+# PKCE: the challenge is base64url(sha256(verifier)). Both are wasm-clean
+# and dependency-light, which is what lets the redirect flow live here
+# without compromising the header note above.
+base64.workspace = true
+sha2.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
