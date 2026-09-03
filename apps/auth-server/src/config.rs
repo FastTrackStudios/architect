@@ -44,7 +44,9 @@ pub struct ServerConfig {
     pub passkey_rp_id: Option<String>,
     /// Origins allowed to call the browser-facing HTTP surface.
     pub cors_origins: Vec<String>,
-    /// Registered OIDC clients, parsed from `AUTH_OIDC_CLIENTS` (JSON).
+    /// Registered OIDC clients, parsed from `AUTH_OIDC_CLIENTS` (JSON),
+    /// with `AUTH_OIDC_CLIENTS_EXTRA` (or its `_FILE` form) merged over
+    /// the top.
     pub oidc_clients: Vec<OidcClientConfig>,
     /// Whether clients may self-register at `/oauth2/register`. Off by
     /// default: on a public issuer, dynamic registration is an open door.
@@ -70,8 +72,12 @@ pub enum ConfigError {
         expected: &'static str,
         value: String,
     },
-    #[error("AUTH_OIDC_CLIENTS is not valid JSON: {0}")]
-    OidcClients(#[source] serde_json::Error),
+    #[error("{var} is not valid JSON: {source}")]
+    OidcClients {
+        var: &'static str,
+        #[source]
+        source: serde_json::Error,
+    },
     #[error(
         "AUTH_SECRET must be at least 32 bytes (got {0}) — architect-auth refuses shorter keys"
     )]
@@ -140,14 +146,26 @@ impl ServerConfig {
             .trim_end_matches('/')
             .to_owned();
 
-        let oidc_clients = match env::var("AUTH_OIDC_CLIENTS") {
-            Ok(raw) if !raw.trim().is_empty() => {
-                let parsed: Vec<OidcClientJson> =
-                    serde_json::from_str(&raw).map_err(ConfigError::OidcClients)?;
-                parsed.into_iter().map(OidcClientConfig::from).collect()
+        // Two sources, because they have different secrecy. The public
+        // clients (native apps, SPAs) hold nothing secret and belong in
+        // the deployment's declarative config, in git. A CONFIDENTIAL
+        // client's entry contains its `client_secret`, which must not be
+        // — so it arrives through the same `_FILE` indirection as
+        // AUTH_SECRET, out of a mounted Kubernetes secret.
+        //
+        // Extras are merged by `client_id`, last writer wins, so a
+        // deployment can also override one declared client without
+        // restating the rest.
+        let mut oidc_clients = read_oidc_clients("AUTH_OIDC_CLIENTS")?;
+        for extra in read_oidc_clients("AUTH_OIDC_CLIENTS_EXTRA")? {
+            match oidc_clients
+                .iter_mut()
+                .find(|client| client.client_id == extra.client_id)
+            {
+                Some(existing) => *existing = extra,
+                None => oidc_clients.push(extra),
             }
-            _ => Vec::new(),
-        };
+        }
 
         Ok(Self {
             bind_addr: env::var("AUTH_BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".into()),
@@ -171,19 +189,45 @@ impl ServerConfig {
     }
 }
 
+/// Read and parse a JSON client list from `<VAR>_FILE` if set, else
+/// `<VAR>`. An unset or empty variable is not an error — a deployment
+/// with only public clients sets no extras, and vice versa.
+fn read_oidc_clients(var: &'static str) -> Result<Vec<OidcClientConfig>, ConfigError> {
+    let raw = match optional_secret(var)? {
+        Some(raw) => raw,
+        None => return Ok(Vec::new()),
+    };
+    if raw.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let parsed: Vec<OidcClientJson> =
+        serde_json::from_str(&raw).map_err(|source| ConfigError::OidcClients { var, source })?;
+    Ok(parsed.into_iter().map(OidcClientConfig::from).collect())
+}
+
 /// Read a secret from `<VAR>_FILE` if set, else `<VAR>`.
 ///
 /// The `_FILE` indirection is how Kubernetes secrets should be
 /// consumed: a mounted file never shows up in `/proc/<pid>/environ`, in
 /// a crash dump, or in `kubectl describe pod`.
 fn read_secret(var: &'static str) -> Result<String, ConfigError> {
+    optional_secret(var)?.ok_or(ConfigError::Missing(var))
+}
+
+/// The `_FILE`-or-env read, without requiring the value to be present.
+///
+/// A missing `_FILE` path is still an error: naming a file that is not
+/// there is a broken deployment, not an absent setting, and silently
+/// falling through to the plain env var would start the server with the
+/// wrong configuration rather than failing at boot.
+fn optional_secret(var: &'static str) -> Result<Option<String>, ConfigError> {
     let file_var = format!("{var}_FILE");
     if let Ok(path) = env::var(&file_var) {
         let contents =
             fs::read_to_string(&path).map_err(|source| ConfigError::Unreadable { var, source })?;
-        return Ok(contents.trim().to_owned());
+        return Ok(Some(contents.trim().to_owned()));
     }
-    env::var(var).map_err(|_| ConfigError::Missing(var))
+    Ok(env::var(var).ok())
 }
 
 fn optional(var: &str) -> Option<String> {

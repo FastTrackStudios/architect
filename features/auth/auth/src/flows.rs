@@ -6046,6 +6046,129 @@ pub mod email_password {
             assert_eq!(key_set.keys.len(), 1);
         }
 
+        // r[verify auth.oidc.pkce]
+        //
+        // PKCE is required of PUBLIC clients and optional for
+        // confidential ones. The public half is the security property and
+        // must never regress; the confidential half exists because
+        // correct server-side clients that predate PKCE — Discourse's
+        // oauth2-basic among them — are otherwise locked out at
+        // /oauth2/authorize before a login page is ever drawn.
+        #[tokio::test]
+        async fn oidc_pkce_is_required_of_public_clients_and_optional_for_confidential_ones() {
+            let auth = ArchitectAuth::builder()
+                .secret("a-secret-at-least-32-bytes-long!!")
+                .base_url("https://auth.example.com")
+                .jwt_issuer("https://auth.example.com")
+                .jwt_audience("architect-auth")
+                .oidc_issuer("https://auth.example.com")
+                .oidc_client(OidcClientConfig {
+                    client_id: "forum".into(),
+                    client_secret: Some("forum-secret".into()),
+                    name: "Forum".into(),
+                    redirect_uris: vec!["https://forum.example.com/callback".into()],
+                    scopes: vec!["openid".into(), "profile".into(), "email".into()],
+                    public_client: false,
+                    skip_consent: true,
+                    disabled: false,
+                })
+                .oidc_client(OidcClientConfig {
+                    client_id: "native".into(),
+                    client_secret: None,
+                    name: "Native".into(),
+                    redirect_uris: vec!["https://native.example.com/callback".into()],
+                    scopes: vec!["openid".into(), "profile".into(), "email".into()],
+                    public_client: true,
+                    skip_consent: true,
+                    disabled: false,
+                })
+                .storage(MemoryStorage::default())
+                .build()
+                .expect("build auth");
+
+            let bundle = auth
+                .create_email_password_user(CreateEmailPasswordUser {
+                    email: "pkce@example.com".into(),
+                    password: "correct horse battery staple".into(),
+                    name: Some("PKCE User".into()),
+                    username: None,
+                    image: None,
+                    metadata_json: None,
+                    ip_address: None,
+                    user_agent: None,
+                })
+                .await
+                .expect("create user");
+
+            let authorize = |client_id: &'static str, redirect_uri: &'static str| {
+                let session_token = bundle.token.clone();
+                auth.authorize_oidc(AuthorizeOidc {
+                    session_token,
+                    client_id: client_id.into(),
+                    redirect_uri: redirect_uri.into(),
+                    response_type: "code".into(),
+                    scope: Some("openid email".into()),
+                    state: None,
+                    nonce: None,
+                    code_challenge: None,
+                    code_challenge_method: None,
+                    prompt: None,
+                })
+            };
+
+            // Public client, no code_challenge: refused.
+            assert!(matches!(
+                authorize("native", "https://native.example.com/callback").await,
+                Err(AuthFlowError::InvalidInput(_))
+            ));
+
+            // Confidential client, no code_challenge: allowed, and the
+            // secret is still what redeems the code.
+            let authorization = authorize("forum", "https://forum.example.com/callback")
+                .await
+                .expect("authorize confidential client without pkce");
+
+            let wrong_secret = auth
+                .exchange_oidc_token(ExchangeOidcToken {
+                    grant_type: "authorization_code".into(),
+                    code: Some(authorization.code.clone()),
+                    redirect_uri: Some("https://forum.example.com/callback".into()),
+                    client_id: "forum".into(),
+                    client_secret: Some("not-the-secret".into()),
+                    code_verifier: None,
+                    refresh_token: None,
+                })
+                .await;
+            assert!(matches!(
+                wrong_secret,
+                Err(AuthFlowError::InvalidCredentials)
+            ));
+
+            let tokens = auth
+                .exchange_oidc_token(ExchangeOidcToken {
+                    grant_type: "authorization_code".into(),
+                    code: Some(authorization.code),
+                    redirect_uri: Some("https://forum.example.com/callback".into()),
+                    client_id: "forum".into(),
+                    client_secret: Some("forum-secret".into()),
+                    code_verifier: None,
+                    refresh_token: None,
+                })
+                .await
+                .expect("exchange code without pkce");
+
+            // The forum reads identity from /oauth2/userinfo, not from the
+            // id_token — so that is what has to work.
+            let user_info = auth
+                .get_oidc_user_info(GetOidcUserInfo {
+                    access_token: tokens.access_token,
+                })
+                .await
+                .expect("userinfo");
+            assert_eq!(user_info.sub, bundle.user.id.to_string());
+            assert_eq!(user_info.email.as_deref(), Some("pkce@example.com"));
+        }
+
         // r[verify auth.oauth-proxy.metadata]
         // r[verify auth.oauth-proxy.state]
         // r[verify auth.oauth-proxy.callback-forwarding]
@@ -10541,7 +10664,24 @@ pub mod oidc_provider {
             }
             let scope = normalize_scope(input.scope.as_deref())?;
             ensure_client_scopes(client, &scope)?;
-            if self.config.oidc.require_pkce && input.code_challenge.is_none() {
+            // PKCE is mandatory for PUBLIC clients and optional for
+            // confidential ones. A public client ships its whole
+            // configuration to the user's device, so the authorization
+            // code is the only thing standing between an attacker who
+            // can intercept the redirect and a session — PKCE is what
+            // binds the code to the requester. A confidential client
+            // proves itself at the token endpoint with a secret the
+            // attacker does not have, which is the same protection by
+            // other means; RFC 9700 recommends PKCE there too, but
+            // requiring it locks out correct, widely-deployed
+            // server-side clients that never implemented it.
+            //
+            // `require_pkce` therefore still governs, but only where it
+            // is load-bearing. Never relax this for public clients.
+            if self.config.oidc.require_pkce
+                && client.public_client
+                && input.code_challenge.is_none()
+            {
                 return Err(AuthFlowError::InvalidInput("pkce is required".into()));
             }
             if input.code_challenge.is_some()
