@@ -91,11 +91,8 @@ fn safe_return_to(raw: Option<&str>) -> String {
 /// as separators for the OUTER URL. `return_to` truncated at the first
 /// one, the rest arrived as siblings of `/sign-up`, and the redirect after
 /// a successful sign-up landed on `/oauth2/authorize?client_id=forum` with
-/// no `redirect_uri` at all:
-///
-///     Failed to deserialize query string: missing field `redirect_uri`
-///
-/// — with the account already created, so the person was left stranded
+/// no `redirect_uri` at all — "Failed to deserialize query string:
+/// missing field `redirect_uri`", with the account already created, so the person was left stranded
 /// with a working account and no way back to what they were signing in to.
 ///
 /// `/` is left alone: it is legal in a query value and keeps the link
