@@ -78,6 +78,12 @@ pub struct OidcProviderConfig {
     pub require_pkce: bool,
     pub allow_dynamic_client_registration: bool,
     pub clients: Vec<OidcClientConfig>,
+    /// Scopes the provider grants beyond the OIDC standard set
+    /// (`openid profile email offline_access`). A deployment adds its own
+    /// capability scopes here — `forge:github`, say — and a client may
+    /// then list them in [`OidcClientConfig::scopes`]. Anything not in
+    /// either set is refused at `/oauth2/authorize`.
+    pub extra_scopes: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -157,6 +163,7 @@ pub struct ArchitectAuthBuilder<S> {
     oidc_require_pkce: bool,
     oidc_allow_dynamic_client_registration: bool,
     oidc_clients: Vec<OidcClientConfig>,
+    oidc_extra_scopes: Vec<String>,
     oauth_proxy_current_url: Option<String>,
     oauth_proxy_production_url: Option<String>,
     oauth_proxy_callback_path: String,
@@ -201,6 +208,7 @@ impl<S> ArchitectAuthBuilder<S> {
             oidc_require_pkce: true,
             oidc_allow_dynamic_client_registration: false,
             oidc_clients: Vec::new(),
+            oidc_extra_scopes: Vec::new(),
             oauth_proxy_current_url: None,
             oauth_proxy_production_url: None,
             oauth_proxy_callback_path: "/auth/oauth-proxy-callback".into(),
@@ -243,6 +251,7 @@ impl<S> ArchitectAuthBuilder<S> {
             oidc_require_pkce: self.oidc_require_pkce,
             oidc_allow_dynamic_client_registration: self.oidc_allow_dynamic_client_registration,
             oidc_clients: self.oidc_clients,
+            oidc_extra_scopes: self.oidc_extra_scopes,
             oauth_proxy_current_url: self.oauth_proxy_current_url,
             oauth_proxy_production_url: self.oauth_proxy_production_url,
             oauth_proxy_callback_path: self.oauth_proxy_callback_path,
@@ -408,6 +417,16 @@ impl<S> ArchitectAuthBuilder<S> {
         self
     }
 
+    /// Accept a non-standard scope at the authorization endpoint and
+    /// advertise it in discovery. Idempotent.
+    pub fn oidc_extra_scope(mut self, scope: impl Into<String>) -> Self {
+        let scope = scope.into();
+        if !self.oidc_extra_scopes.contains(&scope) {
+            self.oidc_extra_scopes.push(scope);
+        }
+        self
+    }
+
     pub fn oauth_proxy_current_url(mut self, url: impl Into<String>) -> Self {
         self.oauth_proxy_current_url = Some(url.into());
         self
@@ -492,6 +511,7 @@ impl<S> ArchitectAuthBuilder<S> {
                     require_pkce: self.oidc_require_pkce,
                     allow_dynamic_client_registration: self.oidc_allow_dynamic_client_registration,
                     clients: self.oidc_clients,
+                    extra_scopes: self.oidc_extra_scopes,
                 },
                 oauth_proxy: OAuthProxyConfig {
                     current_url: oauth_proxy_current_url,

@@ -26,20 +26,22 @@
 //! drift, because there is only one implementation underneath.
 
 use architect_auth::{
-    AuthStorage, CompletePasswordReset, CreateEmailPasswordUser, RequestEmailVerification,
-    RequestPasswordReset, VerifyEmail, transport::AuthCookieConfig,
+    AuthStorage, CompletePasswordReset, CreateEmailPasswordUser, CurrentSession,
+    RequestEmailVerification, RequestPasswordReset, VerifyEmail,
+    transport::{AuthCookieConfig, axum::session_token_from_headers},
 };
 use auth_proto::{AuthSessionBundle, SignInEmailPassword};
 use axum::{
     Router,
     extract::{Form, Query, State},
     http::{HeaderMap, StatusCode, header},
-    response::{Html, IntoResponse, Response},
+    response::{Html, IntoResponse, Redirect, Response},
     routing::get,
 };
 use dioxus::prelude::*;
 
-use crate::http::{HttpState, client_ip, user_agent};
+use crate::http::{HttpState, LinkedAccountView, UnlinkError, client_ip, user_agent};
+use crate::social::Provider;
 
 /// Where to send a browser that has just signed in, when the request
 /// carried no `return_to` of its own.
@@ -64,14 +66,207 @@ where
         // editing the database by hand.
         .route(
             "/forgot-password",
-            get(forgot_password_page::<S>).post(forgot_password_submit::<S>),
+            get(forgot_password_page).post(forgot_password_submit::<S>),
         )
         .route(
             "/reset-password",
-            get(reset_password_page::<S>).post(reset_password_submit::<S>),
+            get(reset_password_page).post(reset_password_submit::<S>),
         )
         .route("/verify-email", get(verify_email_page::<S>))
+        // The signed-in person's own page: which providers are linked,
+        // and the buttons to link or unlink them.
+        .route("/account", get(account_page::<S>))
+        .route("/account/unlink", axum::routing::post(account_unlink::<S>))
         .with_state(state)
+}
+
+// ── Account page ─────────────────────────────────────────────────────
+
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct AccountQuery {
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub linked: Option<String>,
+    #[serde(default)]
+    pub unlinked: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct UnlinkForm {
+    pub provider: String,
+}
+
+/// `GET /account` — sends a browser with no session to sign in first,
+/// with this page as the place to come back to.
+async fn account_page<S>(
+    State(state): State<HttpState<S>>,
+    headers: HeaderMap,
+    Query(q): Query<AccountQuery>,
+) -> Response
+where
+    S: AuthStorage,
+{
+    let Some(token) = session_token_from_headers(&headers, &state.cookie) else {
+        return Redirect::to("/login?return_to=%2Faccount").into_response();
+    };
+    let bundle = match state.auth.current_session(CurrentSession { token }).await {
+        Ok(bundle) => bundle,
+        Err(_) => return Redirect::to("/login?return_to=%2Faccount").into_response(),
+    };
+    let accounts = crate::http::linked_accounts(&state, bundle.user.id)
+        .await
+        .unwrap_or_default();
+    let flash = account_flash(&q);
+    let body = dioxus_ssr::render_element(rsx! {
+        AccountPage {
+            email: bundle.user.email.clone().unwrap_or_default(),
+            providers: state.social.enabled_providers(),
+            accounts,
+            flash,
+        }
+    });
+    Html(format!("<!doctype html>\n<html lang=\"en\">{body}</html>")).into_response()
+}
+
+/// `POST /account/unlink` — the form twin of
+/// `POST /auth/accounts/{provider}/unlink`, answering with a redirect
+/// back to the page instead of JSON.
+async fn account_unlink<S>(
+    State(state): State<HttpState<S>>,
+    headers: HeaderMap,
+    Form(form): Form<UnlinkForm>,
+) -> Response
+where
+    S: AuthStorage,
+{
+    let Some(token) = session_token_from_headers(&headers, &state.cookie) else {
+        return Redirect::to("/login?return_to=%2Faccount").into_response();
+    };
+    let Some(provider) = Provider::parse(&form.provider) else {
+        return Redirect::to("/account?error=unknown_provider").into_response();
+    };
+    let location = match crate::http::unlink(&state, token, provider).await {
+        Ok(()) => format!("/account?unlinked={}", provider.id()),
+        Err(UnlinkError::NotLinked) => "/account?error=not_linked".to_owned(),
+        Err(UnlinkError::LastCredential) => "/account?error=last_credential".to_owned(),
+        Err(UnlinkError::Auth(_)) => "/account?error=unlink".to_owned(),
+    };
+    (StatusCode::SEE_OTHER, [(header::LOCATION, location)]).into_response()
+}
+
+/// A message for the page, from the `?error=`, `?linked=` and
+/// `?unlinked=` codes the callback and unlink routes redirect with.
+fn account_flash(q: &AccountQuery) -> Option<Flash> {
+    if let Some(provider) = q.linked.as_deref().and_then(Provider::parse) {
+        return Some(Flash::Ok(format!("{} linked.", provider.display_name())));
+    }
+    if let Some(provider) = q.unlinked.as_deref().and_then(Provider::parse) {
+        return Some(Flash::Ok(format!("{} unlinked.", provider.display_name())));
+    }
+    let error = q.error.as_deref()?;
+    Some(Flash::Error(describe_social_error(error).to_owned()))
+}
+
+/// The `?error=` codes in words. Shared with the login page, which gets
+/// the sign-in ones.
+fn describe_social_error(code: &str) -> &'static str {
+    match code {
+        "denied" => "The provider did not grant access.",
+        "state" => "That sign-in link expired or was already used. Try again.",
+        "exchange" | "profile" => "The provider could not be reached. Try again in a moment.",
+        "email_in_use" => {
+            "An account with that email already exists. Sign in with your password, then link the provider from your account page."
+        }
+        "no_email" => {
+            "The provider did not share an email address, which is needed to create an account."
+        }
+        "already_linked" => "That account is already linked to a different user.",
+        "session" => "Your session ended before the link finished. Sign in and try again.",
+        "last_credential" => {
+            "That is your only way to sign in. Set a password or link another provider before unlinking it."
+        }
+        "not_linked" => "That provider is not linked.",
+        "unknown_provider" => "That provider is not available.",
+        _ => "Something went wrong. Try again.",
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum Flash {
+    Ok(String),
+    Error(String),
+}
+
+#[component]
+fn AccountPage(
+    email: String,
+    providers: Vec<Provider>,
+    accounts: Vec<LinkedAccountView>,
+    flash: Option<Flash>,
+) -> Element {
+    rsx! {
+        head {
+            meta { charset: "utf-8" }
+            meta { name: "viewport", content: "width=device-width, initial-scale=1" }
+            title { "Your account · FastTrackStudio" }
+            style { {STYLE} }
+        }
+        body {
+            main { class: "card",
+                h1 { "Your account" }
+                p { class: "sub", "Signed in as {email}" }
+
+                match flash {
+                    Some(Flash::Ok(message)) => rsx! { p { class: "ok", role: "status", "{message}" } },
+                    Some(Flash::Error(message)) => rsx! { p { class: "error", role: "alert", "{message}" } },
+                    None => rsx! {},
+                }
+
+                h2 { "Linked accounts" }
+                if providers.is_empty() {
+                    p { class: "sub", "No providers are configured on this server." }
+                }
+                ul { class: "providers",
+                    for provider in providers.iter().copied() {
+                        {
+                            let linked = accounts.iter().find(|a| a.provider_id == provider.id());
+                            let name = provider.display_name();
+                            let id = provider.id();
+                            match linked {
+                                Some(account) => {
+                                    let handle = account.login.clone().unwrap_or_else(|| account.account_id.clone());
+                                    rsx! {
+                                        li { class: "provider",
+                                            span { "Linked as " strong { "{handle}" } " · {name}" }
+                                            form { method: "post", action: "/account/unlink", class: "inline",
+                                                input { r#type: "hidden", name: "provider", value: "{id}" }
+                                                button { r#type: "submit", class: "link", "Unlink" }
+                                            }
+                                        }
+                                    }
+                                }
+                                None => rsx! {
+                                    li { class: "provider",
+                                        span { "{name}" }
+                                        a { class: "button", href: "/auth/social/{id}/start?mode=link&return_to=%2Faccount",
+                                            "Link {name}"
+                                        }
+                                    }
+                                },
+                            }
+                        }
+                    }
+                }
+
+                p { class: "alt",
+                    form { method: "post", action: "/auth/sign-out", class: "inline",
+                        button { r#type: "submit", class: "link", "Sign out" }
+                    }
+                }
+            }
+        }
+    }
 }
 
 // ── Password reset ───────────────────────────────────────────────────
@@ -110,10 +305,7 @@ pub struct VerifyQuery {
     pub token: Option<String>,
 }
 
-async fn forgot_password_page<S>(Query(q): Query<PageQuery>) -> Html<String>
-where
-    S: AuthStorage,
-{
+async fn forgot_password_page(Query(q): Query<PageQuery>) -> Html<String> {
     Html(render(
         Screen::ForgotPassword,
         &safe_return_to(q.return_to.as_deref()),
@@ -153,10 +345,7 @@ where
     )
 }
 
-async fn reset_password_page<S>(Query(q): Query<ResetQuery>) -> Html<String>
-where
-    S: AuthStorage,
-{
+async fn reset_password_page(Query(q): Query<ResetQuery>) -> Html<String> {
     Html(render_with_reset(
         Screen::ResetPassword,
         &safe_return_to(q.return_to.as_deref()),
@@ -320,29 +509,40 @@ fn encode_query_value(value: &str) -> String {
 pub struct PageQuery {
     #[serde(default)]
     pub return_to: Option<String>,
+    /// A short code from a failed social sign-in, shown in words.
+    #[serde(default)]
+    pub error: Option<String>,
 }
 
 // ── GET ──────────────────────────────────────────────────────────────
 
-async fn login_page<S>(Query(q): Query<PageQuery>) -> Html<String>
+async fn login_page<S>(
+    State(state): State<HttpState<S>>,
+    Query(q): Query<PageQuery>,
+) -> Html<String>
 where
     S: AuthStorage,
 {
-    Html(render(
+    Html(render_page(
         Screen::SignIn,
         &safe_return_to(q.return_to.as_deref()),
-        None,
+        q.error.as_deref().map(describe_social_error),
+        &state.social.enabled_providers(),
     ))
 }
 
-async fn sign_up_page<S>(Query(q): Query<PageQuery>) -> Html<String>
+async fn sign_up_page<S>(
+    State(state): State<HttpState<S>>,
+    Query(q): Query<PageQuery>,
+) -> Html<String>
 where
     S: AuthStorage,
 {
-    Html(render(
+    Html(render_page(
         Screen::SignUp,
         &safe_return_to(q.return_to.as_deref()),
-        None,
+        q.error.as_deref().map(describe_social_error),
+        &state.social.enabled_providers(),
     ))
 }
 
@@ -549,7 +749,17 @@ impl Screen {
 }
 
 fn render(screen: Screen, return_to: &str, error: Option<&str>) -> String {
-    render_with_reset(screen, return_to, error, "", "")
+    render_full(screen, return_to, error, "", "", &[])
+}
+
+/// As [`render`], with the social buttons for the configured providers.
+fn render_page(
+    screen: Screen,
+    return_to: &str,
+    error: Option<&str>,
+    providers: &[Provider],
+) -> String {
+    render_full(screen, return_to, error, "", "", providers)
 }
 
 /// As [`render`], but carrying the credentials a password reset needs.
@@ -562,6 +772,17 @@ fn render_with_reset(
     reset_email: &str,
     reset_token: &str,
 ) -> String {
+    render_full(screen, return_to, error, reset_email, reset_token, &[])
+}
+
+fn render_full(
+    screen: Screen,
+    return_to: &str,
+    error: Option<&str>,
+    reset_email: &str,
+    reset_token: &str,
+    providers: &[Provider],
+) -> String {
     let body = dioxus_ssr::render_element(rsx! {
         Page {
             screen,
@@ -569,6 +790,7 @@ fn render_with_reset(
             error: error.map(std::borrow::ToOwned::to_owned),
             reset_email: reset_email.to_owned(),
             reset_token: reset_token.to_owned(),
+            providers: providers.to_vec(),
         }
     });
     format!("<!doctype html>\n<html lang=\"en\">{body}</html>")
@@ -604,6 +826,7 @@ fn Page(
     error: Option<String>,
     reset_email: String,
     reset_token: String,
+    providers: Vec<Provider>,
 ) -> Element {
     rsx! {
         head {
@@ -675,6 +898,22 @@ fn Page(
                     }
 
                     button { r#type: "submit", "{screen.submit()}" }
+                }
+
+                // "Continue with GitHub / Google" — only on the two
+                // screens that sign someone in, and only for providers
+                // this deployment has configured.
+                if matches!(screen, Screen::SignIn | Screen::SignUp) && !providers.is_empty() {
+                    div { class: "social",
+                        p { class: "or", "or" }
+                        for provider in providers.iter().copied() {
+                            a {
+                                class: "button secondary",
+                                href: "/auth/social/{provider.id()}/start?mode=sign-in&return_to={encode_query_value(&return_to)}",
+                                "Continue with {provider.display_name()}"
+                            }
+                        }
+                    }
                 }
 
                 p { class: "alt",
@@ -787,6 +1026,50 @@ button:hover { filter: brightness(1.07); }
 }
 .alt { margin: 1.25rem 0 0; font-size: .875rem; color: var(--muted); text-align: center; }
 a { color: var(--accent); }
+.ok {
+  margin: 0 0 1rem;
+  padding: .6rem .7rem;
+  font-size: .875rem;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+}
+h2 { margin: 1.5rem 0 .5rem; font-size: 1rem; }
+.social { margin-top: 1rem; display: grid; gap: .5rem; }
+.or { margin: 0; text-align: center; color: var(--muted); font-size: .8rem; }
+a.button {
+  display: block;
+  padding: .6rem;
+  text-align: center;
+  text-decoration: none;
+  font-weight: 600;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  color: var(--fg);
+  background: var(--bg);
+}
+a.button:hover { border-color: var(--accent); }
+.providers { list-style: none; margin: 0; padding: 0; display: grid; gap: .75rem; }
+.provider {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: .9rem;
+}
+.provider a.button { display: inline-block; padding: .4rem .8rem; }
+form.inline { display: inline; margin: 0; }
+button.link {
+  width: auto;
+  padding: 0;
+  font-weight: 500;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+button.link:hover { filter: none; }
 "#;
 
 #[cfg(test)]

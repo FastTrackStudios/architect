@@ -3902,6 +3902,125 @@ pub mod email_password {
                 .expect("build auth")
         }
 
+        /// A deployment-defined scope (`forge:github`) is refused unless the
+        /// builder registers it, and once registered it is advertised in
+        /// discovery, accepted at authorize, and carried into the access
+        /// token's `scope` claim — which is what a relying party checks
+        /// before handing out a linked provider token.
+        #[tokio::test]
+        async fn extra_oidc_scopes_are_advertised_granted_and_carried_in_the_access_token() {
+            let client = OidcClientConfig {
+                client_id: "task".into(),
+                client_secret: None,
+                name: "Task".into(),
+                redirect_uris: vec!["https://task.example.com/callback".into()],
+                scopes: vec!["openid".into(), "email".into(), "forge:github".into()],
+                public_client: true,
+                skip_consent: true,
+                disabled: false,
+            };
+            let without = ArchitectAuth::builder()
+                .secret("a-secret-at-least-32-bytes-long!!")
+                .base_url("https://auth.example.com")
+                .oidc_client(client.clone())
+                .storage(MemoryStorage::default())
+                .build()
+                .expect("build auth");
+            let with = ArchitectAuth::builder()
+                .secret("a-secret-at-least-32-bytes-long!!")
+                .base_url("https://auth.example.com")
+                .oidc_client(client)
+                .oidc_extra_scope("forge:github")
+                .oidc_extra_scope("forge:github")
+                .storage(MemoryStorage::default())
+                .build()
+                .expect("build auth");
+
+            assert!(
+                !without
+                    .oidc_discovery()
+                    .scopes_supported
+                    .contains(&"forge:github".to_string())
+            );
+            let advertised = with.oidc_discovery().scopes_supported;
+            assert_eq!(
+                advertised
+                    .iter()
+                    .filter(|scope| scope.as_str() == "forge:github")
+                    .count(),
+                1,
+                "registered once, listed once: {advertised:?}"
+            );
+
+            let verifier = "correct-horse-battery-staple-verifier";
+            let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .encode(sha2::Sha256::digest(verifier.as_bytes()));
+            let authorize = |token: String| AuthorizeOidc {
+                session_token: token,
+                client_id: "task".into(),
+                redirect_uri: "https://task.example.com/callback".into(),
+                response_type: "code".into(),
+                scope: Some("openid email forge:github".into()),
+                state: None,
+                nonce: None,
+                code_challenge: Some(challenge.clone()),
+                code_challenge_method: Some("S256".into()),
+                prompt: None,
+            };
+            let sign_up = |email: &str| CreateEmailPasswordUser {
+                email: email.into(),
+                password: "correct horse battery staple".into(),
+                name: None,
+                username: None,
+                image: None,
+                metadata_json: None,
+                ip_address: None,
+                user_agent: None,
+            };
+
+            let bundle = without
+                .create_email_password_user(sign_up("a@example.com"))
+                .await
+                .expect("create user");
+            let refused = without.authorize_oidc(authorize(bundle.token)).await;
+            assert!(
+                matches!(refused, Err(AuthFlowError::InvalidInput(ref m)) if m.contains("forge:github")),
+                "unregistered scope must be refused, got {refused:?}"
+            );
+
+            let bundle = with
+                .create_email_password_user(sign_up("b@example.com"))
+                .await
+                .expect("create user");
+            let authorization = with
+                .authorize_oidc(authorize(bundle.token))
+                .await
+                .expect("authorize with the extra scope");
+            assert!(authorization.scope.split(' ').any(|s| s == "forge:github"));
+            let tokens = with
+                .exchange_oidc_token(ExchangeOidcToken {
+                    grant_type: "authorization_code".into(),
+                    code: Some(authorization.code),
+                    redirect_uri: Some("https://task.example.com/callback".into()),
+                    client_id: "task".into(),
+                    client_secret: None,
+                    code_verifier: Some(verifier.into()),
+                    refresh_token: None,
+                })
+                .await
+                .expect("exchange");
+            let claims = with
+                .verify_jwt(VerifyJwt {
+                    token: tokens.access_token,
+                    audience: None,
+                })
+                .await
+                .expect("verify access token")
+                .claims;
+            let scope = claims.extra.as_ref().and_then(|e| e.get("scope")).cloned();
+            assert_eq!(scope, Some(serde_json::json!("openid email forge:github")));
+        }
+
         fn auth_with_oauth_proxy() -> ArchitectAuth<MemoryStorage> {
             ArchitectAuth::builder()
                 .secret("a-secret-at-least-32-bytes-long!!")
@@ -10572,6 +10691,7 @@ pub mod oidc_provider {
                 scopes_supported: SUPPORTED_SCOPES
                     .iter()
                     .map(|scope| (*scope).into())
+                    .chain(self.config.oidc.extra_scopes.iter().cloned())
                     .collect(),
                 response_types_supported: vec!["code".into()],
                 grant_types_supported: vec!["authorization_code".into(), "refresh_token".into()],
@@ -10626,7 +10746,7 @@ pub mod oidc_provider {
                 },
                 client_name: input.client_name.unwrap_or_else(|| "OIDC client".into()),
                 redirect_uris: input.redirect_uris,
-                scope: normalize_scope(input.scope.as_deref())?,
+                scope: normalize_scope(input.scope.as_deref(), &self.config.oidc.extra_scopes)?,
                 token_endpoint_auth_method: input
                     .token_endpoint_auth_method
                     .unwrap_or_else(|| "client_secret_post".into()),
@@ -10662,7 +10782,7 @@ pub mod oidc_provider {
                     "redirect_uri is not registered".into(),
                 ));
             }
-            let scope = normalize_scope(input.scope.as_deref())?;
+            let scope = normalize_scope(input.scope.as_deref(), &self.config.oidc.extra_scopes)?;
             ensure_client_scopes(client, &scope)?;
             // PKCE is mandatory for PUBLIC clients and optional for
             // confidential ones. A public client ships its whole
@@ -10909,11 +11029,11 @@ pub mod oidc_provider {
         }
     }
 
-    fn normalize_scope(scope: Option<&str>) -> Result<String, AuthFlowError> {
+    fn normalize_scope(scope: Option<&str>, extra: &[String]) -> Result<String, AuthFlowError> {
         let scopes = scope.unwrap_or("openid");
         let mut normalized = Vec::new();
         for scope in scopes.split_whitespace() {
-            if !SUPPORTED_SCOPES.contains(&scope) {
+            if !SUPPORTED_SCOPES.contains(&scope) && !extra.iter().any(|e| e == scope) {
                 return Err(AuthFlowError::InvalidInput(format!(
                     "unsupported scope: {scope}"
                 )));
