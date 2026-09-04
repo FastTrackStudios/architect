@@ -83,6 +83,36 @@ fn safe_return_to(raw: Option<&str>) -> String {
     }
 }
 
+/// Percent-encode a value that is going INSIDE a query-string parameter.
+///
+/// `return_to` is itself a URL carrying its own query —
+/// `/oauth2/authorize?client_id=forum&redirect_uri=…&state=…` — so
+/// interpolating it raw into `?return_to={}` let the browser read its `&`
+/// as separators for the OUTER URL. `return_to` truncated at the first
+/// one, the rest arrived as siblings of `/sign-up`, and the redirect after
+/// a successful sign-up landed on `/oauth2/authorize?client_id=forum` with
+/// no `redirect_uri` at all:
+///
+///     Failed to deserialize query string: missing field `redirect_uri`
+///
+/// — with the account already created, so the person was left stranded
+/// with a working account and no way back to what they were signing in to.
+///
+/// `/` is left alone: it is legal in a query value and keeps the link
+/// readable.
+fn encode_query_value(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
+                out.push(byte as char);
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
 #[derive(Debug, Default, serde::Deserialize)]
 pub struct PageQuery {
     #[serde(default)]
@@ -95,14 +125,22 @@ async fn login_page<S>(Query(q): Query<PageQuery>) -> Html<String>
 where
     S: AuthStorage,
 {
-    Html(render(Screen::SignIn, &safe_return_to(q.return_to.as_deref()), None))
+    Html(render(
+        Screen::SignIn,
+        &safe_return_to(q.return_to.as_deref()),
+        None,
+    ))
 }
 
 async fn sign_up_page<S>(Query(q): Query<PageQuery>) -> Html<String>
 where
     S: AuthStorage,
 {
-    Html(render(Screen::SignUp, &safe_return_to(q.return_to.as_deref()), None))
+    Html(render(
+        Screen::SignUp,
+        &safe_return_to(q.return_to.as_deref()),
+        None,
+    ))
 }
 
 // ── POST ─────────────────────────────────────────────────────────────
@@ -149,7 +187,11 @@ where
         // Deliberately not distinguishing "no such account" from "wrong
         // password": the difference is an account-enumeration oracle,
         // and a person who mistyped either one does the same thing next.
-        Err(_) => rejected(Screen::SignIn, &return_to, "Email or password is incorrect."),
+        Err(_) => rejected(
+            Screen::SignIn,
+            &return_to,
+            "Email or password is incorrect.",
+        ),
     }
 }
 
@@ -336,15 +378,21 @@ fn Page(screen: Screen, return_to: String, error: Option<String>) -> Element {
                 }
 
                 p { class: "alt",
-                    match screen {
-                        Screen::SignIn => rsx! {
-                            "No account yet? "
-                            a { href: "/sign-up?return_to={return_to}", "Create one" }
-                        },
-                        Screen::SignUp => rsx! {
-                            "Already have an account? "
-                            a { href: "/login?return_to={return_to}", "Sign in" }
-                        },
+                    // Encoded, not raw: see `encode_query_value`. The
+                    // hidden form field below needs no such treatment —
+                    // a POST body carries the value as one field.
+                    {
+                        let return_to = encode_query_value(&return_to);
+                        match screen {
+                            Screen::SignIn => rsx! {
+                                "No account yet? "
+                                a { href: "/sign-up?return_to={return_to}", "Create one" }
+                            },
+                            Screen::SignUp => rsx! {
+                                "Already have an account? "
+                                a { href: "/login?return_to={return_to}", "Sign in" }
+                            },
+                        }
                     }
                 }
             }
@@ -445,7 +493,10 @@ mod tests {
     /// site from a link that started at the real login screen.
     #[test]
     fn only_same_origin_paths_survive() {
-        assert_eq!(safe_return_to(Some("/oauth2/authorize?x=1")), "/oauth2/authorize?x=1");
+        assert_eq!(
+            safe_return_to(Some("/oauth2/authorize?x=1")),
+            "/oauth2/authorize?x=1"
+        );
 
         for hostile in [
             "//evil.example",
@@ -461,6 +512,55 @@ mod tests {
                 "{hostile} should not survive"
             );
         }
+    }
+
+    /// The bug this pins: a real sign-up at the forum's issuer created the
+    /// account, then dumped the person on
+    /// `/oauth2/authorize?client_id=forum` — everything from the first `&`
+    /// onwards had been eaten, so the authorize endpoint refused it with
+    /// "missing field `redirect_uri`". `return_to` carries a URL with its
+    /// own query, and it was being interpolated raw into another one.
+    #[test]
+    fn a_return_to_carrying_its_own_query_survives_the_round_trip() {
+        let return_to = "/oauth2/authorize?client_id=forum                         &redirect_uri=https%3A%2F%2Fforum.example%2Fcb                         &response_type=code&scope=openid+email&state=abc";
+
+        let html = render(Screen::SignIn, return_to, None);
+        let href = html
+            .split("href=\"")
+            .find(|part| part.starts_with("/sign-up"))
+            .expect("a sign-up link")
+            .split('"')
+            .next()
+            .unwrap();
+
+        // Exactly one parameter on the OUTER url. A bare `&` here is the
+        // whole bug: the browser would read it as a separator.
+        let query = href.strip_prefix("/sign-up?").expect("a query");
+        assert!(
+            !query.contains('&') && !query.contains("&#38;"),
+            "return_to leaked separators into the outer query: {href}"
+        );
+
+        // And it still means the same thing once decoded.
+        let value = query.strip_prefix("return_to=").expect("return_to");
+        assert_eq!(decode(value), return_to);
+    }
+
+    fn decode(value: &str) -> String {
+        let bytes = value.as_bytes();
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'%' && i + 2 < bytes.len() {
+                let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap();
+                out.push(u8::from_str_radix(hex, 16).unwrap());
+                i += 3;
+            } else {
+                out.push(bytes[i]);
+                i += 1;
+            }
+        }
+        String::from_utf8(out).unwrap()
     }
 
     #[test]

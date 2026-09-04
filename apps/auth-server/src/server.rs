@@ -134,10 +134,7 @@ where
         // database that has gone away surfaces as a 5xx on real traffic.
         .route("/healthz", get(|| async { "ok" }))
         .route("/readyz", get(|| async { "ok" }))
-        .merge(http::router(HttpState::new(
-            auth.clone(),
-            cookie.clone(),
-        )))
+        .merge(http::router(HttpState::new(auth.clone(), cookie.clone())))
         // The sign-in and sign-up pages. Merged separately from the API
         // so an embedder that already has its own login screen can take
         // `http::router` alone — see `ui::router`.

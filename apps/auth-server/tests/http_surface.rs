@@ -393,8 +393,8 @@ async fn authorize_with_a_bearer_token_still_gets_401() {
                  &response_type=code&scope=openid&state=xyz",
             )
             .header(header::AUTHORIZATION, "Bearer not-a-real-token")
-                .body(Body::empty())
-                .unwrap(),
+            .body(Body::empty())
+            .unwrap(),
         )
         .await
         .expect("request");
