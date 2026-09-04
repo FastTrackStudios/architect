@@ -25,7 +25,10 @@
 //! methods, and answer with a redirect — so the two surfaces cannot
 //! drift, because there is only one implementation underneath.
 
-use architect_auth::{AuthStorage, CreateEmailPasswordUser, transport::AuthCookieConfig};
+use architect_auth::{
+    AuthStorage, CompletePasswordReset, CreateEmailPasswordUser, RequestEmailVerification,
+    RequestPasswordReset, VerifyEmail, transport::AuthCookieConfig,
+};
 use auth_proto::{AuthSessionBundle, SignInEmailPassword};
 use axum::{
     Router,
@@ -55,7 +58,210 @@ where
     Router::new()
         .route("/login", get(login_page::<S>).post(login_submit::<S>))
         .route("/sign-up", get(sign_up_page::<S>).post(sign_up_submit::<S>))
+        // Password reset. These did not exist at all before there was a
+        // mailer: the engine could mint a reset token and the server had
+        // nowhere to send it, so a forgotten password meant an operator
+        // editing the database by hand.
+        .route(
+            "/forgot-password",
+            get(forgot_password_page::<S>).post(forgot_password_submit::<S>),
+        )
+        .route(
+            "/reset-password",
+            get(reset_password_page::<S>).post(reset_password_submit::<S>),
+        )
+        .route("/verify-email", get(verify_email_page::<S>))
         .with_state(state)
+}
+
+// ── Password reset ───────────────────────────────────────────────────
+
+#[derive(Debug, serde::Deserialize)]
+pub struct ForgotForm {
+    pub email: String,
+    #[serde(default)]
+    pub return_to: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct ResetForm {
+    pub email: String,
+    pub token: String,
+    pub password: String,
+    #[serde(default)]
+    pub return_to: Option<String>,
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct ResetQuery {
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(default)]
+    pub token: Option<String>,
+    #[serde(default)]
+    pub return_to: Option<String>,
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct VerifyQuery {
+    #[serde(default)]
+    pub user_id: Option<String>,
+    #[serde(default)]
+    pub token: Option<String>,
+}
+
+async fn forgot_password_page<S>(Query(q): Query<PageQuery>) -> Html<String>
+where
+    S: AuthStorage,
+{
+    Html(render(
+        Screen::ForgotPassword,
+        &safe_return_to(q.return_to.as_deref()),
+        None,
+    ))
+}
+
+async fn forgot_password_submit<S>(
+    State(state): State<HttpState<S>>,
+    Form(form): Form<ForgotForm>,
+) -> Response
+where
+    S: AuthStorage,
+{
+    let return_to = safe_return_to(form.return_to.as_deref());
+
+    if let Ok(token) = state
+        .auth
+        .request_password_reset(RequestPasswordReset {
+            email: form.email.clone(),
+        })
+        .await
+    {
+        state
+            .mail
+            .send_password_reset(&form.email, &token.token)
+            .await;
+    }
+
+    // The SAME answer whether or not the address is known. Anything else
+    // is an account-enumeration oracle: "no such account" tells a stranger
+    // exactly which of your users exist.
+    notice(
+        "Check your email",
+        "If that address has an account, a reset link is on its way.          The link is valid for a short time.",
+        &return_to,
+    )
+}
+
+async fn reset_password_page<S>(Query(q): Query<ResetQuery>) -> Html<String>
+where
+    S: AuthStorage,
+{
+    Html(render_with_reset(
+        Screen::ResetPassword,
+        &safe_return_to(q.return_to.as_deref()),
+        None,
+        q.email.as_deref().unwrap_or(""),
+        q.token.as_deref().unwrap_or(""),
+    ))
+}
+
+async fn reset_password_submit<S>(
+    State(state): State<HttpState<S>>,
+    Form(form): Form<ResetForm>,
+) -> Response
+where
+    S: AuthStorage,
+{
+    let return_to = safe_return_to(form.return_to.as_deref());
+
+    if form.password.chars().count() < 8 {
+        return Html(render_with_reset(
+            Screen::ResetPassword,
+            &return_to,
+            Some("Password must be at least 8 characters."),
+            &form.email,
+            &form.token,
+        ))
+        .into_response();
+    }
+
+    match state
+        .auth
+        .complete_password_reset(CompletePasswordReset {
+            email: form.email.clone(),
+            token: form.token.clone(),
+            new_password: form.password,
+        })
+        .await
+    {
+        Ok(_) => notice(
+            "Password changed",
+            "You can sign in with your new password.",
+            &return_to,
+        ),
+        // A used or expired link is the common case, not an attack, so it
+        // says so plainly instead of failing blank.
+        Err(_) => Html(render_with_reset(
+            Screen::ResetPassword,
+            &return_to,
+            Some("That reset link is no longer valid. Ask for a new one."),
+            &form.email,
+            &form.token,
+        ))
+        .into_response(),
+    }
+}
+
+async fn verify_email_page<S>(
+    State(state): State<HttpState<S>>,
+    Query(q): Query<VerifyQuery>,
+) -> Response
+where
+    S: AuthStorage,
+{
+    let parsed = q
+        .user_id
+        .as_deref()
+        .and_then(|id| uuid::Uuid::parse_str(id).ok());
+
+    let ok = match (parsed, q.token.as_deref()) {
+        (Some(user_id), Some(token)) => state
+            .auth
+            .verify_email(VerifyEmail {
+                user_id,
+                token: token.to_owned(),
+            })
+            .await
+            .is_ok(),
+        _ => false,
+    };
+
+    if ok {
+        notice(
+            "Email confirmed",
+            "Your account is ready. You can sign in.",
+            "/",
+        )
+    } else {
+        notice(
+            "That link did not work",
+            "It may have already been used, or expired. Sign in and ask for another.",
+            "/",
+        )
+    }
+}
+
+/// A plain outcome page in the same shell as the forms.
+fn notice(title: &str, message: &str, return_to: &str) -> Response {
+    let body = dioxus_ssr::render_element(rsx! {
+        Notice {
+            title: title.to_owned(),
+            message: message.to_owned(),
+            return_to: return_to.to_owned(),
+        }
+    });
+    Html(format!("<!doctype html>\n<html lang=\"en\">{body}</html>")).into_response()
 }
 
 // ── Redirect safety ──────────────────────────────────────────────────
@@ -228,7 +434,26 @@ where
         .await;
 
     match result {
-        Ok(bundle) => signed_in(&state.cookie, &bundle, &return_to),
+        Ok(bundle) => {
+            // Best effort, and deliberately after the account exists. A
+            // provider having a bad minute must not turn a successful
+            // sign-up into a failed one — the account is real either way,
+            // and another link can always be asked for.
+            if let Ok(token) = state
+                .auth
+                .request_email_verification(RequestEmailVerification {
+                    user_id: bundle.user.id,
+                })
+                .await
+                && let Some(email) = bundle.user.email.clone()
+            {
+                state
+                    .mail
+                    .send_email_verification(&email, bundle.user.id, &token.token)
+                    .await;
+            }
+            signed_in(&state.cookie, &bundle, &return_to)
+        }
         Err(e) => rejected(Screen::SignUp, &return_to, &describe_sign_up_error(&e)),
     }
 }
@@ -277,6 +502,11 @@ fn rejected(screen: Screen, return_to: &str, message: &str) -> Response {
 pub enum Screen {
     SignIn,
     SignUp,
+    /// "Send me a reset link" — email only.
+    ForgotPassword,
+    /// "Choose a new password" — password only, with the token carried
+    /// in hidden fields.
+    ResetPassword,
 }
 
 impl Screen {
@@ -284,6 +514,8 @@ impl Screen {
         match self {
             Screen::SignIn => "Sign in",
             Screen::SignUp => "Create your account",
+            Screen::ForgotPassword => "Reset your password",
+            Screen::ResetPassword => "Choose a new password",
         }
     }
 
@@ -291,6 +523,8 @@ impl Screen {
         match self {
             Screen::SignIn => "/login",
             Screen::SignUp => "/sign-up",
+            Screen::ForgotPassword => "/forgot-password",
+            Screen::ResetPassword => "/reset-password",
         }
     }
 
@@ -298,23 +532,79 @@ impl Screen {
         match self {
             Screen::SignIn => "Sign in",
             Screen::SignUp => "Create account",
+            Screen::ForgotPassword => "Send reset link",
+            Screen::ResetPassword => "Set password",
         }
+    }
+
+    /// Whether this screen asks for an email address.
+    fn wants_email(self) -> bool {
+        !matches!(self, Screen::ResetPassword)
+    }
+
+    /// Whether this screen asks for a password.
+    fn wants_password(self) -> bool {
+        !matches!(self, Screen::ForgotPassword)
     }
 }
 
 fn render(screen: Screen, return_to: &str, error: Option<&str>) -> String {
+    render_with_reset(screen, return_to, error, "", "")
+}
+
+/// As [`render`], but carrying the credentials a password reset needs.
+/// Kept separate so the four existing call sites do not grow two empty
+/// arguments they have no use for.
+fn render_with_reset(
+    screen: Screen,
+    return_to: &str,
+    error: Option<&str>,
+    reset_email: &str,
+    reset_token: &str,
+) -> String {
     let body = dioxus_ssr::render_element(rsx! {
         Page {
             screen,
             return_to: return_to.to_owned(),
             error: error.map(std::borrow::ToOwned::to_owned),
+            reset_email: reset_email.to_owned(),
+            reset_token: reset_token.to_owned(),
         }
     });
     format!("<!doctype html>\n<html lang=\"en\">{body}</html>")
 }
 
+/// The outcome pages — confirmed, link expired, check your email. Same
+/// shell as the forms so the flow does not visibly change hands.
 #[component]
-fn Page(screen: Screen, return_to: String, error: Option<String>) -> Element {
+fn Notice(title: String, message: String, return_to: String) -> Element {
+    rsx! {
+        head {
+            meta { charset: "utf-8" }
+            meta { name: "viewport", content: "width=device-width, initial-scale=1" }
+            title { "{title}" }
+            style { {STYLE} }
+        }
+        body {
+            main { class: "card",
+                h1 { "{title}" }
+                p { class: "sub", "{message}" }
+                p { class: "alt",
+                    a { href: "/login?return_to={return_to}", "Go to sign in" }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn Page(
+    screen: Screen,
+    return_to: String,
+    error: Option<String>,
+    reset_email: String,
+    reset_token: String,
+) -> Element {
     rsx! {
         head {
             meta { charset: "utf-8" }
@@ -347,16 +637,28 @@ fn Page(screen: Screen, return_to: String, error: Option<String>) -> Element {
                         }
                     }
 
-                    label { r#for: "email", "Email" }
-                    input {
-                        id: "email",
-                        name: "email",
-                        r#type: "email",
-                        autocomplete: "email",
-                        required: true,
-                        autofocus: true,
+                    if screen.wants_email() {
+                        label { r#for: "email", "Email" }
+                        input {
+                            id: "email",
+                            name: "email",
+                            r#type: "email",
+                            autocomplete: "email",
+                            required: true,
+                            autofocus: true,
+                        }
                     }
 
+                    // The reset token rides in the form rather than
+                    // staying in the URL, so choosing a new password is a
+                    // POST and the token never lands in a Referer header
+                    // on the way out.
+                    if screen == Screen::ResetPassword {
+                        input { r#type: "hidden", name: "email", value: "{reset_email}" }
+                        input { r#type: "hidden", name: "token", value: "{reset_token}" }
+                    }
+
+                    if screen.wants_password() {
                     label { r#for: "password", "Password" }
                     input {
                         id: "password",
@@ -368,7 +670,8 @@ fn Page(screen: Screen, return_to: String, error: Option<String>) -> Element {
                         // sometimes refuse to fill.
                         autocomplete: if screen == Screen::SignUp { "new-password" } else { "current-password" },
                         required: true,
-                        minlength: if screen == Screen::SignUp { "8" } else { "1" },
+                        minlength: if matches!(screen, Screen::SignUp | Screen::ResetPassword) { "8" } else { "1" },
+                    }
                     }
 
                     button { r#type: "submit", "{screen.submit()}" }
@@ -384,10 +687,15 @@ fn Page(screen: Screen, return_to: String, error: Option<String>) -> Element {
                             Screen::SignIn => rsx! {
                                 "No account yet? "
                                 a { href: "/sign-up?return_to={return_to}", "Create one" }
+                                " · "
+                                a { href: "/forgot-password?return_to={return_to}", "Forgot password?" }
                             },
                             Screen::SignUp => rsx! {
                                 "Already have an account? "
                                 a { href: "/login?return_to={return_to}", "Sign in" }
+                            },
+                            _ => rsx! {
+                                a { href: "/login?return_to={return_to}", "Back to sign in" }
                             },
                         }
                     }

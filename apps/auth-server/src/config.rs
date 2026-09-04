@@ -12,6 +12,8 @@ use std::fs;
 
 use architect_auth::OidcClientConfig;
 
+use crate::mail::MailConfig;
+
 /// Anything the operator can set. Every field has an env var; only the
 /// database URL and the signing secret are mandatory.
 #[derive(Clone, Debug)]
@@ -54,6 +56,10 @@ pub struct ServerConfig {
     /// Run migrations on boot. On in normal operation; an operator can
     /// turn it off to gate schema changes behind a separate job.
     pub run_migrations: bool,
+    /// Outgoing mail. Without `AUTH_SMTP_HOST` the mailer only logs, and
+    /// every flow that has to reach a person — verification, password
+    /// reset — completes as far as minting a token and no further.
+    pub mail: MailConfig,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -171,7 +177,7 @@ impl ServerConfig {
             bind_addr: env::var("AUTH_BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".into()),
             database_url,
             secret,
-            base_url,
+            base_url: base_url.clone(),
             oidc_issuer: optional("AUTH_OIDC_ISSUER"),
             session_ttl_seconds: parse_or("AUTH_SESSION_TTL_SECONDS", 60 * 60 * 24 * 30)?,
             require_email_verification: flag("AUTH_REQUIRE_EMAIL_VERIFICATION", false)?,
@@ -180,6 +186,16 @@ impl ServerConfig {
             oidc_clients,
             oidc_allow_dynamic_client_registration: flag("AUTH_OIDC_DYNAMIC_REGISTRATION", false)?,
             run_migrations: flag("AUTH_RUN_MIGRATIONS", true)?,
+            mail: MailConfig {
+                host: optional("AUTH_SMTP_HOST"),
+                port: parse_or("AUTH_SMTP_PORT", 587)? as u16,
+                username: optional("AUTH_SMTP_USERNAME"),
+                // Same `_FILE` indirection as AUTH_SECRET: a mounted file
+                // does not appear in `kubectl describe pod`.
+                password: optional_secret("AUTH_SMTP_PASSWORD")?,
+                from: optional("AUTH_MAIL_FROM").unwrap_or_else(|| "noreply@localhost".to_owned()),
+                base_url: base_url.clone(),
+            },
         })
     }
 

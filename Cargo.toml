@@ -63,6 +63,9 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/FastTrackStudios/architect"
 
 [workspace.dependencies]
+# SMTP for the auth server's verification and password-reset mail.
+# rustls, not native-tls, so the build carries no OpenSSL dependency.
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-rustls-tls", "builder", "hostname"] }
 # ── Internal — every crate in this repo, path declared ONCE ───────────
 architect = { path = "crates/architect" }
 architect-atom = { path = "features/atom" }

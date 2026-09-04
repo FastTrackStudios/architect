@@ -48,11 +48,34 @@ use serde_json::{Value, json};
 pub struct HttpState<S> {
     pub auth: ArchitectAuth<S>,
     pub cookie: AuthCookieConfig,
+    /// Outgoing mail. Defaults to a log-only mailer so every existing
+    /// caller — and every test — keeps working without one; a deployment
+    /// supplies the real thing with [`HttpState::with_mailer`].
+    pub mail: std::sync::Arc<crate::mail::Mailer>,
 }
 
 impl<S> HttpState<S> {
     pub fn new(auth: ArchitectAuth<S>, cookie: AuthCookieConfig) -> Self {
-        Self { auth, cookie }
+        let mail = crate::mail::Mailer::new(crate::mail::MailConfig {
+            host: None,
+            port: 587,
+            username: None,
+            password: None,
+            from: "noreply@localhost".into(),
+            base_url: "http://localhost:8080".into(),
+        })
+        .expect("a mailer with no host cannot fail to build");
+        Self {
+            auth,
+            cookie,
+            mail: std::sync::Arc::new(mail),
+        }
+    }
+
+    /// Attach a configured mailer.
+    pub fn with_mailer(mut self, mail: std::sync::Arc<crate::mail::Mailer>) -> Self {
+        self.mail = mail;
+        self
     }
 }
 

@@ -106,6 +106,32 @@ where
     S: architect_auth::AuthStorage + Clone + Send + Sync + 'static,
 {
     let cookie = cookie_config(config);
+
+    // One mailer, shared by both routers. A failure to BUILD it (a bad
+    // host, say) is a configuration error worth surfacing, but not worth
+    // refusing to boot over: falling back to log mode keeps sign-in
+    // working while mail is broken, which is the right way round.
+    let mail = std::sync::Arc::new(match crate::mail::Mailer::new(config.mail.clone()) {
+        Ok(mailer) => {
+            if mailer.is_live() {
+                tracing::info!(target: "auth_server::mail", from = %config.mail.from, "mail is live");
+            } else {
+                tracing::warn!(
+                    target: "auth_server::mail",
+                    "AUTH_SMTP_HOST is unset — verification and password-reset mail will be LOGGED, not sent"
+                );
+            }
+            mailer
+        }
+        Err(err) => {
+            tracing::error!(target: "auth_server::mail", %err, "mailer failed to build; falling back to log mode");
+            crate::mail::Mailer::new(crate::mail::MailConfig {
+                host: None,
+                ..config.mail.clone()
+            })
+            .expect("a mailer with no host cannot fail to build")
+        }
+    });
     // Mounted through the dispatcher rather than the plain
     // `auth_service_layer`, so `AuthServerMiddleware` parses the
     // `authorization` metadata entry off each call before the service
@@ -134,11 +160,13 @@ where
         // database that has gone away surfaces as a 5xx on real traffic.
         .route("/healthz", get(|| async { "ok" }))
         .route("/readyz", get(|| async { "ok" }))
-        .merge(http::router(HttpState::new(auth.clone(), cookie.clone())))
+        .merge(http::router(
+            HttpState::new(auth.clone(), cookie.clone()).with_mailer(mail.clone()),
+        ))
         // The sign-in and sign-up pages. Merged separately from the API
         // so an embedder that already has its own login screen can take
         // `http::router` alone — see `ui::router`.
-        .merge(ui::router(HttpState::new(auth, cookie)))
+        .merge(ui::router(HttpState::new(auth, cookie).with_mailer(mail)))
         .layer(cors_layer(config))
         .layer(TraceLayer::new_for_http())
 }

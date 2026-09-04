@@ -29,6 +29,7 @@ chrono.workspace = true
 dioxus.workspace = true
 dioxus-ssr.workspace = true
 eyre.workspace = true
+lettre.workspace = true
 sea-orm.workspace = true
 sea-orm-migration.workspace = true
 serde.workspace = true

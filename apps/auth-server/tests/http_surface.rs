@@ -27,6 +27,17 @@ fn test_config() -> ServerConfig {
         oidc_clients: Vec::new(),
         oidc_allow_dynamic_client_registration: false,
         run_migrations: true,
+        // Log mode: these tests assert on the HTTP surface, not on
+        // delivery, and a test that tried to reach an SMTP host would
+        // be testing the network.
+        mail: auth_server::mail::MailConfig {
+            host: None,
+            port: 587,
+            username: None,
+            password: None,
+            from: "noreply@example.com".into(),
+            base_url: "http://localhost:8080".into(),
+        },
     }
 }
 
@@ -425,4 +436,84 @@ async fn the_sign_in_and_sign_up_pages_are_served() {
             "{path} should serve HTML, got {content_type}"
         );
     }
+}
+
+/// The reset and verification pages exist at all. Before there was a
+/// mailer these routes did not exist: the engine could mint a reset token
+/// and the server had nowhere to send it, so a forgotten password meant an
+/// operator editing the database by hand.
+#[tokio::test]
+async fn the_password_reset_and_verification_pages_are_served() {
+    for path in ["/forgot-password", "/reset-password", "/verify-email"] {
+        let response = app()
+            .await
+            .oneshot(Request::get(path).body(Body::empty()).unwrap())
+            .await
+            .expect("request");
+
+        assert_eq!(response.status(), StatusCode::OK, "{path}");
+    }
+}
+
+/// Asking for a reset must answer identically whether or not the address
+/// is known. Anything else is an account-enumeration oracle: a stranger
+/// learns exactly which of your users exist by trying addresses.
+#[tokio::test]
+async fn a_reset_request_does_not_reveal_whether_the_account_exists() {
+    let mut bodies = Vec::new();
+
+    for email in [
+        "definitely-not-registered@example.com",
+        "also-not-there@example.com",
+    ] {
+        let response = app()
+            .await
+            .oneshot(
+                Request::post("/forgot-password")
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from(format!("email={email}")))
+                    .unwrap(),
+            )
+            .await
+            .expect("request");
+
+        assert_eq!(response.status(), StatusCode::OK, "{email}");
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        bodies.push(String::from_utf8_lossy(&body).into_owned());
+    }
+
+    assert_eq!(
+        bodies[0], bodies[1],
+        "the answer differed between addresses"
+    );
+    assert!(
+        !bodies[0].to_lowercase().contains("no such")
+            && !bodies[0].to_lowercase().contains("not found"),
+        "the page hints at whether the account exists: {}",
+        bodies[0]
+    );
+}
+
+/// A verification link with a nonsense token must not verify anything, and
+/// must not 500 either — a malformed uuid is a bored stranger, not a bug.
+#[tokio::test]
+async fn a_bad_verification_link_is_refused_politely() {
+    let response = app()
+        .await
+        .oneshot(
+            Request::get("/verify-email?user_id=not-a-uuid&token=nonsense")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .expect("request");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body");
+    let body = String::from_utf8_lossy(&body);
+    assert!(body.contains("did not work"), "unexpected page: {body}");
 }

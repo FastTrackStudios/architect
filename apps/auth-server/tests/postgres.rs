@@ -67,6 +67,17 @@ fn test_config(database_url: String) -> ServerConfig {
         oidc_clients: Vec::new(),
         oidc_allow_dynamic_client_registration: false,
         run_migrations: true,
+        // Log mode: these tests assert on the HTTP surface, not on
+        // delivery, and a test that tried to reach an SMTP host would
+        // be testing the network.
+        mail: auth_server::mail::MailConfig {
+            host: None,
+            port: 587,
+            username: None,
+            password: None,
+            from: "noreply@example.com".into(),
+            base_url: "http://localhost:8080".into(),
+        },
     }
 }
 
