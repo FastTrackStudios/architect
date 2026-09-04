@@ -26,20 +26,22 @@
 //! drift, because there is only one implementation underneath.
 
 use architect_auth::{
-    AuthStorage, CompletePasswordReset, CreateEmailPasswordUser, RequestEmailVerification,
-    RequestPasswordReset, VerifyEmail, transport::AuthCookieConfig,
+    AuthStorage, CompletePasswordReset, CreateEmailPasswordUser, CurrentSession,
+    RequestEmailVerification, RequestPasswordReset, VerifyEmail,
+    transport::{AuthCookieConfig, axum::session_token_from_headers},
 };
 use auth_proto::{AuthSessionBundle, SignInEmailPassword};
 use axum::{
     Router,
     extract::{Form, Query, State},
     http::{HeaderMap, StatusCode, header},
-    response::{Html, IntoResponse, Response},
+    response::{Html, IntoResponse, Redirect, Response},
     routing::get,
 };
 use dioxus::prelude::*;
 
-use crate::http::{HttpState, client_ip, user_agent};
+use crate::http::{HttpState, LinkedAccountView, UnlinkError, client_ip, user_agent};
+use crate::social::Provider;
 
 /// Where to send a browser that has just signed in, when the request
 /// carried no `return_to` of its own.
@@ -64,14 +66,222 @@ where
         // editing the database by hand.
         .route(
             "/forgot-password",
-            get(forgot_password_page::<S>).post(forgot_password_submit::<S>),
+            get(forgot_password_page).post(forgot_password_submit::<S>),
         )
         .route(
             "/reset-password",
-            get(reset_password_page::<S>).post(reset_password_submit::<S>),
+            get(reset_password_page).post(reset_password_submit::<S>),
         )
         .route("/verify-email", get(verify_email_page::<S>))
+        // The signed-in person's own page: which providers are linked,
+        // and the buttons to link or unlink them.
+        .route("/account", get(account_page::<S>))
+        .route("/account/unlink", axum::routing::post(account_unlink::<S>))
         .with_state(state)
+}
+
+// ── Account page ─────────────────────────────────────────────────────
+
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct AccountQuery {
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub linked: Option<String>,
+    #[serde(default)]
+    pub unlinked: Option<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct UnlinkForm {
+    pub provider: String,
+}
+
+/// `GET /account` — sends a browser with no session to sign in first,
+/// with this page as the place to come back to.
+async fn account_page<S>(
+    State(state): State<HttpState<S>>,
+    headers: HeaderMap,
+    Query(q): Query<AccountQuery>,
+) -> Response
+where
+    S: AuthStorage,
+{
+    let Some(token) = session_token_from_headers(&headers, &state.cookie) else {
+        return Redirect::to("/login?return_to=%2Faccount").into_response();
+    };
+    let bundle = match state.auth.current_session(CurrentSession { token }).await {
+        Ok(bundle) => bundle,
+        Err(_) => return Redirect::to("/login?return_to=%2Faccount").into_response(),
+    };
+    let accounts = crate::http::linked_accounts(&state, bundle.user.id)
+        .await
+        .unwrap_or_default();
+    let flash = account_flash(&q);
+    let body = dioxus_ssr::render_element(rsx! {
+        AccountPage {
+            email: bundle.user.email.clone().unwrap_or_default(),
+            providers: state.social.enabled_providers(),
+            accounts,
+            flash,
+        }
+    });
+    Html(format!("<!doctype html>\n<html lang=\"en\">{body}</html>")).into_response()
+}
+
+/// `POST /account/unlink` — the form twin of
+/// `POST /auth/accounts/{provider}/unlink`, answering with a redirect
+/// back to the page instead of JSON.
+async fn account_unlink<S>(
+    State(state): State<HttpState<S>>,
+    headers: HeaderMap,
+    Form(form): Form<UnlinkForm>,
+) -> Response
+where
+    S: AuthStorage,
+{
+    let Some(token) = session_token_from_headers(&headers, &state.cookie) else {
+        return Redirect::to("/login?return_to=%2Faccount").into_response();
+    };
+    let Some(provider) = Provider::parse(&form.provider) else {
+        return Redirect::to("/account?error=unknown_provider").into_response();
+    };
+    let location = match crate::http::unlink(&state, token, provider).await {
+        Ok(()) => format!("/account?unlinked={}", provider.id()),
+        Err(UnlinkError::NotLinked) => "/account?error=not_linked".to_owned(),
+        Err(UnlinkError::LastCredential) => "/account?error=last_credential".to_owned(),
+        Err(UnlinkError::Auth(_)) => "/account?error=unlink".to_owned(),
+    };
+    (StatusCode::SEE_OTHER, [(header::LOCATION, location)]).into_response()
+}
+
+/// A message for the page, from the `?error=`, `?linked=` and
+/// `?unlinked=` codes the callback and unlink routes redirect with.
+fn account_flash(q: &AccountQuery) -> Option<Flash> {
+    if let Some(provider) = q.linked.as_deref().and_then(Provider::parse) {
+        return Some(Flash::Ok(format!("{} linked.", provider.display_name())));
+    }
+    if let Some(provider) = q.unlinked.as_deref().and_then(Provider::parse) {
+        return Some(Flash::Ok(format!("{} unlinked.", provider.display_name())));
+    }
+    let error = q.error.as_deref()?;
+    Some(Flash::Error(describe_social_error(error).to_owned()))
+}
+
+/// The `?error=` codes in words. Shared with the login page, which gets
+/// the sign-in ones.
+fn describe_social_error(code: &str) -> &'static str {
+    match code {
+        "denied" => "The provider did not grant access.",
+        "state" => "That sign-in link expired or was already used. Try again.",
+        "exchange" | "profile" => "The provider could not be reached. Try again in a moment.",
+        "email_in_use" => {
+            "An account with that email already exists. Sign in with your password, then link the provider from your account page."
+        }
+        "no_email" => {
+            "The provider did not share an email address, which is needed to create an account."
+        }
+        "already_linked" => "That account is already linked to a different user.",
+        "session" => "Your session ended before the link finished. Sign in and try again.",
+        "last_credential" => {
+            "That is your only way to sign in. Set a password or link another provider before unlinking it."
+        }
+        "not_linked" => "That provider is not linked.",
+        "unknown_provider" => "That provider is not available.",
+        _ => "Something went wrong. Try again.",
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum Flash {
+    Ok(String),
+    Error(String),
+}
+
+#[component]
+fn AccountPage(
+    email: String,
+    providers: Vec<Provider>,
+    accounts: Vec<LinkedAccountView>,
+    flash: Option<Flash>,
+) -> Element {
+    rsx! {
+        head {
+            meta { charset: "utf-8" }
+            meta { name: "viewport", content: "width=device-width, initial-scale=1" }
+            title { "Your account · FastTrackStudio" }
+            style { {STYLE} }
+        }
+        body {
+            Shell {
+                h1 { "Your account" }
+                p { class: "sub", "Signed in as {email}" }
+
+                match flash {
+                    Some(Flash::Ok(message)) => rsx! { p { class: "ok", role: "status", "{message}" } },
+                    Some(Flash::Error(message)) => rsx! { p { class: "error", role: "alert", "{message}" } },
+                    None => rsx! {},
+                }
+
+                h2 { "Linked accounts" }
+                p { class: "hint",
+                    "Sign in with a linked account, and let the apps act as it. Task pushes and proposes the wiki edits you accept under your linked GitHub name."
+                }
+                if providers.is_empty() {
+                    p { class: "sub", "No providers are configured on this server." }
+                }
+                ul { class: "providers",
+                    for provider in providers.iter().copied() {
+                        {
+                            let linked = accounts.iter().find(|a| a.provider_id == provider.id());
+                            let name = provider.display_name();
+                            let id = provider.id();
+                            match linked {
+                                Some(account) => {
+                                    let handle = account.login.clone().unwrap_or_else(|| account.account_id.clone());
+                                    rsx! {
+                                        li { class: "provider",
+                                            span { class: "provider-name",
+                                                ProviderMark { provider }
+                                                span {
+                                                    strong { "{name}" }
+                                                    span { class: "handle", "Linked as {handle}" }
+                                                }
+                                            }
+                                            form { method: "post", action: "/account/unlink", class: "inline",
+                                                input { r#type: "hidden", name: "provider", value: "{id}" }
+                                                button { r#type: "submit", class: "link", "Unlink" }
+                                            }
+                                        }
+                                    }
+                                }
+                                None => rsx! {
+                                    li { class: "provider",
+                                        span { class: "provider-name",
+                                            ProviderMark { provider }
+                                            span {
+                                                strong { "{name}" }
+                                                span { class: "handle", "Not linked" }
+                                            }
+                                        }
+                                        a { class: "button small", href: "/auth/social/{id}/start?mode=link&return_to=%2Faccount",
+                                            "Link {name}"
+                                        }
+                                    }
+                                },
+                            }
+                        }
+                    }
+                }
+
+                p { class: "alt",
+                    form { method: "post", action: "/auth/sign-out", class: "inline",
+                        button { r#type: "submit", class: "link", "Sign out" }
+                    }
+                }
+            }
+        }
+    }
 }
 
 // ── Password reset ───────────────────────────────────────────────────
@@ -110,10 +320,7 @@ pub struct VerifyQuery {
     pub token: Option<String>,
 }
 
-async fn forgot_password_page<S>(Query(q): Query<PageQuery>) -> Html<String>
-where
-    S: AuthStorage,
-{
+async fn forgot_password_page(Query(q): Query<PageQuery>) -> Html<String> {
     Html(render(
         Screen::ForgotPassword,
         &safe_return_to(q.return_to.as_deref()),
@@ -153,10 +360,7 @@ where
     )
 }
 
-async fn reset_password_page<S>(Query(q): Query<ResetQuery>) -> Html<String>
-where
-    S: AuthStorage,
-{
+async fn reset_password_page(Query(q): Query<ResetQuery>) -> Html<String> {
     Html(render_with_reset(
         Screen::ResetPassword,
         &safe_return_to(q.return_to.as_deref()),
@@ -320,29 +524,40 @@ fn encode_query_value(value: &str) -> String {
 pub struct PageQuery {
     #[serde(default)]
     pub return_to: Option<String>,
+    /// A short code from a failed social sign-in, shown in words.
+    #[serde(default)]
+    pub error: Option<String>,
 }
 
 // ── GET ──────────────────────────────────────────────────────────────
 
-async fn login_page<S>(Query(q): Query<PageQuery>) -> Html<String>
+async fn login_page<S>(
+    State(state): State<HttpState<S>>,
+    Query(q): Query<PageQuery>,
+) -> Html<String>
 where
     S: AuthStorage,
 {
-    Html(render(
+    Html(render_page(
         Screen::SignIn,
         &safe_return_to(q.return_to.as_deref()),
-        None,
+        q.error.as_deref().map(describe_social_error),
+        &state.social.enabled_providers(),
     ))
 }
 
-async fn sign_up_page<S>(Query(q): Query<PageQuery>) -> Html<String>
+async fn sign_up_page<S>(
+    State(state): State<HttpState<S>>,
+    Query(q): Query<PageQuery>,
+) -> Html<String>
 where
     S: AuthStorage,
 {
-    Html(render(
+    Html(render_page(
         Screen::SignUp,
         &safe_return_to(q.return_to.as_deref()),
-        None,
+        q.error.as_deref().map(describe_social_error),
+        &state.social.enabled_providers(),
     ))
 }
 
@@ -549,7 +764,17 @@ impl Screen {
 }
 
 fn render(screen: Screen, return_to: &str, error: Option<&str>) -> String {
-    render_with_reset(screen, return_to, error, "", "")
+    render_full(screen, return_to, error, "", "", &[])
+}
+
+/// As [`render`], with the social buttons for the configured providers.
+fn render_page(
+    screen: Screen,
+    return_to: &str,
+    error: Option<&str>,
+    providers: &[Provider],
+) -> String {
+    render_full(screen, return_to, error, "", "", providers)
 }
 
 /// As [`render`], but carrying the credentials a password reset needs.
@@ -562,6 +787,17 @@ fn render_with_reset(
     reset_email: &str,
     reset_token: &str,
 ) -> String {
+    render_full(screen, return_to, error, reset_email, reset_token, &[])
+}
+
+fn render_full(
+    screen: Screen,
+    return_to: &str,
+    error: Option<&str>,
+    reset_email: &str,
+    reset_token: &str,
+    providers: &[Provider],
+) -> String {
     let body = dioxus_ssr::render_element(rsx! {
         Page {
             screen,
@@ -569,6 +805,7 @@ fn render_with_reset(
             error: error.map(std::borrow::ToOwned::to_owned),
             reset_email: reset_email.to_owned(),
             reset_token: reset_token.to_owned(),
+            providers: providers.to_vec(),
         }
     });
     format!("<!doctype html>\n<html lang=\"en\">{body}</html>")
@@ -586,7 +823,7 @@ fn Notice(title: String, message: String, return_to: String) -> Element {
             style { {STYLE} }
         }
         body {
-            main { class: "card",
+            Shell {
                 h1 { "{title}" }
                 p { class: "sub", "{message}" }
                 p { class: "alt",
@@ -597,6 +834,67 @@ fn Notice(title: String, message: String, return_to: String) -> Element {
     }
 }
 
+/// The apps one account opens, each with the colour the studio gives it
+/// on fasttrackstudio.app. The brand panel draws them as a short
+/// spectrum — the site's own motif — with the names beneath.
+const APPS: [(&str, &str); 5] = [
+    ("Task", "#ededf1"),
+    ("Keyflow", "#a78bfa"),
+    ("Signal", "#2fd673"),
+    ("Session", "#2e9bff"),
+    ("Ignition", "#ff8a2b"),
+];
+
+/// The page frame every hosted screen sits in: the brand panel that says
+/// what this account is for, and the working panel beside it. On a
+/// narrow screen the brand panel folds into a short header so the form
+/// is the first thing in reach.
+#[component]
+fn Shell(children: Element) -> Element {
+    rsx! {
+        div { class: "console",
+            aside { class: "brand",
+                a { class: "wordmark", href: "https://fasttrackstudio.app", "FastTrackStudio" }
+                div { class: "pitch",
+                    p { class: "tagline", "One account." }
+                    p { class: "tagline dim", "Every app in the studio." }
+                }
+                ul { class: "apps", aria_label: "Apps this account signs in to",
+                    for (name, color) in APPS {
+                        li { style: "--app: {color}",
+                            i { class: "bar" }
+                            span { "{name}" }
+                        }
+                    }
+                }
+            }
+            main { class: "panel", {children} }
+        }
+    }
+}
+
+/// A provider's own mark, inline so the page stays one request. GitHub's
+/// takes the button's text colour; Google's keeps its four colours, as
+/// its brand rules ask.
+#[component]
+fn ProviderMark(provider: Provider) -> Element {
+    match provider {
+        Provider::GitHub => rsx! {
+            svg { class: "mark", view_box: "0 0 24 24", width: "20", height: "20", fill: "currentColor", "aria-hidden": "true",
+                path { d: "M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.36-3.87-1.36-.52-1.33-1.28-1.68-1.28-1.68-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.19 1.76 1.19 1.03 1.76 2.69 1.25 3.35.96.1-.75.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.8 1.19 1.83 1.19 3.09 0 4.42-2.69 5.39-5.26 5.68.41.36.78 1.05.78 2.12v3.14c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5z" }
+            }
+        },
+        Provider::Google => rsx! {
+            svg { class: "mark", view_box: "0 0 24 24", width: "20", height: "20", "aria-hidden": "true",
+                path { fill: "#4285F4", d: "M23.5 12.27c0-.79-.07-1.54-.2-2.27H12v4.3h6.46a5.53 5.53 0 0 1-2.4 3.63v3h3.87c2.27-2.09 3.57-5.17 3.57-8.66z" }
+                path { fill: "#34A853", d: "M12 24c3.24 0 5.96-1.07 7.94-2.91l-3.87-3c-1.07.72-2.45 1.15-4.07 1.15-3.13 0-5.78-2.11-6.73-4.96H1.27v3.09A12 12 0 0 0 12 24z" }
+                path { fill: "#FBBC05", d: "M5.27 14.28A7.2 7.2 0 0 1 4.9 12c0-.79.14-1.56.37-2.28V6.63H1.27A12 12 0 0 0 0 12c0 1.94.46 3.77 1.27 5.37l4-3.09z" }
+                path { fill: "#EA4335", d: "M12 4.75c1.76 0 3.34.61 4.59 1.8l3.44-3.44C17.95 1.19 15.23 0 12 0A12 12 0 0 0 1.27 6.63l4 3.09C6.22 6.87 8.87 4.75 12 4.75z" }
+            }
+        },
+    }
+}
+
 #[component]
 fn Page(
     screen: Screen,
@@ -604,6 +902,7 @@ fn Page(
     error: Option<String>,
     reset_email: String,
     reset_token: String,
+    providers: Vec<Provider>,
 ) -> Element {
     rsx! {
         head {
@@ -616,12 +915,35 @@ fn Page(
             style { {STYLE} }
         }
         body {
-            main { class: "card",
+            Shell {
                 h1 { "{screen.title()}" }
-                p { class: "sub", "One account for every FastTrackStudio app." }
+                p { class: "sub",
+                    match screen {
+                        Screen::SignIn => "Welcome back.",
+                        Screen::SignUp => "Free, and it works in every FastTrackStudio app.",
+                        Screen::ForgotPassword => "Enter your email and we'll send a link to choose a new password.",
+                        Screen::ResetPassword => "Pick something at least eight characters long.",
+                    }
+                }
 
                 if let Some(message) = error {
                     p { class: "error", role: "alert", "{message}" }
+                }
+
+                // GitHub and Google first, on the two screens that sign
+                // someone in, for the providers this deployment has.
+                if matches!(screen, Screen::SignIn | Screen::SignUp) && !providers.is_empty() {
+                    div { class: "social",
+                        for provider in providers.iter().copied() {
+                            a {
+                                class: "button provider-button",
+                                href: "/auth/social/{provider.id()}/start?mode=sign-in&return_to={encode_query_value(&return_to)}",
+                                ProviderMark { provider }
+                                span { "Continue with {provider.display_name()}" }
+                            }
+                        }
+                    }
+                    p { class: "or", span { "or with email" } }
                 }
 
                 form { method: "post", action: screen.action(),
@@ -685,10 +1007,11 @@ fn Page(
                         let return_to = encode_query_value(&return_to);
                         match screen {
                             Screen::SignIn => rsx! {
-                                "No account yet? "
-                                a { href: "/sign-up?return_to={return_to}", "Create one" }
-                                " · "
-                                a { href: "/forgot-password?return_to={return_to}", "Forgot password?" }
+                                span {
+                                    "No account yet? "
+                                    a { href: "/sign-up?return_to={return_to}", "Create one" }
+                                }
+                                a { class: "quiet", href: "/forgot-password?return_to={return_to}", "Forgot password?" }
                             },
                             Screen::SignUp => rsx! {
                                 "Already have an account? "
@@ -711,82 +1034,236 @@ fn Page(
 /// arrive unstyled because the styles cannot arrive separately. It is
 /// small enough that this costs less than the extra round trip would.
 const STYLE: &str = r#"
+@import url("https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@87.5..112.5,400..700&family=JetBrains+Mono:wght@400;700&display=swap");
 :root {
-  color-scheme: light dark;
-  --bg: #f6f7f9;
-  --card: #ffffff;
-  --fg: #14161a;
-  --muted: #5c6370;
-  --line: #d8dce3;
-  --accent: #2f6fed;
-  --error: #b3261e;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0f1115;
-    --card: #171a21;
-    --fg: #e8eaed;
-    --muted: #9aa1ad;
-    --line: #2a2f3a;
-    --accent: #6c9bff;
-    --error: #f2b8b5;
-  }
+  color-scheme: dark;
+  /* fasttrackstudio.app's own tokens */
+  --void: #08080a;
+  --bg: #0a0a0c;
+  --deck: #131318;
+  --surface: #16161c;
+  --raised: #1d1d25;
+  --line: #26262f;
+  --line-strong: #353541;
+  --fg: #ededf1;
+  --muted: #9c9ca8;
+  --subtle: #63636f;
+  --error: #ff8a7a;
+  --ok: #2fd673;
+  --sans: "Archivo", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 * { box-sizing: border-box; }
+html { background: var(--bg); }
 body {
   margin: 0;
   min-height: 100vh;
   display: grid;
   place-items: center;
-  padding: 1.5rem;
-  background: var(--bg);
+  padding: 1.25rem;
   color: var(--fg);
-  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font: 15px/1.5 var(--sans);
+  font-variation-settings: "wdth" 100;
+  -webkit-font-smoothing: antialiased;
 }
-.card {
+.console {
   width: 100%;
-  max-width: 22rem;
-  background: var(--card);
+  max-width: 56rem;
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+  background: var(--deck);
   border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 2rem;
+  border-radius: 14px;
+  overflow: hidden;
 }
-h1 { margin: 0 0 .25rem; font-size: 1.4rem; }
-.sub { margin: 0 0 1.5rem; color: var(--muted); font-size: .9rem; }
-label { display: block; margin: 0 0 .35rem; font-size: .85rem; font-weight: 600; }
+/* ── Brand panel ─────────────────────────────────────── */
+.brand {
+  display: flex;
+  flex-direction: column;
+  gap: 2.5rem;
+  padding: 2.25rem 2rem;
+  background: var(--void);
+  border-right: 1px solid var(--line);
+}
+.wordmark {
+  align-self: flex-start;
+  margin: 0;
+  color: var(--fg);
+  text-decoration: none;
+  font-weight: 700;
+  font-size: .95rem;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+  font-variation-settings: "wdth" 95;
+}
+.pitch { margin-top: auto; }
+.tagline {
+  margin: 0;
+  font-size: clamp(1.75rem, 3.2vw, 2.25rem);
+  line-height: 1.05;
+  font-weight: 600;
+  letter-spacing: -.02em;
+  font-variation-settings: "wdth" 92;
+}
+.tagline.dim { color: var(--muted); }
+/* the site's spectrum motif: one bar per app, in the app's colour */
+.apps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: .6rem;
+}
+.apps li {
+  display: grid;
+  gap: .55rem;
+  font: 700 .6rem/1 var(--mono);
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+.apps .bar {
+  display: block;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--app);
+  opacity: .9;
+}
+/* ── Working panel ───────────────────────────────────── */
+.panel {
+  padding: 2.25rem 2.25rem 2rem;
+  background: var(--deck);
+}
+h1 {
+  margin: 0 0 .3rem;
+  font-size: 1.6rem;
+  line-height: 1.15;
+  font-weight: 600;
+  letter-spacing: -.015em;
+  font-variation-settings: "wdth" 95;
+}
+h2 {
+  margin: 1.75rem 0 .35rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+.sub { margin: 0 0 1.5rem; color: var(--muted); }
+.hint { margin: 0 0 1rem; color: var(--muted); font-size: .9rem; }
+label {
+  display: block;
+  margin: 0 0 .35rem;
+  color: var(--muted);
+  font-size: .85rem;
+  font-weight: 500;
+}
 input {
   width: 100%;
-  margin: 0 0 1rem;
-  padding: .6rem .7rem;
+  margin: 0 0 .9rem;
+  padding: .7rem .8rem;
   font: inherit;
   color: var(--fg);
-  background: var(--bg);
-  border: 1px solid var(--line);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
   border-radius: 8px;
 }
-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+input:hover { border-color: var(--subtle); }
+input:focus-visible { outline: 2px solid var(--fg); outline-offset: 1px; border-color: var(--fg); }
 button {
   width: 100%;
-  padding: .65rem;
+  margin-top: .25rem;
+  padding: .75rem;
   font: inherit;
   font-weight: 600;
-  color: #fff;
-  background: var(--accent);
+  color: var(--void);
+  background: var(--fg);
   border: 0;
   border-radius: 8px;
   cursor: pointer;
 }
-button:hover { filter: brightness(1.07); }
-.error {
-  margin: 0 0 1rem;
-  padding: .6rem .7rem;
-  font-size: .875rem;
-  color: var(--error);
-  border: 1px solid var(--error);
+button:hover { background: #fff; }
+button:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+/* provider buttons: the mark, then the words, centred as one unit */
+.social { display: grid; gap: .6rem; }
+a.button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: .65rem;
+  padding: .72rem .9rem;
+  text-decoration: none;
+  font-weight: 600;
+  color: var(--fg);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
   border-radius: 8px;
 }
-.alt { margin: 1.25rem 0 0; font-size: .875rem; color: var(--muted); text-align: center; }
-a { color: var(--accent); }
+a.button:hover { background: var(--raised); border-color: var(--subtle); }
+a.button:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+a.button.small { display: inline-flex; padding: .45rem .8rem; font-size: .875rem; }
+.mark { flex: none; }
+.or {
+  display: flex;
+  align-items: center;
+  gap: .9rem;
+  margin: 1.25rem 0 1.1rem;
+  color: var(--subtle);
+  font-size: .8rem;
+}
+.or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.error, .ok {
+  margin: 0 0 1rem;
+  padding: .65rem .8rem;
+  font-size: .9rem;
+  border-radius: 8px;
+  border: 1px solid;
+}
+.error { color: var(--error); border-color: color-mix(in srgb, var(--error) 45%, transparent); }
+.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.alt { display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin: 1.5rem 0 0; color: var(--muted); font-size: .9rem; }
+a.quiet { color: var(--muted); }
+a.quiet:hover { color: var(--fg); }
+a { color: var(--fg); text-underline-offset: .15em; }
+a:hover { color: #fff; }
+/* account: linked providers */
+.providers { list-style: none; margin: 0; padding: 0; display: grid; }
+.provider {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: .9rem 0;
+  border-top: 1px solid var(--line);
+}
+.provider:last-child { border-bottom: 1px solid var(--line); }
+.provider-name { display: flex; align-items: center; gap: .8rem; }
+.provider-name strong { display: block; font-weight: 600; }
+.handle { display: block; color: var(--muted); font-size: .85rem; }
+form.inline { display: inline; margin: 0; }
+button.link {
+  width: auto;
+  margin: 0;
+  padding: 0;
+  font-weight: 500;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: .15em;
+}
+button.link:hover { color: var(--fg); background: none; }
+@media (max-width: 52rem) {
+  body { padding: 0; align-items: start; }
+  .console { max-width: none; min-height: 100vh; grid-template-columns: 1fr; border: 0; border-radius: 0; }
+  .brand { gap: 1.25rem; padding: 1.25rem 1.5rem; border-right: 0; border-bottom: 1px solid var(--line); }
+  .pitch { display: none; }
+  .apps { gap: .4rem; }
+  .panel { padding: 1.75rem 1.5rem 2rem; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  a.button, button, input { transition: background-color .15s ease, border-color .15s ease; }
+}
 "#;
 
 #[cfg(test)]

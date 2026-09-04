@@ -60,6 +60,55 @@ pub struct ServerConfig {
     /// every flow that has to reach a person — verification, password
     /// reset — completes as far as minting a token and no further.
     pub mail: MailConfig,
+    /// Social providers and the linked-token policy. See the module docs.
+    pub social: SocialConfig,
+}
+
+/// One upstream OAuth provider this server may sign people in with and
+/// link accounts against.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SocialProviderConfig {
+    pub client_id: String,
+    pub client_secret: String,
+    /// Scopes requested at the provider, space-separated on the wire.
+    pub scopes: Vec<String>,
+}
+
+/// Which providers are on, and what a relying party needs in order to be
+/// handed a linked token.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SocialConfig {
+    pub github: Option<SocialProviderConfig>,
+    pub google: Option<SocialProviderConfig>,
+    /// The OIDC scope an access token must carry for
+    /// `GET /oauth2/linked-token`. Registered as an extra grantable
+    /// scope with the OIDC provider.
+    pub linked_token_scope: String,
+}
+
+impl SocialConfig {
+    pub const DEFAULT_LINKED_TOKEN_SCOPE: &'static str = "forge:github";
+    pub const DEFAULT_GITHUB_SCOPES: &'static str = "repo read:user user:email";
+    pub const DEFAULT_GOOGLE_SCOPES: &'static str = "openid email profile";
+
+    /// Nothing configured — the routes 404 and the pages show no buttons.
+    pub fn disabled() -> Self {
+        Self {
+            github: None,
+            google: None,
+            linked_token_scope: Self::DEFAULT_LINKED_TOKEN_SCOPE.to_owned(),
+        }
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        self.github.is_some() || self.google.is_some()
+    }
+}
+
+impl Default for SocialConfig {
+    fn default() -> Self {
+        Self::disabled()
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -196,6 +245,22 @@ impl ServerConfig {
                 from: optional("AUTH_MAIL_FROM").unwrap_or_else(|| "noreply@localhost".to_owned()),
                 base_url: base_url.clone(),
             },
+            social: SocialConfig {
+                github: read_social_provider(
+                    "AUTH_GITHUB_CLIENT_ID",
+                    "AUTH_GITHUB_CLIENT_SECRET",
+                    "AUTH_GITHUB_SCOPES",
+                    SocialConfig::DEFAULT_GITHUB_SCOPES,
+                )?,
+                google: read_social_provider(
+                    "AUTH_GOOGLE_CLIENT_ID",
+                    "AUTH_GOOGLE_CLIENT_SECRET",
+                    "AUTH_GOOGLE_SCOPES",
+                    SocialConfig::DEFAULT_GOOGLE_SCOPES,
+                )?,
+                linked_token_scope: optional("AUTH_LINKED_TOKEN_SCOPE")
+                    .unwrap_or_else(|| SocialConfig::DEFAULT_LINKED_TOKEN_SCOPE.to_owned()),
+            },
         })
     }
 
@@ -203,6 +268,32 @@ impl ServerConfig {
     pub fn issuer(&self) -> &str {
         self.oidc_issuer.as_deref().unwrap_or(&self.base_url)
     }
+}
+
+/// A provider is present exactly when its client id is set. A client id
+/// without a secret is a broken deployment, not a disabled provider —
+/// it would send people to GitHub and fail on the way back — so it is
+/// refused at boot.
+fn read_social_provider(
+    id_var: &'static str,
+    secret_var: &'static str,
+    scopes_var: &'static str,
+    default_scopes: &str,
+) -> Result<Option<SocialProviderConfig>, ConfigError> {
+    let Some(client_id) = optional(id_var) else {
+        return Ok(None);
+    };
+    let client_secret = read_secret(secret_var)?;
+    let scopes = optional(scopes_var)
+        .unwrap_or_else(|| default_scopes.to_owned())
+        .split_whitespace()
+        .map(ToOwned::to_owned)
+        .collect();
+    Ok(Some(SocialProviderConfig {
+        client_id,
+        client_secret,
+        scopes,
+    }))
 }
 
 /// Read and parse a JSON client list from `<VAR>_FILE` if set, else

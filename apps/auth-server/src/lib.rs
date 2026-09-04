@@ -27,6 +27,10 @@
 //! | `/oauth2/{authorize,token,userinfo}` | OIDC provider |
 //! | `/auth/jwt/jwks` | key set (see the caveat below) |
 //! | `/auth/{sign-up,sign-in,session,refresh,sign-out}` | session JSON |
+//! | `/auth/social/{github,google}/{start,callback}` | social sign-in and account linking |
+//! | `/auth/accounts`, `/auth/accounts/{provider}/unlink` | linked accounts |
+//! | `/oauth2/linked-token` | a linked GitHub token for a relying party (see [`social`]) |
+//! | `/login`, `/sign-up`, `/account`, … | hosted pages |
 //! | `/healthz`, `/readyz` | probes |
 //!
 //! # Known limitations
@@ -48,7 +52,10 @@ pub mod config;
 pub mod http;
 pub mod mail;
 pub mod server;
+pub mod social;
 pub mod ui;
 
-pub use config::{ConfigError, ServerConfig};
-pub use server::{AuthServer, VOX_SUBPROTOCOL, app_router, build, build_engine, serve};
+pub use config::{ConfigError, ServerConfig, SocialConfig, SocialProviderConfig};
+pub use server::{
+    AuthServer, VOX_SUBPROTOCOL, app_router, app_router_with_social, build, build_engine, serve,
+};

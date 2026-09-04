@@ -37,6 +37,17 @@ async fn spawn_server() -> String {
         oidc_clients: Vec::new(),
         oidc_allow_dynamic_client_registration: false,
         run_migrations: false,
+        // Log-only mail and no social providers: neither is exercised
+        // by the round trip, and both must be stated to build a config.
+        mail: auth_server::mail::MailConfig {
+            host: None,
+            port: 587,
+            username: None,
+            password: None,
+            from: "noreply@example.com".into(),
+            base_url: "http://127.0.0.1".into(),
+        },
+        social: auth_server::SocialConfig::disabled(),
     };
 
     let auth = server::build_engine(&config, AuthSeaOrmStorage::new(db)).expect("build engine");

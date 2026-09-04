@@ -310,7 +310,10 @@ mod tests {
     fn state_is_checked_both_ways() {
         let p = pkce();
         assert!(p.check_state(p.state()).is_ok());
-        assert_eq!(p.check_state("something else"), Err(OidcError::StateMismatch));
+        assert_eq!(
+            p.check_state("something else"),
+            Err(OidcError::StateMismatch)
+        );
         assert_eq!(p.check_state(""), Err(OidcError::StateMismatch));
     }
 
@@ -341,7 +344,13 @@ mod tests {
     /// some gateways route differently and none route better.
     #[test]
     fn a_trailing_slash_on_the_issuer_does_not_double_up() {
-        let url = authorize_url("https://a.test/", "c", "https://b.test/cb", &pkce(), "openid");
+        let url = authorize_url(
+            "https://a.test/",
+            "c",
+            "https://b.test/cb",
+            &pkce(),
+            "openid",
+        );
         assert!(url.starts_with("https://a.test/oauth2/authorize?"), "{url}");
     }
 

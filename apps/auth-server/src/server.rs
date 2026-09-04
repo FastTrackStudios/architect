@@ -83,6 +83,15 @@ pub fn build_engine<S>(config: &ServerConfig, storage: S) -> eyre::Result<Archit
         // a secret, so the code-interception defence is the only one they
         // have.
         .oidc_require_pkce(true)
+        // Signing in with GitHub or Google for the first time creates the
+        // account; without this the engine refuses unknown provider
+        // identities and social sign-in only works for people who linked
+        // first.
+        .oauth_signup_enabled(true)
+        // The scope a relying party must hold to be handed a linked
+        // GitHub token. Registered here so a client that lists it can
+        // actually be granted it at `/oauth2/authorize`.
+        .oidc_extra_scope(config.social.linked_token_scope.clone())
         .jwt_issuer(config.issuer().to_owned());
 
     if let Some(rp_id) = &config.passkey_rp_id {
@@ -102,6 +111,29 @@ pub fn build_engine<S>(config: &ServerConfig, storage: S) -> eyre::Result<Archit
 
 /// The full axum app: vox WebSocket + HTTP surface + health probes.
 pub fn app_router<S>(config: &ServerConfig, auth: ArchitectAuth<S>) -> Router
+where
+    S: architect_auth::AuthStorage + Clone + Send + Sync + 'static,
+{
+    // A provider client that cannot be built is a deployment that will
+    // send people to GitHub and never finish; refusing to boot is kinder
+    // than that. Only reachable when a provider is configured.
+    let social = match HttpState::<S>::social_state(config) {
+        Ok(social) => social,
+        Err(err) if config.social.is_enabled() => {
+            panic!("social providers are configured but the HTTP client failed to build: {err}")
+        }
+        Err(_) => http::SocialState::disabled(),
+    };
+    app_router_with_social(config, auth, std::sync::Arc::new(social))
+}
+
+/// As [`app_router`], with the social state supplied — the seam tests
+/// use to swap the provider client for a fake.
+pub fn app_router_with_social<S>(
+    config: &ServerConfig,
+    auth: ArchitectAuth<S>,
+    social: std::sync::Arc<http::SocialState>,
+) -> Router
 where
     S: architect_auth::AuthStorage + Clone + Send + Sync + 'static,
 {
@@ -161,12 +193,18 @@ where
         .route("/healthz", get(|| async { "ok" }))
         .route("/readyz", get(|| async { "ok" }))
         .merge(http::router(
-            HttpState::new(auth.clone(), cookie.clone()).with_mailer(mail.clone()),
+            HttpState::new(auth.clone(), cookie.clone())
+                .with_mailer(mail.clone())
+                .with_social(social.clone()),
         ))
         // The sign-in and sign-up pages. Merged separately from the API
         // so an embedder that already has its own login screen can take
         // `http::router` alone — see `ui::router`.
-        .merge(ui::router(HttpState::new(auth, cookie).with_mailer(mail)))
+        .merge(ui::router(
+            HttpState::new(auth, cookie)
+                .with_mailer(mail)
+                .with_social(social),
+        ))
         .layer(cors_layer(config))
         .layer(TraceLayer::new_for_http())
 }

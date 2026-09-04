@@ -27,6 +27,7 @@ fn test_config() -> ServerConfig {
         oidc_clients: Vec::new(),
         oidc_allow_dynamic_client_registration: false,
         run_migrations: true,
+        social: auth_server::SocialConfig::disabled(),
         // Log mode: these tests assert on the HTTP surface, not on
         // delivery, and a test that tried to reach an SMTP host would
         // be testing the network.
