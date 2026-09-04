@@ -213,7 +213,7 @@ fn AccountPage(
             style { {STYLE} }
         }
         body {
-            main { class: "card",
+            Shell {
                 h1 { "Your account" }
                 p { class: "sub", "Signed in as {email}" }
 
@@ -224,6 +224,9 @@ fn AccountPage(
                 }
 
                 h2 { "Linked accounts" }
+                p { class: "hint",
+                    "Sign in with a linked account, and let the apps act as it. Task pushes and proposes the wiki edits you accept under your linked GitHub name."
+                }
                 if providers.is_empty() {
                     p { class: "sub", "No providers are configured on this server." }
                 }
@@ -238,7 +241,13 @@ fn AccountPage(
                                     let handle = account.login.clone().unwrap_or_else(|| account.account_id.clone());
                                     rsx! {
                                         li { class: "provider",
-                                            span { "Linked as " strong { "{handle}" } " · {name}" }
+                                            span { class: "provider-name",
+                                                ProviderMark { provider }
+                                                span {
+                                                    strong { "{name}" }
+                                                    span { class: "handle", "Linked as {handle}" }
+                                                }
+                                            }
                                             form { method: "post", action: "/account/unlink", class: "inline",
                                                 input { r#type: "hidden", name: "provider", value: "{id}" }
                                                 button { r#type: "submit", class: "link", "Unlink" }
@@ -248,8 +257,14 @@ fn AccountPage(
                                 }
                                 None => rsx! {
                                     li { class: "provider",
-                                        span { "{name}" }
-                                        a { class: "button", href: "/auth/social/{id}/start?mode=link&return_to=%2Faccount",
+                                        span { class: "provider-name",
+                                            ProviderMark { provider }
+                                            span {
+                                                strong { "{name}" }
+                                                span { class: "handle", "Not linked" }
+                                            }
+                                        }
+                                        a { class: "button small", href: "/auth/social/{id}/start?mode=link&return_to=%2Faccount",
                                             "Link {name}"
                                         }
                                     }
@@ -808,7 +823,7 @@ fn Notice(title: String, message: String, return_to: String) -> Element {
             style { {STYLE} }
         }
         body {
-            main { class: "card",
+            Shell {
                 h1 { "{title}" }
                 p { class: "sub", "{message}" }
                 p { class: "alt",
@@ -816,6 +831,67 @@ fn Notice(title: String, message: String, return_to: String) -> Element {
                 }
             }
         }
+    }
+}
+
+/// The apps one account opens, each with the colour the studio gives it
+/// on fasttrackstudio.app. The brand panel draws them as a short
+/// spectrum — the site's own motif — with the names beneath.
+const APPS: [(&str, &str); 5] = [
+    ("Task", "#ededf1"),
+    ("Keyflow", "#a78bfa"),
+    ("Signal", "#2fd673"),
+    ("Session", "#2e9bff"),
+    ("Ignition", "#ff8a2b"),
+];
+
+/// The page frame every hosted screen sits in: the brand panel that says
+/// what this account is for, and the working panel beside it. On a
+/// narrow screen the brand panel folds into a short header so the form
+/// is the first thing in reach.
+#[component]
+fn Shell(children: Element) -> Element {
+    rsx! {
+        div { class: "console",
+            aside { class: "brand",
+                a { class: "wordmark", href: "https://fasttrackstudio.app", "FastTrackStudio" }
+                div { class: "pitch",
+                    p { class: "tagline", "One account." }
+                    p { class: "tagline dim", "Every app in the studio." }
+                }
+                ul { class: "apps", aria_label: "Apps this account signs in to",
+                    for (name, color) in APPS {
+                        li { style: "--app: {color}",
+                            i { class: "bar" }
+                            span { "{name}" }
+                        }
+                    }
+                }
+            }
+            main { class: "panel", {children} }
+        }
+    }
+}
+
+/// A provider's own mark, inline so the page stays one request. GitHub's
+/// takes the button's text colour; Google's keeps its four colours, as
+/// its brand rules ask.
+#[component]
+fn ProviderMark(provider: Provider) -> Element {
+    match provider {
+        Provider::GitHub => rsx! {
+            svg { class: "mark", view_box: "0 0 24 24", width: "20", height: "20", fill: "currentColor", "aria-hidden": "true",
+                path { d: "M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.36-3.87-1.36-.52-1.33-1.28-1.68-1.28-1.68-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.19 1.76 1.19 1.03 1.76 2.69 1.25 3.35.96.1-.75.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.8 1.19 1.83 1.19 3.09 0 4.42-2.69 5.39-5.26 5.68.41.36.78 1.05.78 2.12v3.14c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5z" }
+            }
+        },
+        Provider::Google => rsx! {
+            svg { class: "mark", view_box: "0 0 24 24", width: "20", height: "20", "aria-hidden": "true",
+                path { fill: "#4285F4", d: "M23.5 12.27c0-.79-.07-1.54-.2-2.27H12v4.3h6.46a5.53 5.53 0 0 1-2.4 3.63v3h3.87c2.27-2.09 3.57-5.17 3.57-8.66z" }
+                path { fill: "#34A853", d: "M12 24c3.24 0 5.96-1.07 7.94-2.91l-3.87-3c-1.07.72-2.45 1.15-4.07 1.15-3.13 0-5.78-2.11-6.73-4.96H1.27v3.09A12 12 0 0 0 12 24z" }
+                path { fill: "#FBBC05", d: "M5.27 14.28A7.2 7.2 0 0 1 4.9 12c0-.79.14-1.56.37-2.28V6.63H1.27A12 12 0 0 0 0 12c0 1.94.46 3.77 1.27 5.37l4-3.09z" }
+                path { fill: "#EA4335", d: "M12 4.75c1.76 0 3.34.61 4.59 1.8l3.44-3.44C17.95 1.19 15.23 0 12 0A12 12 0 0 0 1.27 6.63l4 3.09C6.22 6.87 8.87 4.75 12 4.75z" }
+            }
+        },
     }
 }
 
@@ -839,12 +915,35 @@ fn Page(
             style { {STYLE} }
         }
         body {
-            main { class: "card",
+            Shell {
                 h1 { "{screen.title()}" }
-                p { class: "sub", "One account for every FastTrackStudio app." }
+                p { class: "sub",
+                    match screen {
+                        Screen::SignIn => "Welcome back.",
+                        Screen::SignUp => "Free, and it works in every FastTrackStudio app.",
+                        Screen::ForgotPassword => "Enter your email and we'll send a link to choose a new password.",
+                        Screen::ResetPassword => "Pick something at least eight characters long.",
+                    }
+                }
 
                 if let Some(message) = error {
                     p { class: "error", role: "alert", "{message}" }
+                }
+
+                // GitHub and Google first, on the two screens that sign
+                // someone in, for the providers this deployment has.
+                if matches!(screen, Screen::SignIn | Screen::SignUp) && !providers.is_empty() {
+                    div { class: "social",
+                        for provider in providers.iter().copied() {
+                            a {
+                                class: "button provider-button",
+                                href: "/auth/social/{provider.id()}/start?mode=sign-in&return_to={encode_query_value(&return_to)}",
+                                ProviderMark { provider }
+                                span { "Continue with {provider.display_name()}" }
+                            }
+                        }
+                    }
+                    p { class: "or", span { "or with email" } }
                 }
 
                 form { method: "post", action: screen.action(),
@@ -900,22 +999,6 @@ fn Page(
                     button { r#type: "submit", "{screen.submit()}" }
                 }
 
-                // "Continue with GitHub / Google" — only on the two
-                // screens that sign someone in, and only for providers
-                // this deployment has configured.
-                if matches!(screen, Screen::SignIn | Screen::SignUp) && !providers.is_empty() {
-                    div { class: "social",
-                        p { class: "or", "or" }
-                        for provider in providers.iter().copied() {
-                            a {
-                                class: "button secondary",
-                                href: "/auth/social/{provider.id()}/start?mode=sign-in&return_to={encode_query_value(&return_to)}",
-                                "Continue with {provider.display_name()}"
-                            }
-                        }
-                    }
-                }
-
                 p { class: "alt",
                     // Encoded, not raw: see `encode_query_value`. The
                     // hidden form field below needs no such treatment —
@@ -924,10 +1007,11 @@ fn Page(
                         let return_to = encode_query_value(&return_to);
                         match screen {
                             Screen::SignIn => rsx! {
-                                "No account yet? "
-                                a { href: "/sign-up?return_to={return_to}", "Create one" }
-                                " · "
-                                a { href: "/forgot-password?return_to={return_to}", "Forgot password?" }
+                                span {
+                                    "No account yet? "
+                                    a { href: "/sign-up?return_to={return_to}", "Create one" }
+                                }
+                                a { class: "quiet", href: "/forgot-password?return_to={return_to}", "Forgot password?" }
                             },
                             Screen::SignUp => rsx! {
                                 "Already have an account? "
@@ -950,126 +1034,236 @@ fn Page(
 /// arrive unstyled because the styles cannot arrive separately. It is
 /// small enough that this costs less than the extra round trip would.
 const STYLE: &str = r#"
+@import url("https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@87.5..112.5,400..700&family=JetBrains+Mono:wght@400;700&display=swap");
 :root {
-  color-scheme: light dark;
-  --bg: #f6f7f9;
-  --card: #ffffff;
-  --fg: #14161a;
-  --muted: #5c6370;
-  --line: #d8dce3;
-  --accent: #2f6fed;
-  --error: #b3261e;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0f1115;
-    --card: #171a21;
-    --fg: #e8eaed;
-    --muted: #9aa1ad;
-    --line: #2a2f3a;
-    --accent: #6c9bff;
-    --error: #f2b8b5;
-  }
+  color-scheme: dark;
+  /* fasttrackstudio.app's own tokens */
+  --void: #08080a;
+  --bg: #0a0a0c;
+  --deck: #131318;
+  --surface: #16161c;
+  --raised: #1d1d25;
+  --line: #26262f;
+  --line-strong: #353541;
+  --fg: #ededf1;
+  --muted: #9c9ca8;
+  --subtle: #63636f;
+  --error: #ff8a7a;
+  --ok: #2fd673;
+  --sans: "Archivo", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 * { box-sizing: border-box; }
+html { background: var(--bg); }
 body {
   margin: 0;
   min-height: 100vh;
   display: grid;
   place-items: center;
-  padding: 1.5rem;
-  background: var(--bg);
+  padding: 1.25rem;
   color: var(--fg);
-  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font: 15px/1.5 var(--sans);
+  font-variation-settings: "wdth" 100;
+  -webkit-font-smoothing: antialiased;
 }
-.card {
+.console {
   width: 100%;
-  max-width: 22rem;
-  background: var(--card);
+  max-width: 56rem;
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+  background: var(--deck);
   border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 2rem;
+  border-radius: 14px;
+  overflow: hidden;
 }
-h1 { margin: 0 0 .25rem; font-size: 1.4rem; }
-.sub { margin: 0 0 1.5rem; color: var(--muted); font-size: .9rem; }
-label { display: block; margin: 0 0 .35rem; font-size: .85rem; font-weight: 600; }
+/* ── Brand panel ─────────────────────────────────────── */
+.brand {
+  display: flex;
+  flex-direction: column;
+  gap: 2.5rem;
+  padding: 2.25rem 2rem;
+  background: var(--void);
+  border-right: 1px solid var(--line);
+}
+.wordmark {
+  align-self: flex-start;
+  margin: 0;
+  color: var(--fg);
+  text-decoration: none;
+  font-weight: 700;
+  font-size: .95rem;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+  font-variation-settings: "wdth" 95;
+}
+.pitch { margin-top: auto; }
+.tagline {
+  margin: 0;
+  font-size: clamp(1.75rem, 3.2vw, 2.25rem);
+  line-height: 1.05;
+  font-weight: 600;
+  letter-spacing: -.02em;
+  font-variation-settings: "wdth" 92;
+}
+.tagline.dim { color: var(--muted); }
+/* the site's spectrum motif: one bar per app, in the app's colour */
+.apps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: .6rem;
+}
+.apps li {
+  display: grid;
+  gap: .55rem;
+  font: 700 .6rem/1 var(--mono);
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+.apps .bar {
+  display: block;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--app);
+  opacity: .9;
+}
+/* ── Working panel ───────────────────────────────────── */
+.panel {
+  padding: 2.25rem 2.25rem 2rem;
+  background: var(--deck);
+}
+h1 {
+  margin: 0 0 .3rem;
+  font-size: 1.6rem;
+  line-height: 1.15;
+  font-weight: 600;
+  letter-spacing: -.015em;
+  font-variation-settings: "wdth" 95;
+}
+h2 {
+  margin: 1.75rem 0 .35rem;
+  font-size: 1rem;
+  font-weight: 600;
+}
+.sub { margin: 0 0 1.5rem; color: var(--muted); }
+.hint { margin: 0 0 1rem; color: var(--muted); font-size: .9rem; }
+label {
+  display: block;
+  margin: 0 0 .35rem;
+  color: var(--muted);
+  font-size: .85rem;
+  font-weight: 500;
+}
 input {
   width: 100%;
-  margin: 0 0 1rem;
-  padding: .6rem .7rem;
+  margin: 0 0 .9rem;
+  padding: .7rem .8rem;
   font: inherit;
   color: var(--fg);
-  background: var(--bg);
-  border: 1px solid var(--line);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
   border-radius: 8px;
 }
-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+input:hover { border-color: var(--subtle); }
+input:focus-visible { outline: 2px solid var(--fg); outline-offset: 1px; border-color: var(--fg); }
 button {
   width: 100%;
-  padding: .65rem;
+  margin-top: .25rem;
+  padding: .75rem;
   font: inherit;
   font-weight: 600;
-  color: #fff;
-  background: var(--accent);
+  color: var(--void);
+  background: var(--fg);
   border: 0;
   border-radius: 8px;
   cursor: pointer;
 }
-button:hover { filter: brightness(1.07); }
-.error {
-  margin: 0 0 1rem;
-  padding: .6rem .7rem;
-  font-size: .875rem;
-  color: var(--error);
-  border: 1px solid var(--error);
-  border-radius: 8px;
-}
-.alt { margin: 1.25rem 0 0; font-size: .875rem; color: var(--muted); text-align: center; }
-a { color: var(--accent); }
-.ok {
-  margin: 0 0 1rem;
-  padding: .6rem .7rem;
-  font-size: .875rem;
-  color: var(--accent);
-  border: 1px solid var(--accent);
-  border-radius: 8px;
-}
-h2 { margin: 1.5rem 0 .5rem; font-size: 1rem; }
-.social { margin-top: 1rem; display: grid; gap: .5rem; }
-.or { margin: 0; text-align: center; color: var(--muted); font-size: .8rem; }
+button:hover { background: #fff; }
+button:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+/* provider buttons: the mark, then the words, centred as one unit */
+.social { display: grid; gap: .6rem; }
 a.button {
-  display: block;
-  padding: .6rem;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: .65rem;
+  padding: .72rem .9rem;
   text-decoration: none;
   font-weight: 600;
-  border-radius: 8px;
-  border: 1px solid var(--line);
   color: var(--fg);
-  background: var(--bg);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
 }
-a.button:hover { border-color: var(--accent); }
-.providers { list-style: none; margin: 0; padding: 0; display: grid; gap: .75rem; }
+a.button:hover { background: var(--raised); border-color: var(--subtle); }
+a.button:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+a.button.small { display: inline-flex; padding: .45rem .8rem; font-size: .875rem; }
+.mark { flex: none; }
+.or {
+  display: flex;
+  align-items: center;
+  gap: .9rem;
+  margin: 1.25rem 0 1.1rem;
+  color: var(--subtle);
+  font-size: .8rem;
+}
+.or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.error, .ok {
+  margin: 0 0 1rem;
+  padding: .65rem .8rem;
+  font-size: .9rem;
+  border-radius: 8px;
+  border: 1px solid;
+}
+.error { color: var(--error); border-color: color-mix(in srgb, var(--error) 45%, transparent); }
+.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.alt { display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin: 1.5rem 0 0; color: var(--muted); font-size: .9rem; }
+a.quiet { color: var(--muted); }
+a.quiet:hover { color: var(--fg); }
+a { color: var(--fg); text-underline-offset: .15em; }
+a:hover { color: #fff; }
+/* account: linked providers */
+.providers { list-style: none; margin: 0; padding: 0; display: grid; }
 .provider {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  font-size: .9rem;
+  padding: .9rem 0;
+  border-top: 1px solid var(--line);
 }
-.provider a.button { display: inline-block; padding: .4rem .8rem; }
+.provider:last-child { border-bottom: 1px solid var(--line); }
+.provider-name { display: flex; align-items: center; gap: .8rem; }
+.provider-name strong { display: block; font-weight: 600; }
+.handle { display: block; color: var(--muted); font-size: .85rem; }
 form.inline { display: inline; margin: 0; }
 button.link {
   width: auto;
+  margin: 0;
   padding: 0;
   font-weight: 500;
-  color: var(--accent);
+  color: var(--muted);
   background: none;
   border: 0;
   cursor: pointer;
   text-decoration: underline;
+  text-underline-offset: .15em;
 }
-button.link:hover { filter: none; }
+button.link:hover { color: var(--fg); background: none; }
+@media (max-width: 52rem) {
+  body { padding: 0; align-items: start; }
+  .console { max-width: none; min-height: 100vh; grid-template-columns: 1fr; border: 0; border-radius: 0; }
+  .brand { gap: 1.25rem; padding: 1.25rem 1.5rem; border-right: 0; border-bottom: 1px solid var(--line); }
+  .pitch { display: none; }
+  .apps { gap: .4rem; }
+  .panel { padding: 1.75rem 1.5rem 2rem; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  a.button, button, input { transition: background-color .15s ease, border-color .15s ease; }
+}
 "#;
 
 #[cfg(test)]
