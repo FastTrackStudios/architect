@@ -15,58 +15,59 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
+  # architect's own self-hosted runner (label `architect`, THEBATTLESHIP):
+  # a warm, persistent target dir instead of a cold ubuntu-latest build
+  # every push. The toolchain and native libraries come from Task's CI
+  # dev shell — the same 1.94.0 pin rust-toolchain.toml names, with the
+  # gtk/webkit/alsa/udev headers the desktop crates link against and the
+  # wasm32 target — so this repo carries no flake of its own.
   check:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, architect]
+    timeout-minutes: 60
+    env:
+      NIX_DEV: nix develop --accept-flake-config github:FastTrackStudios/task#ci -c
     steps:
       - uses: actions/checkout@v4
-
-      # System headers the UI and storage crates link against.
-      - name: apt deps
+      - name: Persistent target dir
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev \
-            libasound2-dev libudev-dev pkg-config \
-            libxdo-dev libayatana-appindicator3-dev
-          # libxdo / appindicator are dioxus-desktop's (global-hotkey, muda,
-          # tray-icon). `cargo check` does not link, so they only bite at the
-          # `test` step — which never ran until fmt started passing.
-
-      # rust-toolchain.toml drives the version; this action honours it.
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+          dir="${CI_CACHE_DIR:-$HOME/cargo-target}/architect"
+          mkdir -p "$dir"
+          echo "CARGO_TARGET_DIR=$dir" >> "$GITHUB_ENV"
+          echo "target dir: $dir ($(du -sh "$dir" 2>/dev/null | cut -f1))"
 
       - name: fmt
-        run: cargo fmt --all -- --check
+        run: ${NIX_DEV} cargo fmt --all -- --check
 
       - name: check
-        run: cargo check --workspace --all-targets
+        run: ${NIX_DEV} cargo check --workspace --all-targets
 
       - name: clippy
-        run: cargo clippy --workspace --all-targets
+        if: ${{ !cancelled() }}
+        run: ${NIX_DEV} cargo clippy --workspace --all-targets
 
       - name: test
-        run: cargo test --workspace
-
-  wasm:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
+        if: ${{ !cancelled() }}
+        run: ${NIX_DEV} cargo test --workspace
 
       # The framework half must stay wasm-clean; the ui/story crates pull
       # native rendering (blitz/vello) and are checked natively only.
       - name: check wasm
+        if: ${{ !cancelled() }}
         run: |
-          cargo check --target wasm32-unknown-unknown \
+          ${NIX_DEV} cargo check --target wasm32-unknown-unknown \
             -p architect -p architect-atom -p architect-form \
             -p architect-permissions -p architect-permissions-proto \
             -p auth-proto -p auth-client -p crdt
           # auth-http is what a browser app signs in through (Keyflow does),
           # so its wasm build is load-bearing — with the `browser` feature,
           # which is the localStorage token store a web app actually uses.
-          cargo check --target wasm32-unknown-unknown \
+          ${NIX_DEV} cargo check --target wasm32-unknown-unknown \
             -p auth-http --features auth-http/browser
+
+      # Cargo never collects stale artifacts; bound the persistent dir.
+      - name: Bound the target dir
+        if: ${{ always() }}
+        run: |
+          rm -rf "${CARGO_TARGET_DIR}/debug/incremental"
+          ${NIX_DEV} cargo sweep --maxsize 60GB || true
+          du -sh "${CARGO_TARGET_DIR}" || true
