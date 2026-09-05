@@ -79,6 +79,10 @@ pub struct SocialProviderConfig {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SocialConfig {
     pub github: Option<SocialProviderConfig>,
+    /// The NAM capture library. A PUBLIC client — it authenticates with
+    /// PKCE and has no secret, which is why `client_secret` is empty here
+    /// and why nothing in a deployment needs to hold one.
+    pub tone3000: Option<SocialProviderConfig>,
     pub google: Option<SocialProviderConfig>,
     /// The OIDC scope an access token must carry for
     /// `GET /oauth2/linked-token`. Registered as an extra grantable
@@ -87,7 +91,35 @@ pub struct SocialConfig {
 }
 
 impl SocialConfig {
+    /// The OIDC scope a bearer must carry to be handed `provider`'s token.
+    ///
+    /// GitHub reads the configured value so an existing deployment keeps the
+    /// scope it already grants; every other provider carries its own, so a
+    /// client trusted to act as someone on TONE3000 does not thereby reach
+    /// their GitHub token.
+    /// This deployment's settings for `provider`, if it is switched on.
+    pub fn provider_config_for(
+        &self,
+        provider: crate::social::Provider,
+    ) -> Option<&SocialProviderConfig> {
+        match provider {
+            crate::social::Provider::GitHub => self.github.as_ref(),
+            crate::social::Provider::Google => self.google.as_ref(),
+            crate::social::Provider::Tone3000 => self.tone3000.as_ref(),
+        }
+    }
+
+    pub fn required_scope(&self, provider: crate::social::Provider) -> &str {
+        match provider {
+            crate::social::Provider::GitHub => self.linked_token_scope.as_str(),
+            other => other.linked_token_scope(),
+        }
+    }
+
     pub const DEFAULT_LINKED_TOKEN_SCOPE: &'static str = "forge:github";
+    /// TONE3000 documents no `scope` parameter on its authorize endpoint,
+    /// and an empty scope is not the same as no scope.
+    pub const DEFAULT_TONE3000_SCOPES: &'static str = "";
     pub const DEFAULT_GITHUB_SCOPES: &'static str = "repo read:user user:email";
     pub const DEFAULT_GOOGLE_SCOPES: &'static str = "openid email profile";
 
@@ -95,13 +127,14 @@ impl SocialConfig {
     pub fn disabled() -> Self {
         Self {
             github: None,
+            tone3000: None,
             google: None,
             linked_token_scope: Self::DEFAULT_LINKED_TOKEN_SCOPE.to_owned(),
         }
     }
 
     pub fn is_enabled(&self) -> bool {
-        self.github.is_some() || self.google.is_some()
+        self.github.is_some() || self.google.is_some() || self.tone3000.is_some()
     }
 }
 
@@ -258,6 +291,11 @@ impl ServerConfig {
                     "AUTH_GOOGLE_SCOPES",
                     SocialConfig::DEFAULT_GOOGLE_SCOPES,
                 )?,
+                tone3000: read_public_social_provider(
+                    "AUTH_TONE3000_CLIENT_ID",
+                    "AUTH_TONE3000_SCOPES",
+                    SocialConfig::DEFAULT_TONE3000_SCOPES,
+                ),
                 linked_token_scope: optional("AUTH_LINKED_TOKEN_SCOPE")
                     .unwrap_or_else(|| SocialConfig::DEFAULT_LINKED_TOKEN_SCOPE.to_owned()),
             },
@@ -294,6 +332,30 @@ fn read_social_provider(
         client_secret,
         scopes,
     }))
+}
+
+/// A provider that authenticates with PKCE rather than a secret.
+///
+/// Deliberately a different function from [`read_social_provider`] rather
+/// than an optional secret on that one: "this deployment forgot to mount
+/// GitHub's secret" and "this provider has no secret by design" are
+/// different situations, and only one of them should start the server.
+fn read_public_social_provider(
+    id_var: &'static str,
+    scopes_var: &'static str,
+    default_scopes: &str,
+) -> Option<SocialProviderConfig> {
+    let client_id = optional(id_var)?;
+    let scopes = optional(scopes_var)
+        .unwrap_or_else(|| default_scopes.to_owned())
+        .split_whitespace()
+        .map(ToOwned::to_owned)
+        .collect();
+    Some(SocialProviderConfig {
+        client_id,
+        client_secret: String::new(),
+        scopes,
+    })
 }
 
 /// Read and parse a JSON client list from `<VAR>_FILE` if set, else

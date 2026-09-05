@@ -94,6 +94,17 @@ pub fn build_engine<S>(config: &ServerConfig, storage: S) -> eyre::Result<Archit
         .oidc_extra_scope(config.social.linked_token_scope.clone())
         .jwt_issuer(config.issuer().to_owned());
 
+    // One grantable scope per configured provider, for the same reason: a
+    // client asking for `tone3000` can only be granted it if this server
+    // knows the scope exists. Per provider rather than one blanket scope so
+    // that being trusted to act as someone on TONE3000 does not also hand
+    // over their GitHub token.
+    for provider in crate::social::Provider::ALL {
+        if config.social.provider_config_for(provider).is_some() {
+            builder = builder.oidc_extra_scope(config.social.required_scope(provider).to_owned());
+        }
+    }
+
     if let Some(rp_id) = &config.passkey_rp_id {
         builder = builder
             .passkey_rp_id(rp_id.clone())
