@@ -29,11 +29,13 @@
 
 use std::sync::Arc;
 
+use chrono::Utc;
+
 use architect_auth::{
     ArchitectAuth, AuthStorage, AuthorizeOidc, BeginOAuthAuthorization, CreateEmailPasswordUser,
     CurrentSession, ExchangeOidcToken, GetOidcUserInfo, LinkOAuthAccount, RefreshSession,
     SignInOAuthAccount, SignOut, UnlinkOAuthAccount, VerifyJwt, VerifyOAuthState,
-    crypto::decrypt_secret,
+    crypto::{decrypt_secret, encrypt_secret},
     transport::{AuthCookieConfig, axum::session_token_from_headers, map_auth_error},
 };
 use auth_proto::{AuthAccount, AuthFlowError, AuthSessionBundle, AuthUser, SignInEmailPassword};
@@ -95,14 +97,26 @@ impl SocialState {
         match provider {
             Provider::GitHub => self.config.github.as_ref(),
             Provider::Google => self.config.google.as_ref(),
+            Provider::Tone3000 => self.config.tone3000.as_ref(),
         }
     }
 
     /// The providers that are actually on, in button order.
+    /// Every configured provider — what the account page offers to link.
     pub fn enabled_providers(&self) -> Vec<Provider> {
         Provider::ALL
             .into_iter()
             .filter(|p| self.provider_config(*p).is_some())
+            .collect()
+    }
+
+    /// The configured providers that can start a session — what the sign-in
+    /// and sign-up pages offer. TONE3000 is not one: it is a service an
+    /// account holds a token for, not a way to become an account.
+    pub fn sign_in_providers(&self) -> Vec<Provider> {
+        self.enabled_providers()
+            .into_iter()
+            .filter(|p| p.can_sign_in())
             .collect()
     }
 
@@ -178,6 +192,18 @@ impl ProviderClient for NoProviderClient {
         _config: &SocialProviderConfig,
         _code: &str,
         _redirect_uri: &str,
+        _verifier: Option<&str>,
+    ) -> Result<crate::social::ProviderTokens, crate::social::ProviderError> {
+        Err(crate::social::ProviderError::Exchange(
+            "no provider configured".into(),
+        ))
+    }
+
+    async fn refresh_tokens(
+        &self,
+        _provider: Provider,
+        _config: &SocialProviderConfig,
+        _refresh_token: &str,
     ) -> Result<crate::social::ProviderTokens, crate::social::ProviderError> {
         Err(crate::social::ProviderError::Exchange(
             "no provider configured".into(),
@@ -768,6 +794,16 @@ where
             "mode must be sign-in or link",
         ))?,
     };
+    // Refused here rather than later: a provider with no verified email
+    // cannot mint an account, and discovering that after the round trip
+    // would strand someone on a callback with nothing to show them.
+    if mode == Mode::SignIn && !provider.can_sign_in() {
+        return Err(ApiError::custom(
+            StatusCode::BAD_REQUEST,
+            "link_only_provider",
+            "that provider can only be linked to an existing account",
+        ));
+    }
     let return_to = state.social.safe_return_to(q.return_to.as_deref());
 
     let session_token = match mode {
@@ -797,15 +833,33 @@ where
             provider_id: provider.id().to_owned(),
         })
         .await?;
+    // PKCE where the provider requires it. The verifier is sealed into the
+    // state alongside everything else, so the callback carries it back
+    // without this server keeping per-flow rows.
+    let pkce = if provider.uses_pkce() {
+        Some(
+            crate::social::generate_pkce()
+                .map_err(|err| ApiError::from(AuthFlowError::Internal(err.to_string())))?,
+        )
+    } else {
+        None
+    };
     let flow = PendingFlow {
         mode,
         return_to,
         session_token,
+        verifier: pkce.as_ref().map(|p| p.verifier.clone()),
     };
     let sealed = flow
         .seal(&state.auth.config.secret, &nonce.token)
         .map_err(|err| ApiError::from(AuthFlowError::Internal(err.to_string())))?;
-    let url = provider.authorize_url(config, &state.social.callback_url(provider), &sealed, mode);
+    let url = provider.authorize_url(
+        config,
+        &state.social.callback_url(provider),
+        &sealed,
+        mode,
+        pkce.as_ref().map(|p| p.challenge.as_str()),
+    );
     Ok(Redirect::to(&url).into_response())
 }
 
@@ -894,6 +948,7 @@ where
             config,
             &code,
             &state.social.callback_url(provider),
+            flow.verifier.as_deref(),
         )
         .await
     {
@@ -1057,16 +1112,21 @@ where
                 .as_deref()
                 .and_then(|ct| decrypt_secret(secret, ct).ok())
                 .and_then(|id_token| email_from_id_token(&id_token)),
-            Provider::GitHub => match plaintext_access_token(secret, &row) {
-                Some(token) => state
-                    .social
-                    .client
-                    .fetch_profile(provider, &token)
-                    .await
-                    .ok()
-                    .and_then(|profile| profile.login),
-                None => None,
-            },
+            // Asked live, which doubles as proof the link still works — and
+            // goes through the refresher, so an hour-old TONE3000 token shows
+            // the handle rather than a bare id.
+            Provider::GitHub | Provider::Tone3000 => {
+                match usable_access_token(state, provider, &row).await {
+                    Some(token) => state
+                        .social
+                        .client
+                        .fetch_profile(provider, &token)
+                        .await
+                        .ok()
+                        .and_then(|profile| profile.login),
+                    None => None,
+                }
+            }
         };
         out.push(LinkedAccountView {
             provider_id: row.provider_id,
@@ -1083,6 +1143,100 @@ fn plaintext_access_token(secret: &str, row: &AuthAccount) -> Option<String> {
     row.access_token_ciphertext
         .as_deref()
         .and_then(|ct| decrypt_secret(secret, ct).ok())
+}
+
+/// Whether a stored access token is at or near the end of its life.
+///
+/// A minute of slack covers a token handed out just before expiry and used
+/// just after — the failure that otherwise surfaces as an occasional,
+/// unreproducible 401 on somebody else's machine.
+fn needs_refresh(row: &AuthAccount) -> bool {
+    row.access_token_expires_at
+        .is_some_and(|at| at <= Utc::now() + chrono::Duration::seconds(60))
+}
+
+/// A usable access token for a linked account, refreshing it if it has run
+/// out.
+///
+/// **This is the reason the tokens live here rather than on each device.**
+/// TONE3000 rotates its refresh token on every use: whoever refreshes must
+/// persist what comes back, and two devices doing that independently
+/// invalidate each other's session. One refresher, in one place, is the only
+/// arrangement that is actually correct — and it is what lets a person sign
+/// in on a phone and have their captures work without a second authorization.
+///
+/// Returns `None` when the account holds no token at all (linked by signing
+/// in rather than by an explicit link), or when a refresh was needed and
+/// failed. A failed refresh is left for the caller to report as "not linked
+/// any more", because from the outside that is what it is.
+async fn usable_access_token<S>(
+    state: &HttpState<S>,
+    provider: Provider,
+    row: &AuthAccount,
+) -> Option<String>
+where
+    S: AuthStorage,
+{
+    let secret = &state.auth.config.secret;
+    let current = plaintext_access_token(secret, row);
+    if !needs_refresh(row) {
+        return current;
+    }
+
+    let refresh_token = row
+        .refresh_token_ciphertext
+        .as_deref()
+        .and_then(|ct| decrypt_secret(secret, ct).ok())?;
+    let config = state.social.provider_config(provider)?;
+
+    let refreshed = match state
+        .social
+        .client
+        .refresh_tokens(provider, config, &refresh_token)
+        .await
+    {
+        Ok(tokens) => tokens,
+        Err(e) => {
+            tracing::warn!(
+                provider = provider.id(),
+                error = %e,
+                "refreshing a linked token failed"
+            );
+            return None;
+        }
+    };
+
+    let expires_at = refreshed
+        .expires_in
+        .map(|secs| Utc::now() + chrono::Duration::seconds(secs));
+    // The rotated refresh token MUST be stored, or this is the last refresh
+    // this account ever does.
+    let refresh_ciphertext = refreshed
+        .refresh_token
+        .as_deref()
+        .and_then(|token| encrypt_secret(secret, token).ok());
+    let access_ciphertext = encrypt_secret(secret, &refreshed.access_token).ok();
+
+    if let Err(e) = state
+        .auth
+        .storage
+        .update_oauth_account_tokens(
+            provider.id(),
+            &row.account_id,
+            access_ciphertext,
+            refresh_ciphertext,
+            None,
+            expires_at,
+            None,
+            refreshed.scope.clone(),
+        )
+        .await
+    {
+        // The token in hand is still good for its hour; failing to persist it
+        // costs a refresh next time, not this call.
+        tracing::error!(provider = provider.id(), error = %e, "could not persist a refreshed token");
+    }
+    Some(refreshed.access_token)
 }
 
 /// Why an unlink did not happen.
@@ -1199,11 +1353,15 @@ pub struct LinkedTokenQuery {
 /// * `401 invalid_token` — no or unverifiable bearer
 /// * `403 insufficient_scope` — the token lacks the scope
 /// * `404 not_linked` — the user has no such account, or it holds no token
-/// * `400 unsupported_provider` — only `github` hands tokens out
+/// * `400 unknown_provider` — no provider by that name is configured
 ///
-/// `login` is fetched live from GitHub with the token, which doubles as
-/// proof the token still works; if that lookup fails the token is still
-/// returned and `login` is `null`.
+/// The token is refreshed first if it has run out, and the rotated refresh
+/// token is persisted — see [`usable_access_token`], which is the reason
+/// these tokens are held centrally at all.
+///
+/// `login` is fetched live with the token, which doubles as proof the token
+/// still works; if that lookup fails the token is still returned and `login`
+/// is `null`.
 async fn linked_token<S>(
     State(state): State<HttpState<S>>,
     headers: HeaderMap,
@@ -1216,16 +1374,25 @@ where
 
     let outcome = |name: &'static str| wide::set("auth.linked_token.outcome", name);
 
-    let provider = q.provider.as_deref().unwrap_or("github");
-    if provider != Provider::GitHub.id() {
-        outcome("unsupported_provider");
+    // GitHub by default, because this endpoint predates every other
+    // provider and existing callers do not send the parameter.
+    let requested = q.provider.as_deref().unwrap_or(Provider::GitHub.id());
+    let Some(provider) = Provider::parse(requested) else {
+        outcome("unknown_provider");
         return Err(ApiError::custom(
             StatusCode::BAD_REQUEST,
-            "unsupported_provider",
-            "only provider=github is supported",
+            "unknown_provider",
+            "no provider by that name",
+        ));
+    };
+    if state.social.provider_config(provider).is_none() {
+        outcome("unknown_provider");
+        return Err(ApiError::custom(
+            StatusCode::BAD_REQUEST,
+            "unknown_provider",
+            "that provider is not configured on this server",
         ));
     }
-    let provider = Provider::GitHub;
     wide::set("auth.linked_token.provider", provider.id());
 
     let Some(access_token) = bearer(&headers) else {
@@ -1250,7 +1417,7 @@ where
             ));
         }
     };
-    let required = state.social.config.linked_token_scope.as_str();
+    let required = state.social.config.required_scope(provider);
     let granted = claims
         .extra
         .as_ref()
@@ -1279,7 +1446,6 @@ where
     };
     wide::set_display("auth.linked_token.user_id", user_id);
 
-    let secret = &state.auth.config.secret;
     let row = state
         .auth
         .storage
@@ -1292,18 +1458,18 @@ where
         return Err(ApiError::custom(
             StatusCode::NOT_FOUND,
             "not_linked",
-            "no GitHub account is linked to this user",
+            "no such account is linked to this user",
         ));
     };
-    let Some(token) = plaintext_access_token(secret, &row) else {
-        // Linked by signing in with GitHub rather than by an explicit
-        // link, so no token was kept. The fix is to link (again) from
-        // the account page.
+    // Refreshes if the stored token has run out, and persists the rotated
+    // refresh token. `None` also covers a link made by signing in rather
+    // than by an explicit link, where no token was kept.
+    let Some(token) = usable_access_token(&state, provider, &row).await else {
         outcome("not_linked");
         return Err(ApiError::custom(
             StatusCode::NOT_FOUND,
             "not_linked",
-            "the linked GitHub account holds no token; link it from the account page",
+            "the linked account holds no usable token; link it again from the account page",
         ));
     };
     let login = state

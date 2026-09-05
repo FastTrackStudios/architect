@@ -1,4 +1,4 @@
-//! Upstream OAuth providers: GitHub and Google.
+//! Upstream OAuth providers: GitHub, Google and TONE3000.
 //!
 //! The engine (`architect-auth`) owns the *model* — linked accounts,
 //! CSRF state, the encrypted token store — but deliberately talks to no
@@ -33,10 +33,34 @@ use crate::config::SocialProviderConfig;
 pub enum Provider {
     GitHub,
     Google,
+    /// The NAM capture library. Unlike the other two this is not a way to
+    /// sign in — nobody has a FastTrackStudio account *because* they have a
+    /// TONE3000 one — it is only ever linked to an account that exists, so
+    /// the apps can browse and download captures as that person.
+    Tone3000,
 }
 
 impl Provider {
-    pub const ALL: [Provider; 2] = [Provider::GitHub, Provider::Google];
+    pub const ALL: [Provider; 3] = [Provider::GitHub, Provider::Google, Provider::Tone3000];
+
+    /// Whether this provider can create or resume a session.
+    ///
+    /// TONE3000 cannot: its profile carries no verified email, and an
+    /// identity provider is a different thing from a service you hold a
+    /// token for. Letting it sign people in would mint accounts with no way
+    /// to recover them.
+    pub fn can_sign_in(self) -> bool {
+        !matches!(self, Provider::Tone3000)
+    }
+
+    /// Whether the flow must carry PKCE.
+    ///
+    /// TONE3000 requires `code_challenge` on the authorization request and
+    /// the matching `code_verifier` at the token endpoint; GitHub and Google
+    /// are confidential clients here and authenticate with their secret.
+    pub fn uses_pkce(self) -> bool {
+        matches!(self, Provider::Tone3000)
+    }
 
     /// The id used in paths, in `provider_id` on stored accounts, and in
     /// the engine's built-in provider table.
@@ -44,6 +68,7 @@ impl Provider {
         match self {
             Provider::GitHub => "github",
             Provider::Google => "google",
+            Provider::Tone3000 => "tone3000",
         }
     }
 
@@ -52,6 +77,20 @@ impl Provider {
         match self {
             Provider::GitHub => "GitHub",
             Provider::Google => "Google",
+            Provider::Tone3000 => "TONE3000",
+        }
+    }
+
+    /// The OIDC scope an access token must carry to be handed this
+    /// provider's linked token.
+    ///
+    /// One scope per provider, so a client granted the right to act as
+    /// someone on TONE3000 does not thereby get their GitHub token.
+    pub fn linked_token_scope(self) -> &'static str {
+        match self {
+            Provider::GitHub => "forge:github",
+            Provider::Google => "forge:google",
+            Provider::Tone3000 => "tone3000",
         }
     }
 
@@ -63,6 +102,7 @@ impl Provider {
         match self {
             Provider::GitHub => "https://github.com/login/oauth/authorize",
             Provider::Google => "https://accounts.google.com/o/oauth2/v2/auth",
+            Provider::Tone3000 => "https://www.tone3000.com/api/v1/oauth/authorize",
         }
     }
 
@@ -70,6 +110,7 @@ impl Provider {
         match self {
             Provider::GitHub => "https://github.com/login/oauth/access_token",
             Provider::Google => "https://oauth2.googleapis.com/token",
+            Provider::Tone3000 => "https://www.tone3000.com/api/v1/oauth/token",
         }
     }
 
@@ -77,6 +118,7 @@ impl Provider {
         match self {
             Provider::GitHub => "https://api.github.com/user",
             Provider::Google => "https://openidconnect.googleapis.com/v1/userinfo",
+            Provider::Tone3000 => "https://www.tone3000.com/api/v1/user",
         }
     }
 
@@ -93,14 +135,23 @@ impl Provider {
         redirect_uri: &str,
         state: &str,
         mode: Mode,
+        challenge: Option<&str>,
     ) -> String {
         let mut params: Vec<(&str, String)> = vec![
             ("client_id", config.client_id.clone()),
             ("redirect_uri", redirect_uri.to_owned()),
             ("response_type", "code".to_owned()),
-            ("scope", config.scopes.join(" ")),
             ("state", state.to_owned()),
         ];
+        // TONE3000 documents no `scope` parameter, and sending an empty one
+        // is not the same as sending none.
+        if !config.scopes.is_empty() {
+            params.push(("scope", config.scopes.join(" ")));
+        }
+        if let Some(challenge) = challenge {
+            params.push(("code_challenge", challenge.to_owned()));
+            params.push(("code_challenge_method", "S256".to_owned()));
+        }
         if self == Provider::Google {
             params.push(("prompt", "select_account".to_owned()));
             if mode == Mode::Link {
@@ -177,6 +228,22 @@ pub trait ProviderClient: Send + Sync {
         config: &SocialProviderConfig,
         code: &str,
         redirect_uri: &str,
+        verifier: Option<&str>,
+    ) -> Result<ProviderTokens, ProviderError>;
+
+    /// Mint a fresh access token from a stored refresh token.
+    ///
+    /// Only meaningful for providers whose access tokens expire — which is
+    /// why it exists at all: a GitHub token is good until revoked, but a
+    /// TONE3000 access token lasts an hour and its refresh token ROTATES on
+    /// every use, so whoever refreshes must also persist what comes back.
+    /// Doing that in one place is the reason these tokens live on the server
+    /// rather than on each device.
+    async fn refresh_tokens(
+        &self,
+        provider: Provider,
+        config: &SocialProviderConfig,
+        refresh_token: &str,
     ) -> Result<ProviderTokens, ProviderError>;
 
     async fn fetch_profile(
@@ -231,6 +298,17 @@ struct GitHubEmail {
     verified: bool,
 }
 
+/// `GET /api/v1/user` — the account a token belongs to.
+#[derive(serde::Deserialize)]
+struct Tone3000User {
+    /// A UUID string, and the stable identity of the account.
+    id: String,
+    #[serde(default)]
+    username: String,
+    #[serde(default)]
+    avatar_url: Option<String>,
+}
+
 #[derive(serde::Deserialize)]
 struct GoogleUser {
     sub: String,
@@ -249,16 +327,67 @@ impl ProviderClient for HttpProviderClient {
         config: &SocialProviderConfig,
         code: &str,
         redirect_uri: &str,
+        verifier: Option<&str>,
     ) -> Result<ProviderTokens, ProviderError> {
-        let form = [
+        let mut form: Vec<(&str, &str)> = vec![
             ("client_id", config.client_id.as_str()),
-            ("client_secret", config.client_secret.as_str()),
             ("code", code),
             ("redirect_uri", redirect_uri),
             ("grant_type", "authorization_code"),
         ];
+        // A PKCE client proves itself with the verifier instead of a secret,
+        // and TONE3000's token endpoint documents no `client_secret` field.
+        // Sending an empty one is worse than sending none: it reads as a
+        // confidential client failing to authenticate.
+        if let Some(verifier) = verifier {
+            form.push(("code_verifier", verifier));
+        }
+        if !config.client_secret.is_empty() {
+            form.push(("client_secret", config.client_secret.as_str()));
+        }
         // GitHub answers with form-encoding unless told otherwise; Google
         // is JSON regardless. Asking for JSON works for both.
+        let response: TokenResponse = self
+            .http
+            .post(provider.token_endpoint())
+            .header(reqwest::header::ACCEPT, "application/json")
+            .form(&form)
+            .send()
+            .await?
+            .json()
+            .await?;
+        if let Some(error) = response.error {
+            return Err(ProviderError::Exchange(format!(
+                "{error}: {}",
+                response.error_description.unwrap_or_default()
+            )));
+        }
+        let access_token = response
+            .access_token
+            .ok_or_else(|| ProviderError::Exchange("no access_token in response".into()))?;
+        Ok(ProviderTokens {
+            access_token,
+            refresh_token: response.refresh_token,
+            id_token: response.id_token,
+            expires_in: response.expires_in,
+            scope: response.scope,
+        })
+    }
+
+    async fn refresh_tokens(
+        &self,
+        provider: Provider,
+        config: &SocialProviderConfig,
+        refresh_token: &str,
+    ) -> Result<ProviderTokens, ProviderError> {
+        let mut form: Vec<(&str, &str)> = vec![
+            ("client_id", config.client_id.as_str()),
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh_token),
+        ];
+        if !config.client_secret.is_empty() {
+            form.push(("client_secret", config.client_secret.as_str()));
+        }
         let response: TokenResponse = self
             .http
             .post(provider.token_endpoint())
@@ -369,6 +498,31 @@ impl ProviderClient for HttpProviderClient {
                     image: user.picture,
                 })
             }
+            Provider::Tone3000 => {
+                let user: Tone3000User = self
+                    .http
+                    .get(provider.userinfo_endpoint())
+                    .bearer_auth(access_token)
+                    .send()
+                    .await?
+                    .error_for_status()?
+                    .json()
+                    .await?;
+                if user.id.is_empty() {
+                    return Err(ProviderError::Profile("empty id".into()));
+                }
+                // No email, and none is wanted: TONE3000 is a service this
+                // account holds a token for, not a way to become one. An
+                // email here would be an identity claim we cannot verify.
+                Ok(Profile {
+                    account_id: user.id,
+                    login: (!user.username.is_empty()).then_some(user.username.clone()),
+                    email: None,
+                    email_verified: false,
+                    name: (!user.username.is_empty()).then_some(user.username),
+                    image: user.avatar_url,
+                })
+            }
         }
     }
 }
@@ -395,6 +549,37 @@ pub struct PendingFlow {
     /// though the callback arrives from a browser with no cookie.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_token: Option<String>,
+    /// The PKCE verifier, for providers that require it.
+    ///
+    /// It travels here rather than in a server-side table because this
+    /// whole struct is already encrypted and authenticated with the server
+    /// secret before it becomes the OAuth `state`, and it is already the
+    /// thing the callback must present to prove it belongs to the request
+    /// that started. A verifier needs exactly those properties and nothing
+    /// more: it is single-use, short-lived, and meaningless without the
+    /// code it is paired with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verifier: Option<String>,
+}
+
+/// A PKCE verifier and its S256 challenge.
+pub struct Pkce {
+    pub verifier: String,
+    pub challenge: String,
+}
+
+/// Mint a PKCE pair.
+///
+/// The verifier is the engine's own token generator — 32 bytes of OS
+/// randomness, base64url — which is exactly what RFC 7636 asks for.
+pub fn generate_pkce() -> Result<Pkce, architect_auth::crypto::TokenError> {
+    use sha2::{Digest, Sha256};
+    let verifier = architect_auth::crypto::generate_token()?;
+    let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
+    Ok(Pkce {
+        verifier,
+        challenge,
+    })
 }
 
 impl PendingFlow {
@@ -500,6 +685,7 @@ mod tests {
             "https://auth.example.com/auth/social/github/callback",
             "the-state",
             Mode::SignIn,
+            None,
         );
         assert!(url.starts_with("https://github.com/login/oauth/authorize?"));
         assert!(url.contains("client_id=gh-client"));
@@ -519,11 +705,94 @@ mod tests {
             client_secret: "s".into(),
             scopes: vec!["openid".into(), "email".into(), "profile".into()],
         };
-        let sign_in = Provider::Google.authorize_url(&config, "https://x/cb", "s", Mode::SignIn);
-        let link = Provider::Google.authorize_url(&config, "https://x/cb", "s", Mode::Link);
+        let sign_in =
+            Provider::Google.authorize_url(&config, "https://x/cb", "s", Mode::SignIn, None);
+        let link = Provider::Google.authorize_url(&config, "https://x/cb", "s", Mode::Link, None);
         assert!(sign_in.contains("prompt=select_account"));
         assert!(!sign_in.contains("access_type=offline"));
         assert!(link.contains("access_type=offline"));
+    }
+
+    /// TONE3000 requires PKCE, and documents no `scope` parameter — an
+    /// empty one is not the same as none.
+    #[test]
+    fn tone3000_carries_pkce_and_no_scope() {
+        let config = SocialProviderConfig {
+            client_id: "t3k_pub_abc".into(),
+            client_secret: String::new(),
+            scopes: Vec::new(),
+        };
+        let url = Provider::Tone3000.authorize_url(
+            &config,
+            "https://auth.example.com/auth/social/tone3000/callback",
+            "the-state",
+            Mode::Link,
+            Some("the-challenge"),
+        );
+        assert!(url.starts_with("https://www.tone3000.com/api/v1/oauth/authorize?"));
+        assert!(url.contains("client_id=t3k_pub_abc"));
+        assert!(url.contains("code_challenge=the-challenge"));
+        assert!(url.contains("code_challenge_method=S256"));
+        assert!(url.contains("state=the-state"));
+        assert!(!url.contains("scope="), "no scope parameter at all: {url}");
+        assert!(!url.contains("client_secret"));
+    }
+
+    /// A PKCE pair must actually verify — a challenge that is not the
+    /// SHA-256 of its verifier fails at the token endpoint, on someone
+    /// else's machine, with a message that does not say why.
+    #[test]
+    fn a_generated_pkce_pair_verifies() {
+        use base64::Engine as _;
+        use sha2::{Digest, Sha256};
+        let pkce = generate_pkce().expect("pkce");
+        let expected = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(Sha256::digest(pkce.verifier.as_bytes()));
+        assert_eq!(pkce.challenge, expected);
+        assert!(pkce.verifier.len() >= 43, "RFC 7636 wants 43..=128 chars");
+    }
+
+    /// TONE3000 is a service you hold a token for, not a way to become an
+    /// account: it has no verified email to build one from.
+    #[test]
+    fn tone3000_is_link_only() {
+        assert!(!Provider::Tone3000.can_sign_in());
+        assert!(Provider::GitHub.can_sign_in());
+        assert!(Provider::Google.can_sign_in());
+    }
+
+    /// One scope per provider: being trusted to act as someone on TONE3000
+    /// must not also hand over their GitHub token.
+    #[test]
+    fn linked_token_scopes_are_not_shared_between_providers() {
+        let scopes = [
+            Provider::GitHub.linked_token_scope(),
+            Provider::Google.linked_token_scope(),
+            Provider::Tone3000.linked_token_scope(),
+        ];
+        let unique: std::collections::HashSet<_> = scopes.iter().collect();
+        assert_eq!(unique.len(), scopes.len(), "{scopes:?}");
+    }
+
+    #[test]
+    fn a_sealed_flow_carries_the_verifier_back() {
+        let flow = PendingFlow {
+            mode: Mode::Link,
+            return_to: "/account".into(),
+            session_token: None,
+            verifier: Some("the-verifier".into()),
+        };
+        let sealed = flow
+            .seal("a-server-secret-that-is-long-enough", "nonce")
+            .unwrap();
+        assert!(
+            !sealed.contains("the-verifier"),
+            "the verifier must not be readable in the state parameter"
+        );
+        let (nonce, back) =
+            PendingFlow::unseal("a-server-secret-that-is-long-enough", &sealed).expect("unseals");
+        assert_eq!(nonce, "nonce");
+        assert_eq!(back.verifier.as_deref(), Some("the-verifier"));
     }
 
     /// The state parameter is the only thing that connects the callback
@@ -535,6 +804,7 @@ mod tests {
             mode: Mode::Link,
             return_to: "/account?tab=linked".into(),
             session_token: Some("session-token-value".into()),
+            verifier: None,
         };
         let state = flow.seal(SECRET, "nonce-abc").expect("seal");
         assert!(state.starts_with("nonce-abc."));

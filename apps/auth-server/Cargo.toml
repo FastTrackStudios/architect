@@ -41,6 +41,8 @@ sea-orm-migration.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+# PKCE challenges (social.rs) — TONE3000 requires S256.
+sha2.workspace = true
 tokio.workspace = true
 tower-http = { workspace = true, features = ["cors", "trace"] }
 tracing.workspace = true

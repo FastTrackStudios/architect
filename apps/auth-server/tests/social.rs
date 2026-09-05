@@ -105,6 +105,7 @@ impl ProviderClient for FakeProvider {
         _config: &SocialProviderConfig,
         code: &str,
         redirect_uri: &str,
+        _verifier: Option<&str>,
     ) -> Result<ProviderTokens, ProviderError> {
         self.exchanges
             .lock()
@@ -120,6 +121,15 @@ impl ProviderClient for FakeProvider {
             expires_in: None,
             scope: Some("repo,read:user,user:email".into()),
         })
+    }
+
+    async fn refresh_tokens(
+        &self,
+        _provider: Provider,
+        _config: &SocialProviderConfig,
+        _refresh_token: &str,
+    ) -> Result<ProviderTokens, ProviderError> {
+        Err(ProviderError::Exchange("refresh not stubbed".into()))
     }
 
     async fn fetch_profile(
