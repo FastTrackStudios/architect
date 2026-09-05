@@ -782,7 +782,9 @@ mod tests {
             session_token: None,
             verifier: Some("the-verifier".into()),
         };
-        let sealed = flow.seal("a-server-secret-that-is-long-enough", "nonce").unwrap();
+        let sealed = flow
+            .seal("a-server-secret-that-is-long-enough", "nonce")
+            .unwrap();
         assert!(
             !sealed.contains("the-verifier"),
             "the verifier must not be readable in the state parameter"
