@@ -59,6 +59,7 @@ pub fn knob<'a>(
 /// hand-written story that points at a `RenderFn`). Mismatched signatures
 /// are UB.
 #[inline]
+#[must_use]
 pub unsafe fn render_fn(story: &Story) -> RenderFn {
     unsafe { std::mem::transmute::<*const (), RenderFn>(story.render) }
 }
@@ -102,6 +103,12 @@ pub struct StoryDef {
 }
 
 impl StoryDef {
+    /// A `StoryDef` with every optional field unset.
+    ///
+    /// The `render` thunk is a sentinel: `#[story]` always overwrites it,
+    /// so reaching it means a `StoryDef` was built by hand and left
+    /// incomplete.
+    #[allow(clippy::panic)]
     pub const DEFAULT: Self = Self {
         name: "",
         category: None,
@@ -114,6 +121,13 @@ impl StoryDef {
 }
 
 /// `const fn` builder so stories can be `static` items.
+// `fn` pointer -> `*const ()` so `Story` can be a plain `static`. There
+// is no `From`/`TryFrom` for this in a `const fn`; the cast is exact and
+// is reversed by the matching `transmute` at call time.
+// `def` by value: `const fn` cannot move out of a reference, and this is
+// the `static`-item constructor.
+#[allow(clippy::as_conversions, clippy::needless_pass_by_value)]
+#[must_use]
 pub const fn const_story(def: StoryDef) -> Story {
     Story {
         name: def.name,

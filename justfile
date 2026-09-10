@@ -34,4 +34,16 @@ test:
 
 lint:
     cargo fmt --all -- --check
-    cargo clippy --workspace --all-targets -- -D warnings
+    cargo clippy --workspace --all-targets --all-features
+
+# Release tags must order the commits the way their numbers do — six
+# repos pin this one by tag, and that is the only question they ask.
+tags:
+    cargo run -p xtask -- tags --verbose
+
+# Repoint every architect-owned git dep in a consumer at ONE tag.
+# Bumping them one at a time is how `signal` ended up with three
+# different checkouts of this repo in one lockfile.
+#   just fleet-bump v0.9.0 ../signal ../task
+fleet-bump TAG +MANIFESTS:
+    cargo run -p xtask -- fleet-bump {{TAG}} {{MANIFESTS}}

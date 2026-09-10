@@ -43,7 +43,7 @@ use dioxus_router::{
 /// On web the URL bar is shareable / refreshable; on desktop / native
 /// the router uses an in-memory history so back / forward keys work
 /// even though there is no address bar.
-#[derive(Routable, Clone, PartialEq)]
+#[derive(Routable, Clone, PartialEq, Eq)]
 #[rustfmt::skip]
 pub enum Route {
     #[layout(Chrome)]
@@ -146,7 +146,7 @@ pub fn Lookbook(props: LookbookProps) -> Element {
                 stories
                     .iter()
                     .find(|s| s.name == h)
-                    .and_then(|s| s.category.map(|c| c.to_string()))
+                    .and_then(|s| s.category.map(std::string::ToString::to_string))
             })
     });
 
@@ -255,8 +255,9 @@ fn ComponentRoute(category: String) -> Element {
         .groups
         .iter()
         .find(|(c, _)| *c == category)
-        .map(|(c, _)| *c)
-        .unwrap_or_else(|| Box::leak(category.into_boxed_str()));
+        // `&*`: `Box::leak` hands back `&mut str`, and both arms of a
+        // `map_or_else` must agree on mutability.
+        .map_or_else(|| &*Box::leak(category.into_boxed_str()), |(c, _)| *c);
 
     rsx! {
         ComponentView { category: category_static, stories }
@@ -548,7 +549,10 @@ fn KnobControl(
         KnobKind::Enum { variants } => {
             let selected = match &current {
                 Some(KnobValue::EnumVariant(v)) => v.to_string(),
-                _ => variants.first().map(|s| s.to_string()).unwrap_or_default(),
+                _ => variants
+                    .first()
+                    .map(std::string::ToString::to_string)
+                    .unwrap_or_default(),
             };
             rsx! {
                 select {

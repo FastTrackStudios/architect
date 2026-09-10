@@ -18,7 +18,7 @@
 use dioxus::prelude::*;
 
 /// The lifecycle of one typed client bundle.
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum ConnectionState<C> {
     /// The connect (+ retry policy) hasn't resolved yet.
     Connecting,
@@ -44,6 +44,7 @@ impl<C: 'static> Copy for Connection<C> {}
 
 impl<C: Clone + 'static> Connection<C> {
     /// The current state (clones the bundle — client handles are cheap).
+    #[must_use]
     pub fn state(&self) -> ConnectionState<C> {
         self.state.read().clone()
     }
@@ -51,6 +52,7 @@ impl<C: Clone + 'static> Connection<C> {
     /// The clients if the connection is up, `None` while connecting or
     /// after a failure. The reactive read: a hook that calls this re-runs
     /// when the connection resolves.
+    #[must_use]
     pub fn ready(&self) -> Option<C> {
         match &*self.state.read() {
             ConnectionState::Ready(c) => Some(c.clone()),
@@ -59,6 +61,7 @@ impl<C: Clone + 'static> Connection<C> {
     }
 
     /// The connect failure, if there is one.
+    #[must_use]
     pub fn error(&self) -> Option<String> {
         match &*self.state.read() {
             ConnectionState::Failed(e) => Some(e.clone()),
@@ -67,6 +70,7 @@ impl<C: Clone + 'static> Connection<C> {
     }
 
     /// True until the connect future settles.
+    #[must_use]
     pub fn is_connecting(&self) -> bool {
         matches!(&*self.state.read(), ConnectionState::Connecting)
     }
@@ -80,6 +84,7 @@ impl<C: Clone + 'static> Connection<C> {
     /// edit). Monotonic for the lifetime of the providing component, so
     /// caches keyed on a caller can compare generations to decide whether a
     /// cached value still belongs to the live connection.
+    #[must_use]
     pub fn generation(&self) -> u64 {
         (self.generation)()
     }
@@ -90,6 +95,7 @@ impl<C: Clone + 'static> Connection<C> {
     /// re-establish (dioxus polls resource futures in a reactive
     /// context); inside a `use_future` the subscription is silently
     /// useless. Loops should peek.
+    #[must_use]
     pub fn generation_now(&self) -> u64 {
         *self.generation.peek()
     }
@@ -108,7 +114,11 @@ impl<C: Clone + 'static> Connection<C> {
         let mut state = self.state;
         let mut generation = self.generation;
         state.set(ConnectionState::Ready(c));
-        generation += 1;
+        // `peek`, not a plain read: dioxus polls these futures in a REACTIVE
+        // context, so reading a signal this loop also writes would subscribe the
+        // loop to its own writes and restart it forever.
+        let next = generation.peek().saturating_add(1);
+        generation.set(next);
     }
 
     /// Transition into `Connecting`. Returns `true` if the state actually
@@ -124,6 +134,9 @@ impl<C: Clone + 'static> Connection<C> {
 
     /// Transition into `Failed(err)`. Returns `true` if the state actually
     /// changed (different variant, or a different error message).
+    // NOT `#[must_use]`: setting the state and ignoring the "did it
+    // change" answer is the ordinary call.
+    #[allow(clippy::must_use_candidate)]
     pub fn set_failed(&self, err: String) -> bool {
         if matches!(&*self.state.peek(), ConnectionState::Failed(e) if *e == err) {
             return false;
@@ -136,26 +149,32 @@ impl<C: Clone + 'static> Connection<C> {
 
 /// Pull the connection for client bundle `C` that the shell provided with
 /// [`use_connect`].
+#[must_use]
 pub fn use_connection<C: 'static>() -> Connection<C> {
     use_context::<Connection<C>>()
 }
 
 /// Create an unresolved `Connection<C>` (state `Connecting`, generation 0)
-/// and provide it as context. The building block the connect hooks share —
-/// and the entry point for *external* supervisors (e.g. `architect`'s
-/// `use_connect_supervised`) that drive the state machine through
-/// [`Connection::set_ready`] / [`set_connecting`](Connection::set_connecting)
-/// / [`set_failed`](Connection::set_failed).
+/// and provide it as context.
+///
+/// The building block the connect hooks share — and the entry point for
+/// *external* supervisors (e.g. `architect`'s `use_connect_supervised`) that
+/// drive the state machine through [`Connection::set_ready`] /
+/// [`set_connecting`](Connection::set_connecting) /
+/// [`set_failed`](Connection::set_failed).
+#[must_use]
 pub fn use_connection_root<C: 'static>() -> Connection<C> {
     let state = use_signal(|| ConnectionState::<C>::Connecting);
     let generation = use_signal(|| 0u64);
     use_context_provider(|| Connection { state, generation })
 }
 
-/// Reactive sibling of [`use_connect`]: re-runs `connect` whenever a
-/// signal it reads **synchronously** (before its first await) changes —
-/// an org/workspace switcher, an editable server URL — resetting the
-/// connection to `Connecting` and re-establishing.
+/// Reactive sibling of [`use_connect`].
+///
+/// Re-runs `connect` whenever a signal it reads **synchronously** (before
+/// its first await) changes — an org/workspace switcher, an editable
+/// server URL — resetting the connection to `Connecting` and
+/// re-establishing.
 ///
 /// ```ignore
 /// // app root: reconnects when the active org changes
@@ -200,7 +219,9 @@ where
 
 /// Establish a client bundle once at the app root and provide it as
 /// context: starts `Connecting`, runs `connect` on mount, resolves to
-/// `Ready`/`Failed`. Call once per bundle type `C`; features pull it with
+/// `Ready`/`Failed`.
+///
+/// Call once per bundle type `C`; features pull it with
 /// [`use_connection::<C>()`](use_connection).
 pub fn use_connect<C, F, Fut>(connect: F) -> Connection<C>
 where

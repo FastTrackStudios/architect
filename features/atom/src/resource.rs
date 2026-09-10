@@ -33,6 +33,7 @@ impl<T: 'static, E: 'static> Copy for Async<T, E> {}
 impl<T: Clone + 'static, E: Clone + 'static> Async<T, E> {
     /// The current async state (stale-while-revalidate). Read in render and
     /// `match` over it.
+    #[must_use]
     pub fn state(&self) -> AtomResult<T, E> {
         self.state.read().clone()
     }
@@ -41,7 +42,7 @@ impl<T: Clone + 'static, E: Clone + 'static> Async<T, E> {
     /// one settles. The Dioxus analog of effect-atom's `useAtomRefresh`.
     pub fn refresh(&self) {
         let mut revision = self.revision;
-        let next = *revision.read() + 1;
+        let next = revision.read().saturating_add(1);
         revision.set(next);
     }
 }
@@ -88,10 +89,10 @@ where
     // during render. `peek` avoids subscribing to `state` inside its own
     // writer (which would loop).
     use_effect(move || {
-        let next = match &*resource.read() {
-            None => state.peek().clone().begin_reload(),
-            Some(outcome) => state.peek().clone().settle(outcome.clone()),
-        };
+        let next = (*resource.read()).as_ref().map_or_else(
+            || state.peek().clone().begin_reload(),
+            |outcome| state.peek().clone().settle(outcome.clone()),
+        );
         state.set(next);
     });
 

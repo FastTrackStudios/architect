@@ -1,4 +1,4 @@
-//! VStack and HStack — flex containers with configurable gap.
+//! `VStack` and `HStack` — flex containers with configurable gap.
 //!
 //! Uses inline `style` for gap instead of Tailwind classes to avoid
 //! the dynamic class name issue where Tailwind can't see `gap-{n}`
@@ -12,10 +12,9 @@ fn spacing_to_rem(value: &str) -> String {
     if value == "0" {
         return "0".into();
     }
-    match value.parse::<f64>() {
-        Ok(n) => format!("{}rem", n * 0.25),
-        Err(_) => "0.5rem".into(), // fallback
-    }
+    value
+        .parse::<f64>()
+        .map_or_else(|_| "0.5rem".into(), |n| format!("{}rem", n * 0.25))
 }
 
 /// Vertical flex container (column direction).

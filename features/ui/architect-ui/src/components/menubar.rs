@@ -133,7 +133,7 @@ pub fn MenubarItem(props: MenubarItemProps) -> Element {
     }
 }
 
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone, PartialEq, Eq)]
 pub struct MenubarSeparatorProps {
     #[props(default)]
     pub class: String,

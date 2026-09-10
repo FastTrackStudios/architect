@@ -246,7 +246,7 @@ pub fn side_sheet_default() -> Element {
             }
             Sheet {
                 open: open(),
-                on_close: move |_| open.set(false),
+                on_close: move |()| open.set(false),
                 side: SheetSide::Right,
                 SheetHeader {
                     SheetTitle { "Edit profile" }

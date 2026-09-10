@@ -48,7 +48,7 @@ pub enum NoticeLevel {
 impl NoticeLevel {
     /// Default time-on-screen for this severity, in ms.
     #[must_use]
-    pub fn default_ttl_ms(self) -> u32 {
+    pub const fn default_ttl_ms(self) -> u32 {
         match self {
             Self::Success => 3_000,
             Self::Info => 4_000,
@@ -59,7 +59,7 @@ impl NoticeLevel {
 }
 
 /// One queued notice.
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Notice {
     /// Stable id for dismissal.
     pub id: u64,
@@ -74,17 +74,11 @@ pub struct Notice {
 }
 
 /// A `Copy` handle to the app-wide notice queue.
+#[derive(Clone, Copy)]
 pub struct Notifications {
     items: Signal<Vec<Notice>>,
     seq: Signal<u64>,
 }
-
-impl Clone for Notifications {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-impl Copy for Notifications {}
 
 impl Notifications {
     /// Queue an error notice. Returns the notice id (for programmatic
@@ -129,13 +123,13 @@ impl Notifications {
                 .iter_mut()
                 .find(|n| n.level == level && n.message == message)
             {
-                existing.count += 1;
+                existing.count = existing.count.saturating_add(1);
                 existing.ttl_ms = ttl_ms;
                 return existing.id;
             }
         }
         let mut seq = self.seq;
-        let id = *seq.peek() + 1;
+        let id = seq.peek().saturating_add(1);
         seq.set(id);
         let mut list = items.write();
         list.push(Notice {
@@ -173,11 +167,13 @@ impl Notifications {
     }
 
     /// Snapshot of the queue (reactive read — re-renders on change).
+    #[must_use]
     pub fn list(&self) -> Vec<Notice> {
         self.items.read().clone()
     }
 
     /// Non-reactive snapshot (for timers / event handlers).
+    #[must_use]
     pub fn list_now(&self) -> Vec<Notice> {
         self.items.peek().clone()
     }
@@ -192,13 +188,16 @@ pub fn provide_notifications() -> Notifications {
 }
 
 /// Pull the queue anywhere under the provider.
+#[must_use]
 pub fn use_notifications() -> Notifications {
     use_context::<Notifications>()
 }
 
-/// Like [`use_notifications`] but tolerant of a missing provider —
+/// Like [`use_notifications`] but tolerant of a missing provider.
+///
 /// [`crate::use_mutation`] (and the derive-emitted CRDT mutations) use
-/// this so writes work (minus auto-report) in apps that haven't opted in.
+/// this so writes work — minus auto-report — in apps that haven't opted
+/// in.
 pub fn try_use_notifications() -> Option<Notifications> {
     use_hook(try_consume_context::<Notifications>)
 }

@@ -25,16 +25,10 @@ use std::collections::HashMap;
 use dioxus::prelude::*;
 
 /// A `Copy` handle to the keyed revision registry.
+#[derive(Clone, Copy)]
 pub struct Reactivity {
     keys: CopyValue<HashMap<&'static str, Signal<u64>>>,
 }
-
-impl Clone for Reactivity {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-impl Copy for Reactivity {}
 
 impl Reactivity {
     fn entry(&self, key: &'static str) -> Signal<u64> {
@@ -59,18 +53,22 @@ impl Reactivity {
     /// event handlers / after mutations settle, never during render.
     pub fn invalidate(&self, key: &'static str) {
         let mut sig = self.entry(key);
-        let next = *sig.peek() + 1;
+        let next = sig.peek().saturating_add(1);
         sig.set(next);
     }
 }
 
 /// Provide the registry at the app root.
+// NOT `#[must_use]`: the point of the call is the side effect of
+// providing; the returned handle is a convenience.
+#[allow(clippy::must_use_candidate)]
 pub fn provide_reactivity() -> Reactivity {
     let keys = use_hook(|| CopyValue::new(HashMap::new()));
     use_context_provider(|| Reactivity { keys })
 }
 
 /// Pull the registry anywhere under the provider.
+#[must_use]
 pub fn use_reactivity() -> Reactivity {
     use_context::<Reactivity>()
 }

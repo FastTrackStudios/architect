@@ -15,7 +15,7 @@
 use crate::prelude::*;
 use dioxus::prelude::*;
 
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone, PartialEq, Eq)]
 pub struct ShowcaseProps {
     /// Label shown in the top bar (e.g. "Web", "Desktop", "Native").
     #[props(default)]
@@ -30,7 +30,7 @@ pub fn Showcase(props: ShowcaseProps) -> Element {
     rsx! {
         ThemeProvider { state: theme_state,
             div { class: "min-h-screen bg-background text-foreground",
-                ShowcaseTopBar { state: theme_state, renderer: renderer.clone() }
+                ShowcaseTopBar { state: theme_state, renderer: renderer }
 
                 main { class: "p-3",
                     // Dense auto-fit grid of compact tiles.
@@ -412,7 +412,7 @@ pub fn Showcase(props: ShowcaseProps) -> Element {
                                                     div { class: "w-5 h-5 rounded bg-primary" }
                                                 }
                                                 span { class: "text-[10px] text-muted-foreground", "Tailwind" }
-                                                HStack { gap: gap_val.clone(),
+                                                HStack { gap: gap_val,
                                                     div { class: "w-5 h-5 rounded bg-chart-2" }
                                                     div { class: "w-5 h-5 rounded bg-chart-2" }
                                                     div { class: "w-5 h-5 rounded bg-chart-2" }
@@ -476,8 +476,7 @@ fn ShowcaseTopBar(state: Signal<ThemeState>, renderer: String) -> Element {
     let preset_label = theme_presets()
         .into_iter()
         .find(|p| p.name == preset_name)
-        .map(|p| p.label)
-        .unwrap_or_else(|| preset_name.clone());
+        .map_or_else(|| preset_name.clone(), |p| p.label);
     let mode = current.mode;
     let mut preset_value = use_signal(|| preset_name.clone());
 
@@ -611,6 +610,10 @@ fn showcase_task_columns() -> Vec<DataTableColumn<ShowcaseTask>> {
     ]
 }
 
+// By value: this is a `DataTable` cell/row callback. The table's
+// callback type is `fn(Context<T>) -> _`, so the signature is the
+// table's, not this function's.
+#[allow(clippy::needless_pass_by_value)]
 fn task_title_cell(context: DataTableCellContext<ShowcaseTask>) -> Element {
     rsx! {
         div { class: "flex flex-col gap-1",
@@ -620,6 +623,7 @@ fn task_title_cell(context: DataTableCellContext<ShowcaseTask>) -> Element {
     }
 }
 
+#[allow(clippy::needless_pass_by_value)]
 fn task_status_cell(context: DataTableCellContext<ShowcaseTask>) -> Element {
     let variant = match context.value.as_str() {
         "Blocked" => BadgeVariant::Destructive,
@@ -632,6 +636,7 @@ fn task_status_cell(context: DataTableCellContext<ShowcaseTask>) -> Element {
     }
 }
 
+#[allow(clippy::needless_pass_by_value)]
 fn task_title_class(context: DataTableCellContext<ShowcaseTask>) -> String {
     if context.selected {
         "bg-muted/40".to_string()
@@ -640,6 +645,7 @@ fn task_title_class(context: DataTableCellContext<ShowcaseTask>) -> String {
     }
 }
 
+#[allow(clippy::needless_pass_by_value)]
 fn task_row_class(context: DataTableRowContext<ShowcaseTask>) -> String {
     if context.row.status == "Blocked" {
         "bg-destructive/5 hover:bg-destructive/10".to_string()

@@ -70,7 +70,7 @@ pub struct AuthRouteDescriptor {
     pub requires_session: bool,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CustomSessionTransport<T> {
     pub user_id: Uuid,
     pub session_id: Uuid,
@@ -213,12 +213,14 @@ auth_command_catalog! {
 
 // r[verify auth.transport.domain-first]
 // r[verify auth.transport.openapi]
-pub fn auth_route_descriptors() -> &'static [AuthRouteDescriptor] {
+#[must_use]
+pub const fn auth_route_descriptors() -> &'static [AuthRouteDescriptor] {
     AUTH_ROUTE_DESCRIPTORS
 }
 
 // r[verify auth.transport.command-metadata]
-pub fn auth_command_descriptors() -> &'static [AuthCommandDescriptor] {
+#[must_use]
+pub const fn auth_command_descriptors() -> &'static [AuthCommandDescriptor] {
     AUTH_COMMAND_DESCRIPTORS
 }
 
@@ -227,6 +229,7 @@ pub fn auth_command_descriptors() -> &'static [AuthCommandDescriptor] {
 // r[impl auth.openapi.request-schemas]
 // r[impl auth.openapi.response-schemas]
 // r[impl auth.openapi.error-schemas]
+#[must_use]
 pub fn auth_openapi_document() -> Value {
     let mut paths = serde_json::Map::new();
     let mut schemas = serde_json::Map::new();
@@ -315,21 +318,30 @@ fn openapi_operation(command: &AuthCommandDescriptor) -> Value {
     });
 
     if command.method != "GET" && command.method != "DELETE" && command.command_type != "()" {
-        operation["requestBody"] = json!({
-            "required": true,
-            "content": {
-                "application/json": {
-                    "schema": schema_ref(command.command_type),
+        // `serde_json::Value` indexing auto-vivifies on assignment; this is
+        // the documented way to build an object in place, and `operation`
+        // is a `Value::Object`.
+        #[allow(clippy::indexing_slicing)]
+        {
+            operation["requestBody"] = json!({
+                "required": true,
+                "content": {
+                    "application/json": {
+                        "schema": schema_ref(command.command_type),
+                    },
                 },
-            },
-        });
+            });
+        }
     }
 
     if command.requires_session {
-        operation["security"] = json!([
-            { "bearerAuth": [] },
-            { "sessionCookie": [] },
-        ]);
+        #[allow(clippy::indexing_slicing)]
+        {
+            operation["security"] = json!([
+                { "bearerAuth": [] },
+                { "sessionCookie": [] },
+            ]);
+        }
     }
 
     operation
@@ -539,12 +551,14 @@ pub const AUTH_ERROR_TAXONOMY: &[AuthErrorTaxonomyEntry] = &[
     },
 ];
 
-pub fn auth_error_taxonomy() -> &'static [AuthErrorTaxonomyEntry] {
+#[must_use]
+pub const fn auth_error_taxonomy() -> &'static [AuthErrorTaxonomyEntry] {
     AUTH_ERROR_TAXONOMY
 }
 
 // r[verify auth.transport.error-mapping]
 // r[impl auth.errors.axum]
+#[must_use]
 pub fn map_auth_error(error: &AuthFlowError) -> PublicAuthError {
     let entry = auth_error_taxonomy_entry(error);
     PublicAuthError {
@@ -555,10 +569,20 @@ pub fn map_auth_error(error: &AuthFlowError) -> PublicAuthError {
 }
 
 // r[impl auth.errors.vox]
+#[must_use]
 pub fn map_auth_error_to_vox_status(error: &AuthFlowError) -> AuthVoxErrorStatus {
     auth_error_taxonomy_entry(error).vox_status
 }
 
+/// # Panics
+///
+/// If the taxonomy table ever stops covering an `AuthFlowError` variant.
+/// The table is the source of truth for the HTTP/vox status of every
+/// error the auth surface can return, so a missing row is a wiring bug
+/// that must fail at the first call rather than silently pick a status.
+/// `taxonomy_is_total` in this module's tests pins it.
+#[allow(clippy::expect_used)]
+#[must_use]
 pub fn auth_error_taxonomy_entry(error: &AuthFlowError) -> &'static AuthErrorTaxonomyEntry {
     let rust_variant = match error {
         AuthFlowError::InvalidCredentials => "InvalidCredentials",
@@ -616,7 +640,8 @@ pub mod axum {
     }
 
     // r[verify auth.transport.axum-feature]
-    pub fn routes() -> AxumAuthRoutes {
+    #[must_use]
+    pub const fn routes() -> AxumAuthRoutes {
         AxumAuthRoutes {
             descriptors: auth_route_descriptors(),
         }
@@ -638,6 +663,7 @@ pub mod axum {
             }
         }
 
+        #[must_use]
         pub fn with_cookie(mut self, cookie: AuthCookieConfig) -> Self {
             self.cookie = cookie;
             self
@@ -653,7 +679,7 @@ pub mod axum {
     }
 
     // r[impl auth.custom-session.axum]
-    #[derive(Clone, Debug, PartialEq)]
+    #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct AuthenticatedCustomSession<T> {
         pub user_id: Uuid,
         pub session_id: Uuid,
@@ -708,6 +734,7 @@ pub mod axum {
     }
 
     // r[impl auth.transport.axum-feature]
+    #[must_use]
     pub fn session_token_from_headers(
         headers: &HeaderMap,
         cookie: &AuthCookieConfig,
@@ -747,8 +774,10 @@ pub mod axum {
         S: AuthStorage,
     {
         let token =
-            session_token_from_headers(request.headers(), &state.cookie).ok_or(AxumAuthError {
-                public: map_auth_error(&AuthFlowError::InvalidCredentials),
+            session_token_from_headers(request.headers(), &state.cookie).ok_or_else(|| {
+                AxumAuthError {
+                    public: map_auth_error(&AuthFlowError::InvalidCredentials),
+                }
             })?;
         let bundle = state
             .auth
@@ -790,7 +819,7 @@ pub mod vox {
     }
 
     impl<S> AuthVoxService<S> {
-        pub fn new(auth: ArchitectAuth<S>) -> Self {
+        pub const fn new(auth: ArchitectAuth<S>) -> Self {
             Self { auth }
         }
     }
@@ -936,7 +965,7 @@ pub mod vox {
     }
 
     // r[impl auth.custom-session.vox]
-    #[derive(Clone, Debug, PartialEq)]
+    #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct AuthVoxCustomSession<T> {
         pub user_id: Uuid,
         pub session_id: Uuid,
@@ -981,10 +1010,10 @@ pub mod vox {
     }
 
     impl ::vox::ClientMiddleware for AuthClientMiddleware {
-        fn pre<'a, 'call>(
+        fn pre<'a>(
             &'a self,
             _context: &'a ::vox::ClientContext<'a>,
-            request: &'a mut ::vox::ClientRequest<'call, 'a>,
+            request: &'a mut ::vox::ClientRequest<'_, 'a>,
         ) -> ::vox::BoxMiddlewareFuture<'a> {
             Box::pin(async move {
                 request.push_string_metadata(
@@ -1008,6 +1037,7 @@ pub mod vox {
     }
 
     // r[impl auth.transport.vox-schema]
+    #[must_use]
     pub fn authorization_token_from_metadata(metadata: &::vox::Metadata) -> Option<String> {
         use ::vox::MetadataExt;
         metadata
@@ -1021,6 +1051,18 @@ pub mod vox {
 pub type VoxSignInEmailPassword = auth_proto::SignInEmailPassword;
 
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic,
+    clippy::float_cmp,
+    clippy::string_slice,
+    clippy::significant_drop_tightening,
+    clippy::too_many_lines
+)]
 mod tests {
     use super::{
         AuthCookieConfig, AuthHookContext, AuthVoxErrorStatus, CustomSessionTransport,
@@ -1374,7 +1416,12 @@ mod tests {
         assert_eq!(cookie.secure(), Some(true));
         assert_eq!(cookie.http_only(), Some(true));
         assert_eq!(cookie.same_site(), Some(cookie::SameSite::Strict));
-        assert_eq!(cookie.max_age().map(|age| age.whole_seconds()), Some(60));
+        assert_eq!(
+            cookie
+                .max_age()
+                .map(cookie::time::SignedDuration::whole_seconds),
+            Some(60)
+        );
     }
 
     #[test]

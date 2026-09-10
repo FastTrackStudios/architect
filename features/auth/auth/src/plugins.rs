@@ -21,6 +21,7 @@ pub struct AuthPluginStorageRequirement {
 }
 
 impl AuthPluginDescriptor {
+    #[must_use]
     pub const fn command_count(&self) -> usize {
         self.command_ids.len()
     }
@@ -57,6 +58,7 @@ const NO_STORAGE: &[&str] = &[];
 // r[impl auth.email.plugin-routes]
 pub const EMAIL_PASSWORD_COMMANDS: &[&str] = &["createEmailPasswordUser", "signInEmailPassword"];
 
+#[must_use]
 pub fn email_password_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&EMAIL_PASSWORD_PLUGIN)
 }
@@ -80,6 +82,7 @@ pub const ANONYMOUS_COMMANDS: &[&str] = &[
     "cleanupAnonymousUsers",
 ];
 
+#[must_use]
 pub fn anonymous_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&ANONYMOUS_PLUGIN)
 }
@@ -112,6 +115,7 @@ pub const SESSION_MANAGEMENT_COMMANDS: &[&str] = &[
     "revokeOtherSessions",
 ];
 
+#[must_use]
 pub fn session_management_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&SESSION_MANAGEMENT_PLUGIN)
 }
@@ -137,6 +141,7 @@ pub const SESSION_MANAGEMENT_PLUGIN: AuthPluginDescriptor = AuthPluginDescriptor
 // r[impl auth.custom-session.plugin-routes]
 pub const CUSTOM_SESSION_COMMANDS: &[&str] = &["currentCustomSession"];
 
+#[must_use]
 pub fn custom_session_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&CUSTOM_SESSION_PLUGIN)
 }
@@ -162,6 +167,7 @@ pub const CUSTOM_SESSION_PLUGIN: AuthPluginDescriptor = AuthPluginDescriptor {
 // r[impl auth.additional-fields.plugin-routes]
 pub const ADDITIONAL_FIELDS_COMMANDS: &[&str] = &["additionalFieldsSchema"];
 
+#[must_use]
 pub fn additional_fields_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&ADDITIONAL_FIELDS_PLUGIN)
 }
@@ -188,6 +194,7 @@ pub const ADDITIONAL_FIELDS_PLUGIN: AuthPluginDescriptor = AuthPluginDescriptor 
 // r[impl auth.openapi.plugin-routes]
 pub const OPEN_API_COMMANDS: &[&str] = &["getOpenApiDocument"];
 
+#[must_use]
 pub fn open_api_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&OPEN_API_PLUGIN)
 }
@@ -217,6 +224,7 @@ pub const PASSWORD_MANAGEMENT_COMMANDS: &[&str] = &[
     "completePasswordReset",
 ];
 
+#[must_use]
 pub fn password_management_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&PASSWORD_MANAGEMENT_PLUGIN)
 }
@@ -240,6 +248,7 @@ pub const PASSWORD_MANAGEMENT_PLUGIN: AuthPluginDescriptor = AuthPluginDescripto
 // r[impl auth.verify.plugin-routes]
 pub const EMAIL_VERIFICATION_COMMANDS: &[&str] = &["requestEmailVerification", "verifyEmail"];
 
+#[must_use]
 pub fn email_verification_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&EMAIL_VERIFICATION_PLUGIN)
 }
@@ -259,6 +268,7 @@ pub const EMAIL_VERIFICATION_PLUGIN: AuthPluginDescriptor = AuthPluginDescriptor
 // r[impl auth.user.plugin-routes]
 pub const USER_MANAGEMENT_COMMANDS: &[&str] = &["changeEmail", "deleteUser"];
 
+#[must_use]
 pub fn user_management_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&USER_MANAGEMENT_PLUGIN)
 }
@@ -279,6 +289,7 @@ pub const USER_MANAGEMENT_PLUGIN: AuthPluginDescriptor = AuthPluginDescriptor {
 pub const ACCOUNT_MANAGEMENT_COMMANDS: &[&str] =
     &["listAccounts", "linkOAuthAccount", "unlinkOAuthAccount"];
 
+#[must_use]
 pub fn account_management_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&ACCOUNT_MANAGEMENT_PLUGIN)
 }
@@ -306,6 +317,7 @@ pub const OAUTH_COMMANDS: &[&str] = &[
     "unlinkOAuthAccount",
 ];
 
+#[must_use]
 pub fn oauth_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&OAUTH_PLUGIN)
 }
@@ -340,6 +352,7 @@ pub const OAUTH_PROXY_COMMANDS: &[&str] = &[
     "consumeOAuthProxyCallback",
 ];
 
+#[must_use]
 pub fn oauth_proxy_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&OAUTH_PROXY_PLUGIN)
 }
@@ -366,6 +379,7 @@ pub const OAUTH_PROXY_PLUGIN: AuthPluginDescriptor = AuthPluginDescriptor {
 // r[impl auth.onetap.plugin-routes]
 pub const ONE_TAP_COMMANDS: &[&str] = &["oneTapCallback"];
 
+#[must_use]
 pub fn one_tap_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&ONE_TAP_PLUGIN)
 }
@@ -396,6 +410,7 @@ pub const ONE_TIME_TOKEN_COMMANDS: &[&str] = &[
     "revokeOneTimeToken",
 ];
 
+#[must_use]
 pub fn one_time_token_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&ONE_TIME_TOKEN_PLUGIN)
 }
@@ -419,6 +434,7 @@ pub const MULTI_SESSION_COMMANDS: &[&str] = &[
     "revokeDeviceSession",
 ];
 
+#[must_use]
 pub fn multi_session_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&MULTI_SESSION_PLUGIN)
 }
@@ -444,6 +460,7 @@ pub const MULTI_SESSION_PLUGIN: AuthPluginDescriptor = AuthPluginDescriptor {
 // r[impl auth.lastlogin.plugin-routes]
 pub const LAST_LOGIN_METHOD_COMMANDS: &[&str] = &["getLastLoginMethod", "clearLastLoginMethod"];
 
+#[must_use]
 pub fn last_login_method_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&LAST_LOGIN_METHOD_PLUGIN)
 }
@@ -469,6 +486,7 @@ pub const LAST_LOGIN_METHOD_PLUGIN: AuthPluginDescriptor = AuthPluginDescriptor 
 // r[impl auth.username.plugin-routes]
 pub const USERNAME_COMMANDS: &[&str] = &["signInUsername", "updateUsername"];
 
+#[must_use]
 pub fn username_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&USERNAME_PLUGIN)
 }
@@ -498,6 +516,7 @@ pub const PHONE_NUMBER_COMMANDS: &[&str] = &[
     "updatePhoneNumber",
 ];
 
+#[must_use]
 pub fn phone_number_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&PHONE_NUMBER_PLUGIN)
 }
@@ -524,6 +543,7 @@ pub const PHONE_NUMBER_PLUGIN: AuthPluginDescriptor = AuthPluginDescriptor {
 // r[impl auth.siwe.plugin-routes]
 pub const SIWE_COMMANDS: &[&str] = &["createSiweNonce", "verifySiweMessage", "linkSiweAddress"];
 
+#[must_use]
 pub fn siwe_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&SIWE_PLUGIN)
 }
@@ -550,6 +570,7 @@ pub const SIWE_PLUGIN: AuthPluginDescriptor = AuthPluginDescriptor {
 // r[impl auth.hibp.plugin-routes]
 pub const HAVEIBEENPWNED_COMMANDS: &[&str] = &["checkPasswordBreach"];
 
+#[must_use]
 pub fn haveibeenpwned_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&HAVEIBEENPWNED_PLUGIN)
 }
@@ -575,6 +596,7 @@ pub const HAVEIBEENPWNED_PLUGIN: AuthPluginDescriptor = AuthPluginDescriptor {
 // r[impl auth.mcp.plugin-routes]
 pub const MCP_COMMANDS: &[&str] = &["authorizeMcpRequest"];
 
+#[must_use]
 pub fn mcp_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&MCP_PLUGIN)
 }
@@ -606,6 +628,7 @@ pub const API_KEY_COMMANDS: &[&str] = &[
     "verifyApiKey",
 ];
 
+#[must_use]
 pub fn api_key_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&API_KEY_PLUGIN)
 }
@@ -634,6 +657,7 @@ pub const API_KEY_PLUGIN: AuthPluginDescriptor = AuthPluginDescriptor {
 // r[impl auth.bearer.plugin-routes]
 pub const BEARER_COMMANDS: &[&str] = &["authenticateBearerToken"];
 
+#[must_use]
 pub fn bearer_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&BEARER_PLUGIN)
 }
@@ -660,6 +684,7 @@ pub const BEARER_PLUGIN: AuthPluginDescriptor = AuthPluginDescriptor {
 // r[impl auth.captcha.plugin-routes]
 pub const CAPTCHA_COMMANDS: &[&str] = &["verifyCaptcha"];
 
+#[must_use]
 pub fn captcha_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&CAPTCHA_PLUGIN)
 }
@@ -686,6 +711,7 @@ pub const CAPTCHA_PLUGIN: AuthPluginDescriptor = AuthPluginDescriptor {
 // r[impl auth.emailotp.plugin-routes]
 pub const EMAIL_OTP_COMMANDS: &[&str] = &["sendEmailOtp", "verifyEmailOtp"];
 
+#[must_use]
 pub fn email_otp_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&EMAIL_OTP_PLUGIN)
 }
@@ -713,6 +739,7 @@ pub const EMAIL_OTP_PLUGIN: AuthPluginDescriptor = AuthPluginDescriptor {
 // r[impl auth.magic.plugin-routes]
 pub const MAGIC_LINK_COMMANDS: &[&str] = &["sendMagicLink", "verifyMagicLink"];
 
+#[must_use]
 pub fn magic_link_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&MAGIC_LINK_PLUGIN)
 }
@@ -740,6 +767,7 @@ pub const MAGIC_LINK_PLUGIN: AuthPluginDescriptor = AuthPluginDescriptor {
 // r[impl auth.jwt.plugin-routes]
 pub const JWT_COMMANDS: &[&str] = &["issueJwt", "verifyJwt", "getJwtKeySet"];
 
+#[must_use]
 pub fn jwt_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&JWT_PLUGIN)
 }
@@ -773,6 +801,7 @@ pub const OIDC_PROVIDER_COMMANDS: &[&str] = &[
     "getOidcUserInfo",
 ];
 
+#[must_use]
 pub fn oidc_provider_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&OIDC_PROVIDER_PLUGIN)
 }
@@ -807,6 +836,7 @@ pub const TWO_FACTOR_COMMANDS: &[&str] = &[
     "disableTwoFactor",
 ];
 
+#[must_use]
 pub fn two_factor_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&TWO_FACTOR_PLUGIN)
 }
@@ -841,6 +871,7 @@ pub const PASSKEY_COMMANDS: &[&str] = &[
     "deletePasskey",
 ];
 
+#[must_use]
 pub fn passkey_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&PASSKEY_PLUGIN)
 }
@@ -876,6 +907,7 @@ pub const DEVICE_AUTHORIZATION_COMMANDS: &[&str] = &[
     "pollDeviceToken",
 ];
 
+#[must_use]
 pub fn device_authorization_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&DEVICE_AUTHORIZATION_PLUGIN)
 }
@@ -923,6 +955,7 @@ pub const ORGANIZATION_COMMANDS: &[&str] = &[
     "listTeamMembers",
 ];
 
+#[must_use]
 pub fn organization_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&ORGANIZATION_PLUGIN)
 }
@@ -963,6 +996,7 @@ pub const ADMIN_COMMANDS: &[&str] = &[
     "adminHasPermission",
 ];
 
+#[must_use]
 pub fn admin_routes() -> Vec<&'static AuthRouteDescriptor> {
     plugin_routes(&ADMIN_PLUGIN)
 }
@@ -1289,26 +1323,31 @@ pub const AUTH_PLUGIN_STORAGE_REQUIREMENTS: &[AuthPluginStorageRequirement] = &[
     },
 ];
 
-pub fn auth_plugin_descriptors() -> &'static [AuthPluginDescriptor] {
+#[must_use]
+pub const fn auth_plugin_descriptors() -> &'static [AuthPluginDescriptor] {
     AUTH_PLUGIN_DESCRIPTORS
 }
 
-pub fn auth_plugin_storage_requirements() -> &'static [AuthPluginStorageRequirement] {
+#[must_use]
+pub const fn auth_plugin_storage_requirements() -> &'static [AuthPluginStorageRequirement] {
     AUTH_PLUGIN_STORAGE_REQUIREMENTS
 }
 
+#[must_use]
 pub fn auth_plugin_storage_requirement(id: &str) -> Option<&'static AuthPluginStorageRequirement> {
     auth_plugin_storage_requirements()
         .iter()
         .find(|requirement| requirement.plugin_id == id)
 }
 
+#[must_use]
 pub fn auth_plugin_descriptor(id: &str) -> Option<&'static AuthPluginDescriptor> {
     auth_plugin_descriptors()
         .iter()
         .find(|plugin| plugin.id == id)
 }
 
+#[must_use]
 pub fn plugin_routes(plugin: &AuthPluginDescriptor) -> Vec<&'static AuthRouteDescriptor> {
     auth_route_descriptors()
         .iter()
@@ -1317,6 +1356,18 @@ pub fn plugin_routes(plugin: &AuthPluginDescriptor) -> Vec<&'static AuthRouteDes
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic,
+    clippy::float_cmp,
+    clippy::string_slice,
+    clippy::significant_drop_tightening,
+    clippy::too_many_lines
+)]
 mod tests {
     use super::{
         ACCOUNT_MANAGEMENT_COMMANDS, ACCOUNT_MANAGEMENT_PLUGIN, ADDITIONAL_FIELDS_COMMANDS,

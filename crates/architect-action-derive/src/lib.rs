@@ -78,7 +78,7 @@ impl syn::parse::Parse for ActionsArgs {
                 ));
             }
         }
-        Ok(ActionsArgs {
+        Ok(Self {
             namespace,
             category,
         })
@@ -401,7 +401,7 @@ fn to_screaming_snake_case(input: &str) -> String {
 
 /// `BuildSetlist` -> `build_setlist`. Idempotent on already-snake input.
 fn to_snake_case(input: &str) -> String {
-    let mut out = String::with_capacity(input.len() + 4);
+    let mut out = String::with_capacity(input.len().saturating_add(4));
     let mut prev_lower_or_digit = false;
     for ch in input.chars() {
         if ch == '_' {
@@ -430,10 +430,9 @@ fn to_title_case(input: &str) -> String {
         .filter(|s| !s.is_empty())
         .map(|word| {
             let mut chars = word.chars();
-            match chars.next() {
-                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-                None => String::new(),
-            }
+            chars.next().map_or_else(String::new, |first| {
+                first.to_uppercase().collect::<String>() + chars.as_str()
+            })
         })
         .collect::<Vec<_>>()
         .join(" ")

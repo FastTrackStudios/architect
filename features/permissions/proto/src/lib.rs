@@ -15,14 +15,14 @@
 use architect_permissions::{Action, PermissionEngine, Principal, Resource};
 
 /// One `(resource pattern, actions)` affordance the caller holds.
-#[derive(Clone, Debug, PartialEq, ::facet::Facet)]
+#[derive(Clone, Debug, PartialEq, Eq, ::facet::Facet)]
 pub struct CapabilityRule {
     pub resource: String,
     pub actions: Vec<String>,
 }
 
 /// The caller's affordance set for this lane.
-#[derive(Clone, Debug, PartialEq, ::facet::Facet)]
+#[derive(Clone, Debug, PartialEq, Eq, ::facet::Facet)]
 pub struct CapabilityManifest {
     /// Who the lane believes the caller is (`user:<id>`, `guest:<link>`,
     /// `service:<name>`, `anonymous`) — display form only.
@@ -33,7 +33,7 @@ pub struct CapabilityManifest {
 }
 
 /// Errors from the permissions surface.
-#[derive(Clone, Debug, PartialEq, ::facet::Facet, thiserror::Error)]
+#[derive(Clone, Debug, PartialEq, Eq, ::facet::Facet, thiserror::Error)]
 #[repr(u8)]
 pub enum PermissionsError {
     #[error("permissions unavailable: {0}")]

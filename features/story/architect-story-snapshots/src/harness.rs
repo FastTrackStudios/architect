@@ -45,12 +45,14 @@ impl SnapshotConfig {
         }
     }
 
-    pub fn with_render(mut self, render: RenderConfig) -> Self {
+    #[must_use]
+    pub const fn with_render(mut self, render: RenderConfig) -> Self {
         self.render = render;
         self
     }
 
-    pub fn with_threshold(mut self, threshold: f64) -> Self {
+    #[must_use]
+    pub const fn with_threshold(mut self, threshold: f64) -> Self {
         self.threshold = threshold;
         self
     }
@@ -62,15 +64,21 @@ impl SnapshotConfig {
 /// Writes the candidate PNG to `cfg.diff_dir` on mismatch and panics
 /// with a useful message. On first run (no baseline file) writes the
 /// current render as the baseline and returns successfully.
+///
+/// # Panics
+///
+/// This is a test assertion: panicking on a mismatch is the whole point,
+/// and so is panicking when the baseline directory can't be read or
+/// written — a snapshot suite that silently skips is worse than one that
+/// fails.
+#[allow(clippy::expect_used, clippy::panic)]
 pub fn assert_snapshot(story: &'static Story, cfg: &SnapshotConfig) {
     let knobs = default_knob_map(story);
     let png = render_story(story, knobs, &cfg.render);
     let label = snapshot_label(story);
     let baseline_path = cfg.baseline_dir.join(format!("{label}.png"));
 
-    let force_update = std::env::var("FTS_STORY_UPDATE_SNAPSHOTS")
-        .map(|v| v == "1")
-        .unwrap_or(false);
+    let force_update = std::env::var("FTS_STORY_UPDATE_SNAPSHOTS").is_ok_and(|v| v == "1");
 
     if force_update || !baseline_path.exists() {
         if let Some(parent) = baseline_path.parent() {
@@ -120,10 +128,10 @@ pub fn assert_snapshot(story: &'static Story, cfg: &SnapshotConfig) {
 }
 
 fn snapshot_label(story: &Story) -> String {
-    match story.category {
-        Some(category) => format!("{}__{}", sanitise(category), sanitise(story.name)),
-        None => sanitise(story.name).into_owned(),
-    }
+    story.category.map_or_else(
+        || sanitise(story.name).into_owned(),
+        |category| format!("{}__{}", sanitise(category), sanitise(story.name)),
+    )
 }
 
 fn sanitise(s: &str) -> std::borrow::Cow<'_, str> {

@@ -4,7 +4,7 @@
 //! A vox RPC return value serializes whole. For a 10 MB FX-state chunk or
 //! an audio sample block, that's 10 MB of facet encoding per call even
 //! when the client only needs a slice of it. The handle pattern (promoted
-//! from FastTrackStudio's hand-rolled audio-accessor registry) keeps the
+//! from `FastTrackStudio`'s hand-rolled audio-accessor registry) keeps the
 //! large allocation in the server process behind an id:
 //!
 //! - [`Handle<T>`] — a typed, `Copy`-able id. Send + Sync regardless of
@@ -120,6 +120,8 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::sync::{Arc, RwLock};
 
+use crate::lock::{read, write};
+
 use uuid::Uuid;
 
 // ── RawHandle — the wire type ───────────────────────────────────────────
@@ -139,16 +141,19 @@ pub struct RawHandle(pub Uuid);
 impl RawHandle {
     /// Mint a fresh (random, v4) handle id.
     #[allow(clippy::new_without_default)] // a random Default would surprise
+    #[must_use]
     pub fn new() -> Self {
         Self(Uuid::new_v4())
     }
 
     /// Wrap an existing id (e.g. one parsed from a log line).
+    #[must_use]
     pub const fn from_uuid(id: Uuid) -> Self {
         Self(id)
     }
 
     /// The underlying id.
+    #[must_use]
     pub const fn uuid(&self) -> Uuid {
         self.0
     }
@@ -156,6 +161,7 @@ impl RawHandle {
     /// Tag this raw id with a resource type, for use against a
     /// [`HandleRegistry<T>`]. The tag is an assertion, not a proof —
     /// a wrong tag means lookups miss (`None`), never a wrong-type deref.
+    #[must_use]
     pub const fn typed<T>(self) -> Handle<T> {
         Handle::from_raw(self)
     }
@@ -170,12 +176,13 @@ impl fmt::Display for RawHandle {
 // ── Handle<T> — the typed wrapper ───────────────────────────────────────
 
 /// A typed resource handle: [`RawHandle`] plus a compile-time tag naming
-/// what it indexes. Always `Copy + Send + Sync` — the phantom is
-/// `fn() -> T`, so the handle never inherits `T`'s auto traits (a handle
-/// to a non-`Send` FFI resource is still freely shareable; only the
-/// *registry* holding the values needs `T: Send + Sync`).
+/// what it indexes.
 ///
-/// Not a wire type itself (see the [module docs](self)); convert with
+/// Always `Copy + Send + Sync` — the phantom is `fn() -> T`, so the
+/// handle never inherits `T`'s auto traits (a handle to a non-`Send` FFI
+/// resource is still freely shareable; only the *registry* holding the
+/// values needs `T: Send + Sync`). Not a wire type itself (see the
+/// [module docs](self)); convert with
 /// [`raw`](Handle::raw) / [`RawHandle::typed`] at the service boundary.
 pub struct Handle<T> {
     raw: RawHandle,
@@ -216,6 +223,7 @@ impl<T> fmt::Display for Handle<T> {
 
 impl<T> Handle<T> {
     /// Tag a wire id with this handle's resource type.
+    #[must_use]
     pub const fn from_raw(raw: RawHandle) -> Self {
         Self {
             raw,
@@ -224,11 +232,13 @@ impl<T> Handle<T> {
     }
 
     /// The untyped wire form — what goes in a service signature.
+    #[must_use]
     pub const fn raw(&self) -> RawHandle {
         self.raw
     }
 
     /// The underlying id.
+    #[must_use]
     pub const fn uuid(&self) -> Uuid {
         self.raw.0
     }
@@ -247,12 +257,13 @@ impl<T> From<Handle<T>> for RawHandle {
 
 // ── HandleRegistry<T> — the server-side table ───────────────────────────
 
-/// Server-side store mapping [`Handle<T>`]s to live values. Thread-safe;
-/// values are handed out as `Arc<T>` so a loan from [`get`](Self::get)
-/// outlives the registry entry (a concurrent [`release`](Self::release)
-/// drops the table's reference, not the borrower's).
+/// Server-side store mapping [`Handle<T>`]s to live values.
 ///
-/// Entries live until explicitly removed — see "Lifetime / eviction" in
+/// Thread-safe; values are handed out as `Arc<T>` so a loan from
+/// [`get`](Self::get) outlives the registry entry (a concurrent
+/// [`release`](Self::release) drops the table's reference, not the
+/// borrower's). Entries live until explicitly removed — see "Lifetime /
+/// eviction" in
 /// the [module docs](self).
 ///
 /// ```
@@ -282,6 +293,7 @@ impl<T> Default for HandleRegistry<T> {
 
 impl<T> HandleRegistry<T> {
     /// An empty registry.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             entries: RwLock::new(HashMap::new()),
@@ -291,21 +303,14 @@ impl<T> HandleRegistry<T> {
     /// Store `value` and mint the handle that names it.
     pub fn create(&self, value: T) -> Handle<T> {
         let handle = RawHandle::new().typed();
-        self.entries
-            .write()
-            .expect("handle registry poisoned")
-            .insert(handle.uuid(), Arc::new(value));
+        write(&self.entries).insert(handle.uuid(), Arc::new(value));
         handle
     }
 
     /// Borrow the value behind `handle` (cheap `Arc` clone), or `None`
     /// for an unknown / already-released handle.
     pub fn get(&self, handle: &Handle<T>) -> Option<Arc<T>> {
-        self.entries
-            .read()
-            .expect("handle registry poisoned")
-            .get(&handle.uuid())
-            .cloned()
+        read(&self.entries).get(&handle.uuid()).cloned()
     }
 
     /// Remove the entry and return the value by **ownership**. Succeeds
@@ -315,7 +320,7 @@ impl<T> HandleRegistry<T> {
     pub fn take(&self, handle: &Handle<T>) -> Option<T> {
         // Hold the write lock across remove + unwrap so no concurrent
         // `get` can observe the entry missing while we put it back.
-        let mut entries = self.entries.write().expect("handle registry poisoned");
+        let mut entries = write(&self.entries);
         let arc = entries.remove(&handle.uuid())?;
         match Arc::try_unwrap(arc) {
             Ok(value) => Some(value),
@@ -331,26 +336,19 @@ impl<T> HandleRegistry<T> {
     /// handle was registered. Outstanding `Arc` loans keep the value
     /// alive until they drop; new lookups miss immediately.
     pub fn release(&self, handle: &Handle<T>) -> bool {
-        self.entries
-            .write()
-            .expect("handle registry poisoned")
-            .remove(&handle.uuid())
-            .is_some()
+        write(&self.entries).remove(&handle.uuid()).is_some()
     }
 
     /// Keep only the entries `keep` approves — the manual-sweep hook for
     /// whatever eviction policy the caller runs (session end, LRU
     /// sidecar, "drop everything for project X").
     pub fn retain(&self, mut keep: impl FnMut(Handle<T>, &T) -> bool) {
-        self.entries
-            .write()
-            .expect("handle registry poisoned")
-            .retain(|id, value| keep(RawHandle::from_uuid(*id).typed(), value));
+        write(&self.entries).retain(|id, value| keep(RawHandle::from_uuid(*id).typed(), value));
     }
 
     /// Number of live entries.
     pub fn len(&self) -> usize {
-        self.entries.read().expect("handle registry poisoned").len()
+        read(&self.entries).len()
     }
 
     /// True when no entries are registered.
@@ -360,6 +358,18 @@ impl<T> HandleRegistry<T> {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic,
+    clippy::float_cmp,
+    clippy::string_slice,
+    clippy::significant_drop_tightening,
+    clippy::too_many_lines
+)]
 mod tests {
     use super::*;
 

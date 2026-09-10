@@ -45,3 +45,6 @@ architect = { workspace = true }
 # under a parent command) without architect itself depending on clap. See
 # `tests/smoke.rs`'s nesting test.
 clap = { version = "4", features = ["derive"] }
+
+[lints]
+workspace = true

@@ -29,6 +29,7 @@ pub struct AuthStorageCapabilities {
 }
 
 impl AuthStorageCapabilities {
+    #[must_use]
     pub const fn runtime_owned(backend: &'static str) -> Self {
         Self {
             backend,
@@ -37,6 +38,7 @@ impl AuthStorageCapabilities {
         }
     }
 
+    #[must_use]
     pub const fn transactional(backend: &'static str, clock: AuthStorageClock) -> Self {
         Self {
             backend,
@@ -494,6 +496,18 @@ pub trait AuthStorage: Clone + Send + Sync + 'static {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic,
+    clippy::float_cmp,
+    clippy::string_slice,
+    clippy::significant_drop_tightening,
+    clippy::too_many_lines
+)]
 mod tests {
     use super::{AuthStorageCapabilities, AuthStorageClock};
 

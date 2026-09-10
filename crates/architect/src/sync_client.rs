@@ -43,7 +43,8 @@ enum Inner {
 impl BlockingCaller {
     /// Drive calls on an existing runtime. The runtime must outlive
     /// every call (`Handle::block_on` panics if its runtime is gone).
-    pub fn from_handle(handle: tokio::runtime::Handle) -> Self {
+    #[must_use]
+    pub const fn from_handle(handle: tokio::runtime::Handle) -> Self {
         Self {
             inner: Inner::Handle(handle),
         }
@@ -76,6 +77,18 @@ impl BlockingCaller {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic,
+    clippy::float_cmp,
+    clippy::string_slice,
+    clippy::significant_drop_tightening,
+    clippy::too_many_lines
+)]
 mod tests {
     use super::*;
 

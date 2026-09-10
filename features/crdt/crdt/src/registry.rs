@@ -94,9 +94,10 @@ struct Shared {
 /// A multi-doc [`DocSync`] + [`DocPresence`] server: per-doc
 /// [`DocSyncHost`]s / [`PresenceHost`]s, opened on demand through the
 /// factory and addressed by the `doc_id` already present in both wire
-/// calls. Cheap to clone — all clones share the doc map.
+/// calls.
 ///
-/// Configure (`with_*`) **before** mounting/cloning: the builder
+/// Cheap to clone — all clones share the doc map. Configure (`with_*`)
+/// **before** mounting/cloning: the builder
 /// methods set plain fields that are copied into each clone, and the
 /// settings are applied when a doc's hosts are created.
 #[derive(Clone)]
@@ -133,21 +134,24 @@ impl DocRegistry {
 
     /// Forwarded to every created host: compact each doc's persistence
     /// every `n` updates ([`DocSyncHost::with_compaction`]).
-    pub fn with_compaction(mut self, n: u32) -> Self {
+    #[must_use]
+    pub const fn with_compaction(mut self, n: u32) -> Self {
         self.compact_every = n;
         self
     }
 
     /// Forwarded to every created host: bootstrap fresh joiners with a
     /// shallow snapshot ([`DocSyncHost::with_shallow_bootstrap`]).
-    pub fn with_shallow_bootstrap(mut self) -> Self {
+    #[must_use]
+    pub const fn with_shallow_bootstrap(mut self) -> Self {
         self.shallow_bootstrap = true;
         self
     }
 
     /// Presence expiry for every created [`PresenceHost`] — how long a
     /// peer's state survives without an update (default 30 000 ms).
-    pub fn with_presence_timeout(mut self, timeout_ms: i64) -> Self {
+    #[must_use]
+    pub const fn with_presence_timeout(mut self, timeout_ms: i64) -> Self {
         self.presence_timeout_ms = timeout_ms;
         self
     }
@@ -162,6 +166,7 @@ impl DocRegistry {
     /// id, not who is asking. Real per-user authz needs caller identity
     /// threaded through the transport (future work — vox middleware
     /// context).
+    #[must_use]
     pub fn with_admission<H>(mut self, hook: H) -> Self
     where
         H: Fn(Uuid) -> bool + Send + Sync + 'static,
@@ -190,15 +195,22 @@ impl DocRegistry {
     /// stale handle reach persistence but not live replicas. Don't
     /// enable eviction if server-side code holds long-lived doc
     /// handles (or re-fetch the handle per use).
+    #[must_use]
     pub fn with_idle_eviction(self, after: Duration) -> Self {
         let weak = Arc::downgrade(&self.shared);
-        let period = (after / 2).max(Duration::from_millis(25));
+        // `checked_div` so a zero-length interval can't panic here.
+        let period = after
+            .checked_div(2)
+            .unwrap_or(after)
+            .max(Duration::from_millis(25));
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(period).await;
                 let Some(shared) = weak.upgrade() else { break };
                 // The creation lock — held while deciding *and* removing,
-                // the same lock every attach holds through completion.
+                // the same lock every attach holds through completion,
+                // then dropped explicitly so the sweep never holds it
+                // across the sleep at the top of the next iteration.
                 let mut docs = shared.docs.lock().await;
                 let idle: Vec<Uuid> = docs
                     .iter()
@@ -221,6 +233,7 @@ impl DocRegistry {
                     }
                     tracing::debug!(?doc_id, "doc-registry: evicted idle doc");
                 }
+                drop(docs);
             }
         });
         self
@@ -230,6 +243,10 @@ impl DocRegistry {
     /// if needed — for server-side reads/writes via entity repos.
     /// Honors the admission hook. Counts as activity for eviction; see
     /// [`Self::with_idle_eviction`] for the stale-handle caveat.
+    // The guard spans the body on purpose: this is the creation lock, and
+    // deciding-then-acting under it is what keeps an attach from racing an
+    // eviction.
+    #[allow(clippy::significant_drop_tightening)]
     pub async fn doc(&self, doc_id: Uuid) -> Result<CrdtDoc, SyncError> {
         if !(self.admission)(doc_id) {
             return Err(SyncError::UnknownDoc);
@@ -272,7 +289,10 @@ impl DocRegistry {
                 last_used: Instant::now(),
             });
         }
-        let entry = docs.get_mut(&doc_id).expect("entry just ensured");
+        // Ensured immediately above, under the same lock — but reading it
+        // fallibly keeps that a local fact rather than a panic if the
+        // ensure path is ever restructured.
+        let entry = docs.get_mut(&doc_id).ok_or(SyncError::UnknownDoc)?;
         entry.last_used = Instant::now();
         Ok(entry)
     }
@@ -294,10 +314,14 @@ impl DocSync for DocRegistry {
         // call AFTER releasing it: `sync` now stays in flight for the
         // whole session (vox 0.10 channel scoping), and a lock held
         // across it would wedge every other doc's attach.
+        // Created and attached under ONE lock, so a concurrent eviction
+        // can't land between the two — then dropped before the pump.
         let session = {
             let mut docs = self.shared.docs.lock().await;
             let entry = self.entry(&mut docs, doc_id).await?;
-            entry.sync.attach(doc_id, from, down)?
+            let session = entry.sync.attach(doc_id, from, down)?;
+            drop(docs);
+            session
         };
         session.pump(up).await;
         Ok(())
@@ -318,7 +342,9 @@ impl DocPresence for DocRegistry {
         let session = {
             let mut docs = self.shared.docs.lock().await;
             let entry = self.entry(&mut docs, doc_id).await?;
-            entry.presence.attach(doc_id, down)?
+            let session = entry.presence.attach(doc_id, down)?;
+            drop(docs);
+            session
         };
         session.pump(up).await;
         Ok(())

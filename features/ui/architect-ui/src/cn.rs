@@ -25,6 +25,7 @@ pub fn merge(input: impl AsRef<str>) -> String {
 ///
 /// Prefer [`cn!`] at component call sites. This helper is useful when class
 /// fragments are already represented as a slice.
+#[must_use]
 pub fn merge_slice(inputs: &[&str]) -> String {
     tw_merge::merge::tw_merge_slice(inputs)
 }
@@ -46,6 +47,18 @@ macro_rules! cn {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic,
+    clippy::float_cmp,
+    clippy::string_slice,
+    clippy::significant_drop_tightening,
+    clippy::too_many_lines
+)]
 mod tests {
     use std::collections::HashMap;
 

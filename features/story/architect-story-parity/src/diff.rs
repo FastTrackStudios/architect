@@ -58,13 +58,19 @@ fn build_side_by_side(left: &[u8], right: &[u8]) -> Result<Vec<u8>, DiffError> {
     // Pad to common height (taller of the two), keep widths separate.
     let h = ah.max(bh);
     let gutter = 2u32;
-    let total_w = aw + gutter + bw;
+    // Checked, not wrapping: `aw`/`bw` come out of a PNG header, so a
+    // crafted (or merely enormous) input must be a decode error rather
+    // than a wrapped width and an out-of-bounds blit.
+    let total_w = aw
+        .checked_add(gutter)
+        .and_then(|w| w.checked_add(bw))
+        .ok_or_else(|| DiffError::Unsupported(format!("composite width overflows: {aw}+{bw}")))?;
 
-    let mut out = vec![0u8; (total_w * h * 4) as usize];
+    let mut out = vec![0u8; rgba_len(total_w, h)?];
 
-    blit(&a, aw, ah, &mut out, total_w, h, 0, 0);
-    fill_rect(&mut out, total_w, h, aw, 0, gutter, h, [0, 0, 0, 255]);
-    blit(&b, bw, bh, &mut out, total_w, h, aw + gutter, 0);
+    blit(&a, aw, ah, &mut out, total_w, 0, 0);
+    fill_rect(&mut out, total_w, aw, 0, gutter, h, [0, 0, 0, 255]);
+    blit(&b, bw, bh, &mut out, total_w, aw.saturating_add(gutter), 0);
 
     let mut png = Vec::with_capacity(out.len() / 2);
     {
@@ -88,6 +94,19 @@ fn build_side_by_side(left: &[u8], right: &[u8]) -> Result<Vec<u8>, DiffError> {
     Ok(png)
 }
 
+/// Byte length of a `w × h` RGBA8 buffer, or a decode error.
+///
+/// PNG dimensions are attacker-controlled: `w * h * 4` in `u32` wraps on
+/// a large-enough header, and the wrapped value then sizes a buffer that
+/// every later offset overruns.
+fn rgba_len(w: u32, h: u32) -> Result<usize, DiffError> {
+    usize::try_from(w)
+        .ok()
+        .and_then(|w| w.checked_mul(usize::try_from(h).ok()?))
+        .and_then(|n| n.checked_mul(4))
+        .ok_or_else(|| DiffError::Unsupported(format!("image of {w}x{h} is too large")))
+}
+
 fn decode_rgba(bytes: &[u8]) -> Result<(Vec<u8>, u32, u32), DiffError> {
     let decoder = png::Decoder::new(bytes);
     let mut reader = decoder.read_info().map_err(map_png_err)?;
@@ -97,28 +116,28 @@ fn decode_rgba(bytes: &[u8]) -> Result<(Vec<u8>, u32, u32), DiffError> {
     let (out, w, h) = match info.color_type {
         png::ColorType::Rgba => (buf, info.width, info.height),
         png::ColorType::Rgb => {
-            let mut rgba = Vec::with_capacity(info.width as usize * info.height as usize * 4);
-            for chunk in buf.chunks_exact(3) {
+            let mut rgba = Vec::with_capacity(rgba_len(info.width, info.height)?);
+            for chunk in buf.as_chunks::<3>().0 {
                 rgba.extend_from_slice(chunk);
                 rgba.push(255);
             }
             (rgba, info.width, info.height)
         }
         png::ColorType::Grayscale => {
-            let mut rgba = Vec::with_capacity(info.width as usize * info.height as usize * 4);
+            let mut rgba = Vec::with_capacity(rgba_len(info.width, info.height)?);
             for &g in &buf {
                 rgba.extend_from_slice(&[g, g, g, 255]);
             }
             (rgba, info.width, info.height)
         }
         png::ColorType::GrayscaleAlpha => {
-            let mut rgba = Vec::with_capacity(info.width as usize * info.height as usize * 4);
-            for chunk in buf.chunks_exact(2) {
+            let mut rgba = Vec::with_capacity(rgba_len(info.width, info.height)?);
+            for chunk in buf.as_chunks::<2>().0 {
                 rgba.extend_from_slice(&[chunk[0], chunk[0], chunk[0], chunk[1]]);
             }
             (rgba, info.width, info.height)
         }
-        other => {
+        other @ png::ColorType::Indexed => {
             return Err(DiffError::Unsupported(format!(
                 "unsupported PNG color type {other:?}"
             )));
@@ -127,26 +146,62 @@ fn decode_rgba(bytes: &[u8]) -> Result<(Vec<u8>, u32, u32), DiffError> {
     Ok((out, w, h))
 }
 
-fn map_png_err(e: png::DecodingError) -> DiffError {
+const fn map_png_err(e: png::DecodingError) -> DiffError {
     DiffError::PngDecode(e)
 }
 
-#[allow(clippy::too_many_arguments)]
-fn blit(src: &[u8], sw: u32, sh: u32, dst: &mut [u8], dw: u32, _dh: u32, x: u32, y: u32) {
+/// Byte offset of pixel `(x, y)` in a `dw`-wide RGBA8 buffer.
+fn px_off(dw: u32, x: u32, y: u32) -> Option<usize> {
+    let index = usize::try_from(y)
+        .ok()?
+        .checked_mul(usize::try_from(dw).ok()?)?
+        .checked_add(usize::try_from(x).ok()?)?;
+    index.checked_mul(4)
+}
+
+/// Copy `src` into `dst` at `(x, y)`.
+///
+/// Rows that would fall outside either buffer are skipped rather than
+/// panicking: a composite is a debugging artefact, and a clipped image is
+/// a far better outcome than a dead snapshot run.
+fn blit(src: &[u8], sw: u32, sh: u32, dst: &mut [u8], dw: u32, x: u32, y: u32) {
+    let Ok(row_bytes) = rgba_len(sw, 1) else {
+        return;
+    };
     for row in 0..sh {
-        let src_off = (row * sw * 4) as usize;
-        let dst_off = (((y + row) * dw + x) * 4) as usize;
-        let end = src_off + (sw * 4) as usize;
-        dst[dst_off..dst_off + (sw * 4) as usize].copy_from_slice(&src[src_off..end]);
+        let (Some(src_off), Some(dst_off)) =
+            (px_off(sw, 0, row), px_off(dw, x, y.saturating_add(row)))
+        else {
+            return;
+        };
+        let (Some(src_end), Some(dst_end)) = (
+            src_off.checked_add(row_bytes),
+            dst_off.checked_add(row_bytes),
+        ) else {
+            return;
+        };
+        let (Some(src_row), Some(dst_row)) =
+            (src.get(src_off..src_end), dst.get_mut(dst_off..dst_end))
+        else {
+            return;
+        };
+        dst_row.copy_from_slice(src_row);
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn fill_rect(dst: &mut [u8], dw: u32, _dh: u32, x: u32, y: u32, w: u32, h: u32, rgba: [u8; 4]) {
+/// Fill a `w × h` rectangle at `(x, y)` with one colour.
+fn fill_rect(dst: &mut [u8], dw: u32, x: u32, y: u32, w: u32, h: u32, rgba: [u8; 4]) {
     for row in 0..h {
         for col in 0..w {
-            let off = (((y + row) * dw + (x + col)) * 4) as usize;
-            dst[off..off + 4].copy_from_slice(&rgba);
+            let Some(off) = px_off(dw, x.saturating_add(col), y.saturating_add(row)) else {
+                return;
+            };
+            let Some(end) = off.checked_add(4) else {
+                return;
+            };
+            if let Some(px) = dst.get_mut(off..end) {
+                px.copy_from_slice(&rgba);
+            }
         }
     }
 }
@@ -155,4 +210,4 @@ fn fill_rect(dst: &mut [u8], dw: u32, _dh: u32, x: u32, y: u32, w: u32, h: u32, 
 // architect_story_snapshots::compare internally; keeping the use here makes
 // the dependency intent explicit.
 #[allow(dead_code)]
-fn _dssim_dep_marker(_: &Dssim) {}
+const fn _dssim_dep_marker(_: &Dssim) {}

@@ -2,6 +2,21 @@
 //! `LocalServer`: the same `#[architect::rpc]` trait mounted twice on one
 //! router under two scopes; each scoped client reaches its own instance, and
 //! an unscoped mount keeps serving unscoped calls.
+
+// This is an integration-test crate. `clippy.toml`'s
+// `allow-*-in-tests` only reaches `#[test]` fns and `#[cfg(test)]`
+// modules, so the fixture/mock `impl` blocks below — where an
+// `unwrap()` IS the assertion — still trip the panic lints. Allow
+// them crate-wide here rather than dotting the file with attributes.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::panic
+)]
 #![cfg(all(feature = "local", not(target_arch = "wasm32")))]
 
 use architect::local::LocalServer;
@@ -172,4 +187,31 @@ mod scoped_views {
         other.write("world".to_string());
         assert_eq!(store.store_direct().region("us".into()).count(), 2);
     }
+}
+
+/// A router that mounts only part of a backend's bundle answers "unknown
+/// method" for the rest, forever, and nothing says so. The two lists that
+/// could drift — what a bundle declares and what a router mounts — both
+/// already exist; this cross-references them.
+#[test]
+fn a_router_reports_what_its_backend_declares_but_it_does_not_mount() {
+    use architect::Services as _;
+
+    // `into_router()` mounts the whole canonical bundle.
+    let complete = EchoBackend { name: "a" }.into_router();
+    assert!(
+        complete.unmounted_from::<EchoBackend>().is_empty(),
+        "the canonical bundle mounts everything it declares"
+    );
+
+    // A hand-assembled router that forgot one is the failure mode.
+    let empty = LayerRouter::new();
+    // `#[architect::rpc]` names the vox service `<Trait>Rpc`, so that is
+    // the name the router mounts under and the name a permit table has to
+    // use — see `PermissionsGate::coverage`.
+    assert_eq!(empty.unmounted_from::<EchoBackend>(), vec!["EchoRpc"]);
+
+    // And `mounted()` is the same list from the other side.
+    assert!(complete.mounted().contains_key("EchoRpc"));
+    assert!(empty.mounted().is_empty());
 }

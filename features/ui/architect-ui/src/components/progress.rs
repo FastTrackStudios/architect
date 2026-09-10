@@ -18,7 +18,7 @@ pub enum ProgressVariant {
 
 impl ProgressVariant {
     // shadcn v4 maia: cn-progress fill color
-    fn fill_class(self) -> &'static str {
+    const fn fill_class(self) -> &'static str {
         match self {
             Self::Default => "bg-primary",
             Self::Destructive => "bg-destructive",

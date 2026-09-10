@@ -1,4 +1,4 @@
-//! ContextMenu — primitive-backed shadcn-style menu.
+//! `ContextMenu` — primitive-backed shadcn-style menu.
 
 use architect_story_runtime::story;
 use dioxus::prelude::*;
@@ -147,7 +147,7 @@ pub fn ContextMenuLabel(props: ContextMenuLabelProps) -> Element {
     }
 }
 
-/// ContextMenu forced open showing items. (Note: positioned at fixed coords.)
+/// `ContextMenu` forced open showing items. (Note: positioned at fixed coords.)
 #[story(category = "ContextMenu", name = "context menu default")]
 pub fn context_menu_default() -> Element {
     let mut open = use_signal(|| true);

@@ -82,19 +82,22 @@ impl StoredSession {
     }
 
     /// Attach the user id.
+    #[must_use]
     pub fn with_user_id(mut self, user_id: impl Into<String>) -> Self {
         self.user_id = Some(user_id.into());
         self
     }
 
     /// Attach the user's email.
+    #[must_use]
     pub fn with_email(mut self, email: impl Into<String>) -> Self {
         self.email = Some(email.into());
         self
     }
 
     /// Attach the expiry (unix seconds, UTC).
-    pub fn with_expires_at_unix(mut self, expires_at_unix: i64) -> Self {
+    #[must_use]
+    pub const fn with_expires_at_unix(mut self, expires_at_unix: i64) -> Self {
         self.expires_at_unix = Some(expires_at_unix);
         self
     }
@@ -127,36 +130,45 @@ pub trait TokenStore: Send + Sync {
 }
 
 /// In-memory [`TokenStore`] — the wasm implementation, and the natural
-/// choice for tests. On the web the token lives for the page's
-/// lifetime; persisting across reloads is the embedding app's call
-/// (and storage surface) — out of scope here.
+/// choice for tests.
+///
+/// On the web the token lives for the page's lifetime; persisting
+/// across reloads is the embedding app's call (and storage surface) —
+/// out of scope here.
 #[derive(Debug, Default)]
 pub struct MemoryTokenStore {
     session: Mutex<Option<StoredSession>>,
 }
 
 impl MemoryTokenStore {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 }
 
+/// Lock the in-memory session slot, recovering from poison.
+///
+/// The slot holds one `Option<StoredSession>` with no invariant that
+/// spans a panic, so propagating poison would only turn some other
+/// thread's panic into a second one here. `auth-client` runs inside
+/// browser and desktop apps; that second panic is the one users see.
+fn lock_session<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 impl TokenStore for MemoryTokenStore {
     fn save(&self, session: &StoredSession) -> Result<(), TokenStoreError> {
-        *self.session.lock().expect("token store mutex poisoned") = Some(session.clone());
+        *lock_session(&self.session) = Some(session.clone());
         Ok(())
     }
 
     fn load(&self) -> Result<Option<StoredSession>, TokenStoreError> {
-        Ok(self
-            .session
-            .lock()
-            .expect("token store mutex poisoned")
-            .clone())
+        Ok(lock_session(&self.session).clone())
     }
 
     fn clear(&self) -> Result<(), TokenStoreError> {
-        *self.session.lock().expect("token store mutex poisoned") = None;
+        *lock_session(&self.session) = None;
         Ok(())
     }
 }
@@ -184,6 +196,7 @@ impl FileTokenStore {
     }
 
     /// The file this store reads and writes.
+    #[must_use]
     pub fn path(&self) -> &std::path::Path {
         &self.path
     }
@@ -267,10 +280,10 @@ impl TokenStoreMiddleware {
 }
 
 impl vox::ClientMiddleware for TokenStoreMiddleware {
-    fn pre<'a, 'call>(
+    fn pre<'a>(
         &'a self,
         _context: &'a vox::ClientContext<'a>,
-        request: &'a mut vox::ClientRequest<'call, 'a>,
+        request: &'a mut vox::ClientRequest<'_, 'a>,
     ) -> vox::BoxMiddlewareFuture<'a> {
         // A missing or unreadable store means an unauthenticated call,
         // not a failed one — the server's middleware treats an absent
@@ -290,6 +303,18 @@ impl vox::ClientMiddleware for TokenStoreMiddleware {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic,
+    clippy::float_cmp,
+    clippy::string_slice,
+    clippy::significant_drop_tightening,
+    clippy::too_many_lines
+)]
 mod tests {
     use super::*;
 

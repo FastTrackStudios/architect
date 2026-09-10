@@ -39,7 +39,7 @@ use syn::{
 ///
 /// emits, in addition to the input trait:
 ///
-/// - `TracksRpc` — hidden async mirror, vox::service-decorated. The
+/// - `TracksRpc` — hidden async mirror, `vox::service-decorated`. The
 ///   trait `#[vox::service]` would generate clients and dispatchers
 ///   against; user code touches it only by name when mounting.
 /// - `TracksHost<S, D>` — server-side wrapper accepting any `impl
@@ -128,7 +128,7 @@ impl syn::parse::Parse for ScopeDecl {
         let name: syn::Ident = input.parse()?;
         input.parse::<syn::Token![:]>()?;
         let ty: Type = input.parse()?;
-        Ok(ScopeDecl { name, ty })
+        Ok(Self { name, ty })
     }
 }
 
@@ -145,7 +145,7 @@ impl syn::parse::Parse for OpsSubst {
         let src: Type = input.parse()?;
         input.parse::<syn::Token![as]>()?;
         let dst: Type = input.parse()?;
-        Ok(OpsSubst { src, dst })
+        Ok(Self { src, dst })
     }
 }
 
@@ -239,6 +239,8 @@ pub fn derive_has_dispatcher(input: TokenStream) -> TokenStream {
     }
 }
 
+// By value: `syn` hands the parsed item over; the emitter consumes it.
+#[allow(clippy::needless_pass_by_value)]
 fn expand_has_dispatcher(input: syn::DeriveInput) -> syn::Result<TokenStream2> {
     let mut dispatcher_ty: Option<Type> = None;
     for attr in &input.attrs {
@@ -271,6 +273,8 @@ fn expand_has_dispatcher(input: syn::DeriveInput) -> syn::Result<TokenStream2> {
 
 /// Main expansion entry. Split out from the proc-macro shim so it can
 /// be exercised from unit tests once they exist.
+// By value: `syn` hands the parsed item over; the emitter consumes it.
+#[allow(clippy::needless_pass_by_value)]
 fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
     let trait_name = &trait_item.ident;
     let vis = &trait_item.vis;
@@ -413,8 +417,8 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
     let scoped_client = match ctx {
         Some(ctx_ty) if !matches!(shape, Shape::Empty) => {
             let actual_client = match shape {
-                Shape::AllAsync => client_name.clone(),
-                _ => rpc_client_name.clone(),
+                Shape::AllAsync => client_name,
+                _ => rpc_client_name,
             };
             emit_scoped_client(trait_name, &actual_client, vis, &methods, ctx_ty)
         }
@@ -434,19 +438,18 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
     // already the rule (the `Service` token collides otherwise), so
     // these can't clash. Proto-crate modules then re-export the whole
     // surface with a single `pub use service::*;`.
-    let bare_aliases = match shape {
-        Shape::Empty => quote! {},
-        _ => {
-            let descriptor_fn = format_ident!(
-                "{}_rpc_service_descriptor",
-                to_snake_case(&trait_name.to_string())
-            );
-            quote! {
-                #[cfg(feature = "vox")]
-                #vis use #rpc_dispatcher_name as Dispatcher;
-                #[cfg(feature = "vox")]
-                #vis use #descriptor_fn as descriptor;
-            }
+    let bare_aliases = if matches!(shape, Shape::Empty) {
+        quote! {}
+    } else {
+        let descriptor_fn = format_ident!(
+            "{}_rpc_service_descriptor",
+            to_snake_case(&trait_name.to_string())
+        );
+        quote! {
+            #[cfg(feature = "vox")]
+            #vis use #rpc_dispatcher_name as Dispatcher;
+            #[cfg(feature = "vox")]
+            #vis use #descriptor_fn as descriptor;
         }
     };
 
@@ -638,17 +641,18 @@ fn emit_scope_views(
                 FnArg::Receiver(_) => None,
             })
             .collect();
-        let mut depth = 0usize;
-        while depth < scopes.len()
-            && depth < typed.len()
-            && ty_key(&typed[depth].ty) == scope_keys[depth]
-        {
-            depth += 1;
-        }
-        if depth == 0 {
+        // How many leading parameters match the declared scope chain.
+        // Zipping the two sequences makes the bound structural instead of
+        // asserting it with two `<` checks and an index.
+        let depth = typed
+            .iter()
+            .zip(scope_keys.iter())
+            .take_while(|(t, key)| ty_key(&t.ty) == **key)
+            .count();
+        // `checked_sub` doubles as the "no scopes matched" guard.
+        let Some(level) = depth.checked_sub(1) else {
             continue;
-        }
-        let level = depth - 1;
+        };
         let name = &f.sig.ident;
         let docs: Vec<_> = f
             .attrs
@@ -656,7 +660,7 @@ fn emit_scope_views(
             .filter(|a| a.path().is_ident("doc"))
             .collect();
         // Remaining (unelided) parameters + their idents.
-        let rest: Vec<&syn::PatType> = typed[depth..].to_vec();
+        let rest: Vec<&syn::PatType> = typed.get(depth..).unwrap_or_default().to_vec();
         let rest_idents: Vec<syn::Ident> = rest
             .iter()
             .filter_map(|t| match &*t.pat {
@@ -671,12 +675,22 @@ fn emit_scope_views(
                  identifiers",
             ));
         }
-        let scope_field_names: Vec<&syn::Ident> = scopes[..depth].iter().map(|s| &s.name).collect();
-        let ret = &f.sig.output;
-        per_level[level].push(quote! {
+        let scope_field_names: Vec<&syn::Ident> = scopes
+            .get(..depth)
+            .unwrap_or_default()
+            .iter()
+            .map(|s| &s.name)
+            .collect();
+        let return_type = &f.sig.output;
+        // `level < depth <= scopes.len() == per_level.len()`, so this
+        // always hits — reading it fallibly keeps the invariant local.
+        let Some(bucket) = per_level.get_mut(level) else {
+            continue;
+        };
+        bucket.push(quote! {
             #(#docs)*
             #[inline]
-            #vis fn #name(&self, #(#rest),*) #ret {
+            #vis fn #name(&self, #(#rest),*) #return_type {
                 <B as #trait_name>::#name(
                     self.backend,
                     #(::core::clone::Clone::clone(&self.#scope_field_names),)*
@@ -689,26 +703,30 @@ fn emit_scope_views(
     // Emit each level's view + the constructor from the level below.
     let mut out = TokenStream2::new();
     for (level, view_name) in view_names.iter().enumerate() {
-        let held = &scopes[..=level];
+        let held = scopes.get(..=level).unwrap_or_default();
         let field_names: Vec<&syn::Ident> = held.iter().map(|s| &s.name).collect();
         let field_tys: Vec<&Type> = held.iter().map(|s| &s.ty).collect();
-        let methods = &per_level[level];
-        let deeper = scopes.get(level + 1).map(|next| {
-            let next_view = &view_names[level + 1];
-            let next_name = &next.name;
-            let next_ty = &next.ty;
-            let doc = format!("Narrow to a specific `{next_name}` scope.");
-            quote! {
-                #[doc = #doc]
-                #vis fn #next_name(&self, #next_name: #next_ty) -> #next_view<'a, B> {
-                    #next_view {
-                        backend: self.backend,
-                        #(#field_names: ::core::clone::Clone::clone(&self.#field_names),)*
-                        #next_name,
+        let methods = per_level.get(level).map_or(&[][..], Vec::as_slice);
+        let next_level = level.saturating_add(1);
+        let deeper =
+            scopes
+                .get(next_level)
+                .zip(view_names.get(next_level))
+                .map(|(next, next_view)| {
+                    let next_name = &next.name;
+                    let next_ty = &next.ty;
+                    let doc = format!("Narrow to a specific `{next_name}` scope.");
+                    quote! {
+                        #[doc = #doc]
+                        #vis fn #next_name(&self, #next_name: #next_ty) -> #next_view<'a, B> {
+                            #next_view {
+                                backend: self.backend,
+                                #(#field_names: ::core::clone::Clone::clone(&self.#field_names),)*
+                                #next_name,
+                            }
+                        }
                     }
-                }
-            }
-        });
+                });
         let accessors = held.iter().map(|s| {
             let name = &s.name;
             let ty = &s.ty;
@@ -725,7 +743,7 @@ fn emit_scope_views(
              chain starting at `{}Direct`.",
             field_names
                 .iter()
-                .map(|i| i.to_string())
+                .map(std::string::ToString::to_string)
                 .collect::<Vec<_>>()
                 .join("` + `"),
             trait_name,
@@ -759,10 +777,14 @@ fn emit_scope_views(
     }
 
     // Entry: the first scope's constructor hangs off the direct view.
-    let first = &scopes[0];
+    // `scopes` is non-empty here (the caller returns early otherwise), but
+    // reading it fallibly keeps that a local fact rather than an
+    // assumption that panics the compiler if it ever stops holding.
+    let (Some(first), Some(first_view)) = (scopes.first(), view_names.first()) else {
+        return Ok(out);
+    };
     let first_name = &first.name;
     let first_ty = &first.ty;
-    let first_view = &view_names[0];
     let doc = format!("Bind a `{first_name}` scope — the entry to the scope chain.");
     out.extend(quote! {
         impl<'a, B: #trait_name + ?Sized> #direct_name<'a, B> {
@@ -843,14 +865,17 @@ fn emit_sync_client(
             ReturnType::Default => quote! {
                 ::core::result::Result<(), ::architect::vox::VoxError>
             },
-            ReturnType::Type(_, ty) => match as_syntactic_result(ty) {
-                Some((ok, err)) => quote! {
-                    ::core::result::Result<#ok, ::architect::vox::VoxError<#err>>
-                },
-                None => quote! {
-                    ::core::result::Result<#ty, ::architect::vox::VoxError>
-                },
-            },
+            ReturnType::Type(_, ty) => {
+                if let Some((ok, err)) = as_syntactic_result(ty) {
+                    quote! {
+                        ::core::result::Result<#ok, ::architect::vox::VoxError<#err>>
+                    }
+                } else {
+                    quote! {
+                        ::core::result::Result<#ty, ::architect::vox::VoxError>
+                    }
+                }
+            }
         };
         // `mirror_inputs` includes the receiver; strip it — the facade
         // method declares its own `&self`.
@@ -1022,7 +1047,7 @@ fn emit_prelude(
     }
 }
 
-/// PascalCase a snake_case identifier — op-enum variant names are the
+/// `PascalCase` a `snake_case` identifier — op-enum variant names are the
 /// method names recased (`set_muted` → `SetMuted`).
 fn to_pascal_case(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
@@ -1255,12 +1280,12 @@ fn emit_ops_block(
     })
 }
 
-/// Snake-case an UpperCamelCase identifier. Mirrors what `#[vox::service]`
+/// Snake-case an `UpperCamelCase` identifier. Mirrors what `#[vox::service]`
 /// does when it derives `<snake_name>_service_descriptor` from the
 /// trait's name, so we can refer to that emitted function by name from
 /// inside the `layer()` body.
 fn to_snake_case(input: &str) -> String {
-    let mut out = String::with_capacity(input.len() + 4);
+    let mut out = String::with_capacity(input.len().saturating_add(4));
     let mut prev_lower = false;
     for ch in input.chars() {
         if ch.is_uppercase() {
@@ -1462,10 +1487,7 @@ fn has_subscribe_attr(method: &TraitItemFn) -> bool {
 /// `<Trait>Op` enum.
 fn has_ops_skip_attr(method: &TraitItemFn) -> bool {
     method.attrs.iter().any(|a| {
-        a.path().is_ident("ops")
-            && a.parse_args::<syn::Ident>()
-                .map(|id| id == "skip")
-                .unwrap_or(false)
+        a.path().is_ident("ops") && a.parse_args::<syn::Ident>().is_ok_and(|id| id == "skip")
     })
 }
 
@@ -1834,14 +1856,17 @@ fn emit_scoped_client(
             ReturnType::Default => quote! {
                 ::core::result::Result<(), ::architect::vox::VoxError>
             },
-            ReturnType::Type(_, ty) => match as_syntactic_result(ty) {
-                Some((ok, err)) => quote! {
-                    ::core::result::Result<#ok, ::architect::vox::VoxError<#err>>
-                },
-                None => quote! {
-                    ::core::result::Result<#ty, ::architect::vox::VoxError>
-                },
-            },
+            ReturnType::Type(_, ty) => {
+                if let Some((ok, err)) = as_syntactic_result(ty) {
+                    quote! {
+                        ::core::result::Result<#ok, ::architect::vox::VoxError<#err>>
+                    }
+                } else {
+                    quote! {
+                        ::core::result::Result<#ty, ::architect::vox::VoxError>
+                    }
+                }
+            }
         };
         let typed_args = m
             .mirror_inputs
@@ -2050,7 +2075,7 @@ fn classify_shape(methods: &[Method]) -> Shape {
         return Shape::Empty;
     }
     let async_count = methods.iter().filter(|m| m.is_async).count();
-    let sync_count = methods.len() - async_count;
+    let sync_count = methods.len().saturating_sub(async_count);
     match (sync_count, async_count) {
         (0, _) => Shape::AllAsync,
         (_, 0) => Shape::AllSync,
@@ -2064,7 +2089,7 @@ fn classify_shape(methods: &[Method]) -> Shape {
 /// `fn -> impl Future<Output = R> + Send` so backends promise
 /// `Send` futures. The bridge calls `self.inner.method(...).await`
 /// in a context that requires Send (the mirror's `async fn`
-/// expands via vox::service to a Send-bounded future), so the
+/// expands via `vox::service` to a Send-bounded future), so the
 /// inner trait must guarantee Send too.
 ///
 /// Sync methods are re-emitted verbatim. `Send + Sync + 'static`
@@ -2244,7 +2269,7 @@ fn emit_bridge_impl(
     // Sync methods receive the ambient context by reference; the owned
     // wire value is captured into the dispatcher closure.
     let ctx_sync_arg = ctx.map(|_| quote! { &ctx, });
-    let ctx_async_arg = ctx.map(|_| quote! { ctx, });
+    let ctx_owned_arg = ctx.map(|_| quote! { ctx, });
     let method_impls = methods.iter().map(|m| {
         let name = &m.decl.sig.ident;
         let mut mirror_iter = m.mirror_inputs.iter();
@@ -2273,7 +2298,7 @@ fn emit_bridge_impl(
             // Pass-through: backend's async method is awaited directly.
             quote! {
                 async fn #name(#receiver, #ctx_param #(#mirror_inputs),*) #output {
-                    self.inner.#name(#ctx_async_arg #(#call_args),*).await
+                    self.inner.#name(#ctx_owned_arg #(#call_args),*).await
                 }
             }
         } else {

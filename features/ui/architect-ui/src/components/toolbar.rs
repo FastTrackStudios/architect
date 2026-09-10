@@ -53,7 +53,7 @@ pub fn ToolbarButton(props: ToolbarButtonProps) -> Element {
         PrimitiveToolbarButton {
             index: props.index,
             disabled: props.disabled,
-            on_click: move |_| {
+            on_click: move |()| {
                 if let Some(callback) = &props.on_click {
                     callback.call(());
                 }
@@ -64,7 +64,7 @@ pub fn ToolbarButton(props: ToolbarButtonProps) -> Element {
     }
 }
 
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone, PartialEq, Eq)]
 pub struct ToolbarSeparatorProps {
     #[props(default)]
     pub horizontal: Option<bool>,

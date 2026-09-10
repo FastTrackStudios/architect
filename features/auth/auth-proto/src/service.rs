@@ -23,11 +23,12 @@ use crate::email_change::AuthEmailChange;
 use crate::{AuthFlowError, AuthSessionBundle, AuthUser, SignInEmailPassword, SignUpEmailPassword};
 use uuid::Uuid;
 
-/// Flattened membership row for the org-members enumeration RPC: the
-/// member's `role` joined with the user's display `name` + `email`, so
-/// clients (rates editor, owner dashboard) get a ready-to-render list
+/// Flattened membership row for the org-members enumeration RPC.
+///
+/// The member's `role` joined with the user's display `name` + `email`,
+/// so clients (rates editor, owner dashboard) get a ready-to-render list
 /// without a second per-user round-trip.
-#[derive(Clone, Debug, PartialEq, ::facet::Facet)]
+#[derive(Clone, Debug, PartialEq, Eq, ::facet::Facet)]
 pub struct OrgMember {
     pub user_id: Uuid,
     pub name: String,

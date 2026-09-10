@@ -832,14 +832,15 @@ pub mod api_keys {
             if !api_key.rate_limit_enabled {
                 return Ok(api_key);
             }
-            let remaining = api_key
-                .remaining
-                .unwrap_or(api_key.rate_limit_max.unwrap_or(0));
+            let remaining = api_key.remaining.or(api_key.rate_limit_max).unwrap_or(0);
             if remaining <= 0 {
                 return Err(AuthFlowError::PermissionDenied);
             }
-            let next_count = api_key.request_count.unwrap_or(0) + 1;
-            let next_remaining = remaining - 1;
+            // Saturating: a request counter that wraps at `i64::MAX`
+            // would hand out free quota, and one that panics would take
+            // the handler down.
+            let next_count = api_key.request_count.unwrap_or(0).saturating_add(1);
+            let next_remaining = remaining.saturating_sub(1);
             self.storage
                 .update_api_key_usage(api_key.id, Some(next_count), Some(next_remaining))
                 .await?;
@@ -980,6 +981,9 @@ pub mod captcha {
             })
         }
 
+        // `async` mirrors the other flow entry points, and a real captcha
+        // provider will await an HTTP round-trip here.
+        #[allow(clippy::unused_async)]
         pub(crate) async fn verify_captcha_for_flow(
             &self,
             flow: CaptchaFlow,
@@ -989,8 +993,7 @@ pub mod captcha {
                 return Ok(());
             }
             match &self.config.captcha.provider {
-                CaptchaProvider::Disabled => Ok(()),
-                CaptchaProvider::Bypass => Ok(()),
+                CaptchaProvider::Disabled | CaptchaProvider::Bypass => Ok(()),
                 CaptchaProvider::Test { valid_token } => {
                     if token == Some(valid_token.as_str()) {
                         Ok(())
@@ -1078,6 +1081,7 @@ pub mod last_login_method {
         }
     }
 
+    #[must_use]
     pub fn default_cookie_config() -> LastLoginMethodCookieConfig {
         LastLoginMethodCookieConfig {
             name: DEFAULT_LAST_LOGIN_METHOD_COOKIE_NAME.into(),
@@ -1219,7 +1223,7 @@ pub mod username {
         // r[impl auth.username.validation]
         /// Set the session owner's display name / avatar.
         ///
-        /// Username, display_username and metadata are read back from
+        /// Username, `display_username` and metadata are read back from
         /// the session's user and written unchanged: the storage
         /// primitive takes the whole profile row, so omitting them
         /// would silently blank an identifier this flow has no
@@ -1457,7 +1461,7 @@ pub mod email_password {
     use auth_proto::{
         AuthAccountCreate, AuthFlowError, AuthSessionBundle, AuthSessionCreate, AuthUserCreate,
     };
-    use chrono::{Duration, Utc};
+    use chrono::Utc;
 
     use crate::{
         ArchitectAuth, AuthService, AuthStorage, ChangeEmail, ChangePassword,
@@ -1564,7 +1568,7 @@ pub mod email_password {
                     AuthSessionCreate {
                         user_id: uuid::Uuid::nil(),
                         token_hash,
-                        expires_at: Utc::now() + Duration::seconds(self.config.session_ttl_seconds),
+                        expires_at: crate::expiry::expires_in(self.config.session_ttl_seconds),
                         ip_address: input.ip_address,
                         user_agent: input.user_agent,
                         impersonated_by: None,
@@ -1599,7 +1603,7 @@ pub mod email_password {
         /// rather than per login: plain-HTTP surfaces where the client
         /// re-presents the same credential every time and has nowhere to
         /// keep a token. HTTP Basic is the case that motivated it (the
-        /// Files WebDAV bridge — Finder re-sends `Authorization: Basic`
+        /// Files `WebDAV` bridge — Finder re-sends `Authorization: Basic`
         /// on every `PROPFIND`).
         ///
         /// Minting a session per such request grows the session table
@@ -1609,7 +1613,7 @@ pub mod email_password {
         /// because the *session* is what gets re-checked rather than the
         /// password. Verifying directly avoids both — every request is
         /// checked against the current stored hash, and no session
-        /// exists to leak or to sweep (FastTrackStudio PR #287 review).
+        /// exists to leak or to sweep (`FastTrackStudio` PR #287 review).
         ///
         /// Emits no audit event and does not touch `last_login_method`:
         /// this is not a login.
@@ -1847,7 +1851,7 @@ pub mod email_password {
                     .create_verification(auth_proto::AuthVerificationCreate {
                         identifier: identifier.clone(),
                         value_hash: hash_token(&self.config.secret, &token),
-                        expires_at: Utc::now() + Duration::seconds(PASSWORD_RESET_TTL_SECONDS),
+                        expires_at: crate::expiry::expires_in(PASSWORD_RESET_TTL_SECONDS),
                     })
                     .await?;
             }
@@ -1908,7 +1912,7 @@ pub mod email_password {
                 .storage
                 .find_latest_verification_by_identifier(&identifier)
                 .await?
-                && existing.created_at + Duration::seconds(EMAIL_VERIFICATION_RESEND_SECONDS)
+                && crate::expiry::after(existing.created_at, EMAIL_VERIFICATION_RESEND_SECONDS)
                     > Utc::now()
             {
                 return Err(AuthFlowError::PermissionDenied);
@@ -1918,7 +1922,7 @@ pub mod email_password {
                 .create_verification(auth_proto::AuthVerificationCreate {
                     identifier: identifier.clone(),
                     value_hash: hash_token(&self.config.secret, &token),
-                    expires_at: Utc::now() + Duration::seconds(EMAIL_VERIFICATION_TTL_SECONDS),
+                    expires_at: crate::expiry::expires_in(EMAIL_VERIFICATION_TTL_SECONDS),
                 })
                 .await?;
             Ok(VerificationToken { identifier, token })
@@ -2137,7 +2141,7 @@ pub mod email_password {
                 .create_session(auth_proto::AuthSessionCreate {
                     user_id: user.id,
                     token_hash,
-                    expires_at: Utc::now() + Duration::seconds(self.config.session_ttl_seconds),
+                    expires_at: crate::expiry::expires_in(self.config.session_ttl_seconds),
                     ip_address,
                     user_agent,
                     impersonated_by,
@@ -2162,7 +2166,7 @@ pub mod email_password {
             &self,
             input: auth_proto::service::ChangeEmailRequest,
         ) -> Result<auth_proto::AuthUser, AuthFlowError> {
-            ArchitectAuth::change_email(
+            Self::change_email(
                 self,
                 ChangeEmail {
                     session_token: input.session_token,
@@ -2176,7 +2180,7 @@ pub mod email_password {
             &self,
             input: auth_proto::service::UpdateProfileRequest,
         ) -> Result<auth_proto::AuthUser, AuthFlowError> {
-            ArchitectAuth::update_profile(
+            Self::update_profile(
                 self,
                 UpdateProfile {
                     session_token: input.session_token,
@@ -2191,7 +2195,7 @@ pub mod email_password {
             &self,
             input: auth_proto::service::ChangePasswordRequest,
         ) -> Result<(), AuthFlowError> {
-            ArchitectAuth::change_password(
+            Self::change_password(
                 self,
                 ChangePassword {
                     session_token: input.session_token,
@@ -2208,14 +2212,14 @@ pub mod email_password {
         ) -> Result<auth_proto::AuthUser, AuthFlowError> {
             // Same contract as the vox transport: the session authorizes
             // the call and names who performed it.
-            let caller = ArchitectAuth::current_session(
+            let caller = Self::current_session(
                 self,
                 CurrentSession {
                     token: input.session_token,
                 },
             )
             .await?;
-            ArchitectAuth::migrate_user_email(
+            Self::migrate_user_email(
                 self,
                 MigrateUserEmail {
                     user_id: input.user_id,
@@ -2231,21 +2235,21 @@ pub mod email_password {
             &self,
             input: auth_proto::service::EmailHistoryRequest,
         ) -> Result<Vec<auth_proto::email_change::AuthEmailChange>, AuthFlowError> {
-            ArchitectAuth::current_session(
+            Self::current_session(
                 self,
                 CurrentSession {
                     token: input.session_token,
                 },
             )
             .await?;
-            ArchitectAuth::list_email_history(self, input.user_id).await
+            Self::list_email_history(self, input.user_id).await
         }
 
         async fn sign_up_email_password(
             &self,
             input: auth_proto::SignUpEmailPassword,
         ) -> Result<AuthSessionBundle, AuthFlowError> {
-            ArchitectAuth::create_email_password_user(
+            Self::create_email_password_user(
                 self,
                 CreateEmailPasswordUser {
                     email: input.email,
@@ -2265,25 +2269,25 @@ pub mod email_password {
             &self,
             input: SignInEmailPassword,
         ) -> Result<AuthSessionBundle, AuthFlowError> {
-            ArchitectAuth::sign_in_email_password(self, input).await
+            Self::sign_in_email_password(self, input).await
         }
 
         async fn current_session(&self, token: String) -> Result<AuthSessionBundle, AuthFlowError> {
-            ArchitectAuth::current_session(self, CurrentSession { token }).await
+            Self::current_session(self, CurrentSession { token }).await
         }
 
         async fn refresh_session(&self, token: String) -> Result<AuthSessionBundle, AuthFlowError> {
-            ArchitectAuth::refresh_session(self, RefreshSession { token }).await
+            Self::refresh_session(self, RefreshSession { token }).await
         }
 
         async fn whoami(&self, token: String) -> Result<auth_proto::AuthUser, AuthFlowError> {
-            ArchitectAuth::current_session(self, CurrentSession { token })
+            Self::current_session(self, CurrentSession { token })
                 .await
                 .map(|bundle| bundle.user)
         }
 
         async fn sign_out(&self, token: String) -> Result<(), AuthFlowError> {
-            ArchitectAuth::sign_out(self, SignOut { token }).await
+            Self::sign_out(self, SignOut { token }).await
         }
 
         async fn list_org_members(
@@ -2333,6 +2337,18 @@ pub mod email_password {
     }
 
     #[cfg(test)]
+    #[allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::indexing_slicing,
+        clippy::arithmetic_side_effects,
+        clippy::as_conversions,
+        clippy::panic,
+        clippy::float_cmp,
+        clippy::string_slice,
+        clippy::significant_drop_tightening,
+        clippy::too_many_lines
+    )]
     mod tests {
         use std::{
             collections::HashMap,
@@ -3930,7 +3946,9 @@ pub mod email_password {
             sub: &str,
             audience: &str,
         ) -> String {
-            let now = Utc::now().timestamp() as usize;
+            // Before 1970 (or on a 32-bit target after 2038) the `as`
+            // cast wrapped to an absurd `iat`; clamp instead.
+            let now = usize::try_from(Utc::now().timestamp()).unwrap_or(0);
             let claims = serde_json::json!({
                 "iss": "https://accounts.google.com",
                 "aud": audience,
@@ -5333,8 +5351,8 @@ pub mod email_password {
                     .lock()
                     .expect("lock memory storage");
                 for verification in inner.verifications.values_mut() {
-                    verification.expires_at = Utc::now() - Duration::seconds(1);
-                    verification.created_at = Utc::now() - Duration::seconds(120);
+                    verification.expires_at = crate::expiry::ago(1);
+                    verification.created_at = crate::expiry::ago(120);
                 }
             }
             let expired_result = expired_auth
@@ -5436,7 +5454,7 @@ pub mod email_password {
                     .lock()
                     .expect("lock memory storage");
                 for verification in inner.verifications.values_mut() {
-                    verification.expires_at = Utc::now() - Duration::seconds(1);
+                    verification.expires_at = crate::expiry::ago(1);
                 }
             }
             let expired_result = expired_auth
@@ -5764,7 +5782,7 @@ pub mod email_password {
                     .lock()
                     .expect("lock memory storage");
                 for verification in inner.verifications.values_mut() {
-                    verification.expires_at = Utc::now() - Duration::seconds(1);
+                    verification.expires_at = crate::expiry::ago(1);
                 }
             }
             let expired_result = expired_auth
@@ -7460,7 +7478,7 @@ pub mod email_password {
                     .lock()
                     .expect("lock memory storage");
                 for verification in inner.verifications.values_mut() {
-                    verification.expires_at = Utc::now() - Duration::seconds(1);
+                    verification.expires_at = crate::expiry::ago(1);
                 }
             }
             assert!(matches!(
@@ -7806,13 +7824,13 @@ pub mod email_password {
                     .get_mut(&created.api_key.key_hash)
                     .expect("stored api key");
                 by_hash.enabled = true;
-                by_hash.expires_at = Some(Utc::now() - Duration::seconds(1));
+                by_hash.expires_at = Some(crate::expiry::ago(1));
                 let by_id = inner
                     .api_keys_by_id
                     .get_mut(&created.api_key.id)
                     .expect("stored api key by id");
                 by_id.enabled = true;
-                by_id.expires_at = Some(Utc::now() - Duration::seconds(1));
+                by_id.expires_at = Some(crate::expiry::ago(1));
             }
             let expired = auth
                 .authenticate_api_key(AuthenticateApiKey { key: created.key })
@@ -9045,7 +9063,7 @@ pub mod email_password {
                     user.user.id,
                     true,
                     Some("expired".into()),
-                    Some(Utc::now() - Duration::seconds(1)),
+                    Some(crate::expiry::ago(1)),
                 )
                 .await
                 .expect("expire ban");
@@ -9365,7 +9383,7 @@ pub mod email_password {
 }
 pub mod email_otp {
     use auth_proto::{AuthFlowError, AuthUserCreate, AuthVerificationCreate};
-    use chrono::{Duration, Utc};
+    use chrono::Utc;
 
     use super::email_password::normalize_email;
     use crate::{
@@ -9396,7 +9414,7 @@ pub mod email_otp {
                 .storage
                 .find_latest_verification_by_identifier(&identifier)
                 .await?
-                && existing.created_at + Duration::seconds(EMAIL_OTP_RESEND_SECONDS) > Utc::now()
+                && crate::expiry::after(existing.created_at, EMAIL_OTP_RESEND_SECONDS) > Utc::now()
             {
                 return Err(AuthFlowError::PermissionDenied);
             }
@@ -9405,7 +9423,7 @@ pub mod email_otp {
                 .create_verification(AuthVerificationCreate {
                     identifier: identifier.clone(),
                     value_hash: hash_token(&self.config.secret, &otp),
-                    expires_at: Utc::now() + Duration::seconds(EMAIL_OTP_TTL_SECONDS),
+                    expires_at: crate::expiry::expires_in(EMAIL_OTP_TTL_SECONDS),
                 })
                 .await?;
             Ok(VerificationToken {
@@ -9491,7 +9509,7 @@ pub mod email_otp {
 }
 pub mod phone_number {
     use auth_proto::{AuthFlowError, AuthUser, AuthUserCreate, AuthVerificationCreate};
-    use chrono::{Duration, Utc};
+    use chrono::Utc;
     use serde_json::{Value, json};
 
     use crate::{
@@ -9523,7 +9541,7 @@ pub mod phone_number {
                 .create_verification(AuthVerificationCreate {
                     identifier: phone_identifier(&phone_number),
                     value_hash: hash_token(&self.config.secret, &otp),
-                    expires_at: Utc::now() + Duration::seconds(PHONE_OTP_TTL_SECONDS),
+                    expires_at: crate::expiry::expires_in(PHONE_OTP_TTL_SECONDS),
                 })
                 .await?;
             Ok(VerificationToken {
@@ -9616,6 +9634,7 @@ pub mod phone_number {
             set_user_phone_number(self, bundle.user, &phone_number, false).await
         }
 
+        #[allow(clippy::unused_async)]
         async fn deliver_phone_otp(&self, _phone_number: &str) -> Result<(), AuthFlowError> {
             match self.config.sms.provider {
                 SmsProvider::Disabled | SmsProvider::Test => Ok(()),
@@ -9639,12 +9658,11 @@ pub mod phone_number {
 
     pub fn normalize_phone_number(phone_number: &str) -> Result<String, AuthFlowError> {
         let trimmed = phone_number.trim();
-        if !trimmed.starts_with('+') {
+        let Some(digits) = trimmed.strip_prefix('+') else {
             return Err(AuthFlowError::InvalidInput(
                 "phone number must be E.164".into(),
             ));
-        }
-        let digits = &trimmed[1..];
+        };
         if digits.len() < 8 || digits.len() > 15 || !digits.chars().all(|ch| ch.is_ascii_digit()) {
             return Err(AuthFlowError::InvalidInput(
                 "phone number must be E.164".into(),
@@ -9726,7 +9744,7 @@ pub mod phone_number {
 }
 pub mod siwe {
     use auth_proto::{AuthAccountCreate, AuthFlowError, AuthSessionBundle, AuthUserCreate};
-    use chrono::{Duration, Utc};
+    use chrono::Utc;
 
     use crate::{
         ArchitectAuth, AuthStorage, CreateSiweNonce, CurrentSession, LinkSiweAddress,
@@ -9759,7 +9777,7 @@ pub mod siwe {
                 .create_verification(auth_proto::AuthVerificationCreate {
                     identifier: siwe_nonce_identifier(&nonce),
                     value_hash: hash_token(&self.config.secret, &nonce),
-                    expires_at: Utc::now() + Duration::seconds(SIWE_NONCE_TTL_SECONDS),
+                    expires_at: crate::expiry::expires_in(SIWE_NONCE_TTL_SECONDS),
                 })
                 .await?;
             Ok(VerificationToken {
@@ -9895,6 +9913,7 @@ pub mod siwe {
         }
     }
 
+    #[must_use]
     pub fn test_siwe_signature(secret: &str, message: &str, address: &str) -> String {
         format!(
             "test:{}",
@@ -9947,8 +9966,9 @@ pub mod siwe {
 
     fn is_ethereum_address(address: &str) -> bool {
         address.len() == 42
-            && address.starts_with("0x")
-            && address[2..].chars().all(|ch| ch.is_ascii_hexdigit())
+            && address
+                .strip_prefix("0x")
+                .is_some_and(|body| body.chars().all(|ch| ch.is_ascii_hexdigit()))
     }
 
     fn siwe_nonce_identifier(nonce: &str) -> String {
@@ -9970,6 +9990,8 @@ pub mod haveibeenpwned {
     {
         // r[impl auth.hibp.range-check]
         // r[impl auth.hibp.failure-policy]
+        // `async` because the non-test provider is an HTTP range query.
+        #[allow(clippy::unused_async)]
         pub async fn check_password_breach(
             &self,
             input: CheckPasswordBreach,
@@ -9977,6 +9999,7 @@ pub mod haveibeenpwned {
             check_password_breach_with_config(&self.config.breached_passwords, &input.password)
         }
 
+        #[allow(clippy::unused_async)]
         pub(crate) async fn reject_breached_password(
             &self,
             password: &str,
@@ -9993,15 +10016,25 @@ pub mod haveibeenpwned {
         }
     }
 
+    /// The k-anonymity split a Have-I-Been-Pwned range query needs: the
+    /// first 5 hex characters of the password's SHA-1, and the rest.
+    #[must_use]
     pub fn sha1_prefix_suffix(password: &str) -> (String, String) {
+        use std::fmt::Write as _;
         let mut hasher = Sha1::new();
         hasher.update(password.as_bytes());
         let digest = hasher.finalize();
-        let hash = digest
-            .iter()
-            .map(|byte| format!("{byte:02X}"))
-            .collect::<String>();
-        (hash[..5].to_owned(), hash[5..].to_owned())
+        let mut hash = String::with_capacity(40);
+        for byte in &digest {
+            // `write!` to a `String` is infallible; the result is
+            // discarded rather than unwrapped.
+            let _ = write!(hash, "{byte:02X}");
+        }
+        // SHA-1 hex is 40 ASCII characters, so `split_at` can neither
+        // panic on a char boundary nor run past the end — but reading it
+        // fallibly keeps the guarantee local instead of assumed.
+        let (prefix, suffix) = hash.split_at_checked(5).unwrap_or((&hash, ""));
+        (prefix.to_owned(), suffix.to_owned())
     }
 
     fn check_password_breach_with_config(
@@ -10030,7 +10063,8 @@ pub mod haveibeenpwned {
                         let (candidate_prefix, candidate_suffix) = sha1_prefix_suffix(candidate);
                         candidate_prefix == prefix && candidate_suffix == suffix
                     })
-                    .count() as u64;
+                    .count();
+                let count = u64::try_from(count).unwrap_or(u64::MAX);
                 Ok(PasswordBreachCheck {
                     breached: count > 0,
                     count,
@@ -10125,7 +10159,7 @@ pub mod mcp {
 }
 pub mod magic_link {
     use auth_proto::{AuthFlowError, AuthUserCreate, AuthVerificationCreate};
-    use chrono::{Duration, Utc};
+    use chrono::Utc;
 
     use super::email_password::normalize_email;
     use crate::{
@@ -10156,7 +10190,7 @@ pub mod magic_link {
                 .storage
                 .find_latest_verification_by_identifier(&identifier)
                 .await?
-                && existing.created_at + Duration::seconds(MAGIC_LINK_RESEND_SECONDS) > Utc::now()
+                && crate::expiry::after(existing.created_at, MAGIC_LINK_RESEND_SECONDS) > Utc::now()
             {
                 return Err(AuthFlowError::PermissionDenied);
             }
@@ -10166,7 +10200,7 @@ pub mod magic_link {
                 .create_verification(AuthVerificationCreate {
                     identifier: identifier.clone(),
                     value_hash: hash_token(&self.config.secret, &token),
-                    expires_at: Utc::now() + Duration::seconds(MAGIC_LINK_TTL_SECONDS),
+                    expires_at: crate::expiry::expires_in(MAGIC_LINK_TTL_SECONDS),
                 })
                 .await?;
             let url = format!(
@@ -10260,7 +10294,7 @@ pub mod magic_link {
 }
 pub mod jwt {
     use auth_proto::AuthFlowError;
-    use chrono::{Duration, Utc};
+    use chrono::Utc;
     use jsonwebtoken::{
         Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, decode_header, encode,
     };
@@ -10293,8 +10327,10 @@ pub mod jwt {
                 .find(|key| key.id == self.config.jwt.active_key_id)
                 .ok_or_else(|| AuthFlowError::Internal("active JWT key missing".into()))?;
             let now = Utc::now();
-            let expires_at = now
-                + Duration::seconds(input.expires_in_seconds.unwrap_or(DEFAULT_JWT_TTL_SECONDS));
+            let expires_at = crate::expiry::after(
+                now,
+                input.expires_in_seconds.unwrap_or(DEFAULT_JWT_TTL_SECONDS),
+            );
             let extra = input
                 .claims_json
                 .map(|claims| {
@@ -10403,7 +10439,7 @@ pub mod jwt {
 pub mod oidc_provider {
     use auth_proto::{AuthFlowError, AuthVerificationCreate};
     use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-    use chrono::{Duration, Utc};
+    use chrono::Utc;
     use serde::{Deserialize, Serialize};
     use serde_json::json;
     use sha2::{Digest, Sha256};
@@ -10570,7 +10606,7 @@ pub mod oidc_provider {
                     identifier: oidc_code_identifier(&self.config.secret, &code),
                     value_hash: serde_json::to_string(&state)
                         .map_err(|err| AuthFlowError::Internal(err.to_string()))?,
-                    expires_at: Utc::now() + Duration::seconds(self.config.oidc.code_ttl_seconds),
+                    expires_at: crate::expiry::expires_in(self.config.oidc.code_ttl_seconds),
                 })
                 .await?;
 
@@ -10750,8 +10786,9 @@ pub mod oidc_provider {
                         identifier: oidc_refresh_identifier(&self.config.secret, &token),
                         value_hash: serde_json::to_string(&state)
                             .map_err(|err| AuthFlowError::Internal(err.to_string()))?,
-                        expires_at: Utc::now()
-                            + Duration::seconds(self.config.oidc.refresh_token_ttl_seconds),
+                        expires_at: crate::expiry::expires_in(
+                            self.config.oidc.refresh_token_ttl_seconds,
+                        ),
                     })
                     .await?;
                 Some(token)
@@ -10832,7 +10869,7 @@ pub mod anonymous {
     use auth_proto::{
         AuthAccountCreate, AuthFlowError, AuthSessionBundle, AuthUser, AuthUserCreate,
     };
-    use chrono::{Duration, Utc};
+
     use serde_json::{Value, json};
 
     use super::email_password::{
@@ -10973,13 +11010,13 @@ pub mod anonymous {
             input: CleanupAnonymousUsers,
         ) -> Result<CleanupAnonymousUsersResult, AuthFlowError> {
             self.require_admin(&input.session_token).await?;
-            let older_than = Utc::now() - Duration::seconds(input.older_than_seconds.max(0));
+            let older_than = crate::expiry::ago(input.older_than_seconds.max(0));
             let (users, _) = self.storage.list_users(0, 10_000).await?;
-            let mut deleted = 0;
+            let mut deleted = 0usize;
             for user in users {
                 if user.created_at < older_than && is_anonymous_user(&user) {
                     self.storage.delete_user_by_id(user.id).await?;
-                    deleted += 1;
+                    deleted = deleted.saturating_add(1);
                 }
             }
             Ok(CleanupAnonymousUsersResult { deleted })
@@ -11037,7 +11074,7 @@ pub mod oauth {
     use auth_proto::{
         AuthAccountCreate, AuthFlowError, AuthSessionBundle, AuthUserCreate, AuthVerificationCreate,
     };
-    use chrono::{Duration, Utc};
+    use chrono::Utc;
 
     use crate::{
         ArchitectAuth, AuthStorage, BeginOAuthAuthorization, GetOAuthAccessToken, LinkOAuthAccount,
@@ -11091,7 +11128,7 @@ pub mod oauth {
                 .create_verification(AuthVerificationCreate {
                     identifier: identifier.clone(),
                     value_hash: hash_token(&self.config.secret, &token),
-                    expires_at: Utc::now() + Duration::seconds(OAUTH_STATE_TTL_SECONDS),
+                    expires_at: crate::expiry::expires_in(OAUTH_STATE_TTL_SECONDS),
                 })
                 .await?;
             Ok(VerificationToken { identifier, token })
@@ -11354,11 +11391,13 @@ pub mod oauth {
 
     // r[impl auth.oauth.provider-registry]
     // r[impl auth.oauth.generic-provider]
-    pub fn built_in_oauth_providers() -> &'static [OAuthProviderDescriptor] {
+    #[must_use]
+    pub const fn built_in_oauth_providers() -> &'static [OAuthProviderDescriptor] {
         BUILT_IN_OAUTH_PROVIDERS
     }
 
-    pub fn generic_oauth_provider(
+    #[must_use]
+    pub const fn generic_oauth_provider(
         id: &'static str,
         auth_url: &'static str,
         token_url: &'static str,
@@ -11497,6 +11536,9 @@ pub mod oauth_proxy {
         // r[impl auth.oauth-proxy.callback-forwarding]
         // r[impl auth.oauth-proxy.max-age]
         // r[impl auth.oauth-proxy.redirect-policy]
+        // Command structs are handed over by value across the whole flow
+        // surface; taking this one by reference would make it the odd one.
+        #[allow(clippy::needless_pass_by_value)]
         pub fn consume_oauth_proxy_callback(
             &self,
             input: ConsumeOAuthProxyCallback,
@@ -11509,7 +11551,8 @@ pub mod oauth_proxy {
             if payload.callback_url != input.callback_url {
                 return Err(AuthFlowError::PermissionDenied);
             }
-            let age = Utc::now().timestamp() - payload.timestamp;
+            // `saturating_sub`: `payload.timestamp` is attacker-supplied.
+            let age = Utc::now().timestamp().saturating_sub(payload.timestamp);
             if age > self.config.oauth_proxy.max_age_seconds || age < -10 {
                 return Err(AuthFlowError::InvalidCredentials);
             }
@@ -11566,6 +11609,18 @@ pub mod oauth_proxy {
     }
 
     #[cfg(test)]
+    #[allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::indexing_slicing,
+        clippy::arithmetic_side_effects,
+        clippy::as_conversions,
+        clippy::panic,
+        clippy::float_cmp,
+        clippy::string_slice,
+        clippy::significant_drop_tightening,
+        clippy::too_many_lines
+    )]
     mod boundary_tests {
         use proptest::prelude::*;
 
@@ -11584,7 +11639,13 @@ pub mod oauth_proxy {
                     host.to_ascii_lowercase()
                 );
 
-                prop_assert_eq!(super::normalized_origin(&input), expected.clone());
+                // The clone is NOT redundant — `prop_assert_eq!` moves its
+                // operands, and `expected` is used again on the next line.
+                // clippy's `redundant_clone` misreads the macro expansion.
+                #[allow(clippy::redundant_clone)]
+                {
+                    prop_assert_eq!(super::normalized_origin(&input), expected.clone());
+                }
                 prop_assert_eq!(super::normalized_origin(&format!("{input}/")), expected);
             }
 
@@ -11760,7 +11821,7 @@ pub mod one_tap {
 }
 pub mod one_time_token {
     use auth_proto::{AuthFlowError, AuthVerificationCreate};
-    use chrono::{Duration, Utc};
+    use chrono::Utc;
     use serde::{Deserialize, Serialize};
 
     use crate::{
@@ -11799,12 +11860,11 @@ pub mod one_time_token {
                 })?;
             }
             let token = generate_token().map_err(|err| AuthFlowError::Internal(err.to_string()))?;
-            let expires_at = Utc::now()
-                + Duration::seconds(
-                    input
-                        .expires_in_seconds
-                        .unwrap_or(DEFAULT_ONE_TIME_TOKEN_TTL_SECONDS),
-                );
+            let expires_at = crate::expiry::expires_in(
+                input
+                    .expires_in_seconds
+                    .unwrap_or(DEFAULT_ONE_TIME_TOKEN_TTL_SECONDS),
+            );
             let state = OneTimeTokenState {
                 session_token: input.session_token,
                 scope: input.scope.clone(),
@@ -12588,17 +12648,15 @@ pub mod organizations {
             "owner" => matches!(
                 (resource, action),
                 ("organization", "update" | "delete")
-                    | ("member", "create" | "update" | "delete")
+                    | ("member" | "team", "create" | "update" | "delete")
                     | ("invitation", "create" | "cancel")
-                    | ("team", "create" | "update" | "delete")
                     | ("ac", "create" | "read" | "update" | "delete")
             ),
             "admin" => matches!(
                 (resource, action),
                 ("organization", "update")
-                    | ("member", "create" | "update" | "delete")
+                    | ("member" | "team", "create" | "update" | "delete")
                     | ("invitation", "create" | "cancel")
-                    | ("team", "create" | "update" | "delete")
                     | ("ac", "create" | "read" | "update" | "delete")
             ),
             "member" => matches!((resource, action), ("ac", "read")),
@@ -12644,6 +12702,18 @@ pub mod organizations {
     }
 
     #[cfg(test)]
+    #[allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::indexing_slicing,
+        clippy::arithmetic_side_effects,
+        clippy::as_conversions,
+        clippy::panic,
+        clippy::float_cmp,
+        clippy::string_slice,
+        clippy::significant_drop_tightening,
+        clippy::too_many_lines
+    )]
     mod boundary_tests {
         use proptest::prelude::*;
         use serde_json::json;
@@ -12656,7 +12726,7 @@ pub mod organizations {
                 action in "[a-z][a-z0-9_.:-]{0,24}",
                 other_action in "[A-Z][A-Za-z0-9_.:-]{0,24}",
             ) {
-                let grants = json!({ resource.clone(): [action.clone(), other_action] }).to_string();
+                let grants = json!({ resource.clone(): [action, other_action] }).to_string();
 
                 prop_assert!(
                     super::permissions_json_grants(&grants, &resource, &action)
@@ -12686,7 +12756,7 @@ pub mod organizations {
 }
 pub mod passkeys {
     use auth_proto::{AuthFlowError, AuthPasskey, AuthPasskeyCreate, AuthSessionBundle};
-    use chrono::{Duration, Utc};
+    use chrono::Utc;
 
     use crate::{
         ArchitectAuth, AuthStorage, BeginPasskeyAuthentication, BeginPasskeyRegistration,
@@ -12720,7 +12790,7 @@ pub mod passkeys {
                 .create_verification(auth_proto::AuthVerificationCreate {
                     identifier: identifier.clone(),
                     value_hash: hash_token(&self.config.secret, &challenge),
-                    expires_at: Utc::now() + Duration::seconds(PASSKEY_CHALLENGE_TTL_SECONDS),
+                    expires_at: crate::expiry::expires_in(PASSKEY_CHALLENGE_TTL_SECONDS),
                 })
                 .await?;
             Ok(VerificationToken {
@@ -12798,7 +12868,7 @@ pub mod passkeys {
                 .create_verification(auth_proto::AuthVerificationCreate {
                     identifier: identifier.clone(),
                     value_hash: hash_token(&self.config.secret, &challenge),
-                    expires_at: Utc::now() + Duration::seconds(PASSKEY_CHALLENGE_TTL_SECONDS),
+                    expires_at: crate::expiry::expires_in(PASSKEY_CHALLENGE_TTL_SECONDS),
                 })
                 .await?;
             Ok(VerificationToken {
@@ -12934,7 +13004,7 @@ pub mod passkeys {
 }
 pub mod device_authorization {
     use auth_proto::{AuthFlowError, AuthSessionBundle, AuthVerificationCreate};
-    use chrono::{Duration, Utc};
+    use chrono::Utc;
 
     use crate::{
         ApproveDeviceCode, ArchitectAuth, AuthStorage, CreateDeviceAuthorization, DenyDeviceCode,
@@ -12971,7 +13041,7 @@ pub mod device_authorization {
                 generate_token().map_err(|err| AuthFlowError::Internal(err.to_string()))?;
             let user_code = generate_user_code()?;
             let device_hash = hash_token(&self.config.secret, &device_code);
-            let expires_at = Utc::now() + Duration::seconds(expires_in_seconds);
+            let expires_at = crate::expiry::expires_in(expires_in_seconds);
             let value = encode_device_value(
                 &device_hash,
                 &input.client_id,
@@ -13134,7 +13204,7 @@ pub mod device_authorization {
                 .storage
                 .find_latest_verification_by_identifier(&identifier)
                 .await?
-                && last_poll.created_at + Duration::seconds(state.interval_seconds) > Utc::now()
+                && crate::expiry::after(last_poll.created_at, state.interval_seconds) > Utc::now()
             {
                 return Err(AuthFlowError::InvalidInput("slow_down".into()));
             }
@@ -13142,7 +13212,7 @@ pub mod device_authorization {
                 .create_verification(AuthVerificationCreate {
                     identifier,
                     value_hash: "poll".into(),
-                    expires_at: Utc::now() + Duration::seconds(state.interval_seconds),
+                    expires_at: crate::expiry::expires_in(state.interval_seconds),
                 })
                 .await
                 .map(|_| ())
@@ -13160,7 +13230,7 @@ pub mod device_authorization {
         let token = generate_token().map_err(|err| AuthFlowError::Internal(err.to_string()))?;
         Ok(token
             .chars()
-            .filter(|ch| ch.is_ascii_alphanumeric())
+            .filter(char::is_ascii_alphanumeric)
             .take(8)
             .collect::<String>()
             .to_ascii_uppercase())
@@ -13230,6 +13300,18 @@ pub mod device_authorization {
     }
 
     #[cfg(test)]
+    #[allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::indexing_slicing,
+        clippy::arithmetic_side_effects,
+        clippy::as_conversions,
+        clippy::panic,
+        clippy::float_cmp,
+        clippy::string_slice,
+        clippy::significant_drop_tightening,
+        clippy::too_many_lines
+    )]
     mod boundary_tests {
         use proptest::prelude::*;
 

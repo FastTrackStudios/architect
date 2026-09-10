@@ -196,10 +196,10 @@ impl CommandMode {
     // deliberately infallible — an unrecognised mode is NoView rather than
     // an error, so a malformed extension manifest still loads.
     #[allow(clippy::should_implement_trait)]
+    #[must_use]
     pub fn from_str(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "view" => Self::View,
-            "no-view" | "noview" | "no_view" => Self::NoView,
             "background" | "bg" => Self::Background,
             _ => Self::NoView,
         }
@@ -219,10 +219,14 @@ impl LoadedExtension {
     pub fn load(path: &Path) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let content = std::fs::read_to_string(path)?;
         let manifest: ExtensionManifest = facet_styx::from_str(&content)?;
-        let base_dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
+        let base_dir = path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf();
         Ok(Self { manifest, base_dir })
     }
 
+    #[must_use]
     pub fn resolve_icon(&self, name: &str) -> Option<String> {
         self.manifest
             .icons
@@ -231,6 +235,7 @@ impl LoadedExtension {
     }
 
     /// Convert commands into launcher Items.
+    #[must_use]
     pub fn to_items(&self) -> Vec<crate::Item> {
         let ext_name = &self.manifest.extension.name;
         let mut items = Vec::new();
@@ -288,8 +293,8 @@ impl LoadedExtension {
 
             let mut item =
                 crate::Item::new(format!("{ext_name}/{}", cmd.name), &cmd.title, ext_name);
-            item.sub = cmd.description.clone();
-            item.icon = icon.clone();
+            item.sub.clone_from(&cmd.description);
+            item.icon.clone_from(&icon);
             item.search_fields = search_fields;
             item.actions = actions;
 
@@ -297,7 +302,7 @@ impl LoadedExtension {
             let tag_strs: Vec<&str> = cmd
                 .items
                 .first()
-                .map(|i| i.tags.iter().map(|s| s.as_str()).collect())
+                .map(|i| i.tags.iter().map(std::string::String::as_str).collect())
                 .unwrap_or_default();
             if !tag_strs.is_empty() {
                 item.tags = crate::TagSet::from_strs(&tag_strs);
@@ -307,11 +312,11 @@ impl LoadedExtension {
 
             // Also add static items from the command
             for ci in &cmd.items {
-                let ci_icon = if !ci.icon.is_empty() {
+                let ci_icon = if ci.icon.is_empty() {
+                    icon.clone()
+                } else {
                     self.resolve_icon(&ci.icon)
                         .unwrap_or_else(|| ci.icon.clone())
-                } else {
-                    icon.clone()
                 };
 
                 let mut ci_actions: Vec<crate::ItemAction> = ci
@@ -340,7 +345,7 @@ impl LoadedExtension {
                     ));
                 }
 
-                let ci_tags: Vec<&str> = ci.tags.iter().map(|s| s.as_str()).collect();
+                let ci_tags: Vec<&str> = ci.tags.iter().map(std::string::String::as_str).collect();
                 let mut ci_search = vec![ci.title.clone()];
                 ci_search.extend(ci.keywords.clone());
 
@@ -349,7 +354,7 @@ impl LoadedExtension {
                     &ci.title,
                     ext_name,
                 );
-                item.sub = ci.subtitle.clone();
+                item.sub.clone_from(&ci.subtitle);
                 item.icon = ci_icon;
                 item.search_fields = ci_search;
                 item.actions = ci_actions;
@@ -381,12 +386,13 @@ fn parse_shortcut_modifier(shortcut: &str) -> crate::ActionModifier {
 /// Central registry that holds all loaded extensions and their preferences.
 pub struct ExtensionRegistry {
     extensions: Vec<LoadedExtension>,
-    /// Per-extension preference values. Key = "ext_name.pref_name".
+    /// Per-extension preference values. Key = "`ext_name.pref_name`".
     preferences: HashMap<String, String>,
     prefs_path: PathBuf,
 }
 
 impl ExtensionRegistry {
+    #[must_use]
     pub fn new() -> Self {
         let prefs_path = default_prefs_path();
         let preferences = load_prefs(&prefs_path);
@@ -443,13 +449,18 @@ impl ExtensionRegistry {
     }
 
     /// Get all loaded extensions.
+    #[must_use]
     pub fn extensions(&self) -> &[LoadedExtension] {
         &self.extensions
     }
 
     /// Get all items from all extensions.
+    #[must_use]
     pub fn all_items(&self) -> Vec<crate::Item> {
-        self.extensions.iter().flat_map(|e| e.to_items()).collect()
+        self.extensions
+            .iter()
+            .flat_map(LoadedExtension::to_items)
+            .collect()
     }
 
     /// Register extension tags with a tag registry.
@@ -467,9 +478,10 @@ impl ExtensionRegistry {
     // ── Preferences ────────────────────────────────────────
 
     /// Get a preference value for an extension.
+    #[must_use]
     pub fn get_pref(&self, ext_name: &str, pref_name: &str) -> Option<&str> {
         let key = format!("{ext_name}.{pref_name}");
-        self.preferences.get(&key).map(|s| s.as_str())
+        self.preferences.get(&key).map(std::string::String::as_str)
     }
 
     /// Set a preference value.
@@ -480,6 +492,7 @@ impl ExtensionRegistry {
     }
 
     /// Get all preference definitions for an extension.
+    #[must_use]
     pub fn pref_defs(&self, ext_name: &str) -> Vec<&PreferenceDef> {
         self.extensions
             .iter()
@@ -492,12 +505,13 @@ impl ExtensionRegistry {
 
     /// Get the sandboxed storage directory for an extension.
     pub fn storage_dir(&self, ext_name: &str) -> PathBuf {
-        let base = std::env::var("XDG_DATA_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| {
+        let base = std::env::var("XDG_DATA_HOME").map_or_else(
+            |_| {
                 let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
                 PathBuf::from(home).join(".local/share")
-            });
+            },
+            PathBuf::from,
+        );
         base.join("dioxus-launcher")
             .join("extensions")
             .join(ext_name)
@@ -513,12 +527,13 @@ impl Default for ExtensionRegistry {
 // ── Preference persistence ─────────────────────────────────────
 
 fn default_prefs_path() -> PathBuf {
-    let base = std::env::var("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
+    let base = std::env::var("XDG_DATA_HOME").map_or_else(
+        |_| {
             let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
             PathBuf::from(home).join(".local/share")
-        });
+        },
+        PathBuf::from,
+    );
     base.join("dioxus-launcher").join("extension-prefs.json")
 }
 
@@ -545,11 +560,12 @@ fn save_prefs(
 
 /// Default extensions directory.
 pub fn default_extensions_dir() -> PathBuf {
-    let base = std::env::var("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
+    let base = std::env::var("XDG_CONFIG_HOME").map_or_else(
+        |_| {
             let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
             PathBuf::from(home).join(".config")
-        });
+        },
+        PathBuf::from,
+    );
     base.join("dioxus-launcher").join("extensions")
 }

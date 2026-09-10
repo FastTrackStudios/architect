@@ -12,7 +12,7 @@ struct FakeClient {
 }
 
 impl FakeClient {
-    fn new(caller: Caller) -> Self {
+    const fn new(caller: Caller) -> Self {
         Self { _caller: caller }
     }
 }
@@ -31,9 +31,9 @@ architect::clients! {
 fn constructs(caller: Caller) {
     let clients = TestClients::new(caller);
     let _ = clients.caller();
-    let _ = clients.transport.clone();
-    let _ = clients.markers.clone();
-    let _ = clients.clone();
+    let _ = clients.transport;
+    let _ = clients.markers;
+    let _ = clients;
 }
 
 #[test]

@@ -202,16 +202,16 @@ pub fn pagination_many_pages() -> Element {
     let mut current = use_signal(|| 6u32);
     let total: u32 = 20;
     let on_select = use_callback(move |p: u32| current.set(p));
-    let on_prev = use_callback(move |_| {
+    let on_prev = use_callback(move |()| {
         let c = current();
         if c > 1 {
-            current.set(c - 1);
+            current.set(c.saturating_sub(1));
         }
     });
-    let on_next = use_callback(move |_| {
+    let on_next = use_callback(move |()| {
         let c = current();
         if c < total {
-            current.set(c + 1);
+            current.set(c.saturating_add(1));
         }
     });
     rsx! {
@@ -253,16 +253,16 @@ pub fn pagination_default() -> Element {
     let mut current = use_signal(|| 2u32);
     let total: u32 = 10;
     let on_select = use_callback(move |p: u32| current.set(p));
-    let on_prev = use_callback(move |_| {
+    let on_prev = use_callback(move |()| {
         let c = current();
         if c > 1 {
-            current.set(c - 1);
+            current.set(c.saturating_sub(1));
         }
     });
-    let on_next = use_callback(move |_| {
+    let on_next = use_callback(move |()| {
         let c = current();
         if c < total {
-            current.set(c + 1);
+            current.set(c.saturating_add(1));
         }
     });
 

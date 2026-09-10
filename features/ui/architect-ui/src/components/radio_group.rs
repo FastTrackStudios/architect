@@ -64,7 +64,7 @@ pub fn RadioGroup(props: RadioGroupProps) -> Element {
 // RadioGroupItem
 // ---------------------------------------------------------------------------
 
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone, PartialEq, Eq)]
 pub struct RadioGroupItemProps {
     /// The value this radio item represents.
     pub value: String,
@@ -85,7 +85,7 @@ pub fn RadioGroupItem(props: RadioGroupItemProps) -> Element {
     let index = use_hook(|| {
         let mut next_index = ctx.next_index.write();
         let index = *next_index;
-        *next_index += 1;
+        *next_index = next_index.saturating_add(1);
         index
     });
     let is_checked = *ctx.value.read() == props.value;

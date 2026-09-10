@@ -257,57 +257,68 @@ impl<S> ArchitectAuthBuilder<S> {
         }
     }
 
+    #[must_use]
     pub fn secret(mut self, secret: impl Into<String>) -> Self {
         self.secret = Some(secret.into());
         self
     }
 
+    #[must_use]
     pub fn base_url(mut self, base_url: impl Into<String>) -> Self {
         self.base_url = Some(base_url.into());
         self
     }
 
-    pub fn session_ttl_seconds(mut self, seconds: i64) -> Self {
+    #[must_use]
+    pub const fn session_ttl_seconds(mut self, seconds: i64) -> Self {
         self.session_ttl_seconds = seconds;
         self
     }
 
-    pub fn email_password_enabled(mut self, enabled: bool) -> Self {
+    #[must_use]
+    pub const fn email_password_enabled(mut self, enabled: bool) -> Self {
         self.email_password_enabled = enabled;
         self
     }
 
-    pub fn require_email_verification(mut self, required: bool) -> Self {
+    #[must_use]
+    pub const fn require_email_verification(mut self, required: bool) -> Self {
         self.require_email_verification = required;
         self
     }
 
-    pub fn oauth_signup_enabled(mut self, enabled: bool) -> Self {
+    #[must_use]
+    pub const fn oauth_signup_enabled(mut self, enabled: bool) -> Self {
         self.oauth_signup_enabled = enabled;
         self
     }
 
     // r[impl auth.oauth.token-encryption]
-    pub fn oauth_token_storage_enabled(mut self, enabled: bool) -> Self {
+    #[must_use]
+    pub const fn oauth_token_storage_enabled(mut self, enabled: bool) -> Self {
         self.oauth_token_storage_enabled = enabled;
         self
     }
 
+    #[must_use]
     pub fn passkey_rp_id(mut self, rp_id: impl Into<String>) -> Self {
         self.passkey_rp_id = Some(rp_id.into());
         self
     }
 
+    #[must_use]
     pub fn passkey_allowed_origin(mut self, origin: impl Into<String>) -> Self {
         self.passkey_allowed_origins.push(origin.into());
         self
     }
 
+    #[must_use]
     pub fn captcha_provider(mut self, provider: CaptchaProvider) -> Self {
         self.captcha.provider = provider;
         self
     }
 
+    #[must_use]
     pub fn captcha_test_token(mut self, token: impl Into<String>) -> Self {
         self.captcha.provider = CaptchaProvider::Test {
             valid_token: token.into(),
@@ -315,11 +326,13 @@ impl<S> ArchitectAuthBuilder<S> {
         self
     }
 
+    #[must_use]
     pub fn captcha_bypass(mut self) -> Self {
         self.captcha.provider = CaptchaProvider::Bypass;
         self
     }
 
+    #[must_use]
     pub fn captcha_protected_flow(mut self, flow: CaptchaFlow) -> Self {
         if !self.captcha.protected_flows.contains(&flow) {
             self.captcha.protected_flows.push(flow);
@@ -327,32 +340,38 @@ impl<S> ArchitectAuthBuilder<S> {
         self
     }
 
-    pub fn sms_provider(mut self, provider: SmsProvider) -> Self {
+    #[must_use]
+    pub const fn sms_provider(mut self, provider: SmsProvider) -> Self {
         self.sms.provider = provider;
         self
     }
 
-    pub fn sms_test_provider(mut self) -> Self {
+    #[must_use]
+    pub const fn sms_test_provider(mut self) -> Self {
         self.sms.provider = SmsProvider::Test;
         self
     }
 
+    #[must_use]
     pub fn siwe_domain(mut self, domain: impl Into<String>) -> Self {
         self.siwe_domain = Some(domain.into());
         self
     }
 
-    pub fn siwe_signup_enabled(mut self, enabled: bool) -> Self {
+    #[must_use]
+    pub const fn siwe_signup_enabled(mut self, enabled: bool) -> Self {
         self.siwe_signup_enabled = enabled;
         self
     }
 
+    #[must_use]
     pub fn breached_password_provider(mut self, provider: BreachedPasswordProvider) -> Self {
         self.breached_passwords.provider = provider;
         self
     }
 
-    pub fn breached_password_failure_policy(
+    #[must_use]
+    pub const fn breached_password_failure_policy(
         mut self,
         policy: BreachedPasswordFailurePolicy,
     ) -> Self {
@@ -360,16 +379,19 @@ impl<S> ArchitectAuthBuilder<S> {
         self
     }
 
+    #[must_use]
     pub fn jwt_issuer(mut self, issuer: impl Into<String>) -> Self {
         self.jwt_issuer = Some(issuer.into());
         self
     }
 
+    #[must_use]
     pub fn jwt_audience(mut self, audience: impl Into<String>) -> Self {
         self.jwt_audience = Some(audience.into());
         self
     }
 
+    #[must_use]
     pub fn jwt_signing_key(mut self, id: impl Into<String>, secret: impl Into<String>) -> Self {
         let id = id.into();
         self.jwt_active_key_id = Some(id.clone());
@@ -380,6 +402,7 @@ impl<S> ArchitectAuthBuilder<S> {
         self
     }
 
+    #[must_use]
     pub fn jwt_fallback_key(mut self, id: impl Into<String>, secret: impl Into<String>) -> Self {
         self.jwt_keys.push(JwtSigningKey {
             id: id.into(),
@@ -388,48 +411,57 @@ impl<S> ArchitectAuthBuilder<S> {
         self
     }
 
+    #[must_use]
     pub fn oidc_issuer(mut self, issuer: impl Into<String>) -> Self {
         self.oidc_issuer = Some(issuer.into());
         self
     }
 
-    pub fn oidc_allow_dynamic_client_registration(mut self, enabled: bool) -> Self {
+    #[must_use]
+    pub const fn oidc_allow_dynamic_client_registration(mut self, enabled: bool) -> Self {
         self.oidc_allow_dynamic_client_registration = enabled;
         self
     }
 
-    pub fn oidc_require_pkce(mut self, required: bool) -> Self {
+    #[must_use]
+    pub const fn oidc_require_pkce(mut self, required: bool) -> Self {
         self.oidc_require_pkce = required;
         self
     }
 
+    #[must_use]
     pub fn oidc_client(mut self, client: OidcClientConfig) -> Self {
         self.oidc_clients.push(client);
         self
     }
 
+    #[must_use]
     pub fn oauth_proxy_current_url(mut self, url: impl Into<String>) -> Self {
         self.oauth_proxy_current_url = Some(url.into());
         self
     }
 
+    #[must_use]
     pub fn oauth_proxy_production_url(mut self, url: impl Into<String>) -> Self {
         self.oauth_proxy_production_url = Some(url.into());
         self
     }
 
+    #[must_use]
     pub fn oauth_proxy_allowed_redirect_origin(mut self, origin: impl Into<String>) -> Self {
         self.oauth_proxy_allowed_redirect_origins
             .push(origin.into());
         self
     }
 
+    #[must_use]
     pub fn one_tap_client_id(mut self, client_id: impl Into<String>) -> Self {
         self.one_tap_client_id = Some(client_id.into());
         self
     }
 
-    pub fn one_tap_disable_signup(mut self, disabled: bool) -> Self {
+    #[must_use]
+    pub const fn one_tap_disable_signup(mut self, disabled: bool) -> Self {
         self.one_tap_disable_signup = disabled;
         self
     }

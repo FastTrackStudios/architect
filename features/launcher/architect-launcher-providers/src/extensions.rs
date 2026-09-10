@@ -10,6 +10,7 @@ pub struct ExtensionProvider {
 
 impl ExtensionProvider {
     /// Create from an already-populated registry.
+    #[must_use]
     pub fn from_registry(registry: &ExtensionRegistry) -> Self {
         Self {
             config: ProviderConfig {
@@ -24,7 +25,7 @@ impl ExtensionProvider {
 }
 
 impl Provider for ExtensionProvider {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "extensions"
     }
     fn config(&self) -> &ProviderConfig {
@@ -56,8 +57,7 @@ impl Provider for ExtensionProvider {
             .actions
             .iter()
             .find(|a| a.name == action)
-            .map(|a| a.exec.as_str())
-            .unwrap_or("");
+            .map_or("", |a| a.exec.as_str());
 
         if exec.is_empty() {
             return Ok(ActivationResult::Close);
@@ -116,8 +116,7 @@ impl Provider for ExtensionProvider {
             .actions
             .iter()
             .find(|a| a.name == action)
-            .map(|a| a.keep_open)
-            .unwrap_or(false);
+            .is_some_and(|a| a.keep_open);
 
         if keep_open {
             Ok(ActivationResult::KeepOpen)

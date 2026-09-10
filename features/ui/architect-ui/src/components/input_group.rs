@@ -1,4 +1,4 @@
-//! InputGroup — input with prefix/suffix addon slots, shadcn v4 maia style.
+//! `InputGroup` — input with prefix/suffix addon slots, shadcn v4 maia style.
 
 use architect_story_runtime::story;
 use dioxus::prelude::*;
@@ -33,7 +33,7 @@ pub fn InputGroup(props: InputGroupProps) -> Element {
 }
 
 /// Alignment for the addon slot.
-#[derive(Clone, Copy, PartialEq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum InputGroupAlign {
     #[default]
     Start,
@@ -49,7 +49,7 @@ pub struct InputGroupAddonProps {
     pub children: Element,
 }
 
-/// Prefix or suffix addon (icon, text, etc.) inside an InputGroup.
+/// Prefix or suffix addon (icon, text, etc.) inside an `InputGroup`.
 #[component]
 pub fn InputGroupAddon(props: InputGroupAddonProps) -> Element {
     let base = "flex items-center text-muted-foreground text-sm font-medium [&>svg:not([class*='size-'])]:size-4";
@@ -81,7 +81,7 @@ pub struct InputGroupControlProps {
     pub class: String,
 }
 
-/// The input element inside an InputGroup.
+/// The input element inside an `InputGroup`.
 #[component]
 pub fn InputGroupControl(props: InputGroupControlProps) -> Element {
     let base = "flex-1 h-full bg-transparent border-none px-3 text-sm placeholder:text-muted-foreground focus:outline-none";

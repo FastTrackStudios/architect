@@ -26,7 +26,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev \
-            libasound2-dev libudev-dev pkg-config
+            libasound2-dev libudev-dev pkg-config \
+            libdbus-1-dev libxdo-dev libayatana-appindicator3-dev
+        # The last three are only needed by `--all-features`, which turns
+        # on `dioxus/desktop` (tao + wry) in `architect-atom`. No feature
+        # combination the fleet actually ships pulls them.
 
       # rust-toolchain.toml drives the version; this action honours it.
       - uses: dtolnay/rust-toolchain@stable
@@ -36,13 +40,32 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: check
-        run: cargo check --workspace --all-targets
+        run: cargo check --workspace --all-targets --all-features
 
+      # `--all-features`: the fleet compiles architect under a dozen
+      # different feature combinations, and the lint gate is only honest
+      # if it sees all of the code they do. The deny levels live in
+      # `[workspace.lints.clippy]`; `clippy.toml` exempts tests.
       - name: clippy
-        run: cargo clippy --workspace --all-targets
+        run: cargo clippy --workspace --all-targets --all-features
 
       - name: test
-        run: cargo test --workspace
+        run: cargo test --workspace --all-features
+
+  # Release tags are the only thing consuming repos can reason about, and
+  # the only useful question they ask is "am I ahead or behind?" — which
+  # has an answer only while the numbering matches history.
+  tags:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The check walks every tag, so it needs the whole history.
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: tag ordering
+        run: cargo run -p xtask -- tags --verbose
 
   wasm:
     runs-on: ubuntu-latest

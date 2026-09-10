@@ -1,5 +1,5 @@
 //! Headless wry capture: spawn the consuming app on Xvfb, wait for
-//! the window to map, screenshot it via ImageMagick, kill everything.
+//! the window to map, screenshot it via `ImageMagick`, kill everything.
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -164,7 +164,11 @@ fn wait_for_window(
     title: &str,
     timeout: Duration,
 ) -> Result<String, WryCaptureError> {
-    let deadline = Instant::now() + timeout;
+    // `checked_add`, saturating: a nonsense timeout must not panic the
+    // capture thread — it just means "wait as long as this clock can".
+    let deadline = Instant::now()
+        .checked_add(timeout)
+        .unwrap_or_else(Instant::now);
     while Instant::now() < deadline {
         let out = Command::new("xdotool")
             .arg("search")
@@ -195,7 +199,9 @@ fn wait_for_window(
     }
     Err(WryCaptureError::WindowTimeout {
         title: title.to_string(),
-        millis: timeout.as_millis() as u64,
+        // A timeout past u64 milliseconds is ~585 million years; report
+        // the saturated value rather than a wrapped one.
+        millis: u64::try_from(timeout.as_millis()).unwrap_or(u64::MAX),
     })
 }
 
@@ -242,8 +248,7 @@ pub fn check_dependencies() -> Result<(), String> {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
+            .is_ok_and(|s| s.success())
     }
     let mut missing = Vec::new();
     if !has("Xvfb") {

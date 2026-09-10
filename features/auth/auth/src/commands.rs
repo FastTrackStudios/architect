@@ -41,10 +41,11 @@ pub struct UpdateUsername {
     pub display_username: Option<String>,
 }
 
-/// Set the session owner's display name / avatar. `None` leaves a
-/// field untouched; `Some("")` clears it — a distinction federated
-/// callers depend on, since "not mentioned" and "deliberately cleared"
-/// must not become the same write.
+/// Set the session owner's display name / avatar.
+///
+/// `None` leaves a field untouched; `Some("")` clears it — a
+/// distinction federated callers depend on, since "not mentioned" and
+/// "deliberately cleared" must not become the same write.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UpdateProfile {
     pub session_token: String,
@@ -87,7 +88,7 @@ pub struct CurrentSession {
     pub token: String,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CustomSessionBundle<T> {
     pub user: auth_proto::AuthUser,
     pub session: auth_proto::AuthSession,
@@ -205,7 +206,7 @@ pub struct UpdatePhoneNumber {
     pub phone_number: String,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PhoneNumberVerification {
     pub user: auth_proto::AuthUser,
     pub session: Option<auth_proto::AuthSession>,
@@ -261,12 +262,12 @@ pub struct AdditionalFieldsConfig {
     pub account: Vec<AdditionalFieldSpec>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AdditionalFieldsView {
     pub fields: Value,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AdditionalFieldsSchema {
     pub user: Vec<AdditionalFieldSpec>,
     pub session: Vec<AdditionalFieldSpec>,
@@ -297,7 +298,7 @@ pub struct LinkSiweAddress {
     pub signature: String,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EmailOtpVerification {
     pub user: auth_proto::AuthUser,
     pub session: Option<auth_proto::AuthSession>,
@@ -327,7 +328,7 @@ pub struct VerifyMagicLink {
     pub user_agent: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MagicLinkVerification {
     pub user: auth_proto::AuthUser,
     pub session: auth_proto::AuthSession,
@@ -649,7 +650,7 @@ pub struct OneTapCallback {
     pub user_agent: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OneTapVerification {
     pub user: auth_proto::AuthUser,
     pub session: auth_proto::AuthSession,
@@ -678,7 +679,7 @@ pub struct VerifyOneTimeToken {
     pub scope: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OneTimeTokenVerification {
     pub user: auth_proto::AuthUser,
     pub session: auth_proto::AuthSession,
@@ -697,7 +698,7 @@ pub struct ListDeviceSessions {
     pub session_tokens: Vec<String>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeviceSession {
     pub user: auth_proto::AuthUser,
     pub session: auth_proto::AuthSession,
@@ -705,7 +706,7 @@ pub struct DeviceSession {
     pub active: bool,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeviceSessions {
     pub sessions: Vec<DeviceSession>,
 }
@@ -717,7 +718,7 @@ pub struct SetActiveDeviceSession {
     pub session_tokens: Vec<String>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActiveDeviceSession {
     pub user: auth_proto::AuthUser,
     pub session: auth_proto::AuthSession,
@@ -731,7 +732,7 @@ pub struct RevokeDeviceSession {
     pub session_tokens: Vec<String>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RevokeDeviceSessionResult {
     pub revoked: bool,
     pub next_active: Option<ActiveDeviceSession>,
@@ -825,7 +826,7 @@ pub struct RevokeApiKey {
     pub api_key_id: Uuid,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ApiKeyBundle {
     pub api_key: auth_proto::AuthApiKey,
     pub user: auth_proto::AuthUser,
@@ -837,7 +838,7 @@ pub struct AuthenticateBearerToken {
     pub authorization_header: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BearerTokenBundle {
     pub user: auth_proto::AuthUser,
     pub token: String,
@@ -873,7 +874,7 @@ pub struct CreateOrganization {
     pub metadata_json: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OrganizationBundle {
     pub organization: auth_proto::AuthOrganization,
     pub membership: auth_proto::AuthMember,
@@ -946,7 +947,7 @@ pub struct CreateInvitation {
     pub expires_at: DateTime<Utc>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InvitationToken {
     pub invitation: auth_proto::AuthInvitation,
     pub token: String,
@@ -1137,7 +1138,7 @@ pub struct ListUsers {
     pub limit: usize,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ListUsersResult {
     pub users: Vec<auth_proto::AuthUser>,
     pub total: usize,

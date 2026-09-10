@@ -16,6 +16,7 @@ pub mod backend_db {
 pub mod commands;
 pub mod config;
 pub mod crypto;
+pub mod expiry;
 pub mod flows;
 pub mod identity;
 pub mod plugins;
@@ -94,6 +95,7 @@ pub struct ArchitectAuth<S> {
 }
 
 impl ArchitectAuth<()> {
+    #[must_use]
     pub fn builder() -> ArchitectAuthBuilder<()> {
         ArchitectAuthBuilder::new(())
     }

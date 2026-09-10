@@ -6,7 +6,7 @@
 //! that boosts frequently-used items in search results.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -23,12 +23,13 @@ pub struct HistoryEntry {
 /// Full history store. Keyed by `(query, item_id)`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct History {
-    /// Map of "query" -> "item_id" -> entry.
+    /// Map of "query" -> "`item_id`" -> entry.
     entries: HashMap<String, HashMap<String, HistoryEntry>>,
 }
 
 impl History {
     /// Load history from a JSON file, or return empty if it doesn't exist.
+    #[must_use]
     pub fn load(path: &PathBuf) -> Self {
         std::fs::read_to_string(path)
             .ok()
@@ -37,9 +38,12 @@ impl History {
     }
 
     /// Save history to a JSON file.
-    pub fn save(&self, path: &PathBuf) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let dir = path.parent().unwrap();
-        std::fs::create_dir_all(dir)?;
+    pub fn save(&self, path: &Path) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // A path with no parent is the filesystem root — nothing to
+        // create, and certainly not a reason to panic on a save.
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
         let data = serde_json::to_string_pretty(self)?;
         std::fs::write(path, data)?;
         Ok(())
@@ -52,7 +56,7 @@ impl History {
             .entry(query.to_string())
             .or_default()
             .entry(item_id.to_string())
-            .or_insert(HistoryEntry {
+            .or_insert_with(|| HistoryEntry {
                 count: 0,
                 last_used: Utc::now(),
             });
@@ -63,11 +67,12 @@ impl History {
     /// Compute a usage score for an item given a query.
     ///
     /// Mirrors Elephant's `CalcUsageScore`:
-    /// - base = 10 - days_since_last_use (clamped to 0)
+    /// - base = 10 - `days_since_last_use` (clamped to 0)
     /// - score = base * min(count, 10)
     ///
     /// This means recent, frequently-used items get a boost of up to 100,
     /// which decays to 0 after 10 days without use.
+    #[must_use]
     pub fn usage_score(&self, query: &str, item_id: &str) -> f64 {
         let Some(query_entries) = self.entries.get(query) else {
             return 0.0;
@@ -76,9 +81,13 @@ impl History {
             return 0.0;
         };
 
-        let days_since = (Utc::now() - entry.last_used).num_days().max(0) as f64;
+        // `num_days` is an `i64` day count clamped at 0; the `as` would be
+        // exact for any plausible value, but `try_from` says so.
+        let elapsed = Utc::now().signed_duration_since(entry.last_used);
+        let days = u32::try_from(elapsed.num_days().max(0)).unwrap_or(u32::MAX);
+        let days_since = f64::from(days);
         let base = (10.0 - days_since).max(0.0);
-        let count = (entry.count as f64).min(10.0);
+        let count = f64::from(entry.count).min(10.0);
         base * count
     }
 
@@ -96,16 +105,18 @@ impl History {
 }
 
 /// Default history file path.
+#[must_use]
 pub fn default_history_path() -> PathBuf {
     dirs_path("history.json")
 }
 
 fn dirs_path(filename: &str) -> PathBuf {
-    let base = std::env::var("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
+    let base = std::env::var("XDG_DATA_HOME").map_or_else(
+        |_| {
             let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
             PathBuf::from(home).join(".local/share")
-        });
+        },
+        PathBuf::from,
+    );
     base.join("dioxus-launcher").join(filename)
 }

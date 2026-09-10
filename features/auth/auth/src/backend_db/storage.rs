@@ -38,19 +38,24 @@ pub struct AuthSeaOrmStorage {
 }
 
 impl AuthSeaOrmStorage {
-    pub fn new(db: DatabaseConnection) -> Self {
+    #[must_use]
+    pub const fn new(db: DatabaseConnection) -> Self {
         Self { db }
     }
 
-    pub fn db(&self) -> &DatabaseConnection {
+    #[must_use]
+    pub const fn db(&self) -> &DatabaseConnection {
         &self.db
     }
 }
 
+// By value: error-mapping adapters for `map_err`.
+#[allow(clippy::needless_pass_by_value)]
 fn map_db_err(err: sea_orm::DbErr) -> AuthFlowError {
     AuthFlowError::Internal(err.to_string())
 }
 
+#[allow(clippy::needless_pass_by_value)]
 fn map_txn_err(err: TransactionError<sea_orm::DbErr>) -> AuthFlowError {
     AuthFlowError::Internal(err.to_string())
 }
@@ -208,14 +213,17 @@ impl AuthStorage for AuthSeaOrmStorage {
         offset: usize,
         limit: usize,
     ) -> Result<(Vec<AuthUser>, usize), AuthFlowError> {
-        let total = AuthUserEntity::find()
-            .count(&self.db)
-            .await
-            .map_err(map_db_err)? as usize;
+        let total = usize::try_from(
+            AuthUserEntity::find()
+                .count(&self.db)
+                .await
+                .map_err(map_db_err)?,
+        )
+        .unwrap_or(usize::MAX);
         let users = AuthUserEntity::find()
             .order_by_asc(AuthUserColumn::CreatedAt)
-            .offset(offset as u64)
-            .limit(limit as u64)
+            .offset(u64::try_from(offset).unwrap_or(u64::MAX))
+            .limit(u64::try_from(limit).unwrap_or(u64::MAX))
             .all(&self.db)
             .await
             .map_err(map_db_err)?
@@ -1498,7 +1506,7 @@ impl AuthStorage for AuthSeaOrmStorage {
             .await
             .map_err(map_db_err)?
             .ok_or(AuthFlowError::InvalidCredentials)?;
-        let next = two_factor.attempt_count + 1;
+        let next = two_factor.attempt_count.saturating_add(1);
         let mut active: AuthTwoFactorActiveModel = two_factor.into();
         active.attempt_count = Set(next);
         active.updated_at = Set(Utc::now());

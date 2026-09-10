@@ -20,7 +20,7 @@ pub enum SidebarSide {
 /// `compact` is the "rail" / icon-only state — when true, sidebars
 /// configured with [`SidebarCollapsible::Icon`] shrink to a narrow
 /// icon strip and any [`SidebarLabel`] children render nothing.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct SidebarContext {
     pub compact: Signal<bool>,
     pub side: SidebarSide,
@@ -30,6 +30,7 @@ pub struct SidebarContext {
 /// from the surrounding [`SidebarProvider`]. Use this to hide
 /// labels, group titles, or anything else that should disappear in
 /// rail mode.
+#[must_use]
 pub fn use_sidebar_compact() -> Signal<bool> {
     use_context::<SidebarContext>().compact
 }
@@ -212,7 +213,7 @@ pub fn SidebarFooter(props: SidebarFooterProps) -> Element {
 // SidebarSeparator
 // ---------------------------------------------------------------------------
 
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone, PartialEq, Eq)]
 pub struct SidebarSeparatorProps {
     #[props(default)]
     pub class: String,
@@ -435,7 +436,7 @@ pub fn SidebarMenuBadge(props: SidebarMenuBadgeProps) -> Element {
 // SidebarTrigger
 // ---------------------------------------------------------------------------
 
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone, PartialEq, Eq)]
 pub struct SidebarTriggerProps {
     #[props(default)]
     pub class: String,

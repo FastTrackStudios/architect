@@ -14,6 +14,11 @@ enum SearchMode {
 }
 
 #[component]
+// `needless_collect` allowed: the row vectors are materialised on
+// purpose. Building them before the `rsx!` keeps the macro body flat,
+// which is what Blitz's layout pass wants, and it keeps the
+// `state.read()` guard out of the render tree.
+#[allow(clippy::needless_collect)]
 pub fn Launcher(state: Signal<LauncherState>, on_close: EventHandler<()>) -> Element {
     let mut query = use_signal(String::new);
     let mut selected_index = use_signal(|| 0usize);
@@ -30,7 +35,7 @@ pub fn Launcher(state: Signal<LauncherState>, on_close: EventHandler<()>) -> Ele
 
     let result_count = results.read().len();
     if selected_index() >= result_count && result_count > 0 {
-        selected_index.set(result_count - 1);
+        selected_index.set(result_count.saturating_sub(1));
     }
     if result_count == 0 {
         selected_index.set(0);
@@ -54,8 +59,8 @@ pub fn Launcher(state: Signal<LauncherState>, on_close: EventHandler<()>) -> Ele
                     .tags()
                     .iter()
                     .take(3)
-                    .map(|t| t.leaf().to_string())
-                    .collect(),
+                    .map(|t| t.leaf().to_owned())
+                    .collect::<Vec<_>>(),
                 is_favorite: s.is_favorite(&item.id),
                 rating: s.rating(&item.id),
                 is_selected: idx == selected_index(),
@@ -131,8 +136,7 @@ pub fn Launcher(state: Signal<LauncherState>, on_close: EventHandler<()>) -> Ele
             let action_name = item
                 .actions
                 .first()
-                .map(|a| a.name.clone())
-                .unwrap_or_else(|| "activate".to_string());
+                .map_or_else(|| "activate".to_string(), |a| a.name.clone());
             let should_close = state.read().activate(&item, &action_name, &q);
             if should_close {
                 drop(r);
@@ -157,13 +161,20 @@ pub fn Launcher(state: Signal<LauncherState>, on_close: EventHandler<()>) -> Ele
             Key::ArrowDown => {
                 evt.prevent_default();
                 if len > 0 {
-                    selected_index.set((selected_index() + 1) % len);
+                    // `checked_rem`: `len > 0` above, so this always hits.
+                    if let Some(next) = selected_index().saturating_add(1).checked_rem(len) {
+                        selected_index.set(next);
+                    }
                 }
             }
             Key::ArrowUp => {
                 evt.prevent_default();
                 if len > 0 {
-                    selected_index.set(selected_index().checked_sub(1).unwrap_or(len - 1));
+                    selected_index.set(
+                        selected_index()
+                            .checked_sub(1)
+                            .unwrap_or_else(|| len.saturating_sub(1)),
+                    );
                 }
             }
             Key::Tab => {
@@ -195,14 +206,12 @@ pub fn Launcher(state: Signal<LauncherState>, on_close: EventHandler<()>) -> Ele
                         .iter()
                         .find(|a| a.modifier == modifier)
                         .or_else(|| item.actions.first())
-                        .map(|a| a.name.clone())
-                        .unwrap_or_else(|| "activate".to_string());
+                        .map_or_else(|| "activate".to_string(), |a| a.name.clone());
                     let keep_open = item
                         .actions
                         .iter()
                         .find(|a| a.modifier == modifier)
-                        .map(|a| a.keep_open)
-                        .unwrap_or(false);
+                        .is_some_and(|a| a.keep_open);
                     let item = item.clone();
                     let q = query.read().clone();
                     let should_close = state.read().activate(&item, &action_name, &q);
@@ -238,13 +247,17 @@ pub fn Launcher(state: Signal<LauncherState>, on_close: EventHandler<()>) -> Ele
             Key::End => {
                 evt.prevent_default();
                 if len > 0 {
-                    selected_index.set(len - 1);
+                    selected_index.set(len.saturating_sub(1));
                 }
             }
             Key::PageDown => {
                 evt.prevent_default();
                 if len > 0 {
-                    selected_index.set((selected_index() + 10).min(len - 1));
+                    selected_index.set(
+                        selected_index()
+                            .saturating_add(10)
+                            .min(len.saturating_sub(1)),
+                    );
                 }
             }
             Key::PageUp => {
@@ -270,7 +283,7 @@ pub fn Launcher(state: Signal<LauncherState>, on_close: EventHandler<()>) -> Ele
                 evt.prevent_default();
                 if !filter.read().is_empty() {
                     let f = filter.read().clone();
-                    let n = preset_counter() + 1;
+                    let n = preset_counter().saturating_add(1);
                     preset_counter.set(n);
                     state.read().save_preset(&format!("Preset {n}"), &f);
                 }
@@ -281,8 +294,10 @@ pub fn Launcher(state: Signal<LauncherState>, on_close: EventHandler<()>) -> Ele
                 {
                     evt.prevent_default();
                     if let Some(item) = results.read().get(selected_index()) {
+                        // `d` is 1..=5 from `to_digit`, so it fits a `u8`.
+                        let rating = u8::try_from(d).unwrap_or(0);
                         let cur = state.read().rating(&item.id);
-                        let new = if cur == d as u8 { 0 } else { d as u8 };
+                        let new = if cur == rating { 0 } else { rating };
                         state.read().set_rating(&item.id, new);
                     }
                 }
@@ -292,7 +307,11 @@ pub fn Launcher(state: Signal<LauncherState>, on_close: EventHandler<()>) -> Ele
                     && (1..=9).contains(&d)
                 {
                     let r = results.read();
-                    if let Some(item) = r.get((d - 1) as usize) {
+                    // `d` is 1..=9 from `to_digit`; index is `d - 1`.
+                    if let Some(item) = usize::try_from(d.saturating_sub(1))
+                        .ok()
+                        .and_then(|i| r.get(i))
+                    {
                         let item = item.clone();
                         let q = query.read().clone();
                         let should_close = state.read().activate(&item, "activate", &q);
@@ -320,7 +339,7 @@ pub fn Launcher(state: Signal<LauncherState>, on_close: EventHandler<()>) -> Ele
                     SidebarButton {
                         active: filter.read().include.is_empty(),
                         label: "All".to_string(),
-                        on_click: move |_| {
+                        on_click: move |()| {
                             filter.write().clear();
                             selected_index.set(0);
                         },
@@ -330,8 +349,8 @@ pub fn Launcher(state: Signal<LauncherState>, on_close: EventHandler<()>) -> Ele
                             active: row.is_active,
                             label: row.label,
                             on_click: {
-                                let path = row.path.clone();
-                                move |_| {
+                                let path = row.path;
+                                move |()| {
                                     let mut f = filter.write();
                                     f.include.clear();
                                     f.exclude.clear();
@@ -382,8 +401,8 @@ pub fn Launcher(state: Signal<LauncherState>, on_close: EventHandler<()>) -> Ele
                                 label: chip.label,
                                 excluded: chip.excluded,
                                 on_remove: {
-                                    let tag = chip.tag.clone();
-                                    move |_| {
+                                    let tag = chip.tag;
+                                    move |()| {
                                         filter.write().remove_tag(&tag);
                                         selected_index.set(0);
                                     }

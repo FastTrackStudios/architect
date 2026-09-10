@@ -64,6 +64,7 @@ impl PartialEq for DocHandle {
 impl DocHandle {
     /// The replica, once open. `None` while an async open (persistent
     /// backends) is still running.
+    #[must_use]
     pub fn doc(&self) -> Option<CrdtDoc> {
         self.doc.read().clone()
     }
@@ -92,38 +93,45 @@ impl DocHandle {
 
     /// Reactive read of the doc revision — subscribe a memo/component
     /// to *every* committed change, local or remote.
+    #[must_use]
     pub fn revision(&self) -> u64 {
         (self.revision)()
     }
 
     /// Reactive read of the sync session state (for a status badge).
+    #[must_use]
     pub fn status(&self) -> SyncStatus {
         (self.status)()
     }
 
     /// Typed repo over the replica, or `None` while opening.
+    #[must_use]
     pub fn repo<E: EntityCrdt>(&self) -> Option<LoroRepo<E>> {
         self.doc().map(|d| d.repo())
     }
 }
 
 /// Pull the [`DocHandle`] provided at the app root.
+#[must_use]
 pub fn use_doc_handle() -> DocHandle {
     use_context::<DocHandle>()
 }
 
 /// Provide a syncing ephemeral replica of `doc_id` for the component
-/// tree. The doc is immediately usable (local-first); a background
-/// driver keeps one sync session against the app's shared
+/// tree.
+///
+/// The doc is immediately usable (local-first); a background driver
+/// keeps one sync session against the app's shared
 /// [`Connection<vox::Caller>`](architect::Connection) alive, retrying
 /// with the version vector so every reconnect is a delta.
+#[must_use]
 pub fn use_synced_doc(doc_id: Uuid) -> DocHandle {
     use_synced_doc_with(doc_id, || async { Ok(CrdtDoc::ephemeral()) })
 }
 
 /// [`use_synced_doc`] with a custom (possibly async) doc constructor —
 /// pass `CrdtDoc::open(doc_id, persistence)` to make the replica itself
-/// survive restarts (file on desktop, IndexedDB in the browser).
+/// survive restarts (file on desktop, `IndexedDB` in the browser).
 pub fn use_synced_doc_with<F, Fut>(doc_id: Uuid, open: F) -> DocHandle
 where
     F: FnOnce() -> Fut + 'static,
@@ -133,13 +141,15 @@ where
     use_context_provider(|| handle)
 }
 
-/// Keyed variant of [`use_synced_doc`]: same machinery (replica + sync
-/// session + revision signal), but the [`DocHandle`] is **returned, not
-/// provided as context** — so a component can hold several docs at once
-/// (the unkeyed context hooks would collide on the single `DocHandle`
-/// context). Pair with a [`DocRegistry`](crate::registry::DocRegistry)
-/// on the server, which serves any `doc_id` over one mounted dispatcher.
+/// Keyed variant of [`use_synced_doc`].
 ///
+/// Same machinery (replica + sync session + revision signal), but the
+/// [`DocHandle`] is **returned, not provided as context** — so a component
+/// can hold several docs at once (the unkeyed context hooks would collide
+/// on the single `DocHandle` context).
+///
+/// Pair with a [`DocRegistry`](crate::registry::DocRegistry) on the
+/// server, which serves any `doc_id` over one mounted dispatcher.
 /// `doc_id` is captured on first render; to switch documents, remount
 /// the component (give it a `key`).
 ///
@@ -147,6 +157,7 @@ where
 /// let project = use_synced_doc_keyed(project_doc_id);
 /// let inbox = use_synced_doc_keyed(inbox_doc_id);
 /// ```
+#[must_use]
 pub fn use_synced_doc_keyed(doc_id: Uuid) -> DocHandle {
     use_synced_doc_keyed_with(doc_id, || async { Ok(CrdtDoc::ephemeral()) })
 }
@@ -181,6 +192,7 @@ where
 /// keyed (fresh replica per remount) while the *signals* live as long
 /// as every reader. A fresh slot reads as `None` doc / revision 0 /
 /// [`SyncStatus::Connecting`]; see [`DocHandle::reset`].
+#[must_use]
 pub fn use_doc_slot() -> DocHandle {
     DocHandle {
         doc: use_signal(|| None::<CrdtDoc>),
@@ -189,13 +201,16 @@ pub fn use_doc_slot() -> DocHandle {
     }
 }
 
-/// Drive a [`use_doc_slot`] slot: open an ephemeral replica of
-/// `doc_id` and keep one sync session alive for the *calling* scope's
-/// lifetime, writing doc/revision/status **into** the slot's
-/// parent-owned signals. The slot is [`reset`](DocHandle::reset) on
-/// mount, so a remounted driver never lets readers see the previous
-/// doc's revision/status. `doc_id` is captured on first render —
-/// remount (`key:`) to switch documents.
+/// Drive a [`use_doc_slot`] slot.
+///
+/// Opens an ephemeral replica of `doc_id` and keeps one sync session alive
+/// for the *calling* scope's lifetime, writing doc/revision/status
+/// **into** the slot's parent-owned signals.
+///
+/// The slot is [`reset`](DocHandle::reset) on mount, so a remounted
+/// driver never lets readers see the previous doc's revision/status.
+/// `doc_id` is captured on first render — remount (`key:`) to switch
+/// documents.
 pub fn use_synced_doc_into(handle: DocHandle, doc_id: Uuid) {
     use_synced_doc_into_with(handle, doc_id, || async { Ok(CrdtDoc::ephemeral()) });
 }
@@ -252,7 +267,11 @@ where
         let bump = async move {
             let _keep = change_sub;
             while rx.recv().await.is_some() {
-                revision += 1;
+                // `peek`, not a plain read: dioxus polls these futures in a REACTIVE
+                // context, so reading a signal this loop also writes would subscribe the
+                // loop to its own writes and restart it forever.
+                let next = revision.peek().saturating_add(1);
+                revision.set(next);
             }
         };
         let drive = async move {
@@ -301,14 +320,14 @@ where
                     // `Err` = attach (or apply) failed — usually a dead
                     // caller racing the supervisor. One warn per outage.
                     Err(e) => {
-                        if !outage_logged {
+                        if outage_logged {
+                            tracing::debug!(?doc_id, "crdt: sync reattach failed: {e}");
+                        } else {
                             tracing::warn!(
                                 ?doc_id,
                                 "crdt: sync session error: {e}; retrying with backoff"
                             );
                             outage_logged = true;
-                        } else {
-                            tracing::debug!(?doc_id, "crdt: sync reattach failed: {e}");
                         }
                     }
                 }
@@ -321,7 +340,7 @@ where
         // Both run for the component's lifetime; the future is dropped
         // (and the session with it) on unmount.
         tokio::select! {
-            _ = bump => {},
+            () = bump => {},
             _ = drive => {},
         }
     });
@@ -330,6 +349,7 @@ where
 /// Every row of `E` in the synced doc, re-read on every doc revision.
 /// `Loading` only while an async open is still running — a local
 /// replica never waits on the network to render.
+#[must_use]
 pub fn use_crdt_list<E: EntityCrdt>() -> AtomResult<Vec<E::Wire>, RepoError>
 where
     E::Wire: Clone,
@@ -347,6 +367,7 @@ where
 
 /// One row by id, re-read on every doc revision. `Error(NotFound)`
 /// when the row doesn't exist (yet — a peer may still be typing it).
+#[must_use]
 pub fn use_crdt_entry<E: EntityCrdt>(id: Uuid) -> AtomResult<E::Wire, RepoError>
 where
     E::Wire: Clone,
@@ -395,12 +416,12 @@ impl Presence {
 
     /// Everyone's current state, reactive — re-renders on every
     /// presence change, expired peers pruned.
+    #[must_use]
     pub fn states(&self) -> std::collections::HashMap<String, loro::LoroValue> {
         let _ = (self.revision)();
-        match &*self.peer.read() {
-            Some(peer) => peer.states(),
-            None => Default::default(),
-        }
+        (*self.peer.read())
+            .as_ref()
+            .map_or_else(std::collections::HashMap::new, PresencePeer::states)
     }
 
     /// Reset the handle to its pre-join state (no peer, revision 0) —
@@ -418,31 +439,38 @@ impl Presence {
     }
 }
 
-/// Join `doc_id`'s presence channel for the component tree's lifetime:
-/// provides a [`Presence`] handle, keeps one session against the shared
+/// Join `doc_id`'s presence channel for the component tree's lifetime.
+///
+/// Provides a [`Presence`] handle, keeps one session against the shared
 /// connection alive, and re-announces this client's keys on reconnect.
+#[must_use]
 pub fn use_presence_channel(doc_id: Uuid, timeout_ms: i64) -> Presence {
     let presence = use_presence_channel_keyed(doc_id, timeout_ms);
     use_context_provider(|| presence)
 }
 
-/// Keyed variant of [`use_presence_channel`]: same machinery, but the
-/// [`Presence`] handle is **returned, not provided as context** — hold
-/// one per doc when a component joins several docs' presence channels
-/// at once. `doc_id` is captured on first render; remount (`key`) to
-/// switch.
+/// Keyed variant of [`use_presence_channel`].
+///
+/// Same machinery, but the [`Presence`] handle is **returned, not provided
+/// as context** — hold one per doc when a component joins several docs'
+/// presence channels at once.
+///
+/// `doc_id` is captured on first render; remount (`key`) to switch.
+#[must_use]
 pub fn use_presence_channel_keyed(doc_id: Uuid, timeout_ms: i64) -> Presence {
     let presence = use_presence_slot();
     use_presence_channel_into(presence, doc_id, timeout_ms);
     presence
 }
 
-/// Create an **empty slot** [`Presence`] owned by the *current* scope
-/// — nobody joins until a driver fills it. The presence twin of
-/// [`use_doc_slot`]: create the handle in the stable (page) scope so
-/// closures that capture it (decoration sources, callbacks) never read
-/// signals owned by a dropped keyed child; drive it from the keyed
-/// child with [`use_presence_channel_into`].
+/// Create an **empty slot** [`Presence`] owned by the *current* scope —
+/// nobody joins until a driver fills it.
+///
+/// The presence twin of [`use_doc_slot`]: create the handle in the
+/// stable (page) scope so closures that capture it (decoration sources,
+/// callbacks) never read signals owned by a dropped keyed child; drive
+/// it from the keyed child with [`use_presence_channel_into`].
+#[must_use]
 pub fn use_presence_slot() -> Presence {
     Presence {
         peer: use_signal(|| None::<PresencePeer>),
@@ -450,11 +478,12 @@ pub fn use_presence_slot() -> Presence {
     }
 }
 
-/// Drive a [`use_presence_slot`] slot: join `doc_id`'s presence
-/// channel for the *calling* scope's lifetime, writing the peer +
-/// revision **into** the slot's parent-owned signals. The slot is
-/// [`reset`](Presence::reset) on mount. `doc_id` is captured on first
-/// render — remount (`key:`) to switch.
+/// Drive a [`use_presence_slot`] slot: join `doc_id`'s presence channel
+/// for the *calling* scope's lifetime, writing the peer + revision
+/// **into** the slot's parent-owned signals.
+///
+/// The slot is [`reset`](Presence::reset) on mount. `doc_id` is
+/// captured on first render — remount (`key:`) to switch.
 pub fn use_presence_channel_into(presence: Presence, doc_id: Uuid, timeout_ms: i64) {
     use_hook(|| presence.reset());
     let Presence {
@@ -482,7 +511,11 @@ pub fn use_presence_channel_into(presence: Presence, doc_id: Uuid, timeout_ms: i
         let bump = async move {
             let _keep = change_sub;
             while rx.recv().await.is_some() {
-                revision += 1;
+                // `peek`, not a plain read: dioxus polls these futures in a REACTIVE
+                // context, so reading a signal this loop also writes would subscribe the
+                // loop to its own writes and restart it forever.
+                let next = revision.peek().saturating_add(1);
+                revision.set(next);
             }
         };
         let drive = async move {
@@ -517,14 +550,14 @@ pub fn use_presence_channel_into(presence: Presence, doc_id: Uuid, timeout_ms: i
                         outage_logged = true;
                     }
                     Err(e) => {
-                        if !outage_logged {
+                        if outage_logged {
+                            tracing::debug!(?doc_id, "presence reattach failed: {e}");
+                        } else {
                             tracing::warn!(
                                 ?doc_id,
                                 "presence session error: {e}; retrying with backoff"
                             );
                             outage_logged = true;
-                        } else {
-                            tracing::debug!(?doc_id, "presence reattach failed: {e}");
                         }
                     }
                 }
@@ -536,14 +569,16 @@ pub fn use_presence_channel_into(presence: Presence, doc_id: Uuid, timeout_ms: i
         // task, never in a render path like `states()`.
         let sweep_peer = peer_for_sweep;
         let sweep = async move {
-            let period = Duration::from_millis((timeout_ms as u64 / 2).max(1_000));
+            // A negative or absurd timeout falls back to the 1s floor.
+            let half = u64::try_from(timeout_ms).unwrap_or(0) / 2;
+            let period = Duration::from_millis(half.max(1_000));
             loop {
                 architect::sleep(period).await;
                 sweep_peer.sweep();
             }
         };
         tokio::select! {
-            _ = bump => {},
+            () = bump => {},
             _ = drive => {},
             _ = sweep => {},
         }
@@ -551,6 +586,7 @@ pub fn use_presence_channel_into(presence: Presence, doc_id: Uuid, timeout_ms: i
 }
 
 /// Pull the [`Presence`] handle provided at the app root.
+#[must_use]
 pub fn use_presence() -> Presence {
     use_context::<Presence>()
 }

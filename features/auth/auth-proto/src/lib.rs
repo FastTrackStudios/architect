@@ -83,7 +83,7 @@ pub enum AuthFlowError {
     Internal(String),
 }
 
-#[derive(Clone, Debug, PartialEq, ::facet::Facet)]
+#[derive(Clone, Debug, PartialEq, Eq, ::facet::Facet)]
 pub struct SignInEmailPassword {
     pub email: String,
     pub password: String,
@@ -93,7 +93,7 @@ pub struct SignInEmailPassword {
 
 /// Wire shape of `ArchitectAuth::create_email_password_user` — the
 /// sign-up command, minus nothing: same fields, RPC-serializable.
-#[derive(Clone, Debug, PartialEq, ::facet::Facet)]
+#[derive(Clone, Debug, PartialEq, Eq, ::facet::Facet)]
 pub struct SignUpEmailPassword {
     pub email: String,
     pub password: String,
@@ -105,7 +105,7 @@ pub struct SignUpEmailPassword {
     pub user_agent: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, ::facet::Facet)]
+#[derive(Clone, Debug, PartialEq, Eq, ::facet::Facet)]
 pub struct AuthSessionBundle {
     pub user: AuthUser,
     pub session: AuthSession,

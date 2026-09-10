@@ -1,4 +1,4 @@
-//! AlertDialog — primitive-backed confirmation dialog for destructive actions.
+//! `AlertDialog` — primitive-backed confirmation dialog for destructive actions.
 
 use architect_story_runtime::story;
 use dioxus::prelude::*;
@@ -165,7 +165,7 @@ pub fn AlertDialogCancel(props: AlertDialogCancelProps) -> Element {
     }
 }
 
-/// AlertDialog with an emphasised destructive primary action.
+/// `AlertDialog` with an emphasised destructive primary action.
 #[story(category = "AlertDialog", name = "destructive")]
 pub fn alert_dialog_destructive() -> Element {
     let mut open = use_signal(|| true);
@@ -180,7 +180,7 @@ pub fn alert_dialog_destructive() -> Element {
             }
             AlertDialog {
                 open: open(),
-                on_close: move |_| open.set(false),
+                on_close: move |()| open.set(false),
                 AlertDialogHeader {
                     AlertDialogTitle { "Delete project?" }
                     AlertDialogDescription { "Deleting this project will permanently remove all of its data, including settings and history. This cannot be undone." }
@@ -202,7 +202,7 @@ pub fn alert_dialog_destructive() -> Element {
     }
 }
 
-/// AlertDialog forced open with destructive confirmation actions.
+/// `AlertDialog` forced open with destructive confirmation actions.
 #[story(category = "AlertDialog", name = "alert dialog default")]
 pub fn alert_dialog_default() -> Element {
     let mut open = use_signal(|| true);
@@ -217,7 +217,7 @@ pub fn alert_dialog_default() -> Element {
             }
             AlertDialog {
                 open: open(),
-                on_close: move |_| open.set(false),
+                on_close: move |()| open.set(false),
                 AlertDialogHeader {
                     AlertDialogTitle { "Are you absolutely sure?" }
                     AlertDialogDescription { "This action cannot be undone. It will permanently delete the resource." }

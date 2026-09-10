@@ -28,7 +28,7 @@
 //!
 //! Design: `apps/task/plans/architect-permissions.md`.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 use architect_permissions::{
@@ -41,9 +41,9 @@ use vox::{
 
 use crate::layer::LayerRouter;
 
+use architect_permissions::Principal;
 #[cfg(feature = "telemetry")]
 use tracing::Instrument as _;
-use architect_permissions::Principal;
 
 /// Metadata key carrying `Bearer <token>` (mirrors auth-proto's
 /// `AUTHORIZATION_METADATA_KEY`; duplicated here so architect does not
@@ -51,12 +51,29 @@ use architect_permissions::Principal;
 pub const AUTHORIZATION_METADATA_KEY: &str = "authorization";
 
 /// What to do with calls to services that registered NO permit table.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// The default is [`Deny`](UnlistedPolicy::Deny). It used to be `Allow`,
+/// on the reasoning that permit tables could then arrive service by
+/// service without breaking the rest — but a gate that serves untabled
+/// services *silently* is not a migration mode, it is the absence of a
+/// gate wearing one's clothes. In one deployment 68 of 70 mounted
+/// services sat unchecked behind it for months, and nothing said so.
+///
+/// The migration mode is [`observe_only`](PermissionsGate::observe_only):
+/// it evaluates and audits every decision while refusing nothing, so the
+/// audit log tells you exactly what enforcement *would* have done before
+/// you switch it on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum UnlistedPolicy {
-    /// Let them through unchecked — the org-lane migration default: permit
-    /// tables arrive service by service without breaking the rest.
+    /// Let them through unchecked.
+    ///
+    /// Use this only with a deliberate, dated reason. Prefer
+    /// [`observe_only`](PermissionsGate::observe_only) for a rollout and
+    /// [`coverage`](PermissionsGate::coverage) to see what is missing.
     Allow,
-    /// Refuse them — the share-lane default: only tabled services exist.
+    /// Refuse them. The default: a service nobody wrote a table for is
+    /// not a service anybody decided to expose.
+    #[default]
     Deny,
 }
 
@@ -79,6 +96,16 @@ pub struct PermissionsGate {
     /// Method ids that belong to services WITH a table but are unlisted →
     /// explicit deny.
     tabled_unlisted: HashMap<MethodId, &'static str>,
+    /// Every `(service, method)` a registered table NAMED, whether or not
+    /// the descriptor actually has that method. Feeds
+    /// [`coverage`](Self::coverage)'s phantom check.
+    ///
+    /// Keyed by the **descriptor's** `service_name`, not the table's
+    /// `service` label: the label is free-form text for audit lines
+    /// (`"gate-probe"` for a `GateProbe` service), while the descriptor
+    /// name is what the router mounts under. Coverage cross-references
+    /// the router, so it has to speak the router's names.
+    declared: BTreeSet<(&'static str, &'static str)>,
     unlisted: UnlistedPolicy,
     /// Observe-only mode: run every check + audit, but never refuse. The
     /// rollout switch — flip off once the audit log runs clean.
@@ -93,23 +120,27 @@ impl PermissionsGate {
             audit: Arc::new(architect_permissions::TracingAudit),
             rules: HashMap::new(),
             tabled_unlisted: HashMap::new(),
-            unlisted: UnlistedPolicy::Allow,
+            declared: BTreeSet::new(),
+            unlisted: UnlistedPolicy::Deny,
             observe_only: false,
         }
     }
 
+    #[must_use]
     pub fn with_audit(mut self, audit: Arc<dyn AuditSink>) -> Self {
         self.audit = audit;
         self
     }
 
-    pub fn unlisted(mut self, policy: UnlistedPolicy) -> Self {
+    #[must_use]
+    pub const fn unlisted(mut self, policy: UnlistedPolicy) -> Self {
         self.unlisted = policy;
         self
     }
 
     /// Observe-only: evaluate + audit every decision but enforce nothing.
-    pub fn observe_only(mut self, on: bool) -> Self {
+    #[must_use]
+    pub const fn observe_only(mut self, on: bool) -> Self {
         self.observe_only = on;
         self
     }
@@ -117,7 +148,16 @@ impl PermissionsGate {
     /// Register a service's permit table. Table methods resolve to method
     /// ids through `descriptor`; descriptor methods NOT in the table are
     /// recorded as explicit denies (fail-closed).
-    pub fn permit(mut self, descriptor: &'static ServiceDescriptor, table: ServicePermits) -> Self {
+    #[must_use]
+    pub fn permit(
+        mut self,
+        descriptor: &'static ServiceDescriptor,
+        table: &ServicePermits,
+    ) -> Self {
+        for permit in table.methods {
+            self.declared
+                .insert((descriptor.service_name, permit.method));
+        }
         for method in descriptor.methods {
             let permit: Option<&MethodPermit> = table
                 .methods
@@ -144,12 +184,79 @@ impl PermissionsGate {
         self
     }
 
+    /// What this gate actually covers of `router`'s mounted surface.
+    ///
+    /// The gate only knows the tables it was handed; the router knows what
+    /// is mounted. Neither half can spot a gap alone, which is how a
+    /// deployment ends up serving dozens of untabled services without
+    /// anything saying so. Cross-referencing them is the whole job.
+    #[must_use]
+    pub fn coverage(&self, router: &LayerRouter) -> GateCoverage {
+        let mounted = router.mounted();
+        let tabled: BTreeSet<&'static str> =
+            self.declared.iter().map(|(service, _)| *service).collect();
+
+        let mut methods = 0usize;
+        let mut permitted = 0usize;
+        let mut untabled = Vec::new();
+        let mut uncovered = Vec::new();
+        let mut real: BTreeSet<(&'static str, &'static str)> = BTreeSet::new();
+
+        for (service, service_methods) in &mounted {
+            methods = methods.saturating_add(service_methods.len());
+            if !tabled.contains(service) {
+                untabled.push(*service);
+                continue;
+            }
+            for method in service_methods {
+                real.insert((*service, *method));
+                if self.declared.contains(&(*service, *method)) {
+                    permitted = permitted.saturating_add(1);
+                } else {
+                    uncovered.push((*service, *method));
+                }
+            }
+        }
+
+        // Named by a table but absent from the descriptor: a typo or a
+        // renamed method. The permit is dead, and the real method — if
+        // there is one — is silently fail-closed.
+        let phantom: Vec<(&'static str, &'static str)> = self
+            .declared
+            .iter()
+            .filter(|entry| mounted.contains_key(entry.0) && !real.contains(*entry))
+            .copied()
+            .collect();
+
+        GateCoverage {
+            services: mounted.len(),
+            tabled: mounted.keys().filter(|s| tabled.contains(*s)).count(),
+            untabled,
+            methods,
+            permitted,
+            uncovered,
+            phantom,
+            unlisted: self.unlisted,
+            observe_only: self.observe_only,
+        }
+    }
+
     /// Wrap a router with this gate.
+    ///
+    /// Reports [`coverage`](Self::coverage) through `tracing` on the way
+    /// past — one `info` line always, plus a `warn` per gap. Every app
+    /// that mounts a gate gets the blind-spot report for free; nobody has
+    /// to remember to ask for it.
+    #[must_use]
     pub fn wrap(self, inner: LayerRouter) -> PermissionedRouter {
+        self.coverage(&inner).report();
         self.wrap_handler(inner)
     }
 
     /// Wrap ANY handler (router or router-wrapper) with this gate.
+    ///
+    /// Cannot report coverage — the handler is already type-erased. Call
+    /// [`GateCoverage::report`] yourself if you have the router.
     pub fn wrap_handler<H>(self, inner: H) -> PermissionedRouter<H> {
         PermissionedRouter {
             inner,
@@ -160,7 +267,7 @@ impl PermissionsGate {
 
     /// Wrap with an ALREADY-SHARED gate (one gate, many lanes/connections —
     /// the per-connection serve path).
-    pub fn wrap_shared<H>(gate: Arc<PermissionsGate>, inner: H) -> PermissionedRouter<H> {
+    pub const fn wrap_shared<H>(gate: Arc<Self>, inner: H) -> PermissionedRouter<H> {
         PermissionedRouter {
             inner,
             gate,
@@ -181,7 +288,7 @@ impl PermissionsGate {
     ///
     /// [`ClientMiddleware`]: vox::ClientMiddleware
     pub fn wrap_shared_with_bearer<H>(
-        gate: Arc<PermissionsGate>,
+        gate: Arc<Self>,
         inner: H,
         bearer: Option<String>,
     ) -> PermissionedRouter<H> {
@@ -194,11 +301,13 @@ impl PermissionsGate {
 
     /// The engine this gate consults — for mounting a `PermissionsService`
     /// oracle that can never disagree with enforcement.
+    #[must_use]
     pub fn engine(&self) -> Arc<dyn PermissionEngine> {
         self.engine.clone()
     }
 
     /// The identity resolver this gate uses.
+    #[must_use]
     pub fn identity_resolver(&self) -> Arc<dyn IdentityResolver> {
         self.identity.clone()
     }
@@ -313,9 +422,10 @@ pub fn caller() -> Option<Principal> {
 }
 
 /// Any handler behind a [`PermissionsGate`] — a bare [`LayerRouter`] or an
-/// already-wrapped one (e.g. a snapshot-gating router). `Handler` for the
-/// same sinks, so it drops into every transport (`axum_ws`, iroh,
-/// LocalServer) exactly where the inner handler would.
+/// already-wrapped one (e.g. a snapshot-gating router).
+///
+/// `Handler` for the same sinks, so it drops into every transport
+/// (`axum_ws`, iroh, `LocalServer`) exactly where the inner handler would.
 #[derive(Clone)]
 pub struct PermissionedRouter<H = LayerRouter> {
     inner: H,
@@ -327,7 +437,7 @@ pub struct PermissionedRouter<H = LayerRouter> {
 }
 
 impl<H> PermissionedRouter<H> {
-    pub fn inner(&self) -> &H {
+    pub const fn inner(&self) -> &H {
         &self.inner
     }
 }
@@ -446,12 +556,18 @@ where
 /// decodes `VoxError::InvalidPayload(reason)` cleanly. Falls back to the
 /// type-erased `send_error` when the shape is unknown or reflective
 /// construction fails.
+#[allow(clippy::default_trait_access)]
 async fn deny_reply(reply: DriverReplySink, shape: Option<&'static facet::Shape>, reason: String) {
     use vox::ReplySink as _;
     // Keep the built value alive across the send. `HeapValue` is
     // conservatively `!Send` (raw pointers); the built response is plain
     // owned wire data with no thread affinity.
     struct SendValue(vox::facet_reflect::HeapValue<'static, false>);
+    // SAFETY: `HeapValue` is `!Send` only because it holds raw pointers.
+    // The value inside is plain owned wire data built here from a
+    // `facet::Shape` — no thread affinity, no borrowed interior. It is
+    // moved into this wrapper immediately and dropped on the same task.
+    #[allow(clippy::non_send_fields_in_send_ty)]
     unsafe impl Send for SendValue {}
     if let Some(shape) = shape {
         // Map into the Send wrapper IMMEDIATELY so no `!Send` binding can
@@ -467,6 +583,10 @@ async fn deny_reply(reply: DriverReplySink, shape: Option<&'static facet::Shape>
             reply
                 .send_reply(vox::RequestResponse {
                     ret,
+                    // `Default::default()`, not the named types: `SchemaBytes`
+                    // lives in `vox-types`, which is an OPTIONAL dependency
+                    // (feature `local`) — naming it here would make this
+                    // module fail to build in the `vox`-only configuration.
                     metadata: Default::default(),
                     schemas: Default::default(),
                 })
@@ -520,6 +640,7 @@ fn build_denied_response(
 /// Convenience: gate helpers on [`LayerRouter`].
 impl LayerRouter {
     /// Put this router behind a permissions gate.
+    #[must_use]
     pub fn with_permissions(self, gate: PermissionsGate) -> PermissionedRouter {
         gate.wrap(self)
     }
@@ -527,3 +648,99 @@ impl LayerRouter {
 
 /// Fixed-principal resolver re-export for share-lane construction.
 pub use architect_permissions::StaticPrincipal;
+
+/// What a [`PermissionsGate`] covers of a router's mounted surface.
+///
+/// Produced by [`PermissionsGate::coverage`] and reported automatically by
+/// [`PermissionsGate::wrap`].
+#[derive(Clone, Debug)]
+pub struct GateCoverage {
+    /// Services the router mounts.
+    pub services: usize,
+    /// …of which carry a permit table.
+    pub tabled: usize,
+    /// Mounted services with NO table — they follow
+    /// [`UnlistedPolicy`](Self::unlisted).
+    pub untabled: Vec<&'static str>,
+    /// Methods across all mounted services.
+    pub methods: usize,
+    /// …of which a permit names.
+    pub permitted: usize,
+    /// `(service, method)` on the descriptor but missing from its table.
+    /// **Fail-closed**: a tabled service denies everything it didn't list.
+    pub uncovered: Vec<(&'static str, &'static str)>,
+    /// `(service, method)` named by a table but absent from the
+    /// descriptor — a typo or a rename. The permit is dead, and the real
+    /// method is silently denied.
+    pub phantom: Vec<(&'static str, &'static str)>,
+    /// The gate's policy for [`untabled`](Self::untabled) services.
+    pub unlisted: UnlistedPolicy,
+    /// Whether the gate is evaluating without enforcing.
+    pub observe_only: bool,
+}
+
+impl GateCoverage {
+    /// Every mounted method resolves to a permit, and no permit is dead.
+    #[must_use]
+    pub const fn is_complete(&self) -> bool {
+        self.untabled.is_empty() && self.uncovered.is_empty() && self.phantom.is_empty()
+    }
+
+    /// Emit the report: one `info` line, plus a `warn` per gap.
+    ///
+    /// Called by [`PermissionsGate::wrap`]. Call it yourself after
+    /// [`PermissionsGate::wrap_shared`], which takes an already-erased
+    /// handler and so cannot see the router.
+    pub fn report(&self) {
+        tracing::info!(
+            services = self.services,
+            tabled = self.tabled,
+            methods = self.methods,
+            permitted = self.permitted,
+            unlisted = ?self.unlisted,
+            observe_only = self.observe_only,
+            "permissions gate: {}/{} services tabled ({}/{} methods)",
+            self.tabled,
+            self.services,
+            self.permitted,
+            self.methods,
+        );
+        if !self.untabled.is_empty() {
+            let verdict = match self.unlisted {
+                UnlistedPolicy::Allow => "SERVED UNCHECKED",
+                UnlistedPolicy::Deny => "denied",
+            };
+            tracing::warn!(
+                count = self.untabled.len(),
+                services = %self.untabled.join(", "),
+                "permissions gate: {} service(s) have NO permit table — {verdict}",
+                self.untabled.len(),
+            );
+        }
+        if !self.uncovered.is_empty() {
+            tracing::warn!(
+                count = self.uncovered.len(),
+                methods = %join_pairs(&self.uncovered),
+                "permissions gate: {} method(s) of a tabled service are unlisted — denied",
+                self.uncovered.len(),
+            );
+        }
+        if !self.phantom.is_empty() {
+            tracing::warn!(
+                count = self.phantom.len(),
+                methods = %join_pairs(&self.phantom),
+                "permissions gate: {} permit(s) name a method that does not exist — \
+                 dead permit, and the real method (if any) is denied",
+                self.phantom.len(),
+            );
+        }
+    }
+}
+
+fn join_pairs(pairs: &[(&'static str, &'static str)]) -> String {
+    pairs
+        .iter()
+        .map(|(service, method)| format!("{service}.{method}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}

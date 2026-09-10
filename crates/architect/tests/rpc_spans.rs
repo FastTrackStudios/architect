@@ -7,6 +7,21 @@
 //! look alike and a Tempo view where every RPC collapses into one bucket.
 //! Asserting the `otel.name` / `rpc.method` fields is asserting that a
 //! trace can actually be read.
+// Integration-test crate: `clippy.toml`'s `allow-*-in-tests` only reaches
+// `#[test]` fns and `#[cfg(test)]` modules, so the fixture/mock `impl`
+// blocks below still trip the panic lints. See the same block in the
+// other `tests/` crates.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::large_stack_arrays,
+    clippy::future_not_send,
+    clippy::panic
+)]
 #![cfg(all(feature = "local", feature = "telemetry", not(target_arch = "wasm32")))]
 
 use std::sync::{Arc, Mutex};

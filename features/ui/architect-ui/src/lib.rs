@@ -1,4 +1,4 @@
-//! FastTrack Studio design system.
+//! `FastTrack` Studio design system.
 //!
 //! Standalone UI component library for all FTS apps. Provides shadcn v4 maia
 //! styled components, layout/typography primitives, and the canonical FTS

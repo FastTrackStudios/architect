@@ -26,7 +26,8 @@ impl FormFieldState {
         }
     }
 
-    pub fn valid(&self) -> bool {
+    #[must_use]
+    pub const fn valid(&self) -> bool {
         self.errors.is_empty()
     }
 }
@@ -43,14 +44,17 @@ impl FormState {
         self.fields.values().all(FormFieldState::valid)
     }
 
+    #[must_use]
     pub fn dirty(&self) -> bool {
         self.fields.values().any(|field| field.dirty)
     }
 
+    #[must_use]
     pub fn touched(&self) -> bool {
         self.fields.values().any(|field| field.touched)
     }
 
+    #[must_use]
     pub fn values(&self) -> HashMap<String, String> {
         self.fields
             .iter()
@@ -126,7 +130,7 @@ fn looks_like_email(value: &str) -> bool {
     !local.is_empty() && domain.contains('.') && !domain.ends_with('.')
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct FormApi {
     state: Signal<FormState>,
 }
@@ -138,10 +142,12 @@ pub fn use_form() -> FormApi {
 }
 
 impl FormApi {
+    #[must_use]
     pub fn state(&self) -> FormState {
         (self.state)()
     }
 
+    #[must_use]
     pub fn values(&self) -> HashMap<String, String> {
         self.state().values()
     }
@@ -164,6 +170,7 @@ impl FormApi {
         }
     }
 
+    #[must_use]
     pub fn value(&self, name: &str) -> String {
         self.state()
             .fields
@@ -237,7 +244,7 @@ impl FormApi {
 
     pub fn submit(&mut self) {
         self.state.with_mut(|state| {
-            state.submit_count += 1;
+            state.submit_count = state.submit_count.saturating_add(1);
             for field in state.fields.values_mut() {
                 field.touched = true;
             }
@@ -249,17 +256,19 @@ impl FormApi {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct FieldApi {
     name: String,
     form: FormApi,
 }
 
 impl FieldApi {
+    #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
+    #[must_use]
     pub fn state(&self) -> FormFieldState {
         self.form
             .state()
@@ -269,14 +278,17 @@ impl FieldApi {
             .unwrap_or_default()
     }
 
+    #[must_use]
     pub fn value(&self) -> String {
         self.state().value
     }
 
+    #[must_use]
     pub fn error(&self) -> Option<String> {
         self.state().errors.first().cloned()
     }
 
+    #[must_use]
     pub fn oninput(&self) -> Callback<FormEvent> {
         let mut form = self.form;
         let name = self.name.clone();
@@ -285,6 +297,7 @@ impl FieldApi {
         })
     }
 
+    #[must_use]
     pub fn onblur(&self) -> Callback<FocusEvent> {
         let mut form = self.form;
         let name = self.name.clone();
@@ -319,7 +332,7 @@ pub fn Form(props: FormProps) -> Element {
     }
 }
 
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone, PartialEq, Eq)]
 pub struct FormMessageProps {
     #[props(default)]
     pub error: Option<String>,
@@ -340,6 +353,18 @@ pub fn FormMessage(props: FormMessageProps) -> Element {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic,
+    clippy::float_cmp,
+    clippy::string_slice,
+    clippy::significant_drop_tightening,
+    clippy::too_many_lines
+)]
 mod tests {
     use super::*;
 

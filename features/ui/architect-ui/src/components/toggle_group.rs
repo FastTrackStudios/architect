@@ -101,7 +101,7 @@ pub fn toggle_group_variants() -> Element {
                     allow_multiple_pressed: true,
                     ToggleGroupItem { index: 0, class: item_class.clone(), "Bold" }
                     ToggleGroupItem { index: 1, class: item_class.clone(), "Italic" }
-                    ToggleGroupItem { index: 2, class: item_class.clone(), "Underline" }
+                    ToggleGroupItem { index: 2, class: item_class, "Underline" }
                 }
             }
         }
@@ -117,7 +117,7 @@ pub fn toggle_group_default() -> Element {
             ToggleGroup {
                 ToggleGroupItem { index: 0, class: item_class.clone(), "Left" }
                 ToggleGroupItem { index: 1, class: item_class.clone(), "Center" }
-                ToggleGroupItem { index: 2, class: item_class.clone(), "Right" }
+                ToggleGroupItem { index: 2, class: item_class, "Right" }
             }
         }
     }

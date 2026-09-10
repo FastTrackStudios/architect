@@ -1,7 +1,7 @@
 //! `SeaOrmPersistence` — server-side `Persistence` impl backed by
 //! two generic tables (`crdt_doc`, `crdt_update`). The same impl
 //! handles every feature in the workspace; each feature just picks a
-//! doc_id namespace and goes.
+//! `doc_id` namespace and goes.
 
 use async_trait::async_trait;
 use crdt::{PersistError, Persistence};
@@ -22,15 +22,19 @@ pub struct SeaOrmPersistence {
 }
 
 impl SeaOrmPersistence {
-    pub fn new(db: DatabaseConnection) -> Self {
+    #[must_use]
+    pub const fn new(db: DatabaseConnection) -> Self {
         Self { db }
     }
 
-    pub fn db(&self) -> &DatabaseConnection {
+    #[must_use]
+    pub const fn db(&self) -> &DatabaseConnection {
         &self.db
     }
 }
 
+// By value: an error-mapping adapter for `map_err`.
+#[allow(clippy::needless_pass_by_value)]
 fn map_err(e: sea_orm::DbErr) -> PersistError {
     PersistError::Backend(e.to_string())
 }

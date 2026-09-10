@@ -47,3 +47,6 @@ full = ["backend-db", "vox", "axum", "auth-proto/full"]
 [dev-dependencies]
 proptest.workspace = true
 tokio.workspace = true
+
+[lints]
+workspace = true

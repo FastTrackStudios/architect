@@ -77,6 +77,8 @@
 
 use std::future::Future;
 use std::sync::{Arc, Mutex};
+
+use crate::lock::lock;
 use std::task::{Context, Poll, Waker};
 
 // The time types, re-exported so durations + instants come from one place
@@ -136,9 +138,11 @@ pub use tokio::sync::{broadcast, mpsc};
 
 // ── Free primitives ─────────────────────────────────────────────────────
 
-/// Sleep for `dur`, portably. Native: [`tokio::time::sleep`] (needs a tokio
-/// runtime). Wasm: a `setTimeout`-backed `TimeoutFuture`. Sub-millisecond
-/// resolution is lost on wasm (the browser timer is millisecond-grained).
+/// Sleep for `dur`, portably.
+///
+/// Native: [`tokio::time::sleep`] (needs a tokio runtime). Wasm: a
+/// `setTimeout`-backed `TimeoutFuture`. Sub-millisecond resolution is lost
+/// on wasm (the browser timer is millisecond-grained).
 pub async fn sleep(dur: Duration) {
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -155,6 +159,7 @@ pub async fn sleep(dur: Duration) {
 
 /// The current monotonic instant ([`web_time::Instant`] — `std` on native,
 /// `performance.now()` on wasm).
+#[must_use]
 pub fn now() -> Instant {
     Instant::now()
 }
@@ -191,10 +196,12 @@ impl Clock for SystemClock {
 // ── TestClock ──────────────────────────────────────────────────────────
 
 /// A deterministic clock whose time only moves when you call
-/// [`advance`](TestClock::advance). [`sleep`](Clock::sleep) parks until
-/// enough time has been advanced past its deadline — so scheduled code
-/// (retries, backoff, repeat-every-N) runs instantly and reproducibly in
-/// tests, with no real waiting.
+/// [`advance`](TestClock::advance).
+///
+/// [`sleep`](Clock::sleep) parks until enough time has been advanced
+/// past its deadline — so scheduled code (retries, backoff,
+/// repeat-every-N) runs instantly and reproducibly in tests, with no
+/// real waiting.
 #[derive(Clone)]
 pub struct TestClock {
     base: Instant,
@@ -212,6 +219,7 @@ struct TestState {
 
 impl TestClock {
     /// A fresh clock at elapsed-zero.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             base: Instant::now(),
@@ -223,15 +231,16 @@ impl TestClock {
     }
 
     /// Total time advanced so far.
+    #[must_use]
     pub fn elapsed(&self) -> Duration {
-        self.state.lock().unwrap().elapsed
+        lock(&self.state).elapsed
     }
 
     /// Move time forward by `by`, waking every [`sleep`](Clock::sleep) whose
     /// deadline is now reached.
     pub fn advance(&self, by: Duration) {
-        let mut s = self.state.lock().unwrap();
-        s.elapsed += by;
+        let mut s = lock(&self.state);
+        s.elapsed = s.elapsed.saturating_add(by);
         let elapsed = s.elapsed;
         let mut still = Vec::new();
         for (deadline, waker) in s.waiters.drain(..) {
@@ -253,10 +262,10 @@ impl Default for TestClock {
 
 impl Clock for TestClock {
     fn now(&self) -> Instant {
-        self.base + self.elapsed()
+        self.base.checked_add(self.elapsed()).unwrap_or(self.base)
     }
     fn sleep(&self, dur: Duration) -> BoxFuture<'static, ()> {
-        let deadline = self.elapsed() + dur;
+        let deadline = self.elapsed().saturating_add(dur);
         Box::pin(TestSleep {
             clock: self.clone(),
             deadline,
@@ -272,7 +281,7 @@ struct TestSleep {
 impl Future for TestSleep {
     type Output = ();
     fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
-        let mut s = self.clock.state.lock().unwrap();
+        let mut s = lock(&self.clock.state);
         if s.elapsed >= self.deadline {
             Poll::Ready(())
         } else {

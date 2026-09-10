@@ -10,6 +10,20 @@
 //! `category -> group -> action` CLI tree without any per-action
 //! hand-wiring.
 
+// This is an integration-test crate. `clippy.toml`'s
+// `allow-*-in-tests` only reaches `#[test]` fns and `#[cfg(test)]`
+// modules, so the fixture/mock `impl` blocks below — where an
+// `unwrap()` IS the assertion — still trip the panic lints. Allow
+// them crate-wide here rather than dotting the file with attributes.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic
+)]
+
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 

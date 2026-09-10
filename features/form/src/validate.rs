@@ -1,5 +1,7 @@
 //! Reusable validators — the building blocks a [`Field`](crate::Field)'s
-//! parser is made of. effect-form composes these from an Effect `Schema`
+//! parser is made of.
+//!
+//! effect-form composes these from an Effect `Schema`
 //! (`Schema.nonEmptyString()`, `Schema.minLength(8)`, …); here they're
 //! plain closure factories you hand to [`use_field`](crate::use_field).
 //!
@@ -76,8 +78,13 @@ pub fn max_length(
 pub fn email(label: &'static str) -> impl Fn(&str) -> Result<String, String> + Clone {
     move |s: &str| {
         let t = s.trim();
-        let parts: Vec<&str> = t.split('@').collect();
-        if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
+        // `split_once` rather than `split().collect()`: one allocation
+        // fewer, and the "exactly one @, both sides non-empty" rule falls
+        // out of the pattern instead of an index into a `Vec`.
+        let valid = t.split_once('@').is_some_and(|(user, host)| {
+            !user.is_empty() && !host.is_empty() && !host.contains('@')
+        });
+        if valid {
             Ok(t.to_string())
         } else {
             Err(format!("{label} must be a valid email address"))
@@ -99,6 +106,18 @@ pub fn and<T, U>(
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic,
+    clippy::float_cmp,
+    clippy::string_slice,
+    clippy::significant_drop_tightening,
+    clippy::too_many_lines
+)]
 mod tests {
     use super::*;
 

@@ -30,6 +30,34 @@ Pre-MVP. Scaffold only — see `docs/roadmap.md`.
 Consumers normally depend on **only** `architect-story-runtime` (story declarations)
 + `architect-story-shell` (interactive browser) + `architect-story-snapshots` (snapshot harness).
 
+## Adoption, measured 2026-09-09
+
+Worth stating plainly, because "seven crates nobody uses" is an easy and
+wrong read of this directory:
+
+| | |
+|---|---|
+| `#[story]` declarations | ~40, all in `architect-ui`'s own components |
+| Consumers **outside** this repo | none — no app crate in `~/fts` depends on a story crate or declares a story |
+| What a consumer actually compiles | `architect-story-runtime` only (141 LOC, `dioxus`) |
+| `-snapshots` / `-parity` | **dev-dependencies** of `architect-ui`, so a consumer never builds the Blitz/vello/dssim stack |
+
+So the carrying cost is one small runtime crate, not the whole family —
+the layering above is doing its job. Two loose ends:
+
+- **`architect-story-fuzz` is an empty stub.** 13 lines, all of them a
+  plan comment behind `#![cfg(not(debug_assertions))]`, with four
+  dependency edges and no consumer anywhere. A plan belongs in
+  `docs/roadmap.md`, not in a workspace member that CI compiles and five
+  consumer workspaces resolve. Retiring it is a **breaking** change even
+  so: those workspaces name it in `[workspace.dependencies]`, and a git
+  tag that no longer contains the package fails to resolve — so it needs
+  a `fleet-bump` in the same change (`cargo xtask fleet-bump`).
+- **The `#[story]` gate is unused.** `-snapshots` (DSSIM baselines) and
+  `-parity` (Blitz vs wry) are built and working; nothing runs them
+  against an app. Landing stories in one app is what would turn this
+  from scaffold into a gate.
+
 ## Why not lookbook?
 
 [`matthunz/lookbook`](https://github.com/matthunz/lookbook) is the

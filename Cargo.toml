@@ -49,6 +49,8 @@ members = [
     "features/launcher/architect-launcher-core",
     "features/launcher/architect-launcher-ui",
     "features/launcher/architect-launcher-providers",
+    # ── repo tooling ──────────────────────────────────────────────────
+    "xtask",
 ]
 
 [workspace.package]
@@ -251,6 +253,79 @@ private_intra_doc_links = "allow"
 redundant_explicit_links = "allow"
 
 [workspace.lints.clippy]
+# ── The house style (namtao.com/rust) ─────────────────────────────────
+# `priority = -1` so the individual `allow`s further down win over the
+# group. Members opt in with `[lints] workspace = true` — a crate without
+# that line inherits NOTHING, which is how the pre-existing allow-list
+# below sat inert in `architect`, the three proc-macro crates, atom,
+# form, auth, crdt and telemetry until 2026-09-09.
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+
+# ── No panics in shipped code ─────────────────────────────────────────
+# architect is a library that runs inside other people's processes — a
+# REAPER extension, an audio pump thread, a long-lived server. A panic
+# here is not a stack trace, it is a dead host. Tests are exempt via
+# `clippy.toml`.
+# The one lint from the set that is turned off, deliberately.
+#
+# architect's fallible APIs return typed `thiserror` enums whose variants
+# carry their own docs (`RepoError`, `AuthFlowError`, `DispatchError`,
+# `LayerPlanError`, …). `# Errors` fired on 230 functions, and the honest
+# section for almost all of them is "returns the error type in the
+# signature, whose variants are documented" — 230 copies of which makes
+# the docs worse, not better, and buries the handful of methods that
+# genuinely have something to say.
+#
+# `missing_panics_doc` stays ON: a function that CAN panic must say so,
+# and after this cleanup there are few enough of those to keep honest.
+missing_errors_doc = "allow"
+
+# The `async` on these is not the impl's to choose. Every site is either
+# a trait method whose signature the trait owns (`Link::close`,
+# `PermissionCheck::can`), or a repo-shaped inherent API whose callers
+# must be able to `.await` it regardless of whether *today's* body
+# happens to be synchronous — `LoroRepo::get`/`list` mirror the async
+# `Repo` surface the derive emits. Dropping `async` would be a breaking
+# change that also forbids the next implementation from awaiting.
+unused_async_trait_impl = "allow"
+
+# Fires on macro attribute structs (`ContainerAttrs`, `FieldAttrs`),
+# Dioxus component props, and config builders. The lint's suggested fix
+# is a state enum, which is right when the bools are mutually exclusive
+# states — and wrong here, where they are independent, individually
+# settable flags. Modelling `#[architect(primary_key, filterable,
+# sortable, fulltext)]` as an enum would be a worse API, not a better one.
+struct_excessive_bools = "allow"
+
+# Counts lines, which in this tree measures the size of a *template*
+# rather than the complexity of a function. Of the 21 sites it flagged,
+# 18 are declarative emitters — proc-macro `quote!` builders
+# (`architect-derive::build_*_block`, `architect-rpc-derive::emit_*`),
+# SeaORM `create_tables`/`create_indexes` DDL, a theme-preset table, a
+# story registry. Splitting those at the 100-line mark would cut a single
+# template in half for no gain in readability.
+#
+# The three that are real control flow were reviewed individually;
+# `architect_launcher_core::query::query_filtered` is the one worth an
+# actual refactor, and it is a launcher concern, not a framework one.
+too_many_lines = "allow"
+
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+arithmetic_side_effects = "deny"
+unreachable = "deny"
+unimplemented = "deny"
+unchecked_time_subtraction = "deny"
+todo = "deny"
+string_slice = "deny"
+panic_in_result_fn = "deny"
+panic = "deny"
+exit = "deny"
+as_conversions = "deny"
+
+# ── Pre-existing per-lint relaxations (priority 0 — these win) ────────
 field_reassign_with_default = "allow"
 redundant_closure = "allow"
 nonminimal_bool = "allow"

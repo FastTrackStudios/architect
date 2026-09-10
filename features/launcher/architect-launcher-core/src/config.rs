@@ -142,15 +142,19 @@ pub struct ProviderOverride {
 
 impl LauncherConfig {
     /// Load configuration from the default path.
+    #[must_use]
     pub fn load() -> Self {
         let path = Self::default_path();
         Self::load_from(&path)
     }
 
     /// Load configuration from a specific path.
+    #[must_use]
     pub fn load_from(path: &PathBuf) -> Self {
-        match std::fs::read_to_string(path) {
-            Ok(content) => match toml::from_str(&content) {
+        std::fs::read_to_string(path).map_or_else(|_| {
+            tracing::debug!(path = %path.display(), "No config file found, using defaults");
+            Self::default()
+        }, |content| match toml::from_str(&content) {
                 Ok(config) => {
                     tracing::info!(path = %path.display(), "Loaded config");
                     config
@@ -159,12 +163,7 @@ impl LauncherConfig {
                     tracing::warn!(path = %path.display(), error = %e, "Failed to parse config, using defaults");
                     Self::default()
                 }
-            },
-            Err(_) => {
-                tracing::debug!(path = %path.display(), "No config file found, using defaults");
-                Self::default()
-            }
-        }
+            })
     }
 
     /// Save configuration to the default path.
@@ -185,16 +184,18 @@ impl LauncherConfig {
 
     /// Default configuration file path.
     pub fn default_path() -> PathBuf {
-        let base = std::env::var("XDG_CONFIG_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| {
+        let base = std::env::var("XDG_CONFIG_HOME").map_or_else(
+            |_| {
                 let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
                 PathBuf::from(home).join(".config")
-            });
+            },
+            PathBuf::from,
+        );
         base.join("dioxus-launcher").join("config.toml")
     }
 
     /// Generate a default config file with comments.
+    #[must_use]
     pub fn generate_default_toml() -> String {
         r#"# Dioxus Launcher Configuration
 

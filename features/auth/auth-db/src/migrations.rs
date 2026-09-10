@@ -1,4 +1,4 @@
-//! SeaORM migrator for architect-auth tables.
+//! `SeaORM` migrator for architect-auth tables.
 
 use sea_orm_migration::prelude::*;
 
@@ -22,6 +22,10 @@ mod m20260513_000001_create_auth_tables {
 
     #[async_trait::async_trait]
     impl MigrationTrait for Migration {
+        // The DDL futures are large because the schema is: one `await`
+        // per table and per index, all in one stack frame. This runs once
+        // at startup, so the frame size is not a cost anyone pays twice.
+        #[allow(clippy::large_futures)]
         async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
             create_tables(manager).await?;
             create_indexes(manager).await
@@ -367,6 +371,10 @@ mod m20260513_000001_create_auth_tables {
 
     // r[impl auth.storage.unique-indexes]
     // r[impl auth.storage.lookup-indexes]
+    // The array IS the index table — a declarative list of every index the
+    // schema declares. Boxing it to satisfy a stack-size heuristic would
+    // obscure that, for no runtime benefit in a once-per-boot migration.
+    #[allow(clippy::large_stack_arrays)]
     async fn create_indexes(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
         for index in [
             unique("idx_auth_users_email", AuthUsers::Table, [AuthUsers::Email]),
@@ -543,7 +551,7 @@ mod m20260513_000001_create_auth_tables {
         for column in columns {
             index.col(column);
         }
-        index.to_owned()
+        index.clone()
     }
 
     fn unique<T, C, const N: usize>(name: &str, table: T, columns: [C; N]) -> IndexCreateStatement
@@ -556,7 +564,7 @@ mod m20260513_000001_create_auth_tables {
         for column in columns {
             index.col(column);
         }
-        index.to_owned()
+        index.clone()
     }
 
     #[derive(Iden)]
@@ -749,6 +757,18 @@ mod m20260513_000001_create_auth_tables {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic,
+    clippy::float_cmp,
+    clippy::string_slice,
+    clippy::significant_drop_tightening,
+    clippy::too_many_lines
+)]
 mod tests {
     use sea_orm::{ConnectionTrait, Database, DbBackend, Statement};
     use sea_orm_migration::MigratorTrait;
@@ -857,7 +877,7 @@ mod m20260809_000001_create_email_history {
     // down on boot. Named explicitly instead, which is also what makes it
     // safe to keep adding migrations to this file.
     impl MigrationName for Migration {
-        fn name(&self) -> &str {
+        fn name(&self) -> &'static str {
             "m20260809_000001_create_email_history"
         }
     }
