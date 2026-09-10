@@ -3,11 +3,11 @@
 use async_trait::async_trait;
 use auth_proto::{
     AuthAccount, AuthAccountCreate, AuthApiKey, AuthApiKeyCreate, AuthFlowError, AuthInvitation,
-    AuthInvitationCreate, AuthMember, AuthMemberCreate, AuthOrganization, AuthOrganizationCreate,
-    AuthOrganizationRole, AuthOrganizationRoleCreate, AuthPasskey, AuthPasskeyCreate, AuthSession,
-    AuthSessionCreate, AuthTeam, AuthTeamCreate, AuthTeamMember, AuthTeamMemberCreate,
-    AuthTwoFactor, AuthTwoFactorCreate, AuthUser, AuthUserCreate, AuthVerification,
-    AuthVerificationCreate, email_change::AuthEmailChange,
+    AuthInvitationCreate, AuthInviteLink, AuthInviteLinkCreate, AuthMember, AuthMemberCreate,
+    AuthOrganization, AuthOrganizationCreate, AuthOrganizationRole, AuthOrganizationRoleCreate,
+    AuthPasskey, AuthPasskeyCreate, AuthSession, AuthSessionCreate, AuthTeam, AuthTeamCreate,
+    AuthTeamMember, AuthTeamMemberCreate, AuthTwoFactor, AuthTwoFactorCreate, AuthUser,
+    AuthUserCreate, AuthVerification, AuthVerificationCreate, email_change::AuthEmailChange,
 };
 use chrono::{DateTime, Utc};
 
@@ -339,6 +339,47 @@ pub trait AuthStorage: Clone + Send + Sync + 'static {
         slug: &str,
     ) -> Result<Option<AuthOrganization>, AuthFlowError>;
 
+    async fn find_organization_by_id(
+        &self,
+        id: uuid::Uuid,
+    ) -> Result<Option<AuthOrganization>, AuthFlowError>;
+
+    /// Every organization `user_id` belongs to, paired with the
+    /// membership that puts them there.
+    ///
+    /// Returned together because every caller needs both: a switcher
+    /// shows the name and the role, and fetching the memberships and
+    /// then the organizations one at a time is the N+1 this avoids.
+    async fn list_organizations_for_user(
+        &self,
+        user_id: uuid::Uuid,
+    ) -> Result<Vec<(AuthOrganization, AuthMember)>, AuthFlowError>;
+
+    async fn update_organization(
+        &self,
+        id: uuid::Uuid,
+        name: Option<String>,
+        slug: Option<String>,
+        logo: Option<Option<String>>,
+        metadata_json: Option<Option<String>>,
+    ) -> Result<AuthOrganization, AuthFlowError>;
+
+    /// Delete the organization and everything that hangs off it.
+    ///
+    /// r[impl auth.storage.transactions]
+    ///
+    /// Memberships, teams, team memberships, roles, invitations and
+    /// invite links all reference the organization and none of them
+    /// mean anything without it. Leaving them behind would leave live
+    /// invite links pointing at an organization that no longer exists.
+    async fn delete_organization(&self, id: uuid::Uuid) -> Result<(), AuthFlowError>;
+
+    async fn delete_member(
+        &self,
+        organization_id: uuid::Uuid,
+        user_id: uuid::Uuid,
+    ) -> Result<(), AuthFlowError>;
+
     async fn create_member(&self, input: AuthMemberCreate) -> Result<AuthMember, AuthFlowError>;
 
     async fn find_member(
@@ -462,6 +503,73 @@ pub trait AuthStorage: Clone + Send + Sync + 'static {
             .await?;
         self.delete_verification(verification_id).await
     }
+
+    async fn list_invitations_by_organization(
+        &self,
+        organization_id: uuid::Uuid,
+    ) -> Result<Vec<AuthInvitation>, AuthFlowError>;
+
+    /// A pending invitation already sent to this address, if any.
+    ///
+    /// Inviting the same person twice is not harmful, but it produces
+    /// two links where one is expected and a member list that reads as
+    /// though somebody is being pestered.
+    async fn find_pending_invitation(
+        &self,
+        organization_id: uuid::Uuid,
+        email: &str,
+    ) -> Result<Option<AuthInvitation>, AuthFlowError>;
+
+    async fn create_invite_link(
+        &self,
+        input: AuthInviteLinkCreate,
+    ) -> Result<AuthInviteLink, AuthFlowError>;
+
+    async fn find_invite_link_by_id(
+        &self,
+        id: uuid::Uuid,
+    ) -> Result<Option<AuthInviteLink>, AuthFlowError>;
+
+    /// Look a link up by the hash of the token in the URL.
+    ///
+    /// The lookup key is the hash, never the token, so the plaintext
+    /// never has to be stored to be found again.
+    async fn find_invite_link_by_token_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<AuthInviteLink>, AuthFlowError>;
+
+    async fn list_invite_links_by_organization(
+        &self,
+        organization_id: uuid::Uuid,
+    ) -> Result<Vec<AuthInviteLink>, AuthFlowError>;
+
+    async fn revoke_invite_link(
+        &self,
+        id: uuid::Uuid,
+        revoked_at: DateTime<Utc>,
+    ) -> Result<(), AuthFlowError>;
+
+    /// Join through a link: count the use and create the membership.
+    ///
+    /// r[impl auth.storage.transactions]
+    ///
+    /// One unit of work. Split in two, a crash between them either
+    /// admits someone without spending a use — so a "max 1" link
+    /// admits the whole channel — or spends one without admitting
+    /// anybody. The default below is the non-transactional fallback for
+    /// backends that cannot do better; the `SeaORM` backend overrides it.
+    async fn redeem_invite_link(
+        &self,
+        link_id: uuid::Uuid,
+        member_input: AuthMemberCreate,
+    ) -> Result<AuthMember, AuthFlowError> {
+        let member = self.create_member(member_input).await?;
+        self.increment_invite_link_uses(link_id).await?;
+        Ok(member)
+    }
+
+    async fn increment_invite_link_uses(&self, id: uuid::Uuid) -> Result<(), AuthFlowError>;
 
     async fn create_two_factor(
         &self,

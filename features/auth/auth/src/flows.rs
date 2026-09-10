@@ -2381,30 +2381,33 @@ pub mod email_password {
             AuthorizeOidc, AuthorizeOrganizationAction, BanUser, BearerTokenStrategy,
             BeginOAuthAuthorization, BeginOAuthProxyAuthorization, BeginPasskeyAuthentication,
             BeginPasskeyRegistration, BreachedPasswordFailurePolicy, BreachedPasswordProvider,
-            CaptchaFlow, ChangeEmail, ChangePassword, CheckPasswordBreach, CleanupAnonymousUsers,
-            ClearLastLoginMethod, CompletePasskeyAuthentication, CompletePasskeyRegistration,
-            CompletePasswordReset, ConfirmTwoFactor, ConsumeOAuthProxyCallback, CreateApiKey,
-            CreateDeviceAuthorization, CreateEmailPasswordUser, CreateInvitation,
-            CreateOrganization, CreateOrganizationRole, CreateSiweNonce, CreateTeam,
-            CurrentSession, CustomSessionEnricher, DeleteApiKey, DeletePasskey, DeleteTeam,
+            CancelInvitation, CaptchaFlow, ChangeEmail, ChangePassword, CheckPasswordBreach,
+            CleanupAnonymousUsers, ClearLastLoginMethod, CompletePasskeyAuthentication,
+            CompletePasskeyRegistration, CompletePasswordReset, ConfirmTwoFactor,
+            ConsumeOAuthProxyCallback, CreateApiKey, CreateDeviceAuthorization,
+            CreateEmailPasswordUser, CreateInvitation, CreateInviteLink, CreateOrganization,
+            CreateOrganizationRole, CreateSiweNonce, CreateTeam, CurrentSession,
+            CustomSessionEnricher, DeleteApiKey, DeleteOrganization, DeletePasskey, DeleteTeam,
             DeleteUser, DenyDeviceCode, DisableTwoFactor, ExchangeOidcToken,
             ForwardOAuthProxyCallback, GenerateOneTimeToken, GetApiKey, GetLastLoginMethod,
-            GetOAuthAccessToken, GetOidcUserInfo, ImpersonateUser, IssueJwt,
+            GetOAuthAccessToken, GetOidcUserInfo, ImpersonateUser, IssueJwt, LeaveOrganization,
             LinkAnonymousEmailPassword, LinkOAuthAccount, LinkSiweAddress, ListAccounts,
-            ListApiKeys, ListDeviceSessions, ListPasskeys, ListSessions, ListTeamMembers,
-            ListTeams, ListUserSessions, ListUsers, MigrateUserEmail, OidcClientConfig,
-            OneTapCallback, PollDeviceToken, RefreshOAuthToken, RegisterOidcClient,
+            ListApiKeys, ListDeviceSessions, ListInvitations, ListInviteLinks, ListMembers,
+            ListOrganizations, ListPasskeys, ListSessions, ListTeamMembers, ListTeams,
+            ListUserSessions, ListUsers, MigrateUserEmail, OidcClientConfig, OneTapCallback,
+            OrganizationBundle, PollDeviceToken, PreviewInvitation, PreviewInviteLink,
+            RedeemInviteLink, RefreshOAuthToken, RegisterOidcClient, RemoveMember,
             RemoveTeamMember, RemoveUser, RequestEmailVerification, RequestPasswordReset,
-            RequireOrganizationRole, RevokeApiKey, RevokeDeviceSession, RevokeOneTimeToken,
-            RevokeOtherSessions, RevokeSession, RevokeUserSession, RevokeUserSessions,
-            SendEmailOtp, SendMagicLink, SendPhoneNumberOtp, SetActiveDeviceSession,
-            SetActiveOrganization, SetMemberRole, SetUserRole, SignInAnonymous,
-            SignInEmailPassword, SignInOAuthAccount, SignInUsername, SignOut, SmsProvider,
-            StartTwoFactorSetup, StopImpersonating, UnbanUser, UnlinkOAuthAccount, UpdateApiKey,
-            UpdatePhoneNumber, UpdateTeam, UpdateUsername, VerifyApiKey, VerifyCaptcha,
-            VerifyDeviceCode, VerifyEmail, VerifyEmailOtp, VerifyJwt, VerifyMagicLink,
-            VerifyOAuthState, VerifyOneTimeToken, VerifyPhoneNumberOtp, VerifySiweMessage,
-            VerifyTwoFactor,
+            RequireOrganizationRole, RevokeApiKey, RevokeDeviceSession, RevokeInviteLink,
+            RevokeOneTimeToken, RevokeOtherSessions, RevokeSession, RevokeUserSession,
+            RevokeUserSessions, SendEmailOtp, SendMagicLink, SendPhoneNumberOtp,
+            SetActiveDeviceSession, SetActiveOrganization, SetMemberRole, SetUserRole,
+            SignInAnonymous, SignInEmailPassword, SignInOAuthAccount, SignInUsername, SignOut,
+            SmsProvider, StartTwoFactorSetup, StopImpersonating, UnbanUser, UnlinkOAuthAccount,
+            UpdateApiKey, UpdateOrganization, UpdatePhoneNumber, UpdateTeam, UpdateUsername,
+            VerifyApiKey, VerifyCaptcha, VerifyDeviceCode, VerifyEmail, VerifyEmailOtp, VerifyJwt,
+            VerifyMagicLink, VerifyOAuthState, VerifyOneTimeToken, VerifyPhoneNumberOtp,
+            VerifySiweMessage, VerifyTwoFactor,
         };
 
         #[derive(Clone, Default)]
@@ -2432,6 +2435,7 @@ pub mod email_password {
             teams: HashMap<Uuid, AuthTeam>,
             team_members: HashMap<(Uuid, Uuid), AuthTeamMember>,
             invitations: HashMap<Uuid, AuthInvitation>,
+            invite_links: HashMap<Uuid, auth_proto::AuthInviteLink>,
             two_factors: HashMap<Uuid, AuthTwoFactor>,
             two_factor_attempts: HashMap<Uuid, i64>,
             /// Append-only, in insertion order — mirrors the real store's
@@ -3393,6 +3397,216 @@ pub mod email_password {
                     .get(slug)
                     .and_then(|id| inner.organizations.get(id))
                     .cloned())
+            }
+
+            async fn find_organization_by_id(
+                &self,
+                id: Uuid,
+            ) -> Result<Option<AuthOrganization>, AuthFlowError> {
+                let inner = self.inner.lock().expect("lock memory storage");
+                Ok(inner.organizations.get(&id).cloned())
+            }
+
+            async fn list_organizations_for_user(
+                &self,
+                user_id: Uuid,
+            ) -> Result<Vec<(AuthOrganization, AuthMember)>, AuthFlowError> {
+                let inner = self.inner.lock().expect("lock memory storage");
+                let mut out: Vec<(AuthOrganization, AuthMember)> = inner
+                    .members
+                    .values()
+                    .filter(|member| member.user_id == user_id)
+                    .filter_map(|member| {
+                        let org = inner.organizations.get(&member.organization_id)?.clone();
+                        Some((org, member.clone()))
+                    })
+                    .collect();
+                out.sort_by(|a, b| a.0.name.cmp(&b.0.name));
+                Ok(out)
+            }
+
+            async fn update_organization(
+                &self,
+                id: Uuid,
+                name: Option<String>,
+                slug: Option<String>,
+                logo: Option<Option<String>>,
+                metadata_json: Option<Option<String>>,
+            ) -> Result<AuthOrganization, AuthFlowError> {
+                let mut inner = self.inner.lock().expect("lock memory storage");
+                let mut organization = inner
+                    .organizations
+                    .get(&id)
+                    .cloned()
+                    .ok_or(AuthFlowError::InvalidCredentials)?;
+                if let Some(name) = name {
+                    organization.name = name;
+                }
+                if let Some(slug) = slug {
+                    inner.organization_ids_by_slug.remove(&organization.slug);
+                    inner.organization_ids_by_slug.insert(slug.clone(), id);
+                    organization.slug = slug;
+                }
+                if let Some(logo) = logo {
+                    organization.logo = logo;
+                }
+                if let Some(metadata_json) = metadata_json {
+                    organization.metadata_json = metadata_json;
+                }
+                organization.updated_at = Utc::now();
+                inner.organizations.insert(id, organization.clone());
+                Ok(organization)
+            }
+
+            async fn delete_organization(&self, id: Uuid) -> Result<(), AuthFlowError> {
+                let mut inner = self.inner.lock().expect("lock memory storage");
+                if let Some(organization) = inner.organizations.remove(&id) {
+                    inner.organization_ids_by_slug.remove(&organization.slug);
+                }
+                let team_ids: Vec<Uuid> = inner
+                    .teams
+                    .values()
+                    .filter(|team| team.organization_id == id)
+                    .map(|team| team.id)
+                    .collect();
+                inner
+                    .team_members
+                    .retain(|(team_id, _), _| !team_ids.contains(team_id));
+                inner.teams.retain(|_, team| team.organization_id != id);
+                inner
+                    .invite_links
+                    .retain(|_, link| link.organization_id != id);
+                inner
+                    .invitations
+                    .retain(|_, invitation| invitation.organization_id != id);
+                inner
+                    .organization_roles
+                    .retain(|(organization_id, _), _| *organization_id != id);
+                inner
+                    .members
+                    .retain(|(organization_id, _), _| *organization_id != id);
+                Ok(())
+            }
+
+            async fn delete_member(
+                &self,
+                organization_id: Uuid,
+                user_id: Uuid,
+            ) -> Result<(), AuthFlowError> {
+                let mut inner = self.inner.lock().expect("lock memory storage");
+                inner.members.remove(&(organization_id, user_id));
+                Ok(())
+            }
+
+            async fn list_invitations_by_organization(
+                &self,
+                organization_id: Uuid,
+            ) -> Result<Vec<AuthInvitation>, AuthFlowError> {
+                let inner = self.inner.lock().expect("lock memory storage");
+                let mut out: Vec<AuthInvitation> = inner
+                    .invitations
+                    .values()
+                    .filter(|invitation| invitation.organization_id == organization_id)
+                    .cloned()
+                    .collect();
+                out.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                Ok(out)
+            }
+
+            async fn find_pending_invitation(
+                &self,
+                organization_id: Uuid,
+                email: &str,
+            ) -> Result<Option<AuthInvitation>, AuthFlowError> {
+                let inner = self.inner.lock().expect("lock memory storage");
+                Ok(inner
+                    .invitations
+                    .values()
+                    .find(|invitation| {
+                        invitation.organization_id == organization_id
+                            && invitation.email == email
+                            && invitation.status == auth_proto::InvitationStatus::Pending.as_str()
+                    })
+                    .cloned())
+            }
+
+            async fn create_invite_link(
+                &self,
+                input: auth_proto::AuthInviteLinkCreate,
+            ) -> Result<auth_proto::AuthInviteLink, AuthFlowError> {
+                let mut inner = self.inner.lock().expect("lock memory storage");
+                let link = auth_proto::AuthInviteLink {
+                    id: Uuid::new_v4(),
+                    organization_id: input.organization_id,
+                    token_hash: input.token_hash,
+                    label: input.label,
+                    role: input.role,
+                    created_by: input.created_by,
+                    expires_at: input.expires_at,
+                    max_uses: input.max_uses,
+                    uses: 0,
+                    revoked_at: input.revoked_at,
+                    created_at: Utc::now(),
+                };
+                inner.invite_links.insert(link.id, link.clone());
+                Ok(link)
+            }
+
+            async fn find_invite_link_by_id(
+                &self,
+                id: Uuid,
+            ) -> Result<Option<auth_proto::AuthInviteLink>, AuthFlowError> {
+                let inner = self.inner.lock().expect("lock memory storage");
+                Ok(inner.invite_links.get(&id).cloned())
+            }
+
+            async fn find_invite_link_by_token_hash(
+                &self,
+                token_hash: &str,
+            ) -> Result<Option<auth_proto::AuthInviteLink>, AuthFlowError> {
+                let inner = self.inner.lock().expect("lock memory storage");
+                Ok(inner
+                    .invite_links
+                    .values()
+                    .find(|link| link.token_hash == token_hash)
+                    .cloned())
+            }
+
+            async fn list_invite_links_by_organization(
+                &self,
+                organization_id: Uuid,
+            ) -> Result<Vec<auth_proto::AuthInviteLink>, AuthFlowError> {
+                let inner = self.inner.lock().expect("lock memory storage");
+                let mut out: Vec<auth_proto::AuthInviteLink> = inner
+                    .invite_links
+                    .values()
+                    .filter(|link| link.organization_id == organization_id)
+                    .cloned()
+                    .collect();
+                out.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                Ok(out)
+            }
+
+            async fn revoke_invite_link(
+                &self,
+                id: Uuid,
+                revoked_at: DateTime<Utc>,
+            ) -> Result<(), AuthFlowError> {
+                let mut inner = self.inner.lock().expect("lock memory storage");
+                let link = inner
+                    .invite_links
+                    .get_mut(&id)
+                    .ok_or(AuthFlowError::InvalidCredentials)?;
+                link.revoked_at = Some(revoked_at);
+                Ok(())
+            }
+
+            async fn increment_invite_link_uses(&self, id: Uuid) -> Result<(), AuthFlowError> {
+                let mut inner = self.inner.lock().expect("lock memory storage");
+                if let Some(link) = inner.invite_links.get_mut(&id) {
+                    link.uses = link.uses.saturating_add(1);
+                }
+                Ok(())
             }
 
             async fn create_member(
@@ -8305,6 +8519,499 @@ pub mod email_password {
             assert!(matches!(denied, Err(AuthFlowError::PermissionDenied)));
         }
 
+        /// A signed-up user, for tests that need several people.
+        async fn user(
+            auth: &ArchitectAuth<MemoryStorage>,
+            email: &str,
+        ) -> crate::AuthSessionBundle {
+            auth.create_email_password_user(CreateEmailPasswordUser {
+                email: email.into(),
+                password: "correct horse battery staple".into(),
+                name: None,
+                username: None,
+                image: None,
+                metadata_json: None,
+                ip_address: None,
+                user_agent: None,
+            })
+            .await
+            .expect("create user")
+        }
+
+        /// An owner with an organization already made.
+        async fn owned_org(
+            auth: &ArchitectAuth<MemoryStorage>,
+        ) -> (crate::AuthSessionBundle, OrganizationBundle) {
+            let owner = user(auth, "owner@example.com").await;
+            let org = auth
+                .create_organization(CreateOrganization {
+                    session_token: owner.token.clone(),
+                    name: "Acme".into(),
+                    slug: "acme".into(),
+                    logo: None,
+                    metadata_json: None,
+                })
+                .await
+                .expect("create org");
+            (owner, org)
+        }
+
+        #[tokio::test]
+        async fn listing_organizations_is_how_a_switcher_finds_the_first_one() {
+            let auth = auth();
+            let (owner, org) = owned_org(&auth).await;
+
+            let mine = auth
+                .list_organizations(ListOrganizations {
+                    session_token: owner.token.clone(),
+                })
+                .await
+                .expect("list organizations");
+            assert_eq!(mine.len(), 1);
+            let first = mine.first().expect("one organization");
+            assert_eq!(first.organization.id, org.organization.id);
+            assert_eq!(first.membership.role, "owner");
+
+            // Somebody else's organization is not in their list.
+            let stranger = user(&auth, "stranger@example.com").await;
+            let theirs = auth
+                .list_organizations(ListOrganizations {
+                    session_token: stranger.token,
+                })
+                .await
+                .expect("list organizations");
+            assert!(theirs.is_empty());
+        }
+
+        // r[verify auth.org.remove-last-owner]
+        #[tokio::test]
+        async fn the_last_owner_can_neither_be_removed_nor_leave() {
+            let auth = auth();
+            let (owner, org) = owned_org(&auth).await;
+
+            let removed = auth
+                .remove_member(RemoveMember {
+                    session_token: owner.token.clone(),
+                    organization_id: org.organization.id,
+                    user_id: owner.user.id,
+                })
+                .await;
+            assert!(matches!(removed, Err(AuthFlowError::InvalidInput(_))));
+
+            let left = auth
+                .leave_organization(LeaveOrganization {
+                    session_token: owner.token.clone(),
+                    organization_id: org.organization.id,
+                })
+                .await;
+            assert!(matches!(left, Err(AuthFlowError::InvalidInput(_))));
+
+            // Still there.
+            assert_eq!(
+                auth.list_members(ListMembers {
+                    session_token: owner.token,
+                    organization_id: org.organization.id,
+                })
+                .await
+                .expect("list members")
+                .len(),
+                1
+            );
+        }
+
+        #[tokio::test]
+        async fn a_member_may_leave_but_may_not_remove_anybody_else() {
+            let auth = auth();
+            let (owner, org) = owned_org(&auth).await;
+            let joiner = user(&auth, "joiner@example.com").await;
+
+            let link = auth
+                .create_invite_link(CreateInviteLink {
+                    session_token: owner.token.clone(),
+                    organization_id: org.organization.id,
+                    role: "member".into(),
+                    label: None,
+                    expires_at: None,
+                    max_uses: None,
+                })
+                .await
+                .expect("create link");
+            auth.redeem_invite_link(RedeemInviteLink {
+                session_token: joiner.token.clone(),
+                token: link.token.clone(),
+            })
+            .await
+            .expect("redeem");
+
+            // No `member:delete` for a plain member.
+            let denied = auth
+                .remove_member(RemoveMember {
+                    session_token: joiner.token.clone(),
+                    organization_id: org.organization.id,
+                    user_id: owner.user.id,
+                })
+                .await;
+            assert!(matches!(denied, Err(AuthFlowError::PermissionDenied)));
+
+            // But nobody needs permission to stop being in a room.
+            auth.leave_organization(LeaveOrganization {
+                session_token: joiner.token,
+                organization_id: org.organization.id,
+            })
+            .await
+            .expect("leave");
+            assert_eq!(
+                auth.list_members(ListMembers {
+                    session_token: owner.token,
+                    organization_id: org.organization.id,
+                })
+                .await
+                .expect("list members")
+                .len(),
+                1
+            );
+        }
+
+        // r[verify auth.org.slug-unique]
+        #[tokio::test]
+        async fn renaming_to_your_own_slug_is_not_a_conflict() {
+            let auth = auth();
+            let (owner, org) = owned_org(&auth).await;
+            auth.create_organization(CreateOrganization {
+                session_token: owner.token.clone(),
+                name: "Other".into(),
+                slug: "other".into(),
+                logo: None,
+                metadata_json: None,
+            })
+            .await
+            .expect("create second org");
+
+            // Its own slug, with only the name changing.
+            let renamed = auth
+                .update_organization(UpdateOrganization {
+                    session_token: owner.token.clone(),
+                    organization_id: org.organization.id,
+                    name: Some("Acme Inc".into()),
+                    slug: Some("acme".into()),
+                    ..UpdateOrganization::default()
+                })
+                .await
+                .expect("rename");
+            assert_eq!(renamed.name, "Acme Inc");
+            assert_eq!(renamed.slug, "acme");
+
+            // Somebody else's slug is still a conflict.
+            let clash = auth
+                .update_organization(UpdateOrganization {
+                    session_token: owner.token,
+                    organization_id: org.organization.id,
+                    slug: Some("other".into()),
+                    ..UpdateOrganization::default()
+                })
+                .await;
+            assert!(matches!(clash, Err(AuthFlowError::InvalidInput(_))));
+        }
+
+        #[tokio::test]
+        async fn deleting_an_organization_takes_its_members_and_links_with_it() {
+            let auth = auth();
+            let (owner, org) = owned_org(&auth).await;
+            let link = auth
+                .create_invite_link(CreateInviteLink {
+                    session_token: owner.token.clone(),
+                    organization_id: org.organization.id,
+                    role: "member".into(),
+                    label: None,
+                    expires_at: None,
+                    max_uses: None,
+                })
+                .await
+                .expect("create link");
+
+            auth.delete_organization(DeleteOrganization {
+                session_token: owner.token.clone(),
+                organization_id: org.organization.id,
+            })
+            .await
+            .expect("delete org");
+
+            assert!(
+                auth.list_organizations(ListOrganizations {
+                    session_token: owner.token,
+                })
+                .await
+                .expect("list")
+                .is_empty()
+            );
+            // The link must not outlive the organization it points at.
+            let orphan = auth
+                .preview_invite_link(PreviewInviteLink { token: link.token })
+                .await;
+            assert!(matches!(orphan, Err(AuthFlowError::InvalidCredentials)));
+        }
+
+        // r[verify auth.org.invite-token]
+        #[tokio::test]
+        async fn an_invite_link_admits_exactly_its_allowance() {
+            let auth = auth();
+            let (owner, org) = owned_org(&auth).await;
+            let link = auth
+                .create_invite_link(CreateInviteLink {
+                    session_token: owner.token.clone(),
+                    organization_id: org.organization.id,
+                    role: "member".into(),
+                    label: Some("launch week".into()),
+                    expires_at: None,
+                    max_uses: Some(1),
+                })
+                .await
+                .expect("create link");
+
+            let preview = auth
+                .preview_invite_link(PreviewInviteLink {
+                    token: link.token.clone(),
+                })
+                .await
+                .expect("preview");
+            assert_eq!(preview.organization_name, "Acme");
+            assert_eq!(preview.role, "member");
+            assert_eq!(preview.uses_remaining, Some(1));
+
+            let first = user(&auth, "first@example.com").await;
+            let member = auth
+                .redeem_invite_link(RedeemInviteLink {
+                    session_token: first.token,
+                    token: link.token.clone(),
+                })
+                .await
+                .expect("first redeem");
+            assert_eq!(member.role, "member");
+
+            // The allowance is spent; the next person is turned away, and
+            // told no more than that.
+            let second = user(&auth, "second@example.com").await;
+            let refused = auth
+                .redeem_invite_link(RedeemInviteLink {
+                    session_token: second.token,
+                    token: link.token,
+                })
+                .await;
+            assert!(matches!(refused, Err(AuthFlowError::InvalidCredentials)));
+        }
+
+        #[tokio::test]
+        async fn following_a_link_you_already_used_does_not_spend_another_use() {
+            let auth = auth();
+            let (owner, org) = owned_org(&auth).await;
+            let link = auth
+                .create_invite_link(CreateInviteLink {
+                    session_token: owner.token.clone(),
+                    organization_id: org.organization.id,
+                    role: "member".into(),
+                    label: None,
+                    expires_at: None,
+                    max_uses: Some(2),
+                })
+                .await
+                .expect("create link");
+
+            let joiner = user(&auth, "joiner@example.com").await;
+            for _ in 0..3 {
+                auth.redeem_invite_link(RedeemInviteLink {
+                    session_token: joiner.token.clone(),
+                    token: link.token.clone(),
+                })
+                .await
+                .expect("redeem is idempotent");
+            }
+
+            // One use spent, not three — otherwise a refresh-happy
+            // browser burns a link nobody else got to use.
+            let links = auth
+                .list_invite_links(ListInviteLinks {
+                    session_token: owner.token.clone(),
+                    organization_id: org.organization.id,
+                })
+                .await
+                .expect("list links");
+            assert_eq!(links.first().expect("one link").uses, 1);
+            assert_eq!(
+                auth.list_members(ListMembers {
+                    session_token: owner.token,
+                    organization_id: org.organization.id,
+                })
+                .await
+                .expect("list members")
+                .len(),
+                2
+            );
+        }
+
+        #[tokio::test]
+        async fn a_revoked_link_stops_admitting_immediately() {
+            let auth = auth();
+            let (owner, org) = owned_org(&auth).await;
+            let link = auth
+                .create_invite_link(CreateInviteLink {
+                    session_token: owner.token.clone(),
+                    organization_id: org.organization.id,
+                    role: "member".into(),
+                    label: None,
+                    expires_at: None,
+                    max_uses: None,
+                })
+                .await
+                .expect("create link");
+
+            auth.revoke_invite_link(RevokeInviteLink {
+                session_token: owner.token.clone(),
+                link_id: link.link.id,
+            })
+            .await
+            .expect("revoke");
+            // Twice, because a second click of a button that worked
+            // should agree rather than error.
+            auth.revoke_invite_link(RevokeInviteLink {
+                session_token: owner.token,
+                link_id: link.link.id,
+            })
+            .await
+            .expect("revoking twice is a no-op");
+
+            let joiner = user(&auth, "joiner@example.com").await;
+            let refused = auth
+                .redeem_invite_link(RedeemInviteLink {
+                    session_token: joiner.token,
+                    token: link.token,
+                })
+                .await;
+            assert!(matches!(refused, Err(AuthFlowError::InvalidCredentials)));
+        }
+
+        #[tokio::test]
+        async fn only_someone_who_can_invite_can_mint_a_link() {
+            let auth = auth();
+            let (owner, org) = owned_org(&auth).await;
+            let link = auth
+                .create_invite_link(CreateInviteLink {
+                    session_token: owner.token.clone(),
+                    organization_id: org.organization.id,
+                    role: "member".into(),
+                    label: None,
+                    expires_at: None,
+                    max_uses: None,
+                })
+                .await
+                .expect("create link");
+            let joiner = user(&auth, "joiner@example.com").await;
+            auth.redeem_invite_link(RedeemInviteLink {
+                session_token: joiner.token.clone(),
+                token: link.token,
+            })
+            .await
+            .expect("redeem");
+
+            // A plain member cannot open the door for anyone else.
+            let denied = auth
+                .create_invite_link(CreateInviteLink {
+                    session_token: joiner.token,
+                    organization_id: org.organization.id,
+                    role: "member".into(),
+                    label: None,
+                    expires_at: None,
+                    max_uses: None,
+                })
+                .await;
+            assert!(matches!(denied, Err(AuthFlowError::PermissionDenied)));
+        }
+
+        // r[verify auth.org.invite-status]
+        #[tokio::test]
+        async fn an_invitation_moves_out_of_pending_exactly_once() {
+            let auth = auth();
+            let (owner, org) = owned_org(&auth).await;
+            let invitation = auth
+                .create_invitation(CreateInvitation {
+                    session_token: owner.token.clone(),
+                    organization_id: org.organization.id,
+                    email: "invitee@example.com".into(),
+                    role: "member".into(),
+                    expires_at: Utc::now() + chrono::Duration::days(7),
+                })
+                .await
+                .expect("create invitation");
+
+            let listed = auth
+                .list_invitations(ListInvitations {
+                    session_token: owner.token.clone(),
+                    organization_id: org.organization.id,
+                })
+                .await
+                .expect("list invitations");
+            assert_eq!(listed.len(), 1);
+
+            auth.cancel_invitation(CancelInvitation {
+                session_token: owner.token.clone(),
+                invitation_id: invitation.invitation.id,
+            })
+            .await
+            .expect("cancel");
+
+            // Cancelled is a terminal state: it cannot be cancelled
+            // again, nor previewed, nor accepted.
+            let again = auth
+                .cancel_invitation(CancelInvitation {
+                    session_token: owner.token,
+                    invitation_id: invitation.invitation.id,
+                })
+                .await;
+            assert!(matches!(again, Err(AuthFlowError::InvalidInput(_))));
+
+            let preview = auth
+                .preview_invitation(PreviewInvitation {
+                    invitation_id: invitation.invitation.id,
+                    token: invitation.token,
+                })
+                .await;
+            assert!(matches!(preview, Err(AuthFlowError::InvalidCredentials)));
+        }
+
+        #[tokio::test]
+        async fn previewing_an_invitation_needs_the_token_not_a_session() {
+            let auth = auth();
+            let (owner, org) = owned_org(&auth).await;
+            let invitation = auth
+                .create_invitation(CreateInvitation {
+                    session_token: owner.token,
+                    organization_id: org.organization.id,
+                    email: "invitee@example.com".into(),
+                    role: "member".into(),
+                    expires_at: Utc::now() + chrono::Duration::days(7),
+                })
+                .await
+                .expect("create invitation");
+
+            // Nobody is signed in here — that is the point.
+            let preview = auth
+                .preview_invitation(PreviewInvitation {
+                    invitation_id: invitation.invitation.id,
+                    token: invitation.token,
+                })
+                .await
+                .expect("preview");
+            assert_eq!(preview.organization_name, "Acme");
+            assert_eq!(preview.email, "invitee@example.com");
+
+            let guessed = auth
+                .preview_invitation(PreviewInvitation {
+                    invitation_id: invitation.invitation.id,
+                    token: "not-the-token".into(),
+                })
+                .await;
+            assert!(matches!(guessed, Err(AuthFlowError::InvalidCredentials)));
+        }
+
         // r[verify auth.org.invite-token]
         // r[verify auth.org.invite-status]
         #[tokio::test]
@@ -12337,17 +13044,21 @@ pub mod organizations {
 
     use crate::{
         AcceptInvitation, AddTeamMember, ArchitectAuth, AuthStorage, AuthorizeOrganizationAction,
-        CreateInvitation, CreateOrganization, CreateOrganizationRole, CreateTeam,
-        DeleteOrganizationRole, DeleteTeam, InvitationToken, ListOrganizationRoles,
-        ListTeamMembers, ListTeams, OrganizationBundle, RemoveTeamMember, RequireOrganizationRole,
-        SetActiveOrganization, SetMemberRole, UpdateOrganizationRole, UpdateTeam,
+        CancelInvitation, CreateInvitation, CreateInviteLink, CreateOrganization,
+        CreateOrganizationRole, CreateTeam, DeleteOrganization, DeleteOrganizationRole, DeleteTeam,
+        GetOrganization, InvitationPreview, InvitationToken, InviteLinkPreview, InviteLinkToken,
+        LeaveOrganization, ListInvitations, ListInviteLinks, ListMembers, ListOrganizationRoles,
+        ListOrganizations, ListTeamMembers, ListTeams, OrganizationBundle, OrganizationMember,
+        PreviewInvitation, PreviewInviteLink, RedeemInviteLink, RejectInvitation, RemoveMember,
+        RemoveTeamMember, RequireOrganizationRole, RevokeInviteLink, SetActiveOrganization,
+        SetMemberRole, UpdateOrganization, UpdateOrganizationRole, UpdateTeam,
         commands::CurrentSession,
         crypto::{generate_token, hash_token},
     };
     use auth_proto::{
-        AuthFlowError, AuthInvitationCreate, AuthMember, AuthMemberCreate, AuthOrganizationCreate,
-        AuthOrganizationRole, AuthOrganizationRoleCreate, AuthTeam, AuthTeamCreate, AuthTeamMember,
-        AuthTeamMemberCreate,
+        AuthFlowError, AuthInvitationCreate, AuthMember, AuthMemberCreate, AuthOrganization,
+        AuthOrganizationCreate, AuthOrganizationRole, AuthOrganizationRoleCreate, AuthTeam,
+        AuthTeamCreate, AuthTeamMember, AuthTeamMemberCreate,
     };
 
     impl<S> ArchitectAuth<S>
@@ -12484,6 +13195,313 @@ pub mod organizations {
                 .await
         }
 
+        /// Every organization the caller belongs to, with their role.
+        ///
+        /// The one query an org switcher needs, and the one that did not
+        /// exist: without it a client can only reach an organization it
+        /// already knows the id of, which means the first one is
+        /// unreachable.
+        pub async fn list_organizations(
+            &self,
+            input: ListOrganizations,
+        ) -> Result<Vec<OrganizationBundle>, AuthFlowError> {
+            let session = self
+                .current_session(CurrentSession {
+                    token: input.session_token,
+                })
+                .await?;
+            Ok(self
+                .storage
+                .list_organizations_for_user(session.user.id)
+                .await?
+                .into_iter()
+                .map(|(organization, membership)| OrganizationBundle {
+                    organization,
+                    membership,
+                })
+                .collect())
+        }
+
+        // r[impl auth.org.active-session]
+        pub async fn get_organization(
+            &self,
+            input: GetOrganization,
+        ) -> Result<OrganizationBundle, AuthFlowError> {
+            let membership = self
+                .require_member(&input.session_token, input.organization_id)
+                .await?;
+            let organization = self
+                .storage
+                .find_organization_by_id(input.organization_id)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            Ok(OrganizationBundle {
+                organization,
+                membership,
+            })
+        }
+
+        // r[impl auth.org.slug-unique]
+        pub async fn update_organization(
+            &self,
+            input: UpdateOrganization,
+        ) -> Result<AuthOrganization, AuthFlowError> {
+            if let Some(metadata_json) = input.metadata_json.as_ref().and_then(Option::as_deref) {
+                validate_json(Some(metadata_json), "metadata_json")?;
+            }
+            self.authorize_member_action(
+                &input.session_token,
+                input.organization_id,
+                "organization",
+                "update",
+            )
+            .await?;
+            let slug = match input.slug {
+                None => None,
+                Some(slug) => {
+                    let slug = normalize_slug(&slug)?;
+                    // Taken by somebody else is a conflict; taken by this
+                    // organization is a no-op rename it should not trip on.
+                    if let Some(existing) = self.storage.find_organization_by_slug(&slug).await? {
+                        if existing.id != input.organization_id {
+                            return Err(AuthFlowError::InvalidInput(
+                                "organization slug already exists".into(),
+                            ));
+                        }
+                    }
+                    Some(slug)
+                }
+            };
+            self.storage
+                .update_organization(
+                    input.organization_id,
+                    input.name,
+                    slug,
+                    input.logo,
+                    input.metadata_json,
+                )
+                .await
+        }
+
+        // r[impl auth.org.remove-last-owner]
+        pub async fn delete_organization(
+            &self,
+            input: DeleteOrganization,
+        ) -> Result<(), AuthFlowError> {
+            // The last-owner rule explicitly does not apply here: an
+            // organization being deleted is meant to end up with no
+            // owners. Requiring `organization:delete` — which only an
+            // owner has by default — is what guards this instead.
+            self.authorize_member_action(
+                &input.session_token,
+                input.organization_id,
+                "organization",
+                "delete",
+            )
+            .await?;
+            self.storage
+                .delete_organization(input.organization_id)
+                .await
+        }
+
+        /// The members of an organization, each with their user record.
+        ///
+        /// Any member may read the roster: knowing who else is in a room
+        /// you are in is not privileged, and a member list gated behind
+        /// `member:read` would be invisible to the `member` role, which
+        /// is everybody.
+        pub async fn list_members(
+            &self,
+            input: ListMembers,
+        ) -> Result<Vec<OrganizationMember>, AuthFlowError> {
+            self.require_member(&input.session_token, input.organization_id)
+                .await?;
+            let members = self
+                .storage
+                .list_members_by_organization(input.organization_id)
+                .await?;
+            let mut out = Vec::with_capacity(members.len());
+            for member in members {
+                // A membership whose user has since been deleted is a
+                // dangling row, not an error worth failing the page over.
+                if let Some(user) = self.storage.find_user_by_id(member.user_id).await? {
+                    out.push(OrganizationMember { member, user });
+                }
+            }
+            Ok(out)
+        }
+
+        // r[impl auth.org.remove-last-owner]
+        pub async fn remove_member(&self, input: RemoveMember) -> Result<(), AuthFlowError> {
+            self.authorize_member_action(
+                &input.session_token,
+                input.organization_id,
+                "member",
+                "delete",
+            )
+            .await?;
+            let member = self
+                .storage
+                .find_member(input.organization_id, input.user_id)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            if member.role == "owner" {
+                reject_if_last_owner(&self.storage, input.organization_id).await?;
+            }
+            self.storage
+                .delete_member(input.organization_id, input.user_id)
+                .await
+        }
+
+        /// Leave under your own steam.
+        ///
+        /// Separate from [`Self::remove_member`] because the permission
+        /// is different: removing *somebody else* needs `member:delete`,
+        /// which a plain member does not have, but nobody should need
+        /// permission to stop being in a room. The last-owner rule still
+        /// applies — an organization with no owner cannot be
+        /// administered or deleted by anyone.
+        // r[impl auth.org.remove-last-owner]
+        pub async fn leave_organization(
+            &self,
+            input: LeaveOrganization,
+        ) -> Result<(), AuthFlowError> {
+            let member = self
+                .require_member(&input.session_token, input.organization_id)
+                .await?;
+            if member.role == "owner" {
+                reject_if_last_owner(&self.storage, input.organization_id).await?;
+            }
+            self.storage
+                .delete_member(input.organization_id, member.user_id)
+                .await
+        }
+
+        pub async fn list_invitations(
+            &self,
+            input: ListInvitations,
+        ) -> Result<Vec<auth_proto::AuthInvitation>, AuthFlowError> {
+            self.authorize_member_action(
+                &input.session_token,
+                input.organization_id,
+                "invitation",
+                "create",
+            )
+            .await?;
+            self.storage
+                .list_invitations_by_organization(input.organization_id)
+                .await
+        }
+
+        // r[impl auth.org.invite-status]
+        pub async fn cancel_invitation(
+            &self,
+            input: CancelInvitation,
+        ) -> Result<(), AuthFlowError> {
+            let invitation = self
+                .storage
+                .find_invitation_by_id(input.invitation_id)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            self.authorize_member_action(
+                &input.session_token,
+                invitation.organization_id,
+                "invitation",
+                "cancel",
+            )
+            .await?;
+            if invitation.status != auth_proto::InvitationStatus::Pending.as_str() {
+                return Err(AuthFlowError::InvalidInput(
+                    "invitation is not pending".into(),
+                ));
+            }
+            self.storage
+                .update_invitation_status(
+                    invitation.id,
+                    auth_proto::InvitationStatus::Canceled.as_str().into(),
+                )
+                .await
+        }
+
+        /// Decline an invitation you were sent.
+        ///
+        /// Authorized by the token, not by a role: the person declining
+        /// is by definition not a member yet, so there is no membership
+        /// to check. Requiring the token stops one person from declining
+        /// invitations addressed to others.
+        // r[impl auth.org.invite-status]
+        // r[impl auth.org.invite-token]
+        pub async fn reject_invitation(
+            &self,
+            input: RejectInvitation,
+        ) -> Result<(), AuthFlowError> {
+            let invitation = self
+                .storage
+                .find_invitation_by_id(input.invitation_id)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            if invitation.status != auth_proto::InvitationStatus::Pending.as_str() {
+                return Err(AuthFlowError::InvalidInput(
+                    "invitation is not pending".into(),
+                ));
+            }
+            let identifier = invitation_identifier(invitation.id);
+            let value_hash = hash_token(&self.config.secret, &input.token);
+            let verification = self
+                .storage
+                .find_verification(&identifier, &value_hash)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            self.storage
+                .update_invitation_status(
+                    invitation.id,
+                    auth_proto::InvitationStatus::Rejected.as_str().into(),
+                )
+                .await?;
+            self.storage.delete_verification(verification.id).await
+        }
+
+        /// What an invitation is *for*, without needing a session.
+        // r[impl auth.org.invite-token]
+        pub async fn preview_invitation(
+            &self,
+            input: PreviewInvitation,
+        ) -> Result<InvitationPreview, AuthFlowError> {
+            let invitation = self
+                .storage
+                .find_invitation_by_id(input.invitation_id)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            if invitation.status != auth_proto::InvitationStatus::Pending.as_str()
+                || invitation.expires_at <= Utc::now()
+            {
+                return Err(AuthFlowError::InvalidCredentials);
+            }
+            let identifier = invitation_identifier(invitation.id);
+            let value_hash = hash_token(&self.config.secret, &input.token);
+            let verification = self
+                .storage
+                .find_verification(&identifier, &value_hash)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            if verification.expires_at <= Utc::now() {
+                return Err(AuthFlowError::InvalidCredentials);
+            }
+            let organization = self
+                .storage
+                .find_organization_by_id(invitation.organization_id)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            Ok(InvitationPreview {
+                invitation_id: invitation.id,
+                organization_name: organization.name,
+                organization_slug: organization.slug,
+                email: invitation.email,
+                role: invitation.role,
+                expires_at: invitation.expires_at,
+            })
+        }
+
         // r[impl auth.org.invite-token]
         pub async fn create_invitation(
             &self,
@@ -12581,6 +13599,177 @@ pub mod organizations {
                     verification.id,
                 )
                 .await
+        }
+
+        /// Mint a shareable link into this organization.
+        ///
+        /// The token is returned once and stored only as a hash, so this
+        /// return value is the only chance to show it. A caller that
+        /// drops it has to mint another link, which is the correct
+        /// outcome — the alternative is a server that can reconstruct
+        /// every live invite URL from its own database.
+        // r[impl auth.org.invite-token]
+        pub async fn create_invite_link(
+            &self,
+            input: CreateInviteLink,
+        ) -> Result<InviteLinkToken, AuthFlowError> {
+            // A link grants a role, so minting one is `invitation:create`
+            // — the same permission as inviting a named person, because
+            // it is the same act with the address left blank.
+            self.authorize_member_action(
+                &input.session_token,
+                input.organization_id,
+                "invitation",
+                "create",
+            )
+            .await?;
+            let session = self
+                .current_session(CurrentSession {
+                    token: input.session_token,
+                })
+                .await?;
+            if input.max_uses.is_some_and(|max| max < 1) {
+                return Err(AuthFlowError::InvalidInput(
+                    "max_uses must be at least 1".into(),
+                ));
+            }
+            if input.expires_at.is_some_and(|at| at <= Utc::now()) {
+                return Err(AuthFlowError::InvalidInput(
+                    "expires_at is already in the past".into(),
+                ));
+            }
+            let token = generate_token().map_err(|err| AuthFlowError::Internal(err.to_string()))?;
+            let link = self
+                .storage
+                .create_invite_link(auth_proto::AuthInviteLinkCreate {
+                    organization_id: input.organization_id,
+                    token_hash: hash_token(&self.config.secret, &token),
+                    label: input.label,
+                    role: input.role,
+                    created_by: session.user.id,
+                    expires_at: input.expires_at,
+                    max_uses: input.max_uses,
+                    revoked_at: None,
+                })
+                .await?;
+            Ok(InviteLinkToken { link, token })
+        }
+
+        pub async fn list_invite_links(
+            &self,
+            input: ListInviteLinks,
+        ) -> Result<Vec<auth_proto::AuthInviteLink>, AuthFlowError> {
+            self.authorize_member_action(
+                &input.session_token,
+                input.organization_id,
+                "invitation",
+                "create",
+            )
+            .await?;
+            self.storage
+                .list_invite_links_by_organization(input.organization_id)
+                .await
+        }
+
+        pub async fn revoke_invite_link(
+            &self,
+            input: RevokeInviteLink,
+        ) -> Result<(), AuthFlowError> {
+            let link = self
+                .storage
+                .find_invite_link_by_id(input.link_id)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            self.authorize_member_action(
+                &input.session_token,
+                link.organization_id,
+                "invitation",
+                "cancel",
+            )
+            .await?;
+            // Revoking twice is not an error: the second click of a
+            // button whose first click already worked should agree.
+            if link.revoked_at.is_some() {
+                return Ok(());
+            }
+            self.storage.revoke_invite_link(link.id, Utc::now()).await
+        }
+
+        /// Where a link leads, for somebody who is not signed in yet.
+        // r[impl auth.org.invite-token]
+        pub async fn preview_invite_link(
+            &self,
+            input: PreviewInviteLink,
+        ) -> Result<InviteLinkPreview, AuthFlowError> {
+            let link = self.usable_invite_link(&input.token).await?;
+            let organization = self
+                .storage
+                .find_organization_by_id(link.organization_id)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            let uses_remaining = link.uses_remaining();
+            Ok(InviteLinkPreview {
+                organization_name: organization.name,
+                organization_slug: organization.slug,
+                role: link.role,
+                uses_remaining,
+            })
+        }
+
+        /// Join the organization a link points at.
+        // r[impl auth.org.invite-token]
+        // r[impl auth.org.member-unique]
+        pub async fn redeem_invite_link(
+            &self,
+            input: RedeemInviteLink,
+        ) -> Result<AuthMember, AuthFlowError> {
+            let session = self
+                .current_session(CurrentSession {
+                    token: input.session_token,
+                })
+                .await?;
+            let link = self.usable_invite_link(&input.token).await?;
+            if let Some(existing) = self
+                .storage
+                .find_member(link.organization_id, session.user.id)
+                .await?
+            {
+                // Already in: following the link a second time is a
+                // no-op, not a failure, and must not spend a use.
+                return Ok(existing);
+            }
+            self.storage
+                .redeem_invite_link(
+                    link.id,
+                    AuthMemberCreate {
+                        organization_id: link.organization_id,
+                        user_id: session.user.id,
+                        role: link.role,
+                    },
+                )
+                .await
+        }
+
+        /// Resolve a link token to a link that will still admit someone.
+        ///
+        /// Every rejection is the same error on purpose: "revoked",
+        /// "expired" and "used up" would each tell a stranger holding a
+        /// guessed token something true about it.
+        async fn usable_invite_link(
+            &self,
+            token: &str,
+        ) -> Result<auth_proto::AuthInviteLink, AuthFlowError> {
+            let token_hash = hash_token(&self.config.secret, token);
+            let link = self
+                .storage
+                .find_invite_link_by_token_hash(&token_hash)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            if link.is_usable_at(Utc::now()) {
+                Ok(link)
+            } else {
+                Err(AuthFlowError::InvalidCredentials)
+            }
         }
 
         // r[impl auth.org.dynamic-access-control]

@@ -1,11 +1,11 @@
 use async_trait::async_trait;
 use auth_proto::{
     AuthAccount, AuthAccountCreate, AuthApiKey, AuthApiKeyCreate, AuthFlowError, AuthInvitation,
-    AuthInvitationCreate, AuthMember, AuthMemberCreate, AuthOrganization, AuthOrganizationCreate,
-    AuthOrganizationRole, AuthOrganizationRoleCreate, AuthPasskey, AuthPasskeyCreate, AuthSession,
-    AuthSessionCreate, AuthTeam, AuthTeamCreate, AuthTeamMember, AuthTeamMemberCreate,
-    AuthTwoFactor, AuthTwoFactorCreate, AuthUser, AuthUserCreate, AuthVerification,
-    AuthVerificationCreate,
+    AuthInvitationCreate, AuthInviteLink, AuthInviteLinkCreate, AuthMember, AuthMemberCreate,
+    AuthOrganization, AuthOrganizationCreate, AuthOrganizationRole, AuthOrganizationRoleCreate,
+    AuthPasskey, AuthPasskeyCreate, AuthSession, AuthSessionCreate, AuthTeam, AuthTeamCreate,
+    AuthTeamMember, AuthTeamMemberCreate, AuthTwoFactor, AuthTwoFactorCreate, AuthUser,
+    AuthUserCreate, AuthVerification, AuthVerificationCreate,
 };
 use chrono::{DateTime, Utc};
 use sea_orm::{
@@ -20,15 +20,17 @@ use crate::{
         AuthAccountActiveModel, AuthAccountColumn, AuthAccountEntity, AuthApiKeyActiveModel,
         AuthApiKeyColumn, AuthApiKeyEntity, AuthAuditEventRecordActiveModel, AuthEmailChange,
         AuthEmailChangeActiveModel, AuthEmailChangeColumn, AuthEmailChangeEntity,
-        AuthInvitationActiveModel, AuthInvitationEntity, AuthMemberActiveModel, AuthMemberColumn,
-        AuthMemberEntity, AuthOrganizationActiveModel, AuthOrganizationColumn,
-        AuthOrganizationEntity, AuthOrganizationRoleActiveModel, AuthOrganizationRoleColumn,
-        AuthOrganizationRoleEntity, AuthPasskeyActiveModel, AuthPasskeyColumn, AuthPasskeyEntity,
-        AuthSessionActiveModel, AuthSessionColumn, AuthSessionEntity, AuthTeamActiveModel,
-        AuthTeamColumn, AuthTeamEntity, AuthTeamMemberActiveModel, AuthTeamMemberColumn,
-        AuthTeamMemberEntity, AuthTwoFactorActiveModel, AuthTwoFactorColumn, AuthTwoFactorEntity,
-        AuthUserActiveModel, AuthUserColumn, AuthUserEntity, AuthVerificationActiveModel,
-        AuthVerificationColumn, AuthVerificationEntity,
+        AuthInvitationActiveModel, AuthInvitationColumn, AuthInvitationEntity,
+        AuthInviteLinkActiveModel, AuthInviteLinkColumn, AuthInviteLinkEntity,
+        AuthMemberActiveModel, AuthMemberColumn, AuthMemberEntity, AuthOrganizationActiveModel,
+        AuthOrganizationColumn, AuthOrganizationEntity, AuthOrganizationRoleActiveModel,
+        AuthOrganizationRoleColumn, AuthOrganizationRoleEntity, AuthPasskeyActiveModel,
+        AuthPasskeyColumn, AuthPasskeyEntity, AuthSessionActiveModel, AuthSessionColumn,
+        AuthSessionEntity, AuthTeamActiveModel, AuthTeamColumn, AuthTeamEntity,
+        AuthTeamMemberActiveModel, AuthTeamMemberColumn, AuthTeamMemberEntity,
+        AuthTwoFactorActiveModel, AuthTwoFactorColumn, AuthTwoFactorEntity, AuthUserActiveModel,
+        AuthUserColumn, AuthUserEntity, AuthVerificationActiveModel, AuthVerificationColumn,
+        AuthVerificationEntity,
     },
 };
 
@@ -1071,6 +1073,150 @@ impl AuthStorage for AuthSeaOrmStorage {
             .map_err(map_db_err)
     }
 
+    async fn find_organization_by_id(
+        &self,
+        id: Uuid,
+    ) -> Result<Option<AuthOrganization>, AuthFlowError> {
+        AuthOrganizationEntity::find_by_id(id)
+            .one(&self.db)
+            .await
+            .map(|org| org.map(AuthOrganization::from))
+            .map_err(map_db_err)
+    }
+
+    async fn list_organizations_for_user(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<(AuthOrganization, AuthMember)>, AuthFlowError> {
+        let members: Vec<AuthMember> = AuthMemberEntity::find()
+            .filter(AuthMemberColumn::UserId.eq(user_id))
+            .all(&self.db)
+            .await
+            .map(|rows| rows.into_iter().map(AuthMember::from).collect())
+            .map_err(map_db_err)?;
+        if members.is_empty() {
+            return Ok(Vec::new());
+        }
+        // One `IN (..)` rather than a query per membership.
+        let ids: Vec<Uuid> = members.iter().map(|m| m.organization_id).collect();
+        let organizations: Vec<AuthOrganization> = AuthOrganizationEntity::find()
+            .filter(AuthOrganizationColumn::Id.is_in(ids))
+            .order_by_asc(AuthOrganizationColumn::Name)
+            .all(&self.db)
+            .await
+            .map(|rows| rows.into_iter().map(AuthOrganization::from).collect())
+            .map_err(map_db_err)?;
+        let by_id: std::collections::HashMap<Uuid, AuthMember> = members
+            .into_iter()
+            .map(|m| (m.organization_id, m))
+            .collect();
+        Ok(organizations
+            .into_iter()
+            .filter_map(|org| {
+                let member = by_id.get(&org.id)?.clone();
+                Some((org, member))
+            })
+            .collect())
+    }
+
+    async fn update_organization(
+        &self,
+        id: Uuid,
+        name: Option<String>,
+        slug: Option<String>,
+        logo: Option<Option<String>>,
+        metadata_json: Option<Option<String>>,
+    ) -> Result<AuthOrganization, AuthFlowError> {
+        let organization = AuthOrganizationEntity::find_by_id(id)
+            .one(&self.db)
+            .await
+            .map_err(map_db_err)?
+            .ok_or(AuthFlowError::InvalidCredentials)?;
+        let mut active: AuthOrganizationActiveModel = organization.into();
+        if let Some(name) = name {
+            active.name = Set(name);
+        }
+        if let Some(slug) = slug {
+            active.slug = Set(slug);
+        }
+        // `Option<Option<_>>`: the outer says whether to touch the
+        // column, the inner is the value to put there. Without the
+        // nesting there is no way to clear a logo.
+        if let Some(logo) = logo {
+            active.logo = Set(logo);
+        }
+        if let Some(metadata_json) = metadata_json {
+            active.metadata_json = Set(metadata_json);
+        }
+        active.updated_at = Set(Utc::now());
+        active
+            .update(&self.db)
+            .await
+            .map(AuthOrganization::from)
+            .map_err(map_db_err)
+    }
+
+    async fn delete_organization(&self, id: Uuid) -> Result<(), AuthFlowError> {
+        self.db
+            .transaction::<_, (), sea_orm::DbErr>(|txn| {
+                Box::pin(async move {
+                    // Team memberships hang off teams, not the
+                    // organization, so they are collected first.
+                    let team_ids: Vec<Uuid> = AuthTeamEntity::find()
+                        .filter(AuthTeamColumn::OrganizationId.eq(id))
+                        .all(txn)
+                        .await?
+                        .into_iter()
+                        .map(|team| team.id)
+                        .collect();
+                    if !team_ids.is_empty() {
+                        AuthTeamMemberEntity::delete_many()
+                            .filter(AuthTeamMemberColumn::TeamId.is_in(team_ids))
+                            .exec(txn)
+                            .await?;
+                    }
+                    AuthTeamEntity::delete_many()
+                        .filter(AuthTeamColumn::OrganizationId.eq(id))
+                        .exec(txn)
+                        .await?;
+                    AuthInviteLinkEntity::delete_many()
+                        .filter(AuthInviteLinkColumn::OrganizationId.eq(id))
+                        .exec(txn)
+                        .await?;
+                    AuthInvitationEntity::delete_many()
+                        .filter(AuthInvitationColumn::OrganizationId.eq(id))
+                        .exec(txn)
+                        .await?;
+                    AuthOrganizationRoleEntity::delete_many()
+                        .filter(AuthOrganizationRoleColumn::OrganizationId.eq(id))
+                        .exec(txn)
+                        .await?;
+                    AuthMemberEntity::delete_many()
+                        .filter(AuthMemberColumn::OrganizationId.eq(id))
+                        .exec(txn)
+                        .await?;
+                    AuthOrganizationEntity::delete_by_id(id).exec(txn).await?;
+                    Ok(())
+                })
+            })
+            .await
+            .map_err(map_txn_err)
+    }
+
+    async fn delete_member(
+        &self,
+        organization_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<(), AuthFlowError> {
+        AuthMemberEntity::delete_many()
+            .filter(AuthMemberColumn::OrganizationId.eq(organization_id))
+            .filter(AuthMemberColumn::UserId.eq(user_id))
+            .exec(&self.db)
+            .await
+            .map(|_| ())
+            .map_err(map_db_err)
+    }
+
     async fn create_member(&self, input: AuthMemberCreate) -> Result<AuthMember, AuthFlowError> {
         AuthMemberActiveModel {
             id: Set(Uuid::new_v4()),
@@ -1435,6 +1581,161 @@ impl AuthStorage for AuthSeaOrmStorage {
             })
             .await
             .map_err(map_txn_err)
+    }
+
+    async fn list_invitations_by_organization(
+        &self,
+        organization_id: Uuid,
+    ) -> Result<Vec<AuthInvitation>, AuthFlowError> {
+        AuthInvitationEntity::find()
+            .filter(AuthInvitationColumn::OrganizationId.eq(organization_id))
+            .order_by_desc(AuthInvitationColumn::CreatedAt)
+            .all(&self.db)
+            .await
+            .map(|rows| rows.into_iter().map(AuthInvitation::from).collect())
+            .map_err(map_db_err)
+    }
+
+    async fn find_pending_invitation(
+        &self,
+        organization_id: Uuid,
+        email: &str,
+    ) -> Result<Option<AuthInvitation>, AuthFlowError> {
+        AuthInvitationEntity::find()
+            .filter(AuthInvitationColumn::OrganizationId.eq(organization_id))
+            .filter(AuthInvitationColumn::Email.eq(email))
+            .filter(AuthInvitationColumn::Status.eq(auth_proto::InvitationStatus::Pending.as_str()))
+            .one(&self.db)
+            .await
+            .map(|row| row.map(AuthInvitation::from))
+            .map_err(map_db_err)
+    }
+
+    async fn create_invite_link(
+        &self,
+        input: AuthInviteLinkCreate,
+    ) -> Result<AuthInviteLink, AuthFlowError> {
+        AuthInviteLinkActiveModel {
+            id: Set(Uuid::new_v4()),
+            organization_id: Set(input.organization_id),
+            token_hash: Set(input.token_hash),
+            label: Set(input.label),
+            role: Set(input.role),
+            created_by: Set(input.created_by),
+            expires_at: Set(input.expires_at),
+            max_uses: Set(input.max_uses),
+            uses: Set(0),
+            revoked_at: Set(input.revoked_at),
+            created_at: Set(Utc::now()),
+        }
+        .insert(&self.db)
+        .await
+        .map(AuthInviteLink::from)
+        .map_err(map_db_err)
+    }
+
+    async fn find_invite_link_by_id(
+        &self,
+        id: Uuid,
+    ) -> Result<Option<AuthInviteLink>, AuthFlowError> {
+        AuthInviteLinkEntity::find_by_id(id)
+            .one(&self.db)
+            .await
+            .map(|row| row.map(AuthInviteLink::from))
+            .map_err(map_db_err)
+    }
+
+    async fn find_invite_link_by_token_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<AuthInviteLink>, AuthFlowError> {
+        AuthInviteLinkEntity::find()
+            .filter(AuthInviteLinkColumn::TokenHash.eq(token_hash))
+            .one(&self.db)
+            .await
+            .map(|row| row.map(AuthInviteLink::from))
+            .map_err(map_db_err)
+    }
+
+    async fn list_invite_links_by_organization(
+        &self,
+        organization_id: Uuid,
+    ) -> Result<Vec<AuthInviteLink>, AuthFlowError> {
+        AuthInviteLinkEntity::find()
+            .filter(AuthInviteLinkColumn::OrganizationId.eq(organization_id))
+            .order_by_desc(AuthInviteLinkColumn::CreatedAt)
+            .all(&self.db)
+            .await
+            .map(|rows| rows.into_iter().map(AuthInviteLink::from).collect())
+            .map_err(map_db_err)
+    }
+
+    async fn revoke_invite_link(
+        &self,
+        id: Uuid,
+        revoked_at: DateTime<Utc>,
+    ) -> Result<(), AuthFlowError> {
+        let link = AuthInviteLinkEntity::find_by_id(id)
+            .one(&self.db)
+            .await
+            .map_err(map_db_err)?
+            .ok_or(AuthFlowError::InvalidCredentials)?;
+        let mut active: AuthInviteLinkActiveModel = link.into();
+        active.revoked_at = Set(Some(revoked_at));
+        active
+            .update(&self.db)
+            .await
+            .map(|_| ())
+            .map_err(map_db_err)
+    }
+
+    // r[impl auth.storage.transactions]
+    async fn redeem_invite_link(
+        &self,
+        link_id: Uuid,
+        member_input: AuthMemberCreate,
+    ) -> Result<AuthMember, AuthFlowError> {
+        self.db
+            .transaction::<_, AuthMember, sea_orm::DbErr>(|txn| {
+                Box::pin(async move {
+                    let member = AuthMemberActiveModel {
+                        id: Set(Uuid::new_v4()),
+                        organization_id: Set(member_input.organization_id),
+                        user_id: Set(member_input.user_id),
+                        role: Set(member_input.role),
+                        created_at: Set(Utc::now()),
+                    }
+                    .insert(txn)
+                    .await?;
+                    if let Some(link) = AuthInviteLinkEntity::find_by_id(link_id).one(txn).await? {
+                        let next = link.uses.saturating_add(1);
+                        let mut active: AuthInviteLinkActiveModel = link.into();
+                        active.uses = Set(next);
+                        active.update(txn).await?;
+                    }
+                    Ok(AuthMember::from(member))
+                })
+            })
+            .await
+            .map_err(map_txn_err)
+    }
+
+    async fn increment_invite_link_uses(&self, id: Uuid) -> Result<(), AuthFlowError> {
+        let Some(link) = AuthInviteLinkEntity::find_by_id(id)
+            .one(&self.db)
+            .await
+            .map_err(map_db_err)?
+        else {
+            return Ok(());
+        };
+        let next = link.uses.saturating_add(1);
+        let mut active: AuthInviteLinkActiveModel = link.into();
+        active.uses = Set(next);
+        active
+            .update(&self.db)
+            .await
+            .map(|_| ())
+            .map_err(map_db_err)
     }
 
     async fn create_two_factor(

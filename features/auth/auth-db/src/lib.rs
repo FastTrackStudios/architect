@@ -94,6 +94,12 @@ pub use auth_proto::invitation::{
     Column as AuthInvitationColumn, Entity as AuthInvitationEntity, InvitationStatus,
     Model as AuthInvitationModel, Relation as AuthInvitationRelation,
 };
+pub use auth_proto::invite_link::{
+    ActiveModel as AuthInviteLinkActiveModel, AuthInviteLink, AuthInviteLinkCreate,
+    AuthInviteLinkList, AuthInviteLinkRepo, AuthInviteLinkRepoStorage, AuthInviteLinkUpdate,
+    Column as AuthInviteLinkColumn, Entity as AuthInviteLinkEntity, Model as AuthInviteLinkModel,
+    Relation as AuthInviteLinkRelation,
+};
 pub use auth_proto::member::{
     ActiveModel as AuthMemberActiveModel, AuthMember, AuthMemberCreate, AuthMemberList,
     AuthMemberRepo, AuthMemberRepoStorage, AuthMemberUpdate, Column as AuthMemberColumn,

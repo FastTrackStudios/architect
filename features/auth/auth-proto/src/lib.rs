@@ -8,6 +8,7 @@ pub mod api_key;
 pub mod audit_event;
 pub mod email_change;
 pub mod invitation;
+pub mod invite_link;
 pub mod member;
 pub mod organization;
 pub mod organization_role;
@@ -32,6 +33,10 @@ pub use audit_event::{
 pub use invitation::{
     AuthInvitation, AuthInvitationCreate, AuthInvitationList, AuthInvitationRepo,
     AuthInvitationUpdate, InvitationStatus,
+};
+pub use invite_link::{
+    AuthInviteLink, AuthInviteLinkCreate, AuthInviteLinkList, AuthInviteLinkRepo,
+    AuthInviteLinkUpdate,
 };
 pub use member::{AuthMember, AuthMemberCreate, AuthMemberList, AuthMemberRepo, AuthMemberUpdate};
 pub use organization::{

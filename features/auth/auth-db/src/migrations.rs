@@ -40,6 +40,7 @@ mod m20260513_000001_create_auth_tables {
             drop_table(manager, AuthApiKeys::Table).await?;
             drop_table(manager, AuthTwoFactors::Table).await?;
             drop_table(manager, AuthVerifications::Table).await?;
+            drop_table(manager, AuthInviteLinks::Table).await?;
             drop_table(manager, AuthInvitations::Table).await?;
             drop_table(manager, AuthMembers::Table).await?;
             drop_table(manager, AuthOrganizations::Table).await?;
@@ -247,6 +248,49 @@ mod m20260513_000001_create_auth_tables {
                     .col(ColumnDef::new(AuthInvitations::InviterId).uuid().not_null())
                     .col(ts(AuthInvitations::ExpiresAt))
                     .col(ts(AuthInvitations::CreatedAt))
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_table(
+                Table::create()
+                    .table(AuthInviteLinks::Table)
+                    .if_not_exists()
+                    .col(uuid_pk(AuthInviteLinks::Id))
+                    .col(
+                        ColumnDef::new(AuthInviteLinks::OrganizationId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(AuthInviteLinks::TokenHash)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(ColumnDef::new(AuthInviteLinks::Label).string().null())
+                    .col(ColumnDef::new(AuthInviteLinks::Role).string().not_null())
+                    .col(ColumnDef::new(AuthInviteLinks::CreatedBy).uuid().not_null())
+                    // Nullable: a link with no expiry and no cap is a
+                    // legitimate thing to hand a whole cohort.
+                    .col(
+                        ColumnDef::new(AuthInviteLinks::ExpiresAt)
+                            .timestamp_with_time_zone()
+                            .null(),
+                    )
+                    .col(ColumnDef::new(AuthInviteLinks::MaxUses).integer().null())
+                    .col(
+                        ColumnDef::new(AuthInviteLinks::Uses)
+                            .integer()
+                            .not_null()
+                            .default(0),
+                    )
+                    .col(
+                        ColumnDef::new(AuthInviteLinks::RevokedAt)
+                            .timestamp_with_time_zone()
+                            .null(),
+                    )
+                    .col(ts(AuthInviteLinks::CreatedAt))
                     .to_owned(),
             )
             .await?;
@@ -462,6 +506,19 @@ mod m20260513_000001_create_auth_tables {
                 [AuthInvitations::ExpiresAt],
             ),
             index(
+                "idx_auth_invite_links_org",
+                AuthInviteLinks::Table,
+                [AuthInviteLinks::OrganizationId],
+            ),
+            // Unique, not merely indexed: the hash IS the credential, so
+            // two rows sharing one would mean one URL admitting people
+            // into two organizations depending on which row was read.
+            unique(
+                "idx_auth_invite_links_token_hash",
+                AuthInviteLinks::Table,
+                [AuthInviteLinks::TokenHash],
+            ),
+            index(
                 "idx_auth_verifications_identifier",
                 AuthVerifications::Table,
                 [AuthVerifications::Identifier],
@@ -670,6 +727,22 @@ mod m20260513_000001_create_auth_tables {
         Id,
         TeamId,
         UserId,
+        CreatedAt,
+    }
+
+    #[derive(Iden)]
+    enum AuthInviteLinks {
+        Table,
+        Id,
+        OrganizationId,
+        TokenHash,
+        Label,
+        Role,
+        CreatedBy,
+        ExpiresAt,
+        MaxUses,
+        Uses,
+        RevokedAt,
         CreatedAt,
     }
 

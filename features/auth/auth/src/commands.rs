@@ -953,6 +953,162 @@ pub struct InvitationToken {
     pub token: String,
 }
 
+/// An organization together with the caller's membership in it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListOrganizations {
+    pub session_token: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GetOrganization {
+    pub session_token: String,
+    pub organization_id: Uuid,
+}
+
+/// Every field optional: absent means "leave it alone".
+///
+/// `logo` and `metadata_json` are doubly optional because they are
+/// themselves nullable — `Some(None)` clears one, `None` leaves it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct UpdateOrganization {
+    pub session_token: String,
+    pub organization_id: Uuid,
+    pub name: Option<String>,
+    pub slug: Option<String>,
+    pub logo: Option<Option<String>>,
+    pub metadata_json: Option<Option<String>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeleteOrganization {
+    pub session_token: String,
+    pub organization_id: Uuid,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListMembers {
+    pub session_token: String,
+    pub organization_id: Uuid,
+}
+
+/// A membership with the person attached.
+///
+/// A member list that shows user ids is not a member list. The user is
+/// resolved server-side so no caller has to fan out over the ids.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OrganizationMember {
+    pub member: auth_proto::AuthMember,
+    pub user: auth_proto::AuthUser,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RemoveMember {
+    pub session_token: String,
+    pub organization_id: Uuid,
+    pub user_id: Uuid,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LeaveOrganization {
+    pub session_token: String,
+    pub organization_id: Uuid,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListInvitations {
+    pub session_token: String,
+    pub organization_id: Uuid,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CancelInvitation {
+    pub session_token: String,
+    pub invitation_id: Uuid,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RejectInvitation {
+    pub session_token: String,
+    pub invitation_id: Uuid,
+    pub token: String,
+}
+
+/// Read an invitation without being signed in.
+///
+/// Deliberately unauthenticated: somebody following a mailed link has
+/// no session yet, and asking them to sign in before telling them what
+/// they are signing in *for* is how invitations go unaccepted. The
+/// token is the credential, and the preview says nothing that the
+/// person holding the link does not already have.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PreviewInvitation {
+    pub invitation_id: Uuid,
+    pub token: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InvitationPreview {
+    pub invitation_id: Uuid,
+    pub organization_name: String,
+    pub organization_slug: String,
+    pub email: String,
+    pub role: String,
+    pub expires_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CreateInviteLink {
+    pub session_token: String,
+    pub organization_id: Uuid,
+    pub role: String,
+    pub label: Option<String>,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub max_uses: Option<i32>,
+}
+
+/// The link, and the one time its token is ever legible.
+///
+/// Only the hash is stored, so this is the single moment the plaintext
+/// exists outside the URL bar of whoever is handed it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InviteLinkToken {
+    pub link: auth_proto::AuthInviteLink,
+    pub token: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListInviteLinks {
+    pub session_token: String,
+    pub organization_id: Uuid,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RevokeInviteLink {
+    pub session_token: String,
+    pub link_id: Uuid,
+}
+
+/// See where a link leads, without being signed in. Same reasoning as
+/// [`PreviewInvitation`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PreviewInviteLink {
+    pub token: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InviteLinkPreview {
+    pub organization_name: String,
+    pub organization_slug: String,
+    pub role: String,
+    pub uses_remaining: Option<i32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RedeemInviteLink {
+    pub session_token: String,
+    pub token: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CreateTeam {
     pub session_token: String,
