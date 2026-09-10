@@ -157,6 +157,34 @@ impl Mailer {
             .await;
     }
 
+    /// A one-click sign-in link.
+    pub async fn send_magic_link(&self, to: &str, url: &str) {
+        let body = format!(
+            "Open this link to sign in to FastTrackStudio:\n\n\
+             {url}\n\n\
+             It works once and expires shortly. If you did not ask to sign \
+             in, ignore this message — nothing happens until the link is \
+             opened.\n"
+        );
+        let _ = self.send(to, "Sign in to FastTrackStudio", body).await;
+    }
+
+    /// A short code to type back into a sign-in page.
+    pub async fn send_login_code(&self, to: &str, code: &str) {
+        // The code is in the subject as well as the body: on a phone
+        // that is what shows in the notification, which is the whole
+        // reason to prefer a code over a link.
+        let body = format!(
+            "Your FastTrackStudio sign-in code is:\n\n\
+             {code}\n\n\
+             It expires shortly and works once. If you did not ask to sign \
+             in, ignore this message.\n"
+        );
+        let _ = self
+            .send(to, &format!("{code} is your sign-in code"), body)
+            .await;
+    }
+
     pub async fn send_password_reset(&self, to: &str, token: &str) {
         let link = self.link(&format!(
             "/reset-password?email={}&token={}",
@@ -182,6 +210,21 @@ impl Mailer {
 /// truncate the link and strand someone mid-reset.
 fn urlencode(value: &str) -> String {
     architect_auth::percent::encode_component(value)
+}
+
+/// The mailer, as `auth-ui`'s sign-in pages want it.
+///
+/// A thin adapter rather than `auth-ui` depending on lettre: that crate
+/// renders pages and should not grow an SMTP stack to do it.
+#[async_trait::async_trait]
+impl auth_ui::mailer::LoginMailer for Mailer {
+    async fn send_magic_link(&self, to: &str, url: &str) {
+        Self::send_magic_link(self, to, url).await;
+    }
+
+    async fn send_login_code(&self, to: &str, code: &str) {
+        Self::send_login_code(self, to, code).await;
+    }
 }
 
 #[cfg(test)]

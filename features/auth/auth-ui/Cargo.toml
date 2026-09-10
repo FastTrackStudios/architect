@@ -14,6 +14,7 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 
 [dependencies]
 architect-auth = { workspace = true, features = ["full"] }
+async-trait.workspace = true
 auth-proto.workspace = true
 axum.workspace = true
 chrono.workspace = true

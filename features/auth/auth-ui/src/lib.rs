@@ -38,6 +38,8 @@
 pub mod admin;
 pub mod api_keys;
 pub mod chrome;
+pub mod login;
+pub mod mailer;
 pub mod orgs;
 pub mod page;
 pub mod passkey_script;
@@ -67,6 +69,13 @@ pub struct UiState<S> {
     /// The name an authenticator app shows next to a two-factor entry.
     /// Your product's name; "architect-auth" unless set.
     pub issuer: String,
+    /// This server's public URL, for building links that arrive by
+    /// mail. Must match what the engine was configured with, or a magic
+    /// link callback is refused as untrusted.
+    pub base_url: String,
+    /// How a sign-in code or link reaches somebody. Logs them instead
+    /// of sending, unless the host supplies a real sender.
+    pub mailer: std::sync::Arc<dyn mailer::LoginMailer>,
 }
 
 impl<S> UiState<S> {
@@ -77,7 +86,23 @@ impl<S> UiState<S> {
             cookie,
             home: "/".to_owned(),
             issuer: "architect-auth".to_owned(),
+            mailer: mailer::log_only(),
+            base_url: "http://localhost:8080".to_owned(),
         }
+    }
+
+    /// This server's public URL, used to build mailed links.
+    #[must_use]
+    pub fn base_url(mut self, base_url: impl Into<String>) -> Self {
+        self.base_url = base_url.into();
+        self
+    }
+
+    /// Supply a real sender for sign-in codes and links.
+    #[must_use]
+    pub fn mailer(mut self, mailer: std::sync::Arc<dyn mailer::LoginMailer>) -> Self {
+        self.mailer = mailer;
+        self
     }
 
     /// The name an authenticator app shows for a two-factor entry.
@@ -110,6 +135,17 @@ where
             get(profile::page::<S>).post(profile::save::<S>),
         )
         .route("/account/sign-out", post(profile::sign_out::<S>))
+        // ── Ways in that are not a password ───────────────────────
+        .route(
+            "/login/code",
+            get(login::code_page::<S>).post(login::send_code::<S>),
+        )
+        .route("/login/code/verify", post(login::verify_code::<S>))
+        .route(
+            "/login/link",
+            get(login::link_page::<S>).post(login::send_link::<S>),
+        )
+        .route("/login/magic", get(login::magic_callback::<S>))
         .route("/account/email", post(profile::change_email::<S>))
         .route("/account/password", post(profile::change_password::<S>))
         .route("/account/two-factor", get(two_factor::page::<S>))

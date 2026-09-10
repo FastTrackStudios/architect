@@ -225,6 +225,24 @@ pub fn app_router_with_social<S>(
 where
     S: architect_auth::AuthStorage + Clone + Send + Sync + 'static,
 {
+    app_router_with_mailer(config, auth, social, None)
+}
+
+/// As [`app_router_with_social`], with the sign-in mailer supplied.
+///
+/// The seam a test needs: sign-in codes and links are only observable
+/// through what was sent, and the router otherwise builds its own
+/// mailer from configuration — which in a test is log mode, where
+/// nothing is observable at all. `None` keeps the built-in behaviour.
+pub fn app_router_with_mailer<S>(
+    config: &ServerConfig,
+    auth: ArchitectAuth<S>,
+    social: std::sync::Arc<http::SocialState>,
+    login_mailer: Option<std::sync::Arc<dyn auth_ui::mailer::LoginMailer>>,
+) -> Router
+where
+    S: architect_auth::AuthStorage + Clone + Send + Sync + 'static,
+{
     let cookie = cookie_config(config);
 
     // One mailer, shared by both routers. A failure to BUILD it (a bad
@@ -248,6 +266,10 @@ where
             crate::mail::Mailer::log_only(config.mail.clone())
         }
     });
+    // The same mailer, seen through the trait `auth-ui`'s sign-in pages
+    // use. One `Mailer`, two views of it — not two mailers.
+    let mail_for_ui: std::sync::Arc<dyn auth_ui::mailer::LoginMailer> =
+        login_mailer.unwrap_or_else(|| mail.clone());
     // Mounted through the dispatcher rather than the plain
     // `auth_service_layer`, so `AuthServerMiddleware` parses the
     // `authorization` metadata entry off each call before the service
@@ -294,7 +316,10 @@ where
         // every deployment — a product wanting an org switcher should
         // mount them, not reimplement them.
         .merge(auth_ui::router(
-            auth_ui::UiState::new(auth, cookie).issuer("FastTrackStudio"),
+            auth_ui::UiState::new(auth, cookie)
+                .issuer("FastTrackStudio")
+                .base_url(config.base_url.clone())
+                .mailer(mail_for_ui),
         ))
         .layer(cors_layer(config))
         .layer(TraceLayer::new_for_http())
@@ -305,7 +330,8 @@ where
 /// `secure` follows the scheme: a `Secure` cookie is silently dropped
 /// over plain HTTP, which would make local development mysteriously
 /// fail to stay signed in.
-fn cookie_config(config: &ServerConfig) -> AuthCookieConfig {
+#[must_use]
+pub fn cookie_config(config: &ServerConfig) -> AuthCookieConfig {
     AuthCookieConfig {
         secure: config.base_url.starts_with("https://"),
         max_age_seconds: Some(config.session_ttl_seconds),

@@ -578,15 +578,32 @@ where
     S: AuthStorage,
 {
     let return_to = safe_return_to(form.return_to.as_deref());
-    let result = state
-        .auth
-        .sign_in_email_password(SignInEmailPassword {
-            email: form.email,
-            password: form.password,
-            ip_address: client_ip(&headers),
-            user_agent: user_agent(&headers),
-        })
-        .await;
+    let identifier = form.email.trim();
+    // One field for both, decided by the shape of what was typed. An
+    // address always has an `@` and a username never may — the engine
+    // rejects one — so this cannot be ambiguous, and it saves asking
+    // somebody to tell us which kind of name they just used.
+    let result = if identifier.contains('@') {
+        state
+            .auth
+            .sign_in_email_password(SignInEmailPassword {
+                email: identifier.to_owned(),
+                password: form.password,
+                ip_address: client_ip(&headers),
+                user_agent: user_agent(&headers),
+            })
+            .await
+    } else {
+        state
+            .auth
+            .sign_in_username(architect_auth::SignInUsername {
+                username: identifier.to_owned(),
+                password: form.password,
+                ip_address: client_ip(&headers),
+                user_agent: user_agent(&headers),
+            })
+            .await
+    };
 
     match result {
         Ok(bundle) => signed_in(&state.cookie, &bundle, &return_to),
@@ -948,12 +965,18 @@ fn Page(
                     }
 
                     if screen.wants_email() {
-                        label { r#for: "email", "Email" }
+                        // `text`, not `email`, on the sign-in screen:
+                        // the field takes a username too, and the
+                        // browser's own validation would refuse one
+                        // before the form was ever submitted.
+                        label { r#for: "email",
+                            if screen == Screen::SignIn { "Email or username" } else { "Email" }
+                        }
                         input {
                             id: "email",
                             name: "email",
-                            r#type: "email",
-                            autocomplete: "email",
+                            r#type: if screen == Screen::SignIn { "text" } else { "email" },
+                            autocomplete: if screen == Screen::SignIn { "username" } else { "email" },
                             required: true,
                             autofocus: true,
                         }
@@ -998,6 +1021,11 @@ fn Page(
                                 span {
                                     "No account yet? "
                                     a { href: "/sign-up?return_to={return_to}", "Create one" }
+                                }
+                                span {
+                                    a { href: "/login/link?return_to={return_to}", "Email me a link" }
+                                    " · "
+                                    a { href: "/login/code?return_to={return_to}", "Email me a code" }
                                 }
                                 a { class: "quiet", href: "/forgot-password?return_to={return_to}", "Forgot password?" }
                             },
