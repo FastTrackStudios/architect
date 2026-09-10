@@ -65,6 +65,15 @@ pub struct HttpState<S> {
     /// Social providers. Defaults to none configured, which turns the
     /// `/auth/social/*` routes into 404s and hides the buttons.
     pub social: Arc<SocialState>,
+    /// The database, for the one route that needs it directly.
+    ///
+    /// `AuthStorage` deliberately exposes no "read every row" method —
+    /// nothing in the engine should want one. Taking a snapshot does,
+    /// and it is a SeaORM-specific operation, so it reaches past the
+    /// trait rather than widening it. `None` when the storage backend
+    /// is something else, which the route reports rather than
+    /// pretending an empty database.
+    pub db: Option<sea_orm::DatabaseConnection>,
 }
 
 /// Everything the social routes need beyond the engine.
@@ -240,7 +249,15 @@ impl<S> HttpState<S> {
             cookie,
             mail: std::sync::Arc::new(mail),
             social: Arc::new(SocialState::disabled()),
+            db: None,
         }
+    }
+
+    /// Attach the database, enabling `GET /admin/snapshot`.
+    #[must_use]
+    pub fn with_db(mut self, db: sea_orm::DatabaseConnection) -> Self {
+        self.db = Some(db);
+        self
     }
 
     /// Attach a configured mailer.

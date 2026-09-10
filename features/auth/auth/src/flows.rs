@@ -11,9 +11,10 @@ pub mod admin {
     };
     use crate::{
         AdminCreateUser, AdminHasPermission, AdminSetUserPassword, ArchitectAuth, AuthAuditEvent,
-        AuthStorage, BanUser, HasPermissionResult, ImpersonateUser, ListUserSessions, ListUsers,
-        ListUsersResult, RemoveUser, RevokeUserSession, RevokeUserSessions, SetUserRole,
-        StopImpersonating, UnbanUser, commands::CurrentSession, crypto::hash_password,
+        AuthStorage, AuthorizeAdmin, BanUser, HasPermissionResult, ImpersonateUser,
+        ListUserSessions, ListUsers, ListUsersResult, RemoveUser, RevokeUserSession,
+        RevokeUserSessions, SetUserRole, StopImpersonating, UnbanUser, commands::CurrentSession,
+        crypto::hash_password,
     };
 
     const ADMIN_ROLE: &str = "admin";
@@ -47,6 +48,20 @@ pub mod admin {
     {
         // r[impl auth.admin.requires-role]
         // r[impl auth.admin.list-users]
+        /// The public face of [`Self::require_admin`].
+        ///
+        /// # Errors
+        ///
+        /// [`AuthFlowError::PermissionDenied`] when the session is not
+        /// an administrator's, and whatever `current_session` returns
+        /// when the token is not a session at all.
+        pub async fn authorize_admin(
+            &self,
+            input: AuthorizeAdmin,
+        ) -> Result<AuthUser, AuthFlowError> {
+            self.require_admin(&input.session_token).await
+        }
+
         pub async fn list_users(&self, input: ListUsers) -> Result<ListUsersResult, AuthFlowError> {
             self.require_admin(&input.session_token).await?;
             let limit = input.limit.clamp(1, 100);

@@ -1290,6 +1290,17 @@ pub struct DisableTwoFactor {
     pub code: String,
 }
 
+/// Confirm the session belongs to a server administrator.
+///
+/// The gate for operations that are not any one flow — taking a
+/// database snapshot, most of all. `require_admin` is internal to the
+/// engine; this is the same check, offered to a host that has its own
+/// privileged endpoint to guard.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AuthorizeAdmin {
+    pub session_token: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ListUsers {
     pub session_token: String,

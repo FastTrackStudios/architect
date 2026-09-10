@@ -13,10 +13,15 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 
 [dependencies]
 auth-proto = { workspace = true, features = ["server"] }
+chrono.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
 sea-orm.workspace = true
 sea-orm-migration.workspace = true
 
 [dev-dependencies]
+serde_json.workspace = true
 tokio.workspace = true
 
 [lints]

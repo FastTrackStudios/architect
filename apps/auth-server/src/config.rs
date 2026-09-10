@@ -56,6 +56,20 @@ pub struct ServerConfig {
     /// Run migrations on boot. On in normal operation; an operator can
     /// turn it off to gate schema changes behind a separate job.
     pub run_migrations: bool,
+    /// Load a sanitised snapshot into an empty *local* database on
+    /// boot. `AUTH_IMPORT_SNAPSHOT=/path/to/auth-snapshot.json`.
+    ///
+    /// Take one with `cargo xtask auth-mirror`. Every imported account
+    /// gets the published development password, which is why this is
+    /// refused against anything but a local database.
+    pub import_snapshot: Option<String>,
+    /// Fill an empty *local* database with the fixed development cast,
+    /// and serve it. `AUTH_DEV_SEED=1`.
+    ///
+    /// Off by default and refused against anything but a local
+    /// database, because it creates accounts whose password is a
+    /// published constant.
+    pub dev_seed: bool,
     /// Outgoing mail. Without `AUTH_SMTP_HOST` the mailer only logs, and
     /// every flow that has to reach a person — verification, password
     /// reset — completes as far as minting a token and no further.
@@ -224,6 +238,43 @@ impl From<OidcClientJson> for OidcClientConfig {
 }
 
 impl ServerConfig {
+    /// A configuration for a server on this machine: in-memory SQLite,
+    /// no OIDC clients, no social providers, mail in log mode.
+    ///
+    /// Exists so that tests and local runs name only what they care
+    /// about (`ServerConfig { dev_seed: true, ..ServerConfig::local() }`)
+    /// rather than every field. There is deliberately no `Default`:
+    /// this carries a fixed development secret, and a config that could
+    /// be reached by accident in production is a config that will be.
+    #[must_use]
+    pub fn local() -> Self {
+        Self {
+            bind_addr: "127.0.0.1:8080".into(),
+            database_url: "sqlite::memory:".into(),
+            secret: "a-secret-at-least-32-bytes-long!!".into(),
+            base_url: "http://localhost:8080".into(),
+            oidc_issuer: None,
+            session_ttl_seconds: 60 * 60 * 24 * 30,
+            require_email_verification: false,
+            passkey_rp_id: None,
+            cors_origins: Vec::new(),
+            oidc_clients: Vec::new(),
+            oidc_allow_dynamic_client_registration: false,
+            run_migrations: true,
+            import_snapshot: None,
+            dev_seed: false,
+            social: SocialConfig::disabled(),
+            mail: crate::mail::MailConfig {
+                host: None,
+                port: 587,
+                username: None,
+                password: None,
+                from: "noreply@localhost".into(),
+                base_url: "http://localhost:8080".into(),
+            },
+        }
+    }
+
     /// Read the configuration from the process environment.
     pub fn from_env() -> Result<Self, ConfigError> {
         let secret = read_secret("AUTH_SECRET")?;
@@ -272,6 +323,8 @@ impl ServerConfig {
             oidc_clients,
             oidc_allow_dynamic_client_registration: flag("AUTH_OIDC_DYNAMIC_REGISTRATION", false)?,
             run_migrations: flag("AUTH_RUN_MIGRATIONS", true)?,
+            import_snapshot: optional("AUTH_IMPORT_SNAPSHOT"),
+            dev_seed: flag("AUTH_DEV_SEED", false)?,
             mail: MailConfig {
                 host: optional("AUTH_SMTP_HOST"),
                 port: parse_port("AUTH_SMTP_PORT", 587)?,

@@ -958,9 +958,14 @@ name = "auth-db"
 version = "0.1.0"
 dependencies = [
  "auth-proto",
+ "chrono",
  "sea-orm",
  "sea-orm-migration",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

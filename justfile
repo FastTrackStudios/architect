@@ -47,3 +47,70 @@ tags:
 #   just fleet-bump v0.9.0 ../signal ../task
 fleet-bump TAG +MANIFESTS:
     cargo run -p xtask -- fleet-bump {{TAG}} {{MANIFESTS}}
+
+# ── Local auth servers ───────────────────────────────────────────────
+
+# A fresh auth server on http://localhost:8080, seeded with a fixed cast.
+#
+# Three people (ada@local.test is the administrator), two organizations,
+# a team, a pending invitation and a live invite link — enough that every
+# section of every page has something in it. Everyone's password is
+# `development-password`.
+#
+# The seed is deterministic: the same accounts and the same organizations
+# on every machine and every run, which is what lets a browser test
+# assert on `ada@local.test` owning `acme` rather than on whatever the
+# fixture happened to make.
+auth-dev:
+    AUTH_DEV_SEED=1 \
+    AUTH_DATABASE_URL="sqlite::memory:" \
+    AUTH_SECRET="a-secret-at-least-32-bytes-long!!" \
+    AUTH_BASE_URL="http://localhost:8080" \
+    cargo run -p auth-server
+
+# The same, but on disk, so it survives a restart.
+#   just auth-dev-persistent ./auth-local.db
+auth-dev-persistent DB="./auth-local.db":
+    AUTH_DEV_SEED=1 \
+    AUTH_DATABASE_URL="sqlite://{{DB}}?mode=rwc" \
+    AUTH_SECRET="a-secret-at-least-32-bytes-long!!" \
+    AUTH_BASE_URL="http://localhost:8080" \
+    cargo run -p auth-server
+
+# Pull a sanitised copy of a running server's database.
+#
+# Needs an administrator's session token in AUTH_ADMIN_TOKEN — read from
+# the environment, not passed as an argument, so it stays out of shell
+# history and the process table.
+#
+# The scrubbing happens on the SERVER: password hashes, sessions, OAuth
+# tokens, API keys, passkeys and two-factor secrets never leave the
+# machine that holds them. What arrives is the organization graph.
+#
+#   AUTH_ADMIN_TOKEN=… just auth-mirror https://auth.fasttrackstudio.app
+auth-mirror FROM OUT="auth-snapshot.json":
+    cargo run -p xtask -- auth-mirror --from {{FROM}} --out {{OUT}}
+
+# As above, with every address replaced by user-<id>@local.invalid.
+auth-mirror-redacted FROM OUT="auth-snapshot.json":
+    cargo run -p xtask -- auth-mirror --from {{FROM}} --out {{OUT}} --redact-emails
+
+# Run a local server on a snapshot taken by `auth-mirror`.
+#
+# Every imported account gets the published development password, so you
+# can sign in as anybody — which is also why the import refuses to run
+# against anything but a local database.
+#
+#   just auth-replay auth-snapshot.json
+auth-replay SNAPSHOT="auth-snapshot.json" DB="./auth-replay.db":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # A snapshot import wants an empty database; starting from a stale
+    # one fails with "already holds N users", which is correct but
+    # unhelpful as the answer to "run this again".
+    rm -f "{{DB}}"
+    AUTH_IMPORT_SNAPSHOT="{{SNAPSHOT}}" \
+    AUTH_DATABASE_URL="sqlite://{{DB}}?mode=rwc" \
+    AUTH_SECRET="a-secret-at-least-32-bytes-long!!" \
+    AUTH_BASE_URL="http://localhost:8080" \
+    cargo run -p auth-server

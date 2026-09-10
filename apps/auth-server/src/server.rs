@@ -54,7 +54,40 @@ pub async fn build(config: &ServerConfig) -> eyre::Result<AuthServer> {
     }
 
     let auth = build_engine(config, AuthSeaOrmStorage::new(db.clone()))?;
-    let app = app_router(config, auth.clone())?;
+
+    if let Some(path) = config.import_snapshot.as_deref() {
+        match crate::dev::import_file(&db, &config.database_url, path).await {
+            Ok(summary) => tracing::info!(
+                target: "auth_server::dev",
+                "imported {path}: {summary} — everyone's password is {:?}",
+                crate::dev::DEV_PASSWORD,
+            ),
+            // Booting anyway would serve an empty server the operator
+            // believes is a copy of production.
+            Err(err) => return Err(eyre::eyre!("{err}")),
+        }
+    }
+
+    if config.dev_seed {
+        match crate::dev::seed(&auth, &config.database_url).await {
+            Ok(true) => tracing::info!(
+                target: "auth_server::dev",
+                "seeded the development cast — sign in as {} with {:?}",
+                crate::dev::DEV_PEOPLE[0].0,
+                crate::dev::DEV_PASSWORD,
+            ),
+            Ok(false) => tracing::info!(
+                target: "auth_server::dev",
+                "database already has people in it; not seeding"
+            ),
+            // A refusal here is the local-database guard, and booting
+            // anyway would serve a server the operator thought was
+            // seeded. It is not a warning.
+            Err(err) => return Err(eyre::eyre!("{err}")),
+        }
+    }
+
+    let app = app_router_with_db(config, auth.clone(), db.clone())?;
 
     Ok(AuthServer {
         auth,
@@ -147,6 +180,32 @@ where
         auth,
         std::sync::Arc::new(social),
     ))
+}
+
+/// As [`app_router`], with the database attached so
+/// `GET /admin/snapshot` can read it.
+///
+/// A separate function rather than a parameter on `app_router` because
+/// the snapshot route is the only thing in the server that wants a
+/// database handle rather than the storage trait, and every existing
+/// caller — including every test — should keep getting a router
+/// without it.
+///
+/// # Errors
+///
+/// As [`app_router`].
+pub fn app_router_with_db<S>(
+    config: &ServerConfig,
+    auth: ArchitectAuth<S>,
+    db: sea_orm::DatabaseConnection,
+) -> eyre::Result<Router>
+where
+    S: architect_auth::AuthStorage + Clone + Send + Sync + 'static,
+{
+    let snapshot = Router::new()
+        .route("/admin/snapshot", get(crate::dev::snapshot_route::<S>))
+        .with_state(HttpState::new(auth.clone(), cookie_config(config)).with_db(db));
+    Ok(app_router(config, auth)?.merge(snapshot))
 }
 
 /// As [`app_router`], with the social state supplied — the seam tests

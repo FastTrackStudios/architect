@@ -6,6 +6,7 @@
 
 mod fleet;
 mod git;
+mod mirror;
 mod tags;
 
 use std::path::PathBuf;
@@ -32,6 +33,28 @@ enum Command {
         #[arg(short, long)]
         verbose: bool,
     },
+    /// Pull a sanitised copy of a running auth server's database.
+    ///
+    /// The scrubbing happens server-side: password hashes, sessions,
+    /// OAuth tokens, API keys, passkeys and two-factor secrets never
+    /// leave the machine that holds them. What arrives is the
+    /// organization graph — who is in what, with which role — which is
+    /// what makes a local server useful for reproducing a bug or
+    /// replaying an incident.
+    ///
+    /// Needs an administrator's session token in `AUTH_ADMIN_TOKEN`.
+    AuthMirror {
+        /// Base URL of the server to copy, e.g.
+        /// `https://auth.fasttrackstudio.app`.
+        #[arg(long)]
+        from: String,
+        /// Where to write the snapshot.
+        #[arg(long, default_value = "auth-snapshot.json")]
+        out: PathBuf,
+        /// Replace every address with `user-<id>@local.invalid`.
+        #[arg(long)]
+        redact_emails: bool,
+    },
     /// Repoint every architect-owned git dep in a manifest at one tag.
     ///
     /// Bumping these one crate at a time is how a consumer ends up with
@@ -52,6 +75,11 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
         Command::Tags { verbose } => tags::run(verbose),
+        Command::AuthMirror {
+            from,
+            out,
+            redact_emails,
+        } => mirror::run(&from, &out, redact_emails),
         Command::FleetBump {
             tag,
             manifests,

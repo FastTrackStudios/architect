@@ -49,6 +49,7 @@
 //! deriving no serde.
 
 pub mod config;
+pub mod dev;
 pub mod http;
 pub mod mail;
 pub mod server;

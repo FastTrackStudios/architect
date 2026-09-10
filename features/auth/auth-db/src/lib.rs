@@ -5,6 +5,8 @@
 // r[impl auth.storage.backend-parity]
 // r[impl auth.storage.transactions]
 // r[impl auth.storage.clock]
+pub mod snapshot;
+
 pub const AUTH_DB_BACKEND: &str = "sea-orm";
 pub const AUTH_DB_SUPPORTS_TRANSACTIONS: bool = true;
 pub const AUTH_DB_CLOCK_SEMANTICS: &str = "backend-generated-utc";

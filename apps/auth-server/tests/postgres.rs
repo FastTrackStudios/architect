@@ -72,28 +72,9 @@ fn test_config(database_url: String) -> ServerConfig {
     ServerConfig {
         bind_addr: "127.0.0.1:0".into(),
         database_url,
-        secret: "a-secret-at-least-32-bytes-long!!".into(),
         base_url: "https://auth.fasttrackstudio.app".into(),
-        oidc_issuer: None,
         session_ttl_seconds: 3600,
-        require_email_verification: false,
-        passkey_rp_id: None,
-        cors_origins: Vec::new(),
-        oidc_clients: Vec::new(),
-        oidc_allow_dynamic_client_registration: false,
-        run_migrations: true,
-        social: auth_server::SocialConfig::disabled(),
-        // Log mode: these tests assert on the HTTP surface, not on
-        // delivery, and a test that tried to reach an SMTP host would
-        // be testing the network.
-        mail: auth_server::mail::MailConfig {
-            host: None,
-            port: 587,
-            username: None,
-            password: None,
-            from: "noreply@example.com".into(),
-            base_url: "http://localhost:8080".into(),
-        },
+        ..ServerConfig::local()
     }
 }
 

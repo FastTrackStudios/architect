@@ -37,14 +37,10 @@ const GITHUB_TOKEN: &str = "gho_plaintext_provider_token";
 fn test_config() -> ServerConfig {
     ServerConfig {
         bind_addr: "127.0.0.1:0".into(),
-        database_url: "sqlite::memory:".into(),
-        secret: "a-secret-at-least-32-bytes-long!!".into(),
         base_url: BASE.into(),
-        oidc_issuer: None,
         session_ttl_seconds: 3600,
-        require_email_verification: false,
-        passkey_rp_id: None,
-        cors_origins: Vec::new(),
+        // The redirect flow these tests drive needs a registered
+        // client; without one `/oauth2/authorize` answers 401.
         oidc_clients: vec![architect_auth::OidcClientConfig {
             client_id: "task".into(),
             client_secret: None,
@@ -60,17 +56,7 @@ fn test_config() -> ServerConfig {
             skip_consent: true,
             disabled: false,
         }],
-        oidc_allow_dynamic_client_registration: false,
-        run_migrations: true,
-        mail: auth_server::mail::MailConfig {
-            host: None,
-            port: 587,
-            username: None,
-            password: None,
-            from: "noreply@example.com".into(),
-            base_url: BASE.into(),
-        },
-        social: SocialConfig::disabled(),
+        ..ServerConfig::local()
     }
 }
 
