@@ -11161,7 +11161,17 @@ pub mod phone_number {
             .await
     }
 
-    fn user_phone_number(user: &AuthUser) -> Result<Option<String>, AuthFlowError> {
+    /// The phone number on an account, if it has one.
+    ///
+    /// Public for the same reason `last_login_method_from_user` is: it
+    /// reads a field the entity does not have a column for, and a
+    /// consumer that had to re-parse `metadata_json` itself would be
+    /// duplicating a key it could get wrong.
+    ///
+    /// # Errors
+    ///
+    /// If `metadata_json` is not JSON.
+    pub fn user_phone_number(user: &AuthUser) -> Result<Option<String>, AuthFlowError> {
         let metadata = serde_json::from_str::<Value>(&user.metadata_json)
             .map_err(|_| AuthFlowError::InvalidInput("metadata_json must be JSON".into()))?;
         Ok(metadata
@@ -11195,6 +11205,26 @@ pub mod phone_number {
         );
         object.insert(PHONE_VERIFIED_METADATA_KEY.into(), Value::Bool(verified));
         serde_json::to_string(&metadata).map_err(|err| AuthFlowError::Internal(err.to_string()))
+    }
+
+    /// Whether the number on an account has been confirmed.
+    ///
+    /// `update_phone_number` attaches a number *unverified* — the
+    /// engine will not let two accounts claim one, so the number has to
+    /// be taken before a code can prove it. A page that showed the two
+    /// states identically would be telling somebody a recovery route
+    /// works when it has never been tested.
+    ///
+    /// # Errors
+    ///
+    /// If `metadata_json` is not JSON.
+    pub fn user_phone_number_verified(user: &AuthUser) -> Result<bool, AuthFlowError> {
+        let metadata = serde_json::from_str::<Value>(&user.metadata_json)
+            .map_err(|_| AuthFlowError::InvalidInput("metadata_json must be JSON".into()))?;
+        Ok(metadata
+            .get(PHONE_VERIFIED_METADATA_KEY)
+            .and_then(Value::as_bool)
+            .unwrap_or(false))
     }
 
     fn phone_identifier(phone_number: &str) -> String {

@@ -67,3 +67,36 @@ impl LoginMailer for LogOnlyMailer {
 pub fn log_only() -> Arc<dyn LoginMailer> {
     Arc::new(LogOnlyMailer)
 }
+
+/// Getting a code to a phone.
+///
+/// Separate from [`LoginMailer`] because the transports are separate:
+/// a deployment may well have mail and no SMS, and a single trait would
+/// force it to stub a method it can never implement. Same rule about
+/// errors — a phone-number page that answered differently for numbers
+/// it knows is the same oracle in a different shape.
+#[async_trait]
+pub trait SmsSender: Send + Sync + 'static {
+    async fn send_login_code(&self, to: &str, code: &str);
+}
+
+/// The default: logs instead of sending.
+pub struct LogOnlySms;
+
+#[async_trait]
+impl SmsSender for LogOnlySms {
+    async fn send_login_code(&self, to: &str, code: &str) {
+        tracing::warn!(
+            target: "auth_ui::sms",
+            %to,
+            %code,
+            "no SMS sender is configured — the code is only in this log"
+        );
+    }
+}
+
+/// The default sender, for a `UiState` that was not given one.
+#[must_use]
+pub fn log_only_sms() -> Arc<dyn SmsSender> {
+    Arc::new(LogOnlySms)
+}

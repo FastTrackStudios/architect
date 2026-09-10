@@ -110,6 +110,8 @@ pub fn OrgsView(rows: Vec<OrgRow>, flash: Option<Flash>) -> Element {
             " · "
             a { href: "/account/two-factor", "Two-factor" }
             " · "
+            a { href: "/account/phone", "Phone" }
+            " · "
             a { href: "/account/sessions", "Sessions" }
             " · "
             a { href: "/account/api-keys", "API keys" }

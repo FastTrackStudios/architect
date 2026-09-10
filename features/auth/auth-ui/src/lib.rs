@@ -40,6 +40,7 @@ pub mod admin;
 pub mod api_keys;
 pub mod chrome;
 pub mod device;
+pub mod guest;
 pub mod last_login;
 pub mod login;
 pub mod mailer;
@@ -48,6 +49,7 @@ pub mod orgs;
 pub mod page;
 pub mod passkey_script;
 pub mod passkeys;
+pub mod phone;
 pub mod profile;
 pub mod qr;
 pub mod sessions;
@@ -80,6 +82,9 @@ pub struct UiState<S> {
     /// How a sign-in code or link reaches somebody. Logs them instead
     /// of sending, unless the host supplies a real sender.
     pub mailer: std::sync::Arc<dyn mailer::LoginMailer>,
+    /// How a code reaches a phone. Logs instead of sending, unless the
+    /// host supplies a real sender.
+    pub sms: std::sync::Arc<dyn mailer::SmsSender>,
 }
 
 impl<S> UiState<S> {
@@ -91,6 +96,7 @@ impl<S> UiState<S> {
             home: "/".to_owned(),
             issuer: "architect-auth".to_owned(),
             mailer: mailer::log_only(),
+            sms: mailer::log_only_sms(),
             base_url: "http://localhost:8080".to_owned(),
         }
     }
@@ -106,6 +112,13 @@ impl<S> UiState<S> {
     #[must_use]
     pub fn mailer(mut self, mailer: std::sync::Arc<dyn mailer::LoginMailer>) -> Self {
         self.mailer = mailer;
+        self
+    }
+
+    /// Supply a real sender for phone codes.
+    #[must_use]
+    pub fn sms(mut self, sms: std::sync::Arc<dyn mailer::SmsSender>) -> Self {
+        self.sms = sms;
         self
     }
 
@@ -139,6 +152,13 @@ where
             get(profile::page::<S>).post(profile::save::<S>),
         )
         .route("/account/sign-out", post(profile::sign_out::<S>))
+        .route("/login/guest", post(guest::start::<S>))
+        .route("/account/upgrade", post(guest::upgrade::<S>))
+        .route(
+            "/account/phone",
+            get(phone::page::<S>).post(phone::send_code::<S>),
+        )
+        .route("/account/phone/verify", post(phone::verify::<S>))
         .route(
             "/account/switch",
             get(accounts::page::<S>).post(accounts::switch::<S>),

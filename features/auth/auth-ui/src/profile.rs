@@ -63,11 +63,13 @@ where
     let Some(session) = current(&state, &headers).await else {
         return sign_in_first(PATH);
     };
+    let guest = crate::guest::is_guest(&session.user);
     let user = session.user;
     document(
         "Your profile",
         rsx! {
             ProfileView {
+                guest,
                 name: user.name.clone().unwrap_or_default(),
                 username: user.username.clone().unwrap_or_default(),
                 image: user.image.clone().unwrap_or_default(),
@@ -283,6 +285,7 @@ fn sentence(detail: &str) -> String {
 
 #[component]
 fn ProfileView(
+    guest: bool,
     name: String,
     username: String,
     image: String,
@@ -292,8 +295,19 @@ fn ProfileView(
 ) -> Element {
     rsx! {
         h1 { "Your profile" }
-        p { class: "sub", "Signed in as {email}" }
+        if guest {
+            p { class: "sub", "Signed in as a guest" }
+        } else {
+            p { class: "sub", "Signed in as {email}" }
+        }
         FlashLine { flash }
+
+        // First on the page, not last: a guest who loses this session
+        // loses everything, and burying that under three forms they
+        // cannot use yet would be the wrong order.
+        if guest {
+            crate::guest::UpgradePanel {}
+        }
 
         h2 { "Details" }
         form { method: "post", action: "{PATH}", class: "stack",
@@ -346,6 +360,8 @@ fn ProfileView(
             a { href: "/account/passkeys", "Passkeys" }
             " · "
             a { href: "/account/two-factor", "Two-factor" }
+            " · "
+            a { href: "/account/phone", "Phone" }
             " · "
             a { href: "/account/sessions", "Sessions" }
             " · "

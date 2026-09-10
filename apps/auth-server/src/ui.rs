@@ -1063,6 +1063,7 @@ fn Page(
                                     a { href: "/login/code?return_to={return_to}", "Email me a code" }
                                 }
                                 a { class: "quiet", href: "/forgot-password?return_to={return_to}", "Forgot password?" }
+                                auth_ui::guest::GuestButton { return_to: return_to.clone() }
                             },
                             Screen::SignUp => rsx! {
                                 "Already have an account? "

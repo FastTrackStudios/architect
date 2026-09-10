@@ -225,20 +225,22 @@ pub fn app_router_with_social<S>(
 where
     S: architect_auth::AuthStorage + Clone + Send + Sync + 'static,
 {
-    app_router_with_mailer(config, auth, social, None)
+    app_router_with_senders(config, auth, social, None, None)
 }
 
-/// As [`app_router_with_social`], with the sign-in mailer supplied.
+/// As [`app_router_with_social`], with the senders supplied.
 ///
-/// The seam a test needs: sign-in codes and links are only observable
-/// through what was sent, and the router otherwise builds its own
-/// mailer from configuration — which in a test is log mode, where
-/// nothing is observable at all. `None` keeps the built-in behaviour.
-pub fn app_router_with_mailer<S>(
+/// The seam a test needs: a sign-in code, a link and a phone code are
+/// only observable through what was sent, and the router otherwise
+/// builds its own senders from configuration — which in a test is log
+/// mode, where nothing is observable at all. `None` keeps the built-in
+/// behaviour for either one.
+pub fn app_router_with_senders<S>(
     config: &ServerConfig,
     auth: ArchitectAuth<S>,
     social: std::sync::Arc<http::SocialState>,
     login_mailer: Option<std::sync::Arc<dyn auth_ui::mailer::LoginMailer>>,
+    sms: Option<std::sync::Arc<dyn auth_ui::mailer::SmsSender>>,
 ) -> Router
 where
     S: architect_auth::AuthStorage + Clone + Send + Sync + 'static,
@@ -319,7 +321,8 @@ where
             auth_ui::UiState::new(auth, cookie)
                 .issuer("FastTrackStudio")
                 .base_url(config.base_url.clone())
-                .mailer(mail_for_ui),
+                .mailer(mail_for_ui)
+                .sms(sms.unwrap_or_else(auth_ui::mailer::log_only_sms)),
         ))
         .layer(cors_layer(config))
         .layer(TraceLayer::new_for_http())

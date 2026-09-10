@@ -83,11 +83,12 @@ async fn app() -> (axum::Router, Outbox) {
     let auth = server::build_engine(&config, AuthSeaOrmStorage::new(db.clone())).unwrap();
     let outbox = Outbox::default();
     let ui: Arc<dyn auth_ui::mailer::LoginMailer> = Arc::new(outbox.clone());
-    let app = server::app_router_with_mailer(
+    let app = server::app_router_with_senders(
         &config,
         auth,
         std::sync::Arc::new(auth_server::http::SocialState::disabled()),
         Some(ui),
+        None,
     );
     (app, outbox)
 }
