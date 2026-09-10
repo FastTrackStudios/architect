@@ -166,11 +166,7 @@ auth_command_catalog! {
     { plugin: "passkey", operation: "beginPasskeyRegistration", method: "POST", path: "/auth/passkey/register/begin", command: "BeginPasskeyRegistration", response: "VerificationToken", requires_session: true },
     { plugin: "passkey", operation: "completePasskeyRegistration", method: "POST", path: "/auth/passkey/register/complete", command: "CompletePasskeyRegistration", response: "AuthPasskey", requires_session: true },
     { plugin: "passkey", operation: "beginPasskeyAuthentication", method: "POST", path: "/auth/passkey/authenticate/begin", command: "BeginPasskeyAuthentication", response: "VerificationToken", requires_session: false },
-    // `completePasskeyAuthentication` is deliberately NOT advertised.
-    // The engine refuses it — see `complete_passkey_authentication` for
-    // why — and a descriptor here would put the endpoint in the
-    // generated OpenAPI document, where a consumer would wire a route
-    // that cannot be served safely.
+    { plugin: "passkey", operation: "completePasskeyAuthentication", method: "POST", path: "/auth/passkey/authenticate/complete", command: "CompletePasskeyAuthentication", response: "AuthSessionBundle", requires_session: false },
     { plugin: "passkey", operation: "listPasskeys", method: "GET", path: "/auth/passkey/list", command: "ListPasskeys", response: "Vec<AuthPasskey>", requires_session: true },
     { plugin: "passkey", operation: "deletePasskey", method: "POST", path: "/auth/passkey/delete", command: "DeletePasskey", response: "()", requires_session: true },
     { plugin: "device-authorization", operation: "createDeviceAuthorization", method: "POST", path: "/auth/device/code", command: "CreateDeviceAuthorization", response: "DeviceAuthorization", requires_session: false },
@@ -1112,13 +1108,11 @@ mod tests {
                 && command.command_type == "VerifyTwoFactor"
                 && !command.requires_session
         }));
-        // Deliberately absent: the engine refuses passkey sign-in
-        // until the assertion signature is verified, and advertising
-        // the endpoint would put it in the OpenAPI document for a
-        // consumer to wire a route it cannot serve safely.
-        assert!(!commands.iter().any(|command| {
+        assert!(commands.iter().any(|command| {
             command.plugin_id == "passkey"
                 && command.operation_id == "completePasskeyAuthentication"
+                && command.response_type == "AuthSessionBundle"
+                && !command.requires_session
         }));
         assert!(commands.iter().any(|command| {
             command.plugin_id == "device-authorization"
@@ -1279,17 +1273,12 @@ mod tests {
             document["paths"]["/auth/two-factor/verify"]["post"]["x-architect-plugin"],
             "two-factor"
         );
-        // Absent by design: the engine refuses passkey sign-in until
-        // the assertion signature is verified, so the document must not
-        // offer an endpoint a consumer would wire and could not serve.
-        assert!(
-            document["paths"]["/auth/passkey/authenticate/complete"].is_null(),
-            "an endpoint the engine refuses must not be published"
-        );
-        // The rest of the passkey plugin is still published — only
-        // sign-in is withheld.
         assert_eq!(
-            document["paths"]["/auth/passkey/authenticate/begin"]["post"]["x-architect-plugin"],
+            document["paths"]["/auth/passkey/authenticate/complete"]["post"]["operationId"],
+            "completePasskeyAuthentication"
+        );
+        assert_eq!(
+            document["paths"]["/auth/passkey/authenticate/complete"]["post"]["x-architect-plugin"],
             "passkey"
         );
         assert_eq!(
@@ -1384,8 +1373,8 @@ mod tests {
             serde_json::json!({
                 "openapi": "3.1.0",
                 "plugin_count": 33,
-                "path_count": 111,
-                "schema_count": 166,
+                "path_count": 112,
+                "schema_count": 167,
                 "selected_plugins": [
                     "email-password",
                     "custom-session",

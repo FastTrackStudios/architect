@@ -13,6 +13,7 @@ pub mod member;
 pub mod organization;
 pub mod organization_role;
 pub mod passkey;
+pub mod passkey_ceremony;
 pub mod service;
 pub mod session;
 pub mod team;
@@ -49,6 +50,10 @@ pub use organization_role::{
 };
 pub use passkey::{
     AuthPasskey, AuthPasskeyCreate, AuthPasskeyList, AuthPasskeyRepo, AuthPasskeyUpdate,
+};
+pub use passkey_ceremony::{
+    AuthPasskeyCeremony, AuthPasskeyCeremonyCreate, AuthPasskeyCeremonyList,
+    AuthPasskeyCeremonyRepo, AuthPasskeyCeremonyUpdate, PasskeyCeremonyKind,
 };
 pub use session::{
     AuthSession, AuthSessionCreate, AuthSessionList, AuthSessionRepo, AuthSessionUpdate,

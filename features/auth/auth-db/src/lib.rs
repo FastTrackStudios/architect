@@ -125,6 +125,13 @@ pub use auth_proto::passkey::{
     AuthPasskeyRepo, AuthPasskeyRepoStorage, AuthPasskeyUpdate, Column as AuthPasskeyColumn,
     Entity as AuthPasskeyEntity, Model as AuthPasskeyModel, Relation as AuthPasskeyRelation,
 };
+pub use auth_proto::passkey_ceremony::{
+    ActiveModel as AuthPasskeyCeremonyActiveModel, AuthPasskeyCeremony, AuthPasskeyCeremonyCreate,
+    AuthPasskeyCeremonyList, AuthPasskeyCeremonyRepo, AuthPasskeyCeremonyRepoStorage,
+    AuthPasskeyCeremonyUpdate, Column as AuthPasskeyCeremonyColumn,
+    Entity as AuthPasskeyCeremonyEntity, Model as AuthPasskeyCeremonyModel, PasskeyCeremonyKind,
+    Relation as AuthPasskeyCeremonyRelation,
+};
 pub use auth_proto::session::{
     ActiveModel as AuthSessionActiveModel, AuthSession, AuthSessionCreate, AuthSessionList,
     AuthSessionRepo, AuthSessionRepoStorage, AuthSessionUpdate, Column as AuthSessionColumn,

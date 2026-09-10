@@ -144,6 +144,16 @@ rand = "0.8"
 sha1 = "0.10"
 sha2 = "0.10"
 totp-rs = { version = "5", features = ["gen_secret", "otpauth"] }
+# WebAuthn. `danger-allow-state-serialisation` lets the challenge state be
+# held in the verification table between the two halves of a ceremony —
+# which is the safe use it is named for: the state stays server-side and
+# is never handed to the browser. `resident-key-support` +
+# `conditional-ui` are what discoverable (usernameless) passkeys need.
+webauthn-rs = { version = "0.5", features = [
+    "danger-allow-state-serialisation",
+    "resident-key-support",
+    "conditional-ui",
+] }
 
 # ── UI framework ──────────────────────────────────────────────────────
 # dioxus 0.8 line — git rev pinned; it must stay in lockstep across every

@@ -35,8 +35,8 @@ A `credential_id` is not a secret — WebAuthn broadcasts it in
 `allowCredentials` on every ceremony — so an implementation that
 accepts a credential id, a challenge and a counter without proving
 possession of the private key is an authentication bypass, not a weak
-check. Until this requirement is met, `completePasskeyAuthentication`
-MUST fail closed and MUST NOT be advertised as a route.
+check. An implementation that cannot meet this requirement MUST fail closed
+rather than accept an unverified assertion.
 
 r[auth.passkey.counter]
 Authentication MUST update and validate the authenticator counter when

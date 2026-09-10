@@ -40,6 +40,7 @@ mod m20260513_000001_create_auth_tables {
             drop_table(manager, AuthApiKeys::Table).await?;
             drop_table(manager, AuthTwoFactors::Table).await?;
             drop_table(manager, AuthVerifications::Table).await?;
+            drop_table(manager, AuthPasskeyCeremonies::Table).await?;
             drop_table(manager, AuthInviteLinks::Table).await?;
             drop_table(manager, AuthInvitations::Table).await?;
             drop_table(manager, AuthMembers::Table).await?;
@@ -298,6 +299,40 @@ mod m20260513_000001_create_auth_tables {
         manager
             .create_table(
                 Table::create()
+                    .table(AuthPasskeyCeremonies::Table)
+                    .if_not_exists()
+                    .col(uuid_pk(AuthPasskeyCeremonies::Id))
+                    .col(
+                        ColumnDef::new(AuthPasskeyCeremonies::HandleHash)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(AuthPasskeyCeremonies::Kind)
+                            .string()
+                            .not_null(),
+                    )
+                    // Null for a discoverable sign-in: the server does
+                    // not yet know who is at the keyboard, which is the
+                    // point of it.
+                    .col(ColumnDef::new(AuthPasskeyCeremonies::UserId).uuid().null())
+                    // `text`, not `string`: a serialised ceremony state
+                    // is well past the 255 characters `string` becomes
+                    // on MySQL.
+                    .col(
+                        ColumnDef::new(AuthPasskeyCeremonies::StateJson)
+                            .text()
+                            .not_null(),
+                    )
+                    .col(ts(AuthPasskeyCeremonies::ExpiresAt))
+                    .col(ts(AuthPasskeyCeremonies::CreatedAt))
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_table(
+                Table::create()
                     .table(AuthVerifications::Table)
                     .if_not_exists()
                     .col(uuid_pk(AuthVerifications::Id))
@@ -504,6 +539,16 @@ mod m20260513_000001_create_auth_tables {
                 "idx_auth_invitations_expires_at",
                 AuthInvitations::Table,
                 [AuthInvitations::ExpiresAt],
+            ),
+            unique(
+                "idx_auth_passkey_ceremonies_handle_hash",
+                AuthPasskeyCeremonies::Table,
+                [AuthPasskeyCeremonies::HandleHash],
+            ),
+            index(
+                "idx_auth_passkey_ceremonies_expires_at",
+                AuthPasskeyCeremonies::Table,
+                [AuthPasskeyCeremonies::ExpiresAt],
             ),
             index(
                 "idx_auth_invite_links_org",
@@ -727,6 +772,18 @@ mod m20260513_000001_create_auth_tables {
         Id,
         TeamId,
         UserId,
+        CreatedAt,
+    }
+
+    #[derive(Iden)]
+    enum AuthPasskeyCeremonies {
+        Table,
+        Id,
+        HandleHash,
+        Kind,
+        UserId,
+        StateJson,
+        ExpiresAt,
         CreatedAt,
     }
 

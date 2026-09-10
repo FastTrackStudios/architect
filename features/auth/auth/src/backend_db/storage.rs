@@ -3,9 +3,10 @@ use auth_proto::{
     AuthAccount, AuthAccountCreate, AuthApiKey, AuthApiKeyCreate, AuthFlowError, AuthInvitation,
     AuthInvitationCreate, AuthInviteLink, AuthInviteLinkCreate, AuthMember, AuthMemberCreate,
     AuthOrganization, AuthOrganizationCreate, AuthOrganizationRole, AuthOrganizationRoleCreate,
-    AuthPasskey, AuthPasskeyCreate, AuthSession, AuthSessionCreate, AuthTeam, AuthTeamCreate,
-    AuthTeamMember, AuthTeamMemberCreate, AuthTwoFactor, AuthTwoFactorCreate, AuthUser,
-    AuthUserCreate, AuthVerification, AuthVerificationCreate,
+    AuthPasskey, AuthPasskeyCeremony, AuthPasskeyCeremonyCreate, AuthPasskeyCreate, AuthSession,
+    AuthSessionCreate, AuthTeam, AuthTeamCreate, AuthTeamMember, AuthTeamMemberCreate,
+    AuthTwoFactor, AuthTwoFactorCreate, AuthUser, AuthUserCreate, AuthVerification,
+    AuthVerificationCreate,
 };
 use chrono::{DateTime, Utc};
 use sea_orm::{
@@ -25,6 +26,7 @@ use crate::{
         AuthMemberActiveModel, AuthMemberColumn, AuthMemberEntity, AuthOrganizationActiveModel,
         AuthOrganizationColumn, AuthOrganizationEntity, AuthOrganizationRoleActiveModel,
         AuthOrganizationRoleColumn, AuthOrganizationRoleEntity, AuthPasskeyActiveModel,
+        AuthPasskeyCeremonyActiveModel, AuthPasskeyCeremonyColumn, AuthPasskeyCeremonyEntity,
         AuthPasskeyColumn, AuthPasskeyEntity, AuthSessionActiveModel, AuthSessionColumn,
         AuthSessionEntity, AuthTeamActiveModel, AuthTeamColumn, AuthTeamEntity,
         AuthTeamMemberActiveModel, AuthTeamMemberColumn, AuthTeamMemberEntity,
@@ -1735,6 +1737,69 @@ impl AuthStorage for AuthSeaOrmStorage {
             .update(&self.db)
             .await
             .map(|_| ())
+            .map_err(map_db_err)
+    }
+
+    async fn create_passkey_ceremony(
+        &self,
+        input: AuthPasskeyCeremonyCreate,
+    ) -> Result<AuthPasskeyCeremony, AuthFlowError> {
+        AuthPasskeyCeremonyActiveModel {
+            id: Set(Uuid::new_v4()),
+            handle_hash: Set(input.handle_hash),
+            kind: Set(input.kind),
+            user_id: Set(input.user_id),
+            state_json: Set(input.state_json),
+            expires_at: Set(input.expires_at),
+            created_at: Set(Utc::now()),
+        }
+        .insert(&self.db)
+        .await
+        .map(AuthPasskeyCeremony::from)
+        .map_err(map_db_err)
+    }
+
+    async fn find_passkey_ceremony_by_handle_hash(
+        &self,
+        handle_hash: &str,
+    ) -> Result<Option<AuthPasskeyCeremony>, AuthFlowError> {
+        AuthPasskeyCeremonyEntity::find()
+            .filter(AuthPasskeyCeremonyColumn::HandleHash.eq(handle_hash))
+            .one(&self.db)
+            .await
+            .map(|row| row.map(AuthPasskeyCeremony::from))
+            .map_err(map_db_err)
+    }
+
+    async fn delete_passkey_ceremony(&self, id: Uuid) -> Result<(), AuthFlowError> {
+        AuthPasskeyCeremonyEntity::delete_by_id(id)
+            .exec(&self.db)
+            .await
+            .map(|_| ())
+            .map_err(map_db_err)
+    }
+
+    async fn update_passkey_credential(
+        &self,
+        credential_id: &str,
+        public_key: String,
+        counter: i64,
+        backed_up: bool,
+    ) -> Result<AuthPasskey, AuthFlowError> {
+        let passkey = AuthPasskeyEntity::find()
+            .filter(AuthPasskeyColumn::CredentialId.eq(credential_id))
+            .one(&self.db)
+            .await
+            .map_err(map_db_err)?
+            .ok_or(AuthFlowError::InvalidCredentials)?;
+        let mut active: AuthPasskeyActiveModel = passkey.into();
+        active.public_key = Set(public_key);
+        active.counter = Set(counter);
+        active.backed_up = Set(backed_up);
+        active
+            .update(&self.db)
+            .await
+            .map(AuthPasskey::from)
             .map_err(map_db_err)
     }
 

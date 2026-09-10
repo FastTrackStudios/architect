@@ -11,6 +11,10 @@ pub struct ArchitectAuthConfig {
     pub oauth_token_storage_enabled: bool,
     pub passkey_rp_id: String,
     pub passkey_allowed_origins: Vec<String>,
+    /// The name an operating system shows when it asks to create or use
+    /// a passkey — your product's name. Falls back to the relying-party
+    /// id, which is a domain and reads like one.
+    pub passkey_rp_name: Option<String>,
     pub captcha: CaptchaConfig,
     pub sms: SmsConfig,
     pub jwt: JwtConfig,
@@ -150,6 +154,7 @@ pub struct ArchitectAuthBuilder<S> {
     oauth_token_storage_enabled: bool,
     passkey_rp_id: Option<String>,
     passkey_allowed_origins: Vec<String>,
+    passkey_rp_name: Option<String>,
     captcha: CaptchaConfig,
     sms: SmsConfig,
     jwt_issuer: Option<String>,
@@ -190,6 +195,7 @@ impl<S> ArchitectAuthBuilder<S> {
             oauth_token_storage_enabled: false,
             passkey_rp_id: None,
             passkey_allowed_origins: vec!["http://localhost:3000".into()],
+            passkey_rp_name: None,
             captcha: CaptchaConfig {
                 provider: CaptchaProvider::Disabled,
                 protected_flows: Vec::new(),
@@ -238,6 +244,7 @@ impl<S> ArchitectAuthBuilder<S> {
             oauth_token_storage_enabled: self.oauth_token_storage_enabled,
             passkey_rp_id: self.passkey_rp_id,
             passkey_allowed_origins: self.passkey_allowed_origins,
+            passkey_rp_name: self.passkey_rp_name,
             captcha: self.captcha,
             sms: self.sms,
             jwt_issuer: self.jwt_issuer,
@@ -312,6 +319,14 @@ impl<S> ArchitectAuthBuilder<S> {
     #[must_use]
     pub fn passkey_rp_id(mut self, rp_id: impl Into<String>) -> Self {
         self.passkey_rp_id = Some(rp_id.into());
+        self
+    }
+
+    /// The name an operating system shows when asking to create or use
+    /// a passkey.
+    #[must_use]
+    pub fn passkey_rp_name(mut self, name: impl Into<String>) -> Self {
+        self.passkey_rp_name = Some(name.into());
         self
     }
 
@@ -528,6 +543,7 @@ impl<S> ArchitectAuthBuilder<S> {
                 oauth_token_storage_enabled: self.oauth_token_storage_enabled,
                 passkey_rp_id: self.passkey_rp_id.unwrap_or_else(|| "localhost".into()),
                 passkey_allowed_origins: self.passkey_allowed_origins,
+                passkey_rp_name: self.passkey_rp_name,
                 captcha: self.captcha,
                 sms: self.sms,
                 jwt: JwtConfig {

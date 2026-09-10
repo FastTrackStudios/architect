@@ -1163,40 +1163,76 @@ pub struct ListTeamMembers {
     pub team_id: Uuid,
 }
 
+/// Start registering a passkey for the signed-in person.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BeginPasskeyRegistration {
     pub session_token: String,
 }
 
+/// Finish registering, with what the browser produced.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompletePasskeyRegistration {
     pub session_token: String,
-    pub challenge: String,
-    pub rp_id: String,
-    pub origin: String,
+    /// The handle from [`PasskeyChallenge`].
+    pub handle: String,
+    /// A label for the credential, so a list of them is readable.
     pub name: String,
-    pub credential_id: String,
-    pub public_key: String,
-    pub counter: i64,
-    pub device_type: String,
-    pub backed_up: bool,
-    pub transports: Option<String>,
+    /// `navigator.credentials.create()`'s result, JSON-serialised by
+    /// the browser. Parsed and *verified* here — the fields that used
+    /// to be passed in individually (`credential_id`, `public_key`,
+    /// `counter`, …) are read out of the verified attestation instead
+    /// of taken on trust.
+    pub credential_json: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// Start a passkey sign-in.
+///
+/// Takes nothing. The ceremony is *discoverable*: the browser offers
+/// whichever passkeys it holds for this site and the server learns who
+/// it is from the signed response. Naming a credential or an address up
+/// front would make this an account-enumeration oracle, and it was
+/// exactly that shape — `begin(credential_id)` with no session — that
+/// let the old bypass fetch a challenge for somebody else.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BeginPasskeyAuthentication {
-    pub credential_id: String,
+    /// Whose passkeys to offer, when the person typed an address.
+    ///
+    /// `None` runs a *discoverable* ceremony: the browser offers
+    /// whatever it holds for this site and the server learns who it is
+    /// from the signed response. That is the better sign-in — one
+    /// button, no typing — but it needs an authenticator that made a
+    /// resident key, which not all do.
+    ///
+    /// `Some(email)` narrows the ceremony to that person's credentials.
+    /// An address with no account, or no passkeys, still gets a
+    /// perfectly ordinary discoverable challenge back: answering
+    /// differently would turn this into a way to ask whether an account
+    /// exists.
+    pub email: Option<String>,
 }
 
+/// Finish a passkey sign-in.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompletePasskeyAuthentication {
-    pub credential_id: String,
-    pub challenge: String,
-    pub rp_id: String,
-    pub origin: String,
-    pub counter: i64,
+    /// The handle from [`PasskeyChallenge`].
+    pub handle: String,
+    /// `navigator.credentials.get()`'s result, JSON-serialised.
+    pub credential_json: String,
     pub ip_address: Option<String>,
     pub user_agent: Option<String>,
+}
+
+/// A challenge to hand to the browser, and the handle that will let the
+/// server find the matching state again.
+///
+/// `options_json` goes straight into `navigator.credentials`. The
+/// ceremony state itself never leaves the server — it is what the
+/// answer is checked against, so a client that could edit it could
+/// check its own homework.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PasskeyChallenge {
+    pub options_json: String,
+    pub handle: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

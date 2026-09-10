@@ -5,9 +5,10 @@ use auth_proto::{
     AuthAccount, AuthAccountCreate, AuthApiKey, AuthApiKeyCreate, AuthFlowError, AuthInvitation,
     AuthInvitationCreate, AuthInviteLink, AuthInviteLinkCreate, AuthMember, AuthMemberCreate,
     AuthOrganization, AuthOrganizationCreate, AuthOrganizationRole, AuthOrganizationRoleCreate,
-    AuthPasskey, AuthPasskeyCreate, AuthSession, AuthSessionCreate, AuthTeam, AuthTeamCreate,
-    AuthTeamMember, AuthTeamMemberCreate, AuthTwoFactor, AuthTwoFactorCreate, AuthUser,
-    AuthUserCreate, AuthVerification, AuthVerificationCreate, email_change::AuthEmailChange,
+    AuthPasskey, AuthPasskeyCeremony, AuthPasskeyCeremonyCreate, AuthPasskeyCreate, AuthSession,
+    AuthSessionCreate, AuthTeam, AuthTeamCreate, AuthTeamMember, AuthTeamMemberCreate,
+    AuthTwoFactor, AuthTwoFactorCreate, AuthUser, AuthUserCreate, AuthVerification,
+    AuthVerificationCreate, email_change::AuthEmailChange,
 };
 use chrono::{DateTime, Utc};
 
@@ -570,6 +571,35 @@ pub trait AuthStorage: Clone + Send + Sync + 'static {
     }
 
     async fn increment_invite_link_uses(&self, id: uuid::Uuid) -> Result<(), AuthFlowError>;
+
+    async fn create_passkey_ceremony(
+        &self,
+        input: AuthPasskeyCeremonyCreate,
+    ) -> Result<AuthPasskeyCeremony, AuthFlowError>;
+
+    async fn find_passkey_ceremony_by_handle_hash(
+        &self,
+        handle_hash: &str,
+    ) -> Result<Option<AuthPasskeyCeremony>, AuthFlowError>;
+
+    /// Remove a ceremony, whether or not it succeeded.
+    ///
+    /// Single-use: a completed challenge that stayed redeemable would
+    /// let one captured assertion be replayed.
+    async fn delete_passkey_ceremony(&self, id: uuid::Uuid) -> Result<(), AuthFlowError>;
+
+    /// Update a passkey's stored credential after a sign-in.
+    ///
+    /// The signature counter and the backup state both move, and a
+    /// counter that goes backwards is how a cloned authenticator is
+    /// noticed — so the stored copy has to keep up.
+    async fn update_passkey_credential(
+        &self,
+        credential_id: &str,
+        public_key: String,
+        counter: i64,
+        backed_up: bool,
+    ) -> Result<AuthPasskey, AuthFlowError>;
 
     async fn create_two_factor(
         &self,

@@ -2455,6 +2455,7 @@ pub mod email_password {
             api_keys_by_id: HashMap<Uuid, AuthApiKey>,
             api_keys_by_hash: HashMap<String, AuthApiKey>,
             passkeys_by_credential_id: HashMap<String, AuthPasskey>,
+            passkey_ceremonies: HashMap<Uuid, auth_proto::AuthPasskeyCeremony>,
             organizations: HashMap<Uuid, AuthOrganization>,
             organization_ids_by_slug: HashMap<String, Uuid>,
             members: HashMap<(Uuid, Uuid), AuthMember>,
@@ -3978,6 +3979,65 @@ pub mod email_password {
                     invitation.status = status;
                 }
                 Ok(())
+            }
+
+            async fn create_passkey_ceremony(
+                &self,
+                input: auth_proto::AuthPasskeyCeremonyCreate,
+            ) -> Result<auth_proto::AuthPasskeyCeremony, AuthFlowError> {
+                let mut inner = self.inner.lock().expect("lock memory storage");
+                let ceremony = auth_proto::AuthPasskeyCeremony {
+                    id: Uuid::new_v4(),
+                    handle_hash: input.handle_hash,
+                    kind: input.kind,
+                    user_id: input.user_id,
+                    state_json: input.state_json,
+                    expires_at: input.expires_at,
+                    created_at: Utc::now(),
+                };
+                inner
+                    .passkey_ceremonies
+                    .insert(ceremony.id, ceremony.clone());
+                Ok(ceremony)
+            }
+
+            async fn find_passkey_ceremony_by_handle_hash(
+                &self,
+                handle_hash: &str,
+            ) -> Result<Option<auth_proto::AuthPasskeyCeremony>, AuthFlowError> {
+                let inner = self.inner.lock().expect("lock memory storage");
+                Ok(inner
+                    .passkey_ceremonies
+                    .values()
+                    .find(|ceremony| ceremony.handle_hash == handle_hash)
+                    .cloned())
+            }
+
+            async fn delete_passkey_ceremony(&self, id: Uuid) -> Result<(), AuthFlowError> {
+                self.inner
+                    .lock()
+                    .expect("lock memory storage")
+                    .passkey_ceremonies
+                    .remove(&id);
+                Ok(())
+            }
+
+            async fn update_passkey_credential(
+                &self,
+                credential_id: &str,
+                public_key: String,
+                counter: i64,
+                backed_up: bool,
+            ) -> Result<AuthPasskey, AuthFlowError> {
+                let mut inner = self.inner.lock().expect("lock memory storage");
+                let passkey = inner
+                    .passkeys_by_credential_id
+                    .get_mut(credential_id)
+                    .ok_or(AuthFlowError::InvalidCredentials)?;
+                passkey.public_key = public_key;
+                passkey.counter = counter;
+                passkey.backed_up = backed_up;
+                Ok(passkey.clone())
             }
 
             async fn create_two_factor(
@@ -7221,33 +7281,12 @@ pub mod email_password {
                 .expect("upgrade anonymous user");
             assert_last_login_method(&auth, &upgraded.token, Some("email")).await;
 
-            let passkey_challenge = auth
-                .begin_passkey_registration(BeginPasskeyRegistration {
-                    session_token: email.token.clone(),
-                })
-                .await
-                .expect("begin passkey registration");
-            auth.complete_passkey_registration(CompletePasskeyRegistration {
-                session_token: email.token.clone(),
-                challenge: passkey_challenge.token,
-                rp_id: "localhost".into(),
-                origin: "http://localhost:3000".into(),
-                name: "laptop".into(),
-                credential_id: "last-login-passkey".into(),
-                public_key: "public-key".into(),
-                counter: 1,
-                device_type: "platform".into(),
-                backed_up: true,
-                transports: Some("internal".into()),
-            })
-            .await
-            .expect("register passkey");
-            // The passkey leg of this test is gone with the bypass:
-            // `complete_passkey_authentication` refuses until the
-            // assertion is verified, so there is no way to reach a
-            // session through a passkey to record a login method on.
-            // `record_last_login_method(.., "passkey")` still runs in
-            // that flow and will be exercised again when sign-in works.
+            // Passkey sign-in has its own tests, with a software
+            // authenticator that really signs — see
+            // `a_passkey_registers_and_then_actually_signs_you_in`.
+            // Fabricating a credential here is exactly what the old
+            // version of this test did, and it is what made an
+            // unverified sign-in look tested.
 
             // Clearing works on any session; `upgraded` is the last
             // one this test signed in with.
@@ -7599,144 +7638,302 @@ pub mod email_password {
             assert!(matches!(reused, Err(AuthFlowError::InvalidCredentials)));
         }
 
-        // r[verify auth.passkey.challenge-random]
-        // r[verify auth.passkey.challenge-expiry]
-        // r[verify auth.passkey.rp-origin]
-        // r[verify auth.passkey.credential-unique]
-        // r[verify auth.passkey.user-match]
-        // r[verify auth.passkey.counter]
-        // r[verify auth.passkey.transports]
-        // r[verify auth.passkey.list]
-        #[tokio::test]
-        async fn passkey_registration_and_authentication_enforce_domain_rules() {
-            let auth = auth();
-            let bundle = auth
-                .create_email_password_user(CreateEmailPasswordUser {
-                    email: "user@example.com".into(),
-                    password: "correct horse battery staple".into(),
-                    name: None,
-                    username: None,
-                    image: None,
-                    metadata_json: None,
-                    ip_address: None,
-                    user_agent: None,
-                })
-                .await
-                .expect("create user");
+        /// A software authenticator standing in for a phone or a
+        /// security key. It really does hold a private key and really
+        /// does sign, so these are end-to-end `WebAuthn` ceremonies
+        /// rather than fixtures.
+        fn authenticator() -> webauthn_authenticator_rs::WebauthnAuthenticator<
+            webauthn_authenticator_rs::softpasskey::SoftPasskey,
+        > {
+            webauthn_authenticator_rs::WebauthnAuthenticator::new(
+                webauthn_authenticator_rs::softpasskey::SoftPasskey::new(true),
+            )
+        }
+
+        fn passkey_origin() -> url::Url {
+            url::Url::parse("http://localhost:3000").expect("origin")
+        }
+
+        /// An engine configured for passkeys at `localhost:3000`.
+        fn passkey_auth() -> ArchitectAuth<MemoryStorage> {
+            ArchitectAuth::builder()
+                .secret("a-secret-at-least-32-bytes-long!!")
+                .storage(MemoryStorage::default())
+                .passkey_rp_id("localhost")
+                .passkey_allowed_origin("http://localhost:3000")
+                .passkey_rp_name("FastTrackStudio")
+                .build()
+                .expect("build auth")
+        }
+
+        /// Register a passkey the way a browser would.
+        async fn register_passkey(
+            auth: &ArchitectAuth<MemoryStorage>,
+            authenticator: &mut webauthn_authenticator_rs::WebauthnAuthenticator<
+                webauthn_authenticator_rs::softpasskey::SoftPasskey,
+            >,
+            session_token: &str,
+            name: &str,
+        ) -> Result<auth_proto::AuthPasskey, AuthFlowError> {
             let challenge = auth
                 .begin_passkey_registration(BeginPasskeyRegistration {
-                    session_token: bundle.token.clone(),
+                    session_token: session_token.to_owned(),
                 })
                 .await
-                .expect("begin passkey registration");
-            assert!(challenge.identifier.starts_with("passkey-registration:"));
-            assert!(!challenge.token.is_empty());
+                .expect("begin registration");
+            let options = serde_json::from_str(&challenge.options_json).expect("options");
+            let credential = authenticator
+                .do_registration(passkey_origin(), options)
+                .expect("authenticator registers");
+            auth.complete_passkey_registration(CompletePasskeyRegistration {
+                session_token: session_token.to_owned(),
+                handle: challenge.handle,
+                name: name.to_owned(),
+                credential_json: serde_json::to_string(&credential).expect("serialise"),
+            })
+            .await
+        }
 
-            let bad_origin = auth
-                .complete_passkey_registration(CompletePasskeyRegistration {
-                    session_token: bundle.token.clone(),
-                    challenge: challenge.token.clone(),
-                    rp_id: "localhost".into(),
-                    origin: "https://evil.example".into(),
-                    name: "laptop".into(),
-                    credential_id: "credential-1".into(),
-                    public_key: "public-key".into(),
-                    counter: 1,
-                    device_type: "platform".into(),
-                    backed_up: true,
-                    transports: Some("internal,hybrid".into()),
-                })
-                .await;
-            assert!(matches!(bad_origin, Err(AuthFlowError::PermissionDenied)));
+        // r[verify auth.passkey.assertion-signature]
+        // r[verify auth.passkey.challenge-random]
+        // r[verify auth.passkey.rp-origin]
+        #[tokio::test]
+        async fn a_passkey_registers_and_then_actually_signs_you_in() {
+            let auth = passkey_auth();
+            let person = user(&auth, "ada@example.com").await;
+            let mut authenticator = authenticator();
 
-            let passkey = auth
-                .complete_passkey_registration(CompletePasskeyRegistration {
-                    session_token: bundle.token.clone(),
-                    challenge: challenge.token,
-                    rp_id: "localhost".into(),
-                    origin: "http://localhost:3000".into(),
-                    name: "laptop".into(),
-                    credential_id: "credential-1".into(),
-                    public_key: "public-key".into(),
-                    counter: 1,
-                    device_type: "platform".into(),
-                    backed_up: true,
-                    transports: Some("internal,hybrid".into()),
-                })
+            let passkey = register_passkey(&auth, &mut authenticator, &person.token, "My phone")
                 .await
-                .expect("complete passkey registration");
-            assert_eq!(passkey.user_id, bundle.user.id);
-            assert_eq!(passkey.transports.as_deref(), Some("internal,hybrid"));
-            let passkeys = auth
-                .list_passkeys(ListPasskeys {
-                    session_token: bundle.token.clone(),
-                })
-                .await
-                .expect("list passkeys");
-            assert_eq!(passkeys.len(), 1);
-            assert_eq!(passkeys[0].credential_id, "credential-1");
+                .expect("register");
+            assert_eq!(passkey.name, "My phone");
+            assert_eq!(passkey.user_id, person.user.id);
+            // The stored key is a real serialised credential, not the
+            // literal string the old fabricated test passed in.
+            assert!(
+                passkey.public_key.contains("cred"),
+                "{}",
+                passkey.public_key
+            );
 
-            let duplicate_challenge = auth
-                .begin_passkey_registration(BeginPasskeyRegistration {
-                    session_token: bundle.token.clone(),
-                })
-                .await
-                .expect("begin duplicate passkey registration");
-            let duplicate = auth
-                .complete_passkey_registration(CompletePasskeyRegistration {
-                    session_token: bundle.token.clone(),
-                    challenge: duplicate_challenge.token,
-                    rp_id: "localhost".into(),
-                    origin: "http://localhost:3000".into(),
-                    name: "duplicate".into(),
-                    credential_id: "credential-1".into(),
-                    public_key: "public-key".into(),
-                    counter: 1,
-                    device_type: "platform".into(),
-                    backed_up: true,
-                    transports: None,
-                })
-                .await;
-            assert!(matches!(duplicate, Err(AuthFlowError::InvalidInput(_))));
-
-            // Beginning is still allowed — it only mints a challenge —
-            // and it still requires the credential to exist.
-            let auth_challenge = auth
+            // Sign in with it. Keyed by address, because the software
+            // authenticator does not make resident keys.
+            let challenge = auth
                 .begin_passkey_authentication(BeginPasskeyAuthentication {
-                    credential_id: "credential-1".into(),
+                    email: Some("ada@example.com".into()),
                 })
                 .await
-                .expect("begin passkey authentication");
-            let unknown = auth
-                .begin_passkey_authentication(BeginPasskeyAuthentication {
-                    credential_id: "no-such-credential".into(),
-                })
-                .await;
-            assert!(matches!(unknown, Err(AuthFlowError::InvalidCredentials)));
-
-            // Completing is refused outright. This assertion used to be
-            // `.expect("complete passkey authentication")` on exactly
-            // these arguments — a credential id, a challenge fetched
-            // with no session, a counter, and no key material anywhere
-            // — which is the shape of the bypass: the stored
-            // `public_key` was never read, so nothing proved possession
-            // of the private key. See
-            // `complete_passkey_authentication`.
-            let refused = auth
+                .expect("begin authentication");
+            let options = serde_json::from_str(&challenge.options_json).expect("options");
+            let assertion = authenticator
+                .do_authentication(passkey_origin(), options)
+                .expect("authenticator signs");
+            let bundle = auth
                 .complete_passkey_authentication(CompletePasskeyAuthentication {
-                    credential_id: "credential-1".into(),
-                    challenge: auth_challenge.token,
-                    rp_id: "localhost".into(),
-                    origin: "http://localhost:3000".into(),
-                    counter: 2,
+                    handle: challenge.handle,
+                    credential_json: serde_json::to_string(&assertion).expect("serialise"),
                     ip_address: Some("127.0.0.1".into()),
                     user_agent: Some("passkey-test".into()),
                 })
+                .await
+                .expect("a real assertion signs in");
+            assert_eq!(bundle.user.id, person.user.id);
+            assert_eq!(bundle.session.user_agent.as_deref(), Some("passkey-test"));
+        }
+
+        // r[verify auth.passkey.assertion-signature]
+        #[tokio::test]
+        async fn a_credential_id_alone_no_longer_signs_anybody_in() {
+            // The bypass, as a test. Before the assertion was verified,
+            // knowing a credential id was enough: ask for a challenge,
+            // send it back with a higher counter, receive a session.
+            // Now the same moves produce nothing, because none of them
+            // involves a signature.
+            let auth = passkey_auth();
+            let person = user(&auth, "ada@example.com").await;
+            let mut authenticator = authenticator();
+            let passkey = register_passkey(&auth, &mut authenticator, &person.token, "phone")
+                .await
+                .expect("register");
+
+            let challenge = auth
+                .begin_passkey_authentication(BeginPasskeyAuthentication {
+                    email: Some("ada@example.com".into()),
+                })
+                .await
+                .expect("begin authentication");
+
+            // Everything an attacker could know or guess, shaped like a
+            // real credential and signed by nobody.
+            let forged = serde_json::json!({
+                "id": passkey.credential_id,
+                "rawId": passkey.credential_id,
+                "type": "public-key",
+                "extensions": {},
+                "response": {
+                    "authenticatorData": "SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MFAAAAAQ",
+                    "clientDataJSON": "e30",
+                    "signature": "MEUCIQD",
+                    "userHandle": null
+                }
+            });
+            let refused = auth
+                .complete_passkey_authentication(CompletePasskeyAuthentication {
+                    handle: challenge.handle,
+                    credential_json: forged.to_string(),
+                    ip_address: None,
+                    user_agent: None,
+                })
                 .await;
             assert!(
-                matches!(refused, Err(AuthFlowError::Internal(_))),
-                "passkey sign-in must fail closed until the assertion is verified"
+                refused.is_err(),
+                "a credential id and a counter must not be enough"
             );
+        }
+
+        #[tokio::test]
+        async fn a_challenge_is_single_use() {
+            let auth = passkey_auth();
+            let person = user(&auth, "ada@example.com").await;
+            let mut authenticator = authenticator();
+            register_passkey(&auth, &mut authenticator, &person.token, "phone")
+                .await
+                .expect("register");
+
+            let challenge = auth
+                .begin_passkey_authentication(BeginPasskeyAuthentication {
+                    email: Some("ada@example.com".into()),
+                })
+                .await
+                .expect("begin");
+            let options = serde_json::from_str(&challenge.options_json).expect("options");
+            let assertion = authenticator
+                .do_authentication(passkey_origin(), options)
+                .expect("sign");
+            let credential_json = serde_json::to_string(&assertion).expect("serialise");
+
+            auth.complete_passkey_authentication(CompletePasskeyAuthentication {
+                handle: challenge.handle.clone(),
+                credential_json: credential_json.clone(),
+                ip_address: None,
+                user_agent: None,
+            })
+            .await
+            .expect("first use");
+
+            // Replaying the very same assertion must not work: the
+            // ceremony is deleted when it is taken, whatever the
+            // outcome.
+            let replayed = auth
+                .complete_passkey_authentication(CompletePasskeyAuthentication {
+                    handle: challenge.handle,
+                    credential_json,
+                    ip_address: None,
+                    user_agent: None,
+                })
+                .await;
+            assert!(matches!(replayed, Err(AuthFlowError::InvalidCredentials)));
+        }
+
+        #[tokio::test]
+        async fn a_registration_ceremony_cannot_be_finished_by_somebody_else() {
+            let auth = passkey_auth();
+            let ada = user(&auth, "ada@example.com").await;
+            let mallory = user(&auth, "mallory@example.com").await;
+            let mut authenticator = authenticator();
+
+            let challenge = auth
+                .begin_passkey_registration(BeginPasskeyRegistration {
+                    session_token: ada.token.clone(),
+                })
+                .await
+                .expect("begin");
+            let options = serde_json::from_str(&challenge.options_json).expect("options");
+            let credential = authenticator
+                .do_registration(passkey_origin(), options)
+                .expect("register");
+
+            // Ada started it; Mallory tries to finish it, which would
+            // otherwise attach a credential Mallory holds to Ada's
+            // ceremony.
+            let stolen = auth
+                .complete_passkey_registration(CompletePasskeyRegistration {
+                    session_token: mallory.token,
+                    handle: challenge.handle,
+                    name: "not mine".into(),
+                    credential_json: serde_json::to_string(&credential).expect("serialise"),
+                })
+                .await;
+            assert!(matches!(stolen, Err(AuthFlowError::PermissionDenied)));
+        }
+
+        #[tokio::test]
+        async fn an_unknown_address_is_answered_exactly_like_a_known_one() {
+            // Otherwise this endpoint is a way to ask whether somebody
+            // has an account here.
+            let auth = passkey_auth();
+            let person = user(&auth, "ada@example.com").await;
+            let mut authenticator = authenticator();
+            register_passkey(&auth, &mut authenticator, &person.token, "phone")
+                .await
+                .expect("register");
+
+            for email in ["ada@example.com", "nobody@example.com", "not-an-address"] {
+                let challenge = auth
+                    .begin_passkey_authentication(BeginPasskeyAuthentication {
+                        email: Some(email.into()),
+                    })
+                    .await
+                    .expect("every address gets a challenge");
+                assert!(!challenge.handle.is_empty(), "{email}");
+                assert!(challenge.options_json.contains("challenge"), "{email}");
+            }
+        }
+
+        // r[verify auth.passkey.list]
+        #[tokio::test]
+        async fn passkeys_are_listed_and_deleted_only_by_their_owner() {
+            let auth = passkey_auth();
+            let ada = user(&auth, "ada@example.com").await;
+            let mallory = user(&auth, "mallory@example.com").await;
+            let mut authenticator = authenticator();
+            let passkey = register_passkey(&auth, &mut authenticator, &ada.token, "phone")
+                .await
+                .expect("register");
+
+            assert_eq!(
+                auth.list_passkeys(ListPasskeys {
+                    session_token: ada.token.clone(),
+                })
+                .await
+                .expect("list")
+                .len(),
+                1
+            );
+            assert!(
+                auth.list_passkeys(ListPasskeys {
+                    session_token: mallory.token.clone(),
+                })
+                .await
+                .expect("list")
+                .is_empty()
+            );
+
+            let stolen = auth
+                .delete_passkey(DeletePasskey {
+                    session_token: mallory.token,
+                    credential_id: passkey.credential_id.clone(),
+                })
+                .await;
+            assert!(matches!(stolen, Err(AuthFlowError::PermissionDenied)));
+
+            // Ada has a password too, so the passkey is not her last way in.
+            auth.delete_passkey(DeletePasskey {
+                session_token: ada.token,
+                credential_id: passkey.credential_id,
+            })
+            .await
+            .expect("owner deletes their own");
         }
 
         // r[verify auth.passkey.delete-last-credential]
@@ -7765,32 +7962,16 @@ pub mod email_password {
                 .issue_session(user.clone(), None, None, None, None)
                 .await
                 .expect("issue passkey-only setup session");
-            let challenge = auth
-                .begin_passkey_registration(BeginPasskeyRegistration {
-                    session_token: session.token.clone(),
-                })
-                .await
-                .expect("begin registration");
-            auth.complete_passkey_registration(CompletePasskeyRegistration {
-                session_token: session.token.clone(),
-                challenge: challenge.token,
-                rp_id: "localhost".into(),
-                origin: "http://localhost:3000".into(),
-                name: "security key".into(),
-                credential_id: "only-passkey".into(),
-                public_key: "public-key".into(),
-                counter: 1,
-                device_type: "cross-platform".into(),
-                backed_up: false,
-                transports: Some("usb".into()),
-            })
-            .await
-            .expect("complete registration");
+            let mut authenticator = authenticator();
+            let passkey =
+                register_passkey(&auth, &mut authenticator, &session.token, "security key")
+                    .await
+                    .expect("register");
 
             let rejected = auth
                 .delete_passkey(DeletePasskey {
                     session_token: session.token.clone(),
-                    credential_id: "only-passkey".into(),
+                    credential_id: passkey.credential_id.clone(),
                 })
                 .await;
             assert!(matches!(rejected, Err(AuthFlowError::InvalidInput(_))));
@@ -7812,7 +7993,7 @@ pub mod email_password {
                 .expect("add password credential");
             auth.delete_passkey(DeletePasskey {
                 session_token: session.token,
-                credential_id: "only-passkey".into(),
+                credential_id: passkey.credential_id,
             })
             .await
             .expect("delete passkey when password remains");
@@ -14386,16 +14567,64 @@ pub mod organizations {
     }
 }
 pub mod passkeys {
-    use auth_proto::{AuthFlowError, AuthPasskey, AuthPasskeyCreate, AuthSessionBundle};
+    //! Passkeys, over `webauthn-rs`.
+    //!
+    //! # What this used to be
+    //!
+    //! An earlier version of this module took `credential_id`,
+    //! `public_key`, `counter` and a challenge as plain fields and
+    //! trusted every one of them. It checked the relying party, the
+    //! challenge and the counter, and never read the stored public key
+    //! — so nothing proved possession of the private key. Since a
+    //! credential id is not a secret and the challenge endpoint needed
+    //! no session, anyone who knew an id could ask for a challenge,
+    //! send it back with `counter + 1`, and be signed in as somebody
+    //! else.
+    //!
+    //! Everything below therefore has one rule: the browser hands over
+    //! one opaque blob, and every field the server records is read out
+    //! of that blob *after* `webauthn-rs` has verified its signature.
+    //! No caller supplies a credential id, a public key or a counter.
+    //!
+    //! # Sign-in is discoverable
+    //!
+    //! [`ArchitectAuth::begin_passkey_authentication`] takes no input.
+    //! The browser offers whichever passkeys it holds for this site and
+    //! the server learns who it is from the signed response. Naming an
+    //! address or a credential up front would tell a stranger whether
+    //! an account exists — and asking for a challenge on somebody
+    //! else's behalf is the exact shape the old bypass exploited.
+    //!
+    //! # Ceremony state
+    //!
+    //! A ceremony is two round trips, and the server has to remember
+    //! precisely what it issued. That state lives in
+    //! `auth_passkey_ceremonies`, keyed by the hash of a handle, and is
+    //! deleted the moment the ceremony ends — successfully or not, so a
+    //! captured assertion cannot be replayed against a challenge that
+    //! stayed open.
+
+    use auth_proto::{AuthFlowError, AuthPasskey, AuthPasskeyCreate, PasskeyCeremonyKind};
     use chrono::Utc;
+    use serde::{Deserialize, Serialize};
+    use webauthn_rs::prelude::{
+        DiscoverableAuthentication, DiscoverableKey, Passkey, PasskeyAuthentication,
+        PublicKeyCredential, RegisterPublicKeyCredential, Url, Webauthn, WebauthnBuilder,
+    };
 
     use crate::{
-        ArchitectAuth, AuthStorage, BeginPasskeyAuthentication, BeginPasskeyRegistration,
-        CompletePasskeyAuthentication, CompletePasskeyRegistration, DeletePasskey, ListPasskeys,
-        VerificationToken, commands::CurrentSession, crypto::generate_token, crypto::hash_token,
+        ArchitectAuth, AuthSessionBundle, AuthStorage, BeginPasskeyAuthentication,
+        BeginPasskeyRegistration, CompletePasskeyAuthentication, CompletePasskeyRegistration,
+        DeletePasskey, ListPasskeys, PasskeyChallenge, commands::CurrentSession,
+        crypto::generate_token, crypto::hash_token,
         flows::last_login_method::record_last_login_method,
     };
 
+    /// How long a browser has to answer a challenge.
+    ///
+    /// Five minutes covers finding a phone, unlocking it and approving
+    /// the prompt. Longer widens the window in which a stolen handle is
+    /// worth something.
     const PASSKEY_CHALLENGE_TTL_SECONDS: i64 = 300;
 
     impl<S> ArchitectAuth<S>
@@ -14405,207 +14634,335 @@ pub mod passkeys {
         // r[impl auth.passkey.challenge-random]
         // r[impl auth.passkey.challenge-expiry]
         // r[impl auth.passkey.user-match]
+        /// Begin registering a passkey for the signed-in person.
+        ///
+        /// # Errors
+        ///
+        /// If the session is invalid, the relying party is
+        /// misconfigured, or storage fails.
         pub async fn begin_passkey_registration(
             &self,
             input: BeginPasskeyRegistration,
-        ) -> Result<VerificationToken, AuthFlowError> {
+        ) -> Result<PasskeyChallenge, AuthFlowError> {
             let session = self
                 .current_session(CurrentSession {
                     token: input.session_token,
                 })
                 .await?;
-            let challenge =
-                generate_token().map_err(|err| AuthFlowError::Internal(err.to_string()))?;
-            let identifier = registration_identifier(session.user.id);
-            self.storage
-                .create_verification(auth_proto::AuthVerificationCreate {
-                    identifier: identifier.clone(),
-                    value_hash: hash_token(&self.config.secret, &challenge),
-                    expires_at: crate::expiry::expires_in(PASSKEY_CHALLENGE_TTL_SECONDS),
-                })
+            let webauthn = self.webauthn()?;
+
+            // Credentials the person already has, so an authenticator
+            // offers to *replace* rather than silently making a second
+            // entry for the same site.
+            let existing = self
+                .storage
+                .list_passkeys_by_user_id(session.user.id)
                 .await?;
-            Ok(VerificationToken {
-                identifier,
-                token: challenge,
+            let exclude: Vec<_> = existing
+                .iter()
+                .filter_map(|row| stored_passkey(row).ok())
+                .map(|passkey| passkey.cred_id().clone())
+                .collect();
+
+            let label = session
+                .user
+                .email
+                .clone()
+                .or_else(|| session.user.name.clone())
+                .unwrap_or_else(|| session.user.id.to_string());
+            let (options, state) = webauthn
+                .start_passkey_registration(
+                    session.user.id,
+                    &label,
+                    session.user.name.as_deref().unwrap_or(&label),
+                    Some(exclude),
+                )
+                .map_err(|err| webauthn_internal(&err))?;
+
+            let handle = self
+                .park_ceremony(
+                    PasskeyCeremonyKind::Registration,
+                    Some(session.user.id),
+                    to_json(&state)?,
+                )
+                .await?;
+            Ok(PasskeyChallenge {
+                options_json: to_json(&options)?,
+                handle,
             })
         }
 
-        // r[impl auth.passkey.challenge-expiry]
+        // r[impl auth.passkey.assertion-signature]
         // r[impl auth.passkey.rp-origin]
         // r[impl auth.passkey.credential-unique]
         // r[impl auth.passkey.user-match]
-        // r[impl auth.passkey.transports]
+        /// Finish registering.
+        ///
+        /// The credential id, public key, counter and backup state are
+        /// all read out of the verified attestation. Nothing the caller
+        /// sent about the credential is trusted.
+        ///
+        /// # Errors
+        ///
+        /// If the ceremony is unknown, expired, or belongs to somebody
+        /// else; if the attestation does not verify; or if the
+        /// credential is already registered.
         pub async fn complete_passkey_registration(
             &self,
             input: CompletePasskeyRegistration,
         ) -> Result<AuthPasskey, AuthFlowError> {
-            self.validate_passkey_relying_party(&input.rp_id, &input.origin)?;
             let session = self
                 .current_session(CurrentSession {
                     token: input.session_token,
                 })
                 .await?;
+            let webauthn = self.webauthn()?;
+            let ceremony = self
+                .take_ceremony(&input.handle, PasskeyCeremonyKind::Registration)
+                .await?;
+            // The ceremony was started by a session; it must be
+            // finished by the same person, or one person could register
+            // a credential onto another's account.
+            if ceremony.user_id != Some(session.user.id) {
+                return Err(AuthFlowError::PermissionDenied);
+            }
+            let state = from_json(&ceremony.state_json)?;
+
+            let credential: RegisterPublicKeyCredential =
+                serde_json::from_str(&input.credential_json)
+                    .map_err(|err| AuthFlowError::InvalidInput(format!("credential: {err}")))?;
+            // Everything is checked in here: the attestation, the
+            // challenge, the origin, the relying-party id, and that the
+            // credential is not already known to this ceremony.
+            let passkey = webauthn
+                .finish_passkey_registration(&credential, &state)
+                .map_err(|_| AuthFlowError::InvalidCredentials)?;
+
+            let credential_id = encode_credential_id(passkey.cred_id().as_ref());
             if self
                 .storage
-                .find_passkey_by_credential_id(&input.credential_id)
+                .find_passkey_by_credential_id(&credential_id)
                 .await?
                 .is_some()
             {
                 return Err(AuthFlowError::InvalidInput(
-                    "passkey credential already exists".into(),
+                    "passkey is already registered".into(),
                 ));
             }
-            let identifier = registration_identifier(session.user.id);
-            let value_hash = hash_token(&self.config.secret, &input.challenge);
-            let verification = self
-                .storage
-                .find_verification(&identifier, &value_hash)
-                .await?
-                .ok_or(AuthFlowError::InvalidCredentials)?;
-            if verification.expires_at <= Utc::now() {
-                return Err(AuthFlowError::InvalidCredentials);
-            }
-            let passkey = self
-                .storage
+
+            let name = input.name.trim();
+            self.storage
                 .create_passkey(AuthPasskeyCreate {
-                    name: input.name,
+                    name: if name.is_empty() {
+                        "Passkey".to_owned()
+                    } else {
+                        name.to_owned()
+                    },
                     user_id: session.user.id,
-                    public_key: input.public_key,
-                    credential_id: input.credential_id,
-                    counter: input.counter,
-                    device_type: input.device_type,
-                    backed_up: input.backed_up,
-                    transports: input.transports,
+                    public_key: to_json(&passkey)?,
+                    credential_id,
+                    counter: 0,
+                    // Reported by the authenticator, and only meaningful
+                    // as a hint in a list: "the one on my phone".
+                    device_type: if credential.response.transports.is_some() {
+                        "multi-device".to_owned()
+                    } else {
+                        "platform".to_owned()
+                    },
+                    backed_up: false,
+                    transports: credential
+                        .response
+                        .transports
+                        .as_ref()
+                        .and_then(|t| serde_json::to_string(t).ok()),
                 })
-                .await?;
-            self.storage.delete_verification(verification.id).await?;
-            Ok(passkey)
+                .await
         }
 
         // r[impl auth.passkey.challenge-random]
         // r[impl auth.passkey.challenge-expiry]
-        pub async fn begin_passkey_authentication(
-            &self,
-            input: BeginPasskeyAuthentication,
-        ) -> Result<VerificationToken, AuthFlowError> {
-            self.storage
-                .find_passkey_by_credential_id(&input.credential_id)
-                .await?
-                .ok_or(AuthFlowError::InvalidCredentials)?;
-            let challenge =
-                generate_token().map_err(|err| AuthFlowError::Internal(err.to_string()))?;
-            let identifier = authentication_identifier(&input.credential_id);
-            self.storage
-                .create_verification(auth_proto::AuthVerificationCreate {
-                    identifier: identifier.clone(),
-                    value_hash: hash_token(&self.config.secret, &challenge),
-                    expires_at: crate::expiry::expires_in(PASSKEY_CHALLENGE_TTL_SECONDS),
-                })
-                .await?;
-            Ok(VerificationToken {
-                identifier,
-                token: challenge,
-            })
-        }
-
-        /// Finish a passkey sign-in.
+        /// Begin a passkey sign-in.
         ///
-        /// # Currently refused
-        ///
-        /// This returns [`AuthFlowError::Internal`] unconditionally,
-        /// and that is deliberate: **it did not verify anything a
-        /// passkey is for.**
-        ///
-        /// It checked that the relying party matched, that the
-        /// credential existed, that the counter had advanced, and that
-        /// the challenge it had minted was unexpired. It never touched
-        /// the stored `public_key` — which is written at registration
-        /// and read nowhere in this crate — so no signature was ever
-        /// checked, and possession of the private key was never proved.
-        ///
-        /// A `credential_id` is not a secret. `WebAuthn` broadcasts it in
-        /// `allowCredentials` on every ceremony, and
-        /// [`Self::begin_passkey_authentication`] takes one with no
-        /// session and hands back the challenge in plaintext. So anyone
-        /// who learned a credential id could ask for a challenge, send
-        /// it straight back with `counter + 1`, and receive a full
-        /// session as that user. That is an authentication bypass with
-        /// no cryptography in it at all.
-        ///
-        /// Nothing in this repository mounts the route, so the hole was
-        /// latent rather than live — but the method is public, the
-        /// route descriptors advertise the endpoint, and the generated
-        /// `OpenAPI` document publishes it. Failing closed is the only
-        /// honest state until an assertion is actually verified:
-        /// `clientDataJSON` (type, challenge, origin), `authenticatorData`
-        /// (RP ID hash, user-present flag, counter), and the signature
-        /// over `authenticatorData || sha256(clientDataJSON)` against
-        /// the stored COSE key.
-        ///
-        /// Registration, listing and deletion are unaffected. They are
-        /// all session-gated, so none of them is a way in.
+        /// Discoverable when no address is given; narrowed to one
+        /// person's credentials when there is one. An unknown address
+        /// gets a discoverable challenge rather than an error, so the
+        /// two cases are indistinguishable from outside.
         ///
         /// # Errors
         ///
-        /// Always, until assertion verification exists.
-        #[allow(clippy::unused_async)]
-        pub async fn complete_passkey_authentication(
+        /// If the relying party is misconfigured or storage fails.
+        pub async fn begin_passkey_authentication(
             &self,
-            _input: CompletePasskeyAuthentication,
-        ) -> Result<AuthSessionBundle, AuthFlowError> {
-            Err(AuthFlowError::Internal(
-                "passkey sign-in is disabled: this build does not verify the WebAuthn assertion                  signature, and accepting one without it is an authentication bypass"
-                    .into(),
-            ))
+            input: BeginPasskeyAuthentication,
+        ) -> Result<PasskeyChallenge, AuthFlowError> {
+            let webauthn = self.webauthn()?;
+
+            // An address that does not resolve to somebody with
+            // passkeys falls through to the discoverable branch, which
+            // is the whole point: no answer here distinguishes "no such
+            // account" from "no passkeys" from "here you are".
+            let narrowed = match input.email.as_deref() {
+                None => None,
+                Some(email) => self.passkeys_for_email(email).await?,
+            };
+
+            let (options_json, state_json) = if let Some((user_id, keys)) = narrowed {
+                let (options, state) = webauthn
+                    .start_passkey_authentication(&keys)
+                    .map_err(|err| webauthn_internal(&err))?;
+                (
+                    to_json(&options)?,
+                    to_json(&AuthCeremony::Keyed { user_id, state })?,
+                )
+            } else {
+                let (options, state) = webauthn
+                    .start_discoverable_authentication()
+                    .map_err(|err| webauthn_internal(&err))?;
+                (
+                    to_json(&options)?,
+                    to_json(&AuthCeremony::Discoverable(state))?,
+                )
+            };
+
+            let handle = self
+                .park_ceremony(PasskeyCeremonyKind::Authentication, None, state_json)
+                .await?;
+            Ok(PasskeyChallenge {
+                options_json,
+                handle,
+            })
         }
 
-        /// The body this once had, kept compiling and unreachable.
+        /// The passkeys belonging to an address, if it has any.
+        async fn passkeys_for_email(
+            &self,
+            email: &str,
+        ) -> Result<Option<(uuid::Uuid, Vec<Passkey>)>, AuthFlowError> {
+            let Ok(canonical) = super::email_password::normalize_email(email) else {
+                return Ok(None);
+            };
+            let Some(user) = self.storage.find_user_by_email(&canonical).await? else {
+                return Ok(None);
+            };
+            let keys: Vec<Passkey> = self
+                .storage
+                .list_passkeys_by_user_id(user.id)
+                .await?
+                .iter()
+                .filter_map(|row| stored_passkey(row).ok())
+                .collect();
+            if keys.is_empty() {
+                return Ok(None);
+            }
+            Ok(Some((user.id, keys)))
+        }
+
+        // r[impl auth.passkey.assertion-signature]
+        // r[impl auth.passkey.rp-origin]
+        // r[impl auth.passkey.counter]
+        /// Finish a passkey sign-in.
         ///
-        /// Retained deliberately rather than deleted: everything here
-        /// except the missing signature check is correct and will be
-        /// needed again the moment verification lands, and rewriting
-        /// the RP, counter and challenge handling from memory is how
-        /// the second attempt loses a check the first one had.
-        #[allow(dead_code)]
-        async fn complete_passkey_authentication_unverified(
+        /// The signature is verified against the stored credential, and
+        /// the person signed in is whoever that credential belongs to —
+        /// never whoever the caller said.
+        ///
+        /// # Errors
+        ///
+        /// If the ceremony is unknown or expired, if the assertion does
+        /// not verify, or if the credential is not registered here.
+        pub async fn complete_passkey_authentication(
             &self,
             input: CompletePasskeyAuthentication,
         ) -> Result<AuthSessionBundle, AuthFlowError> {
-            self.validate_passkey_relying_party(&input.rp_id, &input.origin)?;
-            let passkey = self
-                .storage
-                .find_passkey_by_credential_id(&input.credential_id)
-                .await?
-                .ok_or(AuthFlowError::InvalidCredentials)?;
-            if input.counter <= passkey.counter {
-                return Err(AuthFlowError::InvalidCredentials);
-            }
-            let identifier = authentication_identifier(&input.credential_id);
-            let value_hash = hash_token(&self.config.secret, &input.challenge);
-            let verification = self
-                .storage
-                .find_verification(&identifier, &value_hash)
-                .await?
-                .ok_or(AuthFlowError::InvalidCredentials)?;
-            if verification.expires_at <= Utc::now() {
-                return Err(AuthFlowError::InvalidCredentials);
-            }
-            let passkey = self
-                .storage
-                .update_passkey_counter(&input.credential_id, input.counter)
+            let webauthn = self.webauthn()?;
+            let ceremony = self
+                .take_ceremony(&input.handle, PasskeyCeremonyKind::Authentication)
                 .await?;
+            let state: AuthCeremony = from_json(&ceremony.state_json)?;
+
+            let credential: PublicKeyCredential = serde_json::from_str(&input.credential_json)
+                .map_err(|err| AuthFlowError::InvalidInput(format!("credential: {err}")))?;
+
+            // THE check, in both branches: `webauthn-rs` verifies the
+            // assertion signature against the stored public key, the
+            // challenge against the parked state, and the origin and
+            // relying-party id against the configuration. Everything
+            // afterwards reads out of the *verified* result.
+            let (result, expected_user) = match state {
+                AuthCeremony::Keyed { user_id, state } => {
+                    let result = webauthn
+                        .finish_passkey_authentication(&credential, &state)
+                        .map_err(|_| AuthFlowError::InvalidCredentials)?;
+                    (result, Some(user_id))
+                }
+                AuthCeremony::Discoverable(state) => {
+                    // Who the authenticator says this is. Unverified so
+                    // far — used only to find the candidate credentials
+                    // the signature is then checked against.
+                    let (claimed, _) = webauthn
+                        .identify_discoverable_authentication(&credential)
+                        .map_err(|_| AuthFlowError::InvalidCredentials)?;
+                    let keys: Vec<DiscoverableKey> = self
+                        .storage
+                        .list_passkeys_by_user_id(claimed)
+                        .await?
+                        .iter()
+                        .filter_map(|row| stored_passkey(row).ok())
+                        .map(|passkey| DiscoverableKey::from(&passkey))
+                        .collect();
+                    if keys.is_empty() {
+                        return Err(AuthFlowError::InvalidCredentials);
+                    }
+                    let result = webauthn
+                        .finish_discoverable_authentication(&credential, state, &keys)
+                        .map_err(|_| AuthFlowError::InvalidCredentials)?;
+                    (result, Some(claimed))
+                }
+            };
+
+            let credential_id = encode_credential_id(result.cred_id().as_ref());
+            let row = self
+                .storage
+                .find_passkey_by_credential_id(&credential_id)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            // The credential the signature proves must belong to the
+            // person the ceremony was for. Without this, a valid
+            // assertion could be paired with somebody else's user
+            // handle and resolve to the wrong account.
+            if expected_user.is_some_and(|expected| expected != row.user_id) {
+                return Err(AuthFlowError::InvalidCredentials);
+            }
+
+            // A counter that moved, or a backup state that changed, has
+            // to be written down: a counter going *backwards* later is
+            // how a cloned authenticator is noticed.
+            if result.needs_update() {
+                let mut passkey = stored_passkey(&row)?;
+                passkey.update_credential(&result);
+                let counter = i64::try_from(result.counter()).unwrap_or(i64::MAX);
+                self.storage
+                    .update_passkey_credential(
+                        &credential_id,
+                        to_json(&passkey)?,
+                        counter,
+                        result.backup_state(),
+                    )
+                    .await?;
+            }
+
             let user = self
                 .storage
-                .find_user_by_id(passkey.user_id)
+                .find_user_by_id(row.user_id)
                 .await?
                 .ok_or(AuthFlowError::InvalidCredentials)?;
-            self.storage.delete_verification(verification.id).await?;
             let bundle = self
                 .issue_session(user, input.ip_address, input.user_agent, None, None)
                 .await?;
             record_last_login_method(self, bundle, "passkey").await
         }
 
+        // r[impl auth.passkey.list]
         pub async fn list_passkeys(
             &self,
             input: ListPasskeys,
@@ -14633,60 +14990,168 @@ pub mod passkeys {
             if passkey.user_id != session.user.id {
                 return Err(AuthFlowError::PermissionDenied);
             }
-            let has_password = self
-                .storage
-                .find_password_account_by_user_id(session.user.id)
-                .await?
-                .is_some();
-            let oauth_count = self
-                .storage
-                .list_accounts_by_user_id(session.user.id)
-                .await?
-                .into_iter()
-                .filter(|account| account.provider_id != "credential")
-                .count();
-            let passkey_count = self
-                .storage
-                .list_passkeys_by_user_id(session.user.id)
-                .await?
-                .len();
-            if !has_password && oauth_count == 0 && passkey_count <= 1 {
-                return Err(AuthFlowError::InvalidInput(
-                    "cannot delete the last sign-in credential".into(),
-                ));
-            }
+            self.reject_if_last_signin_credential(session.user.id, &input.credential_id)
+                .await?;
             self.storage
                 .delete_passkey_by_credential_id(&input.credential_id)
                 .await
         }
 
-        fn validate_passkey_relying_party(
-            &self,
-            rp_id: &str,
-            origin: &str,
-        ) -> Result<(), AuthFlowError> {
-            if rp_id != self.config.passkey_rp_id {
-                return Err(AuthFlowError::PermissionDenied);
+        /// The configured relying party, as `webauthn-rs` wants it.
+        fn webauthn(&self) -> Result<Webauthn, AuthFlowError> {
+            let origins = &self.config.passkey_allowed_origins;
+            let primary = origins.first().ok_or_else(|| {
+                AuthFlowError::Internal(
+                    "no passkey origin is configured; passkeys cannot be used".into(),
+                )
+            })?;
+            let url = Url::parse(primary).map_err(|err| {
+                AuthFlowError::Internal(format!("passkey origin {primary:?} is not a URL: {err}"))
+            })?;
+            let mut builder = WebauthnBuilder::new(&self.config.passkey_rp_id, &url)
+                .map_err(|err| webauthn_internal(&err))?
+                .rp_name(
+                    self.config
+                        .passkey_rp_name
+                        .as_deref()
+                        .unwrap_or(&self.config.passkey_rp_id),
+                );
+            // Anything after the first is an additional allowed origin —
+            // a staging host, or the same site on another port.
+            for extra in origins.iter().skip(1) {
+                let extra = Url::parse(extra).map_err(|err| {
+                    AuthFlowError::Internal(format!("passkey origin {extra:?} is not a URL: {err}"))
+                })?;
+                builder = builder.append_allowed_origin(&extra);
             }
-            if self
-                .config
-                .passkey_allowed_origins
-                .iter()
-                .any(|allowed| allowed == origin)
-            {
+            builder.build().map_err(|err| webauthn_internal(&err))
+        }
+
+        /// Store ceremony state and return the handle that finds it.
+        ///
+        /// Takes the state already serialised: `webauthn-rs`'s state
+        /// types are not `Send`, and holding one across the storage
+        /// `await` would make every caller's future non-`Send` — which
+        /// an axum handler cannot be.
+        async fn park_ceremony(
+            &self,
+            kind: PasskeyCeremonyKind,
+            user_id: Option<uuid::Uuid>,
+            state_json: String,
+        ) -> Result<String, AuthFlowError> {
+            let handle =
+                generate_token().map_err(|err| AuthFlowError::Internal(err.to_string()))?;
+            self.storage
+                .create_passkey_ceremony(auth_proto::AuthPasskeyCeremonyCreate {
+                    handle_hash: hash_token(&self.config.secret, &handle),
+                    kind: kind.as_str().to_owned(),
+                    user_id,
+                    state_json,
+                    expires_at: crate::expiry::expires_in(PASSKEY_CHALLENGE_TTL_SECONDS),
+                })
+                .await?;
+            Ok(handle)
+        }
+
+        /// Fetch a ceremony and delete it, whatever happens next.
+        ///
+        /// Deleted before the answer is checked, not after: a challenge
+        /// that survived a failed attempt could be tried against again.
+        async fn take_ceremony(
+            &self,
+            handle: &str,
+            expected: PasskeyCeremonyKind,
+        ) -> Result<auth_proto::AuthPasskeyCeremony, AuthFlowError> {
+            let handle_hash = hash_token(&self.config.secret, handle);
+            let ceremony = self
+                .storage
+                .find_passkey_ceremony_by_handle_hash(&handle_hash)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            self.storage.delete_passkey_ceremony(ceremony.id).await?;
+            if ceremony.kind != expected.as_str() {
+                return Err(AuthFlowError::InvalidCredentials);
+            }
+            if ceremony.expires_at <= Utc::now() {
+                return Err(AuthFlowError::InvalidCredentials);
+            }
+            Ok(ceremony)
+        }
+
+        async fn reject_if_last_signin_credential(
+            &self,
+            user_id: uuid::Uuid,
+            credential_id: &str,
+        ) -> Result<(), AuthFlowError> {
+            let remaining = self
+                .storage
+                .list_passkeys_by_user_id(user_id)
+                .await?
+                .into_iter()
+                .filter(|passkey| passkey.credential_id != credential_id)
+                .count();
+            if remaining > 0 {
+                return Ok(());
+            }
+            let has_other = self
+                .storage
+                .list_accounts_by_user_id(user_id)
+                .await?
+                .into_iter()
+                .any(|account| {
+                    account.password_hash.is_some() || account.provider_id != "credential"
+                });
+            if has_other {
                 Ok(())
             } else {
-                Err(AuthFlowError::PermissionDenied)
+                Err(AuthFlowError::InvalidInput(
+                    "cannot delete the last sign-in credential".into(),
+                ))
             }
         }
     }
 
-    fn registration_identifier(user_id: uuid::Uuid) -> String {
-        format!("passkey-registration:{user_id}")
+    /// Which kind of sign-in ceremony is parked.
+    ///
+    /// Both are opaque `webauthn-rs` state; wrapping them in one enum
+    /// keeps the ceremony row a single column and makes it impossible
+    /// to finish a discoverable ceremony with keyed state or the other
+    /// way round — the deserialise simply fails.
+    #[derive(Serialize, Deserialize)]
+    enum AuthCeremony {
+        Discoverable(DiscoverableAuthentication),
+        Keyed {
+            user_id: uuid::Uuid,
+            state: PasskeyAuthentication,
+        },
     }
 
-    fn authentication_identifier(credential_id: &str) -> String {
-        format!("passkey-authentication:{credential_id}")
+    /// The stored credential, back as a `webauthn-rs` type.
+    fn stored_passkey(row: &AuthPasskey) -> Result<Passkey, AuthFlowError> {
+        from_json(&row.public_key)
+    }
+
+    /// Credential ids are bytes; the column is text.
+    ///
+    /// `webauthn-rs` serialises them as base64url, and matching that
+    /// keeps a stored id the same string the browser and the logs use.
+    fn encode_credential_id(bytes: &[u8]) -> String {
+        use base64::Engine as _;
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+    }
+
+    fn to_json<T: serde::Serialize>(value: &T) -> Result<String, AuthFlowError> {
+        serde_json::to_string(value).map_err(|err| AuthFlowError::Internal(err.to_string()))
+    }
+
+    fn from_json<T: serde::de::DeserializeOwned>(json: &str) -> Result<T, AuthFlowError> {
+        serde_json::from_str(json).map_err(|err| AuthFlowError::Internal(err.to_string()))
+    }
+
+    /// A `webauthn-rs` error at *setup* time is a misconfiguration, not
+    /// a bad credential, so it must not be reported as one.
+    fn webauthn_internal(err: &webauthn_rs::prelude::WebauthnError) -> AuthFlowError {
+        AuthFlowError::Internal(format!("webauthn: {err}"))
     }
 }
 pub mod device_authorization {
