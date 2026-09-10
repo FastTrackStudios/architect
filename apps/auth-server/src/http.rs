@@ -1000,7 +1000,12 @@ where
                 })
                 .await;
             match result {
-                Ok(bundle) => Ok(redirect_signed_in(&state.cookie, &bundle, &return_to)),
+                Ok(bundle) => Ok(redirect_signed_in(
+                    &state.cookie,
+                    &headers,
+                    &bundle,
+                    &return_to,
+                )),
                 Err(AuthFlowError::InvalidInput(message)) if message.contains("email already") => {
                     Ok(redirect_with(&return_to, "error", "email_in_use"))
                 }
@@ -1540,6 +1545,7 @@ fn redirect_with(target: &str, key: &str, value: &str) -> Response {
 /// wants a bearer token exchanges the session over `/auth/session`.
 fn redirect_signed_in(
     cookie: &AuthCookieConfig,
+    headers: &HeaderMap,
     bundle: &AuthSessionBundle,
     return_to: &str,
 ) -> Response {
@@ -1564,8 +1570,9 @@ fn redirect_signed_in(
     )
         .into_response();
     // "You signed in with GitHub last time" — the hint that keeps
-    // somebody from resetting a password they never had.
-    auth_ui::login::remember_method(&mut response, &bundle.user);
+    // somebody from resetting a password they never had — and the
+    // roster that puts this account on the switcher.
+    auth_ui::login::remember_signed_in(&mut response, cookie, headers, bundle);
     response
 }
 

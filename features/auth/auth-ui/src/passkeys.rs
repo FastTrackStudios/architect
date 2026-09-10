@@ -253,7 +253,7 @@ where
                 Json(json!({ "redirect": return_to })),
             )
                 .into_response();
-            crate::login::remember_method(&mut response, &bundle.user);
+            crate::login::remember_signed_in(&mut response, &state.cookie, &headers, &bundle);
             response
         }
         Err(error) => refuse(StatusCode::UNAUTHORIZED, &message(&error)),
@@ -364,15 +364,19 @@ fn PasskeysView(rows: Vec<PasskeyRow>, flash: Option<Flash>) -> Element {
         }
 
         p { class: "alt",
+            a { href: "/account/profile", "Profile" }
+            " · "
             a { href: "/account", "Linked accounts" }
             " · "
-            a { href: "/account/profile", "Profile" }
+            a { href: "/account/passkeys", "Passkeys" }
             " · "
             a { href: "/account/two-factor", "Two-factor" }
             " · "
             a { href: "/account/sessions", "Sessions" }
             " · "
             a { href: "/account/api-keys", "API keys" }
+            " · "
+            a { href: "/account/switch", "Accounts" }
             " · "
             a { href: "/orgs", "Organizations" }
         }

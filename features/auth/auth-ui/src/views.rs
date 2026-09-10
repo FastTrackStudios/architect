@@ -102,15 +102,19 @@ pub fn OrgsView(rows: Vec<OrgRow>, flash: Option<Flash>) -> Element {
         }
 
         p { class: "alt",
+            a { href: "/account/profile", "Profile" }
+            " · "
             a { href: "/account", "Linked accounts" }
             " · "
-            a { href: "/account/profile", "Profile" }
+            a { href: "/account/passkeys", "Passkeys" }
             " · "
             a { href: "/account/two-factor", "Two-factor" }
             " · "
             a { href: "/account/sessions", "Sessions" }
             " · "
             a { href: "/account/api-keys", "API keys" }
+            " · "
+            a { href: "/account/switch", "Accounts" }
             " · "
             a { href: "/orgs", "Organizations" }
         }

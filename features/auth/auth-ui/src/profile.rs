@@ -208,14 +208,20 @@ where
         let _ = state.auth.sign_out(architect_auth::SignOut { token }).await;
     }
     let cleared = state.cookie.session_cookie(String::new());
-    (
+    let mut response = (
         axum::http::StatusCode::SEE_OTHER,
         [
             (axum::http::header::SET_COOKIE, cleared.to_string()),
             (axum::http::header::LOCATION, "/login".to_owned()),
         ],
     )
-        .into_response()
+        .into_response();
+    // Drop it from the roster too, or the switcher keeps offering an
+    // account that is no longer signed in.
+    if let Some(token) = token_of(&headers, &state.cookie) {
+        crate::multi_session::forget(&mut response, &state.cookie, &headers, &token);
+    }
+    response
 }
 
 async fn current<S>(
@@ -333,15 +339,19 @@ fn ProfileView(
         }
 
         p { class: "alt",
+            a { href: "/account/profile", "Profile" }
+            " · "
             a { href: "/account", "Linked accounts" }
             " · "
-            a { href: "/account/profile", "Profile" }
+            a { href: "/account/passkeys", "Passkeys" }
             " · "
             a { href: "/account/two-factor", "Two-factor" }
             " · "
             a { href: "/account/sessions", "Sessions" }
             " · "
             a { href: "/account/api-keys", "API keys" }
+            " · "
+            a { href: "/account/switch", "Accounts" }
             " · "
             a { href: "/orgs", "Organizations" }
         }

@@ -167,6 +167,7 @@ where
         Ok(result) => match (result.session, result.token) {
             (Some(session), Some(token)) => signed_in(
                 &state.cookie,
+                &headers,
                 &AuthSessionBundle {
                     user: result.user,
                     session,
@@ -275,6 +276,7 @@ where
     {
         Ok(verified) => signed_in(
             &state.cookie,
+            &headers,
             &AuthSessionBundle {
                 user: verified.user,
                 session: verified.session,
@@ -313,7 +315,12 @@ fn back_to_code(email: &str, return_to: &str, message: &str) -> Response {
 ///
 /// 303 so the browser switches to GET: a refresh on the destination
 /// must not re-submit the code.
-fn signed_in(cookie: &AuthCookieConfig, bundle: &AuthSessionBundle, return_to: &str) -> Response {
+fn signed_in(
+    cookie: &AuthCookieConfig,
+    headers: &HeaderMap,
+    bundle: &AuthSessionBundle,
+    return_to: &str,
+) -> Response {
     let set_cookie = cookie.session_cookie(bundle.token.clone());
     // A passwordless sign-in is still subject to two-factor, and the
     // session it issues is inactive until that is given — the same
@@ -334,7 +341,7 @@ fn signed_in(cookie: &AuthCookieConfig, bundle: &AuthSessionBundle, return_to: &
         ],
     )
         .into_response();
-    remember_method(&mut response, &bundle.user);
+    remember_signed_in(&mut response, cookie, headers, bundle);
     response
 }
 
@@ -349,6 +356,22 @@ pub fn remember_method(response: &mut Response, user: &architect_auth::proto::Au
     {
         response.headers_mut().append(header::SET_COOKIE, value);
     }
+}
+
+/// Everything a successful sign-in should leave in the browser besides
+/// the session cookie: the method hint, and the account roster.
+///
+/// One function because these are the same moment, and a sign-in path
+/// that remembered one and forgot the other is the bug this prevents —
+/// an account that signed in but never appears on the switcher.
+pub fn remember_signed_in(
+    response: &mut Response,
+    cookie: &AuthCookieConfig,
+    headers: &axum::http::HeaderMap,
+    bundle: &AuthSessionBundle,
+) {
+    remember_method(response, &bundle.user);
+    crate::multi_session::remember(response, cookie, headers, &bundle.token);
 }
 
 fn expired(return_to: &str) -> Response {

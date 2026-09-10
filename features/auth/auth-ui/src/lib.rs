@@ -35,12 +35,15 @@
 //! the mailer and the social providers. This crate is what a person
 //! does *after* they are signed in.
 
+pub mod accounts;
 pub mod admin;
 pub mod api_keys;
 pub mod chrome;
+pub mod device;
 pub mod last_login;
 pub mod login;
 pub mod mailer;
+pub mod multi_session;
 pub mod orgs;
 pub mod page;
 pub mod passkey_script;
@@ -136,6 +139,21 @@ where
             get(profile::page::<S>).post(profile::save::<S>),
         )
         .route("/account/sign-out", post(profile::sign_out::<S>))
+        .route(
+            "/account/switch",
+            get(accounts::page::<S>).post(accounts::switch::<S>),
+        )
+        .route("/account/switch/leave", post(accounts::leave::<S>))
+        .route("/account/switch/leave-all", post(accounts::leave_all::<S>))
+        // ── A device that has no browser ──────────────────────────
+        // `/auth/device` is not a choice: the engine puts it in the
+        // `verification_uri` printed on the other device's screen.
+        .route(
+            "/auth/device",
+            get(device::page::<S>).post(device::look_up::<S>),
+        )
+        .route("/auth/device/approve", post(device::approve::<S>))
+        .route("/auth/device/deny", post(device::deny::<S>))
         // ── Ways in that are not a password ───────────────────────
         .route(
             "/login/code",

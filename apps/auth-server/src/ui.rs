@@ -610,7 +610,7 @@ where
     };
 
     match result {
-        Ok(bundle) => signed_in(&state.cookie, &bundle, &return_to),
+        Ok(bundle) => signed_in(&state.cookie, &headers, &bundle, &return_to),
         // Deliberately not distinguishing "no such account" from "wrong
         // password": the difference is an account-enumeration oracle,
         // and a person who mistyped either one does the same thing next.
@@ -676,7 +676,7 @@ where
                     .send_email_verification(&email, bundle.user.id, &token.token)
                     .await;
             }
-            signed_in(&state.cookie, &bundle, &return_to)
+            signed_in(&state.cookie, &headers, &bundle, &return_to)
         }
         Err(e) => rejected(Screen::SignUp, &return_to, &describe_sign_up_error(&e)),
     }
@@ -710,7 +710,12 @@ fn describe_sign_up_error(error: &impl std::fmt::Display) -> String {
 /// bounced again — two-factor accounts could not use the web UI at all.
 /// The cookie is still set (the challenge needs it to know whose
 /// session to activate); only the destination differs.
-fn signed_in(cookie: &AuthCookieConfig, bundle: &AuthSessionBundle, return_to: &str) -> Response {
+fn signed_in(
+    cookie: &AuthCookieConfig,
+    headers: &HeaderMap,
+    bundle: &AuthSessionBundle,
+    return_to: &str,
+) -> Response {
     let set_cookie = cookie.session_cookie(bundle.token.clone());
     let location = if bundle.session.active {
         return_to.to_owned()
@@ -728,9 +733,9 @@ fn signed_in(cookie: &AuthCookieConfig, bundle: &AuthSessionBundle, return_to: &
         ],
     )
         .into_response();
-    // Leaves the "you signed in this way" hint for the next visit to
-    // the sign-in page, which is the only place it is read.
-    auth_ui::login::remember_method(&mut response, &bundle.user);
+    // The hint for the next visit to the sign-in page, and the roster
+    // that puts this account on the switcher.
+    auth_ui::login::remember_signed_in(&mut response, cookie, headers, bundle);
     response
 }
 
