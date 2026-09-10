@@ -11,14 +11,20 @@ test.describe("organizations", () => {
   });
 
   test("a new organization gets a slug derived from its name", async ({ signedIn: page }) => {
+    // Unique per run: slugs are unique server-wide, and the config
+    // reuses an already-running server locally, so a fixed name here
+    // passes once and then collides forever.
+    const suffix = Math.random().toString(36).slice(2, 8);
+    const name = `Midnight Sessions, Inc. ${suffix}`;
     await page.goto("/orgs");
-    await page.getByLabel("Name").fill("Midnight Sessions, Inc.");
+    await page.getByLabel("Name").fill(name);
     // Slug left blank on purpose: being made to invent a URL fragment
     // before you can make a workspace is friction for nothing.
     await page.getByRole("button", { name: /create organization/i }).click();
 
-    await expect(page.getByRole("heading", { name: "Midnight Sessions, Inc." })).toBeVisible();
-    await expect(page.getByText("/midnight-sessions-inc")).toBeVisible();
+    await expect(page.getByRole("heading", { name })).toBeVisible();
+    // Punctuation collapses to single dashes and nothing trails.
+    await expect(page.getByText(`/midnight-sessions-inc-${suffix}`)).toBeVisible();
   });
 
   test("a member sees the roster but none of the levers", async ({ page }) => {

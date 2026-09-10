@@ -327,9 +327,17 @@ fn KeysView(rows: Vec<KeyRow>, minted: Option<String>, flash: Option<Flash>) -> 
         }
 
         p { class: "alt",
-            a { href: "/account/profile", "Your profile" }
+            a { href: "/account", "Linked accounts" }
+            " · "
+            a { href: "/account/profile", "Profile" }
             " · "
             a { href: "/account/two-factor", "Two-factor" }
+            " · "
+            a { href: "/account/sessions", "Sessions" }
+            " · "
+            a { href: "/account/api-keys", "API keys" }
+            " · "
+            a { href: "/orgs", "Organizations" }
         }
     }
 }

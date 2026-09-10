@@ -30,9 +30,14 @@ test.describe("profile", () => {
     await signIn(page, email);
   });
 
-  test("changing an address says to check the mail, not that it is done", async ({ signedIn: page }) => {
+  test("changing an address says to check the mail, not that it is done", async ({ page }) => {
+    // Its own account. With verification off this change applies
+    // immediately, so doing it to a shared account renames somebody
+    // every other test signs in as — which is exactly how this suite
+    // first went red, in whichever test happened to run after it.
+    const email = await signUpFresh(page);
     await page.goto("/account/profile");
-    await page.getByLabel("New address").fill("ada+moved@local.test");
+    await page.getByLabel("New address").fill(`moved-${email}`);
     await page.getByRole("button", { name: /change address/i }).click();
 
     // Claiming it took effect while it waits on verification is how
@@ -81,6 +86,87 @@ test.describe("signed out", () => {
       await page.goto(path);
       await expect(page).toHaveURL(/\/login\?return_to=/);
       expect(decodeURIComponent(page.url())).toContain(path);
+    }
+  });
+});
+
+test.describe("two-factor", () => {
+  test("enrolling shows a QR, a key and ten codes, and a wrong code does not switch it on", async ({
+    page,
+  }) => {
+    // Its own account: enrolling changes how this person signs in.
+    await signUpFresh(page);
+    await page.goto("/account/two-factor");
+    await expect(page.getByText(/Anyone with your password/)).toBeVisible();
+
+    await page.getByRole("button", { name: /set up two-factor/i }).click();
+    await expect(page.getByRole("img", { name: /scan/i })).toBeVisible();
+    const key = await page.getByLabel("Setup key").inputValue();
+    expect(key.length).toBeGreaterThan(20);
+    await expect(page.locator("ul.codes li")).toHaveCount(10);
+
+    await page.getByLabel("Code from your app").fill("000000");
+    await page.getByRole("button", { name: /turn on two-factor/i }).click();
+    await expect(page.getByRole("alert")).toBeVisible();
+    // Still off — a wrong code must not enable it.
+    await expect(page.getByText(/Anyone with your password/)).toBeVisible();
+  });
+
+  test("the page is reachable from every other account page", async ({ signedIn: page }) => {
+    for (const from of ["/account/profile", "/account/sessions", "/account/api-keys", "/orgs"]) {
+      await page.goto(from);
+      await expect(page.getByRole("link", { name: "Two-factor" })).toBeVisible();
+    }
+  });
+});
+
+test.describe("api keys", () => {
+  test("a key is shown once and then only by its prefix", async ({ signedIn: page }) => {
+    await page.goto("/account/api-keys");
+    await page.getByLabel("Name").fill("Playwright key");
+    await page.getByRole("button", { name: /create key/i }).click();
+
+    const key = await page.getByLabel("New API key").inputValue();
+    expect(key).toMatch(/^ak_/);
+
+    await page.goto("/account/api-keys");
+    await expect(page.getByText("Playwright key")).toBeVisible();
+    await expect(page.getByLabel("New API key")).toBeHidden();
+    await expect(page.getByText(key)).toBeHidden();
+  });
+
+  test("revoking marks the row and keeps it", async ({ page }) => {
+    await signUpFresh(page);
+    await page.goto("/account/api-keys");
+    await page.getByLabel("Name").fill("Leaked key");
+    await page.getByRole("button", { name: /create key/i }).click();
+
+    await page
+      .getByRole("row")
+      .filter({ hasText: "Leaked key" })
+      .getByRole("button", { name: "Revoke" })
+      .click();
+    await expect(page.getByRole("status")).toContainText(/revoked/i);
+    // The record survives the response to a leak.
+    await expect(page.getByRole("row").filter({ hasText: "Leaked key" })).toContainText("revoked");
+  });
+});
+
+test.describe("admin", () => {
+  test("a non-administrator is told no, and shown nobody", async ({ page }) => {
+    await signIn(page, PEOPLE.grace);
+    const response = await page.goto("/admin/users");
+    expect(response?.status()).toBe(403);
+    await expect(page.getByRole("heading", { name: /not allowed/i })).toBeVisible();
+    await expect(page.getByText(PEOPLE.alan)).toBeHidden();
+  });
+
+  test("an administrator sees every account", async ({ signedIn: page }) => {
+    // `signedIn` is ada, the seeded administrator.
+    await page.goto("/admin/users");
+    await expect(page.getByRole("heading", { name: "Users" })).toBeVisible();
+    for (const email of Object.values(PEOPLE)) {
+      await expect(page.getByText(email).first()).toBeVisible();
     }
   });
 });
