@@ -984,6 +984,7 @@ fn Page(
                 // shows no button rather than a dead one.
                 if screen == Screen::SignIn {
                     auth_ui::passkeys::SignInButton { return_to: return_to.clone() }
+                    auth_ui::wallet::SignInButton { return_to: return_to.clone() }
                 }
 
                 form { method: "post", action: screen.action(),

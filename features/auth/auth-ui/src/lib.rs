@@ -39,6 +39,7 @@ pub mod accounts;
 pub mod admin;
 pub mod api_keys;
 pub mod chrome;
+pub mod consent;
 pub mod device;
 pub mod guest;
 pub mod last_login;
@@ -55,6 +56,7 @@ pub mod qr;
 pub mod sessions;
 pub mod two_factor;
 pub mod views;
+pub mod wallet;
 
 use architect_auth::transport::AuthCookieConfig;
 use architect_auth::{ArchitectAuth, AuthStorage};
@@ -79,6 +81,9 @@ pub struct UiState<S> {
     /// mail. Must match what the engine was configured with, or a magic
     /// link callback is refused as untrusted.
     pub base_url: String,
+    /// The domain a wallet signature is bound to. Must match what the
+    /// engine was configured with, or every signature is refused.
+    pub siwe_domain: String,
     /// How a sign-in code or link reaches somebody. Logs them instead
     /// of sending, unless the host supplies a real sender.
     pub mailer: std::sync::Arc<dyn mailer::LoginMailer>,
@@ -98,6 +103,7 @@ impl<S> UiState<S> {
             mailer: mailer::log_only(),
             sms: mailer::log_only_sms(),
             base_url: "http://localhost:8080".to_owned(),
+            siwe_domain: "localhost".to_owned(),
         }
     }
 
@@ -105,6 +111,13 @@ impl<S> UiState<S> {
     #[must_use]
     pub fn base_url(mut self, base_url: impl Into<String>) -> Self {
         self.base_url = base_url.into();
+        self
+    }
+
+    /// The domain wallet signatures are bound to.
+    #[must_use]
+    pub fn siwe_domain(mut self, domain: impl Into<String>) -> Self {
+        self.siwe_domain = domain.into();
         self
     }
 
@@ -152,6 +165,7 @@ where
             get(profile::page::<S>).post(profile::save::<S>),
         )
         .route("/account/sign-out", post(profile::sign_out::<S>))
+        .route("/oauth2/consent", post(consent::decide::<S>))
         .route("/login/guest", post(guest::start::<S>))
         .route("/account/upgrade", post(guest::upgrade::<S>))
         .route(
@@ -220,6 +234,8 @@ where
             post(passkeys::complete_registration::<S>),
         )
         .route("/account/passkeys/delete", post(passkeys::delete::<S>))
+        .route("/login/wallet/begin", post(wallet::begin::<S>))
+        .route("/login/wallet/complete", post(wallet::complete::<S>))
         .route("/login/passkey/begin", post(passkeys::begin_sign_in::<S>))
         .route(
             "/login/passkey/complete",

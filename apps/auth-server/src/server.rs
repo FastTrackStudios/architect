@@ -138,6 +138,12 @@ pub fn build_engine<S>(config: &ServerConfig, storage: S) -> eyre::Result<Archit
         }
     }
 
+    // The engine checks the domain line of a signed message against
+    // this, and the UI composes that line from the same value. Two
+    // settings that must agree are two settings that will not, so both
+    // come from `base_url`.
+    builder = builder.siwe_domain(siwe_domain(config));
+
     if let Some(rp_id) = &config.passkey_rp_id {
         builder = builder
             .passkey_rp_id(rp_id.clone())
@@ -321,6 +327,7 @@ where
             auth_ui::UiState::new(auth, cookie)
                 .issuer("FastTrackStudio")
                 .base_url(config.base_url.clone())
+                .siwe_domain(siwe_domain(config))
                 .mailer(mail_for_ui)
                 .sms(sms.unwrap_or_else(auth_ui::mailer::log_only_sms)),
         ))
@@ -333,6 +340,23 @@ where
 /// `secure` follows the scheme: a `Secure` cookie is silently dropped
 /// over plain HTTP, which would make local development mysteriously
 /// fail to stay signed in.
+/// The host a wallet signature is bound to.
+///
+/// Derived from `base_url` rather than configured separately: it has to
+/// be the host a browser reports, and two settings that must agree are
+/// two settings that will not.
+fn siwe_domain(config: &ServerConfig) -> String {
+    config
+        .base_url
+        .split("://")
+        .nth(1)
+        .unwrap_or(&config.base_url)
+        .split('/')
+        .next()
+        .unwrap_or_default()
+        .to_owned()
+}
+
 #[must_use]
 pub fn cookie_config(config: &ServerConfig) -> AuthCookieConfig {
     AuthCookieConfig {

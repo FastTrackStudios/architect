@@ -439,17 +439,41 @@ where
         .auth
         .authorize_oidc(AuthorizeOidc {
             session_token,
-            client_id: params.client_id,
-            redirect_uri: params.redirect_uri,
-            response_type: params.response_type.unwrap_or_else(|| "code".into()),
-            scope: params.scope,
-            state: params.state,
-            nonce: params.nonce,
-            code_challenge: params.code_challenge,
-            code_challenge_method: params.code_challenge_method,
-            prompt: params.prompt,
+            client_id: params.client_id.clone(),
+            redirect_uri: params.redirect_uri.clone(),
+            response_type: params
+                .response_type
+                .clone()
+                .unwrap_or_else(|| "code".into()),
+            scope: params.scope.clone(),
+            state: params.state.clone(),
+            nonce: params.nonce.clone(),
+            code_challenge: params.code_challenge.clone(),
+            code_challenge_method: params.code_challenge_method.clone(),
+            prompt: params.prompt.clone(),
         })
-        .await?;
+        .await;
+
+    let authorization = match authorization {
+        Ok(authorization) => authorization,
+        // "Ask them." A client registered without `skip_consent` gets
+        // this, and until there was a consent screen it came out as an
+        // API error — so a client that *wanted* consent could not
+        // finish authorizing at all.
+        Err(AuthFlowError::VerificationRequired) => {
+            return Ok(auth_ui::consent::page(&auth_ui::consent::ConsentParams {
+                client_id: params.client_id,
+                redirect_uri: params.redirect_uri,
+                response_type: params.response_type,
+                scope: params.scope,
+                state: params.state,
+                nonce: params.nonce,
+                code_challenge: params.code_challenge,
+                code_challenge_method: params.code_challenge_method,
+            }));
+        }
+        Err(error) => return Err(ApiError::from(error)),
+    };
 
     // The engine already appended `code` and `state` to the registered
     // redirect_uri, so this is a plain 302 to a URI it validated.

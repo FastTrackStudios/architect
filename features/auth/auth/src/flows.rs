@@ -5971,7 +5971,8 @@ pub mod email_password {
                 .storage(MemoryStorage::default())
                 .build()
                 .expect("build auth");
-            let address = "0x1111111111111111111111111111111111111111";
+            let (wallet, address) = crate::flows::siwe::test_wallet(7);
+            let address = address.as_str();
             let nonce = auth
                 .create_siwe_nonce(CreateSiweNonce)
                 .await
@@ -5980,8 +5981,7 @@ pub mod email_password {
                 "auth.example.com\nAddress: {address}\nURI: https://auth.example.com\nVersion: 1\nChain ID: 1\nNonce: {}",
                 nonce.token
             );
-            let signature =
-                crate::flows::siwe::test_siwe_signature(&auth.config.secret, &message, address);
+            let signature = crate::flows::siwe::test_sign(&wallet, &message);
             let session = auth
                 .verify_siwe_message(VerifySiweMessage {
                     message: message.clone(),
@@ -6012,11 +6012,7 @@ pub mod email_password {
                 "auth.example.com\nAddress: {address}\nURI: https://auth.example.com\nVersion: 1\nChain ID: 1\nNonce: {}",
                 linked_nonce.token
             );
-            let linked_signature = crate::flows::siwe::test_siwe_signature(
-                &auth.config.secret,
-                &linked_message,
-                address,
-            );
+            let linked_signature = crate::flows::siwe::test_sign(&wallet, &linked_message);
             let linked = auth
                 .verify_siwe_message(VerifySiweMessage {
                     message: linked_message,
@@ -6036,11 +6032,8 @@ pub mod email_password {
                 "evil.example.com\nAddress: {address}\nURI: https://evil.example.com\nVersion: 1\nChain ID: 1\nNonce: {}",
                 wrong_domain_nonce.token
             );
-            let wrong_domain_signature = crate::flows::siwe::test_siwe_signature(
-                &auth.config.secret,
-                &wrong_domain_message,
-                address,
-            );
+            let wrong_domain_signature =
+                crate::flows::siwe::test_sign(&wallet, &wrong_domain_message);
             let wrong_domain = auth
                 .verify_siwe_message(VerifySiweMessage {
                     message: wrong_domain_message,
@@ -6082,7 +6075,8 @@ pub mod email_password {
                 })
                 .await
                 .expect("create password user");
-            let link_address = "0x2222222222222222222222222222222222222222";
+            let (link_wallet, link_address) = crate::flows::siwe::test_wallet(9);
+            let link_address = link_address.as_str();
             let link_nonce = auth
                 .create_siwe_nonce(CreateSiweNonce)
                 .await
@@ -6091,11 +6085,7 @@ pub mod email_password {
                 "auth.example.com\nAddress: {link_address}\nURI: https://auth.example.com\nVersion: 1\nChain ID: 1\nNonce: {}",
                 link_nonce.token
             );
-            let link_signature = crate::flows::siwe::test_siwe_signature(
-                &auth.config.secret,
-                &link_message,
-                link_address,
-            );
+            let link_signature = crate::flows::siwe::test_sign(&link_wallet, &link_message);
             auth.link_siwe_address(LinkSiweAddress {
                 session_token: password_user.token.clone(),
                 message: link_message,
@@ -6112,11 +6102,7 @@ pub mod email_password {
                 "auth.example.com\nAddress: {link_address}\nURI: https://auth.example.com\nVersion: 1\nChain ID: 1\nNonce: {}",
                 relogin_nonce.token
             );
-            let relogin_signature = crate::flows::siwe::test_siwe_signature(
-                &auth.config.secret,
-                &relogin_message,
-                link_address,
-            );
+            let relogin_signature = crate::flows::siwe::test_sign(&link_wallet, &relogin_message);
             let relogin = auth
                 .verify_siwe_message(VerifySiweMessage {
                     message: relogin_message,
@@ -7692,6 +7678,90 @@ pub mod email_password {
                 credential_json: serde_json::to_string(&credential).expect("serialise"),
             })
             .await
+        }
+
+        // r[verify auth.siwe.verify]
+        #[tokio::test]
+        async fn a_wallet_address_cannot_be_claimed_without_its_key() {
+            // The shape the old placeholder had: the address is read
+            // out of the message text, so if the signature is not
+            // actually checked against it, writing somebody else's
+            // address in is a complete impersonation.
+            let auth = ArchitectAuth::builder()
+                .secret("a-secret-at-least-32-bytes-long!!")
+                .siwe_domain("auth.example.com")
+                .storage(MemoryStorage::default())
+                .build()
+                .expect("build auth");
+            let (mallory_key, _) = crate::flows::siwe::test_wallet(3);
+            let (_, victim) = crate::flows::siwe::test_wallet(5);
+
+            let nonce = auth
+                .create_siwe_nonce(CreateSiweNonce)
+                .await
+                .expect("nonce");
+            // Mallory's key, the victim's address in the text.
+            let message = format!(
+                "auth.example.com\nAddress: {victim}\nURI: https://auth.example.com\nVersion: 1\nChain ID: 1\nNonce: {}",
+                nonce.token
+            );
+            let signature = crate::flows::siwe::test_sign(&mallory_key, &message);
+            let stolen = auth
+                .verify_siwe_message(VerifySiweMessage {
+                    message,
+                    signature,
+                    ip_address: None,
+                    user_agent: None,
+                })
+                .await;
+            assert!(
+                matches!(stolen, Err(AuthFlowError::InvalidCredentials)),
+                "signing with one key must not claim another address"
+            );
+        }
+
+        #[tokio::test]
+        async fn a_signature_that_is_not_one_is_refused_rather_than_panicking() {
+            let auth = ArchitectAuth::builder()
+                .secret("a-secret-at-least-32-bytes-long!!")
+                .siwe_domain("auth.example.com")
+                .storage(MemoryStorage::default())
+                .build()
+                .expect("build auth");
+            let (_, address) = crate::flows::siwe::test_wallet(11);
+            let nonce = auth
+                .create_siwe_nonce(CreateSiweNonce)
+                .await
+                .expect("nonce");
+            let message = format!(
+                "auth.example.com\nAddress: {address}\nURI: https://auth.example.com\nVersion: 1\nChain ID: 1\nNonce: {}",
+                nonce.token
+            );
+
+            // Everything a wallet might send when something went wrong,
+            // and everything an attacker sends on purpose.
+            for signature in [
+                "",
+                "0x",
+                "not hex at all",
+                "0xdeadbeef",
+                // Right length, wrong content.
+                &format!("0x{}", "11".repeat(65)),
+                // A valid-looking signature with an impossible `v`.
+                &format!("0x{}ff", "11".repeat(64)),
+                // The old placeholder's shape.
+                "test:whatever",
+            ] {
+                let refused = auth
+                    .verify_siwe_message(VerifySiweMessage {
+                        message: message.clone(),
+                        signature: signature.to_owned(),
+                        ip_address: None,
+                        user_agent: None,
+                    })
+                    .await;
+                assert!(refused.is_err(), "{signature:?} must not verify");
+            }
         }
 
         // r[verify auth.twofactor.signin-required]
@@ -11401,7 +11471,7 @@ pub mod siwe {
             if parsed.domain != self.config.siwe.domain {
                 return Err(AuthFlowError::PermissionDenied);
             }
-            verify_test_signature(&self.config.secret, message, &parsed.address, signature)?;
+            verify_siwe_signature(message, &parsed.address, signature)?;
             let identifier = siwe_nonce_identifier(&parsed.nonce);
             let value_hash = hash_token(&self.config.secret, &parsed.nonce);
             let verification = self
@@ -11417,25 +11487,128 @@ pub mod siwe {
         }
     }
 
-    #[must_use]
-    pub fn test_siwe_signature(secret: &str, message: &str, address: &str) -> String {
-        format!(
-            "test:{}",
-            hash_token(secret, &format!("{message}:{address}"))
-        )
-    }
-
-    fn verify_test_signature(
-        secret: &str,
+    /// Check that `signature` really is `address` signing `message`.
+    ///
+    /// # What this replaces
+    ///
+    /// A placeholder: signatures had to start with `test:` and be an
+    /// HMAC of the server's own secret. That was not exploitable — only
+    /// the server could compute one — but it meant no wallet on earth
+    /// could sign in, because a wallet produces an ECDSA signature and
+    /// not an HMAC of a secret it has never seen. The feature was a
+    /// stub with a working-looking test.
+    ///
+    /// # How it works
+    ///
+    /// A wallet's `personal_sign` does not sign the message directly.
+    /// It signs `keccak256("\x19Ethereum Signed Message:\n" || len ||
+    /// message)` — the EIP-191 prefix, which exists so that a signature
+    /// obtained by tricking somebody into signing a "login message" can
+    /// never also be a valid *transaction*. Getting that prefix wrong
+    /// is the classic way to build a signing oracle, so it is not
+    /// optional.
+    ///
+    /// The signature is 65 bytes: `r || s || v`. `v` names which of the
+    /// two possible public keys to recover, and Ethereum has spelled it
+    /// 27/28 since long before it also spelled it 0/1, so both are
+    /// accepted. The address is the last twenty bytes of the keccak of
+    /// the recovered key.
+    fn verify_siwe_signature(
         message: &str,
         address: &str,
         signature: &str,
     ) -> Result<(), AuthFlowError> {
-        if signature == test_siwe_signature(secret, message, address) {
+        use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
+        use sha3::{Digest as _, Keccak256};
+
+        let bytes = hex::decode(
+            signature
+                .trim()
+                .strip_prefix("0x")
+                .unwrap_or_else(|| signature.trim()),
+        )
+        .map_err(|_| AuthFlowError::InvalidCredentials)?;
+        let Some((v, rs)) = bytes.split_last() else {
+            return Err(AuthFlowError::InvalidCredentials);
+        };
+        if rs.len() != 64 {
+            return Err(AuthFlowError::InvalidCredentials);
+        }
+        // 27/28 is the original spelling and still what most wallets
+        // send; 0/1 is the raw recovery id. Anything else is not a
+        // signature this scheme produced.
+        let recovery = match v {
+            0 | 27 => 0,
+            1 | 28 => 1,
+            _ => return Err(AuthFlowError::InvalidCredentials),
+        };
+        let recovery_id =
+            RecoveryId::from_byte(recovery).ok_or(AuthFlowError::InvalidCredentials)?;
+        let signature = Signature::from_slice(rs).map_err(|_| AuthFlowError::InvalidCredentials)?;
+
+        let digest = Keccak256::new_with_prefix(eip191(message));
+        let key = VerifyingKey::recover_from_digest(digest, &signature, recovery_id)
+            .map_err(|_| AuthFlowError::InvalidCredentials)?;
+
+        // The uncompressed key is `04 || X || Y`; the address is the
+        // last twenty bytes of the keccak of `X || Y`.
+        let encoded = key.to_sec1_point(false);
+        let public = encoded
+            .as_bytes()
+            .get(1..)
+            .ok_or(AuthFlowError::InvalidCredentials)?;
+        let hashed = Keccak256::digest(public);
+        let recovered = hashed.get(12..).ok_or(AuthFlowError::InvalidCredentials)?;
+        let recovered = format!("0x{}", hex::encode(recovered));
+
+        // Constant-time is not the concern — the answer is public — but
+        // case is: an address is hex and wallets disagree about
+        // capitalisation.
+        if recovered.eq_ignore_ascii_case(address) {
             Ok(())
         } else {
             Err(AuthFlowError::InvalidCredentials)
         }
+    }
+
+    /// A wallet, for tests: a real secp256k1 key and its address.
+    ///
+    /// Real rather than a fixture, so these tests exercise the same
+    /// recovery a browser wallet's signature goes through. The previous
+    /// version signed with an HMAC of the server secret, which passed
+    /// while no wallet on earth could have.
+    #[cfg(test)]
+    pub(crate) fn test_wallet(seed: u8) -> (k256::ecdsa::SigningKey, String) {
+        use sha3::{Digest as _, Keccak256};
+
+        let key = k256::ecdsa::SigningKey::from_slice(&[seed.max(1); 32]).expect("a key");
+        let encoded = key.verifying_key().to_sec1_point(false);
+        let public = encoded.as_bytes().get(1..).expect("a public key");
+        let hashed = Keccak256::digest(public);
+        let address = format!("0x{}", hex::encode(hashed.get(12..).expect("an address")));
+        (key, address)
+    }
+
+    /// Sign a message the way `personal_sign` would.
+    #[cfg(test)]
+    pub(crate) fn test_sign(key: &k256::ecdsa::SigningKey, message: &str) -> String {
+        use k256::ecdsa::signature::hazmat::PrehashSigner;
+        use sha3::{Digest as _, Keccak256};
+
+        let digest: [u8; 32] = Keccak256::digest(eip191(message)).into();
+        let (signature, recovery): (k256::ecdsa::Signature, k256::ecdsa::RecoveryId) =
+            key.sign_prehash(&digest).expect("sign");
+        let mut bytes = signature.to_bytes().to_vec();
+        // 27 is the spelling wallets use.
+        bytes.push(recovery.to_byte().saturating_add(27));
+        format!("0x{}", hex::encode(bytes))
+    }
+
+    /// The bytes a wallet's `personal_sign` actually hashes.
+    fn eip191(message: &str) -> Vec<u8> {
+        let mut prefixed = format!("\x19Ethereum Signed Message:\n{}", message.len()).into_bytes();
+        prefixed.extend_from_slice(message.as_bytes());
+        prefixed
     }
 
     fn parse_siwe_message(message: &str) -> Result<ParsedSiweMessage, AuthFlowError> {

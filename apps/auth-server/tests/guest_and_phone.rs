@@ -340,3 +340,122 @@ async fn the_phone_page_needs_a_session() {
     assert!(sent.location.starts_with("/login?"), "{}", sent.location);
     assert!(texts.0.lock().unwrap().is_empty(), "nothing may be sent");
 }
+
+// ── Wallets ──────────────────────────────────────────────────────────
+
+/// Sign the way a wallet's `personal_sign` does.
+fn wallet_sign(key: &k256::ecdsa::SigningKey, message: &str) -> String {
+    use k256::ecdsa::signature::hazmat::PrehashSigner;
+    use sha3::{Digest as _, Keccak256};
+
+    let mut prefixed = format!("\x19Ethereum Signed Message:\n{}", message.len()).into_bytes();
+    prefixed.extend_from_slice(message.as_bytes());
+    let digest: [u8; 32] = Keccak256::digest(&prefixed).into();
+    let (signature, recovery): (k256::ecdsa::Signature, k256::ecdsa::RecoveryId) =
+        key.sign_prehash(&digest).unwrap();
+    let mut bytes = signature.to_bytes().to_vec();
+    bytes.push(recovery.to_byte() + 27);
+    format!("0x{}", hex::encode(bytes))
+}
+
+async fn post_json(
+    app: &axum::Router,
+    uri: &str,
+    body: serde_json::Value,
+) -> (StatusCode, serde_json::Value, Vec<String>) {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let cookies = response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .map(str::to_owned)
+        .collect();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+        cookies,
+    )
+}
+
+#[tokio::test]
+async fn a_wallet_signature_signs_you_in_over_http() {
+    let (app, _) = app().await;
+    let key = k256::ecdsa::SigningKey::from_slice(&[7u8; 32]).unwrap();
+
+    let (status, start, _) = post_json(&app, "/login/wallet/begin", serde_json::json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{start}");
+    let template = start["message"].as_str().expect("a message").to_owned();
+    // The server composes it, and its first line is the domain — which
+    // is what stops a signature collected elsewhere being replayed here.
+    assert!(template.starts_with("localhost"), "{template}");
+    assert!(template.contains("Nonce: "), "{template}");
+
+    // The browser fills the address in; the signature is checked
+    // against whatever ends up there.
+    let address = {
+        use sha3::{Digest as _, Keccak256};
+        let encoded = key.verifying_key().to_sec1_point(false);
+        let hashed = Keccak256::digest(&encoded.as_bytes()[1..]);
+        format!("0x{}", hex::encode(&hashed[12..]))
+    };
+    let message = template.replace("\nURI:", &format!("\nAddress: {address}\nURI:"));
+    let signature = wallet_sign(&key, &message);
+
+    let (status, done, cookies) = post_json(
+        &app,
+        "/login/wallet/complete",
+        serde_json::json!({ "message": message, "signature": signature, "return_to": "/orgs" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{done}");
+    assert_eq!(done["redirect"], "/orgs");
+    let session = session_of(&cookies);
+    assert!(!session.is_empty());
+
+    let orgs = get(&app, "/orgs", Some(&session)).await;
+    assert_eq!(orgs.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn a_signature_from_the_wrong_key_is_refused_over_http() {
+    let (app, _) = app().await;
+    let mallory = k256::ecdsa::SigningKey::from_slice(&[3u8; 32]).unwrap();
+    let victim = {
+        use sha3::{Digest as _, Keccak256};
+        let key = k256::ecdsa::SigningKey::from_slice(&[5u8; 32]).unwrap();
+        let encoded = key.verifying_key().to_sec1_point(false);
+        let hashed = Keccak256::digest(&encoded.as_bytes()[1..]);
+        format!("0x{}", hex::encode(&hashed[12..]))
+    };
+
+    let (_, start, _) = post_json(&app, "/login/wallet/begin", serde_json::json!({})).await;
+    let template = start["message"].as_str().unwrap().to_owned();
+    // The victim's address in the text, Mallory's key on the signature.
+    let message = template.replace("\nURI:", &format!("\nAddress: {victim}\nURI:"));
+    let signature = wallet_sign(&mallory, &message);
+
+    let (status, body, cookies) = post_json(
+        &app,
+        "/login/wallet/complete",
+        serde_json::json!({ "message": message, "signature": signature }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+    assert!(session_of(&cookies).is_empty(), "no session may be issued");
+}

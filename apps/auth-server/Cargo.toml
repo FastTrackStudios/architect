@@ -50,6 +50,9 @@ tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+hex.workspace = true
+k256.workspace = true
+sha3.workspace = true
 url = "2"
 webauthn-authenticator-rs = { version = "0.5", features = ["softpasskey"] }
 totp-rs.workspace = true

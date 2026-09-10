@@ -207,6 +207,12 @@ percent-encoding = "2"
 # QR rendering for the two-factor enrolment page. Pure Rust, no image
 # crate: the page draws SVG, so nothing is rasterised or base64-inlined.
 qrcodegen = "1"
+# Sign-In With Ethereum. `k256` recovers the signing key from a
+# signature; `sha3` is keccak-256, which is what Ethereum hashes with
+# (and is NOT the SHA-3 of the same name — the padding differs).
+k256 = { version = "0.14", features = ["ecdsa"] }
+sha3 = "0.12"
+hex = "0.4"
 serde_json = "1.0"
 toml = "0.8"
 thiserror = "2.0"

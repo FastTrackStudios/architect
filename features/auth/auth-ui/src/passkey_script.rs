@@ -3,9 +3,10 @@
 //! `navigator.credentials` is the whole of `WebAuthn` and there is no
 //! form post that reaches it — a passkey is created and used by the
 //! browser's own credential store, not by anything a server can render.
-//! So this is a genuine exception to the rest of these pages, and it is
-//! kept to exactly that: the script adds passkey buttons and does
-//! nothing else.
+//! The same is true of `window.ethereum`: a wallet signature comes from
+//! an extension, not from a form. So this is a genuine exception to the
+//! rest of these pages, and it is kept to exactly that: the script adds
+//! passkey and wallet buttons and does nothing else.
 //!
 //! # Progressive enhancement, not a dependency
 //!
@@ -27,7 +28,7 @@
 //! is uneven enough that hand-rolling thirty lines is the smaller risk.
 
 /// The script, inlined into any page with passkey controls.
-pub const PASSKEY_SCRIPT: &str = r"
+pub const PASSKEY_SCRIPT: &str = r#"
 (function () {
   if (!window.PublicKeyCredential || !navigator.credentials) return;
 
@@ -167,12 +168,60 @@ pub const PASSKEY_SCRIPT: &str = r"
       });
   };
 
+  var wallet = function (button) {
+    if (!window.ethereum) {
+      say('passkey-status', 'No wallet was found in this browser.', true);
+      return;
+    }
+    button.disabled = true;
+    var returnTo = button.getAttribute('data-return-to') || '/';
+    window.ethereum
+      .request({ method: 'eth_requestAccounts' })
+      .then(function (accounts) {
+        var address = accounts && accounts[0];
+        if (!address) throw new Error('No account was shared.');
+        return post('/login/wallet/begin', {}).then(function (start) {
+          // The message is built by the SERVER and signed as-is. A
+          // message assembled here could be edited before signing, and
+          // the domain line is what stops a signature obtained on one
+          // site being replayed on another.
+          return window.ethereum
+            .request({ method: 'personal_sign', params: [start.message, address] })
+            .then(function (signature) {
+              return post('/login/wallet/complete', {
+                message: start.message,
+                signature: signature,
+                return_to: returnTo
+              });
+            });
+        });
+      })
+      .then(function (done) { window.location.assign(done.redirect || '/'); })
+      .catch(function (error) {
+        button.disabled = false;
+        // 4001 is the wallet's code for "the person said no".
+        if (error && (error.code === 4001 || error.name === 'NotAllowedError')) {
+          say('passkey-status', 'No wallet was used.', false);
+        } else {
+          say('passkey-status', error.message || 'Could not sign in with a wallet.', true);
+        }
+      });
+  };
+
   document.addEventListener('DOMContentLoaded', function () {
     reveal();
+    var connect = document.getElementById('wallet-signin');
+    if (connect) {
+      // Only offered where a wallet actually exists.
+      if (window.ethereum) {
+        connect.parentNode.hidden = false;
+        connect.addEventListener('click', function () { wallet(connect); });
+      }
+    }
     var add = document.getElementById('passkey-register');
     if (add) add.addEventListener('click', function () { register(add); });
     var use = document.getElementById('passkey-signin');
     if (use) use.addEventListener('click', function () { signIn(use); });
   });
 })();
-";
+"#;
