@@ -3918,6 +3918,125 @@ pub mod email_password {
                 .expect("build auth")
         }
 
+        /// A deployment-defined scope (`forge:github`) is refused unless the
+        /// builder registers it, and once registered it is advertised in
+        /// discovery, accepted at authorize, and carried into the access
+        /// token's `scope` claim — which is what a relying party checks
+        /// before handing out a linked provider token.
+        #[tokio::test]
+        async fn extra_oidc_scopes_are_advertised_granted_and_carried_in_the_access_token() {
+            let client = OidcClientConfig {
+                client_id: "task".into(),
+                client_secret: None,
+                name: "Task".into(),
+                redirect_uris: vec!["https://task.example.com/callback".into()],
+                scopes: vec!["openid".into(), "email".into(), "forge:github".into()],
+                public_client: true,
+                skip_consent: true,
+                disabled: false,
+            };
+            let without = ArchitectAuth::builder()
+                .secret("a-secret-at-least-32-bytes-long!!")
+                .base_url("https://auth.example.com")
+                .oidc_client(client.clone())
+                .storage(MemoryStorage::default())
+                .build()
+                .expect("build auth");
+            let with = ArchitectAuth::builder()
+                .secret("a-secret-at-least-32-bytes-long!!")
+                .base_url("https://auth.example.com")
+                .oidc_client(client)
+                .oidc_extra_scope("forge:github")
+                .oidc_extra_scope("forge:github")
+                .storage(MemoryStorage::default())
+                .build()
+                .expect("build auth");
+
+            assert!(
+                !without
+                    .oidc_discovery()
+                    .scopes_supported
+                    .contains(&"forge:github".to_string())
+            );
+            let advertised = with.oidc_discovery().scopes_supported;
+            assert_eq!(
+                advertised
+                    .iter()
+                    .filter(|scope| scope.as_str() == "forge:github")
+                    .count(),
+                1,
+                "registered once, listed once: {advertised:?}"
+            );
+
+            let verifier = "correct-horse-battery-staple-verifier";
+            let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .encode(sha2::Sha256::digest(verifier.as_bytes()));
+            let authorize = |token: String| AuthorizeOidc {
+                session_token: token,
+                client_id: "task".into(),
+                redirect_uri: "https://task.example.com/callback".into(),
+                response_type: "code".into(),
+                scope: Some("openid email forge:github".into()),
+                state: None,
+                nonce: None,
+                code_challenge: Some(challenge.clone()),
+                code_challenge_method: Some("S256".into()),
+                prompt: None,
+            };
+            let sign_up = |email: &str| CreateEmailPasswordUser {
+                email: email.into(),
+                password: "correct horse battery staple".into(),
+                name: None,
+                username: None,
+                image: None,
+                metadata_json: None,
+                ip_address: None,
+                user_agent: None,
+            };
+
+            let bundle = without
+                .create_email_password_user(sign_up("a@example.com"))
+                .await
+                .expect("create user");
+            let refused = without.authorize_oidc(authorize(bundle.token)).await;
+            assert!(
+                matches!(refused, Err(AuthFlowError::InvalidInput(ref m)) if m.contains("forge:github")),
+                "unregistered scope must be refused, got {refused:?}"
+            );
+
+            let bundle = with
+                .create_email_password_user(sign_up("b@example.com"))
+                .await
+                .expect("create user");
+            let authorization = with
+                .authorize_oidc(authorize(bundle.token))
+                .await
+                .expect("authorize with the extra scope");
+            assert!(authorization.scope.split(' ').any(|s| s == "forge:github"));
+            let tokens = with
+                .exchange_oidc_token(ExchangeOidcToken {
+                    grant_type: "authorization_code".into(),
+                    code: Some(authorization.code),
+                    redirect_uri: Some("https://task.example.com/callback".into()),
+                    client_id: "task".into(),
+                    client_secret: None,
+                    code_verifier: Some(verifier.into()),
+                    refresh_token: None,
+                })
+                .await
+                .expect("exchange");
+            let claims = with
+                .verify_jwt(VerifyJwt {
+                    token: tokens.access_token,
+                    audience: None,
+                })
+                .await
+                .expect("verify access token")
+                .claims;
+            let scope = claims.extra.as_ref().and_then(|e| e.get("scope")).cloned();
+            assert_eq!(scope, Some(serde_json::json!("openid email forge:github")));
+        }
+
         fn auth_with_oauth_proxy() -> ArchitectAuth<MemoryStorage> {
             ArchitectAuth::builder()
                 .secret("a-secret-at-least-32-bytes-long!!")
@@ -6062,6 +6181,129 @@ pub mod email_password {
 
             let key_set = auth.jwt_key_set();
             assert_eq!(key_set.keys.len(), 1);
+        }
+
+        // r[verify auth.oidc.pkce]
+        //
+        // PKCE is required of PUBLIC clients and optional for
+        // confidential ones. The public half is the security property and
+        // must never regress; the confidential half exists because
+        // correct server-side clients that predate PKCE — Discourse's
+        // oauth2-basic among them — are otherwise locked out at
+        // /oauth2/authorize before a login page is ever drawn.
+        #[tokio::test]
+        async fn oidc_pkce_is_required_of_public_clients_and_optional_for_confidential_ones() {
+            let auth = ArchitectAuth::builder()
+                .secret("a-secret-at-least-32-bytes-long!!")
+                .base_url("https://auth.example.com")
+                .jwt_issuer("https://auth.example.com")
+                .jwt_audience("architect-auth")
+                .oidc_issuer("https://auth.example.com")
+                .oidc_client(OidcClientConfig {
+                    client_id: "forum".into(),
+                    client_secret: Some("forum-secret".into()),
+                    name: "Forum".into(),
+                    redirect_uris: vec!["https://forum.example.com/callback".into()],
+                    scopes: vec!["openid".into(), "profile".into(), "email".into()],
+                    public_client: false,
+                    skip_consent: true,
+                    disabled: false,
+                })
+                .oidc_client(OidcClientConfig {
+                    client_id: "native".into(),
+                    client_secret: None,
+                    name: "Native".into(),
+                    redirect_uris: vec!["https://native.example.com/callback".into()],
+                    scopes: vec!["openid".into(), "profile".into(), "email".into()],
+                    public_client: true,
+                    skip_consent: true,
+                    disabled: false,
+                })
+                .storage(MemoryStorage::default())
+                .build()
+                .expect("build auth");
+
+            let bundle = auth
+                .create_email_password_user(CreateEmailPasswordUser {
+                    email: "pkce@example.com".into(),
+                    password: "correct horse battery staple".into(),
+                    name: Some("PKCE User".into()),
+                    username: None,
+                    image: None,
+                    metadata_json: None,
+                    ip_address: None,
+                    user_agent: None,
+                })
+                .await
+                .expect("create user");
+
+            let authorize = |client_id: &'static str, redirect_uri: &'static str| {
+                let session_token = bundle.token.clone();
+                auth.authorize_oidc(AuthorizeOidc {
+                    session_token,
+                    client_id: client_id.into(),
+                    redirect_uri: redirect_uri.into(),
+                    response_type: "code".into(),
+                    scope: Some("openid email".into()),
+                    state: None,
+                    nonce: None,
+                    code_challenge: None,
+                    code_challenge_method: None,
+                    prompt: None,
+                })
+            };
+
+            // Public client, no code_challenge: refused.
+            assert!(matches!(
+                authorize("native", "https://native.example.com/callback").await,
+                Err(AuthFlowError::InvalidInput(_))
+            ));
+
+            // Confidential client, no code_challenge: allowed, and the
+            // secret is still what redeems the code.
+            let authorization = authorize("forum", "https://forum.example.com/callback")
+                .await
+                .expect("authorize confidential client without pkce");
+
+            let wrong_secret = auth
+                .exchange_oidc_token(ExchangeOidcToken {
+                    grant_type: "authorization_code".into(),
+                    code: Some(authorization.code.clone()),
+                    redirect_uri: Some("https://forum.example.com/callback".into()),
+                    client_id: "forum".into(),
+                    client_secret: Some("not-the-secret".into()),
+                    code_verifier: None,
+                    refresh_token: None,
+                })
+                .await;
+            assert!(matches!(
+                wrong_secret,
+                Err(AuthFlowError::InvalidCredentials)
+            ));
+
+            let tokens = auth
+                .exchange_oidc_token(ExchangeOidcToken {
+                    grant_type: "authorization_code".into(),
+                    code: Some(authorization.code),
+                    redirect_uri: Some("https://forum.example.com/callback".into()),
+                    client_id: "forum".into(),
+                    client_secret: Some("forum-secret".into()),
+                    code_verifier: None,
+                    refresh_token: None,
+                })
+                .await
+                .expect("exchange code without pkce");
+
+            // The forum reads identity from /oauth2/userinfo, not from the
+            // id_token — so that is what has to work.
+            let user_info = auth
+                .get_oidc_user_info(GetOidcUserInfo {
+                    access_token: tokens.access_token,
+                })
+                .await
+                .expect("userinfo");
+            assert_eq!(user_info.sub, bundle.user.id.to_string());
+            assert_eq!(user_info.email.as_deref(), Some("pkce@example.com"));
         }
 
         // r[verify auth.oauth-proxy.metadata]
@@ -10485,6 +10727,7 @@ pub mod oidc_provider {
                 scopes_supported: SUPPORTED_SCOPES
                     .iter()
                     .map(|scope| (*scope).into())
+                    .chain(self.config.oidc.extra_scopes.iter().cloned())
                     .collect(),
                 response_types_supported: vec!["code".into()],
                 grant_types_supported: vec!["authorization_code".into(), "refresh_token".into()],
@@ -10539,7 +10782,7 @@ pub mod oidc_provider {
                 },
                 client_name: input.client_name.unwrap_or_else(|| "OIDC client".into()),
                 redirect_uris: input.redirect_uris,
-                scope: normalize_scope(input.scope.as_deref())?,
+                scope: normalize_scope(input.scope.as_deref(), &self.config.oidc.extra_scopes)?,
                 token_endpoint_auth_method: input
                     .token_endpoint_auth_method
                     .unwrap_or_else(|| "client_secret_post".into()),
@@ -10575,9 +10818,26 @@ pub mod oidc_provider {
                     "redirect_uri is not registered".into(),
                 ));
             }
-            let scope = normalize_scope(input.scope.as_deref())?;
+            let scope = normalize_scope(input.scope.as_deref(), &self.config.oidc.extra_scopes)?;
             ensure_client_scopes(client, &scope)?;
-            if self.config.oidc.require_pkce && input.code_challenge.is_none() {
+            // PKCE is mandatory for PUBLIC clients and optional for
+            // confidential ones. A public client ships its whole
+            // configuration to the user's device, so the authorization
+            // code is the only thing standing between an attacker who
+            // can intercept the redirect and a session — PKCE is what
+            // binds the code to the requester. A confidential client
+            // proves itself at the token endpoint with a secret the
+            // attacker does not have, which is the same protection by
+            // other means; RFC 9700 recommends PKCE there too, but
+            // requiring it locks out correct, widely-deployed
+            // server-side clients that never implemented it.
+            //
+            // `require_pkce` therefore still governs, but only where it
+            // is load-bearing. Never relax this for public clients.
+            if self.config.oidc.require_pkce
+                && client.public_client
+                && input.code_challenge.is_none()
+            {
                 return Err(AuthFlowError::InvalidInput("pkce is required".into()));
             }
             if input.code_challenge.is_some()
@@ -10806,11 +11066,11 @@ pub mod oidc_provider {
         }
     }
 
-    fn normalize_scope(scope: Option<&str>) -> Result<String, AuthFlowError> {
+    fn normalize_scope(scope: Option<&str>, extra: &[String]) -> Result<String, AuthFlowError> {
         let scopes = scope.unwrap_or("openid");
         let mut normalized = Vec::new();
         for scope in scopes.split_whitespace() {
-            if !SUPPORTED_SCOPES.contains(&scope) {
+            if !SUPPORTED_SCOPES.contains(&scope) && !extra.iter().any(|e| e == scope) {
                 return Err(AuthFlowError::InvalidInput(format!(
                     "unsupported scope: {scope}"
                 )));

@@ -36,6 +36,16 @@
 //! // Logout: drop the file.
 //! store.clear()?;
 //! ```
+//!
+//! # Signing in through the issuer
+//!
+//! [`oidc`] carries the redirect flow every FastTrackStudio app shares:
+//! PKCE, the two request shapes, and the two response shapes. It does no
+//! HTTP and touches no browser, which is what keeps this crate as small
+//! and wasm-clean as the note above promises — an app supplies entropy
+//! and sends the requests itself.
+
+pub mod oidc;
 
 use std::sync::{Arc, Mutex};
 
@@ -110,6 +120,12 @@ pub enum TokenStoreError {
     Io(#[from] std::io::Error),
     #[error("session store encoding: {0}")]
     Encoding(#[from] serde_json::Error),
+    /// A store whose backend is not a filesystem — browser
+    /// `localStorage`, a keychain, a platform secret service — failed.
+    /// Those report opaque errors that do not map onto [`std::io`], so
+    /// they arrive as a message.
+    #[error("session store backend: {0}")]
+    Backend(String),
 }
 
 /// Save / load / clear of one session.

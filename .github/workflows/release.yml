@@ -12,7 +12,9 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    # The repo's own self-hosted runner on THEBATTLESHIP. Only git and the
+    # node-based release action are needed here.
+    runs-on: [self-hosted, architect]
     steps:
       - uses: actions/checkout@v4
         with:

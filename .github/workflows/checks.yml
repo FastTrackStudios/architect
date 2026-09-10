@@ -15,46 +15,76 @@ env:
   RUSTFLAGS: -D warnings
 
 jobs:
+  # architect's own self-hosted runner (label `architect`, THEBATTLESHIP):
+  # a warm, persistent target dir instead of a cold ubuntu-latest build
+  # every push. The toolchain and native libraries come from Task's CI
+  # dev shell — the same 1.94.0 pin rust-toolchain.toml names, with the
+  # gtk/webkit/alsa/udev headers the desktop crates link against and the
+  # wasm32 target — so this repo carries no flake of its own.
   check:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, architect]
+    timeout-minutes: 60
+    env:
+      NIX_DEV: nix develop --accept-flake-config github:FastTrackStudios/task#ci -c
     steps:
       - uses: actions/checkout@v4
-
-      # System headers the UI and storage crates link against.
-      - name: apt deps
+      - name: Persistent target dir
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev \
-            libasound2-dev libudev-dev pkg-config \
-            libdbus-1-dev libxdo-dev libayatana-appindicator3-dev
-        # The last three are only needed by `--all-features`, which turns
-        # on `dioxus/desktop` (tao + wry) in `architect-atom`. No feature
-        # combination the fleet actually ships pulls them.
-
-      # rust-toolchain.toml drives the version; this action honours it.
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+          dir="${CI_CACHE_DIR:-$HOME/cargo-target}/architect"
+          mkdir -p "$dir"
+          echo "CARGO_TARGET_DIR=$dir" >> "$GITHUB_ENV"
+          echo "target dir: $dir ($(du -sh "$dir" 2>/dev/null | cut -f1))"
 
       - name: fmt
-        run: cargo fmt --all -- --check
+        run: ${NIX_DEV} cargo fmt --all -- --check
 
       - name: check
-        run: cargo check --workspace --all-targets --all-features
+        run: ${NIX_DEV} cargo check --workspace --all-targets
 
-      # `--all-features`: the fleet compiles architect under a dozen
-      # different feature combinations, and the lint gate is only honest
-      # if it sees all of the code they do. The deny levels live in
-      # `[workspace.lints.clippy]`; `clippy.toml` exempts tests.
       - name: clippy
-        run: cargo clippy --workspace --all-targets --all-features
+        if: ${{ !cancelled() }}
+        run: ${NIX_DEV} cargo clippy --workspace --all-targets
 
       - name: test
-        run: cargo test --workspace --all-features
+        if: ${{ !cancelled() }}
+        run: ${NIX_DEV} cargo test --workspace
+
+      # The framework half must stay wasm-clean; the ui/story crates pull
+      # native rendering (blitz/vello) and are checked natively only.
+      - name: check wasm
+        if: ${{ !cancelled() }}
+        run: |
+          ${NIX_DEV} cargo check --target wasm32-unknown-unknown \
+            -p architect -p architect-atom -p architect-form \
+            -p architect-permissions -p architect-permissions-proto \
+            -p auth-proto -p auth-client -p crdt
+          # auth-http is what a browser app signs in through (Keyflow does),
+          # so its wasm build is load-bearing — with the `browser` feature,
+          # which is the localStorage token store a web app actually uses.
+          ${NIX_DEV} cargo check --target wasm32-unknown-unknown \
+            -p auth-http --features auth-http/browser
+
+      # The lint config denies the panic-shaped lints, so a `--all-features`
+      # build would be the stricter gate. It is not run here: turning on
+      # every feature pulls `dioxus/desktop` (tao + wry) into
+      # `architect-atom`, which needs dbus, xdo and appindicator headers
+      # that Task's CI shell does not carry — and no feature combination
+      # the fleet ships pulls them either. `scratchpad/gate.sh` runs it
+      # locally against a shell that does.
+
+      # Cargo never collects stale artifacts; bound the persistent dir.
+      - name: Bound the target dir
+        if: ${{ always() }}
+        run: |
+          rm -rf "${CARGO_TARGET_DIR}/debug/incremental"
+          ${NIX_DEV} cargo sweep --maxsize 60GB || true
+          du -sh "${CARGO_TARGET_DIR}" || true
 
   # Release tags are the only thing consuming repos can reason about, and
-  # the only useful question they ask is "am I ahead or behind?" — which
-  # has an answer only while the numbering matches history.
+  # the only useful question they ask is "am I ahead of or behind that
+  # other repo?" — which has an answer only while the numbering matches
+  # what the graph says. `v0.0.2` already names a commit sitting between
+  # v0.5.0 and v0.6.0; this stops the next one.
   tags:
     runs-on: ubuntu-latest
     steps:
@@ -66,21 +96,3 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: tag ordering
         run: cargo run -p xtask -- tags --verbose
-
-  wasm:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
-
-      # The framework half must stay wasm-clean; the ui/story crates pull
-      # native rendering (blitz/vello) and are checked natively only.
-      - name: check wasm
-        run: |
-          cargo check --target wasm32-unknown-unknown \
-            -p architect -p architect-atom -p architect-form \
-            -p architect-permissions -p architect-permissions-proto \
-            -p auth-proto -p crdt
