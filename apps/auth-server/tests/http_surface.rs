@@ -5,6 +5,21 @@
 //! extraction, cookie shaping and error mapping together — the parts a
 //! compile check cannot vouch for.
 
+// This is an integration-test crate. `clippy.toml`'s
+// `allow-*-in-tests` only reaches `#[test]` fns and `#[cfg(test)]`
+// modules, so the fixture and helper code below — where an `unwrap()`
+// IS the assertion — still trips the panic lints. Allow them
+// crate-wide here rather than dotting the file with attributes.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::panic
+)]
+
 use architect_auth::db::{AuthSeaOrmStorage, Migrator};
 use auth_server::{ServerConfig, server};
 use axum::body::Body;
@@ -51,7 +66,7 @@ async fn app_with(mutate: impl FnOnce(&mut ServerConfig)) -> axum::Router {
     let mut config = test_config();
     mutate(&mut config);
     let auth = server::build_engine(&config, AuthSeaOrmStorage::new(db)).expect("build engine");
-    server::app_router(&config, auth)
+    server::app_router(&config, auth).expect("router builds with no social providers")
 }
 
 async fn app() -> axum::Router {
@@ -61,7 +76,7 @@ async fn app() -> axum::Router {
     Migrator::up(&db, None).await.expect("migrate");
     let config = test_config();
     let auth = server::build_engine(&config, AuthSeaOrmStorage::new(db)).expect("build engine");
-    server::app_router(&config, auth)
+    server::app_router(&config, auth).expect("router builds with no social providers")
 }
 
 async fn json_body(response: axum::response::Response) -> serde_json::Value {

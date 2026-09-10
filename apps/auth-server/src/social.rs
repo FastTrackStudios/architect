@@ -34,14 +34,14 @@ pub enum Provider {
     GitHub,
     Google,
     /// The NAM capture library. Unlike the other two this is not a way to
-    /// sign in — nobody has a FastTrackStudio account *because* they have a
+    /// sign in — nobody has a `FastTrackStudio` account *because* they have a
     /// TONE3000 one — it is only ever linked to an account that exists, so
     /// the apps can browse and download captures as that person.
     Tone3000,
 }
 
 impl Provider {
-    pub const ALL: [Provider; 3] = [Provider::GitHub, Provider::Google, Provider::Tone3000];
+    pub const ALL: [Self; 3] = [Self::GitHub, Self::Google, Self::Tone3000];
 
     /// Whether this provider can create or resume a session.
     ///
@@ -49,8 +49,9 @@ impl Provider {
     /// identity provider is a different thing from a service you hold a
     /// token for. Letting it sign people in would mint accounts with no way
     /// to recover them.
-    pub fn can_sign_in(self) -> bool {
-        !matches!(self, Provider::Tone3000)
+    #[must_use]
+    pub const fn can_sign_in(self) -> bool {
+        !matches!(self, Self::Tone3000)
     }
 
     /// Whether the flow must carry PKCE.
@@ -58,26 +59,29 @@ impl Provider {
     /// TONE3000 requires `code_challenge` on the authorization request and
     /// the matching `code_verifier` at the token endpoint; GitHub and Google
     /// are confidential clients here and authenticate with their secret.
-    pub fn uses_pkce(self) -> bool {
-        matches!(self, Provider::Tone3000)
+    #[must_use]
+    pub const fn uses_pkce(self) -> bool {
+        matches!(self, Self::Tone3000)
     }
 
     /// The id used in paths, in `provider_id` on stored accounts, and in
     /// the engine's built-in provider table.
-    pub fn id(self) -> &'static str {
+    #[must_use]
+    pub const fn id(self) -> &'static str {
         match self {
-            Provider::GitHub => "github",
-            Provider::Google => "google",
-            Provider::Tone3000 => "tone3000",
+            Self::GitHub => "github",
+            Self::Google => "google",
+            Self::Tone3000 => "tone3000",
         }
     }
 
     /// Human name for buttons and labels.
-    pub fn display_name(self) -> &'static str {
+    #[must_use]
+    pub const fn display_name(self) -> &'static str {
         match self {
-            Provider::GitHub => "GitHub",
-            Provider::Google => "Google",
-            Provider::Tone3000 => "TONE3000",
+            Self::GitHub => "GitHub",
+            Self::Google => "Google",
+            Self::Tone3000 => "TONE3000",
         }
     }
 
@@ -86,39 +90,44 @@ impl Provider {
     ///
     /// One scope per provider, so a client granted the right to act as
     /// someone on TONE3000 does not thereby get their GitHub token.
-    pub fn linked_token_scope(self) -> &'static str {
+    #[must_use]
+    pub const fn linked_token_scope(self) -> &'static str {
         match self {
-            Provider::GitHub => "forge:github",
-            Provider::Google => "forge:google",
-            Provider::Tone3000 => "tone3000",
+            Self::GitHub => "forge:github",
+            Self::Google => "forge:google",
+            Self::Tone3000 => "tone3000",
         }
     }
 
+    #[must_use]
     pub fn parse(id: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|p| p.id() == id)
     }
 
-    pub fn authorize_endpoint(self) -> &'static str {
+    #[must_use]
+    pub const fn authorize_endpoint(self) -> &'static str {
         match self {
-            Provider::GitHub => "https://github.com/login/oauth/authorize",
-            Provider::Google => "https://accounts.google.com/o/oauth2/v2/auth",
-            Provider::Tone3000 => "https://www.tone3000.com/api/v1/oauth/authorize",
+            Self::GitHub => "https://github.com/login/oauth/authorize",
+            Self::Google => "https://accounts.google.com/o/oauth2/v2/auth",
+            Self::Tone3000 => "https://www.tone3000.com/api/v1/oauth/authorize",
         }
     }
 
-    pub fn token_endpoint(self) -> &'static str {
+    #[must_use]
+    pub const fn token_endpoint(self) -> &'static str {
         match self {
-            Provider::GitHub => "https://github.com/login/oauth/access_token",
-            Provider::Google => "https://oauth2.googleapis.com/token",
-            Provider::Tone3000 => "https://www.tone3000.com/api/v1/oauth/token",
+            Self::GitHub => "https://github.com/login/oauth/access_token",
+            Self::Google => "https://oauth2.googleapis.com/token",
+            Self::Tone3000 => "https://www.tone3000.com/api/v1/oauth/token",
         }
     }
 
-    pub fn userinfo_endpoint(self) -> &'static str {
+    #[must_use]
+    pub const fn userinfo_endpoint(self) -> &'static str {
         match self {
-            Provider::GitHub => "https://api.github.com/user",
-            Provider::Google => "https://openidconnect.googleapis.com/v1/userinfo",
-            Provider::Tone3000 => "https://www.tone3000.com/api/v1/user",
+            Self::GitHub => "https://api.github.com/user",
+            Self::Google => "https://openidconnect.googleapis.com/v1/userinfo",
+            Self::Tone3000 => "https://www.tone3000.com/api/v1/user",
         }
     }
 
@@ -129,6 +138,7 @@ impl Provider {
     /// and asking for one on plain sign-in adds a consent step for
     /// nothing. `prompt=select_account` so someone with several Google
     /// accounts is not silently signed in with whichever is active.
+    #[must_use]
     pub fn authorize_url(
         self,
         config: &SocialProviderConfig,
@@ -152,7 +162,7 @@ impl Provider {
             params.push(("code_challenge", challenge.to_owned()));
             params.push(("code_challenge_method", "S256".to_owned()));
         }
-        if self == Provider::Google {
+        if self == Self::Google {
             params.push(("prompt", "select_account".to_owned()));
             if mode == Mode::Link {
                 params.push(("access_type", "offline".to_owned()));
@@ -174,10 +184,11 @@ pub enum Mode {
 }
 
 impl Mode {
+    #[must_use]
     pub fn parse(raw: &str) -> Option<Self> {
         match raw {
-            "sign-in" => Some(Mode::SignIn),
-            "link" => Some(Mode::Link),
+            "sign-in" => Some(Self::SignIn),
+            "link" => Some(Self::Link),
             _ => None,
         }
     }
@@ -436,29 +447,25 @@ impl ProviderClient for HttpProviderClient {
                 // make public, and often nothing. The emails endpoint
                 // (needs `user:email`) says which address is primary and
                 // verified — the only one worth trusting for matching.
-                let (email, email_verified) = match user.email {
-                    Some(email) => (Some(email), false),
-                    None => {
-                        let emails: Vec<GitHubEmail> = self
-                            .http
-                            .get("https://api.github.com/user/emails")
-                            .bearer_auth(access_token)
-                            .header(reqwest::header::ACCEPT, "application/vnd.github+json")
-                            .send()
-                            .await?
-                            .error_for_status()?
-                            .json()
-                            .await
-                            .unwrap_or_default();
-                        let primary = emails
-                            .iter()
-                            .find(|e| e.primary && e.verified)
-                            .or_else(|| emails.iter().find(|e| e.verified));
-                        match primary {
-                            Some(e) => (Some(e.email.clone()), true),
-                            None => (None, false),
-                        }
-                    }
+                let (email, email_verified) = if let Some(email) = user.email {
+                    (Some(email), false)
+                } else {
+                    let emails: Vec<GitHubEmail> = self
+                        .http
+                        .get("https://api.github.com/user/emails")
+                        .bearer_auth(access_token)
+                        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+                        .send()
+                        .await?
+                        .error_for_status()?
+                        .json()
+                        .await
+                        .unwrap_or_default();
+                    let primary = emails
+                        .iter()
+                        .find(|e| e.primary && e.verified)
+                        .or_else(|| emails.iter().find(|e| e.verified));
+                    primary.map_or((None, false), |e| (Some(e.email.clone()), true))
                 };
                 let account_id = match &user.id {
                     serde_json::Value::Number(n) => n.to_string(),
@@ -625,6 +632,7 @@ pub enum StateError {
 /// `application/x-www-form-urlencoded` for a query string. Hand-rolled
 /// to keep the dependency list where it is; spaces become `%20` (not
 /// `+`), which every provider accepts in a query.
+#[must_use]
 pub fn form_encode(params: &[(&str, String)]) -> String {
     params
         .iter()
@@ -633,20 +641,13 @@ pub fn form_encode(params: &[(&str, String)]) -> String {
         .join("&")
 }
 
+/// Percent-encode a value going into an OAuth query string.
+#[must_use]
 pub fn encode_component(raw: &str) -> String {
-    let mut out = String::with_capacity(raw.len() + raw.len() / 2);
-    for byte in raw.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(byte as char);
-            }
-            other => out.push_str(&format!("%{other:02X}")),
-        }
-    }
-    out
+    architect_auth::percent::encode_component(raw)
 }
 
-/// Read the `email` claim out of an id_token we stored ourselves.
+/// Read the `email` claim out of an `id_token` we stored ourselves.
 ///
 /// Unverified on purpose: this is our own copy of a token the provider
 /// handed us over TLS at link time, kept encrypted since. It is used
@@ -822,7 +823,7 @@ mod tests {
             StateError::Tampered
         );
         // A flipped byte in the payload is refused, not misread.
-        let mut bytes = state.clone().into_bytes();
+        let mut bytes = state.into_bytes();
         let last = bytes.len() - 1;
         bytes[last] = if bytes[last] == b'A' { b'B' } else { b'A' };
         let tampered = String::from_utf8(bytes).unwrap();

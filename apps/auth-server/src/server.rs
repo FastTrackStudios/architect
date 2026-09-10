@@ -54,7 +54,7 @@ pub async fn build(config: &ServerConfig) -> eyre::Result<AuthServer> {
     }
 
     let auth = build_engine(config, AuthSeaOrmStorage::new(db.clone()))?;
-    let app = app_router(config, auth.clone());
+    let app = app_router(config, auth.clone())?;
 
     Ok(AuthServer {
         auth,
@@ -121,21 +121,32 @@ pub fn build_engine<S>(config: &ServerConfig, storage: S) -> eyre::Result<Archit
 }
 
 /// The full axum app: vox WebSocket + HTTP surface + health probes.
-pub fn app_router<S>(config: &ServerConfig, auth: ArchitectAuth<S>) -> Router
+///
+/// # Errors
+///
+/// When social providers are configured but their HTTP client cannot be
+/// built. That is a deployment which would send people to GitHub and
+/// never finish, so it refuses to boot rather than serving a sign-in
+/// button that dead-ends. With no provider configured the same failure
+/// is not an error: nothing was going to use the client.
+pub fn app_router<S>(config: &ServerConfig, auth: ArchitectAuth<S>) -> eyre::Result<Router>
 where
     S: architect_auth::AuthStorage + Clone + Send + Sync + 'static,
 {
-    // A provider client that cannot be built is a deployment that will
-    // send people to GitHub and never finish; refusing to boot is kinder
-    // than that. Only reachable when a provider is configured.
     let social = match HttpState::<S>::social_state(config) {
         Ok(social) => social,
         Err(err) if config.social.is_enabled() => {
-            panic!("social providers are configured but the HTTP client failed to build: {err}")
+            return Err(eyre::eyre!(
+                "social providers are configured but the HTTP client failed to build: {err}"
+            ));
         }
         Err(_) => http::SocialState::disabled(),
     };
-    app_router_with_social(config, auth, std::sync::Arc::new(social))
+    Ok(app_router_with_social(
+        config,
+        auth,
+        std::sync::Arc::new(social),
+    ))
 }
 
 /// As [`app_router`], with the social state supplied — the seam tests
@@ -168,11 +179,7 @@ where
         }
         Err(err) => {
             tracing::error!(target: "auth_server::mail", %err, "mailer failed to build; falling back to log mode");
-            crate::mail::Mailer::new(crate::mail::MailConfig {
-                host: None,
-                ..config.mail.clone()
-            })
-            .expect("a mailer with no host cannot fail to build")
+            crate::mail::Mailer::log_only(config.mail.clone())
         }
     });
     // Mounted through the dispatcher rather than the plain

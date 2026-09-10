@@ -44,3 +44,6 @@ axum.workspace = true
 sea-orm.workspace = true
 sea-orm-migration.workspace = true
 tokio = { workspace = true }
+
+[lints]
+workspace = true

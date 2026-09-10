@@ -75,12 +75,32 @@ impl Mailer {
         Ok(Self { config, transport })
     }
 
+    /// A mailer that only ever logs, which cannot fail to build.
+    ///
+    /// The `None` host arm of [`Mailer::new`] builds no transport and so
+    /// has nothing to fail at — but that is a fact about the body of a
+    /// function returning `Result`, and three call sites were asserting
+    /// it with `.expect("a mailer with no host cannot fail to build")`.
+    /// Naming the infallible case makes it infallible in the type.
+    #[must_use]
+    pub fn log_only(config: MailConfig) -> Self {
+        Self {
+            config: MailConfig {
+                host: None,
+                ..config
+            },
+            transport: None,
+        }
+    }
+
     /// Whether mail will actually leave the building.
-    pub fn is_live(&self) -> bool {
+    #[must_use]
+    pub const fn is_live(&self) -> bool {
         self.transport.is_some()
     }
 
     /// Absolute link into this server, for use in mail.
+    #[must_use]
     pub fn link(&self, path: &str) -> String {
         format!("{}{}", self.config.base_url.trim_end_matches('/'), path)
     }
@@ -156,21 +176,12 @@ impl Mailer {
     }
 }
 
-/// Percent-encode a value going into a query parameter. Same reasoning as
-/// `ui::encode_query_value`, which this deliberately mirrors: a token that
-/// happens to contain `&` or `+` would otherwise silently truncate the
-/// link and strand someone mid-reset.
+/// Percent-encode a value going into a query parameter.
+///
+/// A token that happens to contain `&` or `+` would otherwise silently
+/// truncate the link and strand someone mid-reset.
 fn urlencode(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                out.push(byte as char);
-            }
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
+    architect_auth::percent::encode_component(value)
 }
 
 #[cfg(test)]

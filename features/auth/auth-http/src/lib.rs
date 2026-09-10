@@ -43,7 +43,7 @@ pub use browser::LocalStorageTokenStore;
 /// `facet` entity carrying storage concerns, and this crate is
 /// deliberately free of the proto/architect dependency so a wasm build
 /// stays small.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuthUser {
     pub id: String,
     pub email: Option<String>,
@@ -62,7 +62,7 @@ pub struct AuthUser {
 
 /// The session, minus anything credential-shaped. The server never
 /// serializes the stored token hash, so there is nothing here to leak.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuthSession {
     pub id: String,
     pub user_id: String,
@@ -71,7 +71,7 @@ pub struct AuthSession {
 }
 
 /// What a sign-in or sign-up returns.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Session {
     pub user: AuthUser,
     pub session: AuthSession,
@@ -107,7 +107,8 @@ impl AuthHttpError {
     /// Whether this is the server saying "you are not signed in", as
     /// opposed to a network problem. A UI should send the user to the
     /// sign-in screen for the first and retry the second.
-    pub fn is_unauthenticated(&self) -> bool {
+    #[must_use]
+    pub const fn is_unauthenticated(&self) -> bool {
         matches!(self, Self::Api { status: 401, .. }) || matches!(self, Self::NoToken)
     }
 }
@@ -142,12 +143,14 @@ impl AuthHttpClient {
     /// Persist the session through `store`, so it survives a restart or
     /// a page reload. Every call that mints a token writes it here, and
     /// [`sign_out`](Self::sign_out) clears it.
+    #[must_use]
     pub fn with_store(mut self, store: Arc<dyn TokenStore>) -> Self {
         self.store = Some(store);
         self
     }
 
     /// The token the store currently holds, if any.
+    #[must_use]
     pub fn token(&self) -> Option<String> {
         self.store
             .as_ref()
@@ -158,6 +161,7 @@ impl AuthHttpClient {
     /// Whether a token is on hand. Cheap and local — it says nothing
     /// about whether the server still considers it valid, which only
     /// [`session`](Self::session) can answer.
+    #[must_use]
     pub fn has_token(&self) -> bool {
         self.token().is_some()
     }
@@ -317,6 +321,7 @@ impl SignUpRequest {
         }
     }
 
+    #[must_use]
     pub fn with_name(mut self, name: impl Into<String>) -> Self {
         self.name = Some(name.into());
         self

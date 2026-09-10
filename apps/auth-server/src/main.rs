@@ -1,4 +1,4 @@
-//! `auth-server` — run the FastTrackStudio identity server.
+//! `auth-server` — run the `FastTrackStudio` identity server.
 //!
 //! Configuration is entirely environmental, so the same image serves
 //! every environment. See [`auth_server::config`] for the full list;

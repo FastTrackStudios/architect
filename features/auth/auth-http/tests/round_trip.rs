@@ -5,6 +5,21 @@
 //! emits. A mismatch between the two is invisible to both crates'
 //! own test suites, and would only show up in a browser.
 
+// This is an integration-test crate. `clippy.toml`'s
+// `allow-*-in-tests` only reaches `#[test]` fns and `#[cfg(test)]`
+// modules, so the fixture and helper code below — where an `unwrap()`
+// IS the assertion — still trips the panic lints. Allow them
+// crate-wide here rather than dotting the file with attributes.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::panic
+)]
+
 use std::sync::Arc;
 
 use architect_auth::db::{AuthSeaOrmStorage, Migrator};
@@ -51,7 +66,7 @@ async fn spawn_server() -> String {
     };
 
     let auth = server::build_engine(&config, AuthSeaOrmStorage::new(db)).expect("build engine");
-    let app = server::app_router(&config, auth);
+    let app = server::app_router(&config, auth).expect("router builds with no social providers");
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await

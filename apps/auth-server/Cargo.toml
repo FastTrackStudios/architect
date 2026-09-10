@@ -52,3 +52,6 @@ uuid.workspace = true
 sha2.workspace = true
 tokio.workspace = true
 tower = { version = "0.5", features = ["util"] }
+
+[lints]
+workspace = true

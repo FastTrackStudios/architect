@@ -19,6 +19,7 @@ pub mod crypto;
 pub mod expiry;
 pub mod flows;
 pub mod identity;
+pub mod percent;
 pub mod plugins;
 pub mod storage;
 pub mod test_utils;

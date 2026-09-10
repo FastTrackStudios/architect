@@ -110,9 +110,8 @@ where
     let Some(token) = session_token_from_headers(&headers, &state.cookie) else {
         return Redirect::to("/login?return_to=%2Faccount").into_response();
     };
-    let bundle = match state.auth.current_session(CurrentSession { token }).await {
-        Ok(bundle) => bundle,
-        Err(_) => return Redirect::to("/login?return_to=%2Faccount").into_response(),
+    let Ok(bundle) = state.auth.current_session(CurrentSession { token }).await else {
+        return Redirect::to("/login?return_to=%2Faccount").into_response();
     };
     let accounts = crate::http::linked_accounts(&state, bundle.user.id)
         .await
@@ -236,8 +235,20 @@ fn AccountPage(
                             let linked = accounts.iter().find(|a| a.provider_id == provider.id());
                             let name = provider.display_name();
                             let id = provider.id();
-                            match linked {
-                                Some(account) => {
+                            linked.map_or_else(|| rsx! {
+                                    li { class: "provider",
+                                        span { class: "provider-name",
+                                            ProviderMark { provider }
+                                            span {
+                                                strong { "{name}" }
+                                                span { class: "handle", "Not linked" }
+                                            }
+                                        }
+                                        a { class: "button small", href: "/auth/social/{id}/start?mode=link&return_to=%2Faccount",
+                                            "Link {name}"
+                                        }
+                                    }
+                                }, |account| {
                                     let handle = account.login.clone().unwrap_or_else(|| account.account_id.clone());
                                     rsx! {
                                         li { class: "provider",
@@ -254,22 +265,7 @@ fn AccountPage(
                                             }
                                         }
                                     }
-                                }
-                                None => rsx! {
-                                    li { class: "provider",
-                                        span { class: "provider-name",
-                                            ProviderMark { provider }
-                                            span {
-                                                strong { "{name}" }
-                                                span { class: "handle", "Not linked" }
-                                            }
-                                        }
-                                        a { class: "button small", href: "/auth/social/{id}/start?mode=link&return_to=%2Faccount",
-                                            "Link {name}"
-                                        }
-                                    }
-                                },
-                            }
+                                })
                         }
                     }
                 }
@@ -399,7 +395,7 @@ where
         })
         .await
     {
-        Ok(_) => notice(
+        Ok(()) => notice(
             "Password changed",
             "You can sign in with your new password.",
             &return_to,
@@ -508,16 +504,7 @@ fn safe_return_to(raw: Option<&str>) -> String {
 /// `/` is left alone: it is legal in a query value and keeps the link
 /// readable.
 fn encode_query_value(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
-                out.push(byte as char);
-            }
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
+    architect_auth::percent::encode_query_value(value)
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -725,41 +712,41 @@ pub enum Screen {
 }
 
 impl Screen {
-    fn title(self) -> &'static str {
+    const fn title(self) -> &'static str {
         match self {
-            Screen::SignIn => "Sign in",
-            Screen::SignUp => "Create your account",
-            Screen::ForgotPassword => "Reset your password",
-            Screen::ResetPassword => "Choose a new password",
+            Self::SignIn => "Sign in",
+            Self::SignUp => "Create your account",
+            Self::ForgotPassword => "Reset your password",
+            Self::ResetPassword => "Choose a new password",
         }
     }
 
-    fn action(self) -> &'static str {
+    const fn action(self) -> &'static str {
         match self {
-            Screen::SignIn => "/login",
-            Screen::SignUp => "/sign-up",
-            Screen::ForgotPassword => "/forgot-password",
-            Screen::ResetPassword => "/reset-password",
+            Self::SignIn => "/login",
+            Self::SignUp => "/sign-up",
+            Self::ForgotPassword => "/forgot-password",
+            Self::ResetPassword => "/reset-password",
         }
     }
 
-    fn submit(self) -> &'static str {
+    const fn submit(self) -> &'static str {
         match self {
-            Screen::SignIn => "Sign in",
-            Screen::SignUp => "Create account",
-            Screen::ForgotPassword => "Send reset link",
-            Screen::ResetPassword => "Set password",
+            Self::SignIn => "Sign in",
+            Self::SignUp => "Create account",
+            Self::ForgotPassword => "Send reset link",
+            Self::ResetPassword => "Set password",
         }
     }
 
     /// Whether this screen asks for an email address.
-    fn wants_email(self) -> bool {
-        !matches!(self, Screen::ResetPassword)
+    const fn wants_email(self) -> bool {
+        !matches!(self, Self::ResetPassword)
     }
 
     /// Whether this screen asks for a password.
-    fn wants_password(self) -> bool {
-        !matches!(self, Screen::ForgotPassword)
+    const fn wants_password(self) -> bool {
+        !matches!(self, Self::ForgotPassword)
     }
 }
 
@@ -1339,20 +1326,7 @@ mod tests {
     }
 
     fn decode(value: &str) -> String {
-        let bytes = value.as_bytes();
-        let mut out = Vec::new();
-        let mut i = 0;
-        while i < bytes.len() {
-            if bytes[i] == b'%' && i + 2 < bytes.len() {
-                let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap();
-                out.push(u8::from_str_radix(hex, 16).unwrap());
-                i += 3;
-            } else {
-                out.push(bytes[i]);
-                i += 1;
-            }
-        }
-        String::from_utf8(out).unwrap()
+        architect_auth::percent::decode(value)
     }
 
     #[test]

@@ -1,4 +1,4 @@
-//! **The FastTrackStudio identity server** — `architect-auth` as a
+//! **The `FastTrackStudio` identity server** — `architect-auth` as a
 //! deployable service instead of an embedded library.
 //!
 //! `architect-auth` is a complete auth engine (password, OAuth, passkey,
@@ -39,7 +39,7 @@
 //! is no public key to publish and `/auth/jwt/jwks` returns an empty key
 //! set by design — see [`http`]. First-party relying parties can verify
 //! through `/oauth2/userinfo`; a genuine third-party RP cannot verify an
-//! id_token offline until the engine grows RS256/ES256 support. That is
+//! `id_token` offline until the engine grows RS256/ES256 support. That is
 //! a change in `auth/src/flows.rs`, not here.
 //!
 //! **The HTTP surface is a subset.** `architect-auth` describes ~150

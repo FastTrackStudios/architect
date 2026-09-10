@@ -12,6 +12,7 @@ repository.workspace = true
 rustdoc-args = ["--html-in-header", "arborium-header.html"]
 
 [dependencies]
+percent-encoding = { workspace = true }
 architect-permissions.workspace = true
 auth-proto.workspace = true
 auth-db = { workspace = true, optional = true }

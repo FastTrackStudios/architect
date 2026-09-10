@@ -39,7 +39,7 @@
 //!
 //! # Signing in through the issuer
 //!
-//! [`oidc`] carries the redirect flow every FastTrackStudio app shares:
+//! [`oidc`] carries the redirect flow every `FastTrackStudio` app shares:
 //! PKCE, the two request shapes, and the two response shapes. It does no
 //! HTTP and touches no browser, which is what keeps this crate as small
 //! and wasm-clean as the note above promises — an app supplies entropy

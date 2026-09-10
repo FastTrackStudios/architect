@@ -1,7 +1,7 @@
 //! Postgres coverage.
 //!
 //! `auth-db`'s support matrix lists Postgres as "planned" — the
-//! migrations are written with SeaORM's backend-agnostic schema builder,
+//! migrations are written with `SeaORM`'s backend-agnostic schema builder,
 //! but nothing had ever run them against a real Postgres. The central
 //! identity server is deployed on Postgres, so that gap is exactly where
 //! a production-only failure would hide.
@@ -15,6 +15,21 @@
 //! AUTH_TEST_POSTGRES_URL=postgres://postgres:test@localhost:55432/authtest \
 //!     cargo test -p auth-server --test postgres
 //! ```
+
+// This is an integration-test crate. `clippy.toml`'s
+// `allow-*-in-tests` only reaches `#[test]` fns and `#[cfg(test)]`
+// modules, so the fixture and helper code below — where an `unwrap()`
+// IS the assertion — still trips the panic lints. Allow them
+// crate-wide here rather than dotting the file with attributes.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::panic
+)]
 
 use architect_auth::db::{AuthSeaOrmStorage, Migrator};
 use auth_server::{ServerConfig, server};
@@ -147,7 +162,7 @@ async fn full_sign_up_and_session_flow_works_on_postgres() {
 
     let config = test_config(scratch);
     let auth = server::build_engine(&config, AuthSeaOrmStorage::new(db)).expect("build engine");
-    let app = server::app_router(&config, auth);
+    let app = server::app_router(&config, auth).expect("router builds with no social providers");
 
     let email = "pg@fasttrackstudio.app";
     let response = app

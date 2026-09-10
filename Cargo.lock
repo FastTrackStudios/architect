@@ -924,6 +924,7 @@ dependencies = [
  "cookie",
  "hkdf",
  "jsonwebtoken",
+ "percent-encoding",
  "proptest",
  "rand 0.8.7",
  "sea-orm",

@@ -17,7 +17,7 @@
 //! place in a standalone identity server:
 //!
 //! * **OIDC provider** — discovery, authorize, token, userinfo, JWKS.
-//!   This is what makes the server an IdP that anything can point at.
+//!   This is what makes the server an `IdP` that anything can point at.
 //! * **Core session JSON** — sign-up, sign-in, session, refresh,
 //!   sign-out. What a web front-end needs before it can do anything.
 //!
@@ -28,8 +28,6 @@
 //! one needs a hand-written extractor — see `docs` in the crate root.
 
 use std::sync::Arc;
-
-use chrono::Utc;
 
 use architect_auth::{
     ArchitectAuth, AuthStorage, AuthorizeOidc, BeginOAuthAuthorization, CreateEmailPasswordUser,
@@ -84,6 +82,7 @@ pub struct SocialState {
 }
 
 impl SocialState {
+    #[must_use]
     pub fn disabled() -> Self {
         Self {
             config: SocialConfig::disabled(),
@@ -93,7 +92,8 @@ impl SocialState {
         }
     }
 
-    pub fn provider_config(&self, provider: Provider) -> Option<&SocialProviderConfig> {
+    #[must_use]
+    pub const fn provider_config(&self, provider: Provider) -> Option<&SocialProviderConfig> {
         match provider {
             Provider::GitHub => self.config.github.as_ref(),
             Provider::Google => self.config.google.as_ref(),
@@ -103,6 +103,7 @@ impl SocialState {
 
     /// The providers that are actually on, in button order.
     /// Every configured provider — what the account page offers to link.
+    #[must_use]
     pub fn enabled_providers(&self) -> Vec<Provider> {
         Provider::ALL
             .into_iter()
@@ -113,6 +114,7 @@ impl SocialState {
     /// The configured providers that can start a session — what the sign-in
     /// and sign-up pages offer. TONE3000 is not one: it is a service an
     /// account holds a token for, not a way to become an account.
+    #[must_use]
     pub fn sign_in_providers(&self) -> Vec<Provider> {
         self.enabled_providers()
             .into_iter()
@@ -120,6 +122,7 @@ impl SocialState {
             .collect()
     }
 
+    #[must_use]
     pub fn callback_url(&self, provider: Provider) -> String {
         format!(
             "{}/auth/social/{}/callback",
@@ -136,6 +139,7 @@ impl SocialState {
     /// places a flow can legitimately have started from. Anything else
     /// is an open redirect on an identity server, and lands on
     /// `/account` instead.
+    #[must_use]
     pub fn safe_return_to(&self, raw: Option<&str>) -> String {
         const DEFAULT: &str = "/account";
         let candidate = raw.unwrap_or("").trim();
@@ -223,15 +227,14 @@ impl ProviderClient for NoProviderClient {
 
 impl<S> HttpState<S> {
     pub fn new(auth: ArchitectAuth<S>, cookie: AuthCookieConfig) -> Self {
-        let mail = crate::mail::Mailer::new(crate::mail::MailConfig {
+        let mail = crate::mail::Mailer::log_only(crate::mail::MailConfig {
             host: None,
             port: 587,
             username: None,
             password: None,
             from: "noreply@localhost".into(),
             base_url: "http://localhost:8080".into(),
-        })
-        .expect("a mailer with no host cannot fail to build");
+        });
         Self {
             auth,
             cookie,
@@ -241,12 +244,14 @@ impl<S> HttpState<S> {
     }
 
     /// Attach a configured mailer.
+    #[must_use]
     pub fn with_mailer(mut self, mail: std::sync::Arc<crate::mail::Mailer>) -> Self {
         self.mail = mail;
         self
     }
 
     /// Attach the social providers.
+    #[must_use]
     pub fn with_social(mut self, social: Arc<SocialState>) -> Self {
         self.social = social;
         self
@@ -355,7 +360,7 @@ where
 /// every reader the power to mint tokens for every account.
 ///
 /// So this endpoint returns a valid, empty key set. Relying parties must
-/// verify id_tokens by calling `/oauth2/userinfo`, or share the secret
+/// verify `id_tokens` by calling `/oauth2/userinfo`, or share the secret
 /// out of band (which is acceptable for first-party apps and not for
 /// anyone else). Asymmetric signing is the fix; see the crate docs.
 async fn jwks<S>(State(state): State<HttpState<S>>) -> Json<Value>
@@ -502,7 +507,8 @@ async fn userinfo<S>(
 where
     S: AuthStorage,
 {
-    let access_token = bearer(&headers).ok_or(ApiError::from(AuthFlowError::InvalidCredentials))?;
+    let access_token =
+        bearer(&headers).ok_or_else(|| ApiError::from(AuthFlowError::InvalidCredentials))?;
     let info = state
         .auth
         .get_oidc_user_info(GetOidcUserInfo { access_token })
@@ -594,7 +600,7 @@ where
     S: AuthStorage,
 {
     let token = session_token_from_headers(&headers, &state.cookie)
-        .ok_or(ApiError::from(AuthFlowError::InvalidCredentials))?;
+        .ok_or_else(|| ApiError::from(AuthFlowError::InvalidCredentials))?;
     let bundle = state.auth.current_session(CurrentSession { token }).await?;
     // No token echoed back: the caller already holds it, and a GET
     // response is the most likely thing to end up in a log or a cache.
@@ -612,7 +618,7 @@ where
     S: AuthStorage,
 {
     let token = session_token_from_headers(&headers, &state.cookie)
-        .ok_or(ApiError::from(AuthFlowError::InvalidCredentials))?;
+        .ok_or_else(|| ApiError::from(AuthFlowError::InvalidCredentials))?;
     let bundle = state.auth.refresh_session(RefreshSession { token }).await?;
     Ok(session_response(&state.cookie, &bundle, StatusCode::OK))
 }
@@ -725,20 +731,10 @@ fn sign_in_url(uri: &Uri) -> String {
 
 /// Percent-encode for use as a query-string *value*.
 ///
-/// Hand-rolled to avoid a dependency for one call site. Unreserved
-/// characters per RFC 3986 pass through; everything else, `&` `=` `?`
-/// `/` `#` included, is escaped.
+/// Unreserved characters per RFC 3986 pass through; everything else,
+/// `&` `=` `?` `/` `#` included, is escaped.
 fn percent_encode_query(raw: &str) -> String {
-    let mut out = String::with_capacity(raw.len() + raw.len() / 2);
-    for byte in raw.as_bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(*byte as char);
-            }
-            other => out.push_str(&format!("%{other:02X}")),
-        }
-    }
-    out
+    architect_auth::percent::encode_component(raw)
 }
 
 pub(crate) fn client_ip(headers: &HeaderMap) -> Option<String> {
@@ -914,10 +910,10 @@ where
         Some(Mode::Link) => "/account",
         _ => "/login",
     };
-    let return_to = unsealed
-        .as_ref()
-        .map(|(_, flow)| flow.return_to.clone())
-        .unwrap_or_else(|| fallback_page.to_owned());
+    let return_to = unsealed.as_ref().map_or_else(
+        || fallback_page.to_owned(),
+        |(_, flow)| flow.return_to.clone(),
+    );
 
     if q.error.is_some() {
         return Ok(redirect_with(&return_to, "error", "denied"));
@@ -1055,6 +1051,7 @@ pub struct LinkedAccountView {
 }
 
 impl LinkedAccountView {
+    #[must_use]
     pub fn to_json(&self) -> Value {
         json!({
             "provider_id": self.provider_id,
@@ -1075,7 +1072,7 @@ where
     S: AuthStorage,
 {
     let token = session_token_from_headers(&headers, &state.cookie)
-        .ok_or(ApiError::from(AuthFlowError::InvalidCredentials))?;
+        .ok_or_else(|| ApiError::from(AuthFlowError::InvalidCredentials))?;
     let bundle = state.auth.current_session(CurrentSession { token }).await?;
     let accounts = linked_accounts(&state, bundle.user.id).await?;
     Ok(Json(Value::Array(
@@ -1087,7 +1084,7 @@ where
 /// be had without trusting anything unverified for authorization.
 ///
 /// The row stores no username, so the handle is derived: Google's from
-/// the email claim of the stored id_token; GitHub's by asking GitHub,
+/// the email claim of the stored `id_token`; GitHub's by asking GitHub,
 /// best effort — a failed lookup leaves `login` empty rather than
 /// failing the page.
 pub(crate) async fn linked_accounts<S>(
@@ -1152,7 +1149,7 @@ fn plaintext_access_token(secret: &str, row: &AuthAccount) -> Option<String> {
 /// unreproducible 401 on somebody else's machine.
 fn needs_refresh(row: &AuthAccount) -> bool {
     row.access_token_expires_at
-        .is_some_and(|at| at <= Utc::now() + chrono::Duration::seconds(60))
+        .is_some_and(|at| at <= architect_auth::expiry::expires_in(60))
 }
 
 /// A usable access token for a linked account, refreshing it if it has run
@@ -1206,9 +1203,10 @@ where
         }
     };
 
-    let expires_at = refreshed
-        .expires_in
-        .map(|secs| Utc::now() + chrono::Duration::seconds(secs));
+    // `expires_in` is whatever the provider sent back, so it saturates
+    // rather than adding: a nonsense value should park the token at the
+    // end of time, not panic inside a refresh.
+    let expires_at = refreshed.expires_in.map(architect_auth::expiry::expires_in);
     // The rotated refresh token MUST be stored, or this is the last refresh
     // this account ever does.
     let refresh_ciphertext = refreshed
@@ -1252,9 +1250,9 @@ impl From<AuthFlowError> for UnlinkError {
     fn from(error: AuthFlowError) -> Self {
         match &error {
             AuthFlowError::InvalidInput(message) if message.contains("last sign-in credential") => {
-                UnlinkError::LastCredential
+                Self::LastCredential
             }
-            _ => UnlinkError::Auth(error),
+            _ => Self::Auth(error),
         }
     }
 }
@@ -1262,17 +1260,17 @@ impl From<AuthFlowError> for UnlinkError {
 impl From<UnlinkError> for ApiError {
     fn from(error: UnlinkError) -> Self {
         match error {
-            UnlinkError::NotLinked => ApiError::custom(
+            UnlinkError::NotLinked => Self::custom(
                 StatusCode::NOT_FOUND,
                 "not_linked",
                 "no account from that provider is linked",
             ),
-            UnlinkError::LastCredential => ApiError::custom(
+            UnlinkError::LastCredential => Self::custom(
                 StatusCode::CONFLICT,
                 "last_credential",
                 "unlinking this account would leave no way to sign in — set a password or link another provider first",
             ),
-            UnlinkError::Auth(error) => ApiError::from(error),
+            UnlinkError::Auth(error) => Self::from(error),
         }
     }
 }
@@ -1328,7 +1326,7 @@ where
         "no such provider",
     ))?;
     let token = session_token_from_headers(&headers, &state.cookie)
-        .ok_or(ApiError::from(AuthFlowError::InvalidCredentials))?;
+        .ok_or_else(|| ApiError::from(AuthFlowError::InvalidCredentials))?;
     unlink(&state, token, provider).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -1399,7 +1397,7 @@ where
         outcome("no_bearer");
         return Err(ApiError::from(AuthFlowError::InvalidCredentials));
     };
-    let claims = match state
+    let claims = if let Ok(verification) = state
         .auth
         .verify_jwt(VerifyJwt {
             token: access_token,
@@ -1407,15 +1405,14 @@ where
         })
         .await
     {
-        Ok(verification) => verification.claims,
-        Err(_) => {
-            outcome("invalid_token");
-            return Err(ApiError::custom(
-                StatusCode::UNAUTHORIZED,
-                "invalid_token",
-                "the bearer is not an access token this server issued",
-            ));
-        }
+        verification.claims
+    } else {
+        outcome("invalid_token");
+        return Err(ApiError::custom(
+            StatusCode::UNAUTHORIZED,
+            "invalid_token",
+            "the bearer is not an access token this server issued",
+        ));
     };
     let required = state.social.config.required_scope(provider);
     let granted = claims
@@ -1551,7 +1548,8 @@ pub struct ApiError(architect_auth::transport::PublicAuthError);
 impl ApiError {
     /// An error the engine's taxonomy has no entry for — a routing-level
     /// refusal such as an unconfigured provider or a missing scope.
-    pub fn custom(status: StatusCode, code: &'static str, message: &'static str) -> Self {
+    #[must_use]
+    pub const fn custom(status: StatusCode, code: &'static str, message: &'static str) -> Self {
         Self(architect_auth::transport::PublicAuthError {
             status: status.as_u16(),
             code,

@@ -20,7 +20,7 @@ use crate::mail::MailConfig;
 pub struct ServerConfig {
     /// `host:port` the HTTP/WebSocket listener binds to.
     pub bind_addr: String,
-    /// SeaORM connection string. `postgres://…` in the cluster,
+    /// `SeaORM` connection string. `postgres://…` in the cluster,
     /// `sqlite://…` for local development.
     pub database_url: String,
     /// Session-token signing secret. Minimum 32 bytes — architect-auth
@@ -98,7 +98,8 @@ impl SocialConfig {
     /// client trusted to act as someone on TONE3000 does not thereby reach
     /// their GitHub token.
     /// This deployment's settings for `provider`, if it is switched on.
-    pub fn provider_config_for(
+    #[must_use]
+    pub const fn provider_config_for(
         &self,
         provider: crate::social::Provider,
     ) -> Option<&SocialProviderConfig> {
@@ -109,7 +110,8 @@ impl SocialConfig {
         }
     }
 
-    pub fn required_scope(&self, provider: crate::social::Provider) -> &str {
+    #[must_use]
+    pub const fn required_scope(&self, provider: crate::social::Provider) -> &str {
         match provider {
             crate::social::Provider::GitHub => self.linked_token_scope.as_str(),
             other => other.linked_token_scope(),
@@ -124,6 +126,7 @@ impl SocialConfig {
     pub const DEFAULT_GOOGLE_SCOPES: &'static str = "openid email profile";
 
     /// Nothing configured — the routes 404 and the pages show no buttons.
+    #[must_use]
     pub fn disabled() -> Self {
         Self {
             github: None,
@@ -133,7 +136,8 @@ impl SocialConfig {
         }
     }
 
-    pub fn is_enabled(&self) -> bool {
+    #[must_use]
+    pub const fn is_enabled(&self) -> bool {
         self.github.is_some() || self.google.is_some() || self.tone3000.is_some()
     }
 }
@@ -270,13 +274,13 @@ impl ServerConfig {
             run_migrations: flag("AUTH_RUN_MIGRATIONS", true)?,
             mail: MailConfig {
                 host: optional("AUTH_SMTP_HOST"),
-                port: parse_or("AUTH_SMTP_PORT", 587)? as u16,
+                port: parse_port("AUTH_SMTP_PORT", 587)?,
                 username: optional("AUTH_SMTP_USERNAME"),
                 // Same `_FILE` indirection as AUTH_SECRET: a mounted file
                 // does not appear in `kubectl describe pod`.
                 password: optional_secret("AUTH_SMTP_PASSWORD")?,
                 from: optional("AUTH_MAIL_FROM").unwrap_or_else(|| "noreply@localhost".to_owned()),
-                base_url: base_url.clone(),
+                base_url,
             },
             social: SocialConfig {
                 github: read_social_provider(
@@ -303,6 +307,7 @@ impl ServerConfig {
     }
 
     /// The issuer, falling back to `base_url`.
+    #[must_use]
     pub fn issuer(&self) -> &str {
         self.oidc_issuer.as_deref().unwrap_or(&self.base_url)
     }
@@ -362,9 +367,8 @@ fn read_public_social_provider(
 /// `<VAR>`. An unset or empty variable is not an error — a deployment
 /// with only public clients sets no extras, and vice versa.
 fn read_oidc_clients(var: &'static str) -> Result<Vec<OidcClientConfig>, ConfigError> {
-    let raw = match optional_secret(var)? {
-        Some(raw) => raw,
-        None => return Ok(Vec::new()),
+    let Some(raw) = optional_secret(var)? else {
+        return Ok(Vec::new());
     };
     if raw.trim().is_empty() {
         return Ok(Vec::new());
@@ -417,9 +421,8 @@ fn list(var: &str) -> Vec<String> {
 }
 
 fn flag(var: &'static str, default: bool) -> Result<bool, ConfigError> {
-    match env::var(var) {
-        Err(_) => Ok(default),
-        Ok(raw) => match raw.trim().to_ascii_lowercase().as_str() {
+    env::var(var).map_or(Ok(default), |raw| {
+        match raw.trim().to_ascii_lowercase().as_str() {
             "1" | "true" | "yes" | "on" => Ok(true),
             "0" | "false" | "no" | "off" => Ok(false),
             _ => Err(ConfigError::Invalid {
@@ -427,19 +430,34 @@ fn flag(var: &'static str, default: bool) -> Result<bool, ConfigError> {
                 expected: "boolean",
                 value: raw,
             }),
-        },
-    }
+        }
+    })
+}
+
+/// A TCP port, rejecting anything outside the range instead of wrapping.
+///
+/// This was `parse_or(..)? as u16`, which is silent: `AUTH_SMTP_PORT=70000`
+/// became 4464 and the server dialled a port nobody was listening on, with
+/// nothing in the logs to say the number it used was not the number
+/// configured.
+fn parse_port(var: &'static str, default: u16) -> Result<u16, ConfigError> {
+    env::var(var).map_or(Ok(default), |raw| {
+        raw.trim().parse().map_err(|_| ConfigError::Invalid {
+            var,
+            expected: "a TCP port (1-65535)",
+            value: raw,
+        })
+    })
 }
 
 fn parse_or(var: &'static str, default: i64) -> Result<i64, ConfigError> {
-    match env::var(var) {
-        Err(_) => Ok(default),
-        Ok(raw) => raw.trim().parse().map_err(|_| ConfigError::Invalid {
+    env::var(var).map_or(Ok(default), |raw| {
+        raw.trim().parse().map_err(|_| ConfigError::Invalid {
             var,
             expected: "integer",
             value: raw,
-        }),
-    }
+        })
+    })
 }
 
 #[cfg(test)]
