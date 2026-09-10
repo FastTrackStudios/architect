@@ -17,7 +17,8 @@ use axum::response::{IntoResponse as _, Response};
 use dioxus::prelude::*;
 
 use crate::UiState;
-use crate::page::{Flash, document, flash_to, sign_in_first, token_of};
+use crate::page::{Flash, flash_to, sign_in_first, token_of};
+use crate::settings::Nav;
 
 const PATH: &str = "/account/profile";
 
@@ -63,10 +64,16 @@ where
     let Some(session) = current(&state, &headers).await else {
         return sign_in_first(PATH);
     };
+    let Some(nav) = Nav::build(&state, &headers, PATH).await else {
+        return sign_in_first(PATH);
+    };
     let guest = crate::guest::is_guest(&session.user);
     let user = session.user;
-    document(
-        "Your profile",
+    crate::settings::document(
+        "Profile",
+        "Profile",
+        "How you appear, and how you sign in.",
+        &nav,
         rsx! {
             ProfileView {
                 guest,
@@ -294,82 +301,64 @@ fn ProfileView(
     flash: Option<Flash>,
 ) -> Element {
     rsx! {
-        h1 { "Your profile" }
-        if guest {
-            p { class: "sub", "Signed in as a guest" }
-        } else {
-            p { class: "sub", "Signed in as {email}" }
-        }
         FlashLine { flash }
 
-        // First on the page, not last: a guest who loses this session
-        // loses everything, and burying that under three forms they
-        // cannot use yet would be the wrong order.
+        // First, not last: a guest who loses this session loses
+        // everything, and burying that under three forms they cannot
+        // use yet would be the wrong order.
         if guest {
-            crate::guest::UpgradePanel {}
-        }
-
-        h2 { "Details" }
-        form { method: "post", action: "{PATH}", class: "stack",
-            label { r#for: "name", "Display name" }
-            input { id: "name", name: "name", value: "{name}", autocomplete: "name" }
-
-            label { r#for: "username", "Username" }
-            input { id: "username", name: "username", value: "{username}", autocomplete: "username" }
-            p { class: "hint", "Lowercase letters, digits and dashes. Others can find you by it." }
-
-            label { r#for: "image", "Avatar URL" }
-            input { id: "image", name: "image", value: "{image}", r#type: "url", placeholder: "https://…" }
-
-            button { r#type: "submit", "Save profile" }
-        }
-
-        h2 { "Email address" }
-        p { class: "hint",
-            if email_verified {
-                "{email} — verified."
-            } else {
-                "{email} — not verified yet."
+            section { class: "panel",
+                crate::guest::UpgradePanel {}
             }
         }
-        form { method: "post", action: "/account/email", class: "stack",
-            label { r#for: "new_email", "New address" }
-            input { id: "new_email", name: "new_email", r#type: "email", required: true, autocomplete: "email" }
-            button { r#type: "submit", "Change address" }
+
+        section { class: "panel",
+            h2 { "Details" }
+            form { method: "post", action: "{PATH}", class: "stack",
+                label { r#for: "name", "Display name" }
+                input { id: "name", name: "name", value: "{name}", autocomplete: "name" }
+
+                label { r#for: "username", "Username" }
+                input { id: "username", name: "username", value: "{username}", autocomplete: "username" }
+                p { class: "hint", "Lowercase letters, digits and dashes. You can sign in with it." }
+
+                label { r#for: "image", "Avatar URL" }
+                input { id: "image", name: "image", value: "{image}", r#type: "url", placeholder: "https://…" }
+
+                button { r#type: "submit", "Save changes" }
+            }
         }
 
-        h2 { "Password" }
-        form { method: "post", action: "/account/password", class: "stack",
-            label { r#for: "current_password", "Current password" }
-            input { id: "current_password", name: "current_password", r#type: "password", required: true, autocomplete: "current-password" }
-
-            label { r#for: "new_password", "New password" }
-            input { id: "new_password", name: "new_password", r#type: "password", required: true, autocomplete: "new-password" }
-
-            label { r#for: "confirm_password", "Confirm new password" }
-            input { id: "confirm_password", name: "confirm_password", r#type: "password", required: true, autocomplete: "new-password" }
-
-            button { r#type: "submit", "Change password" }
+        section { class: "panel",
+            h2 { "Email address" }
+            p { class: "hint",
+                if email_verified {
+                    "{email} — verified."
+                } else {
+                    "{email} — not verified yet."
+                }
+            }
+            form { method: "post", action: "/account/email", class: "stack",
+                label { r#for: "new_email", "New address" }
+                input { id: "new_email", name: "new_email", r#type: "email", required: true, autocomplete: "email" }
+                button { r#type: "submit", "Change address" }
+            }
         }
 
-        p { class: "alt",
-            a { href: "/account/profile", "Profile" }
-            " · "
-            a { href: "/account", "Linked accounts" }
-            " · "
-            a { href: "/account/passkeys", "Passkeys" }
-            " · "
-            a { href: "/account/two-factor", "Two-factor" }
-            " · "
-            a { href: "/account/phone", "Phone" }
-            " · "
-            a { href: "/account/sessions", "Sessions" }
-            " · "
-            a { href: "/account/api-keys", "API keys" }
-            " · "
-            a { href: "/account/switch", "Accounts" }
-            " · "
-            a { href: "/orgs", "Organizations" }
+        section { class: "panel",
+            h2 { "Password" }
+            form { method: "post", action: "/account/password", class: "stack",
+                label { r#for: "current_password", "Current password" }
+                input { id: "current_password", name: "current_password", r#type: "password", required: true, autocomplete: "current-password" }
+
+                label { r#for: "new_password", "New password" }
+                input { id: "new_password", name: "new_password", r#type: "password", required: true, autocomplete: "new-password" }
+
+                label { r#for: "confirm_password", "Confirm new password" }
+                input { id: "confirm_password", name: "confirm_password", r#type: "password", required: true, autocomplete: "new-password" }
+
+                button { r#type: "submit", "Change password" }
+            }
         }
     }
 }

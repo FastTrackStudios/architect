@@ -153,11 +153,9 @@ async fn the_profile_page_warns_a_guest_first_and_plainly() {
 
     let page = get(&app, "/account/profile", Some(&guest)).await;
     assert_eq!(page.status, StatusCode::OK);
-    assert!(
-        page.body.contains("Signed in as a guest"),
-        "{:.500}",
-        page.body
-    );
+    // The rail says who you are; a guest has no address to show, so it
+    // says what they have instead — nothing saved.
+    assert!(page.body.contains("Not saved yet"), "{:.900}", page.body);
     assert!(
         page.body.contains("Save your account"),
         "{:.900}",
@@ -207,8 +205,13 @@ async fn upgrading_keeps_the_same_account_and_everything_in_it() {
     // And it is no longer a guest.
     let profile = get(&app, "/account/profile", Some(&session)).await;
     assert!(
-        !profile.body.contains("Signed in as a guest"),
-        "{:.400}",
+        !profile.body.contains("Not saved yet"),
+        "{:.600}",
+        profile.body
+    );
+    assert!(
+        !profile.body.contains("Save your account"),
+        "{:.600}",
         profile.body
     );
     assert!(profile.body.contains("ada@example.com"));

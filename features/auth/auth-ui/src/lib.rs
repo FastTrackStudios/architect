@@ -54,6 +54,7 @@ pub mod phone;
 pub mod profile;
 pub mod qr;
 pub mod sessions;
+pub mod settings;
 pub mod two_factor;
 pub mod views;
 pub mod wallet;

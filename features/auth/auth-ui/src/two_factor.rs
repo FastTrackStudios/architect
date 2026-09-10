@@ -33,6 +33,7 @@ use dioxus::prelude::*;
 use crate::UiState;
 use crate::page::{Flash, document, flash_to, sign_in_first, token_of};
 use crate::profile::{FlashLine, message};
+use crate::settings::Nav;
 
 const PATH: &str = "/account/two-factor";
 
@@ -74,8 +75,14 @@ where
     let Ok(session) = state.auth.current_session(CurrentSession { token }).await else {
         return sign_in_first(PATH);
     };
-    document(
-        "Two-factor authentication",
+    let Some(nav) = Nav::build(&state, &headers, PATH).await else {
+        return sign_in_first(PATH);
+    };
+    crate::settings::document(
+        "Two-factor",
+        "Two-factor",
+        "A second step at sign-in, from an app on your phone.",
+        &nav,
         rsx! {
             StatusView {
                 enabled: session.user.two_factor_enabled,
@@ -124,8 +131,14 @@ where
             // holding it in a session or passing a secret through a URL.
             let qr = crate::qr::svg(&enrollment.otpauth_url, "Scan with your authenticator app")
                 .unwrap_or_default();
-            document(
+            let Some(nav) = Nav::build(&state, &headers, PATH).await else {
+                return sign_in_first(PATH);
+            };
+            crate::settings::document(
                 "Set up two-factor",
+                "Set up two-factor",
+                "Two steps. Nothing is switched on until the second one.",
+                &nav,
                 rsx! {
                     EnrollView {
                         qr,
@@ -262,7 +275,9 @@ where
 #[component]
 fn StatusView(enabled: bool, flash: Option<Flash>) -> Element {
     rsx! {
-        h1 { "Two-factor authentication" }
+        FlashLine { flash }
+
+        section { class: "panel",
         p { class: "sub",
             if enabled {
                 "On. Signing in asks for a code from your authenticator app."
@@ -270,7 +285,6 @@ fn StatusView(enabled: bool, flash: Option<Flash>) -> Element {
                 "Off. Anyone with your password can sign in as you."
             }
         }
-        FlashLine { flash }
 
         if enabled {
             h2 { "Turn it off" }
@@ -296,26 +310,8 @@ fn StatusView(enabled: bool, flash: Option<Flash>) -> Element {
                 button { r#type: "submit", "Set up two-factor" }
             }
         }
-
-        p { class: "alt",
-            a { href: "/account/profile", "Profile" }
-            " · "
-            a { href: "/account", "Linked accounts" }
-            " · "
-            a { href: "/account/passkeys", "Passkeys" }
-            " · "
-            a { href: "/account/two-factor", "Two-factor" }
-            " · "
-            a { href: "/account/phone", "Phone" }
-            " · "
-            a { href: "/account/sessions", "Sessions" }
-            " · "
-            a { href: "/account/api-keys", "API keys" }
-            " · "
-            a { href: "/account/switch", "Accounts" }
-            " · "
-            a { href: "/orgs", "Organizations" }
         }
+
     }
 }
 
@@ -327,9 +323,7 @@ fn EnrollView(
     backup_codes: Vec<String>,
 ) -> Element {
     rsx! {
-        h1 { "Set up two-factor" }
-        p { class: "sub", "Two steps. Nothing is switched on until the second one." }
-
+        section { class: "panel",
         h2 { "1. Add it to your app" }
         div { class: "qr", dangerous_inner_html: "{qr}" }
         p { class: "hint", "No camera? Type this into your app instead:" }
@@ -341,6 +335,9 @@ fn EnrollView(
             a { href: "{otpauth_url}", "Open in your authenticator app" }
         }
 
+        }
+
+        section { class: "panel",
         h2 { "2. Save your backup codes" }
         p { class: "hint",
             "Each works once, in place of a code from the app. They are shown now and never again — only their hashes are stored. Print them or put them in your password manager."
@@ -351,6 +348,9 @@ fn EnrollView(
             }
         }
 
+        }
+
+        section { class: "panel",
         h2 { "3. Confirm" }
         p { class: "hint", "Enter the six-digit code your app is showing." }
         form { method: "post", action: "{PATH}/confirm", class: "stack",
@@ -364,6 +364,7 @@ fn EnrollView(
                 autofocus: true,
             }
             button { r#type: "submit", "Turn on two-factor" }
+        }
         }
 
         p { class: "alt", a { href: "{PATH}", "Cancel" } }
@@ -393,11 +394,6 @@ fn ChallengeView(return_to: String, error: Option<String>) -> Element {
         }
         p { class: "hint",
             "Lost your phone? Use one of the backup codes you saved when you turned this on."
-        }
-        p { class: "alt",
-            form { method: "post", action: "/account/sign-out", class: "inline",
-                button { r#type: "submit", class: "link", "Sign in as someone else" }
-            }
         }
     }
 }

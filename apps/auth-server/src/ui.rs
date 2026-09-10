@@ -118,15 +118,24 @@ where
         .await
         .unwrap_or_default();
     let flash = account_flash(&q);
-    let body = dioxus_ssr::render_element(rsx! {
-        AccountPage {
-            email: bundle.user.email.clone().unwrap_or_default(),
-            providers: state.social.enabled_providers(),
-            accounts,
-            flash,
-        }
-    });
-    Html(format!("<!doctype html>\n<html lang=\"en\">{body}</html>")).into_response()
+    let ui = auth_ui::UiState::new(state.auth.clone(), state.cookie.clone());
+    let Some(nav) = auth_ui::settings::Nav::build(&ui, &headers, "/account").await else {
+        return Redirect::to("/login?return_to=%2Faccount").into_response();
+    };
+    auth_ui::settings::document(
+        "Linked accounts",
+        "Linked accounts",
+        "Sign in with a linked account, and let the apps act as it.",
+        &nav,
+        rsx! {
+            AccountPage {
+                email: bundle.user.email.clone().unwrap_or_default(),
+                providers: state.social.enabled_providers(),
+                accounts,
+                flash,
+            }
+        },
+    )
 }
 
 /// `POST /account/unlink` — the form twin of
@@ -205,75 +214,59 @@ fn AccountPage(
     accounts: Vec<LinkedAccountView>,
     flash: Option<Flash>,
 ) -> Element {
+    // The address is on the rail now, not repeated in the body.
+    let _ = email;
     rsx! {
-        head {
-            meta { charset: "utf-8" }
-            meta { name: "viewport", content: "width=device-width, initial-scale=1" }
-            title { "Your account · FastTrackStudio" }
-            style { {STYLE} }
+        match flash {
+            Some(Flash::Ok(message)) => rsx! { p { class: "ok", role: "status", "{message}" } },
+            Some(Flash::Error(message)) => rsx! { p { class: "error", role: "alert", "{message}" } },
+            None => rsx! {},
         }
-        body {
-            Shell {
-                h1 { "Your account" }
-                p { class: "sub", "Signed in as {email}" }
 
-                match flash {
-                    Some(Flash::Ok(message)) => rsx! { p { class: "ok", role: "status", "{message}" } },
-                    Some(Flash::Error(message)) => rsx! { p { class: "error", role: "alert", "{message}" } },
-                    None => rsx! {},
-                }
-
-                h2 { "Linked accounts" }
-                p { class: "hint",
-                    "Sign in with a linked account, and let the apps act as it. Task pushes and proposes the wiki edits you accept under your linked GitHub name."
-                }
-                if providers.is_empty() {
-                    p { class: "sub", "No providers are configured on this server." }
-                }
-                ul { class: "providers",
-                    for provider in providers.iter().copied() {
-                        {
-                            let linked = accounts.iter().find(|a| a.provider_id == provider.id());
-                            let name = provider.display_name();
-                            let id = provider.id();
-                            linked.map_or_else(|| rsx! {
+        section { class: "panel",
+            p { class: "hint",
+                "Task pushes and proposes the wiki edits you accept under your linked GitHub name."
+            }
+            if providers.is_empty() {
+                p { class: "hint", "No providers are configured on this server." }
+            }
+            ul { class: "providers",
+                for provider in providers.iter().copied() {
+                    {
+                        let linked = accounts.iter().find(|a| a.provider_id == provider.id());
+                        let name = provider.display_name();
+                        let id = provider.id();
+                        linked.map_or_else(|| rsx! {
+                                li { class: "provider",
+                                    span { class: "provider-name",
+                                        ProviderMark { provider }
+                                        span {
+                                            strong { "{name}" }
+                                            span { class: "handle", "Not linked" }
+                                        }
+                                    }
+                                    a { class: "button small", href: "/auth/social/{id}/start?mode=link&return_to=%2Faccount",
+                                        "Link {name}"
+                                    }
+                                }
+                            }, |account| {
+                                let handle = account.login.clone().unwrap_or_else(|| account.account_id.clone());
+                                rsx! {
                                     li { class: "provider",
                                         span { class: "provider-name",
                                             ProviderMark { provider }
                                             span {
                                                 strong { "{name}" }
-                                                span { class: "handle", "Not linked" }
+                                                span { class: "handle", "Linked as {handle}" }
                                             }
                                         }
-                                        a { class: "button small", href: "/auth/social/{id}/start?mode=link&return_to=%2Faccount",
-                                            "Link {name}"
-                                        }
-                                    }
-                                }, |account| {
-                                    let handle = account.login.clone().unwrap_or_else(|| account.account_id.clone());
-                                    rsx! {
-                                        li { class: "provider",
-                                            span { class: "provider-name",
-                                                ProviderMark { provider }
-                                                span {
-                                                    strong { "{name}" }
-                                                    span { class: "handle", "Linked as {handle}" }
-                                                }
-                                            }
-                                            form { method: "post", action: "/account/unlink", class: "inline",
-                                                input { r#type: "hidden", name: "provider", value: "{id}" }
-                                                button { r#type: "submit", class: "link", "Unlink" }
-                                            }
+                                        form { method: "post", action: "/account/unlink", class: "inline",
+                                            input { r#type: "hidden", name: "provider", value: "{id}" }
+                                            button { r#type: "submit", class: "link", "Unlink" }
                                         }
                                     }
-                                })
-                        }
-                    }
-                }
-
-                p { class: "alt",
-                    form { method: "post", action: "/account/sign-out", class: "inline",
-                        button { r#type: "submit", class: "link", "Sign out" }
+                                }
+                            })
                     }
                 }
             }

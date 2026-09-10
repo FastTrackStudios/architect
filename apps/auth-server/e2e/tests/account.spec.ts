@@ -1,11 +1,11 @@
-import { PASSWORD, PEOPLE, expect, signIn, signUpFresh, test } from "./fixtures";
+import { PASSWORD, PEOPLE, expect, sheet, signIn, signUpFresh, test } from "./fixtures";
 
 test.describe("profile", () => {
   test("a saved name comes back on the page it was typed on", async ({ signedIn: page }) => {
     await page.goto("/account/profile");
     await page.getByLabel("Display name").fill("Ada, Countess of Lovelace");
     await page.getByLabel("Username").fill("countess");
-    await page.getByRole("button", { name: /save profile/i }).click();
+    await page.getByRole("button", { name: /save changes/i }).click();
 
     await expect(page.getByRole("status")).toContainText(/profile saved/i);
     await page.reload();
@@ -26,7 +26,7 @@ test.describe("profile", () => {
     await expect(page.getByRole("alert")).toContainText(/do not match/i);
     // And the old one still works, which is the assertion that matters.
     await page.goto("/account/sessions");
-    await page.getByRole("button", { name: /^sign out$/i }).click();
+    await sheet(page).getByRole("button", { name: /^sign out$/i }).click();
     await signIn(page, email);
   });
 
@@ -130,7 +130,9 @@ test.describe("api keys", () => {
     expect(key).toMatch(/^ak_/);
 
     await page.goto("/account/api-keys");
-    await expect(page.getByText("Playwright key")).toBeVisible();
+    // A cell, not any text: "Playwright key" is also sitting in the
+    // name field the form remembered.
+    await expect(sheet(page).getByRole("cell", { name: "Playwright key" })).toBeVisible();
     await expect(page.getByLabel("New API key")).toBeHidden();
     await expect(page.getByText(key)).toBeHidden();
   });
@@ -158,7 +160,7 @@ test.describe("admin", () => {
     const response = await page.goto("/admin/users");
     expect(response?.status()).toBe(403);
     await expect(page.getByRole("heading", { name: /not allowed/i })).toBeVisible();
-    await expect(page.getByText(PEOPLE.alan)).toBeHidden();
+    await expect(sheet(page).getByText(PEOPLE.alan)).toBeHidden();
   });
 
   test("an administrator sees every account", async ({ signedIn: page }) => {
@@ -166,7 +168,7 @@ test.describe("admin", () => {
     await page.goto("/admin/users");
     await expect(page.getByRole("heading", { name: "Users" })).toBeVisible();
     for (const email of Object.values(PEOPLE)) {
-      await expect(page.getByText(email).first()).toBeVisible();
+      await expect(sheet(page).getByText(email).first()).toBeVisible();
     }
   });
 });

@@ -1,13 +1,13 @@
-import { ORGS, PASSWORD, PEOPLE, expect, signIn, test } from "./fixtures";
+import { ORGS, PASSWORD, PEOPLE, expect, sheet, signIn, test } from "./fixtures";
 
 test.describe("organizations", () => {
   test("an owner sees their organizations and can open one", async ({ signedIn: page }) => {
     await page.goto("/orgs");
     await expect(page.getByRole("heading", { name: "Organizations" })).toBeVisible();
-    await page.getByRole("link", { name: new RegExp(ORGS.acme) }).click();
+    await sheet(page).getByRole("link", { name: new RegExp(ORGS.acme) }).click();
 
     await expect(page.getByRole("heading", { name: ORGS.acme })).toBeVisible();
-    await expect(page.getByText(PEOPLE.grace)).toBeVisible();
+    await expect(sheet(page).getByText(PEOPLE.grace)).toBeVisible();
   });
 
   test("a new organization gets a slug derived from its name", async ({ signedIn: page }) => {
@@ -31,10 +31,10 @@ test.describe("organizations", () => {
     // Alan is a plain member of Indie Collective.
     await signIn(page, PEOPLE.alan);
     await page.goto("/orgs");
-    await page.getByRole("link", { name: new RegExp(ORGS.indie) }).click();
+    await sheet(page).getByRole("link", { name: new RegExp(ORGS.indie) }).click();
 
     await expect(page.getByRole("heading", { name: ORGS.indie })).toBeVisible();
-    await expect(page.getByText(PEOPLE.grace)).toBeVisible();
+    await expect(sheet(page).getByText(PEOPLE.grace)).toBeVisible();
     // The whole point: what is on the page follows the permission the
     // reader holds, not just what the route allows.
     await expect(page.getByRole("heading", { name: "Invite links" })).toBeHidden();
@@ -43,7 +43,7 @@ test.describe("organizations", () => {
 
   test("a role change shows up in the roster", async ({ signedIn: page }) => {
     await page.goto("/orgs");
-    await page.getByRole("link", { name: new RegExp(ORGS.acme) }).click();
+    await sheet(page).getByRole("link", { name: new RegExp(ORGS.acme) }).click();
 
     const row = page.getByRole("row").filter({ hasText: PEOPLE.grace });
     await row.getByRole("combobox").selectOption("member");
@@ -57,7 +57,7 @@ test.describe("organizations", () => {
 
   test("the last owner cannot leave", async ({ signedIn: page }) => {
     await page.goto("/orgs");
-    await page.getByRole("link", { name: new RegExp(ORGS.acme) }).click();
+    await sheet(page).getByRole("link", { name: new RegExp(ORGS.acme) }).click();
     await page.getByRole("button", { name: /leave this organization/i }).click();
 
     // An organization with no owner can be administered by nobody.
@@ -68,7 +68,7 @@ test.describe("organizations", () => {
 test.describe("invite links", () => {
   test("a stranger can see where a link leads before signing up", async ({ signedIn: page, browser }) => {
     await page.goto("/orgs");
-    await page.getByRole("link", { name: new RegExp(ORGS.acme) }).click();
+    await sheet(page).getByRole("link", { name: new RegExp(ORGS.acme) }).click();
 
     await page.getByLabel("Label").fill("Playwright cohort");
     await page.getByLabel(/maximum uses/i).fill("1");
@@ -89,7 +89,7 @@ test.describe("invite links", () => {
 
   test("a revoked link stops admitting between two visits", async ({ signedIn: page }) => {
     await page.goto("/orgs");
-    await page.getByRole("link", { name: new RegExp(ORGS.acme) }).click();
+    await sheet(page).getByRole("link", { name: new RegExp(ORGS.acme) }).click();
     await page.getByLabel("Label").fill("Revoked shortly");
     await page.getByRole("button", { name: /create invite link/i }).click();
 
@@ -98,7 +98,7 @@ test.describe("invite links", () => {
     await expect(page.getByRole("heading", { name: `Join ${ORGS.acme}` })).toBeVisible();
 
     await page.goto("/orgs");
-    await page.getByRole("link", { name: new RegExp(ORGS.acme) }).click();
+    await sheet(page).getByRole("link", { name: new RegExp(ORGS.acme) }).click();
     await page
       .getByRole("row")
       .filter({ hasText: "Revoked shortly" })

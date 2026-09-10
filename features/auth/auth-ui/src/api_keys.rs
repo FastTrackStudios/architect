@@ -31,8 +31,9 @@ use dioxus::prelude::*;
 use uuid::Uuid;
 
 use crate::UiState;
-use crate::page::{Flash, document, flash_to, sign_in_first, token_of};
+use crate::page::{Flash, flash_to, sign_in_first, token_of};
 use crate::profile::{FlashLine, message};
+use crate::settings::Nav;
 
 const PATH: &str = "/account/api-keys";
 
@@ -88,8 +89,14 @@ where
     else {
         return sign_in_first(PATH);
     };
-    document(
+    let Some(nav) = Nav::build(&state, &headers, PATH).await else {
+        return sign_in_first(PATH);
+    };
+    crate::settings::document(
         "API keys",
+        "API keys",
+        "For programs that act as you — scripts, CI, the CLI.",
+        &nav,
         rsx! {
             KeysView {
                 rows: rows(keys),
@@ -144,8 +151,14 @@ where
                 })
                 .await
                 .unwrap_or_default();
-            document(
+            let Some(nav) = Nav::build(&state, &headers, PATH).await else {
+                return sign_in_first(PATH);
+            };
+            crate::settings::document(
                 "API keys",
+                "API keys",
+                "For programs that act as you — scripts, CI, the CLI.",
+                &nav,
                 rsx! {
                     KeysView {
                         rows: rows(keys),
@@ -255,8 +268,6 @@ where
 #[component]
 fn KeysView(rows: Vec<KeyRow>, minted: Option<String>, flash: Option<Flash>) -> Element {
     rsx! {
-        h1 { "API keys" }
-        p { class: "sub", "For programs that act as you — scripts, CI, the CLI." }
         FlashLine { flash }
 
         if let Some(key) = minted {
@@ -268,9 +279,11 @@ fn KeysView(rows: Vec<KeyRow>, minted: Option<String>, flash: Option<Flash>) -> 
             }
         }
 
+        section { class: "panel",
         if rows.is_empty() {
             p { class: "hint", "No keys yet." }
         } else {
+            div { class: "wide",
             table { class: "grid",
                 thead {
                     tr {
@@ -309,11 +322,14 @@ fn KeysView(rows: Vec<KeyRow>, minted: Option<String>, flash: Option<Flash>) -> 
                     }
                 }
             }
+            }
             p { class: "hint",
-                "Revoking stops a key working and keeps the record. Deleting removes the record too — if you are responding to a leak, revoke."
+                "Revoking stops a key working and keeps the record. Deleting removes it too — if you are responding to a leak, revoke."
             }
         }
+        }
 
+        section { class: "panel",
         h2 { "New key" }
         form { method: "post", action: "{PATH}", class: "stack",
             label { r#for: "key-name", "Name" }
@@ -325,25 +341,7 @@ fn KeysView(rows: Vec<KeyRow>, minted: Option<String>, flash: Option<Flash>) -> 
 
             button { r#type: "submit", "Create key" }
         }
-
-        p { class: "alt",
-            a { href: "/account/profile", "Profile" }
-            " · "
-            a { href: "/account", "Linked accounts" }
-            " · "
-            a { href: "/account/passkeys", "Passkeys" }
-            " · "
-            a { href: "/account/two-factor", "Two-factor" }
-            " · "
-            a { href: "/account/phone", "Phone" }
-            " · "
-            a { href: "/account/sessions", "Sessions" }
-            " · "
-            a { href: "/account/api-keys", "API keys" }
-            " · "
-            a { href: "/account/switch", "Accounts" }
-            " · "
-            a { href: "/orgs", "Organizations" }
         }
+
     }
 }

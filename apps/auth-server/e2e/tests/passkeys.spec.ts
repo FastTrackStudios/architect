@@ -1,4 +1,4 @@
-import { PEOPLE, expect, signIn, signUpFresh, test } from "./fixtures";
+import { PEOPLE, expect, sheet, signIn, signUpFresh, test } from "./fixtures";
 
 /**
  * These use Chrome's *virtual authenticator* over CDP — a software
@@ -55,7 +55,7 @@ test.describe("passkeys", () => {
 
     // Now sign out and come back in with it alone.
     await page.goto("/account/sessions");
-    await page.getByRole("button", { name: /^sign out$/i }).click();
+    await sheet(page).getByRole("button", { name: /^sign out$/i }).click();
     await expect(page).toHaveURL(/\/login|\/$/);
 
     await page.goto("/login");
@@ -66,7 +66,7 @@ test.describe("passkeys", () => {
     await expect(page).not.toHaveURL(/\/login/);
     await page.goto("/account/profile");
     // First: the address appears in the header and again in a field.
-    await expect(page.getByText(email).first()).toBeVisible();
+    await expect(sheet(page).getByText(email).first()).toBeVisible();
   });
 
   test("removing a passkey is a plain form and needs no script", async ({ page }) => {

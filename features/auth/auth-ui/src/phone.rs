@@ -21,8 +21,9 @@ use axum::response::{IntoResponse as _, Response};
 use dioxus::prelude::*;
 
 use crate::UiState;
-use crate::page::{Flash, document, flash_to, sign_in_first, token_of};
+use crate::page::{Flash, flash_to, sign_in_first, token_of};
 use crate::profile::{FlashLine, message};
+use crate::settings::Nav;
 
 const PATH: &str = "/account/phone";
 
@@ -64,8 +65,14 @@ where
     let Ok(session) = state.auth.current_session(CurrentSession { token }).await else {
         return sign_in_first(PATH);
     };
-    document(
-        "Phone number",
+    let Some(nav) = Nav::build(&state, &headers, PATH).await else {
+        return sign_in_first(PATH);
+    };
+    crate::settings::document(
+        "Phone",
+        "Phone",
+        "A number we can reach you on, once you have proved you hold it.",
+        &nav,
         rsx! {
             PhoneView {
                 current: architect_auth::flows::phone_number::user_phone_number(&session.user)
@@ -182,7 +189,7 @@ fn PhoneView(
     flash: Option<Flash>,
 ) -> Element {
     rsx! {
-        h1 { "Phone number" }
+        section { class: "panel",
         if current.is_empty() {
             p { class: "sub", "No phone number on this account." }
         } else if verified {
@@ -233,11 +240,7 @@ fn PhoneView(
                 button { r#type: "submit", "Send a code" }
             }
         }
-
-        p { class: "alt",
-            a { href: "/account/profile", "Profile" }
-            " · "
-            a { href: "/account/two-factor", "Two-factor" }
         }
+
     }
 }

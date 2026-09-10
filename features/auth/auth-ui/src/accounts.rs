@@ -22,8 +22,9 @@ use dioxus::prelude::*;
 
 use crate::UiState;
 use crate::multi_session;
-use crate::page::{Flash, document, flash_to, sign_in_first, token_of};
+use crate::page::{Flash, flash_to, sign_in_first, token_of};
 use crate::profile::FlashLine;
+use crate::settings::Nav;
 
 const PATH: &str = "/account/switch";
 
@@ -78,8 +79,14 @@ where
         return sign_in_first(PATH);
     };
 
-    document(
-        "Accounts",
+    let Some(nav) = Nav::build(&state, &headers, PATH).await else {
+        return sign_in_first(PATH);
+    };
+    crate::settings::document(
+        "Switch account",
+        "Switch account",
+        "Signed in on this browser. Switching does not sign anybody out.",
+        &nav,
         rsx! {
             AccountsView {
                 rows: sessions
@@ -243,10 +250,9 @@ where
 #[component]
 fn AccountsView(rows: Vec<AccountRow>, flash: Option<Flash>) -> Element {
     rsx! {
-        h1 { "Accounts" }
-        p { class: "sub", "Signed in on this browser. Switching does not sign anybody out." }
         FlashLine { flash }
 
+        section { class: "panel",
         ul { class: "orgs",
             for row in rows.iter() {
                 li { key: "{row.token}", class: "org",
@@ -273,16 +279,15 @@ fn AccountsView(rows: Vec<AccountRow>, flash: Option<Flash>) -> Element {
         p { class: "hint",
             "Sign in as somebody else and they will appear here too, up to five."
         }
-        form { method: "post", action: "/login", class: "inline",
-            a { class: "button", href: "/login?return_to=%2Faccount%2Fswitch", "Add another account" }
+        a { class: "button small", href: "/login?return_to=%2Faccount%2Fswitch", "Add another account" }
         }
 
-        p { class: "alt",
-            form { method: "post", action: "{PATH}/leave-all", class: "inline",
-                button { r#type: "submit", class: "link danger", "Sign out of everything" }
+        section { class: "panel",
+            h2 { "Leaving the machine?" }
+            p { class: "hint", "Ends every account above, not just this one." }
+            form { method: "post", action: "{PATH}/leave-all", class: "stack",
+                button { r#type: "submit", class: "danger", "Sign out of everything" }
             }
-            " · "
-            a { href: "/account/profile", "Profile" }
         }
     }
 }

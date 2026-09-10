@@ -1,4 +1,4 @@
-import { PASSWORD, PEOPLE, expect, signIn, signUpFresh, test } from "./fixtures";
+import { PASSWORD, PEOPLE, expect, sheet, signIn, signUpFresh, test } from "./fixtures";
 
 /**
  * The mailed code and link cannot be read from a browser — the dev
@@ -23,11 +23,11 @@ test.describe("ways in", () => {
     const username = `u${Math.random().toString(36).slice(2, 10)}`;
     await page.goto("/account/profile");
     await page.getByLabel("Username").fill(username);
-    await page.getByRole("button", { name: /save profile/i }).click();
+    await page.getByRole("button", { name: /save changes/i }).click();
     await expect(page.getByRole("status")).toBeVisible();
 
     await page.goto("/account/sessions");
-    await page.getByRole("button", { name: /^sign out$/i }).click();
+    await sheet(page).getByRole("button", { name: /^sign out$/i }).click();
     await expect(page).toHaveURL(/\/login/);
 
     await page.getByLabel("Email or username").fill(username);
@@ -36,7 +36,7 @@ test.describe("ways in", () => {
     await expect(page).not.toHaveURL(/\/login/);
 
     await page.goto("/account/profile");
-    await expect(page.getByText(email).first()).toBeVisible();
+    await expect(sheet(page).getByText(email).first()).toBeVisible();
   });
 
   test("both passwordless routes are offered from the sign-in page", async ({ page }) => {

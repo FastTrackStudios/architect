@@ -19,8 +19,9 @@ use dioxus::prelude::*;
 use uuid::Uuid;
 
 use crate::UiState;
-use crate::page::{Flash, document, flash_to, sign_in_first, token_of};
+use crate::page::{Flash, flash_to, sign_in_first, token_of};
 use crate::profile::{FlashLine, message};
+use crate::settings::Nav;
 
 const PATH: &str = "/account/sessions";
 
@@ -92,8 +93,14 @@ where
         })
         .collect();
 
-    document(
-        "Active sessions",
+    let Some(nav) = Nav::build(&state, &headers, PATH).await else {
+        return sign_in_first(PATH);
+    };
+    crate::settings::document(
+        "Sessions",
+        "Sessions",
+        "Everywhere this account is currently signed in.",
+        &nav,
         rsx! {
             SessionsView {
                 rows,
@@ -192,10 +199,10 @@ fn describe_agent(agent: Option<&str>) -> String {
 fn SessionsView(rows: Vec<SessionRow>, flash: Option<Flash>) -> Element {
     let others = rows.iter().filter(|row| !row.current).count();
     rsx! {
-        h1 { "Active sessions" }
-        p { class: "sub", "Everywhere this account is currently signed in." }
         FlashLine { flash }
 
+        section { class: "panel",
+        div { class: "wide",
         table { class: "grid",
             thead {
                 tr {
@@ -235,34 +242,21 @@ fn SessionsView(rows: Vec<SessionRow>, flash: Option<Flash>) -> Element {
             }
         }
 
+        }
+        }
+
         if others > 0 {
-            form { method: "post", action: "{PATH}/revoke-others", class: "stack",
+            section { class: "panel",
+                h2 { "Not you?" }
                 p { class: "hint",
-                    "If you do not recognise a session above, sign out everywhere else and change your password."
+                    "If you do not recognise a session above, end the others and change your password."
                 }
-                button { r#type: "submit", "Sign out {others} other session(s)" }
+                form { method: "post", action: "{PATH}/revoke-others", class: "stack",
+                    button { r#type: "submit", "Sign out {others} other session(s)" }
+                }
             }
         }
 
-        p { class: "alt",
-            a { href: "/account/profile", "Profile" }
-            " · "
-            a { href: "/account", "Linked accounts" }
-            " · "
-            a { href: "/account/passkeys", "Passkeys" }
-            " · "
-            a { href: "/account/two-factor", "Two-factor" }
-            " · "
-            a { href: "/account/phone", "Phone" }
-            " · "
-            a { href: "/account/sessions", "Sessions" }
-            " · "
-            a { href: "/account/api-keys", "API keys" }
-            " · "
-            a { href: "/account/switch", "Accounts" }
-            " · "
-            a { href: "/orgs", "Organizations" }
-        }
     }
 }
 

@@ -29,9 +29,10 @@ use dioxus::prelude::*;
 use serde_json::{Value, json};
 
 use crate::UiState;
-use crate::page::{Flash, document_with_script, flash_to, safe_path, sign_in_first, token_of};
+use crate::page::{Flash, flash_to, safe_path, sign_in_first, token_of};
 use crate::passkey_script::PASSKEY_SCRIPT;
 use crate::profile::{FlashLine, message};
+use crate::settings::Nav;
 
 const PATH: &str = "/account/passkeys";
 
@@ -99,8 +100,15 @@ where
     else {
         return sign_in_first(PATH);
     };
-    document_with_script(
+    let Some(nav) = Nav::build(&state, &headers, PATH).await else {
+        return sign_in_first(PATH);
+    };
+    crate::settings::document_with_script(
         "Passkeys",
+        "Passkeys",
+        "Sign in with your fingerprint, face or screen lock instead of a password.",
+        &nav,
+        PASSKEY_SCRIPT,
         rsx! {
             PasskeysView {
                 rows: passkeys
@@ -115,7 +123,6 @@ where
                 flash: Flash::from_query(q.ok.as_deref(), q.error.as_deref()),
             }
         },
-        PASSKEY_SCRIPT,
     )
 }
 
@@ -304,15 +311,13 @@ pub fn SignInButton(return_to: String) -> Element {
 #[component]
 fn PasskeysView(rows: Vec<PasskeyRow>, flash: Option<Flash>) -> Element {
     rsx! {
-        h1 { "Passkeys" }
-        p { class: "sub",
-            "Sign in with your fingerprint, face or screen lock instead of a password."
-        }
         FlashLine { flash }
 
+        section { class: "panel",
         if rows.is_empty() {
             p { class: "hint", "No passkeys yet." }
         } else {
+            div { class: "wide",
             table { class: "grid",
                 thead {
                     tr {
@@ -346,11 +351,13 @@ fn PasskeysView(rows: Vec<PasskeyRow>, flash: Option<Flash>) -> Element {
                     }
                 }
             }
+            }
+        }
         }
 
         // Everything below needs `navigator.credentials`, so it stays
         // hidden unless the script found it.
-        div { "data-passkey": "true", hidden: true,
+        section { class: "panel", "data-passkey": "true", hidden: true,
             h2 { "Add a passkey" }
             p { class: "hint",
                 "Your device will ask you to confirm. The key never leaves it — this site only ever sees the public half."
@@ -363,24 +370,5 @@ fn PasskeysView(rows: Vec<PasskeyRow>, flash: Option<Flash>) -> Element {
             p { id: "passkey-status", hidden: true }
         }
 
-        p { class: "alt",
-            a { href: "/account/profile", "Profile" }
-            " · "
-            a { href: "/account", "Linked accounts" }
-            " · "
-            a { href: "/account/passkeys", "Passkeys" }
-            " · "
-            a { href: "/account/two-factor", "Two-factor" }
-            " · "
-            a { href: "/account/phone", "Phone" }
-            " · "
-            a { href: "/account/sessions", "Sessions" }
-            " · "
-            a { href: "/account/api-keys", "API keys" }
-            " · "
-            a { href: "/account/switch", "Accounts" }
-            " · "
-            a { href: "/orgs", "Organizations" }
-        }
     }
 }

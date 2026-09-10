@@ -280,4 +280,267 @@ button.link:hover { color: var(--fg); background: none; }
 @media (prefers-reduced-motion: no-preference) {
   a.button, button, input { transition: background-color .15s ease, border-color .15s ease; }
 }
+/* ══ Settings ═══════════════════════════════════════════════════════
+   The sign-in card is one centred module. This is the console the
+   card lets you into: a fixed rail down the left and a working
+   surface beside it, both bolted to the same chassis.
+
+   Separation here is ground contrast and a hairline — never a shadow,
+   and never the same radius on everything. Panels are modules on a
+   deck, not cards floating over a page. */
+body.app {
+  display: block;
+  place-items: initial;
+  padding: 0;
+  min-height: 100vh;
+  background: var(--bg);
+}
+.app-frame {
+  display: grid;
+  grid-template-columns: 15.5rem minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+/* ── The rail ────────────────────────────────────────── */
+/* Not a route list. It shows where you stand: your name, the rooms
+   you are in and what you are in them, and — only if you are one —
+   the server itself. */
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 1.6rem 1rem 1.25rem;
+  background: var(--void);
+  border-right: 1px solid var(--line);
+  /* Narrowed: the rail is dense and technical, the content is not.
+     Archivo's width axis does the work a second typeface would. */
+  font-variation-settings: "wdth" 94;
+}
+.rail .wordmark { padding: 0 .65rem; }
+.rail-who {
+  padding: 0 .65rem;
+  min-width: 0;
+}
+.rail-who strong {
+  display: block;
+  font-size: .95rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.rail-who span {
+  display: block;
+  margin-top: .1rem;
+  color: var(--subtle);
+  font-size: .8rem;
+  overflow-wrap: anywhere;
+}
+.rail-group { display: flex; flex-direction: column; gap: .1rem; }
+.rail-group + .rail-group { margin-top: .25rem; }
+.rail-label {
+  margin: 0 0 .45rem;
+  padding: .5rem .65rem 0;
+  border-top: 1px solid var(--line);
+  color: var(--subtle);
+  font-size: .78rem;
+  font-weight: 500;
+}
+.rail a {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: .5rem;
+  padding: .42rem .65rem;
+  border-radius: 7px;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: .9rem;
+  /* The 2px bar an active item grows. Reserved as transparent so the
+     label never shifts sideways when it lights up. */
+  box-shadow: inset 2px 0 0 transparent;
+}
+.rail a:hover { color: var(--fg); background: var(--deck); }
+.rail a:focus-visible { outline: 2px solid var(--fg); outline-offset: -2px; }
+.rail a[aria-current="page"] {
+  color: var(--fg);
+  background: var(--deck);
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--fg);
+}
+.rail a .role {
+  flex: none;
+  color: var(--subtle);
+  font-size: .75rem;
+  font-variation-settings: "wdth" 90;
+}
+.rail-foot { margin-top: auto; }
+.rail-foot form { margin: 0; }
+.rail-foot button.link { padding: .42rem .65rem; font-size: .9rem; }
+
+/* ── The working surface ─────────────────────────────── */
+.sheet { min-width: 0; padding: 2.25rem 2rem 4rem; }
+.sheet-head { margin-bottom: 1.75rem; }
+.sheet h1 { margin: 0; }
+.sheet .sub { margin: .35rem 0 0; }
+.sheet-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  max-width: 58rem;
+}
+/* A module. Bolted down, not floating: no shadow, small radius. */
+.panel {
+  padding: 1.4rem 1.5rem;
+  background: var(--deck);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.panel > h2:first-child { margin-top: 0; }
+.panel > .sub:last-child, .panel > .hint:last-child { margin-bottom: 0; }
+/* Forms want a readable measure; a text field the width of a table
+   is a field nobody can scan. */
+.panel form.stack { max-width: 26rem; }
+.panel form.stack input:last-of-type { margin-bottom: 1.1rem; }
+.panel form.stack button { width: auto; min-width: 11rem; }
+
+/* ── Tables ──────────────────────────────────────────── */
+table.grid {
+  width: 100%;
+  margin: 0 0 .25rem;
+  /* A table that follows a form needs air, or the header row reads as
+     part of the button above it. */
+  border-collapse: collapse;
+  font-size: .92rem;
+}
+table.grid th {
+  padding: 0 .75rem .55rem 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--subtle);
+  font-size: .8rem;
+  font-weight: 500;
+  text-align: left;
+}
+table.grid td {
+  padding: .7rem .75rem .7rem 0;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+table.grid tr:last-child td { border-bottom: 0; }
+table.grid td:last-child, table.grid th:last-child { padding-right: 0; text-align: right; }
+/* Several inline forms in one cell. Without this they run together as
+   one word — "BanSign in asDelete" — which is how the admin table
+   read before there was any CSS for it at all. */
+table.grid td:last-child form.inline { display: inline-flex; }
+table.grid td:last-child > * + * { margin-left: .9rem; }
+table.grid td input { width: auto; margin: 0 .5rem 0 0; padding: .35rem .5rem; font-size: .85rem; }
+table.grid select { margin-right: .5rem; }
+.wide { overflow-x: auto; }
+form + .wide, form + table.grid { margin-top: 1.75rem; }
+.wide + form.stack, table.grid + form.stack { margin-top: 1.5rem; }
+
+/* ── Controls ────────────────────────────────────────── */
+select {
+  max-width: 100%;
+  padding: .4rem .5rem;
+  font: inherit;
+  font-size: .85rem;
+  color: var(--fg);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+}
+select:focus-visible { outline: 2px solid var(--fg); outline-offset: 1px; }
+form.stack select { width: 100%; margin-bottom: .9rem; padding: .7rem .8rem; font-size: 1rem; }
+button.danger { color: var(--error); }
+button.link.danger:hover { color: var(--error); }
+.mono { font-family: var(--mono); font-size: .85rem; font-variant-numeric: tabular-nums; }
+input.mono { font-size: .85rem; }
+.tag {
+  display: inline-block;
+  margin-left: .5rem;
+  padding: .08rem .42rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: .72rem;
+  font-variation-settings: "wdth" 92;
+  vertical-align: 1px;
+}
+
+/* ── Lists ───────────────────────────────────────────── */
+ul.orgs, ul.teams, ul.codes, ul.providers { margin: 0; padding: 0; list-style: none; }
+ul.orgs, ul.teams { display: flex; flex-direction: column; }
+li.org, li.team {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  padding: .8rem 0;
+  border-bottom: 1px solid var(--line);
+}
+li.org > a, li.team > .team-head { flex: 1; min-width: 0; text-decoration: none; color: var(--fg); }
+li.org:last-child, li.team:last-child { border-bottom: 0; }
+li.org > a strong, li.team strong { font-weight: 600; }
+/* `li.team` beats `.team` on specificity, so the override has to
+   match the same way — otherwise `align-items: center` from the shared
+   rule above survives and centres the whole block. */
+li.team { flex-direction: column; align-items: stretch; gap: .45rem; }
+.team-head { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+/* Backup codes and scopes: read down a column, not across a line. */
+ul.codes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: .35rem .9rem;
+  margin: 0 0 1rem;
+  font-family: var(--mono);
+  font-size: .9rem;
+}
+li.provider { display: flex; align-items: center; justify-content: space-between; gap: .9rem; padding: .8rem 0; border-bottom: 1px solid var(--line); }
+li.provider:last-child { border-bottom: 0; }
+.provider-name { display: flex; align-items: center; gap: .7rem; }
+
+/* ── Shown once ──────────────────────────────────────── */
+/* A key or an invite URL that cannot be fetched again. Raised off the
+   deck so it reads as something to act on now, not a row to skim. */
+.minted {
+  margin: 0 0 1.1rem;
+  padding: 1rem 1.1rem;
+  background: var(--raised);
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+}
+.minted p { margin-top: 0; }
+.minted input { margin: 0; }
+.qr { margin: 0 0 1rem; }
+.qr svg { display: block; }
+
+.alt { margin: 1.5rem 0 0; color: var(--muted); font-size: .9rem; }
+.sheet .alt a { color: var(--muted); }
+.sheet .alt a:hover { color: var(--fg); }
+
+/* ── Narrow ──────────────────────────────────────────── */
+/* The rail becomes a scrolling strip above the sheet. No script, so
+   this is the whole responsive story. */
+@media (max-width: 60rem) {
+  .app-frame { grid-template-columns: minmax(0, 1fr); }
+  .rail {
+    flex-direction: row;
+    align-items: center;
+    gap: .35rem;
+    overflow-x: auto;
+    padding: .6rem .75rem;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .rail .wordmark, .rail-who, .rail-label { display: none; }
+  .rail-group { flex-direction: row; gap: .35rem; }
+  .rail-group + .rail-group { margin-top: 0; }
+  .rail a { white-space: nowrap; }
+  .rail a .role { display: none; }
+  .rail-foot { margin-top: 0; margin-left: auto; }
+  .sheet { padding: 1.5rem 1rem 3rem; }
+  table.grid td:last-child > * + * { margin-left: .6rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+
 "#;

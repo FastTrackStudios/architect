@@ -37,6 +37,7 @@ use uuid::Uuid;
 use crate::UiState;
 use crate::page::{Flash, document, flash_to, sign_in_first, token_of};
 use crate::profile::message;
+use crate::settings::Nav;
 use crate::views::{
     DeadEnd, Declined, InvitationRow, InvitationView, JoinView, LinkRow, MemberRow, OrgRow,
     OrgView, OrgsView, TeamRow,
@@ -159,8 +160,14 @@ where
             role: bundle.membership.role,
         })
         .collect();
-    document(
+    let Some(nav) = Nav::build(&state, &headers, "/orgs").await else {
+        return sign_in_first("/orgs");
+    };
+    crate::settings::document(
         "Organizations",
+        "Organizations",
+        "The organizations this account belongs to.",
+        &nav,
         rsx! {
             OrgsView { rows, flash: Flash::from_query(q.ok.as_deref(), q.error.as_deref()) }
         },
@@ -319,8 +326,19 @@ where
 
     let now = Utc::now();
     let can_invite = matches!(bundle.membership.role.as_str(), "owner" | "admin");
-    document(
-        &bundle.organization.name.clone(),
+    let Some(nav) = Nav::build(&state, &headers, &path).await else {
+        return sign_in_first(&path);
+    };
+    let heading = bundle.organization.name.clone();
+    let blurb = format!(
+        "/{} · you are {}",
+        bundle.organization.slug, bundle.membership.role
+    );
+    crate::settings::document(
+        &heading,
+        &heading,
+        &blurb,
+        &nav,
         rsx! {
             OrgView {
                 id,

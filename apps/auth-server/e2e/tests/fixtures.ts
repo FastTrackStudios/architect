@@ -25,6 +25,17 @@ export const ORGS = {
   indie: "Indie Collective",
 } as const;
 
+/**
+ * The working surface, excluding the settings rail.
+ *
+ * The rail repeats the organizations and "Sign out", so a page-wide
+ * `getByRole` matches twice. Scoping to `main` is also closer to what
+ * these tests mean: "the thing the page is about".
+ */
+export function sheet(page: Page) {
+  return page.locator("main");
+}
+
 /** Sign in through the real form, the way a person does. */
 export async function signIn(page: Page, email: string): Promise<void> {
   await page.goto("/login");

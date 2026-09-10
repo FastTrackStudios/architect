@@ -36,6 +36,7 @@ use uuid::Uuid;
 use crate::UiState;
 use crate::page::{Flash, document, flash_to, sign_in_first, token_of};
 use crate::profile::{FlashLine, message};
+use crate::settings::Nav;
 
 const PATH: &str = "/admin/users";
 
@@ -120,8 +121,14 @@ where
         .await
         .ok();
 
-    document(
+    let Some(nav) = Nav::build(&state, &headers, PATH).await else {
+        return sign_in_first(PATH);
+    };
+    crate::settings::document(
         "Users",
+        "Users",
+        &format!("{} account(s) on this server.", listed.total),
+        &nav,
         rsx! {
             UsersView {
                 rows: listed
@@ -430,12 +437,10 @@ fn UsersView(
     let next = offset.saturating_add(PAGE_SIZE);
     let previous = offset.saturating_sub(PAGE_SIZE);
     rsx! {
-        h1 { "Users" }
-        p { class: "sub", "{total} account(s)." }
         FlashLine { flash }
 
         if impersonating {
-            div { class: "minted",
+            section { class: "panel minted",
                 p { class: "error", role: "alert",
                     "You are signed in as someone else. Everything you do is recorded against them."
                 }
@@ -445,6 +450,8 @@ fn UsersView(
             }
         }
 
+        section { class: "panel",
+        div { class: "wide",
         table { class: "grid",
             thead {
                 tr {
@@ -523,13 +530,16 @@ fn UsersView(
             }
         }
 
-        p { class: "alt",
-            if offset > 0 {
-                a { href: "{PATH}?offset={previous}", "Previous" }
-                " · "
-            }
-            if offset.saturating_add(shown) < total {
-                a { href: "{PATH}?offset={next}", "Next" }
+        }
+        }
+        if offset > 0 || offset.saturating_add(shown) < total {
+            p { class: "alt",
+                if offset > 0 {
+                    a { href: "{PATH}?offset={previous}", "Previous" }
+                }
+                if offset.saturating_add(shown) < total {
+                    a { href: "{PATH}?offset={next}", "Next" }
+                }
             }
         }
     }
