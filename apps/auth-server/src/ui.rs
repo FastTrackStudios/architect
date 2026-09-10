@@ -272,7 +272,7 @@ fn AccountPage(
                 }
 
                 p { class: "alt",
-                    form { method: "post", action: "/auth/sign-out", class: "inline",
+                    form { method: "post", action: "/account/sign-out", class: "inline",
                         button { r#type: "submit", class: "link", "Sign out" }
                     }
                 }
@@ -892,6 +892,10 @@ fn Page(
             style { {STYLE} }
         }
         body {
+            // The one script in these pages, and only where it is
+            // needed: `navigator.credentials` cannot be reached from a
+            // form. Everything else on this page is still a form post.
+            script { dangerous_inner_html: auth_ui::passkey_script::PASSKEY_SCRIPT }
             Shell {
                 h1 { "{screen.title()}" }
                 p { class: "sub",
@@ -921,6 +925,13 @@ fn Page(
                         }
                     }
                     p { class: "or", span { "or with email" } }
+                }
+
+                // Hidden until the script confirms the browser has
+                // `navigator.credentials`, so a browser without it
+                // shows no button rather than a dead one.
+                if screen == Screen::SignIn {
+                    auth_ui::passkeys::SignInButton { return_to: return_to.clone() }
                 }
 
                 form { method: "post", action: screen.action(),

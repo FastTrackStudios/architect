@@ -12,7 +12,10 @@ import { defineConfig, devices } from "@playwright/test";
  * every push rather than nightly.
  */
 const PORT = Number(process.env.AUTH_E2E_PORT ?? 8181);
-const BASE_URL = `http://127.0.0.1:${PORT}`;
+// `localhost`, not `127.0.0.1`: a WebAuthn relying-party id has to be a
+// registrable domain suffix of the origin's host, and an IP address has
+// no such suffix — passkeys simply cannot work on one.
+const BASE_URL = `http://localhost:${PORT}`;
 
 /**
  * A browser to use instead of the one Playwright downloads.
@@ -62,6 +65,7 @@ export default defineConfig({
       AUTH_SECRET: "a-secret-at-least-32-bytes-long!!",
       AUTH_BASE_URL: BASE_URL,
       AUTH_BIND_ADDR: `127.0.0.1:${PORT}`,
+      AUTH_PASSKEY_RP_ID: "localhost",
       RUST_LOG: "info,auth_server=debug",
     },
   },

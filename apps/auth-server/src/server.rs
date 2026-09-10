@@ -141,7 +141,14 @@ pub fn build_engine<S>(config: &ServerConfig, storage: S) -> eyre::Result<Archit
     if let Some(rp_id) = &config.passkey_rp_id {
         builder = builder
             .passkey_rp_id(rp_id.clone())
-            .passkey_allowed_origin(config.base_url.clone());
+            // The origin a browser will report, which is this server's
+            // own public URL. A mismatch here is not a subtle bug: the
+            // browser refuses the ceremony outright.
+            .passkey_allowed_origin(config.base_url.clone())
+            // Shown by the operating system when it asks to create or
+            // use a passkey. Without it the prompt says the domain,
+            // which reads like a warning rather than an invitation.
+            .passkey_rp_name("FastTrackStudio");
     }
 
     for client in &config.oidc_clients {

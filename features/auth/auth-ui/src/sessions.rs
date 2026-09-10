@@ -220,7 +220,7 @@ fn SessionsView(rows: Vec<SessionRow>, flash: Option<Flash>) -> Element {
                         td { class: "mono", "{row.expires}" }
                         td {
                             if row.current {
-                                form { method: "post", action: "/auth/sign-out", class: "inline",
+                                form { method: "post", action: "/account/sign-out", class: "inline",
                                     button { r#type: "submit", class: "link", "Sign out" }
                                 }
                             } else {

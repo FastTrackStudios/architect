@@ -40,6 +40,8 @@ pub mod api_keys;
 pub mod chrome;
 pub mod orgs;
 pub mod page;
+pub mod passkey_script;
+pub mod passkeys;
 pub mod profile;
 pub mod qr;
 pub mod sessions;
@@ -107,6 +109,7 @@ where
             "/account/profile",
             get(profile::page::<S>).post(profile::save::<S>),
         )
+        .route("/account/sign-out", post(profile::sign_out::<S>))
         .route("/account/email", post(profile::change_email::<S>))
         .route("/account/password", post(profile::change_password::<S>))
         .route("/account/two-factor", get(two_factor::page::<S>))
@@ -132,6 +135,21 @@ where
         )
         .route("/account/api-keys/revoke", post(api_keys::revoke::<S>))
         .route("/account/api-keys/delete", post(api_keys::delete::<S>))
+        .route("/account/passkeys", get(passkeys::page::<S>))
+        .route(
+            "/account/passkeys/begin",
+            post(passkeys::begin_registration::<S>),
+        )
+        .route(
+            "/account/passkeys/complete",
+            post(passkeys::complete_registration::<S>),
+        )
+        .route("/account/passkeys/delete", post(passkeys::delete::<S>))
+        .route("/login/passkey/begin", post(passkeys::begin_sign_in::<S>))
+        .route(
+            "/login/passkey/complete",
+            post(passkeys::complete_sign_in::<S>),
+        )
         .route("/account/sessions", get(sessions::page::<S>))
         .route("/account/sessions/revoke", post(sessions::revoke::<S>))
         .route(

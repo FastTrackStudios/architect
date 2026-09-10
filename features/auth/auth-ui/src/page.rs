@@ -50,6 +50,31 @@ pub fn document(title: &str, body: Element) -> Response {
     .into_response()
 }
 
+/// As [`document`], with a script in the page.
+///
+/// Only the passkey pages use this: `navigator.credentials` cannot be
+/// reached from a form, so a passkey needs script no matter what. It
+/// is inlined rather than fetched for the same reason the stylesheet
+/// is — one document, no second request to fail.
+pub fn document_with_script(title: &str, body: Element, script: &str) -> Response {
+    let rendered = dioxus_ssr::render_element(rsx! {
+        head {
+            meta { charset: "utf-8" }
+            meta { name: "viewport", content: "width=device-width, initial-scale=1" }
+            title { "{title} · FastTrackStudio" }
+            style { {STYLE} }
+        }
+        body {
+            Shell { {body} }
+            script { dangerous_inner_html: "{script}" }
+        }
+    });
+    Html(format!(
+        "<!doctype html>\n<html lang=\"en\">{rendered}</html>"
+    ))
+    .into_response()
+}
+
 /// Redirect back to `path`, carrying a flash message.
 #[must_use]
 pub fn flash_to(path: &str, flash: &Flash) -> Response {

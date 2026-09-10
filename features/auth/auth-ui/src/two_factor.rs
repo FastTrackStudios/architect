@@ -389,7 +389,7 @@ fn ChallengeView(return_to: String, error: Option<String>) -> Element {
             "Lost your phone? Use one of the backup codes you saved when you turned this on."
         }
         p { class: "alt",
-            form { method: "post", action: "/auth/sign-out", class: "inline",
+            form { method: "post", action: "/account/sign-out", class: "inline",
                 button { r#type: "submit", class: "link", "Sign in as someone else" }
             }
         }

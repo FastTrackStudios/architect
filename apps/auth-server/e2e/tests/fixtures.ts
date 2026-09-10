@@ -30,7 +30,8 @@ export async function signIn(page: Page, email: string): Promise<void> {
   await page.goto("/login");
   await page.getByLabel(/email/i).fill(email);
   await page.getByLabel(/password/i).fill(PASSWORD);
-  await page.getByRole("button", { name: /sign in/i }).click();
+  // Exact: the login page also offers "Sign in with a passkey".
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
   // The redirect off /login is the signal; asserting on it here means a
   // broken sign-in fails in the fixture rather than confusingly later.
   await expect(page).not.toHaveURL(/\/login/);

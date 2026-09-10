@@ -13,7 +13,7 @@ use architect_auth::{
 use axum::Form;
 use axum::extract::{Query, State};
 use axum::http::HeaderMap;
-use axum::response::Response;
+use axum::response::{IntoResponse as _, Response};
 use dioxus::prelude::*;
 
 use crate::UiState;
@@ -189,6 +189,33 @@ where
         Ok(()) => flash_to(PATH, &Flash::Ok("Password changed.".into())),
         Err(error) => flash_to(PATH, &Flash::Error(message(&error))),
     }
+}
+
+/// `POST /account/sign-out` — the form twin of `POST /auth/sign-out`.
+///
+/// The JSON endpoint answers `204 No Content`, which is right for a
+/// program and wrong for a browser: a form post that gets a 204 leaves
+/// the page exactly where it was, so the cookie was cleared and the
+/// screen still looked signed in until somebody reloaded. This clears
+/// the cookie and *goes somewhere*.
+pub async fn sign_out<S>(State(state): State<UiState<S>>, headers: HeaderMap) -> Response
+where
+    S: AuthStorage,
+{
+    if let Some(token) = token_of(&headers, &state.cookie) {
+        // Idempotent: a token that is already dead has achieved what
+        // was asked, and the cookie goes either way.
+        let _ = state.auth.sign_out(architect_auth::SignOut { token }).await;
+    }
+    let cleared = state.cookie.session_cookie(String::new());
+    (
+        axum::http::StatusCode::SEE_OTHER,
+        [
+            (axum::http::header::SET_COOKIE, cleared.to_string()),
+            (axum::http::header::LOCATION, "/login".to_owned()),
+        ],
+    )
+        .into_response()
 }
 
 async fn current<S>(
