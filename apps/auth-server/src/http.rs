@@ -1544,14 +1544,29 @@ fn redirect_signed_in(
     return_to: &str,
 ) -> Response {
     let set_cookie = cookie.session_cookie(bundle.token.clone());
-    (
+    // A social sign-in for somebody with two-factor on issues an
+    // inactive session, same as every other route; sending them to
+    // `return_to` would bounce them back to /login forever.
+    let location = if bundle.session.active {
+        return_to.to_owned()
+    } else {
+        format!(
+            "/login/two-factor?return_to={}",
+            architect_auth::percent::encode_component(return_to)
+        )
+    };
+    let mut response = (
         StatusCode::SEE_OTHER,
         [
             (header::SET_COOKIE, set_cookie.to_string()),
-            (header::LOCATION, return_to.to_owned()),
+            (header::LOCATION, location),
         ],
     )
-        .into_response()
+        .into_response();
+    // "You signed in with GitHub last time" — the hint that keeps
+    // somebody from resetting a password they never had.
+    auth_ui::login::remember_method(&mut response, &bundle.user);
+    response
 }
 
 /// An `AuthFlowError` on its way out as HTTP.

@@ -7694,6 +7694,123 @@ pub mod email_password {
             .await
         }
 
+        // r[verify auth.twofactor.signin-required]
+        #[tokio::test]
+        async fn every_way_in_owes_the_second_factor_not_just_the_password_form() {
+            // Before this, enabling two-factor protected the password
+            // form and nothing else: an emailed code, an emailed link, a
+            // passkey and a social button each issued an ACTIVE session
+            // and walked straight past the challenge. The spec's MUST is
+            // unqualified, so all of them owe it.
+            let auth = passkey_auth();
+            let person = user(&auth, "ada@example.com").await;
+            let enrollment = auth
+                .begin_two_factor_enrollment(BeginTwoFactorEnrollment {
+                    session_token: person.token.clone(),
+                    account_label: "ada@example.com".into(),
+                    issuer: "FastTrackStudio".into(),
+                })
+                .await
+                .expect("enrol");
+            auth.confirm_two_factor(ConfirmTwoFactor {
+                session_token: person.token.clone(),
+                code: totp_code(&enrollment.secret),
+            })
+            .await
+            .expect("confirm");
+
+            // A mailed code.
+            let otp = auth
+                .send_email_otp(SendEmailOtp {
+                    email: "ada@example.com".into(),
+                })
+                .await
+                .expect("send code");
+            let bundle = auth
+                .verify_email_otp(VerifyEmailOtp {
+                    email: "ada@example.com".into(),
+                    otp: otp.token,
+                    create_session: true,
+                    ip_address: None,
+                    user_agent: None,
+                })
+                .await
+                .expect("verify code");
+            let session = bundle.session.expect("a session");
+            assert!(
+                !session.active,
+                "an emailed code must not skip the second factor"
+            );
+
+            // A mailed link.
+            let link = auth
+                .send_magic_link(SendMagicLink {
+                    email: "ada@example.com".into(),
+                    callback_url: None,
+                })
+                .await
+                .expect("send link");
+            let verified = auth
+                .verify_magic_link(VerifyMagicLink {
+                    email: "ada@example.com".into(),
+                    token: link.token,
+                    callback_url: None,
+                    ip_address: None,
+                    user_agent: None,
+                })
+                .await
+                .expect("verify link");
+            assert!(
+                !verified.session.active,
+                "an emailed link must not skip the second factor"
+            );
+
+            // A passkey. Debatable — the authenticator did verify the
+            // person — but the spec does not carve it out, and a route
+            // that silently exempts itself is the shape this test
+            // exists to catch.
+            let mut authenticator = authenticator();
+            register_passkey(&auth, &mut authenticator, &person.token, "phone")
+                .await
+                .expect("register");
+            let challenge = auth
+                .begin_passkey_authentication(BeginPasskeyAuthentication {
+                    email: Some("ada@example.com".into()),
+                })
+                .await
+                .expect("begin");
+            let options = serde_json::from_str(&challenge.options_json).expect("options");
+            let assertion = authenticator
+                .do_authentication(passkey_origin(), options)
+                .expect("sign");
+            let signed_in = auth
+                .complete_passkey_authentication(CompletePasskeyAuthentication {
+                    handle: challenge.handle,
+                    credential_json: serde_json::to_string(&assertion).expect("serialise"),
+                    ip_address: None,
+                    user_agent: None,
+                })
+                .await
+                .expect("passkey sign-in");
+            assert!(
+                !signed_in.session.active,
+                "a passkey must not skip the second factor"
+            );
+
+            // And the challenge really does finish the job.
+            auth.verify_two_factor(VerifyTwoFactor {
+                session_token: signed_in.token.clone(),
+                code: totp_code(&enrollment.secret),
+            })
+            .await
+            .expect("second factor");
+            auth.current_session(CurrentSession {
+                token: signed_in.token,
+            })
+            .await
+            .expect("the session is usable once the factor is given");
+        }
+
         // r[verify auth.passkey.assertion-signature]
         // r[verify auth.passkey.challenge-random]
         // r[verify auth.passkey.rp-origin]
@@ -10787,8 +10904,23 @@ pub mod email_otp {
             self.storage.delete_verification(verification.id).await?;
 
             if input.create_session {
+                let second_factor_pending = user.two_factor_enabled;
                 let bundle = self
-                    .issue_session(user, input.ip_address, input.user_agent, None, None)
+                    .issue_session_with_state(
+                        user,
+                        input.ip_address,
+                        input.user_agent,
+                        None,
+                        None,
+                        // r[impl auth.twofactor.signin-required]
+                        // Inactive when a second factor is owed, exactly as
+                        // the password path does. Every one of these routes
+                        // used to issue an ACTIVE session, so enabling
+                        // two-factor protected the password form and
+                        // nothing else — a code, a link, a passkey or a
+                        // social button all walked straight past it.
+                        !second_factor_pending,
+                    )
                     .await?;
                 let bundle = record_last_login_method(self, bundle, "email-otp").await?;
                 Ok(EmailOtpVerification {
@@ -10904,8 +11036,23 @@ pub mod phone_number {
             };
 
             if input.create_session {
+                let second_factor_pending = user.two_factor_enabled;
                 let bundle = self
-                    .issue_session(user, input.ip_address, input.user_agent, None, None)
+                    .issue_session_with_state(
+                        user,
+                        input.ip_address,
+                        input.user_agent,
+                        None,
+                        None,
+                        // r[impl auth.twofactor.signin-required]
+                        // Inactive when a second factor is owed, exactly as
+                        // the password path does. Every one of these routes
+                        // used to issue an ACTIVE session, so enabling
+                        // two-factor protected the password form and
+                        // nothing else — a code, a link, a passkey or a
+                        // social button all walked straight past it.
+                        !second_factor_pending,
+                    )
                     .await?;
                 let bundle = record_last_login_method(self, bundle, "phone-number").await?;
                 Ok(PhoneNumberVerification {
@@ -11157,8 +11304,23 @@ pub mod siwe {
                     .await?;
                 user
             };
+            let second_factor_pending = user.two_factor_enabled;
             let bundle = self
-                .issue_session(user, input.ip_address, input.user_agent, None, None)
+                .issue_session_with_state(
+                    user,
+                    input.ip_address,
+                    input.user_agent,
+                    None,
+                    None,
+                    // r[impl auth.twofactor.signin-required]
+                    // Inactive when a second factor is owed, exactly as
+                    // the password path does. Every one of these routes
+                    // used to issue an ACTIVE session, so enabling
+                    // two-factor protected the password form and
+                    // nothing else — a code, a link, a passkey or a
+                    // social button all walked straight past it.
+                    !second_factor_pending,
+                )
                 .await?;
             record_last_login_method(self, bundle, "siwe").await
         }
@@ -11572,8 +11734,23 @@ pub mod magic_link {
                     .await?
             };
             self.storage.delete_verification(verification.id).await?;
+            let second_factor_pending = user.two_factor_enabled;
             let bundle = self
-                .issue_session(user, input.ip_address, input.user_agent, None, None)
+                .issue_session_with_state(
+                    user,
+                    input.ip_address,
+                    input.user_agent,
+                    None,
+                    None,
+                    // r[impl auth.twofactor.signin-required]
+                    // Inactive when a second factor is owed, exactly as
+                    // the password path does. Every one of these routes
+                    // used to issue an ACTIVE session, so enabling
+                    // two-factor protected the password form and
+                    // nothing else — a code, a link, a passkey or a
+                    // social button all walked straight past it.
+                    !second_factor_pending,
+                )
                 .await?;
             let bundle = record_last_login_method(self, bundle, "magic-link").await?;
             Ok(MagicLinkVerification {
@@ -12585,8 +12762,23 @@ pub mod oauth {
                     .find_user_by_id(account.user_id)
                     .await?
                     .ok_or(AuthFlowError::InvalidCredentials)?;
+                let second_factor_pending = user.two_factor_enabled;
                 let bundle = self
-                    .issue_session(user, input.ip_address, input.user_agent, None, None)
+                    .issue_session_with_state(
+                        user,
+                        input.ip_address,
+                        input.user_agent,
+                        None,
+                        None,
+                        // r[impl auth.twofactor.signin-required]
+                        // Inactive when a second factor is owed, exactly as
+                        // the password path does. Every one of these routes
+                        // used to issue an ACTIVE session, so enabling
+                        // two-factor protected the password form and
+                        // nothing else — a code, a link, a passkey or a
+                        // social button all walked straight past it.
+                        !second_factor_pending,
+                    )
                     .await?;
                 return record_last_login_method(self, bundle, method).await;
             }
@@ -12633,8 +12825,23 @@ pub mod oauth {
                     password_hash: None,
                 })
                 .await?;
+            let second_factor_pending = user.two_factor_enabled;
             let bundle = self
-                .issue_session(user, input.ip_address, input.user_agent, None, None)
+                .issue_session_with_state(
+                    user,
+                    input.ip_address,
+                    input.user_agent,
+                    None,
+                    None,
+                    // r[impl auth.twofactor.signin-required]
+                    // Inactive when a second factor is owed, exactly as
+                    // the password path does. Every one of these routes
+                    // used to issue an ACTIVE session, so enabling
+                    // two-factor protected the password form and
+                    // nothing else — a code, a link, a passkey or a
+                    // social button all walked straight past it.
+                    !second_factor_pending,
+                )
                 .await?;
             record_last_login_method(self, bundle, method).await
         }
@@ -14956,8 +15163,23 @@ pub mod passkeys {
                 .find_user_by_id(row.user_id)
                 .await?
                 .ok_or(AuthFlowError::InvalidCredentials)?;
+            let second_factor_pending = user.two_factor_enabled;
             let bundle = self
-                .issue_session(user, input.ip_address, input.user_agent, None, None)
+                .issue_session_with_state(
+                    user,
+                    input.ip_address,
+                    input.user_agent,
+                    None,
+                    None,
+                    // r[impl auth.twofactor.signin-required]
+                    // Inactive when a second factor is owed, exactly as
+                    // the password path does. Every one of these routes
+                    // used to issue an ACTIVE session, so enabling
+                    // two-factor protected the password form and
+                    // nothing else — a code, a link, a passkey or a
+                    // social button all walked straight past it.
+                    !second_factor_pending,
+                )
                 .await?;
             record_last_login_method(self, bundle, "passkey").await
         }

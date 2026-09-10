@@ -326,14 +326,29 @@ fn signed_in(cookie: &AuthCookieConfig, bundle: &AuthSessionBundle, return_to: &
             architect_auth::percent::encode_component(return_to)
         )
     };
-    (
+    let mut response = (
         StatusCode::SEE_OTHER,
         [
             (header::SET_COOKIE, set_cookie.to_string()),
             (header::LOCATION, location),
         ],
     )
-        .into_response()
+        .into_response();
+    remember_method(&mut response, &bundle.user);
+    response
+}
+
+/// Leave the "you signed in this way" hint behind.
+///
+/// Appended rather than set: the session cookie is already in this
+/// response, and `SET_COOKIE` is one of the few headers that may
+/// legitimately appear more than once.
+pub fn remember_method(response: &mut Response, user: &architect_auth::proto::AuthUser) {
+    if let Some(cookie) = crate::last_login::remember(user)
+        && let Ok(value) = cookie.parse()
+    {
+        response.headers_mut().append(header::SET_COOKIE, value);
+    }
 }
 
 fn expired(return_to: &str) -> Response {

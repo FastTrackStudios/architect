@@ -499,3 +499,177 @@ async fn a_link_signs_up_somebody_who_had_no_account() {
     let (status, _, _) = get(&app, "/orgs", Some(&cookie_value(&set_cookie))).await;
     assert_eq!(status, StatusCode::OK, "the new account is signed in");
 }
+
+// ── The hint ─────────────────────────────────────────────────────────
+
+/// The value of the last-login cookie in a `Set-Cookie` header, if any.
+fn last_login_cookie(set_cookie: &str) -> Option<String> {
+    set_cookie
+        .split(';')
+        .map(str::trim)
+        .filter_map(|pair| pair.split_once('='))
+        .find(|(key, _)| *key == "better-auth.last_used_login_method")
+        .map(|(_, value)| value.to_owned())
+}
+
+/// All `Set-Cookie` headers on a response, joined.
+async fn all_cookies(app: &axum::Router, uri: &str, form: &str) -> String {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(form.to_owned()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+#[tokio::test]
+async fn signing_in_leaves_a_hint_for_next_time() {
+    let (app, outbox) = app().await;
+    signed_up(&app, "ada@example.com").await;
+
+    // The password form.
+    let cookies = all_cookies(
+        &app,
+        "/login",
+        "email=ada@example.com&password=correct+horse+battery+staple",
+    )
+    .await;
+    assert_eq!(last_login_cookie(&cookies).as_deref(), Some("email"));
+
+    // A mailed code records its own method, not the password's.
+    post(&app, "/login/code", "email=ada@example.com").await;
+    let code = outbox.latest("code", "ada@example.com").unwrap();
+    let cookies = all_cookies(
+        &app,
+        "/login/code/verify",
+        &format!("email=ada@example.com&code={code}"),
+    )
+    .await;
+    assert_eq!(last_login_cookie(&cookies).as_deref(), Some("email-otp"));
+}
+
+#[tokio::test]
+async fn the_sign_in_page_says_how_you_signed_in_last_time() {
+    let (app, _) = app().await;
+    signed_up(&app, "ada@example.com").await;
+
+    // No cookie, no hint — a first visit must not invent one.
+    let page = body_of(&app, "/login").await;
+    assert!(!page.contains("You last signed in"), "{page:.900}");
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/login")
+                .header(header::COOKIE, "better-auth.last_used_login_method=github")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let page = String::from_utf8_lossy(&bytes);
+    // Named in words, not as the internal identifier.
+    assert!(
+        page.contains("You last signed in with GitHub."),
+        "{page:.900}"
+    );
+}
+
+// ── The second factor, on every route ────────────────────────────────
+
+#[tokio::test]
+async fn a_mailed_code_still_owes_the_second_factor() {
+    // Two-factor used to guard the password form and nothing else, so
+    // this route walked straight past it.
+    let (app, outbox) = app().await;
+    let token = signed_up(&app, "ada@example.com").await;
+
+    // Enrol through the pages.
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/account/two-factor/enroll")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let page = String::from_utf8_lossy(&bytes).into_owned();
+    let marker = r#"aria-label="Setup key""#;
+    let at = page.find(marker).expect("a setup key");
+    let before = &page[..at];
+    let value_at = before.rfind(r#"value=""#).expect("a value");
+    let secret: String = before[value_at + r#"value=""#.len()..]
+        .chars()
+        .take_while(|c| *c != '"')
+        .collect();
+
+    let code = {
+        use totp_rs::{Algorithm, Secret, TOTP};
+        TOTP::new(
+            Algorithm::SHA1,
+            6,
+            1,
+            30,
+            Secret::Encoded(secret).to_bytes().unwrap(),
+            None,
+            "architect-auth".into(),
+        )
+        .unwrap()
+        .generate_current()
+        .unwrap()
+    };
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/account/two-factor/confirm")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(format!("code={code}")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+
+    // Now sign in with a code. It must land on the challenge.
+    post(&app, "/login/code", "email=ada@example.com").await;
+    let otp = outbox.latest("code", "ada@example.com").unwrap();
+    let (status, location, _) = post(
+        &app,
+        "/login/code/verify",
+        &format!("email=ada@example.com&code={otp}&return_to=%2Forgs"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert!(
+        location.starts_with("/login/two-factor"),
+        "a code must not skip the second factor, got {location}"
+    );
+}

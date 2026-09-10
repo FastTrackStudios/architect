@@ -521,16 +521,20 @@ pub struct PageQuery {
 
 async fn login_page<S>(
     State(state): State<HttpState<S>>,
+    headers: HeaderMap,
     Query(q): Query<PageQuery>,
 ) -> Html<String>
 where
     S: AuthStorage,
 {
-    Html(render_page(
+    Html(render_full(
         Screen::SignIn,
         &safe_return_to(q.return_to.as_deref()),
         q.error.as_deref().map(describe_social_error),
+        "",
+        "",
         &state.social.sign_in_providers(),
+        auth_ui::last_login::recall(&headers),
     ))
 }
 
@@ -716,14 +720,18 @@ fn signed_in(cookie: &AuthCookieConfig, bundle: &AuthSessionBundle, return_to: &
             encode_query_value(return_to)
         )
     };
-    (
+    let mut response = (
         StatusCode::SEE_OTHER,
         [
             (header::SET_COOKIE, set_cookie.to_string()),
             (header::LOCATION, location),
         ],
     )
-        .into_response()
+        .into_response();
+    // Leaves the "you signed in this way" hint for the next visit to
+    // the sign-in page, which is the only place it is read.
+    auth_ui::login::remember_method(&mut response, &bundle.user);
+    response
 }
 
 /// Re-render the screen with the reason it failed.
@@ -787,7 +795,7 @@ impl Screen {
 }
 
 fn render(screen: Screen, return_to: &str, error: Option<&str>) -> String {
-    render_full(screen, return_to, error, "", "", &[])
+    render_full(screen, return_to, error, "", "", &[], None)
 }
 
 /// As [`render`], with the social buttons for the configured providers.
@@ -797,7 +805,7 @@ fn render_page(
     error: Option<&str>,
     providers: &[Provider],
 ) -> String {
-    render_full(screen, return_to, error, "", "", providers)
+    render_full(screen, return_to, error, "", "", providers, None)
 }
 
 /// As [`render`], but carrying the credentials a password reset needs.
@@ -810,7 +818,15 @@ fn render_with_reset(
     reset_email: &str,
     reset_token: &str,
 ) -> String {
-    render_full(screen, return_to, error, reset_email, reset_token, &[])
+    render_full(
+        screen,
+        return_to,
+        error,
+        reset_email,
+        reset_token,
+        &[],
+        None,
+    )
 }
 
 fn render_full(
@@ -820,6 +836,7 @@ fn render_full(
     reset_email: &str,
     reset_token: &str,
     providers: &[Provider],
+    last_login: Option<String>,
 ) -> String {
     let body = dioxus_ssr::render_element(rsx! {
         Page {
@@ -829,6 +846,7 @@ fn render_full(
             reset_email: reset_email.to_owned(),
             reset_token: reset_token.to_owned(),
             providers: providers.to_vec(),
+            last_login,
         }
     });
     format!("<!doctype html>\n<html lang=\"en\">{body}</html>")
@@ -897,6 +915,7 @@ fn Page(
     reset_email: String,
     reset_token: String,
     providers: Vec<Provider>,
+    last_login: Option<String>,
 ) -> Element {
     rsx! {
         head {
@@ -926,6 +945,17 @@ fn Page(
 
                 if let Some(message) = error {
                     p { class: "error", role: "alert", "{message}" }
+                }
+
+                // A sign-in screen with five buttons is a memory test,
+                // and failing it is expensive: somebody who signed up
+                // with Google tries the password form, fails, resets a
+                // password they never had, and ends up with a second
+                // account. This turns that into a glance.
+                if screen == Screen::SignIn && let Some(method) = last_login.as_deref() {
+                    p { class: "hint last-login",
+                        "You last signed in {auth_ui::last_login::describe(method)}."
+                    }
                 }
 
                 // GitHub and Google first, on the two screens that sign

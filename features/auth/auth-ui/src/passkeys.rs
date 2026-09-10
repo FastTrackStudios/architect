@@ -246,13 +246,15 @@ where
             // authenticator verified the person before it would sign —
             // so the session it issues is active and there is no
             // challenge to route through.
-            let cookie = state.cookie.session_cookie(bundle.token);
-            (
+            let cookie = state.cookie.session_cookie(bundle.token.clone());
+            let mut response = (
                 StatusCode::OK,
                 [(header::SET_COOKIE, cookie.to_string())],
                 Json(json!({ "redirect": return_to })),
             )
-                .into_response()
+                .into_response();
+            crate::login::remember_method(&mut response, &bundle.user);
+            response
         }
         Err(error) => refuse(StatusCode::UNAUTHORIZED, &message(&error)),
     }
