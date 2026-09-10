@@ -1,0 +1,133 @@
+//! Server-rendered account and organization pages for architect-auth.
+//!
+//! # Why these live in a crate and not in the server
+//!
+//! The pages that manage an organization — who is in it, what they may
+//! do, which links let more people in — are the same pages for every
+//! deployment. They were written once inside `apps/auth-server`, where
+//! no other binary could reach them, so a second product wanting an
+//! org switcher had to reimplement one. Here they mount anywhere:
+//!
+//! ```no_run
+//! # use auth_ui::UiState;
+//! # fn example<S: architect_auth::AuthStorage + Clone + Send + Sync + 'static>(
+//! #     auth: architect_auth::ArchitectAuth<S>,
+//! #     cookie: architect_auth::transport::AuthCookieConfig,
+//! # ) -> axum::Router {
+//! axum::Router::new().merge(auth_ui::router(UiState::new(auth, cookie)))
+//! # }
+//! ```
+//!
+//! # Server-rendered, and no script at all
+//!
+//! Rendered with `dioxus-ssr` into plain HTML, with ordinary `<form>`
+//! posts — the same choice the sign-in screen makes, for the same
+//! reason and one more. The reason: an account page reached by someone
+//! locked out of an app must not itself depend on a WASM bundle
+//! booting. The extra one: every action here is a POST with a
+//! deterministic redirect, so the whole surface is testable by a
+//! browser driver without waiting on hydration, and by `tower::oneshot`
+//! without a browser at all.
+//!
+//! # What is deliberately not here
+//!
+//! Sign-in, sign-up and password reset stay with the server that owns
+//! the mailer and the social providers. This crate is what a person
+//! does *after* they are signed in.
+
+pub mod chrome;
+pub mod orgs;
+pub mod page;
+pub mod profile;
+pub mod sessions;
+pub mod views;
+
+use architect_auth::transport::AuthCookieConfig;
+use architect_auth::{ArchitectAuth, AuthStorage};
+use axum::Router;
+use axum::routing::{get, post};
+
+/// What the pages need from the host application.
+///
+/// Deliberately small: the engine and the cookie policy, and nothing
+/// about mail, social providers or OIDC. A consumer that has an
+/// `ArchitectAuth` can mount these pages, which is the point.
+#[derive(Clone)]
+pub struct UiState<S> {
+    pub auth: ArchitectAuth<S>,
+    pub cookie: AuthCookieConfig,
+    /// Where "back to the app" goes. `/` unless set.
+    pub home: String,
+}
+
+impl<S> UiState<S> {
+    #[must_use]
+    pub fn new(auth: ArchitectAuth<S>, cookie: AuthCookieConfig) -> Self {
+        Self {
+            auth,
+            cookie,
+            home: "/".to_owned(),
+        }
+    }
+
+    #[must_use]
+    pub fn home(mut self, home: impl Into<String>) -> Self {
+        self.home = home.into();
+        self
+    }
+}
+
+/// Mount every page this crate provides.
+///
+/// One router rather than several so a consumer cannot accidentally
+/// mount the org pages without the invitation pages that org pages
+/// link to.
+pub fn router<S>(state: UiState<S>) -> Router
+where
+    S: AuthStorage + Clone + Send + Sync + 'static,
+{
+    Router::new()
+        // ── The person ────────────────────────────────────────────
+        .route(
+            "/account/profile",
+            get(profile::page::<S>).post(profile::save::<S>),
+        )
+        .route("/account/email", post(profile::change_email::<S>))
+        .route("/account/password", post(profile::change_password::<S>))
+        .route("/account/sessions", get(sessions::page::<S>))
+        .route("/account/sessions/revoke", post(sessions::revoke::<S>))
+        .route(
+            "/account/sessions/revoke-others",
+            post(sessions::revoke_others::<S>),
+        )
+        // ── Organizations ─────────────────────────────────────────
+        .route("/orgs", get(orgs::index::<S>).post(orgs::create::<S>))
+        .route("/orgs/{id}", get(orgs::show::<S>).post(orgs::update::<S>))
+        .route("/orgs/{id}/delete", post(orgs::delete::<S>))
+        .route("/orgs/{id}/leave", post(orgs::leave::<S>))
+        .route("/orgs/{id}/members/role", post(orgs::set_role::<S>))
+        .route("/orgs/{id}/members/remove", post(orgs::remove_member::<S>))
+        .route("/orgs/{id}/teams", post(orgs::create_team::<S>))
+        .route("/orgs/{id}/teams/delete", post(orgs::delete_team::<S>))
+        .route("/orgs/{id}/teams/members", post(orgs::add_team_member::<S>))
+        .route(
+            "/orgs/{id}/teams/members/remove",
+            post(orgs::remove_team_member::<S>),
+        )
+        .route("/orgs/{id}/invitations", post(orgs::invite::<S>))
+        .route(
+            "/orgs/{id}/invitations/cancel",
+            post(orgs::cancel_invitation::<S>),
+        )
+        .route("/orgs/{id}/links", post(orgs::create_link::<S>))
+        .route("/orgs/{id}/links/revoke", post(orgs::revoke_link::<S>))
+        // ── Coming in ─────────────────────────────────────────────
+        // Unauthenticated on purpose: somebody following one of these
+        // has no session yet, and must be able to see what they are
+        // being asked to join before signing up for it.
+        .route("/invite/{id}", get(orgs::invitation_page::<S>))
+        .route("/invite/{id}/accept", post(orgs::accept_invitation::<S>))
+        .route("/invite/{id}/reject", post(orgs::reject_invitation::<S>))
+        .route("/join", get(orgs::join_page::<S>).post(orgs::join::<S>))
+        .with_state(state)
+}

@@ -219,10 +219,15 @@ where
         // so an embedder that already has its own login screen can take
         // `http::router` alone — see `ui::router`.
         .merge(ui::router(
-            HttpState::new(auth, cookie)
+            HttpState::new(auth.clone(), cookie.clone())
                 .with_mailer(mail)
                 .with_social(social),
         ))
+        // Account, organization and invitation pages. These live in
+        // `auth-ui` rather than here because they are the same pages for
+        // every deployment — a product wanting an org switcher should
+        // mount them, not reimplement them.
+        .merge(auth_ui::router(auth_ui::UiState::new(auth, cookie)))
         .layer(cors_layer(config))
         .layer(TraceLayer::new_for_http())
 }

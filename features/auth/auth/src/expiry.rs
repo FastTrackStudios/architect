@@ -34,6 +34,19 @@ pub fn after(base: DateTime<Utc>, secs: i64) -> DateTime<Utc> {
         .unwrap_or(DateTime::<Utc>::MAX_UTC)
 }
 
+/// Seconds in a day, for the callers that think in days.
+const DAY: i64 = 60 * 60 * 24;
+
+/// `now + days`, saturating — including the days-to-seconds conversion.
+///
+/// Invitation and invite-link expiries are chosen in days, and by a
+/// person typing into a form. `days * 86_400` overflows long before
+/// `i64::MAX` days does, so the multiply saturates too.
+#[must_use]
+pub fn in_days(days: i64) -> DateTime<Utc> {
+    expires_in(days.saturating_mul(DAY))
+}
+
 /// `now - secs`, saturating at [`DateTime::<Utc>::MIN_UTC`]. The cutoff
 /// half of the same idea: "everything older than N seconds ago".
 #[must_use]

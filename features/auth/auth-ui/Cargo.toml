@@ -1,0 +1,34 @@
+[package]
+name = "auth-ui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Server-rendered account, organization and invitation pages for architect-auth."
+
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
+[dependencies]
+architect-auth = { workspace = true, features = ["full"] }
+auth-proto.workspace = true
+axum.workspace = true
+chrono.workspace = true
+dioxus.workspace = true
+dioxus-ssr.workspace = true
+serde.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+architect-auth = { workspace = true, features = ["full", "db"] }
+sea-orm.workspace = true
+sea-orm-migration.workspace = true
+tokio.workspace = true
+tower = { version = "0.5", features = ["util"] }
+
+[lints]
+workspace = true

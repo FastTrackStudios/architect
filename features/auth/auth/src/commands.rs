@@ -1027,8 +1027,11 @@ pub struct CancelInvitation {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+/// Decline an invitation.
+///
+/// No session: the token *is* the credential, and somebody deciding
+/// not to join should not have to make an account in order to say so.
 pub struct RejectInvitation {
-    pub session_token: String,
     pub invitation_id: Uuid,
     pub token: String,
 }

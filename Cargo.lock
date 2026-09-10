@@ -1019,6 +1019,7 @@ dependencies = [
  "architect-telemetry",
  "async-trait",
  "auth-proto",
+ "auth-ui",
  "axum",
  "base64 0.22.1",
  "chrono",
@@ -1036,6 +1037,25 @@ dependencies = [
  "tokio",
  "tower",
  "tower-http",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "auth-ui"
+version = "0.1.0"
+dependencies = [
+ "architect-auth",
+ "auth-proto",
+ "axum",
+ "chrono",
+ "dioxus",
+ "dioxus-ssr",
+ "sea-orm",
+ "sea-orm-migration",
+ "serde",
+ "tokio",
+ "tower",
  "tracing",
  "uuid",
 ]
