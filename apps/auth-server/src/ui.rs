@@ -679,13 +679,31 @@ fn describe_sign_up_error(error: &impl std::fmt::Display) -> String {
 ///
 /// 303, not 302: the browser must switch to GET for the redirect, or a
 /// refresh on the destination re-submits the credentials.
+///
+/// # The pending case
+///
+/// A sign-in by somebody with two-factor enabled issues a session that
+/// is **not active**, and every page treats an inactive session as no
+/// session at all. Sending such a browser to `return_to` therefore
+/// bounced it straight back to `/login`, which signed in again, which
+/// bounced again — two-factor accounts could not use the web UI at all.
+/// The cookie is still set (the challenge needs it to know whose
+/// session to activate); only the destination differs.
 fn signed_in(cookie: &AuthCookieConfig, bundle: &AuthSessionBundle, return_to: &str) -> Response {
     let set_cookie = cookie.session_cookie(bundle.token.clone());
+    let location = if bundle.session.active {
+        return_to.to_owned()
+    } else {
+        format!(
+            "/login/two-factor?return_to={}",
+            encode_query_value(return_to)
+        )
+    };
     (
         StatusCode::SEE_OTHER,
         [
             (header::SET_COOKIE, set_cookie.to_string()),
-            (header::LOCATION, return_to.to_owned()),
+            (header::LOCATION, location),
         ],
     )
         .into_response()

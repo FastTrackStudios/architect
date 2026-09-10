@@ -69,6 +69,32 @@ pub fn sign_in_first(return_to: &str) -> Response {
     Redirect::to(&format!("/login?return_to={encoded}")).into_response()
 }
 
+/// Reduce a caller-supplied path to something safe to `Location:`.
+///
+/// An unchecked `return_to` is an open redirect, and on an *identity*
+/// server that is worth more than usual: the phishing page it forwards
+/// to is reached through a link that genuinely begins at the real login
+/// screen, having genuinely signed the person in.
+///
+/// Only same-origin absolute paths survive. `//evil.example` is
+/// rejected along with every scheme-bearing URL — a leading `//` is a
+/// protocol-relative URL, which browsers treat as cross-origin even
+/// though it looks like a path. Backslashes and newlines go too: the
+/// first because some browsers normalise `\` to `/`, the second
+/// because a newline in a header value splits the response.
+#[must_use]
+pub fn safe_path(raw: Option<&str>) -> String {
+    let candidate = raw.unwrap_or("").trim();
+    let ok = candidate.starts_with('/')
+        && !candidate.starts_with("//")
+        && !candidate.contains(['\\', '\r', '\n']);
+    if ok {
+        candidate.to_owned()
+    } else {
+        "/".to_owned()
+    }
+}
+
 /// The session token on this request, from `Authorization` or the cookie.
 #[must_use]
 pub fn token_of(headers: &HeaderMap, cookie: &AuthCookieConfig) -> Option<String> {
@@ -77,7 +103,35 @@ pub fn token_of(headers: &HeaderMap, cookie: &AuthCookieConfig) -> Option<String
 
 #[cfg(test)]
 mod tests {
-    use super::Flash;
+    use super::{Flash, safe_path};
+
+    #[test]
+    fn only_a_same_origin_path_survives() {
+        assert_eq!(safe_path(Some("/orgs")), "/orgs");
+        assert_eq!(safe_path(Some("/a?b=c&d=e")), "/a?b=c&d=e");
+    }
+
+    #[test]
+    fn an_open_redirect_is_refused() {
+        // Each of these would forward somebody off an identity server
+        // through a link that genuinely began at the real login screen.
+        for hostile in [
+            "//evil.example",
+            "https://evil.example",
+            "javascript:alert(1)",
+            "/\\evil.example",
+            "/ok\r\nSet-Cookie: a=b",
+            "",
+            "   ",
+        ] {
+            assert_eq!(
+                safe_path(Some(hostile)),
+                "/",
+                "{hostile:?} must not survive"
+            );
+        }
+        assert_eq!(safe_path(None), "/");
+    }
 
     #[test]
     fn an_error_wins_over_an_ok() {

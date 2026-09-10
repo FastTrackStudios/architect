@@ -286,7 +286,9 @@ where
         // `auth-ui` rather than here because they are the same pages for
         // every deployment — a product wanting an org switcher should
         // mount them, not reimplement them.
-        .merge(auth_ui::router(auth_ui::UiState::new(auth, cookie)))
+        .merge(auth_ui::router(
+            auth_ui::UiState::new(auth, cookie).issuer("FastTrackStudio"),
+        ))
         .layer(cors_layer(config))
         .layer(TraceLayer::new_for_http())
 }

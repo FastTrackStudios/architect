@@ -589,9 +589,17 @@ pub trait AuthStorage: Clone + Send + Sync + 'static {
         backup_codes_hash: Option<String>,
     ) -> Result<(), AuthFlowError>;
 
+    /// Count one failed second-factor attempt, discarding any older
+    /// than `window_start`.
+    ///
+    /// Windowed because the counter used to be monotonic: six wrong
+    /// codes locked an account permanently, recoverable only by an
+    /// operator editing the database by hand. A limit that never
+    /// expires is a lockout, not a rate limit.
     async fn increment_two_factor_attempts(
         &self,
         user_id: uuid::Uuid,
+        window_start: DateTime<Utc>,
     ) -> Result<i64, AuthFlowError>;
 
     async fn reset_two_factor_attempts(&self, user_id: uuid::Uuid) -> Result<(), AuthFlowError>;

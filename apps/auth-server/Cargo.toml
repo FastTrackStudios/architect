@@ -50,6 +50,7 @@ tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+totp-rs.workspace = true
 sha2.workspace = true
 tokio.workspace = true
 tower = { version = "0.5", features = ["util"] }

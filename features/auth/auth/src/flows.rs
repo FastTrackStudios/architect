@@ -2395,11 +2395,11 @@ pub mod email_password {
             AuthenticateApiKey, AuthenticateBearerToken, AuthorizeApiKey, AuthorizeMcpRequest,
             AuthorizeOidc, AuthorizeOrganizationAction, BanUser, BearerTokenStrategy,
             BeginOAuthAuthorization, BeginOAuthProxyAuthorization, BeginPasskeyAuthentication,
-            BeginPasskeyRegistration, BreachedPasswordFailurePolicy, BreachedPasswordProvider,
-            CancelInvitation, CaptchaFlow, ChangeEmail, ChangePassword, CheckPasswordBreach,
-            CleanupAnonymousUsers, ClearLastLoginMethod, CompletePasskeyAuthentication,
-            CompletePasskeyRegistration, CompletePasswordReset, ConfirmTwoFactor,
-            ConsumeOAuthProxyCallback, CreateApiKey, CreateDeviceAuthorization,
+            BeginPasskeyRegistration, BeginTwoFactorEnrollment, BreachedPasswordFailurePolicy,
+            BreachedPasswordProvider, CancelInvitation, CaptchaFlow, ChangeEmail, ChangePassword,
+            CheckPasswordBreach, CleanupAnonymousUsers, ClearLastLoginMethod,
+            CompletePasskeyAuthentication, CompletePasskeyRegistration, CompletePasswordReset,
+            ConfirmTwoFactor, ConsumeOAuthProxyCallback, CreateApiKey, CreateDeviceAuthorization,
             CreateEmailPasswordUser, CreateInvitation, CreateInviteLink, CreateOrganization,
             CreateOrganizationRole, CreateSiweNonce, CreateTeam, CurrentSession,
             CustomSessionEnricher, DeleteApiKey, DeleteOrganization, DeletePasskey, DeleteTeam,
@@ -2430,6 +2430,18 @@ pub mod email_password {
             inner: Arc<Mutex<State>>,
         }
 
+        impl MemoryStorage {
+            /// Push the second-factor attempt run into the past, so the
+            /// next attempt starts a fresh window. Stands in for waiting
+            /// fifteen minutes.
+            fn lapse_two_factor_window(&self, user_id: Uuid) {
+                let mut inner = self.inner.lock().expect("lock memory storage");
+                if let Some((last, _)) = inner.two_factor_attempts.get_mut(&user_id) {
+                    *last = Utc::now() - chrono::Duration::hours(1);
+                }
+            }
+        }
+
         #[derive(Default)]
         struct State {
             users: HashMap<Uuid, AuthUser>,
@@ -2452,7 +2464,8 @@ pub mod email_password {
             invitations: HashMap<Uuid, AuthInvitation>,
             invite_links: HashMap<Uuid, auth_proto::AuthInviteLink>,
             two_factors: HashMap<Uuid, AuthTwoFactor>,
-            two_factor_attempts: HashMap<Uuid, i64>,
+            /// `(when the run of failures last advanced, how many)`.
+            two_factor_attempts: HashMap<Uuid, (DateTime<Utc>, i64)>,
             /// Append-only, in insertion order — mirrors the real store's
             /// "oldest first" ordering without needing timestamps to be
             /// distinct (tests move fast enough to collide on `Utc::now`).
@@ -4028,10 +4041,18 @@ pub mod email_password {
             async fn increment_two_factor_attempts(
                 &self,
                 user_id: Uuid,
+                window_start: DateTime<Utc>,
             ) -> Result<i64, AuthFlowError> {
                 let mut inner = self.inner.lock().expect("lock memory storage");
-                let attempts = inner.two_factor_attempts.entry(user_id).or_default();
-                *attempts += 1;
+                let (last, attempts) = inner
+                    .two_factor_attempts
+                    .entry(user_id)
+                    .or_insert_with(|| (Utc::now(), 0));
+                if *last < window_start {
+                    *attempts = 0;
+                }
+                *last = Utc::now();
+                *attempts = attempts.saturating_add(1);
                 Ok(*attempts)
             }
 
@@ -8569,6 +8590,167 @@ pub mod email_password {
                 .await
                 .expect("create org");
             (owner, org)
+        }
+
+        #[tokio::test]
+        async fn enrolling_in_two_factor_mints_everything_the_page_must_show() {
+            let auth = auth();
+            let person = user(&auth, "ada@example.com").await;
+
+            let enrollment = auth
+                .begin_two_factor_enrollment(BeginTwoFactorEnrollment {
+                    session_token: person.token.clone(),
+                    account_label: "ada@example.com".into(),
+                    issuer: "FastTrackStudio".into(),
+                })
+                .await
+                .expect("begin enrollment");
+
+            assert!(enrollment.otpauth_url.starts_with("otpauth://totp/"));
+            assert!(enrollment.otpauth_url.contains("FastTrackStudio"));
+            assert_eq!(enrollment.backup_codes.len(), 10);
+            // Distinct, and typeable: no separators, because the stored
+            // hash is over exactly the string that was shown.
+            let unique: std::collections::HashSet<_> = enrollment.backup_codes.iter().collect();
+            assert_eq!(unique.len(), 10);
+            for code in &enrollment.backup_codes {
+                assert!(
+                    code.chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()),
+                    "{code:?} is not typeable without thinking"
+                );
+            }
+
+            // Enrolment is not enabled until a code from the app
+            // confirms it, so closing the page leaves nothing switched on.
+            let session = auth
+                .current_session(CurrentSession {
+                    token: person.token.clone(),
+                })
+                .await
+                .expect("session");
+            assert!(!session.user.two_factor_enabled);
+
+            // A backup code does NOT confirm enrolment: confirming has
+            // to prove you hold the app, not the printed sheet.
+            let printed = enrollment.backup_codes.first().expect("a code").clone();
+            let refused = auth
+                .confirm_two_factor(ConfirmTwoFactor {
+                    session_token: person.token.clone(),
+                    code: printed,
+                })
+                .await;
+            assert!(matches!(refused, Err(AuthFlowError::InvalidCredentials)));
+
+            // The secret we handed out really does drive the codes the
+            // server accepts — which is the whole point of the page.
+            auth.confirm_two_factor(ConfirmTwoFactor {
+                session_token: person.token.clone(),
+                code: totp_code(&enrollment.secret),
+            })
+            .await
+            .expect("a code from the app confirms enrolment");
+            let session = auth
+                .current_session(CurrentSession {
+                    token: person.token,
+                })
+                .await
+                .expect("session");
+            assert!(session.user.two_factor_enabled);
+        }
+
+        /// The code an authenticator app would be showing right now for
+        /// this secret.
+        fn totp_code(secret: &str) -> String {
+            use totp_rs::{Algorithm, Secret, TOTP};
+            TOTP::new(
+                Algorithm::SHA1,
+                6,
+                1,
+                30,
+                Secret::Encoded(secret.to_owned())
+                    .to_bytes()
+                    .expect("decode secret"),
+                None,
+                "architect-auth".into(),
+            )
+            .expect("build totp")
+            .generate_current()
+            .expect("generate code")
+        }
+
+        // r[verify auth.twofactor.rate-limit]
+        #[tokio::test]
+        async fn fumbling_the_second_factor_locks_you_out_only_for_a_while() {
+            let auth = auth();
+            let person = user(&auth, "ada@example.com").await;
+            let enrollment = auth
+                .begin_two_factor_enrollment(BeginTwoFactorEnrollment {
+                    session_token: person.token.clone(),
+                    account_label: "ada@example.com".into(),
+                    issuer: "FastTrackStudio".into(),
+                })
+                .await
+                .expect("begin enrollment");
+            auth.confirm_two_factor(ConfirmTwoFactor {
+                session_token: person.token,
+                code: totp_code(&enrollment.secret),
+            })
+            .await
+            .expect("confirm");
+
+            // Sign in: the session is issued but not active until the
+            // second factor is given.
+            let pending = auth
+                .sign_in_email_password(SignInEmailPassword {
+                    email: "ada@example.com".into(),
+                    password: "correct horse battery staple".into(),
+                    ip_address: None,
+                    user_agent: None,
+                })
+                .await
+                .expect("sign in");
+            assert!(!pending.session.active);
+
+            for _ in 0..5 {
+                let wrong = auth
+                    .verify_two_factor(VerifyTwoFactor {
+                        session_token: pending.token.clone(),
+                        code: "000000".into(),
+                    })
+                    .await;
+                assert!(matches!(wrong, Err(AuthFlowError::InvalidCredentials)));
+            }
+            let refused = auth
+                .verify_two_factor(VerifyTwoFactor {
+                    session_token: pending.token.clone(),
+                    code: "000000".into(),
+                })
+                .await;
+            assert!(matches!(refused, Err(AuthFlowError::PermissionDenied)));
+
+            // Even a CORRECT code is refused while the run is live —
+            // that is what the limit is for.
+            let good = enrollment.backup_codes.first().expect("a code").clone();
+            let refused = auth
+                .verify_two_factor(VerifyTwoFactor {
+                    session_token: pending.token.clone(),
+                    code: good.clone(),
+                })
+                .await;
+            assert!(matches!(refused, Err(AuthFlowError::PermissionDenied)));
+
+            // The counter used to be monotonic, so this was the end of
+            // the account: six fumbles and only an operator with
+            // database access could undo it. Once the window lapses,
+            // the run starts again.
+            auth.storage.lapse_two_factor_window(person.user.id);
+            auth.verify_two_factor(VerifyTwoFactor {
+                session_token: pending.token,
+                code: good,
+            })
+            .await
+            .expect("the window lapsed, so this is a fresh run");
         }
 
         #[tokio::test]
@@ -14831,11 +15013,29 @@ pub mod two_factor {
     use totp_rs::{Algorithm, Secret, TOTP};
 
     use crate::{
-        ArchitectAuth, AuthStorage, ConfirmTwoFactor, DisableTwoFactor, StartTwoFactorSetup,
-        VerifyTwoFactor,
+        ArchitectAuth, AuthStorage, BeginTwoFactorEnrollment, ConfirmTwoFactor, DisableTwoFactor,
+        StartTwoFactorSetup, TwoFactorEnrollment, VerifyTwoFactor,
         commands::CurrentSession,
-        crypto::{decrypt_secret, encrypt_secret, hash_token},
+        crypto::{decrypt_secret, encrypt_secret, generate_token, hash_token},
     };
+
+    /// How many failed second-factor attempts before refusing, and over
+    /// what span.
+    ///
+    /// Five in fifteen minutes stops guessing at a six-digit code — a
+    /// exhaustive search needs 10^6 tries — while letting somebody who
+    /// fumbled their phone try again after a coffee. The window is the
+    /// important half: without one this is not a rate limit but a
+    /// permanent lockout with no self-service way out.
+    /// How many backup codes an enrolment mints.
+    ///
+    /// Ten is the number every other implementation uses, and the
+    /// reason is that people print them: enough that losing a few to a
+    /// bad photocopy does not matter, few enough to fit on a card.
+    const BACKUP_CODE_COUNT: usize = 10;
+
+    const TWO_FACTOR_MAX_ATTEMPTS: i64 = 5;
+    const TWO_FACTOR_WINDOW_SECS: i64 = 15 * 60;
 
     impl<S> ArchitectAuth<S>
     where
@@ -14845,6 +15045,60 @@ pub mod two_factor {
         // r[impl auth.twofactor.secret-encryption]
         // r[impl auth.twofactor.backup-codes-hash]
         // r[impl auth.twofactor.confirm-before-enabled]
+        /// Mint a secret and backup codes, and start enrolment with them.
+        ///
+        /// The return value is the only time any of it is legible: the
+        /// secret is stored encrypted and the codes only as hashes.
+        /// Enrolment is not finished until [`Self::confirm_two_factor`]
+        /// sees a code from the app, so a person who closes the page
+        /// here is left exactly as they were.
+        ///
+        /// # Errors
+        ///
+        /// If the session is not valid, if the platform RNG fails, or
+        /// if storage does.
+        pub async fn begin_two_factor_enrollment(
+            &self,
+            input: BeginTwoFactorEnrollment,
+        ) -> Result<TwoFactorEnrollment, AuthFlowError> {
+            let secret = Secret::generate_secret().to_encoded().to_string();
+            let mut backup_codes = Vec::with_capacity(BACKUP_CODE_COUNT);
+            for _ in 0..BACKUP_CODE_COUNT {
+                backup_codes.push(backup_code()?);
+            }
+
+            // Built only to render the URL. Verification reconstructs
+            // its own from the stored secret, and the issuer and label
+            // are decoration in an app's list — they take no part in
+            // computing a code.
+            let totp = TOTP::new(
+                Algorithm::SHA1,
+                6,
+                1,
+                30,
+                Secret::Encoded(secret.clone())
+                    .to_bytes()
+                    .map_err(|err| AuthFlowError::InvalidInput(err.to_string()))?,
+                Some(input.issuer),
+                input.account_label,
+            )
+            .map_err(|err| AuthFlowError::InvalidInput(err.to_string()))?;
+            let otpauth_url = totp.get_url();
+
+            self.start_two_factor_setup(StartTwoFactorSetup {
+                session_token: input.session_token,
+                secret_ciphertext: secret.clone(),
+                backup_codes: backup_codes.clone(),
+            })
+            .await?;
+
+            Ok(TwoFactorEnrollment {
+                secret,
+                otpauth_url,
+                backup_codes,
+            })
+        }
+
         pub async fn start_two_factor_setup(
             &self,
             input: StartTwoFactorSetup,
@@ -14968,8 +15222,11 @@ pub mod two_factor {
             user_id: uuid::Uuid,
             code: &str,
         ) -> Result<(), AuthFlowError> {
-            let attempts = self.storage.increment_two_factor_attempts(user_id).await?;
-            if attempts > 5 {
+            let attempts = self
+                .storage
+                .increment_two_factor_attempts(user_id, crate::expiry::ago(TWO_FACTOR_WINDOW_SECS))
+                .await?;
+            if attempts > TWO_FACTOR_MAX_ATTEMPTS {
                 return Err(AuthFlowError::PermissionDenied);
             }
             if self.verify_totp_for_user(user_id, code).await.is_ok() {
@@ -15019,6 +15276,32 @@ pub mod two_factor {
                 .await
         }
     }
+
+    /// One backup code: lowercase alphanumerics, no separators.
+    ///
+    /// No dashes or spaces on purpose. The stored value is
+    /// `hash_token(secret, code)` over exactly the string that was
+    /// shown, so any prettifying here becomes a way for somebody to
+    /// type a code that is right and have it rejected.
+    fn backup_code() -> Result<String, AuthFlowError> {
+        let token = generate_token().map_err(|err| AuthFlowError::Internal(err.to_string()))?;
+        let code: String = token
+            .chars()
+            .filter(char::is_ascii_alphanumeric)
+            .map(|c| c.to_ascii_lowercase())
+            .take(BACKUP_CODE_LEN)
+            .collect();
+        if code.chars().count() < BACKUP_CODE_LEN {
+            return Err(AuthFlowError::Internal(
+                "backup code generation produced too few usable characters".into(),
+            ));
+        }
+        Ok(code)
+    }
+
+    /// Ten characters of `[a-z0-9]` — about 51 bits, which is far more
+    /// than the five-attempt window can be walked through.
+    const BACKUP_CODE_LEN: usize = 10;
 
     fn totp_from_encoded_secret(secret: &str) -> Result<TOTP, AuthFlowError> {
         TOTP::new(

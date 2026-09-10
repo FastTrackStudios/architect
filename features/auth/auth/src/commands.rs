@@ -1272,6 +1272,37 @@ pub struct StartTwoFactorSetup {
     pub backup_codes: Vec<String>,
 }
 
+/// Start enrolling in two-factor, letting the engine mint the secret.
+///
+/// [`StartTwoFactorSetup`] takes a secret and backup codes the *caller*
+/// generated, which means every consumer has to know how to produce a
+/// valid base32 TOTP secret and a set of codes — and its
+/// `secret_ciphertext` field is a plaintext secret that the flow then
+/// encrypts, which reads like the opposite of what it is. This does
+/// that work once, here.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BeginTwoFactorEnrollment {
+    pub session_token: String,
+    /// Shown as the account name in the authenticator app. The person's
+    /// address, usually — it is what tells two entries apart.
+    pub account_label: String,
+    /// Shown as the issuer. Your product's name.
+    pub issuer: String,
+}
+
+/// Everything that must be shown to the person exactly once.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TwoFactorEnrollment {
+    /// The base32 secret, for typing in by hand when a camera is not an
+    /// option.
+    pub secret: String,
+    /// `otpauth://totp/...` — what a QR code encodes.
+    pub otpauth_url: String,
+    /// Single-use codes for when the phone is lost. Stored only as
+    /// hashes, so this is the one moment they are legible.
+    pub backup_codes: Vec<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConfirmTwoFactor {
     pub session_token: String,

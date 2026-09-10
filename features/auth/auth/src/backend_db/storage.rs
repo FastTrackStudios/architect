@@ -1800,14 +1800,26 @@ impl AuthStorage for AuthSeaOrmStorage {
             .map_err(map_db_err)
     }
 
-    async fn increment_two_factor_attempts(&self, user_id: Uuid) -> Result<i64, AuthFlowError> {
+    async fn increment_two_factor_attempts(
+        &self,
+        user_id: Uuid,
+        window_start: DateTime<Utc>,
+    ) -> Result<i64, AuthFlowError> {
         let two_factor = AuthTwoFactorEntity::find()
             .filter(AuthTwoFactorColumn::UserId.eq(user_id))
             .one(&self.db)
             .await
             .map_err(map_db_err)?
             .ok_or(AuthFlowError::InvalidCredentials)?;
-        let next = two_factor.attempt_count.saturating_add(1);
+        // `updated_at` is stamped by every increment, so it is when the
+        // last failure was. Older than the window means the run of
+        // failures has lapsed and this one starts a new run.
+        let previous = if two_factor.updated_at >= window_start {
+            two_factor.attempt_count
+        } else {
+            0
+        };
+        let next = previous.saturating_add(1);
         let mut active: AuthTwoFactorActiveModel = two_factor.into();
         active.attempt_count = Set(next);
         active.updated_at = Set(Utc::now());

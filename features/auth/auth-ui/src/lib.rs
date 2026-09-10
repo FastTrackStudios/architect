@@ -39,7 +39,9 @@ pub mod chrome;
 pub mod orgs;
 pub mod page;
 pub mod profile;
+pub mod qr;
 pub mod sessions;
+pub mod two_factor;
 pub mod views;
 
 use architect_auth::transport::AuthCookieConfig;
@@ -58,6 +60,9 @@ pub struct UiState<S> {
     pub cookie: AuthCookieConfig,
     /// Where "back to the app" goes. `/` unless set.
     pub home: String,
+    /// The name an authenticator app shows next to a two-factor entry.
+    /// Your product's name; "architect-auth" unless set.
+    pub issuer: String,
 }
 
 impl<S> UiState<S> {
@@ -67,7 +72,15 @@ impl<S> UiState<S> {
             auth,
             cookie,
             home: "/".to_owned(),
+            issuer: "architect-auth".to_owned(),
         }
+    }
+
+    /// The name an authenticator app shows for a two-factor entry.
+    #[must_use]
+    pub fn issuer(mut self, issuer: impl Into<String>) -> Self {
+        self.issuer = issuer.into();
+        self
     }
 
     #[must_use]
@@ -94,6 +107,23 @@ where
         )
         .route("/account/email", post(profile::change_email::<S>))
         .route("/account/password", post(profile::change_password::<S>))
+        .route("/account/two-factor", get(two_factor::page::<S>))
+        .route("/account/two-factor/enroll", post(two_factor::enroll::<S>))
+        .route(
+            "/account/two-factor/confirm",
+            post(two_factor::confirm::<S>),
+        )
+        .route(
+            "/account/two-factor/disable",
+            post(two_factor::disable::<S>),
+        )
+        // The step between a password and a session. Not under
+        // `/account`, because at this moment there is no usable session
+        // for an account page to render from.
+        .route(
+            "/login/two-factor",
+            get(two_factor::challenge::<S>).post(two_factor::verify::<S>),
+        )
         .route("/account/sessions", get(sessions::page::<S>))
         .route("/account/sessions/revoke", post(sessions::revoke::<S>))
         .route(
