@@ -2203,7 +2203,10 @@ mod tests {
         assert!(plugin.capabilities.contains(&"rp-origin-validation"));
 
         let routes = passkey_routes();
-        assert_eq!(routes.len(), PASSKEY_COMMANDS.len());
+        // One fewer route than commands: `completePasskeyAuthentication`
+        // is a command the engine still has and an endpoint it will not
+        // advertise, because it refuses to serve it.
+        assert_eq!(routes.len(), PASSKEY_COMMANDS.len() - 1);
         assert_eq!(
             routes
                 .iter()
@@ -2213,7 +2216,6 @@ mod tests {
                 "beginPasskeyRegistration",
                 "completePasskeyRegistration",
                 "beginPasskeyAuthentication",
-                "completePasskeyAuthentication",
                 "listPasskeys",
                 "deletePasskey",
             ]

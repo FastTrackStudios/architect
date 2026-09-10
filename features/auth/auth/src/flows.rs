@@ -7242,36 +7242,25 @@ pub mod email_password {
             })
             .await
             .expect("register passkey");
-            let passkey_challenge = auth
-                .begin_passkey_authentication(BeginPasskeyAuthentication {
-                    credential_id: "last-login-passkey".into(),
-                })
-                .await
-                .expect("begin passkey authentication");
-            let passkey = auth
-                .complete_passkey_authentication(CompletePasskeyAuthentication {
-                    credential_id: "last-login-passkey".into(),
-                    challenge: passkey_challenge.token,
-                    rp_id: "localhost".into(),
-                    origin: "http://localhost:3000".into(),
-                    counter: 2,
-                    ip_address: None,
-                    user_agent: None,
-                })
-                .await
-                .expect("complete passkey authentication");
-            assert_last_login_method(&auth, &passkey.token, Some("passkey")).await;
+            // The passkey leg of this test is gone with the bypass:
+            // `complete_passkey_authentication` refuses until the
+            // assertion is verified, so there is no way to reach a
+            // session through a passkey to record a login method on.
+            // `record_last_login_method(.., "passkey")` still runs in
+            // that flow and will be exercised again when sign-in works.
 
+            // Clearing works on any session; `upgraded` is the last
+            // one this test signed in with.
             let cleared = auth
                 .clear_last_login_method(ClearLastLoginMethod {
-                    session_token: passkey.token.clone(),
+                    session_token: upgraded.token.clone(),
                 })
                 .await
                 .expect("clear last login method");
             assert_eq!(cleared.method, None);
             assert_eq!(cleared.cookie_name, "better-auth.last_used_login_method");
             assert_eq!(cleared.max_age_seconds, 60 * 60 * 24 * 30);
-            assert_last_login_method(&auth, &passkey.token, None).await;
+            assert_last_login_method(&auth, &upgraded.token, None).await;
         }
 
         // r[verify auth.oauth.link-authenticated]
@@ -7710,35 +7699,30 @@ pub mod email_password {
                 .await;
             assert!(matches!(duplicate, Err(AuthFlowError::InvalidInput(_))));
 
+            // Beginning is still allowed — it only mints a challenge —
+            // and it still requires the credential to exist.
             let auth_challenge = auth
                 .begin_passkey_authentication(BeginPasskeyAuthentication {
                     credential_id: "credential-1".into(),
                 })
                 .await
                 .expect("begin passkey authentication");
-            let stale_counter = auth
-                .complete_passkey_authentication(CompletePasskeyAuthentication {
-                    credential_id: "credential-1".into(),
-                    challenge: auth_challenge.token.clone(),
-                    rp_id: "localhost".into(),
-                    origin: "http://localhost:3000".into(),
-                    counter: 1,
-                    ip_address: None,
-                    user_agent: None,
+            let unknown = auth
+                .begin_passkey_authentication(BeginPasskeyAuthentication {
+                    credential_id: "no-such-credential".into(),
                 })
                 .await;
-            assert!(matches!(
-                stale_counter,
-                Err(AuthFlowError::InvalidCredentials)
-            ));
+            assert!(matches!(unknown, Err(AuthFlowError::InvalidCredentials)));
 
-            let auth_challenge = auth
-                .begin_passkey_authentication(BeginPasskeyAuthentication {
-                    credential_id: "credential-1".into(),
-                })
-                .await
-                .expect("begin second passkey authentication");
-            let session = auth
+            // Completing is refused outright. This assertion used to be
+            // `.expect("complete passkey authentication")` on exactly
+            // these arguments — a credential id, a challenge fetched
+            // with no session, a counter, and no key material anywhere
+            // — which is the shape of the bypass: the stored
+            // `public_key` was never read, so nothing proved possession
+            // of the private key. See
+            // `complete_passkey_authentication`.
+            let refused = auth
                 .complete_passkey_authentication(CompletePasskeyAuthentication {
                     credential_id: "credential-1".into(),
                     challenge: auth_challenge.token,
@@ -7748,10 +7732,11 @@ pub mod email_password {
                     ip_address: Some("127.0.0.1".into()),
                     user_agent: Some("passkey-test".into()),
                 })
-                .await
-                .expect("complete passkey authentication");
-            assert_eq!(session.user.id, bundle.user.id);
-            assert_eq!(session.session.user_agent.as_deref(), Some("passkey-test"));
+                .await;
+            assert!(
+                matches!(refused, Err(AuthFlowError::Internal(_))),
+                "passkey sign-in must fail closed until the assertion is verified"
+            );
         }
 
         // r[verify auth.passkey.delete-last-credential]
@@ -14523,10 +14508,66 @@ pub mod passkeys {
             })
         }
 
-        // r[impl auth.passkey.challenge-expiry]
-        // r[impl auth.passkey.rp-origin]
-        // r[impl auth.passkey.counter]
+        /// Finish a passkey sign-in.
+        ///
+        /// # Currently refused
+        ///
+        /// This returns [`AuthFlowError::Internal`] unconditionally,
+        /// and that is deliberate: **it did not verify anything a
+        /// passkey is for.**
+        ///
+        /// It checked that the relying party matched, that the
+        /// credential existed, that the counter had advanced, and that
+        /// the challenge it had minted was unexpired. It never touched
+        /// the stored `public_key` — which is written at registration
+        /// and read nowhere in this crate — so no signature was ever
+        /// checked, and possession of the private key was never proved.
+        ///
+        /// A `credential_id` is not a secret. `WebAuthn` broadcasts it in
+        /// `allowCredentials` on every ceremony, and
+        /// [`Self::begin_passkey_authentication`] takes one with no
+        /// session and hands back the challenge in plaintext. So anyone
+        /// who learned a credential id could ask for a challenge, send
+        /// it straight back with `counter + 1`, and receive a full
+        /// session as that user. That is an authentication bypass with
+        /// no cryptography in it at all.
+        ///
+        /// Nothing in this repository mounts the route, so the hole was
+        /// latent rather than live — but the method is public, the
+        /// route descriptors advertise the endpoint, and the generated
+        /// `OpenAPI` document publishes it. Failing closed is the only
+        /// honest state until an assertion is actually verified:
+        /// `clientDataJSON` (type, challenge, origin), `authenticatorData`
+        /// (RP ID hash, user-present flag, counter), and the signature
+        /// over `authenticatorData || sha256(clientDataJSON)` against
+        /// the stored COSE key.
+        ///
+        /// Registration, listing and deletion are unaffected. They are
+        /// all session-gated, so none of them is a way in.
+        ///
+        /// # Errors
+        ///
+        /// Always, until assertion verification exists.
+        #[allow(clippy::unused_async)]
         pub async fn complete_passkey_authentication(
+            &self,
+            _input: CompletePasskeyAuthentication,
+        ) -> Result<AuthSessionBundle, AuthFlowError> {
+            Err(AuthFlowError::Internal(
+                "passkey sign-in is disabled: this build does not verify the WebAuthn assertion                  signature, and accepting one without it is an authentication bypass"
+                    .into(),
+            ))
+        }
+
+        /// The body this once had, kept compiling and unreachable.
+        ///
+        /// Retained deliberately rather than deleted: everything here
+        /// except the missing signature check is correct and will be
+        /// needed again the moment verification lands, and rewriting
+        /// the RP, counter and challenge handling from memory is how
+        /// the second attempt loses a check the first one had.
+        #[allow(dead_code)]
+        async fn complete_passkey_authentication_unverified(
             &self,
             input: CompletePasskeyAuthentication,
         ) -> Result<AuthSessionBundle, AuthFlowError> {
