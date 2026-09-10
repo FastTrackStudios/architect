@@ -206,15 +206,46 @@ where
         .ok()
 }
 
-/// The public wording for a flow error.
+/// The wording to put in front of a person for a flow error.
 ///
-/// Through the same taxonomy the JSON API answers with, so a person and
-/// a program are told the same thing, and neither is told anything the
-/// taxonomy considers internal.
+/// `InvalidInput` renders its own message; everything else renders the
+/// taxonomy's. That split is the point:
+///
+/// - `InvalidInput` is *authored for the reader* — "organization slug
+///   already exists", "cannot demote the last organization owner". The
+///   taxonomy flattens all of them to "invalid input", which is the
+///   right answer on the wire, where the `code` carries the meaning and
+///   the message is a fixed string a client can match on. On a page it
+///   is useless: a person told "invalid input" after clicking *Leave*
+///   has learnt nothing about why they cannot.
+/// - Every other variant goes through [`map_auth_error`] unchanged, so
+///   `Internal` still says "internal error" and never the database
+///   error underneath it.
+///
+/// [`map_auth_error`]: architect_auth::transport::map_auth_error
 pub(crate) fn message(error: &architect_auth::proto::AuthFlowError) -> String {
-    architect_auth::transport::map_auth_error(error)
-        .message
-        .to_owned()
+    match error {
+        architect_auth::proto::AuthFlowError::InvalidInput(detail) if !detail.trim().is_empty() => {
+            sentence(detail)
+        }
+        other => architect_auth::transport::map_auth_error(other)
+            .message
+            .to_owned(),
+    }
+}
+
+/// A lowercase engine message, as a sentence.
+fn sentence(detail: &str) -> String {
+    let detail = detail.trim();
+    let mut chars = detail.chars();
+    let capitalised = chars.next().map_or_else(String::new, |first| {
+        first.to_uppercase().collect::<String>() + chars.as_str()
+    });
+    if capitalised.ends_with(['.', '!', '?']) {
+        capitalised
+    } else {
+        format!("{capitalised}.")
+    }
 }
 
 #[component]
@@ -290,5 +321,49 @@ pub(crate) fn FlashLine(flash: Option<Flash>) -> Element {
         Some(Flash::Ok(message)) => rsx! { p { class: "ok", role: "status", "{message}" } },
         Some(Flash::Error(message)) => rsx! { p { class: "error", role: "alert", "{message}" } },
         None => rsx! {},
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use architect_auth::proto::AuthFlowError;
+
+    use super::{message, sentence};
+
+    #[test]
+    fn a_validation_message_reaches_the_reader() {
+        // The regression: every one of these rendered as "invalid
+        // input", so the org pages could not say why anything failed.
+        assert_eq!(
+            message(&AuthFlowError::InvalidInput(
+                "cannot demote the last organization owner".into()
+            )),
+            "Cannot demote the last organization owner."
+        );
+    }
+
+    #[test]
+    fn an_internal_error_still_says_nothing() {
+        // The other half of the split, and the reason it is a split at
+        // all rather than "render whatever the error says".
+        let rendered = message(&AuthFlowError::Internal(
+            "connection to postgres://auth:hunter2@db failed".into(),
+        ));
+        assert_eq!(rendered, "internal error");
+        assert!(!rendered.contains("hunter2"));
+    }
+
+    #[test]
+    fn an_empty_validation_message_falls_back_rather_than_rendering_a_full_stop() {
+        assert_eq!(
+            message(&AuthFlowError::InvalidInput("   ".into())),
+            "invalid input"
+        );
+    }
+
+    #[test]
+    fn a_message_that_is_already_a_sentence_is_left_alone() {
+        assert_eq!(sentence("Already done."), "Already done.");
+        assert_eq!(sentence("really?"), "Really?");
     }
 }

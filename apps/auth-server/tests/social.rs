@@ -23,7 +23,7 @@ use architect_auth::AuthStorage;
 use architect_auth::db::{AuthSeaOrmStorage, Migrator};
 use auth_server::http::SocialState;
 use auth_server::social::{Profile, Provider, ProviderClient, ProviderError, ProviderTokens};
-use auth_server::{ServerConfig, SocialConfig, SocialProviderConfig, server};
+use auth_server::{ServerConfig, SocialProviderConfig, server};
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use base64::Engine;

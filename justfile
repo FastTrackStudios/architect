@@ -114,3 +114,11 @@ auth-replay SNAPSHOT="auth-snapshot.json" DB="./auth-replay.db":
     AUTH_SECRET="a-secret-at-least-32-bytes-long!!" \
     AUTH_BASE_URL="http://localhost:8080" \
     cargo run -p auth-server
+
+# Browser tests for the auth pages, against a server this starts itself.
+#
+# First run downloads a browser and builds the server. On NixOS the
+# downloaded browser cannot find libglib, so point it at a system one:
+#   nix-shell -p chromium --run 'PLAYWRIGHT_CHROMIUM_PATH=$(which chromium) just auth-e2e'
+auth-e2e:
+    cd apps/auth-server/e2e && npm install && npx playwright test
