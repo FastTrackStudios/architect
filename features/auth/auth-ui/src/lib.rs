@@ -35,6 +35,8 @@
 //! the mailer and the social providers. This crate is what a person
 //! does *after* they are signed in.
 
+pub mod admin;
+pub mod api_keys;
 pub mod chrome;
 pub mod orgs;
 pub mod page;
@@ -124,6 +126,12 @@ where
             "/login/two-factor",
             get(two_factor::challenge::<S>).post(two_factor::verify::<S>),
         )
+        .route(
+            "/account/api-keys",
+            get(api_keys::page::<S>).post(api_keys::create::<S>),
+        )
+        .route("/account/api-keys/revoke", post(api_keys::revoke::<S>))
+        .route("/account/api-keys/delete", post(api_keys::delete::<S>))
         .route("/account/sessions", get(sessions::page::<S>))
         .route("/account/sessions/revoke", post(sessions::revoke::<S>))
         .route(
@@ -151,6 +159,14 @@ where
         )
         .route("/orgs/{id}/links", post(orgs::create_link::<S>))
         .route("/orgs/{id}/links/revoke", post(orgs::revoke_link::<S>))
+        // ── Operator ──────────────────────────────────
+        .route("/admin/users", get(admin::users::<S>))
+        .route("/admin/users/role", post(admin::set_role::<S>))
+        .route("/admin/users/ban", post(admin::ban::<S>))
+        .route("/admin/users/unban", post(admin::unban::<S>))
+        .route("/admin/users/delete", post(admin::delete::<S>))
+        .route("/admin/users/impersonate", post(admin::impersonate::<S>))
+        .route("/admin/stop-impersonating", post(admin::stop::<S>))
         // ── Coming in ─────────────────────────────────────────────
         // Unauthenticated on purpose: somebody following one of these
         // has no session yet, and must be able to see what they are
