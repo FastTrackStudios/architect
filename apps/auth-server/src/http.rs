@@ -283,9 +283,7 @@ impl<S> HttpState<S> {
     ) -> Result<SocialState, reqwest::Error> {
         Ok(SocialState {
             config: config.social.clone(),
-            client: Arc::new(
-                HttpProviderClient::new()?.with_mock(config.social.mock_url.clone()),
-            ),
+            client: Arc::new(HttpProviderClient::new()?.with_mock(config.social.mock_url.clone())),
             base_url: config.base_url.clone(),
             allowed_return_origins: config
                 .oidc_clients

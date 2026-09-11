@@ -154,7 +154,13 @@ impl Provider {
     pub fn authorize_endpoint_at(self, mock: Option<&str>) -> String {
         mock.map_or_else(
             || self.authorize_endpoint().to_owned(),
-            |base| format!("{}/{}/authorize", base.trim_end_matches('/'), self.mock_path()),
+            |base| {
+                format!(
+                    "{}/{}/authorize",
+                    base.trim_end_matches('/'),
+                    self.mock_path()
+                )
+            },
         )
     }
 
@@ -777,7 +783,8 @@ mod tests {
         };
         let sign_in =
             Provider::Google.authorize_url(&config, "https://x/cb", "s", Mode::SignIn, None, None);
-        let link = Provider::Google.authorize_url(&config, "https://x/cb", "s", Mode::Link, None, None);
+        let link =
+            Provider::Google.authorize_url(&config, "https://x/cb", "s", Mode::Link, None, None);
         assert!(sign_in.contains("prompt=select_account"));
         assert!(!sign_in.contains("access_type=offline"));
         assert!(link.contains("access_type=offline"));

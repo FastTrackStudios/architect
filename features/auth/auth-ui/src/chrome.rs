@@ -70,8 +70,13 @@ pub const STYLE: &str = r#"
   --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 * { box-sizing: border-box; }
-html { background: var(--bg); }
-body {
+/* This sheet is served to the settings pages as well, which are drawn
+   with the design system — so everything below is scoped to the centred
+   card shell rather than to the document. An unscoped `body` rule here
+   would centre the settings app and repaint it in these colours instead
+   of the themed ones. */
+html:has(body.auth-card) { background: var(--bg); }
+body.auth-card {
   margin: 0;
   min-height: 100vh;
   display: grid;
@@ -151,7 +156,7 @@ body {
   padding: 2.25rem 2.25rem 2rem;
   background: var(--deck);
 }
-h1 {
+main h1 {
   margin: 0 0 .3rem;
   font-size: 1.6rem;
   line-height: 1.15;
@@ -159,21 +164,21 @@ h1 {
   letter-spacing: -.015em;
   font-variation-settings: "wdth" 95;
 }
-h2 {
+main h2 {
   margin: 1.75rem 0 .35rem;
   font-size: 1rem;
   font-weight: 600;
 }
 .sub { margin: 0 0 1.5rem; color: var(--muted); }
 .hint { margin: 0 0 1rem; color: var(--muted); font-size: .9rem; }
-label {
+main label {
   display: block;
   margin: 0 0 .35rem;
   color: var(--muted);
   font-size: .85rem;
   font-weight: 500;
 }
-input {
+main input {
   width: 100%;
   margin: 0 0 .9rem;
   padding: .7rem .8rem;
@@ -183,9 +188,9 @@ input {
   border: 1px solid var(--line-strong);
   border-radius: 8px;
 }
-input:hover { border-color: var(--subtle); }
-input:focus-visible { outline: 2px solid var(--fg); outline-offset: 1px; border-color: var(--fg); }
-button {
+main input:hover { border-color: var(--subtle); }
+main input:focus-visible { outline: 2px solid var(--fg); outline-offset: 1px; border-color: var(--fg); }
+main button {
   width: 100%;
   margin-top: .25rem;
   padding: .75rem;
@@ -197,11 +202,11 @@ button {
   border-radius: 8px;
   cursor: pointer;
 }
-button:hover { background: #fff; }
-button:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+main button:hover { background: #fff; }
+main button:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
 /* provider buttons: the mark, then the words, centred as one unit */
 .social { display: grid; gap: .6rem; }
-a.button {
+main a.button {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -214,9 +219,9 @@ a.button {
   border: 1px solid var(--line-strong);
   border-radius: 8px;
 }
-a.button:hover { background: var(--raised); border-color: var(--subtle); }
-a.button:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
-a.button.small { display: inline-flex; padding: .45rem .8rem; font-size: .875rem; }
+main a.button:hover { background: var(--raised); border-color: var(--subtle); }
+main a.button:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+main a.button.small { display: inline-flex; padding: .45rem .8rem; font-size: .875rem; }
 .mark { flex: none; }
 .or {
   display: flex;
@@ -237,10 +242,10 @@ a.button.small { display: inline-flex; padding: .45rem .8rem; font-size: .875rem
 .error { color: var(--error); border-color: color-mix(in srgb, var(--error) 45%, transparent); }
 .ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
 .alt { display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin: 1.5rem 0 0; color: var(--muted); font-size: .9rem; }
-a.quiet { color: var(--muted); }
-a.quiet:hover { color: var(--fg); }
-a { color: var(--fg); text-underline-offset: .15em; }
-a:hover { color: #fff; }
+main a.quiet { color: var(--muted); }
+main a.quiet:hover { color: var(--fg); }
+main a { color: var(--fg); text-underline-offset: .15em; }
+main a:hover { color: #fff; }
 /* account: linked providers */
 .providers { list-style: none; margin: 0; padding: 0; display: grid; }
 .provider {
@@ -255,8 +260,8 @@ a:hover { color: #fff; }
 .provider-name { display: flex; align-items: center; gap: .8rem; }
 .provider-name strong { display: block; font-weight: 600; }
 .handle { display: block; color: var(--muted); font-size: .85rem; }
-form.inline { display: inline; margin: 0; }
-button.link {
+main form.inline { display: inline; margin: 0; }
+main button.link {
   width: auto;
   margin: 0;
   padding: 0;
@@ -268,9 +273,9 @@ button.link {
   text-decoration: underline;
   text-underline-offset: .15em;
 }
-button.link:hover { color: var(--fg); background: none; }
+main button.link:hover { color: var(--fg); background: none; }
 @media (max-width: 52rem) {
-  body { padding: 0; align-items: start; }
+  body.auth-card { padding: 0; align-items: start; }
   .console { max-width: none; min-height: 100vh; grid-template-columns: 1fr; border: 0; border-radius: 0; }
   .brand { gap: 1.25rem; padding: 1.25rem 1.5rem; border-right: 0; border-bottom: 1px solid var(--line); }
   .pitch { display: none; }
@@ -280,113 +285,11 @@ button.link:hover { color: var(--fg); background: none; }
 @media (prefers-reduced-motion: no-preference) {
   a.button, button, input { transition: background-color .15s ease, border-color .15s ease; }
 }
-/* ══ Settings ═══════════════════════════════════════════════════════
-   The sign-in card is one centred module. This is the console the
-   card lets you into: a fixed rail down the left and a working
-   surface beside it, both bolted to the same chassis.
-
-   Separation here is ground contrast and a hairline — never a shadow,
-   and never the same radius on everything. Panels are modules on a
-   deck, not cards floating over a page. */
-body.app {
-  display: block;
-  place-items: initial;
-  padding: 0;
-  min-height: 100vh;
-  background: var(--bg);
-}
-.app-frame {
-  display: grid;
-  grid-template-columns: 15.5rem minmax(0, 1fr);
-  min-height: 100vh;
-}
-
-/* ── The rail ────────────────────────────────────────── */
-/* Not a route list. It shows where you stand: your name, the rooms
-   you are in and what you are in them, and — only if you are one —
-   the server itself. */
-.rail {
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-  padding: 1.6rem 1rem 1.25rem;
-  background: var(--void);
-  border-right: 1px solid var(--line);
-  /* Narrowed: the rail is dense and technical, the content is not.
-     Archivo's width axis does the work a second typeface would. */
-  font-variation-settings: "wdth" 94;
-}
-.rail .wordmark { padding: 0 .65rem; }
-.rail-who {
-  padding: 0 .65rem;
-  min-width: 0;
-}
-.rail-who strong {
-  display: block;
-  font-size: .95rem;
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-.rail-who span {
-  display: block;
-  margin-top: .1rem;
-  color: var(--subtle);
-  font-size: .8rem;
-  overflow-wrap: anywhere;
-}
-.rail-group { display: flex; flex-direction: column; gap: .1rem; }
-.rail-group + .rail-group { margin-top: .25rem; }
-.rail-label {
-  margin: 0 0 .45rem;
-  padding: .5rem .65rem 0;
-  border-top: 1px solid var(--line);
-  color: var(--subtle);
-  font-size: .78rem;
-  font-weight: 500;
-}
-.rail a {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: .5rem;
-  padding: .42rem .65rem;
-  border-radius: 7px;
-  color: var(--muted);
-  text-decoration: none;
-  font-size: .9rem;
-  /* The 2px bar an active item grows. Reserved as transparent so the
-     label never shifts sideways when it lights up. */
-  box-shadow: inset 2px 0 0 transparent;
-}
-.rail a:hover { color: var(--fg); background: var(--deck); }
-.rail a:focus-visible { outline: 2px solid var(--fg); outline-offset: -2px; }
-.rail a[aria-current="page"] {
-  color: var(--fg);
-  background: var(--deck);
-  font-weight: 600;
-  box-shadow: inset 2px 0 0 var(--fg);
-}
-.rail a .role {
-  flex: none;
-  color: var(--subtle);
-  font-size: .75rem;
-  font-variation-settings: "wdth" 90;
-}
-.rail-foot { margin-top: auto; }
-.rail-foot form { margin: 0; }
-.rail-foot button.link { padding: .42rem .65rem; font-size: .9rem; }
-
-/* ── The working surface ─────────────────────────────── */
-.sheet { min-width: 0; padding: 2.25rem 2rem 4rem; }
-.sheet-head { margin-bottom: 1.75rem; }
-.sheet h1 { margin: 0; }
-.sheet .sub { margin: .35rem 0 0; }
-.sheet-body {
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-  max-width: 58rem;
-}
+/* ══ Settings ══════════════════════════════════════════════════════
+   The chassis — rail, frame and working surface — is the design
+   system's now (see `settings.rs`). What is left below is the module
+   styling the page bodies still use, until each page is converted in
+   turn. */
 /* A module. Bolted down, not floating: no shadow, small radius. */
 .panel {
   padding: 1.4rem 1.5rem;
@@ -403,7 +306,7 @@ body.app {
 .panel form.stack button { width: auto; min-width: 11rem; }
 
 /* ── Tables ──────────────────────────────────────────── */
-table.grid {
+main table.grid {
   width: 100%;
   margin: 0 0 .25rem;
   /* A table that follows a form needs air, or the header row reads as
@@ -411,7 +314,7 @@ table.grid {
   border-collapse: collapse;
   font-size: .92rem;
 }
-table.grid th {
+main table.grid th {
   padding: 0 .75rem .55rem 0;
   border-bottom: 1px solid var(--line);
   color: var(--subtle);
@@ -419,26 +322,26 @@ table.grid th {
   font-weight: 500;
   text-align: left;
 }
-table.grid td {
+main table.grid td {
   padding: .7rem .75rem .7rem 0;
   border-bottom: 1px solid var(--line);
   vertical-align: top;
 }
-table.grid tr:last-child td { border-bottom: 0; }
-table.grid td:last-child, table.grid th:last-child { padding-right: 0; text-align: right; }
+main table.grid tr:last-child td { border-bottom: 0; }
+main table.grid td:last-child, main table.grid th:last-child { padding-right: 0; text-align: right; }
 /* Several inline forms in one cell. Without this they run together as
    one word — "BanSign in asDelete" — which is how the admin table
    read before there was any CSS for it at all. */
-table.grid td:last-child form.inline { display: inline-flex; }
-table.grid td:last-child > * + * { margin-left: .9rem; }
-table.grid td input { width: auto; margin: 0 .5rem 0 0; padding: .35rem .5rem; font-size: .85rem; }
-table.grid select { margin-right: .5rem; }
+main table.grid td:last-child form.inline { display: inline-flex; }
+main table.grid td:last-child > * + * { margin-left: .9rem; }
+main table.grid td input { width: auto; margin: 0 .5rem 0 0; padding: .35rem .5rem; font-size: .85rem; }
+main table.grid select { margin-right: .5rem; }
 .wide { overflow-x: auto; }
-form + .wide, form + table.grid { margin-top: 1.75rem; }
+main form + .wide, main form + table.grid { margin-top: 1.75rem; }
 .wide + form.stack, table.grid + form.stack { margin-top: 1.5rem; }
 
 /* ── Controls ────────────────────────────────────────── */
-select {
+main select {
   max-width: 100%;
   padding: .4rem .5rem;
   font: inherit;
@@ -448,12 +351,12 @@ select {
   border: 1px solid var(--line-strong);
   border-radius: 7px;
 }
-select:focus-visible { outline: 2px solid var(--fg); outline-offset: 1px; }
-form.stack select { width: 100%; margin-bottom: .9rem; padding: .7rem .8rem; font-size: 1rem; }
-button.danger { color: var(--error); }
-button.link.danger:hover { color: var(--error); }
+main select:focus-visible { outline: 2px solid var(--fg); outline-offset: 1px; }
+main form.stack select { width: 100%; margin-bottom: .9rem; padding: .7rem .8rem; font-size: 1rem; }
+main button.danger { color: var(--error); }
+main button.link.danger:hover { color: var(--error); }
 .mono { font-family: var(--mono); font-size: .85rem; font-variant-numeric: tabular-nums; }
-input.mono { font-size: .85rem; }
+main input.mono { font-size: .85rem; }
 .tag {
   display: inline-block;
   margin-left: .5rem;
@@ -467,25 +370,25 @@ input.mono { font-size: .85rem; }
 }
 
 /* ── Lists ───────────────────────────────────────────── */
-ul.orgs, ul.teams, ul.codes, ul.providers { margin: 0; padding: 0; list-style: none; }
-ul.orgs, ul.teams { display: flex; flex-direction: column; }
-li.org, li.team {
+main ul.orgs, main ul.teams, main ul.codes, main ul.providers { margin: 0; padding: 0; list-style: none; }
+main ul.orgs, main ul.teams { display: flex; flex-direction: column; }
+main li.org, main li.team {
   display: flex;
   align-items: center;
   gap: .75rem;
   padding: .8rem 0;
   border-bottom: 1px solid var(--line);
 }
-li.org > a, li.team > .team-head { flex: 1; min-width: 0; text-decoration: none; color: var(--fg); }
-li.org:last-child, li.team:last-child { border-bottom: 0; }
-li.org > a strong, li.team strong { font-weight: 600; }
+main li.org > a, main li.team > .team-head { flex: 1; min-width: 0; text-decoration: none; color: var(--fg); }
+main li.org:last-child, main li.team:last-child { border-bottom: 0; }
+main li.org > a strong, main li.team strong { font-weight: 600; }
 /* `li.team` beats `.team` on specificity, so the override has to
    match the same way — otherwise `align-items: center` from the shared
    rule above survives and centres the whole block. */
-li.team { flex-direction: column; align-items: stretch; gap: .45rem; }
+main li.team { flex-direction: column; align-items: stretch; gap: .45rem; }
 .team-head { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
 /* Backup codes and scopes: read down a column, not across a line. */
-ul.codes {
+main ul.codes {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
   gap: .35rem .9rem;
@@ -493,8 +396,8 @@ ul.codes {
   font-family: var(--mono);
   font-size: .9rem;
 }
-li.provider { display: flex; align-items: center; justify-content: space-between; gap: .9rem; padding: .8rem 0; border-bottom: 1px solid var(--line); }
-li.provider:last-child { border-bottom: 0; }
+main li.provider { display: flex; align-items: center; justify-content: space-between; gap: .9rem; padding: .8rem 0; border-bottom: 1px solid var(--line); }
+main li.provider:last-child { border-bottom: 0; }
 .provider-name { display: flex; align-items: center; gap: .7rem; }
 
 /* ── Shown once ──────────────────────────────────────── */
@@ -513,31 +416,10 @@ li.provider:last-child { border-bottom: 0; }
 .qr svg { display: block; }
 
 .alt { margin: 1.5rem 0 0; color: var(--muted); font-size: .9rem; }
-.sheet .alt a { color: var(--muted); }
-.sheet .alt a:hover { color: var(--fg); }
 
 /* ── Narrow ──────────────────────────────────────────── */
-/* The rail becomes a scrolling strip above the sheet. No script, so
-   this is the whole responsive story. */
 @media (max-width: 60rem) {
-  .app-frame { grid-template-columns: minmax(0, 1fr); }
-  .rail {
-    flex-direction: row;
-    align-items: center;
-    gap: .35rem;
-    overflow-x: auto;
-    padding: .6rem .75rem;
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
-  }
-  .rail .wordmark, .rail-who, .rail-label { display: none; }
-  .rail-group { flex-direction: row; gap: .35rem; }
-  .rail-group + .rail-group { margin-top: 0; }
-  .rail a { white-space: nowrap; }
-  .rail a .role { display: none; }
-  .rail-foot { margin-top: 0; margin-left: auto; }
-  .sheet { padding: 1.5rem 1rem 3rem; }
-  table.grid td:last-child > * + * { margin-left: .6rem; }
+  main table.grid td:last-child > * + * { margin-left: .6rem; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }

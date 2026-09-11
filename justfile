@@ -26,6 +26,22 @@ ui-css-check: ui-css
     fi
     echo "utilities.css is up to date"
 
+# The auth pages' sheet. Same generated-but-committed deal as `ui-css`,
+# scanning this crate AND architect-ui so a class used here but not by
+# any architect-ui component still gets a rule — without it the element
+# renders unstyled and nothing warns.
+auth-ui-css:
+    cd features/auth/auth-ui && tailwindcss -i tailwind.css -o assets/utilities.css --minify
+
+auth-ui-css-check: auth-ui-css
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! git diff --quiet -- features/auth/auth-ui/assets/utilities.css; then
+        echo "auth-ui's utilities.css is out of date — run 'just auth-ui-css' and commit the result" >&2
+        exit 1
+    fi
+    echo "auth-ui utilities.css is up to date"
+
 check:
     cargo check --workspace --all-targets
 

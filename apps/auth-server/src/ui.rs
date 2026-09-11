@@ -861,7 +861,7 @@ fn Notice(title: String, message: String, return_to: String) -> Element {
             title { "{title}" }
             style { {STYLE} }
         }
-        body {
+        body { class: "auth-card",
             Shell {
                 h1 { "{title}" }
                 p { class: "sub", "{message}" }
@@ -925,7 +925,7 @@ fn Page(
             title { "{screen.title()} · FastTrackStudio" }
             style { {STYLE} }
         }
-        body {
+        body { class: "auth-card",
             // The one script in these pages, and only where it is
             // needed: `navigator.credentials` cannot be reached from a
             // form. Everything else on this page is still a form post.

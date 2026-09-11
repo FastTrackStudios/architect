@@ -185,7 +185,10 @@ async fn flow_through(
 ) -> axum::response::Response {
     let mut request = Request::get(format!("/auth/social/{provider}/start?mode={mode}"));
     if let Some(session) = session {
-        request = request.header(axum::http::header::AUTHORIZATION, format!("Bearer {session}"));
+        request = request.header(
+            axum::http::header::AUTHORIZATION,
+            format!("Bearer {session}"),
+        );
     }
     let start = app
         .clone()
@@ -197,8 +200,10 @@ async fn flow_through(
     let query = back.split_once('?').expect("callback query").1.to_owned();
     let mut callback = Request::get(format!("/auth/social/{provider}/callback?{query}"));
     if let Some(session) = session {
-        callback =
-            callback.header(axum::http::header::AUTHORIZATION, format!("Bearer {session}"));
+        callback = callback.header(
+            axum::http::header::AUTHORIZATION,
+            format!("Bearer {session}"),
+        );
     }
     app.clone()
         .oneshot(callback.body(Body::empty()).unwrap())
@@ -217,7 +222,10 @@ async fn a_mock_url_replaces_the_provider_origin_in_the_authorize_redirect() {
             .clone()
             .oneshot(
                 Request::get(format!("/auth/social/{provider}/start?mode=link"))
-                    .header(axum::http::header::AUTHORIZATION, format!("Bearer {session}"))
+                    .header(
+                        axum::http::header::AUTHORIZATION,
+                        format!("Bearer {session}"),
+                    )
                     .body(Body::empty())
                     .unwrap(),
             )

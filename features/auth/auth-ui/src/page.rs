@@ -40,7 +40,7 @@ pub fn document(title: &str, body: Element) -> Response {
             title { "{title} · FastTrackStudio" }
             style { {STYLE} }
         }
-        body {
+        body { class: "auth-card",
             Shell { {body} }
         }
     });
@@ -64,7 +64,7 @@ pub fn document_with_script(title: &str, body: Element, script: &str) -> Respons
             title { "{title} · FastTrackStudio" }
             style { {STYLE} }
         }
-        body {
+        body { class: "auth-card",
             Shell { {body} }
             script { dangerous_inner_html: "{script}" }
         }

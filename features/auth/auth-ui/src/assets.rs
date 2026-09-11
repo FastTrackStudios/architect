@@ -27,23 +27,28 @@ use axum::response::{IntoResponse, Response};
 
 use crate::chrome::STYLE;
 
+/// The design system's tokens and every utility these pages use.
+///
+/// Compiled from `tailwind.css` in this crate, which scans both this
+/// crate's sources and `architect-ui`'s — see the note there for why it
+/// cannot simply inject `architect_ui::UTILITIES_CSS`.
+const UTILITIES: &str = include_str!("../assets/utilities.css");
+
 /// Everything the pages need, in cascade order.
 ///
-/// The design system's tokens come first, then its compiled utilities,
-/// then this crate's own sheet — which is last because it is the one
-/// allowed to override the others.
+/// The compiled utilities come first and this crate's own hand-written
+/// sheet last, because during the conversion to the design system it is
+/// the one that must keep winning.
 fn sheet() -> &'static str {
     static SHEET: OnceLock<String> = OnceLock::new();
     SHEET.get_or_init(|| {
         let mut css = String::with_capacity(
-            architect_ui::THEME_CSS
+            UTILITIES
                 .len()
-                .saturating_add(architect_ui::UTILITIES_CSS.len())
-                .saturating_add(STYLE.len()),
+                .saturating_add(STYLE.len())
+                .saturating_add(1),
         );
-        css.push_str(architect_ui::THEME_CSS);
-        css.push('\n');
-        css.push_str(architect_ui::UTILITIES_CSS);
+        css.push_str(UTILITIES);
         css.push('\n');
         css.push_str(STYLE);
         css
@@ -113,14 +118,14 @@ mod tests {
         let css = sheet();
         assert!(css.contains("--background"), "design tokens");
         assert!(css.contains("@layer utilities"), "compiled utilities");
-        assert!(css.contains(".rail"), "this crate's own sheet");
+        assert!(css.contains(".panel"), "this crate's own sheet");
     }
 
     #[test]
     fn our_own_rules_come_last_so_they_win() {
         let css = sheet();
         let tokens = css.find("--background").expect("tokens");
-        let ours = css.find(".rail").expect("ours");
+        let ours = css.find(".panel").expect("ours");
         assert!(tokens < ours, "the design system must not override us");
     }
 

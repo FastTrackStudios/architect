@@ -36,9 +36,9 @@
 //! does *after* they are signed in.
 
 pub mod accounts;
-pub mod assets;
 pub mod admin;
 pub mod api_keys;
+pub mod assets;
 pub mod chrome;
 pub mod consent;
 pub mod device;
