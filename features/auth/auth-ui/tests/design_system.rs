@@ -73,7 +73,10 @@ async fn the_stylesheet_is_served_as_css_that_can_be_cached_forever() {
         .expect("body");
     let css = String::from_utf8(body.to_vec()).expect("utf-8 css");
     assert!(css.contains("--background"), "design tokens");
-    assert!(css.contains("bg-primary"), "the class the button above asks for");
+    assert!(
+        css.contains("bg-primary"),
+        "the class the button above asks for"
+    );
 }
 
 #[tokio::test]

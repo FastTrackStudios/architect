@@ -15350,7 +15350,9 @@ pub mod passkeys {
             if result.needs_update() {
                 let mut passkey = stored_passkey(&row)?;
                 passkey.update_credential(&result);
-                let counter = i64::try_from(result.counter()).unwrap_or(i64::MAX);
+                // `u32` into `i64` cannot fail, so the fallible form was
+                // carrying an `unwrap_or` branch nothing could reach.
+                let counter = i64::from(result.counter());
                 self.storage
                     .update_passkey_credential(
                         &credential_id,

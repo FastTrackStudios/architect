@@ -283,9 +283,7 @@ impl<S> HttpState<S> {
     ) -> Result<SocialState, reqwest::Error> {
         Ok(SocialState {
             config: config.social.clone(),
-            client: Arc::new(
-                HttpProviderClient::new()?.with_mock(config.social.mock_url.clone()),
-            ),
+            client: Arc::new(HttpProviderClient::new()?.with_mock(config.social.mock_url.clone())),
             base_url: config.base_url.clone(),
             allowed_return_origins: config
                 .oidc_clients
@@ -756,9 +754,7 @@ fn field_str(body: &Value, key: &'static str) -> Result<String, ApiError> {
 
 /// The same, for an optional one. A JSON `null` reads as absent.
 fn field_opt_str(body: &Value, key: &str) -> Option<String> {
-    body.get(key)
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned)
+    body.get(key).and_then(Value::as_str).map(ToOwned::to_owned)
 }
 
 /// Read a required uuid field.
@@ -927,10 +923,7 @@ where
             metadata_json: field_opt_str(&body, "metadata_json"),
         })
         .await?;
-    Ok((
-        StatusCode::CREATED,
-        Json(organization_bundle_json(&bundle)),
-    ))
+    Ok((StatusCode::CREATED, Json(organization_bundle_json(&bundle))))
 }
 
 /// `POST /auth/organization/set-active` — `{organization_id}`.
@@ -970,16 +963,26 @@ where
 {
     let session_token = require_token(&state, &headers)?;
     let expires_at = match field_opt_str(&body, "expires_at") {
-        Some(raw) => raw
-            .parse::<chrono::DateTime<chrono::Utc>>()
-            .map_err(|_| {
+        Some(raw) => raw.parse::<chrono::DateTime<chrono::Utc>>().map_err(|_| {
+            ApiError::custom(
+                StatusCode::BAD_REQUEST,
+                "invalid_timestamp",
+                "expires_at must be an RFC 3339 timestamp",
+            )
+        })?,
+        // `checked_add_signed` rather than `+`: the addition cannot
+        // overflow seven days from now, but an invitation whose expiry
+        // silently wrapped would be a standing key, so the impossible
+        // branch refuses instead of inventing a date.
+        None => chrono::Utc::now()
+            .checked_add_signed(chrono::Duration::days(7))
+            .ok_or_else(|| {
                 ApiError::custom(
-                    StatusCode::BAD_REQUEST,
-                    "invalid_timestamp",
-                    "expires_at must be an RFC 3339 timestamp",
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "expiry_overflow",
+                    "could not compute a default expiry",
                 )
             })?,
-        None => chrono::Utc::now() + chrono::Duration::days(7),
     };
     let issued = state
         .auth
@@ -1007,7 +1010,8 @@ where
 /// token}`. Accepted as the signed-in caller, whoever was invited.
 ///
 /// 204, because the flow returns nothing. The route descriptor claimed
-/// `AuthMember` and always had; the OpenAPI therefore advertised a body
+/// `AuthMember` and always had; the `OpenAPI` document therefore
+/// advertised a body
 /// no caller could ever receive. Fixed alongside this mount rather than
 /// papered over here — a client generated from that document would have
 /// failed to parse the empty response.

@@ -261,7 +261,12 @@ async fn members_come_back_with_the_person_attached() {
     let org_id = created["organization"]["id"].as_str().expect("org id");
 
     let members = json_body(
-        get(&app, &format!("/auth/organization/{org_id}/members"), &token).await,
+        get(
+            &app,
+            &format!("/auth/organization/{org_id}/members"),
+            &token,
+        )
+        .await,
     )
     .await;
     let members = members.as_array().expect("a list");
@@ -395,7 +400,10 @@ async fn a_role_change_shows_up_on_the_members_list() {
     assert_eq!(response.status(), StatusCode::OK);
 
     let list = json_body(get(&app, "/auth/organization/list", &other).await).await;
-    assert_eq!(list.as_array().expect("a list")[0]["membership"]["role"], "admin");
+    assert_eq!(
+        list.as_array().expect("a list")[0]["membership"]["role"],
+        "admin"
+    );
 }
 
 /// A malformed body says which field was wrong. A 400 that does not

@@ -246,7 +246,7 @@ impl From<OidcClientJson> for OidcClientConfig {
 }
 
 impl ServerConfig {
-    /// A configuration for a server on this machine: in-memory SQLite,
+    /// A configuration for a server on this machine: in-memory `SQLite`,
     /// no OIDC clients, no social providers, mail in log mode.
     ///
     /// Exists so that tests and local runs name only what they care
