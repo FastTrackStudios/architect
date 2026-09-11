@@ -1074,12 +1074,6 @@ fn Page(
     }
 }
 
-/// Inlined rather than served as a file.
-///
-/// One request, no cache to bust, and nothing to 404 — the page cannot
-/// arrive unstyled because the styles cannot arrive separately. It is
-/// small enough that this costs less than the extra round trip would.
-
 #[cfg(test)]
 mod tests {
     use super::{Screen, render, safe_return_to};
