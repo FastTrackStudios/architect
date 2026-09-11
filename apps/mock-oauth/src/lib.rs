@@ -250,9 +250,9 @@ async fn authorize_page(Path(provider): Path<String>, Query(q): Query<AuthorizeQ
     let mut rows = String::new();
     for account in &cast {
         use std::fmt::Write as _;
-        // `write!` into a String cannot fail; the result is discarded
+        // `write!` into a String cannot fail; the result is dropped
         // rather than unwrapped so this stays panic-free.
-        drop(write!(
+        let _ = write!(
             rows,
             "<form method=\"post\">\
                <input type=\"hidden\" name=\"account_id\" value=\"{id}\">\
@@ -265,7 +265,7 @@ async fn authorize_page(Path(provider): Path<String>, Query(q): Query<AuthorizeQ
             state = escape(&q.state),
             name = escape(&account.name),
             login = escape(&account.login),
-        ));
+        );
     }
 
     Html(page(
