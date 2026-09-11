@@ -59,6 +59,9 @@ totp-rs.workspace = true
 sha2.workspace = true
 tokio.workspace = true
 tower = { version = "0.5", features = ["util"] }
+# The stand-in provider, so the real HTTP client can be driven against
+# something that answers like GitHub, Google and TONE3000.
+mock-oauth = { path = "../mock-oauth" }
 
 [lints]
 workspace = true

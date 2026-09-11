@@ -16,6 +16,11 @@ const PORT = Number(process.env.AUTH_E2E_PORT ?? 8181);
 // registrable domain suffix of the origin's host, and an IP address has
 // no such suffix — passkeys simply cannot work on one.
 const BASE_URL = `http://localhost:${PORT}`;
+// The stand-in provider. Its own port, so a `just mock-oauth` left
+// running on 4040 does not get adopted by a test run — and so a test
+// run does not take a port somebody is demoing on.
+const MOCK_PORT = Number(process.env.AUTH_E2E_MOCK_PORT ?? 4141);
+const MOCK_URL = `http://localhost:${MOCK_PORT}`;
 
 /**
  * A browser to use instead of the one Playwright downloads.
@@ -51,22 +56,41 @@ export default defineConfig({
     // whatever device the message arrived on.
     { name: "mobile", use: { ...devices["Pixel 7"], launchOptions } },
   ],
-  webServer: {
-    // `--release` would be faster to run and much slower to build; these
-    // are IO-bound against sqlite either way.
-    command: "cargo run -p auth-server",
-    url: `${BASE_URL}/healthz`,
-    reuseExistingServer: !process.env.CI,
-    timeout: 300_000,
-    cwd: "../../..",
-    env: {
-      AUTH_DEV_SEED: "1",
-      AUTH_DATABASE_URL: "sqlite::memory:",
-      AUTH_SECRET: "a-secret-at-least-32-bytes-long!!",
-      AUTH_BASE_URL: BASE_URL,
-      AUTH_BIND_ADDR: `127.0.0.1:${PORT}`,
-      AUTH_PASSKEY_RP_ID: "localhost",
-      RUST_LOG: "info,auth_server=debug",
+  webServer: [
+    {
+      // Social sign-in points here instead of at GitHub, Google and
+      // TONE3000, so the buttons are exercised without anyone's
+      // credentials and without leaving the machine.
+      command: "cargo run -p mock-oauth",
+      url: MOCK_URL,
+      reuseExistingServer: !process.env.CI,
+      timeout: 300_000,
+      cwd: "../../..",
+      env: { MOCK_OAUTH_BIND_ADDR: `127.0.0.1:${MOCK_PORT}` },
     },
-  },
+    {
+      // `--release` would be faster to run and much slower to build; these
+      // are IO-bound against sqlite either way.
+      command: "cargo run -p auth-server",
+      url: `${BASE_URL}/healthz`,
+      reuseExistingServer: !process.env.CI,
+      timeout: 300_000,
+      cwd: "../../..",
+      env: {
+        AUTH_DEV_SEED: "1",
+        AUTH_DATABASE_URL: "sqlite::memory:",
+        AUTH_SECRET: "a-secret-at-least-32-bytes-long!!",
+        AUTH_BASE_URL: BASE_URL,
+        AUTH_BIND_ADDR: `127.0.0.1:${PORT}`,
+        AUTH_PASSKEY_RP_ID: "localhost",
+        RUST_LOG: "info,auth_server=debug",
+        AUTH_SOCIAL_MOCK_URL: MOCK_URL,
+        AUTH_GITHUB_CLIENT_ID: "mock-github",
+        AUTH_GITHUB_CLIENT_SECRET: "mock-github-secret",
+        AUTH_GOOGLE_CLIENT_ID: "mock-google",
+        AUTH_GOOGLE_CLIENT_SECRET: "mock-google-secret",
+        AUTH_TONE3000_CLIENT_ID: "mock-tone3000",
+      },
+    },
+  ],
 });

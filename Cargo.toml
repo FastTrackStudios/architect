@@ -22,6 +22,7 @@ members = [
     "crates/architect-action-derive",
     # ── apps ──────────────────────────────────────────────────────────
     "apps/auth-server",
+    "apps/mock-oauth",
     # ── auth ──────────────────────────────────────────────────────────
     "features/auth/architect-auth",
     "features/auth/auth",

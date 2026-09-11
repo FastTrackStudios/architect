@@ -131,6 +131,58 @@ impl Provider {
         }
     }
 
+    /// The path this provider's endpoints sit under on a mock server.
+    ///
+    /// A mock serves all three, so the provider has to be in the path —
+    /// `/github/authorize`, `/google/token`, and so on.
+    #[must_use]
+    pub const fn mock_path(self) -> &'static str {
+        match self {
+            Self::GitHub => "github",
+            Self::Google => "google",
+            Self::Tone3000 => "tone3000",
+        }
+    }
+
+    /// Where to send the browser, given an optional mock origin.
+    ///
+    /// `None` is the real provider. A mock origin replaces all three
+    /// endpoints at once rather than one at a time: a deployment
+    /// pointing *some* calls at a mock and others at the real provider
+    /// would fail in ways that look like the provider misbehaving.
+    #[must_use]
+    pub fn authorize_endpoint_at(self, mock: Option<&str>) -> String {
+        mock.map_or_else(
+            || self.authorize_endpoint().to_owned(),
+            |base| format!("{}/{}/authorize", base.trim_end_matches('/'), self.mock_path()),
+        )
+    }
+
+    #[must_use]
+    pub fn token_endpoint_at(self, mock: Option<&str>) -> String {
+        mock.map_or_else(
+            || self.token_endpoint().to_owned(),
+            |base| format!("{}/{}/token", base.trim_end_matches('/'), self.mock_path()),
+        )
+    }
+
+    #[must_use]
+    pub fn userinfo_endpoint_at(self, mock: Option<&str>) -> String {
+        mock.map_or_else(
+            || self.userinfo_endpoint().to_owned(),
+            |base| format!("{}/{}/user", base.trim_end_matches('/'), self.mock_path()),
+        )
+    }
+
+    /// GitHub's separate address list. Only GitHub has one.
+    #[must_use]
+    pub fn emails_endpoint_at(mock: Option<&str>) -> String {
+        mock.map_or_else(
+            || "https://api.github.com/user/emails".to_owned(),
+            |base| format!("{}/github/user/emails", base.trim_end_matches('/')),
+        )
+    }
+
     /// The full authorization URL the browser is sent to.
     ///
     /// Google is asked for `access_type=offline` only when linking: a
@@ -146,6 +198,7 @@ impl Provider {
         state: &str,
         mode: Mode,
         challenge: Option<&str>,
+        mock: Option<&str>,
     ) -> String {
         let mut params: Vec<(&str, String)> = vec![
             ("client_id", config.client_id.clone()),
@@ -168,7 +221,11 @@ impl Provider {
                 params.push(("access_type", "offline".to_owned()));
             }
         }
-        format!("{}?{}", self.authorize_endpoint(), form_encode(&params))
+        format!(
+            "{}?{}",
+            self.authorize_endpoint_at(mock),
+            form_encode(&params)
+        )
     }
 }
 
@@ -268,6 +325,10 @@ pub trait ProviderClient: Send + Sync {
 #[derive(Clone)]
 pub struct HttpProviderClient {
     http: reqwest::Client,
+    /// A mock provider's origin, when one is configured. Held on the
+    /// client so the token exchange and the profile fetch cannot
+    /// disagree with the authorize URL about where the provider is.
+    mock: Option<String>,
 }
 
 impl HttpProviderClient {
@@ -278,7 +339,14 @@ impl HttpProviderClient {
             .timeout(Duration::from_secs(15))
             .user_agent("architect-auth-server")
             .build()?;
-        Ok(Self { http })
+        Ok(Self { http, mock: None })
+    }
+
+    /// Point every provider at a mock origin instead of the real one.
+    #[must_use]
+    pub fn with_mock(mut self, mock: Option<String>) -> Self {
+        self.mock = mock;
+        self
     }
 }
 
@@ -360,7 +428,7 @@ impl ProviderClient for HttpProviderClient {
         // is JSON regardless. Asking for JSON works for both.
         let response: TokenResponse = self
             .http
-            .post(provider.token_endpoint())
+            .post(provider.token_endpoint_at(self.mock.as_deref()))
             .header(reqwest::header::ACCEPT, "application/json")
             .form(&form)
             .send()
@@ -435,7 +503,7 @@ impl ProviderClient for HttpProviderClient {
             Provider::GitHub => {
                 let user: GitHubUser = self
                     .http
-                    .get(provider.userinfo_endpoint())
+                    .get(provider.userinfo_endpoint_at(self.mock.as_deref()))
                     .bearer_auth(access_token)
                     .header(reqwest::header::ACCEPT, "application/vnd.github+json")
                     .send()
@@ -452,7 +520,7 @@ impl ProviderClient for HttpProviderClient {
                 } else {
                     let emails: Vec<GitHubEmail> = self
                         .http
-                        .get("https://api.github.com/user/emails")
+                        .get(Provider::emails_endpoint_at(self.mock.as_deref()))
                         .bearer_auth(access_token)
                         .header(reqwest::header::ACCEPT, "application/vnd.github+json")
                         .send()
@@ -486,7 +554,7 @@ impl ProviderClient for HttpProviderClient {
             Provider::Google => {
                 let user: GoogleUser = self
                     .http
-                    .get(provider.userinfo_endpoint())
+                    .get(provider.userinfo_endpoint_at(self.mock.as_deref()))
                     .bearer_auth(access_token)
                     .send()
                     .await?
@@ -508,7 +576,7 @@ impl ProviderClient for HttpProviderClient {
             Provider::Tone3000 => {
                 let user: Tone3000User = self
                     .http
-                    .get(provider.userinfo_endpoint())
+                    .get(provider.userinfo_endpoint_at(self.mock.as_deref()))
                     .bearer_auth(access_token)
                     .send()
                     .await?
@@ -687,6 +755,7 @@ mod tests {
             "the-state",
             Mode::SignIn,
             None,
+            None,
         );
         assert!(url.starts_with("https://github.com/login/oauth/authorize?"));
         assert!(url.contains("client_id=gh-client"));
@@ -707,8 +776,8 @@ mod tests {
             scopes: vec!["openid".into(), "email".into(), "profile".into()],
         };
         let sign_in =
-            Provider::Google.authorize_url(&config, "https://x/cb", "s", Mode::SignIn, None);
-        let link = Provider::Google.authorize_url(&config, "https://x/cb", "s", Mode::Link, None);
+            Provider::Google.authorize_url(&config, "https://x/cb", "s", Mode::SignIn, None, None);
+        let link = Provider::Google.authorize_url(&config, "https://x/cb", "s", Mode::Link, None, None);
         assert!(sign_in.contains("prompt=select_account"));
         assert!(!sign_in.contains("access_type=offline"));
         assert!(link.contains("access_type=offline"));
@@ -729,6 +798,7 @@ mod tests {
             "the-state",
             Mode::Link,
             Some("the-challenge"),
+            None,
         );
         assert!(url.starts_with("https://www.tone3000.com/api/v1/oauth/authorize?"));
         assert!(url.contains("client_id=t3k_pub_abc"));

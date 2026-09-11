@@ -122,17 +122,21 @@ test.describe("two-factor", () => {
 
 test.describe("api keys", () => {
   test("a key is shown once and then only by its prefix", async ({ signedIn: page }) => {
+    // A name of its own: both browser projects run this file against one
+    // server as the same person, so a fixed name leaves two identical
+    // rows and the cell lookup below matches both.
+    const name = `Playwright key ${crypto.randomUUID().slice(0, 8)}`;
     await page.goto("/account/api-keys");
-    await page.getByLabel("Name").fill("Playwright key");
+    await page.getByLabel("Name").fill(name);
     await page.getByRole("button", { name: /create key/i }).click();
 
     const key = await page.getByLabel("New API key").inputValue();
     expect(key).toMatch(/^ak_/);
 
     await page.goto("/account/api-keys");
-    // A cell, not any text: "Playwright key" is also sitting in the
-    // name field the form remembered.
-    await expect(sheet(page).getByRole("cell", { name: "Playwright key" })).toBeVisible();
+    // A cell, not any text: the name is also sitting in the field the
+    // form remembered.
+    await expect(sheet(page).getByRole("cell", { name })).toBeVisible();
     await expect(page.getByLabel("New API key")).toBeHidden();
     await expect(page.getByText(key)).toBeHidden();
   });

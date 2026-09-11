@@ -27,7 +27,7 @@
 //! | `/oauth2/{authorize,token,userinfo}` | OIDC provider |
 //! | `/auth/jwt/jwks` | key set (see the caveat below) |
 //! | `/auth/{sign-up,sign-in,session,refresh,sign-out}` | session JSON |
-//! | `/auth/social/{github,google}/{start,callback}` | social sign-in and account linking |
+//! | `/auth/social/{github,google,tone3000}/{start,callback}` | social sign-in and account linking |
 //! | `/auth/accounts`, `/auth/accounts/{provider}/unlink` | linked accounts |
 //! | `/oauth2/linked-token` | a linked GitHub token for a relying party (see [`social`]) |
 //! | `/login`, `/sign-up`, `/account`, … | hosted pages |

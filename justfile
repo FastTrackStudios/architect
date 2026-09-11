@@ -61,12 +61,45 @@ fleet-bump TAG +MANIFESTS:
 # on every machine and every run, which is what lets a browser test
 # assert on `ada@local.test` owning `acme` rather than on whatever the
 # fixture happened to make.
+#
+# Social sign-in is on, pointed at the mock provider below rather than
+# at GitHub, Google and TONE3000 — so the buttons work without anyone's
+# credentials. `just mock-oauth` has to be running; `just auth-demo`
+# starts both.
 auth-dev:
     AUTH_DEV_SEED=1 \
     AUTH_DATABASE_URL="sqlite::memory:" \
     AUTH_SECRET="a-secret-at-least-32-bytes-long!!" \
     AUTH_BASE_URL="http://localhost:8080" \
+    AUTH_SOCIAL_MOCK_URL="http://localhost:4040" \
+    AUTH_GITHUB_CLIENT_ID="mock-github" \
+    AUTH_GITHUB_CLIENT_SECRET="mock-github-secret" \
+    AUTH_GOOGLE_CLIENT_ID="mock-google" \
+    AUTH_GOOGLE_CLIENT_SECRET="mock-google-secret" \
+    AUTH_TONE3000_CLIENT_ID="mock-tone3000" \
     cargo run -p auth-server
+
+# A stand-in for GitHub, Google and TONE3000 on http://localhost:4040.
+#
+# It verifies nothing — no client secret, no PKCE, no expiry — and says
+# so on every page it renders. Setting AUTH_SOCIAL_MOCK_URL is what
+# points a server at it; leave that unset and the real providers are
+# used, which is why production needs no flag to stay safe.
+mock-oauth:
+    cargo run -p mock-oauth
+
+# The full demo: mock providers and a freshly seeded auth server.
+#
+# The mock runs in the background and is killed when this exits, so
+# Ctrl-C leaves nothing holding port 4040.
+auth-demo:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo build -p mock-oauth -p auth-server
+    cargo run -p mock-oauth &
+    mock=$!
+    trap 'kill "$mock" 2>/dev/null || true' EXIT
+    just auth-dev
 
 # The same, but on disk, so it survives a restart.
 #   just auth-dev-persistent ./auth-local.db

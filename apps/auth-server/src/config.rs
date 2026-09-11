@@ -102,6 +102,13 @@ pub struct SocialConfig {
     /// `GET /oauth2/linked-token`. Registered as an extra grantable
     /// scope with the OIDC provider.
     pub linked_token_scope: String,
+    /// Send every provider to a mock server at this origin instead of
+    /// the real one. `AUTH_SOCIAL_MOCK_URL`.
+    ///
+    /// All three or none: a deployment pointing some calls at a mock
+    /// and others at the real provider fails in ways that look like the
+    /// provider misbehaving.
+    pub mock_url: Option<String>,
 }
 
 impl SocialConfig {
@@ -147,6 +154,7 @@ impl SocialConfig {
             tone3000: None,
             google: None,
             linked_token_scope: Self::DEFAULT_LINKED_TOKEN_SCOPE.to_owned(),
+            mock_url: None,
         }
     }
 
@@ -355,6 +363,7 @@ impl ServerConfig {
                 ),
                 linked_token_scope: optional("AUTH_LINKED_TOKEN_SCOPE")
                     .unwrap_or_else(|| SocialConfig::DEFAULT_LINKED_TOKEN_SCOPE.to_owned()),
+                mock_url: optional("AUTH_SOCIAL_MOCK_URL"),
             },
         })
     }
