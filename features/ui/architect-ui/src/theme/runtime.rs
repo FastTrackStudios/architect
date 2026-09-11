@@ -1,5 +1,7 @@
 use dioxus::prelude::*;
 
+use std::fmt::Write as _;
+
 use crate::components::{Button, ButtonVariant, Label, Select, SelectContent, SelectItem};
 
 const SHADOW_KEYS: [&str; 6] = [
@@ -18,19 +20,21 @@ pub enum ThemeMode {
 }
 
 impl ThemeMode {
-    pub fn as_str(self) -> &'static str {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Light => "light",
             Self::Dark => "dark",
         }
     }
 
-    pub fn is_dark(self) -> bool {
+    #[must_use]
+    pub const fn is_dark(self) -> bool {
         matches!(self, Self::Dark)
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ThemeToken {
     pub key: String,
     pub value: String,
@@ -45,7 +49,7 @@ impl ThemeToken {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ThemeStyle {
     pub tokens: Vec<ThemeToken>,
 }
@@ -57,6 +61,7 @@ impl ThemeStyle {
         }
     }
 
+    #[must_use]
     pub fn get(&self, key: &str) -> Option<&str> {
         self.tokens
             .iter()
@@ -75,11 +80,13 @@ impl ThemeStyle {
         }
     }
 
+    #[must_use]
     pub fn with(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.set(key, value);
         self
     }
 
+    #[must_use]
     pub fn css_variables(&self) -> String {
         let mut css = String::new();
 
@@ -99,14 +106,15 @@ impl ThemeStyle {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ThemeStyles {
     pub light: ThemeStyle,
     pub dark: ThemeStyle,
 }
 
 impl ThemeStyles {
-    pub fn active(&self, mode: ThemeMode) -> &ThemeStyle {
+    #[must_use]
+    pub const fn active(&self, mode: ThemeMode) -> &ThemeStyle {
         match mode {
             ThemeMode::Light => &self.light,
             ThemeMode::Dark => &self.dark,
@@ -114,14 +122,14 @@ impl ThemeStyles {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ThemePreset {
     pub name: String,
     pub label: String,
     pub styles: ThemeStyles,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ThemeState {
     pub mode: ThemeMode,
     pub preset: String,
@@ -129,6 +137,7 @@ pub struct ThemeState {
 }
 
 impl ThemeState {
+    #[must_use]
     pub fn new(preset: ThemePreset, mode: ThemeMode) -> Self {
         Self {
             mode,
@@ -137,11 +146,12 @@ impl ThemeState {
         }
     }
 
-    pub fn active_style(&self) -> &ThemeStyle {
+    #[must_use]
+    pub const fn active_style(&self) -> &ThemeStyle {
         self.styles.active(self.mode)
     }
 
-    pub fn set_mode(&mut self, mode: ThemeMode) {
+    pub const fn set_mode(&mut self, mode: ThemeMode) {
         self.mode = mode;
     }
 
@@ -209,8 +219,7 @@ pub fn ThemeScope(props: ThemeScopeProps) -> Element {
     let inherited = try_consume_context::<ThemeContext>();
     let inherited_mode = inherited
         .as_ref()
-        .map(|context| (context.state)().mode)
-        .unwrap_or(ThemeMode::Light);
+        .map_or(ThemeMode::Light, |context| (context.state)().mode);
     let mode = props.mode.unwrap_or(inherited_mode);
     let style = theme_style_attribute(&props.styles, mode, props.allow_layout_scale);
 
@@ -274,7 +283,7 @@ pub fn ThemeRuntimeStyle() -> Element {
     }
 }
 
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone, PartialEq, Eq)]
 pub struct ThemeSwitcherProps {
     pub state: Signal<ThemeState>,
     #[props(default)]
@@ -374,14 +383,17 @@ pub fn ThemeSwitcher(mut props: ThemeSwitcherProps) -> Element {
     }
 }
 
+#[must_use]
 pub fn use_theme() -> ThemeContext {
     use_context::<ThemeContext>()
 }
 
+#[must_use]
 pub fn default_theme_state() -> ThemeState {
     ThemeState::new(default_theme_preset(), ThemeMode::Light)
 }
 
+#[must_use]
 pub fn default_theme_preset() -> ThemePreset {
     ThemePreset {
         name: "default".to_string(),
@@ -393,6 +405,7 @@ pub fn default_theme_preset() -> ThemePreset {
     }
 }
 
+#[must_use]
 pub fn theme_presets() -> Vec<ThemePreset> {
     vec![
         default_theme_preset(),
@@ -418,6 +431,7 @@ pub fn theme_presets() -> Vec<ThemePreset> {
     ]
 }
 
+#[must_use]
 pub fn theme_preset(name: &str) -> Option<ThemePreset> {
     theme_presets()
         .into_iter()
@@ -483,20 +497,22 @@ fn append_shadow_variables(css: &mut String, style: &ThemeStyle) {
     let color_half = format!("color-mix(in oklab, {color} calc({opacity} * 50%), transparent)");
     let color_full = format!("color-mix(in oklab, {color} calc({opacity} * 100%), transparent)");
 
-    css.push_str("--shadow-xs: ");
-    css.push_str(&format!("{x} {y} {blur} {spread} {color_half};"));
-    css.push_str("--shadow-sm: ");
-    css.push_str(&format!(
-        "{x} {y} {blur} {spread} {color_full}, {x} 1px 2px -1px {color_full};"
-    ));
-    css.push_str("--shadow-md: ");
-    css.push_str(&format!(
-        "{x} {y} {blur} {spread} {color_full}, {x} 2px 4px -1px {color_full};"
-    ));
-    css.push_str("--shadow-lg: ");
-    css.push_str(&format!(
-        "{x} {y} {blur} {spread} {color_full}, {x} 4px 6px -1px {color_full};"
-    ));
+    // `write!` into `css` rather than `push_str(&format!(..))`: same
+    // output, one fewer temporary `String` per line. Writing to a
+    // `String` is infallible, so the result is discarded.
+    let _ = write!(css, "--shadow-xs: {x} {y} {blur} {spread} {color_half};");
+    let _ = write!(
+        css,
+        "--shadow-sm: {x} {y} {blur} {spread} {color_full}, {x} 1px 2px -1px {color_full};"
+    );
+    let _ = write!(
+        css,
+        "--shadow-md: {x} {y} {blur} {spread} {color_full}, {x} 2px 4px -1px {color_full};"
+    );
+    let _ = write!(
+        css,
+        "--shadow-lg: {x} {y} {blur} {spread} {color_full}, {x} 4px 6px -1px {color_full};"
+    );
 }
 
 fn push_css_var(css: &mut String, key: &str, value: &str) {
@@ -1064,7 +1080,7 @@ fn doom_64_theme_preset() -> ThemePreset {
     )
 }
 
-/// The FastTrackStudio brand preset — the fasttrackstudio.app look:
+/// The `FastTrackStudio` brand preset — the fasttrackstudio.app look:
 /// near-black zinc surfaces with the site's violet-indigo accent
 /// (hero gradient oklch(0.72 0.18 264) → oklch(0.78 0.16 320)).
 /// Dark is the canonical mode; light keeps the indigo accent on
@@ -1434,7 +1450,7 @@ const STACK_SERIF: &str = "ui-serif, Georgia, serif";
 const STACK_MONO: &str = "ui-monospace, SFMono-Regular, Menlo, monospace";
 
 /// The non-color keys shared by the community presets — appended to
-/// each color block so the full default_light_style key set is covered.
+/// each color block so the full `default_light_style` key set is covered.
 const PRESET_BASE_TOKENS: &[(&str, &str)] = &[
     ("font-sans", STACK_SANS),
     ("font-serif", STACK_SERIF),

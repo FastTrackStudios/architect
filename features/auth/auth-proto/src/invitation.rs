@@ -12,6 +12,7 @@ pub enum InvitationStatus {
 }
 
 impl InvitationStatus {
+    #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Pending => "pending",
@@ -23,7 +24,7 @@ impl InvitationStatus {
 }
 
 #[cfg_attr(feature = "fake", derive(::fake::Dummy))]
-#[derive(architect::Entity, ::facet::Facet, Clone, Debug, PartialEq)]
+#[derive(architect::Entity, ::facet::Facet, Clone, Debug, PartialEq, Eq)]
 #[architect(table_name = "auth_invitations", repo)]
 pub struct AuthInvitation {
     #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]

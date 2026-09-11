@@ -20,7 +20,7 @@ pub enum SidebarSide {
 /// `compact` is the "rail" / icon-only state — when true, sidebars
 /// configured with [`SidebarCollapsible::Icon`] shrink to a narrow
 /// icon strip and any [`SidebarLabel`] children render nothing.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct SidebarContext {
     pub compact: Signal<bool>,
     pub side: SidebarSide,
@@ -30,6 +30,7 @@ pub struct SidebarContext {
 /// from the surrounding [`SidebarProvider`]. Use this to hide
 /// labels, group titles, or anything else that should disappear in
 /// rail mode.
+#[must_use]
 pub fn use_sidebar_compact() -> Signal<bool> {
     use_context::<SidebarContext>().compact
 }
@@ -212,7 +213,7 @@ pub fn SidebarFooter(props: SidebarFooterProps) -> Element {
 // SidebarSeparator
 // ---------------------------------------------------------------------------
 
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone, PartialEq, Eq)]
 pub struct SidebarSeparatorProps {
     #[props(default)]
     pub class: String,
@@ -353,10 +354,29 @@ pub enum SidebarMenuButtonVariant {
     Outline,
 }
 
+/// What element a [`SidebarMenuButton`] renders as.
+///
+/// The same choice [`crate::components::ButtonRenderAs`] offers, and
+/// for the same reason: a sidebar entry that *navigates* is a link, not
+/// a button. A server-rendered app has no click handler to give it —
+/// the anchor's `href` is the whole behaviour — and rendering a
+/// `<button>` there would leave the entry unreachable by keyboard
+/// navigation, unopenable in a new tab, and invisible to a crawler.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub enum SidebarMenuButtonRenderAs {
+    #[default]
+    Button,
+    Anchor {
+        href: String,
+    },
+}
+
 #[derive(Props, Clone, PartialEq)]
 pub struct SidebarMenuButtonProps {
     #[props(default = false)]
     pub is_active: bool,
+    #[props(default)]
+    pub render_as: SidebarMenuButtonRenderAs,
     #[props(default)]
     pub size: SidebarMenuButtonSize,
     #[props(default)]
@@ -394,19 +414,46 @@ pub fn SidebarMenuButton(props: SidebarMenuButtonProps) -> Element {
     };
 
     let data_active = props.is_active.then_some("true");
+    let class = crate::cn::merge_slice(&[
+        base,
+        variant_cls,
+        active_cls,
+        size_cls,
+        props.class.as_str(),
+    ]);
 
-    rsx! {
-        button {
-            class: crate::cn::merge_slice(&[base, variant_cls, active_cls, size_cls, props.class.as_str()]),
-            r#type: "button",
-            "data-active": data_active,
-            onclick: move |_| {
-                if let Some(cb) = &props.on_click {
-                    cb.call(());
-                }
-            },
-            {props.children}
-        }
+    match props.render_as.clone() {
+        SidebarMenuButtonRenderAs::Button => rsx! {
+            button {
+                class,
+                r#type: "button",
+                "data-active": data_active,
+                onclick: move |_| {
+                    if let Some(cb) = &props.on_click {
+                        cb.call(());
+                    }
+                },
+                {props.children}
+            }
+        },
+        SidebarMenuButtonRenderAs::Anchor { href } => rsx! {
+            a {
+                class,
+                href,
+                "data-active": data_active,
+                // The active entry in a navigation IS the page being
+                // read, so it carries `aria-current` rather than only a
+                // colour — that is what a screen reader announces, and
+                // colour alone says nothing to one.
+                "aria-current": if props.is_active { "page" } else { "" },
+                onclick: move |_| {
+                    if let Some(cb) = &props.on_click {
+                        cb.call(());
+                    }
+                },
+                {props.children}
+            }
+        },
     }
 }
 
@@ -435,7 +482,7 @@ pub fn SidebarMenuBadge(props: SidebarMenuBadgeProps) -> Element {
 // SidebarTrigger
 // ---------------------------------------------------------------------------
 
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone, PartialEq, Eq)]
 pub struct SidebarTriggerProps {
     #[props(default)]
     pub class: String,

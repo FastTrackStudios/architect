@@ -4,6 +4,19 @@
 //! on every other; a replica that connects late (or reconnects) must
 //! catch up by version vector.
 
+// This is an integration-test crate. `clippy.toml`'s
+// `allow-*-in-tests` only reaches `#[test]` fns and `#[cfg(test)]`
+// modules, so the fixture/mock `impl` blocks below — where an
+// `unwrap()` IS the assertion — still trip the panic lints. Allow
+// them crate-wide here rather than dotting the file with attributes.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic
+)]
 #![cfg(not(target_arch = "wasm32"))]
 
 use std::time::Duration;
@@ -172,7 +185,7 @@ async fn single_replica_attach_returns() {
         frame = tokio::time::timeout(Duration::from_secs(5), down_rx.recv()) => {
             let frame = frame.expect("attach frame timed out").expect("down channel error");
             let frame = frame.expect("down channel closed before attach");
-            let _ = frame.map(|f| attached = Some(f.clone()));
+            let _ = frame.map(|f| attached = Some(f));
         }
     }
     match attached {

@@ -29,6 +29,8 @@
 use std::future::Future;
 use std::sync::{Arc, Mutex};
 
+use crate::lock::lock;
+
 // ── Send / wasm cfg-split ───────────────────────────────────────────────
 //
 // Mirrors `layer::DynHandler`: native futures are `+ Send` (tokio
@@ -65,10 +67,11 @@ type Finalizer = Box<dyn FnOnce() -> BoxFuture<'static, ()>>;
 
 // ── Scope ───────────────────────────────────────────────────────────────
 
-/// Collects async finalizers and runs them in **reverse registration
-/// order** (LIFO) on [`close`](Scope::close) — the standard
-/// acquire/release discipline, so a pool opened after a config is closed
-/// before it.
+/// Collects async finalizers and runs them LIFO on close.
+///
+/// **Reverse registration order** on [`close`](Scope::close) is the
+/// standard acquire/release discipline, so a pool opened after a config
+/// is closed before it.
 ///
 /// Held behind an [`Arc`] so a [`Resource`] graph and the eventual owner
 /// (a server's shutdown path) share the same scope.
@@ -78,6 +81,7 @@ pub struct Scope {
 }
 
 impl Scope {
+    #[must_use]
     pub fn new() -> Arc<Self> {
         Arc::new(Self::default())
     }
@@ -89,17 +93,14 @@ impl Scope {
         F: FnOnce() -> Fut + MaybeSend + 'static,
         Fut: Future<Output = ()> + MaybeSend + 'static,
     {
-        self.finalizers
-            .lock()
-            .expect("scope finalizers poisoned")
-            .push(Box::new(move || Box::pin(f())));
+        lock(&self.finalizers).push(Box::new(move || Box::pin(f())));
     }
 
     /// Run all finalizers in reverse order, draining the scope. Safe to
     /// call once; a second call is a no-op (finalizers already drained).
     pub async fn close(&self) {
         let mut pending = {
-            let mut guard = self.finalizers.lock().expect("scope finalizers poisoned");
+            let mut guard = lock(&self.finalizers);
             std::mem::take(&mut *guard)
         };
         while let Some(f) = pending.pop() {
@@ -109,10 +110,7 @@ impl Scope {
 
     /// Number of finalizers currently registered (for tests / metrics).
     pub fn pending(&self) -> usize {
-        self.finalizers
-            .lock()
-            .expect("scope finalizers poisoned")
-            .len()
+        lock(&self.finalizers).len()
     }
 }
 
@@ -123,12 +121,23 @@ type BuildFn<T, E> = Box<dyn FnOnce(Arc<Scope>) -> BoxFuture<'static, Result<T, 
 #[cfg(target_arch = "wasm32")]
 type BuildFn<T, E> = Box<dyn FnOnce(Arc<Scope>) -> BoxFuture<'static, Result<T, E>>>;
 
+// A **re-runnable** recipe, for `SharedResource`. `BuildFn` is `FnOnce`
+// because `Resource::succeed` moves its value out of the closure; a
+// memoized resource needs the opposite property, because it documents
+// that a failed build can be retried — and a retry has to call the
+// recipe a second time.
+#[cfg(not(target_arch = "wasm32"))]
+type RebuildFn<T, E> =
+    dyn Fn(Arc<Scope>) -> BoxFuture<'static, Result<T, E>> + Send + Sync + 'static;
+#[cfg(target_arch = "wasm32")]
+type RebuildFn<T, E> = dyn Fn(Arc<Scope>) -> BoxFuture<'static, Result<T, E>> + 'static;
+
 /// A lazy, composable recipe that builds a `T`, optionally registering
-/// cleanup on a [`Scope`]. The construction analog of
-/// `Layer`: a `Layer` *binds* services; a
-/// `Resource` *builds* the backend they bind to.
+/// cleanup on a [`Scope`].
 ///
-/// `E` defaults to [`eyre::Report`]; name a concrete error for typed
+/// The construction analog of `Layer`: a `Layer` *binds* services; a
+/// `Resource` *builds* the backend they bind to. `E` defaults to
+/// [`eyre::Report`]; name a concrete error for typed
 /// failures.
 pub struct Resource<T, E = eyre::Report> {
     build: BuildFn<T, E>,
@@ -159,7 +168,7 @@ where
     /// Acquire a resource and register its release on the scope. The
     /// release runs LIFO when the scope closes. Needs `T: Clone` (one
     /// clone for the caller, one for the finalizer).
-    pub fn acquire_release<Rel, RelFut>(acquire: Resource<T, E>, release: Rel) -> Self
+    pub fn acquire_release<Rel, RelFut>(acquire: Self, release: Rel) -> Self
     where
         T: Clone,
         Rel: FnOnce(T) -> RelFut + MaybeSend + 'static,
@@ -210,6 +219,7 @@ where
 
     /// **Independent pairing.** Build both (this one first), return the
     /// pair. For resources with no dependency between them.
+    #[must_use]
     pub fn zip<U>(self, other: Resource<U, E>) -> Resource<(T, U), E>
     where
         U: MaybeSend + 'static,
@@ -233,17 +243,6 @@ where
     T: Clone + MaybeSend + MaybeSync + 'static,
     E: MaybeSend + 'static,
 {
-    /// **Build once, share.** Returns a cloneable handle whose first
-    /// build runs the recipe and caches the value; every later build (on
-    /// any clone) returns that same instance. Use for a pool/config
-    /// several backends depend on. Errors are *not* cached — a failed
-    /// build can be retried.
-    pub fn memoize(self) -> SharedResource<T, E> {
-        SharedResource {
-            cell: Arc::new(tokio::sync::OnceCell::new()),
-            builder: Arc::new(Mutex::new(Some(self.build))),
-        }
-    }
 }
 
 // ── SharedResource (memoized) ───────────────────────────────────────────
@@ -252,7 +251,7 @@ where
 /// [`Resource::memoize`].
 pub struct SharedResource<T, E = eyre::Report> {
     cell: Arc<tokio::sync::OnceCell<T>>,
-    builder: Arc<Mutex<Option<BuildFn<T, E>>>>,
+    builder: Arc<RebuildFn<T, E>>,
 }
 
 impl<T, E> Clone for SharedResource<T, E> {
@@ -269,24 +268,46 @@ where
     T: Clone + MaybeSend + MaybeSync + 'static,
     E: MaybeSend + 'static,
 {
+    /// **Build once, share.** The first successful build caches its
+    /// value; every later build — on this handle or any clone — returns
+    /// that same instance. Use for a pool or config that several
+    /// backends depend on.
+    ///
+    /// The recipe is `Fn`, not `FnOnce`, precisely so the documented
+    /// retry contract on [`build`](Self::build) can hold.
+    pub fn from_fn<F, Fut>(f: F) -> Self
+    where
+        F: Fn(Arc<Scope>) -> Fut + MaybeSend + MaybeSync + 'static,
+        Fut: Future<Output = Result<T, E>> + MaybeSend + 'static,
+    {
+        // `as BoxFuture` is an unsizing coercion to `Pin<Box<dyn Future>>`,
+        // not a numeric cast.
+        #[allow(clippy::as_conversions)]
+        Self {
+            cell: Arc::new(tokio::sync::OnceCell::new()),
+            builder: Arc::new(move |scope| Box::pin(f(scope)) as BoxFuture<'static, _>),
+        }
+    }
+
     /// Build (or return the cached instance). The recipe runs at most
-    /// once across all clones; concurrent first-builds are deduplicated.
+    /// once *successfully* across all clones; concurrent first-builds are
+    /// deduplicated.
+    ///
+    /// # Errors
+    ///
+    /// Returns the recipe's error. Failures are **not** cached: the next
+    /// call runs the recipe again. (Before 2026-09 the recipe was
+    /// `FnOnce` and had already been consumed by the failed attempt, so
+    /// that next call panicked instead of retrying.)
     pub async fn build(&self, scope: &Arc<Scope>) -> Result<T, E> {
         if let Some(value) = self.cell.get() {
             return Ok(value.clone());
         }
         let scope = Arc::clone(scope);
-        let builder = &self.builder;
+        let builder = Arc::clone(&self.builder);
         let value = self
             .cell
-            .get_or_try_init(|| async {
-                let build = builder
-                    .lock()
-                    .expect("memoized builder poisoned")
-                    .take()
-                    .expect("memoized builder already consumed");
-                build(scope).await
-            })
+            .get_or_try_init(|| async move { builder(scope).await })
             .await?;
         Ok(value.clone())
     }
@@ -294,6 +315,7 @@ where
     /// View this memoized resource as a fresh [`Resource`] so it can feed
     /// further `.map` / `.and_then` chains. Each built copy still shares
     /// the one cached instance.
+    #[must_use]
     pub fn resource(&self) -> Resource<T, E> {
         let shared = self.clone();
         Resource::from_fn(move |scope| async move { shared.build(&scope).await })
@@ -318,6 +340,18 @@ where
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic,
+    clippy::float_cmp,
+    clippy::string_slice,
+    clippy::significant_drop_tightening,
+    clippy::too_many_lines
+)]
 mod tests {
     use super::*;
     use futures_lite::future::block_on;
@@ -385,14 +419,13 @@ mod tests {
         let builds = Arc::new(AtomicUsize::new(0));
         let shared = {
             let builds = Arc::clone(&builds);
-            Resource::<i32>::from_fn(move |_| {
+            SharedResource::<i32>::from_fn(move |_| {
                 let builds = Arc::clone(&builds);
                 async move {
                     builds.fetch_add(1, Ordering::SeqCst);
                     Ok(42)
                 }
             })
-            .memoize()
         };
         let a = shared.clone();
         let b = shared.clone();
@@ -400,5 +433,32 @@ mod tests {
         assert_eq!(block_on(b.build(&scope)).unwrap(), 42);
         assert_eq!(block_on(shared.build(&scope)).unwrap(), 42);
         assert_eq!(builds.load(Ordering::SeqCst), 1, "built exactly once");
+    }
+
+    #[test]
+    fn memoize_retries_after_a_failed_build() {
+        // The documented contract: errors are not cached. The recipe
+        // fails once, then succeeds, and the second `build` must run it
+        // again rather than panic on a consumed builder.
+        let scope = Scope::new();
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let shared = {
+            let attempts = Arc::clone(&attempts);
+            SharedResource::<i32, String>::from_fn(move |_| {
+                let attempts = Arc::clone(&attempts);
+                async move {
+                    let n = attempts.fetch_add(1, Ordering::SeqCst);
+                    if n == 0 {
+                        Err("first attempt fails".to_owned())
+                    } else {
+                        Ok(7)
+                    }
+                }
+            })
+        };
+        assert!(block_on(shared.build(&scope)).is_err());
+        assert_eq!(block_on(shared.build(&scope)).unwrap(), 7);
+        assert_eq!(block_on(shared.build(&scope)).unwrap(), 7);
+        assert_eq!(attempts.load(Ordering::SeqCst), 2, "retried, then cached");
     }
 }

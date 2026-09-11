@@ -43,6 +43,7 @@ pub(super) fn fuzzy_best_score(query: &str, candidates: &[&str]) -> Option<u32> 
 
 /// Nucleo-backed filter callback for `Combobox::filter`.
 /// Returns `true` when the option's text matches the query fzf-style.
+#[must_use]
 pub fn fuzzy_nucleo_filter() -> Callback<(String, String), bool> {
     Callback::new(|(query, text): (String, String)| {
         fuzzy_best_score(&query, &[text.as_str()]).is_some()
@@ -51,10 +52,12 @@ pub fn fuzzy_nucleo_filter() -> Callback<(String, String), bool> {
 
 // ── Data helper ──────────────────────────────────────────────────────────────
 
-/// Data record for a single combobox option. Pair with `for item in items`
-/// inside `ComboboxList` to render a list. Carries `keywords` so synonyms
-/// / emoji can match a search even when they aren't in the visible label.
-#[derive(Clone, PartialEq)]
+/// Data record for a single combobox option.
+///
+/// Pair with `for item in items` inside `ComboboxList` to render a list.
+/// Carries `keywords` so synonyms / emoji can match a search even when
+/// they aren't in the visible label.
+#[derive(Clone, PartialEq, Eq)]
 pub struct ComboboxItemData {
     /// Stable selection value.
     pub value: String,
@@ -76,6 +79,7 @@ impl ComboboxItemData {
         }
     }
 
+    #[must_use]
     pub fn keywords<I, S>(mut self, kw: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -85,13 +89,15 @@ impl ComboboxItemData {
         self
     }
 
-    pub fn disabled(mut self, disabled: bool) -> Self {
+    #[must_use]
+    pub const fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
     /// Text used by the primitive's filter callback. Joins label + value
     /// + keywords so any of them can match.
+    #[must_use]
     pub fn text_value(&self) -> String {
         let label = if self.label.is_empty() {
             self.value.as_str()
@@ -171,7 +177,7 @@ pub fn Combobox(props: ComboboxProps) -> Element {
 
 // ── Input ────────────────────────────────────────────────────────────────────
 
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone, PartialEq, Eq)]
 pub struct ComboboxInputProps {
     #[props(default = "Search...".to_string())]
     pub placeholder: String,

@@ -12,6 +12,7 @@ pub struct WorkflowProvider {
 
 impl WorkflowProvider {
     /// Create from pre-extracted items (packs already converted to Items).
+    #[must_use]
     pub fn from_items(items: Vec<Item>) -> Self {
         Self {
             config: ProviderConfig {
@@ -25,10 +26,14 @@ impl WorkflowProvider {
     }
 
     /// Create by scanning the default pack directory.
+    #[must_use]
     pub fn from_default_dir() -> Self {
         let dir = pack::default_pack_dir();
         let packs = pack::scan_packs(&dir);
-        let items = packs.iter().flat_map(|p| p.to_items()).collect();
+        let items = packs
+            .iter()
+            .flat_map(architect_launcher_core::LoadedPack::to_items)
+            .collect();
         Self::from_items(items)
     }
 }
@@ -40,7 +45,7 @@ impl Default for WorkflowProvider {
 }
 
 impl Provider for WorkflowProvider {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "workflows"
     }
 

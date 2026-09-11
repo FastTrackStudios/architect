@@ -20,7 +20,11 @@ repository.workspace = true
 # pull `architect/vox` when they want the RPC stack so the choice
 # happens at the contract crate's level, not by accident.
 default = []
-vox = ["dep:vox"]
+# `dep:tracing` rides along because `permissions_gate` — which is on
+# whenever `vox` is — reports its coverage through `tracing` at wrap
+# time. A gate that can only tell you about its blind spots when some
+# *other* feature happens to have pulled a logger is not much of a gate.
+vox = ["dep:vox", "dep:tracing"]
 
 # Client-side optimistic / stale-while-revalidate state for Dioxus,
 # re-exported as `architect::atom`. Pulls Dioxus (via architect-atom), so
@@ -60,6 +64,11 @@ platform = ["dep:web-time", "dep:async-channel", "tokio/time", "tokio/rt", "dep:
 # (exponential backoff, jitter, caps, recurrence limits) + drivers that run
 # a plain `async FnMut() -> Result` under them. Implies `platform` (it sleeps
 # between attempts through a `Clock`).
+# Kept as an alias so `features = ["schedule"]` still resolves. The
+# module itself is now gated on `platform`: `reconnect::Backoff` is a
+# `Schedule` preset, so the layer is no longer optional relative to it,
+# and "opt in to get retry policies" was a feature nothing in the fleet
+# ever opted into while fifteen files hand-rolled their own backoff.
 schedule = ["platform"]
 
 # Two server-side features, deliberately independent so a binary can
@@ -90,6 +99,26 @@ rig = ["vox", "dep:tracing"]
 # with the server task on `platform::spawn` (spawn_local). Pulls `platform`
 # + vox-types (for the wasm `Link` impl).
 local = ["vox", "dep:vox-core", "dep:vox-types", "dep:tracing", "tokio/rt", "platform"]
+
+# Client-side connection establishment (`architect::connect`) — the twin
+# of `server-axum`'s `axum_ws::serve`. One connection per
+# (endpoint, identity), single-flighted, liveness-checked; typed clients
+# are cheap views over its caller.
+#
+# Target-split under the hood: `tokio-tungstenite` natively,
+# `web-sys`/`js-sys` in the browser. Both ride `vox-websocket`.
+connect = [
+  "vox",
+  "dep:vox-core",
+  "dep:vox-websocket",
+  "dep:futures",
+  "dep:tracing",
+  "dep:tokio-tungstenite",
+  "dep:wasm-bindgen",
+  "dep:web-sys",
+  "dep:js-sys",
+  "platform",
+]
 
 # iroh p2p transport (`architect::iroh_link`): serve/consume a vox
 # router over an iroh QUIC endpoint — same acceptor dance as `server-axum`,
@@ -251,6 +280,7 @@ tower-http = { workspace = true, optional = true }
 include_dir = { workspace = true, optional = true }
 vox-core = { workspace = true, optional = true }
 vox-types = { workspace = true, optional = true }
+vox-websocket = { version = "0.10.0-rc.5", optional = true }
 
 # iroh p2p bundle. Only pulled by the `iroh` feature. Target-split
 # because iroh's defaults (portmapper etc.) don't build on wasm32: the
@@ -258,6 +288,11 @@ vox-types = { workspace = true, optional = true }
 # version with defaults off + a TLS provider (relay-only in browsers).
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 iroh = { workspace = true, optional = true }
+# `connect`'s native dial. Native builds its own handshake request so the
+# bearer can ride an `Authorization` header.
+# Must track `vox-websocket`'s own tungstenite: `WsLink::new` takes
+# that crate's stream type, so a version skew is a type mismatch.
+tokio-tungstenite = { version = "0.29", optional = true }
 
 # Wasm-only platform deps. Browser timers (gloo-timers' `TimeoutFuture`
 # is a real async sleep backed by setTimeout) and `spawn_local` for the
@@ -265,6 +300,11 @@ iroh = { workspace = true, optional = true }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 gloo-timers = { version = "0.3", default-features = false, features = ["futures"], optional = true }
 wasm-bindgen-futures = { version = "0.4", optional = true }
+# `connect`'s browser dial. A browser cannot set request headers, so the
+# bearer rides the subprotocol list — see `connect::ws`.
+wasm-bindgen = { version = "0.2", optional = true }
+web-sys = { version = "0.3.98", features = ["WebSocket", "BinaryType", "Event", "CloseEvent", "MessageEvent"], optional = true }
+js-sys = { version = "0.3", optional = true }
 iroh = { version = "1", default-features = false, features = ["tls-ring"], optional = true }
 
 [dev-dependencies]
@@ -286,3 +326,6 @@ required-features = ["atom", "platform", "local"]
 [[test]]
 name = "iroh_link"
 required-features = ["iroh"]
+
+[lints]
+workspace = true

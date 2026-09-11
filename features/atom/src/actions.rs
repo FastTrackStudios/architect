@@ -27,8 +27,9 @@ pub trait ActionLike: Clone + PartialEq + 'static {
 
 /// Group `actions` by category, then by group within each category —
 /// the same shape a CLI/menu builder needs (see
-/// `architect-action-derive`'s own `clap::Command` construction). Pure
-/// and unit-testable without a Dioxus runtime, per this crate's
+/// `architect-action-derive`'s own `clap::Command` construction).
+///
+/// Pure and unit-testable without a Dioxus runtime, per this crate's
 /// `Store`/`StoreData` convention — [`use_actions_grouped`] is the thin
 /// reactive wrapper.
 pub fn group_actions<A: ActionLike>(actions: &[A]) -> BTreeMap<String, BTreeMap<String, Vec<A>>> {
@@ -44,19 +45,21 @@ pub fn group_actions<A: ActionLike>(actions: &[A]) -> BTreeMap<String, BTreeMap<
 }
 
 /// Reactive, category-then-group grouped view of a `'static` action
-/// list (e.g. the macro-emitted `<Trait>Actions::all()`). A `Memo` over
-/// a fixed input, not a fetch-backed [`crate::Store`] — actions are
-/// declared at compile time and don't change at runtime, so there's no
-/// async phase to track.
+/// list (e.g. the macro-emitted `<Trait>Actions::all()`).
+///
+/// A `Memo` over a fixed input, not a fetch-backed [`crate::Store`] —
+/// actions are declared at compile time and don't change at runtime, so
+/// there's no async phase to track.
 pub fn use_actions_grouped<A: ActionLike>(
     all: &'static [A],
 ) -> Memo<BTreeMap<String, BTreeMap<String, Vec<A>>>> {
     use_memo(move || group_actions(all))
 }
 
-/// Wraps a plain invoke callback with a reactive "which action id was
-/// last invoked" signal, for lightweight UI feedback (e.g. flashing a
-/// checkmark on the clicked menu item) without pulling in the full
+/// Wraps an invoke callback with a "last invoked action id" signal.
+///
+/// For lightweight UI feedback (e.g. flashing a checkmark on the clicked
+/// menu item) without pulling in the full
 /// [`crate::Async`]/[`crate::Mutation`] machinery.
 ///
 /// v1 actions (`fn name(&self)`, no return value) are synchronous
@@ -76,6 +79,7 @@ impl<A: ActionLike> ActionInvoker<A> {
     /// clear itself — components that want a transient flash should
     /// pair this with their own timer (e.g. clear after N ms), the
     /// same way a caller would debounce any other signal.
+    #[must_use]
     pub fn last_invoked_id(&self) -> Option<String> {
         self.last_invoked_id.read().clone()
     }
@@ -100,6 +104,18 @@ pub fn use_action_invoker<A: ActionLike>(
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic,
+    clippy::float_cmp,
+    clippy::string_slice,
+    clippy::significant_drop_tightening,
+    clippy::too_many_lines
+)]
 mod tests {
     use super::*;
 

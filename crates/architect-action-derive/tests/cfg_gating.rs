@@ -6,8 +6,8 @@
 //!
 //! Run both ways to exercise both states of the same trait:
 //!
-//!   cargo test -p architect-action-derive --test cfg_gating
-//!   cargo test -p architect-action-derive --test cfg_gating --features test-gated
+//!   cargo test -p architect-action-derive --test `cfg_gating`
+//!   cargo test -p architect-action-derive --test `cfg_gating` --features test-gated
 //!
 //! If the cfg passthrough were broken, the `test-gated`-off run wouldn't
 //! even compile: `register_cfg_gated_actions` would still try to

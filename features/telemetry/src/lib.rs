@@ -42,6 +42,7 @@ mod native {
     /// The tracing layer that forwards `error!`/`warn!` events (and spans
     /// as breadcrumbs) to Sentry. Compose into a
     /// [`fn@tracing_subscriber::registry`].
+    #[must_use]
     pub fn tracing_layer<S>() -> sentry_tracing::SentryLayer<S>
     where
         S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
@@ -55,6 +56,7 @@ mod native {
     /// Uses `.try_init()` so a later subscriber init (e.g. dioxus) failing
     /// to become the global default is a no-op rather than a panic.
     /// Returns the Sentry guard — hold it for the process lifetime.
+    #[must_use]
     pub fn init_tracing(
         service: &str,
         env_filter_default: &str,
@@ -64,10 +66,11 @@ mod native {
 
     /// [`init_tracing`] plus the OTLP guard, for callers that want both.
     ///
-    /// Both guards must outlive the process; dropping the OTel one flushes
+    /// Both guards must outlive the process; dropping the `OTel` one flushes
     /// and stops the exporters. The client apps use [`init_tracing`] and
-    /// leak the OTel guard (see below) because their `main` hands control
+    /// leak the `OTel` guard (see below) because their `main` hands control
     /// to a UI event loop that never returns normally.
+    #[must_use]
     pub fn init_tracing_full(
         service: &str,
         env_filter_default: &str,
@@ -125,7 +128,7 @@ pub type OtelHandle = Option<()>;
 ///
 /// This exists because `tracing`'s macros take a *static* field list —
 /// you cannot add a field to a span that the macro did not declare.
-/// [`wide::set`] goes around that via the OTel span extension, which takes
+/// [`wide::set`] goes around that via the `OTel` span extension, which takes
 /// dynamic keys. That is the whole reason for this module.
 ///
 /// ```ignore
@@ -147,7 +150,7 @@ pub type OtelHandle = Option<()>;
 pub mod wide {
     /// Attach a field to the current unit of work.
     ///
-    /// A no-op when nothing is listening (no OTel layer installed, or the
+    /// A no-op when nothing is listening (no `OTel` layer installed, or the
     /// `otel` feature is off) — call it freely from library code without
     /// gating the call site.
     #[cfg(feature = "otel")]
@@ -213,9 +216,7 @@ pub mod otel {
     /// Whether OTLP export is configured for this process.
     #[must_use]
     pub fn enabled() -> bool {
-        std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
-            .map(|v| !v.trim().is_empty())
-            .unwrap_or(false)
+        std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").is_ok_and(|v| !v.trim().is_empty())
     }
 
     /// Resolve the shipped-client OTLP config into the standard
@@ -246,18 +247,19 @@ pub mod otel {
                 std::env::set_var(
                     "OTEL_EXPORTER_OTLP_HEADERS",
                     format!("Authorization=Bearer {baked_token}"),
-                )
+                );
             };
         }
     }
 
-    /// Initialise the OTLP pipelines (http/protobuf; endpoint and
-    /// headers come from the standard `OTEL_EXPORTER_OTLP_*` env vars)
-    /// and return the guard plus the tracing layers to compose into
-    /// the subscriber registry:
+    /// Initialise the OTLP pipelines and return the tracing layers.
     ///
-    /// - a `tracing-opentelemetry` layer — spans become OTel traces;
-    /// - the appender bridge — `tracing` events become OTel log
+    /// http/protobuf; endpoint and headers come from the standard
+    /// `OTEL_EXPORTER_OTLP_*` env vars. Returns the guard plus the layers
+    /// to compose into the subscriber registry:
+    ///
+    /// - a `tracing-opentelemetry` layer — spans become `OTel` traces;
+    /// - the appender bridge — `tracing` events become `OTel` log
     ///   records (queryable in Loki alongside pod stdout).
     ///
     /// The meter provider is installed globally
@@ -269,6 +271,7 @@ pub mod otel {
     /// successfully.
     pub type OtelLayers<S> = Vec<Box<dyn Layer<S> + Send + Sync>>;
 
+    #[must_use]
     pub fn init<S>(service: &'static str) -> Option<(OtelGuard, OtelLayers<S>)>
     where
         S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a> + Send + Sync,

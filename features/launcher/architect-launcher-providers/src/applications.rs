@@ -29,6 +29,7 @@ struct DesktopEntry {
 }
 
 impl ApplicationsProvider {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             config: ProviderConfig {
@@ -91,13 +92,13 @@ impl ApplicationsProvider {
         self.apps.retain(|app| seen.insert(app.name.clone()));
 
         // Resolve icon names to file paths
-        let mut resolved = 0;
+        let mut resolved = 0usize;
         for app in &mut self.apps {
             if !app.icon.is_empty()
                 && let Some(path) = self.icon_resolver.resolve(&app.icon)
             {
                 app.icon_path = path;
-                resolved += 1;
+                resolved = resolved.saturating_add(1);
             }
         }
 
@@ -116,7 +117,7 @@ impl Default for ApplicationsProvider {
 }
 
 impl Provider for ApplicationsProvider {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "applications"
     }
 
@@ -164,16 +165,19 @@ impl Provider for ApplicationsProvider {
                     .iter()
                     .map(|c| format!("desktop/applications/{}", c.to_lowercase()))
                     .collect();
-                let tag_refs: Vec<&str> = category_tags.iter().map(|s| s.as_str()).collect();
+                let tag_refs: Vec<&str> = category_tags
+                    .iter()
+                    .map(std::string::String::as_str)
+                    .collect();
 
                 let mut all_tags = tags.clone();
                 all_tags.extend(tag_refs.iter());
 
                 // Use resolved icon path if available, otherwise the icon name
-                let icon = if !app.icon_path.is_empty() {
-                    &app.icon_path
-                } else {
+                let icon = if app.icon_path.is_empty() {
                     &app.icon
+                } else {
+                    &app.icon_path
                 };
 
                 Item::new(&app.id, &app.name, "applications")
@@ -193,10 +197,12 @@ impl Provider for ApplicationsProvider {
         item: &Item,
         _action: &str,
     ) -> Result<ActivationResult, Box<dyn std::error::Error + Send + Sync>> {
-        let exec = item.metadata["exec"]
-            .as_str()
+        let exec = item
+            .metadata
+            .get("exec")
+            .and_then(serde_json::Value::as_str)
             .unwrap_or_default()
-            .to_string();
+            .to_owned();
 
         if exec.is_empty() {
             return Err("No exec command for this application".into());
@@ -222,7 +228,7 @@ impl Provider for ApplicationsProvider {
     }
 }
 
-/// Parse a freedesktop .desktop file into a DesktopEntry.
+/// Parse a freedesktop .desktop file into a `DesktopEntry`.
 fn parse_desktop_file(path: &PathBuf) -> Option<DesktopEntry> {
     let content = std::fs::read_to_string(path).ok()?;
 

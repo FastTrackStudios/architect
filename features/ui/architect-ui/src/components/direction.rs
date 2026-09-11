@@ -11,6 +11,7 @@ pub enum Direction {
 }
 
 impl Direction {
+    #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Ltr => "ltr",
@@ -18,6 +19,7 @@ impl Direction {
         }
     }
 
+    #[must_use]
     pub const fn is_rtl(self) -> bool {
         matches!(self, Self::Rtl)
     }
@@ -28,6 +30,7 @@ pub struct DirectionContext {
     pub direction: Direction,
 }
 
+#[must_use]
 pub fn use_direction() -> Direction {
     use_context::<DirectionContext>().direction
 }

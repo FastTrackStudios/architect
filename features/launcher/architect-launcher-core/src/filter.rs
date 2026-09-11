@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::tags::Tag;
 
 /// Active filter state. Multiple tags can be combined with different logic.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct FilterState {
     /// Include tags: item matches if it has ANY of these (OR union).
     pub include: Vec<String>,
@@ -26,11 +26,13 @@ pub struct FilterState {
 }
 
 impl FilterState {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn is_empty(&self) -> bool {
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
         self.include.is_empty() && self.exclude.is_empty() && self.provider.is_none()
     }
 
@@ -71,6 +73,7 @@ impl FilterState {
     }
 
     /// Check if an item's tags pass this filter.
+    #[must_use]
     pub fn matches(&self, item_tags: &crate::tags::TagSet) -> bool {
         // Check excludes first (fast reject)
         for ex in &self.exclude {
@@ -97,6 +100,7 @@ impl FilterState {
     }
 
     /// Get a display-friendly list of active filters.
+    #[must_use]
     pub fn active_labels(&self) -> Vec<FilterLabel> {
         let mut labels = Vec::new();
         for tag in &self.include {
@@ -115,19 +119,19 @@ impl FilterState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FilterMode {
     Include,
     Exclude,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FilterLabel {
     pub tag: String,
     pub mode: FilterMode,
 }
 
-/// Named filter preset — saves a FilterState for instant recall.
+/// Named filter preset — saves a `FilterState` for instant recall.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FilterPreset {
     pub name: String,
@@ -141,6 +145,7 @@ pub struct FilterPresets {
 }
 
 impl FilterPresets {
+    #[must_use]
     pub fn load(path: &PathBuf) -> Self {
         std::fs::read_to_string(path)
             .ok()
@@ -168,10 +173,12 @@ impl FilterPresets {
         self.presets.retain(|p| p.name != name);
     }
 
+    #[must_use]
     pub fn get(&self, name: &str) -> Option<&FilterPreset> {
         self.presets.iter().find(|p| p.name == name)
     }
 
+    #[must_use]
     pub fn list(&self) -> &[FilterPreset] {
         &self.presets
     }
@@ -208,13 +215,19 @@ impl MagicWords {
     }
 
     /// Check if the query starts with a magic word followed by a space.
-    /// Returns (preset_name, remaining_query) if matched.
+    /// Returns (`preset_name`, `remaining_query`) if matched.
+    #[must_use]
     pub fn check<'a>(&'a self, query: &'a str) -> Option<(&'a str, &'a str)> {
         let query_lower = query.to_lowercase();
         for word in &self.words {
             let prefix = format!("{} ", word.keyword);
             if query_lower.starts_with(&prefix) {
-                let remainder = &query[prefix.len()..];
+                // `prefix` is `keyword + ' '` and `query_lower` is the
+                // lowercase of `query`, so the byte length lines up — but
+                // `get` keeps that a check rather than an assumption.
+                let Some(remainder) = query.get(prefix.len()..) else {
+                    continue;
+                };
                 return Some((&word.preset_name, remainder));
             }
             if query_lower == word.keyword {
@@ -224,17 +237,19 @@ impl MagicWords {
         None
     }
 
+    #[must_use]
     pub fn list(&self) -> &[MagicWord] {
         &self.words
     }
 }
 
 pub fn default_presets_path() -> PathBuf {
-    let base = std::env::var("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
+    let base = std::env::var("XDG_DATA_HOME").map_or_else(
+        |_| {
             let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
             PathBuf::from(home).join(".local/share")
-        });
+        },
+        PathBuf::from,
+    );
     base.join("dioxus-launcher").join("filter-presets.json")
 }

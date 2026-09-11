@@ -4,7 +4,7 @@ use architect_story_runtime::story;
 use dioxus::prelude::*;
 
 /// Text style variant.
-#[derive(Clone, Copy, PartialEq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum TextVariant {
     /// Standard body text.
     #[default]
@@ -18,7 +18,7 @@ pub enum TextVariant {
 }
 
 impl TextVariant {
-    fn classes(self) -> &'static str {
+    const fn classes(self) -> &'static str {
         match self {
             Self::Body => "text-sm",
             Self::Small => "text-xs",

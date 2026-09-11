@@ -60,7 +60,8 @@ pub struct ParityRunner {
 }
 
 impl ParityRunner {
-    pub fn new(cfg: ParityConfig) -> Self {
+    #[must_use]
+    pub const fn new(cfg: ParityConfig) -> Self {
         Self { cfg }
     }
 
@@ -74,8 +75,8 @@ impl ParityRunner {
         // `scale`, so back the CSS-pixel size out from the screen
         // dimensions.
         let mut blitz_render = self.cfg.blitz_render.clone();
-        blitz_render.width = (self.cfg.wry_capture.screen_w as f32 / blitz_render.scale) as u32;
-        blitz_render.height = (self.cfg.wry_capture.screen_h as f32 / blitz_render.scale) as u32;
+        blitz_render.width = css_px(self.cfg.wry_capture.screen_w, blitz_render.scale);
+        blitz_render.height = css_px(self.cfg.wry_capture.screen_h, blitz_render.scale);
 
         let blitz_png = render_story(story, self.cfg.blitz_knobs.clone(), &blitz_render);
         let wry_png = capture_wry_via_xvfb(&self.cfg.wry_capture, story.name)?;
@@ -96,10 +97,10 @@ impl ParityRunner {
 }
 
 fn label_for(story: &Story) -> String {
-    match story.category {
-        Some(c) => format!("{}__{}", sanitise(c), sanitise(story.name)),
-        None => sanitise(story.name).into_owned(),
-    }
+    story.category.map_or_else(
+        || sanitise(story.name).into_owned(),
+        |c| format!("{}__{}", sanitise(c), sanitise(story.name)),
+    )
 }
 
 fn sanitise(s: &str) -> std::borrow::Cow<'_, str> {
@@ -119,5 +120,31 @@ fn sanitise(s: &str) -> std::borrow::Cow<'_, str> {
                 })
                 .collect(),
         )
+    }
+}
+
+/// Back a CSS-pixel dimension out of a device-pixel one.
+///
+/// `device / scale`, clamped into `u32`. A zero or non-finite scale (a
+/// mis-set config) yields the device size rather than a NaN cast, which
+/// `as` would silently turn into `0`.
+// f64 -> u32 has no total conversion in std. Everything that could make
+// the cast lossy is excluded above: non-finite and negative values return
+// early, and `min` caps at `u32::MAX`.
+#[allow(
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
+fn css_px(device: u32, scale: f32) -> u32 {
+    if !scale.is_finite() || scale <= 0.0 {
+        return device;
+    }
+    let px = f64::from(device) / f64::from(scale);
+    if px.is_finite() && px >= 0.0 {
+        // `px` is a pixel count already clamped to a sane range below.
+        px.min(f64::from(u32::MAX)).round() as u32
+    } else {
+        device
     }
 }

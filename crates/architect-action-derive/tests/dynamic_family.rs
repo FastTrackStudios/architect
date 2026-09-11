@@ -6,6 +6,21 @@
 //! second, complementary construction path for `&'static ActionMeta`,
 //! not a new registration mechanism.
 
+// This is an integration-test crate. `clippy.toml`'s
+// `allow-*-in-tests` only reaches `#[test]` fns and `#[cfg(test)]`
+// modules, so the fixture/mock `impl` blocks below — where an
+// `unwrap()` IS the assertion — still trip the panic lints. Allow
+// them crate-wide here rather than dotting the file with attributes.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::needless_pass_by_value,
+    clippy::panic
+)]
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 

@@ -43,10 +43,10 @@ impl ScopeMiddleware {
 }
 
 impl vox::ClientMiddleware for ScopeMiddleware {
-    fn pre<'a, 'call>(
+    fn pre<'a>(
         &'a self,
         _context: &'a vox::ClientContext<'a>,
-        request: &'a mut vox::ClientRequest<'call, 'a>,
+        request: &'a mut vox::ClientRequest<'_, 'a>,
     ) -> vox::BoxMiddlewareFuture<'a> {
         Box::pin(async move {
             request.push_string_metadata(SCOPE_METADATA_KEY, self.scope.clone());
@@ -64,6 +64,7 @@ macro_rules! scope_client {
 }
 
 /// The scope a request carries, if any.
+#[must_use]
 pub fn scope_of(metadata: &vox::Metadata) -> Option<&str> {
     use vox::MetadataExt;
     metadata.meta_str(SCOPE_METADATA_KEY)

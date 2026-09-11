@@ -1,4 +1,4 @@
-//! InputOtp — shadcn v4 maia style one-time password input.
+//! `InputOtp` — shadcn v4 maia style one-time password input.
 
 use architect_story_runtime::story;
 use dioxus::prelude::*;
@@ -73,7 +73,7 @@ pub fn InputOtp(props: InputOtpProps) -> Element {
                     let raw: String = evt
                         .value()
                         .chars()
-                        .filter(|c| c.is_ascii_alphanumeric())
+                        .filter(char::is_ascii_alphanumeric)
                         .take(length)
                         .collect();
                     value.set(raw.clone());
@@ -117,7 +117,7 @@ pub fn InputOtpGroup(props: InputOtpGroupProps) -> Element {
 // InputOtpSlot
 // ---------------------------------------------------------------------------
 
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone, PartialEq, Eq)]
 pub struct InputOtpSlotProps {
     /// Zero-based index of this slot.
     pub index: usize,
@@ -158,7 +158,7 @@ pub fn InputOtpSlot(props: InputOtpSlotProps) -> Element {
 // InputOtpSeparator
 // ---------------------------------------------------------------------------
 
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone, PartialEq, Eq)]
 pub struct InputOtpSeparatorProps {
     #[props(default)]
     pub class: String,

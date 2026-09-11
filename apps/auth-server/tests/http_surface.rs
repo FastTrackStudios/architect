@@ -5,6 +5,21 @@
 //! extraction, cookie shaping and error mapping together — the parts a
 //! compile check cannot vouch for.
 
+// This is an integration-test crate. `clippy.toml`'s
+// `allow-*-in-tests` only reaches `#[test]` fns and `#[cfg(test)]`
+// modules, so the fixture and helper code below — where an `unwrap()`
+// IS the assertion — still trips the panic lints. Allow them
+// crate-wide here rather than dotting the file with attributes.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::panic
+)]
+
 use architect_auth::db::{AuthSeaOrmStorage, Migrator};
 use auth_server::{ServerConfig, server};
 use axum::body::Body;
@@ -16,29 +31,9 @@ use tower::ServiceExt;
 fn test_config() -> ServerConfig {
     ServerConfig {
         bind_addr: "127.0.0.1:0".into(),
-        database_url: "sqlite::memory:".into(),
-        secret: "a-secret-at-least-32-bytes-long!!".into(),
         base_url: "https://auth.fasttrackstudio.app".into(),
-        oidc_issuer: None,
         session_ttl_seconds: 3600,
-        require_email_verification: false,
-        passkey_rp_id: None,
-        cors_origins: Vec::new(),
-        oidc_clients: Vec::new(),
-        oidc_allow_dynamic_client_registration: false,
-        run_migrations: true,
-        social: auth_server::SocialConfig::disabled(),
-        // Log mode: these tests assert on the HTTP surface, not on
-        // delivery, and a test that tried to reach an SMTP host would
-        // be testing the network.
-        mail: auth_server::mail::MailConfig {
-            host: None,
-            port: 587,
-            username: None,
-            password: None,
-            from: "noreply@example.com".into(),
-            base_url: "http://localhost:8080".into(),
-        },
+        ..ServerConfig::local()
     }
 }
 
@@ -51,7 +46,7 @@ async fn app_with(mutate: impl FnOnce(&mut ServerConfig)) -> axum::Router {
     let mut config = test_config();
     mutate(&mut config);
     let auth = server::build_engine(&config, AuthSeaOrmStorage::new(db)).expect("build engine");
-    server::app_router(&config, auth)
+    server::app_router(&config, auth).expect("router builds with no social providers")
 }
 
 async fn app() -> axum::Router {
@@ -61,7 +56,7 @@ async fn app() -> axum::Router {
     Migrator::up(&db, None).await.expect("migrate");
     let config = test_config();
     let auth = server::build_engine(&config, AuthSeaOrmStorage::new(db)).expect("build engine");
-    server::app_router(&config, auth)
+    server::app_router(&config, auth).expect("router builds with no social providers")
 }
 
 async fn json_body(response: axum::response::Response) -> serde_json::Value {

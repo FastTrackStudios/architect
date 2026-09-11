@@ -3,7 +3,7 @@
 //! See the crate-level docs in `architect` for the conceptual overview.
 //! This file is the emission engine: parse the `#[architect(...)]`
 //! container + field attributes, then synthesise the wire types, the
-//! repo trait, and (under `--features server`) the SeaORM bridge.
+//! repo trait, and (under `--features server`) the `SeaORM` bridge.
 
 use heck::{ToPascalCase, ToSnakeCase, ToTitleCase};
 use proc_macro::TokenStream;
@@ -32,7 +32,7 @@ struct ContainerAttrs {
     /// wrapper whose `Services` bundle mounts repo + events together, and
     /// (with `store`) the client subscription hook. Requires `repo`.
     emit_events: bool,
-    /// Also emit the CRDT story: the `EntityCrdt` impl (field ↔ LoroMap
+    /// Also emit the CRDT story: the `EntityCrdt` impl (field ↔ `LoroMap`
     /// codec), the `<E>RepoLoro` Loro-backed repo, and (with the user
     /// crate's `atom` feature) the replica-backed hooks + write actions.
     /// Gated on the user crate's `crdt` feature. Requires `repo`.
@@ -53,13 +53,13 @@ struct FieldAttrs {
     fulltext: bool,
     exclude_create: bool,
     exclude_update: bool,
-    /// Store this field as a JSON column in the SeaORM model. Required
+    /// Store this field as a JSON column in the `SeaORM` model. Required
     /// for `Vec<T>` / structured types — `sea_orm::Value` has no
     /// blanket `From<Vec<T>>` impl, so without this attribute the
-    /// generated DeriveEntityModel fails to compile on `server`
+    /// generated `DeriveEntityModel` fails to compile on `server`
     /// builds. Container-shaped fields (`Vec<T>` except `Vec<u8>`,
     /// maps, sets) that lack this attribute are a **derive-time error**
-    /// so the failure points at the declaration, not at SeaORM
+    /// so the failure points at the declaration, not at `SeaORM`
     /// internals. The field type must be `serde::Serialize +
     /// DeserializeOwned`; sea-orm's `with-json` feature handles the
     /// rest. No-op when the `server` feature isn't active.
@@ -188,6 +188,8 @@ struct ParsedField<'a> {
     forward_attrs: Vec<syn::Attribute>,
 }
 
+// By value: `syn` hands the parsed item over; the emitter consumes it.
+#[allow(clippy::needless_pass_by_value)]
 fn expand(input: DeriveInput) -> Result<TokenStream2> {
     let ident = input.ident.clone();
     let vis = input.vis.clone();
@@ -212,7 +214,7 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
     };
 
     let mut parsed: Vec<ParsedField> = Vec::with_capacity(named.len());
-    for f in named.iter() {
+    for f in named {
         let attrs = parse_field_attrs(f)?;
         // Pass-through attrs end up on the emitted `Create`
         // struct (whose only derive is `Facet` + optional
@@ -234,8 +236,16 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
             })
             .cloned()
             .collect();
+        let Some(field_ident) = f.ident.as_ref() else {
+            // `fields_named` above should have rejected this, but a real
+            // syn error beats a "proc macro panicked" from the compiler.
+            return Err(syn::Error::new_spanned(
+                f,
+                "#[derive(architect::Entity)] requires named fields",
+            ));
+        };
         parsed.push(ParsedField {
-            ident: f.ident.as_ref().unwrap(),
+            ident: field_ident,
             ty: &f.ty,
             attrs,
             forward_attrs,
@@ -373,6 +383,13 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
     let create_struct = quote! {
         #[cfg_attr(feature = "fake", derive(::architect::fake::Dummy))]
         #[derive(Clone, Debug, PartialEq, ::architect::facet::Facet)]
+        // Generated payloads mirror the entity's fields, so whether `Eq`
+        // is derivable is decided by the *user's* field types, not by
+        // anything the caller of this derive can change. Blaming their
+        // `#[derive(architect::Entity)]` line for it is a lint the
+        // consumer cannot act on, so the generated item carries the
+        // allow itself.
+        #[allow(clippy::derive_partial_eq_without_eq)]
         #vis struct #create_ident {
             #(#create_field_defs,)*
         }
@@ -391,6 +408,13 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
     let update_struct = quote! {
         #[cfg_attr(feature = "fake", derive(::architect::fake::Dummy))]
         #[derive(Clone, Debug, PartialEq, ::architect::facet::Facet, Default)]
+        // Generated payloads mirror the entity's fields, so whether `Eq`
+        // is derivable is decided by the *user's* field types, not by
+        // anything the caller of this derive can change. Blaming their
+        // `#[derive(architect::Entity)]` line for it is a lint the
+        // consumer cannot act on, so the generated item carries the
+        // allow itself.
+        #[allow(clippy::derive_partial_eq_without_eq)]
         #vis struct #update_ident {
             #(#update_field_defs,)*
         }
@@ -400,6 +424,13 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
     let list_struct = quote! {
         #[cfg_attr(feature = "fake", derive(::architect::fake::Dummy))]
         #[derive(Clone, Debug, PartialEq, ::architect::facet::Facet)]
+        // Generated payloads mirror the entity's fields, so whether `Eq`
+        // is derivable is decided by the *user's* field types, not by
+        // anything the caller of this derive can change. Blaming their
+        // `#[derive(architect::Entity)]` line for it is a lint the
+        // consumer cannot act on, so the generated item carries the
+        // allow itself.
+        #[allow(clippy::derive_partial_eq_without_eq)]
         #vis struct #list_ident {
             pub items: ::std::vec::Vec<#ident>,
             pub total: u32,
@@ -763,6 +794,7 @@ fn build_events_block(
         #[doc = #doc_event]
         #[cfg_attr(feature = "fake", derive(::architect::fake::Dummy))]
         #[derive(Clone, Debug, PartialEq, ::architect::facet::Facet)]
+        #[allow(clippy::derive_partial_eq_without_eq)]
         #[repr(u8)]
         #vis enum #event_ident {
             /// The current full row set — the **first** event every
@@ -1108,6 +1140,7 @@ fn build_form_block(
             #[doc = #doc_fields]
             #[cfg(feature = "form")]
             #[derive(Clone, Copy, PartialEq)]
+            #[allow(clippy::derive_partial_eq_without_eq)]
             #vis struct #fields_ident {
                 #(#field_defs,)*
             }
@@ -1200,7 +1233,7 @@ fn build_store_block(
     vis: &syn::Visibility,
     container: &ContainerAttrs,
     parsed: &[ParsedField],
-    _pk_ident: &Ident,
+    pk_ident: &Ident,
     pk_ty: &Type,
     create_ident: &Ident,
     update_ident: &Ident,
@@ -1249,7 +1282,7 @@ fn build_store_block(
     );
 
     // The primary-key accessor for `StoreEntity::key`.
-    let pk_field = _pk_ident;
+    let pk_field = pk_ident;
 
     // `draft` field assignments: a client-side placeholder row built from
     // the Create payload. `on_create` expressions are evaluated locally as
@@ -1257,13 +1290,16 @@ fn build_store_block(
     // excluded fields without an expression fall back to `Default`.
     let draft_assigns = parsed.iter().map(|f| {
         let id = f.ident;
-        if let Some(e) = &f.attrs.on_create {
-            quote! { #id: #e }
-        } else if f.attrs.exclude_create {
-            quote! { #id: ::core::default::Default::default() }
-        } else {
-            quote! { #id: input.#id.clone() }
-        }
+        f.attrs.on_create.as_ref().map_or_else(
+            || {
+                if f.attrs.exclude_create {
+                    quote! { #id: ::core::default::Default::default() }
+                } else {
+                    quote! { #id: input.#id.clone() }
+                }
+            },
+            |e| quote! { #id: #e },
+        )
     });
 
     // Optimistic update patch: apply each `Some` field of the Update
@@ -1277,14 +1313,13 @@ fn build_store_block(
             }
         }
     });
-    let patch_touches = parsed
-        .iter()
-        .filter(|f| f.attrs.on_update.is_some())
-        .map(|f| {
-            let id = f.ident;
-            let e = f.attrs.on_update.as_ref().unwrap();
-            quote! { row.#id = #e; }
-        });
+    let patch_touches = parsed.iter().filter_map(|f| {
+        let id = f.ident;
+        // `filter_map`, not `filter(..is_some()).map(..unwrap())`: same
+        // set of fields, but the compiler carries the invariant.
+        let e = f.attrs.on_update.as_ref()?;
+        Some(quote! { row.#id = #e; })
+    });
 
     let doc_store = format!(
         "The shared optimistic cache of [`{ident}`] rows \
@@ -1296,11 +1331,31 @@ fn build_store_block(
          reflects optimistic edits), else the fallback fetch's phase. \
          `match` the returned phase in the page."
     );
+    let live_note = if container.emit_events {
+        format!(
+            "\n\n# Live, or a cache?\n\nThis entity declares `events`, so \
+             `provide_{snake}()` at the app root subscribes the store to \
+             server changes and every page rendering from it goes live. \
+             Without that call the store is a **cache**: it shows what the \
+             last fetch returned and goes stale the moment anyone else \
+             writes. `Store::is_live()` says which you have."
+        )
+    } else {
+        format!(
+            "\n\n# Live, or a cache?\n\nThis is a **cache**: it shows what \
+             the last fetch returned and goes stale the moment another \
+             client — or the server — writes. Reaching for a manual \
+             refresh signal is the symptom. Add `events` to \
+             `#[architect(...)]` and call `provide_{snake}()` at the app \
+             root to make it live instead; `Store::is_live()` says which \
+             you have."
+        )
+    };
     let doc_use_list = format!(
         "The [`{ident}`] list as one `AtomResult` (rows are the value, the \
          backing fetch the phase). Tracks the `\"{invalidate_key}\"` \
          reactivity key when a `Reactivity` registry is provided, so \
-         settled mutations re-fetch it."
+         settled mutations re-fetch it.{live_note}"
     );
     let doc_muts = format!(
         "Optimistic write actions for [`{ident}`]: each patches the store \
@@ -1596,13 +1651,16 @@ fn build_server_block(
     // ActiveModel field assignments for create.
     let create_active_assigns = parsed.iter().map(|f| {
         let id = f.ident;
-        if let Some(e) = &f.attrs.on_create {
-            quote! { #id: ::sea_orm::Set(#e) }
-        } else if f.attrs.exclude_create {
-            quote! { #id: ::sea_orm::NotSet }
-        } else {
-            quote! { #id: ::sea_orm::Set(input.#id) }
-        }
+        f.attrs.on_create.as_ref().map_or_else(
+            || {
+                if f.attrs.exclude_create {
+                    quote! { #id: ::sea_orm::NotSet }
+                } else {
+                    quote! { #id: ::sea_orm::Set(input.#id) }
+                }
+            },
+            |e| quote! { #id: ::sea_orm::Set(#e) },
+        )
     });
 
     // ActiveModel field assignments for update.
@@ -1615,14 +1673,11 @@ fn build_server_block(
         }
     });
 
-    let touch_updated = parsed
-        .iter()
-        .filter(|f| f.attrs.on_update.is_some())
-        .map(|f| {
-            let id = f.ident;
-            let e = f.attrs.on_update.as_ref().unwrap();
-            quote! { am.#id = ::sea_orm::Set(#e); }
-        });
+    let touch_updated = parsed.iter().filter_map(|f| {
+        let id = f.ident;
+        let e = f.attrs.on_update.as_ref()?;
+        Some(quote! { am.#id = ::sea_orm::Set(#e); })
+    });
 
     let _ = (create_fields, list_ident, repo_ident);
 
@@ -1661,6 +1716,7 @@ fn build_server_block(
 
             #[cfg_attr(feature = "fake", derive(::architect::fake::Dummy))]
             #[derive(Clone, Debug, PartialEq, ::sea_orm::DeriveEntityModel)]
+            #[allow(clippy::derive_partial_eq_without_eq)]
             #[sea_orm(table_name = #table_name)]
             pub struct Model {
                 #(#model_fields,)*
@@ -1913,8 +1969,8 @@ fn type_first_generic(ty: &Type) -> Option<&Type> {
 }
 
 /// The container shape (after unwrapping one `Option`) that requires
-/// `#[architect(json)]` for the SeaORM column emission, or `None` for
-/// types SeaORM maps natively. `Vec<u8>` is native (bytes column);
+/// `#[architect(json)]` for the `SeaORM` column emission, or `None` for
+/// types `SeaORM` maps natively. `Vec<u8>` is native (bytes column);
 /// every other `Vec<T>`, plus the std maps/sets, has no
 /// `sea_orm::Value` impl and must be stored as JSON.
 fn json_requiring_container(ty: &Type) -> Option<String> {
@@ -1955,7 +2011,7 @@ enum CrdtKind {
 
 impl CrdtKind {
     /// `(kind, optional)` for a field type, or None if unsupported.
-    fn of(ty: &Type) -> Option<(CrdtKind, bool)> {
+    fn of(ty: &Type) -> Option<(Self, bool)> {
         let last = type_last_ident(ty)?;
         if last == "Option" {
             let inner = type_first_generic(ty)?;
@@ -1964,7 +2020,7 @@ impl CrdtKind {
         Self::base_of(ty).map(|k| (k, false))
     }
 
-    fn base_of(ty: &Type) -> Option<CrdtKind> {
+    fn base_of(ty: &Type) -> Option<Self> {
         match type_last_ident(ty)?.as_str() {
             "Uuid" => Some(Self::Uuid),
             "String" => Some(Self::Str),
@@ -2003,10 +2059,8 @@ impl CrdtKind {
     /// Shape a value expression for the writer's parameter type.
     fn write_arg(self, optional: bool, value: TokenStream2) -> TokenStream2 {
         match (self, optional) {
-            (Self::Str, false) => quote! { &#value },
-            (Self::Str, true) => quote! { #value.as_deref() },
-            (Self::StringList, false) => quote! { &#value },
-            (Self::StringList, true) => quote! { #value.as_deref() },
+            (Self::Str | Self::StringList, true) => quote! { #value.as_deref() },
+            (Self::Str | Self::StringList, false) => quote! { &#value },
             _ => value,
         }
     }
@@ -2076,13 +2130,16 @@ fn build_crdt_block(
     // come from the payload.
     let from_create_assigns = parsed.iter().map(|f| {
         let id = f.ident;
-        if let Some(e) = &f.attrs.on_create {
-            quote! { #id: #e }
-        } else if f.attrs.exclude_create {
-            quote! { #id: ::core::default::Default::default() }
-        } else {
-            quote! { #id: c.#id }
-        }
+        f.attrs.on_create.as_ref().map_or_else(
+            || {
+                if f.attrs.exclude_create {
+                    quote! { #id: ::core::default::Default::default() }
+                } else {
+                    quote! { #id: c.#id }
+                }
+            },
+            |e| quote! { #id: #e },
+        )
     });
 
     let encode_calls = parsed.iter().zip(&kinds).map(|(f, (kind, opt))| {
@@ -2101,37 +2158,37 @@ fn build_crdt_block(
     });
 
     // `apply_update`: write each `Some` field of the Update payload …
-    let apply_update_arms = update_fields.iter().map(|f| {
+    let apply_update_arms = update_fields.iter().filter_map(|f| {
         let id = f.ident;
         let key = LitStr::new(&id.to_string(), id.span());
-        let (kind, opt) = CrdtKind::of(f.ty).expect("validated above");
+        // `filter_map` over `expect("validated above")`: the validation
+        // does run earlier, but re-deriving the kind here means a future
+        // reorder degrades to "field omitted from apply_update" rather
+        // than a panic inside the compiler.
+        let (kind, opt) = CrdtKind::of(f.ty)?;
         let writer = format_ident!("write_{}", kind.suffix(opt));
         let arg = kind.write_arg(opt, quote! { v });
-        quote! {
+        Some(quote! {
             if let ::core::option::Option::Some(v) = u.#id {
                 ::crdt::codec::#writer(m, #key, #arg)?;
             }
-        }
+        })
     });
     // … then refresh the `on_update` fields (e.g. `updated_at`), exactly
     // like the SeaORM update path does.
-    let apply_update_touches = parsed
-        .iter()
-        .zip(&kinds)
-        .filter(|(f, _)| f.attrs.on_update.is_some())
-        .map(|(f, (kind, opt))| {
-            let id = f.ident;
-            let key = LitStr::new(&id.to_string(), id.span());
-            let e = f.attrs.on_update.as_ref().unwrap();
-            let writer = format_ident!("write_{}", kind.suffix(*opt));
-            let arg = kind.write_arg(*opt, quote! { __touch });
-            quote! {
-                {
-                    let __touch = #e;
-                    ::crdt::codec::#writer(m, #key, #arg)?;
-                }
+    let apply_update_touches = parsed.iter().zip(&kinds).filter_map(|(f, (kind, opt))| {
+        let id = f.ident;
+        let key = LitStr::new(&id.to_string(), id.span());
+        let e = f.attrs.on_update.as_ref()?;
+        let writer = format_ident!("write_{}", kind.suffix(*opt));
+        let arg = kind.write_arg(*opt, quote! { __touch });
+        Some(quote! {
+            {
+                let __touch = #e;
+                ::crdt::codec::#writer(m, #key, #arg)?;
             }
-        });
+        })
+    });
 
     let sort_arms = parsed.iter().filter(|f| f.attrs.sortable).map(|f| {
         let id = f.ident;
@@ -2381,6 +2438,18 @@ fn build_crdt_block(
 // test crates (`example-tests-native`, `app-tests-e2e`).
 
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic,
+    clippy::float_cmp,
+    clippy::string_slice,
+    clippy::significant_drop_tightening,
+    clippy::too_many_lines
+)]
 mod tests {
     use super::*;
     use syn::parse_quote;

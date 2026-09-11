@@ -5,7 +5,7 @@ use dioxus::prelude::*;
 use dioxus_primitives::toggle::Toggle as PrimitiveToggle;
 
 /// Variant for the toggle button.
-#[derive(Clone, Copy, PartialEq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum ToggleVariant {
     #[default]
     Default,
@@ -13,7 +13,7 @@ pub enum ToggleVariant {
 }
 
 /// Size for the toggle button.
-#[derive(Clone, Copy, PartialEq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum ToggleSize {
     Small,
     #[default]
@@ -22,7 +22,7 @@ pub enum ToggleSize {
 }
 
 impl ToggleSize {
-    fn classes(self) -> &'static str {
+    const fn classes(self) -> &'static str {
         match self {
             Self::Small => "h-8 min-w-8 px-3",
             Self::Medium => "h-9 min-w-9 px-3",

@@ -20,7 +20,7 @@ use crate::mail::MailConfig;
 pub struct ServerConfig {
     /// `host:port` the HTTP/WebSocket listener binds to.
     pub bind_addr: String,
-    /// SeaORM connection string. `postgres://…` in the cluster,
+    /// `SeaORM` connection string. `postgres://…` in the cluster,
     /// `sqlite://…` for local development.
     pub database_url: String,
     /// Session-token signing secret. Minimum 32 bytes — architect-auth
@@ -56,6 +56,20 @@ pub struct ServerConfig {
     /// Run migrations on boot. On in normal operation; an operator can
     /// turn it off to gate schema changes behind a separate job.
     pub run_migrations: bool,
+    /// Load a sanitised snapshot into an empty *local* database on
+    /// boot. `AUTH_IMPORT_SNAPSHOT=/path/to/auth-snapshot.json`.
+    ///
+    /// Take one with `cargo xtask auth-mirror`. Every imported account
+    /// gets the published development password, which is why this is
+    /// refused against anything but a local database.
+    pub import_snapshot: Option<String>,
+    /// Fill an empty *local* database with the fixed development cast,
+    /// and serve it. `AUTH_DEV_SEED=1`.
+    ///
+    /// Off by default and refused against anything but a local
+    /// database, because it creates accounts whose password is a
+    /// published constant.
+    pub dev_seed: bool,
     /// Outgoing mail. Without `AUTH_SMTP_HOST` the mailer only logs, and
     /// every flow that has to reach a person — verification, password
     /// reset — completes as far as minting a token and no further.
@@ -88,6 +102,13 @@ pub struct SocialConfig {
     /// `GET /oauth2/linked-token`. Registered as an extra grantable
     /// scope with the OIDC provider.
     pub linked_token_scope: String,
+    /// Send every provider to a mock server at this origin instead of
+    /// the real one. `AUTH_SOCIAL_MOCK_URL`.
+    ///
+    /// All three or none: a deployment pointing some calls at a mock
+    /// and others at the real provider fails in ways that look like the
+    /// provider misbehaving.
+    pub mock_url: Option<String>,
 }
 
 impl SocialConfig {
@@ -98,7 +119,8 @@ impl SocialConfig {
     /// client trusted to act as someone on TONE3000 does not thereby reach
     /// their GitHub token.
     /// This deployment's settings for `provider`, if it is switched on.
-    pub fn provider_config_for(
+    #[must_use]
+    pub const fn provider_config_for(
         &self,
         provider: crate::social::Provider,
     ) -> Option<&SocialProviderConfig> {
@@ -109,7 +131,8 @@ impl SocialConfig {
         }
     }
 
-    pub fn required_scope(&self, provider: crate::social::Provider) -> &str {
+    #[must_use]
+    pub const fn required_scope(&self, provider: crate::social::Provider) -> &str {
         match provider {
             crate::social::Provider::GitHub => self.linked_token_scope.as_str(),
             other => other.linked_token_scope(),
@@ -124,16 +147,19 @@ impl SocialConfig {
     pub const DEFAULT_GOOGLE_SCOPES: &'static str = "openid email profile";
 
     /// Nothing configured — the routes 404 and the pages show no buttons.
+    #[must_use]
     pub fn disabled() -> Self {
         Self {
             github: None,
             tone3000: None,
             google: None,
             linked_token_scope: Self::DEFAULT_LINKED_TOKEN_SCOPE.to_owned(),
+            mock_url: None,
         }
     }
 
-    pub fn is_enabled(&self) -> bool {
+    #[must_use]
+    pub const fn is_enabled(&self) -> bool {
         self.github.is_some() || self.google.is_some() || self.tone3000.is_some()
     }
 }
@@ -220,6 +246,43 @@ impl From<OidcClientJson> for OidcClientConfig {
 }
 
 impl ServerConfig {
+    /// A configuration for a server on this machine: in-memory SQLite,
+    /// no OIDC clients, no social providers, mail in log mode.
+    ///
+    /// Exists so that tests and local runs name only what they care
+    /// about (`ServerConfig { dev_seed: true, ..ServerConfig::local() }`)
+    /// rather than every field. There is deliberately no `Default`:
+    /// this carries a fixed development secret, and a config that could
+    /// be reached by accident in production is a config that will be.
+    #[must_use]
+    pub fn local() -> Self {
+        Self {
+            bind_addr: "127.0.0.1:8080".into(),
+            database_url: "sqlite::memory:".into(),
+            secret: "a-secret-at-least-32-bytes-long!!".into(),
+            base_url: "http://localhost:8080".into(),
+            oidc_issuer: None,
+            session_ttl_seconds: 60 * 60 * 24 * 30,
+            require_email_verification: false,
+            passkey_rp_id: None,
+            cors_origins: Vec::new(),
+            oidc_clients: Vec::new(),
+            oidc_allow_dynamic_client_registration: false,
+            run_migrations: true,
+            import_snapshot: None,
+            dev_seed: false,
+            social: SocialConfig::disabled(),
+            mail: crate::mail::MailConfig {
+                host: None,
+                port: 587,
+                username: None,
+                password: None,
+                from: "noreply@localhost".into(),
+                base_url: "http://localhost:8080".into(),
+            },
+        }
+    }
+
     /// Read the configuration from the process environment.
     pub fn from_env() -> Result<Self, ConfigError> {
         let secret = read_secret("AUTH_SECRET")?;
@@ -268,15 +331,17 @@ impl ServerConfig {
             oidc_clients,
             oidc_allow_dynamic_client_registration: flag("AUTH_OIDC_DYNAMIC_REGISTRATION", false)?,
             run_migrations: flag("AUTH_RUN_MIGRATIONS", true)?,
+            import_snapshot: optional("AUTH_IMPORT_SNAPSHOT"),
+            dev_seed: flag("AUTH_DEV_SEED", false)?,
             mail: MailConfig {
                 host: optional("AUTH_SMTP_HOST"),
-                port: parse_or("AUTH_SMTP_PORT", 587)? as u16,
+                port: parse_port("AUTH_SMTP_PORT", 587)?,
                 username: optional("AUTH_SMTP_USERNAME"),
                 // Same `_FILE` indirection as AUTH_SECRET: a mounted file
                 // does not appear in `kubectl describe pod`.
                 password: optional_secret("AUTH_SMTP_PASSWORD")?,
                 from: optional("AUTH_MAIL_FROM").unwrap_or_else(|| "noreply@localhost".to_owned()),
-                base_url: base_url.clone(),
+                base_url,
             },
             social: SocialConfig {
                 github: read_social_provider(
@@ -298,11 +363,13 @@ impl ServerConfig {
                 ),
                 linked_token_scope: optional("AUTH_LINKED_TOKEN_SCOPE")
                     .unwrap_or_else(|| SocialConfig::DEFAULT_LINKED_TOKEN_SCOPE.to_owned()),
+                mock_url: optional("AUTH_SOCIAL_MOCK_URL"),
             },
         })
     }
 
     /// The issuer, falling back to `base_url`.
+    #[must_use]
     pub fn issuer(&self) -> &str {
         self.oidc_issuer.as_deref().unwrap_or(&self.base_url)
     }
@@ -362,9 +429,8 @@ fn read_public_social_provider(
 /// `<VAR>`. An unset or empty variable is not an error — a deployment
 /// with only public clients sets no extras, and vice versa.
 fn read_oidc_clients(var: &'static str) -> Result<Vec<OidcClientConfig>, ConfigError> {
-    let raw = match optional_secret(var)? {
-        Some(raw) => raw,
-        None => return Ok(Vec::new()),
+    let Some(raw) = optional_secret(var)? else {
+        return Ok(Vec::new());
     };
     if raw.trim().is_empty() {
         return Ok(Vec::new());
@@ -417,9 +483,8 @@ fn list(var: &str) -> Vec<String> {
 }
 
 fn flag(var: &'static str, default: bool) -> Result<bool, ConfigError> {
-    match env::var(var) {
-        Err(_) => Ok(default),
-        Ok(raw) => match raw.trim().to_ascii_lowercase().as_str() {
+    env::var(var).map_or(Ok(default), |raw| {
+        match raw.trim().to_ascii_lowercase().as_str() {
             "1" | "true" | "yes" | "on" => Ok(true),
             "0" | "false" | "no" | "off" => Ok(false),
             _ => Err(ConfigError::Invalid {
@@ -427,19 +492,34 @@ fn flag(var: &'static str, default: bool) -> Result<bool, ConfigError> {
                 expected: "boolean",
                 value: raw,
             }),
-        },
-    }
+        }
+    })
+}
+
+/// A TCP port, rejecting anything outside the range instead of wrapping.
+///
+/// This was `parse_or(..)? as u16`, which is silent: `AUTH_SMTP_PORT=70000`
+/// became 4464 and the server dialled a port nobody was listening on, with
+/// nothing in the logs to say the number it used was not the number
+/// configured.
+fn parse_port(var: &'static str, default: u16) -> Result<u16, ConfigError> {
+    env::var(var).map_or(Ok(default), |raw| {
+        raw.trim().parse().map_err(|_| ConfigError::Invalid {
+            var,
+            expected: "a TCP port (1-65535)",
+            value: raw,
+        })
+    })
 }
 
 fn parse_or(var: &'static str, default: i64) -> Result<i64, ConfigError> {
-    match env::var(var) {
-        Err(_) => Ok(default),
-        Ok(raw) => raw.trim().parse().map_err(|_| ConfigError::Invalid {
+    env::var(var).map_or(Ok(default), |raw| {
+        raw.trim().parse().map_err(|_| ConfigError::Invalid {
             var,
             expected: "integer",
             value: raw,
-        }),
-    }
+        })
+    })
 }
 
 #[cfg(test)]

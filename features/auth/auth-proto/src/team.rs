@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 #[cfg_attr(feature = "fake", derive(::fake::Dummy))]
-#[derive(architect::Entity, ::facet::Facet, Clone, Debug, PartialEq)]
+#[derive(architect::Entity, ::facet::Facet, Clone, Debug, PartialEq, Eq)]
 #[architect(table_name = "auth_teams", repo)]
 pub struct AuthTeam {
     #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]

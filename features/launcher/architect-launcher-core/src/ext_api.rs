@@ -14,6 +14,7 @@ pub struct ExtensionApi {
 }
 
 impl ExtensionApi {
+    #[must_use]
     pub fn new(ext_name: &str, storage_dir: PathBuf) -> Self {
         Self {
             ext_name: ext_name.to_string(),
@@ -21,6 +22,7 @@ impl ExtensionApi {
         }
     }
 
+    #[must_use]
     pub fn extension_name(&self) -> &str {
         &self.ext_name
     }
@@ -93,6 +95,7 @@ impl ExtensionApi {
     // ── Per-Extension Storage ──────────────────────────────
 
     /// Get a value from per-extension local storage.
+    #[must_use]
     pub fn storage_get(&self, key: &str) -> Option<String> {
         let path = self.storage_dir.join("storage.json");
         let data: HashMap<String, String> = std::fs::read_to_string(&path)
@@ -130,6 +133,7 @@ impl ExtensionApi {
     }
 
     /// List all keys in per-extension local storage.
+    #[must_use]
     pub fn storage_keys(&self) -> Vec<String> {
         let path = self.storage_dir.join("storage.json");
         let data: HashMap<String, String> = std::fs::read_to_string(&path)

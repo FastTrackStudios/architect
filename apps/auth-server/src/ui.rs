@@ -31,6 +31,7 @@ use architect_auth::{
     transport::{AuthCookieConfig, axum::session_token_from_headers},
 };
 use auth_proto::{AuthSessionBundle, SignInEmailPassword};
+use auth_ui::chrome::{STYLE, Shell};
 use axum::{
     Router,
     extract::{Form, Query, State},
@@ -110,23 +111,31 @@ where
     let Some(token) = session_token_from_headers(&headers, &state.cookie) else {
         return Redirect::to("/login?return_to=%2Faccount").into_response();
     };
-    let bundle = match state.auth.current_session(CurrentSession { token }).await {
-        Ok(bundle) => bundle,
-        Err(_) => return Redirect::to("/login?return_to=%2Faccount").into_response(),
+    let Ok(bundle) = state.auth.current_session(CurrentSession { token }).await else {
+        return Redirect::to("/login?return_to=%2Faccount").into_response();
     };
     let accounts = crate::http::linked_accounts(&state, bundle.user.id)
         .await
         .unwrap_or_default();
     let flash = account_flash(&q);
-    let body = dioxus_ssr::render_element(rsx! {
-        AccountPage {
-            email: bundle.user.email.clone().unwrap_or_default(),
-            providers: state.social.enabled_providers(),
-            accounts,
-            flash,
-        }
-    });
-    Html(format!("<!doctype html>\n<html lang=\"en\">{body}</html>")).into_response()
+    let ui = auth_ui::UiState::new(state.auth.clone(), state.cookie.clone());
+    let Some(nav) = auth_ui::settings::Nav::build(&ui, &headers, "/account").await else {
+        return Redirect::to("/login?return_to=%2Faccount").into_response();
+    };
+    auth_ui::settings::document(
+        "Linked accounts",
+        "Linked accounts",
+        "Sign in with a linked account, and let the apps act as it.",
+        &nav,
+        rsx! {
+            AccountPage {
+                email: bundle.user.email.clone().unwrap_or_default(),
+                providers: state.social.enabled_providers(),
+                accounts,
+                flash,
+            }
+        },
+    )
 }
 
 /// `POST /account/unlink` — the form twin of
@@ -205,78 +214,59 @@ fn AccountPage(
     accounts: Vec<LinkedAccountView>,
     flash: Option<Flash>,
 ) -> Element {
+    // The address is on the rail now, not repeated in the body.
+    let _ = email;
     rsx! {
-        head {
-            meta { charset: "utf-8" }
-            meta { name: "viewport", content: "width=device-width, initial-scale=1" }
-            title { "Your account · FastTrackStudio" }
-            style { {STYLE} }
+        match flash {
+            Some(Flash::Ok(message)) => rsx! { p { class: "ok", role: "status", "{message}" } },
+            Some(Flash::Error(message)) => rsx! { p { class: "error", role: "alert", "{message}" } },
+            None => rsx! {},
         }
-        body {
-            Shell {
-                h1 { "Your account" }
-                p { class: "sub", "Signed in as {email}" }
 
-                match flash {
-                    Some(Flash::Ok(message)) => rsx! { p { class: "ok", role: "status", "{message}" } },
-                    Some(Flash::Error(message)) => rsx! { p { class: "error", role: "alert", "{message}" } },
-                    None => rsx! {},
-                }
-
-                h2 { "Linked accounts" }
-                p { class: "hint",
-                    "Sign in with a linked account, and let the apps act as it. Task pushes and proposes the wiki edits you accept under your linked GitHub name."
-                }
-                if providers.is_empty() {
-                    p { class: "sub", "No providers are configured on this server." }
-                }
-                ul { class: "providers",
-                    for provider in providers.iter().copied() {
-                        {
-                            let linked = accounts.iter().find(|a| a.provider_id == provider.id());
-                            let name = provider.display_name();
-                            let id = provider.id();
-                            match linked {
-                                Some(account) => {
-                                    let handle = account.login.clone().unwrap_or_else(|| account.account_id.clone());
-                                    rsx! {
-                                        li { class: "provider",
-                                            span { class: "provider-name",
-                                                ProviderMark { provider }
-                                                span {
-                                                    strong { "{name}" }
-                                                    span { class: "handle", "Linked as {handle}" }
-                                                }
-                                            }
-                                            form { method: "post", action: "/account/unlink", class: "inline",
-                                                input { r#type: "hidden", name: "provider", value: "{id}" }
-                                                button { r#type: "submit", class: "link", "Unlink" }
-                                            }
+        section { class: "panel",
+            p { class: "hint",
+                "Task pushes and proposes the wiki edits you accept under your linked GitHub name."
+            }
+            if providers.is_empty() {
+                p { class: "hint", "No providers are configured on this server." }
+            }
+            ul { class: "providers",
+                for provider in providers.iter().copied() {
+                    {
+                        let linked = accounts.iter().find(|a| a.provider_id == provider.id());
+                        let name = provider.display_name();
+                        let id = provider.id();
+                        linked.map_or_else(|| rsx! {
+                                li { class: "provider",
+                                    span { class: "provider-name",
+                                        ProviderMark { provider }
+                                        span {
+                                            strong { "{name}" }
+                                            span { class: "handle", "Not linked" }
                                         }
                                     }
+                                    a { class: "button small", href: "/auth/social/{id}/start?mode=link&return_to=%2Faccount",
+                                        "Link {name}"
+                                    }
                                 }
-                                None => rsx! {
+                            }, |account| {
+                                let handle = account.login.clone().unwrap_or_else(|| account.account_id.clone());
+                                rsx! {
                                     li { class: "provider",
                                         span { class: "provider-name",
                                             ProviderMark { provider }
                                             span {
                                                 strong { "{name}" }
-                                                span { class: "handle", "Not linked" }
+                                                span { class: "handle", "Linked as {handle}" }
                                             }
                                         }
-                                        a { class: "button small", href: "/auth/social/{id}/start?mode=link&return_to=%2Faccount",
-                                            "Link {name}"
+                                        form { method: "post", action: "/account/unlink", class: "inline",
+                                            input { r#type: "hidden", name: "provider", value: "{id}" }
+                                            button { r#type: "submit", class: "link", "Unlink" }
                                         }
                                     }
-                                },
-                            }
-                        }
-                    }
-                }
-
-                p { class: "alt",
-                    form { method: "post", action: "/auth/sign-out", class: "inline",
-                        button { r#type: "submit", class: "link", "Sign out" }
+                                }
+                            })
                     }
                 }
             }
@@ -399,7 +389,7 @@ where
         })
         .await
     {
-        Ok(_) => notice(
+        Ok(()) => notice(
             "Password changed",
             "You can sign in with your new password.",
             &return_to,
@@ -508,16 +498,7 @@ fn safe_return_to(raw: Option<&str>) -> String {
 /// `/` is left alone: it is legal in a query value and keeps the link
 /// readable.
 fn encode_query_value(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
-                out.push(byte as char);
-            }
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
+    architect_auth::percent::encode_query_value(value)
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -533,16 +514,20 @@ pub struct PageQuery {
 
 async fn login_page<S>(
     State(state): State<HttpState<S>>,
+    headers: HeaderMap,
     Query(q): Query<PageQuery>,
 ) -> Html<String>
 where
     S: AuthStorage,
 {
-    Html(render_page(
+    Html(render_full(
         Screen::SignIn,
         &safe_return_to(q.return_to.as_deref()),
         q.error.as_deref().map(describe_social_error),
+        "",
+        "",
         &state.social.sign_in_providers(),
+        auth_ui::last_login::recall(&headers),
     ))
 }
 
@@ -590,18 +575,35 @@ where
     S: AuthStorage,
 {
     let return_to = safe_return_to(form.return_to.as_deref());
-    let result = state
-        .auth
-        .sign_in_email_password(SignInEmailPassword {
-            email: form.email,
-            password: form.password,
-            ip_address: client_ip(&headers),
-            user_agent: user_agent(&headers),
-        })
-        .await;
+    let identifier = form.email.trim();
+    // One field for both, decided by the shape of what was typed. An
+    // address always has an `@` and a username never may — the engine
+    // rejects one — so this cannot be ambiguous, and it saves asking
+    // somebody to tell us which kind of name they just used.
+    let result = if identifier.contains('@') {
+        state
+            .auth
+            .sign_in_email_password(SignInEmailPassword {
+                email: identifier.to_owned(),
+                password: form.password,
+                ip_address: client_ip(&headers),
+                user_agent: user_agent(&headers),
+            })
+            .await
+    } else {
+        state
+            .auth
+            .sign_in_username(architect_auth::SignInUsername {
+                username: identifier.to_owned(),
+                password: form.password,
+                ip_address: client_ip(&headers),
+                user_agent: user_agent(&headers),
+            })
+            .await
+    };
 
     match result {
-        Ok(bundle) => signed_in(&state.cookie, &bundle, &return_to),
+        Ok(bundle) => signed_in(&state.cookie, &headers, &bundle, &return_to),
         // Deliberately not distinguishing "no such account" from "wrong
         // password": the difference is an account-enumeration oracle,
         // and a person who mistyped either one does the same thing next.
@@ -667,7 +669,7 @@ where
                     .send_email_verification(&email, bundle.user.id, &token.token)
                     .await;
             }
-            signed_in(&state.cookie, &bundle, &return_to)
+            signed_in(&state.cookie, &headers, &bundle, &return_to)
         }
         Err(e) => rejected(Screen::SignUp, &return_to, &describe_sign_up_error(&e)),
     }
@@ -691,16 +693,43 @@ fn describe_sign_up_error(error: &impl std::fmt::Display) -> String {
 ///
 /// 303, not 302: the browser must switch to GET for the redirect, or a
 /// refresh on the destination re-submits the credentials.
-fn signed_in(cookie: &AuthCookieConfig, bundle: &AuthSessionBundle, return_to: &str) -> Response {
+///
+/// # The pending case
+///
+/// A sign-in by somebody with two-factor enabled issues a session that
+/// is **not active**, and every page treats an inactive session as no
+/// session at all. Sending such a browser to `return_to` therefore
+/// bounced it straight back to `/login`, which signed in again, which
+/// bounced again — two-factor accounts could not use the web UI at all.
+/// The cookie is still set (the challenge needs it to know whose
+/// session to activate); only the destination differs.
+fn signed_in(
+    cookie: &AuthCookieConfig,
+    headers: &HeaderMap,
+    bundle: &AuthSessionBundle,
+    return_to: &str,
+) -> Response {
     let set_cookie = cookie.session_cookie(bundle.token.clone());
-    (
+    let location = if bundle.session.active {
+        return_to.to_owned()
+    } else {
+        format!(
+            "/login/two-factor?return_to={}",
+            encode_query_value(return_to)
+        )
+    };
+    let mut response = (
         StatusCode::SEE_OTHER,
         [
             (header::SET_COOKIE, set_cookie.to_string()),
-            (header::LOCATION, return_to.to_owned()),
+            (header::LOCATION, location),
         ],
     )
-        .into_response()
+        .into_response();
+    // The hint for the next visit to the sign-in page, and the roster
+    // that puts this account on the switcher.
+    auth_ui::login::remember_signed_in(&mut response, cookie, headers, bundle);
+    response
 }
 
 /// Re-render the screen with the reason it failed.
@@ -725,46 +754,46 @@ pub enum Screen {
 }
 
 impl Screen {
-    fn title(self) -> &'static str {
+    const fn title(self) -> &'static str {
         match self {
-            Screen::SignIn => "Sign in",
-            Screen::SignUp => "Create your account",
-            Screen::ForgotPassword => "Reset your password",
-            Screen::ResetPassword => "Choose a new password",
+            Self::SignIn => "Sign in",
+            Self::SignUp => "Create your account",
+            Self::ForgotPassword => "Reset your password",
+            Self::ResetPassword => "Choose a new password",
         }
     }
 
-    fn action(self) -> &'static str {
+    const fn action(self) -> &'static str {
         match self {
-            Screen::SignIn => "/login",
-            Screen::SignUp => "/sign-up",
-            Screen::ForgotPassword => "/forgot-password",
-            Screen::ResetPassword => "/reset-password",
+            Self::SignIn => "/login",
+            Self::SignUp => "/sign-up",
+            Self::ForgotPassword => "/forgot-password",
+            Self::ResetPassword => "/reset-password",
         }
     }
 
-    fn submit(self) -> &'static str {
+    const fn submit(self) -> &'static str {
         match self {
-            Screen::SignIn => "Sign in",
-            Screen::SignUp => "Create account",
-            Screen::ForgotPassword => "Send reset link",
-            Screen::ResetPassword => "Set password",
+            Self::SignIn => "Sign in",
+            Self::SignUp => "Create account",
+            Self::ForgotPassword => "Send reset link",
+            Self::ResetPassword => "Set password",
         }
     }
 
     /// Whether this screen asks for an email address.
-    fn wants_email(self) -> bool {
-        !matches!(self, Screen::ResetPassword)
+    const fn wants_email(self) -> bool {
+        !matches!(self, Self::ResetPassword)
     }
 
     /// Whether this screen asks for a password.
-    fn wants_password(self) -> bool {
-        !matches!(self, Screen::ForgotPassword)
+    const fn wants_password(self) -> bool {
+        !matches!(self, Self::ForgotPassword)
     }
 }
 
 fn render(screen: Screen, return_to: &str, error: Option<&str>) -> String {
-    render_full(screen, return_to, error, "", "", &[])
+    render_full(screen, return_to, error, "", "", &[], None)
 }
 
 /// As [`render`], with the social buttons for the configured providers.
@@ -774,7 +803,7 @@ fn render_page(
     error: Option<&str>,
     providers: &[Provider],
 ) -> String {
-    render_full(screen, return_to, error, "", "", providers)
+    render_full(screen, return_to, error, "", "", providers, None)
 }
 
 /// As [`render`], but carrying the credentials a password reset needs.
@@ -787,7 +816,15 @@ fn render_with_reset(
     reset_email: &str,
     reset_token: &str,
 ) -> String {
-    render_full(screen, return_to, error, reset_email, reset_token, &[])
+    render_full(
+        screen,
+        return_to,
+        error,
+        reset_email,
+        reset_token,
+        &[],
+        None,
+    )
 }
 
 fn render_full(
@@ -797,6 +834,7 @@ fn render_full(
     reset_email: &str,
     reset_token: &str,
     providers: &[Provider],
+    last_login: Option<String>,
 ) -> String {
     let body = dioxus_ssr::render_element(rsx! {
         Page {
@@ -806,6 +844,7 @@ fn render_full(
             reset_email: reset_email.to_owned(),
             reset_token: reset_token.to_owned(),
             providers: providers.to_vec(),
+            last_login,
         }
     });
     format!("<!doctype html>\n<html lang=\"en\">{body}</html>")
@@ -822,7 +861,7 @@ fn Notice(title: String, message: String, return_to: String) -> Element {
             title { "{title}" }
             style { {STYLE} }
         }
-        body {
+        body { class: "auth-card",
             Shell {
                 h1 { "{title}" }
                 p { class: "sub", "{message}" }
@@ -830,45 +869,6 @@ fn Notice(title: String, message: String, return_to: String) -> Element {
                     a { href: "/login?return_to={return_to}", "Go to sign in" }
                 }
             }
-        }
-    }
-}
-
-/// The apps one account opens, each with the colour the studio gives it
-/// on fasttrackstudio.app. The brand panel draws them as a short
-/// spectrum — the site's own motif — with the names beneath.
-const APPS: [(&str, &str); 5] = [
-    ("Task", "#ededf1"),
-    ("Keyflow", "#a78bfa"),
-    ("Signal", "#2fd673"),
-    ("Session", "#2e9bff"),
-    ("Ignition", "#ff8a2b"),
-];
-
-/// The page frame every hosted screen sits in: the brand panel that says
-/// what this account is for, and the working panel beside it. On a
-/// narrow screen the brand panel folds into a short header so the form
-/// is the first thing in reach.
-#[component]
-fn Shell(children: Element) -> Element {
-    rsx! {
-        div { class: "console",
-            aside { class: "brand",
-                a { class: "wordmark", href: "https://fasttrackstudio.app", "FastTrackStudio" }
-                div { class: "pitch",
-                    p { class: "tagline", "One account." }
-                    p { class: "tagline dim", "Every app in the studio." }
-                }
-                ul { class: "apps", aria_label: "Apps this account signs in to",
-                    for (name, color) in APPS {
-                        li { style: "--app: {color}",
-                            i { class: "bar" }
-                            span { "{name}" }
-                        }
-                    }
-                }
-            }
-            main { class: "panel", {children} }
         }
     }
 }
@@ -913,6 +913,7 @@ fn Page(
     reset_email: String,
     reset_token: String,
     providers: Vec<Provider>,
+    last_login: Option<String>,
 ) -> Element {
     rsx! {
         head {
@@ -924,7 +925,11 @@ fn Page(
             title { "{screen.title()} · FastTrackStudio" }
             style { {STYLE} }
         }
-        body {
+        body { class: "auth-card",
+            // The one script in these pages, and only where it is
+            // needed: `navigator.credentials` cannot be reached from a
+            // form. Everything else on this page is still a form post.
+            script { dangerous_inner_html: auth_ui::passkey_script::PASSKEY_SCRIPT }
             Shell {
                 h1 { "{screen.title()}" }
                 p { class: "sub",
@@ -938,6 +943,17 @@ fn Page(
 
                 if let Some(message) = error {
                     p { class: "error", role: "alert", "{message}" }
+                }
+
+                // A sign-in screen with five buttons is a memory test,
+                // and failing it is expensive: somebody who signed up
+                // with Google tries the password form, fails, resets a
+                // password they never had, and ends up with a second
+                // account. This turns that into a glance.
+                if screen == Screen::SignIn && let Some(method) = last_login.as_deref() {
+                    p { class: "hint last-login",
+                        "You last signed in {auth_ui::last_login::describe(method)}."
+                    }
                 }
 
                 // GitHub and Google first, on the two screens that sign
@@ -956,6 +972,14 @@ fn Page(
                     p { class: "or", span { "or with email" } }
                 }
 
+                // Hidden until the script confirms the browser has
+                // `navigator.credentials`, so a browser without it
+                // shows no button rather than a dead one.
+                if screen == Screen::SignIn {
+                    auth_ui::passkeys::SignInButton { return_to: return_to.clone() }
+                    auth_ui::wallet::SignInButton { return_to: return_to.clone() }
+                }
+
                 form { method: "post", action: screen.action(),
                     input { r#type: "hidden", name: "return_to", value: "{return_to}" }
 
@@ -970,12 +994,18 @@ fn Page(
                     }
 
                     if screen.wants_email() {
-                        label { r#for: "email", "Email" }
+                        // `text`, not `email`, on the sign-in screen:
+                        // the field takes a username too, and the
+                        // browser's own validation would refuse one
+                        // before the form was ever submitted.
+                        label { r#for: "email",
+                            if screen == Screen::SignIn { "Email or username" } else { "Email" }
+                        }
                         input {
                             id: "email",
                             name: "email",
-                            r#type: "email",
-                            autocomplete: "email",
+                            r#type: if screen == Screen::SignIn { "text" } else { "email" },
+                            autocomplete: if screen == Screen::SignIn { "username" } else { "email" },
                             required: true,
                             autofocus: true,
                         }
@@ -1021,7 +1051,13 @@ fn Page(
                                     "No account yet? "
                                     a { href: "/sign-up?return_to={return_to}", "Create one" }
                                 }
+                                span {
+                                    a { href: "/login/link?return_to={return_to}", "Email me a link" }
+                                    " · "
+                                    a { href: "/login/code?return_to={return_to}", "Email me a code" }
+                                }
                                 a { class: "quiet", href: "/forgot-password?return_to={return_to}", "Forgot password?" }
+                                auth_ui::guest::GuestButton { return_to: return_to.clone() }
                             },
                             Screen::SignUp => rsx! {
                                 "Already have an account? "
@@ -1043,238 +1079,6 @@ fn Page(
 /// One request, no cache to bust, and nothing to 404 — the page cannot
 /// arrive unstyled because the styles cannot arrive separately. It is
 /// small enough that this costs less than the extra round trip would.
-const STYLE: &str = r#"
-@import url("https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@87.5..112.5,400..700&family=JetBrains+Mono:wght@400;700&display=swap");
-:root {
-  color-scheme: dark;
-  /* fasttrackstudio.app's own tokens */
-  --void: #08080a;
-  --bg: #0a0a0c;
-  --deck: #131318;
-  --surface: #16161c;
-  --raised: #1d1d25;
-  --line: #26262f;
-  --line-strong: #353541;
-  --fg: #ededf1;
-  --muted: #9c9ca8;
-  --subtle: #63636f;
-  --error: #ff8a7a;
-  --ok: #2fd673;
-  --sans: "Archivo", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-* { box-sizing: border-box; }
-html { background: var(--bg); }
-body {
-  margin: 0;
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: 1.25rem;
-  color: var(--fg);
-  font: 15px/1.5 var(--sans);
-  font-variation-settings: "wdth" 100;
-  -webkit-font-smoothing: antialiased;
-}
-.console {
-  width: 100%;
-  max-width: 56rem;
-  display: grid;
-  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
-  background: var(--deck);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  overflow: hidden;
-}
-/* ── Brand panel ─────────────────────────────────────── */
-.brand {
-  display: flex;
-  flex-direction: column;
-  gap: 2.5rem;
-  padding: 2.25rem 2rem;
-  background: var(--void);
-  border-right: 1px solid var(--line);
-}
-.wordmark {
-  align-self: flex-start;
-  margin: 0;
-  color: var(--fg);
-  text-decoration: none;
-  font-weight: 700;
-  font-size: .95rem;
-  letter-spacing: .02em;
-  text-transform: uppercase;
-  font-variation-settings: "wdth" 95;
-}
-.pitch { margin-top: auto; }
-.tagline {
-  margin: 0;
-  font-size: clamp(1.75rem, 3.2vw, 2.25rem);
-  line-height: 1.05;
-  font-weight: 600;
-  letter-spacing: -.02em;
-  font-variation-settings: "wdth" 92;
-}
-.tagline.dim { color: var(--muted); }
-/* the site's spectrum motif: one bar per app, in the app's colour */
-.apps {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: .6rem;
-}
-.apps li {
-  display: grid;
-  gap: .55rem;
-  font: 700 .6rem/1 var(--mono);
-  letter-spacing: .18em;
-  text-transform: uppercase;
-  color: var(--subtle);
-}
-.apps .bar {
-  display: block;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--app);
-  opacity: .9;
-}
-/* ── Working panel ───────────────────────────────────── */
-.panel {
-  padding: 2.25rem 2.25rem 2rem;
-  background: var(--deck);
-}
-h1 {
-  margin: 0 0 .3rem;
-  font-size: 1.6rem;
-  line-height: 1.15;
-  font-weight: 600;
-  letter-spacing: -.015em;
-  font-variation-settings: "wdth" 95;
-}
-h2 {
-  margin: 1.75rem 0 .35rem;
-  font-size: 1rem;
-  font-weight: 600;
-}
-.sub { margin: 0 0 1.5rem; color: var(--muted); }
-.hint { margin: 0 0 1rem; color: var(--muted); font-size: .9rem; }
-label {
-  display: block;
-  margin: 0 0 .35rem;
-  color: var(--muted);
-  font-size: .85rem;
-  font-weight: 500;
-}
-input {
-  width: 100%;
-  margin: 0 0 .9rem;
-  padding: .7rem .8rem;
-  font: inherit;
-  color: var(--fg);
-  background: var(--surface);
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-}
-input:hover { border-color: var(--subtle); }
-input:focus-visible { outline: 2px solid var(--fg); outline-offset: 1px; border-color: var(--fg); }
-button {
-  width: 100%;
-  margin-top: .25rem;
-  padding: .75rem;
-  font: inherit;
-  font-weight: 600;
-  color: var(--void);
-  background: var(--fg);
-  border: 0;
-  border-radius: 8px;
-  cursor: pointer;
-}
-button:hover { background: #fff; }
-button:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
-/* provider buttons: the mark, then the words, centred as one unit */
-.social { display: grid; gap: .6rem; }
-a.button {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: .65rem;
-  padding: .72rem .9rem;
-  text-decoration: none;
-  font-weight: 600;
-  color: var(--fg);
-  background: var(--surface);
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-}
-a.button:hover { background: var(--raised); border-color: var(--subtle); }
-a.button:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
-a.button.small { display: inline-flex; padding: .45rem .8rem; font-size: .875rem; }
-.mark { flex: none; }
-.or {
-  display: flex;
-  align-items: center;
-  gap: .9rem;
-  margin: 1.25rem 0 1.1rem;
-  color: var(--subtle);
-  font-size: .8rem;
-}
-.or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
-.error, .ok {
-  margin: 0 0 1rem;
-  padding: .65rem .8rem;
-  font-size: .9rem;
-  border-radius: 8px;
-  border: 1px solid;
-}
-.error { color: var(--error); border-color: color-mix(in srgb, var(--error) 45%, transparent); }
-.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
-.alt { display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin: 1.5rem 0 0; color: var(--muted); font-size: .9rem; }
-a.quiet { color: var(--muted); }
-a.quiet:hover { color: var(--fg); }
-a { color: var(--fg); text-underline-offset: .15em; }
-a:hover { color: #fff; }
-/* account: linked providers */
-.providers { list-style: none; margin: 0; padding: 0; display: grid; }
-.provider {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: .9rem 0;
-  border-top: 1px solid var(--line);
-}
-.provider:last-child { border-bottom: 1px solid var(--line); }
-.provider-name { display: flex; align-items: center; gap: .8rem; }
-.provider-name strong { display: block; font-weight: 600; }
-.handle { display: block; color: var(--muted); font-size: .85rem; }
-form.inline { display: inline; margin: 0; }
-button.link {
-  width: auto;
-  margin: 0;
-  padding: 0;
-  font-weight: 500;
-  color: var(--muted);
-  background: none;
-  border: 0;
-  cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: .15em;
-}
-button.link:hover { color: var(--fg); background: none; }
-@media (max-width: 52rem) {
-  body { padding: 0; align-items: start; }
-  .console { max-width: none; min-height: 100vh; grid-template-columns: 1fr; border: 0; border-radius: 0; }
-  .brand { gap: 1.25rem; padding: 1.25rem 1.5rem; border-right: 0; border-bottom: 1px solid var(--line); }
-  .pitch { display: none; }
-  .apps { gap: .4rem; }
-  .panel { padding: 1.75rem 1.5rem 2rem; }
-}
-@media (prefers-reduced-motion: no-preference) {
-  a.button, button, input { transition: background-color .15s ease, border-color .15s ease; }
-}
-"#;
 
 #[cfg(test)]
 mod tests {
@@ -1339,20 +1143,7 @@ mod tests {
     }
 
     fn decode(value: &str) -> String {
-        let bytes = value.as_bytes();
-        let mut out = Vec::new();
-        let mut i = 0;
-        while i < bytes.len() {
-            if bytes[i] == b'%' && i + 2 < bytes.len() {
-                let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap();
-                out.push(u8::from_str_radix(hex, 16).unwrap());
-                i += 3;
-            } else {
-                out.push(bytes[i]);
-                i += 1;
-            }
-        }
-        String::from_utf8(out).unwrap()
+        architect_auth::percent::decode(value)
     }
 
     #[test]

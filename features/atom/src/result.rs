@@ -60,16 +60,18 @@ impl<T, E> Default for AtomResult<T, E> {
 impl<T, E> AtomResult<T, E> {
     /// The best value available in any phase (stale-while-revalidate): the
     /// success/reloading value, or a retained stale value on failure.
-    pub fn value(&self) -> Option<&T> {
+    pub const fn value(&self) -> Option<&T> {
         match self {
-            Self::Reloading(v) | Self::Success(v) => Some(v),
-            Self::Error { last: Some(v), .. } | Self::Defect { last: Some(v), .. } => Some(v),
+            Self::Reloading(v)
+            | Self::Success(v)
+            | Self::Error { last: Some(v), .. }
+            | Self::Defect { last: Some(v), .. } => Some(v),
             _ => None,
         }
     }
 
     /// The typed error of the most recent failed request (not a defect).
-    pub fn error(&self) -> Option<&E> {
+    pub const fn error(&self) -> Option<&E> {
         match self {
             Self::Error { error, .. } => Some(error),
             _ => None,
@@ -85,23 +87,23 @@ impl<T, E> AtomResult<T, E> {
     }
 
     /// True while a request is in flight — first load *or* refetch.
-    pub fn is_loading(&self) -> bool {
+    pub const fn is_loading(&self) -> bool {
         matches!(self, Self::Loading | Self::Reloading(_))
     }
 
     /// True if the most recent request succeeded.
-    pub fn is_success(&self) -> bool {
+    pub const fn is_success(&self) -> bool {
         matches!(self, Self::Success(_))
     }
 
     /// True before any request has been made.
-    pub fn is_initial(&self) -> bool {
+    pub const fn is_initial(&self) -> bool {
         matches!(self, Self::Initial)
     }
 
     /// True while *waiting* on a request: no request has settled yet
     /// (`Initial`) or one is in flight (`Loading`/`Reloading`).
-    pub fn is_waiting(&self) -> bool {
+    pub const fn is_waiting(&self) -> bool {
         matches!(self, Self::Initial | Self::Loading | Self::Reloading(_))
     }
 
@@ -117,7 +119,7 @@ impl<T, E> AtomResult<T, E> {
     /// }
     /// ```
     pub fn zip<U>(self, other: AtomResult<U, E>) -> AtomResult<(T, U), E> {
-        use AtomResult::*;
+        use AtomResult::{Defect, Error, Initial, Loading, Reloading, Success};
         // Failures dominate (carrying any stale pair as `last`)…
         let pair_of = |a: Option<T>, b: Option<U>| Some((a?, b?));
         match (self, other) {
@@ -153,7 +155,7 @@ impl<T, E> AtomResult<T, E> {
 
     /// Combine many same-typed results: `Success` only when every input
     /// is. Same precedence as [`zip`](Self::zip).
-    pub fn all(results: impl IntoIterator<Item = AtomResult<T, E>>) -> AtomResult<Vec<T>, E> {
+    pub fn all(results: impl IntoIterator<Item = Self>) -> AtomResult<Vec<T>, E> {
         let mut acc = AtomResult::Success(Vec::new());
         for r in results {
             acc = acc.zip(r).map(|(mut v, t)| {
@@ -224,6 +226,18 @@ impl<T: Clone, E> AtomResult<T, E> {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic,
+    clippy::float_cmp,
+    clippy::string_slice,
+    clippy::significant_drop_tightening,
+    clippy::too_many_lines
+)]
 mod tests {
     use super::*;
 

@@ -1,7 +1,5 @@
 //! Test helpers for downstream architect-auth integration tests.
 
-use chrono::{Duration, Utc};
-
 use crate::{
     ApiKeyBundle, ArchitectAuth, AuthCookieConfig, AuthFlowError, AuthSessionBundle, AuthStorage,
     CreateApiKey, CreateEmailPasswordUser, CreateInvitation, CreateOrganization,
@@ -39,7 +37,7 @@ impl<S> AuthTestHarness<S>
 where
     S: AuthStorage,
 {
-    pub fn new(auth: ArchitectAuth<S>) -> Self {
+    pub const fn new(auth: ArchitectAuth<S>) -> Self {
         Self { auth }
     }
 
@@ -194,18 +192,20 @@ where
                 organization_id,
                 email: email.into(),
                 role: role.into(),
-                expires_at: Utc::now() + Duration::hours(1),
+                expires_at: crate::expiry::expires_in(3_600),
             })
             .await
     }
 }
 
 // r[impl auth.test-utils.cookies]
+#[must_use]
 pub fn session_cookie_header(token: &str, cookie: &AuthCookieConfig) -> String {
     format!("{}={token}", cookie.name)
 }
 
 // r[impl auth.test-utils.cookies]
+#[must_use]
 pub fn bearer_header(token: &str) -> String {
     format!("Bearer {token}")
 }
@@ -240,6 +240,13 @@ pub mod axum {
     use crate::AuthCookieConfig;
 
     // r[impl auth.test-utils.axum]
+    ///
+    /// # Panics
+    ///
+    /// If the token doesn't fit an HTTP header value. This is test
+    /// scaffolding: a header that can't be built is a broken fixture, and
+    /// failing at the call names it immediately.
+    #[allow(clippy::expect_used)]
     pub fn session_headers(token: &str, cookie: &AuthCookieConfig) -> HeaderMap {
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -251,6 +258,12 @@ pub mod axum {
     }
 
     // r[impl auth.test-utils.axum]
+    ///
+    /// # Panics
+    ///
+    /// If the token doesn't fit an HTTP header value — see
+    /// [`session_headers`].
+    #[allow(clippy::expect_used)]
     pub fn bearer_headers(token: &str) -> HeaderMap {
         let mut headers = HeaderMap::new();
         headers.insert(
@@ -273,6 +286,18 @@ pub mod vox {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic,
+    clippy::float_cmp,
+    clippy::string_slice,
+    clippy::significant_drop_tightening,
+    clippy::too_many_lines
+)]
 mod tests {
     use super::*;
 

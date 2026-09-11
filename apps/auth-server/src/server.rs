@@ -40,9 +40,41 @@ pub struct AuthServer {
     pub db: DatabaseConnection,
 }
 
+/// How to connect, given what the URL is.
+///
+/// # In-memory SQLite needs a pool of one
+///
+/// An in-memory SQLite database belongs to its *connection*, not to the
+/// process. With the default pool the migrations run on one connection
+/// and the second request is handed a different one — a database with
+/// no tables in it — so the server boots, reports that it seeded, and
+/// then fails every request with a 500.
+///
+/// It is the obvious URL to reach for on a dev machine and it looked
+/// like it worked, because the first request often reuses the same
+/// connection. Capping the pool at one makes `sqlite::memory:` mean
+/// what everybody assumes it means.
+fn connect_options(database_url: &str) -> sea_orm::ConnectOptions {
+    let mut options = sea_orm::ConnectOptions::new(database_url.to_owned());
+    if is_in_memory(database_url) {
+        options.max_connections(1).min_connections(1);
+    }
+    options
+}
+
+/// Is this a SQLite database that lives only in this connection?
+fn is_in_memory(database_url: &str) -> bool {
+    let url = database_url.trim();
+    url.starts_with("sqlite:")
+        && (url.contains(":memory:") || url.contains("mode=memory"))
+        // `cache=shared` makes one in-memory database visible to every
+        // connection, which is the other way to solve this.
+        && !url.contains("cache=shared")
+}
+
 /// Connect, migrate, and assemble everything from a [`ServerConfig`].
 pub async fn build(config: &ServerConfig) -> eyre::Result<AuthServer> {
-    let db = Database::connect(&config.database_url)
+    let db = Database::connect(connect_options(&config.database_url))
         .await
         .map_err(|error| eyre::eyre!("connect auth database: {error}"))?;
 
@@ -54,7 +86,40 @@ pub async fn build(config: &ServerConfig) -> eyre::Result<AuthServer> {
     }
 
     let auth = build_engine(config, AuthSeaOrmStorage::new(db.clone()))?;
-    let app = app_router(config, auth.clone());
+
+    if let Some(path) = config.import_snapshot.as_deref() {
+        match crate::dev::import_file(&db, &config.database_url, path).await {
+            Ok(summary) => tracing::info!(
+                target: "auth_server::dev",
+                "imported {path}: {summary} — everyone's password is {:?}",
+                crate::dev::DEV_PASSWORD,
+            ),
+            // Booting anyway would serve an empty server the operator
+            // believes is a copy of production.
+            Err(err) => return Err(eyre::eyre!("{err}")),
+        }
+    }
+
+    if config.dev_seed {
+        match crate::dev::seed(&auth, &config.database_url).await {
+            Ok(true) => tracing::info!(
+                target: "auth_server::dev",
+                "seeded the development cast — sign in as {} with {:?}",
+                crate::dev::DEV_PEOPLE[0].0,
+                crate::dev::DEV_PASSWORD,
+            ),
+            Ok(false) => tracing::info!(
+                target: "auth_server::dev",
+                "database already has people in it; not seeding"
+            ),
+            // A refusal here is the local-database guard, and booting
+            // anyway would serve a server the operator thought was
+            // seeded. It is not a warning.
+            Err(err) => return Err(eyre::eyre!("{err}")),
+        }
+    }
+
+    let app = app_router_with_db(config, auth.clone(), db.clone())?;
 
     Ok(AuthServer {
         auth,
@@ -105,10 +170,23 @@ pub fn build_engine<S>(config: &ServerConfig, storage: S) -> eyre::Result<Archit
         }
     }
 
+    // The engine checks the domain line of a signed message against
+    // this, and the UI composes that line from the same value. Two
+    // settings that must agree are two settings that will not, so both
+    // come from `base_url`.
+    builder = builder.siwe_domain(siwe_domain(config));
+
     if let Some(rp_id) = &config.passkey_rp_id {
         builder = builder
             .passkey_rp_id(rp_id.clone())
-            .passkey_allowed_origin(config.base_url.clone());
+            // The origin a browser will report, which is this server's
+            // own public URL. A mismatch here is not a subtle bug: the
+            // browser refuses the ceremony outright.
+            .passkey_allowed_origin(config.base_url.clone())
+            // Shown by the operating system when it asks to create or
+            // use a passkey. Without it the prompt says the domain,
+            // which reads like a warning rather than an invitation.
+            .passkey_rp_name("FastTrackStudio");
     }
 
     for client in &config.oidc_clients {
@@ -121,21 +199,58 @@ pub fn build_engine<S>(config: &ServerConfig, storage: S) -> eyre::Result<Archit
 }
 
 /// The full axum app: vox WebSocket + HTTP surface + health probes.
-pub fn app_router<S>(config: &ServerConfig, auth: ArchitectAuth<S>) -> Router
+///
+/// # Errors
+///
+/// When social providers are configured but their HTTP client cannot be
+/// built. That is a deployment which would send people to GitHub and
+/// never finish, so it refuses to boot rather than serving a sign-in
+/// button that dead-ends. With no provider configured the same failure
+/// is not an error: nothing was going to use the client.
+pub fn app_router<S>(config: &ServerConfig, auth: ArchitectAuth<S>) -> eyre::Result<Router>
 where
     S: architect_auth::AuthStorage + Clone + Send + Sync + 'static,
 {
-    // A provider client that cannot be built is a deployment that will
-    // send people to GitHub and never finish; refusing to boot is kinder
-    // than that. Only reachable when a provider is configured.
     let social = match HttpState::<S>::social_state(config) {
         Ok(social) => social,
         Err(err) if config.social.is_enabled() => {
-            panic!("social providers are configured but the HTTP client failed to build: {err}")
+            return Err(eyre::eyre!(
+                "social providers are configured but the HTTP client failed to build: {err}"
+            ));
         }
         Err(_) => http::SocialState::disabled(),
     };
-    app_router_with_social(config, auth, std::sync::Arc::new(social))
+    Ok(app_router_with_social(
+        config,
+        auth,
+        std::sync::Arc::new(social),
+    ))
+}
+
+/// As [`app_router`], with the database attached so
+/// `GET /admin/snapshot` can read it.
+///
+/// A separate function rather than a parameter on `app_router` because
+/// the snapshot route is the only thing in the server that wants a
+/// database handle rather than the storage trait, and every existing
+/// caller — including every test — should keep getting a router
+/// without it.
+///
+/// # Errors
+///
+/// As [`app_router`].
+pub fn app_router_with_db<S>(
+    config: &ServerConfig,
+    auth: ArchitectAuth<S>,
+    db: sea_orm::DatabaseConnection,
+) -> eyre::Result<Router>
+where
+    S: architect_auth::AuthStorage + Clone + Send + Sync + 'static,
+{
+    let snapshot = Router::new()
+        .route("/admin/snapshot", get(crate::dev::snapshot_route::<S>))
+        .with_state(HttpState::new(auth.clone(), cookie_config(config)).with_db(db));
+    Ok(app_router(config, auth)?.merge(snapshot))
 }
 
 /// As [`app_router`], with the social state supplied — the seam tests
@@ -144,6 +259,26 @@ pub fn app_router_with_social<S>(
     config: &ServerConfig,
     auth: ArchitectAuth<S>,
     social: std::sync::Arc<http::SocialState>,
+) -> Router
+where
+    S: architect_auth::AuthStorage + Clone + Send + Sync + 'static,
+{
+    app_router_with_senders(config, auth, social, None, None)
+}
+
+/// As [`app_router_with_social`], with the senders supplied.
+///
+/// The seam a test needs: a sign-in code, a link and a phone code are
+/// only observable through what was sent, and the router otherwise
+/// builds its own senders from configuration — which in a test is log
+/// mode, where nothing is observable at all. `None` keeps the built-in
+/// behaviour for either one.
+pub fn app_router_with_senders<S>(
+    config: &ServerConfig,
+    auth: ArchitectAuth<S>,
+    social: std::sync::Arc<http::SocialState>,
+    login_mailer: Option<std::sync::Arc<dyn auth_ui::mailer::LoginMailer>>,
+    sms: Option<std::sync::Arc<dyn auth_ui::mailer::SmsSender>>,
 ) -> Router
 where
     S: architect_auth::AuthStorage + Clone + Send + Sync + 'static,
@@ -168,13 +303,13 @@ where
         }
         Err(err) => {
             tracing::error!(target: "auth_server::mail", %err, "mailer failed to build; falling back to log mode");
-            crate::mail::Mailer::new(crate::mail::MailConfig {
-                host: None,
-                ..config.mail.clone()
-            })
-            .expect("a mailer with no host cannot fail to build")
+            crate::mail::Mailer::log_only(config.mail.clone())
         }
     });
+    // The same mailer, seen through the trait `auth-ui`'s sign-in pages
+    // use. One `Mailer`, two views of it — not two mailers.
+    let mail_for_ui: std::sync::Arc<dyn auth_ui::mailer::LoginMailer> =
+        login_mailer.unwrap_or_else(|| mail.clone());
     // Mounted through the dispatcher rather than the plain
     // `auth_service_layer`, so `AuthServerMiddleware` parses the
     // `authorization` metadata entry off each call before the service
@@ -212,9 +347,21 @@ where
         // so an embedder that already has its own login screen can take
         // `http::router` alone — see `ui::router`.
         .merge(ui::router(
-            HttpState::new(auth, cookie)
+            HttpState::new(auth.clone(), cookie.clone())
                 .with_mailer(mail)
                 .with_social(social),
+        ))
+        // Account, organization and invitation pages. These live in
+        // `auth-ui` rather than here because they are the same pages for
+        // every deployment — a product wanting an org switcher should
+        // mount them, not reimplement them.
+        .merge(auth_ui::router(
+            auth_ui::UiState::new(auth, cookie)
+                .issuer("FastTrackStudio")
+                .base_url(config.base_url.clone())
+                .siwe_domain(siwe_domain(config))
+                .mailer(mail_for_ui)
+                .sms(sms.unwrap_or_else(auth_ui::mailer::log_only_sms)),
         ))
         .layer(cors_layer(config))
         .layer(TraceLayer::new_for_http())
@@ -225,7 +372,25 @@ where
 /// `secure` follows the scheme: a `Secure` cookie is silently dropped
 /// over plain HTTP, which would make local development mysteriously
 /// fail to stay signed in.
-fn cookie_config(config: &ServerConfig) -> AuthCookieConfig {
+/// The host a wallet signature is bound to.
+///
+/// Derived from `base_url` rather than configured separately: it has to
+/// be the host a browser reports, and two settings that must agree are
+/// two settings that will not.
+fn siwe_domain(config: &ServerConfig) -> String {
+    config
+        .base_url
+        .split("://")
+        .nth(1)
+        .unwrap_or(&config.base_url)
+        .split('/')
+        .next()
+        .unwrap_or_default()
+        .to_owned()
+}
+
+#[must_use]
+pub fn cookie_config(config: &ServerConfig) -> AuthCookieConfig {
     AuthCookieConfig {
         secure: config.base_url.starts_with("https://"),
         max_age_seconds: Some(config.session_ttl_seconds),
@@ -270,4 +435,29 @@ pub async fn serve(server: AuthServer) -> eyre::Result<()> {
     axum::serve(listener, server.app)
         .await
         .map_err(|error| eyre::eyre!("serve: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_in_memory;
+
+    #[test]
+    fn an_in_memory_sqlite_url_is_recognised() {
+        // Each of these gives every connection its own empty database,
+        // which is a server that boots and then 500s on every request.
+        assert!(is_in_memory("sqlite::memory:"));
+        assert!(is_in_memory("sqlite://:memory:"));
+        assert!(is_in_memory("sqlite:file:x?mode=memory"));
+    }
+
+    #[test]
+    fn a_shared_cache_url_solves_it_the_other_way() {
+        assert!(!is_in_memory("sqlite:file:x?mode=memory&cache=shared"));
+    }
+
+    #[test]
+    fn a_real_database_is_left_alone() {
+        assert!(!is_in_memory("sqlite://./auth.db?mode=rwc"));
+        assert!(!is_in_memory("postgres://auth@db/auth"));
+    }
 }

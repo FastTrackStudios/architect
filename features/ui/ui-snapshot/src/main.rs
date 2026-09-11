@@ -4,6 +4,11 @@
 //!   ui-snapshot check        # render all scenes, fail on pixel diff
 //!   ui-snapshot update       # regenerate + overwrite reference PNGs
 //!   ui-snapshot render <name>  # render a single scene to target/ui-snapshots/
+// This binary is the snapshot dev tool (`update` / `render` / `check`).
+// Its failure modes are "the output directory is unwritable" and "the
+// PNG encoder rejected our own buffer" — operator errors that must stop
+// the run loudly, not be threaded through a `Result` nobody reads.
+#![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::fs;
 use std::io::Write;
@@ -165,7 +170,7 @@ fn diff_png(actual: &Path, reference: &Path, tolerance: f32) -> Result<usize, St
         block_out_areas: None,
     };
     match dify::diff::run(&params) {
-        Ok(Some(n)) if n > 0 => Ok(n as usize),
+        Ok(Some(n)) if n > 0 => Ok(usize::try_from(n).unwrap_or(usize::MAX)),
         Ok(_) => Ok(0),
         Err(e) => Err(format!("{e:?}")),
     }
@@ -173,6 +178,6 @@ fn diff_png(actual: &Path, reference: &Path, tolerance: f32) -> Result<usize, St
 
 // Silence dead-code warnings for the struct re-exported from the lib.
 #[allow(dead_code)]
-fn _unused(scene: &Scene) -> u32 {
+const fn _unused(scene: &Scene) -> u32 {
     scene.width
 }

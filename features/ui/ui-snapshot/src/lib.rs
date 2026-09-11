@@ -12,7 +12,7 @@ use blitz_paint::paint_scene;
 use blitz_traits::shell::{ColorScheme, Viewport};
 use dioxus::prelude::*;
 use dioxus_native::DioxusDocument;
-use kurbo::Rect;
+use kurbo::{Affine, Rect};
 use peniko::{Color as PColor, Fill};
 
 pub mod scenes;
@@ -83,10 +83,10 @@ pub fn render_scene(scene: &Scene) -> Vec<u8> {
         |canvas| {
             canvas.fill(
                 Fill::NonZero,
-                Default::default(),
+                Affine::IDENTITY,
                 bg,
-                Default::default(),
-                &Rect::new(0.0, 0.0, width as f64, height as f64),
+                Option::<Affine>::None,
+                &Rect::new(0.0, 0.0, f64::from(width), f64::from(height)),
             );
             paint_scene(canvas, &mut doc.inner_mut(), 1.0, width, height, 0, 0);
         },
@@ -96,13 +96,28 @@ pub fn render_scene(scene: &Scene) -> Vec<u8> {
 }
 
 /// Sample one RGBA pixel out of a tightly-packed RGBA8 buffer.
+///
+/// Returns transparent black for a pixel outside the buffer — a probe
+/// past the edge is a mis-specified test, not a reason to abort the
+/// whole snapshot run.
+#[must_use]
 pub fn sample_pixel(buffer: &[u8], width: u32, x: u32, y: u32) -> [u8; 4] {
-    let idx = ((y * width + x) * 4) as usize;
+    let Some(idx) = usize::try_from(y)
+        .ok()
+        .and_then(|y| y.checked_mul(usize::try_from(width).ok()?))
+        .and_then(|row| row.checked_add(usize::try_from(x).ok()?))
+        .and_then(|i| i.checked_mul(4))
+    else {
+        return [0, 0, 0, 0];
+    };
+    let Some(px) = buffer.get(idx..idx.saturating_add(4)) else {
+        return [0, 0, 0, 0];
+    };
     [
-        buffer[idx],
-        buffer[idx + 1],
-        buffer[idx + 2],
-        buffer[idx + 3],
+        px.first().copied().unwrap_or(0),
+        px.get(1).copied().unwrap_or(0),
+        px.get(2).copied().unwrap_or(0),
+        px.get(3).copied().unwrap_or(0),
     ]
 }
 

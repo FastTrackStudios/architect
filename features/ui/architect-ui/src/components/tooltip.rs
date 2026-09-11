@@ -15,7 +15,7 @@ use dioxus_primitives::{
 // ---------------------------------------------------------------------------
 
 /// Which side the tooltip content appears on relative to the trigger.
-#[derive(Clone, Copy, PartialEq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum TooltipSide {
     #[default]
     Top,
@@ -25,7 +25,7 @@ pub enum TooltipSide {
 }
 
 impl TooltipSide {
-    fn primitive_side(self) -> ContentSide {
+    const fn primitive_side(self) -> ContentSide {
         match self {
             Self::Top => ContentSide::Top,
             Self::Bottom => ContentSide::Bottom,
@@ -34,7 +34,7 @@ impl TooltipSide {
         }
     }
 
-    fn position_class(self, align: ContentAlign) -> &'static str {
+    const fn position_class(self, align: ContentAlign) -> &'static str {
         match (self, align) {
             (Self::Top, ContentAlign::Start) => "bottom-full left-0 mb-2",
             (Self::Top, ContentAlign::Center) => "bottom-full left-1/2 -translate-x-1/2 mb-2",

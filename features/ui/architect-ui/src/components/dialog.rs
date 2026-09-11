@@ -172,7 +172,7 @@ pub fn dialog_default() -> Element {
             }
             Dialog {
                 open: open(),
-                on_close: move |_| open.set(false),
+                on_close: move |()| open.set(false),
                 DialogHeader {
                     DialogTitle { "Confirm action" }
                     DialogDescription { "This is a forced-open dialog used for snapshot testing." }

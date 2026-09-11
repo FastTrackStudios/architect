@@ -1,4 +1,4 @@
-//! ColorPicker — primitive-backed HSV picker with styled area + hue slider.
+//! `ColorPicker` — primitive-backed HSV picker with styled area + hue slider.
 //!
 //! Wraps `dioxus_primitives::color_picker` with FTS tokens. The primitive
 //! controls saturation/value via `ColorArea`; this wrapper pairs it with
@@ -20,6 +20,7 @@ pub use dioxus_primitives::color_picker::Color;
 // ── Hsv helpers ──────────────────────────────────────────────────────────────
 
 /// Convenience constructor: HSV in degrees / 0..1 / 0..1.
+#[must_use]
 pub fn hsv(h: f64, s: f64, v: f64) -> Hsv<encoding::Srgb, f64> {
     Hsv::<encoding::Srgb, f64>::new(RgbHue::new(h), s, v)
 }
@@ -34,7 +35,7 @@ fn with_hue(c: Hsv<encoding::Srgb, f64>, h: f64) -> Hsv<encoding::Srgb, f64> {
 
 // ── ColorPicker ──────────────────────────────────────────────────────────────
 
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone, PartialEq, Eq)]
 pub struct ColorPickerProps {
     /// HSV color (two-way bound). Use `hsv(h, s, v)` to construct.
     pub value: Signal<Hsv<encoding::Srgb, f64>>,

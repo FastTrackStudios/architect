@@ -215,6 +215,8 @@ fn infer_kind(ty: &Type) -> InferredKind {
     }
 }
 
+// By value: `syn` hands the parsed item over; the emitter consumes it.
+#[allow(clippy::needless_pass_by_value)]
 fn story_impl(args: TokenStream2, item_fn: ItemFn) -> TokenStream2 {
     let args = match parse_story_args(args) {
         Ok(a) => a,
@@ -234,7 +236,7 @@ fn story_impl(args: TokenStream2, item_fn: ItemFn) -> TokenStream2 {
     }
 
     let mut knobs: Vec<ParsedKnob> = Vec::with_capacity(item_fn.sig.inputs.len());
-    for arg in item_fn.sig.inputs.iter() {
+    for arg in &item_fn.sig.inputs {
         match parse_knob(arg, &args.knob_defaults) {
             Ok(k) => knobs.push(k),
             Err(e) => return e.to_compile_error(),
@@ -252,10 +254,10 @@ fn story_impl(args: TokenStream2, item_fn: ItemFn) -> TokenStream2 {
     let thunk_ident = format_ident!("__{upper}_STORY_THUNK");
     let reg_ident = format_ident!("__{upper}_STORY_REG");
 
-    let category_expr = match args.category {
-        Some(s) => quote! { ::core::option::Option::Some(#s) },
-        None => quote! { ::core::option::Option::None },
-    };
+    let category_expr = args.category.map_or_else(
+        || quote! { ::core::option::Option::None },
+        |s| quote! { ::core::option::Option::Some(#s) },
+    );
 
     let knob_specs = knobs.iter().map(|k| {
         let name = k.name.to_string();

@@ -5,6 +5,21 @@
 //! emits. A mismatch between the two is invisible to both crates'
 //! own test suites, and would only show up in a browser.
 
+// This is an integration-test crate. `clippy.toml`'s
+// `allow-*-in-tests` only reaches `#[test]` fns and `#[cfg(test)]`
+// modules, so the fixture and helper code below — where an `unwrap()`
+// IS the assertion — still trips the panic lints. Allow them
+// crate-wide here rather than dotting the file with attributes.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::panic
+)]
+
 use std::sync::Arc;
 
 use architect_auth::db::{AuthSeaOrmStorage, Migrator};
@@ -24,34 +39,15 @@ async fn spawn_server() -> String {
     let config = ServerConfig {
         bind_addr: "127.0.0.1:0".into(),
         database_url: "sqlite::memory:".into(),
-        secret: "a-secret-at-least-32-bytes-long!!".into(),
-        // http, so the cookie is not marked Secure — irrelevant here
-        // (this client uses bearer tokens) but it keeps the server's
-        // own logging honest about what it is serving.
         base_url: "http://127.0.0.1".into(),
-        oidc_issuer: None,
         session_ttl_seconds: 3600,
-        require_email_verification: false,
-        passkey_rp_id: None,
-        cors_origins: Vec::new(),
-        oidc_clients: Vec::new(),
-        oidc_allow_dynamic_client_registration: false,
+        // This test migrates the database itself, above.
         run_migrations: false,
-        // Log-only mail and no social providers: neither is exercised
-        // by the round trip, and both must be stated to build a config.
-        mail: auth_server::mail::MailConfig {
-            host: None,
-            port: 587,
-            username: None,
-            password: None,
-            from: "noreply@example.com".into(),
-            base_url: "http://127.0.0.1".into(),
-        },
-        social: auth_server::SocialConfig::disabled(),
+        ..ServerConfig::local()
     };
 
     let auth = server::build_engine(&config, AuthSeaOrmStorage::new(db)).expect("build engine");
-    let app = server::app_router(&config, auth);
+    let app = server::app_router(&config, auth).expect("router builds with no social providers");
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await

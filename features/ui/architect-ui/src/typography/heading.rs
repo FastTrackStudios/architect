@@ -4,7 +4,7 @@ use architect_story_runtime::story;
 use dioxus::prelude::*;
 
 /// Heading level.
-#[derive(Clone, Copy, PartialEq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum HeadingLevel {
     H1,
     H2,
@@ -16,7 +16,7 @@ pub enum HeadingLevel {
 }
 
 impl HeadingLevel {
-    fn classes(self) -> &'static str {
+    const fn classes(self) -> &'static str {
         match self {
             Self::H1 => "scroll-m-20 text-4xl font-extrabold tracking-tight lg:text-5xl",
             Self::H2 => "scroll-m-20 text-3xl font-semibold tracking-tight",

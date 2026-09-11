@@ -68,61 +68,73 @@ impl<T> DataTableColumn<T> {
         }
     }
 
-    pub fn sortable(mut self, sortable: bool) -> Self {
+    #[must_use]
+    pub const fn sortable(mut self, sortable: bool) -> Self {
         self.sortable = sortable;
         self
     }
 
+    #[must_use]
     pub fn sort_value(mut self, sort_value: fn(&T) -> DataTableSortValue) -> Self {
         self.sort_value = Some(sort_value);
         self
     }
 
-    pub fn filterable(mut self, filterable: bool) -> Self {
+    #[must_use]
+    pub const fn filterable(mut self, filterable: bool) -> Self {
         self.filterable = filterable;
         self
     }
 
+    #[must_use]
     pub fn filter(mut self, filter: fn(&T, &str) -> bool) -> Self {
         self.filter = Some(filter);
         self
     }
 
+    #[must_use]
     pub fn cell(mut self, cell: fn(&T) -> Element) -> Self {
         self.cell = Some(cell);
         self
     }
 
+    #[must_use]
     pub fn header_render(mut self, header_render: fn(DataTableHeaderContext) -> Element) -> Self {
         self.header_render = Some(header_render);
         self
     }
 
+    #[must_use]
     pub fn cell_render(mut self, cell_render: fn(DataTableCellContext<T>) -> Element) -> Self {
         self.cell_render = Some(cell_render);
         self
     }
 
-    pub fn hideable(mut self, hideable: bool) -> Self {
+    #[must_use]
+    pub const fn hideable(mut self, hideable: bool) -> Self {
         self.hideable = hideable;
         self
     }
 
-    pub fn class(mut self, class: &'static str) -> Self {
+    #[must_use]
+    pub const fn class(mut self, class: &'static str) -> Self {
         self.class = class;
         self
     }
 
-    pub fn head_class(mut self, class: &'static str) -> Self {
+    #[must_use]
+    pub const fn head_class(mut self, class: &'static str) -> Self {
         self.head_class = class;
         self
     }
 
-    pub fn cell_class(mut self, class: &'static str) -> Self {
+    #[must_use]
+    pub const fn cell_class(mut self, class: &'static str) -> Self {
         self.cell_class = class;
         self
     }
 
+    #[must_use]
     pub fn dynamic_head_class(
         mut self,
         dynamic_head_class: fn(DataTableHeaderContext) -> String,
@@ -131,6 +143,7 @@ impl<T> DataTableColumn<T> {
         self
     }
 
+    #[must_use]
     pub fn dynamic_cell_class(
         mut self,
         dynamic_cell_class: fn(DataTableCellContext<T>) -> String,
@@ -147,7 +160,7 @@ pub struct DataTableHeaderContext {
     pub sorted: Option<DataTableSortDirection>,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct DataTableCellContext<T> {
     pub row_id: String,
     pub row: T,
@@ -156,7 +169,7 @@ pub struct DataTableCellContext<T> {
     pub selected: bool,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct DataTableRowContext<T> {
     pub row_id: String,
     pub row: T,
@@ -301,38 +314,44 @@ fn default_row_id<T>(_row: &T, index: usize) -> String {
 }
 
 impl<T> DataTableOptions<T> {
+    #[must_use]
     pub fn get_row_id(mut self, get_row_id: fn(&T, usize) -> String) -> Self {
         self.get_row_id = get_row_id;
         self
     }
 
+    #[must_use]
     pub fn row_class(mut self, row_class: fn(DataTableRowContext<T>) -> String) -> Self {
         self.row_class = Some(row_class);
         self
     }
 
-    pub fn manual_filtering(mut self, manual_filtering: bool) -> Self {
+    #[must_use]
+    pub const fn manual_filtering(mut self, manual_filtering: bool) -> Self {
         self.manual_filtering = manual_filtering;
         self
     }
 
-    pub fn manual_sorting(mut self, manual_sorting: bool) -> Self {
+    #[must_use]
+    pub const fn manual_sorting(mut self, manual_sorting: bool) -> Self {
         self.manual_sorting = manual_sorting;
         self
     }
 
-    pub fn manual_pagination(mut self, manual_pagination: bool) -> Self {
+    #[must_use]
+    pub const fn manual_pagination(mut self, manual_pagination: bool) -> Self {
         self.manual_pagination = manual_pagination;
         self
     }
 
-    pub fn total_rows(mut self, total_rows: usize) -> Self {
+    #[must_use]
+    pub const fn total_rows(mut self, total_rows: usize) -> Self {
         self.total_rows = Some(total_rows);
         self
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct DataTableRow<T> {
     pub id: String,
     pub original: T,
@@ -340,11 +359,13 @@ pub struct DataTableRow<T> {
 }
 
 impl<T: Clone> DataTableModel<T> {
+    #[must_use]
     pub fn new(rows: Vec<T>, columns: Vec<DataTableColumn<T>>, state: DataTableState) -> Self {
         Self::with_options(rows, columns, state, DataTableOptions::default())
     }
 
-    pub fn with_options(
+    #[must_use]
+    pub const fn with_options(
         rows: Vec<T>,
         columns: Vec<DataTableColumn<T>>,
         state: DataTableState,
@@ -358,6 +379,7 @@ impl<T: Clone> DataTableModel<T> {
         }
     }
 
+    #[must_use]
     pub fn visible_columns(&self) -> Vec<&DataTableColumn<T>> {
         self.columns
             .iter()
@@ -371,6 +393,7 @@ impl<T: Clone> DataTableModel<T> {
             .collect()
     }
 
+    #[must_use]
     pub fn row_model(&self) -> Vec<T> {
         self.resolved_rows()
             .into_iter()
@@ -378,6 +401,7 @@ impl<T: Clone> DataTableModel<T> {
             .collect()
     }
 
+    #[must_use]
     pub fn resolved_rows(&self) -> Vec<DataTableRow<T>> {
         let global_filter = self.state.global_filter.trim().to_lowercase();
         let mut rows = self
@@ -407,10 +431,9 @@ impl<T: Clone> DataTableModel<T> {
                         self.columns
                             .iter()
                             .find(|column| column.id == column_id && column.filterable)
-                            .map(|column| {
+                            .map_or(true, |column| {
                                 column_matches_filter(column, row, &filter.to_lowercase())
                             })
-                            .unwrap_or(true)
                     });
 
                 global_matches && column_matches
@@ -447,6 +470,7 @@ impl<T: Clone> DataTableModel<T> {
         rows
     }
 
+    #[must_use]
     pub fn page_count(&self) -> usize {
         let page_size = self.state.page_size.max(1);
         let total = self
@@ -456,6 +480,7 @@ impl<T: Clone> DataTableModel<T> {
         total.div_ceil(page_size)
     }
 
+    #[must_use]
     pub fn page_rows(&self) -> Vec<T> {
         self.page_row_model()
             .into_iter()
@@ -463,6 +488,7 @@ impl<T: Clone> DataTableModel<T> {
             .collect()
     }
 
+    #[must_use]
     pub fn page_row_model(&self) -> Vec<DataTableRow<T>> {
         let rows = self.resolved_rows();
         if self.options.manual_pagination {
@@ -474,6 +500,7 @@ impl<T: Clone> DataTableModel<T> {
         rows.into_iter().skip(start).take(page_size).collect()
     }
 
+    #[must_use]
     pub fn selected_rows(&self) -> Vec<DataTableRow<T>> {
         self.resolved_rows()
             .into_iter()
@@ -481,25 +508,24 @@ impl<T: Clone> DataTableModel<T> {
             .collect()
     }
 
+    #[must_use]
     pub fn selected_count(&self) -> usize {
         self.state.row_selection.len()
     }
 }
 
 fn column_matches_filter<T>(column: &DataTableColumn<T>, row: &T, filter: &str) -> bool {
-    if let Some(filter_fn) = column.filter {
-        filter_fn(row, filter)
-    } else {
-        (column.accessor)(row).to_lowercase().contains(filter)
-    }
+    column.filter.map_or_else(
+        || (column.accessor)(row).to_lowercase().contains(filter),
+        |filter_fn| filter_fn(row, filter),
+    )
 }
 
 fn sort_value<T>(column: &DataTableColumn<T>, row: &T) -> DataTableSortValue {
-    if let Some(sort_value) = column.sort_value {
-        sort_value(row)
-    } else {
-        DataTableSortValue::Text((column.accessor)(row))
-    }
+    column.sort_value.map_or_else(
+        || DataTableSortValue::Text((column.accessor)(row)),
+        |sort_value| sort_value(row),
+    )
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -534,6 +560,7 @@ pub fn use_data_table_with_options<T: Clone + PartialEq + 'static>(
 }
 
 impl<T: Clone + PartialEq + 'static> DataTableApi<T> {
+    #[must_use]
     pub fn state(&self) -> DataTableState {
         (self.state)()
     }
@@ -545,6 +572,7 @@ impl<T: Clone + PartialEq + 'static> DataTableApi<T> {
         }
     }
 
+    #[must_use]
     pub fn model(&self) -> DataTableModel<T> {
         DataTableModel::with_options(
             (self.rows)(),
@@ -554,7 +582,8 @@ impl<T: Clone + PartialEq + 'static> DataTableApi<T> {
         )
     }
 
-    pub fn with_on_state_change(mut self, on_state_change: Callback<DataTableState>) -> Self {
+    #[must_use]
+    pub const fn with_on_state_change(mut self, on_state_change: Callback<DataTableState>) -> Self {
         self.on_state_change = Some(on_state_change);
         self
     }
@@ -595,8 +624,8 @@ impl<T: Clone + PartialEq + 'static> DataTableApi<T> {
     pub fn next_page(&mut self) {
         let page_count = self.model().page_count();
         self.update_state(|state| {
-            if state.page_index + 1 < page_count {
-                state.page_index += 1;
+            if state.page_index.saturating_add(1) < page_count {
+                state.page_index = state.page_index.saturating_add(1);
             }
         });
     }
@@ -680,16 +709,19 @@ impl<T: Clone + PartialEq + 'static> DataTableApi<T> {
         });
     }
 
+    #[must_use]
     pub fn all_page_rows_selected(&self) -> bool {
         let rows = self.model().page_row_model();
         !rows.is_empty() && rows.iter().all(|row| row.selected)
     }
 
+    #[must_use]
     pub fn some_page_rows_selected(&self) -> bool {
         let rows = self.model().page_row_model();
         rows.iter().any(|row| row.selected) && !rows.iter().all(|row| row.selected)
     }
 
+    #[must_use]
     pub fn selected_count(&self) -> usize {
         self.state().row_selection.len()
     }
@@ -734,7 +766,7 @@ pub struct DataTablePaginationProps {
 #[component]
 pub fn DataTablePagination(props: DataTablePaginationProps) -> Element {
     let can_previous = props.page_index > 0;
-    let can_next = props.page_index + 1 < props.page_count;
+    let can_next = props.page_index.saturating_add(1) < props.page_count;
 
     rsx! {
         div {
@@ -775,7 +807,7 @@ pub fn DataTableView<T: Clone + PartialEq + 'static>(props: DataTableViewProps<T
     let model = props.table.model();
     let columns = model.visible_columns();
     let rows = model.page_row_model();
-    let total_columns = columns.len() + usize::from(props.selectable);
+    let total_columns = columns.len().saturating_add(usize::from(props.selectable));
 
     rsx! {
         div {
@@ -799,7 +831,7 @@ pub fn DataTableView<T: Clone + PartialEq + 'static>(props: DataTableViewProps<T
                                     }
                                 }
                             }
-                            for column in columns.iter().cloned().cloned() {
+                            for column in columns.iter().copied().cloned() {
                                 DataTableHeaderCell {
                                     key: "{column.id}",
                                     table: props.table.clone(),
@@ -823,7 +855,7 @@ pub fn DataTableView<T: Clone + PartialEq + 'static>(props: DataTableViewProps<T
                                 DataTableBodyRow {
                                     key: "{row.id}",
                                     table: props.table.clone(),
-                                    columns: columns.iter().cloned().cloned().collect::<Vec<_>>(),
+                                    columns: columns.iter().copied().cloned().collect::<Vec<_>>(),
                                     row,
                                     row_class: model.options.row_class,
                                     selectable: props.selectable,
@@ -871,7 +903,7 @@ fn DataTableHeaderCell<T: Clone + PartialEq + 'static>(
                         move |_| table.toggle_sort(column_id)
                     },
                     if let Some(header_render) = props.column.header_render {
-                        {header_render(context.clone())}
+                        {header_render(context)}
                     } else {
                         "{props.column.header}"
                     }
@@ -967,7 +999,7 @@ fn DataTableBodyCell<T: Clone + PartialEq + 'static>(props: DataTableBodyCellPro
                 dynamic_class.as_str(),
             ]),
             if let Some(cell_render) = props.column.cell_render {
-                {cell_render(context.clone())}
+                {cell_render(context)}
             } else if let Some(cell) = props.column.cell {
                 {cell(&props.row.original)}
             } else {
@@ -1186,11 +1218,10 @@ fn sort_indicator(state: &DataTableState, column_id: &str) -> &'static str {
         .sorting
         .iter()
         .find(|sort| sort.column_id == column_id)
-        .map(|sort| match sort.direction {
+        .map_or("Sort", |sort| match sort.direction {
             DataTableSortDirection::Asc => "Asc",
             DataTableSortDirection::Desc => "Desc",
         })
-        .unwrap_or("Sort")
 }
 
 #[derive(Clone, PartialEq)]
@@ -1255,7 +1286,7 @@ fn data_table_story_columns() -> Vec<DataTableColumn<DataTableStoryTask>> {
     ]
 }
 
-/// Default DataTable story with toolbar, view, and footer wiring.
+/// Default `DataTable` story with toolbar, view, and footer wiring.
 #[story(category = "DataTable", name = "default")]
 pub fn data_table_default() -> Element {
     let rows = use_signal(data_table_story_tasks);

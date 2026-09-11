@@ -100,20 +100,30 @@ pub fn Calendar(props: CalendarProps) -> Element {
     }
 }
 
+/// `chrono` → `time`, falling back to the Unix epoch.
+///
+/// Every `NaiveDate` is representable as a `time::Date`, so the fallback
+/// is unreachable — but a date picker returning the epoch beats a date
+/// picker that panics the whole page.
 fn chrono_to_time(date: NaiveDate) -> Date {
-    chrono_to_time_checked(date).expect("chrono NaiveDate should convert to time Date")
+    chrono_to_time_checked(date)
+        .unwrap_or_else(|| Date::from_ordinal_date(1970, 1).unwrap_or(Date::MIN))
 }
 
 fn chrono_to_time_checked(date: NaiveDate) -> Option<Date> {
-    let month = Month::try_from(date.month() as u8).ok()?;
-    Date::from_calendar_date(date.year(), month, date.day() as u8).ok()
+    let month = Month::try_from(u8::try_from(date.month()).ok()?).ok()?;
+    Date::from_calendar_date(date.year(), month, u8::try_from(date.day()).ok()?).ok()
 }
 
 fn time_to_chrono_checked(date: Date) -> Option<NaiveDate> {
-    NaiveDate::from_ymd_opt(date.year(), date.month() as u32, date.day() as u32)
+    NaiveDate::from_ymd_opt(
+        date.year(),
+        u32::from(u8::from(date.month())),
+        u32::from(date.day()),
+    )
 }
 
-fn weekday_abbreviation(weekday: Weekday) -> &'static str {
+const fn weekday_abbreviation(weekday: Weekday) -> &'static str {
     match weekday {
         Weekday::Monday => "Mon",
         Weekday::Tuesday => "Tue",
@@ -125,7 +135,7 @@ fn weekday_abbreviation(weekday: Weekday) -> &'static str {
     }
 }
 
-fn month_name(month: Month) -> &'static str {
+const fn month_name(month: Month) -> &'static str {
     match month {
         Month::January => "January",
         Month::February => "February",

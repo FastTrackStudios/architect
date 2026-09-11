@@ -6,7 +6,7 @@ use architect_story_runtime::story;
 use dioxus::prelude::*;
 
 /// Size variants for the section header.
-#[derive(Clone, Copy, PartialEq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum SectionHeaderSize {
     /// Tiny — `text-[8px]` with wide tracking. Used inside dropdowns/pickers.
     Small,
@@ -16,7 +16,7 @@ pub enum SectionHeaderSize {
 }
 
 impl SectionHeaderSize {
-    fn classes(self) -> &'static str {
+    const fn classes(self) -> &'static str {
         match self {
             Self::Small => "text-[8px] font-semibold uppercase tracking-[0.2em]",
             Self::Medium => "text-sm font-medium uppercase tracking-wider",

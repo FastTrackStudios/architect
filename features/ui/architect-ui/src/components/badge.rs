@@ -4,7 +4,7 @@ use architect_story_runtime::story;
 use dioxus::prelude::*;
 
 /// Visual variant for the badge.
-#[derive(Clone, Copy, PartialEq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum BadgeVariant {
     #[default]
     Default,
@@ -16,7 +16,7 @@ pub enum BadgeVariant {
 
 impl BadgeVariant {
     // shadcn v4 maia: cn-badge-variant-*
-    fn classes(self) -> &'static str {
+    const fn classes(self) -> &'static str {
         match self {
             Self::Default => "bg-primary text-primary-foreground",
             Self::Secondary => "bg-secondary text-secondary-foreground",

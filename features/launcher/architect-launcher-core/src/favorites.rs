@@ -15,6 +15,7 @@ pub struct Favorites {
 }
 
 impl Favorites {
+    #[must_use]
     pub fn load(path: &PathBuf) -> Self {
         std::fs::read_to_string(path)
             .ok()
@@ -49,19 +50,23 @@ impl Favorites {
         }
     }
 
+    #[must_use]
     pub fn is_favorite(&self, item_id: &str) -> bool {
         self.items.contains(item_id)
     }
 
-    pub fn all(&self) -> &HashSet<String> {
+    #[must_use]
+    pub const fn all(&self) -> &HashSet<String> {
         &self.items
     }
 
+    #[must_use]
     pub fn count(&self) -> usize {
         self.items.len()
     }
 
     /// Score boost for favorites. Applied on top of match + history score.
+    #[must_use]
     pub fn score_boost(&self, item_id: &str) -> f64 {
         if self.items.contains(item_id) {
             500.0
@@ -72,11 +77,12 @@ impl Favorites {
 }
 
 pub fn default_favorites_path() -> PathBuf {
-    let base = std::env::var("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
+    let base = std::env::var("XDG_DATA_HOME").map_or_else(
+        |_| {
             let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
             PathBuf::from(home).join(".local/share")
-        });
+        },
+        PathBuf::from,
+    );
     base.join("dioxus-launcher").join("favorites.json")
 }

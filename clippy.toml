@@ -1,0 +1,11 @@
+# Panic-lint test escape hatch. The `deny`-level panic lints in
+# `[workspace.lints.clippy]` (unwrap_used, expect_used, indexing_slicing,
+# panic) are about *shipped* code: a library that panics takes the host
+# down with it — a REAPER extension, an audio thread, a server handler.
+#
+# Tests are the one place fast prototyping belongs, so panicking there is
+# allowed: `unwrap()` in a test IS the assertion.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true

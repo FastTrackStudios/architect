@@ -63,6 +63,13 @@ pub struct StoreData<T: StoreEntity, E = String> {
     /// [`use_store_list`] / [`use_store_entry`] and invoked by
     /// [`Store::reload`]. `None` until the first fetch hook mounts.
     reloader: Option<Callback<()>>,
+    /// Set once a live event stream is folding into this store.
+    ///
+    /// A store without one is a *cache*: it shows what the last fetch
+    /// returned, and goes stale the moment anyone else writes. That is a
+    /// legitimate choice, but it should be a choice — see
+    /// [`Store::is_live`].
+    live: bool,
 }
 
 impl<T: StoreEntity, E> Default for StoreData<T, E> {
@@ -74,13 +81,14 @@ impl<T: StoreEntity, E> Default for StoreData<T, E> {
             rollback: HashMap::new(),
             seq: 0,
             reloader: None,
+            live: false,
         }
     }
 }
 
 impl<T: StoreEntity, E: Clone> StoreData<T, E> {
-    fn next_seq(&mut self) -> u64 {
-        self.seq += 1;
+    const fn next_seq(&mut self) -> u64 {
+        self.seq = self.seq.saturating_add(1);
         self.seq
     }
 
@@ -158,8 +166,13 @@ impl<T: StoreEntity, E: Clone> StoreData<T, E> {
         match (snapshot, server_value) {
             (Snapshot::Inserted(temp_id), Some(v)) => {
                 let real = Id::Real(v.key());
-                if let Some(pos) = self.order.iter().position(|x| *x == temp_id) {
-                    self.order[pos] = real.clone();
+                if let Some(slot) = self
+                    .order
+                    .iter()
+                    .position(|x| *x == temp_id)
+                    .and_then(|pos| self.order.get_mut(pos))
+                {
+                    *slot = real.clone();
                 }
                 self.items.remove(&temp_id);
                 self.items.insert(real, v);
@@ -173,8 +186,7 @@ impl<T: StoreEntity, E: Clone> StoreData<T, E> {
             }
             // Server confirmed but returned no body — keep the optimistic
             // value (it's our best guess) / leave the removal in place.
-            (Snapshot::Updated(_, _), None) => {}
-            (Snapshot::Removed { .. }, _) => {}
+            (Snapshot::Updated(_, _), None) | (Snapshot::Removed { .. }, _) => {}
         }
     }
 
@@ -262,6 +274,7 @@ impl<T: StoreEntity, E: 'static> Copy for Store<T, E> {}
 /// "value used outside its owning scope" warning (and risk a
 /// use-after-drop) once that provider unmounts. Rooting it makes the
 /// "the store lives at the app root" contract real.
+#[must_use]
 pub fn use_store<T: StoreEntity, E: 'static>() -> Store<T, E> {
     let inner = use_hook(|| Signal::new_in_scope(StoreData::default(), ScopeId::ROOT));
     Store { inner }
@@ -269,7 +282,8 @@ pub fn use_store<T: StoreEntity, E: 'static>() -> Store<T, E> {
 
 impl<T: StoreEntity, E: Clone + 'static> Store<T, E> {
     /// Wrap an existing signal (e.g. one created with `use_context_provider`).
-    pub fn from_signal(inner: Signal<StoreData<T, E>>) -> Self {
+    #[must_use]
+    pub const fn from_signal(inner: Signal<StoreData<T, E>>) -> Self {
         Self { inner }
     }
 
@@ -302,6 +316,32 @@ impl<T: StoreEntity, E: Clone + 'static> Store<T, E> {
     pub fn set_reloader(&self, reloader: Callback<()>) {
         let mut inner = self.inner;
         inner.write().reloader = Some(reloader);
+    }
+
+    /// Mark this store as fed by a live event stream.
+    ///
+    /// Called by
+    /// [`use_store_stream`](https://docs.rs/architect/latest/architect/stream/fn.use_store_stream.html);
+    /// you should not need to call it yourself.
+    pub fn mark_live(&self) {
+        let mut inner = self.inner;
+        inner.write().live = true;
+    }
+
+    /// Is a live event stream folding into this store?
+    ///
+    /// `false` means the store is a **cache**: it shows what the last
+    /// fetch returned and goes stale the moment another client — or the
+    /// server itself — writes. Reaching for a manual "refresh" signal is
+    /// the symptom; a `#[architect(events)]` entity (or `use_store_stream`
+    /// over a hand-written `#[subscribe]`) is the cure.
+    ///
+    /// Exposed so an app can assert it: `assert!(store.is_live())` in a
+    /// smoke test is the cheapest way to stop a screen silently
+    /// regressing to polling.
+    #[must_use]
+    pub fn is_live(&self) -> bool {
+        self.inner.read().live
     }
 
     /// Re-run the backing fetch — a manual retry/refresh. Drives the
@@ -349,6 +389,7 @@ impl<T: StoreEntity, E: Clone + 'static> Store<T, E> {
     }
 
     /// The ordered snapshot of rows. Call inside a `use_memo`.
+    #[must_use]
     pub fn list(&self) -> Vec<T> {
         self.inner.read().list()
     }
@@ -372,6 +413,7 @@ impl<T: StoreEntity, E: Clone + 'static> Store<T, E> {
     /// The ordered `(id, row)` pairs — use when the view needs the [`Id`]
     /// itself (a stable list `key`, or to tell a temp row from a real one).
     /// Call inside a `use_memo`.
+    #[must_use]
     pub fn entries(&self) -> Vec<(Id<T::Key>, T)> {
         self.inner.read().entries()
     }
@@ -384,6 +426,7 @@ impl<T: StoreEntity, E: Clone + 'static> Store<T, E> {
     ///
     /// [`use_async`]: crate::use_async
     #[allow(clippy::type_complexity)] // `AtomResult<Vec<(Id, T)>, E>` reads fine.
+    #[must_use]
     pub fn entries_result(&self) -> AtomResult<Vec<(Id<T::Key>, T)>, E> {
         let data = self.inner.read();
         let entries: Vec<(Id<T::Key>, T)> = data
@@ -407,11 +450,13 @@ impl<T: StoreEntity, E: Clone + 'static> Store<T, E> {
     }
 
     /// The backing list-fetch phase (for a stale-while-revalidate banner).
+    #[must_use]
     pub fn status(&self) -> AtomResult<(), E> {
         self.inner.read().status.clone()
     }
 
     /// True when there are no rows.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.inner.read().order.is_empty()
     }
@@ -477,6 +522,9 @@ where
 ///     })
 /// }
 /// ```
+// `id` by value: it is the route parameter, owned by the caller's render
+// and moved into the fetch closure below.
+#[allow(clippy::needless_pass_by_value)]
 pub fn use_store_entry<T, E, Fut>(
     store: Store<T, E>,
     id: String,
@@ -535,6 +583,18 @@ where
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic,
+    clippy::float_cmp,
+    clippy::string_slice,
+    clippy::significant_drop_tightening,
+    clippy::too_many_lines
+)]
 mod tests {
     use super::*;
 

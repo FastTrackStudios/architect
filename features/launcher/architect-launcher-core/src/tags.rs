@@ -4,7 +4,7 @@
 //! An item tagged `audio/effects/reverb` automatically matches queries
 //! for `audio/effects` and `audio` (inheritance).
 //!
-//! The TagRegistry holds:
+//! The `TagRegistry` holds:
 //! - Known tag definitions with metadata (icon, description)
 //! - Aliases that map shorthand names to full tag paths
 //!
@@ -25,20 +25,18 @@ impl Tag {
     pub fn new(path: impl Into<String>) -> Self {
         let path = path.into();
         // Normalize: lowercase, trim slashes, collapse double slashes
-        let normalized = path
-            .to_lowercase()
-            .trim_matches('/')
-            .replace("//", "/")
-            .to_string();
+        let normalized = path.to_lowercase().trim_matches('/').replace("//", "/");
         Self(normalized)
     }
 
     /// The full tag path, e.g. `"audio/effects/reverb"`.
+    #[must_use]
     pub fn path(&self) -> &str {
         &self.0
     }
 
     /// Number of segments. `"audio/effects/reverb"` has depth 3.
+    #[must_use]
     pub fn depth(&self) -> usize {
         if self.0.is_empty() {
             return 0;
@@ -47,20 +45,23 @@ impl Tag {
     }
 
     /// The leaf segment. `"audio/effects/reverb"` -> `"reverb"`.
+    #[must_use]
     pub fn leaf(&self) -> &str {
         self.0.rsplit('/').next().unwrap_or(&self.0)
     }
 
     /// The parent tag. `"audio/effects/reverb"` -> `Some(Tag("audio/effects"))`.
-    pub fn parent(&self) -> Option<Tag> {
+    #[must_use]
+    pub fn parent(&self) -> Option<Self> {
         self.0
             .rsplit_once('/')
-            .map(|(parent, _)| Tag(parent.to_string()))
+            .map(|(parent, _)| Self(parent.to_string()))
     }
 
     /// All ancestor tags, from most specific to root.
     /// `"audio/effects/reverb"` -> `["audio/effects", "audio"]`.
-    pub fn ancestors(&self) -> Vec<Tag> {
+    #[must_use]
+    pub fn ancestors(&self) -> Vec<Self> {
         let mut result = Vec::new();
         let mut current = self.clone();
         while let Some(parent) = current.parent() {
@@ -75,7 +76,8 @@ impl Tag {
     /// `"audio/effects/reverb".is_under("audio")` -> true
     /// `"audio/effects/reverb".is_under("audio/effects/reverb")` -> true
     /// `"audio/effects/reverb".is_under("video")` -> false
-    pub fn is_under(&self, other: &Tag) -> bool {
+    #[must_use]
+    pub fn is_under(&self, other: &Self) -> bool {
         self.0 == other.0
             || (self.0.starts_with(&other.0) && self.0.as_bytes().get(other.0.len()) == Some(&b'/'))
     }
@@ -89,13 +91,13 @@ impl std::fmt::Display for Tag {
 
 impl From<&str> for Tag {
     fn from(s: &str) -> Self {
-        Tag::new(s)
+        Self::new(s)
     }
 }
 
 impl From<String> for Tag {
     fn from(s: String) -> Self {
-        Tag::new(s)
+        Self::new(s)
     }
 }
 
@@ -128,6 +130,7 @@ pub struct TagRegistry {
 }
 
 impl TagRegistry {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -159,7 +162,7 @@ impl TagRegistry {
                     let name = ancestor.leaf().to_string();
                     TagInfo {
                         tag: ancestor,
-                        display_name: name.clone(),
+                        display_name: name,
                         description: String::new(),
                         icon: String::new(),
                         color: String::new(),
@@ -228,16 +231,16 @@ impl TagRegistry {
     }
 
     /// Resolve a tag string, checking aliases first.
+    #[must_use]
     pub fn resolve(&self, input: &str) -> Tag {
         let lower = input.to_lowercase();
-        if let Some(resolved) = self.aliases.get(&lower) {
-            Tag::new(resolved.clone())
-        } else {
-            Tag::new(input)
-        }
+        self.aliases
+            .get(&lower)
+            .map_or_else(|| Tag::new(input), |resolved| Tag::new(resolved.clone()))
     }
 
     /// Get metadata for a tag, if registered.
+    #[must_use]
     pub fn info(&self, tag: &Tag) -> Option<&TagInfo> {
         self.tags.get(tag.path())
     }
@@ -248,6 +251,7 @@ impl TagRegistry {
     }
 
     /// List all registered top-level tags (depth 1).
+    #[must_use]
     pub fn root_tags(&self) -> Vec<&TagInfo> {
         self.tags
             .values()
@@ -256,17 +260,20 @@ impl TagRegistry {
     }
 
     /// List children of a tag.
+    #[must_use]
     pub fn children_of(&self, parent: &Tag) -> Vec<&TagInfo> {
         let prefix = format!("{}/", parent.path());
         self.tags
             .values()
             .filter(|info| {
-                info.tag.path().starts_with(&prefix) && info.tag.depth() == parent.depth() + 1
+                info.tag.path().starts_with(&prefix)
+                    && info.tag.depth() == parent.depth().saturating_add(1)
             })
             .collect()
     }
 
     /// List all tags under a parent (recursive).
+    #[must_use]
     pub fn descendants_of(&self, parent: &Tag) -> Vec<&TagInfo> {
         let prefix = format!("{}/", parent.path());
         self.tags
@@ -276,11 +283,13 @@ impl TagRegistry {
     }
 
     /// Check if any items with the given tags match a tag filter.
+    #[must_use]
     pub fn matches_filter(item_tags: &[Tag], filter: &Tag) -> bool {
         item_tags.iter().any(|t| t.is_under(filter))
     }
 
     /// List all registered tags (flat).
+    #[must_use]
     pub fn all_tags(&self) -> Vec<&TagInfo> {
         self.tags.values().collect()
     }
@@ -289,12 +298,12 @@ impl TagRegistry {
     /// Returns the source tag path for the caller to update items.
     pub fn merge_tag(&mut self, source: &str, dest: &str) -> Option<(Tag, Tag)> {
         let src = Tag::new(source);
-        let dst = Tag::new(dest);
-        if self.tags.contains_key(src.path()) && self.tags.contains_key(dst.path()) {
+        let destination = Tag::new(dest);
+        if self.tags.contains_key(src.path()) && self.tags.contains_key(destination.path()) {
             self.tags.remove(src.path());
             // Remove aliases pointing to source
             self.aliases.retain(|_, v| v != src.path());
-            Some((src, dst))
+            Some((src, destination))
         } else {
             None
         }
@@ -330,6 +339,7 @@ impl TagRegistry {
     }
 
     /// Get the color for a tag, inheriting from ancestors if not set.
+    #[must_use]
     pub fn effective_color(&self, tag: &Tag) -> String {
         // Check this tag first
         if let Some(info) = self.tags.get(tag.path())
@@ -350,21 +360,24 @@ impl TagRegistry {
 }
 
 /// A set of tags on an item. Provides convenience methods.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct TagSet {
     tags: Vec<Tag>,
 }
 
 impl TagSet {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn from_tags(tags: Vec<Tag>) -> Self {
+    #[must_use]
+    pub const fn from_tags(tags: Vec<Tag>) -> Self {
         Self { tags }
     }
 
     /// Create from string slices.
+    #[must_use]
     pub fn from_strs(tags: &[&str]) -> Self {
         Self {
             tags: tags.iter().map(|&s| Tag::new(s)).collect(),
@@ -382,34 +395,52 @@ impl TagSet {
         self.tags.retain(|t| t != tag);
     }
 
+    #[must_use]
     pub fn contains(&self, tag: &Tag) -> bool {
         self.tags.contains(tag)
     }
 
     /// Check if any tag in this set is under the given filter tag.
+    #[must_use]
     pub fn matches(&self, filter: &Tag) -> bool {
         TagRegistry::matches_filter(&self.tags, filter)
     }
 
     /// Check if this set contains a tag or any of its descendants.
+    #[must_use]
     pub fn matches_any(&self, filters: &[Tag]) -> bool {
         filters.iter().any(|f| self.matches(f))
     }
 
+    #[must_use]
     pub fn tags(&self) -> &[Tag] {
         &self.tags
     }
 
-    pub fn is_empty(&self) -> bool {
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
         self.tags.is_empty()
     }
 
-    pub fn len(&self) -> usize {
+    #[must_use]
+    pub const fn len(&self) -> usize {
         self.tags.len()
     }
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic,
+    clippy::float_cmp,
+    clippy::string_slice,
+    clippy::significant_drop_tightening,
+    clippy::too_many_lines
+)]
 mod tests {
     use super::*;
 

@@ -88,7 +88,7 @@ where
                     // move while the buffer is alive, so cloning out is sound
                     // — our `Ev: Clone + 'static` events own their data.
                     let mut owned: Option<Ev> = None;
-                    let _ = event.map(|ev| owned = Some(ev.clone()));
+                    let _ = event.map(|ev| owned = Some(ev));
                     if let Some(ev) = owned {
                         on_event(ev);
                     }
@@ -120,11 +120,15 @@ where
                 400
             } else {
                 let n = *misses.peek();
-                misses.set((n + 1).min(4));
+                misses.set(n.saturating_add(1).min(4));
                 1000u64 << n.min(3)
             };
             crate::platform::sleep(core::time::Duration::from_millis(wait_ms)).await;
-            generation += 1;
+            // `peek`, not a plain read: dioxus polls these futures in a REACTIVE
+            // context, so reading a signal this loop also writes would subscribe the
+            // loop to its own writes and restart it forever.
+            let next = generation.peek().saturating_add(1);
+            generation.set(next);
         }
     });
 }
@@ -146,5 +150,9 @@ pub fn use_store_stream<T, E, Ev, F, Fut>(
     F: Fn(vox::Tx<Ev>) -> Fut + 'static,
     Fut: Future<Output = bool> + 'static,
 {
+    // Record that this store has a feed, so
+    // [`Store::is_live`](architect_atom::Store::is_live) can tell a live
+    // store from a cache that happens to have been fetched recently.
+    store.mark_live();
     use_stream(subscribe, move |event| apply(&store, event));
 }

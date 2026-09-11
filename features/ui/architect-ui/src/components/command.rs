@@ -82,7 +82,7 @@ pub fn CommandDialog(props: CommandDialogProps) -> Element {
 
 // ── CommandInput ────────────────────────────────────────────────────────────
 
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone, PartialEq, Eq)]
 pub struct CommandInputProps {
     /// Two-way bound search text.
     pub value: Signal<String>,
@@ -180,6 +180,7 @@ impl CommandItemData {
         }
     }
 
+    #[must_use]
     pub fn keywords<I, S>(mut self, kw: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -189,22 +190,26 @@ impl CommandItemData {
         self
     }
 
+    #[must_use]
     pub fn group(mut self, group: impl Into<String>) -> Self {
         self.group = Some(group.into());
         self
     }
 
+    #[must_use]
     pub fn shortcut(mut self, shortcut: impl Into<String>) -> Self {
         self.shortcut = Some(shortcut.into());
         self
     }
 
-    pub fn on_select(mut self, cb: Callback<()>) -> Self {
+    #[must_use]
+    pub const fn on_select(mut self, cb: Callback<()>) -> Self {
         self.on_select = Some(cb);
         self
     }
 
-    pub fn disabled(mut self, disabled: bool) -> Self {
+    #[must_use]
+    pub const fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
@@ -261,7 +266,7 @@ fn render_command_items(
         .iter()
         .filter_map(|item| {
             let mut candidates: Vec<&str> = vec![item.value.as_str()];
-            candidates.extend(item.keywords.iter().map(|s| s.as_str()));
+            candidates.extend(item.keywords.iter().map(std::string::String::as_str));
             if !item.label.is_empty() && item.label != item.value {
                 candidates.push(item.label.as_str());
             }
@@ -423,9 +428,9 @@ pub fn CommandItem(props: CommandItemProps) -> Element {
     // (`nucleo-matcher`) that Combobox uses, so behaviour matches.
     // Items with an empty `value` and no `keywords` are always shown.
     let query = ctx.search_query.read().clone();
-    if !query.is_empty() && !(props.value.is_empty() && props.keywords.is_empty()) {
+    if !(query.is_empty() || props.value.is_empty() && props.keywords.is_empty()) {
         let mut candidates: Vec<&str> = vec![props.value.as_str()];
-        candidates.extend(props.keywords.iter().map(|s| s.as_str()));
+        candidates.extend(props.keywords.iter().map(std::string::String::as_str));
         if super::combobox::fuzzy_best_score(&query, &candidates).is_none() {
             return rsx! {};
         }
@@ -472,7 +477,7 @@ pub fn CommandEmpty(props: CommandEmptyProps) -> Element {
 
 // ── CommandSeparator ────────────────────────────────────────────────────────
 
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone, PartialEq, Eq)]
 pub struct CommandSeparatorProps {
     #[props(default)]
     pub class: String,
@@ -547,7 +552,7 @@ pub fn command_default() -> Element {
             }
             CommandDialog {
                 open: open(),
-                on_close: move |_| open.set(false),
+                on_close: move |()| open.set(false),
                 CommandInput { value, placeholder: "Type a command...".to_string() }
                 CommandList { items }
             }

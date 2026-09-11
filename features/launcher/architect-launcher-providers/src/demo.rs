@@ -11,6 +11,7 @@ pub struct DemoProvider {
 }
 
 impl DemoProvider {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             config: ProviderConfig {
@@ -30,7 +31,7 @@ impl Default for DemoProvider {
 }
 
 impl Provider for DemoProvider {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "demo"
     }
 

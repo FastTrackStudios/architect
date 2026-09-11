@@ -166,11 +166,15 @@ impl LoadedPack {
     pub fn load(path: &Path) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let content = std::fs::read_to_string(path)?;
         let def: PackDef = facet_styx::from_str(&content)?;
-        let base_dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
+        let base_dir = path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf();
         Ok(Self { def, base_dir })
     }
 
     /// Resolve an icon name to a file path using the pack's icon mappings.
+    #[must_use]
     pub fn resolve_icon(&self, name: &str) -> Option<String> {
         self.def.icons.get(name).map(|rel_path| {
             let full = self.base_dir.join(rel_path);
@@ -179,6 +183,7 @@ impl LoadedPack {
     }
 
     /// Convert pack items into engine Items.
+    #[must_use]
     pub fn to_items(&self) -> Vec<Item> {
         let pack_name = &self.def.pack.name;
         self.def
@@ -218,11 +223,15 @@ impl LoadedPack {
                     pi.search_fields.clone()
                 };
 
-                let tags =
-                    TagSet::from_strs(&pi.tags.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+                let tags = TagSet::from_strs(
+                    &pi.tags
+                        .iter()
+                        .map(std::string::String::as_str)
+                        .collect::<Vec<_>>(),
+                );
 
                 let mut item = Item::new(&pi.id, &pi.label, pack_name);
-                item.sub = pi.sub.clone();
+                item.sub.clone_from(&pi.sub);
                 item.icon = icon;
                 item.actions = actions;
                 item.search_fields = search_fields;
@@ -247,6 +256,7 @@ fn pack_action_to_item_action(pa: &PackAction, modifier: ActionModifier) -> Item
 // ── Pack Directory Scanner ─────────────────────────────────────
 
 /// Scan a directory for pack files (.styx and legacy .toml).
+#[must_use]
 pub fn scan_packs(dir: &Path) -> Vec<LoadedPack> {
     let mut packs = Vec::new();
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -293,11 +303,12 @@ fn load_and_push(path: &Path, packs: &mut Vec<LoadedPack>) {
 
 /// Default pack directory.
 pub fn default_pack_dir() -> PathBuf {
-    let base = std::env::var("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
+    let base = std::env::var("XDG_CONFIG_HOME").map_or_else(
+        |_| {
             let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
             PathBuf::from(home).join(".config")
-        });
+        },
+        PathBuf::from,
+    );
     base.join("dioxus-launcher").join("packs")
 }

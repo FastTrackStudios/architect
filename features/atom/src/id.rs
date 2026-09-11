@@ -35,7 +35,7 @@ impl<K: std::fmt::Display> std::fmt::Display for Id<K> {
 
 impl<K> Id<K> {
     /// The real key, or `None` for a still-optimistic temp row.
-    pub fn real(&self) -> Option<&K> {
+    pub const fn real(&self) -> Option<&K> {
         match self {
             Self::Real(k) => Some(k),
             Self::Temp(_) => None,
@@ -43,12 +43,12 @@ impl<K> Id<K> {
     }
 
     /// True for a client-forged placeholder id.
-    pub fn is_temp(&self) -> bool {
+    pub const fn is_temp(&self) -> bool {
         matches!(self, Self::Temp(_))
     }
 
     /// True for a server-assigned id.
-    pub fn is_real(&self) -> bool {
+    pub const fn is_real(&self) -> bool {
         matches!(self, Self::Real(_))
     }
 }

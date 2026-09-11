@@ -76,21 +76,24 @@ pub enum Principal {
 
 impl Principal {
     /// Short display form for audit lines and deny reasons.
+    #[must_use]
     pub fn describe(&self) -> String {
         match self {
-            Principal::User { user_id } => format!("user:{user_id}"),
-            Principal::Guest { link_id, .. } => format!("guest:{link_id}"),
-            Principal::Service { name } => format!("service:{name}"),
-            Principal::Host { endpoint } => format!("host:{endpoint}"),
-            Principal::Anonymous => "anonymous".to_string(),
+            Self::User { user_id } => format!("user:{user_id}"),
+            Self::Guest { link_id, .. } => format!("guest:{link_id}"),
+            Self::Service { name } => format!("service:{name}"),
+            Self::Host { endpoint } => format!("host:{endpoint}"),
+            Self::Anonymous => "anonymous".to_string(),
         }
     }
 }
 
-/// WHAT is being touched. Hierarchical and path-shaped so allowlists are
-/// cheap prefix/glob matches. Conventions (see the design doc):
-/// `vault/<path>`, `media/<hash>`, `doc/<doc-id>`,
-/// `threads/<entity_type>/<entity_id>`, `service/<name>/<method>`.
+/// WHAT is being touched.
+///
+/// Hierarchical and path-shaped so allowlists are cheap prefix/glob
+/// matches. Conventions (see the design doc): `vault/<path>`,
+/// `media/<hash>`, `doc/<doc-id>`, `threads/<entity_type>/<entity_id>`,
+/// `service/<name>/<method>`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Resource(pub String);
 
@@ -98,6 +101,7 @@ impl Resource {
     pub fn new(s: impl Into<String>) -> Self {
         Self(s.into())
     }
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -129,18 +133,23 @@ impl Action {
     pub fn new(s: impl Into<String>) -> Self {
         Self(s.into())
     }
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
+    #[must_use]
     pub fn read() -> Self {
         Self::new(Self::READ)
     }
+    #[must_use]
     pub fn write() -> Self {
         Self::new(Self::WRITE)
     }
+    #[must_use]
     pub fn comment() -> Self {
         Self::new(Self::COMMENT)
     }
+    #[must_use]
     pub fn admin() -> Self {
         Self::new(Self::ADMIN)
     }
@@ -162,21 +171,24 @@ pub enum Decision {
 
 impl Decision {
     pub fn deny(reason: impl Into<String>) -> Self {
-        Decision::Deny {
+        Self::Deny {
             reason: reason.into(),
         }
     }
-    pub fn allowed(&self) -> bool {
-        matches!(self, Decision::Allow)
+    #[must_use]
+    pub const fn allowed(&self) -> bool {
+        matches!(self, Self::Allow)
     }
 }
 
 // ─── The engine ──────────────────────────────────────────────────────────
 
-/// May `who` perform `action` on `what`? Implementations are cheap,
-/// synchronous, and read-only — anything needing I/O materializes its rule
-/// set up front (see [`ScopeEngine`]) or caches (identity resolution is a
-/// separate, async concern: [`IdentityResolver`]).
+/// May `who` perform `action` on `what`?
+///
+/// Implementations are cheap, synchronous, and read-only — anything
+/// needing I/O materializes its rule set up front (see [`ScopeEngine`]) or
+/// caches (identity resolution is a separate, async concern:
+/// [`IdentityResolver`]).
 pub trait PermissionEngine: MaybeSendSync {
     fn check(&self, who: &Principal, what: &Resource, action: &Action) -> Decision;
 
@@ -225,11 +237,13 @@ impl IdentityResolver for StaticPrincipal {
 
 // ─── Glob matching ───────────────────────────────────────────────────────
 
-/// Match `pattern` against a resource path. Supported syntax (segment
-/// separator `/`): literal segments, `*` (one segment), `**` (any tail —
-/// only meaningful as the final segment), and a trailing `/` prefix form
-/// (`vault/Songs/` ≡ `vault/Songs/**`). An empty pattern matches nothing;
-/// `**` alone matches everything.
+/// Match `pattern` against a resource path.
+///
+/// Supported syntax (segment separator `/`): literal segments, `*` (one
+/// segment), `**` (any tail — only meaningful as the final segment), and
+/// a trailing `/` prefix form (`vault/Songs/` ≡ `vault/Songs/**`). An
+/// empty pattern matches nothing; `**` alone matches everything.
+#[must_use]
 pub fn glob_matches(pattern: &str, path: &str) -> bool {
     if pattern.is_empty() {
         return false;
@@ -242,6 +256,12 @@ pub fn glob_matches(pattern: &str, path: &str) -> bool {
     glob_segments(&pat, &segs)
 }
 
+/// Everything after the first element — `&xs[1..]` without the panic on
+/// an empty slice.
+fn rest<T>(xs: &[T]) -> &[T] {
+    xs.get(1..).unwrap_or_default()
+}
+
 fn glob_segments(pat: &[&str], segs: &[&str]) -> bool {
     match (pat.first(), segs.first()) {
         (None, None) => true,
@@ -251,10 +271,11 @@ fn glob_segments(pat: &[&str], segs: &[&str]) -> bool {
             if pat.len() == 1 {
                 return true;
             }
-            (0..=segs.len()).any(|skip| glob_segments(&pat[1..], &segs[skip..]))
+            (0..=segs.len())
+                .any(|skip| glob_segments(rest(pat), segs.get(skip..).unwrap_or_default()))
         }
-        (Some(&"*"), Some(_)) => glob_segments(&pat[1..], &segs[1..]),
-        (Some(p), Some(s)) if p == s => glob_segments(&pat[1..], &segs[1..]),
+        (Some(&"*"), Some(_)) => glob_segments(rest(pat), rest(segs)),
+        (Some(p), Some(s)) if p == s => glob_segments(rest(pat), rest(segs)),
         _ => false,
     }
 }
@@ -272,10 +293,14 @@ impl Rule {
     pub fn new(resource: impl Into<String>, actions: &[&str]) -> Self {
         Self {
             resource: resource.into(),
-            actions: actions.iter().map(|s| s.to_string()).collect(),
+            actions: actions
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect(),
         }
     }
 
+    #[must_use]
     pub fn permits(&self, what: &Resource, action: &Action) -> bool {
         self.actions
             .iter()
@@ -286,18 +311,22 @@ impl Rule {
 
 /// A materialized allowlist for ONE principal shape — the share lane's
 /// engine (built from an expanded `ShareScope`), also usable standalone in
-/// tests. Checks ignore the principal: whoever reached this engine holds
-/// exactly these rules.
+/// tests.
+///
+/// Checks ignore the principal: whoever reached this engine holds exactly
+/// these rules.
 #[derive(Clone, Debug, Default)]
 pub struct ScopeEngine {
     rules: Vec<Rule>,
 }
 
 impl ScopeEngine {
-    pub fn new(rules: Vec<Rule>) -> Self {
+    #[must_use]
+    pub const fn new(rules: Vec<Rule>) -> Self {
         Self { rules }
     }
 
+    #[must_use]
     pub fn rules(&self) -> &[Rule] {
         &self.rules
     }
@@ -330,11 +359,13 @@ impl PermissionEngine for ScopeEngine {
     }
 }
 
-/// Role → rules, for org members. Role rule sets come from
-/// `AuthOrganizationRole.permissions_json` (a JSON `[{resource, actions}]`
-/// list) plus built-in defaults for `owner`/`member`/`guest`; the caller
-/// supplies the `user_id → role` mapping (from `AuthMember`) at
-/// construction/refresh time so checks stay synchronous.
+/// Role → rules, for org members.
+///
+/// Role rule sets come from `AuthOrganizationRole.permissions_json` (a
+/// JSON `[{resource, actions}]` list) plus built-in defaults for
+/// `owner`/`member`/`guest`; the caller supplies the `user_id → role`
+/// mapping (from `AuthMember`) at construction/refresh time so checks stay
+/// synchronous.
 #[derive(Clone, Debug, Default)]
 pub struct RoleEngine {
     /// role name → rules.
@@ -351,10 +382,11 @@ pub struct RoleEngine {
 }
 
 impl RoleEngine {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             roles: Self::default_roles(),
-            members: Default::default(),
+            members: std::collections::HashMap::new(),
             allow_services: true,
             default_user_role: None,
         }
@@ -362,6 +394,7 @@ impl RoleEngine {
 
     /// Built-in roles: `owner` = everything; `member` = everything except
     /// `admin`; `guest` = nothing (share grants supply guest rules).
+    #[must_use]
     pub fn default_roles() -> std::collections::HashMap<String, Vec<Rule>> {
         let mut m = std::collections::HashMap::new();
         m.insert("owner".into(), vec![Rule::new("**", &["*"])]);
@@ -398,6 +431,7 @@ impl RoleEngine {
     }
 
     /// Assume this role for validated users missing a membership row.
+    #[must_use]
     pub fn with_default_user_role(mut self, role: impl Into<String>) -> Self {
         self.default_user_role = Some(role.into());
         self
@@ -415,7 +449,7 @@ impl RoleEngine {
                 .get(user_id)
                 .or(self.default_user_role.as_ref())
                 .and_then(|role| self.roles.get(role))
-                .map(|v| v.as_slice()),
+                .map(std::vec::Vec::as_slice),
             _ => None,
         }
     }
@@ -465,9 +499,11 @@ pub struct CompositeEngine {
 }
 
 impl CompositeEngine {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
+    #[must_use]
     pub fn push(mut self, engine: Arc<dyn PermissionEngine>) -> Self {
         self.engines.push(engine);
         self
@@ -480,7 +516,7 @@ impl PermissionEngine for CompositeEngine {
         for e in &self.engines {
             match e.check(who, what, action) {
                 Decision::Allow => return Decision::Allow,
-                deny => {
+                deny @ Decision::Deny { .. } => {
                     if first_deny.is_none() {
                         first_deny = Some(deny);
                     }
@@ -511,12 +547,14 @@ impl PermissionEngine for AllowAll {
 
 // ─── Method permits (the router gate's rule table) ───────────────────────
 
-/// What one RPC method requires. `resource` may reference decoded argument
-/// fields as `{field}` (interpolated reflectively by the gate when the
-/// transport exposes decoded args) — a method-level gate that can't
-/// interpolate falls back to the literal template with `{field}` intact,
-/// so patterns should put wildcards AFTER any interpolated tail
-/// (`vault/{path}` is checked as `vault/**` at method level).
+/// What one RPC method requires.
+///
+/// `resource` may reference decoded argument fields as `{field}`
+/// (interpolated reflectively by the gate when the transport exposes
+/// decoded args) — a method-level gate that can't interpolate falls back
+/// to the literal template with `{field}` intact, so patterns should put
+/// wildcards AFTER any interpolated tail (`vault/{path}` is checked as
+/// `vault/**` at method level).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MethodPermit {
     pub method: &'static str,
@@ -528,6 +566,7 @@ pub struct MethodPermit {
 }
 
 impl MethodPermit {
+    #[must_use]
     pub const fn new(method: &'static str, action: &'static str, resource: &'static str) -> Self {
         Self {
             method,
@@ -536,6 +575,7 @@ impl MethodPermit {
             audit: false,
         }
     }
+    #[must_use]
     pub const fn audited(mut self) -> Self {
         self.audit = true;
         self
@@ -543,6 +583,7 @@ impl MethodPermit {
 
     /// The method-level (pre-decode) resource: the template with every
     /// `{arg}` interpolation widened to `**`.
+    #[must_use]
     pub fn coarse_resource(&self) -> Resource {
         if !self.resource.contains('{') {
             return Resource::new(self.resource);

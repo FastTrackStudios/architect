@@ -24,7 +24,19 @@ pub enum DiffError {
     Unsupported(String),
 }
 
-/// Decode `bytes` as RGBA8.
+/// Byte length of a `w × h` RGBA8 buffer, or a decode error.
+///
+/// PNG dimensions are attacker-controlled: `w * h * 4` in `u32` wraps on
+/// a large-enough header, and the wrapped value then sizes a buffer that
+/// every later offset overruns.
+fn rgba_len(w: u32, h: u32) -> Result<usize, DiffError> {
+    usize::try_from(w)
+        .ok()
+        .and_then(|w| w.checked_mul(usize::try_from(h).ok()?))
+        .and_then(|n| n.checked_mul(4))
+        .ok_or_else(|| DiffError::Unsupported(format!("image of {w}x{h} is too large")))
+}
+
 fn decode_rgba(bytes: &[u8]) -> Result<(Vec<u8>, u32, u32), DiffError> {
     let decoder = png::Decoder::new(bytes);
     let mut reader = decoder.read_info()?;
@@ -36,8 +48,8 @@ fn decode_rgba(bytes: &[u8]) -> Result<(Vec<u8>, u32, u32), DiffError> {
     let (out, w, h) = match info.color_type {
         png::ColorType::Rgba => (buf, info.width, info.height),
         png::ColorType::Rgb => {
-            let mut rgba = Vec::with_capacity(info.width as usize * info.height as usize * 4);
-            for chunk in buf.chunks_exact(3) {
+            let mut rgba = Vec::with_capacity(rgba_len(info.width, info.height)?);
+            for chunk in buf.as_chunks::<3>().0 {
                 rgba.extend_from_slice(chunk);
                 rgba.push(255);
             }
@@ -51,20 +63,20 @@ fn decode_rgba(bytes: &[u8]) -> Result<(Vec<u8>, u32, u32), DiffError> {
             // the resulting score will be poor (uniform image),
             // which is the right signal that paint_grace needs
             // bumping.
-            let mut rgba = Vec::with_capacity(info.width as usize * info.height as usize * 4);
+            let mut rgba = Vec::with_capacity(rgba_len(info.width, info.height)?);
             for &g in &buf {
                 rgba.extend_from_slice(&[g, g, g, 255]);
             }
             (rgba, info.width, info.height)
         }
         png::ColorType::GrayscaleAlpha => {
-            let mut rgba = Vec::with_capacity(info.width as usize * info.height as usize * 4);
-            for chunk in buf.chunks_exact(2) {
+            let mut rgba = Vec::with_capacity(rgba_len(info.width, info.height)?);
+            for chunk in buf.as_chunks::<2>().0 {
                 rgba.extend_from_slice(&[chunk[0], chunk[0], chunk[0], chunk[1]]);
             }
             (rgba, info.width, info.height)
         }
-        other => {
+        other @ png::ColorType::Indexed => {
             return Err(DiffError::Unsupported(format!(
                 "unsupported PNG color type {other:?}"
             )));
@@ -82,11 +94,18 @@ fn build_image(
 ) -> Result<DssimImage<f32>, DiffError> {
     // dssim wants packed `rgb::RGBA<u8>` slices.
     let pixels: Vec<rgb::RGBA8> = rgba
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|c| rgb::RGBA8::new(c[0], c[1], c[2], c[3]))
         .collect();
+    let (Ok(w), Ok(h)) = (usize::try_from(width), usize::try_from(height)) else {
+        return Err(DiffError::Unsupported(format!(
+            "image of {width}x{height} is too large"
+        )));
+    };
     dssim
-        .create_image_rgba(&pixels, width as usize, height as usize)
+        .create_image_rgba(&pixels, w, h)
         .ok_or(DiffError::DssimImageBuild)
 }
 

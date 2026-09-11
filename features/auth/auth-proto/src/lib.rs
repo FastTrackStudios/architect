@@ -8,10 +8,12 @@ pub mod api_key;
 pub mod audit_event;
 pub mod email_change;
 pub mod invitation;
+pub mod invite_link;
 pub mod member;
 pub mod organization;
 pub mod organization_role;
 pub mod passkey;
+pub mod passkey_ceremony;
 pub mod service;
 pub mod session;
 pub mod team;
@@ -33,6 +35,10 @@ pub use invitation::{
     AuthInvitation, AuthInvitationCreate, AuthInvitationList, AuthInvitationRepo,
     AuthInvitationUpdate, InvitationStatus,
 };
+pub use invite_link::{
+    AuthInviteLink, AuthInviteLinkCreate, AuthInviteLinkList, AuthInviteLinkRepo,
+    AuthInviteLinkUpdate,
+};
 pub use member::{AuthMember, AuthMemberCreate, AuthMemberList, AuthMemberRepo, AuthMemberUpdate};
 pub use organization::{
     AuthOrganization, AuthOrganizationCreate, AuthOrganizationList, AuthOrganizationRepo,
@@ -44,6 +50,10 @@ pub use organization_role::{
 };
 pub use passkey::{
     AuthPasskey, AuthPasskeyCreate, AuthPasskeyList, AuthPasskeyRepo, AuthPasskeyUpdate,
+};
+pub use passkey_ceremony::{
+    AuthPasskeyCeremony, AuthPasskeyCeremonyCreate, AuthPasskeyCeremonyList,
+    AuthPasskeyCeremonyRepo, AuthPasskeyCeremonyUpdate, PasskeyCeremonyKind,
 };
 pub use session::{
     AuthSession, AuthSessionCreate, AuthSessionList, AuthSessionRepo, AuthSessionUpdate,
@@ -83,7 +93,7 @@ pub enum AuthFlowError {
     Internal(String),
 }
 
-#[derive(Clone, Debug, PartialEq, ::facet::Facet)]
+#[derive(Clone, Debug, PartialEq, Eq, ::facet::Facet)]
 pub struct SignInEmailPassword {
     pub email: String,
     pub password: String,
@@ -93,7 +103,7 @@ pub struct SignInEmailPassword {
 
 /// Wire shape of `ArchitectAuth::create_email_password_user` — the
 /// sign-up command, minus nothing: same fields, RPC-serializable.
-#[derive(Clone, Debug, PartialEq, ::facet::Facet)]
+#[derive(Clone, Debug, PartialEq, Eq, ::facet::Facet)]
 pub struct SignUpEmailPassword {
     pub email: String,
     pub password: String,
@@ -105,7 +115,7 @@ pub struct SignUpEmailPassword {
     pub user_agent: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, ::facet::Facet)]
+#[derive(Clone, Debug, PartialEq, Eq, ::facet::Facet)]
 pub struct AuthSessionBundle {
     pub user: AuthUser,
     pub session: AuthSession,

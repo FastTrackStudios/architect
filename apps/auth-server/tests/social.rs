@@ -2,13 +2,28 @@
 //! endpoint, driven through the real router over in-memory SQLite with
 //! the provider network swapped for a fake.
 
+// This is an integration-test crate. `clippy.toml`'s
+// `allow-*-in-tests` only reaches `#[test]` fns and `#[cfg(test)]`
+// modules, so the fixture and helper code below — where an `unwrap()`
+// IS the assertion — still trips the panic lints. Allow them
+// crate-wide here rather than dotting the file with attributes.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::panic
+)]
+
 use std::sync::{Arc, Mutex};
 
 use architect_auth::AuthStorage;
 use architect_auth::db::{AuthSeaOrmStorage, Migrator};
 use auth_server::http::SocialState;
 use auth_server::social::{Profile, Provider, ProviderClient, ProviderError, ProviderTokens};
-use auth_server::{ServerConfig, SocialConfig, SocialProviderConfig, server};
+use auth_server::{ServerConfig, SocialProviderConfig, server};
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use base64::Engine;
@@ -22,14 +37,10 @@ const GITHUB_TOKEN: &str = "gho_plaintext_provider_token";
 fn test_config() -> ServerConfig {
     ServerConfig {
         bind_addr: "127.0.0.1:0".into(),
-        database_url: "sqlite::memory:".into(),
-        secret: "a-secret-at-least-32-bytes-long!!".into(),
         base_url: BASE.into(),
-        oidc_issuer: None,
         session_ttl_seconds: 3600,
-        require_email_verification: false,
-        passkey_rp_id: None,
-        cors_origins: Vec::new(),
+        // The redirect flow these tests drive needs a registered
+        // client; without one `/oauth2/authorize` answers 401.
         oidc_clients: vec![architect_auth::OidcClientConfig {
             client_id: "task".into(),
             client_secret: None,
@@ -45,17 +56,7 @@ fn test_config() -> ServerConfig {
             skip_consent: true,
             disabled: false,
         }],
-        oidc_allow_dynamic_client_registration: false,
-        run_migrations: true,
-        mail: auth_server::mail::MailConfig {
-            host: None,
-            port: 587,
-            username: None,
-            password: None,
-            from: "noreply@example.com".into(),
-            base_url: BASE.into(),
-        },
-        social: SocialConfig::disabled(),
+        ..ServerConfig::local()
     }
 }
 

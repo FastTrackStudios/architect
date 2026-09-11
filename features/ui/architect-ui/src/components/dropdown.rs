@@ -96,7 +96,6 @@ pub struct DropdownContentProps {
 #[component]
 pub fn DropdownContent(props: DropdownContentProps) -> Element {
     let anchor = match (props.side.as_str(), props.align.as_str()) {
-        ("bottom", "start") => "top-full mt-2 left-0 origin-top-left",
         ("bottom", "center") => "top-full mt-2 left-1/2 -translate-x-1/2 origin-top",
         ("bottom", "end") => "top-full mt-2 right-0 origin-top-right",
         ("top", "start") => "bottom-full mb-2 left-0 origin-bottom-left",
@@ -188,7 +187,7 @@ pub fn DropdownLabel(props: DropdownLabelProps) -> Element {
     }
 }
 
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone, PartialEq, Eq)]
 pub struct DropdownSeparatorProps {
     #[props(default)]
     pub class: String,

@@ -99,9 +99,9 @@ pub struct PopoverContentProps {
 /// the popover's start/center/end with the trigger's matching edge via
 /// `left-0` / `left-1/2 -translate-x-1/2` / `right-0`. For horizontal
 /// sides, similar with vertical anchors.
-fn anchor_class(side: ContentSide, align: ContentAlign) -> &'static str {
-    use ContentAlign::*;
-    use ContentSide::*;
+const fn anchor_class(side: ContentSide, align: ContentAlign) -> &'static str {
+    use ContentAlign::{Center, End, Start};
+    use ContentSide::{Bottom, Left, Right, Top};
     match (side, align) {
         (Bottom, Start) => "top-full mt-2 left-0",
         (Bottom, Center) => "top-full mt-2 left-1/2 -translate-x-1/2",

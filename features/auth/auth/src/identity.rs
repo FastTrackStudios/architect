@@ -24,6 +24,17 @@ use crate::ArchitectAuth;
 use crate::commands::CurrentSession;
 use crate::storage::AuthStorage;
 
+/// Lock the identity cache, recovering from poison.
+///
+/// A `HashMap` of token → principal has no invariant that spans a panic,
+/// so propagating poison would only turn some other thread's panic into a
+/// second one inside a request handler. (`architect::lock` is the same
+/// helper; `architect` is an optional dependency here, so this crate
+/// carries its own two lines rather than making the dep mandatory.)
+fn lock_cache<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// Resolve bearer tokens against an org's [`ArchitectAuth`] engine.
 pub struct SessionIdentityResolver<S> {
     auth: ArchitectAuth<S>,
@@ -40,7 +51,8 @@ impl<S> SessionIdentityResolver<S> {
         }
     }
 
-    pub fn with_ttl(mut self, ttl: Duration) -> Self {
+    #[must_use]
+    pub const fn with_ttl(mut self, ttl: Duration) -> Self {
         self.ttl = ttl;
         self
     }
@@ -49,7 +61,7 @@ impl<S> SessionIdentityResolver<S> {
         if self.ttl.is_zero() {
             return None;
         }
-        let mut cache = self.cache.lock().expect("identity cache poisoned");
+        let mut cache = lock_cache(&self.cache);
         match cache.get(token) {
             Some((principal, at)) if at.elapsed() < self.ttl => Some(principal.clone()),
             Some(_) => {
@@ -64,7 +76,7 @@ impl<S> SessionIdentityResolver<S> {
         if self.ttl.is_zero() {
             return;
         }
-        let mut cache = self.cache.lock().expect("identity cache poisoned");
+        let mut cache = lock_cache(&self.cache);
         // Bounded: drop everything once it grows silly (sessions per org are
         // small; this is belt-and-braces against token spray).
         if cache.len() > 4096 {

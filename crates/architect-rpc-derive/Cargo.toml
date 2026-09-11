@@ -61,3 +61,6 @@ futures-lite = "2"
 
 [package.metadata.cargo-shear]
 ignored = ["vox"]
+
+[lints]
+workspace = true

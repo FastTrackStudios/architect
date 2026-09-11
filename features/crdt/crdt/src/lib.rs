@@ -71,11 +71,12 @@ pub mod indexeddb;
 #[cfg(all(target_arch = "wasm32", feature = "indexeddb"))]
 pub use indexeddb::IndexedDbPersistence;
 
-/// Re-exports for awareness / cursor-sync work. `EphemeralStore`
-/// is the Loro primitive for ephemeral state (remote cursors,
-/// presence) — timestamp-LWW, partial-update encoding, stale-
-/// peer timeouts. Lives in `loro_internal` because the public
-/// `loro` crate doesn't expose it.
+/// Re-exports for awareness / cursor-sync work.
+///
+/// `EphemeralStore` is the Loro primitive for ephemeral state (remote
+/// cursors, presence) — timestamp-LWW, partial-update encoding, stale-
+/// peer timeouts. Lives in `loro_internal` because the public `loro`
+/// crate doesn't expose it.
 pub mod awareness {
     pub use loro_internal::awareness::{EphemeralStore, EphemeralStoreEvent};
 }
@@ -102,7 +103,7 @@ pub use persistence::{PersistError, Persistence};
 // `architect::Entity` emits it next to the SeaORM bridge: same field
 // attrs (`primary_key`, `sortable`, `on_create`) drive both.
 
-/// Per-feature marker + codec for entity ↔ LoroMap.
+/// Per-feature marker + codec for entity ↔ `LoroMap`.
 ///
 /// `EntityCrdt` is implemented on a zero-sized marker type local to
 /// the feature crate (e.g. `pub struct ExampleEntity;`), not directly
@@ -123,7 +124,7 @@ pub trait EntityCrdt: Send + Sync + 'static {
     /// the architect macro. Built via `build_list`.
     type List: Send + 'static;
 
-    /// Root container key under the LoroDoc. One per entity type.
+    /// Root container key under the `LoroDoc`. One per entity type.
     /// e.g. "examples", "projects", "tasks".
     const ROOT: &'static str;
 
@@ -132,7 +133,7 @@ pub trait EntityCrdt: Send + Sync + 'static {
 
     /// Materialize a wire row from a `Create` payload. The feature
     /// owns id-generation policy and timestamping (matching what the
-    /// architect macro does for the SeaORM path).
+    /// architect macro does for the `SeaORM` path).
     fn from_create(input: Self::Create) -> Self::Wire;
 
     /// Encode a wire row into a freshly inserted sub-LoroMap.
@@ -146,7 +147,7 @@ pub trait EntityCrdt: Send + Sync + 'static {
     fn apply_update(map: &LoroMap, input: Self::Update) -> Result<(), RepoError>;
 
     /// Sort an in-memory slice by the requested field. Returns
-    /// `InvalidInput` for unknown fields — matches the SeaORM impl's
+    /// `InvalidInput` for unknown fields — matches the `SeaORM` impl's
     /// behavior so the trait contract is one shape, two backends.
     fn sort_items(items: &mut [Self::Wire], field: &str, order: SortOrder)
     -> Result<(), RepoError>;
@@ -157,7 +158,7 @@ pub trait EntityCrdt: Send + Sync + 'static {
 
 // ── CrdtDoc ───────────────────────────────────────────────────────────
 
-/// One collaboration boundary. Owns the LoroDoc, the persistence
+/// One collaboration boundary. Owns the `LoroDoc`, the persistence
 /// handle, and the local-update subscription that flushes new bytes
 /// back to storage. Construct typed `LoroRepo<E>` handles off it.
 ///
@@ -189,7 +190,7 @@ impl CrdtDoc {
     /// forwards future commits back to storage.
     ///
     /// Works on both targets. Loro's local-update callback requires
-    /// `Send + Sync`, but browser storage handles (IndexedDB) aren't —
+    /// `Send + Sync`, but browser storage handles (`IndexedDB`) aren't —
     /// so the callback only pushes bytes into a channel, and a single
     /// spawned writer task (tokio native, `spawn_local` wasm) owns the
     /// persistence handle and drains it in commit order.
@@ -209,7 +210,7 @@ impl CrdtDoc {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
         let sub = doc.subscribe_local_update(Box::new(move |bytes| {
             // Writer gone (shutdown) → stop forwarding, keep committing.
-            tx.send(bytes.to_vec()).is_ok()
+            tx.send(bytes.clone()).is_ok()
         }));
         let writer = persistence.clone();
         spawn_persist_writer(async move {
@@ -233,6 +234,7 @@ impl CrdtDoc {
     /// Wrap a pre-built `LoroDoc` (e.g. one that already imported a
     /// snapshot from elsewhere). No persistence — for tests, demos,
     /// or callers that own their own I/O.
+    #[must_use]
     pub fn from_loro(doc: LoroDoc) -> Self {
         let persistence: Arc<dyn Persistence> = Arc::new(in_memory::InMemoryPersistence::new());
         let sub = doc.subscribe_local_update(Box::new(|_bytes| true));
@@ -248,6 +250,7 @@ impl CrdtDoc {
 
     /// Construct without persistence — local-only, no snapshot or
     /// update I/O. For tests, demos, and ephemeral workflows.
+    #[must_use]
     pub fn ephemeral() -> Self {
         let persistence: Arc<dyn Persistence> = Arc::new(in_memory::InMemoryPersistence::new());
         let doc = LoroDoc::new();
@@ -271,6 +274,7 @@ impl CrdtDoc {
     /// unsubscribe path — which re-enters the subscriber registry's
     /// (non-reentrant) lock to drop the doc's own subscription and
     /// deadlocks. Hold a `WeakCrdtDoc` there and `upgrade()` on use.
+    #[must_use]
     pub fn downgrade(&self) -> WeakCrdtDoc {
         WeakCrdtDoc {
             inner: Arc::downgrade(&self.inner),
@@ -280,6 +284,7 @@ impl CrdtDoc {
     /// Typed handle over the entity's root container. Multiple repos
     /// over different entity types all share this doc — writes
     /// commit together, exports cover the whole boundary.
+    #[must_use]
     pub fn repo<E: EntityCrdt>(&self) -> LoroRepo<E> {
         LoroRepo {
             inner: self.inner.clone(),
@@ -287,8 +292,9 @@ impl CrdtDoc {
         }
     }
 
-    /// Borrow the underlying LoroDoc — for export bundle assembly,
+    /// Borrow the underlying `LoroDoc` — for export bundle assembly,
     /// time-travel (`checkout`/`fork`), or custom subscriptions.
+    #[must_use]
     pub fn loro(&self) -> &LoroDoc {
         &self.inner.doc
     }
@@ -337,6 +343,7 @@ pub struct WeakCrdtDoc {
 
 impl WeakCrdtDoc {
     /// The doc, if it's still alive.
+    #[must_use]
     pub fn upgrade(&self) -> Option<CrdtDoc> {
         self.inner.upgrade().map(|inner| CrdtDoc { inner })
     }
@@ -364,10 +371,16 @@ impl<E: EntityCrdt> Clone for LoroRepo<E> {
 }
 
 impl<E: EntityCrdt> LoroRepo<E> {
+    // `async` mirrors the `Repo` surface the entity derive emits, so a
+    // caller can swap a SeaORM repo for a Loro one without touching a
+    // call site. Today's body happens not to await; that is an
+    // implementation detail, not the contract.
+    #[allow(clippy::unused_async)]
     pub async fn get(&self, id: Uuid) -> Result<E::Wire, RepoError> {
         self.get_now(id)
     }
 
+    #[allow(clippy::unused_async)]
     pub async fn list(
         &self,
         page: Page,
@@ -407,10 +420,7 @@ impl<E: EntityCrdt> LoroRepo<E> {
                 }
             }
         });
-        match decode_err {
-            Some(e) => Err(e),
-            None => Ok(items),
-        }
+        decode_err.map_or_else(|| Ok(items), |e| Err(e))
     }
 
     /// Synchronous `list` — the read path behind the async method, exposed
@@ -427,9 +437,13 @@ impl<E: EntityCrdt> LoroRepo<E> {
             E::sort_items(&mut items, &s.field, s.order)?;
         }
 
-        let total = items.len() as u32;
-        let size = page.size.max(1) as usize;
-        let start = (page.index as usize).saturating_mul(size);
+        // A page count that doesn't fit `u32` means more rows than the
+        // wire type can describe; saturate rather than wrap.
+        let total = u32::try_from(items.len()).unwrap_or(u32::MAX);
+        let size = usize::try_from(page.size.max(1)).unwrap_or(usize::MAX);
+        let start = usize::try_from(page.index)
+            .unwrap_or(usize::MAX)
+            .saturating_mul(size);
         let items: Vec<E::Wire> = items.into_iter().skip(start).take(size).collect();
         Ok(E::build_list(items, total, page))
     }
@@ -471,6 +485,7 @@ impl<E: EntityCrdt> LoroRepo<E> {
 
     /// Borrow the doc this repo lives in. Convenience for tests +
     /// callers that want to drive export/import directly.
+    #[must_use]
     pub fn doc(&self) -> &LoroDoc {
         &self.inner.doc
     }

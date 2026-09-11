@@ -1,7 +1,8 @@
-//! `InMemoryPersistence` — the test/demo backend. Backs every
-//! method onto a per-doc `(snapshot, Vec<update>)` pair inside a
-//! `Mutex<HashMap>`. Survives across clones (via `Arc`), does not
-//! survive across processes.
+//! `InMemoryPersistence` — the test/demo backend.
+//!
+//! Backs every method onto a per-doc `(snapshot, Vec<update>)` pair
+//! inside a `Mutex<HashMap>`. Survives across clones (via `Arc`), does
+//! not survive across processes.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -23,6 +24,7 @@ pub struct InMemoryPersistence {
 }
 
 impl InMemoryPersistence {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -32,18 +34,13 @@ impl InMemoryPersistence {
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 impl Persistence for InMemoryPersistence {
     async fn load_snapshot(&self, doc_id: Uuid) -> Result<Option<Vec<u8>>, PersistError> {
-        Ok(self
-            .inner
-            .lock()
-            .unwrap()
+        Ok(architect::lock(&self.inner)
             .get(&doc_id)
             .and_then(|d| d.snapshot.clone()))
     }
 
     async fn write_snapshot(&self, doc_id: Uuid, bytes: &[u8]) -> Result<(), PersistError> {
-        self.inner
-            .lock()
-            .unwrap()
+        architect::lock(&self.inner)
             .entry(doc_id)
             .or_default()
             .snapshot = Some(bytes.to_vec());
@@ -51,9 +48,7 @@ impl Persistence for InMemoryPersistence {
     }
 
     async fn append_update(&self, doc_id: Uuid, bytes: &[u8]) -> Result<(), PersistError> {
-        self.inner
-            .lock()
-            .unwrap()
+        architect::lock(&self.inner)
             .entry(doc_id)
             .or_default()
             .updates
@@ -62,17 +57,17 @@ impl Persistence for InMemoryPersistence {
     }
 
     async fn load_updates(&self, doc_id: Uuid) -> Result<Vec<Vec<u8>>, PersistError> {
-        Ok(self
-            .inner
-            .lock()
-            .unwrap()
+        Ok(architect::lock(&self.inner)
             .get(&doc_id)
             .map(|d| d.updates.clone())
             .unwrap_or_default())
     }
 
+    // The guard spans the body: the entry is looked up and mutated as
+    // one step.
+    #[allow(clippy::significant_drop_tightening)]
     async fn compact(&self, doc_id: Uuid, snapshot: &[u8]) -> Result<(), PersistError> {
-        let mut guard = self.inner.lock().unwrap();
+        let mut guard = architect::lock(&self.inner);
         let entry = guard.entry(doc_id).or_default();
         entry.snapshot = Some(snapshot.to_vec());
         entry.updates.clear();

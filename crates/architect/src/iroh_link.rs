@@ -32,7 +32,7 @@
 //! Gated behind `--features iroh`. The client side (`connect`,
 //! [`IrohLink`], [`iroh_link_source`]) also compiles on
 //! wasm32-unknown-unknown — browsers dial relay-only (no UDP in the
-//! sandbox; traffic rides WebSockets to the relays, still
+//! sandbox; traffic rides `WebSockets` to the relays, still
 //! e2e-encrypted). Serving (`serve_endpoint` / `serve_link`) and
 //! on-disk key persistence are native only; browser callers persist
 //! the key themselves via [`secret_key_to_hex`] /
@@ -108,8 +108,14 @@ pub fn secret_key_from_hex(s: &str) -> Result<iroh::SecretKey, iroh::KeyParsingE
 
 /// Hex-encode a secret key for persistence outside the filesystem —
 /// the inverse of [`secret_key_from_hex`].
+#[must_use]
 pub fn secret_key_to_hex(key: &iroh::SecretKey) -> String {
-    key.to_bytes().iter().map(|b| format!("{b:02x}")).collect()
+    use std::fmt::Write as _;
+    key.to_bytes().iter().fold(String::new(), |mut out, b| {
+        // Writing to a `String` is infallible.
+        let _ = write!(out, "{b:02x}");
+        out
+    })
 }
 
 /// Bind an iroh endpoint speaking [`VOX_ALPN`] with the n0 defaults
@@ -164,10 +170,12 @@ where
     }
 }
 
-/// Serve a whole router over an iroh endpoint — the iroh analogue of
-/// [`crate::axum_ws::serve_router`], accepting any vox [`vox::Handler`] and
-/// collapsing the `lane_acceptor_fn(|_, conn| conn.handle_with(router.clone()))`
-/// + [`serve_endpoint`] boilerplate to one call.
+/// Serve a whole router over an iroh endpoint.
+///
+/// The iroh analogue of [`crate::axum_ws::serve_router`]: accepts any vox
+/// [`vox::Handler`] and collapses the
+/// `lane_acceptor_fn(|_, conn| conn.handle_with(router.clone()))` +
+/// [`serve_endpoint`] boilerplate to one call.
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn serve_router<H>(endpoint: &iroh::Endpoint, router: H)
 where
@@ -282,7 +290,8 @@ pub struct IrohLink {
 }
 
 impl IrohLink {
-    pub fn new(
+    #[must_use]
+    pub const fn new(
         connection: iroh::endpoint::Connection,
         send: iroh::endpoint::SendStream,
         recv: iroh::endpoint::RecvStream,
@@ -298,12 +307,14 @@ impl IrohLink {
     /// Fire `closed` when the receive half is dropped (peer gone, stream
     /// finished, or vox tearing the session down) — how [`serve_link`]
     /// knows to release its `ConnectionHandle`.
+    #[must_use]
     pub fn with_closed_notifier(mut self, closed: tokio::sync::oneshot::Sender<()>) -> Self {
         self.closed = Some(closed);
         self
     }
 
     /// The remote peer's endpoint id.
+    #[must_use]
     pub fn remote_id(&self) -> iroh::EndpointId {
         self.connection.remote_id()
     }
@@ -393,11 +404,13 @@ impl vox_types::LinkRx for IrohLinkRx {
         match self.recv.read_exact(&mut len_bytes).await {
             Ok(()) => {}
             // Peer finished the stream at a frame boundary: clean close.
-            Err(ReadExactError::FinishedEarly(0)) => return Ok(None),
+            Err(
+                ReadExactError::FinishedEarly(0)
+                | ReadExactError::ReadError(ReadError::ConnectionLost(
+                    ConnectionError::ApplicationClosed(_) | ConnectionError::LocallyClosed,
+                )),
+            ) => return Ok(None),
             // Peer closed the whole QUIC connection: also a close.
-            Err(ReadExactError::ReadError(ReadError::ConnectionLost(
-                ConnectionError::ApplicationClosed(_) | ConnectionError::LocallyClosed,
-            ))) => return Ok(None),
             Err(e) => return Err(IrohLinkError(e.to_string())),
         }
         let len = u32::from_be_bytes(len_bytes);
@@ -406,7 +419,11 @@ impl vox_types::LinkRx for IrohLinkRx {
                 "vox frame of {len} bytes exceeds {MAX_FRAME_LEN}"
             )));
         }
-        let mut bytes = vec![0u8; len as usize];
+        // `MAX_FRAME_LEN` was already enforced above, so this fits;
+        // `try_from` keeps it total on a 16-bit target too.
+        let len = usize::try_from(len)
+            .map_err(|_| IrohLinkError(format!("vox frame of {len} bytes does not fit usize")))?;
+        let mut bytes = vec![0u8; len];
         self.recv
             .read_exact(&mut bytes)
             .await

@@ -51,6 +51,7 @@
 //! }
 //! ```
 
+use crate::lock::lock;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
@@ -124,31 +125,36 @@ impl<T> PubSub<T> {
     /// Bounded per-subscriber mailboxes; on overflow the **oldest** queued
     /// event for that subscriber is dropped. The default for state-shaped
     /// events.
+    #[must_use]
     pub fn sliding(capacity: usize) -> Self {
         Self::with_strategy(Strategy::Sliding(capacity.max(1)))
     }
 
     /// Bounded per-subscriber mailboxes; on overflow the **incoming**
     /// event is dropped for that subscriber.
+    #[must_use]
     pub fn dropping(capacity: usize) -> Self {
         Self::with_strategy(Strategy::Dropping(capacity.max(1)))
     }
 
     /// Unbounded per-subscriber mailboxes — nothing is ever dropped.
+    #[must_use]
     pub fn unbounded() -> Self {
         Self::with_strategy(Strategy::Unbounded)
     }
 
     /// Keep the last `n` published events and hand them to every new
     /// subscriber before live traffic (effect's `replay` option).
-    pub fn with_replay(mut self, n: usize) -> Self {
+    #[must_use]
+    pub const fn with_replay(mut self, n: usize) -> Self {
         self.replay_capacity = n;
         self
     }
 
     /// Live subscriber count (as of the last sweep).
+    #[must_use]
     pub fn subscriber_count(&self) -> usize {
-        self.inner.lock().expect("pubsub lock").subscribers.len()
+        lock(&self.inner).subscribers.len()
     }
 }
 
@@ -168,10 +174,14 @@ where
     /// the subscriber's mailbox, but nothing is delivered until
     /// [`complete_attach`](Self::complete_attach) — giving the caller a
     /// race-free window to capture a snapshot.
+    // The guard spans the whole body on purpose: allocating the id,
+    // seeding the replay mailbox and pushing the subscriber must be one
+    // atomic step, or a concurrent `publish` can land between them.
+    #[allow(clippy::significant_drop_tightening)]
     pub fn begin_attach(&self, sink: vox::Tx<T>) -> PendingAttach {
-        let mut inner = self.inner.lock().expect("pubsub lock");
+        let mut inner = lock(&self.inner);
         let id = inner.next_id;
-        inner.next_id += 1;
+        inner.next_id = inner.next_id.saturating_add(1);
         let mailbox = inner.replay.iter().cloned().collect();
         inner.subscribers.push(Subscriber {
             sink,
@@ -185,8 +195,12 @@ where
 
     /// Finish a buffered attach: prepend `intro` (the snapshot) ahead of
     /// everything the mailbox collected, and open the tap.
+    // `PendingAttach` by value on purpose: it is a linear token handed
+    // out by `begin_attach`, and consuming it is what stops the same
+    // attach being completed (or aborted) twice.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn complete_attach(&self, pending: PendingAttach, intro: Option<T>) {
-        let mut inner = self.inner.lock().expect("pubsub lock");
+        let mut inner = lock(&self.inner);
         if let Some(sub) = inner.subscribers.iter_mut().find(|s| s.id == pending.0) {
             if let Some(intro) = intro {
                 sub.mailbox.push_front(intro);
@@ -199,8 +213,10 @@ where
 
     /// Abandon a buffered attach (e.g. the snapshot read failed) — the
     /// subscriber is removed without receiving anything.
+    // By value for the same reason as `complete_attach`.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn abort_attach(&self, pending: PendingAttach) {
-        let mut inner = self.inner.lock().expect("pubsub lock");
+        let mut inner = lock(&self.inner);
         inner.subscribers.retain(|s| s.id != pending.0);
     }
 
@@ -218,7 +234,7 @@ where
     /// `architect::rt::rt_channel` (the `rt` feature) and a normal
     /// thread drains it into the hub via `RtConsumer::drain_into`.
     pub fn publish(&self, event: T) -> usize {
-        let mut inner = self.inner.lock().expect("pubsub lock");
+        let mut inner = lock(&self.inner);
         if self.replay_capacity > 0 {
             if inner.replay.len() == self.replay_capacity {
                 inner.replay.pop_front();

@@ -11,6 +11,8 @@ use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
+use crate::lock::lock;
+
 use tokio::sync::Notify;
 
 use super::task::{Either, race};
@@ -18,7 +20,7 @@ use super::task::{Either, race};
 struct Inner {
     cancelled: AtomicBool,
     notify: Notify,
-    children: Mutex<Vec<Weak<Inner>>>,
+    children: Mutex<Vec<Weak<Self>>>,
 }
 
 impl Inner {
@@ -36,7 +38,7 @@ impl Inner {
             self.notify.notify_waiters();
             // Propagate downward, then forget the children (cancellation is
             // one-shot, so we never need to revisit them).
-            let drained: Vec<_> = self.children.lock().unwrap().drain(..).collect();
+            let drained: Vec<_> = lock(&self.children).drain(..).collect();
             for weak in drained {
                 if let Some(child) = weak.upgrade() {
                     child.cancel();
@@ -56,6 +58,7 @@ pub struct CancellationToken {
 
 impl CancellationToken {
     /// A fresh, un-cancelled token.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             inner: Inner::new(),
@@ -64,6 +67,7 @@ impl CancellationToken {
 
     /// A child token. Cancelling `self` (or any ancestor) cancels this child;
     /// cancelling the child does **not** affect the parent.
+    #[must_use]
     pub fn child_token(&self) -> Self {
         let child = Inner::new();
         if self.inner.cancelled.load(Ordering::SeqCst) {
@@ -71,22 +75,22 @@ impl CancellationToken {
             // registering (the parent will never drain again).
             child.cancel();
         } else {
-            self.inner
-                .children
-                .lock()
-                .unwrap()
-                .push(Arc::downgrade(&child));
+            lock(&self.inner.children).push(Arc::downgrade(&child));
         }
         Self { inner: child }
     }
 
     /// Trigger cancellation. Returns `true` if this call was the one that
     /// flipped the token (idempotent — later calls return `false`).
+    // NOT `#[must_use]`: cancelling and ignoring the "was I first"
+    // answer is the ordinary call.
+    #[allow(clippy::must_use_candidate)]
     pub fn cancel(&self) -> bool {
         self.inner.cancel()
     }
 
     /// Non-blocking: has this token been cancelled?
+    #[must_use]
     pub fn is_cancelled(&self) -> bool {
         self.inner.cancelled.load(Ordering::SeqCst)
     }
@@ -183,7 +187,7 @@ mod tests {
             async {
                 assert!(!woke.load(Ordering::SeqCst));
                 token.cancel();
-                pending::<()>().await
+                pending::<()>().await;
             },
         ));
         assert!(woke.load(Ordering::SeqCst));

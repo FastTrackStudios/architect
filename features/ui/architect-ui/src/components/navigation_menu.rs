@@ -1,4 +1,4 @@
-//! NavigationMenu — shadcn v4 maia style top-level navigation with mega-menu dropdowns.
+//! `NavigationMenu` — shadcn v4 maia style top-level navigation with mega-menu dropdowns.
 
 use architect_story_runtime::story;
 use dioxus::prelude::*;
@@ -98,19 +98,14 @@ pub struct NavigationMenuTriggerProps {
 pub fn NavigationMenuTrigger(props: NavigationMenuTriggerProps) -> Element {
     let mut ctx: NavigationMenuContext = use_context();
     let item_ctx: NavigationMenuItemContext = use_context();
-    let item_value = item_ctx.value.clone();
+    let item_value = item_ctx.value;
 
-    let is_open = ctx
-        .active
-        .read()
-        .as_ref()
-        .map(|v| v == &item_value)
-        .unwrap_or(false);
+    let is_open = ctx.active.read().as_ref().is_some_and(|v| v == &item_value);
 
     let open_class = if is_open { "bg-muted/50" } else { "" };
     let chevron_rotate = if is_open { "rotate-180" } else { "" };
 
-    let toggle_value = item_value.clone();
+    let toggle_value = item_value;
 
     rsx! {
         button {
@@ -165,8 +160,7 @@ pub fn NavigationMenuContent(props: NavigationMenuContentProps) -> Element {
         .active
         .read()
         .as_ref()
-        .map(|v| v == &item_ctx.value)
-        .unwrap_or(false);
+        .is_some_and(|v| v == &item_ctx.value);
 
     if !is_active {
         return rsx! {};
@@ -231,7 +225,7 @@ pub fn NavigationMenuLink(props: NavigationMenuLinkProps) -> Element {
     }
 }
 
-/// NavigationMenu with two items, one with a dropdown content panel.
+/// `NavigationMenu` with two items, one with a dropdown content panel.
 #[story(category = "NavigationMenu", name = "default")]
 pub fn navigation_menu_default() -> Element {
     rsx! {

@@ -100,13 +100,14 @@ pub struct Decision {
     pub delay: Duration,
 }
 
-/// A retry/repeat policy. Build one with a constructor
-/// ([`exponential`](Schedule::exponential), [`spaced`](Schedule::spaced),
-/// [`recurs`](Schedule::recurs), …) and refine it with the builder
-/// combinators ([`max_delay`](Schedule::max_delay), [`jittered`](Schedule::jittered),
-/// [`take`](Schedule::take), [`and_then`](Schedule::and_then), …).
+/// A retry/repeat policy.
 ///
-/// Faithful to Effect / id_effect's enum model: combinators box their
+/// Build one with a constructor ([`exponential`](Schedule::exponential),
+/// [`spaced`](Schedule::spaced), [`recurs`](Schedule::recurs), …) and refine it with
+/// the builder combinators ([`max_delay`](Schedule::max_delay),
+/// [`jittered`](Schedule::jittered), [`take`](Schedule::take),
+/// [`and_then`](Schedule::and_then), …). Faithful to Effect / `id_effect`'s enum
+/// model: combinators box their
 /// sub-schedules. `Schedule` is **not** `Clone` (it may hold a closure and
 /// carries combinator state) — build a fresh one per drive.
 pub enum Schedule {
@@ -121,26 +122,34 @@ pub enum Schedule {
     /// Always recur; delay = `base * attempt`.
     Linear(Duration),
     /// Cap the inner schedule's delay at `cap`.
-    MaxDelay(Box<Schedule>, Duration),
+    MaxDelay(Box<Self>, Duration),
     /// Stop after the inner schedule has recurred `n` times.
-    Take(Box<Schedule>, u64),
+    Take(Box<Self>, u64),
     /// Scale the inner schedule's delay by a deterministic jitter factor in
     /// `[1 - frac, 1 + frac]` (derived purely from the attempt number).
-    Jittered(Box<Schedule>, f64),
+    Jittered(Box<Self>, f64),
+    /// Draw uniformly from `[floor, delay)` — AWS "full jitter" — off a
+    /// **stateful** RNG stream, so two instances of the same schedule
+    /// disagree. See [`Schedule::full_jitter`].
+    FullJitter {
+        inner: Box<Self>,
+        floor: Duration,
+        rng: u64,
+    },
     /// Transform the inner schedule's delay through a custom function (the
     /// escape hatch for true RNG, deadlines, etc.).
-    MapDelay(Box<Schedule>, DelayMap),
+    MapDelay(Box<Self>, DelayMap),
     /// Run `first` until it stops, then `second` (attempt count rebased).
     AndThen {
-        first: Box<Schedule>,
-        second: Box<Schedule>,
+        first: Box<Self>,
+        second: Box<Self>,
         in_second: bool,
         consumed: u64,
     },
     /// Recur only while **both** recur; delay = the larger of the two.
-    Intersect(Box<Schedule>, Box<Schedule>),
+    Intersect(Box<Self>, Box<Self>),
     /// Recur while **either** recurs; delay = the smaller of the two.
-    Union(Box<Schedule>, Box<Schedule>),
+    Union(Box<Self>, Box<Self>),
 }
 
 /// `d * f`, saturating to `Duration::{ZERO, MAX}` instead of panicking on
@@ -156,89 +165,144 @@ fn mul_saturating(d: Duration, f: f64) -> Duration {
     }
 }
 
-/// Deterministic unit float in `[0, 1)` from a seed (splitmix64). Keeps
-/// jitter reproducible + wasm-clean (no `getrandom`).
-fn jitter_unit(seed: u64) -> f64 {
-    let mut z = seed.wrapping_add(0x9E37_79B9_7F4A_7C15);
-    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    z ^= z >> 31;
-    // top 53 bits → [0, 1)
-    (z >> 11) as f64 / ((1u64 << 53) as f64)
+// Deterministic unit float in `[0, 1)` — shared with `reconnect::Backoff`,
+// which used to carry a byte-identical copy. See `crate::jitter`.
+use crate::jitter::unit as jitter_unit;
+
+/// `attempt - 1` as the exponent `f64::powi` wants, saturating.
+///
+/// An attempt count past `i32::MAX` means the caller has been retrying
+/// for longer than any cap could matter; pinning the exponent there is
+/// the honest degenerate answer, and it cannot panic.
+fn exponent(attempt: u64) -> i32 {
+    i32::try_from(attempt).unwrap_or(i32::MAX).saturating_sub(1)
+}
+
+/// An attempt count as an `f64` multiplier.
+// Above 2^53 an attempt count is no longer exactly representable. A
+// linear schedule that has run 9 quadrillion times has already saturated
+// its delay, so the lost precision is unobservable.
+#[allow(clippy::as_conversions, clippy::cast_precision_loss)]
+const fn attempt_as_f64(attempt: u64) -> f64 {
+    attempt as f64
 }
 
 impl Schedule {
     // ── constructors ────────────────────────────────────────────────────
 
     /// Never recur — the driven operation runs exactly once.
-    pub fn never() -> Self {
-        Schedule::Never
+    #[must_use]
+    pub const fn never() -> Self {
+        Self::Never
     }
 
     /// Recur up to `n` times with no delay between attempts.
-    pub fn recurs(n: u64) -> Self {
-        Schedule::Recurs(n)
+    #[must_use]
+    pub const fn recurs(n: u64) -> Self {
+        Self::Recurs(n)
     }
 
     /// Recur forever with a fixed `delay` between attempts.
-    pub fn spaced(delay: Duration) -> Self {
-        Schedule::Spaced(delay)
+    #[must_use]
+    pub const fn spaced(delay: Duration) -> Self {
+        Self::Spaced(delay)
     }
 
     /// Exponential backoff: `base`, `base*2`, `base*4`, … (factor 2). Pair
     /// with [`take`](Schedule::take) / [`max_delay`](Schedule::max_delay) to
     /// bound it.
-    pub fn exponential(base: Duration) -> Self {
-        Schedule::Exponential { base, factor: 2.0 }
+    #[must_use]
+    pub const fn exponential(base: Duration) -> Self {
+        Self::Exponential { base, factor: 2.0 }
     }
 
     /// Exponential backoff with a custom growth `factor`.
-    pub fn exponential_factor(base: Duration, factor: f64) -> Self {
-        Schedule::Exponential { base, factor }
+    #[must_use]
+    pub const fn exponential_factor(base: Duration, factor: f64) -> Self {
+        Self::Exponential { base, factor }
     }
 
     /// Linear backoff: `base`, `base*2`, `base*3`, … (delay grows by `base`
     /// each attempt).
-    pub fn linear(base: Duration) -> Self {
-        Schedule::Linear(base)
+    #[must_use]
+    pub const fn linear(base: Duration) -> Self {
+        Self::Linear(base)
     }
 
     // ── combinators ──────────────────────────────────────────────────────
 
     /// Cap every delay at `cap`.
+    #[must_use]
     pub fn max_delay(self, cap: Duration) -> Self {
-        Schedule::MaxDelay(Box::new(self), cap)
+        Self::MaxDelay(Box::new(self), cap)
     }
 
     /// Stop after at most `n` recurrences (independent of the inner policy).
+    #[must_use]
     pub fn take(self, n: u64) -> Self {
-        Schedule::Take(Box::new(self), n)
+        Self::Take(Box::new(self), n)
     }
 
     /// Add ±20% deterministic jitter to each delay (the common default that
     /// de-synchronizes a thundering herd without going unbounded).
+    #[must_use]
     pub fn jittered(self) -> Self {
         self.jittered_by(0.2)
     }
 
     /// Add ±`frac` deterministic jitter (e.g. `0.5` → `[0.5×, 1.5×]`).
+    ///
+    /// **Deterministic on the attempt number**, which makes it
+    /// reproducible in tests — and means every instance of this schedule
+    /// picks the same delay for the same attempt. That is fine for
+    /// retrying a local operation and exactly wrong for spreading a
+    /// reconnect storm; use [`full_jitter`](Self::full_jitter) there.
+    #[must_use]
     pub fn jittered_by(self, frac: f64) -> Self {
-        Schedule::Jittered(Box::new(self), frac.abs())
+        Self::Jittered(Box::new(self), frac.abs())
+    }
+
+    /// Draw each delay uniformly from `[floor, delay)` — AWS "full
+    /// jitter" — off a per-instance RNG stream.
+    ///
+    /// This is the shape that de-synchronises a thundering herd: two
+    /// clients that died together get different delays, because the seed
+    /// differs per instance rather than being a function of the attempt
+    /// number. It is what [`reconnect::Backoff`](crate::reconnect::Backoff)
+    /// is built from.
+    ///
+    /// Use [`full_jitter_seeded`](Self::full_jitter_seeded) in tests.
+    #[must_use]
+    pub fn full_jitter(self, floor: Duration) -> Self {
+        self.full_jitter_seeded(floor, crate::jitter::entropy_seed())
+    }
+
+    /// [`full_jitter`](Self::full_jitter) with an explicit seed —
+    /// deterministic, for tests.
+    #[must_use]
+    pub fn full_jitter_seeded(self, floor: Duration, seed: u64) -> Self {
+        Self::FullJitter {
+            inner: Box::new(self),
+            floor,
+            rng: seed,
+        }
     }
 
     /// Transform each delay through `f` — the hook for custom logic such as
     /// true RNG jitter or a fixed floor.
+    #[must_use]
     pub fn map_delay<F>(self, f: F) -> Self
     where
         F: Fn(Duration) -> Duration + MaybeSendSync + 'static,
     {
-        Schedule::MapDelay(Box::new(self), Box::new(f))
+        Self::MapDelay(Box::new(self), Box::new(f))
     }
 
     /// Run `self` to exhaustion, then continue with `next` (its attempt count
     /// rebased to start fresh).
-    pub fn and_then(self, next: Schedule) -> Self {
-        Schedule::AndThen {
+    #[must_use]
+    pub fn and_then(self, next: Self) -> Self {
+        Self::AndThen {
             first: Box::new(self),
             second: Box::new(next),
             in_second: false,
@@ -248,14 +312,16 @@ impl Schedule {
 
     /// Recur only while **both** `self` and `other` would recur; the delay is
     /// the larger of the two (the more conservative).
-    pub fn intersect(self, other: Schedule) -> Self {
-        Schedule::Intersect(Box::new(self), Box::new(other))
+    #[must_use]
+    pub fn intersect(self, other: Self) -> Self {
+        Self::Intersect(Box::new(self), Box::new(other))
     }
 
     /// Recur while **either** `self` or `other` would recur; the delay is the
     /// smaller of the two (the more eager).
-    pub fn union(self, other: Schedule) -> Self {
-        Schedule::Union(Box::new(self), Box::new(other))
+    #[must_use]
+    pub fn union(self, other: Self) -> Self {
+        Self::Union(Box::new(self), Box::new(other))
     }
 
     // ── decision ──────────────────────────────────────────────────────────
@@ -265,38 +331,49 @@ impl Schedule {
     /// attempt again; `None` → stop.
     pub fn next(&mut self, attempt: u64) -> Option<Decision> {
         match self {
-            Schedule::Never => None,
-            Schedule::Recurs(n) => (attempt <= *n).then_some(Decision {
+            Self::Never => None,
+            Self::Recurs(n) => (attempt <= *n).then_some(Decision {
                 delay: Duration::ZERO,
             }),
-            Schedule::Spaced(d) => Some(Decision { delay: *d }),
-            Schedule::Exponential { base, factor } => Some(Decision {
-                delay: mul_saturating(*base, factor.powi((attempt as i32) - 1)),
+            Self::Spaced(d) => Some(Decision { delay: *d }),
+            Self::Exponential { base, factor } => Some(Decision {
+                delay: mul_saturating(*base, factor.powi(exponent(attempt))),
             }),
-            Schedule::Linear(base) => Some(Decision {
-                delay: mul_saturating(*base, attempt as f64),
+            Self::Linear(base) => Some(Decision {
+                delay: mul_saturating(*base, attempt_as_f64(attempt)),
             }),
-            Schedule::MaxDelay(inner, cap) => inner.next(attempt).map(|d| Decision {
+            Self::MaxDelay(inner, cap) => inner.next(attempt).map(|d| Decision {
                 delay: d.delay.min(*cap),
             }),
-            Schedule::Take(inner, n) => {
+            Self::Take(inner, n) => {
                 if attempt > *n {
                     None
                 } else {
                     inner.next(attempt)
                 }
             }
-            Schedule::Jittered(inner, frac) => inner.next(attempt).map(|d| {
+            Self::Jittered(inner, frac) => inner.next(attempt).map(|d| {
                 let unit = jitter_unit(attempt); // [0,1)
-                let scale = 1.0 - *frac + 2.0 * *frac * unit; // [1-frac, 1+frac)
+                let scale = (2.0 * *frac).mul_add(unit, 1.0 - *frac); // [1-frac, 1+frac)
                 Decision {
                     delay: mul_saturating(d.delay, scale),
                 }
             }),
-            Schedule::MapDelay(inner, f) => {
-                inner.next(attempt).map(|d| Decision { delay: f(d.delay) })
-            }
-            Schedule::AndThen {
+            Self::FullJitter { inner, floor, rng } => inner.next(attempt).map(|d| {
+                // `[floor, ceiling)`: the floor is a hard minimum, the
+                // rest of the window is uniform.
+                let ceiling = d.delay.max(*floor);
+                let span = ceiling.saturating_sub(*floor);
+                if span.is_zero() {
+                    return Decision { delay: *floor };
+                }
+                let unit = crate::jitter::next_unit(rng);
+                Decision {
+                    delay: floor.saturating_add(Duration::from_secs_f64(span.as_secs_f64() * unit)),
+                }
+            }),
+            Self::MapDelay(inner, f) => inner.next(attempt).map(|d| Decision { delay: f(d.delay) }),
+            Self::AndThen {
                 first,
                 second,
                 in_second,
@@ -309,11 +386,11 @@ impl Schedule {
                     // First declined at `attempt` — it accounted for the
                     // prior `attempt - 1` recurrences; hand off to `second`.
                     *in_second = true;
-                    *consumed = attempt - 1;
+                    *consumed = attempt.saturating_sub(1);
                 }
-                second.next(attempt - *consumed)
+                second.next(attempt.saturating_sub(*consumed))
             }
-            Schedule::Intersect(a, b) => {
+            Self::Intersect(a, b) => {
                 // Call both (they may carry state) before combining.
                 let da = a.next(attempt);
                 let db = b.next(attempt);
@@ -324,7 +401,7 @@ impl Schedule {
                     _ => None,
                 }
             }
-            Schedule::Union(a, b) => {
+            Self::Union(a, b) => {
                 let da = a.next(attempt);
                 let db = b.next(attempt);
                 match (da, db) {
@@ -384,7 +461,7 @@ where
         match op().await {
             Ok(value) => return Ok(value),
             Err(err) => {
-                attempt += 1;
+                attempt = attempt.saturating_add(1);
                 match schedule.next(attempt) {
                     Some(decision) => clock.sleep(decision.delay).await,
                     None => return Err(err),
@@ -422,7 +499,7 @@ where
         match op().await {
             Ok(value) => {
                 last = value;
-                attempt += 1;
+                attempt = attempt.saturating_add(1);
                 match schedule.next(attempt) {
                     Some(decision) => clock.sleep(decision.delay).await,
                     None => return Ok(last),
@@ -450,7 +527,7 @@ mod tests {
     }
     impl RecordingClock {
         fn delays(&self) -> Vec<Duration> {
-            self.delays.lock().unwrap().clone()
+            crate::lock::lock(&self.delays).clone()
         }
     }
     impl Clock for RecordingClock {
@@ -458,7 +535,7 @@ mod tests {
             Instant::now()
         }
         fn sleep(&self, dur: Duration) -> BoxFuture<'static, ()> {
-            self.delays.lock().unwrap().push(dur);
+            crate::lock::lock(&self.delays).push(dur);
             Box::pin(async {})
         }
     }

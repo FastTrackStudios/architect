@@ -11,7 +11,7 @@
 //! - **Uuid** → RFC4122 string. Round-trips losslessly, sorts
 //!   lexicographically (which is *not* timestamp order — use a
 //!   dedicated `created_at` field for that).
-//! - **DateTime\<Utc\>** → RFC3339 string. Sub-second precision is
+//! - **`DateTime`\<Utc\>** → RFC3339 string. Sub-second precision is
 //!   preserved at the nanosecond level chrono emits; round-tripping
 //!   through parse can normalize nanos → micros on some platforms.
 //! - **i32 / u32 / i64** → `LoroValue::I64`. `i32` and `u32` are
@@ -31,134 +31,230 @@ use loro::{Container, LoroMap, LoroText, LoroValue};
 use uuid::Uuid;
 
 /// Wrap any Loro error into the architect `RepoError` shape so call
-/// sites stay quiet. Used by every write primitive below.
+/// sites stay quiet.
+///
+/// Used by every write primitive below.
+#[must_use]
 pub fn loro_err<E: std::fmt::Display>(e: E) -> RepoError {
     RepoError::Internal(format!("loro: {e}"))
 }
 
 // ── Writes ────────────────────────────────────────────────────────────
 
+/// Write a string at `k`.
+/// # Errors
+///
+/// [`RepoError::Internal`] if Loro rejects the write — the document is
+/// detached, or the key already holds an incompatible container.
 pub fn write_str(m: &LoroMap, k: &str, v: &str) -> Result<(), RepoError> {
     m.insert(k, v).map_err(loro_err)
 }
 
+/// Writes `v`, or deletes the key when `v` is `None`.
+///
+/// # Errors
+///
+/// [`RepoError::Internal`] if Loro rejects the write. Deleting an
+/// absent key is not an error.
 pub fn write_opt_str(m: &LoroMap, k: &str, v: Option<&str>) -> Result<(), RepoError> {
-    match v {
-        Some(s) => write_str(m, k, s),
-        None => {
+    v.map_or_else(
+        || {
             let _ = m.delete(k);
             Ok(())
-        }
-    }
+        },
+        |s| write_str(m, k, s),
+    )
 }
 
+/// Write a `Uuid` as its RFC4122 string form.
+/// # Errors
+///
+/// [`RepoError::Internal`] if Loro rejects the write — the document is
+/// detached, or the key already holds an incompatible container.
 pub fn write_uuid(m: &LoroMap, k: &str, v: Uuid) -> Result<(), RepoError> {
     write_str(m, k, &v.to_string())
 }
 
+/// Writes `v`, or deletes the key when `v` is `None`.
+///
+/// # Errors
+///
+/// [`RepoError::Internal`] if Loro rejects the write. Deleting an
+/// absent key is not an error.
 pub fn write_opt_uuid(m: &LoroMap, k: &str, v: Option<Uuid>) -> Result<(), RepoError> {
-    match v {
-        Some(u) => write_uuid(m, k, u),
-        None => {
+    v.map_or_else(
+        || {
             let _ = m.delete(k);
             Ok(())
-        }
-    }
+        },
+        |u| write_uuid(m, k, u),
+    )
 }
 
+/// Write a timestamp as its RFC3339 string form.
+/// # Errors
+///
+/// [`RepoError::Internal`] if Loro rejects the write — the document is
+/// detached, or the key already holds an incompatible container.
 pub fn write_dt(m: &LoroMap, k: &str, v: DateTime<Utc>) -> Result<(), RepoError> {
     write_str(m, k, &v.to_rfc3339())
 }
 
+/// Writes `v`, or deletes the key when `v` is `None`.
+///
+/// # Errors
+///
+/// [`RepoError::Internal`] if Loro rejects the write. Deleting an
+/// absent key is not an error.
 pub fn write_opt_dt(m: &LoroMap, k: &str, v: Option<DateTime<Utc>>) -> Result<(), RepoError> {
-    match v {
-        Some(dt) => write_dt(m, k, dt),
-        None => {
+    v.map_or_else(
+        || {
             let _ = m.delete(k);
             Ok(())
-        }
-    }
+        },
+        |dt| write_dt(m, k, dt),
+    )
 }
 
+/// Write a bool at `k`.
+/// # Errors
+///
+/// [`RepoError::Internal`] if Loro rejects the write — the document is
+/// detached, or the key already holds an incompatible container.
 pub fn write_bool(m: &LoroMap, k: &str, v: bool) -> Result<(), RepoError> {
     m.insert(k, v).map_err(loro_err)
 }
 
+/// Writes `v`, or deletes the key when `v` is `None`.
+///
+/// # Errors
+///
+/// [`RepoError::Internal`] if Loro rejects the write. Deleting an
+/// absent key is not an error.
 pub fn write_opt_bool(m: &LoroMap, k: &str, v: Option<bool>) -> Result<(), RepoError> {
-    match v {
-        Some(b) => write_bool(m, k, b),
-        None => {
+    v.map_or_else(
+        || {
             let _ = m.delete(k);
             Ok(())
-        }
-    }
+        },
+        |b| write_bool(m, k, b),
+    )
 }
 
+/// Write an `i64` at `k`.
+/// # Errors
+///
+/// [`RepoError::Internal`] if Loro rejects the write — the document is
+/// detached, or the key already holds an incompatible container.
 pub fn write_i64(m: &LoroMap, k: &str, v: i64) -> Result<(), RepoError> {
     m.insert(k, v).map_err(loro_err)
 }
 
+/// Writes `v`, or deletes the key when `v` is `None`.
+///
+/// # Errors
+///
+/// [`RepoError::Internal`] if Loro rejects the write. Deleting an
+/// absent key is not an error.
 pub fn write_opt_i64(m: &LoroMap, k: &str, v: Option<i64>) -> Result<(), RepoError> {
-    match v {
-        Some(n) => write_i64(m, k, n),
-        None => {
+    v.map_or_else(
+        || {
             let _ = m.delete(k);
             Ok(())
-        }
-    }
+        },
+        |n| write_i64(m, k, n),
+    )
 }
 
+/// Write an `i32`, widened to the stored `i64`.
+/// # Errors
+///
+/// [`RepoError::Internal`] if Loro rejects the write — the document is
+/// detached, or the key already holds an incompatible container.
 pub fn write_i32(m: &LoroMap, k: &str, v: i32) -> Result<(), RepoError> {
-    write_i64(m, k, v as i64)
+    write_i64(m, k, i64::from(v))
 }
 
+/// Writes `v`, or deletes the key when `v` is `None`.
+///
+/// # Errors
+///
+/// [`RepoError::Internal`] if Loro rejects the write. Deleting an
+/// absent key is not an error.
 pub fn write_opt_i32(m: &LoroMap, k: &str, v: Option<i32>) -> Result<(), RepoError> {
-    match v {
-        Some(n) => write_i32(m, k, n),
-        None => {
+    v.map_or_else(
+        || {
             let _ = m.delete(k);
             Ok(())
-        }
-    }
+        },
+        |n| write_i32(m, k, n),
+    )
 }
 
+/// Write a `u32`, widened to the stored `i64`.
+/// # Errors
+///
+/// [`RepoError::Internal`] if Loro rejects the write — the document is
+/// detached, or the key already holds an incompatible container.
 pub fn write_u32(m: &LoroMap, k: &str, v: u32) -> Result<(), RepoError> {
-    write_i64(m, k, v as i64)
+    write_i64(m, k, i64::from(v))
 }
 
+/// Writes `v`, or deletes the key when `v` is `None`.
+///
+/// # Errors
+///
+/// [`RepoError::Internal`] if Loro rejects the write. Deleting an
+/// absent key is not an error.
 pub fn write_opt_u32(m: &LoroMap, k: &str, v: Option<u32>) -> Result<(), RepoError> {
-    match v {
-        Some(n) => write_u32(m, k, n),
-        None => {
+    v.map_or_else(
+        || {
             let _ = m.delete(k);
             Ok(())
-        }
-    }
+        },
+        |n| write_u32(m, k, n),
+    )
 }
 
 /// Tab-separated encoding. Naive LWW on the whole vec — fine for
 /// tags and other rarely-conflicting lists. Upgrade individual call
 /// sites to `LoroList` sub-containers when concurrent edits matter.
+///
+/// # Errors
+///
+/// [`RepoError::Internal`] if Loro rejects the write.
 pub fn write_string_list(m: &LoroMap, k: &str, v: &[String]) -> Result<(), RepoError> {
     let joined = v.join("\t");
     write_str(m, k, &joined)
 }
 
+/// Writes `v`, or deletes the key when `v` is `None`.
+///
+/// # Errors
+///
+/// [`RepoError::Internal`] if Loro rejects the write. Deleting an
+/// absent key is not an error.
 pub fn write_opt_string_list(m: &LoroMap, k: &str, v: Option<&[String]>) -> Result<(), RepoError> {
-    match v {
-        Some(slice) => write_string_list(m, k, slice),
-        None => {
+    v.map_or_else(
+        || {
             let _ = m.delete(k);
             Ok(())
-        }
-    }
+        },
+        |slice| write_string_list(m, k, slice),
+    )
 }
 
 // ── Reads ─────────────────────────────────────────────────────────────
 
+/// Read a string at `k`.
+///
+/// # Errors
+///
+/// [`RepoError::Internal`] if the key is missing, or holds a
+/// value of the wrong type.
 pub fn read_str(m: &LoroMap, k: &str) -> Result<String, RepoError> {
     match m.get(k) {
-        Some(loro::ValueOrContainer::Value(LoroValue::String(s))) => Ok((*s).to_string()),
+        Some(loro::ValueOrContainer::Value(LoroValue::String(s))) => Ok((*s).clone()),
         Some(other) => Err(RepoError::Internal(format!(
             "expected string at `{k}`, got {other:?}"
         ))),
@@ -166,40 +262,71 @@ pub fn read_str(m: &LoroMap, k: &str) -> Result<String, RepoError> {
     }
 }
 
+/// Read an optional string at `k`.
+///
+/// An absent key and an explicit `Null` both read as `None`.
+///
+/// # Errors
+///
+/// [`RepoError::Internal`] if the key holds a value of the wrong
+/// type.
 pub fn read_opt_str(m: &LoroMap, k: &str) -> Result<Option<String>, RepoError> {
     match m.get(k) {
-        None => Ok(None),
-        Some(loro::ValueOrContainer::Value(LoroValue::Null)) => Ok(None),
-        Some(loro::ValueOrContainer::Value(LoroValue::String(s))) => Ok(Some((*s).to_string())),
+        None | Some(loro::ValueOrContainer::Value(LoroValue::Null)) => Ok(None),
+        Some(loro::ValueOrContainer::Value(LoroValue::String(s))) => Ok(Some((*s).clone())),
         Some(other) => Err(RepoError::Internal(format!(
             "expected string at `{k}`, got {other:?}"
         ))),
     }
 }
 
+/// Read a `Uuid` from its RFC4122 string form.
+///
+/// # Errors
+///
+/// [`RepoError::Internal`] if the key is missing or is not a valid UUID, or holds a
+/// value of the wrong type.
 pub fn read_uuid(m: &LoroMap, k: &str) -> Result<Uuid, RepoError> {
     Uuid::parse_str(&read_str(m, k)?)
         .map_err(|e| RepoError::Internal(format!("bad uuid at `{k}`: {e}")))
 }
 
+/// Read an optional `Uuid`.
+///
+/// An absent key and an explicit `Null` both read as `None`.
+///
+/// # Errors
+///
+/// [`RepoError::Internal`] if the key holds a value of the wrong
+/// type or is not a valid UUID.
 pub fn read_opt_uuid(m: &LoroMap, k: &str) -> Result<Option<Uuid>, RepoError> {
-    match read_opt_str(m, k)? {
-        None => Ok(None),
-        Some(s) => Uuid::parse_str(&s)
+    read_opt_str(m, k)?.map_or(Ok(None), |s| {
+        Uuid::parse_str(&s)
             .map(Some)
-            .map_err(|e| RepoError::Internal(format!("bad uuid at `{k}`: {e}"))),
-    }
+            .map_err(|e| RepoError::Internal(format!("bad uuid at `{k}`: {e}")))
+    })
 }
 
+/// Read a timestamp from its RFC3339 string form.
+///
+/// # Errors
+///
+/// [`RepoError::Internal`] if the key is missing or is not valid RFC3339, or holds a
+/// value of the wrong type.
 pub fn read_dt(m: &LoroMap, k: &str) -> Result<DateTime<Utc>, RepoError> {
     parse_dt(&read_str(m, k)?, k)
 }
 
+/// Read an optional timestamp.
+///
+/// An absent key and an explicit `Null` both read as `None`.
+///
+/// # Errors
+///
+/// [`RepoError::Internal`] if the key holds a value of the wrong
+/// type or is not valid RFC3339.
 pub fn read_opt_dt(m: &LoroMap, k: &str) -> Result<Option<DateTime<Utc>>, RepoError> {
-    match read_opt_str(m, k)? {
-        None => Ok(None),
-        Some(s) => parse_dt(&s, k).map(Some),
-    }
+    read_opt_str(m, k)?.map_or(Ok(None), |s| parse_dt(&s, k).map(Some))
 }
 
 fn parse_dt(s: &str, k: &str) -> Result<DateTime<Utc>, RepoError> {
@@ -208,6 +335,12 @@ fn parse_dt(s: &str, k: &str) -> Result<DateTime<Utc>, RepoError> {
         .map_err(|e| RepoError::Internal(format!("bad timestamp at `{k}`: {e}")))
 }
 
+/// Read a bool at `k`.
+///
+/// # Errors
+///
+/// [`RepoError::Internal`] if the key is missing, or holds a
+/// value of the wrong type.
 pub fn read_bool(m: &LoroMap, k: &str) -> Result<bool, RepoError> {
     match m.get(k) {
         Some(loro::ValueOrContainer::Value(LoroValue::Bool(b))) => Ok(b),
@@ -218,10 +351,17 @@ pub fn read_bool(m: &LoroMap, k: &str) -> Result<bool, RepoError> {
     }
 }
 
+/// Read an optional bool at `k`.
+///
+/// An absent key and an explicit `Null` both read as `None`.
+///
+/// # Errors
+///
+/// [`RepoError::Internal`] if the key holds a value of the wrong
+/// type.
 pub fn read_opt_bool(m: &LoroMap, k: &str) -> Result<Option<bool>, RepoError> {
     match m.get(k) {
-        None => Ok(None),
-        Some(loro::ValueOrContainer::Value(LoroValue::Null)) => Ok(None),
+        None | Some(loro::ValueOrContainer::Value(LoroValue::Null)) => Ok(None),
         Some(loro::ValueOrContainer::Value(LoroValue::Bool(b))) => Ok(Some(b)),
         Some(other) => Err(RepoError::Internal(format!(
             "expected bool at `{k}`, got {other:?}"
@@ -229,6 +369,12 @@ pub fn read_opt_bool(m: &LoroMap, k: &str) -> Result<Option<bool>, RepoError> {
     }
 }
 
+/// Read an `i64` at `k`.
+///
+/// # Errors
+///
+/// [`RepoError::Internal`] if the key is missing, or holds a
+/// value of the wrong type.
 pub fn read_i64(m: &LoroMap, k: &str) -> Result<i64, RepoError> {
     match m.get(k) {
         Some(loro::ValueOrContainer::Value(LoroValue::I64(n))) => Ok(n),
@@ -239,10 +385,17 @@ pub fn read_i64(m: &LoroMap, k: &str) -> Result<i64, RepoError> {
     }
 }
 
+/// Read an optional `i64` at `k`.
+///
+/// An absent key and an explicit `Null` both read as `None`.
+///
+/// # Errors
+///
+/// [`RepoError::Internal`] if the key holds a value of the wrong
+/// type.
 pub fn read_opt_i64(m: &LoroMap, k: &str) -> Result<Option<i64>, RepoError> {
     match m.get(k) {
-        None => Ok(None),
-        Some(loro::ValueOrContainer::Value(LoroValue::Null)) => Ok(None),
+        None | Some(loro::ValueOrContainer::Value(LoroValue::Null)) => Ok(None),
         Some(loro::ValueOrContainer::Value(LoroValue::I64(n))) => Ok(Some(n)),
         Some(other) => Err(RepoError::Internal(format!(
             "expected i64 at `{k}`, got {other:?}"
@@ -250,54 +403,70 @@ pub fn read_opt_i64(m: &LoroMap, k: &str) -> Result<Option<i64>, RepoError> {
     }
 }
 
+/// Read an `i32` from the stored `i64`.
+///
+/// # Errors
+///
+/// [`RepoError::Internal`] if the key is missing or is outside `i32` range, or holds a
+/// value of the wrong type.
 pub fn read_i32(m: &LoroMap, k: &str) -> Result<i32, RepoError> {
     let n = read_i64(m, k)?;
-    if n < i32::MIN as i64 || n > i32::MAX as i64 {
-        return Err(RepoError::Internal(format!(
-            "out of range i32 at `{k}`: {n}"
-        )));
-    }
-    Ok(n as i32)
+    narrow_i32(n, k)
 }
 
+/// Read an optional `i32` from the stored `i64`.
+///
+/// An absent key and an explicit `Null` both read as `None`.
+///
+/// # Errors
+///
+/// [`RepoError::Internal`] if the key holds a value of the wrong
+/// type or is outside `i32` range.
 pub fn read_opt_i32(m: &LoroMap, k: &str) -> Result<Option<i32>, RepoError> {
-    match read_opt_i64(m, k)? {
-        None => Ok(None),
-        Some(n) => {
-            if n < i32::MIN as i64 || n > i32::MAX as i64 {
-                return Err(RepoError::Internal(format!(
-                    "out of range i32 at `{k}`: {n}"
-                )));
-            }
-            Ok(Some(n as i32))
-        }
-    }
+    read_opt_i64(m, k)?.map_or(Ok(None), |n| narrow_i32(n, k).map(Some))
 }
 
+// `try_from` IS the range check — the hand-written comparison plus an
+// `as` cast said the same thing twice, and only the comparison was
+// checked by the compiler.
+fn narrow_i32(n: i64, k: &str) -> Result<i32, RepoError> {
+    i32::try_from(n).map_err(|_| RepoError::Internal(format!("out of range i32 at `{k}`: {n}")))
+}
+
+fn narrow_u32(n: i64, k: &str) -> Result<u32, RepoError> {
+    u32::try_from(n).map_err(|_| RepoError::Internal(format!("out of range u32 at `{k}`: {n}")))
+}
+
+/// Read a `u32` from the stored `i64`.
+///
+/// # Errors
+///
+/// [`RepoError::Internal`] if the key is missing or is outside `u32` range, or holds a
+/// value of the wrong type.
 pub fn read_u32(m: &LoroMap, k: &str) -> Result<u32, RepoError> {
     let n = read_i64(m, k)?;
-    if n < 0 || n > u32::MAX as i64 {
-        return Err(RepoError::Internal(format!(
-            "out of range u32 at `{k}`: {n}"
-        )));
-    }
-    Ok(n as u32)
+    narrow_u32(n, k)
 }
 
+/// Read an optional `u32` from the stored `i64`.
+///
+/// An absent key and an explicit `Null` both read as `None`.
+///
+/// # Errors
+///
+/// [`RepoError::Internal`] if the key holds a value of the wrong
+/// type or is outside `u32` range.
 pub fn read_opt_u32(m: &LoroMap, k: &str) -> Result<Option<u32>, RepoError> {
-    match read_opt_i64(m, k)? {
-        None => Ok(None),
-        Some(n) => {
-            if n < 0 || n > u32::MAX as i64 {
-                return Err(RepoError::Internal(format!(
-                    "out of range u32 at `{k}`: {n}"
-                )));
-            }
-            Ok(Some(n as u32))
-        }
-    }
+    read_opt_i64(m, k)?.map_or(Ok(None), |n| narrow_u32(n, k).map(Some))
 }
 
+/// Read a tab-separated string list. An empty string reads as an
+/// empty `Vec`.
+///
+/// # Errors
+///
+/// [`RepoError::Internal`] if the key is missing, or holds a
+/// value of the wrong type.
 pub fn read_string_list(m: &LoroMap, k: &str) -> Result<Vec<String>, RepoError> {
     let raw = read_str(m, k)?;
     if raw.is_empty() {
@@ -307,6 +476,14 @@ pub fn read_string_list(m: &LoroMap, k: &str) -> Result<Vec<String>, RepoError> 
     }
 }
 
+/// Read an optional tab-separated string list.
+///
+/// An absent key and an explicit `Null` both read as `None`.
+///
+/// # Errors
+///
+/// [`RepoError::Internal`] if the key holds a value of the wrong
+/// type.
 pub fn read_opt_string_list(m: &LoroMap, k: &str) -> Result<Option<Vec<String>>, RepoError> {
     match read_opt_str(m, k)? {
         None => Ok(None),
@@ -335,6 +512,11 @@ pub enum TextOp {
 /// Returns `Err` if the key already holds a non-text value (legacy
 /// snapshot string) — callers wanting migration use
 /// [`read_text_with_migration`].
+///
+/// # Errors
+///
+/// [`RepoError::Internal`] if `key` holds a non-text value, or if Loro
+/// rejects creating the container.
 pub fn text_child(m: &LoroMap, key: &str) -> Result<LoroText, RepoError> {
     if let Some(loro::ValueOrContainer::Container(Container::Text(t))) = m.get(key) {
         return Ok(t);
@@ -348,6 +530,11 @@ pub fn text_child(m: &LoroMap, key: &str) -> Result<LoroText, RepoError> {
 }
 
 /// Read the current text. Returns "" if the key is absent.
+///
+/// # Errors
+///
+/// [`RepoError::Internal`] if `key` holds something other than a text
+/// container.
 pub fn read_text(m: &LoroMap, key: &str) -> Result<String, RepoError> {
     match m.get(key) {
         None => Ok(String::new()),
@@ -358,15 +545,20 @@ pub fn read_text(m: &LoroMap, key: &str) -> Result<String, RepoError> {
     }
 }
 
-/// Read text with migration from a legacy string LoroValue. If `key`
-/// holds a plain string (from older snapshots), seeds a `LoroText`
-/// container with that content and returns the value. Idempotent
-/// after the first call: subsequent reads hit the text-container path.
+/// Read text with migration from a legacy string `LoroValue`.
+///
+/// If `key` holds a plain string (from older snapshots), seeds a
+/// `LoroText` container with that content and returns the value.
+/// Idempotent after the first call: subsequent reads hit the
+/// text-container path. # Errors
+///
+/// [`RepoError::Internal`] if `key` holds neither a text container nor
+/// a legacy string, or if Loro rejects the in-place migration.
 pub fn read_text_with_migration(m: &LoroMap, key: &str) -> Result<String, RepoError> {
     match m.get(key) {
         Some(loro::ValueOrContainer::Container(Container::Text(t))) => Ok(t.to_string()),
         Some(loro::ValueOrContainer::Value(LoroValue::String(s))) => {
-            let legacy = (*s).to_string();
+            let legacy = (*s).clone();
             m.delete(key).map_err(loro_err)?;
             let t = m.ensure_mergeable_text(key).map_err(loro_err)?;
             if !legacy.is_empty() {
@@ -384,15 +576,28 @@ pub fn read_text_with_migration(m: &LoroMap, key: &str) -> Result<String, RepoEr
 /// Apply a sequence of `TextOp` against the text child at `map[key]`.
 /// Each op runs against the post-state of the previous ops, matching
 /// the editor's stream-of-keystrokes semantics.
+///
+/// # Errors
+///
+/// [`RepoError::Internal`] if the container can't be reached (see
+/// [`text_child`]), if a position doesn't fit `usize` on this target, or
+/// if Loro rejects an op (a position past the end of the text).
 pub fn apply_text_ops(m: &LoroMap, key: &str, ops: &[TextOp]) -> Result<(), RepoError> {
     let t = text_child(m, key)?;
+    // `u32 as usize` is lossless on 64- and 32-bit targets but not on
+    // 16-bit ones, and `as` would silently wrap there. `try_from` turns
+    // that into an ordinary decode error.
+    let fit = |n: u32| -> Result<usize, RepoError> {
+        usize::try_from(n)
+            .map_err(|_| RepoError::Internal(format!("text position {n} out of range")))
+    };
     for op in ops {
         match op {
             TextOp::Insert { pos, text } => {
-                t.insert(*pos as usize, text).map_err(loro_err)?;
+                t.insert(fit(*pos)?, text).map_err(loro_err)?;
             }
             TextOp::Delete { pos, len } => {
-                t.delete(*pos as usize, *len as usize).map_err(loro_err)?;
+                t.delete(fit(*pos)?, fit(*len)?).map_err(loro_err)?;
             }
         }
     }
@@ -400,10 +605,16 @@ pub fn apply_text_ops(m: &LoroMap, key: &str, ops: &[TextOp]) -> Result<(), Repo
 }
 
 /// Fallback diff: compute a minimal insert/delete pair from old → new
-/// using common-prefix + common-suffix stripping. O(n). Correct for
-/// typing flows and most paste/programmatic-overwrite cases. For
-/// non-prefix/suffix edits, the change collapses to a single
-/// delete-middle + insert-middle pair — not optimal but correct.
+/// using common-prefix + common-suffix stripping.
+///
+/// O(n). Correct for typing flows and most paste/programmatic-overwrite
+/// cases. For non-prefix/suffix edits, the change collapses to a single
+/// delete-middle + insert-middle pair — not optimal but correct. #
+/// Errors
+///
+/// [`RepoError::Internal`] if the container can't be reached (see
+/// [`text_child`]), if either side is longer than `u32::MAX` characters,
+/// or if Loro rejects the resulting ops.
 pub fn apply_text_diff(m: &LoroMap, key: &str, old: &str, new: &str) -> Result<(), RepoError> {
     if old == new {
         // Touch the container so callers can rely on its existence.
@@ -413,42 +624,65 @@ pub fn apply_text_diff(m: &LoroMap, key: &str, old: &str, new: &str) -> Result<(
     let old_chars: Vec<char> = old.chars().collect();
     let new_chars: Vec<char> = new.chars().collect();
 
-    let mut prefix = 0usize;
-    while prefix < old_chars.len()
-        && prefix < new_chars.len()
-        && old_chars[prefix] == new_chars[prefix]
-    {
-        prefix += 1;
-    }
-    let mut suffix = 0usize;
-    while suffix < old_chars.len() - prefix
-        && suffix < new_chars.len() - prefix
-        && old_chars[old_chars.len() - 1 - suffix] == new_chars[new_chars.len() - 1 - suffix]
-    {
-        suffix += 1;
-    }
+    // Common prefix. Zipping the two sequences makes the bound implicit
+    // instead of asserting it with two `<` checks and an index.
+    let prefix = old_chars
+        .iter()
+        .zip(new_chars.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
 
-    let del_len = old_chars.len() - prefix - suffix;
-    let ins_chars = &new_chars[prefix..new_chars.len() - suffix];
-    let ins: String = ins_chars.iter().collect();
+    // Common suffix, over what the prefix left behind on each side.
+    let old_rest = old_chars.len().saturating_sub(prefix);
+    let new_rest = new_chars.len().saturating_sub(prefix);
+    let suffix = old_chars
+        .iter()
+        .rev()
+        .take(old_rest)
+        .zip(new_chars.iter().rev().take(new_rest))
+        .take_while(|(a, b)| a == b)
+        .count();
+
+    let del_len = old_rest.saturating_sub(suffix);
+    let ins: String = new_chars
+        .get(prefix..new_chars.len().saturating_sub(suffix))
+        .unwrap_or_default()
+        .iter()
+        .collect();
+
+    // Loro's positions are u32. A document longer than 4G characters is
+    // a decode error, not a silently wrapped position.
+    let fit = |n: usize| -> Result<u32, RepoError> {
+        u32::try_from(n).map_err(|_| RepoError::Internal(format!("text position {n} out of range")))
+    };
+    let pos = fit(prefix)?;
 
     let mut ops: Vec<TextOp> = Vec::new();
     if del_len > 0 {
         ops.push(TextOp::Delete {
-            pos: prefix as u32,
-            len: del_len as u32,
+            pos,
+            len: fit(del_len)?,
         });
     }
     if !ins.is_empty() {
-        ops.push(TextOp::Insert {
-            pos: prefix as u32,
-            text: ins,
-        });
+        ops.push(TextOp::Insert { pos, text: ins });
     }
     apply_text_ops(m, key, &ops)
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic,
+    clippy::float_cmp,
+    clippy::string_slice,
+    clippy::significant_drop_tightening,
+    clippy::too_many_lines
+)]
 mod scalar_tests {
     use super::*;
     use loro::LoroDoc;
@@ -486,8 +720,8 @@ mod scalar_tests {
     fn read_i32_out_of_range_errors() {
         let doc = LoroDoc::new();
         let m = root(&doc);
-        write_i64(&m, "big", i32::MAX as i64 + 1).unwrap();
-        write_i64(&m, "small", i32::MIN as i64 - 1).unwrap();
+        write_i64(&m, "big", i64::from(i32::MAX) + 1).unwrap();
+        write_i64(&m, "small", i64::from(i32::MIN) - 1).unwrap();
         assert!(matches!(
             read_i32(&m, "big"),
             Err(RepoError::Internal(msg)) if msg.contains("out of range i32")
@@ -520,12 +754,24 @@ mod scalar_tests {
     fn read_opt_i32_out_of_range_errors() {
         let doc = LoroDoc::new();
         let m = root(&doc);
-        write_i64(&m, "big", u32::MAX as i64).unwrap();
+        write_i64(&m, "big", i64::from(u32::MAX)).unwrap();
         assert!(read_opt_i32(&m, "big").is_err());
     }
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic,
+    clippy::float_cmp,
+    clippy::string_slice,
+    clippy::significant_drop_tightening,
+    clippy::too_many_lines
+)]
 mod text_tests {
     use super::*;
     use loro::{ContainerTrait, ExportMode, LoroDoc};

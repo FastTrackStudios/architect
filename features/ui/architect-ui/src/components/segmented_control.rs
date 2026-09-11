@@ -11,7 +11,7 @@ use dioxus::prelude::*;
 // ---------------------------------------------------------------------------
 
 /// Size variants for the segmented control.
-#[derive(Clone, Copy, PartialEq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum SegmentedControlSize {
     /// Compact size — `text-[11px]`, tighter padding. Good for secondary selectors.
     Small,
@@ -21,7 +21,7 @@ pub enum SegmentedControlSize {
 }
 
 impl SegmentedControlSize {
-    fn active_classes(self) -> &'static str {
+    const fn active_classes(self) -> &'static str {
         match self {
             Self::Small => {
                 "px-2 py-0.5 text-[11px] font-medium rounded bg-accent text-accent-foreground"
@@ -32,7 +32,7 @@ impl SegmentedControlSize {
         }
     }
 
-    fn inactive_classes(self) -> &'static str {
+    const fn inactive_classes(self) -> &'static str {
         match self {
             Self::Small => {
                 "px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded transition-colors"

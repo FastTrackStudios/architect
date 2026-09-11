@@ -57,7 +57,7 @@ pub fn SearchableList(props: SearchableListProps) -> Element {
                     r#type: "text",
                     placeholder: "{props.placeholder}",
                     value: "{value}",
-                    oninput: move |evt| value.set(evt.value().clone()),
+                    oninput: move |evt| value.set(evt.value()),
                     autofocus: true,
                     onmounted: move |elem| async move {
                         let _ = elem.set_focus(true).await;
@@ -165,7 +165,7 @@ pub fn searchable_list_default() -> Element {
                 has_results,
                 for item in filtered {
                     SearchableListItem {
-                        on_click: move |_| {},
+                        on_click: move |()| {},
                         label: item.to_string(),
                     }
                 }

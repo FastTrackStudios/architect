@@ -59,6 +59,7 @@ pub fn Toast(props: PrimitiveToastProps) -> Element {
     }
 }
 
+#[must_use]
 pub fn styled_toast_options() -> ToastOptions {
     ToastOptions::new()
 }

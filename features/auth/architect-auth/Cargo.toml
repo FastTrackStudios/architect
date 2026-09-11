@@ -39,3 +39,6 @@ required-features = ["full"]
 [[example]]
 name = "vox_rpc"
 required-features = ["full"]
+
+[lints]
+workspace = true

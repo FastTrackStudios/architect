@@ -1,4 +1,4 @@
-//! **The FastTrackStudio identity server** — `architect-auth` as a
+//! **The `FastTrackStudio` identity server** — `architect-auth` as a
 //! deployable service instead of an embedded library.
 //!
 //! `architect-auth` is a complete auth engine (password, OAuth, passkey,
@@ -27,7 +27,7 @@
 //! | `/oauth2/{authorize,token,userinfo}` | OIDC provider |
 //! | `/auth/jwt/jwks` | key set (see the caveat below) |
 //! | `/auth/{sign-up,sign-in,session,refresh,sign-out}` | session JSON |
-//! | `/auth/social/{github,google}/{start,callback}` | social sign-in and account linking |
+//! | `/auth/social/{github,google,tone3000}/{start,callback}` | social sign-in and account linking |
 //! | `/auth/accounts`, `/auth/accounts/{provider}/unlink` | linked accounts |
 //! | `/oauth2/linked-token` | a linked GitHub token for a relying party (see [`social`]) |
 //! | `/login`, `/sign-up`, `/account`, … | hosted pages |
@@ -39,7 +39,7 @@
 //! is no public key to publish and `/auth/jwt/jwks` returns an empty key
 //! set by design — see [`http`]. First-party relying parties can verify
 //! through `/oauth2/userinfo`; a genuine third-party RP cannot verify an
-//! id_token offline until the engine grows RS256/ES256 support. That is
+//! `id_token` offline until the engine grows RS256/ES256 support. That is
 //! a change in `auth/src/flows.rs`, not here.
 //!
 //! **The HTTP surface is a subset.** `architect-auth` describes ~150
@@ -49,6 +49,7 @@
 //! deriving no serde.
 
 pub mod config;
+pub mod dev;
 pub mod http;
 pub mod mail;
 pub mod server;

@@ -4,7 +4,7 @@ use architect_story_runtime::story;
 use dioxus::prelude::*;
 
 /// Which edge the drawer slides in from.
-#[derive(Clone, Copy, PartialEq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum DrawerSide {
     #[default]
     Bottom,
@@ -149,7 +149,7 @@ pub fn DrawerFooter(props: DrawerFooterProps) -> Element {
     }
 }
 
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone, PartialEq, Eq)]
 pub struct DrawerHandleProps {
     #[props(default)]
     pub class: String,
@@ -217,7 +217,7 @@ pub fn drawer_default() -> Element {
             }
             Drawer {
                 open: open(),
-                on_close: move |_| open.set(false),
+                on_close: move |()| open.set(false),
                 side: DrawerSide::Right,
                 DrawerHeader {
                     DrawerTitle { "Drawer" }

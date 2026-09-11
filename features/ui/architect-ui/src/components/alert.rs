@@ -12,7 +12,7 @@ pub enum AlertVariant {
 }
 
 impl AlertVariant {
-    fn classes(self) -> &'static str {
+    const fn classes(self) -> &'static str {
         match self {
             Self::Default => "bg-card text-card-foreground",
             Self::Destructive => "text-destructive bg-card",

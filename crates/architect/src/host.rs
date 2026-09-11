@@ -19,8 +19,18 @@ use axum::routing::get;
 
 use crate::LayerRouter;
 
-/// Build a multi-thread tokio runtime and block on `fut` until it completes —
-/// the entry point of an engine binary (`fn run() { host::block_on(main()) }`).
+/// Build a multi-thread tokio runtime and block on `fut` until it completes.
+///
+/// The entry point of an engine binary
+/// (`fn run() { host::block_on(main()) }`).
+///
+/// # Panics
+///
+/// If the tokio runtime cannot be built — the OS refused to spawn worker
+/// threads or allocate their stacks. There is no engine to run without
+/// it, and no caller that could do anything with the error, so this one
+/// stays a panic and says so.
+#[allow(clippy::expect_used)]
 pub fn block_on<F: Future>(fut: F) -> F::Output {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -109,6 +119,7 @@ impl EngineHost {
     /// clients that can't speak vox over WebSocket — watchOS remotes). The
     /// routes are mounted alongside `/health` + `/vox`, before the SPA
     /// fallback, so they win over the web bundle.
+    #[must_use]
     pub fn extend(mut self, routes: Router) -> Self {
         self.extra = Some(match self.extra {
             Some(existing) => existing.merge(routes),
@@ -121,6 +132,7 @@ impl EngineHost {
     /// `key_path` (stable id across restarts); the endpoint id is written to
     /// `id_path` when given, for other devices/agents to read.
     #[cfg(feature = "iroh")]
+    #[must_use]
     pub fn iroh(mut self, key_path: PathBuf, id_path: Option<PathBuf>) -> Self {
         self.iroh = Some(IrohConfig { key_path, id_path });
         self
@@ -128,6 +140,7 @@ impl EngineHost {
 
     /// Serve `bundle` as the HTTP fallback (the browser remote). `None` leaves
     /// the host headless (only `/health` + `/vox`).
+    #[must_use]
     pub fn web(mut self, bundle: Option<WebBundle>) -> Self {
         self.web = bundle;
         self
@@ -149,13 +162,14 @@ impl EngineHost {
     /// CORP/CORS. Turn it on only for a host whose assets it owns (the
     /// engine serves its own bundle, so it qualifies); a host embedding
     /// third-party iframes or CDN assets must not.
-    pub fn cross_origin_isolated(mut self, on: bool) -> Self {
+    #[must_use]
+    pub const fn cross_origin_isolated(mut self, on: bool) -> Self {
         self.cross_origin_isolated = on;
         self
     }
 
     /// Bind and serve until the server dies. Never returns on success.
-    pub async fn serve(self) {
+    pub async fn serve(self) -> std::io::Result<()> {
         let router = self.router;
 
         #[cfg(feature = "iroh")]
@@ -190,7 +204,7 @@ impl EngineHost {
             }
             Some(WebBundle::Embedded(dir)) => {
                 app = app.fallback(get(move |uri: axum::http::Uri| async move {
-                    embedded_asset(dir, uri)
+                    embedded_asset(dir, &uri)
                 }));
                 tracing::info!("web remote fallback: embedded bundle");
             }
@@ -227,11 +241,13 @@ impl EngineHost {
             tracing::info!("cross-origin isolated (COOP/COEP): SharedArrayBuffer enabled");
         }
 
-        let listener = tokio::net::TcpListener::bind(&self.addr)
-            .await
-            .unwrap_or_else(|e| panic!("bind {}: {e}", self.addr));
+        // A port already in use is an ordinary operational condition —
+        // another engine is running, or the port is privileged. Returning
+        // it lets the binary print something useful and pick an exit code,
+        // instead of dying with a panic backtrace in the middle of startup.
+        let listener = tokio::net::TcpListener::bind(&self.addr).await?;
         tracing::info!("engine serving ws://{}/vox", self.addr);
-        axum::serve(listener, app).await.expect("axum serve");
+        axum::serve(listener, app).await
     }
 }
 
@@ -263,7 +279,7 @@ async fn serve_iroh(router: LayerRouter, cfg: IrohConfig) {
 
 /// Serve an embedded SPA bundle from memory: an exact file match, else
 /// `index.html` (client-side routing). Content type is inferred from the path.
-fn embedded_asset(dir: &'static include_dir::Dir<'static>, uri: axum::http::Uri) -> Response {
+fn embedded_asset(dir: &'static include_dir::Dir<'static>, uri: &axum::http::Uri) -> Response {
     let path = uri.path().trim_start_matches('/');
     let (path, file) = match dir.get_file(path) {
         Some(f) if !path.is_empty() => (path, f),

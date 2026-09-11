@@ -13,7 +13,7 @@ pub enum SpinnerSize {
 }
 
 impl SpinnerSize {
-    fn classes(self) -> &'static str {
+    const fn classes(self) -> &'static str {
         match self {
             Self::Small => "size-4",
             Self::Medium => "size-6",
@@ -22,7 +22,7 @@ impl SpinnerSize {
     }
 }
 
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone, PartialEq, Eq)]
 pub struct SpinnerProps {
     #[props(default)]
     pub size: SpinnerSize,

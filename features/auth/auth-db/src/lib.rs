@@ -1,10 +1,12 @@
-//! SeaORM backend for architect-auth entities.
+//! `SeaORM` backend for architect-auth entities.
 
 // r[impl auth.storage.repo-first]
 // r[impl auth.storage.no-public-sql]
 // r[impl auth.storage.backend-parity]
 // r[impl auth.storage.transactions]
 // r[impl auth.storage.clock]
+pub mod snapshot;
+
 pub const AUTH_DB_BACKEND: &str = "sea-orm";
 pub const AUTH_DB_SUPPORTS_TRANSACTIONS: bool = true;
 pub const AUTH_DB_CLOCK_SEMANTICS: &str = "backend-generated-utc";
@@ -51,7 +53,8 @@ pub const AUTH_DATABASE_SUPPORT_MATRIX: &[AuthDatabaseSupport] = &[
     },
 ];
 
-pub fn auth_db_storage_capabilities() -> (&'static str, bool, &'static str) {
+#[must_use]
+pub const fn auth_db_storage_capabilities() -> (&'static str, bool, &'static str) {
     (
         AUTH_DB_BACKEND,
         AUTH_DB_SUPPORTS_TRANSACTIONS,
@@ -59,7 +62,8 @@ pub fn auth_db_storage_capabilities() -> (&'static str, bool, &'static str) {
     )
 }
 
-pub fn auth_database_support_matrix() -> &'static [AuthDatabaseSupport] {
+#[must_use]
+pub const fn auth_database_support_matrix() -> &'static [AuthDatabaseSupport] {
     AUTH_DATABASE_SUPPORT_MATRIX
 }
 
@@ -92,6 +96,12 @@ pub use auth_proto::invitation::{
     Column as AuthInvitationColumn, Entity as AuthInvitationEntity, InvitationStatus,
     Model as AuthInvitationModel, Relation as AuthInvitationRelation,
 };
+pub use auth_proto::invite_link::{
+    ActiveModel as AuthInviteLinkActiveModel, AuthInviteLink, AuthInviteLinkCreate,
+    AuthInviteLinkList, AuthInviteLinkRepo, AuthInviteLinkRepoStorage, AuthInviteLinkUpdate,
+    Column as AuthInviteLinkColumn, Entity as AuthInviteLinkEntity, Model as AuthInviteLinkModel,
+    Relation as AuthInviteLinkRelation,
+};
 pub use auth_proto::member::{
     ActiveModel as AuthMemberActiveModel, AuthMember, AuthMemberCreate, AuthMemberList,
     AuthMemberRepo, AuthMemberRepoStorage, AuthMemberUpdate, Column as AuthMemberColumn,
@@ -114,6 +124,13 @@ pub use auth_proto::passkey::{
     ActiveModel as AuthPasskeyActiveModel, AuthPasskey, AuthPasskeyCreate, AuthPasskeyList,
     AuthPasskeyRepo, AuthPasskeyRepoStorage, AuthPasskeyUpdate, Column as AuthPasskeyColumn,
     Entity as AuthPasskeyEntity, Model as AuthPasskeyModel, Relation as AuthPasskeyRelation,
+};
+pub use auth_proto::passkey_ceremony::{
+    ActiveModel as AuthPasskeyCeremonyActiveModel, AuthPasskeyCeremony, AuthPasskeyCeremonyCreate,
+    AuthPasskeyCeremonyList, AuthPasskeyCeremonyRepo, AuthPasskeyCeremonyRepoStorage,
+    AuthPasskeyCeremonyUpdate, Column as AuthPasskeyCeremonyColumn,
+    Entity as AuthPasskeyCeremonyEntity, Model as AuthPasskeyCeremonyModel, PasskeyCeremonyKind,
+    Relation as AuthPasskeyCeremonyRelation,
 };
 pub use auth_proto::session::{
     ActiveModel as AuthSessionActiveModel, AuthSession, AuthSessionCreate, AuthSessionList,
@@ -154,6 +171,18 @@ pub mod migrations;
 pub use migrations::Migrator;
 
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic,
+    clippy::float_cmp,
+    clippy::string_slice,
+    clippy::significant_drop_tightening,
+    clippy::too_many_lines
+)]
 mod tests {
     use super::{AuthDatabaseKind, auth_database_support_matrix, auth_db_storage_capabilities};
 

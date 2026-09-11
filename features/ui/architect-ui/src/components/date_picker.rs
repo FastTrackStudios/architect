@@ -123,7 +123,7 @@ pub fn DatePickerCalendar(#[props(default)] class: String) -> Element {
     }
 }
 
-/// Default DatePicker story rendering input + popover calendar.
+/// Default `DatePicker` story rendering input + popover calendar.
 #[story(category = "DatePicker", name = "default")]
 pub fn date_picker_default() -> Element {
     rsx! {
