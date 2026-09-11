@@ -180,11 +180,24 @@ auth_command_catalog! {
     { plugin: "two-factor", operation: "disableTwoFactor", method: "POST", path: "/auth/two-factor/disable", command: "DisableTwoFactor", response: "()", requires_session: true },
     { plugin: "organization", operation: "createOrganization", method: "POST", path: "/auth/organization/create", command: "CreateOrganization", response: "OrganizationBundle", requires_session: true },
     { plugin: "organization", operation: "setActiveOrganization", method: "POST", path: "/auth/organization/set-active", command: "SetActiveOrganization", response: "()", requires_session: true },
+    // The read side. `ListOrganizations`, `GetOrganization` and
+    // `ListMembers` were implemented as flows, and tested, without ever
+    // reaching this table — so the question a relying party asks first,
+    // "which orgs does this token belong to, and with what role", had no
+    // operation at all. A bundle answers it in one call: the
+    // organization carries the slug, the membership carries the role,
+    // which is exactly the pair an authorization fence needs.
+    { plugin: "organization", operation: "listOrganizations", method: "GET", path: "/auth/organization/list", command: "ListOrganizations", response: "Vec<OrganizationBundle>", requires_session: true },
+    { plugin: "organization", operation: "getOrganization", method: "GET", path: "/auth/organization/{organization_id}", command: "GetOrganization", response: "OrganizationBundle", requires_session: true },
+    { plugin: "organization", operation: "listMembers", method: "GET", path: "/auth/organization/{organization_id}/members", command: "ListMembers", response: "Vec<OrganizationMember>", requires_session: true },
     { plugin: "organization", operation: "requireOrganizationRole", method: "POST", path: "/auth/organization/require-role", command: "RequireOrganizationRole", response: "()", requires_session: true },
     { plugin: "organization", operation: "authorizeOrganizationAction", method: "POST", path: "/auth/organization/authorize", command: "AuthorizeOrganizationAction", response: "()", requires_session: true },
     { plugin: "organization", operation: "setMemberRole", method: "POST", path: "/auth/organization/update-member-role", command: "SetMemberRole", response: "AuthMember", requires_session: true },
     { plugin: "organization", operation: "createInvitation", method: "POST", path: "/auth/organization/invite-member", command: "CreateInvitation", response: "InvitationToken", requires_session: true },
-    { plugin: "organization", operation: "acceptInvitation", method: "POST", path: "/auth/organization/accept-invitation", command: "AcceptInvitation", response: "AuthMember", requires_session: true },
+    // `()`, not `AuthMember`: the flow returns nothing, so the document
+    // was advertising a body no caller could ever receive and a
+    // generated client would have failed to parse the empty response.
+    { plugin: "organization", operation: "acceptInvitation", method: "POST", path: "/auth/organization/accept-invitation", command: "AcceptInvitation", response: "()", requires_session: true },
     { plugin: "organization", operation: "createOrganizationRole", method: "POST", path: "/auth/organization/roles", command: "CreateOrganizationRole", response: "AuthOrganizationRole", requires_session: true },
     { plugin: "organization", operation: "updateOrganizationRole", method: "PATCH", path: "/auth/organization/roles/{role}", command: "UpdateOrganizationRole", response: "AuthOrganizationRole", requires_session: true },
     { plugin: "organization", operation: "deleteOrganizationRole", method: "DELETE", path: "/auth/organization/roles/{role}", command: "DeleteOrganizationRole", response: "()", requires_session: true },
@@ -1373,8 +1386,8 @@ mod tests {
             serde_json::json!({
                 "openapi": "3.1.0",
                 "plugin_count": 33,
-                "path_count": 112,
-                "schema_count": 167,
+                "path_count": 115,
+                "schema_count": 172,
                 "selected_plugins": [
                     "email-password",
                     "custom-session",
