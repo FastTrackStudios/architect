@@ -95,37 +95,13 @@ pub struct {entity} {{
     pub name: String,
 }}
 
-/// How this feature fails. `HttpError` says how each case looks over
-/// HTTP; `From<TransportError>` lets the generated clients implement the
-/// service trait themselves.
-#[architect::wire]
-#[derive(Eq, thiserror::Error)]
+/// How this feature fails. The status, the code and the transport
+/// variant (what lets the generated clients implement the service trait)
+/// are written by the attribute.
+#[architect::error]
 pub enum {pascal}Error {{
     #[error("not found")]
     NotFound,
-    #[error("unreachable: {{0}}")]
-    Unreachable(String),
-}}
-
-impl architect::http::HttpError for {pascal}Error {{
-    fn status(&self) -> u16 {{
-        match self {{
-            Self::NotFound => 404,
-            Self::Unreachable(_) => 503,
-        }}
-    }}
-    fn code(&self) -> &'static str {{
-        match self {{
-            Self::NotFound => "not_found",
-            Self::Unreachable(_) => "unreachable",
-        }}
-    }}
-}}
-
-impl From<architect::TransportError> for {pascal}Error {{
-    fn from(e: architect::TransportError) -> Self {{
-        Self::Unreachable(e.to_string())
-    }}
 }}
 
 /// The service: `POST /{name}/<method-kebab>` over HTTP, the same

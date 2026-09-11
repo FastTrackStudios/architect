@@ -20,21 +20,14 @@ pub struct Note {
     pub body: String,
 }
 
-// An error. `HttpError` says how each case looks over HTTP;
-// `From<TransportError>` lets the generated clients implement the trait.
-#[architect::wire]
-#[derive(Eq, thiserror::Error)]
+// An error. The attribute writes the wire derives, the HTTP status and
+// code per variant, and a `Transport(String)` variant — the one that lets
+// the generated clients implement the trait.
+#[architect::error]
 pub enum GreetError {
     #[error("nobody is called {0}")]
+    #[architect(status = 404)]
     Unknown(String),
-    #[error("unreachable: {0}")]
-    Unreachable(String),
-}
-impl architect::http::HttpError for GreetError {
-    fn status(&self) -> u16 { if matches!(self, Self::Unknown(_)) { 404 } else { 503 } }
-}
-impl From<architect::TransportError> for GreetError {
-    fn from(e: architect::TransportError) -> Self { Self::Unreachable(e.to_string()) }
 }
 
 // A service. From this one trait: the vox service, `POST /greeter/greet`,

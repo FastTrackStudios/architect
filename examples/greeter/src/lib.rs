@@ -8,7 +8,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use architect::{Filter, Page, PubSub, RepoError, Sort, TransportError};
+use architect::{Filter, Page, PubSub, RepoError, Sort};
 use uuid::Uuid;
 
 // ── 1. An entity ──────────────────────────────────────────────────────
@@ -31,39 +31,16 @@ pub struct Note {
 
 // ── 2. A service and its error ────────────────────────────────────────
 //
-// `#[architect::wire]` writes the derives a wire type needs. The error
-// says how it maps to HTTP, and how it absorbs a transport failure — that
-// last impl is what lets the generated clients implement `Greeter`
-// themselves.
+// `#[architect::error]` writes the wire derives, the `HttpError` impl
+// (status per variant: named or `status = …`, code from the variant
+// name) and a `Transport(String)` variant with `From<TransportError>` —
+// which is what lets the generated clients implement `Greeter`.
 
-#[architect::wire]
-#[derive(Eq, thiserror::Error)]
+#[architect::error]
 pub enum GreetError {
     #[error("nobody is called {0}")]
+    #[architect(status = 404)]
     Unknown(String),
-    #[error("the greeter is unreachable: {0}")]
-    Unreachable(String),
-}
-
-impl architect::http::HttpError for GreetError {
-    fn status(&self) -> u16 {
-        match self {
-            Self::Unknown(_) => 404,
-            Self::Unreachable(_) => 503,
-        }
-    }
-    fn code(&self) -> &'static str {
-        match self {
-            Self::Unknown(_) => "unknown",
-            Self::Unreachable(_) => "unreachable",
-        }
-    }
-}
-
-impl From<TransportError> for GreetError {
-    fn from(e: TransportError) -> Self {
-        Self::Unreachable(e.to_string())
-    }
 }
 
 /// One `#[architect::service]` and you have the vox service, the axum

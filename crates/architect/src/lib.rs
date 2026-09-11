@@ -30,12 +30,14 @@
 
 pub use architect_derive::Entity;
 
+// `#[architect::error]` — a service error with its `HttpError` impl, a
+// transport variant and `From<TransportError>` written for you.
 // `#[architect::entity]` — the attribute form: writes the derive line
 // (`Entity`, `Facet`, `Clone`, `Debug`, `PartialEq`, the `fake` hook) for
 // you, so an entity is its fields and its `#[architect(…)]` options and
 // nothing else. `#[architect::wire]` is the same for plain wire types
 // (request/response structs and enums — adds `#[repr(u8)]` to enums).
-pub use architect_derive::{entity, wire};
+pub use architect_derive::{entity, error, wire};
 
 // `#[derive(architect::Config)]` — a config struct that reads itself from
 // the environment: `env = "…"`, `default = …`, `secret` (the `_FILE`

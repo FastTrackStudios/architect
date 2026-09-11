@@ -53,8 +53,10 @@ scenario(&GreeterHttpClient::at(base)).await;  // HTTP
 ```
 
 A transport failure arrives through the error type's `From` — for
-`RepoError` that is `Internal`; a feature's own error usually adds an
-`Unreachable(String)` variant.
+`RepoError` that is `Internal`. For your own errors, `#[architect::error]`
+writes all of it: the wire derives, the `HttpError` impl (status by
+variant name or `#[architect(status = …)]`, code from the variant name
+or `code = "…"`), and a `Transport(String)` variant with the `From`.
 
 ## The wire
 

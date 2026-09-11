@@ -3030,6 +3030,166 @@ pub fn wire(args: TokenStream, input: TokenStream) -> TokenStream {
     .into()
 }
 
+// ── `#[architect::error]` ─────────────────────────────────────────────────
+
+/// `#[architect::error]` — a service's error type, every impl written for
+/// you.
+///
+/// ```ignore
+/// #[architect::error]
+/// pub enum GreetError {
+///     #[error("nobody is called {0}")]
+///     #[architect(status = 404)]
+///     Unknown(String),
+///     #[error("too many greetings")]
+///     RateLimited,                         // 400, code "rate_limited"
+/// }
+/// ```
+///
+/// Emits the wire derives (`Facet`, `Clone`, `Debug`, `PartialEq`,
+/// `thiserror::Error`, `#[repr(u8)]`, the `fake` hook), an
+/// `architect::http::HttpError` impl (status per variant, code = the
+/// variant name in `snake_case`), and a `Transport(String)` variant with
+/// `From<architect::TransportError>` — which is what lets the generated
+/// clients implement the service trait. Mark your own variant
+/// `#[architect(transport)]` (it must hold one `String`) to use it
+/// instead of the added one.
+///
+/// Status defaults follow the variant's name when it is one of the
+/// obvious ones — `NotFound` 404, `Unauthenticated` / `InvalidCredentials`
+/// 401, `Forbidden` / `PermissionDenied` 403, `Conflict` 409, `Internal`
+/// 500, the transport variant 503 — and `400` otherwise. `status = N`
+/// and `code = "…"` override either.
+#[proc_macro_attribute]
+pub fn error(args: TokenStream, input: TokenStream) -> TokenStream {
+    if !args.is_empty() {
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "#[architect::error] takes no arguments",
+        )
+        .to_compile_error()
+        .into();
+    }
+    let item = parse_macro_input!(input as syn::ItemEnum);
+    match expand_error(item) {
+        Ok(ts) => ts.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
+fn default_status(variant: &str, is_transport: bool) -> u16 {
+    if is_transport {
+        return 503;
+    }
+    match variant {
+        "NotFound" => 404,
+        "Unauthenticated" | "InvalidCredentials" | "SessionExpired" => 401,
+        "Forbidden" | "PermissionDenied" => 403,
+        "Conflict" => 409,
+        "Internal" => 500,
+        _ => 400,
+    }
+}
+
+fn expand_error(mut item: syn::ItemEnum) -> Result<TokenStream2> {
+    let ident = item.ident.clone();
+    let mut arms_status = Vec::new();
+    let mut arms_code = Vec::new();
+    let mut transport: Option<Ident> = None;
+
+    for variant in &mut item.variants {
+        let name = variant.ident.clone();
+        let mut status: Option<u16> = None;
+        let mut code: Option<String> = None;
+        let mut is_transport = false;
+        let mut keep = Vec::new();
+        for attr in variant.attrs.drain(..) {
+            if !attr.path().is_ident("architect") {
+                keep.push(attr);
+                continue;
+            }
+            attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("status") {
+                    let n: syn::LitInt = meta.value()?.parse()?;
+                    status = Some(n.base10_parse()?);
+                } else if meta.path.is_ident("code") {
+                    let s: LitStr = meta.value()?.parse()?;
+                    code = Some(s.value());
+                } else if meta.path.is_ident("transport") {
+                    is_transport = true;
+                } else {
+                    return Err(
+                        meta.error("unknown architect variant attribute (status, code, transport)")
+                    );
+                }
+                Ok(())
+            })?;
+        }
+        variant.attrs = keep;
+        if is_transport {
+            let holds_one_string =
+                matches!(&variant.fields, Fields::Unnamed(f) if f.unnamed.len() == 1);
+            if !holds_one_string {
+                return Err(syn::Error::new_spanned(
+                    &variant.ident,
+                    "the #[architect(transport)] variant must hold exactly one `String`",
+                ));
+            }
+            if transport.replace(name.clone()).is_some() {
+                return Err(syn::Error::new_spanned(
+                    &variant.ident,
+                    "only one variant can be the transport one",
+                ));
+            }
+        }
+        let status = status.unwrap_or_else(|| default_status(&name.to_string(), is_transport));
+        let code = code.unwrap_or_else(|| name.to_string().to_snake_case());
+        arms_status.push(quote! { Self::#name { .. } => #status });
+        arms_code.push(quote! { Self::#name { .. } => #code });
+    }
+
+    let transport = transport.unwrap_or_else(|| {
+        let name = format_ident!("Transport");
+        item.variants.push(syn::parse_quote! {
+            /// The call never reached the service: the connection dropped,
+            /// the reply was not JSON, the server was unreachable.
+            #[error("transport failure: {0}")]
+            #name(String)
+        });
+        arms_status.push(quote! { Self::#name { .. } => 503u16 });
+        arms_code.push(quote! { Self::#name { .. } => "transport" });
+        name
+    });
+
+    Ok(quote! {
+        #[derive(
+            ::architect::facet::Facet,
+            ::core::clone::Clone,
+            ::core::fmt::Debug,
+            ::core::cmp::PartialEq,
+            ::thiserror::Error
+        )]
+        #[cfg_attr(feature = "fake", derive(::architect::fake::Dummy))]
+        #[repr(u8)]
+        #item
+
+        impl ::architect::http::HttpError for #ident {
+            fn status(&self) -> u16 {
+                match self { #(#arms_status),* }
+            }
+            fn code(&self) -> &'static str {
+                match self { #(#arms_code),* }
+            }
+        }
+
+        impl ::core::convert::From<::architect::TransportError> for #ident {
+            fn from(e: ::architect::TransportError) -> Self {
+                Self::#transport(::std::string::ToString::to_string(&e))
+            }
+        }
+    })
+}
+
 // ── `#[derive(architect::Config)]` ───────────────────────────────────────
 
 /// `#[derive(architect::Config)]` — a struct that reads itself from the
