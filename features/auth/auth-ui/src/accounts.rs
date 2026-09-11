@@ -65,7 +65,7 @@ where
     // for anybody who signed in before this existed — so it is added
     // here rather than being absent from its own page.
     let mut tokens = multi_session::roster(&headers, &state.cookie.name);
-    if !tokens.iter().any(|token| *token == current) {
+    if !tokens.contains(&current) {
         tokens.insert(0, current.clone());
     }
 
@@ -128,7 +128,7 @@ where
     // is the authorisation, since the browser was given each of these
     // by signing in.
     let held = multi_session::roster(&headers, &state.cookie.name);
-    if !held.iter().any(|token| *token == form.token) {
+    if !held.contains(&form.token) {
         return flash_to(
             PATH,
             &Flash::Error("That account is not signed in here.".into()),
@@ -175,7 +175,7 @@ where
     S: AuthStorage,
 {
     let held = multi_session::roster(&headers, &state.cookie.name);
-    if !held.iter().any(|token| *token == form.token) {
+    if !held.contains(&form.token) {
         return flash_to(
             PATH,
             &Flash::Error("That account is not signed in here.".into()),

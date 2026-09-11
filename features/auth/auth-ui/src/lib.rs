@@ -36,6 +36,7 @@
 //! does *after* they are signed in.
 
 pub mod accounts;
+pub mod assets;
 pub mod admin;
 pub mod api_keys;
 pub mod chrome;
@@ -160,6 +161,8 @@ where
     S: AuthStorage + Clone + Send + Sync + 'static,
 {
     Router::new()
+        // ── What the pages are drawn with ─────────────────────────
+        .route("/auth/assets/{file}", get(assets::serve))
         // ── The person ────────────────────────────────────────────
         .route(
             "/account/profile",

@@ -1103,6 +1103,7 @@ name = "auth-ui"
 version = "0.1.0"
 dependencies = [
  "architect-auth",
+ "architect-ui",
  "async-trait",
  "auth-proto",
  "axum",
