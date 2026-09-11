@@ -1,5 +1,5 @@
 //! Social sign-in, account linking and the relying-party linked-token
-//! endpoint, driven through the real router over in-memory SQLite with
+//! endpoint, driven through the real router over in-memory `SQLite` with
 //! the provider network swapped for a fake.
 
 // This is an integration-test crate. `clippy.toml`'s

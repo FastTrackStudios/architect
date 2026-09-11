@@ -42,9 +42,9 @@ pub struct AuthServer {
 
 /// How to connect, given what the URL is.
 ///
-/// # In-memory SQLite needs a pool of one
+/// # In-memory `SQLite` needs a pool of one
 ///
-/// An in-memory SQLite database belongs to its *connection*, not to the
+/// An in-memory `SQLite` database belongs to its *connection*, not to the
 /// process. With the default pool the migrations run on one connection
 /// and the second request is handed a different one — a database with
 /// no tables in it — so the server boots, reports that it seeded, and
@@ -62,7 +62,7 @@ fn connect_options(database_url: &str) -> sea_orm::ConnectOptions {
     options
 }
 
-/// Is this a SQLite database that lives only in this connection?
+/// Is this a `SQLite` database that lives only in this connection?
 fn is_in_memory(database_url: &str) -> bool {
     let url = database_url.trim();
     url.starts_with("sqlite:")
@@ -132,7 +132,7 @@ pub async fn build(config: &ServerConfig) -> eyre::Result<AuthServer> {
 /// Turn a [`ServerConfig`] into a configured engine.
 ///
 /// Generic over storage so tests can build the same engine over
-/// in-memory SQLite.
+/// in-memory `SQLite`.
 pub fn build_engine<S>(config: &ServerConfig, storage: S) -> eyre::Result<ArchitectAuth<S>> {
     let mut builder = ArchitectAuth::builder()
         .storage(storage)

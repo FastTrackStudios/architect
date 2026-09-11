@@ -1,5 +1,5 @@
 //! End-to-end coverage of the HTTP surface against a real engine over
-//! in-memory SQLite.
+//! in-memory `SQLite`.
 //!
 //! These drive the actual `app_router`, so they exercise routing,
 //! extraction, cookie shaping and error mapping together — the parts a

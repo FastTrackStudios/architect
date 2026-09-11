@@ -338,6 +338,35 @@ where
             "/auth/accounts/{provider}/unlink",
             post(unlink_account::<S>),
         )
+        // ── Organizations ────────────────────────────────────────────
+        // The read side first: `list` is what a relying party calls to
+        // learn which orgs a token belongs to and with what role, and it
+        // is the reason this surface is mounted at all.
+        .route("/auth/organization/list", get(list_organizations::<S>))
+        .route("/auth/organization/create", post(create_organization::<S>))
+        .route(
+            "/auth/organization/set-active",
+            post(set_active_organization::<S>),
+        )
+        .route("/auth/organization/invite-member", post(invite_member::<S>))
+        .route(
+            "/auth/organization/accept-invitation",
+            post(accept_invitation::<S>),
+        )
+        .route(
+            "/auth/organization/update-member-role",
+            post(update_member_role::<S>),
+        )
+        // Parameterised paths last, so the literal segments above are
+        // never shadowed by `{organization_id}`.
+        .route(
+            "/auth/organization/{organization_id}",
+            get(get_organization::<S>),
+        )
+        .route(
+            "/auth/organization/{organization_id}/members",
+            get(list_members::<S>),
+        )
         // ── Relying-party access to a linked token ───────────────────
         .route("/oauth2/linked-token", get(linked_token::<S>))
         // ── Introspection ────────────────────────────────────────────
@@ -687,6 +716,346 @@ where
 
 async fn openapi() -> Json<Value> {
     Json(architect_auth::transport::auth_openapi_document())
+}
+
+// ── Organizations ────────────────────────────────────────────────────
+//
+// The organization engine has been complete for a while — orgs,
+// members, invitations, roles, teams, RBAC, all with flows and tests —
+// and none of it was reachable over HTTP. The module note above explains
+// why: the command structs derive no serde, so every route needs a
+// hand-written extractor, and the generic mount nobody could write
+// became a reason to mount nothing.
+//
+// That is a fine trade for teams and passkeys, which a Rust app reaches
+// over vox. It is not a fine trade for organizations, because an
+// organization is the one thing a *relying party* has to ask about.
+// Task authorizes every request against "which orgs does this principal
+// belong to, and with what role"; with no HTTP answer to that, every
+// relying party has to keep its own copy of the membership table and
+// the identity server stops being the authority on its own data.
+//
+// So: the read side plus the management verbs an operator needs, each
+// with its extractor written out. Teams, roles and the RBAC checks stay
+// on vox until something asks for them.
+
+/// Read a required string field out of a JSON body.
+///
+/// The extractor half of the trade above. The offending key travels as
+/// the error's `message` — `PublicAuthError` carries `&'static str`, and
+/// a field name is one — because a 400 that does not say which key was
+/// wrong turns an obvious typo into a debugging session.
+fn field_str(body: &Value, key: &'static str) -> Result<String, ApiError> {
+    body.get(key)
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| ApiError::custom(StatusCode::BAD_REQUEST, "missing_field", key))
+}
+
+/// The same, for an optional one. A JSON `null` reads as absent.
+fn field_opt_str(body: &Value, key: &str) -> Option<String> {
+    body.get(key).and_then(Value::as_str).map(ToOwned::to_owned)
+}
+
+/// Read a required uuid field.
+fn field_uuid(body: &Value, key: &'static str) -> Result<uuid::Uuid, ApiError> {
+    field_str(body, key)?
+        .parse()
+        .map_err(|_| ApiError::custom(StatusCode::BAD_REQUEST, "invalid_uuid", key))
+}
+
+/// The session token, or the refusal every one of these routes shares.
+fn require_token<S>(state: &HttpState<S>, headers: &HeaderMap) -> Result<String, ApiError>
+where
+    S: AuthStorage,
+{
+    session_token_from_headers(headers, &state.cookie)
+        .ok_or_else(|| ApiError::from(AuthFlowError::InvalidCredentials))
+}
+
+fn organization_json(org: &auth_proto::AuthOrganization) -> Value {
+    json!({
+        "id": org.id,
+        "name": org.name,
+        // The slug is the field relying parties key on: it is what an
+        // operator types and what a deployment's own directories are
+        // named after, where the id is meaningful only here.
+        "slug": org.slug,
+        "logo": org.logo,
+        "metadata_json": org.metadata_json,
+        "created_at": org.created_at,
+        "updated_at": org.updated_at,
+    })
+}
+
+fn member_json(member: &auth_proto::AuthMember) -> Value {
+    json!({
+        "id": member.id,
+        "organization_id": member.organization_id,
+        "user_id": member.user_id,
+        "role": member.role,
+        "created_at": member.created_at,
+    })
+}
+
+/// An organization together with the caller's membership in it.
+///
+/// Deliberately one object rather than two lists to join client-side:
+/// the pair `(slug, role)` is the whole answer to "may this principal
+/// act here", and splitting it invites a caller to read one without the
+/// other.
+fn organization_bundle_json(bundle: &architect_auth::OrganizationBundle) -> Value {
+    json!({
+        "organization": organization_json(&bundle.organization),
+        "membership": member_json(&bundle.membership),
+    })
+}
+
+fn invitation_json(invitation: &auth_proto::AuthInvitation) -> Value {
+    json!({
+        "id": invitation.id,
+        "organization_id": invitation.organization_id,
+        "email": invitation.email,
+        "role": invitation.role,
+        "status": invitation.status,
+        "inviter_id": invitation.inviter_id,
+        "expires_at": invitation.expires_at,
+        "created_at": invitation.created_at,
+    })
+}
+
+/// `GET /auth/organization/list` — every org this session belongs to,
+/// with the caller's role in each.
+///
+/// The endpoint this whole section exists for. One call, one round trip,
+/// and a relying party needs no membership table of its own.
+async fn list_organizations<S>(
+    State(state): State<HttpState<S>>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiError>
+where
+    S: AuthStorage,
+{
+    let session_token = require_token(&state, &headers)?;
+    let bundles = state
+        .auth
+        .list_organizations(architect_auth::ListOrganizations { session_token })
+        .await?;
+    Ok(Json(Value::Array(
+        bundles.iter().map(organization_bundle_json).collect(),
+    )))
+}
+
+/// `GET /auth/organization/{organization_id}` — one org, if the caller
+/// is in it. A non-member gets the same answer as a missing org, which
+/// is the engine's choice and the right one: membership is not
+/// something an outsider should be able to probe for.
+async fn get_organization<S>(
+    State(state): State<HttpState<S>>,
+    Path(organization_id): Path<uuid::Uuid>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiError>
+where
+    S: AuthStorage,
+{
+    let session_token = require_token(&state, &headers)?;
+    let bundle = state
+        .auth
+        .get_organization(architect_auth::GetOrganization {
+            session_token,
+            organization_id,
+        })
+        .await?;
+    Ok(Json(organization_bundle_json(&bundle)))
+}
+
+/// `GET /auth/organization/{organization_id}/members` — who is in it.
+///
+/// The user is resolved server-side, so a member list is a list of
+/// people rather than a list of ids the caller has to fan out over.
+async fn list_members<S>(
+    State(state): State<HttpState<S>>,
+    Path(organization_id): Path<uuid::Uuid>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, ApiError>
+where
+    S: AuthStorage,
+{
+    let session_token = require_token(&state, &headers)?;
+    let members = state
+        .auth
+        .list_members(architect_auth::ListMembers {
+            session_token,
+            organization_id,
+        })
+        .await?;
+    Ok(Json(Value::Array(
+        members
+            .iter()
+            .map(|m| {
+                json!({
+                    "member": member_json(&m.member),
+                    "user": user_json(&m.user),
+                })
+            })
+            .collect(),
+    )))
+}
+
+/// `POST /auth/organization/create` — `{name, slug, logo?,
+/// metadata_json?}`. The caller becomes its owner.
+async fn create_organization<S>(
+    State(state): State<HttpState<S>>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Result<(StatusCode, Json<Value>), ApiError>
+where
+    S: AuthStorage,
+{
+    let session_token = require_token(&state, &headers)?;
+    let bundle = state
+        .auth
+        .create_organization(architect_auth::CreateOrganization {
+            session_token,
+            name: field_str(&body, "name")?,
+            slug: field_str(&body, "slug")?,
+            logo: field_opt_str(&body, "logo"),
+            metadata_json: field_opt_str(&body, "metadata_json"),
+        })
+        .await?;
+    Ok((StatusCode::CREATED, Json(organization_bundle_json(&bundle))))
+}
+
+/// `POST /auth/organization/set-active` — `{organization_id}`.
+async fn set_active_organization<S>(
+    State(state): State<HttpState<S>>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Result<StatusCode, ApiError>
+where
+    S: AuthStorage,
+{
+    let session_token = require_token(&state, &headers)?;
+    state
+        .auth
+        .set_active_organization(architect_auth::SetActiveOrganization {
+            session_token,
+            organization_id: field_uuid(&body, "organization_id")?,
+        })
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `POST /auth/organization/invite-member` — `{organization_id, email,
+/// role, expires_at?}`.
+///
+/// `expires_at` defaults to a week out rather than being required: an
+/// invitation with no expiry is a standing key, and making the caller
+/// name one every time is how it ends up pasted as a far-future
+/// constant. A week is long enough to survive a holiday.
+async fn invite_member<S>(
+    State(state): State<HttpState<S>>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Result<(StatusCode, Json<Value>), ApiError>
+where
+    S: AuthStorage,
+{
+    let session_token = require_token(&state, &headers)?;
+    let expires_at = match field_opt_str(&body, "expires_at") {
+        Some(raw) => raw.parse::<chrono::DateTime<chrono::Utc>>().map_err(|_| {
+            ApiError::custom(
+                StatusCode::BAD_REQUEST,
+                "invalid_timestamp",
+                "expires_at must be an RFC 3339 timestamp",
+            )
+        })?,
+        // `checked_add_signed` rather than `+`: the addition cannot
+        // overflow seven days from now, but an invitation whose expiry
+        // silently wrapped would be a standing key, so the impossible
+        // branch refuses instead of inventing a date.
+        None => chrono::Utc::now()
+            .checked_add_signed(chrono::Duration::days(7))
+            .ok_or_else(|| {
+                ApiError::custom(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "expiry_overflow",
+                    "could not compute a default expiry",
+                )
+            })?,
+    };
+    let issued = state
+        .auth
+        .create_invitation(architect_auth::CreateInvitation {
+            session_token,
+            organization_id: field_uuid(&body, "organization_id")?,
+            email: field_str(&body, "email")?,
+            role: field_str(&body, "role")?,
+            expires_at,
+        })
+        .await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "invitation": invitation_json(&issued.invitation),
+            // Returned once, here, and never readable again — the
+            // invitation row stores a hash. Whoever calls this is
+            // responsible for delivering it.
+            "token": issued.token,
+        })),
+    ))
+}
+
+/// `POST /auth/organization/accept-invitation` — `{invitation_id,
+/// token}`. Accepted as the signed-in caller, whoever was invited.
+///
+/// 204, because the flow returns nothing. The route descriptor claimed
+/// `AuthMember` and always had; the `OpenAPI` document therefore
+/// advertised a body
+/// no caller could ever receive. Fixed alongside this mount rather than
+/// papered over here — a client generated from that document would have
+/// failed to parse the empty response.
+async fn accept_invitation<S>(
+    State(state): State<HttpState<S>>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Result<StatusCode, ApiError>
+where
+    S: AuthStorage,
+{
+    let session_token = require_token(&state, &headers)?;
+    state
+        .auth
+        .accept_invitation(architect_auth::AcceptInvitation {
+            session_token,
+            invitation_id: field_uuid(&body, "invitation_id")?,
+            token: field_str(&body, "token")?,
+        })
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `POST /auth/organization/update-member-role` — `{organization_id,
+/// user_id, role}`.
+async fn update_member_role<S>(
+    State(state): State<HttpState<S>>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, ApiError>
+where
+    S: AuthStorage,
+{
+    let session_token = require_token(&state, &headers)?;
+    let member = state
+        .auth
+        .set_member_role(architect_auth::SetMemberRole {
+            session_token,
+            organization_id: field_uuid(&body, "organization_id")?,
+            user_id: field_uuid(&body, "user_id")?,
+            role: field_str(&body, "role")?,
+        })
+        .await?;
+    Ok(Json(member_json(&member)))
 }
 
 // ── Shared shaping ───────────────────────────────────────────────────
