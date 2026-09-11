@@ -40,9 +40,41 @@ pub struct AuthServer {
     pub db: DatabaseConnection,
 }
 
+/// How to connect, given what the URL is.
+///
+/// # In-memory SQLite needs a pool of one
+///
+/// An in-memory SQLite database belongs to its *connection*, not to the
+/// process. With the default pool the migrations run on one connection
+/// and the second request is handed a different one — a database with
+/// no tables in it — so the server boots, reports that it seeded, and
+/// then fails every request with a 500.
+///
+/// It is the obvious URL to reach for on a dev machine and it looked
+/// like it worked, because the first request often reuses the same
+/// connection. Capping the pool at one makes `sqlite::memory:` mean
+/// what everybody assumes it means.
+fn connect_options(database_url: &str) -> sea_orm::ConnectOptions {
+    let mut options = sea_orm::ConnectOptions::new(database_url.to_owned());
+    if is_in_memory(database_url) {
+        options.max_connections(1).min_connections(1);
+    }
+    options
+}
+
+/// Is this a SQLite database that lives only in this connection?
+fn is_in_memory(database_url: &str) -> bool {
+    let url = database_url.trim();
+    url.starts_with("sqlite:")
+        && (url.contains(":memory:") || url.contains("mode=memory"))
+        // `cache=shared` makes one in-memory database visible to every
+        // connection, which is the other way to solve this.
+        && !url.contains("cache=shared")
+}
+
 /// Connect, migrate, and assemble everything from a [`ServerConfig`].
 pub async fn build(config: &ServerConfig) -> eyre::Result<AuthServer> {
-    let db = Database::connect(&config.database_url)
+    let db = Database::connect(connect_options(&config.database_url))
         .await
         .map_err(|error| eyre::eyre!("connect auth database: {error}"))?;
 
@@ -403,4 +435,29 @@ pub async fn serve(server: AuthServer) -> eyre::Result<()> {
     axum::serve(listener, server.app)
         .await
         .map_err(|error| eyre::eyre!("serve: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_in_memory;
+
+    #[test]
+    fn an_in_memory_sqlite_url_is_recognised() {
+        // Each of these gives every connection its own empty database,
+        // which is a server that boots and then 500s on every request.
+        assert!(is_in_memory("sqlite::memory:"));
+        assert!(is_in_memory("sqlite://:memory:"));
+        assert!(is_in_memory("sqlite:file:x?mode=memory"));
+    }
+
+    #[test]
+    fn a_shared_cache_url_solves_it_the_other_way() {
+        assert!(!is_in_memory("sqlite:file:x?mode=memory&cache=shared"));
+    }
+
+    #[test]
+    fn a_real_database_is_left_alone() {
+        assert!(!is_in_memory("sqlite://./auth.db?mode=rwc"));
+        assert!(!is_in_memory("postgres://auth@db/auth"));
+    }
 }
