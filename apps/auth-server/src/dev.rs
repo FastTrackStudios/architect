@@ -20,7 +20,7 @@
 //! memory on a laptop first.
 //!
 //! Both refuse to do anything unless they are asked to. Seeding is
-//! gated on [`DevConfig::enabled`], which `ServerConfig::from_env` only
+//! gated on [`DevConfig::enabled`], which `ServerConfig::load` only
 //! sets from `AUTH_DEV_SEED=1`, and the snapshot route needs a real
 //! administrator's session.
 
@@ -34,7 +34,7 @@ use axum::response::{IntoResponse, Response};
 use sea_orm::DatabaseConnection;
 use uuid::Uuid;
 
-use crate::http::HttpState;
+use crate::oauth::HttpState;
 
 /// The password every seeded account has.
 ///

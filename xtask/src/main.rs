@@ -7,6 +7,7 @@
 mod fleet;
 mod git;
 mod mirror;
+mod scaffold;
 mod tags;
 
 use std::path::PathBuf;
@@ -23,6 +24,13 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Scaffold a feature: `features/<name>/<name>-proto` (entity, service,
+    /// error) and `features/<name>/<name>-memory` (an in-memory backend
+    /// with passing tests). Add both to the workspace members and go.
+    Feature {
+        #[command(subcommand)]
+        action: FeatureAction,
+    },
     /// Check that release tags order the commits the way their numbers do.
     ///
     /// Six repos pin architect by tag, and the only question they ask of a
@@ -71,10 +79,33 @@ enum Command {
     },
 }
 
+#[derive(Subcommand)]
+enum FeatureAction {
+    /// Create the crates for a new feature.
+    New {
+        /// Lowercase kebab-case crate name (`inventory`, `tour-dates`).
+        name: String,
+    },
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
         Command::Tags { verbose } => tags::run(verbose),
+        Command::Feature {
+            action: FeatureAction::New { name },
+        } => {
+            let repo = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            scaffold::feature_new(&repo, &name).map(|written| {
+                for path in written {
+                    println!("wrote {}", path.display());
+                }
+                println!(
+                    "next: add \"features/{name}/{name}-proto\" and \"features/{name}/{name}-memory\" \
+                     to [workspace] members, then `cargo test -p {name}-memory`"
+                );
+            })
+        }
         Command::AuthMirror {
             from,
             out,

@@ -1,0 +1,146 @@
+//! The organization surface: one `#[architect::rpc]` trait, both faces.
+//!
+//! Everything a relying party needs to answer "which orgs is this person
+//! in, and what may they do there" — the orgs a session belongs to with
+//! the caller's role in each, one org's members as people rather than
+//! ids, and the writes that change either. The server mounts this over
+//! vox and over HTTP from the same declaration; the clients are
+//! generated with it.
+//!
+//! Every method takes the session `token` as its first argument. Over
+//! HTTP that argument may ride `Authorization: Bearer …` instead of the
+//! body — the generated router fills it in — so a browser keeps the
+//! credential in a header exactly as a vox client keeps it in metadata.
+
+use chrono::{DateTime, Utc};
+use uuid::Uuid;
+
+use crate::{AuthFlowError, AuthInvitation, AuthMember, AuthOrganization, AuthUser};
+
+/// An organization together with the caller's membership in it.
+///
+/// Deliberately one object rather than two lists to join client-side:
+/// the pair `(slug, role)` is the whole answer to "may this principal
+/// act here", and splitting it invites a caller to read one without the
+/// other.
+#[architect::wire]
+#[derive(Eq)]
+pub struct OrganizationBundle {
+    pub organization: AuthOrganization,
+    pub membership: AuthMember,
+}
+
+/// A membership with the person attached.
+///
+/// A member list that shows user ids is not a member list. The user is
+/// resolved server-side so no caller has to fan out over the ids.
+#[architect::wire]
+#[derive(Eq)]
+pub struct OrganizationMember {
+    pub member: AuthMember,
+    pub user: AuthUser,
+}
+
+/// A freshly issued invitation and the one-time token that redeems it.
+///
+/// The token is returned once, here, and never readable again — the
+/// invitation row stores a hash. Whoever calls `invite_member` is
+/// responsible for delivering it.
+#[architect::wire]
+#[derive(Eq)]
+pub struct IssuedInvitation {
+    pub invitation: AuthInvitation,
+    pub token: String,
+}
+
+/// What a new organization is called. The caller becomes its owner.
+#[architect::wire]
+#[derive(Eq)]
+pub struct NewOrganization {
+    pub name: String,
+    /// What relying parties key on: what an operator types, and what a
+    /// deployment's own directories are named after. The id is
+    /// meaningful only here.
+    pub slug: String,
+    pub logo: Option<String>,
+    pub metadata_json: Option<String>,
+}
+
+/// Who to invite, and as what.
+#[architect::wire]
+#[derive(Eq)]
+pub struct Invite {
+    pub organization_id: Uuid,
+    pub email: String,
+    pub role: String,
+    /// `None` means a week from now. An invitation with no expiry is a
+    /// standing key, and making the caller name one every time is how it
+    /// ends up pasted as a far-future constant. A week survives a holiday.
+    pub expires_at: Option<DateTime<Utc>>,
+}
+
+// r[impl auth.transport.vox-schema]
+#[architect::service]
+pub trait OrganizationService {
+    /// Every org this session belongs to, with the caller's role in each.
+    /// One call, one round trip, and a relying party needs no membership
+    /// table of its own.
+    async fn list_organizations(
+        &self,
+        token: String,
+    ) -> Result<Vec<OrganizationBundle>, AuthFlowError>;
+
+    /// One org, if the caller is in it. A non-member gets the same answer
+    /// as a missing org: membership is not something an outsider should
+    /// be able to probe for.
+    async fn get_organization(
+        &self,
+        token: String,
+        organization_id: Uuid,
+    ) -> Result<OrganizationBundle, AuthFlowError>;
+
+    /// Who is in an org — people, not ids.
+    async fn list_members(
+        &self,
+        token: String,
+        organization_id: Uuid,
+    ) -> Result<Vec<OrganizationMember>, AuthFlowError>;
+
+    /// Create an org; the caller becomes its owner.
+    async fn create_organization(
+        &self,
+        token: String,
+        organization: NewOrganization,
+    ) -> Result<OrganizationBundle, AuthFlowError>;
+
+    /// Make one of the caller's orgs the session's active one.
+    async fn set_active_organization(
+        &self,
+        token: String,
+        organization_id: Uuid,
+    ) -> Result<(), AuthFlowError>;
+
+    /// Issue an invitation. The returned token is shown once.
+    async fn invite_member(
+        &self,
+        token: String,
+        invite: Invite,
+    ) -> Result<IssuedInvitation, AuthFlowError>;
+
+    /// Redeem an invitation as the signed-in caller, whoever was invited.
+    async fn accept_invitation(
+        &self,
+        token: String,
+        invitation_id: Uuid,
+        invitation_token: String,
+    ) -> Result<(), AuthFlowError>;
+
+    /// Change a member's role.
+    async fn update_member_role(
+        &self,
+        token: String,
+        organization_id: Uuid,
+        user_id: Uuid,
+        role: String,
+    ) -> Result<AuthMember, AuthFlowError>;
+}

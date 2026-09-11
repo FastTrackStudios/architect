@@ -1,5 +1,7 @@
-//! End-to-end coverage of the HTTP surface against a real engine over
-//! in-memory `SQLite`.
+//! End-to-end coverage of the hand-written HTTP surface — the OIDC
+//! provider, the pages, CORS, the probes — against a real engine over
+//! in-memory `SQLite`. The generated session/organization face is
+//! covered by `surfaces.rs`, once per transport.
 //!
 //! These drive the actual `app_router`, so they exercise routing,
 //! extraction, cookie shaping and error mapping together — the parts a
@@ -113,142 +115,8 @@ async fn advertised_jwks_uri_is_routed_and_leaks_no_key_material() {
     );
 }
 
-#[tokio::test]
-async fn sign_up_then_session_round_trips_a_bearer_token() {
-    let app = app().await;
-
-    let response = app
-        .clone()
-        .oneshot(
-            Request::post("/auth/sign-up/email")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    r#"{"email":"cody@fasttrackstudio.app","password":"correct-horse-battery-staple"}"#,
-                ))
-                .unwrap(),
-        )
-        .await
-        .expect("sign up");
-
-    assert_eq!(response.status(), StatusCode::CREATED);
-    // The browser path: a session cookie is set on the response.
-    let cookie = response
-        .headers()
-        .get(header::SET_COOKIE)
-        .expect("session cookie is set")
-        .to_str()
-        .expect("cookie is ascii")
-        .to_owned();
-    assert!(cookie.contains("architect-auth.session="));
-    assert!(
-        cookie.contains("HttpOnly"),
-        "session cookie must be HttpOnly"
-    );
-    assert!(
-        cookie.contains("Secure"),
-        "an https base_url must yield a Secure cookie"
-    );
-
-    let body = json_body(response).await;
-    let token = body["token"].as_str().expect("token in body").to_owned();
-    assert_eq!(body["user"]["email"], "cody@fasttrackstudio.app");
-    // The stored verifier must never be serialized.
-    assert!(body["session"].get("token_hash").is_none());
-
-    // The native path: the same token as a bearer resolves the session.
-    let response = app
-        .oneshot(
-            Request::get("/auth/session")
-                .header(header::AUTHORIZATION, format!("Bearer {token}"))
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .expect("session");
-
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = json_body(response).await;
-    assert_eq!(body["user"]["email"], "cody@fasttrackstudio.app");
-}
-
-#[tokio::test]
-async fn session_without_credentials_is_401_not_500() {
-    let response = app()
-        .await
-        .oneshot(Request::get("/auth/session").body(Body::empty()).unwrap())
-        .await
-        .expect("request");
-
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-}
-
-#[tokio::test]
-async fn wrong_password_is_indistinguishable_from_unknown_account() {
-    let app = app().await;
-
-    app.clone()
-        .oneshot(
-            Request::post("/auth/sign-up/email")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    r#"{"email":"real@fasttrackstudio.app","password":"correct-horse-battery-staple"}"#,
-                ))
-                .unwrap(),
-        )
-        .await
-        .expect("sign up");
-
-    let wrong_password = app
-        .clone()
-        .oneshot(
-            Request::post("/auth/sign-in/email")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    r#"{"email":"real@fasttrackstudio.app","password":"not-the-password"}"#,
-                ))
-                .unwrap(),
-        )
-        .await
-        .expect("sign in");
-
-    let unknown_account = app
-        .oneshot(
-            Request::post("/auth/sign-in/email")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(
-                    r#"{"email":"ghost@fasttrackstudio.app","password":"not-the-password"}"#,
-                ))
-                .unwrap(),
-        )
-        .await
-        .expect("sign in");
-
-    assert_eq!(wrong_password.status(), unknown_account.status());
-    assert_eq!(
-        json_body(wrong_password).await,
-        json_body(unknown_account).await,
-        "a differing response would let an attacker enumerate accounts"
-    );
-}
-
-#[tokio::test]
-async fn sign_out_is_idempotent_and_clears_the_cookie() {
-    let response = app()
-        .await
-        .oneshot(Request::post("/auth/sign-out").body(Body::empty()).unwrap())
-        .await
-        .expect("request");
-
-    // No token supplied: already signed out, so this is a success.
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
-    let cookie = response
-        .headers()
-        .get(header::SET_COOKIE)
-        .expect("cookie cleared")
-        .to_str()
-        .unwrap();
-    assert!(cookie.contains("architect-auth.session="));
-}
+// The session lifecycle itself — sign-up, session, refresh, sign-out,
+// wrong password — is covered once for every transport in `surfaces.rs`.
 
 #[tokio::test]
 async fn health_probes_answer() {
@@ -280,7 +148,7 @@ async fn configuring_cors_origins_does_not_panic_and_echoes_the_origin() {
         .oneshot(
             Request::builder()
                 .method("OPTIONS")
-                .uri("/auth/sign-in/email")
+                .uri("/auth/sign-in-email-password")
                 .header(header::ORIGIN, "https://keyflow.fasttrackstudio.app")
                 .header("access-control-request-method", "POST")
                 .header("access-control-request-headers", "content-type")
@@ -318,7 +186,7 @@ async fn an_unlisted_origin_is_not_granted_cors_access() {
         .oneshot(
             Request::builder()
                 .method("OPTIONS")
-                .uri("/auth/sign-in/email")
+                .uri("/auth/sign-in-email-password")
                 .header(header::ORIGIN, "https://evil.example")
                 .header("access-control-request-method", "POST")
                 .body(Body::empty())

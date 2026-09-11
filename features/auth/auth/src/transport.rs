@@ -971,6 +971,164 @@ pub mod vox {
         }
     }
 
+    /// The organization surface over the same engine. Each method
+    /// forwards to the engine command of the same name; the session
+    /// token is the authorization on every one.
+    impl<S> auth_proto::OrganizationService for AuthVoxService<S>
+    where
+        S: AuthStorage,
+    {
+        async fn list_organizations(
+            &self,
+            token: String,
+        ) -> Result<Vec<auth_proto::OrganizationBundle>, AuthFlowError> {
+            let bundles = self
+                .auth
+                .list_organizations(crate::ListOrganizations {
+                    session_token: token,
+                })
+                .await?;
+            Ok(bundles.into_iter().map(org_bundle).collect())
+        }
+
+        async fn get_organization(
+            &self,
+            token: String,
+            organization_id: Uuid,
+        ) -> Result<auth_proto::OrganizationBundle, AuthFlowError> {
+            self.auth
+                .get_organization(crate::GetOrganization {
+                    session_token: token,
+                    organization_id,
+                })
+                .await
+                .map(org_bundle)
+        }
+
+        async fn list_members(
+            &self,
+            token: String,
+            organization_id: Uuid,
+        ) -> Result<Vec<auth_proto::OrganizationMember>, AuthFlowError> {
+            let members = self
+                .auth
+                .list_members(crate::ListMembers {
+                    session_token: token,
+                    organization_id,
+                })
+                .await?;
+            Ok(members
+                .into_iter()
+                .map(|m| auth_proto::OrganizationMember {
+                    member: m.member,
+                    user: m.user,
+                })
+                .collect())
+        }
+
+        async fn create_organization(
+            &self,
+            token: String,
+            organization: auth_proto::NewOrganization,
+        ) -> Result<auth_proto::OrganizationBundle, AuthFlowError> {
+            self.auth
+                .create_organization(crate::CreateOrganization {
+                    session_token: token,
+                    name: organization.name,
+                    slug: organization.slug,
+                    logo: organization.logo,
+                    metadata_json: organization.metadata_json,
+                })
+                .await
+                .map(org_bundle)
+        }
+
+        async fn set_active_organization(
+            &self,
+            token: String,
+            organization_id: Uuid,
+        ) -> Result<(), AuthFlowError> {
+            self.auth
+                .set_active_organization(crate::SetActiveOrganization {
+                    session_token: token,
+                    organization_id,
+                })
+                .await
+        }
+
+        async fn invite_member(
+            &self,
+            token: String,
+            invite: auth_proto::Invite,
+        ) -> Result<auth_proto::IssuedInvitation, AuthFlowError> {
+            // `checked_add_signed` rather than `+`: the addition cannot
+            // overflow seven days from now, but an invitation whose
+            // expiry silently wrapped would be a standing key, so the
+            // impossible branch refuses instead of inventing a date.
+            let expires_at = match invite.expires_at {
+                Some(at) => at,
+                None => chrono::Utc::now()
+                    .checked_add_signed(chrono::Duration::days(7))
+                    .ok_or_else(|| {
+                        AuthFlowError::Internal("could not compute a default expiry".into())
+                    })?,
+            };
+            let issued = self
+                .auth
+                .create_invitation(crate::CreateInvitation {
+                    session_token: token,
+                    organization_id: invite.organization_id,
+                    email: invite.email,
+                    role: invite.role,
+                    expires_at,
+                })
+                .await?;
+            Ok(auth_proto::IssuedInvitation {
+                invitation: issued.invitation,
+                token: issued.token,
+            })
+        }
+
+        async fn accept_invitation(
+            &self,
+            token: String,
+            invitation_id: Uuid,
+            invitation_token: String,
+        ) -> Result<(), AuthFlowError> {
+            self.auth
+                .accept_invitation(crate::AcceptInvitation {
+                    session_token: token,
+                    invitation_id,
+                    token: invitation_token,
+                })
+                .await
+        }
+
+        async fn update_member_role(
+            &self,
+            token: String,
+            organization_id: Uuid,
+            user_id: Uuid,
+            role: String,
+        ) -> Result<auth_proto::AuthMember, AuthFlowError> {
+            self.auth
+                .set_member_role(crate::SetMemberRole {
+                    session_token: token,
+                    organization_id,
+                    user_id,
+                    role,
+                })
+                .await
+        }
+    }
+
+    fn org_bundle(bundle: crate::OrganizationBundle) -> auth_proto::OrganizationBundle {
+        auth_proto::OrganizationBundle {
+            organization: bundle.organization,
+            membership: bundle.membership,
+        }
+    }
+
     // r[impl auth.transport.vox-schema]
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct AuthVoxContext {

@@ -56,7 +56,7 @@ async fn app() -> (axum::Router, Texts) {
     let app = server::app_router_with_senders(
         &config,
         auth,
-        std::sync::Arc::new(auth_server::http::SocialState::disabled()),
+        std::sync::Arc::new(auth_server::oauth::SocialState::disabled()),
         None,
         Some(sms),
     );
@@ -249,10 +249,10 @@ async fn a_number_is_only_saved_after_a_code_comes_back() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/auth/sign-up/email")
+                .uri("/auth/sign-up-email-password")
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(
-                    r#"{"email":"ada@example.com","password":"correct horse battery staple"}"#,
+                    r#"{"input":{"email":"ada@example.com","password":"correct horse battery staple"}}"#,
                 ))
                 .unwrap(),
         )

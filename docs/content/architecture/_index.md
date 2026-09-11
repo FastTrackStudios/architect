@@ -26,6 +26,9 @@ distinction visible at a glance.
 - [The in-process transport](@/architecture/local.md) —
   `LocalServer`: typed clients over a vox memory link; desktop, CLI,
   and tests with no server.
+- [The HTTP face](@/architecture/http.md) — `#[architect::service]`:
+  one trait, vox and HTTP+JSON, clients for both; how a host mounts the
+  generated faces next to its plugins.
 - [Testing strata](@/architecture/testing.md) — native unit, native
   integration, browser e2e: which lives where.
 - [Server push](@/architecture/streams.md) — `PubSub`, Entity events,

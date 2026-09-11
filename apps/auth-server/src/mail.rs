@@ -24,18 +24,26 @@ use lettre::transport::smtp::authentication::Credentials;
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 
 /// Everything needed to send, or the absence of it.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, architect::Config)]
+#[architect(prefix = "AUTH_SMTP")]
 pub struct MailConfig {
     /// SMTP host. `None` puts the mailer in log mode.
     pub host: Option<String>,
+    #[architect(default = 587u16)]
     pub port: u16,
     pub username: Option<String>,
+    /// Same `_FILE` indirection as `AUTH_SECRET`: a mounted file does not
+    /// appear in `kubectl describe pod`.
+    #[architect(secret)]
     pub password: Option<String>,
     /// Envelope and header `From`. Must be an address the provider has
     /// been told this server may send as, or everything bounces.
+    #[architect(env = "AUTH_MAIL_FROM", default = "noreply@localhost")]
     pub from: String,
     /// The externally visible origin, used to build the links in mail.
     /// Must be the public URL — a link to the pod address helps nobody.
+    /// Copied from `AUTH_BASE_URL` by `ServerConfig::load`.
+    #[architect(skip)]
     pub base_url: String,
 }
 

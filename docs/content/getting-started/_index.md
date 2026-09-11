@@ -61,3 +61,15 @@ health endpoint at `/api/health`.
 Read [**Build a feature, end to end**](@/getting-started/walkthrough.md)
 — it walks the whole flow (define an entity → pick a backend → serve it →
 consume it remote *or* in-process) against the reference example.
+
+## A new feature in one command
+
+```sh
+cargo xtask feature new inventory
+```
+
+writes `features/inventory/inventory-proto` (an entity, a service, its
+error) and `features/inventory/inventory-memory` (an in-memory backend
+whose tests already pass over vox). Add both to the workspace members
+and `cargo test -p inventory-memory`. `examples/greeter` is the same
+shape with a server on top — copy it when you need one.

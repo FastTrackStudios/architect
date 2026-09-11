@@ -41,7 +41,7 @@ use axum::{
 };
 use dioxus::prelude::*;
 
-use crate::http::{HttpState, LinkedAccountView, UnlinkError, client_ip, user_agent};
+use crate::oauth::{HttpState, LinkedAccountView, UnlinkError, client_ip, user_agent};
 use crate::social::Provider;
 
 /// Where to send a browser that has just signed in, when the request
@@ -50,7 +50,7 @@ const DEFAULT_AFTER_SIGN_IN: &str = "/";
 
 /// Mount the sign-in and sign-up pages.
 ///
-/// Merged next to [`crate::http::router`] rather than folded into it:
+/// Merged next to [`crate::oauth::router`] rather than folded into it:
 /// an embedder that already has its own login screen wants the API
 /// without these, and keeping them separable is the difference between
 /// "use our pages" and "use our server".
@@ -114,7 +114,7 @@ where
     let Ok(bundle) = state.auth.current_session(CurrentSession { token }).await else {
         return Redirect::to("/login?return_to=%2Faccount").into_response();
     };
-    let accounts = crate::http::linked_accounts(&state, bundle.user.id)
+    let accounts = crate::oauth::linked_accounts(&state, bundle.user.id)
         .await
         .unwrap_or_default();
     let flash = account_flash(&q);
@@ -155,7 +155,7 @@ where
     let Some(provider) = Provider::parse(&form.provider) else {
         return Redirect::to("/account?error=unknown_provider").into_response();
     };
-    let location = match crate::http::unlink(&state, token, provider).await {
+    let location = match crate::oauth::unlink(&state, token, provider).await {
         Ok(()) => format!("/account?unlinked={}", provider.id()),
         Err(UnlinkError::NotLinked) => "/account?error=not_linked".to_owned(),
         Err(UnlinkError::LastCredential) => "/account?error=last_credential".to_owned(),

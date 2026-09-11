@@ -20,6 +20,8 @@ members = [
     "crates/architect-derive",
     "crates/architect-rpc-derive",
     "crates/architect-action-derive",
+    # ── the reference example ─────────────────────────────────────────
+    "examples/greeter",
     # ── apps ──────────────────────────────────────────────────────────
     "apps/auth-server",
     "apps/mock-oauth",
@@ -29,7 +31,6 @@ members = [
     "features/auth/auth-proto",
     "features/auth/auth-db",
     "features/auth/auth-client",
-    "features/auth/auth-http",
     "features/auth/auth-ui",
     "features/auth/tests/native",
     # ── crdt ──────────────────────────────────────────────────────────
@@ -85,7 +86,6 @@ auth = { path = "features/auth/auth" }
 auth-proto = { path = "features/auth/auth-proto" }
 auth-db = { path = "features/auth/auth-db" }
 auth-client = { path = "features/auth/auth-client" }
-auth-http = { path = "features/auth/auth-http" }
 auth-ui = { path = "features/auth/auth-ui" }
 crdt = { path = "features/crdt/crdt" }
 crdt-derive = { path = "features/crdt/crdt-derive" }
@@ -281,6 +281,10 @@ phon-jit = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.1.0" 
 dead_code = "warn"
 unused = "warn"
 unused_unsafe = "warn"
+# The derives emit `#[cfg(feature = "vox" | "server" | "fake")]` into
+# consumer crates; a crate that declares none of them (an app, an
+# example) should not warn about it.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("vox", "server", "fake"))'] }
 
 [workspace.lints.rustdoc]
 broken_intra_doc_links = "allow"

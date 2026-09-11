@@ -7,32 +7,21 @@ weight = 30
 ## Crate map
 
 architect itself lives in `crates/architect` (facade) +
-`crates/` (its proc-macros); everything under `examples/` is
-the reference demo a real project would copy.
+`crates/` (its proc-macros); `examples/greeter` is the reference
+feature a real project would copy, and `cargo xtask feature new <name>`
+scaffolds one.
 
 | Crate | Path | Role |
 |-------|------|------|
 | `architect` | `crates/architect` | User-facing — re-exports the derive + runtime (layer / `Resource` / `local`). |
 | `architect-derive` | `crates/architect-derive` | The `#[derive(Entity)]` / `#[derive(JsonField)]` proc-macro. |
-| `architect-rpc-derive` | `crates/architect-rpc-derive` | `#[architect::rpc]` — sync/async trait → vox service + `Layer` token. |
+| `architect-rpc-derive` | `crates/architect-rpc-derive` | `#[architect::service]` / `rpc` / `http` — sync/async trait → vox service + `Layer` token + HTTP router + HTTP client. |
 | `architect-action-derive` | `crates/architect-action-derive` | `#[architect::actions]` — named-command traits with menu/CLI metadata. |
 | `crdt`, `crdt-seaorm`, `crdt-derive` | `features/crdt/` | Loro CRDT layer + its SeaORM persistence — the local-first feature every `#[architect(crdt)]` entity builds on. |
-| `architect-cli` | `apps/architect/cli` | `architect feature new <name>` scaffolder. |
-| `example` | `examples/app/features/example/example` | Facade for the example feature. |
-| `example-proto` | `…/example-proto` | Wire contract — `#[derive(architect::Entity)]` + `ExampleService`. |
-| `example-db` | `…/example-db` | SeaORM/SQLite implementation. |
-| `example-memory` | `…/example-memory` | In-memory implementation. |
-| `example-crdt` | `…/example-crdt` | Loro CRDT implementation. |
-| `example-ui` | `…/example-ui` | Per-feature Dioxus components. |
-| `example-tests-native` / `-web` | `…/tests/{native,web}` | native + browser tests. |
-| `app-server` | `examples/app/server` | axum + vox runtime (lib `service_router` + bin). |
-| `app-cli` | `examples/app/cli` | native vox client (`app`). |
-| `app-db` | `examples/app/db` | sea-orm-migration CLI. |
-| `app-ui` / `app-web` / `app-desktop` | `examples/app/{ui,web,desktop}` | shared shell + wasm web + native desktop. |
-| `app-tests-e2e` | `examples/app/tests/e2e` | native end-to-end (remote + in-process). |
-| `example-stub-backend` | `examples/external-stub` | third-party backend pattern. |
-| `example-custom-server` | `examples/custom-server` | server assembled by hand. |
-| `example-layered-services` | `examples/layered-services` | `Layer` / `Resource` / planner walkthrough. |
+| `example-greeter` | `examples/greeter` | The reference feature + server: entity, service, backend, every wire, the tests. Copy this. |
+| `auth-proto`, `auth`, `auth-db`, `auth-client`, `auth-ui`, `architect-auth` | `features/auth/` | The identity feature — see [the auth feature](@/architecture/auth.md). |
+| `auth-server` | `apps/auth-server` | The identity server: the generated faces plus the OAuth/OIDC and page plugins. |
+| `xtask` | `xtask` | `cargo xtask feature new <name>` scaffolds a feature; tags, mirror, fleet tooling. |
 
 ## Cargo features
 
@@ -41,14 +30,14 @@ the reference demo a real project would copy.
 | `architect` | `vox` | Enable the `#[vox::service]` surface + the `layer` module. |
 | `architect` | `server-seaorm` (alias `server`) | SeaORM storage helpers (`storage::DbConn`); derive emits `<T>RepoStorage`. |
 | `architect` | `server-axum` | axum adapter — `architect::axum_ws` (Link + `serve`). |
+| `architect` | `http` | The HTTP+JSON face over axum. Off, `architect::http` is an inert facade with the same names, so derive-emitted routers still compile (a wasm client, a proto crate on its own). Implied by `server` and `host`. |
+| `architect` | `http-client` | `architect::http::HttpClient` over reqwest (native + wasm). Off, the generated `<Trait>HttpClient`s exist but answer every call with a `Transport` error. |
+| `architect` | `host` | `architect::host::EngineHost` — `/vox` + `/health` + plugins + optional iroh + SPA bundle from one router. |
 | `architect` | `local` | In-process transport — `architect::{LocalServer, serve_local}` (native). |
 | `architect` | `platform` | Portable clock/sleep/spawn — `architect::platform` (native tokio ↔ wasm browser timers). |
 | `architect` | `schedule` | Retry/repeat policies — `architect::{Schedule, retry, repeat}` (implies `platform`). |
 | `architect` | `fake` | `#[derive(fake::Dummy)]` on emitted structs for seeding. |
-| `example` | `backend-db` / `backend-memory` / `backend-crdt` | re-export the chosen backend at `example::backend_*`. |
-| `example` | `server-axum` | re-export `architect::axum_ws`. |
-| `example-proto` | `vox` (default) / `server` | the RPC surface / forward to `architect/server-seaorm`. |
-| `app-server` | `backend-db` (default) / `backend-memory` | which storage the server binary builds with. |
+| any `*-proto` | `vox` (default) / `server` | **The whole proto-crate profile.** `vox` is the RPC face; `server` adds the SeaORM storage + migration. HTTP, the HTTP client and `fake` need no forwarding. |
 
 ## Vox dependency convention
 
@@ -78,7 +67,12 @@ The runtime DI engine (see [idioms §6–7](@/architecture/idioms.md)):
 See [The architect pattern](@/architecture/pattern.md) for the full
 list of fields and the input → output mapping.
 
-## `#[architect::rpc]` mechanics
+## `#[architect::service]` and `#[architect::rpc]` mechanics
+
+`#[architect::service]` is `#[architect::rpc]` plus the HTTP face
+(see [the HTTP face](@/architecture/http.md)); the consumer's cargo
+features (`vox`, `http`, `http-client`) decide which faces compile.
+Both take the same options.
 
 Given a trait, the macro classifies each method **sync** or **async**
 and adapts what it emits: all-sync traits get a bridge that marshals

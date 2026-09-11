@@ -66,8 +66,57 @@ enum Strategy {
     Unbounded,
 }
 
+/// Where a subscriber's events go.
+///
+/// A vox channel (the wire) or a local async channel (an in-process
+/// consumer — the HTTP Server-Sent-Events bridge, a test, a poller).
+/// Every attach verb takes `impl Into<EventSink<T>>`, so backends written
+/// against `vox::Tx` keep compiling unchanged.
+pub enum EventSink<T> {
+    /// A vox channel sender — events cross the wire.
+    Vox(vox::Tx<T>),
+    /// A local bounded channel — events stay in-process.
+    Local(async_channel::Sender<T>),
+}
+
+impl<T> From<vox::Tx<T>> for EventSink<T> {
+    fn from(tx: vox::Tx<T>) -> Self {
+        Self::Vox(tx)
+    }
+}
+
+impl<T> From<async_channel::Sender<T>> for EventSink<T> {
+    fn from(tx: async_channel::Sender<T>) -> Self {
+        Self::Local(tx)
+    }
+}
+
+impl<T> EventSink<T> {
+    /// A local sink and its receiving end, with a mailbox of `capacity`.
+    /// The hub's own per-subscriber mailbox sits in front of it, so this
+    /// only needs to cover the consumer's read latency.
+    #[must_use]
+    pub fn local(capacity: usize) -> (Self, async_channel::Receiver<T>) {
+        let (tx, rx) = async_channel::bounded(capacity.max(1));
+        (Self::Local(tx), rx)
+    }
+
+    fn try_send(&self, event: T) -> Result<(), vox::TrySendError<T>>
+    where
+        T: facet::Facet<'static>,
+    {
+        match self {
+            Self::Vox(tx) => tx.try_send(event),
+            Self::Local(tx) => tx.try_send(event).map_err(|err| match err {
+                async_channel::TrySendError::Full(event) => vox::TrySendError::Full(event),
+                async_channel::TrySendError::Closed(event) => vox::TrySendError::Closed(event),
+            }),
+        }
+    }
+}
+
 struct Subscriber<T> {
-    sink: vox::Tx<T>,
+    sink: EventSink<T>,
     mailbox: VecDeque<T>,
     /// Buffered-attach parking: while `true`, the mailbox collects but
     /// nothing is sent (the snapshot hasn't been prepended yet).
@@ -151,6 +200,19 @@ impl<T> PubSub<T> {
         self
     }
 
+    /// Subscribe from in-process: a receiver that sees the replay window
+    /// and then every publish, until it is dropped. The local twin of
+    /// handing a `vox::Tx` to [`attach`](Self::attach).
+    #[must_use]
+    pub fn subscribe(&self, capacity: usize) -> async_channel::Receiver<T>
+    where
+        T: Clone + facet::Facet<'static>,
+    {
+        let (sink, rx) = EventSink::local(capacity);
+        self.attach(sink);
+        rx
+    }
+
     /// Live subscriber count (as of the last sweep).
     #[must_use]
     pub fn subscriber_count(&self) -> usize {
@@ -165,7 +227,7 @@ where
     /// Attach a subscriber: replay window first, then every subsequent
     /// publish. For snapshot-then-changes semantics use
     /// [`begin_attach`](Self::begin_attach) instead.
-    pub fn attach(&self, sink: vox::Tx<T>) {
+    pub fn attach(&self, sink: impl Into<EventSink<T>>) {
         let pending = self.begin_attach(sink);
         self.complete_attach(pending, None);
     }
@@ -178,7 +240,8 @@ where
     // seeding the replay mailbox and pushing the subscriber must be one
     // atomic step, or a concurrent `publish` can land between them.
     #[allow(clippy::significant_drop_tightening)]
-    pub fn begin_attach(&self, sink: vox::Tx<T>) -> PendingAttach {
+    pub fn begin_attach(&self, sink: impl Into<EventSink<T>>) -> PendingAttach {
+        let sink = sink.into();
         let mut inner = lock(&self.inner);
         let id = inner.next_id;
         inner.next_id = inner.next_id.saturating_add(1);

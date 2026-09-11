@@ -149,16 +149,16 @@ async fn full_sign_up_and_session_flow_works_on_postgres() {
     let response = app
         .clone()
         .oneshot(
-            Request::post("/auth/sign-up/email")
+            Request::post("/auth/sign-up-email-password")
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(format!(
-                    r#"{{"email":"{email}","password":"correct-horse-battery-staple"}}"#
+                    r#"{{"input":{{"email":"{email}","password":"correct-horse-battery-staple"}}}}"#
                 )))
                 .unwrap(),
         )
         .await
         .expect("sign up");
-    assert_eq!(response.status(), StatusCode::CREATED);
+    assert_eq!(response.status(), StatusCode::OK);
 
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
@@ -170,7 +170,7 @@ async fn full_sign_up_and_session_flow_works_on_postgres() {
     // the token hash matched on the way out.
     let response = app
         .oneshot(
-            Request::get("/auth/session")
+            Request::post("/auth/current-session")
                 .header(header::AUTHORIZATION, format!("Bearer {token}"))
                 .body(Body::empty())
                 .unwrap(),

@@ -28,7 +28,8 @@ use uuid::Uuid;
 /// The member's `role` joined with the user's display `name` + `email`,
 /// so clients (rates editor, owner dashboard) get a ready-to-render list
 /// without a second per-user round-trip.
-#[derive(Clone, Debug, PartialEq, Eq, ::facet::Facet)]
+#[architect::wire]
+#[derive(Eq)]
 pub struct OrgMember {
     pub user_id: Uuid,
     pub name: String,
@@ -44,7 +45,8 @@ pub struct OrgMember {
 pub const AUTHORIZATION_METADATA_KEY: &str = "authorization";
 
 /// Wire form of a self-service email change.
-#[derive(Clone, Debug, PartialEq, Eq, ::facet::Facet)]
+#[architect::wire]
+#[derive(Eq)]
 pub struct ChangeEmailRequest {
     /// Identifies the account; the change always applies to the
     /// session's own user.
@@ -53,7 +55,8 @@ pub struct ChangeEmailRequest {
 }
 
 /// Wire form of a self-service password change.
-#[derive(Clone, Debug, PartialEq, Eq, ::facet::Facet)]
+#[architect::wire]
+#[derive(Eq)]
 pub struct ChangePasswordRequest {
     /// Identifies the account. The change always applies to the session's
     /// own user — there is no target parameter, by design.
@@ -65,7 +68,8 @@ pub struct ChangePasswordRequest {
 }
 
 /// Wire form of an operator-performed email migration.
-#[derive(Clone, Debug, PartialEq, Eq, ::facet::Facet)]
+#[architect::wire]
+#[derive(Eq)]
 pub struct MigrateUserEmailRequest {
     /// Authorizes the call AND identifies who to record as `changed_by`.
     pub session_token: String,
@@ -78,14 +82,15 @@ pub struct MigrateUserEmailRequest {
 }
 
 /// Wire form of a history read.
-#[derive(Clone, Debug, PartialEq, Eq, ::facet::Facet)]
+#[architect::wire]
+#[derive(Eq)]
 pub struct EmailHistoryRequest {
     pub session_token: String,
     pub user_id: uuid::Uuid,
 }
 
 // r[impl auth.transport.vox-schema]
-#[architect::rpc]
+#[architect::service]
 pub trait AuthService {
     /// Create an email/password user and sign them in. Returns the
     /// freshly issued session bundle (the raw token is only returned
@@ -187,8 +192,8 @@ pub trait AuthService {
 }
 
 /// Wire form of a self-service profile change.
-#[derive(Clone, Debug, PartialEq, Eq, ::facet::Facet)]
-#[repr(C)]
+#[architect::wire]
+#[derive(Eq)]
 pub struct UpdateProfileRequest {
     /// Identifies the account; the change always applies to the
     /// session's own user.

@@ -1,0 +1,38 @@
+[package]
+name = "example-greeter"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "The whole architect flow in one small crate: an entity, a service, a backend, a server — and the tests that prove every wire agrees."
+
+[dependencies]
+architect = { workspace = true, features = ["host", "http-client", "local"] }
+vox.workspace = true
+chrono.workspace = true
+eyre.workspace = true
+facet.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+
+# The proto-crate profile: `vox` is the RPC face (on by default), `server`
+# adds the SeaORM storage + migration. These two are the whole contract —
+# there is nothing else to forward.
+[features]
+default = ["vox"]
+vox = ["architect/vox"]
+server = ["architect/server", "dep:sea-orm"]
+
+[dependencies.sea-orm]
+workspace = true
+optional = true
+
+[dev-dependencies]
+futures = "0.3"
+
+[[bin]]
+name = "greeter"
+path = "src/main.rs"
+
+[lints]
+workspace = true

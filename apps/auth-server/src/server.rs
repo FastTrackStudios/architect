@@ -1,86 +1,102 @@
-//! Assembling the running server: storage, engine, routers, listener.
+//! Assembling the running server: storage, engine, the generated faces,
+//! the plugins, the listener.
+//!
+//! The shape is the architect one. The auth *services* are declared once
+//! as `#[architect::service]` traits in `auth-proto`; from that
+//! declaration the framework emits the vox dispatchers, the axum routes,
+//! and the clients. This module therefore mounts, it does not write
+//! routes:
+//!
+//! ```text
+//! services().provide(svc)        →  the vox router     (served at /vox, and over iroh)
+//! services().provide_http(&svc)  →  the HTTP+JSON face (POST /auth/…, /organization/…)
+//! EngineHost::new(vox).plugin(http).plugin(oauth).plugin(pages)…
+//! ```
+//!
+//! What remains hand-written is what is HTTP by nature: the OAuth/OIDC
+//! redirect flows ([`crate::oauth`]) and the server-rendered pages
+//! ([`crate::ui`], `auth_ui`). Those mount as plugins next to the
+//! generated face.
 
-use architect::LayerRouter;
+use std::path::PathBuf;
+
+use architect::host::EngineHost;
+use architect::{Layer as _, LayerRouter};
 use architect_auth::{
-    ArchitectAuth, AuthServiceDispatcher,
+    ArchitectAuth, AuthStorage,
     db::{AuthSeaOrmStorage, Migrator},
-    transport::{
-        AuthCookieConfig,
-        vox::{AuthServerMiddleware, AuthVoxService},
-    },
+    transport::{AuthCookieConfig, vox::AuthVoxService},
 };
+use auth_proto::{AuthServiceService, OrganizationServiceService};
 use axum::{
     Router,
-    extract::ws::WebSocketUpgrade,
     http::{HeaderValue, Method, header},
-    response::IntoResponse,
     routing::get,
 };
-use sea_orm::{Database, DatabaseConnection};
-use sea_orm_migration::MigratorTrait;
+use sea_orm::DatabaseConnection;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
 use crate::config::ServerConfig;
-use crate::http::{self, HttpState};
+use crate::oauth::{self, HttpState};
 use crate::ui;
 
-/// The vox WebSocket subprotocol. A browser client that offers a
-/// subprotocol gets no connection at all unless the server echoes it
-/// back, so this is not cosmetic.
-pub const VOX_SUBPROTOCOL: &str = "vox.v1";
+/// The vox WebSocket subprotocol `/vox` echoes. Re-exported from the
+/// framework host, which is what mounts `/vox` now.
+pub use architect::host::VOX_SUBPROTOCOL;
 
 /// A built, not-yet-listening server.
 pub struct AuthServer {
     pub auth: ArchitectAuth<AuthSeaOrmStorage>,
-    pub app: Router,
-    pub bind_addr: String,
+    /// Everything mounted, ready to bind. [`EngineHost::into_app`] hands
+    /// back the axum app for in-process use; [`serve`] binds it.
+    pub host: EngineHost,
     /// Kept so callers (tests, an embedding binary) can reach the same
     /// pool the engine writes through.
     pub db: DatabaseConnection,
 }
 
-/// How to connect, given what the URL is.
-///
-/// # In-memory `SQLite` needs a pool of one
-///
-/// An in-memory `SQLite` database belongs to its *connection*, not to the
-/// process. With the default pool the migrations run on one connection
-/// and the second request is handed a different one — a database with
-/// no tables in it — so the server boots, reports that it seeded, and
-/// then fails every request with a 500.
-///
-/// It is the obvious URL to reach for on a dev machine and it looked
-/// like it worked, because the first request often reuses the same
-/// connection. Capping the pool at one makes `sqlite::memory:` mean
-/// what everybody assumes it means.
-fn connect_options(database_url: &str) -> sea_orm::ConnectOptions {
-    let mut options = sea_orm::ConnectOptions::new(database_url.to_owned());
-    if is_in_memory(database_url) {
-        options.max_connections(1).min_connections(1);
-    }
-    options
+/// The service bundle: every `#[architect::service]` trait the server
+/// mounts, bound to the one backend that implements them all. The same
+/// value provides the vox router and the HTTP router.
+#[must_use]
+pub fn services<S>() -> impl architect::Layer<AuthVoxService<S>>
+where
+    S: AuthStorage,
+{
+    architect::layers![AuthServiceService, OrganizationServiceService]
 }
 
-/// Is this a `SQLite` database that lives only in this connection?
-fn is_in_memory(database_url: &str) -> bool {
-    let url = database_url.trim();
-    url.starts_with("sqlite:")
-        && (url.contains(":memory:") || url.contains("mode=memory"))
-        // `cache=shared` makes one in-memory database visible to every
-        // connection, which is the other way to solve this.
-        && !url.contains("cache=shared")
+/// The vox router — what `/vox`, the iroh endpoint, and an in-process
+/// `LocalServer` all serve.
+#[must_use]
+pub fn vox_router<S>(auth: ArchitectAuth<S>) -> LayerRouter
+where
+    S: AuthStorage,
+{
+    services().provide(AuthVoxService::new(auth))
+}
+
+/// The generated HTTP+JSON face — `POST /auth/<method>` and
+/// `POST /organization/<method>`, JSON in, JSON out, the session
+/// token in the body or as `Authorization: Bearer`.
+#[must_use]
+pub fn http_router<S>(auth: ArchitectAuth<S>) -> Router
+where
+    S: AuthStorage,
+{
+    services().provide_http(&AuthVoxService::new(auth))
 }
 
 /// Connect, migrate, and assemble everything from a [`ServerConfig`].
 pub async fn build(config: &ServerConfig) -> eyre::Result<AuthServer> {
-    let db = Database::connect(connect_options(&config.database_url))
+    let db = architect::storage::connect(&config.database_url)
         .await
         .map_err(|error| eyre::eyre!("connect auth database: {error}"))?;
 
     if config.run_migrations {
         tracing::info!("running auth migrations");
-        Migrator::up(&db, None)
+        architect::storage::migrate::<Migrator>(&db)
             .await
             .map_err(|error| eyre::eyre!("auth migrations: {error}"))?;
     }
@@ -119,14 +135,25 @@ pub async fn build(config: &ServerConfig) -> eyre::Result<AuthServer> {
         }
     }
 
-    let app = app_router_with_db(config, auth.clone(), db.clone())?;
+    let social = social_state(config)?;
+    let mut host = host_with_senders(
+        config,
+        auth.clone(),
+        std::sync::Arc::new(social),
+        None,
+        None,
+    )
+    .plugin(snapshot_plugin(config, auth.clone(), db.clone()));
 
-    Ok(AuthServer {
-        auth,
-        app,
-        bind_addr: config.bind_addr.clone(),
-        db,
-    })
+    if let Some(key_path) = &config.iroh_key_path {
+        tracing::info!(key = %key_path, "serving the vox router over iroh as well");
+        host = host.iroh(
+            PathBuf::from(key_path),
+            config.iroh_id_path.as_deref().map(PathBuf::from),
+        );
+    }
+
+    Ok(AuthServer { auth, host, db })
 }
 
 /// Turn a [`ServerConfig`] into a configured engine.
@@ -198,7 +225,7 @@ pub fn build_engine<S>(config: &ServerConfig, storage: S) -> eyre::Result<Archit
         .map_err(|error| eyre::eyre!("build ArchitectAuth: {error}"))
 }
 
-/// The full axum app: vox WebSocket + HTTP surface + health probes.
+/// The social-provider state, or why it could not be built.
 ///
 /// # Errors
 ///
@@ -207,19 +234,27 @@ pub fn build_engine<S>(config: &ServerConfig, storage: S) -> eyre::Result<Archit
 /// never finish, so it refuses to boot rather than serving a sign-in
 /// button that dead-ends. With no provider configured the same failure
 /// is not an error: nothing was going to use the client.
+fn social_state(config: &ServerConfig) -> eyre::Result<oauth::SocialState> {
+    match HttpState::<AuthSeaOrmStorage>::social_state(config) {
+        Ok(social) => Ok(social),
+        Err(err) if config.social.is_enabled() => Err(eyre::eyre!(
+            "social providers are configured but the HTTP client failed to build: {err}"
+        )),
+        Err(_) => Ok(oauth::SocialState::disabled()),
+    }
+}
+
+/// The full axum app: vox WebSocket + generated HTTP face + plugins +
+/// health probes. What every in-process test drives.
+///
+/// # Errors
+///
+/// As [`social_state`].
 pub fn app_router<S>(config: &ServerConfig, auth: ArchitectAuth<S>) -> eyre::Result<Router>
 where
-    S: architect_auth::AuthStorage + Clone + Send + Sync + 'static,
+    S: AuthStorage,
 {
-    let social = match HttpState::<S>::social_state(config) {
-        Ok(social) => social,
-        Err(err) if config.social.is_enabled() => {
-            return Err(eyre::eyre!(
-                "social providers are configured but the HTTP client failed to build: {err}"
-            ));
-        }
-        Err(_) => http::SocialState::disabled(),
-    };
+    let social = social_state(config)?;
     Ok(app_router_with_social(
         config,
         auth,
@@ -230,12 +265,6 @@ where
 /// As [`app_router`], with the database attached so
 /// `GET /admin/snapshot` can read it.
 ///
-/// A separate function rather than a parameter on `app_router` because
-/// the snapshot route is the only thing in the server that wants a
-/// database handle rather than the storage trait, and every existing
-/// caller — including every test — should keep getting a router
-/// without it.
-///
 /// # Errors
 ///
 /// As [`app_router`].
@@ -245,12 +274,18 @@ pub fn app_router_with_db<S>(
     db: sea_orm::DatabaseConnection,
 ) -> eyre::Result<Router>
 where
-    S: architect_auth::AuthStorage + Clone + Send + Sync + 'static,
+    S: AuthStorage,
 {
-    let snapshot = Router::new()
-        .route("/admin/snapshot", get(crate::dev::snapshot_route::<S>))
-        .with_state(HttpState::new(auth.clone(), cookie_config(config)).with_db(db));
-    Ok(app_router(config, auth)?.merge(snapshot))
+    let social = social_state(config)?;
+    Ok(host_with_senders(
+        config,
+        auth.clone(),
+        std::sync::Arc::new(social),
+        None,
+        None,
+    )
+    .plugin(snapshot_plugin(config, auth, db))
+    .into_app())
 }
 
 /// As [`app_router`], with the social state supplied — the seam tests
@@ -258,10 +293,10 @@ where
 pub fn app_router_with_social<S>(
     config: &ServerConfig,
     auth: ArchitectAuth<S>,
-    social: std::sync::Arc<http::SocialState>,
+    social: std::sync::Arc<oauth::SocialState>,
 ) -> Router
 where
-    S: architect_auth::AuthStorage + Clone + Send + Sync + 'static,
+    S: AuthStorage,
 {
     app_router_with_senders(config, auth, social, None, None)
 }
@@ -276,12 +311,52 @@ where
 pub fn app_router_with_senders<S>(
     config: &ServerConfig,
     auth: ArchitectAuth<S>,
-    social: std::sync::Arc<http::SocialState>,
+    social: std::sync::Arc<oauth::SocialState>,
     login_mailer: Option<std::sync::Arc<dyn auth_ui::mailer::LoginMailer>>,
     sms: Option<std::sync::Arc<dyn auth_ui::mailer::SmsSender>>,
 ) -> Router
 where
-    S: architect_auth::AuthStorage + Clone + Send + Sync + 'static,
+    S: AuthStorage,
+{
+    host_with_senders(config, auth, social, login_mailer, sms).into_app()
+}
+
+/// `GET /admin/snapshot` — the one route that wants the database rather
+/// than the storage trait. A plugin of its own so every other caller
+/// gets a host without it.
+fn snapshot_plugin<S>(
+    config: &ServerConfig,
+    auth: ArchitectAuth<S>,
+    db: sea_orm::DatabaseConnection,
+) -> Router
+where
+    S: AuthStorage,
+{
+    Router::new()
+        .route("/admin/snapshot", get(crate::dev::snapshot_route::<S>))
+        .with_state(HttpState::new(auth, cookie_config(config)).with_db(db))
+}
+
+/// Liveness and readiness. Readiness is the same check for now — the
+/// engine holds no lazily-initialised state, and a database that has
+/// gone away surfaces as a 5xx on real traffic. `/health` comes from
+/// the framework host; these are the names the deployment probes.
+fn probes() -> Router {
+    Router::new()
+        .route("/healthz", get(|| async { "ok" }))
+        .route("/readyz", get(|| async { "ok" }))
+}
+
+/// The host, assembled: the generated faces plus every plugin.
+fn host_with_senders<S>(
+    config: &ServerConfig,
+    auth: ArchitectAuth<S>,
+    social: std::sync::Arc<oauth::SocialState>,
+    login_mailer: Option<std::sync::Arc<dyn auth_ui::mailer::LoginMailer>>,
+    sms: Option<std::sync::Arc<dyn auth_ui::mailer::SmsSender>>,
+) -> EngineHost
+where
+    S: AuthStorage,
 {
     let cookie = cookie_config(config);
 
@@ -310,43 +385,24 @@ where
     // use. One `Mailer`, two views of it — not two mailers.
     let mail_for_ui: std::sync::Arc<dyn auth_ui::mailer::LoginMailer> =
         login_mailer.unwrap_or_else(|| mail.clone());
-    // Mounted through the dispatcher rather than the plain
-    // `auth_service_layer`, so `AuthServerMiddleware` parses the
-    // `authorization` metadata entry off each call before the service
-    // sees it — the same wrapping the token-store client middleware on
-    // the app side expects.
-    let vox_router = LayerRouter::new().with(
-        architect_auth::auth_service_service_descriptor(),
-        AuthServiceDispatcher::new(AuthVoxService::new(auth.clone()))
-            .with_middleware(AuthServerMiddleware),
-    );
 
-    Router::new()
-        .route(
-            "/vox",
-            get(move |ws: WebSocketUpgrade| {
-                let router = vox_router.clone();
-                async move {
-                    ws.protocols([VOX_SUBPROTOCOL])
-                        .on_upgrade(move |socket| architect::axum_ws::serve_router(socket, router))
-                        .into_response()
-                }
-            }),
-        )
-        // Liveness: the process is up. Readiness is the same check for
-        // now — the engine holds no lazily-initialised state, and a
-        // database that has gone away surfaces as a 5xx on real traffic.
-        .route("/healthz", get(|| async { "ok" }))
-        .route("/readyz", get(|| async { "ok" }))
-        .merge(http::router(
+    let cors = cors_layer(config);
+    let svc = AuthVoxService::new(auth.clone());
+
+    EngineHost::new(services().provide(svc.clone()), config.bind_addr.clone())
+        // The same services, as HTTP+JSON — generated from the traits.
+        .plugin(services().provide_http(&svc))
+        .plugin(probes())
+        // The OAuth flows: this server as an OIDC provider, and as a
+        // client of GitHub / Google / TONE3000.
+        .plugin(oauth::router(
             HttpState::new(auth.clone(), cookie.clone())
                 .with_mailer(mail.clone())
                 .with_social(social.clone()),
         ))
-        // The sign-in and sign-up pages. Merged separately from the API
-        // so an embedder that already has its own login screen can take
-        // `http::router` alone — see `ui::router`.
-        .merge(ui::router(
+        // The sign-in and sign-up pages. A plugin of their own so an
+        // embedder that already has a login screen can leave them out.
+        .plugin(ui::router(
             HttpState::new(auth.clone(), cookie.clone())
                 .with_mailer(mail)
                 .with_social(social),
@@ -355,7 +411,7 @@ where
         // `auth-ui` rather than here because they are the same pages for
         // every deployment — a product wanting an org switcher should
         // mount them, not reimplement them.
-        .merge(auth_ui::router(
+        .plugin(auth_ui::router(
             auth_ui::UiState::new(auth, cookie)
                 .issuer("FastTrackStudio")
                 .base_url(config.base_url.clone())
@@ -363,15 +419,9 @@ where
                 .mailer(mail_for_ui)
                 .sms(sms.unwrap_or_else(auth_ui::mailer::log_only_sms)),
         ))
-        .layer(cors_layer(config))
-        .layer(TraceLayer::new_for_http())
+        .finish(move |app| app.layer(cors).layer(TraceLayer::new_for_http()))
 }
 
-/// Cookie policy derived from the deployment.
-///
-/// `secure` follows the scheme: a `Secure` cookie is silently dropped
-/// over plain HTTP, which would make local development mysteriously
-/// fail to stay signed in.
 /// The host a wallet signature is bound to.
 ///
 /// Derived from `base_url` rather than configured separately: it has to
@@ -389,6 +439,11 @@ fn siwe_domain(config: &ServerConfig) -> String {
         .to_owned()
 }
 
+/// Cookie policy derived from the deployment.
+///
+/// `secure` follows the scheme: a `Secure` cookie is silently dropped
+/// over plain HTTP, which would make local development mysteriously
+/// fail to stay signed in.
 #[must_use]
 pub fn cookie_config(config: &ServerConfig) -> AuthCookieConfig {
     AuthCookieConfig {
@@ -426,38 +481,12 @@ fn cors_layer(config: &ServerConfig) -> CorsLayer {
         .allow_credentials(true)
 }
 
-/// Bind and serve until the process dies.
+/// Bind and serve until the process dies — `/vox`, the HTTP face, every
+/// plugin, and (when configured) the same vox router over iroh.
 pub async fn serve(server: AuthServer) -> eyre::Result<()> {
-    let listener = tokio::net::TcpListener::bind(&server.bind_addr)
-        .await
-        .map_err(|error| eyre::eyre!("bind {}: {error}", server.bind_addr))?;
-    tracing::info!(addr = %server.bind_addr, "auth server listening");
-    axum::serve(listener, server.app)
+    server
+        .host
+        .serve()
         .await
         .map_err(|error| eyre::eyre!("serve: {error}"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::is_in_memory;
-
-    #[test]
-    fn an_in_memory_sqlite_url_is_recognised() {
-        // Each of these gives every connection its own empty database,
-        // which is a server that boots and then 500s on every request.
-        assert!(is_in_memory("sqlite::memory:"));
-        assert!(is_in_memory("sqlite://:memory:"));
-        assert!(is_in_memory("sqlite:file:x?mode=memory"));
-    }
-
-    #[test]
-    fn a_shared_cache_url_solves_it_the_other_way() {
-        assert!(!is_in_memory("sqlite:file:x?mode=memory&cache=shared"));
-    }
-
-    #[test]
-    fn a_real_database_is_left_alone() {
-        assert!(!is_in_memory("sqlite://./auth.db?mode=rwc"));
-        assert!(!is_in_memory("postgres://auth@db/auth"));
-    }
 }

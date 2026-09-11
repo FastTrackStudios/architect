@@ -22,9 +22,8 @@ use uuid::Uuid;
 /// state itself is not a credential — completing a ceremony still
 /// needs a valid signature — but a database dump should not let
 /// somebody resume ceremonies either.
-#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
-#[derive(architect::Entity, ::facet::Facet, Clone, Debug, PartialEq, Eq)]
-#[architect(table_name = "auth_passkey_ceremonies", repo)]
+#[architect::entity(table_name = "auth_passkey_ceremonies", repo)]
+#[derive(Eq)]
 pub struct AuthPasskeyCeremony {
     #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
     pub id: Uuid,
@@ -52,8 +51,8 @@ pub struct AuthPasskeyCeremony {
 /// Stored as a string, and checked on completion: a registration state
 /// must not be redeemable by the authentication endpoint or the other
 /// way round, even though both are opaque blobs to this crate.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, ::facet::Facet)]
-#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[architect::wire]
+#[derive(Copy, Eq)]
 #[repr(u8)]
 pub enum PasskeyCeremonyKind {
     Registration,

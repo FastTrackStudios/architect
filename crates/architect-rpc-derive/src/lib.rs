@@ -79,7 +79,13 @@ pub fn rpc(args: TokenStream, input: TokenStream) -> TokenStream {
     let parser = syn::meta::parser(|meta| rpc_args.parse(&meta));
     parse_macro_input!(args with parser);
 
-    let trait_item = parse_macro_input!(input as ItemTrait);
+    let mut trait_item = parse_macro_input!(input as ItemTrait);
+    // `#[architect::http]` written *below* `#[architect::rpc]` reaches us
+    // as a plain attribute on the trait: honour it and strip it, so the
+    // two spellings (`#[http] #[rpc]` and `#[rpc] #[http]`) behave alike.
+    if strip_http_marker(&mut trait_item.attrs) {
+        rpc_args.http = true;
+    }
 
     match expand(trait_item, rpc_args) {
         Ok(tokens) => tokens.into(),
@@ -87,10 +93,145 @@ pub fn rpc(args: TokenStream, input: TokenStream) -> TokenStream {
     }
 }
 
+/// `#[architect::service]` — the one attribute: every face the trait can
+/// have, and the consumer crate's cargo features decide which compile.
+///
+/// ```ignore
+/// #[architect::service]
+/// pub trait Greeter {
+///     async fn greet(&self, name: String) -> Result<String, GreetError>;
+/// }
+/// ```
+///
+/// | consumer feature | what materialises |
+/// |------------------|-------------------|
+/// | (none)           | the trait, the direct view, the in-process host |
+/// | `vox`            | `GreeterClient`, dispatcher, descriptor, `Service` token, `layer` / `serve` |
+/// | `http`           | `http::router(backend)` (axum), `http::<Method>Args`, `BindHttp` |
+/// | `http-client`    | `GreeterHttpClient` |
+///
+/// Accepts every `#[architect::rpc(...)]` option (`context = T`,
+/// `scopes(...)`, `ops`, `sync_client`). `#[rpc]` remains the vox-only
+/// spelling and `#[http]` the explicit opt-in; this is both.
+#[proc_macro_attribute]
+pub fn service(args: TokenStream, input: TokenStream) -> TokenStream {
+    let mut rpc_args = RpcArgs {
+        http: true,
+        ..RpcArgs::default()
+    };
+    let parser = syn::meta::parser(|meta| rpc_args.parse(&meta));
+    parse_macro_input!(args with parser);
+    let mut trait_item = parse_macro_input!(input as ItemTrait);
+    let _ = strip_http_marker(&mut trait_item.attrs);
+    match expand(trait_item, rpc_args) {
+        Ok(tokens) => tokens.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
+/// `#[architect::http]` — opt a trait into the HTTP+JSON face.
+///
+/// Written next to `#[architect::rpc]` in either order:
+///
+/// ```ignore
+/// use architect::{http, rpc};
+///
+/// #[http]
+/// #[rpc]
+/// pub trait Greeter {
+///     async fn greet(&self, name: String) -> Result<String, GreetError>;
+/// }
+/// ```
+///
+/// Alone, it implies `#[rpc]`: one attribute, both faces. What it adds is
+/// described in `architect::http` — `http::router(backend)` (axum),
+/// `http::<Method>Args`, `impl BindHttp for Service`, and
+/// `<Trait>HttpClient`, gated on the consumer's `http` / `http-client`
+/// features exactly as the vox items are gated on `vox`.
+#[proc_macro_attribute]
+pub fn http(args: TokenStream, input: TokenStream) -> TokenStream {
+    if !args.is_empty() {
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "#[architect::http] takes no arguments — put rpc options on #[architect::rpc(...)]",
+        )
+        .to_compile_error()
+        .into();
+    }
+    let mut trait_item = parse_macro_input!(input as ItemTrait);
+    // Running first (written above `#[rpc]`): fold `http` into the rpc
+    // attribute's arguments and let it expand everything in one pass.
+    // With no `#[rpc]` present, add one — `#[http]` alone means both.
+    let mut found = false;
+    for attr in &mut trait_item.attrs {
+        if !is_rpc_path(attr.path()) {
+            continue;
+        }
+        found = true;
+        let path = attr.path().clone();
+        *attr = match &attr.meta {
+            syn::Meta::Path(_) => parse_quote! { #[#path(http)] },
+            syn::Meta::List(list) => {
+                let inner = &list.tokens;
+                parse_quote! { #[#path(http, #inner)] }
+            }
+            syn::Meta::NameValue(_) => {
+                return syn::Error::new_spanned(
+                    attr,
+                    "#[architect::rpc] takes a list, not a value",
+                )
+                .to_compile_error()
+                .into();
+            }
+        };
+    }
+    if !found {
+        trait_item
+            .attrs
+            .insert(0, parse_quote! { #[::architect::rpc(http)] });
+    }
+    quote! { #trait_item }.into()
+}
+
+/// `rpc`, `architect::rpc`, `::architect::rpc`.
+fn is_rpc_path(path: &syn::Path) -> bool {
+    path.segments.last().is_some_and(|s| s.ident == "rpc")
+        && path.segments.len() <= 2
+        && path
+            .segments
+            .first()
+            .is_some_and(|s| s.ident == "rpc" || s.ident == "architect")
+}
+
+/// Remove a bare `#[http]` / `#[architect::http]` marker; true if one was there.
+fn strip_http_marker(attrs: &mut Vec<syn::Attribute>) -> bool {
+    let before = attrs.len();
+    attrs.retain(|a| {
+        let path = a.path();
+        !(path.segments.last().is_some_and(|s| s.ident == "http")
+            && path.segments.len() <= 2
+            && path
+                .segments
+                .first()
+                .is_some_and(|s| s.ident == "http" || s.ident == "architect"))
+    });
+    attrs.len() != before
+}
+
 /// Arguments to `#[architect::rpc(...)]`. All optional; the bare form
 /// is the common case.
 #[derive(Default)]
 struct RpcArgs {
+    /// `http` — additionally emit the HTTP+JSON face (`http::router`,
+    /// the `<Method>Args` bodies, `<Trait>HttpClient`). Set by the
+    /// `#[architect::http]` companion attribute, or spelled directly as
+    /// `#[architect::rpc(http)]`.
+    http: bool,
+    /// `path = "auth"` — the HTTP mount prefix. Defaults to the trait name
+    /// in kebab-case with a trailing `Service` dropped (`AuthService` →
+    /// `/auth`, `OrganizationService` → `/organization`, `Greeter` →
+    /// `/greeter`); methods are kebab-cased under it.
+    path: Option<String>,
     /// `sync_client` — additionally emit the `<Trait>SyncClient`
     /// blocking facade (vox-gated, native only). Opt-in so consumers
     /// that never block don't carry the extra surface.
@@ -153,6 +294,23 @@ impl RpcArgs {
     fn parse(&mut self, meta: &syn::meta::ParseNestedMeta) -> syn::Result<()> {
         if meta.path.is_ident("sync_client") {
             self.sync_client = true;
+            return Ok(());
+        }
+        if meta.path.is_ident("http") {
+            self.http = true;
+            return Ok(());
+        }
+        if meta.path.is_ident("path") {
+            let lit: syn::LitStr = meta.value()?.parse()?;
+            let raw = lit.value();
+            let trimmed = raw.trim_matches('/');
+            if trimmed.is_empty() || trimmed.contains('/') {
+                return Err(meta.error(
+                    "`path` is one segment, the mount prefix (`path = \"auth\"`); nest the router \
+                     in axum for anything deeper",
+                ));
+            }
+            self.path = Some(trimmed.to_owned());
             return Ok(());
         }
         if meta.path.is_ident("context") {
@@ -381,7 +539,7 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
     // `layer` — bundles (descriptor, serve(backend)) into an
     // `architect::Mounted` so callers can compose mounting via
     // `Layer::merge` instead of writing per-service `.with(...)` calls.
-    let layer_fn = emit_layer_fn(trait_name, vis, shape);
+    let layer_fn = emit_layer_fn(trait_name, vis, shape, args.http);
 
     // `prelude` — crate-root-ready re-exports with the trait name baked
     // in, so proto crates glob one module per service instead of
@@ -394,15 +552,18 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
         vis,
         shape,
         &subscriptions,
-        args.sync_client,
-        args.context.is_some(),
-        args.ops.is_some(),
+        PreludeExtras {
+            sync_client: args.sync_client,
+            has_context: args.context.is_some(),
+            has_ops: args.ops.is_some(),
+            has_http: args.http,
+        },
     );
 
     // Stream sibling — emitted when the trait declares `#[subscribe]`
     // methods: the `<Trait>Stream` vox service, the `<Trait>StreamSource`
     // backend contract, and the stream mount verbs.
-    let stream_block = emit_stream_block(trait_name, vis, &subscriptions);
+    let stream_block = emit_stream_block(trait_name, vis, &subscriptions, args.http);
 
     // Blocking facade over the async client — sync code talking to a
     // remote backend. Opt-in via `#[architect::rpc(sync_client)]`.
@@ -430,6 +591,25 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
     let ops_block = match &args.ops {
         Some(substs) => emit_ops_block(trait_name, vis, &methods, ctx, substs)?,
         None => quote! {},
+    };
+
+    // HTTP face — the axum router + typed HTTP client, gated on the
+    // consumer's `http` / `http-client` features exactly as the vox
+    // items are gated on `vox`.
+    let http_block = if args.http {
+        emit_http_block(
+            trait_name,
+            &host_name,
+            &rpc_trait_name,
+            vis,
+            shape,
+            &methods,
+            &subscriptions,
+            ctx,
+            args.path.as_deref(),
+        )
+    } else {
+        quote! {}
     };
 
     // Bare module-scope aliases completing the uniform five-name set
@@ -478,6 +658,7 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
         #direct_view
         #scope_views
         #ops_block
+        #http_block
         #bare_aliases
         #prelude
     })
@@ -928,6 +1109,16 @@ fn emit_sync_client(
 /// The vox-only items carry the same `#[cfg(feature = "vox")]` gates
 /// as their definitions, so the glob works in non-vox builds too (it
 /// just re-exports the bare trait).
+/// Which optional surfaces the expansion produced — what the prelude
+/// has to re-export beyond the always-on names.
+#[derive(Clone, Copy)]
+struct PreludeExtras {
+    sync_client: bool,
+    has_context: bool,
+    has_ops: bool,
+    has_http: bool,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn emit_prelude(
     trait_name: &syn::Ident,
@@ -937,10 +1128,14 @@ fn emit_prelude(
     vis: &syn::Visibility,
     shape: Shape,
     subs: &[Subscription],
-    sync_client: bool,
-    has_context: bool,
-    has_ops: bool,
+    extras: PreludeExtras,
 ) -> TokenStream2 {
+    let PreludeExtras {
+        sync_client,
+        has_context,
+        has_ops,
+        has_http,
+    } = extras;
     let snake = to_snake_case(&trait_name.to_string());
     let service_alias = format_ident!("{}Service", trait_name);
     let layer_alias = format_ident!("{snake}_layer");
@@ -969,6 +1164,19 @@ fn emit_prelude(
                 stream_layer as #stream_layer_alias,
                 stream_serve as #stream_serve_alias,
             };
+        }
+    };
+
+    // HTTP face re-exports: the client keeps its trait-prefixed name; the
+    // `http` module gets the trait name baked in (`auth_service_http`).
+    let http_items = if !has_http || matches!(shape, Shape::Empty) || has_context {
+        quote! {}
+    } else {
+        let http_client = format_ident!("{}HttpClient", trait_name);
+        let http_mod = format_ident!("{snake}_http");
+        quote! {
+            pub use super::http as #http_mod;
+            pub use super::#http_client;
         }
     };
 
@@ -1043,6 +1251,7 @@ fn emit_prelude(
             #sync_items
             #scoped_items
             #ops_items
+            #http_items
         }
     }
 }
@@ -1312,7 +1521,12 @@ fn to_snake_case(input: &str) -> String {
 /// - `pub struct Service;` + `impl architect::Bind<B> for Service` —
 ///   the deferred-bind token. Architectures compose these into
 ///   `architect::Layer<B>` and bind once at `.provide(B)` time.
-fn emit_layer_fn(trait_name: &syn::Ident, vis: &syn::Visibility, shape: Shape) -> TokenStream2 {
+fn emit_layer_fn(
+    trait_name: &syn::Ident,
+    vis: &syn::Visibility,
+    shape: Shape,
+    http: bool,
+) -> TokenStream2 {
     let descriptor_fn = format_ident!(
         "{}_rpc_service_descriptor",
         to_snake_case(&trait_name.to_string())
@@ -1337,6 +1551,27 @@ fn emit_layer_fn(trait_name: &syn::Ident, vis: &syn::Visibility, shape: Shape) -
         ),
     };
 
+    // Without the HTTP face the token still has to be a `Layer` — whose
+    // supertrait `BindHttp` it then satisfies by mounting nothing.
+    let no_http_bind = if http {
+        quote! {}
+    } else {
+        quote! {
+            #[cfg(feature = "vox")]
+            impl<S> ::architect::http::BindHttp<S> for Service {
+                fn bind_http(&self, _backend: &S, _routes: &mut ::architect::http::HttpRoutes) {}
+            }
+        }
+    };
+    let layer_body = if http {
+        quote! {
+            let http_backend = backend.clone();
+            ::architect::Mounted::new(#descriptor_fn(), serve(backend))
+                .with_http(move |routes| http::mount(http_backend.clone(), routes))
+        }
+    } else {
+        quote! { ::architect::Mounted::new(#descriptor_fn(), serve(backend)) }
+    };
     quote! {
         /// Immediate-bind shortcut: wrap a backend in this service's
         /// vox dispatcher and return a `Mounted`. For deferred
@@ -1347,9 +1582,10 @@ fn emit_layer_fn(trait_name: &syn::Ident, vis: &syn::Visibility, shape: Shape) -
         #[cfg(feature = "vox")]
         #vis fn layer<S>(backend: S) -> ::architect::Mounted
         where
+            S: ::core::clone::Clone,
             #bounds
         {
-            ::architect::Mounted::new(#descriptor_fn(), serve(backend))
+            #layer_body
         }
 
         /// Deferred-bind service token. Acts as a one-element
@@ -1358,6 +1594,8 @@ fn emit_layer_fn(trait_name: &syn::Ident, vis: &syn::Visibility, shape: Shape) -
         #[cfg(feature = "vox")]
         #[derive(Debug, Default, Clone, Copy)]
         #vis struct Service;
+
+        #no_http_bind
 
         #[cfg(feature = "vox")]
         impl ::architect::BindAny for Service {
@@ -1591,6 +1829,7 @@ fn emit_stream_block(
     trait_name: &syn::Ident,
     vis: &syn::Visibility,
     subs: &[Subscription],
+    http: bool,
 ) -> TokenStream2 {
     if subs.is_empty() {
         return quote! {};
@@ -1633,7 +1872,7 @@ fn emit_stream_block(
             quote! {
                 #(#docs)*
                 #[doc = #doc]
-                fn #attach_fn(&self, #(#inputs,)* sink: ::architect::vox::Tx<#ev>);
+                fn #attach_fn(&self, #(#inputs,)* sink: ::architect::EventSink<#ev>);
             }
         }
     });
@@ -1683,7 +1922,7 @@ fn emit_stream_block(
                 });
             quote! {
                 async fn #name(&self, #(#inputs,)* sink: ::architect::vox::Tx<#ev>) {
-                    self.inner.#attach_fn(#(#call_args,)* sink);
+                    self.inner.#attach_fn(#(#call_args,)* sink.into());
                     // Hold the request open — see the parameterless variant.
                     ::core::future::pending::<()>().await;
                 }
@@ -1691,6 +1930,25 @@ fn emit_stream_block(
         }
     });
 
+    let no_http_stream_bind = if http {
+        quote! {}
+    } else {
+        quote! {
+            #[cfg(feature = "vox")]
+            impl<S> ::architect::http::BindHttp<S> for StreamService {
+                fn bind_http(&self, _backend: &S, _routes: &mut ::architect::http::HttpRoutes) {}
+            }
+        }
+    };
+    let stream_layer_body = if http {
+        quote! {
+            let http_backend = backend.clone();
+            ::architect::Mounted::new(#stream_descriptor_fn(), stream_serve(backend))
+                .with_http(move |routes| http::stream_mount(http_backend.clone(), routes))
+        }
+    } else {
+        quote! { ::architect::Mounted::new(#stream_descriptor_fn(), stream_serve(backend)) }
+    };
     let source_doc = format!(
         "Backend contract for [`{trait_name}`]'s `#[subscribe]` streams. \
          Implement on the backend alongside `{trait_name}`; mount with \
@@ -1771,9 +2029,9 @@ fn emit_stream_block(
         #[cfg(feature = "vox")]
         #vis fn stream_layer<S>(backend: S) -> ::architect::Mounted
         where
-            S: #source_trait + ::architect::MaybeSendSync + 'static,
+            S: ::core::clone::Clone + #source_trait + ::architect::MaybeSendSync + 'static,
         {
-            ::architect::Mounted::new(#stream_descriptor_fn(), stream_serve(backend))
+            #stream_layer_body
         }
 
         /// Deferred-bind token for the stream sibling — slots into
@@ -1781,6 +2039,8 @@ fn emit_stream_block(
         #[cfg(feature = "vox")]
         #[derive(Debug, Default, Clone, Copy)]
         #vis struct StreamService;
+
+        #no_http_stream_bind
 
         #[cfg(feature = "vox")]
         impl ::architect::BindAny for StreamService {
@@ -2417,5 +2677,521 @@ fn emit_passthrough_impl(
         {
             #(#method_impls)*
         }
+    }
+}
+
+// ── HTTP face ──────────────────────────────────────────────────────────
+
+/// The default HTTP mount prefix for a trait: kebab-case, minus a
+/// trailing `Service` (`AuthService` → `auth`, `Greeter` → `greeter`).
+/// A trait literally named `Service` keeps its name.
+fn http_prefix(trait_name: &str) -> String {
+    let base = match trait_name.strip_suffix("Service") {
+        Some(stripped) if !stripped.is_empty() => stripped,
+        _ => trait_name,
+    };
+    to_kebab_case(&to_snake_case(base))
+}
+
+/// `snake_case` → `kebab-case`.
+fn to_kebab_case(input: &str) -> String {
+    input.replace('_', "-")
+}
+
+/// Split a `-> Result<T, E>` return into `(T, E)`; `None` for anything
+/// else (an infallible method, or a `Result` alias the macro cannot see
+/// through — which then maps as a plain value).
+fn result_parts(ret: &ReturnType) -> Option<(Type, Type)> {
+    let ReturnType::Type(_, ty) = ret else {
+        return None;
+    };
+    let Type::Path(path) = &**ty else {
+        return None;
+    };
+    let last = path.path.segments.last()?;
+    if last.ident != "Result" {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &last.arguments else {
+        return None;
+    };
+    let mut generics = args.args.iter().filter_map(|a| match a {
+        syn::GenericArgument::Type(t) => Some(t.clone()),
+        _ => None,
+    });
+    let ok = generics.next()?;
+    let err = generics.next()?;
+    Some((ok, err))
+}
+
+/// The plain value type of a return: `T` for `-> T`, `()` for no return.
+fn value_type(ret: &ReturnType) -> Type {
+    match ret {
+        ReturnType::Default => parse_quote! { () },
+        ReturnType::Type(_, ty) => (**ty).clone(),
+    }
+}
+
+/// Emit the HTTP face:
+///
+/// - `http::<Method>Args` — one named-field `Facet` struct per method;
+///   the JSON body shape (`{"arg": value, …}`). An argument named `token`
+///   is `#[facet(default)]` so it may arrive as `Authorization: Bearer`.
+/// - `http::mount(backend, &mut HttpRoutes)` / `http::router(backend)` —
+///   `POST /<prefix>/<method-kebab>` for every method; `Result<T, E>`
+///   replies via `architect::http::respond` (`E: HttpError + Facet`),
+///   anything else via `ok`.
+/// - `http::stream_mount` / `http::stream_router` — every `#[subscribe]`
+///   as Server-Sent Events (needs `vox` for the hub types).
+/// - `http::PATHS` — `(method, path)` pairs, for tests and docs.
+/// - `impl BindHttp<S> for Service` (and `StreamService`) — the bundle hooks.
+/// - `<Trait>HttpClient` — the typed client over `architect::http::HttpClient`,
+///   one async method per trait method returning `Result<T, ClientError<E>>`
+///   (`ClientError<()>` for infallible methods), one per stream returning
+///   an `EventStream<E>`.
+/// - `impl <Trait> for <Trait>HttpClient` (and for the vox `<Trait>Client`)
+///   when the trait is all-async and every method is fallible — the
+///   error types absorb transport failure via `From<TransportError>`.
+///
+/// Nothing here is cfg-gated on the consumer's features: `architect::http`
+/// is a facade that exists in every build (axum/reqwest under `http` /
+/// `http-client`, inert stubs otherwise). Only the stream server side
+/// needs `vox`, for `PubSub` / `EventSink`.
+///
+/// Sync and mixed traits are served through the same bridge the vox host
+/// uses, so a sync backend's dispatcher is honoured on the HTTP path too.
+/// Traits with an ambient `context = T` are skipped: there is no
+/// transport-neutral way to pull `T` out of an HTTP request yet.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn emit_http_block(
+    trait_name: &syn::Ident,
+    host_name: &syn::Ident,
+    rpc_trait_name: &syn::Ident,
+    vis: &syn::Visibility,
+    shape: Shape,
+    methods: &[Method],
+    subs: &[Subscription],
+    ctx: Option<&Type>,
+    path: Option<&str>,
+) -> TokenStream2 {
+    if matches!(shape, Shape::Empty) || ctx.is_some() {
+        return quote! {};
+    }
+    let source_trait = format_ident!("{}StreamSource", trait_name);
+    let prefix = path.map_or_else(|| http_prefix(&trait_name.to_string()), str::to_owned);
+    let client_name = format_ident!("{}HttpClient", trait_name);
+    let vox_client_name = match shape {
+        Shape::AllAsync => format_ident!("{}Client", trait_name),
+        _ => format_ident!("{}RpcClient", trait_name),
+    };
+
+    let async_face = match shape {
+        Shape::AllAsync => trait_name.clone(),
+        _ => rpc_trait_name.clone(),
+    };
+    let (backend_bounds, host_ty, make_host) = match shape {
+        Shape::AllAsync => (
+            quote! { S: #trait_name + ::architect::MaybeSendSync + 'static },
+            quote! { #host_name<S> },
+            quote! { #host_name::new(backend) },
+        ),
+        _ => (
+            quote! {
+                S: #trait_name
+                    + ::architect::HasDispatcher
+                    + ::architect::MaybeSendSync
+                    + 'static
+            },
+            quote! { #host_name<S, <S as ::architect::HasDispatcher>::Dispatcher> },
+            quote! {
+                {
+                    let dispatcher = ::architect::HasDispatcher::dispatcher(&backend);
+                    #host_name::new(backend, dispatcher)
+                }
+            },
+        ),
+    };
+
+    let mut args_structs = Vec::new();
+    let mut routes = Vec::new();
+    let mut handlers = Vec::new();
+    let mut path_pairs = Vec::new();
+    let mut client_methods = Vec::new();
+    // The trait impls over the clients: only meaningful when every
+    // method can report a transport failure through its error type.
+    let mut http_trait_methods = Vec::new();
+    let mut vox_trait_methods = Vec::new();
+    let all_fallible = methods.iter().all(|m| result_parts(&m.return_ty).is_some());
+
+    for m in methods {
+        let name = &m.decl.sig.ident;
+        let name_str = name.to_string();
+        let path = format!("/{prefix}/{}", to_kebab_case(&name_str));
+        let args_name = format_ident!("{}Args", to_pascal_case(&name_str));
+        let handler_name = format_ident!("__http_{}", name);
+        let docs: Vec<&syn::Attribute> = m
+            .decl
+            .attrs
+            .iter()
+            .filter(|a| a.path().is_ident("doc"))
+            .collect();
+
+        let mut fields = Vec::new();
+        let mut field_names = Vec::new();
+        let mut client_params = Vec::new();
+        let mut token_fixups = Vec::new();
+        for input in m.mirror_inputs.iter().skip(1) {
+            let FnArg::Typed(pat_ty) = input else {
+                continue;
+            };
+            let Pat::Ident(PatIdent { ident, .. }) = &*pat_ty.pat else {
+                continue;
+            };
+            let ty = &pat_ty.ty;
+            let is_token = ident == "token";
+            let attr = if is_token {
+                quote! { #[facet(default)] }
+            } else {
+                quote! {}
+            };
+            fields.push(quote! { #attr pub #ident: #ty });
+            field_names.push(ident.clone());
+            client_params.push(quote! { #ident: #ty });
+            if is_token {
+                token_fixups.push(quote! {
+                    args.#ident = ::architect::http::token_or_bearer(args.#ident, bearer.clone());
+                });
+            }
+        }
+
+        let reply = if result_parts(&m.return_ty).is_some() {
+            quote! { ::architect::http::respond(result) }
+        } else {
+            quote! { ::architect::http::ok(&result) }
+        };
+        let (client_ok, client_err) = match result_parts(&m.return_ty) {
+            Some((ok, err)) => (ok, err),
+            None => (value_type(&m.return_ty), parse_quote! { () }),
+        };
+
+        args_structs.push(quote! {
+            #(#docs)*
+            #[derive(Clone, Debug, ::architect::facet::Facet)]
+            #vis struct #args_name {
+                #(#fields,)*
+            }
+        });
+
+        handlers.push(quote! {
+            async fn #handler_name<S>(
+                ::architect::http::State(host): ::architect::http::State<::std::sync::Arc<#host_ty>>,
+                call: ::architect::http::Call<#args_name>,
+            ) -> ::architect::http::Response
+            where
+                #backend_bounds,
+            {
+                let ::architect::http::Call { mut args, bearer, .. } = call;
+                let _ = &mut args;
+                let _ = &bearer;
+                #(#token_fixups)*
+                let result = <#host_ty as #async_face>::#name(
+                    host.as_ref(),
+                    #(args.#field_names),*
+                ).await;
+                #reply
+            }
+        });
+
+        routes.push(quote! {
+            routes.route(
+                #path,
+                ::architect::http::post(#handler_name::<S>).with_state(host.clone()),
+            );
+        });
+        path_pairs.push(quote! { (#name_str, #path) });
+
+        client_methods.push(quote! {
+            #(#docs)*
+            pub async fn #name(
+                &self,
+                #(#client_params),*
+            ) -> ::core::result::Result<#client_ok, ::architect::ClientError<#client_err>> {
+                let args = http::#args_name { #(#field_names),* };
+                self.inner.call(#path, &args).await
+            }
+        });
+
+        if all_fallible {
+            let output = &m.return_ty;
+            http_trait_methods.push(quote! {
+                async fn #name(&self, #(#client_params),*) #output {
+                    #client_name::#name(self, #(#field_names),*)
+                        .await
+                        .map_err(::architect::ClientError::into_app)
+                }
+            });
+            vox_trait_methods.push(quote! {
+                async fn #name(&self, #(#client_params),*) #output {
+                    #vox_client_name::#name(self, #(#field_names),*)
+                        .await
+                        .map_err(::architect::vox_into_app)
+                }
+            });
+        }
+    }
+
+    // Streams: one SSE route per `#[subscribe]` declaration.
+    let mut stream_args_structs = Vec::new();
+    let mut stream_handlers = Vec::new();
+    let mut stream_routes = Vec::new();
+    let mut stream_client_methods = Vec::new();
+    for sub in subs {
+        let name = &sub.name;
+        let name_str = name.to_string();
+        let path = format!("/{prefix}/{}", to_kebab_case(&name_str));
+        let args_name = format_ident!("{}Args", to_pascal_case(&name_str));
+        let handler_name = format_ident!("__http_stream_{}", name);
+        let ev = &sub.event_ty;
+        let docs = &sub.docs;
+        let mut fields = Vec::new();
+        let mut field_names = Vec::new();
+        let mut client_params = Vec::new();
+        for input in &sub.mirror_inputs {
+            let FnArg::Typed(pat_ty) = input else {
+                continue;
+            };
+            let Pat::Ident(PatIdent { ident, .. }) = &*pat_ty.pat else {
+                continue;
+            };
+            let ty = &pat_ty.ty;
+            fields.push(quote! { pub #ident: #ty });
+            field_names.push(ident.clone());
+            client_params.push(quote! { #ident: #ty });
+        }
+        let attach = if sub.arg_idents.is_empty() {
+            let hub_fn = format_ident!("{}_hub", name);
+            quote! { backend.#hub_fn().attach(sink) }
+        } else {
+            let attach_fn = format_ident!("{}_attach", name);
+            let call_args =
+                sub.arg_idents
+                    .iter()
+                    .zip(sub.arg_was_ref.iter())
+                    .map(|(id, &was_ref)| {
+                        if was_ref {
+                            quote! { &args.#id }
+                        } else {
+                            quote! { args.#id }
+                        }
+                    });
+            quote! { backend.#attach_fn(#(#call_args,)* sink) }
+        };
+        stream_args_structs.push(quote! {
+            #(#docs)*
+            #[derive(Clone, Debug, ::architect::facet::Facet)]
+            #vis struct #args_name {
+                #(#fields,)*
+            }
+        });
+        stream_handlers.push(quote! {
+            #[cfg(feature = "vox")]
+            async fn #handler_name<S>(
+                ::architect::http::State(backend): ::architect::http::State<::std::sync::Arc<S>>,
+                call: ::architect::http::Call<#args_name>,
+            ) -> ::architect::http::Response
+            where
+                S: #source_trait + ::architect::MaybeSendSync + 'static,
+            {
+                let args = call.args;
+                let _ = &args;
+                ::architect::http::sse::<#ev, _>(move |sink| { #attach; })
+            }
+        });
+        stream_routes.push(quote! {
+            routes.route(
+                #path,
+                ::architect::http::post(#handler_name::<S>)
+                    .get(#handler_name::<S>)
+                    .with_state(backend.clone()),
+            );
+        });
+        path_pairs.push(quote! { (#name_str, #path) });
+        stream_client_methods.push(quote! {
+            #(#docs)*
+            ///
+            /// Opens a Server-Sent-Events subscription; drop the stream to
+            /// unsubscribe.
+            pub async fn #name(
+                &self,
+                #(#client_params),*
+            ) -> ::core::result::Result<
+                ::architect::http::EventStream<#ev>,
+                ::architect::ClientError<()>,
+            > {
+                let args = http::#args_name { #(#field_names),* };
+                self.inner.stream(#path, &args).await
+            }
+        });
+    }
+    let stream_block = if subs.is_empty() {
+        quote! {}
+    } else {
+        let stream_router_doc = format!(
+            "Every `{trait_name}` `#[subscribe]` stream as `POST /{prefix}/<name-kebab>` \
+             (GET works too) answering Server-Sent Events — one `data:` frame per event. \
+             Mount next to `router`; needs the `vox` feature for the hub types."
+        );
+        quote! {
+            #(#stream_handlers)*
+
+            /// Bind the streams into a route table — see `stream_router`.
+            #[cfg(feature = "vox")]
+            pub fn stream_mount<S>(backend: S, routes: &mut ::architect::http::HttpRoutes)
+            where
+                S: #source_trait + ::architect::MaybeSendSync + 'static,
+            {
+                let backend = ::std::sync::Arc::new(backend);
+                #(#stream_routes)*
+            }
+
+            #[doc = #stream_router_doc]
+            #[cfg(feature = "vox")]
+            pub fn stream_router<S>(backend: S) -> ::architect::http::Router
+            where
+                S: #source_trait + ::architect::MaybeSendSync + 'static,
+            {
+                let mut routes = ::architect::http::HttpRoutes::default();
+                stream_mount(backend, &mut routes);
+                routes.into_router()
+            }
+        }
+    };
+    let stream_bind = if subs.is_empty() {
+        quote! {}
+    } else {
+        quote! {
+            #[cfg(feature = "vox")]
+            impl<S> ::architect::http::BindHttp<S> for StreamService
+            where
+                S: ::core::clone::Clone + #source_trait + ::architect::MaybeSendSync + 'static,
+            {
+                fn bind_http(&self, backend: &S, routes: &mut ::architect::http::HttpRoutes) {
+                    http::stream_mount(backend.clone(), routes);
+                }
+            }
+        }
+    };
+
+    let router_doc = format!(
+        "Every `{trait_name}` method as `POST /{prefix}/<method-kebab>` with a JSON \
+         body of named arguments. Nest it wherever the app wants \
+         (`Router::nest(\"/api\", router)`)."
+    );
+
+    let trait_impls = if all_fallible && matches!(shape, Shape::AllAsync) {
+        let doc = format!(
+            "`{trait_name}` over HTTP: any caller that takes `impl {trait_name}` can be \
+             handed this client. Transport failures arrive through each error type's \
+             `From<TransportError>`."
+        );
+        quote! {
+            #[doc = #doc]
+            impl #trait_name for #client_name {
+                #(#http_trait_methods)*
+            }
+
+            /// The same for the vox client — see the HTTP impl.
+            #[cfg(feature = "vox")]
+            impl #trait_name for #vox_client_name {
+                #(#vox_trait_methods)*
+            }
+        }
+    } else {
+        quote! {}
+    };
+
+    quote! {
+        /// The HTTP+JSON face of this service — see `architect::http`.
+        #vis mod http {
+            use super::*;
+
+            #(#args_structs)*
+            #(#stream_args_structs)*
+
+            /// `(method, path)` for every route `router` / `stream_router` mounts.
+            pub const PATHS: &[(&str, &str)] = &[#(#path_pairs),*];
+
+            #(#handlers)*
+
+            /// Bind every method into a route table — see `router`.
+            pub fn mount<S>(backend: S, routes: &mut ::architect::http::HttpRoutes)
+            where
+                #backend_bounds,
+            {
+                let host = ::std::sync::Arc::new(#make_host);
+                #(#routes)*
+            }
+
+            #[doc = #router_doc]
+            pub fn router<S>(backend: S) -> ::architect::http::Router
+            where
+                #backend_bounds,
+            {
+                let mut routes = ::architect::http::HttpRoutes::default();
+                mount(backend, &mut routes);
+                routes.into_router()
+            }
+
+            #stream_block
+        }
+
+        #stream_bind
+
+        #[cfg(feature = "vox")]
+        impl<S> ::architect::http::BindHttp<S> for Service
+        where
+            S: ::core::clone::Clone,
+            #backend_bounds,
+        {
+            fn bind_http(&self, backend: &S, routes: &mut ::architect::http::HttpRoutes) {
+                http::mount(backend.clone(), routes);
+            }
+        }
+
+        /// The typed HTTP client: one method per trait method, over
+        /// `architect::http::HttpClient`. Errors arrive as
+        /// `ClientError<E>` — the same envelope the vox client folds into.
+        #[derive(Clone, Debug)]
+        #vis struct #client_name {
+            inner: ::architect::http::HttpClient,
+        }
+
+        impl #client_name {
+            /// Over a shared transport (base URL + bearer + pool).
+            pub fn new(inner: ::architect::http::HttpClient) -> Self {
+                Self { inner }
+            }
+
+            /// Shortcut: a fresh transport rooted at `base_url`.
+            pub fn at(base_url: impl ::core::convert::Into<::std::string::String>) -> Self {
+                Self::new(::architect::http::HttpClient::new(base_url))
+            }
+
+            /// Present `token` as `Authorization: Bearer` on every call.
+            pub fn with_bearer(mut self, token: impl ::core::convert::Into<::std::string::String>) -> Self {
+                self.inner = self.inner.with_bearer(token);
+                self
+            }
+
+            /// The underlying transport.
+            pub fn transport(&self) -> &::architect::http::HttpClient {
+                &self.inner
+            }
+
+            #(#client_methods)*
+            #(#stream_client_methods)*
+        }
+
+        #trait_impls
     }
 }

@@ -1,8 +1,8 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, ::facet::Facet)]
-#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
+#[architect::wire]
+#[derive(Copy, Eq)]
 #[repr(u8)]
 pub enum InvitationStatus {
     Pending,
@@ -23,9 +23,8 @@ impl InvitationStatus {
     }
 }
 
-#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
-#[derive(architect::Entity, ::facet::Facet, Clone, Debug, PartialEq, Eq)]
-#[architect(table_name = "auth_invitations", repo)]
+#[architect::entity(table_name = "auth_invitations", repo)]
+#[derive(Eq)]
 pub struct AuthInvitation {
     #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
     pub id: Uuid,

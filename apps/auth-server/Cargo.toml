@@ -21,7 +21,7 @@ name = "auth-server"
 path = "src/main.rs"
 
 [dependencies]
-architect = { workspace = true, features = ["server", "host"] }
+architect = { workspace = true, features = ["server", "host", "http", "http-client", "local", "connect", "iroh"] }
 architect-auth = { workspace = true, features = ["full"] }
 architect-telemetry.workspace = true
 async-trait.workspace = true
@@ -34,8 +34,8 @@ dioxus.workspace = true
 dioxus-ssr.workspace = true
 eyre.workspace = true
 lettre.workspace = true
-# Provider HTTP (GitHub/Google token exchange + profile). Same shape as
-# `auth-http`: rustls, no native TLS, no blocking stack.
+# Provider HTTP (GitHub/Google token exchange + profile): rustls, no
+# native TLS, no blocking stack.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 sea-orm.workspace = true
 sea-orm-migration.workspace = true
@@ -62,6 +62,10 @@ tower = { version = "0.5", features = ["util"] }
 # The stand-in provider, so the real HTTP client can be driven against
 # something that answers like GitHub, Google and TONE3000.
 mock-oauth = { path = "../mock-oauth" }
+# The cross-transport suite dials the vox router over iroh, loopback.
+iroh.workspace = true
+vox-core.workspace = true
+futures = "0.3"
 
 [lints]
 workspace = true

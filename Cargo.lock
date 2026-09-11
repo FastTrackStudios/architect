@@ -431,6 +431,7 @@ dependencies = [
  "dioxus",
  "eyre",
  "facet",
+ "facet-json",
  "fake",
  "futures",
  "futures-lite",
@@ -438,11 +439,14 @@ dependencies = [
  "include_dir",
  "iroh",
  "js-sys",
+ "reqwest 0.12.28",
  "rtrb",
  "sea-orm",
+ "sea-orm-migration",
  "thiserror 2.0.20",
  "tokio",
  "tokio-tungstenite",
+ "tower",
  "tower-http",
  "tracing",
  "tracing-subscriber",
@@ -1014,24 +1018,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "auth-http"
-version = "0.1.0"
-dependencies = [
- "architect-auth",
- "auth-client",
- "auth-server",
- "axum",
- "reqwest 0.12.28",
- "sea-orm",
- "sea-orm-migration",
- "serde",
- "serde_json",
- "thiserror 2.0.20",
- "tokio",
- "web-sys",
-]
-
-[[package]]
 name = "auth-native-tests"
 version = "0.1.0"
 dependencies = [
@@ -1076,7 +1062,9 @@ dependencies = [
  "dioxus",
  "dioxus-ssr",
  "eyre",
+ "futures",
  "hex",
+ "iroh",
  "k256",
  "lettre",
  "mock-oauth",
@@ -1095,6 +1083,7 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+ "vox-core",
  "webauthn-authenticator-rs",
 ]
 
@@ -3697,6 +3686,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-greeter"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "chrono",
+ "eyre",
+ "facet",
+ "futures",
+ "sea-orm",
+ "thiserror 2.0.20",
+ "tokio",
+ "uuid",
+ "vox",
+]
+
+[[package]]
 name = "exr"
 version = "1.74.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3771,6 +3776,19 @@ dependencies = [
  "facet-path",
  "facet-reflect",
  "facet-solver",
+]
+
+[[package]]
+name = "facet-json"
+version = "0.50.0-rc.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82902c758e29af6599f852dd783206697fd33383fa499b07bdcddbd8eb1ef4d0"
+dependencies = [
+ "facet",
+ "facet-core",
+ "facet-format",
+ "facet-reflect",
+ "weavy",
 ]
 
 [[package]]
@@ -9350,12 +9368,14 @@ dependencies = [
  "sync_wrapper",
  "tokio",
  "tokio-rustls",
+ "tokio-util",
  "tower",
  "tower-http",
  "tower-service",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasm-streams 0.4.2",
  "web-sys",
  "webpki-roots 1.0.9",
 ]

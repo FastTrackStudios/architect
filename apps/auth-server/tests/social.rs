@@ -21,7 +21,7 @@ use std::sync::{Arc, Mutex};
 
 use architect_auth::AuthStorage;
 use architect_auth::db::{AuthSeaOrmStorage, Migrator};
-use auth_server::http::SocialState;
+use auth_server::oauth::SocialState;
 use auth_server::social::{Profile, Provider, ProviderClient, ProviderError, ProviderTokens};
 use auth_server::{ServerConfig, SocialProviderConfig, server};
 use axum::body::Body;
@@ -230,16 +230,16 @@ async fn sign_up(app: &axum::Router, email: &str) -> String {
     let response = app
         .clone()
         .oneshot(
-            Request::post("/auth/sign-up/email")
+            Request::post("/auth/sign-up-email-password")
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(format!(
-                    r#"{{"email":"{email}","password":"correct-horse-battery-staple"}}"#
+                    r#"{{"input":{{"email":"{email}","password":"correct-horse-battery-staple"}}}}"#
                 )))
                 .unwrap(),
         )
         .await
         .expect("sign up");
-    assert_eq!(response.status(), StatusCode::CREATED);
+    assert_eq!(response.status(), StatusCode::OK);
     body_json(response).await["token"]
         .as_str()
         .expect("token")
@@ -594,14 +594,16 @@ async fn social_sign_in_creates_the_user_and_sets_the_session_cookie() {
         "https://auth.fasttrackstudio.app/auth/social/github/callback"
     );
 
-    // The cookie is a real session for the new user.
+    // The cookie is a real session for the new user: its value is the
+    // session token, which the generated JSON face takes as a bearer.
     let session_cookie = cookie.split(';').next().unwrap().to_owned();
+    let token = session_cookie.split_once('=').unwrap().1.to_owned();
     let response = h
         .app
         .clone()
         .oneshot(
-            Request::get("/auth/session")
-                .header(header::COOKIE, session_cookie)
+            Request::post("/auth/current-session")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -888,12 +890,20 @@ async fn unlinking_the_only_credential_is_refused_with_409() {
     assert_eq!(location(&response), "/account?error=last_credential");
 
     // A sign-in-only link holds no token for a relying party.
+    let token = cookie
+        .split(';')
+        .next()
+        .unwrap()
+        .split_once('=')
+        .unwrap()
+        .1
+        .to_owned();
     let response = h
         .app
         .clone()
         .oneshot(
-            Request::get("/auth/session")
-                .header(header::COOKIE, cookie.clone())
+            Request::post("/auth/current-session")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
                 .body(Body::empty())
                 .unwrap(),
         )

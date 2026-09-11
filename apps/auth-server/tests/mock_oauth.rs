@@ -21,7 +21,7 @@
 use std::sync::Arc;
 
 use architect_auth::db::{AuthSeaOrmStorage, Migrator};
-use auth_server::http::SocialState;
+use auth_server::oauth::SocialState;
 use auth_server::social::HttpProviderClient;
 use auth_server::{ServerConfig, SocialProviderConfig, server};
 use axum::body::Body;
@@ -153,16 +153,16 @@ async fn sign_up(app: &axum::Router, email: &str) -> String {
     let response = app
         .clone()
         .oneshot(
-            Request::post("/auth/sign-up/email")
+            Request::post("/auth/sign-up-email-password")
                 .header(axum::http::header::CONTENT_TYPE, "application/json")
                 .body(Body::from(format!(
-                    r#"{{"email":"{email}","password":"correct-horse-battery-staple"}}"#
+                    r#"{{"input":{{"email":"{email}","password":"correct-horse-battery-staple"}}}}"#
                 )))
                 .unwrap(),
         )
         .await
         .expect("sign up");
-    assert_eq!(response.status(), StatusCode::CREATED);
+    assert_eq!(response.status(), StatusCode::OK);
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .expect("body");

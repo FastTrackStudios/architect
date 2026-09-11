@@ -49,16 +49,16 @@ async fn signed_up(app: &axum::Router, email: &str) -> String {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/auth/sign-up/email")
+                .uri("/auth/sign-up-email-password")
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(format!(
-                    r#"{{"email":"{email}","password":"correct horse battery staple"}}"#
+                    r#"{{"input":{{"email":"{email}","password":"correct horse battery staple"}}}}"#
                 )))
                 .unwrap(),
         )
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::CREATED);
+    assert_eq!(response.status(), StatusCode::OK);
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();

@@ -36,6 +36,16 @@ async fn list_sorted_by_name_ascending() {
 
 Run with `cargo test -p example-tests-native`.
 
+### One scenario, every wire
+
+The generated clients implement the service trait, so write the
+scenario once as `async fn scenario(s: &impl Greeter)` and call it with
+the backend itself, a `LocalServer` client, a WebSocket client, an iroh
+client and the HTTP client. `examples/greeter/tests/round_trip.rs` and
+`apps/auth-server/tests/surfaces.rs` are the pattern. Mocks: merge one
+over the bundle — `Memory::layers().merge(greeter::layer(Mock))` — and
+it replaces the real service on vox **and** HTTP.
+
 ### Testing a backend without any server
 
 Layer 1 has three rungs of its own, in increasing wire-fidelity. Pick

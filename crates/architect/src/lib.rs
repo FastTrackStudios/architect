@@ -30,6 +30,140 @@
 
 pub use architect_derive::Entity;
 
+// `#[architect::entity]` — the attribute form: writes the derive line
+// (`Entity`, `Facet`, `Clone`, `Debug`, `PartialEq`, the `fake` hook) for
+// you, so an entity is its fields and its `#[architect(…)]` options and
+// nothing else. `#[architect::wire]` is the same for plain wire types
+// (request/response structs and enums — adds `#[repr(u8)]` to enums).
+pub use architect_derive::{entity, wire};
+
+// `#[derive(architect::Config)]` — a config struct that reads itself from
+// the environment: `env = "…"`, `default = …`, `secret` (the `_FILE`
+// indirection), `nested`, `skip`. See `architect::config`.
+pub use architect_derive::Config;
+
+pub mod config {
+    //! Runtime for `#[derive(architect::Config)]`: environment-backed
+    //! configuration. The derive emits `from_env()` over these helpers;
+    //! nothing here is specific to any app.
+
+    use std::str::FromStr;
+
+    #[derive(Debug, thiserror::Error)]
+    pub enum ConfigError {
+        #[error("{var} is required")]
+        Missing { var: String },
+        #[error("{var}: {detail}")]
+        Invalid { var: String, detail: String },
+        #[error("{var}_FILE ({path}): {source}")]
+        File {
+            var: String,
+            path: String,
+            #[source]
+            source: std::io::Error,
+        },
+    }
+
+    /// The raw value of `var`, or `None` when unset or blank.
+    #[must_use]
+    pub fn var(var: &str) -> Option<String> {
+        std::env::var(var)
+            .ok()
+            .map(|v| v.trim().to_owned())
+            .filter(|v| !v.is_empty())
+    }
+
+    /// A secret: `VAR`, or the trimmed contents of the file `VAR_FILE`
+    /// names — a mounted file does not show up in `kubectl describe`.
+    pub fn secret(var_name: &str) -> Result<Option<String>, ConfigError> {
+        let file_var = format!("{var_name}_FILE");
+        if let Some(path) = var(&file_var) {
+            let contents = std::fs::read_to_string(&path).map_err(|source| ConfigError::File {
+                var: var_name.to_owned(),
+                path,
+                source,
+            })?;
+            return Ok(Some(contents.trim().to_owned()));
+        }
+        Ok(var(var_name))
+    }
+
+    /// How a field reads itself from an env value. Implemented for the
+    /// scalar types, `Option<T>` (absent → `None`) and `Vec<T>`
+    /// (comma-separated).
+    pub trait FromEnvValue: Sized {
+        /// `None` means the variable was unset; a required field errors,
+        /// an `Option` field is `None`, a field with `default = …` uses it.
+        fn from_env_value(var: &str, raw: Option<String>) -> Result<Self, ConfigError>;
+    }
+
+    fn parse<T: FromStr>(var: &str, raw: &str) -> Result<T, ConfigError>
+    where
+        T::Err: std::fmt::Display,
+    {
+        raw.parse().map_err(|e: T::Err| ConfigError::Invalid {
+            var: var.to_owned(),
+            detail: e.to_string(),
+        })
+    }
+
+    macro_rules! scalar {
+        ($($t:ty),*) => {$(
+            impl FromEnvValue for $t {
+                fn from_env_value(var: &str, raw: Option<String>) -> Result<Self, ConfigError> {
+                    match raw {
+                        Some(raw) => parse(var, &raw),
+                        None => Err(ConfigError::Missing { var: var.to_owned() }),
+                    }
+                }
+            }
+        )*};
+    }
+    scalar!(
+        String, i8, i16, i32, i64, u8, u16, u32, u64, usize, f32, f64
+    );
+
+    impl FromEnvValue for bool {
+        fn from_env_value(var: &str, raw: Option<String>) -> Result<Self, ConfigError> {
+            match raw.as_deref().map(str::to_ascii_lowercase).as_deref() {
+                Some("1" | "true" | "yes" | "on") => Ok(true),
+                Some("0" | "false" | "no" | "off") => Ok(false),
+                Some(other) => Err(ConfigError::Invalid {
+                    var: var.to_owned(),
+                    detail: format!("expected a boolean, got {other:?}"),
+                }),
+                None => Err(ConfigError::Missing {
+                    var: var.to_owned(),
+                }),
+            }
+        }
+    }
+
+    impl<T: FromEnvValue> FromEnvValue for Option<T> {
+        fn from_env_value(var: &str, raw: Option<String>) -> Result<Self, ConfigError> {
+            raw.map_or_else(
+                || Ok(None),
+                |raw| T::from_env_value(var, Some(raw)).map(Some),
+            )
+        }
+    }
+
+    impl<T: FromEnvValue> FromEnvValue for Vec<T> {
+        fn from_env_value(var: &str, raw: Option<String>) -> Result<Self, ConfigError> {
+            raw.map_or_else(
+                || Ok(Self::new()),
+                |raw| {
+                    raw.split(',')
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(|s| T::from_env_value(var, Some(s.to_owned())))
+                        .collect()
+                },
+            )
+        }
+    }
+}
+
 // Companion derive for any type carried by an `#[architect(json)]`
 // field. Emits the four sea_orm traits (`Into<Value>`, `TryGetable`,
 // `ValueType`, `Nullable`) via a `serde_json` round-trip, cfg-gated
@@ -43,6 +177,17 @@ pub use architect_derive::JsonField;
 // the `dispatch` module for the runtime contract the emitted code
 // relies on.
 pub use architect_rpc_derive::rpc;
+
+// `#[architect::service]` — the canonical attribute: `rpc` + `http` in
+// one, with the consumer's cargo features (`vox`, `http`, `http-client`)
+// deciding which faces compile. See `architect::http` for the HTTP half.
+pub use architect_rpc_derive::service;
+
+// `#[architect::http]` — opt an rpc trait into the HTTP+JSON face. Lives
+// in the macro namespace; the `http` *module* below carries the runtime
+// half, so `use architect::{http, rpc};` brings both attribute and
+// module into scope (Clone-style pairing, like `HasDispatcher`).
+pub use architect_rpc_derive::http;
 
 // `#[derive(HasDispatcher)]` — kills the four-line manual impl for the
 // common case where the dispatcher is default-constructible. Shares a
@@ -325,7 +470,7 @@ impl<T: ?Sized> MaybeSend for T {}
 #[cfg(feature = "vox")]
 pub mod pubsub;
 #[cfg(feature = "vox")]
-pub use pubsub::{PendingAttach, PubSub};
+pub use pubsub::{EventSink, PendingAttach, PubSub};
 
 // Real-time publisher bridge (`rt` feature): wait-free SPSC handoff from
 // an audio callback (or any real-time thread) to a normal thread that
@@ -523,6 +668,65 @@ pub enum RepoError {
     Internal(String),
 }
 
+// ── Transport failure, as an application error type absorbs it ─────────
+
+/// A call that failed before the backend answered — the socket dropped,
+/// the HTTP reply was not JSON, the connection could not be made.
+///
+/// The generated clients implement their service trait (`impl Greeter for
+/// GreeterClient`, and for `GreeterHttpClient`) when every method is
+/// fallible and each error type can absorb one of these via
+/// `From<TransportError>`. That is what lets a screen, a CLI or a test
+/// take `impl Greeter` and never know which wire is underneath.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("transport failure: {detail}")]
+pub struct TransportError {
+    pub detail: String,
+    /// Whether a retry on a fresh connection may succeed.
+    pub retryable: bool,
+}
+
+impl From<TransportError> for RepoError {
+    fn from(e: TransportError) -> Self {
+        Self::Internal(e.to_string())
+    }
+}
+
+impl<E> ClientError<E> {
+    /// Fold into the app error: a typed error passes through, a
+    /// transport failure is absorbed via `From<TransportError>`.
+    pub fn into_app(self) -> E
+    where
+        E: From<TransportError>,
+    {
+        match self {
+            Self::App(e) => e,
+            Self::Connect(detail) => E::from(TransportError {
+                detail,
+                retryable: true,
+            }),
+            Self::Transport { detail, retryable } => E::from(TransportError { detail, retryable }),
+        }
+    }
+}
+
+/// Fold a vox call error into the app error — the vox twin of
+/// [`ClientError::into_app`]; used by the generated trait impls.
+#[cfg(feature = "vox")]
+#[must_use]
+pub fn vox_into_app<E>(e: vox::VoxError<E>) -> E
+where
+    E: From<TransportError> + std::fmt::Display,
+{
+    match e {
+        vox::VoxError::User(e) => *e,
+        other => E::from(TransportError {
+            retryable: other.is_connection_interruption(),
+            detail: other.to_string(),
+        }),
+    }
+}
+
 // ── Client-side error envelope ──────────────────────────────────────────
 
 /// What a client-side data hook can fail with.
@@ -646,6 +850,11 @@ pub mod iroh_link;
 // from a router. Native only.
 #[cfg(feature = "host")]
 pub mod host;
+
+// The HTTP+JSON face — `HttpError` is always available (an error type
+// declares its status without pulling axum); the axum router glue and
+// the reqwest client sit behind `http` / `http-client`.
+pub mod http;
 
 #[cfg(feature = "fake")]
 pub mod seed {
@@ -1336,11 +1545,73 @@ pub mod action {
     }
 }
 
+/// Assemble a sea-orm `Migrator` from derive-emitted (or hand-written)
+/// migrations, in order:
+///
+/// ```ignore
+/// architect::migrator!(Migrator: [WidgetMigration, GadgetMigration]);
+/// architect::storage::migrate::<Migrator>(&db).await?;
+/// ```
+#[cfg(feature = "server-seaorm")]
+#[macro_export]
+macro_rules! migrator {
+    ($name:ident : [ $($migration:ty),* $(,)? ]) => {
+        pub struct $name;
+        #[$crate::storage::migration::async_trait::async_trait]
+        impl $crate::storage::migration::MigratorTrait for $name {
+            fn migrations() -> ::std::vec::Vec<
+                ::std::boxed::Box<dyn $crate::storage::migration::MigrationTrait>,
+            > {
+                ::std::vec![$(::std::boxed::Box::new(<$migration>::default()),)*]
+            }
+        }
+    };
+}
+
 #[cfg(feature = "server-seaorm")]
 pub mod storage {
-    //! Generic storage helpers used by macro-emitted code.
+    //! Generic storage helpers used by macro-emitted code, plus the two
+    //! verbs every server binary otherwise repeats: connect and migrate.
 
     use sea_orm::ConnectionTrait;
+
+    /// sea-orm-migration, re-exported for the derive-emitted
+    /// `<Entity>Migration`s and the [`migrator!`](crate::migrator) macro.
+    pub use sea_orm_migration as migration;
+
+    /// Connect to `database_url`, sizing the pool so that an in-memory
+    /// `SQLite` URL means what everybody assumes it means.
+    ///
+    /// An in-memory `SQLite` database belongs to its *connection*: with
+    /// the default pool the migrations run on one connection and the next
+    /// request is handed another — a database with no tables in it. A
+    /// pool of one fixes that; a `cache=shared` URL is the other fix and
+    /// is left alone.
+    pub async fn connect(
+        database_url: &str,
+    ) -> Result<sea_orm::DatabaseConnection, sea_orm::DbErr> {
+        let mut options = sea_orm::ConnectOptions::new(database_url.to_owned());
+        if is_in_memory_sqlite(database_url) {
+            options.max_connections(1).min_connections(1);
+        }
+        sea_orm::Database::connect(options).await
+    }
+
+    /// Is this a `SQLite` database that lives only in one connection?
+    #[must_use]
+    pub fn is_in_memory_sqlite(database_url: &str) -> bool {
+        let url = database_url.trim();
+        url.starts_with("sqlite:")
+            && (url.contains(":memory:") || url.contains("mode=memory"))
+            && !url.contains("cache=shared")
+    }
+
+    /// Apply every pending migration of `M`.
+    pub async fn migrate<M: sea_orm_migration::MigratorTrait>(
+        db: &sea_orm::DatabaseConnection,
+    ) -> Result<(), sea_orm::DbErr> {
+        M::up(db, None).await
+    }
 
     /// Bound the macro's emitted repository structs use for their
     /// connection generic. Kept here so the macro doesn't have to

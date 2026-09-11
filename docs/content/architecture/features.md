@@ -14,7 +14,7 @@ profiles; the à la carte flags below them exist for fine-grained builds.
 | Feature  | Enables                                            | For |
 |----------|----------------------------------------------------|-----|
 | `client` | `vox`, `atom`, `form`                              | UI crates — wasm or desktop shells. Typed RPC clients, optimistic store hooks, validated forms. Wasm-clean. |
-| `server` | `vox`, `server-seaorm`, `server-axum`, `dispatch-tokio` | Native server binaries. RPC, SeaORM storage bridge, axum WebSocket transport, tokio blocking dispatcher. |
+| `server` | `vox`, `server-seaorm`, `server-axum`, `dispatch-tokio`, `http` | Native server binaries. RPC, SeaORM storage bridge, axum WebSocket transport, tokio blocking dispatcher, the generated HTTP+JSON face. |
 | `full`   | `vox`, `server-seaorm`, `server-axum`, `fake`, `platform`, `schedule`, `rt` | Development / single-binary builds. Deliberately excludes `atom`/`form` (server builds never compile Dioxus) and `diagnostics` (needs a frame-pointer build, see below). |
 
 A typical app:

@@ -17,9 +17,8 @@ use uuid::Uuid;
 /// stolen database dump therefore yields no working link, and the
 /// consequence — that the plaintext is shown exactly once, at
 /// creation — is the intended one.
-#[cfg_attr(feature = "fake", derive(::fake::Dummy))]
-#[derive(architect::Entity, ::facet::Facet, Clone, Debug, PartialEq, Eq)]
-#[architect(table_name = "auth_invite_links", repo)]
+#[architect::entity(table_name = "auth_invite_links", repo)]
+#[derive(Eq)]
 pub struct AuthInviteLink {
     #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
     pub id: Uuid,

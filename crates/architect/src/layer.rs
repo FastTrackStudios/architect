@@ -187,12 +187,20 @@ where
 
 // ── Mounted ───────────────────────────────────────────────────────────────
 
-/// A service bound to a backend — descriptor + erased handler.
+/// A service bound to a backend — descriptor + erased handler, plus
+/// (when the service has one) its HTTP face, so a merged override
+/// replaces both wires.
 #[derive(Clone)]
 pub struct Mounted {
     descriptor: &'static ServiceDescriptor,
     handler: Arc<dyn DynHandler>,
+    http: Option<HttpMount>,
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+type HttpMount = Arc<dyn Fn(&mut crate::http::HttpRoutes) + Send + Sync>;
+#[cfg(target_arch = "wasm32")]
+type HttpMount = Arc<dyn Fn(&mut crate::http::HttpRoutes)>;
 
 impl Mounted {
     #[cfg(not(target_arch = "wasm32"))]
@@ -203,6 +211,7 @@ impl Mounted {
         Self {
             descriptor,
             handler: Arc::new(handler),
+            http: None,
         }
     }
 
@@ -214,6 +223,7 @@ impl Mounted {
         Self {
             descriptor,
             handler: Arc::new(handler),
+            http: None,
         }
     }
 
@@ -221,6 +231,26 @@ impl Mounted {
         Self {
             descriptor,
             handler,
+            http: None,
+        }
+    }
+
+    /// Attach the service's HTTP face, so binding this `Mounted` over
+    /// HTTP mounts (or overrides) its routes too. The generated
+    /// `layer(backend)` does this for you.
+    #[must_use]
+    pub fn with_http(
+        mut self,
+        mount: impl Fn(&mut crate::http::HttpRoutes) + crate::MaybeSendSync + 'static,
+    ) -> Self {
+        self.http = Some(Arc::new(mount));
+        self
+    }
+
+    /// Mount the attached HTTP face, if any.
+    pub fn bind_http_into(&self, routes: &mut crate::http::HttpRoutes) {
+        if let Some(mount) = &self.http {
+            mount(routes);
         }
     }
 
@@ -321,8 +351,11 @@ where
     R: Bind<B>,
 {
     fn bind_into(self, backend: &B, router: &mut LayerRouter) {
-        self.svc.bind_into(backend, router);
+        // Tail first, head last: `merge` prepends, and the router keeps
+        // the LAST registration per method id — so a merged mock, at the
+        // head, binds after the bundle it overrides and wins.
         self.rest.bind_into(backend, router);
+        self.svc.bind_into(backend, router);
     }
 }
 
@@ -331,6 +364,13 @@ where
 /// Empty layer — base case of the cons chain.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Empty;
+
+impl Empty {
+    /// Start a bundle from a bound service — see [`Cons::merge`].
+    pub fn merge<M: Into<Mounted>>(self, m: M) -> Cons<Mounted, Self> {
+        Cons::new(m.into(), self)
+    }
+}
 
 /// One service cell prepended to a tail layer. Built by
 /// [`Layer::merge`] when a service token is merged into a layer.
@@ -342,6 +382,24 @@ pub struct Cons<S, R> {
 impl<S, R> Cons<S, R> {
     pub const fn new(svc: S, rest: R) -> Self {
         Self { svc, rest }
+    }
+
+    /// Merge a bound service (a mock, an override) into this bundle.
+    /// The merged service wins over anything in the bundle with the
+    /// same methods, on every wire. Inherent, so it needs no backend
+    /// type to be known yet — unlike the `Layer<B>` method it shadows.
+    pub fn merge<M: Into<Mounted>>(self, m: M) -> Cons<Mounted, Self> {
+        Cons::new(m.into(), self)
+    }
+
+    /// The service token at this cell.
+    pub const fn svc(&self) -> &S {
+        &self.svc
+    }
+
+    /// The remaining cells.
+    pub const fn rest(&self) -> &R {
+        &self.rest
     }
 }
 
@@ -363,7 +421,16 @@ impl<S, R> Cons<S, R> {
 ///     layers![transport::Service, project::Service, /* … */]
 /// }
 /// ```
-pub trait Layer<B>: Bind<B> + Descriptors + Sized {
+pub trait Layer<B>: Bind<B> + crate::http::BindHttp<B> + Descriptors + Sized {
+    /// Bind a backend and produce the HTTP router — the HTTP twin of
+    /// [`provide`](Self::provide): every service's routes, in one
+    /// `axum::Router` (or the inert facade router without `http`).
+    fn provide_http(&self, backend: &B) -> crate::http::Router {
+        let mut routes = crate::http::HttpRoutes::default();
+        crate::http::BindHttp::bind_http(self, backend, &mut routes);
+        routes.into_router()
+    }
+
     /// Merge a bound service into this layer. Mirrors Effect-ts's
     /// `Layer.merge` — pass anything convertible into a [`Mounted`]
     /// (a service's `layer(backend)` result, a `mock()` builder,
@@ -409,7 +476,7 @@ pub trait Layer<B>: Bind<B> + Descriptors + Sized {
     }
 }
 
-impl<B, T> Layer<B> for T where T: Bind<B> + Descriptors + Sized {}
+impl<B, T> Layer<B> for T where T: Bind<B> + crate::http::BindHttp<B> + Descriptors + Sized {}
 
 // ── Append<R> ─────────────────────────────────────────────────────────────
 
@@ -610,6 +677,15 @@ pub trait Services: Sized {
         Self: Clone + crate::MaybeSendSync + 'static,
     {
         Self::layers().provide(self)
+    }
+
+    /// The HTTP twin of [`into_router`](Self::into_router): the bundle's
+    /// routes, bound to `self`.
+    fn into_http_router(self) -> crate::http::Router
+    where
+        Self: Clone + crate::MaybeSendSync + 'static,
+    {
+        Self::layers().provide_http(&self)
     }
 }
 

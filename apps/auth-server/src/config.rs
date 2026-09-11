@@ -7,39 +7,48 @@
 //! generic architect-auth host, and the *deployment* decides the issuer,
 //! the clients and the database.
 
-use std::env;
-use std::fs;
-
 use architect_auth::OidcClientConfig;
 
 use crate::mail::MailConfig;
 
 /// Anything the operator can set. Every field has an env var; only the
 /// database URL and the signing secret are mandatory.
-#[derive(Clone, Debug)]
+///
+/// The simple fields read themselves (`#[derive(architect::Config)]`,
+/// prefix `AUTH_`); the three that need parsing beyond a scalar — the
+/// OIDC client list, the social providers, and the mail block's public
+/// origin — are filled in by [`ServerConfig::load`].
+#[derive(Clone, Debug, architect::Config)]
+#[architect(prefix = "AUTH")]
 pub struct ServerConfig {
     /// `host:port` the HTTP/WebSocket listener binds to.
+    #[architect(default = "0.0.0.0:8080")]
     pub bind_addr: String,
     /// `SeaORM` connection string. `postgres://…` in the cluster,
     /// `sqlite://…` for local development.
+    #[architect(secret)]
     pub database_url: String,
     /// Session-token signing secret. Minimum 32 bytes — architect-auth
     /// rejects anything shorter, which is the check that keeps a
     /// misconfigured deploy from issuing forgeable tokens.
+    #[architect(secret)]
     pub secret: String,
     /// Public origin this server is reached at, e.g.
     /// `https://auth.fasttrackstudio.app`. Every OIDC endpoint in the
     /// discovery document is derived from it, so it must be the
     /// externally visible URL, not the pod address.
+    #[architect(default = "http://localhost:8080")]
     pub base_url: String,
     /// OIDC issuer. Defaults to `base_url`; split out because an issuer
     /// is a stable identity that outlives a hostname change.
     pub oidc_issuer: Option<String>,
     /// Session lifetime in seconds.
+    #[architect(default = 60 * 60 * 24 * 30)]
     pub session_ttl_seconds: i64,
     /// Whether a fresh account must verify its email before it can sign
     /// in. Off by default so a first deploy is usable before SMTP is
     /// wired up.
+    #[architect(default = false)]
     pub require_email_verification: bool,
     /// Relying-party id for passkeys — the registrable domain, e.g.
     /// `fasttrackstudio.app`.
@@ -49,12 +58,15 @@ pub struct ServerConfig {
     /// Registered OIDC clients, parsed from `AUTH_OIDC_CLIENTS` (JSON),
     /// with `AUTH_OIDC_CLIENTS_EXTRA` (or its `_FILE` form) merged over
     /// the top.
+    #[architect(skip)]
     pub oidc_clients: Vec<OidcClientConfig>,
     /// Whether clients may self-register at `/oauth2/register`. Off by
     /// default: on a public issuer, dynamic registration is an open door.
+    #[architect(env = "AUTH_OIDC_DYNAMIC_REGISTRATION", default = false)]
     pub oidc_allow_dynamic_client_registration: bool,
     /// Run migrations on boot. On in normal operation; an operator can
     /// turn it off to gate schema changes behind a separate job.
+    #[architect(default = true)]
     pub run_migrations: bool,
     /// Load a sanitised snapshot into an empty *local* database on
     /// boot. `AUTH_IMPORT_SNAPSHOT=/path/to/auth-snapshot.json`.
@@ -63,18 +75,30 @@ pub struct ServerConfig {
     /// gets the published development password, which is why this is
     /// refused against anything but a local database.
     pub import_snapshot: Option<String>,
+    /// Also serve the vox router over iroh, peer to peer. The endpoint's
+    /// secret key persists at this path (a stable id across restarts);
+    /// `AUTH_IROH_KEY_FILE=/var/lib/auth/iroh.key`. Unset means no p2p.
+    #[architect(env = "AUTH_IROH_KEY_FILE")]
+    pub iroh_key_path: Option<String>,
+    /// Where to write the iroh endpoint id on boot, for other devices
+    /// and agents to read. `AUTH_IROH_ID_FILE`.
+    #[architect(env = "AUTH_IROH_ID_FILE")]
+    pub iroh_id_path: Option<String>,
     /// Fill an empty *local* database with the fixed development cast,
     /// and serve it. `AUTH_DEV_SEED=1`.
     ///
     /// Off by default and refused against anything but a local
     /// database, because it creates accounts whose password is a
     /// published constant.
+    #[architect(default = false)]
     pub dev_seed: bool,
     /// Outgoing mail. Without `AUTH_SMTP_HOST` the mailer only logs, and
     /// every flow that has to reach a person — verification, password
     /// reset — completes as far as minting a token and no further.
+    #[architect(nested)]
     pub mail: MailConfig,
     /// Social providers and the linked-token policy. See the module docs.
+    #[architect(skip)]
     pub social: SocialConfig,
 }
 
@@ -172,6 +196,8 @@ impl Default for SocialConfig {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
+    #[error(transparent)]
+    Env(#[from] architect::config::ConfigError),
     #[error("{0} is required but not set")]
     Missing(&'static str),
     #[error("{var} is set but unreadable: {source}")]
@@ -270,6 +296,8 @@ impl ServerConfig {
             oidc_allow_dynamic_client_registration: false,
             run_migrations: true,
             import_snapshot: None,
+            iroh_key_path: None,
+            iroh_id_path: None,
             dev_seed: false,
             social: SocialConfig::disabled(),
             mail: crate::mail::MailConfig {
@@ -284,18 +312,16 @@ impl ServerConfig {
     }
 
     /// Read the configuration from the process environment.
-    pub fn from_env() -> Result<Self, ConfigError> {
-        let secret = read_secret("AUTH_SECRET")?;
-        if secret.len() < 32 {
-            return Err(ConfigError::SecretTooShort(secret.len()));
+    ///
+    /// The derived `from_env` reads every scalar; this finishes the job:
+    /// the secret length check, the OIDC client lists, the social
+    /// providers, and the mail block's public origin.
+    pub fn load() -> Result<Self, ConfigError> {
+        let mut config = Self::from_env()?;
+        if config.secret.len() < 32 {
+            return Err(ConfigError::SecretTooShort(config.secret.len()));
         }
-
-        let database_url = read_secret("AUTH_DATABASE_URL")?;
-
-        let base_url = env::var("AUTH_BASE_URL")
-            .unwrap_or_else(|_| "http://localhost:8080".into())
-            .trim_end_matches('/')
-            .to_owned();
+        config.base_url = config.base_url.trim_end_matches('/').to_owned();
 
         // Two sources, because they have different secrecy. The public
         // clients (native apps, SPAs) hold nothing secret and belong in
@@ -317,55 +343,32 @@ impl ServerConfig {
                 None => oidc_clients.push(extra),
             }
         }
+        config.oidc_clients = oidc_clients;
 
-        Ok(Self {
-            bind_addr: env::var("AUTH_BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".into()),
-            database_url,
-            secret,
-            base_url: base_url.clone(),
-            oidc_issuer: optional("AUTH_OIDC_ISSUER"),
-            session_ttl_seconds: parse_or("AUTH_SESSION_TTL_SECONDS", 60 * 60 * 24 * 30)?,
-            require_email_verification: flag("AUTH_REQUIRE_EMAIL_VERIFICATION", false)?,
-            passkey_rp_id: optional("AUTH_PASSKEY_RP_ID"),
-            cors_origins: list("AUTH_CORS_ORIGINS"),
-            oidc_clients,
-            oidc_allow_dynamic_client_registration: flag("AUTH_OIDC_DYNAMIC_REGISTRATION", false)?,
-            run_migrations: flag("AUTH_RUN_MIGRATIONS", true)?,
-            import_snapshot: optional("AUTH_IMPORT_SNAPSHOT"),
-            dev_seed: flag("AUTH_DEV_SEED", false)?,
-            mail: MailConfig {
-                host: optional("AUTH_SMTP_HOST"),
-                port: parse_port("AUTH_SMTP_PORT", 587)?,
-                username: optional("AUTH_SMTP_USERNAME"),
-                // Same `_FILE` indirection as AUTH_SECRET: a mounted file
-                // does not appear in `kubectl describe pod`.
-                password: optional_secret("AUTH_SMTP_PASSWORD")?,
-                from: optional("AUTH_MAIL_FROM").unwrap_or_else(|| "noreply@localhost".to_owned()),
-                base_url,
-            },
-            social: SocialConfig {
-                github: read_social_provider(
-                    "AUTH_GITHUB_CLIENT_ID",
-                    "AUTH_GITHUB_CLIENT_SECRET",
-                    "AUTH_GITHUB_SCOPES",
-                    SocialConfig::DEFAULT_GITHUB_SCOPES,
-                )?,
-                google: read_social_provider(
-                    "AUTH_GOOGLE_CLIENT_ID",
-                    "AUTH_GOOGLE_CLIENT_SECRET",
-                    "AUTH_GOOGLE_SCOPES",
-                    SocialConfig::DEFAULT_GOOGLE_SCOPES,
-                )?,
-                tone3000: read_public_social_provider(
-                    "AUTH_TONE3000_CLIENT_ID",
-                    "AUTH_TONE3000_SCOPES",
-                    SocialConfig::DEFAULT_TONE3000_SCOPES,
-                ),
-                linked_token_scope: optional("AUTH_LINKED_TOKEN_SCOPE")
-                    .unwrap_or_else(|| SocialConfig::DEFAULT_LINKED_TOKEN_SCOPE.to_owned()),
-                mock_url: optional("AUTH_SOCIAL_MOCK_URL"),
-            },
-        })
+        config.social = SocialConfig {
+            github: read_social_provider(
+                "AUTH_GITHUB_CLIENT_ID",
+                "AUTH_GITHUB_CLIENT_SECRET",
+                "AUTH_GITHUB_SCOPES",
+                SocialConfig::DEFAULT_GITHUB_SCOPES,
+            )?,
+            google: read_social_provider(
+                "AUTH_GOOGLE_CLIENT_ID",
+                "AUTH_GOOGLE_CLIENT_SECRET",
+                "AUTH_GOOGLE_SCOPES",
+                SocialConfig::DEFAULT_GOOGLE_SCOPES,
+            )?,
+            tone3000: read_public_social_provider(
+                "AUTH_TONE3000_CLIENT_ID",
+                "AUTH_TONE3000_SCOPES",
+                SocialConfig::DEFAULT_TONE3000_SCOPES,
+            ),
+            linked_token_scope: optional("AUTH_LINKED_TOKEN_SCOPE")
+                .unwrap_or_else(|| SocialConfig::DEFAULT_LINKED_TOKEN_SCOPE.to_owned()),
+            mock_url: optional("AUTH_SOCIAL_MOCK_URL"),
+        };
+        config.mail.base_url = config.base_url.clone();
+        Ok(config)
     }
 
     /// The issuer, falling back to `base_url`.
@@ -440,111 +443,16 @@ fn read_oidc_clients(var: &'static str) -> Result<Vec<OidcClientConfig>, ConfigE
     Ok(parsed.into_iter().map(OidcClientConfig::from).collect())
 }
 
-/// Read a secret from `<VAR>_FILE` if set, else `<VAR>`.
-///
-/// The `_FILE` indirection is how Kubernetes secrets should be
-/// consumed: a mounted file never shows up in `/proc/<pid>/environ`, in
-/// a crash dump, or in `kubectl describe pod`.
+/// Read a secret from `<VAR>_FILE` if set, else `<VAR>` — the
+/// framework's reader, with this crate's error type.
 fn read_secret(var: &'static str) -> Result<String, ConfigError> {
     optional_secret(var)?.ok_or(ConfigError::Missing(var))
 }
 
-/// The `_FILE`-or-env read, without requiring the value to be present.
-///
-/// A missing `_FILE` path is still an error: naming a file that is not
-/// there is a broken deployment, not an absent setting, and silently
-/// falling through to the plain env var would start the server with the
-/// wrong configuration rather than failing at boot.
 fn optional_secret(var: &'static str) -> Result<Option<String>, ConfigError> {
-    let file_var = format!("{var}_FILE");
-    if let Ok(path) = env::var(&file_var) {
-        let contents =
-            fs::read_to_string(&path).map_err(|source| ConfigError::Unreadable { var, source })?;
-        return Ok(Some(contents.trim().to_owned()));
-    }
-    Ok(env::var(var).ok())
+    Ok(architect::config::secret(var)?)
 }
 
 fn optional(var: &str) -> Option<String> {
-    env::var(var).ok().filter(|value| !value.trim().is_empty())
-}
-
-fn list(var: &str) -> Vec<String> {
-    env::var(var)
-        .ok()
-        .map(|raw| {
-            raw.split(',')
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(ToOwned::to_owned)
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn flag(var: &'static str, default: bool) -> Result<bool, ConfigError> {
-    env::var(var).map_or(Ok(default), |raw| {
-        match raw.trim().to_ascii_lowercase().as_str() {
-            "1" | "true" | "yes" | "on" => Ok(true),
-            "0" | "false" | "no" | "off" => Ok(false),
-            _ => Err(ConfigError::Invalid {
-                var,
-                expected: "boolean",
-                value: raw,
-            }),
-        }
-    })
-}
-
-/// A TCP port, rejecting anything outside the range instead of wrapping.
-///
-/// This was `parse_or(..)? as u16`, which is silent: `AUTH_SMTP_PORT=70000`
-/// became 4464 and the server dialled a port nobody was listening on, with
-/// nothing in the logs to say the number it used was not the number
-/// configured.
-fn parse_port(var: &'static str, default: u16) -> Result<u16, ConfigError> {
-    env::var(var).map_or(Ok(default), |raw| {
-        raw.trim().parse().map_err(|_| ConfigError::Invalid {
-            var,
-            expected: "a TCP port (1-65535)",
-            value: raw,
-        })
-    })
-}
-
-fn parse_or(var: &'static str, default: i64) -> Result<i64, ConfigError> {
-    env::var(var).map_or(Ok(default), |raw| {
-        raw.trim().parse().map_err(|_| ConfigError::Invalid {
-            var,
-            expected: "integer",
-            value: raw,
-        })
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn oidc_client_json_defaults_to_openid_profile_email() {
-        let parsed: Vec<OidcClientJson> = serde_json::from_str(
-            r#"[{"client_id":"task","redirect_uris":["https://task.fasttrackstudio.app/callback"]}]"#,
-        )
-        .expect("parse");
-        let client = OidcClientConfig::from(parsed.into_iter().next().expect("one client"));
-        assert_eq!(client.scopes, vec!["openid", "profile", "email"]);
-        // The display name falls back to the id rather than being empty.
-        assert_eq!(client.name, "task");
-        assert!(!client.public_client);
-    }
-
-    #[test]
-    fn flag_rejects_nonsense_rather_than_defaulting() {
-        // Safety-relevant: silently treating `AUTH_REQUIRE_EMAIL_VERIFICATION=maybe`
-        // as `false` would weaken the deploy without saying so.
-        unsafe { env::set_var("AUTH_TEST_FLAG", "maybe") };
-        assert!(flag("AUTH_TEST_FLAG", true).is_err());
-        unsafe { env::remove_var("AUTH_TEST_FLAG") };
-    }
+    architect::config::var(var)
 }
