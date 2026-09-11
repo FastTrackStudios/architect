@@ -37,6 +37,7 @@ pub struct Note {
 // which is what lets the generated clients implement `Greeter`.
 
 #[architect::error]
+#[derive(Eq)]
 pub enum GreetError {
     #[error("nobody is called {0}")]
     #[architect(status = 404)]

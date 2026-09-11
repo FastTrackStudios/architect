@@ -99,6 +99,7 @@ pub struct {entity} {{
 /// variant (what lets the generated clients implement the service trait)
 /// are written by the attribute.
 #[architect::error]
+#[derive(Eq)]
 pub enum {pascal}Error {{
     #[error("not found")]
     NotFound,

@@ -24,6 +24,7 @@ pub struct Note {
 // code per variant, and a `Transport(String)` variant — the one that lets
 // the generated clients implement the trait.
 #[architect::error]
+#[derive(Eq)]
 pub enum GreetError {
     #[error("nobody is called {0}")]
     #[architect(status = 404)]
