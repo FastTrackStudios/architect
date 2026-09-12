@@ -3039,7 +3039,7 @@ pub fn wire(args: TokenStream, input: TokenStream) -> TokenStream {
 /// #[architect::error]
 /// pub enum GreetError {
 ///     #[error("nobody is called {0}")]
-///     #[architect(status = 404)]
+///     #[architect(http_status = 404)]
 ///     Unknown(String),
 ///     #[error("too many greetings")]
 ///     RateLimited,                         // 400, code "rate_limited"
@@ -3058,7 +3058,7 @@ pub fn wire(args: TokenStream, input: TokenStream) -> TokenStream {
 /// Status defaults follow the variant's name when it is one of the
 /// obvious ones — `NotFound` 404, `Unauthenticated` / `InvalidCredentials`
 /// 401, `Forbidden` / `PermissionDenied` 403, `Conflict` 409, `Internal`
-/// 500, the transport variant 503 — and `400` otherwise. `status = N`
+/// 500, the transport variant 503 — and `400` otherwise. `http_status = N`
 /// and `code = "…"` override either.
 #[proc_macro_attribute]
 pub fn error(args: TokenStream, input: TokenStream) -> TokenStream {
@@ -3109,9 +3109,11 @@ fn expand_error(mut item: syn::ItemEnum) -> Result<TokenStream2> {
                 continue;
             }
             attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident("status") {
+                if meta.path.is_ident("http_status") {
                     let n: syn::LitInt = meta.value()?.parse()?;
                     status = Some(n.base10_parse()?);
+                } else if meta.path.is_ident("status") {
+                    return Err(meta.error("write `http_status = 404` — the status is an HTTP detail"));
                 } else if meta.path.is_ident("code") {
                     let s: LitStr = meta.value()?.parse()?;
                     code = Some(s.value());

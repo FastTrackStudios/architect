@@ -32,7 +32,7 @@ pub struct Note {
 // ── 2. A service and its error ────────────────────────────────────────
 //
 // `#[architect::error]` writes the wire derives, the `HttpError` impl
-// (status per variant: named or `status = …`, code from the variant
+// (status per variant: named or `http_status = …`, code from the variant
 // name) and a `Transport(String)` variant with `From<TransportError>` —
 // which is what lets the generated clients implement `Greeter`.
 
@@ -40,7 +40,7 @@ pub struct Note {
 #[derive(Eq)]
 pub enum GreetError {
     #[error("nobody is called {0}")]
-    #[architect(status = 404)]
+    #[architect(http_status = 404)]
     Unknown(String),
 }
 

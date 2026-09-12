@@ -27,7 +27,7 @@ pub struct Note {
 #[derive(Eq)]
 pub enum GreetError {
     #[error("nobody is called {0}")]
-    #[architect(status = 404)]
+    #[architect(http_status = 404)]
     Unknown(String),
 }
 
