@@ -31,6 +31,28 @@ pub struct OrgRow {
     pub role: String,
 }
 
+/// An invitation waiting for the person looking at the page.
+///
+/// The mirror of [`InvitationRow`], which is an administrator's view of
+/// who *they* have invited — hence its `email` and `status`. This is the
+/// invitee's side, so it names the organization instead: you already
+/// know your own address, and what you need told is which room this is
+/// and what you would be.
+///
+/// Carries the invitation's id rather than the organization's, because
+/// the accept and decline forms act on the invitation — the person is
+/// not a member yet, so there is nothing of the organization's to act
+/// on.
+#[derive(Clone, PartialEq, Eq)]
+pub struct MyInvitationRow {
+    pub id: Uuid,
+    /// The organization's name where it could be read, otherwise its
+    /// id — which is still better than an invitation the person never
+    /// sees.
+    pub organization: String,
+    pub role: String,
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub struct MemberRow {
     pub user_id: Uuid,
@@ -66,9 +88,48 @@ pub struct LinkRow {
 }
 
 #[component]
-pub fn OrgsView(rows: Vec<OrgRow>, flash: Option<Flash>) -> Element {
+pub fn OrgsView(
+    rows: Vec<OrgRow>,
+    invitations: Vec<MyInvitationRow>,
+    flash: Option<Flash>,
+) -> Element {
     rsx! {
         FlashLine { flash }
+
+        // Invitations first, and only when there are any. Something
+        // waiting for a decision outranks a list of things already
+        // settled — and until this panel existed an invitation was
+        // reachable only through the link it arrived in, so losing the
+        // link lost the invitation.
+        if !invitations.is_empty() {
+            section { class: "panel",
+                h2 { "Invitations" }
+                ul { class: "orgs",
+                    for invite in invitations.iter() {
+                        li { key: "{invite.id}", class: "org",
+                            span {
+                                strong { "{invite.organization}" }
+                                span { class: "handle", "as {invite.role}" }
+                            }
+                            span {
+                                form {
+                                    method: "post",
+                                    action: "/invite/{invite.id}/accept",
+                                    style: "display:inline",
+                                    button { r#type: "submit", "Accept" }
+                                }
+                                form {
+                                    method: "post",
+                                    action: "/invite/{invite.id}/reject",
+                                    style: "display:inline",
+                                    button { r#type: "submit", class: "secondary", "Decline" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         section { class: "panel",
             if rows.is_empty() {

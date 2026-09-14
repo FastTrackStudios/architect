@@ -510,6 +510,20 @@ pub trait AuthStorage: Clone + Send + Sync + 'static {
         organization_id: uuid::Uuid,
     ) -> Result<Vec<AuthInvitation>, AuthFlowError>;
 
+    /// Every pending invitation sent to one address, across all orgs.
+    ///
+    /// The other direction from
+    /// [`Self::list_invitations_by_organization`], and the one the
+    /// invited person needs. That one answers "who have we invited
+    /// here"; this answers "what have I been invited to". Without it an
+    /// invitation is reachable only through the link it was mailed in,
+    /// so a lost link is a lost invitation and an account page has no
+    /// way to show that anything is waiting.
+    async fn list_pending_invitations_for_email(
+        &self,
+        email: &str,
+    ) -> Result<Vec<AuthInvitation>, AuthFlowError>;
+
     /// A pending invitation already sent to this address, if any.
     ///
     /// Inviting the same person twice is not harmful, but it produces

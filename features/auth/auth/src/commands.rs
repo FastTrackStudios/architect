@@ -1020,6 +1020,23 @@ pub struct ListInvitations {
     pub organization_id: Uuid,
 }
 
+/// Invitations addressed to the caller, across every organization.
+///
+/// No organization field on purpose: the scope is the person, not a
+/// room they have not joined yet.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListMyInvitations {
+    pub session_token: String,
+}
+
+/// Accept an invitation addressed to you, proven by your address
+/// rather than by the emailed token.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClaimInvitation {
+    pub session_token: String,
+    pub invitation_id: Uuid,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CancelInvitation {
     pub session_token: String,

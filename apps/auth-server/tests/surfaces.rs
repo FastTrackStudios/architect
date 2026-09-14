@@ -737,6 +737,183 @@ async fn org_members_can_be_removed() {
     on_every_transport(scenario!(an_owner_removes_a_member)).await;
 }
 
+/// An invitation is findable without the link it arrived in.
+///
+/// Until `list_my_invitations` existed an invitation lived only in the
+/// URL it was mailed in: a lost mail was a lost invitation, and no
+/// account page could show that anything was waiting. The query is
+/// scoped by the caller's own address, so the middle of this asserts
+/// the part that matters most — somebody else's invitation is not in
+/// the list.
+async fn an_invitee_can_find_their_own_invitations<A: AuthService, O: OrganizationService>(
+    auth: &A,
+    orgs: &O,
+) {
+    let owner = signed_up(auth, "boss@example.com").await;
+    let invitee = signed_up(auth, "wanted@example.com").await;
+    let bystander = signed_up(auth, "unrelated@example.com").await;
+    let org = orgs
+        .create_organization(owner.token.clone(), new_org("Team", "team"))
+        .await
+        .expect("create");
+
+    assert!(
+        orgs.list_my_invitations(invitee.token.clone())
+            .await
+            .expect("list")
+            .is_empty(),
+        "nothing has been sent yet"
+    );
+
+    orgs.invite_member(
+        owner.token.clone(),
+        Invite {
+            organization_id: org.organization.id,
+            email: "wanted@example.com".into(),
+            role: "admin".into(),
+            expires_at: None,
+        },
+    )
+    .await
+    .expect("invite");
+
+    let mine = orgs
+        .list_my_invitations(invitee.token.clone())
+        .await
+        .expect("list");
+    assert_eq!(mine.len(), 1, "{mine:?}");
+    assert_eq!(mine[0].organization_id, org.organization.id);
+    assert_eq!(mine[0].role, "admin");
+
+    assert!(
+        orgs.list_my_invitations(bystander.token)
+            .await
+            .expect("list")
+            .is_empty(),
+        "an invitation addressed to somebody else must not be listed"
+    );
+
+    // Claimed by address, with no token in hand — the account-page path.
+    orgs.claim_invitation(invitee.token.clone(), mine[0].id)
+        .await
+        .expect("claim");
+    let joined = orgs
+        .list_organizations(invitee.token.clone())
+        .await
+        .expect("orgs");
+    assert_eq!(joined.len(), 1);
+    assert_eq!(joined[0].membership.role, "admin");
+    assert!(
+        orgs.list_my_invitations(invitee.token)
+            .await
+            .expect("list")
+            .is_empty(),
+        "a claimed invitation is no longer pending"
+    );
+}
+
+#[tokio::test]
+async fn invitees_can_find_and_claim_their_invitations() {
+    on_every_transport(scenario!(an_invitee_can_find_their_own_invitations)).await;
+}
+
+/// Claiming proves entitlement by address, so somebody else's
+/// invitation is refused even when its id is known.
+///
+/// The id is not a secret — it travels in a URL — so this check is what
+/// stands between a guessed id and a membership. The token path makes
+/// no such check, which is exactly why the account page uses this one
+/// rather than reusing that.
+async fn a_stranger_cannot_claim_an_invitation<A: AuthService, O: OrganizationService>(
+    auth: &A,
+    orgs: &O,
+) {
+    let owner = signed_up(auth, "boss@example.com").await;
+    let invitee = signed_up(auth, "wanted@example.com").await;
+    let stranger = signed_up(auth, "mallory@example.com").await;
+    let org = orgs
+        .create_organization(owner.token.clone(), new_org("Team", "team"))
+        .await
+        .expect("create");
+    let issued = orgs
+        .invite_member(
+            owner.token,
+            Invite {
+                organization_id: org.organization.id,
+                email: "wanted@example.com".into(),
+                role: "member".into(),
+                expires_at: None,
+            },
+        )
+        .await
+        .expect("invite");
+
+    assert!(
+        orgs.claim_invitation(stranger.token.clone(), issued.invitation.id)
+            .await
+            .is_err(),
+        "an invitation is claimable only by the address it names"
+    );
+    assert!(
+        orgs.list_organizations(stranger.token)
+            .await
+            .expect("orgs")
+            .is_empty()
+    );
+
+    // And the real invitee is unaffected by the attempt.
+    orgs.claim_invitation(invitee.token.clone(), issued.invitation.id)
+        .await
+        .expect("the named person can still claim");
+    assert_eq!(
+        orgs.list_organizations(invitee.token)
+            .await
+            .expect("orgs")
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn only_the_named_invitee_can_claim() {
+    on_every_transport(scenario!(a_stranger_cannot_claim_an_invitation)).await;
+}
+
+/// Renaming, now that `update_organization` reaches the service.
+async fn an_owner_renames_the_organization<A: AuthService, O: OrganizationService>(
+    auth: &A,
+    orgs: &O,
+) {
+    let owner = signed_up(auth, "boss@example.com").await;
+    let org = orgs
+        .create_organization(owner.token.clone(), new_org("Typo Inc", "typo-inc"))
+        .await
+        .expect("create");
+
+    let renamed = orgs
+        .update_organization(
+            owner.token.clone(),
+            org.organization.id,
+            Some("Fixed Inc".into()),
+            None,
+        )
+        .await
+        .expect("rename");
+    assert_eq!(renamed.name, "Fixed Inc");
+    assert_eq!(
+        renamed.slug, "typo-inc",
+        "an absent field is left alone, not cleared"
+    );
+
+    let mine = orgs.list_organizations(owner.token).await.expect("orgs");
+    assert_eq!(mine[0].organization.name, "Fixed Inc");
+}
+
+#[tokio::test]
+async fn org_can_be_renamed() {
+    on_every_transport(scenario!(an_owner_renames_the_organization)).await;
+}
+
 // ── The HTTP face's own affordances ────────────────────────────────────
 
 /// Over HTTP the session token may travel as `Authorization: Bearer`

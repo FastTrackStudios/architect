@@ -19,12 +19,12 @@
 //! reveals nothing that the holder of the link does not already have.
 
 use architect_auth::{
-    AcceptInvitation, AddTeamMember, AuthStorage, CancelInvitation, CreateInvitation,
-    CreateInviteLink, CreateOrganization, CreateTeam, CurrentSession, DeleteOrganization,
-    DeleteTeam, LeaveOrganization, ListInvitations, ListInviteLinks, ListMembers,
-    ListOrganizations, ListTeamMembers, ListTeams, PreviewInvitation, PreviewInviteLink,
-    RedeemInviteLink, RejectInvitation, RemoveMember, RemoveTeamMember, RevokeInviteLink,
-    SetMemberRole, UpdateOrganization,
+    AcceptInvitation, AddTeamMember, AuthStorage, CancelInvitation, ClaimInvitation,
+    CreateInvitation, CreateInviteLink, CreateOrganization, CreateTeam, CurrentSession,
+    DeleteOrganization, DeleteTeam, LeaveOrganization, ListInvitations, ListInviteLinks,
+    ListMembers, ListMyInvitations, ListOrganizations, ListTeamMembers, ListTeams,
+    PreviewInvitation, PreviewInviteLink, RedeemInviteLink, RejectInvitation, RemoveMember,
+    RemoveTeamMember, RevokeInviteLink, SetMemberRole, UpdateOrganization,
 };
 use axum::Form;
 use axum::extract::{Path, Query, State};
@@ -39,8 +39,8 @@ use crate::page::{Flash, document, flash_to, sign_in_first, token_of};
 use crate::profile::message;
 use crate::settings::Nav;
 use crate::views::{
-    DeadEnd, Declined, InvitationRow, InvitationView, JoinView, LinkRow, MemberRow, OrgRow,
-    OrgView, OrgsView, TeamRow,
+    DeadEnd, Declined, InvitationRow, InvitationView, JoinView, LinkRow, MemberRow,
+    MyInvitationRow, OrgRow, OrgView, OrgsView, TeamRow,
 };
 
 /// How long an emailed invitation stays good for.
@@ -125,6 +125,11 @@ pub struct TokenQuery {
 
 #[derive(Debug, serde::Deserialize)]
 pub struct TokenForm {
+    /// Absent when the form came from the account page rather than
+    /// from a mailed link. The link path proves entitlement with this
+    /// token; the account path proves it with the signed-in address,
+    /// so there is nothing to carry.
+    #[serde(default)]
     pub token: String,
 }
 
@@ -163,15 +168,66 @@ where
     let Some(nav) = Nav::build(&state, &headers, "/orgs").await else {
         return sign_in_first("/orgs");
     };
+    // What is waiting for a decision. Best effort: an invitation list
+    // that cannot be read is no reason to refuse the page somebody came
+    // here to see, so a failure shows no invitations rather than no
+    // organizations.
+    let invitations = pending_invitations(&state, &headers).await;
     crate::settings::document(
         "Organizations",
         "Organizations",
         "The organizations this account belongs to.",
         &nav,
         rsx! {
-            OrgsView { rows, flash: Flash::from_query(q.ok.as_deref(), q.error.as_deref()) }
+            OrgsView {
+                rows,
+                invitations,
+                flash: Flash::from_query(q.ok.as_deref(), q.error.as_deref()),
+            }
         },
     )
+}
+
+/// Invitations addressed to the signed-in person, named where possible.
+///
+/// The organization's name needs a read the invitee is not entitled to
+/// — they are not a member yet — so it is looked up directly rather
+/// than through `get_organization`. Asking somebody to accept something
+/// identified only by a uuid is not an invitation; the id is the
+/// fallback, not the plan.
+async fn pending_invitations<S>(state: &UiState<S>, headers: &HeaderMap) -> Vec<MyInvitationRow>
+where
+    S: AuthStorage,
+{
+    let Some(token) = token_of(headers, &state.cookie) else {
+        return Vec::new();
+    };
+    let Ok(invitations) = state
+        .auth
+        .list_my_invitations(ListMyInvitations {
+            session_token: token,
+        })
+        .await
+    else {
+        return Vec::new();
+    };
+    let mut rows = Vec::with_capacity(invitations.len());
+    for invitation in invitations {
+        let organization = state
+            .auth
+            .storage
+            .find_organization_by_id(invitation.organization_id)
+            .await
+            .ok()
+            .flatten()
+            .map_or_else(|| invitation.organization_id.to_string(), |org| org.name);
+        rows.push(MyInvitationRow {
+            id: invitation.id,
+            organization,
+            role: invitation.role,
+        });
+    }
+    rows
 }
 
 /// `POST /orgs`
@@ -869,22 +925,45 @@ pub async fn accept_invitation<S>(
 where
     S: AuthStorage,
 {
-    let back = format!(
-        "/invite/{id}?token={}",
-        architect_auth::percent::encode_component(&form.token)
-    );
+    // No token means this came from the account page, where the form
+    // has no link to carry one from — so there is no invitation page to
+    // send a failure back to either.
+    let from_link = !form.token.is_empty();
+    let back = if from_link {
+        format!(
+            "/invite/{id}?token={}",
+            architect_auth::percent::encode_component(&form.token)
+        )
+    } else {
+        "/orgs".to_owned()
+    };
     let Some(session_token) = token_of(&headers, &state.cookie) else {
         return sign_in_first(&back);
     };
-    match state
-        .auth
-        .accept_invitation(AcceptInvitation {
-            session_token,
-            invitation_id: id,
-            token: form.token,
-        })
-        .await
-    {
+    // Two proofs of the same entitlement. The link carries a token,
+    // which is the only thing that distinguishes its holder; the account
+    // page carries none, and is answered by matching the invitation's
+    // address against the session's — which is the stricter of the two,
+    // since the token path never checks the address at all.
+    let outcome = if from_link {
+        state
+            .auth
+            .accept_invitation(AcceptInvitation {
+                session_token,
+                invitation_id: id,
+                token: form.token,
+            })
+            .await
+    } else {
+        state
+            .auth
+            .claim_invitation(ClaimInvitation {
+                session_token,
+                invitation_id: id,
+            })
+            .await
+    };
+    match outcome {
         Ok(()) => flash_to("/orgs", &Flash::Ok("You have joined.".into())),
         Err(error) => flash_to(&back, &Flash::Error(message(&error))),
     }
