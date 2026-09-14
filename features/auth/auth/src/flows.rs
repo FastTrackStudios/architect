@@ -13997,14 +13997,13 @@ pub mod organizations {
             &self,
             input: ListOrganizations,
         ) -> Result<Vec<OrganizationBundle>, AuthFlowError> {
-            let session = self
-                .current_session(CurrentSession {
-                    token: input.session_token,
-                })
-                .await?;
+            // The one organization method an OIDC client's access token
+            // may call — see `organization_caller`. Everything that
+            // *changes* an organization still asks for a session.
+            let caller = self.organization_caller(&input.session_token).await?;
             Ok(self
                 .storage
-                .list_organizations_for_user(session.user.id)
+                .list_organizations_for_user(caller.id)
                 .await?
                 .into_iter()
                 .map(|(organization, membership)| OrganizationBundle {
@@ -14862,6 +14861,61 @@ pub mod organizations {
             self.require_team_in_organization(input.team_id, input.organization_id)
                 .await?;
             self.storage.list_team_members(input.team_id).await
+        }
+
+        /// The account behind a credential presented to the *read* side of
+        /// the organization surface.
+        ///
+        /// Two kinds of caller reach it. The issuer's own pages and the
+        /// desktop clients hold a **session token**. An OIDC client — a
+        /// web app that signed the person in through `/oauth2/authorize`,
+        /// Keyflow say — holds only the **access token** `/oauth2/token`
+        /// minted, a JWT, and has no session token to present. Both name
+        /// the same account, and "which organizations am I in" is a
+        /// question either has every right to ask; refusing the JWT meant
+        /// every OIDC client saw an empty organization list, and a
+        /// downstream server mirroring memberships from here learned
+        /// nothing about the person.
+        ///
+        /// The session is tried first because it is the common case and
+        /// the cheaper check. A JWT is only verified when the token is
+        /// shaped like one, so a bad session token still fails as a bad
+        /// session token, and the verification is the same one
+        /// `/oauth2/userinfo` performs — this server's own keys, its own
+        /// issuer, expiry honoured.
+        async fn organization_caller(
+            &self,
+            token: &str,
+        ) -> Result<auth_proto::AuthUser, AuthFlowError> {
+            let by_session = self
+                .current_session(CurrentSession {
+                    token: token.to_owned(),
+                })
+                .await;
+            match by_session {
+                Ok(bundle) => Ok(bundle.user),
+                Err(error) => {
+                    let is_jwt = token.split('.').filter(|part| !part.is_empty()).count() == 3;
+                    if !is_jwt {
+                        return Err(error);
+                    }
+                    let verification = self
+                        .verify_jwt(crate::VerifyJwt {
+                            token: token.to_owned(),
+                            audience: None,
+                        })
+                        .await?;
+                    let user_id: uuid::Uuid = verification
+                        .claims
+                        .sub
+                        .parse()
+                        .map_err(|_| AuthFlowError::InvalidCredentials)?;
+                    self.storage
+                        .find_user_by_id(user_id)
+                        .await?
+                        .ok_or(AuthFlowError::InvalidCredentials)
+                }
+            }
         }
 
         async fn require_member(
