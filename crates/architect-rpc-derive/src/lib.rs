@@ -1735,6 +1735,62 @@ fn strip_ops_attrs(method: &mut TraitItemFn) {
     method.attrs.retain(|a| !a.path().is_ident("ops"));
 }
 
+/// `#[http(path = "sign-in/email")]` on a trait method — the HTTP tail
+/// it answers on, in place of its kebab-cased name.
+///
+/// A method name is one Rust identifier, so a path derived from it can
+/// only ever be one flat segment: `sign_in_email_password` becomes
+/// `/auth/sign-in/email`. That is a fine default and a poor
+/// URL. Resources nest — `/auth/sign-in/email` reads the way a reader of
+/// URLs expects and leaves room for `/auth/sign-in/username` beside it —
+/// and no naming convention on the identifier can express that, because
+/// an identifier has nowhere to put the slash.
+///
+/// So it is declared instead of inferred. Only the HTTP face moves: the
+/// vox method name, the generated client methods and the schema stamp
+/// all stay the identifier, so renaming a path breaks HTTP callers and
+/// nothing else.
+fn http_path_attr(method: &TraitItemFn) -> syn::Result<Option<String>> {
+    let Some(attr) = method.attrs.iter().find(|a| a.path().is_ident("http")) else {
+        return Ok(None);
+    };
+    let mut found: Option<String> = None;
+    attr.parse_nested_meta(|meta| {
+        if !meta.path.is_ident("path") {
+            return Err(meta.error("unknown `#[http(…)]` option; expected `path = \"…\"`"));
+        }
+        let lit: syn::LitStr = meta.value()?.parse()?;
+        let raw = lit.value();
+        let trimmed = raw.trim_matches('/');
+        if trimmed.is_empty() {
+            return Err(meta.error("`path` cannot be empty"));
+        }
+        // Each segment must actually be one. An empty segment is a
+        // doubled slash, which mounts at a path no caller can type; a
+        // `{param}` segment would promise dynamic routing this face does
+        // not do, since arguments arrive in the JSON body.
+        for segment in trimmed.split('/') {
+            if segment.is_empty() {
+                return Err(meta.error("`path` has an empty segment (a doubled `/`)"));
+            }
+            if segment.contains('{') || segment.contains('}') {
+                return Err(meta.error(
+                    "`path` segments are literal — arguments arrive in the JSON body, not \
+                     in the path",
+                ));
+            }
+        }
+        found = Some(trimmed.to_owned());
+        Ok(())
+    })?;
+    Ok(found)
+}
+
+/// Strip the method-level `#[http(…)]` marker before re-emitting.
+fn strip_http_attrs(method: &mut TraitItemFn) {
+    method.attrs.retain(|a| !a.path().is_ident("http"));
+}
+
 fn classify_subscription(method: &TraitItemFn) -> syn::Result<Subscription> {
     if method.sig.asyncness.is_some() {
         return Err(syn::Error::new_spanned(
@@ -2202,6 +2258,9 @@ struct Method {
     /// `#[ops(skip)]` — excluded from the `<Trait>Op` reified-call
     /// enum (e.g. a return type phon cannot lower, like a tuple).
     ops_skip: bool,
+    /// `#[http(path = "…")]` — the HTTP tail, in place of the
+    /// kebab-cased method name. HTTP only; see [`http_path_attr`].
+    http_path: Option<String>,
 }
 
 fn classify_method(method: &TraitItemFn) -> syn::Result<Method> {
@@ -2283,8 +2342,10 @@ fn classify_method(method: &TraitItemFn) -> syn::Result<Method> {
     }
 
     let ops_skip = has_ops_skip_attr(method);
+    let http_path = http_path_attr(method)?;
     let mut decl = method.clone();
     strip_ops_attrs(&mut decl);
+    strip_http_attrs(&mut decl);
 
     Ok(Method {
         decl,
@@ -2294,6 +2355,7 @@ fn classify_method(method: &TraitItemFn) -> syn::Result<Method> {
         arg_was_ref,
         return_ty: method.sig.output.clone(),
         ops_skip,
+        http_path,
     })
 }
 
@@ -2826,7 +2888,14 @@ fn emit_http_block(
     for m in methods {
         let name = &m.decl.sig.ident;
         let name_str = name.to_string();
-        let path = format!("/{prefix}/{}", to_kebab_case(&name_str));
+        // `#[http(path = "…")]` wins over the derived name; see
+        // `http_path_attr` for why an identifier cannot express a
+        // nested path on its own.
+        let tail = m
+            .http_path
+            .clone()
+            .unwrap_or_else(|| to_kebab_case(&name_str));
+        let path = format!("/{prefix}/{tail}");
         let args_name = format_ident!("{}Args", to_pascal_case(&name_str));
         let handler_name = format_ident!("__http_{}", name);
         let docs: Vec<&syn::Attribute> = m

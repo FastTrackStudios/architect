@@ -148,7 +148,7 @@ async fn configuring_cors_origins_does_not_panic_and_echoes_the_origin() {
         .oneshot(
             Request::builder()
                 .method("OPTIONS")
-                .uri("/auth/sign-in-email-password")
+                .uri("/auth/sign-in/email")
                 .header(header::ORIGIN, "https://keyflow.fasttrackstudio.app")
                 .header("access-control-request-method", "POST")
                 .header("access-control-request-headers", "content-type")
@@ -186,7 +186,7 @@ async fn an_unlisted_origin_is_not_granted_cors_access() {
         .oneshot(
             Request::builder()
                 .method("OPTIONS")
-                .uri("/auth/sign-in-email-password")
+                .uri("/auth/sign-in/email")
                 .header(header::ORIGIN, "https://evil.example")
                 .header("access-control-request-method", "POST")
                 .body(Body::empty())

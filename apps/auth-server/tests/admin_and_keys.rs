@@ -51,7 +51,7 @@ async fn sign_in(app: &axum::Router, email: &str) -> String {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/auth/sign-in-email-password")
+                .uri("/auth/sign-in/email")
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(format!(
                     r#"{{"input":{{"email":"{email}","password":"{}"}}}}"#,

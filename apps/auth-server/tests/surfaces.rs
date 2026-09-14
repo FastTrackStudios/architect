@@ -653,7 +653,7 @@ async fn http_errors_carry_status_code_and_the_typed_error() {
     let (config, auth) = engine().await;
     let base = format!("http://{}", spawn_app(&config, auth).await);
     let response = reqwest::Client::new()
-        .post(format!("{base}/auth/current-session"))
+        .post(format!("{base}/auth/session"))
         .header("content-type", "application/json")
         .body(r#"{"token":"nope"}"#)
         .send()
@@ -666,8 +666,18 @@ async fn http_errors_carry_status_code_and_the_typed_error() {
     assert_eq!(body["error"], "InvalidCredentials");
 }
 
-/// Every route the two services generate is mounted, and nothing that
-/// used to be hand-written next to them survives.
+/// Every route the two services generate is mounted, on the paths the
+/// hand-written surface used.
+///
+/// The generated face used to rename them: a method name is one Rust
+/// identifier, so a derived path could only ever be one flat segment,
+/// and `/auth/sign-in/email` came out as
+/// `/auth/sign-in/email`. Those paths are a published
+/// contract — relying parties and already-deployed clients call them —
+/// so renaming them is a breaking change that generating a surface
+/// should never make on its own. `#[http(path = "…")]` puts the path in
+/// the declaration, and the second half of this test is what keeps it
+/// honest.
 #[tokio::test]
 async fn the_generated_paths_are_the_whole_json_api() {
     let (config, auth) = engine().await;
@@ -686,18 +696,26 @@ async fn the_generated_paths_are_the_whole_json_api() {
         assert_ne!(status.as_u16(), 404, "{path} is mounted");
         assert_ne!(status.as_u16(), 405, "{path} takes POST");
     }
-    for old in [
+    // The contract, spelled out. Each of these is a path something
+    // outside this repository already calls: Task's central-auth
+    // resolver asks `/auth/session` on every request it authorizes, and
+    // the agent bootstrap script posts to `/auth/sign-up/email`. If a
+    // refactor moves one, it breaks a deployment rather than a test —
+    // which is exactly what happened once already.
+    for live in [
+        "/auth/sign-up/email",
         "/auth/sign-in/email",
         "/auth/session",
+        "/auth/refresh",
         "/auth/organization/list",
     ] {
         let status = http
-            .post(format!("{base}{old}"))
+            .post(format!("{base}{live}"))
             .send()
             .await
             .unwrap()
             .status();
-        assert_eq!(status.as_u16(), 404, "{old} is gone");
+        assert_ne!(status.as_u16(), 404, "{live} must stay mounted");
     }
 }
 

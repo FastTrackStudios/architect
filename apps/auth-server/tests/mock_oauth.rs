@@ -153,7 +153,7 @@ async fn sign_up(app: &axum::Router, email: &str) -> String {
     let response = app
         .clone()
         .oneshot(
-            Request::post("/auth/sign-up-email-password")
+            Request::post("/auth/sign-up/email")
                 .header(axum::http::header::CONTENT_TYPE, "application/json")
                 .body(Body::from(format!(
                     r#"{{"input":{{"email":"{email}","password":"correct-horse-battery-staple"}}}}"#

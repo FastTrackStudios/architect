@@ -95,22 +95,28 @@ pub trait AuthService {
     /// Create an email/password user and sign them in. Returns the
     /// freshly issued session bundle (the raw token is only returned
     /// here — only its hash is stored).
+    /// `/auth/sign-up/email` — the way in nests, so `…/google` and
+    /// `…/phone` can sit beside it rather than each inventing a name.
+    #[http(path = "sign-up/email")]
     async fn sign_up_email_password(
         &self,
         input: SignUpEmailPassword,
     ) -> Result<AuthSessionBundle, AuthFlowError>;
 
     /// Password sign-in for an existing user.
+    #[http(path = "sign-in/email")]
     async fn sign_in_email_password(
         &self,
         input: SignInEmailPassword,
     ) -> Result<AuthSessionBundle, AuthFlowError>;
 
     /// Validate a session token, returning the matching user + session.
+    #[http(path = "session")]
     async fn current_session(&self, token: String) -> Result<AuthSessionBundle, AuthFlowError>;
 
     /// Rotate a valid session: issue a fresh token with a new expiry
     /// and deactivate the old one.
+    #[http(path = "refresh")]
     async fn refresh_session(&self, token: String) -> Result<AuthSessionBundle, AuthFlowError>;
 
     /// Resolve a session token to its user — `current_session` minus

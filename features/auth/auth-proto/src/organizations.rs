@@ -94,6 +94,7 @@ pub trait OrganizationService {
     /// Every org this session belongs to, with the caller's role in each.
     /// One call, one round trip, and a relying party needs no membership
     /// table of its own.
+    #[http(path = "organization/list")]
     async fn list_organizations(
         &self,
         token: String,
@@ -102,6 +103,7 @@ pub trait OrganizationService {
     /// One org, if the caller is in it. A non-member gets the same answer
     /// as a missing org: membership is not something an outsider should
     /// be able to probe for.
+    #[http(path = "organization/get")]
     async fn get_organization(
         &self,
         token: String,
@@ -109,6 +111,7 @@ pub trait OrganizationService {
     ) -> Result<OrganizationBundle, AuthFlowError>;
 
     /// Who is in an org — people, not ids.
+    #[http(path = "organization/members")]
     async fn list_members(
         &self,
         token: String,
@@ -116,6 +119,7 @@ pub trait OrganizationService {
     ) -> Result<Vec<OrganizationMember>, AuthFlowError>;
 
     /// Create an org; the caller becomes its owner.
+    #[http(path = "organization/create")]
     async fn create_organization(
         &self,
         token: String,
@@ -123,6 +127,7 @@ pub trait OrganizationService {
     ) -> Result<OrganizationBundle, AuthFlowError>;
 
     /// Make one of the caller's orgs the session's active one.
+    #[http(path = "organization/set-active")]
     async fn set_active_organization(
         &self,
         token: String,
@@ -130,6 +135,7 @@ pub trait OrganizationService {
     ) -> Result<(), AuthFlowError>;
 
     /// Issue an invitation. The returned token is shown once.
+    #[http(path = "organization/invite-member")]
     async fn invite_member(
         &self,
         token: String,
@@ -137,6 +143,7 @@ pub trait OrganizationService {
     ) -> Result<IssuedInvitation, AuthFlowError>;
 
     /// Redeem an invitation as the signed-in caller, whoever was invited.
+    #[http(path = "organization/accept-invitation")]
     async fn accept_invitation(
         &self,
         token: String,
@@ -145,6 +152,7 @@ pub trait OrganizationService {
     ) -> Result<(), AuthFlowError>;
 
     /// Change a member's role.
+    #[http(path = "organization/update-member-role")]
     async fn update_member_role(
         &self,
         token: String,
