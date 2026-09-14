@@ -424,6 +424,44 @@ where
         None => return Ok(Redirect::to(&sign_in_url(&uri)).into_response()),
     };
 
+    // A browser whose cookie names a session that is gone — expired,
+    // revoked, or minted by a server since reset — is a browser with no
+    // session, and gets what one gets: the sign-in page, with the
+    // authorize request to come back to. Plus a removal for the dead
+    // cookie, or the browser keeps presenting it and every site that
+    // sends someone here gets `invalid_credentials` as JSON, with no way
+    // through short of clearing site data. A program with a dead bearer
+    // still gets the 401: it cannot render a login page.
+    //
+    // Checked HERE, on the session alone, and not by matching the
+    // engine's error afterwards: `authorize_oidc` answers an unknown
+    // client_id with the very same `InvalidCredentials`, and reading
+    // that as "dead cookie" turns a misconfigured client into an
+    // endless loop through the login page — the person signs in, is
+    // sent back here, is refused, is sent to sign in again. An unknown
+    // client with a live session must stay the 401 it always was.
+    if from_browser
+        && state
+            .auth
+            .current_session(CurrentSession {
+                token: session_token.clone(),
+            })
+            .await
+            .is_err()
+    {
+        return Ok((
+            StatusCode::SEE_OTHER,
+            [
+                (header::LOCATION, sign_in_url(&uri)),
+                (
+                    header::SET_COOKIE,
+                    state.cookie.removal_cookie().to_string(),
+                ),
+            ],
+        )
+            .into_response());
+    }
+
     let authorization = state
         .auth
         .authorize_oidc(AuthorizeOidc {
@@ -460,27 +498,6 @@ where
                 code_challenge: params.code_challenge,
                 code_challenge_method: params.code_challenge_method,
             }));
-        }
-        // A browser whose cookie names a session that is gone — expired,
-        // revoked, or minted by a server since reset — is a browser with
-        // no session, and gets what one gets: the sign-in page, with the
-        // authorize request to come back to. Plus a removal for the dead
-        // cookie, or the browser keeps presenting it and every site that
-        // sends someone here gets `invalid_credentials` as JSON, with no
-        // way through short of clearing site data. A program with a dead
-        // bearer still gets the 401: it cannot render a login page.
-        Err(AuthFlowError::InvalidCredentials | AuthFlowError::SessionExpired) if from_browser => {
-            return Ok((
-                StatusCode::SEE_OTHER,
-                [
-                    (header::LOCATION, sign_in_url(&uri)),
-                    (
-                        header::SET_COOKIE,
-                        state.cookie.removal_cookie().to_string(),
-                    ),
-                ],
-            )
-                .into_response());
         }
         Err(error) => return Err(ApiError::from(error)),
     };
