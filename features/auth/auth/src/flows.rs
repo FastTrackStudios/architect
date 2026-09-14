@@ -3527,6 +3527,24 @@ pub mod email_password {
                 Ok(())
             }
 
+            async fn list_pending_invitations_for_email(
+                &self,
+                email: &str,
+            ) -> Result<Vec<AuthInvitation>, AuthFlowError> {
+                let inner = self.inner.lock().expect("lock memory storage");
+                let mut out: Vec<AuthInvitation> = inner
+                    .invitations
+                    .values()
+                    .filter(|invitation| {
+                        invitation.email == email
+                            && invitation.status == auth_proto::InvitationStatus::Pending.as_str()
+                    })
+                    .cloned()
+                    .collect();
+                out.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                Ok(out)
+            }
+
             async fn list_invitations_by_organization(
                 &self,
                 organization_id: Uuid,
@@ -13817,14 +13835,15 @@ pub mod organizations {
 
     use crate::{
         AcceptInvitation, AddTeamMember, ArchitectAuth, AuthStorage, AuthorizeOrganizationAction,
-        CancelInvitation, CreateInvitation, CreateInviteLink, CreateOrganization,
+        CancelInvitation, ClaimInvitation, CreateInvitation, CreateInviteLink, CreateOrganization,
         CreateOrganizationRole, CreateTeam, DeleteOrganization, DeleteOrganizationRole, DeleteTeam,
         GetOrganization, InvitationPreview, InvitationToken, InviteLinkPreview, InviteLinkToken,
-        LeaveOrganization, ListInvitations, ListInviteLinks, ListMembers, ListOrganizationRoles,
-        ListOrganizations, ListTeamMembers, ListTeams, OrganizationBundle, OrganizationMember,
-        PreviewInvitation, PreviewInviteLink, RedeemInviteLink, RejectInvitation, RemoveMember,
-        RemoveTeamMember, RequireOrganizationRole, RevokeInviteLink, SetActiveOrganization,
-        SetMemberRole, UpdateOrganization, UpdateOrganizationRole, UpdateTeam,
+        LeaveOrganization, ListInvitations, ListInviteLinks, ListMembers, ListMyInvitations,
+        ListOrganizationRoles, ListOrganizations, ListTeamMembers, ListTeams, OrganizationBundle,
+        OrganizationMember, PreviewInvitation, PreviewInviteLink, RedeemInviteLink,
+        RejectInvitation, RemoveMember, RemoveTeamMember, RequireOrganizationRole,
+        RevokeInviteLink, SetActiveOrganization, SetMemberRole, UpdateOrganization,
+        UpdateOrganizationRole, UpdateTeam,
         commands::CurrentSession,
         crypto::{generate_token, hash_token},
     };
@@ -14166,6 +14185,35 @@ pub mod organizations {
                 .await
         }
 
+        /// What the signed-in person has been invited to, anywhere.
+        ///
+        /// No organization parameter and no permission check, because
+        /// the answer is scoped by the caller's own address: the session
+        /// says who they are, and they see invitations addressed to them
+        /// and nothing else. That is the security argument too — the
+        /// address comes from the validated session, never from the
+        /// caller, so this cannot be pointed at somebody else's mail.
+        ///
+        /// An account with no address (a guest) is invited to nothing
+        /// rather than an error: there is no address an invitation could
+        /// have been sent to.
+        pub async fn list_my_invitations(
+            &self,
+            input: ListMyInvitations,
+        ) -> Result<Vec<auth_proto::AuthInvitation>, AuthFlowError> {
+            let session = self
+                .current_session(CurrentSession {
+                    token: input.session_token,
+                })
+                .await?;
+            let Some(email) = session.user.email else {
+                return Ok(Vec::new());
+            };
+            self.storage
+                .list_pending_invitations_for_email(&email)
+                .await
+        }
+
         // r[impl auth.org.invite-status]
         pub async fn cancel_invitation(
             &self,
@@ -14370,6 +14418,81 @@ pub mod organizations {
                     invitation.id,
                     auth_proto::InvitationStatus::Accepted.as_str().into(),
                     verification.id,
+                )
+                .await
+        }
+
+        /// Accept an invitation addressed to you, without the link.
+        ///
+        /// [`Self::accept_invitation`] proves entitlement with the
+        /// emailed token, which is right for an invite *link*: the token
+        /// is the only thing separating its holder from a stranger. It
+        /// is the wrong proof for a named invitation reached from the
+        /// account page, where there is no link in hand and the person
+        /// is already signed in.
+        ///
+        /// So this proves it the other way round — the invitation's
+        /// address must equal the session's. That is strictly stronger
+        /// than the token path, which never checks the address at all:
+        /// anyone holding a link can accept an invitation meant for
+        /// somebody else. Here only the named person can, and a lost
+        /// link stops being a lost invitation.
+        ///
+        /// The verification row is left to expire rather than deleted.
+        /// The invitation is marked accepted, so the token it belongs to
+        /// cannot be redeemed through the other path either.
+        pub async fn claim_invitation(&self, input: ClaimInvitation) -> Result<(), AuthFlowError> {
+            let session = self
+                .current_session(CurrentSession {
+                    token: input.session_token,
+                })
+                .await?;
+            let invitation = self
+                .storage
+                .find_invitation_by_id(input.invitation_id)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            if invitation.status != auth_proto::InvitationStatus::Pending.as_str() {
+                return Err(AuthFlowError::InvalidInput(
+                    "invitation is not pending".into(),
+                ));
+            }
+            if invitation.expires_at <= Utc::now() {
+                return Err(AuthFlowError::InvalidCredentials);
+            }
+            // The address is the entitlement. Compared case-insensitively
+            // because an operator typing an invitation and an identity
+            // provider reporting an address are two different people's
+            // idea of capitalisation.
+            let addressed_to_me = session
+                .user
+                .email
+                .as_deref()
+                .is_some_and(|mine| mine.eq_ignore_ascii_case(&invitation.email));
+            if !addressed_to_me {
+                return Err(AuthFlowError::InvalidCredentials);
+            }
+            if self
+                .storage
+                .find_member(invitation.organization_id, session.user.id)
+                .await?
+                .is_some()
+            {
+                return Err(AuthFlowError::InvalidInput(
+                    "organization member already exists".into(),
+                ));
+            }
+            self.storage
+                .create_member(AuthMemberCreate {
+                    organization_id: invitation.organization_id,
+                    user_id: session.user.id,
+                    role: invitation.role,
+                })
+                .await?;
+            self.storage
+                .update_invitation_status(
+                    invitation.id,
+                    auth_proto::InvitationStatus::Accepted.as_str().into(),
                 )
                 .await
         }

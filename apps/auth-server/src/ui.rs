@@ -46,7 +46,13 @@ use crate::social::Provider;
 
 /// Where to send a browser that has just signed in, when the request
 /// carried no `return_to` of its own.
-const DEFAULT_AFTER_SIGN_IN: &str = "/";
+///
+/// `/account`, not `/`. `/` was a 404, so somebody who signed in
+/// directly — rather than being bounced here by an app that set
+/// `return_to` — landed on a dead end at the exact moment the sign-in
+/// had worked. `/` now redirects here anyway, but naming the
+/// destination beats relying on that hop.
+const DEFAULT_AFTER_SIGN_IN: &str = "/account";
 
 /// Mount the sign-in and sign-up pages.
 ///
@@ -73,6 +79,13 @@ where
             "/reset-password",
             get(reset_password_page).post(reset_password_submit::<S>),
         )
+        // The front door. Typing the bare host is what somebody does
+        // when they want to manage their account, and it answered 404 —
+        // so the one URL a person is most likely to guess was the only
+        // one that told them nothing. `/account` decides from there:
+        // signed in, it renders; signed out, it bounces to `/login` and
+        // comes back afterwards.
+        .route("/", get(|| async { Redirect::to("/account") }))
         .route("/verify-email", get(verify_email_page::<S>))
         // The signed-in person's own page: which providers are linked,
         // and the buttons to link or unlink them.
@@ -1076,7 +1089,7 @@ fn Page(
 
 #[cfg(test)]
 mod tests {
-    use super::{Screen, render, safe_return_to};
+    use super::{DEFAULT_AFTER_SIGN_IN, Screen, render, safe_return_to};
 
     /// The open-redirect fence. Each of these, forwarded verbatim in a
     /// `Location:`, sends a freshly-signed-in person to someone else's
@@ -1098,7 +1111,7 @@ mod tests {
         ] {
             assert_eq!(
                 safe_return_to(Some(hostile)),
-                "/",
+                DEFAULT_AFTER_SIGN_IN,
                 "{hostile} should not survive"
             );
         }
@@ -1142,8 +1155,11 @@ mod tests {
 
     #[test]
     fn a_missing_return_to_is_the_default() {
-        assert_eq!(safe_return_to(None), "/");
-        assert_eq!(safe_return_to(Some("   ")), "/");
+        // Against the constant, not a literal: the destination moved
+        // from `/` to `/account` once `/` stopped being a 404, and a
+        // test that spells it out again is a second place to forget.
+        assert_eq!(safe_return_to(None), DEFAULT_AFTER_SIGN_IN);
+        assert_eq!(safe_return_to(Some("   ")), DEFAULT_AFTER_SIGN_IN);
     }
 
     /// The form has to carry `return_to` forward, or the resumed

@@ -192,4 +192,49 @@ pub trait OrganizationService {
         token: String,
         organization_id: Uuid,
     ) -> Result<(), AuthFlowError>;
+
+    /// Rename an organization, or change its slug.
+    ///
+    /// Both optional and absent means "leave it alone", so renaming
+    /// does not require restating the slug and risking a typo in the
+    /// field nobody meant to touch.
+    #[http(path = "organization/update")]
+    async fn update_organization(
+        &self,
+        token: String,
+        organization_id: Uuid,
+        name: Option<String>,
+        slug: Option<String>,
+    ) -> Result<AuthOrganization, AuthFlowError>;
+
+    /// What the caller has been invited to, anywhere.
+    ///
+    /// Scoped by the session's own address, so it needs no organization
+    /// and grants no permission: you see invitations sent to you and
+    /// nothing else. Without this an invitation exists only in the link
+    /// it was mailed in — a lost link is a lost invitation, and no
+    /// account page can show that something is waiting.
+    #[http(path = "organization/my-invitations")]
+    async fn list_my_invitations(
+        &self,
+        token: String,
+    ) -> Result<Vec<AuthInvitation>, AuthFlowError>;
+
+    /// Accept an invitation addressed to you, without its token.
+    ///
+    /// The counterpart to [`Self::accept_invitation`], which proves
+    /// entitlement with the emailed secret. That is the right proof for
+    /// a link — the token is all that separates its holder from a
+    /// stranger — and the wrong one from an account page, where the
+    /// person is signed in and holds no link.
+    ///
+    /// This proves it by address instead, which is strictly stronger:
+    /// the token path never checks who the invitation names, so anyone
+    /// with the link can take it. Here only the named person can.
+    #[http(path = "organization/claim-invitation")]
+    async fn claim_invitation(
+        &self,
+        token: String,
+        invitation_id: Uuid,
+    ) -> Result<(), AuthFlowError>;
 }

@@ -1148,6 +1148,53 @@ pub mod vox {
                 })
                 .await
         }
+
+        async fn update_organization(
+            &self,
+            token: String,
+            organization_id: Uuid,
+            name: Option<String>,
+            slug: Option<String>,
+        ) -> Result<auth_proto::AuthOrganization, AuthFlowError> {
+            self.auth
+                .update_organization(crate::UpdateOrganization {
+                    session_token: token,
+                    organization_id,
+                    name,
+                    slug,
+                    // Absent, not cleared. The wire shape carries only
+                    // the two fields anybody renames by; `None` here
+                    // means "leave it alone", where `Some(None)` would
+                    // wipe a logo nobody mentioned.
+                    logo: None,
+                    metadata_json: None,
+                })
+                .await
+        }
+
+        async fn list_my_invitations(
+            &self,
+            token: String,
+        ) -> Result<Vec<auth_proto::AuthInvitation>, AuthFlowError> {
+            self.auth
+                .list_my_invitations(crate::ListMyInvitations {
+                    session_token: token,
+                })
+                .await
+        }
+
+        async fn claim_invitation(
+            &self,
+            token: String,
+            invitation_id: Uuid,
+        ) -> Result<(), AuthFlowError> {
+            self.auth
+                .claim_invitation(crate::ClaimInvitation {
+                    session_token: token,
+                    invitation_id,
+                })
+                .await
+        }
     }
 
     fn org_bundle(bundle: crate::OrganizationBundle) -> auth_proto::OrganizationBundle {

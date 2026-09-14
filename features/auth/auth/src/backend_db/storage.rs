@@ -1598,6 +1598,20 @@ impl AuthStorage for AuthSeaOrmStorage {
             .map_err(map_db_err)
     }
 
+    async fn list_pending_invitations_for_email(
+        &self,
+        email: &str,
+    ) -> Result<Vec<AuthInvitation>, AuthFlowError> {
+        AuthInvitationEntity::find()
+            .filter(AuthInvitationColumn::Email.eq(email))
+            .filter(AuthInvitationColumn::Status.eq(auth_proto::InvitationStatus::Pending.as_str()))
+            .order_by_desc(AuthInvitationColumn::CreatedAt)
+            .all(&self.db)
+            .await
+            .map(|rows| rows.into_iter().map(AuthInvitation::from).collect())
+            .map_err(map_db_err)
+    }
+
     async fn find_pending_invitation(
         &self,
         organization_id: Uuid,
