@@ -325,6 +325,61 @@ async fn authorize_with_a_bearer_token_still_gets_401() {
 
 /// The pages have to actually be mounted — the whole redirect is a dead
 /// end if `/login` 404s.
+/// The other half of the stale-cookie rule. The engine answers an
+/// unknown `client_id` with the same `InvalidCredentials` a dead session
+/// gets, and if the handler read that as "dead cookie" a misconfigured
+/// client would send a signed-in person round the login page forever:
+/// sign in, come back here, be refused, sign in again. A live session
+/// with an unknown client is the 401 it always was, and the cookie
+/// stays.
+#[tokio::test]
+async fn authorize_with_a_live_session_and_an_unknown_client_is_401_not_a_login_loop() {
+    let app = app().await;
+    let token = signed_up(&app, "bee@example.test").await;
+    let response = app
+        .oneshot(
+            Request::get(
+                "/oauth2/authorize?client_id=no-such-client\
+                 &redirect_uri=https://nowhere.example/cb\
+                 &response_type=code&scope=openid&state=xyz",
+            )
+            .header(header::COOKIE, format!("architect-auth.session={token}"))
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .expect("request");
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert!(
+        response.headers().get(header::SET_COOKIE).is_none(),
+        "a live session must not be cleared over somebody else's misconfiguration"
+    );
+}
+
+async fn signed_up(app: &axum::Router, email: &str) -> String {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/sign-up/email")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(format!(
+                    r#"{{"input":{{"email":"{email}","password":"correct horse battery staple"}}}}"#
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    json["token"].as_str().unwrap().to_owned()
+}
+
 #[tokio::test]
 async fn the_sign_in_and_sign_up_pages_are_served() {
     for path in ["/login", "/sign-up"] {
