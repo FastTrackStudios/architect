@@ -614,6 +614,129 @@ async fn org_invitations_and_roles() {
     .await;
 }
 
+/// Handing an organization over: promote a successor, then step out.
+///
+/// This is how somebody who is not the intended owner can still do the
+/// setup — an operator, or an agent — and leave the organization
+/// belonging to the right person with no trace of the creator.
+///
+/// The order is the safety. Promote first, leave second, so the org is
+/// never ownerless in between, and the last-owner rule enforces it:
+/// leaving while sole owner is refused, which this asserts before doing
+/// the handover properly.
+async fn an_owner_hands_the_organization_over<A: AuthService, O: OrganizationService>(
+    auth: &A,
+    orgs: &O,
+) {
+    let creator = signed_up(auth, "creator@example.com").await;
+    let heir = signed_up(auth, "heir@example.com").await;
+    let org = orgs
+        .create_organization(creator.token.clone(), new_org("Rockstars", "rockstars"))
+        .await
+        .expect("create");
+
+    assert!(
+        orgs.leave_organization(creator.token.clone(), org.organization.id)
+            .await
+            .is_err(),
+        "the last owner must not be able to leave — a handover that failed \
+         halfway would strand the org with nobody able to administer it"
+    );
+
+    let issued = orgs
+        .invite_member(
+            creator.token.clone(),
+            Invite {
+                organization_id: org.organization.id,
+                email: "heir@example.com".into(),
+                role: "owner".into(),
+                expires_at: None,
+            },
+        )
+        .await
+        .expect("invite as owner");
+    orgs.accept_invitation(heir.token.clone(), issued.invitation.id, issued.token)
+        .await
+        .expect("accept");
+
+    // Two owners now, so the creator can step out.
+    orgs.leave_organization(creator.token.clone(), org.organization.id)
+        .await
+        .expect("leave once a second owner exists");
+
+    let theirs = orgs
+        .list_organizations(heir.token.clone())
+        .await
+        .expect("heir's orgs");
+    assert_eq!(theirs.len(), 1);
+    assert_eq!(theirs[0].organization.slug, "rockstars");
+    assert_eq!(theirs[0].membership.role, "owner");
+
+    let members = orgs
+        .list_members(heir.token, org.organization.id)
+        .await
+        .expect("members");
+    assert_eq!(members.len(), 1, "the creator is gone: {members:?}");
+    assert_eq!(members[0].user.id, heir.user.id);
+
+    let mine = orgs
+        .list_organizations(creator.token)
+        .await
+        .expect("creator's orgs");
+    assert!(mine.is_empty(), "{mine:?}");
+}
+
+#[tokio::test]
+async fn org_ownership_transfers() {
+    on_every_transport(scenario!(an_owner_hands_the_organization_over)).await;
+}
+
+/// Removing somebody else is a different permission from leaving.
+async fn an_owner_removes_a_member<A: AuthService, O: OrganizationService>(auth: &A, orgs: &O) {
+    let owner = signed_up(auth, "boss@example.com").await;
+    let member = signed_up(auth, "staff@example.com").await;
+    let org = orgs
+        .create_organization(owner.token.clone(), new_org("Team", "team"))
+        .await
+        .expect("create");
+    let issued = orgs
+        .invite_member(
+            owner.token.clone(),
+            Invite {
+                organization_id: org.organization.id,
+                email: "staff@example.com".into(),
+                role: "member".into(),
+                expires_at: None,
+            },
+        )
+        .await
+        .expect("invite");
+    orgs.accept_invitation(member.token.clone(), issued.invitation.id, issued.token)
+        .await
+        .expect("accept");
+
+    assert!(
+        orgs.remove_member(member.token.clone(), org.organization.id, owner.user.id)
+            .await
+            .is_err(),
+        "`member:delete` is not a plain member's to use"
+    );
+
+    orgs.remove_member(owner.token, org.organization.id, member.user.id)
+        .await
+        .expect("owner removes a member");
+    let mine = orgs
+        .list_organizations(member.token)
+        .await
+        .expect("removed member's orgs");
+    assert!(mine.is_empty(), "{mine:?}");
+}
+
+#[tokio::test]
+async fn org_members_can_be_removed() {
+    on_every_transport(scenario!(an_owner_removes_a_member)).await;
+}
+
 // ── The HTTP face's own affordances ────────────────────────────────────
 
 /// Over HTTP the session token may travel as `Authorization: Bearer`

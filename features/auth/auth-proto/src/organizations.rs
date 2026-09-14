@@ -152,6 +152,14 @@ pub trait OrganizationService {
     ) -> Result<(), AuthFlowError>;
 
     /// Change a member's role.
+    ///
+    /// Promoting somebody to `owner` is half of handing an organization
+    /// over; [`Self::leave_organization`] is the other half. Together
+    /// they are a transfer: make them an owner, then stop being one.
+    /// There is no single "transfer" verb, because two steps in this
+    /// order mean the organization is never ownerless in between — and
+    /// a verb that did both would have to invent an answer for the case
+    /// where the second half fails.
     #[http(path = "organization/update-member-role")]
     async fn update_member_role(
         &self,
@@ -160,4 +168,28 @@ pub trait OrganizationService {
         user_id: Uuid,
         role: String,
     ) -> Result<AuthMember, AuthFlowError>;
+
+    /// Remove somebody else. Needs `member:delete`.
+    #[http(path = "organization/remove-member")]
+    async fn remove_member(
+        &self,
+        token: String,
+        organization_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<(), AuthFlowError>;
+
+    /// Stop being a member yourself.
+    ///
+    /// Deliberately not the same call as [`Self::remove_member`]:
+    /// removing somebody else needs permission over them, and nobody
+    /// needs permission to leave a room. The last-owner rule applies to
+    /// both, so an organization cannot be left ownerless — the final
+    /// owner has to promote a successor before stepping out, which is
+    /// exactly what makes the pair above a safe transfer.
+    #[http(path = "organization/leave")]
+    async fn leave_organization(
+        &self,
+        token: String,
+        organization_id: Uuid,
+    ) -> Result<(), AuthFlowError>;
 }
