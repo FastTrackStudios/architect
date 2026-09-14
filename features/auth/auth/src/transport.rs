@@ -484,6 +484,29 @@ impl AuthCookieConfig {
         }
         cookie.build()
     }
+
+    /// The `Set-Cookie` that removes the session cookie from a browser:
+    /// same name, path and domain as [`Self::session_cookie`] — a removal
+    /// only matches on those — with an empty value and `Max-Age=0`.
+    ///
+    /// For a browser presenting a cookie the server no longer recognises
+    /// (a session that expired, or was revoked). Left in place, that
+    /// cookie rides every request and every answer is "invalid
+    /// credentials"; the person cannot reach the sign-in page from the
+    /// site that sent them, because the server sees the cookie before
+    /// it sees them.
+    pub fn removal_cookie(&self) -> Cookie<'static> {
+        let mut cookie = Cookie::build((self.name.clone(), String::new()))
+            .secure(self.secure)
+            .http_only(self.http_only)
+            .same_site(SameSite::from(self.same_site))
+            .path(self.path.clone())
+            .max_age(Duration::ZERO);
+        if let Some(domain) = self.domain.clone() {
+            cookie = cookie.domain(domain);
+        }
+        cookie.build()
+    }
 }
 
 // r[impl auth.transport.error-mapping]
