@@ -80,7 +80,16 @@ pub struct Invite {
 }
 
 // r[impl auth.transport.vox-schema]
-#[architect::service]
+//
+// `path = "auth"` rather than the default `organization`: everything this
+// server serves lives under `/auth`, and a relying party already told
+// "the auth surface is /auth" should not have to learn that one group of
+// it sits somewhere else. The method names already carry the noun
+// (`list-organizations`, `create-organization`), so the extra segment
+// bought nothing — and `path` takes a single segment by design, so
+// `auth/organization` would have meant nesting the router by hand at the
+// mount site to say the same thing.
+#[architect::service(path = "auth")]
 pub trait OrganizationService {
     /// Every org this session belongs to, with the caller's role in each.
     /// One call, one round trip, and a relying party needs no membership
