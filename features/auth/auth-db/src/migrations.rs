@@ -10,6 +10,7 @@ impl MigratorTrait for Migrator {
         vec![
             Box::new(m20260513_000001_create_auth_tables::Migration),
             Box::new(m20260809_000001_create_email_history::Migration),
+            Box::new(m20260914_000001_create_agent_links::Migration),
         ]
     }
 }
@@ -1139,6 +1140,107 @@ mod m20260809_000001_create_email_history {
         NewEmail,
         ChangedBy,
         Reason,
+        CreatedAt,
+    }
+}
+
+/// The linked-agents table, for databases that were created before it
+/// existed.
+///
+/// `auth_agent_links` was first added to the initial migration, which is
+/// right for a fresh database and does nothing for one that has already
+/// run it — and every production database had. So the issuer that
+/// shipped it answered every organization list with "relation does not
+/// exist" until the table was created by hand. This migration is what
+/// should have shipped with it; `if_not_exists` throughout, so it is a
+/// no-op on a fresh database and on one where the table was made by hand.
+mod m20260914_000001_create_agent_links {
+    use sea_orm_migration::prelude::*;
+
+    pub struct Migration;
+
+    impl MigrationName for Migration {
+        fn name(&self) -> &'static str {
+            "m20260914_000001_create_agent_links"
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl MigrationTrait for Migration {
+        async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .create_table(
+                    Table::create()
+                        .table(AuthAgentLinks::Table)
+                        .if_not_exists()
+                        .col(
+                            ColumnDef::new(AuthAgentLinks::Id)
+                                .uuid()
+                                .not_null()
+                                .primary_key(),
+                        )
+                        .col(
+                            ColumnDef::new(AuthAgentLinks::OwnerUserId)
+                                .uuid()
+                                .not_null(),
+                        )
+                        .col(
+                            ColumnDef::new(AuthAgentLinks::AgentUserId)
+                                .uuid()
+                                .not_null(),
+                        )
+                        .col(ColumnDef::new(AuthAgentLinks::MaxRole).string().not_null())
+                        .col(
+                            ColumnDef::new(AuthAgentLinks::CreatedAt)
+                                .timestamp_with_time_zone()
+                                .not_null(),
+                        )
+                        .to_owned(),
+                )
+                .await?;
+            manager
+                .create_index(
+                    Index::create()
+                        .name("idx_auth_agent_links_owner_agent")
+                        .table(AuthAgentLinks::Table)
+                        .col(AuthAgentLinks::OwnerUserId)
+                        .col(AuthAgentLinks::AgentUserId)
+                        .unique()
+                        .if_not_exists()
+                        .to_owned(),
+                )
+                .await?;
+            manager
+                .create_index(
+                    Index::create()
+                        .name("idx_auth_agent_links_agent")
+                        .table(AuthAgentLinks::Table)
+                        .col(AuthAgentLinks::AgentUserId)
+                        .if_not_exists()
+                        .to_owned(),
+                )
+                .await
+        }
+
+        async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .drop_table(
+                    Table::drop()
+                        .table(AuthAgentLinks::Table)
+                        .if_exists()
+                        .to_owned(),
+                )
+                .await
+        }
+    }
+
+    #[derive(Iden)]
+    enum AuthAgentLinks {
+        Table,
+        Id,
+        OwnerUserId,
+        AgentUserId,
+        MaxRole,
         CreatedAt,
     }
 }
