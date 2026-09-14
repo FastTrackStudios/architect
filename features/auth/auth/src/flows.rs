@@ -2459,6 +2459,7 @@ pub mod email_password {
             organizations: HashMap<Uuid, AuthOrganization>,
             organization_ids_by_slug: HashMap<String, Uuid>,
             members: HashMap<(Uuid, Uuid), AuthMember>,
+            agent_links: HashMap<Uuid, auth_proto::AuthAgentLink>,
             organization_roles: HashMap<(Uuid, String), AuthOrganizationRole>,
             teams: HashMap<Uuid, AuthTeam>,
             team_members: HashMap<(Uuid, Uuid), AuthTeamMember>,
@@ -3680,6 +3681,66 @@ pub mod email_password {
                     .members
                     .insert((member.organization_id, member.user_id), member.clone());
                 Ok(member)
+            }
+
+            async fn create_agent_link(
+                &self,
+                input: auth_proto::AuthAgentLinkCreate,
+            ) -> Result<auth_proto::AuthAgentLink, AuthFlowError> {
+                let mut inner = self.inner.lock().expect("lock memory storage");
+                let link = auth_proto::AuthAgentLink {
+                    id: Uuid::new_v4(),
+                    owner_user_id: input.owner_user_id,
+                    agent_user_id: input.agent_user_id,
+                    max_role: input.max_role,
+                    created_at: Utc::now(),
+                };
+                inner.agent_links.insert(link.id, link.clone());
+                Ok(link)
+            }
+
+            async fn list_agent_links_for_owner(
+                &self,
+                owner_user_id: Uuid,
+            ) -> Result<Vec<auth_proto::AuthAgentLink>, AuthFlowError> {
+                let inner = self.inner.lock().expect("lock memory storage");
+                let mut out: Vec<_> = inner
+                    .agent_links
+                    .values()
+                    .filter(|link| link.owner_user_id == owner_user_id)
+                    .cloned()
+                    .collect();
+                out.sort_by_key(|link| link.created_at);
+                Ok(out)
+            }
+
+            async fn list_agent_links_for_agent(
+                &self,
+                agent_user_id: Uuid,
+            ) -> Result<Vec<auth_proto::AuthAgentLink>, AuthFlowError> {
+                let inner = self.inner.lock().expect("lock memory storage");
+                Ok(inner
+                    .agent_links
+                    .values()
+                    .filter(|link| link.agent_user_id == agent_user_id)
+                    .cloned()
+                    .collect())
+            }
+
+            async fn delete_agent_link(
+                &self,
+                id: Uuid,
+                owner_user_id: Uuid,
+            ) -> Result<bool, AuthFlowError> {
+                let mut inner = self.inner.lock().expect("lock memory storage");
+                let owned = inner
+                    .agent_links
+                    .get(&id)
+                    .is_some_and(|link| link.owner_user_id == owner_user_id);
+                if owned {
+                    inner.agent_links.remove(&id);
+                }
+                Ok(owned)
             }
 
             async fn find_member(
@@ -13838,19 +13899,19 @@ pub mod organizations {
         CancelInvitation, ClaimInvitation, CreateInvitation, CreateInviteLink, CreateOrganization,
         CreateOrganizationRole, CreateTeam, DeleteOrganization, DeleteOrganizationRole, DeleteTeam,
         GetOrganization, InvitationPreview, InvitationToken, InviteLinkPreview, InviteLinkToken,
-        LeaveOrganization, ListInvitations, ListInviteLinks, ListMembers, ListMyInvitations,
-        ListOrganizationRoles, ListOrganizations, ListTeamMembers, ListTeams, OrganizationBundle,
-        OrganizationMember, PreviewInvitation, PreviewInviteLink, RedeemInviteLink,
-        RejectInvitation, RemoveMember, RemoveTeamMember, RequireOrganizationRole,
-        RevokeInviteLink, SetActiveOrganization, SetMemberRole, UpdateOrganization,
-        UpdateOrganizationRole, UpdateTeam,
+        LeaveOrganization, LinkAgent, LinkedAgent, ListAgents, ListInvitations, ListInviteLinks,
+        ListMembers, ListMyInvitations, ListOrganizationRoles, ListOrganizations, ListTeamMembers,
+        ListTeams, OrganizationBundle, OrganizationMember, PreviewInvitation, PreviewInviteLink,
+        RedeemInviteLink, RejectInvitation, RemoveMember, RemoveTeamMember,
+        RequireOrganizationRole, RevokeInviteLink, SetActiveOrganization, SetMemberRole,
+        UnlinkAgent, UpdateOrganization, UpdateOrganizationRole, UpdateTeam,
         commands::CurrentSession,
         crypto::{generate_token, hash_token},
     };
     use auth_proto::{
-        AuthFlowError, AuthInvitationCreate, AuthMember, AuthMemberCreate, AuthOrganization,
-        AuthOrganizationCreate, AuthOrganizationRole, AuthOrganizationRoleCreate, AuthTeam,
-        AuthTeamCreate, AuthTeamMember, AuthTeamMemberCreate,
+        AuthAgentLinkCreate, AuthFlowError, AuthInvitationCreate, AuthMember, AuthMemberCreate,
+        AuthOrganization, AuthOrganizationCreate, AuthOrganizationRole, AuthOrganizationRoleCreate,
+        AuthTeam, AuthTeamCreate, AuthTeamMember, AuthTeamMemberCreate,
     };
 
     impl<S> ArchitectAuth<S>
@@ -14001,7 +14062,7 @@ pub mod organizations {
             // may call — see `organization_caller`. Everything that
             // *changes* an organization still asks for a session.
             let caller = self.organization_caller(&input.session_token).await?;
-            Ok(self
+            let mut bundles: Vec<OrganizationBundle> = self
                 .storage
                 .list_organizations_for_user(caller.id)
                 .await?
@@ -14010,7 +14071,41 @@ pub mod organizations {
                     organization,
                     membership,
                 })
-                .collect())
+                .collect();
+
+            // r[impl auth.org.linked-agent]
+            // What the caller inherits as somebody's agent. Their own
+            // membership in an organization always wins: it was granted
+            // to them by name, and a link must not quietly lower it.
+            // Everything else comes across with the role capped, and
+            // under the caller's own id — the membership is theirs to
+            // act on; only its origin is the owner's.
+            for link in self.storage.list_agent_links_for_agent(caller.id).await? {
+                for (organization, owned) in self
+                    .storage
+                    .list_organizations_for_user(link.owner_user_id)
+                    .await?
+                {
+                    if bundles
+                        .iter()
+                        .any(|bundle| bundle.organization.id == organization.id)
+                    {
+                        continue;
+                    }
+                    let membership = AuthMember {
+                        id: owned.id,
+                        organization_id: owned.organization_id,
+                        user_id: caller.id,
+                        role: inherited_role(&owned.role, &link.max_role).to_owned(),
+                        created_at: link.created_at,
+                    };
+                    bundles.push(OrganizationBundle {
+                        organization,
+                        membership,
+                    });
+                }
+            }
+            Ok(bundles)
         }
 
         // r[impl auth.org.active-session]
@@ -14863,6 +14958,98 @@ pub mod organizations {
             self.storage.list_team_members(input.team_id).await
         }
 
+        /// Let another account act wherever the caller can, up to
+        /// `max_role`. See [`auth_proto::AuthAgentLink`] for why.
+        pub async fn link_agent(
+            &self,
+            input: LinkAgent,
+        ) -> Result<auth_proto::AuthAgentLink, AuthFlowError> {
+            let session = self
+                .current_session(CurrentSession {
+                    token: input.session_token,
+                })
+                .await?;
+            let max_role = input.max_role.trim().to_ascii_lowercase();
+            if !matches!(max_role.as_str(), "admin" | "member") {
+                return Err(AuthFlowError::InvalidInput(
+                    "max_role must be admin or member".into(),
+                ));
+            }
+            let email = normalize_email(&input.agent_email)?;
+            let agent = self
+                .storage
+                .find_user_by_email(&email)
+                .await?
+                .ok_or_else(|| AuthFlowError::InvalidInput("no account has that address".into()))?;
+            if agent.id == session.user.id {
+                return Err(AuthFlowError::InvalidInput(
+                    "an account cannot be its own agent".into(),
+                ));
+            }
+            let already = self
+                .storage
+                .list_agent_links_for_owner(session.user.id)
+                .await?
+                .into_iter()
+                .any(|link| link.agent_user_id == agent.id);
+            if already {
+                return Err(AuthFlowError::InvalidInput(
+                    "that account is already linked".into(),
+                ));
+            }
+            self.storage
+                .create_agent_link(AuthAgentLinkCreate {
+                    owner_user_id: session.user.id,
+                    agent_user_id: agent.id,
+                    max_role,
+                })
+                .await
+        }
+
+        /// Withdraw a link. Only its owner can.
+        pub async fn unlink_agent(&self, input: UnlinkAgent) -> Result<(), AuthFlowError> {
+            let session = self
+                .current_session(CurrentSession {
+                    token: input.session_token,
+                })
+                .await?;
+            if self
+                .storage
+                .delete_agent_link(input.link_id, session.user.id)
+                .await?
+            {
+                Ok(())
+            } else {
+                Err(AuthFlowError::PermissionDenied)
+            }
+        }
+
+        /// The agents the caller has linked, with who they are.
+        pub async fn list_agents(
+            &self,
+            input: ListAgents,
+        ) -> Result<Vec<LinkedAgent>, AuthFlowError> {
+            let session = self
+                .current_session(CurrentSession {
+                    token: input.session_token,
+                })
+                .await?;
+            let links = self
+                .storage
+                .list_agent_links_for_owner(session.user.id)
+                .await?;
+            let mut out = Vec::with_capacity(links.len());
+            for link in links {
+                let agent = self.storage.find_user_by_id(link.agent_user_id).await?;
+                out.push(LinkedAgent {
+                    agent_email: agent.as_ref().and_then(|user| user.email.clone()),
+                    agent_name: agent.and_then(|user| user.name),
+                    link,
+                });
+            }
+            Ok(out)
+        }
+
         /// The account behind a credential presented to the *read* side of
         /// the organization surface.
         ///
@@ -15040,6 +15227,63 @@ pub mod organizations {
         Ok(actions
             .iter()
             .any(|value| value.as_str().is_some_and(|candidate| candidate == action)))
+    }
+
+    /// The role an agent holds through a link: the owner's, lowered to
+    /// the link's cap where the owner's is higher. Owner never comes
+    /// across — a cap of `owner` is not offered and would read as
+    /// `member` here — and a role this server does not rank (a custom
+    /// one) is treated as the least, because inheriting an unknown
+    /// amount of power is the one thing a cap must not do.
+    fn inherited_role<'a>(owned: &'a str, max_role: &'a str) -> &'a str {
+        fn rank(role: &str) -> u8 {
+            match role {
+                "owner" => 3,
+                "admin" => 2,
+                _ => 1,
+            }
+        }
+        let cap = if max_role == "admin" {
+            "admin"
+        } else {
+            "member"
+        };
+        if rank(owned) <= rank(cap) && owned != "owner" {
+            owned
+        } else {
+            cap
+        }
+    }
+
+    #[cfg(test)]
+    mod inherited_role_tests {
+        use super::inherited_role;
+
+        /// The owner's role comes across as it is when it fits under the
+        /// cap, and lowered to the cap when it does not.
+        #[test]
+        fn the_cap_lowers_and_never_raises() {
+            assert_eq!(inherited_role("member", "admin"), "member");
+            assert_eq!(inherited_role("admin", "admin"), "admin");
+            assert_eq!(inherited_role("admin", "member"), "member");
+            assert_eq!(inherited_role("member", "member"), "member");
+        }
+
+        /// Owner is never inheritable, whatever the cap says.
+        #[test]
+        fn owner_never_comes_across() {
+            assert_eq!(inherited_role("owner", "admin"), "admin");
+            assert_eq!(inherited_role("owner", "member"), "member");
+            assert_eq!(inherited_role("owner", "owner"), "member");
+            assert_eq!(inherited_role("admin", "owner"), "member");
+        }
+
+        /// A role this server does not rank is the least, not the most.
+        #[test]
+        fn an_unknown_role_is_the_least() {
+            assert_eq!(inherited_role("stagehand", "admin"), "stagehand");
+            assert_eq!(inherited_role("stagehand", "member"), "stagehand");
+        }
     }
 
     fn default_role_grants(role: &str, resource: &str, action: &str) -> bool {

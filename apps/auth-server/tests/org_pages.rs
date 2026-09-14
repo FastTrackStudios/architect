@@ -373,3 +373,92 @@ fn value_after(html: &str, needle: &str) -> String {
         .expect("its value")
         .to_owned()
 }
+
+/// A linked agent goes wherever its owner goes, at up to the cap, and
+/// stops the moment the link is withdrawn. Read as the agent through the
+/// same organization list every relying party mirrors from.
+#[tokio::test]
+async fn a_linked_agent_inherits_the_owners_organizations_up_to_the_cap() {
+    let app = app().await;
+    let owner = signed_up(&app, "owner@example.com").await;
+    let agent = signed_up(&app, "agent@example.com").await;
+
+    let (status, location) = post(&app, "/orgs", Some(&owner), "name=Acme+Records&slug=").await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    let id = org_id(&location).to_owned();
+
+    // Nothing yet: an account is nobody's agent until it is linked.
+    let (status, page) = get(&app, "/orgs", Some(&agent)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(page.contains("not in any organization yet"));
+
+    // Owner is not a cap on offer, and linking yourself is refused.
+    let (_, location) = post(
+        &app,
+        "/account/agents/link",
+        Some(&owner),
+        "agent_email=agent%40example.com&max_role=owner",
+    )
+    .await;
+    assert!(
+        location.contains("error="),
+        "owner is never inheritable: {location}"
+    );
+    let (_, location) = post(
+        &app,
+        "/account/agents/link",
+        Some(&owner),
+        "agent_email=owner%40example.com&max_role=admin",
+    )
+    .await;
+    assert!(
+        location.contains("error="),
+        "an account cannot be its own agent: {location}"
+    );
+
+    let (status, location) = post(
+        &app,
+        "/account/agents/link",
+        Some(&owner),
+        "agent_email=agent%40example.com&max_role=member",
+    )
+    .await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert!(location.contains("ok="), "the link is made: {location}");
+
+    let (_, page) = get(&app, "/orgs", Some(&owner)).await;
+    assert!(
+        page.contains("agent@example.com"),
+        "the owner sees the agent"
+    );
+    assert!(page.contains("up to member"));
+
+    // The agent now sees the owner's organization, lowered to the cap.
+    let (status, listed) = get(&app, "/orgs", Some(&agent)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(listed.contains("Acme Records"), "inherited: {listed:.600}");
+    assert!(
+        listed.contains(">member<"),
+        "capped to member: {listed:.600}"
+    );
+    assert!(!listed.contains(">owner<"), "never owner: {listed:.600}");
+
+    // Withdrawn, and gone at once.
+    let (_, page) = get(&app, "/orgs", Some(&owner)).await;
+    let link_id = page
+        .split("name=\"link_id\" value=\"")
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+        .expect("the link id is in the form");
+    let (status, location) = post(
+        &app,
+        "/account/agents/unlink",
+        Some(&owner),
+        &format!("link_id={link_id}"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SEE_OTHER, "{location}");
+    let (_, page) = get(&app, "/orgs", Some(&agent)).await;
+    assert!(page.contains("not in any organization yet"));
+    let _ = id;
+}

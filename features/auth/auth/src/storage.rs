@@ -2,13 +2,14 @@
 
 use async_trait::async_trait;
 use auth_proto::{
-    AuthAccount, AuthAccountCreate, AuthApiKey, AuthApiKeyCreate, AuthFlowError, AuthInvitation,
-    AuthInvitationCreate, AuthInviteLink, AuthInviteLinkCreate, AuthMember, AuthMemberCreate,
-    AuthOrganization, AuthOrganizationCreate, AuthOrganizationRole, AuthOrganizationRoleCreate,
-    AuthPasskey, AuthPasskeyCeremony, AuthPasskeyCeremonyCreate, AuthPasskeyCreate, AuthSession,
-    AuthSessionCreate, AuthTeam, AuthTeamCreate, AuthTeamMember, AuthTeamMemberCreate,
-    AuthTwoFactor, AuthTwoFactorCreate, AuthUser, AuthUserCreate, AuthVerification,
-    AuthVerificationCreate, email_change::AuthEmailChange,
+    AuthAccount, AuthAccountCreate, AuthAgentLink, AuthAgentLinkCreate, AuthApiKey,
+    AuthApiKeyCreate, AuthFlowError, AuthInvitation, AuthInvitationCreate, AuthInviteLink,
+    AuthInviteLinkCreate, AuthMember, AuthMemberCreate, AuthOrganization, AuthOrganizationCreate,
+    AuthOrganizationRole, AuthOrganizationRoleCreate, AuthPasskey, AuthPasskeyCeremony,
+    AuthPasskeyCeremonyCreate, AuthPasskeyCreate, AuthSession, AuthSessionCreate, AuthTeam,
+    AuthTeamCreate, AuthTeamMember, AuthTeamMemberCreate, AuthTwoFactor, AuthTwoFactorCreate,
+    AuthUser, AuthUserCreate, AuthVerification, AuthVerificationCreate,
+    email_change::AuthEmailChange,
 };
 use chrono::{DateTime, Utc};
 
@@ -382,6 +383,30 @@ pub trait AuthStorage: Clone + Send + Sync + 'static {
     ) -> Result<(), AuthFlowError>;
 
     async fn create_member(&self, input: AuthMemberCreate) -> Result<AuthMember, AuthFlowError>;
+
+    // ── Linked agents ─────────────────────────────────────────────
+
+    async fn create_agent_link(
+        &self,
+        input: AuthAgentLinkCreate,
+    ) -> Result<AuthAgentLink, AuthFlowError>;
+
+    async fn list_agent_links_for_owner(
+        &self,
+        owner_user_id: uuid::Uuid,
+    ) -> Result<Vec<AuthAgentLink>, AuthFlowError>;
+
+    async fn list_agent_links_for_agent(
+        &self,
+        agent_user_id: uuid::Uuid,
+    ) -> Result<Vec<AuthAgentLink>, AuthFlowError>;
+
+    /// Remove a link the owner holds. `false` when there was none.
+    async fn delete_agent_link(
+        &self,
+        id: uuid::Uuid,
+        owner_user_id: uuid::Uuid,
+    ) -> Result<bool, AuthFlowError>;
 
     async fn find_member(
         &self,

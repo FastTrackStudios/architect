@@ -4,6 +4,7 @@ pub use architect;
 
 // r[impl auth.core.entities.single-source]
 pub mod account;
+pub mod agent_link;
 pub mod api_key;
 pub mod audit_event;
 pub mod email_change;
@@ -26,6 +27,9 @@ pub mod verification;
 // r[verify auth.core.entities.single-source]
 pub use account::{
     AuthAccount, AuthAccountCreate, AuthAccountList, AuthAccountRepo, AuthAccountUpdate,
+};
+pub use agent_link::{
+    AuthAgentLink, AuthAgentLinkCreate, AuthAgentLinkList, AuthAgentLinkRepo, AuthAgentLinkUpdate,
 };
 pub use api_key::{AuthApiKey, AuthApiKeyCreate, AuthApiKeyList, AuthApiKeyRepo, AuthApiKeyUpdate};
 pub use audit_event::{
@@ -141,7 +145,7 @@ pub use service::{AuthServiceDispatcher, auth_service_service_descriptor};
 // The organization surface — same shape, second trait.
 pub use organizations::prelude::*;
 pub use organizations::{
-    Invite, IssuedInvitation, NewOrganization, OrganizationBundle, OrganizationMember,
+    Invite, IssuedInvitation, LinkedAgent, NewOrganization, OrganizationBundle, OrganizationMember,
 };
 
 /// A call that never reached the engine is an internal failure from the

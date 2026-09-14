@@ -21,10 +21,10 @@
 use architect_auth::{
     AcceptInvitation, AddTeamMember, AuthStorage, CancelInvitation, ClaimInvitation,
     CreateInvitation, CreateInviteLink, CreateOrganization, CreateTeam, CurrentSession,
-    DeleteOrganization, DeleteTeam, LeaveOrganization, ListInvitations, ListInviteLinks,
-    ListMembers, ListMyInvitations, ListOrganizations, ListTeamMembers, ListTeams,
+    DeleteOrganization, DeleteTeam, LeaveOrganization, LinkAgent, ListAgents, ListInvitations,
+    ListInviteLinks, ListMembers, ListMyInvitations, ListOrganizations, ListTeamMembers, ListTeams,
     PreviewInvitation, PreviewInviteLink, RedeemInviteLink, RejectInvitation, RemoveMember,
-    RemoveTeamMember, RevokeInviteLink, SetMemberRole, UpdateOrganization,
+    RemoveTeamMember, RevokeInviteLink, SetMemberRole, UnlinkAgent, UpdateOrganization,
 };
 use axum::Form;
 use axum::extract::{Path, Query, State};
@@ -39,7 +39,7 @@ use crate::page::{Flash, document, flash_to, sign_in_first, token_of};
 use crate::profile::message;
 use crate::settings::Nav;
 use crate::views::{
-    DeadEnd, Declined, InvitationRow, InvitationView, JoinView, LinkRow, MemberRow,
+    AgentRow, DeadEnd, Declined, InvitationRow, InvitationView, JoinView, LinkRow, MemberRow,
     MyInvitationRow, OrgRow, OrgView, OrgsView, TeamRow,
 };
 
@@ -173,6 +173,7 @@ where
     // here to see, so a failure shows no invitations rather than no
     // organizations.
     let invitations = pending_invitations(&state, &headers).await;
+    let agents = linked_agents(&state, &headers).await;
     crate::settings::document(
         "Organizations",
         "Organizations",
@@ -182,10 +183,107 @@ where
             OrgsView {
                 rows,
                 invitations,
+                agents,
                 flash: Flash::from_query(q.ok.as_deref(), q.error.as_deref()),
             }
         },
     )
+}
+
+/// The agents this account has linked. Best effort, like the
+/// invitations: a list that cannot be read hides the panel's rows, not
+/// the page.
+async fn linked_agents<S>(state: &UiState<S>, headers: &HeaderMap) -> Vec<AgentRow>
+where
+    S: AuthStorage,
+{
+    let Some(token) = token_of(headers, &state.cookie) else {
+        return Vec::new();
+    };
+    let Ok(agents) = state
+        .auth
+        .list_agents(ListAgents {
+            session_token: token,
+        })
+        .await
+    else {
+        return Vec::new();
+    };
+    agents
+        .into_iter()
+        .map(|agent| AgentRow {
+            id: agent.link.id,
+            who: agent
+                .agent_email
+                .or(agent.agent_name)
+                .unwrap_or_else(|| agent.link.agent_user_id.to_string()),
+            cap: agent.link.max_role,
+        })
+        .collect()
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct LinkAgentForm {
+    #[serde(default)]
+    pub agent_email: String,
+    #[serde(default)]
+    pub max_role: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct UnlinkAgentForm {
+    pub link_id: Uuid,
+}
+
+/// `POST /account/agents/link`
+pub async fn link_agent<S>(
+    State(state): State<UiState<S>>,
+    headers: HeaderMap,
+    Form(form): Form<LinkAgentForm>,
+) -> Response
+where
+    S: AuthStorage,
+{
+    let Some(token) = token_of(&headers, &state.cookie) else {
+        return sign_in_first("/orgs");
+    };
+    match state
+        .auth
+        .link_agent(LinkAgent {
+            session_token: token,
+            agent_email: form.agent_email,
+            max_role: form.max_role,
+        })
+        .await
+    {
+        Ok(_) => flash_to("/orgs", &Flash::Ok("Agent linked.".into())),
+        Err(error) => flash_to("/orgs", &Flash::Error(message(&error))),
+    }
+}
+
+/// `POST /account/agents/unlink`
+pub async fn unlink_agent<S>(
+    State(state): State<UiState<S>>,
+    headers: HeaderMap,
+    Form(form): Form<UnlinkAgentForm>,
+) -> Response
+where
+    S: AuthStorage,
+{
+    let Some(token) = token_of(&headers, &state.cookie) else {
+        return sign_in_first("/orgs");
+    };
+    match state
+        .auth
+        .unlink_agent(UnlinkAgent {
+            session_token: token,
+            link_id: form.link_id,
+        })
+        .await
+    {
+        Ok(()) => flash_to("/orgs", &Flash::Ok("Agent removed.".into())),
+        Err(error) => flash_to("/orgs", &Flash::Error(message(&error))),
+    }
 }
 
 /// Invitations addressed to the signed-in person, named where possible.
