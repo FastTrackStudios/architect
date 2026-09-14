@@ -265,9 +265,52 @@ fn paths_follow_the_one_scheme() {
         ]
     );
     assert_eq!(architect::http::path("greeter", "greet"), "/greeter/greet");
+    // The helper only kebab-cases. It knows nothing of
+    // `#[http(path = "…")]`, which the macro resolves before this is
+    // ever reached — so a method declaring `sign-in/email` serves there
+    // while this still reads the identifier.
     assert_eq!(
         architect::http::path("/auth/", "sign_in_email_password"),
         "/auth/sign-in-email-password"
+    );
+}
+
+/// A declared path replaces the derived one and may nest.
+///
+/// Without this, a path is a function of a Rust identifier — which means
+/// renaming a method silently moves a published URL, and no identifier
+/// can ever produce a nested one. `#[http(path = "…")]` breaks that
+/// coupling; an undeclared method still derives as before.
+#[test]
+fn a_declared_path_overrides_the_derived_one() {
+    mod nested {
+        #[architect::error]
+        pub enum Oops {
+            #[error("nope")]
+            Nope,
+        }
+
+        #[architect::service(path = "auth")]
+        pub trait Doors {
+            /// Nests two segments deep.
+            #[http(path = "sign-in/email")]
+            async fn sign_in_email_password(&self, email: String) -> Result<String, Oops>;
+            /// Replaces a long name with a short single segment.
+            #[http(path = "session")]
+            async fn current_session(&self, token: String) -> Result<String, Oops>;
+            /// Undeclared: still the kebab-cased identifier.
+            async fn sign_out(&self, token: String) -> Result<(), Oops>;
+        }
+    }
+
+    assert_eq!(
+        nested::http::PATHS,
+        &[
+            ("sign_in_email_password", "/auth/sign-in/email"),
+            ("current_session", "/auth/session"),
+            ("sign_out", "/auth/sign-out"),
+        ],
+        "a declared path wins; an undeclared one is still derived"
     );
 }
 

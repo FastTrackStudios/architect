@@ -249,7 +249,7 @@ async fn a_number_is_only_saved_after_a_code_comes_back() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/auth/sign-up-email-password")
+                .uri("/auth/sign-up/email")
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(
                     r#"{"input":{"email":"ada@example.com","password":"correct horse battery staple"}}"#,

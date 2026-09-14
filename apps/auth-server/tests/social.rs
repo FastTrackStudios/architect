@@ -230,7 +230,7 @@ async fn sign_up(app: &axum::Router, email: &str) -> String {
     let response = app
         .clone()
         .oneshot(
-            Request::post("/auth/sign-up-email-password")
+            Request::post("/auth/sign-up/email")
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(format!(
                     r#"{{"input":{{"email":"{email}","password":"correct-horse-battery-staple"}}}}"#
@@ -602,7 +602,7 @@ async fn social_sign_in_creates_the_user_and_sets_the_session_cookie() {
         .app
         .clone()
         .oneshot(
-            Request::post("/auth/current-session")
+            Request::post("/auth/session")
                 .header(header::AUTHORIZATION, format!("Bearer {token}"))
                 .body(Body::empty())
                 .unwrap(),
@@ -902,7 +902,7 @@ async fn unlinking_the_only_credential_is_refused_with_409() {
         .app
         .clone()
         .oneshot(
-            Request::post("/auth/current-session")
+            Request::post("/auth/session")
                 .header(header::AUTHORIZATION, format!("Bearer {token}"))
                 .body(Body::empty())
                 .unwrap(),

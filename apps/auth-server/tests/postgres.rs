@@ -149,7 +149,7 @@ async fn full_sign_up_and_session_flow_works_on_postgres() {
     let response = app
         .clone()
         .oneshot(
-            Request::post("/auth/sign-up-email-password")
+            Request::post("/auth/sign-up/email")
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(format!(
                     r#"{{"input":{{"email":"{email}","password":"correct-horse-battery-staple"}}}}"#
@@ -170,7 +170,7 @@ async fn full_sign_up_and_session_flow_works_on_postgres() {
     // the token hash matched on the way out.
     let response = app
         .oneshot(
-            Request::post("/auth/current-session")
+            Request::post("/auth/session")
                 .header(header::AUTHORIZATION, format!("Bearer {token}"))
                 .body(Body::empty())
                 .unwrap(),

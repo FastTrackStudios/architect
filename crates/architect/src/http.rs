@@ -18,6 +18,15 @@
 //! kebab-case minus a trailing `Service` (`AuthService` → `/auth`), or
 //! whatever `#[architect::service(path = "…")]` says.
 //!
+//! A method may name its own tail — `#[http(path = "sign-in/email")]` —
+//! which is the only way a path nests. Derived from the identifier it
+//! can be one flat segment and no more: `sign_in_email_password` gives
+//! `/auth/sign-in-email-password`. A URL is a published contract, and it
+//! should not move because somebody renamed a Rust method, so the
+//! declaration carries it. Only the HTTP face is affected — the vox
+//! method name, the generated client methods and the schema stamp all
+//! stay the identifier.
+//!
 //! What the derive emits under the consumer's `http` feature, per trait
 //! module:
 //!
