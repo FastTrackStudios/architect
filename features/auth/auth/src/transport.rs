@@ -495,6 +495,7 @@ impl AuthCookieConfig {
     /// credentials"; the person cannot reach the sign-in page from the
     /// site that sent them, because the server sees the cookie before
     /// it sees them.
+    #[must_use]
     pub fn removal_cookie(&self) -> Cookie<'static> {
         let mut cookie = Cookie::build((self.name.clone(), String::new()))
             .secure(self.secure)
