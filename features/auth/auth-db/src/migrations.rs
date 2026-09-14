@@ -43,6 +43,7 @@ mod m20260513_000001_create_auth_tables {
             drop_table(manager, AuthPasskeyCeremonies::Table).await?;
             drop_table(manager, AuthInviteLinks::Table).await?;
             drop_table(manager, AuthInvitations::Table).await?;
+            drop_table(manager, AuthAgentLinks::Table).await?;
             drop_table(manager, AuthMembers::Table).await?;
             drop_table(manager, AuthOrganizations::Table).await?;
             drop_table(manager, AuthAccounts::Table).await?;
@@ -201,6 +202,28 @@ mod m20260513_000001_create_auth_tables {
                     .col(ColumnDef::new(AuthMembers::UserId).uuid().not_null())
                     .col(ColumnDef::new(AuthMembers::Role).string().not_null())
                     .col(ts(AuthMembers::CreatedAt))
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_table(
+                Table::create()
+                    .table(AuthAgentLinks::Table)
+                    .if_not_exists()
+                    .col(uuid_pk(AuthAgentLinks::Id))
+                    .col(
+                        ColumnDef::new(AuthAgentLinks::OwnerUserId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(AuthAgentLinks::AgentUserId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(ColumnDef::new(AuthAgentLinks::MaxRole).string().not_null())
+                    .col(ts(AuthAgentLinks::CreatedAt))
                     .to_owned(),
             )
             .await?;
@@ -510,6 +533,16 @@ mod m20260513_000001_create_auth_tables {
                 AuthMembers::Table,
                 [AuthMembers::OrganizationId, AuthMembers::UserId],
             ),
+            unique(
+                "idx_auth_agent_links_owner_agent",
+                AuthAgentLinks::Table,
+                [AuthAgentLinks::OwnerUserId, AuthAgentLinks::AgentUserId],
+            ),
+            index(
+                "idx_auth_agent_links_agent",
+                AuthAgentLinks::Table,
+                [AuthAgentLinks::AgentUserId],
+            ),
             index(
                 "idx_auth_teams_org",
                 AuthTeams::Table,
@@ -753,6 +786,16 @@ mod m20260513_000001_create_auth_tables {
         OrganizationId,
         UserId,
         Role,
+        CreatedAt,
+    }
+
+    #[derive(Iden)]
+    enum AuthAgentLinks {
+        Table,
+        Id,
+        OwnerUserId,
+        AgentUserId,
+        MaxRole,
         CreatedAt,
     }
 

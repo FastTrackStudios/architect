@@ -1,12 +1,12 @@
 use async_trait::async_trait;
 use auth_proto::{
-    AuthAccount, AuthAccountCreate, AuthApiKey, AuthApiKeyCreate, AuthFlowError, AuthInvitation,
-    AuthInvitationCreate, AuthInviteLink, AuthInviteLinkCreate, AuthMember, AuthMemberCreate,
-    AuthOrganization, AuthOrganizationCreate, AuthOrganizationRole, AuthOrganizationRoleCreate,
-    AuthPasskey, AuthPasskeyCeremony, AuthPasskeyCeremonyCreate, AuthPasskeyCreate, AuthSession,
-    AuthSessionCreate, AuthTeam, AuthTeamCreate, AuthTeamMember, AuthTeamMemberCreate,
-    AuthTwoFactor, AuthTwoFactorCreate, AuthUser, AuthUserCreate, AuthVerification,
-    AuthVerificationCreate,
+    AuthAccount, AuthAccountCreate, AuthAgentLink, AuthAgentLinkCreate, AuthApiKey,
+    AuthApiKeyCreate, AuthFlowError, AuthInvitation, AuthInvitationCreate, AuthInviteLink,
+    AuthInviteLinkCreate, AuthMember, AuthMemberCreate, AuthOrganization, AuthOrganizationCreate,
+    AuthOrganizationRole, AuthOrganizationRoleCreate, AuthPasskey, AuthPasskeyCeremony,
+    AuthPasskeyCeremonyCreate, AuthPasskeyCreate, AuthSession, AuthSessionCreate, AuthTeam,
+    AuthTeamCreate, AuthTeamMember, AuthTeamMemberCreate, AuthTwoFactor, AuthTwoFactorCreate,
+    AuthUser, AuthUserCreate, AuthVerification, AuthVerificationCreate,
 };
 use chrono::{DateTime, Utc};
 use sea_orm::{
@@ -18,8 +18,9 @@ use uuid::Uuid;
 use crate::{
     AuthAuditEvent, AuthStorage, AuthStorageCapabilities, AuthStorageClock,
     backend_db::{
-        AuthAccountActiveModel, AuthAccountColumn, AuthAccountEntity, AuthApiKeyActiveModel,
-        AuthApiKeyColumn, AuthApiKeyEntity, AuthAuditEventRecordActiveModel, AuthEmailChange,
+        AuthAccountActiveModel, AuthAccountColumn, AuthAccountEntity, AuthAgentLinkActiveModel,
+        AuthAgentLinkColumn, AuthAgentLinkEntity, AuthApiKeyActiveModel, AuthApiKeyColumn,
+        AuthApiKeyEntity, AuthAuditEventRecordActiveModel, AuthEmailChange,
         AuthEmailChangeActiveModel, AuthEmailChangeColumn, AuthEmailChangeEntity,
         AuthInvitationActiveModel, AuthInvitationColumn, AuthInvitationEntity,
         AuthInviteLinkActiveModel, AuthInviteLinkColumn, AuthInviteLinkEntity,
@@ -1231,6 +1232,62 @@ impl AuthStorage for AuthSeaOrmStorage {
         .await
         .map(AuthMember::from)
         .map_err(map_db_err)
+    }
+
+    async fn create_agent_link(
+        &self,
+        input: AuthAgentLinkCreate,
+    ) -> Result<AuthAgentLink, AuthFlowError> {
+        AuthAgentLinkActiveModel {
+            id: Set(Uuid::new_v4()),
+            owner_user_id: Set(input.owner_user_id),
+            agent_user_id: Set(input.agent_user_id),
+            max_role: Set(input.max_role),
+            created_at: Set(Utc::now()),
+        }
+        .insert(&self.db)
+        .await
+        .map(AuthAgentLink::from)
+        .map_err(map_db_err)
+    }
+
+    async fn list_agent_links_for_owner(
+        &self,
+        owner_user_id: Uuid,
+    ) -> Result<Vec<AuthAgentLink>, AuthFlowError> {
+        AuthAgentLinkEntity::find()
+            .filter(AuthAgentLinkColumn::OwnerUserId.eq(owner_user_id))
+            .order_by_asc(AuthAgentLinkColumn::CreatedAt)
+            .all(&self.db)
+            .await
+            .map(|links| links.into_iter().map(AuthAgentLink::from).collect())
+            .map_err(map_db_err)
+    }
+
+    async fn list_agent_links_for_agent(
+        &self,
+        agent_user_id: Uuid,
+    ) -> Result<Vec<AuthAgentLink>, AuthFlowError> {
+        AuthAgentLinkEntity::find()
+            .filter(AuthAgentLinkColumn::AgentUserId.eq(agent_user_id))
+            .all(&self.db)
+            .await
+            .map(|links| links.into_iter().map(AuthAgentLink::from).collect())
+            .map_err(map_db_err)
+    }
+
+    async fn delete_agent_link(
+        &self,
+        id: Uuid,
+        owner_user_id: Uuid,
+    ) -> Result<bool, AuthFlowError> {
+        AuthAgentLinkEntity::delete_many()
+            .filter(AuthAgentLinkColumn::Id.eq(id))
+            .filter(AuthAgentLinkColumn::OwnerUserId.eq(owner_user_id))
+            .exec(&self.db)
+            .await
+            .map(|result| result.rows_affected > 0)
+            .map_err(map_db_err)
     }
 
     async fn find_member(

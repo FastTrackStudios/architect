@@ -272,6 +272,8 @@ where
         )
         .route("/orgs/{id}/links", post(orgs::create_link::<S>))
         .route("/orgs/{id}/links/revoke", post(orgs::revoke_link::<S>))
+        .route("/account/agents/link", post(orgs::link_agent::<S>))
+        .route("/account/agents/unlink", post(orgs::unlink_agent::<S>))
         // ── Operator ──────────────────────────────────
         .route("/admin/users", get(admin::users::<S>))
         .route("/admin/users/role", post(admin::set_role::<S>))

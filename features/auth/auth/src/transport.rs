@@ -1219,6 +1219,50 @@ pub mod vox {
                 })
                 .await
         }
+
+        async fn link_agent(
+            &self,
+            token: String,
+            agent_email: String,
+            max_role: String,
+        ) -> Result<auth_proto::AuthAgentLink, AuthFlowError> {
+            self.auth
+                .link_agent(crate::LinkAgent {
+                    session_token: token,
+                    agent_email,
+                    max_role,
+                })
+                .await
+        }
+
+        async fn unlink_agent(&self, token: String, link_id: Uuid) -> Result<(), AuthFlowError> {
+            self.auth
+                .unlink_agent(crate::UnlinkAgent {
+                    session_token: token,
+                    link_id,
+                })
+                .await
+        }
+
+        async fn list_agents(
+            &self,
+            token: String,
+        ) -> Result<Vec<auth_proto::LinkedAgent>, AuthFlowError> {
+            let agents = self
+                .auth
+                .list_agents(crate::ListAgents {
+                    session_token: token,
+                })
+                .await?;
+            Ok(agents
+                .into_iter()
+                .map(|agent| auth_proto::LinkedAgent {
+                    link: agent.link,
+                    agent_email: agent.agent_email,
+                    agent_name: agent.agent_name,
+                })
+                .collect())
+        }
     }
 
     fn org_bundle(bundle: crate::OrganizationBundle) -> auth_proto::OrganizationBundle {

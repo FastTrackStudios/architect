@@ -32,6 +32,13 @@ r[auth.org.remove-last-owner]
 Removing or demoting the last owner of an organization MUST be rejected
 unless the organization is being deleted.
 
+r[auth.org.linked-agent]
+An account MAY link another account as its agent with a cap of `admin`
+or `member`. Listing the agent's organizations MUST include every
+organization the owner is in that the agent is not, with the owner's
+role lowered to the cap; the agent's own membership MUST take
+precedence, and `owner` MUST never be inherited.
+
 r[auth.org.active-session]
 When a session has an active organization, commands scoped to that
 organization MUST confirm the user is still an active member.

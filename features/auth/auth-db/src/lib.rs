@@ -72,6 +72,12 @@ pub use auth_proto::account::{
     AuthAccountRepo, AuthAccountRepoStorage, AuthAccountUpdate, Column as AuthAccountColumn,
     Entity as AuthAccountEntity, Model as AuthAccountModel, Relation as AuthAccountRelation,
 };
+pub use auth_proto::agent_link::{
+    ActiveModel as AuthAgentLinkActiveModel, AuthAgentLink, AuthAgentLinkCreate, AuthAgentLinkList,
+    AuthAgentLinkRepo, AuthAgentLinkRepoStorage, AuthAgentLinkUpdate,
+    Column as AuthAgentLinkColumn, Entity as AuthAgentLinkEntity, Model as AuthAgentLinkModel,
+    Relation as AuthAgentLinkRelation,
+};
 pub use auth_proto::api_key::{
     ActiveModel as AuthApiKeyActiveModel, AuthApiKey, AuthApiKeyCreate, AuthApiKeyList,
     AuthApiKeyRepo, AuthApiKeyRepoStorage, AuthApiKeyUpdate, Column as AuthApiKeyColumn,

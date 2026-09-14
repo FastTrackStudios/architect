@@ -43,6 +43,15 @@ pub struct OrgRow {
 /// the accept and decline forms act on the invitation — the person is
 /// not a member yet, so there is nothing of the organization's to act
 /// on.
+/// An account linked as the owner's agent: who it is, and the most it
+/// may be anywhere it inherits.
+#[derive(Clone, PartialEq, Eq)]
+pub struct AgentRow {
+    pub id: Uuid,
+    pub who: String,
+    pub cap: String,
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub struct MyInvitationRow {
     pub id: Uuid,
@@ -91,6 +100,7 @@ pub struct LinkRow {
 pub fn OrgsView(
     rows: Vec<OrgRow>,
     invitations: Vec<MyInvitationRow>,
+    agents: Vec<AgentRow>,
     flash: Option<Flash>,
 ) -> Element {
     rsx! {
@@ -162,6 +172,52 @@ pub fn OrgsView(
                 p { class: "hint", "Leave blank to build one from the name." }
 
                 button { r#type: "submit", "Create organization" }
+            }
+        }
+
+        // Agents. An account you run — an AI assistant, usually — that
+        // goes wherever you go, at up to the role you pick. It stays its
+        // own account, so what it does is attributed to it and not to
+        // you, and one link replaces an invitation per organization.
+        section { class: "panel",
+            h2 { "Agents" }
+            p { class: "hint",
+                "An account that inherits your organizations, up to the role you choose. It acts under its own name, never yours."
+            }
+            if !agents.is_empty() {
+                ul { class: "orgs",
+                    for agent in agents.iter() {
+                        li { key: "{agent.id}", class: "org",
+                            span {
+                                strong { "{agent.who}" }
+                                span { class: "handle", "up to {agent.cap}" }
+                            }
+                            form {
+                                method: "post",
+                                action: "/account/agents/unlink",
+                                style: "display:inline",
+                                input { r#type: "hidden", name: "link_id", value: "{agent.id}" }
+                                button { r#type: "submit", class: "secondary", "Remove" }
+                            }
+                        }
+                    }
+                }
+            }
+            form { method: "post", action: "/account/agents/link", class: "stack",
+                label { r#for: "agent-email", "Account email" }
+                input {
+                    id: "agent-email",
+                    name: "agent_email",
+                    r#type: "email",
+                    required: true,
+                    placeholder: "agent@example.com",
+                }
+                label { r#for: "agent-cap", "At most" }
+                select { id: "agent-cap", name: "max_role",
+                    option { value: "admin", "Admin" }
+                    option { value: "member", "Member" }
+                }
+                button { r#type: "submit", "Link agent" }
             }
         }
     }

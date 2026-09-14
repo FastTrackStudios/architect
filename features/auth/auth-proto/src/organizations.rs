@@ -15,7 +15,20 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::{AuthFlowError, AuthInvitation, AuthMember, AuthOrganization, AuthUser};
+use crate::{AuthAgentLink, AuthFlowError, AuthInvitation, AuthMember, AuthOrganization, AuthUser};
+
+/// A linked agent as the owner sees it: the link, and who it names.
+///
+/// The user is resolved server-side for the same reason
+/// [`OrganizationMember`] carries one: a list of agent ids is not a
+/// list anybody can act on.
+#[architect::wire]
+#[derive(Eq)]
+pub struct LinkedAgent {
+    pub link: AuthAgentLink,
+    pub agent_email: Option<String>,
+    pub agent_name: Option<String>,
+}
 
 /// An organization together with the caller's membership in it.
 ///
@@ -237,4 +250,27 @@ pub trait OrganizationService {
         token: String,
         invitation_id: Uuid,
     ) -> Result<(), AuthFlowError>;
+
+    /// Let another account act wherever you can, up to `max_role`.
+    ///
+    /// For the assistant a person runs under its own account: it
+    /// inherits the caller's memberships as they change, so joining an
+    /// organization never needs a second invitation for the agent. The
+    /// cap is `admin` or `member`; owner is never inheritable.
+    #[http(path = "organization/agents/link")]
+    async fn link_agent(
+        &self,
+        token: String,
+        agent_email: String,
+        max_role: String,
+    ) -> Result<AuthAgentLink, AuthFlowError>;
+
+    /// Withdraw a link. Only its owner can, and the agent loses every
+    /// inherited membership at once.
+    #[http(path = "organization/agents/unlink")]
+    async fn unlink_agent(&self, token: String, link_id: Uuid) -> Result<(), AuthFlowError>;
+
+    /// The agents the caller has linked, with who they are.
+    #[http(path = "organization/agents")]
+    async fn list_agents(&self, token: String) -> Result<Vec<LinkedAgent>, AuthFlowError>;
 }

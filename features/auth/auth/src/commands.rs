@@ -1037,6 +1037,35 @@ pub struct ClaimInvitation {
     pub invitation_id: Uuid,
 }
 
+/// Let another account act wherever the caller can, up to `max_role`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinkAgent {
+    pub session_token: String,
+    pub agent_email: String,
+    pub max_role: String,
+}
+
+/// Withdraw a link the caller owns.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnlinkAgent {
+    pub session_token: String,
+    pub link_id: Uuid,
+}
+
+/// The agents the caller has linked.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListAgents {
+    pub session_token: String,
+}
+
+/// A link together with who it names.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinkedAgent {
+    pub link: auth_proto::AuthAgentLink,
+    pub agent_email: Option<String>,
+    pub agent_name: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CancelInvitation {
     pub session_token: String,
