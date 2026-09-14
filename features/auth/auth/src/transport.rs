@@ -1120,6 +1120,34 @@ pub mod vox {
                 })
                 .await
         }
+
+        async fn remove_member(
+            &self,
+            token: String,
+            organization_id: Uuid,
+            user_id: Uuid,
+        ) -> Result<(), AuthFlowError> {
+            self.auth
+                .remove_member(crate::RemoveMember {
+                    session_token: token,
+                    organization_id,
+                    user_id,
+                })
+                .await
+        }
+
+        async fn leave_organization(
+            &self,
+            token: String,
+            organization_id: Uuid,
+        ) -> Result<(), AuthFlowError> {
+            self.auth
+                .leave_organization(crate::LeaveOrganization {
+                    session_token: token,
+                    organization_id,
+                })
+                .await
+        }
     }
 
     fn org_bundle(bundle: crate::OrganizationBundle) -> auth_proto::OrganizationBundle {
