@@ -3113,7 +3113,9 @@ fn expand_error(mut item: syn::ItemEnum) -> Result<TokenStream2> {
                     let n: syn::LitInt = meta.value()?.parse()?;
                     status = Some(n.base10_parse()?);
                 } else if meta.path.is_ident("status") {
-                    return Err(meta.error("write `http_status = 404` — the status is an HTTP detail"));
+                    return Err(
+                        meta.error("write `http_status = 404` — the status is an HTTP detail")
+                    );
                 } else if meta.path.is_ident("code") {
                     let s: LitStr = meta.value()?.parse()?;
                     code = Some(s.value());
