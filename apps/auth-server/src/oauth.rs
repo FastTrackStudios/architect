@@ -413,9 +413,12 @@ async fn authorize<S>(
 where
     S: AuthStorage,
 {
+    // A program presents a bearer; a browser presents the cookie. The
+    // distinction decides what a dead credential gets below.
+    let from_browser = !headers.contains_key(header::AUTHORIZATION);
     let session_token = match session_token_from_headers(&headers, &state.cookie) {
         Some(token) => token,
-        None if headers.contains_key(header::AUTHORIZATION) => {
+        None if !from_browser => {
             return Err(ApiError::from(AuthFlowError::InvalidCredentials));
         }
         None => return Ok(Redirect::to(&sign_in_url(&uri)).into_response()),
@@ -457,6 +460,27 @@ where
                 code_challenge: params.code_challenge,
                 code_challenge_method: params.code_challenge_method,
             }));
+        }
+        // A browser whose cookie names a session that is gone — expired,
+        // revoked, or minted by a server since reset — is a browser with
+        // no session, and gets what one gets: the sign-in page, with the
+        // authorize request to come back to. Plus a removal for the dead
+        // cookie, or the browser keeps presenting it and every site that
+        // sends someone here gets `invalid_credentials` as JSON, with no
+        // way through short of clearing site data. A program with a dead
+        // bearer still gets the 401: it cannot render a login page.
+        Err(AuthFlowError::InvalidCredentials | AuthFlowError::SessionExpired) if from_browser => {
+            return Ok((
+                StatusCode::SEE_OTHER,
+                [
+                    (header::LOCATION, sign_in_url(&uri)),
+                    (
+                        header::SET_COOKIE,
+                        state.cookie.removal_cookie().to_string(),
+                    ),
+                ],
+            )
+                .into_response());
         }
         Err(error) => return Err(ApiError::from(error)),
     };

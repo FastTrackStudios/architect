@@ -253,6 +253,52 @@ async fn authorize_without_a_session_sends_a_browser_to_the_login_page() {
 /// A program is not a person: it cannot render a login page, and a 303
 /// to HTML would read as a baffling success. Bearer callers keep the
 /// old 401.
+/// A browser can hold a session cookie the server no longer recognises —
+/// the session expired, or was revoked, or the server was reset under
+/// it. That browser must land on the sign-in page like one with no
+/// cookie at all, and be told to drop the cookie, or every visit to
+/// `/oauth2/authorize` from every site answers `invalid_credentials`
+/// as JSON and there is no way through short of clearing site data.
+#[tokio::test]
+async fn authorize_with_a_stale_cookie_clears_it_and_sends_the_browser_to_sign_in() {
+    let response = app()
+        .await
+        .oneshot(
+            Request::get(
+                "/oauth2/authorize?client_id=task\
+                 &redirect_uri=https://task.fasttrackstudio.app/auth/callback\
+                 &response_type=code&scope=openid&state=xyz",
+            )
+            .header(header::COOKIE, "architect-auth.session=no-such-session")
+            .body(Body::empty())
+            .unwrap(),
+        )
+        .await
+        .expect("request");
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let location = response
+        .headers()
+        .get(header::LOCATION)
+        .expect("a Location header")
+        .to_str()
+        .expect("ascii");
+    assert!(
+        location.starts_with("/login?return_to="),
+        "expected the login page, got {location}"
+    );
+    let set_cookie = response
+        .headers()
+        .get(header::SET_COOKIE)
+        .expect("the dead cookie is removed")
+        .to_str()
+        .expect("ascii");
+    assert!(
+        set_cookie.starts_with("architect-auth.session=;") && set_cookie.contains("Max-Age=0"),
+        "expected a removal cookie, got {set_cookie}"
+    );
+}
+
 #[tokio::test]
 async fn authorize_with_a_bearer_token_still_gets_401() {
     let response = app()
