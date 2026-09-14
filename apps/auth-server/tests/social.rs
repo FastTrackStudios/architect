@@ -947,3 +947,54 @@ async fn the_account_page_needs_a_session_and_unlinking_an_unlinked_provider_is_
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     assert_eq!(body_json(response).await["error"], "not_linked");
 }
+
+/// An OIDC client holds only the access token `/oauth2/token` minted —
+/// no session token — and "which organizations am I in" is a question
+/// it has every right to ask. Task mirrors memberships from exactly this
+/// call, so a refusal here meant a person signed in through Keyflow was
+/// a member of nothing downstream. The session token keeps working, and
+/// junk is still refused.
+#[tokio::test]
+async fn an_access_token_can_list_the_organizations_it_belongs_to() {
+    let h = harness(|_| {}).await;
+    let session = sign_up(&h.app, "keyflow-user@example.test").await;
+    let access = oidc_access_token(&h.app, &session, "openid").await;
+
+    for (label, token) in [("session", &session), ("access", &access)] {
+        let response = h
+            .app
+            .clone()
+            .oneshot(
+                Request::post("/auth/organization/list")
+                    .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .expect("list");
+        assert_eq!(response.status(), StatusCode::OK, "{label} token");
+        assert!(
+            body_json(response).await.is_array(),
+            "{label} token answers a list"
+        );
+    }
+
+    let response = h
+        .app
+        .clone()
+        .oneshot(
+            Request::post("/auth/organization/list")
+                .header(header::AUTHORIZATION, "Bearer not.a.jwt")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .expect("list");
+    assert_eq!(
+        response.status(),
+        StatusCode::UNAUTHORIZED,
+        "junk stays refused"
+    );
+}
