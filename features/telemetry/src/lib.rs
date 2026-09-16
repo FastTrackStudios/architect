@@ -92,7 +92,7 @@ mod native {
         #[cfg(feature = "otel")]
         {
             let service: &'static str = Box::leak(service.to_owned().into_boxed_str());
-            if let Some((otel_guard, layers)) = super::otel::init(service) {
+            if let Some((otel_guard, layers)) = super::otel::init(service, env_filter_default) {
                 let _ = registry.with(layers).try_init();
                 return (guard, Some(otel_guard));
             }
@@ -184,7 +184,7 @@ pub mod otel {
     use opentelemetry_sdk::logs::SdkLoggerProvider;
     use opentelemetry_sdk::metrics::SdkMeterProvider;
     use opentelemetry_sdk::trace::SdkTracerProvider;
-    use tracing_subscriber::Layer;
+    use tracing_subscriber::{EnvFilter, Layer};
 
     /// Re-export for callers that record custom metrics (the server's
     /// HTTP middleware) without adding their own opentelemetry dep.
@@ -272,7 +272,10 @@ pub mod otel {
     pub type OtelLayers<S> = Vec<Box<dyn Layer<S> + Send + Sync>>;
 
     #[must_use]
-    pub fn init<S>(service: &'static str) -> Option<(OtelGuard, OtelLayers<S>)>
+    pub fn init<S>(
+        service: &'static str,
+        env_filter_default: &str,
+    ) -> Option<(OtelGuard, OtelLayers<S>)>
     where
         S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a> + Send + Sync,
     {
@@ -325,8 +328,28 @@ pub mod otel {
         let no_otel_feedback = tracing_subscriber::filter::FilterFn::new(|meta| {
             !meta.target().starts_with("opentelemetry")
         });
+        // The trace layer needs its own copy of the filter.
+        //
+        // A subscriber whose layers carry per-layer filters decides
+        // interest per layer, and a layer with no filter is interested in
+        // everything — so an unfiltered trace layer exports spans the
+        // global `EnvFilter` was meant to drop. The symptom is a silent
+        // one, because the fmt layer obeys the filter and looks fine: on
+        // 2026-09-16 task-server's logs had not a single `poll_send` line
+        // while Tempo was taking 684 of those spans a second from iroh's
+        // UDP send path, 3 GB of traces in three hours.
+        //
+        // Same directives, same `RUST_LOG`, so the filter a deployment
+        // already sets now governs what it exports as well as what it
+        // prints.
+        let trace_filter = EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| EnvFilter::new(env_filter_default));
         let layers: Vec<Box<dyn Layer<S> + Send + Sync>> = vec![
-            Box::new(tracing_opentelemetry::layer().with_tracer(tracer)),
+            Box::new(
+                tracing_opentelemetry::layer()
+                    .with_tracer(tracer)
+                    .with_filter(trace_filter),
+            ),
             Box::new(
                 opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge::new(
                     &logger_provider,
