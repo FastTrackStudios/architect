@@ -1911,10 +1911,28 @@ fn emit_stream_block(
                  into it; the stream host attaches every subscriber sink.",
                 s.name
             );
+            let intro_fn = format_ident!("{}_intro", s.name);
+            let intro_doc = format!(
+                "The first frame a new `{}` subscriber receives, before \
+                 anything published after it attaches.\n\n\
+                 Defaults to `None`, which is the old behaviour. Return \
+                 `Some(..)` to close the gap between \"subscribe \
+                 returned\" and \"the hub has the sink\": the client \
+                 cannot otherwise know when the attach landed, so \
+                 anything published in between is delivered to nobody. A \
+                 marker variant the client awaits and swallows is enough; \
+                 a snapshot works the same way.",
+                s.name
+            );
             quote! {
                 #(#docs)*
                 #[doc = #doc]
                 fn #hub_fn(&self) -> &::architect::PubSub<#ev>;
+
+                #[doc = #intro_doc]
+                fn #intro_fn(&self) -> ::core::option::Option<#ev> {
+                    ::core::option::Option::None
+                }
             }
         } else {
             let attach_fn = format_ident!("{}_attach", s.name);
@@ -1952,9 +1970,17 @@ fn emit_stream_block(
         let inputs = &s.mirror_inputs;
         if s.arg_idents.is_empty() {
             let hub_fn = format_ident!("{}_hub", s.name);
+            let intro_fn = format_ident!("{}_intro", s.name);
             quote! {
                 async fn #name(&self, sink: ::architect::vox::Tx<#ev>) {
-                    self.inner.#hub_fn().attach(sink);
+                    // Attached in two steps so an intro can go at the
+                    // FRONT of this subscriber's mailbox — ahead of
+                    // anything published between the attach and the
+                    // client learning about it. `begin_attach` parks the
+                    // sink; `complete_attach` unparks it, intro first.
+                    let hub = self.inner.#hub_fn();
+                    let pending = hub.begin_attach(sink);
+                    hub.complete_attach(pending, self.inner.#intro_fn());
                     // vox scopes channels to their request: delivering the
                     // response terminates the sink. Hold the request open for
                     // the life of the subscription — the client unsubscribes
@@ -3039,7 +3065,13 @@ fn emit_http_block(
         }
         let attach = if sub.arg_idents.is_empty() {
             let hub_fn = format_ident!("{}_hub", name);
-            quote! { backend.#hub_fn().attach(sink) }
+            let intro_fn = format_ident!("{}_intro", name);
+            quote! {{
+                // Same two-step attach as the stream host — see there.
+                let hub = backend.#hub_fn();
+                let pending = hub.begin_attach(sink);
+                hub.complete_attach(pending, backend.#intro_fn());
+            }}
         } else {
             let attach_fn = format_ident!("{}_attach", name);
             let call_args =
