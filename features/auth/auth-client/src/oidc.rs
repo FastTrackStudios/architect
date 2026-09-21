@@ -1,6 +1,6 @@
 //! The redirect sign-in, minus the plumbing.
 //!
-//! Every `FastTrackStudio` app — Task, Session, Signal, Keyflow, Ignition
+//! Every FastTrackStudio app — Task, Session, Signal, Keyflow, Ignition
 //! — signs people in the same way: send the browser to the issuer, get
 //! an authorization code back, redeem it for a token. Five apps doing
 //! that is five chances to build the challenge wrong, and the failure
@@ -189,19 +189,13 @@ pub fn token_request_body(client_id: &str, redirect_uri: &str, code: &str, pkce:
 /// escaped. It matters most for `redirect_uri`, whose `:` and `/` would
 /// otherwise read as structure in the URL being built.
 fn encode(raw: &str) -> String {
-    use std::fmt::Write as _;
-
-    // Worst case every byte escapes to three characters.
-    let mut out = String::with_capacity(raw.len().saturating_mul(3));
+    let mut out = String::with_capacity(raw.len() + raw.len() / 2);
     for byte in raw.as_bytes() {
         match byte {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(char::from(*byte));
+                out.push(*byte as char);
             }
-            // Writing to a `String` is infallible.
-            other => {
-                let _ = write!(out, "%{other:02X}");
-            }
+            other => out.push_str(&format!("%{other:02X}")),
         }
     }
     out
