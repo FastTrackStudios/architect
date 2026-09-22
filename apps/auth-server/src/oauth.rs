@@ -1099,10 +1099,10 @@ fn plaintext_access_token(secret: &str, row: &AuthAccount) -> Option<String> {
 /// unlinked and linked again. One refresh records the expiry, after which
 /// this is the ordinary clock check.
 fn needs_refresh(row: &AuthAccount) -> bool {
-    match row.access_token_expires_at {
-        Some(at) => at <= architect_auth::expiry::expires_in(60),
-        None => row.refresh_token_ciphertext.is_some(),
-    }
+    row.access_token_expires_at.map_or_else(
+        || row.refresh_token_ciphertext.is_some(),
+        |at| at <= architect_auth::expiry::expires_in(60),
+    )
 }
 
 /// How long a provider token lives when the provider does not say.

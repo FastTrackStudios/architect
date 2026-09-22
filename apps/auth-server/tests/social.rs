@@ -139,12 +139,15 @@ impl ProviderClient for FakeProvider {
         if self.refresh_token.lock().unwrap().is_none() {
             return Err(ProviderError::Exchange("refresh not stubbed".into()));
         }
-        let mut seen = self.refreshes.lock().unwrap();
-        seen.push(refresh_token.to_owned());
+        let n = {
+            let mut seen = self.refreshes.lock().unwrap();
+            seen.push(refresh_token.to_owned());
+            seen.len()
+        };
         // Rotates, as TONE3000 does: the next refresh must present this one.
         Ok(ProviderTokens {
-            access_token: format!("refreshed-{}", seen.len()),
-            refresh_token: Some(format!("rt-{}", seen.len() + 1)),
+            access_token: format!("refreshed-{n}"),
+            refresh_token: Some(format!("rt-{}", n + 1)),
             id_token: None,
             expires_in: Some(3600),
             scope: None,
