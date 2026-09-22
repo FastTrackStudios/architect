@@ -908,18 +908,24 @@ where
             // The engine encrypts these before they touch storage; the
             // field names say "ciphertext" because that is what ends up
             // in the row.
+            let account_id = profile.account_id;
+            let access_token = tokens.access_token;
+            let expires_in = tokens.expires_in;
             let result = state
                 .auth
                 .link_oauth_account(LinkOAuthAccount {
                     session_token,
                     provider_id: provider.id().to_owned(),
-                    account_id: profile.account_id,
-                    access_token_ciphertext: Some(tokens.access_token),
+                    account_id: account_id.clone(),
+                    access_token_ciphertext: Some(access_token.clone()),
                     refresh_token_ciphertext: tokens.refresh_token,
                     id_token_ciphertext: tokens.id_token,
                     scope: tokens.scope.or_else(|| Some(config.scopes.join(" "))),
                 })
                 .await;
+            if result.is_ok() {
+                record_link_expiry(&state, provider, &account_id, &access_token, expires_in).await;
+            }
             match result {
                 Ok(()) => Ok(redirect_with(&return_to, "linked", provider.id())),
                 Err(AuthFlowError::InvalidInput(message)) if message.contains("already linked") => {
@@ -934,6 +940,46 @@ where
                 }
             }
         }
+    }
+}
+
+/// Store when a freshly linked token expires.
+///
+/// `LinkOAuthAccount` carries no expiry, so without this the row starts with
+/// none and the refresher cannot tell when the token runs out. Best-effort:
+/// if it fails, [`needs_refresh`] treats the unknown expiry as spent and the
+/// first use refreshes instead.
+async fn record_link_expiry<S>(
+    state: &HttpState<S>,
+    provider: Provider,
+    account_id: &str,
+    access_token: &str,
+    expires_in: Option<i64>,
+) where
+    S: AuthStorage,
+{
+    let secret = &state.auth.config.secret;
+    let Ok(access_ciphertext) = encrypt_secret(secret, access_token) else {
+        return;
+    };
+    let expires_at =
+        architect_auth::expiry::expires_in(expires_in.unwrap_or(ASSUMED_TOKEN_LIFETIME_SECS));
+    if let Err(e) = state
+        .auth
+        .storage
+        .update_oauth_account_tokens(
+            provider.id(),
+            account_id,
+            Some(access_ciphertext),
+            None,
+            None,
+            Some(expires_at),
+            None,
+            None,
+        )
+        .await
+    {
+        tracing::warn!(provider = provider.id(), error = %e, "could not record a linked token's expiry");
     }
 }
 
@@ -1045,10 +1091,26 @@ fn plaintext_access_token(secret: &str, row: &AuthAccount) -> Option<String> {
 /// A minute of slack covers a token handed out just before expiry and used
 /// just after — the failure that otherwise surfaces as an occasional,
 /// unreproducible 401 on somebody else's machine.
+///
+/// An expiry the row never recorded counts as spent when there is a refresh
+/// token to spend. Links made before the expiry was stored have none, and
+/// treating "unknown" as "fresh" served their link-time token forever — it
+/// died an hour after linking and every request 401'd until the person
+/// unlinked and linked again. One refresh records the expiry, after which
+/// this is the ordinary clock check.
 fn needs_refresh(row: &AuthAccount) -> bool {
-    row.access_token_expires_at
-        .is_some_and(|at| at <= architect_auth::expiry::expires_in(60))
+    row.access_token_expires_at.map_or_else(
+        || row.refresh_token_ciphertext.is_some(),
+        |at| at <= architect_auth::expiry::expires_in(60),
+    )
 }
+
+/// How long a provider token lives when the provider does not say.
+///
+/// An hour is what TONE3000 and GitHub's expiring tokens both use. Without a
+/// default, a provider that omits `expires_in` would leave the expiry unset
+/// and [`needs_refresh`] would rotate the token on every single request.
+const ASSUMED_TOKEN_LIFETIME_SECS: i64 = 3600;
 
 /// A usable access token for a linked account, refreshing it if it has run
 /// out.
@@ -1104,7 +1166,9 @@ where
     // `expires_in` is whatever the provider sent back, so it saturates
     // rather than adding: a nonsense value should park the token at the
     // end of time, not panic inside a refresh.
-    let expires_at = refreshed.expires_in.map(architect_auth::expiry::expires_in);
+    let expires_at = Some(architect_auth::expiry::expires_in(
+        refreshed.expires_in.unwrap_or(ASSUMED_TOKEN_LIFETIME_SECS),
+    ));
     // The rotated refresh token MUST be stored, or this is the last refresh
     // this account ever does.
     let refresh_ciphertext = refreshed

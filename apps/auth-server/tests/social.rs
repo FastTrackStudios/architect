@@ -80,6 +80,12 @@ struct FakeProvider {
     profile: Mutex<Profile>,
     exchanges: Mutex<Vec<(Provider, String, String)>>,
     profile_fetches: Mutex<Vec<String>>,
+    /// A refresh token to hand out at exchange, and whether refreshing it
+    /// works. `None` keeps the provider non-expiring, as GitHub's OAuth
+    /// Apps are.
+    refresh_token: Mutex<Option<String>>,
+    /// Refresh tokens presented to `refresh_tokens`, in order.
+    refreshes: Mutex<Vec<String>>,
 }
 
 impl FakeProvider {
@@ -117,7 +123,7 @@ impl ProviderClient for FakeProvider {
         }
         Ok(ProviderTokens {
             access_token: GITHUB_TOKEN.into(),
-            refresh_token: None,
+            refresh_token: self.refresh_token.lock().unwrap().clone(),
             id_token: None,
             expires_in: None,
             scope: Some("repo,read:user,user:email".into()),
@@ -128,9 +134,24 @@ impl ProviderClient for FakeProvider {
         &self,
         _provider: Provider,
         _config: &SocialProviderConfig,
-        _refresh_token: &str,
+        refresh_token: &str,
     ) -> Result<ProviderTokens, ProviderError> {
-        Err(ProviderError::Exchange("refresh not stubbed".into()))
+        if self.refresh_token.lock().unwrap().is_none() {
+            return Err(ProviderError::Exchange("refresh not stubbed".into()));
+        }
+        let n = {
+            let mut seen = self.refreshes.lock().unwrap();
+            seen.push(refresh_token.to_owned());
+            seen.len()
+        };
+        // Rotates, as TONE3000 does: the next refresh must present this one.
+        Ok(ProviderTokens {
+            access_token: format!("refreshed-{n}"),
+            refresh_token: Some(format!("rt-{}", n + 1)),
+            id_token: None,
+            expires_in: Some(3600),
+            scope: None,
+        })
     }
 
     async fn fetch_profile(
@@ -996,5 +1017,118 @@ async fn an_access_token_can_list_the_organizations_it_belongs_to() {
         response.status(),
         StatusCode::UNAUTHORIZED,
         "junk stays refused"
+    );
+}
+
+/// Link a provider that issues refresh tokens, and return a relying-party
+/// token that may read it.
+async fn linked_with_refresh(h: &Harness) -> String {
+    *h.provider.refresh_token.lock().unwrap() = Some("rt-1".into());
+    let session = sign_up(&h.app, "cody@fasttrackstudio.app").await;
+    let state = start(&h.app, "github", "link", Some(&session)).await;
+    let response = callback(&h.app, "github", &format!("code=good&state={state}")).await;
+    assert_eq!(location(&response), "/account?linked=github");
+    oidc_access_token(&h.app, &session, "openid email forge:github").await
+}
+
+async fn linked_access_token(h: &Harness, rp_token: &str) -> String {
+    let response = h
+        .app
+        .clone()
+        .oneshot(
+            Request::get("/oauth2/linked-token?provider=github")
+                .header(header::AUTHORIZATION, format!("Bearer {rp_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .expect("linked-token");
+    assert_eq!(response.status(), StatusCode::OK);
+    body_json(response).await["access_token"]
+        .as_str()
+        .expect("a token")
+        .to_owned()
+}
+
+async fn set_expiry(h: &Harness, at: Option<chrono::DateTime<chrono::Utc>>) {
+    let row = h
+        .storage
+        .find_account_by_provider_account("github", "583231")
+        .await
+        .unwrap()
+        .expect("linked");
+    h.storage
+        .update_oauth_account_tokens(
+            "github",
+            "583231",
+            row.access_token_ciphertext,
+            None,
+            None,
+            at,
+            None,
+            None,
+        )
+        .await
+        .expect("update");
+}
+
+/// A link records when its token runs out — the provider's own figure, or
+/// an hour when it gives none — so the refresher has a clock to read.
+#[tokio::test]
+async fn a_link_records_when_its_token_expires() {
+    let h = harness(with_providers).await;
+    let rp = linked_with_refresh(&h).await;
+    let row = h
+        .storage
+        .find_account_by_provider_account("github", "583231")
+        .await
+        .unwrap()
+        .expect("linked");
+    assert!(
+        row.access_token_expires_at.is_some(),
+        "expiry recorded at link"
+    );
+    // Still fresh: the link-time token, no refresh spent.
+    assert_eq!(linked_access_token(&h, &rp).await, GITHUB_TOKEN);
+    assert!(h.provider.refreshes.lock().unwrap().is_empty());
+}
+
+/// A link made before expiries were recorded has none. It used to be served
+/// as-is forever — dead an hour after linking, 401 on every request until
+/// unlink + link. Unknown now counts as spent: it refreshes once, records
+/// the expiry, and stops.
+#[tokio::test]
+async fn a_link_with_no_recorded_expiry_refreshes_instead_of_going_stale() {
+    let h = harness(with_providers).await;
+    let rp = linked_with_refresh(&h).await;
+    set_expiry(&h, None).await;
+
+    assert_eq!(linked_access_token(&h, &rp).await, "refreshed-1");
+    assert_eq!(
+        linked_access_token(&h, &rp).await,
+        "refreshed-1",
+        "fresh now: no second refresh"
+    );
+    assert_eq!(
+        *h.provider.refreshes.lock().unwrap(),
+        vec!["rt-1".to_string()]
+    );
+}
+
+/// An expired token refreshes, and the rotated refresh token is what the
+/// next refresh presents — or the second refresh would be the last.
+#[tokio::test]
+async fn an_expired_link_refreshes_and_keeps_the_rotated_refresh_token() {
+    let h = harness(with_providers).await;
+    let rp = linked_with_refresh(&h).await;
+    let past = chrono::Utc::now() - chrono::Duration::minutes(5);
+
+    set_expiry(&h, Some(past)).await;
+    assert_eq!(linked_access_token(&h, &rp).await, "refreshed-1");
+    set_expiry(&h, Some(past)).await;
+    assert_eq!(linked_access_token(&h, &rp).await, "refreshed-2");
+    assert_eq!(
+        *h.provider.refreshes.lock().unwrap(),
+        vec!["rt-1".to_string(), "rt-2".to_string()]
     );
 }
