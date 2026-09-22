@@ -1081,7 +1081,10 @@ async fn a_link_records_when_its_token_expires() {
         .await
         .unwrap()
         .expect("linked");
-    assert!(row.access_token_expires_at.is_some(), "expiry recorded at link");
+    assert!(
+        row.access_token_expires_at.is_some(),
+        "expiry recorded at link"
+    );
     // Still fresh: the link-time token, no refresh spent.
     assert_eq!(linked_access_token(&h, &rp).await, GITHUB_TOKEN);
     assert!(h.provider.refreshes.lock().unwrap().is_empty());
@@ -1098,8 +1101,15 @@ async fn a_link_with_no_recorded_expiry_refreshes_instead_of_going_stale() {
     set_expiry(&h, None).await;
 
     assert_eq!(linked_access_token(&h, &rp).await, "refreshed-1");
-    assert_eq!(linked_access_token(&h, &rp).await, "refreshed-1", "fresh now: no second refresh");
-    assert_eq!(*h.provider.refreshes.lock().unwrap(), vec!["rt-1".to_string()]);
+    assert_eq!(
+        linked_access_token(&h, &rp).await,
+        "refreshed-1",
+        "fresh now: no second refresh"
+    );
+    assert_eq!(
+        *h.provider.refreshes.lock().unwrap(),
+        vec!["rt-1".to_string()]
+    );
 }
 
 /// An expired token refreshes, and the rotated refresh token is what the
