@@ -427,6 +427,8 @@ pub struct PresenceHost {
     /// Live presence sessions — same lifecycle as
     /// [`DocSyncHost::active_sessions`].
     sessions: Arc<std::sync::atomic::AtomicUsize>,
+    // Keeps the server-local-presence → hub bridge alive.
+    _local_sub: Arc<loro::Subscription>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -434,11 +436,24 @@ impl PresenceHost {
     /// `timeout_ms` — how long a peer's state survives without an
     /// update before it's considered gone (Loro's ephemeral timeout).
     pub fn new(doc_id: Uuid, timeout_ms: i64) -> Self {
+        let store = crate::awareness::EphemeralStore::new(timeout_ms);
+        let hub = architect::PubSub::sliding(64);
+        // The host may be a participant too (a desktop hosting the session
+        // it is editing): what it writes into its own store goes out to
+        // every attached peer, as a peer's own writes do. Only local
+        // writes fire this — updates relayed from peers are published by
+        // their session's pump.
+        let bridge = hub.clone();
+        let sub = store.subscribe_local_updates(Box::new(move |bytes| {
+            bridge.publish(bytes.clone());
+            true
+        }));
         Self {
             doc_id,
-            store: crate::awareness::EphemeralStore::new(timeout_ms),
-            hub: architect::PubSub::sliding(64),
+            store,
+            hub,
             sessions: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            _local_sub: Arc::new(sub),
         }
     }
 
