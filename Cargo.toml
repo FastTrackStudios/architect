@@ -108,13 +108,18 @@ architect-launcher-core = { path = "features/launcher/architect-launcher-core" }
 architect-launcher-ui = { path = "features/launcher/architect-launcher-ui" }
 architect-launcher-providers = { path = "features/launcher/architect-launcher-providers" }
 
-# ── Facet reflection + vox RPC — the rc.5 fleet pins ──────────────────
-facet = { version = "0.50.0-rc.5", features = ["reflect", "chrono", "uuid"] }
-vox = { version = "0.10.0-rc.5", default-features = false, features = ["runtime"] }
-vox-types = { version = "0.10.0-rc.5" }
-vox-core = { version = "0.10.0-rc.5" }
-# Styx config language (facet-backed) — pinned to the FTS fleet version.
-facet-styx = { version = "5.0.0-rc.5" }
+# ── Facet reflection + vox RPC — the rc.7 fleet ───────────────────────
+# Caret ranges: the version is a FLOOR, the lockfile holds the exact one.
+# The fleet (architect, task, session, keyflow, fasttrackstudio) moves
+# together because a vox client and server on different rcs fail the
+# handshake ("schema decode consumed N of M bytes"); the rc.7 floor keeps
+# every consumer of architect off the older ones.
+facet = { version = "0.50.0-rc.7", features = ["reflect", "chrono", "uuid"] }
+vox = { version = "0.10.0-rc.7", default-features = false, features = ["runtime"] }
+vox-types = { version = "0.10.0-rc.7" }
+vox-core = { version = "0.10.0-rc.7" }
+# Styx config language (facet-backed) — the fleet's facet-styx.
+facet-styx = { version = "5.0.0-rc.7" }
 iroh = { version = "1" }
 
 # ── Server / storage ──────────────────────────────────────────────────
@@ -242,14 +247,27 @@ blitz-html = { git = "https://github.com/FastTrackStudios/blitz", rev = "c82dd23
 # Vendored one-line fix: quote scalars containing `<`/`>` — upstream
 # styx-format emits them bare but styx-parse rejects them.
 styx-format = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.1.0" }
-# Vendored phon rc.5 + derive support for parse/display opaque scalars
-# (Uuid, chrono DateTime/NaiveDate, url, …). Upstream rc.5 PANICS the first
-# time a vox RPC reply contains such a field.
-phon = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.1.0" }
-# Vendored phon-jit rc.5 with a one-line build.rs fix: force the stable,
-# call-based stencils (upstream's nightly detection misfires on the pinned
-# stable toolchain → E0658 on `become`).
-phon-jit = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.1.0" }
+# The FastTrackStudios/vendor forks on the rc.7 fleet (each one's reason
+# is in vendor's README). phon and facet-core are SIBLING-CHECKOUT PATHS
+# (../vendor, a clone of that repo): their rc.7 forward-ports are
+# committed there locally but not tagged yet — replace each with a pinned
+# vendor tag before this repo is pushed. phon-jit and vox-phon were
+# already on rc.7 at published tags.
+#
+# phon rc.7 + derive support for parse/display opaque scalars (Uuid,
+# chrono DateTime/NaiveDate, url, …). Upstream PANICS the first time a vox
+# RPC reply contains such a field.
+phon = { path = "../vendor/phon" }
+# phon-jit rc.7 with a build.rs fix: build the tail-call stencils on the
+# pinned stable rustc (upstream's nightly detection misfires on it →
+# E0658 on `become`).
+phon-jit = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.2.3" }
+# facet-core rc.7: chrono's display fns keep sub-second precision
+# (upstream rounds every timestamp on every vox RPC to the second).
+facet-core = { path = "../vendor/facet-core" }
+# vox-phon rc.7 without the bogus post-decode length check: upstream fails
+# every real schema exchange with "schema decode consumed N of M bytes".
+vox-phon = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.3.0" }
 
 # ── Lints ─────────────────────────────────────────────────────────────
 [workspace.lints.rust]
