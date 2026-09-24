@@ -30,8 +30,9 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 default = []
 # The real-time sync transport (`crdt::sync`): the DocSync vox service,
 # the server host (canonical doc + fan-out), the SyncedDoc client
-# driver, and the presence channel. Pulls vox + architect's PubSub.
-vox = ["dep:vox", "dep:facet", "architect/vox"]
+# driver, and the presence channel. Pulls vox + architect's PubSub, and
+# architect's platform timers for the presence driver's housekeeping.
+vox = ["dep:vox", "dep:facet", "architect/vox", "architect/platform"]
 # Dioxus hooks (`crdt::hooks`): use_synced_doc / use_crdt_list /
 # use_crdt_entry / use_presence_channel — the client-side bridge from a
 # syncing replica to AtomResult phase rendering. Implies the sync

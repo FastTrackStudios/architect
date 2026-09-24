@@ -170,6 +170,43 @@ async fn registry_presence_is_per_doc() {
     scope.close().await;
 }
 
+/// A peer that sits still stays: its driver writes its keys again well
+/// inside the timeout. One that leaves goes: the others' drivers prune it
+/// once it has outlived the timeout.
+#[tokio::test(flavor = "multi_thread")]
+async fn presence_keeps_a_still_peer_and_drops_a_gone_one() {
+    const TIMEOUT_MS: i64 = 1_500;
+    let scope = Scope::new();
+    let registry = ephemeral_registry().with_presence_timeout(TIMEOUT_MS);
+    let local = serve(&registry, &scope);
+    let doc_id = Uuid::new_v4();
+
+    let mut drivers = Vec::new();
+    let mut peers = Vec::new();
+    for (key, value) in [("a", "alice"), ("b", "bob")] {
+        let client: DocPresenceClient = local.establish().await.expect("presence client");
+        let (peer, mut driver) = PresencePeer::new(doc_id, TIMEOUT_MS);
+        drivers.push(tokio::spawn(async move {
+            let _ = driver.run(&client).await;
+        }));
+        peer.set(key, value);
+        peers.push(peer);
+    }
+    let bob = &peers[1];
+    eventually("bob sees alice", async || bob.states().contains_key("a")).await;
+
+    // Twice the timeout with nothing new from alice: still here.
+    tokio::time::sleep(Duration::from_millis(2 * TIMEOUT_MS as u64)).await;
+    assert!(bob.states().contains_key("a"), "a still peer is kept alive");
+
+    // Alice goes.
+    drivers[0].abort();
+    eventually("bob no longer sees alice", async || !bob.states().contains_key("a")).await;
+    assert!(bob.states().contains_key("b"), "bob keeps himself");
+
+    scope.close().await;
+}
+
 /// The admission hook gates opening *and* serving: a rejected id fails
 /// with `UnknownDoc` and never reaches the factory.
 #[tokio::test(flavor = "multi_thread")]

@@ -577,6 +577,7 @@ impl PresencePeer {
         let driver = PresenceDriver {
             doc_id,
             peer: peer.clone(),
+            timeout_ms,
             outbox,
             _local_sub: sub,
         };
@@ -614,6 +615,20 @@ impl PresencePeer {
         self.store.remove_outdated();
     }
 
+    /// Write this peer's keys again, unchanged: a value lives
+    /// `timeout_ms` from its last write at every other peer (and at the
+    /// server, which prunes on attach), so a peer that sits still would
+    /// otherwise vanish while it is still here. The driver does this on
+    /// a timer.
+    fn refresh(&self) {
+        let keys: Vec<String> = self.local_keys.lock().unwrap().iter().cloned().collect();
+        for key in keys {
+            if let Some(value) = self.store.get(&key) {
+                self.store.set(&key, value);
+            }
+        }
+    }
+
     /// The underlying store — for change subscriptions.
     pub fn store(&self) -> &crate::awareness::EphemeralStore {
         &self.store
@@ -625,6 +640,9 @@ impl PresencePeer {
 pub struct PresenceDriver {
     doc_id: Uuid,
     peer: PresencePeer,
+    /// How long a value lives without an update — what the keep-alive
+    /// and the sweep run against.
+    timeout_ms: i64,
     outbox: tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>,
     _local_sub: loro::Subscription,
 }
@@ -697,6 +715,20 @@ impl PresenceDriver {
             }
         };
 
+        // Housekeeping, while connected: this peer's keys written again
+        // well inside the timeout, so the others keep it; theirs pruned
+        // once they outlive it, so a peer that left goes (subscribers see
+        // `Timeout` events — a task, never a render path).
+        let peer = self.peer.clone();
+        let period = std::time::Duration::from_millis(u64::try_from(self.timeout_ms / 3).unwrap_or(0).max(1_000));
+        let housekeeping = async move {
+            loop {
+                architect::platform::sleep(period).await;
+                peer.refresh();
+                peer.sweep();
+            }
+        };
+
         tokio::select! {
             res = call => match res {
                 Ok(()) => Ok(()),
@@ -704,6 +736,7 @@ impl PresenceDriver {
             },
             () = up => Ok(()),   // up channel gone — connection closed
             () = down => Ok(()), // down stream ended
+            () = housekeeping => Ok(()),
         }
     }
 }
