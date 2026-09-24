@@ -1,10 +1,10 @@
-//! SeaORM entities for the two CRDT-persistence tables. Generic
+//! `SeaORM` entities for the two CRDT-persistence tables. Generic
 //! across every feature in the workspace.
 
 pub mod crdt_doc {
     use sea_orm::entity::prelude::*;
 
-    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
     #[sea_orm(table_name = "crdt_doc")]
     pub struct Model {
         #[sea_orm(primary_key, auto_increment = false)]
@@ -22,7 +22,7 @@ pub mod crdt_doc {
 pub mod crdt_update {
     use sea_orm::entity::prelude::*;
 
-    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
+    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
     #[sea_orm(table_name = "crdt_update")]
     pub struct Model {
         #[sea_orm(primary_key, auto_increment = false)]

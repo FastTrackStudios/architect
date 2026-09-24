@@ -14,7 +14,7 @@
 //! - The **wry** capture spawns the consuming app's binary in
 //!   `--snapshot=<story>` mode against an internally-managed `Xvfb`
 //!   display, polls `xdotool` until the window is mapped, screenshots
-//!   it via ImageMagick `import`, then kills both processes.
+//!   it via `ImageMagick` `import`, then kills both processes.
 //!
 //! Required system tools (Linux only for now): `Xvfb`, `xdotool`,
 //! `import` (from imagemagick). Document via the `wry_capture` errors.

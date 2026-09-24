@@ -138,7 +138,7 @@ pub fn TabContent(props: TabContentProps) -> Element {
     }
 }
 
-/// Tabs in vertical orientation — `horizontal: false`. The TabList is
+/// Tabs in vertical orientation — `horizontal: false`. The `TabList` is
 /// flipped to a column and placed beside the content panels.
 #[story(category = "Tabs", name = "vertical")]
 pub fn tabs_vertical() -> Element {

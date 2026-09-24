@@ -20,15 +20,18 @@ members = [
     "crates/architect-derive",
     "crates/architect-rpc-derive",
     "crates/architect-action-derive",
+    # ── the reference example ─────────────────────────────────────────
+    "examples/greeter",
     # ── apps ──────────────────────────────────────────────────────────
     "apps/auth-server",
+    "apps/mock-oauth",
     # ── auth ──────────────────────────────────────────────────────────
     "features/auth/architect-auth",
     "features/auth/auth",
     "features/auth/auth-proto",
     "features/auth/auth-db",
     "features/auth/auth-client",
-    "features/auth/auth-http",
+    "features/auth/auth-ui",
     "features/auth/tests/native",
     # ── crdt ──────────────────────────────────────────────────────────
     "features/crdt/crdt",
@@ -52,6 +55,8 @@ members = [
     "features/launcher/architect-launcher-core",
     "features/launcher/architect-launcher-ui",
     "features/launcher/architect-launcher-providers",
+    # ── repo tooling ──────────────────────────────────────────────────
+    "xtask",
 ]
 
 [workspace.package]
@@ -81,7 +86,7 @@ auth = { path = "features/auth/auth" }
 auth-proto = { path = "features/auth/auth-proto" }
 auth-db = { path = "features/auth/auth-db" }
 auth-client = { path = "features/auth/auth-client" }
-auth-http = { path = "features/auth/auth-http" }
+auth-ui = { path = "features/auth/auth-ui" }
 crdt = { path = "features/crdt/crdt" }
 crdt-derive = { path = "features/crdt/crdt-derive" }
 crdt-seaorm = { path = "features/crdt/crdt-seaorm" }
@@ -145,6 +150,16 @@ rand = "0.8"
 sha1 = "0.10"
 sha2 = "0.10"
 totp-rs = { version = "5", features = ["gen_secret", "otpauth"] }
+# WebAuthn. `danger-allow-state-serialisation` lets the challenge state be
+# held in the verification table between the two halves of a ceremony —
+# which is the safe use it is named for: the state stays server-side and
+# is never handed to the browser. `resident-key-support` +
+# `conditional-ui` are what discoverable (usernameless) passkeys need.
+webauthn-rs = { version = "0.5", features = [
+    "danger-allow-state-serialisation",
+    "resident-key-support",
+    "conditional-ui",
+] }
 
 # ── UI framework ──────────────────────────────────────────────────────
 # dioxus 0.8 line — git rev pinned; it must stay in lockstep across every
@@ -194,6 +209,16 @@ tokio = { version = "1.48", features = ["full"] }
 
 # ── Serialization ─────────────────────────────────────────────────────
 serde = { version = "1.0", features = ["derive"] }
+percent-encoding = "2"
+# QR rendering for the two-factor enrolment page. Pure Rust, no image
+# crate: the page draws SVG, so nothing is rasterised or base64-inlined.
+qrcodegen = "1"
+# Sign-In With Ethereum. `k256` recovers the signing key from a
+# signature; `sha3` is keccak-256, which is what Ethereum hashes with
+# (and is NOT the SHA-3 of the same name — the padding differs).
+k256 = { version = "0.14", features = ["ecdsa"] }
+sha3 = "0.12"
+hex = "0.4"
 serde_json = "1.0"
 toml = "0.8"
 thiserror = "2.0"
@@ -248,23 +273,21 @@ blitz-html = { git = "https://github.com/FastTrackStudios/blitz", rev = "c82dd23
 # styx-format emits them bare but styx-parse rejects them.
 styx-format = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.1.0" }
 # The FastTrackStudios/vendor forks on the rc.7 fleet (each one's reason
-# is in vendor's README). phon and facet-core are SIBLING-CHECKOUT PATHS
-# (../vendor, a clone of that repo): their rc.7 forward-ports are
-# committed there locally but not tagged yet — replace each with a pinned
-# vendor tag before this repo is pushed. phon-jit and vox-phon were
-# already on rc.7 at published tags.
+# is in vendor's README). phon and facet-core carry their rc.7
+# forward-ports from vendor v0.4.0; phon-jit and vox-phon were already on
+# rc.7 at earlier tags.
 #
 # phon rc.7 + derive support for parse/display opaque scalars (Uuid,
 # chrono DateTime/NaiveDate, url, …). Upstream PANICS the first time a vox
 # RPC reply contains such a field.
-phon = { path = "../vendor/phon" }
+phon = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.4.0" }
 # phon-jit rc.7 with a build.rs fix: build the tail-call stencils on the
 # pinned stable rustc (upstream's nightly detection misfires on it →
 # E0658 on `become`).
 phon-jit = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.2.3" }
 # facet-core rc.7: chrono's display fns keep sub-second precision
 # (upstream rounds every timestamp on every vox RPC to the second).
-facet-core = { path = "../vendor/facet-core" }
+facet-core = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.4.0" }
 # vox-phon rc.7 without the bogus post-decode length check: upstream fails
 # every real schema exchange with "schema decode consumed N of M bytes".
 vox-phon = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.3.0" }
@@ -274,6 +297,10 @@ vox-phon = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.3.0" 
 dead_code = "warn"
 unused = "warn"
 unused_unsafe = "warn"
+# The derives emit `#[cfg(feature = "vox" | "server" | "fake")]` into
+# consumer crates; a crate that declares none of them (an app, an
+# example) should not warn about it.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("vox", "server", "fake"))'] }
 
 [workspace.lints.rustdoc]
 broken_intra_doc_links = "allow"
@@ -281,6 +308,79 @@ private_intra_doc_links = "allow"
 redundant_explicit_links = "allow"
 
 [workspace.lints.clippy]
+# ── The house style (namtao.com/rust) ─────────────────────────────────
+# `priority = -1` so the individual `allow`s further down win over the
+# group. Members opt in with `[lints] workspace = true` — a crate without
+# that line inherits NOTHING, which is how the pre-existing allow-list
+# below sat inert in `architect`, the three proc-macro crates, atom,
+# form, auth, crdt and telemetry until 2026-09-09.
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+
+# ── No panics in shipped code ─────────────────────────────────────────
+# architect is a library that runs inside other people's processes — a
+# REAPER extension, an audio pump thread, a long-lived server. A panic
+# here is not a stack trace, it is a dead host. Tests are exempt via
+# `clippy.toml`.
+# The one lint from the set that is turned off, deliberately.
+#
+# architect's fallible APIs return typed `thiserror` enums whose variants
+# carry their own docs (`RepoError`, `AuthFlowError`, `DispatchError`,
+# `LayerPlanError`, …). `# Errors` fired on 230 functions, and the honest
+# section for almost all of them is "returns the error type in the
+# signature, whose variants are documented" — 230 copies of which makes
+# the docs worse, not better, and buries the handful of methods that
+# genuinely have something to say.
+#
+# `missing_panics_doc` stays ON: a function that CAN panic must say so,
+# and after this cleanup there are few enough of those to keep honest.
+missing_errors_doc = "allow"
+
+# The `async` on these is not the impl's to choose. Every site is either
+# a trait method whose signature the trait owns (`Link::close`,
+# `PermissionCheck::can`), or a repo-shaped inherent API whose callers
+# must be able to `.await` it regardless of whether *today's* body
+# happens to be synchronous — `LoroRepo::get`/`list` mirror the async
+# `Repo` surface the derive emits. Dropping `async` would be a breaking
+# change that also forbids the next implementation from awaiting.
+unused_async_trait_impl = "allow"
+
+# Fires on macro attribute structs (`ContainerAttrs`, `FieldAttrs`),
+# Dioxus component props, and config builders. The lint's suggested fix
+# is a state enum, which is right when the bools are mutually exclusive
+# states — and wrong here, where they are independent, individually
+# settable flags. Modelling `#[architect(primary_key, filterable,
+# sortable, fulltext)]` as an enum would be a worse API, not a better one.
+struct_excessive_bools = "allow"
+
+# Counts lines, which in this tree measures the size of a *template*
+# rather than the complexity of a function. Of the 21 sites it flagged,
+# 18 are declarative emitters — proc-macro `quote!` builders
+# (`architect-derive::build_*_block`, `architect-rpc-derive::emit_*`),
+# SeaORM `create_tables`/`create_indexes` DDL, a theme-preset table, a
+# story registry. Splitting those at the 100-line mark would cut a single
+# template in half for no gain in readability.
+#
+# The three that are real control flow were reviewed individually;
+# `architect_launcher_core::query::query_filtered` is the one worth an
+# actual refactor, and it is a launcher concern, not a framework one.
+too_many_lines = "allow"
+
+unwrap_used = "deny"
+expect_used = "deny"
+indexing_slicing = "deny"
+arithmetic_side_effects = "deny"
+unreachable = "deny"
+unimplemented = "deny"
+unchecked_time_subtraction = "deny"
+todo = "deny"
+string_slice = "deny"
+panic_in_result_fn = "deny"
+panic = "deny"
+exit = "deny"
+as_conversions = "deny"
+
+# ── Pre-existing per-lint relaxations (priority 0 — these win) ────────
 field_reassign_with_default = "allow"
 redundant_closure = "allow"
 nonminimal_bool = "allow"

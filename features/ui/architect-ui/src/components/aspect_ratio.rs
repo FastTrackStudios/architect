@@ -1,4 +1,4 @@
-//! AspectRatio — shadcn v4 maia style CSS aspect-ratio wrapper.
+//! `AspectRatio` — shadcn v4 maia style CSS aspect-ratio wrapper.
 
 use architect_story_runtime::story;
 use dioxus::prelude::*;
@@ -28,7 +28,7 @@ pub fn AspectRatio(props: AspectRatioProps) -> Element {
     }
 }
 
-/// Default AspectRatio story showing common ratios side-by-side.
+/// Default `AspectRatio` story showing common ratios side-by-side.
 #[story(category = "AspectRatio", name = "default")]
 pub fn aspect_ratio_default() -> Element {
     rsx! {

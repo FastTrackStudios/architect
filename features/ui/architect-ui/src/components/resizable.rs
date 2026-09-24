@@ -2,6 +2,8 @@
 //!
 //! Simplified flex-basis approach (no JS drag interop).
 
+use std::fmt::Write as _;
+
 use architect_story_runtime::story;
 use dioxus::prelude::*;
 
@@ -22,7 +24,7 @@ pub enum ResizeDirection {
 // ---------------------------------------------------------------------------
 
 /// Shared context provided by [`ResizablePanelGroup`] to children.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResizableContext {
     pub direction: ResizeDirection,
 }
@@ -102,10 +104,10 @@ pub fn ResizablePanel(props: ResizablePanelProps) -> Element {
     if let Some(min) = props.min_size {
         match ctx.direction {
             ResizeDirection::Horizontal => {
-                style.push_str(&format!(" min-width: {min}%;"));
+                let _ = write!(style, " min-width: {min}%;");
             }
             ResizeDirection::Vertical => {
-                style.push_str(&format!(" min-height: {min}%;"));
+                let _ = write!(style, " min-height: {min}%;");
             }
         }
     }
@@ -113,10 +115,10 @@ pub fn ResizablePanel(props: ResizablePanelProps) -> Element {
     if let Some(max) = props.max_size {
         match ctx.direction {
             ResizeDirection::Horizontal => {
-                style.push_str(&format!(" max-width: {max}%;"));
+                let _ = write!(style, " max-width: {max}%;");
             }
             ResizeDirection::Vertical => {
-                style.push_str(&format!(" max-height: {max}%;"));
+                let _ = write!(style, " max-height: {max}%;");
             }
         }
     }
@@ -134,7 +136,7 @@ pub fn ResizablePanel(props: ResizablePanelProps) -> Element {
 // ResizableHandle
 // ---------------------------------------------------------------------------
 
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone, PartialEq, Eq)]
 pub struct ResizableHandleProps {
     /// Show a visible grip icon in the centre of the handle.
     #[props(default = false)]

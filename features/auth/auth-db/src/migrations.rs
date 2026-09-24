@@ -1,4 +1,4 @@
-//! SeaORM migrator for architect-auth tables.
+//! `SeaORM` migrator for architect-auth tables.
 
 use sea_orm_migration::prelude::*;
 
@@ -10,6 +10,7 @@ impl MigratorTrait for Migrator {
         vec![
             Box::new(m20260513_000001_create_auth_tables::Migration),
             Box::new(m20260809_000001_create_email_history::Migration),
+            Box::new(m20260914_000001_create_agent_links::Migration),
         ]
     }
 }
@@ -22,6 +23,10 @@ mod m20260513_000001_create_auth_tables {
 
     #[async_trait::async_trait]
     impl MigrationTrait for Migration {
+        // The DDL futures are large because the schema is: one `await`
+        // per table and per index, all in one stack frame. This runs once
+        // at startup, so the frame size is not a cost anyone pays twice.
+        #[allow(clippy::large_futures)]
         async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
             create_tables(manager).await?;
             create_indexes(manager).await
@@ -36,7 +41,10 @@ mod m20260513_000001_create_auth_tables {
             drop_table(manager, AuthApiKeys::Table).await?;
             drop_table(manager, AuthTwoFactors::Table).await?;
             drop_table(manager, AuthVerifications::Table).await?;
+            drop_table(manager, AuthPasskeyCeremonies::Table).await?;
+            drop_table(manager, AuthInviteLinks::Table).await?;
             drop_table(manager, AuthInvitations::Table).await?;
+            drop_table(manager, AuthAgentLinks::Table).await?;
             drop_table(manager, AuthMembers::Table).await?;
             drop_table(manager, AuthOrganizations::Table).await?;
             drop_table(manager, AuthAccounts::Table).await?;
@@ -202,6 +210,28 @@ mod m20260513_000001_create_auth_tables {
         manager
             .create_table(
                 Table::create()
+                    .table(AuthAgentLinks::Table)
+                    .if_not_exists()
+                    .col(uuid_pk(AuthAgentLinks::Id))
+                    .col(
+                        ColumnDef::new(AuthAgentLinks::OwnerUserId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(AuthAgentLinks::AgentUserId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(ColumnDef::new(AuthAgentLinks::MaxRole).string().not_null())
+                    .col(ts(AuthAgentLinks::CreatedAt))
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_table(
+                Table::create()
                     .table(AuthTeams::Table)
                     .if_not_exists()
                     .col(uuid_pk(AuthTeams::Id))
@@ -243,6 +273,83 @@ mod m20260513_000001_create_auth_tables {
                     .col(ColumnDef::new(AuthInvitations::InviterId).uuid().not_null())
                     .col(ts(AuthInvitations::ExpiresAt))
                     .col(ts(AuthInvitations::CreatedAt))
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_table(
+                Table::create()
+                    .table(AuthInviteLinks::Table)
+                    .if_not_exists()
+                    .col(uuid_pk(AuthInviteLinks::Id))
+                    .col(
+                        ColumnDef::new(AuthInviteLinks::OrganizationId)
+                            .uuid()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(AuthInviteLinks::TokenHash)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(ColumnDef::new(AuthInviteLinks::Label).string().null())
+                    .col(ColumnDef::new(AuthInviteLinks::Role).string().not_null())
+                    .col(ColumnDef::new(AuthInviteLinks::CreatedBy).uuid().not_null())
+                    // Nullable: a link with no expiry and no cap is a
+                    // legitimate thing to hand a whole cohort.
+                    .col(
+                        ColumnDef::new(AuthInviteLinks::ExpiresAt)
+                            .timestamp_with_time_zone()
+                            .null(),
+                    )
+                    .col(ColumnDef::new(AuthInviteLinks::MaxUses).integer().null())
+                    .col(
+                        ColumnDef::new(AuthInviteLinks::Uses)
+                            .integer()
+                            .not_null()
+                            .default(0),
+                    )
+                    .col(
+                        ColumnDef::new(AuthInviteLinks::RevokedAt)
+                            .timestamp_with_time_zone()
+                            .null(),
+                    )
+                    .col(ts(AuthInviteLinks::CreatedAt))
+                    .to_owned(),
+            )
+            .await?;
+
+        manager
+            .create_table(
+                Table::create()
+                    .table(AuthPasskeyCeremonies::Table)
+                    .if_not_exists()
+                    .col(uuid_pk(AuthPasskeyCeremonies::Id))
+                    .col(
+                        ColumnDef::new(AuthPasskeyCeremonies::HandleHash)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(AuthPasskeyCeremonies::Kind)
+                            .string()
+                            .not_null(),
+                    )
+                    // Null for a discoverable sign-in: the server does
+                    // not yet know who is at the keyboard, which is the
+                    // point of it.
+                    .col(ColumnDef::new(AuthPasskeyCeremonies::UserId).uuid().null())
+                    // `text`, not `string`: a serialised ceremony state
+                    // is well past the 255 characters `string` becomes
+                    // on MySQL.
+                    .col(
+                        ColumnDef::new(AuthPasskeyCeremonies::StateJson)
+                            .text()
+                            .not_null(),
+                    )
+                    .col(ts(AuthPasskeyCeremonies::ExpiresAt))
+                    .col(ts(AuthPasskeyCeremonies::CreatedAt))
                     .to_owned(),
             )
             .await?;
@@ -367,6 +474,10 @@ mod m20260513_000001_create_auth_tables {
 
     // r[impl auth.storage.unique-indexes]
     // r[impl auth.storage.lookup-indexes]
+    // The array IS the index table — a declarative list of every index the
+    // schema declares. Boxing it to satisfy a stack-size heuristic would
+    // obscure that, for no runtime benefit in a once-per-boot migration.
+    #[allow(clippy::large_stack_arrays)]
     async fn create_indexes(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
         for index in [
             unique("idx_auth_users_email", AuthUsers::Table, [AuthUsers::Email]),
@@ -423,6 +534,16 @@ mod m20260513_000001_create_auth_tables {
                 AuthMembers::Table,
                 [AuthMembers::OrganizationId, AuthMembers::UserId],
             ),
+            unique(
+                "idx_auth_agent_links_owner_agent",
+                AuthAgentLinks::Table,
+                [AuthAgentLinks::OwnerUserId, AuthAgentLinks::AgentUserId],
+            ),
+            index(
+                "idx_auth_agent_links_agent",
+                AuthAgentLinks::Table,
+                [AuthAgentLinks::AgentUserId],
+            ),
             index(
                 "idx_auth_teams_org",
                 AuthTeams::Table,
@@ -452,6 +573,29 @@ mod m20260513_000001_create_auth_tables {
                 "idx_auth_invitations_expires_at",
                 AuthInvitations::Table,
                 [AuthInvitations::ExpiresAt],
+            ),
+            unique(
+                "idx_auth_passkey_ceremonies_handle_hash",
+                AuthPasskeyCeremonies::Table,
+                [AuthPasskeyCeremonies::HandleHash],
+            ),
+            index(
+                "idx_auth_passkey_ceremonies_expires_at",
+                AuthPasskeyCeremonies::Table,
+                [AuthPasskeyCeremonies::ExpiresAt],
+            ),
+            index(
+                "idx_auth_invite_links_org",
+                AuthInviteLinks::Table,
+                [AuthInviteLinks::OrganizationId],
+            ),
+            // Unique, not merely indexed: the hash IS the credential, so
+            // two rows sharing one would mean one URL admitting people
+            // into two organizations depending on which row was read.
+            unique(
+                "idx_auth_invite_links_token_hash",
+                AuthInviteLinks::Table,
+                [AuthInviteLinks::TokenHash],
             ),
             index(
                 "idx_auth_verifications_identifier",
@@ -543,7 +687,7 @@ mod m20260513_000001_create_auth_tables {
         for column in columns {
             index.col(column);
         }
-        index.to_owned()
+        index.clone()
     }
 
     fn unique<T, C, const N: usize>(name: &str, table: T, columns: [C; N]) -> IndexCreateStatement
@@ -556,7 +700,7 @@ mod m20260513_000001_create_auth_tables {
         for column in columns {
             index.col(column);
         }
-        index.to_owned()
+        index.clone()
     }
 
     #[derive(Iden)]
@@ -647,6 +791,16 @@ mod m20260513_000001_create_auth_tables {
     }
 
     #[derive(Iden)]
+    enum AuthAgentLinks {
+        Table,
+        Id,
+        OwnerUserId,
+        AgentUserId,
+        MaxRole,
+        CreatedAt,
+    }
+
+    #[derive(Iden)]
     enum AuthTeams {
         Table,
         Id,
@@ -662,6 +816,34 @@ mod m20260513_000001_create_auth_tables {
         Id,
         TeamId,
         UserId,
+        CreatedAt,
+    }
+
+    #[derive(Iden)]
+    enum AuthPasskeyCeremonies {
+        Table,
+        Id,
+        HandleHash,
+        Kind,
+        UserId,
+        StateJson,
+        ExpiresAt,
+        CreatedAt,
+    }
+
+    #[derive(Iden)]
+    enum AuthInviteLinks {
+        Table,
+        Id,
+        OrganizationId,
+        TokenHash,
+        Label,
+        Role,
+        CreatedBy,
+        ExpiresAt,
+        MaxUses,
+        Uses,
+        RevokedAt,
         CreatedAt,
     }
 
@@ -749,6 +931,18 @@ mod m20260513_000001_create_auth_tables {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic,
+    clippy::float_cmp,
+    clippy::string_slice,
+    clippy::significant_drop_tightening,
+    clippy::too_many_lines
+)]
 mod tests {
     use sea_orm::{ConnectionTrait, Database, DbBackend, Statement};
     use sea_orm_migration::MigratorTrait;
@@ -857,7 +1051,7 @@ mod m20260809_000001_create_email_history {
     // down on boot. Named explicitly instead, which is also what makes it
     // safe to keep adding migrations to this file.
     impl MigrationName for Migration {
-        fn name(&self) -> &str {
+        fn name(&self) -> &'static str {
             "m20260809_000001_create_email_history"
         }
     }
@@ -946,6 +1140,107 @@ mod m20260809_000001_create_email_history {
         NewEmail,
         ChangedBy,
         Reason,
+        CreatedAt,
+    }
+}
+
+/// The linked-agents table, for databases that were created before it
+/// existed.
+///
+/// `auth_agent_links` was first added to the initial migration, which is
+/// right for a fresh database and does nothing for one that has already
+/// run it — and every production database had. So the issuer that
+/// shipped it answered every organization list with "relation does not
+/// exist" until the table was created by hand. This migration is what
+/// should have shipped with it; `if_not_exists` throughout, so it is a
+/// no-op on a fresh database and on one where the table was made by hand.
+mod m20260914_000001_create_agent_links {
+    use sea_orm_migration::prelude::*;
+
+    pub struct Migration;
+
+    impl MigrationName for Migration {
+        fn name(&self) -> &'static str {
+            "m20260914_000001_create_agent_links"
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl MigrationTrait for Migration {
+        async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .create_table(
+                    Table::create()
+                        .table(AuthAgentLinks::Table)
+                        .if_not_exists()
+                        .col(
+                            ColumnDef::new(AuthAgentLinks::Id)
+                                .uuid()
+                                .not_null()
+                                .primary_key(),
+                        )
+                        .col(
+                            ColumnDef::new(AuthAgentLinks::OwnerUserId)
+                                .uuid()
+                                .not_null(),
+                        )
+                        .col(
+                            ColumnDef::new(AuthAgentLinks::AgentUserId)
+                                .uuid()
+                                .not_null(),
+                        )
+                        .col(ColumnDef::new(AuthAgentLinks::MaxRole).string().not_null())
+                        .col(
+                            ColumnDef::new(AuthAgentLinks::CreatedAt)
+                                .timestamp_with_time_zone()
+                                .not_null(),
+                        )
+                        .to_owned(),
+                )
+                .await?;
+            manager
+                .create_index(
+                    Index::create()
+                        .name("idx_auth_agent_links_owner_agent")
+                        .table(AuthAgentLinks::Table)
+                        .col(AuthAgentLinks::OwnerUserId)
+                        .col(AuthAgentLinks::AgentUserId)
+                        .unique()
+                        .if_not_exists()
+                        .to_owned(),
+                )
+                .await?;
+            manager
+                .create_index(
+                    Index::create()
+                        .name("idx_auth_agent_links_agent")
+                        .table(AuthAgentLinks::Table)
+                        .col(AuthAgentLinks::AgentUserId)
+                        .if_not_exists()
+                        .to_owned(),
+                )
+                .await
+        }
+
+        async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .drop_table(
+                    Table::drop()
+                        .table(AuthAgentLinks::Table)
+                        .if_exists()
+                        .to_owned(),
+                )
+                .await
+        }
+    }
+
+    #[derive(Iden)]
+    enum AuthAgentLinks {
+        Table,
+        Id,
+        OwnerUserId,
+        AgentUserId,
+        MaxRole,
         CreatedAt,
     }
 }

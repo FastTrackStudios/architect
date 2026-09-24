@@ -28,3 +28,6 @@ sea-orm = ["dep:sea-orm"]
 server = ["architect/server-seaorm", "sea-orm"]
 fake = ["dep:fake", "architect/fake"]
 full = ["vox", "server", "fake"]
+
+[lints]
+workspace = true

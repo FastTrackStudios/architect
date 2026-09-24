@@ -35,6 +35,8 @@
 
 use std::time::Duration;
 
+use crate::schedule::Schedule;
+
 // ── Backoff policy ──────────────────────────────────────────────────────
 
 /// Reconnect delay policy: exponential with full jitter.
@@ -45,15 +47,35 @@ use std::time::Duration;
 /// reconnecting clients while keeping a hard floor and cap. Defaults:
 /// floor 250ms, cap 10s.
 ///
-/// The RNG is a tiny splitmix64 stream seeded from wall-clock entropy
-/// (per-instance), so two browsers that died together don't retry in
-/// lockstep. Tests use [`Backoff::seeded`] for determinism.
-#[derive(Debug, Clone)]
+/// ## One implementation
+///
+/// This is a **named preset over [`Schedule`](crate::schedule::Schedule)**,
+/// not a second backoff. It used to be its own exponential-plus-splitmix64
+/// implementation sitting beside `Schedule`'s, which meant two policies to
+/// reason about, two to test, and a fleet that adopted neither. The
+/// equivalent long-hand is:
+///
+/// ```
+/// # use architect::Schedule;
+/// # use std::time::Duration;
+/// let floor = Duration::from_millis(250);
+/// let policy = Schedule::exponential(floor)
+///     .max_delay(Duration::from_secs(10))
+///     .full_jitter(floor);
+/// ```
+///
+/// The seed is per-instance (see
+/// [`Schedule::full_jitter`](crate::schedule::Schedule::full_jitter)), so
+/// two browsers that died together don't retry in lockstep. Tests use
+/// [`Backoff::seeded`] for determinism.
+///
+/// Like [`Schedule`] itself, `Backoff` is neither `Clone` nor `Debug`: it
+/// carries combinator state and an RNG stream, and copying either would
+/// hand out a policy that replays the same delays — the lockstep this
+/// exists to avoid. Build one per drive loop.
 pub struct Backoff {
-    floor: Duration,
-    cap: Duration,
-    attempt: u32,
-    rng: u64,
+    schedule: Schedule,
+    attempt: u64,
 }
 
 impl Default for Backoff {
@@ -65,69 +87,45 @@ impl Default for Backoff {
 
 impl Backoff {
     /// A policy with a custom floor/cap, seeded from wall-clock entropy.
+    #[must_use]
     pub fn new(floor: Duration, cap: Duration) -> Self {
-        // Per-instance entropy: sub-second wall-clock nanos (different per
-        // client and per construction) mixed with a process-global counter
-        // (different per instance within one client). `web_time::SystemTime`
-        // works on both native and wasm (Date.now() in the browser).
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static NONCE: AtomicU64 = AtomicU64::new(0);
-        let nanos = web_time::SystemTime::now()
-            .duration_since(web_time::UNIX_EPOCH)
-            .map(|d| d.subsec_nanos() as u64 ^ d.as_secs())
-            .unwrap_or(0);
-        let seed = nanos ^ NONCE.fetch_add(1, Ordering::Relaxed).rotate_left(32);
-        Self::seeded(floor, cap, seed)
+        Self::from_schedule(Self::policy(floor, cap).full_jitter(floor.min(cap)))
     }
 
     /// A policy with an explicit RNG seed — deterministic, for tests.
+    #[must_use]
     pub fn seeded(floor: Duration, cap: Duration, seed: u64) -> Self {
+        Self::from_schedule(Self::policy(floor, cap).full_jitter_seeded(floor.min(cap), seed))
+    }
+
+    /// The un-jittered shape: `min(cap, floor * 2^n)`.
+    fn policy(floor: Duration, cap: Duration) -> Schedule {
+        Schedule::exponential(floor.min(cap)).max_delay(cap)
+    }
+
+    const fn from_schedule(schedule: Schedule) -> Self {
         Self {
-            floor: floor.min(cap),
-            cap,
+            schedule,
             attempt: 0,
-            rng: seed,
         }
     }
 
     /// Back to attempt zero — call on every successful (re-)establish.
-    pub fn reset(&mut self) {
+    ///
+    /// The RNG stream deliberately does **not** reset: re-seeding on every
+    /// success would make a flapping connection replay the same delay
+    /// sequence, which is the lockstep this policy exists to avoid.
+    pub const fn reset(&mut self) {
         self.attempt = 0;
     }
 
     /// The next delay: full jitter over the current exponential ceiling,
     /// then advance the attempt counter.
     pub fn next_delay(&mut self) -> Duration {
-        let ceiling = self.ceiling(self.attempt);
         self.attempt = self.attempt.saturating_add(1);
-        let span = ceiling.saturating_sub(self.floor);
-        if span.is_zero() {
-            return self.floor;
-        }
-        // delay = floor + unit·span, unit ∈ [0, 1)
-        let unit = self.next_unit();
-        self.floor + Duration::from_secs_f64(span.as_secs_f64() * unit)
-    }
-
-    /// `min(cap, floor * 2^attempt)`, saturating.
-    fn ceiling(&self, attempt: u32) -> Duration {
-        let factor = 2f64.powi(attempt.min(63) as i32);
-        let secs = self.floor.as_secs_f64() * factor;
-        if !secs.is_finite() || secs >= self.cap.as_secs_f64() {
-            self.cap
-        } else {
-            Duration::from_secs_f64(secs)
-        }
-    }
-
-    /// splitmix64 step → unit float in `[0, 1)`.
-    fn next_unit(&mut self) -> f64 {
-        self.rng = self.rng.wrapping_add(0x9E37_79B9_7F4A_7C15);
-        let mut z = self.rng;
-        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-        z ^= z >> 31;
-        (z >> 11) as f64 / ((1u64 << 53) as f64)
+        self.schedule
+            .next(self.attempt)
+            .map_or(Duration::ZERO, |decision| decision.delay)
     }
 }
 
@@ -143,15 +141,17 @@ mod hooks {
     use super::Backoff;
     use crate::platform;
 
-    /// Supervised sibling of `use_connect_reactive`: establish `C`, then
-    /// **supervise** it — when `watch_death(c)` resolves, flip the
-    /// provided [`Connection`] back to `Connecting` and reconnect under a
-    /// [`Backoff`] (exponential, full jitter, floor 250ms, cap 10s, reset
-    /// on success). Retries forever; a failed attempt parks the state at
-    /// `Failed(e)` (so pages can render the typed connect error) while
-    /// the loop keeps going.
+    /// Supervised sibling of `use_connect_reactive`.
     ///
-    /// Reactivity contract is the same as `use_connect_reactive`: signals
+    /// Establishes `C`, then **supervises** it: when `watch_death(c)`
+    /// resolves, the provided [`Connection`] flips back to `Connecting`
+    /// and reconnects under a [`Backoff`] (exponential, full jitter,
+    /// floor 250ms, cap 10s, reset on success).
+    ///
+    /// Retries forever; a failed attempt parks the state at `Failed(e)`
+    /// (so pages can render the typed connect error) while the loop keeps
+    /// going. Reactivity contract is the same as `use_connect_reactive`:
+    /// signals
     /// read **synchronously** by `connect` (org switcher, server URL) are
     /// dependencies — when one changes the whole supervisor restarts with
     /// a fresh state machine. The
@@ -188,15 +188,21 @@ mod hooks {
                 let mut had_connection = false;
                 conn.set_connecting();
                 loop {
-                    let attempt = match first.take() {
-                        Some(f) => f,
-                        // Later attempts re-run the closure. Note dioxus
-                        // polls resource futures in a reactive context, so
-                        // signal reads here are tracked too — that's why
-                        // this loop only ever *peeks* the connection's own
-                        // signals (a reactive read of a signal it writes
-                        // would restart the supervisor on its own writes).
-                        None => connect(),
+                    // `if let`, not `map_or_else`: `connect` is an `Rc<F>`
+                    // here, not a callable, so the `map_or_else` form
+                    // clippy suggests does not type-check.
+                    //
+                    // Later attempts re-run the closure. Note dioxus polls
+                    // resource futures in a reactive context, so signal
+                    // reads here are tracked too — that's why this loop
+                    // only ever *peeks* the connection's own signals (a
+                    // reactive read of a signal it writes would restart the
+                    // supervisor on its own writes).
+                    #[allow(clippy::option_if_let_else)]
+                    let attempt = if let Some(f) = first.take() {
+                        f
+                    } else {
+                        connect()
                     };
                     match attempt.await {
                         Ok(c) => {
@@ -220,11 +226,11 @@ mod hooks {
                             tracing::warn!(generation, "connection lost; reconnecting");
                         }
                         Err(e) => {
-                            if !outage_logged {
+                            if outage_logged {
+                                tracing::debug!("reconnect attempt failed: {e}");
+                            } else {
                                 tracing::warn!("connect failed: {e}; retrying with backoff");
                                 outage_logged = true;
-                            } else {
-                                tracing::debug!("reconnect attempt failed: {e}");
                             }
                             conn.set_failed(e);
                             platform::sleep(backoff.next_delay()).await;
@@ -256,17 +262,12 @@ mod tests {
         }
     }
 
-    #[test]
-    fn ceiling_doubles_until_the_cap() {
-        let floor = Duration::from_millis(250);
-        let cap = Duration::from_secs(10);
-        let b = Backoff::seeded(floor, cap, 0);
-        assert_eq!(b.ceiling(0), Duration::from_millis(250));
-        assert_eq!(b.ceiling(1), Duration::from_millis(500));
-        assert_eq!(b.ceiling(2), Duration::from_secs(1));
-        assert_eq!(b.ceiling(5), Duration::from_secs(8));
-        assert_eq!(b.ceiling(6), cap); // 16s > cap
-        assert_eq!(b.ceiling(60), cap);
+    /// `min(cap, floor * 2^n)` — the band attempt `n` draws from. The
+    /// expected shape, stated here rather than read off the
+    /// implementation.
+    fn expected_ceiling(floor: Duration, cap: Duration, attempt: u32) -> Duration {
+        let doubled = floor.saturating_mul(1u32 << attempt.min(20));
+        doubled.min(cap)
     }
 
     #[test]
@@ -277,14 +278,45 @@ mod tests {
         for seed in 0..20 {
             let mut b = Backoff::seeded(floor, cap, seed);
             for attempt in 0u32..8 {
-                let ceiling = b.ceiling(attempt);
+                let ceiling = expected_ceiling(floor, cap, attempt);
                 let d = b.next_delay();
                 assert!(
-                    d <= ceiling,
-                    "seed {seed} attempt {attempt}: {d:?} > ceiling {ceiling:?}"
+                    d >= floor && d <= ceiling,
+                    "seed {seed} attempt {attempt}: {d:?} outside [{floor:?}, {ceiling:?}]"
                 );
             }
         }
+    }
+
+    /// The point of full jitter: two clients that died together must not
+    /// retry together. `Schedule::jittered` — deterministic on the
+    /// attempt number — would fail this.
+    #[test]
+    fn two_instances_do_not_move_in_lockstep() {
+        let floor = Duration::from_millis(250);
+        let cap = Duration::from_secs(10);
+        let mut a = Backoff::seeded(floor, cap, 1);
+        let mut b = Backoff::seeded(floor, cap, 2);
+        let mut differed = false;
+        for _ in 0..8 {
+            if a.next_delay() != b.next_delay() {
+                differed = true;
+            }
+        }
+        assert!(differed, "two seeds produced an identical delay sequence");
+    }
+
+    /// The same seed still replays exactly — that is what makes a
+    /// reconnect test deterministic.
+    #[test]
+    fn the_same_seed_replays_exactly() {
+        let floor = Duration::from_millis(250);
+        let cap = Duration::from_secs(10);
+        let run = || {
+            let mut b = Backoff::seeded(floor, cap, 99);
+            (0..8).map(|_| b.next_delay()).collect::<Vec<_>>()
+        };
+        assert_eq!(run(), run());
     }
 
     #[test]
@@ -298,7 +330,7 @@ mod tests {
         b.reset();
         // Post-reset the very next delay is back in the attempt-0 band.
         let d = b.next_delay();
-        assert!(d >= floor && d <= b.ceiling(0), "{d:?}");
+        assert!(d >= floor && d <= expected_ceiling(floor, cap, 0), "{d:?}");
     }
 
     #[test]

@@ -41,10 +41,11 @@ pub struct UpdateUsername {
     pub display_username: Option<String>,
 }
 
-/// Set the session owner's display name / avatar. `None` leaves a
-/// field untouched; `Some("")` clears it — a distinction federated
-/// callers depend on, since "not mentioned" and "deliberately cleared"
-/// must not become the same write.
+/// Set the session owner's display name / avatar.
+///
+/// `None` leaves a field untouched; `Some("")` clears it — a
+/// distinction federated callers depend on, since "not mentioned" and
+/// "deliberately cleared" must not become the same write.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UpdateProfile {
     pub session_token: String,
@@ -87,7 +88,7 @@ pub struct CurrentSession {
     pub token: String,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CustomSessionBundle<T> {
     pub user: auth_proto::AuthUser,
     pub session: auth_proto::AuthSession,
@@ -205,7 +206,7 @@ pub struct UpdatePhoneNumber {
     pub phone_number: String,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PhoneNumberVerification {
     pub user: auth_proto::AuthUser,
     pub session: Option<auth_proto::AuthSession>,
@@ -261,12 +262,12 @@ pub struct AdditionalFieldsConfig {
     pub account: Vec<AdditionalFieldSpec>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AdditionalFieldsView {
     pub fields: Value,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AdditionalFieldsSchema {
     pub user: Vec<AdditionalFieldSpec>,
     pub session: Vec<AdditionalFieldSpec>,
@@ -297,7 +298,7 @@ pub struct LinkSiweAddress {
     pub signature: String,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EmailOtpVerification {
     pub user: auth_proto::AuthUser,
     pub session: Option<auth_proto::AuthSession>,
@@ -327,7 +328,7 @@ pub struct VerifyMagicLink {
     pub user_agent: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MagicLinkVerification {
     pub user: auth_proto::AuthUser,
     pub session: auth_proto::AuthSession,
@@ -649,7 +650,7 @@ pub struct OneTapCallback {
     pub user_agent: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OneTapVerification {
     pub user: auth_proto::AuthUser,
     pub session: auth_proto::AuthSession,
@@ -678,7 +679,7 @@ pub struct VerifyOneTimeToken {
     pub scope: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OneTimeTokenVerification {
     pub user: auth_proto::AuthUser,
     pub session: auth_proto::AuthSession,
@@ -697,7 +698,7 @@ pub struct ListDeviceSessions {
     pub session_tokens: Vec<String>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeviceSession {
     pub user: auth_proto::AuthUser,
     pub session: auth_proto::AuthSession,
@@ -705,7 +706,7 @@ pub struct DeviceSession {
     pub active: bool,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeviceSessions {
     pub sessions: Vec<DeviceSession>,
 }
@@ -717,7 +718,7 @@ pub struct SetActiveDeviceSession {
     pub session_tokens: Vec<String>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActiveDeviceSession {
     pub user: auth_proto::AuthUser,
     pub session: auth_proto::AuthSession,
@@ -731,7 +732,7 @@ pub struct RevokeDeviceSession {
     pub session_tokens: Vec<String>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RevokeDeviceSessionResult {
     pub revoked: bool,
     pub next_active: Option<ActiveDeviceSession>,
@@ -825,7 +826,7 @@ pub struct RevokeApiKey {
     pub api_key_id: Uuid,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ApiKeyBundle {
     pub api_key: auth_proto::AuthApiKey,
     pub user: auth_proto::AuthUser,
@@ -837,7 +838,7 @@ pub struct AuthenticateBearerToken {
     pub authorization_header: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BearerTokenBundle {
     pub user: auth_proto::AuthUser,
     pub token: String,
@@ -873,7 +874,7 @@ pub struct CreateOrganization {
     pub metadata_json: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OrganizationBundle {
     pub organization: auth_proto::AuthOrganization,
     pub membership: auth_proto::AuthMember,
@@ -946,9 +947,214 @@ pub struct CreateInvitation {
     pub expires_at: DateTime<Utc>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InvitationToken {
     pub invitation: auth_proto::AuthInvitation,
+    pub token: String,
+}
+
+/// An organization together with the caller's membership in it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListOrganizations {
+    pub session_token: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GetOrganization {
+    pub session_token: String,
+    pub organization_id: Uuid,
+}
+
+/// Every field optional: absent means "leave it alone".
+///
+/// `logo` and `metadata_json` are doubly optional because they are
+/// themselves nullable — `Some(None)` clears one, `None` leaves it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct UpdateOrganization {
+    pub session_token: String,
+    pub organization_id: Uuid,
+    pub name: Option<String>,
+    pub slug: Option<String>,
+    pub logo: Option<Option<String>>,
+    pub metadata_json: Option<Option<String>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeleteOrganization {
+    pub session_token: String,
+    pub organization_id: Uuid,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListMembers {
+    pub session_token: String,
+    pub organization_id: Uuid,
+}
+
+/// A membership with the person attached.
+///
+/// A member list that shows user ids is not a member list. The user is
+/// resolved server-side so no caller has to fan out over the ids.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OrganizationMember {
+    pub member: auth_proto::AuthMember,
+    pub user: auth_proto::AuthUser,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RemoveMember {
+    pub session_token: String,
+    pub organization_id: Uuid,
+    pub user_id: Uuid,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LeaveOrganization {
+    pub session_token: String,
+    pub organization_id: Uuid,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListInvitations {
+    pub session_token: String,
+    pub organization_id: Uuid,
+}
+
+/// Invitations addressed to the caller, across every organization.
+///
+/// No organization field on purpose: the scope is the person, not a
+/// room they have not joined yet.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListMyInvitations {
+    pub session_token: String,
+}
+
+/// Accept an invitation addressed to you, proven by your address
+/// rather than by the emailed token.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClaimInvitation {
+    pub session_token: String,
+    pub invitation_id: Uuid,
+}
+
+/// Let another account act wherever the caller can, up to `max_role`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinkAgent {
+    pub session_token: String,
+    pub agent_email: String,
+    pub max_role: String,
+}
+
+/// Withdraw a link the caller owns.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnlinkAgent {
+    pub session_token: String,
+    pub link_id: Uuid,
+}
+
+/// The agents the caller has linked.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListAgents {
+    pub session_token: String,
+}
+
+/// A link together with who it names.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinkedAgent {
+    pub link: auth_proto::AuthAgentLink,
+    pub agent_email: Option<String>,
+    pub agent_name: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CancelInvitation {
+    pub session_token: String,
+    pub invitation_id: Uuid,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+/// Decline an invitation.
+///
+/// No session: the token *is* the credential, and somebody deciding
+/// not to join should not have to make an account in order to say so.
+pub struct RejectInvitation {
+    pub invitation_id: Uuid,
+    pub token: String,
+}
+
+/// Read an invitation without being signed in.
+///
+/// Deliberately unauthenticated: somebody following a mailed link has
+/// no session yet, and asking them to sign in before telling them what
+/// they are signing in *for* is how invitations go unaccepted. The
+/// token is the credential, and the preview says nothing that the
+/// person holding the link does not already have.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PreviewInvitation {
+    pub invitation_id: Uuid,
+    pub token: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InvitationPreview {
+    pub invitation_id: Uuid,
+    pub organization_name: String,
+    pub organization_slug: String,
+    pub email: String,
+    pub role: String,
+    pub expires_at: DateTime<Utc>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CreateInviteLink {
+    pub session_token: String,
+    pub organization_id: Uuid,
+    pub role: String,
+    pub label: Option<String>,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub max_uses: Option<i32>,
+}
+
+/// The link, and the one time its token is ever legible.
+///
+/// Only the hash is stored, so this is the single moment the plaintext
+/// exists outside the URL bar of whoever is handed it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InviteLinkToken {
+    pub link: auth_proto::AuthInviteLink,
+    pub token: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListInviteLinks {
+    pub session_token: String,
+    pub organization_id: Uuid,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RevokeInviteLink {
+    pub session_token: String,
+    pub link_id: Uuid,
+}
+
+/// See where a link leads, without being signed in. Same reasoning as
+/// [`PreviewInvitation`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PreviewInviteLink {
+    pub token: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InviteLinkPreview {
+    pub organization_name: String,
+    pub organization_slug: String,
+    pub role: String,
+    pub uses_remaining: Option<i32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RedeemInviteLink {
+    pub session_token: String,
     pub token: String,
 }
 
@@ -1003,40 +1209,76 @@ pub struct ListTeamMembers {
     pub team_id: Uuid,
 }
 
+/// Start registering a passkey for the signed-in person.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BeginPasskeyRegistration {
     pub session_token: String,
 }
 
+/// Finish registering, with what the browser produced.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompletePasskeyRegistration {
     pub session_token: String,
-    pub challenge: String,
-    pub rp_id: String,
-    pub origin: String,
+    /// The handle from [`PasskeyChallenge`].
+    pub handle: String,
+    /// A label for the credential, so a list of them is readable.
     pub name: String,
-    pub credential_id: String,
-    pub public_key: String,
-    pub counter: i64,
-    pub device_type: String,
-    pub backed_up: bool,
-    pub transports: Option<String>,
+    /// `navigator.credentials.create()`'s result, JSON-serialised by
+    /// the browser. Parsed and *verified* here — the fields that used
+    /// to be passed in individually (`credential_id`, `public_key`,
+    /// `counter`, …) are read out of the verified attestation instead
+    /// of taken on trust.
+    pub credential_json: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// Start a passkey sign-in.
+///
+/// Takes nothing. The ceremony is *discoverable*: the browser offers
+/// whichever passkeys it holds for this site and the server learns who
+/// it is from the signed response. Naming a credential or an address up
+/// front would make this an account-enumeration oracle, and it was
+/// exactly that shape — `begin(credential_id)` with no session — that
+/// let the old bypass fetch a challenge for somebody else.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BeginPasskeyAuthentication {
-    pub credential_id: String,
+    /// Whose passkeys to offer, when the person typed an address.
+    ///
+    /// `None` runs a *discoverable* ceremony: the browser offers
+    /// whatever it holds for this site and the server learns who it is
+    /// from the signed response. That is the better sign-in — one
+    /// button, no typing — but it needs an authenticator that made a
+    /// resident key, which not all do.
+    ///
+    /// `Some(email)` narrows the ceremony to that person's credentials.
+    /// An address with no account, or no passkeys, still gets a
+    /// perfectly ordinary discoverable challenge back: answering
+    /// differently would turn this into a way to ask whether an account
+    /// exists.
+    pub email: Option<String>,
 }
 
+/// Finish a passkey sign-in.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompletePasskeyAuthentication {
-    pub credential_id: String,
-    pub challenge: String,
-    pub rp_id: String,
-    pub origin: String,
-    pub counter: i64,
+    /// The handle from [`PasskeyChallenge`].
+    pub handle: String,
+    /// `navigator.credentials.get()`'s result, JSON-serialised.
+    pub credential_json: String,
     pub ip_address: Option<String>,
     pub user_agent: Option<String>,
+}
+
+/// A challenge to hand to the browser, and the handle that will let the
+/// server find the matching state again.
+///
+/// `options_json` goes straight into `navigator.credentials`. The
+/// ceremony state itself never leaves the server — it is what the
+/// answer is checked against, so a client that could edit it could
+/// check its own homework.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PasskeyChallenge {
+    pub options_json: String,
+    pub handle: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1112,6 +1354,37 @@ pub struct StartTwoFactorSetup {
     pub backup_codes: Vec<String>,
 }
 
+/// Start enrolling in two-factor, letting the engine mint the secret.
+///
+/// [`StartTwoFactorSetup`] takes a secret and backup codes the *caller*
+/// generated, which means every consumer has to know how to produce a
+/// valid base32 TOTP secret and a set of codes — and its
+/// `secret_ciphertext` field is a plaintext secret that the flow then
+/// encrypts, which reads like the opposite of what it is. This does
+/// that work once, here.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BeginTwoFactorEnrollment {
+    pub session_token: String,
+    /// Shown as the account name in the authenticator app. The person's
+    /// address, usually — it is what tells two entries apart.
+    pub account_label: String,
+    /// Shown as the issuer. Your product's name.
+    pub issuer: String,
+}
+
+/// Everything that must be shown to the person exactly once.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TwoFactorEnrollment {
+    /// The base32 secret, for typing in by hand when a camera is not an
+    /// option.
+    pub secret: String,
+    /// `otpauth://totp/...` — what a QR code encodes.
+    pub otpauth_url: String,
+    /// Single-use codes for when the phone is lost. Stored only as
+    /// hashes, so this is the one moment they are legible.
+    pub backup_codes: Vec<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConfirmTwoFactor {
     pub session_token: String,
@@ -1130,6 +1403,17 @@ pub struct DisableTwoFactor {
     pub code: String,
 }
 
+/// Confirm the session belongs to a server administrator.
+///
+/// The gate for operations that are not any one flow — taking a
+/// database snapshot, most of all. `require_admin` is internal to the
+/// engine; this is the same check, offered to a host that has its own
+/// privileged endpoint to guard.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AuthorizeAdmin {
+    pub session_token: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ListUsers {
     pub session_token: String,
@@ -1137,7 +1421,7 @@ pub struct ListUsers {
     pub limit: usize,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ListUsersResult {
     pub users: Vec<auth_proto::AuthUser>,
     pub total: usize,

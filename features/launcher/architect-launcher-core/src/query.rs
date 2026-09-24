@@ -28,6 +28,7 @@ pub struct QueryEngine {
 }
 
 impl QueryEngine {
+    #[must_use]
     pub fn new() -> Self {
         let history_path = crate::history::default_history_path();
         let history = History::load(&history_path);
@@ -53,20 +54,23 @@ impl QueryEngine {
         }
     }
 
+    #[must_use]
     pub fn builder() -> QueryEngineBuilder {
         QueryEngineBuilder::new()
     }
 
-    pub fn with_max_results(mut self, max: usize) -> Self {
+    #[must_use]
+    pub const fn with_max_results(mut self, max: usize) -> Self {
         self.max_results = max;
         self
     }
 
-    pub fn tag_registry(&self) -> &TagRegistry {
+    #[must_use]
+    pub const fn tag_registry(&self) -> &TagRegistry {
         &self.tag_registry
     }
 
-    pub fn tag_registry_mut(&mut self) -> &mut TagRegistry {
+    pub const fn tag_registry_mut(&mut self) -> &mut TagRegistry {
         &mut self.tag_registry
     }
 
@@ -86,10 +90,12 @@ impl QueryEngine {
         }
     }
 
+    #[must_use]
     pub fn provider_names(&self) -> Vec<&str> {
         self.providers.iter().map(|p| p.name()).collect()
     }
 
+    #[must_use]
     pub fn provider_configs(&self) -> Vec<(&str, &crate::provider::ProviderConfig)> {
         self.providers
             .iter()
@@ -100,21 +106,20 @@ impl QueryEngine {
 
     // ── Favorites ──────────────────────────────────────────
 
+    #[must_use]
     pub fn is_favorite(&self, item_id: &str) -> bool {
-        self.favorites
-            .read()
-            .map(|f| f.is_favorite(item_id))
-            .unwrap_or(false)
+        self.favorites.read().is_ok_and(|f| f.is_favorite(item_id))
     }
 
+    // NOT `#[must_use]`: toggling and ignoring the resulting state is
+    // the ordinary call — the caller just re-reads it.
+    #[allow(clippy::must_use_candidate)]
     pub fn toggle_favorite(&self, item_id: &str) -> bool {
-        if let Ok(mut favs) = self.favorites.write() {
+        self.favorites.write().map_or(false, |mut favs| {
             let r = favs.toggle(item_id);
             let _ = favs.save(&self.favorites_path);
             r
-        } else {
-            false
-        }
+        })
     }
 
     // ── User Tags (Quick Tag) ──────────────────────────────
@@ -133,6 +138,7 @@ impl QueryEngine {
         }
     }
 
+    #[must_use]
     pub fn user_tags(&self, item_id: &str) -> Vec<String> {
         self.userdata
             .read()
@@ -149,11 +155,9 @@ impl QueryEngine {
         }
     }
 
+    #[must_use]
     pub fn rating(&self, item_id: &str) -> u8 {
-        self.userdata
-            .read()
-            .map(|ud| ud.rating(item_id))
-            .unwrap_or(0)
+        self.userdata.read().map_or(0, |ud| ud.rating(item_id))
     }
 
     // ── Notes ──────────────────────────────────────────────
@@ -165,6 +169,7 @@ impl QueryEngine {
         }
     }
 
+    #[must_use]
     pub fn note(&self, item_id: &str) -> String {
         self.userdata
             .read()
@@ -174,30 +179,27 @@ impl QueryEngine {
 
     // ── Hidden ─────────────────────────────────────────────
 
+    #[must_use]
     pub fn toggle_hidden(&self, item_id: &str) -> bool {
-        if let Ok(mut ud) = self.userdata.write() {
+        self.userdata.write().map_or(false, |mut ud| {
             let r = ud.toggle_hidden(item_id);
             let _ = ud.save(&self.userdata_path);
             r
-        } else {
-            false
-        }
+        })
     }
 
+    #[must_use]
     pub fn is_hidden(&self, item_id: &str) -> bool {
-        self.userdata
-            .read()
-            .map(|ud| ud.is_hidden(item_id))
-            .unwrap_or(false)
+        self.userdata.read().is_ok_and(|ud| ud.is_hidden(item_id))
     }
 
     // ── Recently Added ─────────────────────────────────────
 
+    #[must_use]
     pub fn is_recently_added(&self, item_id: &str) -> bool {
         self.userdata
             .read()
-            .map(|ud| ud.is_recently_added(item_id))
-            .unwrap_or(false)
+            .is_ok_and(|ud| ud.is_recently_added(item_id))
     }
 
     /// Call after all providers are set up to mark scan timestamp.
@@ -210,6 +212,7 @@ impl QueryEngine {
 
     // ── Presets ────────────────────────────────────────────
 
+    #[must_use]
     pub fn presets(&self) -> Vec<crate::filter::FilterPreset> {
         self.presets
             .read()
@@ -231,6 +234,7 @@ impl QueryEngine {
         }
     }
 
+    #[must_use]
     pub fn load_preset(&self, name: &str) -> Option<FilterState> {
         self.presets
             .read()
@@ -246,16 +250,27 @@ impl QueryEngine {
         }
     }
 
-    /// Check if query matches a magic word. Returns (FilterState, remaining_query).
+    /// Check if query matches a magic word. Returns (`FilterState`, `remaining_query`).
+    #[must_use]
+    // The read guard is already scoped to the block below; the lint sees
+    // the `?` early-returns inside it and asks for a tighter scope that
+    // does not exist.
+    #[allow(clippy::significant_drop_tightening)]
     pub fn check_magic_word(&self, query: &str) -> Option<(FilterState, String)> {
-        let mw = self.magic_words.read().ok()?;
-        let (preset_name, remainder) = mw.check(query)?;
-        let preset = self.load_preset(preset_name)?;
-        Some((preset, remainder.to_string()))
+        // Resolve the name and remainder, then drop the read guard before
+        // `load_preset` — which takes its own lock.
+        let (preset_name, remainder) = {
+            let mw = self.magic_words.read().ok()?;
+            let (name, rest) = mw.check(query)?;
+            (name.to_owned(), rest.to_owned())
+        };
+        let preset = self.load_preset(&preset_name)?;
+        Some((preset, remainder))
     }
 
     // ── Export / Import ────────────────────────────────────
 
+    #[must_use]
     pub fn export_all(&self) -> ExportBundle {
         ExportBundle {
             version: ExportBundle::CURRENT_VERSION,
@@ -339,7 +354,10 @@ impl QueryEngine {
                         }
                         if item.tags.is_empty() && !default_tags.is_empty() {
                             item.tags = TagSet::from_strs(
-                                &default_tags.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+                                &default_tags
+                                    .iter()
+                                    .map(std::string::String::as_str)
+                                    .collect::<Vec<_>>(),
                             );
                         }
                     }
@@ -417,26 +435,28 @@ impl QueryEngine {
         scored
     }
 
+    #[must_use]
     pub fn query(&self, raw_query: &str) -> Vec<Item> {
         self.query_filtered(raw_query, &FilterState::new())
     }
 
+    #[must_use]
     pub fn query_tagged(&self, tag: &str, search: &str) -> Vec<Item> {
         self.query(&format!("#{tag} {search}"))
     }
 
     fn parse_tag_filter<'a>(&self, query: &'a str) -> (Option<Tag>, Option<&'a str>) {
-        if !query.starts_with('#') {
+        // `strip_prefix` / `split_once` rather than byte-range slicing: the
+        // query is user input, and a multi-byte character right after the
+        // `#` would put `&query[1..]` inside a UTF-8 sequence.
+        let Some(without_hash) = query.strip_prefix('#') else {
             return (None, None);
-        }
-        let without_hash = &query[1..];
-        let (tag_str, remainder) = match without_hash.find(' ') {
-            Some(pos) => (
-                &without_hash[..pos],
-                Some(without_hash[pos + 1..].trim_start()),
-            ),
-            None => (without_hash, None),
         };
+        let (tag_str, remainder) = without_hash
+            .split_once(' ')
+            .map_or((without_hash, None), |(tag, rest)| {
+                (tag, Some(rest.trim_start()))
+            });
         if tag_str.is_empty() {
             return (None, None);
         }
@@ -457,7 +477,9 @@ impl QueryEngine {
                 .map(|p| p.name())
                 .collect();
             if !matching.is_empty() {
-                return (Some(matching), query[2..].trim_start());
+                // `chars` has already consumed the prefix char and the
+                // space, so `as_str()` is the rest — no byte-index slice.
+                return (Some(matching), chars.as_str().trim_start());
             }
         }
         (None, query)
@@ -503,6 +525,7 @@ pub struct QueryEngineBuilder {
 }
 
 impl QueryEngineBuilder {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             providers: Vec::new(),
@@ -513,22 +536,26 @@ impl QueryEngineBuilder {
         }
     }
 
-    pub fn max_results(mut self, max: usize) -> Self {
+    #[must_use]
+    pub const fn max_results(mut self, max: usize) -> Self {
         self.max_results = max;
         self
     }
 
+    #[must_use]
     pub fn history_path(mut self, path: impl Into<PathBuf>) -> Self {
         self.history_path = Some(path.into());
         self
     }
 
+    #[must_use]
     pub fn register_tags(mut self, f: impl FnOnce(&mut TagRegistry)) -> Self {
         f(&mut self.tag_registry);
         self
     }
 
     /// Register magic words: keyword + Space loads a filter preset.
+    #[must_use]
     pub fn magic_word(
         mut self,
         keyword: impl Into<String>,
@@ -538,11 +565,13 @@ impl QueryEngineBuilder {
         self
     }
 
+    #[must_use]
     pub fn provider(mut self, provider: Box<dyn Provider>) -> Self {
         self.providers.push(provider);
         self
     }
 
+    #[must_use]
     pub fn providers(mut self, providers: Vec<Box<dyn Provider>>) -> Self {
         self.providers.extend(providers);
         self
@@ -557,6 +586,7 @@ impl QueryEngineBuilder {
     /// After calling this, you still need to add a `WorkflowProvider`
     /// (from the `providers` crate) that serves the pack items.
     /// Or use `register_packs_with_provider()` to do both at once.
+    #[must_use]
     pub fn register_packs(mut self, packs: &[crate::pack::LoadedPack]) -> Self {
         for pack in packs {
             // Register tags
@@ -569,7 +599,7 @@ impl QueryEngineBuilder {
                 if !tag.icon.is_empty()
                     && let Some(info) = self.tag_registry.info_mut(&Tag::new(&tag.path))
                 {
-                    info.icon = tag.icon.clone();
+                    info.icon.clone_from(&tag.icon);
                 }
             }
             // Register magic words

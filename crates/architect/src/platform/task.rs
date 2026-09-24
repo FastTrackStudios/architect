@@ -112,9 +112,11 @@ impl std::fmt::Display for Aborted {
 }
 impl std::error::Error for Aborted {}
 
-/// A handle to a [`spawn`]ed task. `await` it for the result, or
-/// [`abort`](JoinHandle::abort) to cancel it cooperatively. Dropping the
-/// handle **detaches** the task (it keeps running); only `abort` stops it.
+/// A handle to a [`spawn`]ed task.
+///
+/// `await` it for the result, or [`abort`](JoinHandle::abort) to cancel it
+/// cooperatively. Dropping the handle **detaches** the task (it keeps
+/// running); only `abort` stops it.
 pub struct JoinHandle<T> {
     rx: oneshot::Receiver<T>,
     token: CancellationToken,

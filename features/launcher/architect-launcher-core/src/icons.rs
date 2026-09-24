@@ -20,6 +20,7 @@ pub struct IconResolver {
 }
 
 impl IconResolver {
+    #[must_use]
     pub fn new() -> Self {
         let mut resolver = Self::default();
         resolver.search_dirs = Self::xdg_icon_dirs();
@@ -190,6 +191,7 @@ impl IconResolver {
     }
 
     /// Get cache statistics.
+    #[must_use]
     pub fn cache_stats(&self) -> (usize, usize) {
         let total = self.cache.len();
         let found = self.cache.values().filter(|v| v.is_some()).count();

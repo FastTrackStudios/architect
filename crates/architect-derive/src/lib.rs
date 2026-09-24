@@ -3,7 +3,7 @@
 //! See the crate-level docs in `architect` for the conceptual overview.
 //! This file is the emission engine: parse the `#[architect(...)]`
 //! container + field attributes, then synthesise the wire types, the
-//! repo trait, and (under `--features server`) the SeaORM bridge.
+//! repo trait, and (under `--features server`) the `SeaORM` bridge.
 
 use heck::{ToPascalCase, ToSnakeCase, ToTitleCase};
 use proc_macro::TokenStream;
@@ -32,7 +32,10 @@ struct ContainerAttrs {
     /// wrapper whose `Services` bundle mounts repo + events together, and
     /// (with `store`) the client subscription hook. Requires `repo`.
     emit_events: bool,
-    /// Also emit the CRDT story: the `EntityCrdt` impl (field ↔ LoroMap
+    /// `#[architect(path = "…")]` — the HTTP mount prefix for the repo's
+    /// generated routes. Default: the entity name in kebab-case.
+    http_path: Option<String>,
+    /// Also emit the CRDT story: the `EntityCrdt` impl (field ↔ `LoroMap`
     /// codec), the `<E>RepoLoro` Loro-backed repo, and (with the user
     /// crate's `atom` feature) the replica-backed hooks + write actions.
     /// Gated on the user crate's `crdt` feature. Requires `repo`.
@@ -53,13 +56,13 @@ struct FieldAttrs {
     fulltext: bool,
     exclude_create: bool,
     exclude_update: bool,
-    /// Store this field as a JSON column in the SeaORM model. Required
+    /// Store this field as a JSON column in the `SeaORM` model. Required
     /// for `Vec<T>` / structured types — `sea_orm::Value` has no
     /// blanket `From<Vec<T>>` impl, so without this attribute the
-    /// generated DeriveEntityModel fails to compile on `server`
+    /// generated `DeriveEntityModel` fails to compile on `server`
     /// builds. Container-shaped fields (`Vec<T>` except `Vec<u8>`,
     /// maps, sets) that lack this attribute are a **derive-time error**
-    /// so the failure points at the declaration, not at SeaORM
+    /// so the failure points at the declaration, not at `SeaORM`
     /// internals. The field type must be `serde::Serialize +
     /// DeserializeOwned`; sea-orm's `with-json` feature handles the
     /// rest. No-op when the `server` feature isn't active.
@@ -96,6 +99,16 @@ fn parse_container_attrs(attrs: &[syn::Attribute]) -> Result<ContainerAttrs> {
             } else if meta.path.is_ident("page_size") {
                 let n: syn::LitInt = meta.value()?.parse()?;
                 out.page_size = Some(n.base10_parse()?);
+            } else if meta.path.is_ident("path") {
+                let s: LitStr = meta.value()?.parse()?;
+                let raw = s.value();
+                let trimmed = raw.trim_matches('/');
+                if trimmed.is_empty() || trimmed.contains('/') {
+                    return Err(meta.error(
+                        "`path` is one segment, the HTTP mount prefix (`path = \"widgets\"`)",
+                    ));
+                }
+                out.http_path = Some(trimmed.to_owned());
             } else {
                 return Err(meta.error("unknown architect container attribute"));
             }
@@ -188,6 +201,8 @@ struct ParsedField<'a> {
     forward_attrs: Vec<syn::Attribute>,
 }
 
+// By value: `syn` hands the parsed item over; the emitter consumes it.
+#[allow(clippy::needless_pass_by_value)]
 fn expand(input: DeriveInput) -> Result<TokenStream2> {
     let ident = input.ident.clone();
     let vis = input.vis.clone();
@@ -212,7 +227,7 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
     };
 
     let mut parsed: Vec<ParsedField> = Vec::with_capacity(named.len());
-    for f in named.iter() {
+    for f in named {
         let attrs = parse_field_attrs(f)?;
         // Pass-through attrs end up on the emitted `Create`
         // struct (whose only derive is `Facet` + optional
@@ -234,8 +249,16 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
             })
             .cloned()
             .collect();
+        let Some(field_ident) = f.ident.as_ref() else {
+            // `fields_named` above should have rejected this, but a real
+            // syn error beats a "proc macro panicked" from the compiler.
+            return Err(syn::Error::new_spanned(
+                f,
+                "#[derive(architect::Entity)] requires named fields",
+            ));
+        };
         parsed.push(ParsedField {
-            ident: f.ident.as_ref().unwrap(),
+            ident: field_ident,
             ty: &f.ty,
             attrs,
             forward_attrs,
@@ -373,6 +396,13 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
     let create_struct = quote! {
         #[cfg_attr(feature = "fake", derive(::architect::fake::Dummy))]
         #[derive(Clone, Debug, PartialEq, ::architect::facet::Facet)]
+        // Generated payloads mirror the entity's fields, so whether `Eq`
+        // is derivable is decided by the *user's* field types, not by
+        // anything the caller of this derive can change. Blaming their
+        // `#[derive(architect::Entity)]` line for it is a lint the
+        // consumer cannot act on, so the generated item carries the
+        // allow itself.
+        #[allow(clippy::derive_partial_eq_without_eq)]
         #vis struct #create_ident {
             #(#create_field_defs,)*
         }
@@ -391,6 +421,13 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
     let update_struct = quote! {
         #[cfg_attr(feature = "fake", derive(::architect::fake::Dummy))]
         #[derive(Clone, Debug, PartialEq, ::architect::facet::Facet, Default)]
+        // Generated payloads mirror the entity's fields, so whether `Eq`
+        // is derivable is decided by the *user's* field types, not by
+        // anything the caller of this derive can change. Blaming their
+        // `#[derive(architect::Entity)]` line for it is a lint the
+        // consumer cannot act on, so the generated item carries the
+        // allow itself.
+        #[allow(clippy::derive_partial_eq_without_eq)]
         #vis struct #update_ident {
             #(#update_field_defs,)*
         }
@@ -400,6 +437,13 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
     let list_struct = quote! {
         #[cfg_attr(feature = "fake", derive(::architect::fake::Dummy))]
         #[derive(Clone, Debug, PartialEq, ::architect::facet::Facet)]
+        // Generated payloads mirror the entity's fields, so whether `Eq`
+        // is derivable is decided by the *user's* field types, not by
+        // anything the caller of this derive can change. Blaming their
+        // `#[derive(architect::Entity)]` line for it is a lint the
+        // consumer cannot act on, so the generated item carries the
+        // allow itself.
+        #[allow(clippy::derive_partial_eq_without_eq)]
         #vis struct #list_ident {
             pub items: ::std::vec::Vec<#ident>,
             pub total: u32,
@@ -459,6 +503,7 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
         let descriptor_fn = format_ident!("{}_service_descriptor", repo_snake);
         let dispatcher_ident = format_ident!("{}Dispatcher", repo_ident);
         let layer_fn = format_ident!("{}_layer", repo_snake);
+        let http_mod = format_ident!("{}_http", ident.to_string().to_snake_case());
         quote! {
             /// Deferred-bind Layer token for the repository service. Acts
             /// as a one-element [`architect::Layer`]; compose it with
@@ -526,7 +571,9 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
                     + ::core::marker::Sync
                     + 'static,
             {
+                let http_backend = backend.clone();
                 ::architect::Mounted::new(#descriptor_fn(), #dispatcher_ident::new(backend))
+                    .with_http(move |routes| #http_mod::mount(http_backend.clone(), routes))
             }
         }
     } else {
@@ -625,6 +672,18 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
         &repo_ident,
     );
 
+    // ── HTTP face (`repo`, plus `events`) ──
+    let http_block = build_http_block(
+        &ident,
+        &vis,
+        &container,
+        pk_ty,
+        &create_ident,
+        &update_ident,
+        &list_ident,
+        &repo_ident,
+    );
+
     // ── CRDT emission (`crdt`) ──
     let crdt_block = build_crdt_block(
         &ident,
@@ -651,8 +710,432 @@ fn expand(input: DeriveInput) -> Result<TokenStream2> {
         #store_block
         #form_block
         #events_block
+        #http_block
         #crdt_block
     })
+}
+
+/// Emit the repo's HTTP+JSON face — the same scheme `#[architect::service]`
+/// uses, so an entity is reachable from a browser without a hand-written
+/// route:
+///
+/// ```text
+/// POST /widget/get      {"id": …}
+/// POST /widget/list     {"page": {…}, "sort": null, "filter": null}
+/// POST /widget/create   {"input": {…}}
+/// POST /widget/update   {"id": …, "input": {…}}
+/// POST /widget/delete   {"id": …}
+/// POST /widget/events   {}              (with `events`: Server-Sent Events, snapshot first)
+/// ```
+///
+/// Gated on the consumer's `http` (server) / `http-client` (client)
+/// features like the rest of the face: `<snake>_http::router(backend)`,
+/// `impl BindHttp for <E>RepoLayer` / `<E>EventsLayer`, and the
+/// `<E>RepoHttpClient` / `<E>EventsHttpClient` clients.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn build_http_block(
+    ident: &Ident,
+    vis: &syn::Visibility,
+    container: &ContainerAttrs,
+    pk_ty: &Type,
+    create_ident: &Ident,
+    update_ident: &Ident,
+    list_ident: &Ident,
+    repo_ident: &Ident,
+) -> TokenStream2 {
+    if !container.emit_repo {
+        return quote! {};
+    }
+    let snake = ident.to_string().to_snake_case();
+    let prefix = container
+        .http_path
+        .clone()
+        .unwrap_or_else(|| snake.replace('_', "-"));
+    let http_mod = format_ident!("{snake}_http");
+    let repo_layer_token = format_ident!("{}Layer", repo_ident);
+    let repo_http_client = format_ident!("{}HttpClient", repo_ident);
+    let repo_vox_client = format_ident!("{}Client", repo_ident);
+    let path_get = format!("/{prefix}/get");
+    let path_list = format!("/{prefix}/list");
+    let path_create = format!("/{prefix}/create");
+    let path_update = format!("/{prefix}/update");
+    let path_delete = format!("/{prefix}/delete");
+    let path_events = format!("/{prefix}/events");
+
+    let backend_bounds = quote! {
+        B: #repo_ident + ::core::marker::Send + ::core::marker::Sync + 'static
+    };
+
+    let events = if container.emit_events {
+        let event_ident = format_ident!("{}Event", ident);
+        let evented_ident = format_ident!("{}Evented", ident);
+        let events_layer_token = format_ident!("{}EventsLayer", ident);
+        let events_http_client = format_ident!("{}EventsHttpClient", ident);
+        let events_doc = format!(
+            "`POST /{prefix}/events` as Server-Sent Events: the current row set \
+             as a `Snapshot` first, then every change — the same feed \
+             `{ident}Events::subscribe` serves over vox."
+        );
+        (
+            quote! {
+                /// The (empty) body of an events subscription.
+                #[derive(Clone, Debug, Default, ::architect::facet::Facet)]
+                #vis struct EventsArgs {}
+
+                #[cfg(all(feature = "vox", not(target_arch = "wasm32")))]
+                async fn __http_events<R>(
+                    ::architect::http::State(evented): ::architect::http::State<
+                        ::std::sync::Arc<#evented_ident<R>>,
+                    >,
+                ) -> ::architect::http::Response
+                where
+                    R: #repo_ident + ::core::clone::Clone + ::core::marker::Send + ::core::marker::Sync + 'static,
+                {
+                    // Snapshot-then-changes, exactly as the vox subscribe:
+                    // park the subscriber, read the rows, deliver the
+                    // snapshot ahead of whatever was collected meanwhile.
+                    let hub = evented.hub();
+                    let (sink, rx) = ::architect::EventSink::local(64);
+                    let pending = hub.begin_attach(sink);
+                    let snapshot = <#evented_ident<R> as #repo_ident>::list(
+                        &evented,
+                        ::architect::Page { index: 0, size: u32::MAX },
+                        ::core::option::Option::None,
+                        ::core::option::Option::None,
+                    )
+                    .await;
+                    match snapshot {
+                        ::core::result::Result::Ok(list) => {
+                            hub.complete_attach(
+                                pending,
+                                ::core::option::Option::Some(#event_ident::Snapshot(list.items)),
+                            );
+                            ::architect::http::sse_from(rx)
+                        }
+                        ::core::result::Result::Err(error) => {
+                            hub.abort_attach(pending);
+                            ::architect::http::err(error)
+                        }
+                    }
+                }
+
+                #[doc = #events_doc]
+                #[cfg(all(feature = "vox", not(target_arch = "wasm32")))]
+                pub fn events_mount<R>(evented: #evented_ident<R>, routes: &mut ::architect::http::HttpRoutes)
+                where
+                    R: #repo_ident + ::core::clone::Clone + ::core::marker::Send + ::core::marker::Sync + 'static,
+                {
+                    let evented = ::std::sync::Arc::new(evented);
+                    routes.route(
+                        #path_events,
+                        ::architect::http::post(__http_events::<R>)
+                            .get(__http_events::<R>)
+                            .with_state(evented),
+                    );
+                }
+
+                #[cfg(all(feature = "vox", not(target_arch = "wasm32")))]
+                pub fn events_router<R>(evented: #evented_ident<R>) -> ::architect::http::Router
+                where
+                    R: #repo_ident + ::core::clone::Clone + ::core::marker::Send + ::core::marker::Sync + 'static,
+                {
+                    let mut routes = ::architect::http::HttpRoutes::default();
+                    events_mount(evented, &mut routes);
+                    routes.into_router()
+                }
+            },
+            quote! { ("events", #path_events), },
+            quote! {
+                #[cfg(all(feature = "vox", not(target_arch = "wasm32")))]
+                impl<R> ::architect::http::BindHttp<#evented_ident<R>> for #events_layer_token
+                where
+                    R: #repo_ident + ::core::clone::Clone + ::core::marker::Send + ::core::marker::Sync + 'static,
+                {
+                    fn bind_http(
+                        &self,
+                        backend: &#evented_ident<R>,
+                        routes: &mut ::architect::http::HttpRoutes,
+                    ) {
+                        #http_mod::events_mount(backend.clone(), routes);
+                    }
+                }
+
+                /// The HTTP twin of the vox events client: one method,
+                /// `subscribe`, a Server-Sent-Events stream of changes.
+                #[derive(Clone, Debug)]
+                #vis struct #events_http_client {
+                    inner: ::architect::http::HttpClient,
+                }
+
+                impl #events_http_client {
+                    pub fn new(inner: ::architect::http::HttpClient) -> Self {
+                        Self { inner }
+                    }
+
+                    pub fn at(base_url: impl ::core::convert::Into<::std::string::String>) -> Self {
+                        Self::new(::architect::http::HttpClient::new(base_url))
+                    }
+
+                    pub fn with_bearer(mut self, token: impl ::core::convert::Into<::std::string::String>) -> Self {
+                        self.inner = self.inner.with_bearer(token);
+                        self
+                    }
+
+                    /// The current rows as a `Snapshot`, then every change.
+                    /// Drop the stream to unsubscribe.
+                    pub async fn subscribe(
+                        &self,
+                    ) -> ::core::result::Result<
+                        ::architect::http::EventStream<#event_ident>,
+                        ::architect::ClientError<()>,
+                    > {
+                        self.inner.stream(#path_events, &#http_mod::EventsArgs {}).await
+                    }
+                }
+            },
+        )
+    } else {
+        (quote! {}, quote! {}, quote! {})
+    };
+    let (events_module_items, events_path, events_outer) = events;
+
+    let module_doc = format!(
+        "The HTTP+JSON face of `{repo_ident}` — see `architect::http`. \
+         `router(backend)` mounts get / list / create / update / delete \
+         under `/{prefix}/`; the `*Args` structs are the request bodies."
+    );
+
+    quote! {
+        #[doc = #module_doc]
+        #vis mod #http_mod {
+            use super::*;
+
+            #[derive(Clone, Debug, ::architect::facet::Facet)]
+            #vis struct GetArgs {
+                pub id: #pk_ty,
+            }
+            #[derive(Clone, Debug, ::architect::facet::Facet)]
+            #vis struct ListArgs {
+                pub page: ::architect::Page,
+                pub sort: ::core::option::Option<::architect::Sort>,
+                pub filter: ::core::option::Option<::architect::Filter>,
+            }
+            #[derive(Clone, Debug, ::architect::facet::Facet)]
+            #vis struct CreateArgs {
+                pub input: #create_ident,
+            }
+            #[derive(Clone, Debug, ::architect::facet::Facet)]
+            #vis struct UpdateArgs {
+                pub id: #pk_ty,
+                pub input: #update_ident,
+            }
+            #[derive(Clone, Debug, ::architect::facet::Facet)]
+            #vis struct DeleteArgs {
+                pub id: #pk_ty,
+            }
+
+            /// `(method, path)` for every route this module mounts.
+            pub const PATHS: &[(&str, &str)] = &[
+                ("get", #path_get),
+                ("list", #path_list),
+                ("create", #path_create),
+                ("update", #path_update),
+                ("delete", #path_delete),
+                #events_path
+            ];
+
+            async fn __http_get<B>(
+                ::architect::http::State(backend): ::architect::http::State<::std::sync::Arc<B>>,
+                call: ::architect::http::Call<GetArgs>,
+            ) -> ::architect::http::Response
+            where
+                #backend_bounds,
+            {
+                ::architect::http::respond(backend.get(call.args.id).await)
+            }
+            async fn __http_list<B>(
+                ::architect::http::State(backend): ::architect::http::State<::std::sync::Arc<B>>,
+                call: ::architect::http::Call<ListArgs>,
+            ) -> ::architect::http::Response
+            where
+                #backend_bounds,
+            {
+                let ListArgs { page, sort, filter } = call.args;
+                ::architect::http::respond(backend.list(page, sort, filter).await)
+            }
+            async fn __http_create<B>(
+                ::architect::http::State(backend): ::architect::http::State<::std::sync::Arc<B>>,
+                call: ::architect::http::Call<CreateArgs>,
+            ) -> ::architect::http::Response
+            where
+                #backend_bounds,
+            {
+                ::architect::http::respond(backend.create(call.args.input).await)
+            }
+            async fn __http_update<B>(
+                ::architect::http::State(backend): ::architect::http::State<::std::sync::Arc<B>>,
+                call: ::architect::http::Call<UpdateArgs>,
+            ) -> ::architect::http::Response
+            where
+                #backend_bounds,
+            {
+                let UpdateArgs { id, input } = call.args;
+                ::architect::http::respond(backend.update(id, input).await)
+            }
+            async fn __http_delete<B>(
+                ::architect::http::State(backend): ::architect::http::State<::std::sync::Arc<B>>,
+                call: ::architect::http::Call<DeleteArgs>,
+            ) -> ::architect::http::Response
+            where
+                #backend_bounds,
+            {
+                ::architect::http::respond(backend.delete(call.args.id).await)
+            }
+
+            /// Bind the repo into a route table — see `router`.
+            pub fn mount<B>(backend: B, routes: &mut ::architect::http::HttpRoutes)
+            where
+                #backend_bounds,
+            {
+                let backend = ::std::sync::Arc::new(backend);
+                routes.route(#path_get, ::architect::http::post(__http_get::<B>).with_state(backend.clone()));
+                routes.route(#path_list, ::architect::http::post(__http_list::<B>).with_state(backend.clone()));
+                routes.route(#path_create, ::architect::http::post(__http_create::<B>).with_state(backend.clone()));
+                routes.route(#path_update, ::architect::http::post(__http_update::<B>).with_state(backend.clone()));
+                routes.route(#path_delete, ::architect::http::post(__http_delete::<B>).with_state(backend));
+            }
+
+            /// The repo as `POST /<prefix>/{get,list,create,update,delete}`.
+            pub fn router<B>(backend: B) -> ::architect::http::Router
+            where
+                #backend_bounds,
+            {
+                let mut routes = ::architect::http::HttpRoutes::default();
+                mount(backend, &mut routes);
+                routes.into_router()
+            }
+
+            #events_module_items
+        }
+
+        #[cfg(feature = "vox")]
+        impl<B> ::architect::http::BindHttp<B> for #repo_layer_token
+        where
+            B: #repo_ident
+                + ::core::clone::Clone
+                + ::core::marker::Send
+                + ::core::marker::Sync
+                + 'static,
+        {
+            fn bind_http(&self, backend: &B, routes: &mut ::architect::http::HttpRoutes) {
+                #http_mod::mount(backend.clone(), routes);
+            }
+        }
+
+        /// The typed HTTP client for the repo — the twin of the vox
+        /// `Client`, returning `ClientError<RepoError>`.
+        #[derive(Clone, Debug)]
+        #vis struct #repo_http_client {
+            inner: ::architect::http::HttpClient,
+        }
+
+        impl #repo_http_client {
+            pub fn new(inner: ::architect::http::HttpClient) -> Self {
+                Self { inner }
+            }
+
+            pub fn at(base_url: impl ::core::convert::Into<::std::string::String>) -> Self {
+                Self::new(::architect::http::HttpClient::new(base_url))
+            }
+
+            pub fn with_bearer(mut self, token: impl ::core::convert::Into<::std::string::String>) -> Self {
+                self.inner = self.inner.with_bearer(token);
+                self
+            }
+
+            pub fn transport(&self) -> &::architect::http::HttpClient {
+                &self.inner
+            }
+
+            pub async fn get(&self, id: #pk_ty) -> ::core::result::Result<#ident, ::architect::ClientError<::architect::RepoError>> {
+                self.inner.call(#path_get, &#http_mod::GetArgs { id }).await
+            }
+
+            pub async fn list(
+                &self,
+                page: ::architect::Page,
+                sort: ::core::option::Option<::architect::Sort>,
+                filter: ::core::option::Option<::architect::Filter>,
+            ) -> ::core::result::Result<#list_ident, ::architect::ClientError<::architect::RepoError>> {
+                self.inner.call(#path_list, &#http_mod::ListArgs { page, sort, filter }).await
+            }
+
+            pub async fn create(&self, input: #create_ident) -> ::core::result::Result<#ident, ::architect::ClientError<::architect::RepoError>> {
+                self.inner.call(#path_create, &#http_mod::CreateArgs { input }).await
+            }
+
+            pub async fn update(&self, id: #pk_ty, input: #update_ident) -> ::core::result::Result<#ident, ::architect::ClientError<::architect::RepoError>> {
+                self.inner.call(#path_update, &#http_mod::UpdateArgs { id, input }).await
+            }
+
+            pub async fn delete(&self, id: #pk_ty) -> ::core::result::Result<(), ::architect::ClientError<::architect::RepoError>> {
+                self.inner.call(#path_delete, &#http_mod::DeleteArgs { id }).await
+            }
+        }
+
+        /// `#repo_ident` over HTTP: hand this client to anything that
+        /// takes `impl #repo_ident`. Transport failures become
+        /// `RepoError::Internal`.
+        impl #repo_ident for #repo_http_client {
+            async fn get(&self, id: #pk_ty) -> ::core::result::Result<#ident, ::architect::RepoError> {
+                #repo_http_client::get(self, id).await.map_err(::architect::ClientError::into_app)
+            }
+            async fn list(
+                &self,
+                page: ::architect::Page,
+                sort: ::core::option::Option<::architect::Sort>,
+                filter: ::core::option::Option<::architect::Filter>,
+            ) -> ::core::result::Result<#list_ident, ::architect::RepoError> {
+                #repo_http_client::list(self, page, sort, filter).await.map_err(::architect::ClientError::into_app)
+            }
+            async fn create(&self, input: #create_ident) -> ::core::result::Result<#ident, ::architect::RepoError> {
+                #repo_http_client::create(self, input).await.map_err(::architect::ClientError::into_app)
+            }
+            async fn update(&self, id: #pk_ty, input: #update_ident) -> ::core::result::Result<#ident, ::architect::RepoError> {
+                #repo_http_client::update(self, id, input).await.map_err(::architect::ClientError::into_app)
+            }
+            async fn delete(&self, id: #pk_ty) -> ::core::result::Result<(), ::architect::RepoError> {
+                #repo_http_client::delete(self, id).await.map_err(::architect::ClientError::into_app)
+            }
+        }
+
+        /// The same over vox — see the HTTP impl.
+        #[cfg(feature = "vox")]
+        impl #repo_ident for #repo_vox_client {
+            async fn get(&self, id: #pk_ty) -> ::core::result::Result<#ident, ::architect::RepoError> {
+                #repo_vox_client::get(self, id).await.map_err(::architect::vox_into_app)
+            }
+            async fn list(
+                &self,
+                page: ::architect::Page,
+                sort: ::core::option::Option<::architect::Sort>,
+                filter: ::core::option::Option<::architect::Filter>,
+            ) -> ::core::result::Result<#list_ident, ::architect::RepoError> {
+                #repo_vox_client::list(self, page, sort, filter).await.map_err(::architect::vox_into_app)
+            }
+            async fn create(&self, input: #create_ident) -> ::core::result::Result<#ident, ::architect::RepoError> {
+                #repo_vox_client::create(self, input).await.map_err(::architect::vox_into_app)
+            }
+            async fn update(&self, id: #pk_ty, input: #update_ident) -> ::core::result::Result<#ident, ::architect::RepoError> {
+                #repo_vox_client::update(self, id, input).await.map_err(::architect::vox_into_app)
+            }
+            async fn delete(&self, id: #pk_ty) -> ::core::result::Result<(), ::architect::RepoError> {
+                #repo_vox_client::delete(self, id).await.map_err(::architect::vox_into_app)
+            }
+        }
+
+        #events_outer
+    }
 }
 
 /// Emit the entity's live-event story:
@@ -763,6 +1246,7 @@ fn build_events_block(
         #[doc = #doc_event]
         #[cfg_attr(feature = "fake", derive(::architect::fake::Dummy))]
         #[derive(Clone, Debug, PartialEq, ::architect::facet::Facet)]
+        #[allow(clippy::derive_partial_eq_without_eq)]
         #[repr(u8)]
         #vis enum #event_ident {
             /// The current full row set — the **first** event every
@@ -1108,6 +1592,7 @@ fn build_form_block(
             #[doc = #doc_fields]
             #[cfg(feature = "form")]
             #[derive(Clone, Copy, PartialEq)]
+            #[allow(clippy::derive_partial_eq_without_eq)]
             #vis struct #fields_ident {
                 #(#field_defs,)*
             }
@@ -1200,7 +1685,7 @@ fn build_store_block(
     vis: &syn::Visibility,
     container: &ContainerAttrs,
     parsed: &[ParsedField],
-    _pk_ident: &Ident,
+    pk_ident: &Ident,
     pk_ty: &Type,
     create_ident: &Ident,
     update_ident: &Ident,
@@ -1249,7 +1734,7 @@ fn build_store_block(
     );
 
     // The primary-key accessor for `StoreEntity::key`.
-    let pk_field = _pk_ident;
+    let pk_field = pk_ident;
 
     // `draft` field assignments: a client-side placeholder row built from
     // the Create payload. `on_create` expressions are evaluated locally as
@@ -1257,13 +1742,16 @@ fn build_store_block(
     // excluded fields without an expression fall back to `Default`.
     let draft_assigns = parsed.iter().map(|f| {
         let id = f.ident;
-        if let Some(e) = &f.attrs.on_create {
-            quote! { #id: #e }
-        } else if f.attrs.exclude_create {
-            quote! { #id: ::core::default::Default::default() }
-        } else {
-            quote! { #id: input.#id.clone() }
-        }
+        f.attrs.on_create.as_ref().map_or_else(
+            || {
+                if f.attrs.exclude_create {
+                    quote! { #id: ::core::default::Default::default() }
+                } else {
+                    quote! { #id: input.#id.clone() }
+                }
+            },
+            |e| quote! { #id: #e },
+        )
     });
 
     // Optimistic update patch: apply each `Some` field of the Update
@@ -1277,14 +1765,13 @@ fn build_store_block(
             }
         }
     });
-    let patch_touches = parsed
-        .iter()
-        .filter(|f| f.attrs.on_update.is_some())
-        .map(|f| {
-            let id = f.ident;
-            let e = f.attrs.on_update.as_ref().unwrap();
-            quote! { row.#id = #e; }
-        });
+    let patch_touches = parsed.iter().filter_map(|f| {
+        let id = f.ident;
+        // `filter_map`, not `filter(..is_some()).map(..unwrap())`: same
+        // set of fields, but the compiler carries the invariant.
+        let e = f.attrs.on_update.as_ref()?;
+        Some(quote! { row.#id = #e; })
+    });
 
     let doc_store = format!(
         "The shared optimistic cache of [`{ident}`] rows \
@@ -1296,11 +1783,31 @@ fn build_store_block(
          reflects optimistic edits), else the fallback fetch's phase. \
          `match` the returned phase in the page."
     );
+    let live_note = if container.emit_events {
+        format!(
+            "\n\n# Live, or a cache?\n\nThis entity declares `events`, so \
+             `provide_{snake}()` at the app root subscribes the store to \
+             server changes and every page rendering from it goes live. \
+             Without that call the store is a **cache**: it shows what the \
+             last fetch returned and goes stale the moment anyone else \
+             writes. `Store::is_live()` says which you have."
+        )
+    } else {
+        format!(
+            "\n\n# Live, or a cache?\n\nThis is a **cache**: it shows what \
+             the last fetch returned and goes stale the moment another \
+             client — or the server — writes. Reaching for a manual \
+             refresh signal is the symptom. Add `events` to \
+             `#[architect(...)]` and call `provide_{snake}()` at the app \
+             root to make it live instead; `Store::is_live()` says which \
+             you have."
+        )
+    };
     let doc_use_list = format!(
         "The [`{ident}`] list as one `AtomResult` (rows are the value, the \
          backing fetch the phase). Tracks the `\"{invalidate_key}\"` \
          reactivity key when a `Reactivity` registry is provided, so \
-         settled mutations re-fetch it."
+         settled mutations re-fetch it.{live_note}"
     );
     let doc_muts = format!(
         "Optimistic write actions for [`{ident}`]: each patches the store \
@@ -1562,6 +2069,30 @@ fn build_server_block(
     let storage_mod = format_ident!("__{}_storage", ident.to_string().to_snake_case());
     // The repo's Layer token, emitted at parent scope in `expand`.
     let layer_token = format_ident!("{}Layer", repo_ident);
+    let migration_ident = format_ident!("{}Migration", ident);
+    let migration_name = format!("architect_{table_name}");
+    // One index per queryable column — the columns `list` can filter or
+    // sort by are the ones a scan would hurt on. The pk already has one.
+    let index_stmts: Vec<TokenStream2> = parsed
+        .iter()
+        .filter(|f| (f.attrs.filterable || f.attrs.sortable) && !f.attrs.primary_key)
+        .map(|f| {
+            let column = format_ident!("{}", f.ident.to_string().to_pascal_case());
+            let index_name = format!("idx_{table_name}_{}", f.ident);
+            quote! {
+                manager
+                    .create_index(
+                        ::sea_orm::sea_query::Index::create()
+                            .name(#index_name)
+                            .table(#storage_mod::Entity)
+                            .col(#storage_mod::Column::#column)
+                            .if_not_exists()
+                            .to_owned(),
+                    )
+                    .await?;
+            }
+        })
+        .collect();
 
     // Model fields with sea_orm attrs.
     let model_fields = parsed.iter().map(|f| {
@@ -1596,13 +2127,16 @@ fn build_server_block(
     // ActiveModel field assignments for create.
     let create_active_assigns = parsed.iter().map(|f| {
         let id = f.ident;
-        if let Some(e) = &f.attrs.on_create {
-            quote! { #id: ::sea_orm::Set(#e) }
-        } else if f.attrs.exclude_create {
-            quote! { #id: ::sea_orm::NotSet }
-        } else {
-            quote! { #id: ::sea_orm::Set(input.#id) }
-        }
+        f.attrs.on_create.as_ref().map_or_else(
+            || {
+                if f.attrs.exclude_create {
+                    quote! { #id: ::sea_orm::NotSet }
+                } else {
+                    quote! { #id: ::sea_orm::Set(input.#id) }
+                }
+            },
+            |e| quote! { #id: ::sea_orm::Set(#e) },
+        )
     });
 
     // ActiveModel field assignments for update.
@@ -1615,14 +2149,11 @@ fn build_server_block(
         }
     });
 
-    let touch_updated = parsed
-        .iter()
-        .filter(|f| f.attrs.on_update.is_some())
-        .map(|f| {
-            let id = f.ident;
-            let e = f.attrs.on_update.as_ref().unwrap();
-            quote! { am.#id = ::sea_orm::Set(#e); }
-        });
+    let touch_updated = parsed.iter().filter_map(|f| {
+        let id = f.ident;
+        let e = f.attrs.on_update.as_ref()?;
+        Some(quote! { am.#id = ::sea_orm::Set(#e); })
+    });
 
     let _ = (create_fields, list_ident, repo_ident);
 
@@ -1661,6 +2192,7 @@ fn build_server_block(
 
             #[cfg_attr(feature = "fake", derive(::architect::fake::Dummy))]
             #[derive(Clone, Debug, PartialEq, ::sea_orm::DeriveEntityModel)]
+            #[allow(clippy::derive_partial_eq_without_eq)]
             #[sea_orm(table_name = #table_name)]
             pub struct Model {
                 #(#model_fields,)*
@@ -1788,6 +2320,52 @@ fn build_server_block(
         // backend: it provides exactly the repo. Declaring its `Services`
         // bundle lets `<Entity>RepoStorage::new(db).into_router()` work
         // out of the box, swappable with any other repo backend.
+        /// The table this entity lives in, as a sea-orm migration:
+        /// `up` creates it from the derived model (every column, the
+        /// primary key, `if_not_exists`) plus an index per `filterable` /
+        /// `sortable` field; `down` drops it. Collect the workspace's
+        /// migrations with `architect::migrator!`.
+        #[cfg(feature = "server")]
+        #[derive(Default)]
+        #vis struct #migration_ident;
+
+        #[cfg(feature = "server")]
+        impl ::architect::storage::migration::MigrationName for #migration_ident {
+            fn name(&self) -> &str {
+                #migration_name
+            }
+        }
+
+        #[cfg(feature = "server")]
+        #[::architect::storage::migration::async_trait::async_trait]
+        impl ::architect::storage::migration::MigrationTrait for #migration_ident {
+            async fn up(
+                &self,
+                manager: &::architect::storage::migration::SchemaManager,
+            ) -> ::core::result::Result<(), ::sea_orm::DbErr> {
+                let backend = manager.get_database_backend();
+                let mut table = ::sea_orm::Schema::new(backend)
+                    .create_table_from_entity(#storage_mod::Entity);
+                manager.create_table(table.if_not_exists().to_owned()).await?;
+                #(#index_stmts)*
+                ::core::result::Result::Ok(())
+            }
+
+            async fn down(
+                &self,
+                manager: &::architect::storage::migration::SchemaManager,
+            ) -> ::core::result::Result<(), ::sea_orm::DbErr> {
+                manager
+                    .drop_table(
+                        ::sea_orm::sea_query::Table::drop()
+                            .table(#storage_mod::Entity)
+                            .if_exists()
+                            .to_owned(),
+                    )
+                    .await
+            }
+        }
+
         #[cfg(all(feature = "server", feature = "vox"))]
         impl<C: ::architect::storage::DbConn> ::architect::Services for #storage_ident<C> {
             fn layers() -> impl ::architect::Layer<Self> {
@@ -1913,8 +2491,8 @@ fn type_first_generic(ty: &Type) -> Option<&Type> {
 }
 
 /// The container shape (after unwrapping one `Option`) that requires
-/// `#[architect(json)]` for the SeaORM column emission, or `None` for
-/// types SeaORM maps natively. `Vec<u8>` is native (bytes column);
+/// `#[architect(json)]` for the `SeaORM` column emission, or `None` for
+/// types `SeaORM` maps natively. `Vec<u8>` is native (bytes column);
 /// every other `Vec<T>`, plus the std maps/sets, has no
 /// `sea_orm::Value` impl and must be stored as JSON.
 fn json_requiring_container(ty: &Type) -> Option<String> {
@@ -1955,7 +2533,7 @@ enum CrdtKind {
 
 impl CrdtKind {
     /// `(kind, optional)` for a field type, or None if unsupported.
-    fn of(ty: &Type) -> Option<(CrdtKind, bool)> {
+    fn of(ty: &Type) -> Option<(Self, bool)> {
         let last = type_last_ident(ty)?;
         if last == "Option" {
             let inner = type_first_generic(ty)?;
@@ -1964,7 +2542,7 @@ impl CrdtKind {
         Self::base_of(ty).map(|k| (k, false))
     }
 
-    fn base_of(ty: &Type) -> Option<CrdtKind> {
+    fn base_of(ty: &Type) -> Option<Self> {
         match type_last_ident(ty)?.as_str() {
             "Uuid" => Some(Self::Uuid),
             "String" => Some(Self::Str),
@@ -2003,10 +2581,8 @@ impl CrdtKind {
     /// Shape a value expression for the writer's parameter type.
     fn write_arg(self, optional: bool, value: TokenStream2) -> TokenStream2 {
         match (self, optional) {
-            (Self::Str, false) => quote! { &#value },
-            (Self::Str, true) => quote! { #value.as_deref() },
-            (Self::StringList, false) => quote! { &#value },
-            (Self::StringList, true) => quote! { #value.as_deref() },
+            (Self::Str | Self::StringList, true) => quote! { #value.as_deref() },
+            (Self::Str | Self::StringList, false) => quote! { &#value },
             _ => value,
         }
     }
@@ -2076,13 +2652,16 @@ fn build_crdt_block(
     // come from the payload.
     let from_create_assigns = parsed.iter().map(|f| {
         let id = f.ident;
-        if let Some(e) = &f.attrs.on_create {
-            quote! { #id: #e }
-        } else if f.attrs.exclude_create {
-            quote! { #id: ::core::default::Default::default() }
-        } else {
-            quote! { #id: c.#id }
-        }
+        f.attrs.on_create.as_ref().map_or_else(
+            || {
+                if f.attrs.exclude_create {
+                    quote! { #id: ::core::default::Default::default() }
+                } else {
+                    quote! { #id: c.#id }
+                }
+            },
+            |e| quote! { #id: #e },
+        )
     });
 
     let encode_calls = parsed.iter().zip(&kinds).map(|(f, (kind, opt))| {
@@ -2101,37 +2680,37 @@ fn build_crdt_block(
     });
 
     // `apply_update`: write each `Some` field of the Update payload …
-    let apply_update_arms = update_fields.iter().map(|f| {
+    let apply_update_arms = update_fields.iter().filter_map(|f| {
         let id = f.ident;
         let key = LitStr::new(&id.to_string(), id.span());
-        let (kind, opt) = CrdtKind::of(f.ty).expect("validated above");
+        // `filter_map` over `expect("validated above")`: the validation
+        // does run earlier, but re-deriving the kind here means a future
+        // reorder degrades to "field omitted from apply_update" rather
+        // than a panic inside the compiler.
+        let (kind, opt) = CrdtKind::of(f.ty)?;
         let writer = format_ident!("write_{}", kind.suffix(opt));
         let arg = kind.write_arg(opt, quote! { v });
-        quote! {
+        Some(quote! {
             if let ::core::option::Option::Some(v) = u.#id {
                 ::crdt::codec::#writer(m, #key, #arg)?;
             }
-        }
+        })
     });
     // … then refresh the `on_update` fields (e.g. `updated_at`), exactly
     // like the SeaORM update path does.
-    let apply_update_touches = parsed
-        .iter()
-        .zip(&kinds)
-        .filter(|(f, _)| f.attrs.on_update.is_some())
-        .map(|(f, (kind, opt))| {
-            let id = f.ident;
-            let key = LitStr::new(&id.to_string(), id.span());
-            let e = f.attrs.on_update.as_ref().unwrap();
-            let writer = format_ident!("write_{}", kind.suffix(*opt));
-            let arg = kind.write_arg(*opt, quote! { __touch });
-            quote! {
-                {
-                    let __touch = #e;
-                    ::crdt::codec::#writer(m, #key, #arg)?;
-                }
+    let apply_update_touches = parsed.iter().zip(&kinds).filter_map(|(f, (kind, opt))| {
+        let id = f.ident;
+        let key = LitStr::new(&id.to_string(), id.span());
+        let e = f.attrs.on_update.as_ref()?;
+        let writer = format_ident!("write_{}", kind.suffix(*opt));
+        let arg = kind.write_arg(*opt, quote! { __touch });
+        Some(quote! {
+            {
+                let __touch = #e;
+                ::crdt::codec::#writer(m, #key, #arg)?;
             }
-        });
+        })
+    });
 
     let sort_arms = parsed.iter().filter(|f| f.attrs.sortable).map(|f| {
         let id = f.ident;
@@ -2380,7 +2959,408 @@ fn build_crdt_block(
 // the *behavior* of the emitted code is covered by the example app's
 // test crates (`example-tests-native`, `app-tests-e2e`).
 
+// ── `#[architect::entity]` / `#[architect::wire]` ────────────────────────
+
+/// `#[architect::entity(table_name = "…", repo, …)]` — the attribute form
+/// of `#[derive(Entity)]`: an entity is its fields and its options,
+/// nothing else.
+///
+/// Expands to the struct with the derive line written for you:
+/// `#[derive(Entity, Facet, Clone, Debug, PartialEq)]` plus the `fake`
+/// hook (`#[cfg_attr(feature = "fake", derive(Dummy))]`), and the
+/// options moved onto `#[architect(…)]`. Derives you add yourself are
+/// kept; `Eq` / `Hash` / `Default` are yours to add when the fields allow.
+#[proc_macro_attribute]
+pub fn entity(args: TokenStream, input: TokenStream) -> TokenStream {
+    let args = proc_macro2::TokenStream::from(args);
+    let item = parse_macro_input!(input as syn::ItemStruct);
+    let options = if args.is_empty() {
+        quote! {}
+    } else {
+        quote! { #[architect(#args)] }
+    };
+    quote! {
+        #[derive(
+            ::architect::Entity,
+            ::architect::facet::Facet,
+            ::core::clone::Clone,
+            ::core::fmt::Debug,
+            ::core::cmp::PartialEq
+        )]
+        #[cfg_attr(feature = "fake", derive(::architect::fake::Dummy))]
+        #options
+        #item
+    }
+    .into()
+}
+
+/// `#[architect::wire]` — a plain wire type, derives written for you.
+///
+/// A request, a response, an error, an event: `Facet`, `Clone`, `Debug`,
+/// `PartialEq` and the `fake` hook; enums also get the `#[repr(u8)]`
+/// facet needs. Add `Eq`, `Hash`, `Default`, `thiserror::Error` yourself.
+#[proc_macro_attribute]
+pub fn wire(args: TokenStream, input: TokenStream) -> TokenStream {
+    if !args.is_empty() {
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "#[architect::wire] takes no arguments",
+        )
+        .to_compile_error()
+        .into();
+    }
+    let item = parse_macro_input!(input as syn::Item);
+    let repr = match &item {
+        syn::Item::Enum(e) if !e.attrs.iter().any(|a| a.path().is_ident("repr")) => {
+            quote! { #[repr(u8)] }
+        }
+        _ => quote! {},
+    };
+    quote! {
+        #[derive(
+            ::architect::facet::Facet,
+            ::core::clone::Clone,
+            ::core::fmt::Debug,
+            ::core::cmp::PartialEq
+        )]
+        #[cfg_attr(feature = "fake", derive(::architect::fake::Dummy))]
+        #repr
+        #item
+    }
+    .into()
+}
+
+// ── `#[architect::error]` ─────────────────────────────────────────────────
+
+/// `#[architect::error]` — a service's error type, every impl written for
+/// you.
+///
+/// ```ignore
+/// #[architect::error]
+/// pub enum GreetError {
+///     #[error("nobody is called {0}")]
+///     #[architect(http_status = 404)]
+///     Unknown(String),
+///     #[error("too many greetings")]
+///     RateLimited,                         // 400, code "rate_limited"
+/// }
+/// ```
+///
+/// Emits the wire derives (`Facet`, `Clone`, `Debug`, `PartialEq`,
+/// `thiserror::Error`, `#[repr(u8)]`, the `fake` hook), an
+/// `architect::http::HttpError` impl (status per variant, code = the
+/// variant name in `snake_case`), and a `Transport(String)` variant with
+/// `From<architect::TransportError>` — which is what lets the generated
+/// clients implement the service trait. Mark your own variant
+/// `#[architect(transport)]` (it must hold one `String`) to use it
+/// instead of the added one.
+///
+/// Status defaults follow the variant's name when it is one of the
+/// obvious ones — `NotFound` 404, `Unauthenticated` / `InvalidCredentials`
+/// 401, `Forbidden` / `PermissionDenied` 403, `Conflict` 409, `Internal`
+/// 500, the transport variant 503 — and `400` otherwise. `http_status = N`
+/// and `code = "…"` override either.
+#[proc_macro_attribute]
+pub fn error(args: TokenStream, input: TokenStream) -> TokenStream {
+    if !args.is_empty() {
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "#[architect::error] takes no arguments",
+        )
+        .to_compile_error()
+        .into();
+    }
+    let item = parse_macro_input!(input as syn::ItemEnum);
+    match expand_error(item) {
+        Ok(ts) => ts.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
+fn default_status(variant: &str, is_transport: bool) -> u16 {
+    if is_transport {
+        return 503;
+    }
+    match variant {
+        "NotFound" => 404,
+        "Unauthenticated" | "InvalidCredentials" | "SessionExpired" => 401,
+        "Forbidden" | "PermissionDenied" => 403,
+        "Conflict" => 409,
+        "Internal" => 500,
+        _ => 400,
+    }
+}
+
+fn expand_error(mut item: syn::ItemEnum) -> Result<TokenStream2> {
+    let ident = item.ident.clone();
+    let mut arms_status = Vec::new();
+    let mut arms_code = Vec::new();
+    let mut transport: Option<Ident> = None;
+
+    for variant in &mut item.variants {
+        let name = variant.ident.clone();
+        let mut status: Option<u16> = None;
+        let mut code: Option<String> = None;
+        let mut is_transport = false;
+        let mut keep = Vec::new();
+        for attr in variant.attrs.drain(..) {
+            if !attr.path().is_ident("architect") {
+                keep.push(attr);
+                continue;
+            }
+            attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("http_status") {
+                    let n: syn::LitInt = meta.value()?.parse()?;
+                    status = Some(n.base10_parse()?);
+                } else if meta.path.is_ident("status") {
+                    return Err(
+                        meta.error("write `http_status = 404` — the status is an HTTP detail")
+                    );
+                } else if meta.path.is_ident("code") {
+                    let s: LitStr = meta.value()?.parse()?;
+                    code = Some(s.value());
+                } else if meta.path.is_ident("transport") {
+                    is_transport = true;
+                } else {
+                    return Err(
+                        meta.error("unknown architect variant attribute (status, code, transport)")
+                    );
+                }
+                Ok(())
+            })?;
+        }
+        variant.attrs = keep;
+        if is_transport {
+            let holds_one_string =
+                matches!(&variant.fields, Fields::Unnamed(f) if f.unnamed.len() == 1);
+            if !holds_one_string {
+                return Err(syn::Error::new_spanned(
+                    &variant.ident,
+                    "the #[architect(transport)] variant must hold exactly one `String`",
+                ));
+            }
+            if transport.replace(name.clone()).is_some() {
+                return Err(syn::Error::new_spanned(
+                    &variant.ident,
+                    "only one variant can be the transport one",
+                ));
+            }
+        }
+        let status = status.unwrap_or_else(|| default_status(&name.to_string(), is_transport));
+        let code = code.unwrap_or_else(|| name.to_string().to_snake_case());
+        arms_status.push(quote! { Self::#name { .. } => #status });
+        arms_code.push(quote! { Self::#name { .. } => #code });
+    }
+
+    let transport = transport.unwrap_or_else(|| {
+        let name = format_ident!("Transport");
+        item.variants.push(syn::parse_quote! {
+            /// The call never reached the service: the connection dropped,
+            /// the reply was not JSON, the server was unreachable.
+            #[error("transport failure: {0}")]
+            #name(String)
+        });
+        arms_status.push(quote! { Self::#name { .. } => 503u16 });
+        arms_code.push(quote! { Self::#name { .. } => "transport" });
+        name
+    });
+
+    Ok(quote! {
+        #[derive(
+            ::architect::facet::Facet,
+            ::core::clone::Clone,
+            ::core::fmt::Debug,
+            ::core::cmp::PartialEq,
+            ::thiserror::Error
+        )]
+        #[cfg_attr(feature = "fake", derive(::architect::fake::Dummy))]
+        #[repr(u8)]
+        #item
+
+        impl ::architect::http::HttpError for #ident {
+            fn status(&self) -> u16 {
+                match self { #(#arms_status),* }
+            }
+            fn code(&self) -> &'static str {
+                match self { #(#arms_code),* }
+            }
+        }
+
+        impl ::core::convert::From<::architect::TransportError> for #ident {
+            fn from(e: ::architect::TransportError) -> Self {
+                Self::#transport(::std::string::ToString::to_string(&e))
+            }
+        }
+    })
+}
+
+// ── `#[derive(architect::Config)]` ───────────────────────────────────────
+
+/// `#[derive(architect::Config)]` — a struct that reads itself from the
+/// environment.
+///
+/// ```ignore
+/// #[derive(architect::Config)]
+/// #[architect(prefix = "AUTH")]
+/// pub struct ServerConfig {
+///     #[architect(default = "0.0.0.0:8080")]
+///     pub bind_addr: String,                       // AUTH_BIND_ADDR
+///     #[architect(secret)]
+///     pub secret: String,                          // AUTH_SECRET or AUTH_SECRET_FILE
+///     pub passkey_rp_id: Option<String>,           // AUTH_PASSKEY_RP_ID, absent → None
+///     pub cors_origins: Vec<String>,               // AUTH_CORS_ORIGINS, comma-separated
+///     #[architect(env = "DATABASE_URL", secret)]   // an explicit name, no prefix
+///     pub database_url: String,
+///     #[architect(nested)]
+///     pub mail: MailConfig,                        // MailConfig::from_env()
+///     #[architect(skip)]
+///     pub oidc_clients: Vec<OidcClient>,           // Default::default(); fill in after
+/// }
+///
+/// let config = ServerConfig::from_env()?;
+/// ```
+///
+/// Field types implement `architect::config::FromEnvValue`: the scalars,
+/// `bool` (`1/true/yes/on`), `Option<T>` (unset → `None`), `Vec<T>`
+/// (comma-separated). `default = expr` is any expression of the field's
+/// type (a string literal converts via `Into` for `String`).
+#[proc_macro_derive(Config, attributes(architect))]
+pub fn derive_config(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match expand_config(&input) {
+        Ok(ts) => ts.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
+}
+
+fn expand_config(input: &DeriveInput) -> Result<TokenStream2> {
+    let ident = &input.ident;
+    let mut prefix: Option<String> = None;
+    for attr in &input.attrs {
+        if !attr.path().is_ident("architect") {
+            continue;
+        }
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("prefix") {
+                let s: LitStr = meta.value()?.parse()?;
+                prefix = Some(s.value().trim_end_matches('_').to_owned());
+                Ok(())
+            } else {
+                Err(meta.error("unknown architect container attribute (expected `prefix`)"))
+            }
+        })?;
+    }
+    let Data::Struct(data) = &input.data else {
+        return Err(syn::Error::new_spanned(
+            ident,
+            "Config derives on structs only",
+        ));
+    };
+    let Fields::Named(fields) = &data.fields else {
+        return Err(syn::Error::new_spanned(ident, "Config needs named fields"));
+    };
+
+    let mut reads = Vec::new();
+    for field in &fields.named {
+        let Some(name) = field.ident.as_ref() else {
+            return Err(syn::Error::new_spanned(field, "Config needs named fields"));
+        };
+        let ty = &field.ty;
+        let mut env: Option<String> = None;
+        let mut default: Option<syn::Expr> = None;
+        let mut secret = false;
+        let mut nested = false;
+        let mut skip = false;
+        for attr in &field.attrs {
+            if !attr.path().is_ident("architect") {
+                continue;
+            }
+            attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("env") {
+                    let s: LitStr = meta.value()?.parse()?;
+                    env = Some(s.value());
+                } else if meta.path.is_ident("default") {
+                    default = Some(meta.value()?.parse()?);
+                } else if meta.path.is_ident("secret") {
+                    secret = true;
+                } else if meta.path.is_ident("nested") {
+                    nested = true;
+                } else if meta.path.is_ident("skip") {
+                    skip = true;
+                } else {
+                    return Err(meta.error(
+                        "unknown architect field attribute (env, default, secret, nested, skip)",
+                    ));
+                }
+                Ok(())
+            })?;
+        }
+        if skip {
+            reads.push(quote! { #name: ::core::default::Default::default() });
+            continue;
+        }
+        if nested {
+            reads.push(quote! { #name: <#ty>::from_env()? });
+            continue;
+        }
+        let var = env.unwrap_or_else(|| {
+            let upper = name.to_string().to_uppercase();
+            match &prefix {
+                Some(p) => format!("{p}_{upper}"),
+                None => upper,
+            }
+        });
+        let raw = if secret {
+            quote! { ::architect::config::secret(#var)? }
+        } else {
+            quote! { ::architect::config::var(#var) }
+        };
+        let read = default.map_or_else(
+            || {
+                quote! {
+                    <#ty as ::architect::config::FromEnvValue>::from_env_value(#var, #raw)?
+                }
+            },
+            |expr| {
+                quote! {
+                    match #raw {
+                        ::core::option::Option::Some(raw) => {
+                            <#ty as ::architect::config::FromEnvValue>::from_env_value(
+                                #var,
+                                ::core::option::Option::Some(raw),
+                            )?
+                        }
+                        ::core::option::Option::None => ::core::convert::Into::into(#expr),
+                    }
+                }
+            },
+        );
+        reads.push(quote! { #name: #read });
+    }
+
+    Ok(quote! {
+        impl #ident {
+            /// Read every field from the process environment.
+            pub fn from_env() -> ::core::result::Result<Self, ::architect::config::ConfigError> {
+                ::core::result::Result::Ok(Self { #(#reads),* })
+            }
+        }
+    })
+}
+
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic,
+    clippy::float_cmp,
+    clippy::string_slice,
+    clippy::significant_drop_tightening,
+    clippy::too_many_lines
+)]
 mod tests {
     use super::*;
     use syn::parse_quote;

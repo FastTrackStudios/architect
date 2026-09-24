@@ -20,7 +20,11 @@ repository.workspace = true
 # pull `architect/vox` when they want the RPC stack so the choice
 # happens at the contract crate's level, not by accident.
 default = []
-vox = ["dep:vox"]
+# `dep:tracing` rides along because `permissions_gate` — which is on
+# whenever `vox` is — reports its coverage through `tracing` at wrap
+# time. A gate that can only tell you about its blind spots when some
+# *other* feature happens to have pulled a logger is not much of a gate.
+vox = ["dep:vox", "dep:tracing", "dep:async-channel"]
 
 # Client-side optimistic / stale-while-revalidate state for Dioxus,
 # re-exported as `architect::atom`. Pulls Dioxus (via architect-atom), so
@@ -60,6 +64,11 @@ platform = ["dep:web-time", "dep:async-channel", "tokio/time", "tokio/rt", "dep:
 # (exponential backoff, jitter, caps, recurrence limits) + drivers that run
 # a plain `async FnMut() -> Result` under them. Implies `platform` (it sleeps
 # between attempts through a `Clock`).
+# Kept as an alias so `features = ["schedule"]` still resolves. The
+# module itself is now gated on `platform`: `reconnect::Backoff` is a
+# `Schedule` preset, so the layer is no longer optional relative to it,
+# and "opt in to get retry policies" was a feature nothing in the fleet
+# ever opted into while fifteen files hand-rolled their own backoff.
 schedule = ["platform"]
 
 # Two server-side features, deliberately independent so a binary can
@@ -91,6 +100,25 @@ rig = ["vox", "dep:tracing"]
 # + vox-types (for the wasm `Link` impl).
 local = ["vox", "dep:vox-core", "dep:vox-types", "dep:tracing", "tokio/rt", "platform"]
 
+# Client-side connection establishment (`architect::connect`) — the twin
+# of `server-axum`'s `axum_ws::serve`. One connection per
+# (endpoint, identity), single-flighted, liveness-checked; typed clients
+# are cheap views over its caller.
+#
+# Target-split under the hood: `tokio-tungstenite` natively,
+# `web-sys`/`js-sys` in the browser. Both ride `vox-websocket`.
+connect = [
+  "vox",
+  "dep:vox-core",
+  "dep:vox-websocket",
+  "dep:tracing",
+  "dep:tokio-tungstenite",
+  "dep:wasm-bindgen",
+  "dep:web-sys",
+  "dep:js-sys",
+  "platform",
+]
+
 # iroh p2p transport (`architect::iroh_link`): serve/consume a vox
 # router over an iroh QUIC endpoint — same acceptor dance as `server-axum`,
 # but the "socket" is a bi-directional QUIC stream reachable by bare
@@ -108,12 +136,11 @@ iroh = [
     "dep:vox-types",
 ]
 
-server-seaorm = ["dep:sea-orm", "dep:async-trait"]
+server-seaorm = ["dep:sea-orm", "dep:sea-orm-migration", "dep:async-trait"]
 server-axum = [
     "dep:axum",
     "tokio/rt-multi-thread",
     "tokio/macros",
-    "dep:futures",
     "dep:tracing",
     "dep:vox-core",
     "dep:vox-types",
@@ -148,7 +175,20 @@ telemetry = ["vox", "dep:tracing"]
 #            `server = ["server-seaorm"]` back-compat alias, so
 #            consumers that wrote `features = ["server"]` keep working.
 client = ["vox", "atom", "form"]
-server = ["vox", "server-seaorm", "server-axum", "dispatch-tokio"]
+server = ["vox", "server-seaorm", "server-axum", "dispatch-tokio", "http"]
+
+# The HTTP+JSON face (`architect::http`): the axum router the rpc derive
+# emits per service (`http::router(backend)`), the `Call<Args>` extractor,
+# the `ErrorBody` envelope and the `BindHttp` / `HttpLayer` composition
+# twins of `Bind` / `Layer`. Pulls axum + facet-json. Implied by `server`
+# and `host` — anything serving vox over a socket wants the same services
+# reachable by a plain `fetch`.
+http = ["dep:axum", "dep:facet-json", "dep:async-channel"]
+
+# The typed HTTP client the rpc derive emits per service
+# (`<Trait>HttpClient`), over `reqwest` — native and wasm (`fetch`).
+# Implied by `client`.
+http-client = ["dep:reqwest", "dep:facet-json"]
 
 # `architect::host` — assemble a headless vox engine binary from a router:
 # the multi-thread runtime, tracing + panic-logger bootstrap, and an
@@ -157,6 +197,7 @@ server = ["vox", "server-seaorm", "server-axum", "dispatch-tokio"]
 # engine binary otherwise repeats. Add `iroh` alongside for p2p serving.
 host = [
     "server-axum",
+    "http",
     "dep:tracing-subscriber",
     "dep:tower-http",
     "dep:include_dir",
@@ -236,11 +277,14 @@ async-channel = { version = "2", optional = true }
 
 # Server-side only — sea-orm + async-trait are gated.
 sea-orm = { workspace = true, optional = true }
+sea-orm-migration = { workspace = true, optional = true }
 async-trait = { version = "0.1", optional = true }
 
 # server-axum bundle. All optional; only pulled when the feature is on.
 axum = { workspace = true, optional = true }
-futures = { version = "0.3", optional = true }
+# Required: the HTTP facade's `EventStream` is a `futures::Stream` in
+# every configuration, so the derive-emitted clients have one shape.
+futures = "0.3"
 tracing = { workspace = true, optional = true }
 
 # `host` bundle — the engine-binary bootstrap. All optional; only the `host`
@@ -251,6 +295,11 @@ tower-http = { workspace = true, optional = true }
 include_dir = { workspace = true, optional = true }
 vox-core = { workspace = true, optional = true }
 vox-types = { workspace = true, optional = true }
+vox-websocket = { version = "0.10.0-rc.5", optional = true }
+facet-json = { version = "0.50.0-rc.5", optional = true }
+# `default-features = false` keeps the wasm build free of the native TLS
+# and blocking stacks; the browser target goes through `fetch` anyway.
+reqwest = { version = "0.12", default-features = false, features = ["stream"], optional = true }
 
 # iroh p2p bundle. Only pulled by the `iroh` feature. Target-split
 # because iroh's defaults (portmapper etc.) don't build on wasm32: the
@@ -258,6 +307,12 @@ vox-types = { workspace = true, optional = true }
 # version with defaults off + a TLS provider (relay-only in browsers).
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 iroh = { workspace = true, optional = true }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"], optional = true }
+# `connect`'s native dial. Native builds its own handshake request so the
+# bearer can ride an `Authorization` header.
+# Must track `vox-websocket`'s own tungstenite: `WsLink::new` takes
+# that crate's stream type, so a version skew is a type mismatch.
+tokio-tungstenite = { version = "0.29", optional = true }
 
 # Wasm-only platform deps. Browser timers (gloo-timers' `TimeoutFuture`
 # is a real async sleep backed by setTimeout) and `spawn_local` for the
@@ -265,6 +320,11 @@ iroh = { workspace = true, optional = true }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 gloo-timers = { version = "0.3", default-features = false, features = ["futures"], optional = true }
 wasm-bindgen-futures = { version = "0.4", optional = true }
+# `connect`'s browser dial. A browser cannot set request headers, so the
+# bearer rides the subprotocol list — see `connect::ws`.
+wasm-bindgen = { version = "0.2", optional = true }
+web-sys = { version = "0.3.98", features = ["WebSocket", "BinaryType", "Event", "CloseEvent", "MessageEvent"], optional = true }
+js-sys = { version = "0.3", optional = true }
 iroh = { version = "1", default-features = false, features = ["tls-ring"], optional = true }
 
 [dev-dependencies]
@@ -278,6 +338,8 @@ vox-types = { workspace = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 # rpc_spans.rs installs a capturing subscriber to assert the dispatch span.
 tracing-subscriber = { workspace = true }
+# http_face.rs drives the generated axum router in-process (`oneshot`).
+tower = { version = "0.5", features = ["util"] }
 
 [[test]]
 name = "reconnect_supervisor"
@@ -286,3 +348,18 @@ required-features = ["atom", "platform", "local"]
 [[test]]
 name = "iroh_link"
 required-features = ["iroh"]
+
+[[test]]
+name = "entity_storage"
+required-features = ["server", "vox"]
+
+[[test]]
+name = "layer_override"
+required-features = ["vox", "local", "http"]
+
+[[test]]
+name = "http_face"
+required-features = ["http", "http-client", "vox", "local", "dispatch-tokio"]
+
+[lints]
+workspace = true

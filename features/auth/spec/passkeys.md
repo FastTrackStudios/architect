@@ -24,6 +24,20 @@ r[auth.passkey.user-match]
 Registration MUST bind the credential to the authenticated user who
 started registration.
 
+r[auth.passkey.assertion-signature]
+Authentication MUST verify the WebAuthn assertion signature against the
+stored credential public key, over
+`authenticatorData || sha256(clientDataJSON)`, and MUST check that
+`clientDataJSON` carries type `webauthn.get`, the issued challenge, and
+an allowed origin.
+
+A `credential_id` is not a secret — WebAuthn broadcasts it in
+`allowCredentials` on every ceremony — so an implementation that
+accepts a credential id, a challenge and a counter without proving
+possession of the private key is an authentication bypass, not a weak
+check. An implementation that cannot meet this requirement MUST fail closed
+rather than accept an unverified assertion.
+
 r[auth.passkey.counter]
 Authentication MUST update and validate the authenticator counter when
 the authenticator provides one.

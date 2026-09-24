@@ -51,6 +51,7 @@
 //! }
 //! ```
 
+use crate::lock::lock;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
@@ -65,8 +66,57 @@ enum Strategy {
     Unbounded,
 }
 
+/// Where a subscriber's events go.
+///
+/// A vox channel (the wire) or a local async channel (an in-process
+/// consumer — the HTTP Server-Sent-Events bridge, a test, a poller).
+/// Every attach verb takes `impl Into<EventSink<T>>`, so backends written
+/// against `vox::Tx` keep compiling unchanged.
+pub enum EventSink<T> {
+    /// A vox channel sender — events cross the wire.
+    Vox(vox::Tx<T>),
+    /// A local bounded channel — events stay in-process.
+    Local(async_channel::Sender<T>),
+}
+
+impl<T> From<vox::Tx<T>> for EventSink<T> {
+    fn from(tx: vox::Tx<T>) -> Self {
+        Self::Vox(tx)
+    }
+}
+
+impl<T> From<async_channel::Sender<T>> for EventSink<T> {
+    fn from(tx: async_channel::Sender<T>) -> Self {
+        Self::Local(tx)
+    }
+}
+
+impl<T> EventSink<T> {
+    /// A local sink and its receiving end, with a mailbox of `capacity`.
+    /// The hub's own per-subscriber mailbox sits in front of it, so this
+    /// only needs to cover the consumer's read latency.
+    #[must_use]
+    pub fn local(capacity: usize) -> (Self, async_channel::Receiver<T>) {
+        let (tx, rx) = async_channel::bounded(capacity.max(1));
+        (Self::Local(tx), rx)
+    }
+
+    fn try_send(&self, event: T) -> Result<(), vox::TrySendError<T>>
+    where
+        T: facet::Facet<'static>,
+    {
+        match self {
+            Self::Vox(tx) => tx.try_send(event),
+            Self::Local(tx) => tx.try_send(event).map_err(|err| match err {
+                async_channel::TrySendError::Full(event) => vox::TrySendError::Full(event),
+                async_channel::TrySendError::Closed(event) => vox::TrySendError::Closed(event),
+            }),
+        }
+    }
+}
+
 struct Subscriber<T> {
-    sink: vox::Tx<T>,
+    sink: EventSink<T>,
     mailbox: VecDeque<T>,
     /// Buffered-attach parking: while `true`, the mailbox collects but
     /// nothing is sent (the snapshot hasn't been prepended yet).
@@ -124,31 +174,49 @@ impl<T> PubSub<T> {
     /// Bounded per-subscriber mailboxes; on overflow the **oldest** queued
     /// event for that subscriber is dropped. The default for state-shaped
     /// events.
+    #[must_use]
     pub fn sliding(capacity: usize) -> Self {
         Self::with_strategy(Strategy::Sliding(capacity.max(1)))
     }
 
     /// Bounded per-subscriber mailboxes; on overflow the **incoming**
     /// event is dropped for that subscriber.
+    #[must_use]
     pub fn dropping(capacity: usize) -> Self {
         Self::with_strategy(Strategy::Dropping(capacity.max(1)))
     }
 
     /// Unbounded per-subscriber mailboxes — nothing is ever dropped.
+    #[must_use]
     pub fn unbounded() -> Self {
         Self::with_strategy(Strategy::Unbounded)
     }
 
     /// Keep the last `n` published events and hand them to every new
     /// subscriber before live traffic (effect's `replay` option).
-    pub fn with_replay(mut self, n: usize) -> Self {
+    #[must_use]
+    pub const fn with_replay(mut self, n: usize) -> Self {
         self.replay_capacity = n;
         self
     }
 
+    /// Subscribe from in-process: a receiver that sees the replay window
+    /// and then every publish, until it is dropped. The local twin of
+    /// handing a `vox::Tx` to [`attach`](Self::attach).
+    #[must_use]
+    pub fn subscribe(&self, capacity: usize) -> async_channel::Receiver<T>
+    where
+        T: Clone + facet::Facet<'static>,
+    {
+        let (sink, rx) = EventSink::local(capacity);
+        self.attach(sink);
+        rx
+    }
+
     /// Live subscriber count (as of the last sweep).
+    #[must_use]
     pub fn subscriber_count(&self) -> usize {
-        self.inner.lock().expect("pubsub lock").subscribers.len()
+        lock(&self.inner).subscribers.len()
     }
 }
 
@@ -159,7 +227,7 @@ where
     /// Attach a subscriber: replay window first, then every subsequent
     /// publish. For snapshot-then-changes semantics use
     /// [`begin_attach`](Self::begin_attach) instead.
-    pub fn attach(&self, sink: vox::Tx<T>) {
+    pub fn attach(&self, sink: impl Into<EventSink<T>>) {
         let pending = self.begin_attach(sink);
         self.complete_attach(pending, None);
     }
@@ -168,10 +236,15 @@ where
     /// the subscriber's mailbox, but nothing is delivered until
     /// [`complete_attach`](Self::complete_attach) — giving the caller a
     /// race-free window to capture a snapshot.
-    pub fn begin_attach(&self, sink: vox::Tx<T>) -> PendingAttach {
-        let mut inner = self.inner.lock().expect("pubsub lock");
+    // The guard spans the whole body on purpose: allocating the id,
+    // seeding the replay mailbox and pushing the subscriber must be one
+    // atomic step, or a concurrent `publish` can land between them.
+    #[allow(clippy::significant_drop_tightening)]
+    pub fn begin_attach(&self, sink: impl Into<EventSink<T>>) -> PendingAttach {
+        let sink = sink.into();
+        let mut inner = lock(&self.inner);
         let id = inner.next_id;
-        inner.next_id += 1;
+        inner.next_id = inner.next_id.saturating_add(1);
         let mailbox = inner.replay.iter().cloned().collect();
         inner.subscribers.push(Subscriber {
             sink,
@@ -185,8 +258,12 @@ where
 
     /// Finish a buffered attach: prepend `intro` (the snapshot) ahead of
     /// everything the mailbox collected, and open the tap.
+    // `PendingAttach` by value on purpose: it is a linear token handed
+    // out by `begin_attach`, and consuming it is what stops the same
+    // attach being completed (or aborted) twice.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn complete_attach(&self, pending: PendingAttach, intro: Option<T>) {
-        let mut inner = self.inner.lock().expect("pubsub lock");
+        let mut inner = lock(&self.inner);
         if let Some(sub) = inner.subscribers.iter_mut().find(|s| s.id == pending.0) {
             if let Some(intro) = intro {
                 sub.mailbox.push_front(intro);
@@ -199,8 +276,10 @@ where
 
     /// Abandon a buffered attach (e.g. the snapshot read failed) — the
     /// subscriber is removed without receiving anything.
+    // By value for the same reason as `complete_attach`.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn abort_attach(&self, pending: PendingAttach) {
-        let mut inner = self.inner.lock().expect("pubsub lock");
+        let mut inner = lock(&self.inner);
         inner.subscribers.retain(|s| s.id != pending.0);
     }
 
@@ -218,7 +297,7 @@ where
     /// `architect::rt::rt_channel` (the `rt` feature) and a normal
     /// thread drains it into the hub via `RtConsumer::drain_into`.
     pub fn publish(&self, event: T) -> usize {
-        let mut inner = self.inner.lock().expect("pubsub lock");
+        let mut inner = lock(&self.inner);
         if self.replay_capacity > 0 {
             if inner.replay.len() == self.replay_capacity {
                 inner.replay.pop_front();

@@ -45,6 +45,7 @@ impl<E: 'static> Copy for Mutation<E> {}
 
 /// Hook: one mutation's state for a component. Call once per logical
 /// mutation (create, delete, …); reuse the returned handle across renders.
+#[must_use]
 pub fn use_mutation<E: 'static>() -> Mutation<E> {
     Mutation {
         pending: use_signal(|| false),
@@ -60,17 +61,20 @@ impl<E: Clone + 'static> Mutation<E> {
     /// run settles (success *or* rollback) — refreshing derived server
     /// data (search results, counts) the store can't reconcile itself.
     /// No-op when no `Reactivity` was provided at the root.
-    pub fn invalidating(mut self, keys: &'static [&'static str]) -> Self {
+    #[must_use]
+    pub const fn invalidating(mut self, keys: &'static [&'static str]) -> Self {
         self.invalidate_keys = keys;
         self
     }
 
     /// True while the server call is in flight.
+    #[must_use]
     pub fn is_pending(&self) -> bool {
         *self.pending.read()
     }
 
     /// The error from the last failed run, if any.
+    #[must_use]
     pub fn error(&self) -> Option<E> {
         self.error.read().clone()
     }

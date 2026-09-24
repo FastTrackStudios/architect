@@ -55,7 +55,7 @@ pub struct Story {
     pub category: Option<&'static str>,
     /// Source-doc-comment description, surfaced in the shell.
     pub description: &'static str,
-    /// Rust path to the source function (file:line, populated by the macro).
+    /// Rust path to the source function (<file:line>, populated by the macro).
     pub source: &'static str,
     /// Knob declarations, in declaration order.
     pub knobs: &'static [KnobSpec],

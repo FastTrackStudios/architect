@@ -70,7 +70,7 @@ pub struct AuthRouteDescriptor {
     pub requires_session: bool,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CustomSessionTransport<T> {
     pub user_id: Uuid,
     pub session_id: Uuid,
@@ -180,11 +180,24 @@ auth_command_catalog! {
     { plugin: "two-factor", operation: "disableTwoFactor", method: "POST", path: "/auth/two-factor/disable", command: "DisableTwoFactor", response: "()", requires_session: true },
     { plugin: "organization", operation: "createOrganization", method: "POST", path: "/auth/organization/create", command: "CreateOrganization", response: "OrganizationBundle", requires_session: true },
     { plugin: "organization", operation: "setActiveOrganization", method: "POST", path: "/auth/organization/set-active", command: "SetActiveOrganization", response: "()", requires_session: true },
+    // The read side. `ListOrganizations`, `GetOrganization` and
+    // `ListMembers` were implemented as flows, and tested, without ever
+    // reaching this table — so the question a relying party asks first,
+    // "which orgs does this token belong to, and with what role", had no
+    // operation at all. A bundle answers it in one call: the
+    // organization carries the slug, the membership carries the role,
+    // which is exactly the pair an authorization fence needs.
+    { plugin: "organization", operation: "listOrganizations", method: "GET", path: "/auth/organization/list", command: "ListOrganizations", response: "Vec<OrganizationBundle>", requires_session: true },
+    { plugin: "organization", operation: "getOrganization", method: "GET", path: "/auth/organization/{organization_id}", command: "GetOrganization", response: "OrganizationBundle", requires_session: true },
+    { plugin: "organization", operation: "listMembers", method: "GET", path: "/auth/organization/{organization_id}/members", command: "ListMembers", response: "Vec<OrganizationMember>", requires_session: true },
     { plugin: "organization", operation: "requireOrganizationRole", method: "POST", path: "/auth/organization/require-role", command: "RequireOrganizationRole", response: "()", requires_session: true },
     { plugin: "organization", operation: "authorizeOrganizationAction", method: "POST", path: "/auth/organization/authorize", command: "AuthorizeOrganizationAction", response: "()", requires_session: true },
     { plugin: "organization", operation: "setMemberRole", method: "POST", path: "/auth/organization/update-member-role", command: "SetMemberRole", response: "AuthMember", requires_session: true },
     { plugin: "organization", operation: "createInvitation", method: "POST", path: "/auth/organization/invite-member", command: "CreateInvitation", response: "InvitationToken", requires_session: true },
-    { plugin: "organization", operation: "acceptInvitation", method: "POST", path: "/auth/organization/accept-invitation", command: "AcceptInvitation", response: "AuthMember", requires_session: true },
+    // `()`, not `AuthMember`: the flow returns nothing, so the document
+    // was advertising a body no caller could ever receive and a
+    // generated client would have failed to parse the empty response.
+    { plugin: "organization", operation: "acceptInvitation", method: "POST", path: "/auth/organization/accept-invitation", command: "AcceptInvitation", response: "()", requires_session: true },
     { plugin: "organization", operation: "createOrganizationRole", method: "POST", path: "/auth/organization/roles", command: "CreateOrganizationRole", response: "AuthOrganizationRole", requires_session: true },
     { plugin: "organization", operation: "updateOrganizationRole", method: "PATCH", path: "/auth/organization/roles/{role}", command: "UpdateOrganizationRole", response: "AuthOrganizationRole", requires_session: true },
     { plugin: "organization", operation: "deleteOrganizationRole", method: "DELETE", path: "/auth/organization/roles/{role}", command: "DeleteOrganizationRole", response: "()", requires_session: true },
@@ -213,12 +226,14 @@ auth_command_catalog! {
 
 // r[verify auth.transport.domain-first]
 // r[verify auth.transport.openapi]
-pub fn auth_route_descriptors() -> &'static [AuthRouteDescriptor] {
+#[must_use]
+pub const fn auth_route_descriptors() -> &'static [AuthRouteDescriptor] {
     AUTH_ROUTE_DESCRIPTORS
 }
 
 // r[verify auth.transport.command-metadata]
-pub fn auth_command_descriptors() -> &'static [AuthCommandDescriptor] {
+#[must_use]
+pub const fn auth_command_descriptors() -> &'static [AuthCommandDescriptor] {
     AUTH_COMMAND_DESCRIPTORS
 }
 
@@ -227,6 +242,7 @@ pub fn auth_command_descriptors() -> &'static [AuthCommandDescriptor] {
 // r[impl auth.openapi.request-schemas]
 // r[impl auth.openapi.response-schemas]
 // r[impl auth.openapi.error-schemas]
+#[must_use]
 pub fn auth_openapi_document() -> Value {
     let mut paths = serde_json::Map::new();
     let mut schemas = serde_json::Map::new();
@@ -315,21 +331,30 @@ fn openapi_operation(command: &AuthCommandDescriptor) -> Value {
     });
 
     if command.method != "GET" && command.method != "DELETE" && command.command_type != "()" {
-        operation["requestBody"] = json!({
-            "required": true,
-            "content": {
-                "application/json": {
-                    "schema": schema_ref(command.command_type),
+        // `serde_json::Value` indexing auto-vivifies on assignment; this is
+        // the documented way to build an object in place, and `operation`
+        // is a `Value::Object`.
+        #[allow(clippy::indexing_slicing)]
+        {
+            operation["requestBody"] = json!({
+                "required": true,
+                "content": {
+                    "application/json": {
+                        "schema": schema_ref(command.command_type),
+                    },
                 },
-            },
-        });
+            });
+        }
     }
 
     if command.requires_session {
-        operation["security"] = json!([
-            { "bearerAuth": [] },
-            { "sessionCookie": [] },
-        ]);
+        #[allow(clippy::indexing_slicing)]
+        {
+            operation["security"] = json!([
+                { "bearerAuth": [] },
+                { "sessionCookie": [] },
+            ]);
+        }
     }
 
     operation
@@ -459,6 +484,30 @@ impl AuthCookieConfig {
         }
         cookie.build()
     }
+
+    /// The `Set-Cookie` that removes the session cookie from a browser:
+    /// same name, path and domain as [`Self::session_cookie`] — a removal
+    /// only matches on those — with an empty value and `Max-Age=0`.
+    ///
+    /// For a browser presenting a cookie the server no longer recognises
+    /// (a session that expired, or was revoked). Left in place, that
+    /// cookie rides every request and every answer is "invalid
+    /// credentials"; the person cannot reach the sign-in page from the
+    /// site that sent them, because the server sees the cookie before
+    /// it sees them.
+    #[must_use]
+    pub fn removal_cookie(&self) -> Cookie<'static> {
+        let mut cookie = Cookie::build((self.name.clone(), String::new()))
+            .secure(self.secure)
+            .http_only(self.http_only)
+            .same_site(SameSite::from(self.same_site))
+            .path(self.path.clone())
+            .max_age(Duration::ZERO);
+        if let Some(domain) = self.domain.clone() {
+            cookie = cookie.domain(domain);
+        }
+        cookie.build()
+    }
 }
 
 // r[impl auth.transport.error-mapping]
@@ -539,12 +588,14 @@ pub const AUTH_ERROR_TAXONOMY: &[AuthErrorTaxonomyEntry] = &[
     },
 ];
 
-pub fn auth_error_taxonomy() -> &'static [AuthErrorTaxonomyEntry] {
+#[must_use]
+pub const fn auth_error_taxonomy() -> &'static [AuthErrorTaxonomyEntry] {
     AUTH_ERROR_TAXONOMY
 }
 
 // r[verify auth.transport.error-mapping]
 // r[impl auth.errors.axum]
+#[must_use]
 pub fn map_auth_error(error: &AuthFlowError) -> PublicAuthError {
     let entry = auth_error_taxonomy_entry(error);
     PublicAuthError {
@@ -555,10 +606,20 @@ pub fn map_auth_error(error: &AuthFlowError) -> PublicAuthError {
 }
 
 // r[impl auth.errors.vox]
+#[must_use]
 pub fn map_auth_error_to_vox_status(error: &AuthFlowError) -> AuthVoxErrorStatus {
     auth_error_taxonomy_entry(error).vox_status
 }
 
+/// # Panics
+///
+/// If the taxonomy table ever stops covering an `AuthFlowError` variant.
+/// The table is the source of truth for the HTTP/vox status of every
+/// error the auth surface can return, so a missing row is a wiring bug
+/// that must fail at the first call rather than silently pick a status.
+/// `taxonomy_is_total` in this module's tests pins it.
+#[allow(clippy::expect_used)]
+#[must_use]
 pub fn auth_error_taxonomy_entry(error: &AuthFlowError) -> &'static AuthErrorTaxonomyEntry {
     let rust_variant = match error {
         AuthFlowError::InvalidCredentials => "InvalidCredentials",
@@ -616,7 +677,8 @@ pub mod axum {
     }
 
     // r[verify auth.transport.axum-feature]
-    pub fn routes() -> AxumAuthRoutes {
+    #[must_use]
+    pub const fn routes() -> AxumAuthRoutes {
         AxumAuthRoutes {
             descriptors: auth_route_descriptors(),
         }
@@ -638,6 +700,7 @@ pub mod axum {
             }
         }
 
+        #[must_use]
         pub fn with_cookie(mut self, cookie: AuthCookieConfig) -> Self {
             self.cookie = cookie;
             self
@@ -653,7 +716,7 @@ pub mod axum {
     }
 
     // r[impl auth.custom-session.axum]
-    #[derive(Clone, Debug, PartialEq)]
+    #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct AuthenticatedCustomSession<T> {
         pub user_id: Uuid,
         pub session_id: Uuid,
@@ -708,6 +771,7 @@ pub mod axum {
     }
 
     // r[impl auth.transport.axum-feature]
+    #[must_use]
     pub fn session_token_from_headers(
         headers: &HeaderMap,
         cookie: &AuthCookieConfig,
@@ -747,8 +811,10 @@ pub mod axum {
         S: AuthStorage,
     {
         let token =
-            session_token_from_headers(request.headers(), &state.cookie).ok_or(AxumAuthError {
-                public: map_auth_error(&AuthFlowError::InvalidCredentials),
+            session_token_from_headers(request.headers(), &state.cookie).ok_or_else(|| {
+                AxumAuthError {
+                    public: map_auth_error(&AuthFlowError::InvalidCredentials),
+                }
             })?;
         let bundle = state
             .auth
@@ -790,7 +856,7 @@ pub mod vox {
     }
 
     impl<S> AuthVoxService<S> {
-        pub fn new(auth: ArchitectAuth<S>) -> Self {
+        pub const fn new(auth: ArchitectAuth<S>) -> Self {
             Self { auth }
         }
     }
@@ -929,6 +995,283 @@ pub mod vox {
         }
     }
 
+    /// The organization surface over the same engine. Each method
+    /// forwards to the engine command of the same name; the session
+    /// token is the authorization on every one.
+    impl<S> auth_proto::OrganizationService for AuthVoxService<S>
+    where
+        S: AuthStorage,
+    {
+        async fn list_organizations(
+            &self,
+            token: String,
+        ) -> Result<Vec<auth_proto::OrganizationBundle>, AuthFlowError> {
+            let bundles = self
+                .auth
+                .list_organizations(crate::ListOrganizations {
+                    session_token: token,
+                })
+                .await?;
+            Ok(bundles.into_iter().map(org_bundle).collect())
+        }
+
+        async fn get_organization(
+            &self,
+            token: String,
+            organization_id: Uuid,
+        ) -> Result<auth_proto::OrganizationBundle, AuthFlowError> {
+            self.auth
+                .get_organization(crate::GetOrganization {
+                    session_token: token,
+                    organization_id,
+                })
+                .await
+                .map(org_bundle)
+        }
+
+        async fn list_members(
+            &self,
+            token: String,
+            organization_id: Uuid,
+        ) -> Result<Vec<auth_proto::OrganizationMember>, AuthFlowError> {
+            let members = self
+                .auth
+                .list_members(crate::ListMembers {
+                    session_token: token,
+                    organization_id,
+                })
+                .await?;
+            Ok(members
+                .into_iter()
+                .map(|m| auth_proto::OrganizationMember {
+                    member: m.member,
+                    user: m.user,
+                })
+                .collect())
+        }
+
+        async fn create_organization(
+            &self,
+            token: String,
+            organization: auth_proto::NewOrganization,
+        ) -> Result<auth_proto::OrganizationBundle, AuthFlowError> {
+            self.auth
+                .create_organization(crate::CreateOrganization {
+                    session_token: token,
+                    name: organization.name,
+                    slug: organization.slug,
+                    logo: organization.logo,
+                    metadata_json: organization.metadata_json,
+                })
+                .await
+                .map(org_bundle)
+        }
+
+        async fn set_active_organization(
+            &self,
+            token: String,
+            organization_id: Uuid,
+        ) -> Result<(), AuthFlowError> {
+            self.auth
+                .set_active_organization(crate::SetActiveOrganization {
+                    session_token: token,
+                    organization_id,
+                })
+                .await
+        }
+
+        async fn invite_member(
+            &self,
+            token: String,
+            invite: auth_proto::Invite,
+        ) -> Result<auth_proto::IssuedInvitation, AuthFlowError> {
+            // `checked_add_signed` rather than `+`: the addition cannot
+            // overflow seven days from now, but an invitation whose
+            // expiry silently wrapped would be a standing key, so the
+            // impossible branch refuses instead of inventing a date.
+            let expires_at = match invite.expires_at {
+                Some(at) => at,
+                None => chrono::Utc::now()
+                    .checked_add_signed(chrono::Duration::days(7))
+                    .ok_or_else(|| {
+                        AuthFlowError::Internal("could not compute a default expiry".into())
+                    })?,
+            };
+            let issued = self
+                .auth
+                .create_invitation(crate::CreateInvitation {
+                    session_token: token,
+                    organization_id: invite.organization_id,
+                    email: invite.email,
+                    role: invite.role,
+                    expires_at,
+                })
+                .await?;
+            Ok(auth_proto::IssuedInvitation {
+                invitation: issued.invitation,
+                token: issued.token,
+            })
+        }
+
+        async fn accept_invitation(
+            &self,
+            token: String,
+            invitation_id: Uuid,
+            invitation_token: String,
+        ) -> Result<(), AuthFlowError> {
+            self.auth
+                .accept_invitation(crate::AcceptInvitation {
+                    session_token: token,
+                    invitation_id,
+                    token: invitation_token,
+                })
+                .await
+        }
+
+        async fn update_member_role(
+            &self,
+            token: String,
+            organization_id: Uuid,
+            user_id: Uuid,
+            role: String,
+        ) -> Result<auth_proto::AuthMember, AuthFlowError> {
+            self.auth
+                .set_member_role(crate::SetMemberRole {
+                    session_token: token,
+                    organization_id,
+                    user_id,
+                    role,
+                })
+                .await
+        }
+
+        async fn remove_member(
+            &self,
+            token: String,
+            organization_id: Uuid,
+            user_id: Uuid,
+        ) -> Result<(), AuthFlowError> {
+            self.auth
+                .remove_member(crate::RemoveMember {
+                    session_token: token,
+                    organization_id,
+                    user_id,
+                })
+                .await
+        }
+
+        async fn leave_organization(
+            &self,
+            token: String,
+            organization_id: Uuid,
+        ) -> Result<(), AuthFlowError> {
+            self.auth
+                .leave_organization(crate::LeaveOrganization {
+                    session_token: token,
+                    organization_id,
+                })
+                .await
+        }
+
+        async fn update_organization(
+            &self,
+            token: String,
+            organization_id: Uuid,
+            name: Option<String>,
+            slug: Option<String>,
+        ) -> Result<auth_proto::AuthOrganization, AuthFlowError> {
+            self.auth
+                .update_organization(crate::UpdateOrganization {
+                    session_token: token,
+                    organization_id,
+                    name,
+                    slug,
+                    // Absent, not cleared. The wire shape carries only
+                    // the two fields anybody renames by; `None` here
+                    // means "leave it alone", where `Some(None)` would
+                    // wipe a logo nobody mentioned.
+                    logo: None,
+                    metadata_json: None,
+                })
+                .await
+        }
+
+        async fn list_my_invitations(
+            &self,
+            token: String,
+        ) -> Result<Vec<auth_proto::AuthInvitation>, AuthFlowError> {
+            self.auth
+                .list_my_invitations(crate::ListMyInvitations {
+                    session_token: token,
+                })
+                .await
+        }
+
+        async fn claim_invitation(
+            &self,
+            token: String,
+            invitation_id: Uuid,
+        ) -> Result<(), AuthFlowError> {
+            self.auth
+                .claim_invitation(crate::ClaimInvitation {
+                    session_token: token,
+                    invitation_id,
+                })
+                .await
+        }
+
+        async fn link_agent(
+            &self,
+            token: String,
+            agent_email: String,
+            max_role: String,
+        ) -> Result<auth_proto::AuthAgentLink, AuthFlowError> {
+            self.auth
+                .link_agent(crate::LinkAgent {
+                    session_token: token,
+                    agent_email,
+                    max_role,
+                })
+                .await
+        }
+
+        async fn unlink_agent(&self, token: String, link_id: Uuid) -> Result<(), AuthFlowError> {
+            self.auth
+                .unlink_agent(crate::UnlinkAgent {
+                    session_token: token,
+                    link_id,
+                })
+                .await
+        }
+
+        async fn list_agents(
+            &self,
+            token: String,
+        ) -> Result<Vec<auth_proto::LinkedAgent>, AuthFlowError> {
+            let agents = self
+                .auth
+                .list_agents(crate::ListAgents {
+                    session_token: token,
+                })
+                .await?;
+            Ok(agents
+                .into_iter()
+                .map(|agent| auth_proto::LinkedAgent {
+                    link: agent.link,
+                    agent_email: agent.agent_email,
+                    agent_name: agent.agent_name,
+                })
+                .collect())
+        }
+    }
+
+    fn org_bundle(bundle: crate::OrganizationBundle) -> auth_proto::OrganizationBundle {
+        auth_proto::OrganizationBundle {
+            organization: bundle.organization,
+            membership: bundle.membership,
+        }
+    }
+
     // r[impl auth.transport.vox-schema]
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct AuthVoxContext {
@@ -936,7 +1279,7 @@ pub mod vox {
     }
 
     // r[impl auth.custom-session.vox]
-    #[derive(Clone, Debug, PartialEq)]
+    #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct AuthVoxCustomSession<T> {
         pub user_id: Uuid,
         pub session_id: Uuid,
@@ -981,10 +1324,10 @@ pub mod vox {
     }
 
     impl ::vox::ClientMiddleware for AuthClientMiddleware {
-        fn pre<'a, 'call>(
+        fn pre<'a>(
             &'a self,
             _context: &'a ::vox::ClientContext<'a>,
-            request: &'a mut ::vox::ClientRequest<'call, 'a>,
+            request: &'a mut ::vox::ClientRequest<'_, 'a>,
         ) -> ::vox::BoxMiddlewareFuture<'a> {
             Box::pin(async move {
                 request.push_string_metadata(
@@ -1008,6 +1351,7 @@ pub mod vox {
     }
 
     // r[impl auth.transport.vox-schema]
+    #[must_use]
     pub fn authorization_token_from_metadata(metadata: &::vox::Metadata) -> Option<String> {
         use ::vox::MetadataExt;
         metadata
@@ -1021,6 +1365,18 @@ pub mod vox {
 pub type VoxSignInEmailPassword = auth_proto::SignInEmailPassword;
 
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic,
+    clippy::float_cmp,
+    clippy::string_slice,
+    clippy::significant_drop_tightening,
+    clippy::too_many_lines
+)]
 mod tests {
     use super::{
         AuthCookieConfig, AuthHookContext, AuthVoxErrorStatus, CustomSessionTransport,
@@ -1331,8 +1687,8 @@ mod tests {
             serde_json::json!({
                 "openapi": "3.1.0",
                 "plugin_count": 33,
-                "path_count": 112,
-                "schema_count": 167,
+                "path_count": 115,
+                "schema_count": 172,
                 "selected_plugins": [
                     "email-password",
                     "custom-session",
@@ -1374,7 +1730,12 @@ mod tests {
         assert_eq!(cookie.secure(), Some(true));
         assert_eq!(cookie.http_only(), Some(true));
         assert_eq!(cookie.same_site(), Some(cookie::SameSite::Strict));
-        assert_eq!(cookie.max_age().map(|age| age.whole_seconds()), Some(60));
+        assert_eq!(
+            cookie
+                .max_age()
+                .map(cookie::time::SignedDuration::whole_seconds),
+            Some(60)
+        );
     }
 
     #[test]

@@ -97,7 +97,7 @@ pub fn CarouselItem(props: CarouselItemProps) -> Element {
 // CarouselPrevious
 // ---------------------------------------------------------------------------
 
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone, PartialEq, Eq)]
 pub struct CarouselPreviousProps {
     #[props(default)]
     pub class: String,
@@ -145,7 +145,7 @@ pub fn CarouselPrevious(props: CarouselPreviousProps) -> Element {
 // CarouselNext
 // ---------------------------------------------------------------------------
 
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone, PartialEq, Eq)]
 pub struct CarouselNextProps {
     #[props(default)]
     pub class: String,
@@ -157,7 +157,7 @@ pub fn CarouselNext(props: CarouselNextProps) -> Element {
     let mut ctx: CarouselContext = use_context();
     let current = *ctx.current.read();
     let total = *ctx.total.read();
-    let disabled = total == 0 || current >= total - 1;
+    let disabled = total == 0 || current >= total.saturating_sub(1);
 
     rsx! {
         button {

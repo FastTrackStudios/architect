@@ -10,7 +10,7 @@ use dioxus::prelude::*;
 /// ```rust,ignore
 /// KeyValueRow { label: "Input", value: "3.2ms" }
 /// ```
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone, PartialEq, Eq)]
 pub struct KeyValueRowProps {
     /// Left-aligned label.
     pub label: String,

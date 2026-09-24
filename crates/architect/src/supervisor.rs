@@ -66,18 +66,20 @@ pub enum Restart {
 
 impl Restart {
     /// Restart on failure (see [`Restart::OnFailure`]).
-    pub fn on_failure(schedule: Schedule) -> Self {
-        Restart::OnFailure(schedule)
+    #[must_use]
+    pub const fn on_failure(schedule: Schedule) -> Self {
+        Self::OnFailure(schedule)
     }
 
     /// Restart on every exit (see [`Restart::OnExit`]).
-    pub fn on_exit(schedule: Schedule) -> Self {
-        Restart::OnExit(schedule)
+    #[must_use]
+    pub const fn on_exit(schedule: Schedule) -> Self {
+        Self::OnExit(schedule)
     }
 
-    fn schedule_mut(&mut self) -> &mut Schedule {
+    const fn schedule_mut(&mut self) -> &mut Schedule {
         match self {
-            Restart::OnFailure(s) | Restart::OnExit(s) => s,
+            Self::OnFailure(s) | Self::OnExit(s) => s,
         }
     }
 }
@@ -93,15 +95,15 @@ pub enum Supervised<T, E> {
 
 impl<T, E> Supervised<T, E> {
     /// `true` if the supervisor was cancelled before settling.
-    pub fn is_cancelled(&self) -> bool {
-        matches!(self, Supervised::Cancelled)
+    pub const fn is_cancelled(&self) -> bool {
+        matches!(self, Self::Cancelled)
     }
 
     /// The settled result, or `None` if the supervisor was cancelled.
     pub fn into_result(self) -> Option<Result<T, E>> {
         match self {
-            Supervised::Settled(r) => Some(r),
-            Supervised::Cancelled => None,
+            Self::Settled(r) => Some(r),
+            Self::Cancelled => None,
         }
     }
 }
@@ -130,21 +132,20 @@ where
             return Supervised::Cancelled;
         }
         // Run the operation, but bail out promptly if cancelled mid-flight.
-        let result = match run_until_cancelled(token, op()).await {
-            Some(result) => result,
-            None => return Supervised::Cancelled,
+        let Some(result) = run_until_cancelled(token, op()).await else {
+            return Supervised::Cancelled;
         };
 
         let restart = match (&policy, &result) {
             (Restart::OnFailure(_), Ok(_)) => false, // success ends an OnFailure supervisor
-            (Restart::OnFailure(_), Err(_)) => true,
-            (Restart::OnExit(_), _) => true, // keep-alive: always restart
+            (Restart::OnFailure(_), Err(_)) | (Restart::OnExit(_), _) => true,
+            // keep-alive: always restart
         };
         if !restart {
             return Supervised::Settled(result);
         }
 
-        attempt += 1;
+        attempt = attempt.saturating_add(1);
         match policy.schedule_mut().next(attempt) {
             // Schedule exhausted — settle with the most recent outcome.
             None => return Supervised::Settled(result),
@@ -176,6 +177,7 @@ pub struct Supervisor {
 
 impl Supervisor {
     /// A supervisor with a fresh cancellation token.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             token: CancellationToken::new(),
@@ -185,18 +187,21 @@ impl Supervisor {
     /// A supervisor sharing an existing token — e.g. a child of an app-wide
     /// shutdown token (`parent.child_token()`), so app shutdown cascades to
     /// every supervised task.
-    pub fn with_token(token: CancellationToken) -> Self {
+    #[must_use]
+    pub const fn with_token(token: CancellationToken) -> Self {
         Self { token }
     }
 
     /// The supervisor's cancellation token (clone it to wire into other
     /// cancellable work).
-    pub fn token(&self) -> &CancellationToken {
+    #[must_use]
+    pub const fn token(&self) -> &CancellationToken {
         &self.token
     }
 
     /// Cancel the token — stops every task this supervisor is driving (at
     /// their next await point). Returns `true` if this call triggered it.
+    #[must_use]
     pub fn shutdown(&self) -> bool {
         self.token.cancel()
     }

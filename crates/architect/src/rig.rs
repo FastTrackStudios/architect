@@ -45,9 +45,12 @@ pub const EVENT_BACKLOG: usize = 64;
 /// Hot-plug rescan cadence, in pump ticks (~2 s at [`PUMP_INTERVAL`]).
 const PORT_SCAN_TICKS: u32 = 60;
 
-/// The canonical rig event hub: `PubSub::sliding(EVENT_BACKLOG)`. Sliding is
-/// the right strategy for state-shaped rig events (a newer `Status`
-/// supersedes older news; a slow subscriber must never block the publisher).
+/// The canonical rig event hub: `PubSub::sliding(EVENT_BACKLOG)`.
+///
+/// Sliding is the right strategy for state-shaped rig events (a newer
+/// `Status` supersedes older news; a slow subscriber must never block the
+/// publisher).
+#[must_use]
 pub fn events_hub<E>() -> PubSub<E> {
     PubSub::sliding(EVENT_BACKLOG)
 }
@@ -114,12 +117,14 @@ pub trait RigBackend: Services + Clone + Send + Sync + Sized + 'static {
     }
 }
 
-/// The pump loop behind [`RigBackend::spawn_meter_pump`]. Each iteration runs
-/// under `catch_unwind`: the pump is a rig's control heartbeat (telemetry,
-/// hot-plug, and whatever [`on_tick`](RigBackend::on_tick) drives — gestures,
-/// auto-saves), so it must survive the whole service. A panic — its own, or
-/// one surfacing through a handler it calls — is logged and the loop keeps
-/// going instead of dying silently while audio plays on.
+/// The pump loop behind [`RigBackend::spawn_meter_pump`].
+///
+/// Each iteration runs under `catch_unwind`: the pump is a rig's control
+/// heartbeat (telemetry, hot-plug, and whatever
+/// [`on_tick`](RigBackend::on_tick) drives — gestures, auto-saves), so it
+/// must survive the whole service. A panic — its own, or one surfacing
+/// through a handler it calls — is logged and the loop keeps going instead of
+/// dying silently while audio plays on.
 pub fn spawn_meter_pump<S: RigBackend>(name: &'static str, source: S) {
     if source.pump_started().swap(true, Ordering::SeqCst) {
         return; // already running

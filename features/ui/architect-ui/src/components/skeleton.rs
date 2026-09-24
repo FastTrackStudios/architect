@@ -3,7 +3,7 @@
 use architect_story_runtime::story;
 use dioxus::prelude::*;
 
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone, PartialEq, Eq)]
 pub struct SkeletonProps {
     #[props(default)]
     pub class: String,
@@ -19,7 +19,7 @@ pub fn Skeleton(props: SkeletonProps) -> Element {
     }
 }
 
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone, PartialEq, Eq)]
 pub struct SkeletonTextProps {
     #[props(default)]
     pub class: String,
@@ -35,7 +35,7 @@ pub fn SkeletonText(props: SkeletonTextProps) -> Element {
     }
 }
 
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone, PartialEq, Eq)]
 pub struct SkeletonCircleProps {
     #[props(default)]
     pub class: String,

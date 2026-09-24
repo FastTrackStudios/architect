@@ -1,4 +1,4 @@
-//! HoverCard — primitive-backed hover/focus card.
+//! `HoverCard` — primitive-backed hover/focus card.
 
 use architect_story_runtime::story;
 use dioxus::prelude::*;
@@ -11,7 +11,7 @@ use dioxus_primitives::{
 };
 
 /// Which side the hover card appears on.
-#[derive(Clone, Copy, PartialEq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum HoverCardSide {
     Top,
     #[default]
@@ -19,7 +19,7 @@ pub enum HoverCardSide {
 }
 
 impl HoverCardSide {
-    fn to_content_side(self) -> ContentSide {
+    const fn to_content_side(self) -> ContentSide {
         match self {
             Self::Top => ContentSide::Top,
             Self::Bottom => ContentSide::Bottom,
@@ -112,7 +112,7 @@ pub fn HoverCardContent(props: HoverCardContentProps) -> Element {
     }
 }
 
-/// HoverCard forced open with content rendered for snapshots.
+/// `HoverCard` forced open with content rendered for snapshots.
 #[story(category = "HoverCard", name = "hover card default")]
 pub fn hover_card_default() -> Element {
     let mut open = use_signal(|| true);

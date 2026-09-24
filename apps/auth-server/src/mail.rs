@@ -24,18 +24,26 @@ use lettre::transport::smtp::authentication::Credentials;
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 
 /// Everything needed to send, or the absence of it.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, architect::Config)]
+#[architect(prefix = "AUTH_SMTP")]
 pub struct MailConfig {
     /// SMTP host. `None` puts the mailer in log mode.
     pub host: Option<String>,
+    #[architect(default = 587u16)]
     pub port: u16,
     pub username: Option<String>,
+    /// Same `_FILE` indirection as `AUTH_SECRET`: a mounted file does not
+    /// appear in `kubectl describe pod`.
+    #[architect(secret)]
     pub password: Option<String>,
     /// Envelope and header `From`. Must be an address the provider has
     /// been told this server may send as, or everything bounces.
+    #[architect(env = "AUTH_MAIL_FROM", default = "noreply@localhost")]
     pub from: String,
     /// The externally visible origin, used to build the links in mail.
     /// Must be the public URL — a link to the pod address helps nobody.
+    /// Copied from `AUTH_BASE_URL` by `ServerConfig::load`.
+    #[architect(skip)]
     pub base_url: String,
 }
 
@@ -75,12 +83,32 @@ impl Mailer {
         Ok(Self { config, transport })
     }
 
+    /// A mailer that only ever logs, which cannot fail to build.
+    ///
+    /// The `None` host arm of [`Mailer::new`] builds no transport and so
+    /// has nothing to fail at — but that is a fact about the body of a
+    /// function returning `Result`, and three call sites were asserting
+    /// it with `.expect("a mailer with no host cannot fail to build")`.
+    /// Naming the infallible case makes it infallible in the type.
+    #[must_use]
+    pub fn log_only(config: MailConfig) -> Self {
+        Self {
+            config: MailConfig {
+                host: None,
+                ..config
+            },
+            transport: None,
+        }
+    }
+
     /// Whether mail will actually leave the building.
-    pub fn is_live(&self) -> bool {
+    #[must_use]
+    pub const fn is_live(&self) -> bool {
         self.transport.is_some()
     }
 
     /// Absolute link into this server, for use in mail.
+    #[must_use]
     pub fn link(&self, path: &str) -> String {
         format!("{}{}", self.config.base_url.trim_end_matches('/'), path)
     }
@@ -137,6 +165,34 @@ impl Mailer {
             .await;
     }
 
+    /// A one-click sign-in link.
+    pub async fn send_magic_link(&self, to: &str, url: &str) {
+        let body = format!(
+            "Open this link to sign in to FastTrackStudio:\n\n\
+             {url}\n\n\
+             It works once and expires shortly. If you did not ask to sign \
+             in, ignore this message — nothing happens until the link is \
+             opened.\n"
+        );
+        let _ = self.send(to, "Sign in to FastTrackStudio", body).await;
+    }
+
+    /// A short code to type back into a sign-in page.
+    pub async fn send_login_code(&self, to: &str, code: &str) {
+        // The code is in the subject as well as the body: on a phone
+        // that is what shows in the notification, which is the whole
+        // reason to prefer a code over a link.
+        let body = format!(
+            "Your FastTrackStudio sign-in code is:\n\n\
+             {code}\n\n\
+             It expires shortly and works once. If you did not ask to sign \
+             in, ignore this message.\n"
+        );
+        let _ = self
+            .send(to, &format!("{code} is your sign-in code"), body)
+            .await;
+    }
+
     pub async fn send_password_reset(&self, to: &str, token: &str) {
         let link = self.link(&format!(
             "/reset-password?email={}&token={}",
@@ -156,21 +212,27 @@ impl Mailer {
     }
 }
 
-/// Percent-encode a value going into a query parameter. Same reasoning as
-/// `ui::encode_query_value`, which this deliberately mirrors: a token that
-/// happens to contain `&` or `+` would otherwise silently truncate the
-/// link and strand someone mid-reset.
+/// Percent-encode a value going into a query parameter.
+///
+/// A token that happens to contain `&` or `+` would otherwise silently
+/// truncate the link and strand someone mid-reset.
 fn urlencode(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                out.push(byte as char);
-            }
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
+    architect_auth::percent::encode_component(value)
+}
+
+/// The mailer, as `auth-ui`'s sign-in pages want it.
+///
+/// A thin adapter rather than `auth-ui` depending on lettre: that crate
+/// renders pages and should not grow an SMTP stack to do it.
+#[async_trait::async_trait]
+impl auth_ui::mailer::LoginMailer for Mailer {
+    async fn send_magic_link(&self, to: &str, url: &str) {
+        Self::send_magic_link(self, to, url).await;
     }
-    out
+
+    async fn send_login_code(&self, to: &str, code: &str) {
+        Self::send_login_code(self, to, code).await;
+    }
 }
 
 #[cfg(test)]

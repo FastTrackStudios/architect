@@ -47,10 +47,12 @@ pub fn button_variants() -> Element {
 }
 
 /// Matrix of every `ButtonVariant` × every state — Enabled, Disabled,
-/// Loading. Designed to surface cross-renderer styling drift in one
-/// snapshot: rows are variants, columns are states. Each cell is
-/// labelled so you can map a divergence in the composite back to the
-/// exact (variant, state) pair without counting.
+/// Loading.
+///
+/// Designed to surface cross-renderer styling drift in one snapshot:
+/// rows are variants, columns are states. Each cell is labelled so you
+/// can map a divergence in the composite back to the exact (variant,
+/// state) pair without counting.
 #[story(category = "Buttons", name = "matrix")]
 pub fn button_matrix() -> Element {
     rsx! {
@@ -136,11 +138,18 @@ pub fn card_basic(title: &str, description: &str) -> Element {
     }
 }
 
-/// Force-link helper — referenced from the binary's `main` so LTO
-/// can't drop the static registrations. Each `#[story]` macro emits
-/// a registration as a `static` item; without a code path that
-/// touches it, the linker may strip it from the final binary.
+/// Force-link helper — referenced from the binary's `main` so LTO can't
+/// drop the static registrations.
+///
+/// Each `#[story]` macro emits a registration as a `static` item;
+/// without a code path that touches it, the linker may strip it from
+/// the final binary.
 pub fn force_link() {
+    // Wildcard import on purpose: this function exists to *name* every
+    // component so the linker keeps their `linkme` story registrations.
+    // Listing them twice — here and in the tuple below — would guarantee
+    // the two lists drift.
+    #[allow(clippy::wildcard_imports)]
     use crate::components::*;
 
     // Tuples can be wide; nested tuples avoid the rustc tuple-arity limit

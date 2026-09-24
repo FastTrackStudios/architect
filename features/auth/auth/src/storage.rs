@@ -2,12 +2,14 @@
 
 use async_trait::async_trait;
 use auth_proto::{
-    AuthAccount, AuthAccountCreate, AuthApiKey, AuthApiKeyCreate, AuthFlowError, AuthInvitation,
-    AuthInvitationCreate, AuthMember, AuthMemberCreate, AuthOrganization, AuthOrganizationCreate,
-    AuthOrganizationRole, AuthOrganizationRoleCreate, AuthPasskey, AuthPasskeyCreate, AuthSession,
-    AuthSessionCreate, AuthTeam, AuthTeamCreate, AuthTeamMember, AuthTeamMemberCreate,
-    AuthTwoFactor, AuthTwoFactorCreate, AuthUser, AuthUserCreate, AuthVerification,
-    AuthVerificationCreate, email_change::AuthEmailChange,
+    AuthAccount, AuthAccountCreate, AuthAgentLink, AuthAgentLinkCreate, AuthApiKey,
+    AuthApiKeyCreate, AuthFlowError, AuthInvitation, AuthInvitationCreate, AuthInviteLink,
+    AuthInviteLinkCreate, AuthMember, AuthMemberCreate, AuthOrganization, AuthOrganizationCreate,
+    AuthOrganizationRole, AuthOrganizationRoleCreate, AuthPasskey, AuthPasskeyCeremony,
+    AuthPasskeyCeremonyCreate, AuthPasskeyCreate, AuthSession, AuthSessionCreate, AuthTeam,
+    AuthTeamCreate, AuthTeamMember, AuthTeamMemberCreate, AuthTwoFactor, AuthTwoFactorCreate,
+    AuthUser, AuthUserCreate, AuthVerification, AuthVerificationCreate,
+    email_change::AuthEmailChange,
 };
 use chrono::{DateTime, Utc};
 
@@ -29,6 +31,7 @@ pub struct AuthStorageCapabilities {
 }
 
 impl AuthStorageCapabilities {
+    #[must_use]
     pub const fn runtime_owned(backend: &'static str) -> Self {
         Self {
             backend,
@@ -37,6 +40,7 @@ impl AuthStorageCapabilities {
         }
     }
 
+    #[must_use]
     pub const fn transactional(backend: &'static str, clock: AuthStorageClock) -> Self {
         Self {
             backend,
@@ -337,7 +341,72 @@ pub trait AuthStorage: Clone + Send + Sync + 'static {
         slug: &str,
     ) -> Result<Option<AuthOrganization>, AuthFlowError>;
 
+    async fn find_organization_by_id(
+        &self,
+        id: uuid::Uuid,
+    ) -> Result<Option<AuthOrganization>, AuthFlowError>;
+
+    /// Every organization `user_id` belongs to, paired with the
+    /// membership that puts them there.
+    ///
+    /// Returned together because every caller needs both: a switcher
+    /// shows the name and the role, and fetching the memberships and
+    /// then the organizations one at a time is the N+1 this avoids.
+    async fn list_organizations_for_user(
+        &self,
+        user_id: uuid::Uuid,
+    ) -> Result<Vec<(AuthOrganization, AuthMember)>, AuthFlowError>;
+
+    async fn update_organization(
+        &self,
+        id: uuid::Uuid,
+        name: Option<String>,
+        slug: Option<String>,
+        logo: Option<Option<String>>,
+        metadata_json: Option<Option<String>>,
+    ) -> Result<AuthOrganization, AuthFlowError>;
+
+    /// Delete the organization and everything that hangs off it.
+    ///
+    /// r[impl auth.storage.transactions]
+    ///
+    /// Memberships, teams, team memberships, roles, invitations and
+    /// invite links all reference the organization and none of them
+    /// mean anything without it. Leaving them behind would leave live
+    /// invite links pointing at an organization that no longer exists.
+    async fn delete_organization(&self, id: uuid::Uuid) -> Result<(), AuthFlowError>;
+
+    async fn delete_member(
+        &self,
+        organization_id: uuid::Uuid,
+        user_id: uuid::Uuid,
+    ) -> Result<(), AuthFlowError>;
+
     async fn create_member(&self, input: AuthMemberCreate) -> Result<AuthMember, AuthFlowError>;
+
+    // ── Linked agents ─────────────────────────────────────────────
+
+    async fn create_agent_link(
+        &self,
+        input: AuthAgentLinkCreate,
+    ) -> Result<AuthAgentLink, AuthFlowError>;
+
+    async fn list_agent_links_for_owner(
+        &self,
+        owner_user_id: uuid::Uuid,
+    ) -> Result<Vec<AuthAgentLink>, AuthFlowError>;
+
+    async fn list_agent_links_for_agent(
+        &self,
+        agent_user_id: uuid::Uuid,
+    ) -> Result<Vec<AuthAgentLink>, AuthFlowError>;
+
+    /// Remove a link the owner holds. `false` when there was none.
+    async fn delete_agent_link(
+        &self,
+        id: uuid::Uuid,
+        owner_user_id: uuid::Uuid,
+    ) -> Result<bool, AuthFlowError>;
 
     async fn find_member(
         &self,
@@ -461,6 +530,116 @@ pub trait AuthStorage: Clone + Send + Sync + 'static {
         self.delete_verification(verification_id).await
     }
 
+    async fn list_invitations_by_organization(
+        &self,
+        organization_id: uuid::Uuid,
+    ) -> Result<Vec<AuthInvitation>, AuthFlowError>;
+
+    /// Every pending invitation sent to one address, across all orgs.
+    ///
+    /// The other direction from
+    /// [`Self::list_invitations_by_organization`], and the one the
+    /// invited person needs. That one answers "who have we invited
+    /// here"; this answers "what have I been invited to". Without it an
+    /// invitation is reachable only through the link it was mailed in,
+    /// so a lost link is a lost invitation and an account page has no
+    /// way to show that anything is waiting.
+    async fn list_pending_invitations_for_email(
+        &self,
+        email: &str,
+    ) -> Result<Vec<AuthInvitation>, AuthFlowError>;
+
+    /// A pending invitation already sent to this address, if any.
+    ///
+    /// Inviting the same person twice is not harmful, but it produces
+    /// two links where one is expected and a member list that reads as
+    /// though somebody is being pestered.
+    async fn find_pending_invitation(
+        &self,
+        organization_id: uuid::Uuid,
+        email: &str,
+    ) -> Result<Option<AuthInvitation>, AuthFlowError>;
+
+    async fn create_invite_link(
+        &self,
+        input: AuthInviteLinkCreate,
+    ) -> Result<AuthInviteLink, AuthFlowError>;
+
+    async fn find_invite_link_by_id(
+        &self,
+        id: uuid::Uuid,
+    ) -> Result<Option<AuthInviteLink>, AuthFlowError>;
+
+    /// Look a link up by the hash of the token in the URL.
+    ///
+    /// The lookup key is the hash, never the token, so the plaintext
+    /// never has to be stored to be found again.
+    async fn find_invite_link_by_token_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<AuthInviteLink>, AuthFlowError>;
+
+    async fn list_invite_links_by_organization(
+        &self,
+        organization_id: uuid::Uuid,
+    ) -> Result<Vec<AuthInviteLink>, AuthFlowError>;
+
+    async fn revoke_invite_link(
+        &self,
+        id: uuid::Uuid,
+        revoked_at: DateTime<Utc>,
+    ) -> Result<(), AuthFlowError>;
+
+    /// Join through a link: count the use and create the membership.
+    ///
+    /// r[impl auth.storage.transactions]
+    ///
+    /// One unit of work. Split in two, a crash between them either
+    /// admits someone without spending a use — so a "max 1" link
+    /// admits the whole channel — or spends one without admitting
+    /// anybody. The default below is the non-transactional fallback for
+    /// backends that cannot do better; the `SeaORM` backend overrides it.
+    async fn redeem_invite_link(
+        &self,
+        link_id: uuid::Uuid,
+        member_input: AuthMemberCreate,
+    ) -> Result<AuthMember, AuthFlowError> {
+        let member = self.create_member(member_input).await?;
+        self.increment_invite_link_uses(link_id).await?;
+        Ok(member)
+    }
+
+    async fn increment_invite_link_uses(&self, id: uuid::Uuid) -> Result<(), AuthFlowError>;
+
+    async fn create_passkey_ceremony(
+        &self,
+        input: AuthPasskeyCeremonyCreate,
+    ) -> Result<AuthPasskeyCeremony, AuthFlowError>;
+
+    async fn find_passkey_ceremony_by_handle_hash(
+        &self,
+        handle_hash: &str,
+    ) -> Result<Option<AuthPasskeyCeremony>, AuthFlowError>;
+
+    /// Remove a ceremony, whether or not it succeeded.
+    ///
+    /// Single-use: a completed challenge that stayed redeemable would
+    /// let one captured assertion be replayed.
+    async fn delete_passkey_ceremony(&self, id: uuid::Uuid) -> Result<(), AuthFlowError>;
+
+    /// Update a passkey's stored credential after a sign-in.
+    ///
+    /// The signature counter and the backup state both move, and a
+    /// counter that goes backwards is how a cloned authenticator is
+    /// noticed — so the stored copy has to keep up.
+    async fn update_passkey_credential(
+        &self,
+        credential_id: &str,
+        public_key: String,
+        counter: i64,
+        backed_up: bool,
+    ) -> Result<AuthPasskey, AuthFlowError>;
+
     async fn create_two_factor(
         &self,
         input: AuthTwoFactorCreate,
@@ -479,9 +658,17 @@ pub trait AuthStorage: Clone + Send + Sync + 'static {
         backup_codes_hash: Option<String>,
     ) -> Result<(), AuthFlowError>;
 
+    /// Count one failed second-factor attempt, discarding any older
+    /// than `window_start`.
+    ///
+    /// Windowed because the counter used to be monotonic: six wrong
+    /// codes locked an account permanently, recoverable only by an
+    /// operator editing the database by hand. A limit that never
+    /// expires is a lockout, not a rate limit.
     async fn increment_two_factor_attempts(
         &self,
         user_id: uuid::Uuid,
+        window_start: DateTime<Utc>,
     ) -> Result<i64, AuthFlowError>;
 
     async fn reset_two_factor_attempts(&self, user_id: uuid::Uuid) -> Result<(), AuthFlowError>;
@@ -494,6 +681,18 @@ pub trait AuthStorage: Clone + Send + Sync + 'static {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic,
+    clippy::float_cmp,
+    clippy::string_slice,
+    clippy::significant_drop_tightening,
+    clippy::too_many_lines
+)]
 mod tests {
     use super::{AuthStorageCapabilities, AuthStorageClock};
 

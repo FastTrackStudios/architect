@@ -90,7 +90,7 @@ pub fn AccordionItem(props: AccordionItemProps) -> Element {
                     callback.call(open);
                 }
             },
-            on_trigger_click: move |_| {
+            on_trigger_click: move |()| {
                 if let Some(callback) = &props.on_trigger_click {
                     callback.call(());
                 }

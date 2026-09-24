@@ -25,6 +25,9 @@ fn main() {
 }
 
 #[component]
+// `asset!` expands to a `&[u8]` the lint reads as a volatile access; it
+// is a build-time asset handle, not a device register.
+#[allow(clippy::volatile_composites)]
 fn App() -> Element {
     rsx! {
         document::Stylesheet { href: asset!("/assets/tailwind.css") }

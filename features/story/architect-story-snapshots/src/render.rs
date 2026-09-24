@@ -21,7 +21,7 @@ use blitz_paint::paint_scene;
 use blitz_traits::shell::{ColorScheme, Viewport};
 use dioxus::prelude::*;
 use dioxus_native_dom::DioxusDocument;
-use peniko::kurbo::Rect;
+use peniko::kurbo::{Affine, Rect};
 use peniko::Fill;
 
 /// Configuration for a single render.
@@ -31,7 +31,7 @@ pub struct RenderConfig {
     pub width: u32,
     /// Output height in CSS pixels.
     pub height: u32,
-    /// HiDPI scale (e.g. `2.0` for retina).
+    /// `HiDPI` scale (e.g. `2.0` for retina).
     pub scale: f32,
     /// Light vs dark color-scheme for `prefers-color-scheme` media queries.
     pub color_scheme: ColorScheme,
@@ -68,18 +68,37 @@ impl Default for RenderConfig {
 /// visually-incorrect output under `debug_assertions`.
 ///
 /// Internally this routes through
-/// [`architect_story_shell::Lookbook`]`{ chrome: false, initial_story: ... }`
+/// <code>[architect_story_shell::Lookbook]{ chrome: false, initial_story: ... }</code>
 /// so the rendered tree is identical to what `apps/desktop`'s
 /// `--snapshot=<story>` mode hands wry. Knob overrides aren't yet
 /// honoured by the chromeless Lookbook path; the parameter is kept
 /// for forward-compat with a future API.
+/// # Panics
+///
+/// In a debug build: Stylo/Parley lay text out differently under
+/// `debug_assertions`, so a snapshot taken there would be compared
+/// against a release baseline and always differ. Failing loudly at the
+/// call is better than a mysteriously red snapshot suite.
+///
+/// Also re-raises any panic from the render itself, after clearing the
+/// thread-local story slot.
+#[allow(clippy::panic)]
+#[must_use]
+// `implicit_hasher` allowed: the map is always the one `default_knob_map`
+// builds, and threading a hasher parameter through would leak into
+// `install_snapshot` and the thread-local slot for no caller's benefit.
+#[allow(clippy::implicit_hasher)]
 pub fn render_story(
     story: &'static Story,
     knobs: HashMap<&'static str, KnobValue>,
     cfg: &RenderConfig,
 ) -> Vec<u8> {
-    if cfg!(debug_assertions) {
-        panic!(
+    // `cfg!`, so this is a compile-time constant — which is exactly the
+    // point: the wrong profile must fail at the first call, loudly.
+    #[allow(clippy::assertions_on_constants)]
+    {
+        assert!(
+            !cfg!(debug_assertions),
             "architect-story-snapshots: render_story called in a debug build. \
              Stylo/Parley produce incorrect renders under debug_assertions; \
              run with `cargo test --release` (or use the Docker harness)."
@@ -96,8 +115,8 @@ pub fn render_story(
 }
 
 fn render_inner(cfg: &RenderConfig) -> Vec<u8> {
-    let render_w = ((cfg.width as f32) * cfg.scale) as u32;
-    let render_h = ((cfg.height as f32) * cfg.scale) as u32;
+    let render_w = scaled_px(cfg.width, cfg.scale);
+    let render_h = scaled_px(cfg.height, cfg.scale);
 
     let viewport = Viewport::new(render_w, render_h, cfg.scale, cfg.color_scheme);
     let vdom = VirtualDom::new(snapshot_component);
@@ -151,15 +170,15 @@ fn render_inner(cfg: &RenderConfig) -> Vec<u8> {
             };
             scene.fill(
                 Fill::NonZero,
-                Default::default(),
+                Affine::IDENTITY,
                 bg,
-                Default::default(),
-                &Rect::new(0.0, 0.0, render_w as f64, render_h as f64),
+                Option::<Affine>::None,
+                &Rect::new(0.0, 0.0, f64::from(render_w), f64::from(render_h)),
             );
             paint_scene(
                 scene,
                 &mut doc.inner.borrow_mut(),
-                cfg.scale as f64,
+                f64::from(cfg.scale),
                 render_w,
                 render_h,
                 0,
@@ -176,9 +195,11 @@ fn render_inner(cfg: &RenderConfig) -> Vec<u8> {
 fn encode_png(rgba: &[u8], width: u32, height: u32) -> Vec<u8> {
     // Match blitz's screenshot example for parity with the broader
     // ecosystem (144 DPI scaled to pixels-per-meter).
-    const PPM: u32 = (144.0 * 39.3701) as u32;
+    // 144 DPI in pixels per metre, rounded — a literal so the cast is
+    // gone rather than merely allowed.
+    const PPM: u32 = 5669;
 
-    let mut out = Vec::with_capacity(rgba.len() + 1024);
+    let mut out = Vec::with_capacity(rgba.len().saturating_add(1024));
     {
         let mut encoder = png::Encoder::new(&mut out, width, height);
         encoder.set_color(png::ColorType::Rgba);
@@ -188,9 +209,16 @@ fn encode_png(rgba: &[u8], width: u32, height: u32) -> Vec<u8> {
             yppu: PPM,
             unit: png::Unit::Meter,
         }));
-        let mut writer = encoder.write_header().expect("png header write");
-        writer.write_image_data(rgba).expect("png pixel data write");
-        writer.finish().expect("png finish");
+        // Encoding an in-memory RGBA8 buffer into a `Vec` has no
+        // failure mode that isn't a bug in this function's own
+        // arguments; a broken snapshot artefact is worth a loud failure
+        // rather than a silently truncated PNG.
+        #[allow(clippy::expect_used)]
+        {
+            let mut writer = encoder.write_header().expect("png header write");
+            writer.write_image_data(rgba).expect("png pixel data write");
+            writer.finish().expect("png finish");
+        }
     }
     out
 }
@@ -212,12 +240,13 @@ struct Snapshot {
 }
 
 /// Install a wrapper fn that is applied to every snapshot-rendered
-/// element. Lets the consumer wrap stories in a `ThemeProvider`,
-/// `Router`, or any other context the bare component fn would
-/// otherwise see. Stays installed until [`clear_wrapper`] is called or
-/// another wrapper is installed.
+/// element.
 ///
-/// The fn receives the story's rendered `Element` and must return the
+/// Lets the consumer wrap stories in a `ThemeProvider`, `Router`, or
+/// any other context the bare component fn would otherwise see. Stays
+/// installed until [`clear_wrapper`] is called or another wrapper is
+/// installed. The fn receives the story's rendered `Element` and must
+/// return the
 /// wrapped one. Typical use:
 ///
 /// ```ignore
@@ -255,13 +284,10 @@ fn clear_snapshot() {
 /// inline Tailwind stylesheet).
 fn snapshot_component() -> Element {
     let story_name = CURRENT.with(|cell| cell.borrow().as_ref().map(|s| s.story_name.clone()));
-    let story_name = match story_name {
-        Some(s) => s,
-        None => {
-            return rsx! {
-                div { "architect-story-snapshots: no snapshot installed; this is a bug." }
-            };
-        }
+    let Some(story_name) = story_name else {
+        return rsx! {
+            div { "architect-story-snapshots: no snapshot installed; this is a bug." }
+        };
     };
     let element = rsx! {
         Lookbook {
@@ -273,5 +299,30 @@ fn snapshot_component() -> Element {
     match wrapper {
         Some(wrap) => wrap(element),
         None => element,
+    }
+}
+
+/// A CSS-pixel dimension scaled into device pixels.
+///
+/// Clamped into `u32`; a zero or non-finite scale (a mis-set config)
+/// yields the unscaled size rather than the `0` an `as` cast of `NaN`
+/// would produce.
+// f32 -> u32 has no total conversion in std; everything that could make
+// the cast lossy is excluded by the guards above it.
+#[allow(
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::cast_precision_loss
+)]
+fn scaled_px(css: u32, scale: f32) -> u32 {
+    if !scale.is_finite() || scale <= 0.0 {
+        return css;
+    }
+    let px = f64::from(css) * f64::from(scale);
+    if px.is_finite() && px >= 0.0 {
+        px.min(f64::from(u32::MAX)).round() as u32
+    } else {
+        css
     }
 }

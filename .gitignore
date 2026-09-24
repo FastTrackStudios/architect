@@ -7,3 +7,6 @@ result
 result-*
 *.profraw
 .DS_Store
+
+# Local git worktrees created by tooling.
+/.claude/worktrees/

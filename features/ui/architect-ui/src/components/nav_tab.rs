@@ -1,8 +1,8 @@
-//! NavTab — standalone navigation pill button.
+//! `NavTab` — standalone navigation pill button.
 //!
 //! A pill-shaped button with active/inactive styling for primary navigation bars.
 //! Unlike `Tabs` (context-based content switcher) or `SegmentedControl` (grouped toggle),
-//! NavTab is a standalone button meant for top-level route navigation.
+//! `NavTab` is a standalone button meant for top-level route navigation.
 
 use architect_story_runtime::story;
 use dioxus::prelude::*;
@@ -37,7 +37,7 @@ pub fn NavTab(props: NavTabProps) -> Element {
             class: crate::cn::merge_slice(&["px-4 py-2 rounded-md font-medium text-sm transition-colors", active_class, props.class.as_str()]),
             onclick: {
                 let on_click = props.on_click;
-                let tab_id = props.tab_id.clone();
+                let tab_id = props.tab_id;
                 move |_| {
                     if let Some(callback) = &on_click {
                         callback.call(tab_id.clone());
@@ -49,7 +49,7 @@ pub fn NavTab(props: NavTabProps) -> Element {
     }
 }
 
-/// Row of NavTab pills with one active.
+/// Row of `NavTab` pills with one active.
 #[story(category = "NavTab", name = "default")]
 pub fn nav_tab_default() -> Element {
     let mut active = use_signal(|| "overview".to_string());

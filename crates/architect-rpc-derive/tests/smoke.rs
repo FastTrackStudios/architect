@@ -20,7 +20,23 @@
 //!
 //! The internal bridge (`__<T>Bridge`) is `#[doc(hidden)]` and isn't
 //! intended for direct use, but tests reach for it to exercise the
-//! bridge body without going through vox::service.
+//! bridge body without going through `vox::service`.
+
+// This is an integration-test crate. `clippy.toml`'s
+// `allow-*-in-tests` only reaches `#[test]` fns and `#[cfg(test)]`
+// modules, so the fixture/mock `impl` blocks below — where an
+// `unwrap()` IS the assertion — still trip the panic lints. Allow
+// them crate-wide here rather than dotting the file with attributes.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::float_cmp,
+    clippy::needless_pass_by_value,
+    clippy::panic
+)]
 
 use architect::rpc;
 
@@ -309,7 +325,7 @@ mod subscriptions {
     // bounds the event on `Clone + Facet`). In the default no-vox
     // build only the (stripped) declaration references the type.
     #[allow(dead_code)]
-    #[derive(Clone, Debug, PartialEq, facet::Facet)]
+    #[derive(Clone, Debug, PartialEq, Eq, facet::Facet)]
     pub struct TickEvent(pub u64);
 
     pub mod ticker {
@@ -378,7 +394,7 @@ mod ambient_context {
 
     // Facet: the context crosses the wire as the first argument of
     // every call, so the vox-enabled build needs it encodable.
-    #[derive(Clone, Debug, PartialEq, facet::Facet)]
+    #[derive(Clone, Debug, PartialEq, Eq, facet::Facet)]
     pub struct Project(pub u32);
 
     pub mod store {
@@ -534,7 +550,7 @@ mod ops_subst {
     use super::rpc;
 
     /// The literal parameter type the trait methods take.
-    #[derive(Clone, Debug, PartialEq, facet::Facet)]
+    #[derive(Clone, Debug, PartialEq, Eq, facet::Facet)]
     pub struct TrackRef(pub u32);
 
     /// Deferred wire representation — literal or an earlier step's output.
@@ -603,7 +619,7 @@ mod ops_subst {
         };
         match op.apply(&backend, &steps).unwrap() {
             MixerOpOutput::Mute(hit) => assert!(hit),
-            other => panic!("unexpected output: {other:?}"),
+            other @ MixerOpOutput::FirstTrack(_) => panic!("unexpected output: {other:?}"),
         }
 
         // Literal path + resolver failure path.

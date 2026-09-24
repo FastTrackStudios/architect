@@ -93,3 +93,6 @@ crdt = { path = ".", features = ["vox"] }
 architect = { workspace = true, features = ["vox", "local"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 tempfile = "3"
+
+[lints]
+workspace = true

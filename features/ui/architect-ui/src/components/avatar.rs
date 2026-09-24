@@ -8,7 +8,7 @@ use dioxus_primitives::avatar::{
 };
 
 /// Size variant for the avatar.
-#[derive(Clone, Copy, PartialEq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum AvatarSize {
     Small,
     #[default]
@@ -17,7 +17,7 @@ pub enum AvatarSize {
 }
 
 impl AvatarSize {
-    fn classes(self) -> &'static str {
+    const fn classes(self) -> &'static str {
         match self {
             Self::Small => "size-6",
             Self::Medium => "size-8",
@@ -58,7 +58,7 @@ pub fn Avatar(props: AvatarProps) -> Element {
     }
 }
 
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone, PartialEq, Eq)]
 pub struct AvatarImageProps {
     pub src: String,
     #[props(default)]

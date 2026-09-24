@@ -16,10 +16,11 @@ use tokio::sync::watch;
 
 // ── Deferred ──────────────────────────────────────────────────────────────
 
-/// A write-once cell that tasks can await. The first [`complete`](Deferred::complete)
-/// sets the value (and wins); every waiter — past or future — then resolves
-/// to a clone of it. Think `tokio::sync::oneshot` but multi-consumer and
-/// non-consuming.
+/// A write-once cell that tasks can await.
+///
+/// The first [`complete`](Deferred::complete) sets the value (and wins); every waiter
+/// — past or future — then resolves to a clone of it. Think `tokio::sync::oneshot`
+/// but multi-consumer and non-consuming.
 #[derive(Clone)]
 pub struct Deferred<T> {
     tx: Arc<watch::Sender<Option<T>>>,
@@ -54,11 +55,13 @@ impl<T: Clone + Send + Sync + 'static> Deferred<T> {
     }
 
     /// The value if already set, else `None` (non-blocking).
+    #[must_use]
     pub fn try_get(&self) -> Option<T> {
         self.rx.borrow().clone()
     }
 
     /// `true` once a value has been set.
+    #[must_use]
     pub fn is_complete(&self) -> bool {
         self.rx.borrow().is_some()
     }
@@ -68,14 +71,18 @@ impl<T: Clone + Send + Sync + 'static> Deferred<T> {
     pub async fn wait(&self) -> T {
         let mut rx = self.rx.clone();
         loop {
-            if let Some(value) = rx.borrow().clone() {
+            // Bind and drop the borrow guard before the await below: a
+            // `watch::Ref` held across `changed()` would deadlock.
+            let current = rx.borrow().clone();
+            if let Some(value) = current {
                 return value;
             }
             // `changed` errors only if every sender dropped — but `self`
             // holds one in an `Arc`, so while a caller can await this, a
             // sender is alive. Re-loop to read the freshly-set value.
             if rx.changed().await.is_err() {
-                if let Some(value) = rx.borrow().clone() {
+                let current = rx.borrow().clone();
+                if let Some(value) = current {
                     return value;
                 }
                 std::future::pending::<()>().await;
@@ -105,6 +112,7 @@ pub struct Permit(#[allow(dead_code)] tokio::sync::OwnedSemaphorePermit);
 
 impl Semaphore {
     /// A semaphore with `permits` slots.
+    #[must_use]
     pub fn new(permits: usize) -> Self {
         Self {
             inner: Arc::new(tokio::sync::Semaphore::new(permits)),
@@ -112,6 +120,16 @@ impl Semaphore {
     }
 
     /// Acquire one permit, waiting if none are free.
+    ///
+    /// # Panics
+    ///
+    /// Never, in practice — see the note below.
+    //
+    // `acquire_owned` only fails on a *closed* semaphore. `self.inner` is
+    // private, is constructed here, and nothing in this module calls
+    // `close()` — so the error arm is unreachable by construction rather
+    // than by assumption. Stated here instead of asserted at runtime.
+    #[allow(clippy::expect_used)]
     pub async fn acquire(&self) -> Permit {
         Permit(
             self.inner
@@ -128,6 +146,7 @@ impl Semaphore {
     }
 
     /// Permits currently available.
+    #[must_use]
     pub fn available_permits(&self) -> usize {
         self.inner.available_permits()
     }
@@ -184,12 +203,14 @@ impl<T> Clone for Queue<T> {
 impl<T> Queue<T> {
     /// A queue that holds at most `cap` items; [`send`](Queue::send) waits
     /// when full (backpressure).
+    #[must_use]
     pub fn bounded(cap: usize) -> Self {
         let (tx, rx) = async_channel::bounded(cap);
         Self { tx, rx }
     }
 
     /// A queue with no capacity bound; [`send`](Queue::send) never waits.
+    #[must_use]
     pub fn unbounded() -> Self {
         let (tx, rx) = async_channel::unbounded();
         Self { tx, rx }
@@ -216,22 +237,28 @@ impl<T> Queue<T> {
     }
 
     /// Try to pop without waiting. `None` if empty (or closed-and-empty).
+    #[must_use]
     pub fn try_recv(&self) -> Option<T> {
         self.rx.try_recv().ok()
     }
 
     /// Close the queue: pending and future `send`s fail; `recv` drains the
     /// remaining items then errors. Returns `true` if this call closed it.
+    // NOT `#[must_use]`: closing and ignoring the "was I first" answer
+    // is the ordinary call.
+    #[allow(clippy::must_use_candidate)]
     pub fn close(&self) -> bool {
         self.tx.close()
     }
 
     /// Items currently buffered.
+    #[must_use]
     pub fn len(&self) -> usize {
         self.rx.len()
     }
 
     /// `true` if no items are buffered.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.rx.is_empty()
     }

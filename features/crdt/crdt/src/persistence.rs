@@ -1,9 +1,9 @@
-//! `Persistence` — the seam between a `CrdtDoc` and wherever its
-//! bytes actually live. Object-safe (via `async-trait`) so a doc can
-//! hold `Arc<dyn Persistence>` and the call sites stay uniform across
-//! deployments.
+//! `Persistence` — the seam between a `CrdtDoc` and wherever its bytes
+//! actually live.
 //!
-//! Two storage shapes, both supported by one trait:
+//! Object-safe (via `async-trait`) so a doc can hold
+//! `Arc<dyn Persistence>` and the call sites stay uniform across
+//! deployments. Two storage shapes, both supported by one trait:
 //!
 //! - **Snapshot** — `load_snapshot` / `write_snapshot`. The full state
 //!   in one blob. Simple, larger writes.
@@ -26,9 +26,11 @@ pub enum PersistError {
     Backend(String),
 }
 
-/// Marker supertrait: `Send + Sync` on native, nothing on wasm. Browser
-/// storage handles (IndexedDB) are single-threaded and `!Send`; wasm is
-/// single-threaded anyway, so the bound only exists where threads do.
+/// Marker supertrait: `Send + Sync` on native, nothing on wasm.
+///
+/// Browser storage handles (`IndexedDB`) are single-threaded and `!Send`;
+/// wasm is single-threaded anyway, so the bound only exists where threads
+/// do.
 #[cfg(not(target_arch = "wasm32"))]
 pub trait MaybeSendSync: Send + Sync {}
 #[cfg(not(target_arch = "wasm32"))]
@@ -51,7 +53,7 @@ pub trait Persistence: MaybeSendSync + 'static {
     async fn write_snapshot(&self, doc_id: Uuid, bytes: &[u8]) -> Result<(), PersistError>;
 
     /// Append a single local-update blob. Called from inside the
-    /// LoroDoc's `subscribe_local_update` callback on every commit.
+    /// `LoroDoc`'s `subscribe_local_update` callback on every commit.
     async fn append_update(&self, doc_id: Uuid, bytes: &[u8]) -> Result<(), PersistError>;
 
     /// Load every stored update for `doc_id` in commit order. Used

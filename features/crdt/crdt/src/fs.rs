@@ -50,7 +50,7 @@ impl FilePersistence {
         }
         let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
             .map_err(io_err)?
-            .filter_map(|e| e.ok())
+            .filter_map(std::result::Result::ok)
             .map(|e| e.path())
             .filter(|p| p.extension().is_some_and(|x| x == "loro"))
             .collect();
@@ -65,11 +65,13 @@ impl FilePersistence {
             .update_files(doc_id)?
             .last()
             .and_then(|p| p.file_stem()?.to_str()?.parse::<u64>().ok())
-            .map_or(0, |n| n + 1);
+            .map_or(0, |n| n.saturating_add(1));
         Ok(dir.join(format!("{next:010}.loro")))
     }
 }
 
+// By value: this is an error-mapping adapter for `map_err`.
+#[allow(clippy::needless_pass_by_value)]
 fn io_err(e: std::io::Error) -> PersistError {
     PersistError::Backend(format!("fs: {e}"))
 }
@@ -86,7 +88,13 @@ impl Persistence for FilePersistence {
 
     async fn write_snapshot(&self, doc_id: Uuid, bytes: &[u8]) -> Result<(), PersistError> {
         let path = self.snapshot_path(doc_id);
-        std::fs::create_dir_all(path.parent().expect("snapshot has a parent")).map_err(io_err)?;
+        // `parent()` is `None` only for a bare root path; a doc path
+        // always has a directory, and a missing one is an IO error, not a
+        // panic.
+        let parent = path.parent().ok_or_else(|| {
+            PersistError::Backend(format!("snapshot path has no parent: {}", path.display()))
+        })?;
+        std::fs::create_dir_all(parent).map_err(io_err)?;
         // Write-then-rename so a crash mid-write never truncates the
         // only copy of the doc.
         let tmp = path.with_extension("loro.tmp");
@@ -117,6 +125,18 @@ impl Persistence for FilePersistence {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic,
+    clippy::float_cmp,
+    clippy::string_slice,
+    clippy::significant_drop_tightening,
+    clippy::too_many_lines
+)]
 mod tests {
     use super::*;
 

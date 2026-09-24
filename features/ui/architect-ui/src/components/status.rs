@@ -11,7 +11,7 @@ use dioxus::prelude::*;
 // ---------------------------------------------------------------------------
 
 /// Semantic color for a status dot.
-#[derive(Clone, PartialEq, Default)]
+#[derive(Clone, PartialEq, Eq, Default)]
 pub enum StatusDotColor {
     /// Green — running, connected, healthy.
     Success,
@@ -28,7 +28,7 @@ pub enum StatusDotColor {
 }
 
 impl StatusDotColor {
-    fn class(&self) -> &str {
+    const fn class(&self) -> &str {
         match self {
             Self::Success => "bg-green-500",
             Self::Warning => "bg-yellow-500",
@@ -47,7 +47,7 @@ impl StatusDotColor {
 }
 
 /// Size variants for the status dot.
-#[derive(Clone, Copy, PartialEq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum StatusDotSize {
     /// 1.5 (6px) — for tight lists.
     Small,
@@ -57,7 +57,7 @@ pub enum StatusDotSize {
 }
 
 impl StatusDotSize {
-    fn classes(self) -> &'static str {
+    const fn classes(self) -> &'static str {
         match self {
             Self::Small => "w-1.5 h-1.5",
             Self::Medium => "w-2.5 h-2.5",
@@ -66,7 +66,7 @@ impl StatusDotSize {
 }
 
 /// A small colored circle indicating status.
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone, PartialEq, Eq)]
 pub struct StatusDotProps {
     /// Semantic color.
     #[props(default)]
@@ -112,7 +112,7 @@ pub fn StatusDot(props: StatusDotProps) -> Element {
 // ---------------------------------------------------------------------------
 
 /// Semantic variant for a status badge.
-#[derive(Clone, Copy, PartialEq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum StatusBadgeVariant {
     /// Green tint — connected, healthy.
     Success,
@@ -126,7 +126,7 @@ pub enum StatusBadgeVariant {
 }
 
 impl StatusBadgeVariant {
-    fn classes(self) -> (&'static str, &'static str) {
+    const fn classes(self) -> (&'static str, &'static str) {
         match self {
             Self::Success => ("bg-green-500/20", "text-green-500"),
             Self::Warning => ("bg-yellow-500/20", "text-yellow-500"),

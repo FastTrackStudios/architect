@@ -67,6 +67,7 @@ where
 }
 
 /// Serve a whole router over an upgraded axum WebSocket — the common case.
+///
 /// Accepts any vox [`vox::Handler`]: a [`crate::LayerRouter`], or
 /// a wrapper around one (e.g. a snapshot-gating router). Collapses the
 /// per-binary `lane_acceptor_fn(|_, conn| conn.handle_with(router.clone()))` +
@@ -87,7 +88,7 @@ pub struct AxumWsLink {
 }
 
 impl AxumWsLink {
-    pub fn new(socket: WebSocket, closed: oneshot::Sender<()>) -> Self {
+    pub const fn new(socket: WebSocket, closed: oneshot::Sender<()>) -> Self {
         Self { socket, closed }
     }
 }
@@ -195,7 +196,8 @@ impl vox_types::LinkRx for AxumWsRx {
                     )));
                 }
                 Some(Ok(AxumWsMessage::Close(_))) | None => return Ok(None),
-                Some(Ok(AxumWsMessage::Ping(_) | AxumWsMessage::Pong(_))) => continue,
+                // Keepalives carry no vox payload: read the next frame.
+                Some(Ok(AxumWsMessage::Ping(_) | AxumWsMessage::Pong(_))) => {}
                 Some(Ok(AxumWsMessage::Text(_))) => {
                     return Err(AxumWsError(
                         "text frames are not valid vox websocket payloads".into(),

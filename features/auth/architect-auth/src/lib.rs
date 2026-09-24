@@ -9,8 +9,9 @@ pub mod db {
     pub use auth_db::*;
 }
 
-/// Client session kit — token storage + vox call decoration. A
-/// re-export of the standalone `auth-client` crate; wasm builds can
+/// Client session kit — token storage + vox call decoration.
+///
+/// A re-export of the standalone `auth-client` crate; wasm builds can
 /// also depend on `auth-client` directly (this umbrella pulls the
 /// native-only engine).
 #[cfg(feature = "client")]
@@ -21,6 +22,7 @@ pub mod client {
 
     /// Build a [`StoredSession`] from the bundle a sign-up / sign-in /
     /// refresh returned — token plus user id, email, and expiry.
+    #[must_use]
     pub fn stored_session(bundle: &AuthSessionBundle) -> StoredSession {
         let mut session = StoredSession::new(bundle.token.clone())
             .with_user_id(bundle.user.id.to_string())

@@ -1,44 +1,31 @@
-//! The HTTP surface: the OIDC provider endpoints plus a small
-//! JSON session API.
+//! The OAuth flows: this server as an OIDC **provider**, and as a
+//! **client** of GitHub, Google and TONE3000 (social sign-in, account
+//! linking, brokered tokens).
 //!
-//! ## Why this module exists
+//! These are HTTP by nature — browser redirects, form posts, a discovery
+//! document — so they are the one part of the server that is written as
+//! axum routes rather than declared as an `#[architect::service]` trait.
+//! The session and organization APIs used to live here too, as
+//! hand-written JSON twins of the vox services; they are now generated
+//! from the same traits (`auth_proto::AuthService`,
+//! `auth_proto::OrganizationService`) and mounted by [`crate::server`] —
+//! nothing in this module duplicates an RPC method.
 //!
-//! `architect-auth`'s `transport::axum` module ships route *descriptors*
-//! and a `require_session` middleware, but it never builds a `Router` —
-//! there is not one `.route()` call in the engine. Everything a client
-//! could reach was therefore reachable only over vox. That is fine for
-//! the Rust apps, and useless for a browser hitting
-//! `/.well-known/openid-configuration`. This module is the missing
-//! mount.
-//!
-//! ## Scope
-//!
-//! Deliberately not all ~150 route descriptors. Two surfaces earn their
-//! place in a standalone identity server:
-//!
-//! * **OIDC provider** — discovery, authorize, token, userinfo, JWKS.
-//!   This is what makes the server an IdP that anything can point at.
-//! * **Core session JSON** — sign-up, sign-in, session, refresh,
-//!   sign-out. What a web front-end needs before it can do anything.
-//!
-//! The remaining commands (admin, orgs, teams, passkeys, 2FA, API keys)
-//! stay reachable over vox and through `ArchitectAuth` directly. Adding
-//! them here later is purely additive. The blocker on doing it
-//! *generically* is that the command structs derive no serde, so each
-//! one needs a hand-written extractor — see `docs` in the crate root.
+//! * **OIDC provider** — discovery, authorize, token, userinfo, JWKS,
+//!   the `OpenAPI` document, and `/oauth2/linked-token` (see [`crate::social`]).
+//! * **Social** — `/auth/social/{provider}/{start,callback}`, the linked
+//!   accounts list and unlink.
 
 use std::sync::Arc;
 
-use chrono::Utc;
-
 use architect_auth::{
-    ArchitectAuth, AuthStorage, AuthorizeOidc, BeginOAuthAuthorization, CreateEmailPasswordUser,
-    CurrentSession, ExchangeOidcToken, GetOidcUserInfo, LinkOAuthAccount, RefreshSession,
-    SignInOAuthAccount, SignOut, UnlinkOAuthAccount, VerifyJwt, VerifyOAuthState,
+    ArchitectAuth, AuthStorage, AuthorizeOidc, BeginOAuthAuthorization, CurrentSession,
+    ExchangeOidcToken, GetOidcUserInfo, LinkOAuthAccount, SignInOAuthAccount, UnlinkOAuthAccount,
+    VerifyJwt, VerifyOAuthState,
     crypto::{decrypt_secret, encrypt_secret},
     transport::{AuthCookieConfig, axum::session_token_from_headers, map_auth_error},
 };
-use auth_proto::{AuthAccount, AuthFlowError, AuthSessionBundle, AuthUser, SignInEmailPassword};
+use auth_proto::{AuthAccount, AuthFlowError, AuthSessionBundle};
 use axum::{
     Json, Router,
     extract::{Path, Query, State},
@@ -67,6 +54,15 @@ pub struct HttpState<S> {
     /// Social providers. Defaults to none configured, which turns the
     /// `/auth/social/*` routes into 404s and hides the buttons.
     pub social: Arc<SocialState>,
+    /// The database, for the one route that needs it directly.
+    ///
+    /// `AuthStorage` deliberately exposes no "read every row" method —
+    /// nothing in the engine should want one. Taking a snapshot does,
+    /// and it is a SeaORM-specific operation, so it reaches past the
+    /// trait rather than widening it. `None` when the storage backend
+    /// is something else, which the route reports rather than
+    /// pretending an empty database.
+    pub db: Option<sea_orm::DatabaseConnection>,
 }
 
 /// Everything the social routes need beyond the engine.
@@ -84,6 +80,7 @@ pub struct SocialState {
 }
 
 impl SocialState {
+    #[must_use]
     pub fn disabled() -> Self {
         Self {
             config: SocialConfig::disabled(),
@@ -93,7 +90,8 @@ impl SocialState {
         }
     }
 
-    pub fn provider_config(&self, provider: Provider) -> Option<&SocialProviderConfig> {
+    #[must_use]
+    pub const fn provider_config(&self, provider: Provider) -> Option<&SocialProviderConfig> {
         match provider {
             Provider::GitHub => self.config.github.as_ref(),
             Provider::Google => self.config.google.as_ref(),
@@ -103,6 +101,7 @@ impl SocialState {
 
     /// The providers that are actually on, in button order.
     /// Every configured provider — what the account page offers to link.
+    #[must_use]
     pub fn enabled_providers(&self) -> Vec<Provider> {
         Provider::ALL
             .into_iter()
@@ -113,6 +112,7 @@ impl SocialState {
     /// The configured providers that can start a session — what the sign-in
     /// and sign-up pages offer. TONE3000 is not one: it is a service an
     /// account holds a token for, not a way to become an account.
+    #[must_use]
     pub fn sign_in_providers(&self) -> Vec<Provider> {
         self.enabled_providers()
             .into_iter()
@@ -120,6 +120,7 @@ impl SocialState {
             .collect()
     }
 
+    #[must_use]
     pub fn callback_url(&self, provider: Provider) -> String {
         format!(
             "{}/auth/social/{}/callback",
@@ -136,6 +137,7 @@ impl SocialState {
     /// places a flow can legitimately have started from. Anything else
     /// is an open redirect on an identity server, and lands on
     /// `/account` instead.
+    #[must_use]
     pub fn safe_return_to(&self, raw: Option<&str>) -> String {
         const DEFAULT: &str = "/account";
         let candidate = raw.unwrap_or("").trim();
@@ -223,30 +225,39 @@ impl ProviderClient for NoProviderClient {
 
 impl<S> HttpState<S> {
     pub fn new(auth: ArchitectAuth<S>, cookie: AuthCookieConfig) -> Self {
-        let mail = crate::mail::Mailer::new(crate::mail::MailConfig {
+        let mail = crate::mail::Mailer::log_only(crate::mail::MailConfig {
             host: None,
             port: 587,
             username: None,
             password: None,
             from: "noreply@localhost".into(),
             base_url: "http://localhost:8080".into(),
-        })
-        .expect("a mailer with no host cannot fail to build");
+        });
         Self {
             auth,
             cookie,
             mail: std::sync::Arc::new(mail),
             social: Arc::new(SocialState::disabled()),
+            db: None,
         }
     }
 
+    /// Attach the database, enabling `GET /admin/snapshot`.
+    #[must_use]
+    pub fn with_db(mut self, db: sea_orm::DatabaseConnection) -> Self {
+        self.db = Some(db);
+        self
+    }
+
     /// Attach a configured mailer.
+    #[must_use]
     pub fn with_mailer(mut self, mail: std::sync::Arc<crate::mail::Mailer>) -> Self {
         self.mail = mail;
         self
     }
 
     /// Attach the social providers.
+    #[must_use]
     pub fn with_social(mut self, social: Arc<SocialState>) -> Self {
         self.social = social;
         self
@@ -261,7 +272,7 @@ impl<S> HttpState<S> {
     ) -> Result<SocialState, reqwest::Error> {
         Ok(SocialState {
             config: config.social.clone(),
-            client: Arc::new(HttpProviderClient::new()?),
+            client: Arc::new(HttpProviderClient::new()?.with_mock(config.social.mock_url.clone())),
             base_url: config.base_url.clone(),
             allowed_return_origins: config
                 .oidc_clients
@@ -299,12 +310,6 @@ where
         )
         .route("/oauth2/token", post(token::<S>))
         .route("/oauth2/userinfo", get(userinfo::<S>).post(userinfo::<S>))
-        // ── Core session JSON ────────────────────────────────────────
-        .route("/auth/sign-up/email", post(sign_up_email::<S>))
-        .route("/auth/sign-in/email", post(sign_in_email::<S>))
-        .route("/auth/session", get(session::<S>))
-        .route("/auth/refresh", post(refresh::<S>))
-        .route("/auth/sign-out", post(sign_out::<S>))
         // ── Social sign-in and account linking ───────────────────────
         .route("/auth/social/{provider}/start", get(social_start::<S>))
         .route(
@@ -316,7 +321,10 @@ where
             "/auth/accounts/{provider}/unlink",
             post(unlink_account::<S>),
         )
-        // ── Relying-party access to a linked token ───────────────────
+        // ── Organizations ────────────────────────────────────────────
+        // The read side first: `list` is what a relying party calls to
+        // learn which orgs a token belongs to and with what role, and it
+        // is the reason this surface is mounted at all.
         .route("/oauth2/linked-token", get(linked_token::<S>))
         // ── Introspection ────────────────────────────────────────────
         .route("/openapi.json", get(openapi))
@@ -355,7 +363,7 @@ where
 /// every reader the power to mint tokens for every account.
 ///
 /// So this endpoint returns a valid, empty key set. Relying parties must
-/// verify id_tokens by calling `/oauth2/userinfo`, or share the secret
+/// verify `id_tokens` by calling `/oauth2/userinfo`, or share the secret
 /// out of band (which is acceptable for first-party apps and not for
 /// anyone else). Asymmetric signing is the fix; see the crate docs.
 async fn jwks<S>(State(state): State<HttpState<S>>) -> Json<Value>
@@ -405,29 +413,94 @@ async fn authorize<S>(
 where
     S: AuthStorage,
 {
+    // A program presents a bearer; a browser presents the cookie. The
+    // distinction decides what a dead credential gets below.
+    let from_browser = !headers.contains_key(header::AUTHORIZATION);
     let session_token = match session_token_from_headers(&headers, &state.cookie) {
         Some(token) => token,
-        None if headers.contains_key(header::AUTHORIZATION) => {
+        None if !from_browser => {
             return Err(ApiError::from(AuthFlowError::InvalidCredentials));
         }
         None => return Ok(Redirect::to(&sign_in_url(&uri)).into_response()),
     };
 
+    // A browser whose cookie names a session that is gone — expired,
+    // revoked, or minted by a server since reset — is a browser with no
+    // session, and gets what one gets: the sign-in page, with the
+    // authorize request to come back to. Plus a removal for the dead
+    // cookie, or the browser keeps presenting it and every site that
+    // sends someone here gets `invalid_credentials` as JSON, with no way
+    // through short of clearing site data. A program with a dead bearer
+    // still gets the 401: it cannot render a login page.
+    //
+    // Checked HERE, on the session alone, and not by matching the
+    // engine's error afterwards: `authorize_oidc` answers an unknown
+    // client_id with the very same `InvalidCredentials`, and reading
+    // that as "dead cookie" turns a misconfigured client into an
+    // endless loop through the login page — the person signs in, is
+    // sent back here, is refused, is sent to sign in again. An unknown
+    // client with a live session must stay the 401 it always was.
+    if from_browser
+        && state
+            .auth
+            .current_session(CurrentSession {
+                token: session_token.clone(),
+            })
+            .await
+            .is_err()
+    {
+        return Ok((
+            StatusCode::SEE_OTHER,
+            [
+                (header::LOCATION, sign_in_url(&uri)),
+                (
+                    header::SET_COOKIE,
+                    state.cookie.removal_cookie().to_string(),
+                ),
+            ],
+        )
+            .into_response());
+    }
+
     let authorization = state
         .auth
         .authorize_oidc(AuthorizeOidc {
             session_token,
-            client_id: params.client_id,
-            redirect_uri: params.redirect_uri,
-            response_type: params.response_type.unwrap_or_else(|| "code".into()),
-            scope: params.scope,
-            state: params.state,
-            nonce: params.nonce,
-            code_challenge: params.code_challenge,
-            code_challenge_method: params.code_challenge_method,
-            prompt: params.prompt,
+            client_id: params.client_id.clone(),
+            redirect_uri: params.redirect_uri.clone(),
+            response_type: params
+                .response_type
+                .clone()
+                .unwrap_or_else(|| "code".into()),
+            scope: params.scope.clone(),
+            state: params.state.clone(),
+            nonce: params.nonce.clone(),
+            code_challenge: params.code_challenge.clone(),
+            code_challenge_method: params.code_challenge_method.clone(),
+            prompt: params.prompt.clone(),
         })
-        .await?;
+        .await;
+
+    let authorization = match authorization {
+        Ok(authorization) => authorization,
+        // "Ask them." A client registered without `skip_consent` gets
+        // this, and until there was a consent screen it came out as an
+        // API error — so a client that *wanted* consent could not
+        // finish authorizing at all.
+        Err(AuthFlowError::VerificationRequired) => {
+            return Ok(auth_ui::consent::page(&auth_ui::consent::ConsentParams {
+                client_id: params.client_id,
+                redirect_uri: params.redirect_uri,
+                response_type: params.response_type,
+                scope: params.scope,
+                state: params.state,
+                nonce: params.nonce,
+                code_challenge: params.code_challenge,
+                code_challenge_method: params.code_challenge_method,
+            }));
+        }
+        Err(error) => return Err(ApiError::from(error)),
+    };
 
     // The engine already appended `code` and `state` to the registered
     // redirect_uri, so this is a plain 302 to a URI it validated.
@@ -502,7 +575,8 @@ async fn userinfo<S>(
 where
     S: AuthStorage,
 {
-    let access_token = bearer(&headers).ok_or(ApiError::from(AuthFlowError::InvalidCredentials))?;
+    let access_token =
+        bearer(&headers).ok_or_else(|| ApiError::from(AuthFlowError::InvalidCredentials))?;
     let info = state
         .auth
         .get_oidc_user_info(GetOidcUserInfo { access_token })
@@ -516,184 +590,8 @@ where
     })))
 }
 
-// ── Session JSON ─────────────────────────────────────────────────────
-
-async fn sign_up_email<S>(
-    State(state): State<HttpState<S>>,
-    headers: HeaderMap,
-    Json(body): Json<SignUpBody>,
-) -> Result<Response, ApiError>
-where
-    S: AuthStorage,
-{
-    let bundle = state
-        .auth
-        .create_email_password_user(CreateEmailPasswordUser {
-            email: body.email,
-            password: body.password,
-            name: body.name,
-            username: body.username,
-            image: body.image,
-            metadata_json: body.metadata_json,
-            ip_address: client_ip(&headers),
-            user_agent: user_agent(&headers),
-        })
-        .await?;
-    Ok(session_response(
-        &state.cookie,
-        &bundle,
-        StatusCode::CREATED,
-    ))
-}
-
-#[derive(Debug, serde::Deserialize)]
-pub struct SignUpBody {
-    pub email: String,
-    pub password: String,
-    #[serde(default)]
-    pub name: Option<String>,
-    #[serde(default)]
-    pub username: Option<String>,
-    #[serde(default)]
-    pub image: Option<String>,
-    #[serde(default)]
-    pub metadata_json: Option<String>,
-}
-
-async fn sign_in_email<S>(
-    State(state): State<HttpState<S>>,
-    headers: HeaderMap,
-    Json(body): Json<SignInBody>,
-) -> Result<Response, ApiError>
-where
-    S: AuthStorage,
-{
-    let bundle = state
-        .auth
-        .sign_in_email_password(SignInEmailPassword {
-            email: body.email,
-            password: body.password,
-            ip_address: client_ip(&headers),
-            user_agent: user_agent(&headers),
-        })
-        .await?;
-    Ok(session_response(&state.cookie, &bundle, StatusCode::OK))
-}
-
-#[derive(Debug, serde::Deserialize)]
-pub struct SignInBody {
-    pub email: String,
-    pub password: String,
-}
-
-async fn session<S>(
-    State(state): State<HttpState<S>>,
-    headers: HeaderMap,
-) -> Result<Json<Value>, ApiError>
-where
-    S: AuthStorage,
-{
-    let token = session_token_from_headers(&headers, &state.cookie)
-        .ok_or(ApiError::from(AuthFlowError::InvalidCredentials))?;
-    let bundle = state.auth.current_session(CurrentSession { token }).await?;
-    // No token echoed back: the caller already holds it, and a GET
-    // response is the most likely thing to end up in a log or a cache.
-    Ok(Json(json!({
-        "user": user_json(&bundle.user),
-        "session": session_json(&bundle),
-    })))
-}
-
-async fn refresh<S>(
-    State(state): State<HttpState<S>>,
-    headers: HeaderMap,
-) -> Result<Response, ApiError>
-where
-    S: AuthStorage,
-{
-    let token = session_token_from_headers(&headers, &state.cookie)
-        .ok_or(ApiError::from(AuthFlowError::InvalidCredentials))?;
-    let bundle = state.auth.refresh_session(RefreshSession { token }).await?;
-    Ok(session_response(&state.cookie, &bundle, StatusCode::OK))
-}
-
-async fn sign_out<S>(
-    State(state): State<HttpState<S>>,
-    headers: HeaderMap,
-) -> Result<Response, ApiError>
-where
-    S: AuthStorage,
-{
-    // Idempotent by design: a caller with no token has already achieved
-    // what it asked for, and saying "no such session" would leak whether
-    // one existed.
-    if let Some(token) = session_token_from_headers(&headers, &state.cookie) {
-        state.auth.sign_out(SignOut { token }).await?;
-    }
-    let cleared = state.cookie.session_cookie("");
-    Ok((
-        StatusCode::NO_CONTENT,
-        [(header::SET_COOKIE, cleared.to_string())],
-    )
-        .into_response())
-}
-
 async fn openapi() -> Json<Value> {
     Json(architect_auth::transport::auth_openapi_document())
-}
-
-// ── Shared shaping ───────────────────────────────────────────────────
-
-/// A successful session response: the bundle as JSON, plus the session
-/// cookie so a browser is signed in without touching the body.
-fn session_response(
-    cookie: &AuthCookieConfig,
-    bundle: &AuthSessionBundle,
-    status: StatusCode,
-) -> Response {
-    let set_cookie = cookie.session_cookie(bundle.token.clone());
-    (
-        status,
-        [(header::SET_COOKIE, set_cookie.to_string())],
-        Json(json!({
-            "user": user_json(&bundle.user),
-            "session": session_json(bundle),
-            // Native clients have no cookie jar, so they read the token
-            // from here and attach it as a bearer on later calls.
-            "token": bundle.token,
-        })),
-    )
-        .into_response()
-}
-
-fn user_json(user: &AuthUser) -> Value {
-    json!({
-        "id": user.id,
-        "email": user.email,
-        "name": user.name,
-        "email_verified": user.email_verified,
-        "image": user.image,
-        "username": user.username,
-        "display_username": user.display_username,
-        "two_factor_enabled": user.two_factor_enabled,
-        "role": user.role,
-        "banned": user.banned,
-        "created_at": user.created_at,
-        "updated_at": user.updated_at,
-    })
-}
-
-/// The session, minus `token_hash`. That field is the stored
-/// verifier — serializing it would put a credential-equivalent value
-/// into every response body.
-fn session_json(bundle: &AuthSessionBundle) -> Value {
-    json!({
-        "id": bundle.session.id,
-        "user_id": bundle.session.user_id,
-        "expires_at": bundle.session.expires_at,
-        "active_organization_id": bundle.session.active_organization_id,
-        "created_at": bundle.session.created_at,
-    })
 }
 
 fn bearer(headers: &HeaderMap) -> Option<String> {
@@ -725,20 +623,10 @@ fn sign_in_url(uri: &Uri) -> String {
 
 /// Percent-encode for use as a query-string *value*.
 ///
-/// Hand-rolled to avoid a dependency for one call site. Unreserved
-/// characters per RFC 3986 pass through; everything else, `&` `=` `?`
-/// `/` `#` included, is escaped.
+/// Unreserved characters per RFC 3986 pass through; everything else,
+/// `&` `=` `?` `/` `#` included, is escaped.
 fn percent_encode_query(raw: &str) -> String {
-    let mut out = String::with_capacity(raw.len() + raw.len() / 2);
-    for byte in raw.as_bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(*byte as char);
-            }
-            other => out.push_str(&format!("%{other:02X}")),
-        }
-    }
-    out
+    architect_auth::percent::encode_component(raw)
 }
 
 pub(crate) fn client_ip(headers: &HeaderMap) -> Option<String> {
@@ -859,6 +747,7 @@ where
         &sealed,
         mode,
         pkce.as_ref().map(|p| p.challenge.as_str()),
+        state.social.config.mock_url.as_deref(),
     );
     Ok(Redirect::to(&url).into_response())
 }
@@ -914,10 +803,10 @@ where
         Some(Mode::Link) => "/account",
         _ => "/login",
     };
-    let return_to = unsealed
-        .as_ref()
-        .map(|(_, flow)| flow.return_to.clone())
-        .unwrap_or_else(|| fallback_page.to_owned());
+    let return_to = unsealed.as_ref().map_or_else(
+        || fallback_page.to_owned(),
+        |(_, flow)| flow.return_to.clone(),
+    );
 
     if q.error.is_some() {
         return Ok(redirect_with(&return_to, "error", "denied"));
@@ -987,7 +876,12 @@ where
                 })
                 .await;
             match result {
-                Ok(bundle) => Ok(redirect_signed_in(&state.cookie, &bundle, &return_to)),
+                Ok(bundle) => Ok(redirect_signed_in(
+                    &state.cookie,
+                    &headers,
+                    &bundle,
+                    &return_to,
+                )),
                 Err(AuthFlowError::InvalidInput(message)) if message.contains("email already") => {
                     Ok(redirect_with(&return_to, "error", "email_in_use"))
                 }
@@ -1014,18 +908,24 @@ where
             // The engine encrypts these before they touch storage; the
             // field names say "ciphertext" because that is what ends up
             // in the row.
+            let account_id = profile.account_id;
+            let access_token = tokens.access_token;
+            let expires_in = tokens.expires_in;
             let result = state
                 .auth
                 .link_oauth_account(LinkOAuthAccount {
                     session_token,
                     provider_id: provider.id().to_owned(),
-                    account_id: profile.account_id,
-                    access_token_ciphertext: Some(tokens.access_token),
+                    account_id: account_id.clone(),
+                    access_token_ciphertext: Some(access_token.clone()),
                     refresh_token_ciphertext: tokens.refresh_token,
                     id_token_ciphertext: tokens.id_token,
                     scope: tokens.scope.or_else(|| Some(config.scopes.join(" "))),
                 })
                 .await;
+            if result.is_ok() {
+                record_link_expiry(&state, provider, &account_id, &access_token, expires_in).await;
+            }
             match result {
                 Ok(()) => Ok(redirect_with(&return_to, "linked", provider.id())),
                 Err(AuthFlowError::InvalidInput(message)) if message.contains("already linked") => {
@@ -1043,6 +943,46 @@ where
     }
 }
 
+/// Store when a freshly linked token expires.
+///
+/// `LinkOAuthAccount` carries no expiry, so without this the row starts with
+/// none and the refresher cannot tell when the token runs out. Best-effort:
+/// if it fails, [`needs_refresh`] treats the unknown expiry as spent and the
+/// first use refreshes instead.
+async fn record_link_expiry<S>(
+    state: &HttpState<S>,
+    provider: Provider,
+    account_id: &str,
+    access_token: &str,
+    expires_in: Option<i64>,
+) where
+    S: AuthStorage,
+{
+    let secret = &state.auth.config.secret;
+    let Ok(access_ciphertext) = encrypt_secret(secret, access_token) else {
+        return;
+    };
+    let expires_at =
+        architect_auth::expiry::expires_in(expires_in.unwrap_or(ASSUMED_TOKEN_LIFETIME_SECS));
+    if let Err(e) = state
+        .auth
+        .storage
+        .update_oauth_account_tokens(
+            provider.id(),
+            account_id,
+            Some(access_ciphertext),
+            None,
+            None,
+            Some(expires_at),
+            None,
+            None,
+        )
+        .await
+    {
+        tracing::warn!(provider = provider.id(), error = %e, "could not record a linked token's expiry");
+    }
+}
+
 /// One linked provider account, as shown to its owner. Never a token.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LinkedAccountView {
@@ -1055,6 +995,7 @@ pub struct LinkedAccountView {
 }
 
 impl LinkedAccountView {
+    #[must_use]
     pub fn to_json(&self) -> Value {
         json!({
             "provider_id": self.provider_id,
@@ -1075,7 +1016,7 @@ where
     S: AuthStorage,
 {
     let token = session_token_from_headers(&headers, &state.cookie)
-        .ok_or(ApiError::from(AuthFlowError::InvalidCredentials))?;
+        .ok_or_else(|| ApiError::from(AuthFlowError::InvalidCredentials))?;
     let bundle = state.auth.current_session(CurrentSession { token }).await?;
     let accounts = linked_accounts(&state, bundle.user.id).await?;
     Ok(Json(Value::Array(
@@ -1087,7 +1028,7 @@ where
 /// be had without trusting anything unverified for authorization.
 ///
 /// The row stores no username, so the handle is derived: Google's from
-/// the email claim of the stored id_token; GitHub's by asking GitHub,
+/// the email claim of the stored `id_token`; GitHub's by asking GitHub,
 /// best effort — a failed lookup leaves `login` empty rather than
 /// failing the page.
 pub(crate) async fn linked_accounts<S>(
@@ -1150,10 +1091,26 @@ fn plaintext_access_token(secret: &str, row: &AuthAccount) -> Option<String> {
 /// A minute of slack covers a token handed out just before expiry and used
 /// just after — the failure that otherwise surfaces as an occasional,
 /// unreproducible 401 on somebody else's machine.
+///
+/// An expiry the row never recorded counts as spent when there is a refresh
+/// token to spend. Links made before the expiry was stored have none, and
+/// treating "unknown" as "fresh" served their link-time token forever — it
+/// died an hour after linking and every request 401'd until the person
+/// unlinked and linked again. One refresh records the expiry, after which
+/// this is the ordinary clock check.
 fn needs_refresh(row: &AuthAccount) -> bool {
-    row.access_token_expires_at
-        .is_some_and(|at| at <= Utc::now() + chrono::Duration::seconds(60))
+    row.access_token_expires_at.map_or_else(
+        || row.refresh_token_ciphertext.is_some(),
+        |at| at <= architect_auth::expiry::expires_in(60),
+    )
 }
+
+/// How long a provider token lives when the provider does not say.
+///
+/// An hour is what TONE3000 and GitHub's expiring tokens both use. Without a
+/// default, a provider that omits `expires_in` would leave the expiry unset
+/// and [`needs_refresh`] would rotate the token on every single request.
+const ASSUMED_TOKEN_LIFETIME_SECS: i64 = 3600;
 
 /// A usable access token for a linked account, refreshing it if it has run
 /// out.
@@ -1206,9 +1163,12 @@ where
         }
     };
 
-    let expires_at = refreshed
-        .expires_in
-        .map(|secs| Utc::now() + chrono::Duration::seconds(secs));
+    // `expires_in` is whatever the provider sent back, so it saturates
+    // rather than adding: a nonsense value should park the token at the
+    // end of time, not panic inside a refresh.
+    let expires_at = Some(architect_auth::expiry::expires_in(
+        refreshed.expires_in.unwrap_or(ASSUMED_TOKEN_LIFETIME_SECS),
+    ));
     // The rotated refresh token MUST be stored, or this is the last refresh
     // this account ever does.
     let refresh_ciphertext = refreshed
@@ -1252,9 +1212,9 @@ impl From<AuthFlowError> for UnlinkError {
     fn from(error: AuthFlowError) -> Self {
         match &error {
             AuthFlowError::InvalidInput(message) if message.contains("last sign-in credential") => {
-                UnlinkError::LastCredential
+                Self::LastCredential
             }
-            _ => UnlinkError::Auth(error),
+            _ => Self::Auth(error),
         }
     }
 }
@@ -1262,17 +1222,17 @@ impl From<AuthFlowError> for UnlinkError {
 impl From<UnlinkError> for ApiError {
     fn from(error: UnlinkError) -> Self {
         match error {
-            UnlinkError::NotLinked => ApiError::custom(
+            UnlinkError::NotLinked => Self::custom(
                 StatusCode::NOT_FOUND,
                 "not_linked",
                 "no account from that provider is linked",
             ),
-            UnlinkError::LastCredential => ApiError::custom(
+            UnlinkError::LastCredential => Self::custom(
                 StatusCode::CONFLICT,
                 "last_credential",
                 "unlinking this account would leave no way to sign in — set a password or link another provider first",
             ),
-            UnlinkError::Auth(error) => ApiError::from(error),
+            UnlinkError::Auth(error) => Self::from(error),
         }
     }
 }
@@ -1328,7 +1288,7 @@ where
         "no such provider",
     ))?;
     let token = session_token_from_headers(&headers, &state.cookie)
-        .ok_or(ApiError::from(AuthFlowError::InvalidCredentials))?;
+        .ok_or_else(|| ApiError::from(AuthFlowError::InvalidCredentials))?;
     unlink(&state, token, provider).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -1399,7 +1359,7 @@ where
         outcome("no_bearer");
         return Err(ApiError::from(AuthFlowError::InvalidCredentials));
     };
-    let claims = match state
+    let claims = if let Ok(verification) = state
         .auth
         .verify_jwt(VerifyJwt {
             token: access_token,
@@ -1407,15 +1367,14 @@ where
         })
         .await
     {
-        Ok(verification) => verification.claims,
-        Err(_) => {
-            outcome("invalid_token");
-            return Err(ApiError::custom(
-                StatusCode::UNAUTHORIZED,
-                "invalid_token",
-                "the bearer is not an access token this server issued",
-            ));
-        }
+        verification.claims
+    } else {
+        outcome("invalid_token");
+        return Err(ApiError::custom(
+            StatusCode::UNAUTHORIZED,
+            "invalid_token",
+            "the bearer is not an access token this server issued",
+        ));
     };
     let required = state.social.config.required_scope(provider);
     let granted = claims
@@ -1526,18 +1485,35 @@ fn redirect_with(target: &str, key: &str, value: &str) -> Response {
 /// wants a bearer token exchanges the session over `/auth/session`.
 fn redirect_signed_in(
     cookie: &AuthCookieConfig,
+    headers: &HeaderMap,
     bundle: &AuthSessionBundle,
     return_to: &str,
 ) -> Response {
     let set_cookie = cookie.session_cookie(bundle.token.clone());
-    (
+    // A social sign-in for somebody with two-factor on issues an
+    // inactive session, same as every other route; sending them to
+    // `return_to` would bounce them back to /login forever.
+    let location = if bundle.session.active {
+        return_to.to_owned()
+    } else {
+        format!(
+            "/login/two-factor?return_to={}",
+            architect_auth::percent::encode_component(return_to)
+        )
+    };
+    let mut response = (
         StatusCode::SEE_OTHER,
         [
             (header::SET_COOKIE, set_cookie.to_string()),
-            (header::LOCATION, return_to.to_owned()),
+            (header::LOCATION, location),
         ],
     )
-        .into_response()
+        .into_response();
+    // "You signed in with GitHub last time" — the hint that keeps
+    // somebody from resetting a password they never had — and the
+    // roster that puts this account on the switcher.
+    auth_ui::login::remember_signed_in(&mut response, cookie, headers, bundle);
+    response
 }
 
 /// An `AuthFlowError` on its way out as HTTP.
@@ -1551,7 +1527,8 @@ pub struct ApiError(architect_auth::transport::PublicAuthError);
 impl ApiError {
     /// An error the engine's taxonomy has no entry for — a routing-level
     /// refusal such as an unconfigured provider or a missing scope.
-    pub fn custom(status: StatusCode, code: &'static str, message: &'static str) -> Self {
+    #[must_use]
+    pub const fn custom(status: StatusCode, code: &'static str, message: &'static str) -> Self {
         Self(architect_auth::transport::PublicAuthError {
             status: status.as_u16(),
             code,

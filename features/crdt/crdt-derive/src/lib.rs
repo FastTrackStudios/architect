@@ -141,10 +141,8 @@ impl FieldKind {
                 // i32 / opt_i32 ride i64 codecs with a cast at the
                 // emit site; no native i32 codec exists in
                 // crdt::codec today.
-                Self::I32 => "i64",
-                Self::OptI32 => "opt_i64",
-                Self::I64 => "i64",
-                Self::OptI64 => "opt_i64",
+                Self::I32 | Self::I64 => "i64",
+                Self::OptI32 | Self::OptI64 => "opt_i64",
                 Self::Dt => "dt",
                 Self::OptDt => "opt_dt",
                 Self::StringList => "string_list",
@@ -162,10 +160,8 @@ impl FieldKind {
                 Self::OptStr => "opt_str",
                 Self::Bool => "bool",
                 Self::OptBool => "opt_bool",
-                Self::I32 => "i64",
-                Self::OptI32 => "opt_i64",
-                Self::I64 => "i64",
-                Self::OptI64 => "opt_i64",
+                Self::I32 | Self::I64 => "i64",
+                Self::OptI32 | Self::OptI64 => "opt_i64",
                 Self::Dt => "dt",
                 Self::OptDt => "opt_dt",
                 Self::StringList => "string_list",
@@ -175,7 +171,7 @@ impl FieldKind {
 
     /// `true` when the field type takes `&value` rather than `value`
     /// in its setter.
-    fn needs_ref(self) -> bool {
+    const fn needs_ref(self) -> bool {
         matches!(self, Self::Str | Self::StringList)
     }
 }
@@ -251,8 +247,7 @@ impl Parse for FieldSpec {
             syn::Error::new(
                 kind_ident.span(),
                 format!(
-                    "unknown field type `{}` (supported: uuid, opt_uuid, str, opt_str, bool, opt_bool, i64, opt_i64, dt, opt_dt, string_list)",
-                    kind_ident
+                    "unknown field type `{kind_ident}` (supported: uuid, opt_uuid, str, opt_str, bool, opt_bool, i64, opt_i64, dt, opt_dt, string_list)"
                 ),
             )
         })?;
@@ -461,16 +456,10 @@ fn expand(input: EntityCrdtInput) -> syn::Result<TokenStream2> {
     let sort_arms = fields.iter().filter(|f| f.flags.sortable).map(|f| {
         let n = &f.name;
         let key = LitStr::new(&n.to_string(), n.span());
-        match f.kind {
-            FieldKind::Str => quote! {
-                #key => items.sort_by(|a, b| a.#n.cmp(&b.#n)),
-            },
-            FieldKind::OptStr => quote! {
-                #key => items.sort_by(|a, b| a.#n.cmp(&b.#n)),
-            },
-            _ => quote! {
-                #key => items.sort_by(|a, b| a.#n.cmp(&b.#n)),
-            },
+        // Every kind sorts the same way today; the `match` was a
+        // placeholder for per-kind comparators that never arrived.
+        quote! {
+            #key => items.sort_by(|a, b| a.#n.cmp(&b.#n)),
         }
     });
 

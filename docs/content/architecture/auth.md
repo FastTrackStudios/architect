@@ -11,7 +11,7 @@ depend on the auth crates directly). The split follows the
 
 | Crate | Role |
 | --- | --- |
-| `auth-proto` | wire types (`AuthUser`, `AuthSession`, `AuthSessionBundle`, payloads, `AuthFlowError`) + the `#[architect::rpc] AuthService` trait |
+| `auth-proto` | wire types (`AuthUser`, `AuthSession`, `AuthSessionBundle`, payloads, `AuthFlowError`) + the `#[architect::service]` traits `AuthService` and `OrganizationService` — vox and HTTP faces, both clients |
 | `auth` | the engine: `ArchitectAuth<S>` over a pluggable `AuthStorage`, ~30 plugins' worth of flows, the vox + axum transports |
 | `auth-db` | SeaORM storage + migrations |
 | `auth-client` | the client session kit — tiny, **wasm-clean**, no engine dependency |
@@ -19,11 +19,16 @@ depend on the auth crates directly). The split follows the
 
 ## The RPC surface
 
-`AuthService` covers exactly the session lifecycle — all-async, so it
-mounts like any other architect service:
+`AuthService` covers the session lifecycle and `OrganizationService`
+the org one — all-async `#[architect::service]` traits, so each mounts
+like any other architect service and comes with every face: the vox
+client and dispatcher, the axum router (`POST /auth/<method>`,
+`POST /organization/<method>`), and the HTTP client
+(`AuthServiceHttpClient`, `OrganizationServiceHttpClient`). See
+[the HTTP face](@/architecture/http.md).
 
 ```rust,ignore
-#[architect::rpc]
+#[architect::service]
 pub trait AuthService {
     async fn sign_up_email_password(&self, input: SignUpEmailPassword) -> Result<AuthSessionBundle, AuthFlowError>;
     async fn sign_in_email_password(&self, input: SignInEmailPassword) -> Result<AuthSessionBundle, AuthFlowError>;
@@ -147,9 +152,19 @@ The wire format is pinned by an integration test that round-trips
 `LocalServer` — empty store → server sees no token; saved token →
 server sees it verbatim; cleared → none again, same clients.
 
+## The server
+
+`apps/auth-server` mounts exactly that: `services().provide(svc)` for
+vox (served at `/vox` and, with `AUTH_IROH_KEY_FILE`, over iroh),
+`services().provide_http(&svc)` for HTTP, and the OAuth/OIDC flows and
+the hosted pages as plugins on an `architect::host::EngineHost`. Nothing
+in the server hand-writes a route that mirrors a trait method.
+`apps/auth-server/tests/surfaces.rs` runs one suite over every
+transport.
+
 ## Beyond the RPC surface
 
-The six-method trait is deliberately minimal. The engine underneath
+The traits are deliberately minimal. The engine underneath
 speaks a much larger command vocabulary — **engine-level only**, called
 on `ArchitectAuth` directly (server-side), not mounted on the wire:
 

@@ -15,7 +15,21 @@
 //!
 //! Run with: `cargo test -p architect --features atom,platform,local
 //! --test reconnect_supervisor`
-
+// Integration-test crate: `clippy.toml`'s `allow-*-in-tests` only reaches
+// `#[test]` fns and `#[cfg(test)]` modules, so the fixture/mock `impl`
+// blocks below still trip the panic lints. See the same block in the
+// other `tests/` crates.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::large_stack_arrays,
+    clippy::future_not_send,
+    clippy::panic
+)]
 #![cfg(all(feature = "atom", feature = "platform", feature = "local"))]
 
 use std::sync::{Arc, Mutex};
@@ -79,7 +93,7 @@ fn app() -> Element {
                     .establish()
                     .await
                     .map_err(|e| format!("establish: {e:?}"))?;
-                Ok(root.caller.clone())
+                Ok(root.caller)
             }
         },
         // The death-watch: vox's session-liveness primitive.
@@ -97,7 +111,7 @@ fn app() -> Element {
     rsx! {}
 }
 
-/// Pump the VirtualDom until the probe satisfies `pred` (or panic after
+/// Pump the `VirtualDom` until the probe satisfies `pred` (or panic after
 /// `secs`). The 25ms tick keeps re-checking while the supervisor's async
 /// work (connects, death-watch, backoff sleeps) settles.
 async fn pump_until(
@@ -118,8 +132,8 @@ async fn pump_until(
             "timed out waiting for {what}; last probe: {snap:?}"
         );
         tokio::select! {
-            _ = dom.wait_for_work() => dom.render_immediate(&mut dioxus::core::NoOpMutations),
-            _ = tokio::time::sleep(Duration::from_millis(25)) => {}
+            () = dom.wait_for_work() => dom.render_immediate(&mut dioxus::core::NoOpMutations),
+            () = tokio::time::sleep(Duration::from_millis(25)) => {}
         }
     }
 }

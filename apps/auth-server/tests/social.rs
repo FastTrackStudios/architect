@@ -1,14 +1,29 @@
 //! Social sign-in, account linking and the relying-party linked-token
-//! endpoint, driven through the real router over in-memory SQLite with
+//! endpoint, driven through the real router over in-memory `SQLite` with
 //! the provider network swapped for a fake.
+
+// This is an integration-test crate. `clippy.toml`'s
+// `allow-*-in-tests` only reaches `#[test]` fns and `#[cfg(test)]`
+// modules, so the fixture and helper code below — where an `unwrap()`
+// IS the assertion — still trips the panic lints. Allow them
+// crate-wide here rather than dotting the file with attributes.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::panic
+)]
 
 use std::sync::{Arc, Mutex};
 
 use architect_auth::AuthStorage;
 use architect_auth::db::{AuthSeaOrmStorage, Migrator};
-use auth_server::http::SocialState;
+use auth_server::oauth::SocialState;
 use auth_server::social::{Profile, Provider, ProviderClient, ProviderError, ProviderTokens};
-use auth_server::{ServerConfig, SocialConfig, SocialProviderConfig, server};
+use auth_server::{ServerConfig, SocialProviderConfig, server};
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use base64::Engine;
@@ -22,14 +37,10 @@ const GITHUB_TOKEN: &str = "gho_plaintext_provider_token";
 fn test_config() -> ServerConfig {
     ServerConfig {
         bind_addr: "127.0.0.1:0".into(),
-        database_url: "sqlite::memory:".into(),
-        secret: "a-secret-at-least-32-bytes-long!!".into(),
         base_url: BASE.into(),
-        oidc_issuer: None,
         session_ttl_seconds: 3600,
-        require_email_verification: false,
-        passkey_rp_id: None,
-        cors_origins: Vec::new(),
+        // The redirect flow these tests drive needs a registered
+        // client; without one `/oauth2/authorize` answers 401.
         oidc_clients: vec![architect_auth::OidcClientConfig {
             client_id: "task".into(),
             client_secret: None,
@@ -45,17 +56,7 @@ fn test_config() -> ServerConfig {
             skip_consent: true,
             disabled: false,
         }],
-        oidc_allow_dynamic_client_registration: false,
-        run_migrations: true,
-        mail: auth_server::mail::MailConfig {
-            host: None,
-            port: 587,
-            username: None,
-            password: None,
-            from: "noreply@example.com".into(),
-            base_url: BASE.into(),
-        },
-        social: SocialConfig::disabled(),
+        ..ServerConfig::local()
     }
 }
 
@@ -79,6 +80,12 @@ struct FakeProvider {
     profile: Mutex<Profile>,
     exchanges: Mutex<Vec<(Provider, String, String)>>,
     profile_fetches: Mutex<Vec<String>>,
+    /// A refresh token to hand out at exchange, and whether refreshing it
+    /// works. `None` keeps the provider non-expiring, as GitHub's OAuth
+    /// Apps are.
+    refresh_token: Mutex<Option<String>>,
+    /// Refresh tokens presented to `refresh_tokens`, in order.
+    refreshes: Mutex<Vec<String>>,
 }
 
 impl FakeProvider {
@@ -116,7 +123,7 @@ impl ProviderClient for FakeProvider {
         }
         Ok(ProviderTokens {
             access_token: GITHUB_TOKEN.into(),
-            refresh_token: None,
+            refresh_token: self.refresh_token.lock().unwrap().clone(),
             id_token: None,
             expires_in: None,
             scope: Some("repo,read:user,user:email".into()),
@@ -127,9 +134,24 @@ impl ProviderClient for FakeProvider {
         &self,
         _provider: Provider,
         _config: &SocialProviderConfig,
-        _refresh_token: &str,
+        refresh_token: &str,
     ) -> Result<ProviderTokens, ProviderError> {
-        Err(ProviderError::Exchange("refresh not stubbed".into()))
+        if self.refresh_token.lock().unwrap().is_none() {
+            return Err(ProviderError::Exchange("refresh not stubbed".into()));
+        }
+        let n = {
+            let mut seen = self.refreshes.lock().unwrap();
+            seen.push(refresh_token.to_owned());
+            seen.len()
+        };
+        // Rotates, as TONE3000 does: the next refresh must present this one.
+        Ok(ProviderTokens {
+            access_token: format!("refreshed-{n}"),
+            refresh_token: Some(format!("rt-{}", n + 1)),
+            id_token: None,
+            expires_in: Some(3600),
+            scope: None,
+        })
     }
 
     async fn fetch_profile(
@@ -232,13 +254,13 @@ async fn sign_up(app: &axum::Router, email: &str) -> String {
             Request::post("/auth/sign-up/email")
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(format!(
-                    r#"{{"email":"{email}","password":"correct-horse-battery-staple"}}"#
+                    r#"{{"input":{{"email":"{email}","password":"correct-horse-battery-staple"}}}}"#
                 )))
                 .unwrap(),
         )
         .await
         .expect("sign up");
-    assert_eq!(response.status(), StatusCode::CREATED);
+    assert_eq!(response.status(), StatusCode::OK);
     body_json(response).await["token"]
         .as_str()
         .expect("token")
@@ -593,14 +615,16 @@ async fn social_sign_in_creates_the_user_and_sets_the_session_cookie() {
         "https://auth.fasttrackstudio.app/auth/social/github/callback"
     );
 
-    // The cookie is a real session for the new user.
+    // The cookie is a real session for the new user: its value is the
+    // session token, which the generated JSON face takes as a bearer.
     let session_cookie = cookie.split(';').next().unwrap().to_owned();
+    let token = session_cookie.split_once('=').unwrap().1.to_owned();
     let response = h
         .app
         .clone()
         .oneshot(
-            Request::get("/auth/session")
-                .header(header::COOKIE, session_cookie)
+            Request::post("/auth/session")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -887,12 +911,20 @@ async fn unlinking_the_only_credential_is_refused_with_409() {
     assert_eq!(location(&response), "/account?error=last_credential");
 
     // A sign-in-only link holds no token for a relying party.
+    let token = cookie
+        .split(';')
+        .next()
+        .unwrap()
+        .split_once('=')
+        .unwrap()
+        .1
+        .to_owned();
     let response = h
         .app
         .clone()
         .oneshot(
-            Request::get("/auth/session")
-                .header(header::COOKIE, cookie.clone())
+            Request::post("/auth/session")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -935,4 +967,168 @@ async fn the_account_page_needs_a_session_and_unlinking_an_unlinked_provider_is_
         .expect("unlink");
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     assert_eq!(body_json(response).await["error"], "not_linked");
+}
+
+/// An OIDC client holds only the access token `/oauth2/token` minted —
+/// no session token — and "which organizations am I in" is a question
+/// it has every right to ask. Task mirrors memberships from exactly this
+/// call, so a refusal here meant a person signed in through Keyflow was
+/// a member of nothing downstream. The session token keeps working, and
+/// junk is still refused.
+#[tokio::test]
+async fn an_access_token_can_list_the_organizations_it_belongs_to() {
+    let h = harness(|_| {}).await;
+    let session = sign_up(&h.app, "keyflow-user@example.test").await;
+    let access = oidc_access_token(&h.app, &session, "openid").await;
+
+    for (label, token) in [("session", &session), ("access", &access)] {
+        let response = h
+            .app
+            .clone()
+            .oneshot(
+                Request::post("/auth/organization/list")
+                    .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .expect("list");
+        assert_eq!(response.status(), StatusCode::OK, "{label} token");
+        assert!(
+            body_json(response).await.is_array(),
+            "{label} token answers a list"
+        );
+    }
+
+    let response = h
+        .app
+        .clone()
+        .oneshot(
+            Request::post("/auth/organization/list")
+                .header(header::AUTHORIZATION, "Bearer not.a.jwt")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .expect("list");
+    assert_eq!(
+        response.status(),
+        StatusCode::UNAUTHORIZED,
+        "junk stays refused"
+    );
+}
+
+/// Link a provider that issues refresh tokens, and return a relying-party
+/// token that may read it.
+async fn linked_with_refresh(h: &Harness) -> String {
+    *h.provider.refresh_token.lock().unwrap() = Some("rt-1".into());
+    let session = sign_up(&h.app, "cody@fasttrackstudio.app").await;
+    let state = start(&h.app, "github", "link", Some(&session)).await;
+    let response = callback(&h.app, "github", &format!("code=good&state={state}")).await;
+    assert_eq!(location(&response), "/account?linked=github");
+    oidc_access_token(&h.app, &session, "openid email forge:github").await
+}
+
+async fn linked_access_token(h: &Harness, rp_token: &str) -> String {
+    let response = h
+        .app
+        .clone()
+        .oneshot(
+            Request::get("/oauth2/linked-token?provider=github")
+                .header(header::AUTHORIZATION, format!("Bearer {rp_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .expect("linked-token");
+    assert_eq!(response.status(), StatusCode::OK);
+    body_json(response).await["access_token"]
+        .as_str()
+        .expect("a token")
+        .to_owned()
+}
+
+async fn set_expiry(h: &Harness, at: Option<chrono::DateTime<chrono::Utc>>) {
+    let row = h
+        .storage
+        .find_account_by_provider_account("github", "583231")
+        .await
+        .unwrap()
+        .expect("linked");
+    h.storage
+        .update_oauth_account_tokens(
+            "github",
+            "583231",
+            row.access_token_ciphertext,
+            None,
+            None,
+            at,
+            None,
+            None,
+        )
+        .await
+        .expect("update");
+}
+
+/// A link records when its token runs out — the provider's own figure, or
+/// an hour when it gives none — so the refresher has a clock to read.
+#[tokio::test]
+async fn a_link_records_when_its_token_expires() {
+    let h = harness(with_providers).await;
+    let rp = linked_with_refresh(&h).await;
+    let row = h
+        .storage
+        .find_account_by_provider_account("github", "583231")
+        .await
+        .unwrap()
+        .expect("linked");
+    assert!(
+        row.access_token_expires_at.is_some(),
+        "expiry recorded at link"
+    );
+    // Still fresh: the link-time token, no refresh spent.
+    assert_eq!(linked_access_token(&h, &rp).await, GITHUB_TOKEN);
+    assert!(h.provider.refreshes.lock().unwrap().is_empty());
+}
+
+/// A link made before expiries were recorded has none. It used to be served
+/// as-is forever — dead an hour after linking, 401 on every request until
+/// unlink + link. Unknown now counts as spent: it refreshes once, records
+/// the expiry, and stops.
+#[tokio::test]
+async fn a_link_with_no_recorded_expiry_refreshes_instead_of_going_stale() {
+    let h = harness(with_providers).await;
+    let rp = linked_with_refresh(&h).await;
+    set_expiry(&h, None).await;
+
+    assert_eq!(linked_access_token(&h, &rp).await, "refreshed-1");
+    assert_eq!(
+        linked_access_token(&h, &rp).await,
+        "refreshed-1",
+        "fresh now: no second refresh"
+    );
+    assert_eq!(
+        *h.provider.refreshes.lock().unwrap(),
+        vec!["rt-1".to_string()]
+    );
+}
+
+/// An expired token refreshes, and the rotated refresh token is what the
+/// next refresh presents — or the second refresh would be the last.
+#[tokio::test]
+async fn an_expired_link_refreshes_and_keeps_the_rotated_refresh_token() {
+    let h = harness(with_providers).await;
+    let rp = linked_with_refresh(&h).await;
+    let past = chrono::Utc::now() - chrono::Duration::minutes(5);
+
+    set_expiry(&h, Some(past)).await;
+    assert_eq!(linked_access_token(&h, &rp).await, "refreshed-1");
+    set_expiry(&h, Some(past)).await;
+    assert_eq!(linked_access_token(&h, &rp).await, "refreshed-2");
+    assert_eq!(
+        *h.provider.refreshes.lock().unwrap(),
+        vec!["rt-1".to_string(), "rt-2".to_string()]
+    );
 }

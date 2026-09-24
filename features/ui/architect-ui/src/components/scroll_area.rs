@@ -1,4 +1,4 @@
-//! ScrollArea — shadcn v4 maia style scroll container.
+//! `ScrollArea` — shadcn v4 maia style scroll container.
 //!
 //! CSS-only approach using Tailwind scrollbar utilities where available,
 //! falling back to native OS scrollbars otherwise.
@@ -38,7 +38,7 @@ pub fn ScrollArea(props: ScrollAreaProps) -> Element {
     }
 }
 
-/// Default ScrollArea story rendering a fixed-height scrolling list.
+/// Default `ScrollArea` story rendering a fixed-height scrolling list.
 #[story(category = "ScrollArea", name = "default")]
 pub fn scroll_area_default() -> Element {
     rsx! {

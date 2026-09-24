@@ -10,6 +10,7 @@ pub struct CalcProvider {
 }
 
 impl CalcProvider {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             config: ProviderConfig {
@@ -29,7 +30,7 @@ impl Default for CalcProvider {
 }
 
 impl Provider for CalcProvider {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "calc"
     }
 
@@ -51,8 +52,9 @@ impl Provider for CalcProvider {
         }
 
         // Simple expression evaluator
-        match eval_expr(query) {
-            Some(result) => {
+        eval_expr(query).map_or_else(
+            || Ok(vec![]),
+            |result| {
                 let label = format!("{result}");
                 let mut item =
                     Item::new("calc-result", &label, "calc").with_tags(&["tools/calculator"]);
@@ -61,9 +63,8 @@ impl Provider for CalcProvider {
                 item.score = 1000.0; // Always show calc results at top when prefix is used
                 item.search_fields = vec![]; // Don't fuzzy match calc results
                 Ok(vec![item])
-            }
-            None => Ok(vec![]),
-        }
+            },
+        )
     }
 
     fn activate(
@@ -143,16 +144,25 @@ fn tokenize(input: &str) -> Option<Vec<Token>> {
     Some(tokens)
 }
 
+/// Advance the token cursor.
+///
+/// `saturating_add` rather than `+= 1`: the cursor is only ever compared
+/// against `tokens.len()` through `get`, so saturating at `usize::MAX`
+/// ends the parse instead of overflowing it.
+const fn advance(pos: &mut usize) {
+    *pos = pos.saturating_add(1);
+}
+
 fn parse_addition(tokens: &[Token], pos: &mut usize) -> Option<f64> {
     let mut left = parse_multiplication(tokens, pos)?;
-    while *pos < tokens.len() {
-        match tokens[*pos] {
+    while let Some(token) = tokens.get(*pos) {
+        match *token {
             Token::Op('+') => {
-                *pos += 1;
+                advance(pos);
                 left += parse_multiplication(tokens, pos)?;
             }
             Token::Op('-') => {
-                *pos += 1;
+                advance(pos);
                 left -= parse_multiplication(tokens, pos)?;
             }
             _ => break,
@@ -163,14 +173,14 @@ fn parse_addition(tokens: &[Token], pos: &mut usize) -> Option<f64> {
 
 fn parse_multiplication(tokens: &[Token], pos: &mut usize) -> Option<f64> {
     let mut left = parse_power(tokens, pos)?;
-    while *pos < tokens.len() {
-        match tokens[*pos] {
+    while let Some(token) = tokens.get(*pos) {
+        match *token {
             Token::Op('*') => {
-                *pos += 1;
+                advance(pos);
                 left *= parse_power(tokens, pos)?;
             }
             Token::Op('/') => {
-                *pos += 1;
+                advance(pos);
                 let right = parse_power(tokens, pos)?;
                 if right == 0.0 {
                     return None;
@@ -178,7 +188,7 @@ fn parse_multiplication(tokens: &[Token], pos: &mut usize) -> Option<f64> {
                 left /= right;
             }
             Token::Op('%') => {
-                *pos += 1;
+                advance(pos);
                 let right = parse_power(tokens, pos)?;
                 if right == 0.0 {
                     return None;
@@ -193,10 +203,8 @@ fn parse_multiplication(tokens: &[Token], pos: &mut usize) -> Option<f64> {
 
 fn parse_power(tokens: &[Token], pos: &mut usize) -> Option<f64> {
     let base = parse_unary(tokens, pos)?;
-    if *pos < tokens.len()
-        && let Token::Op('^') = tokens[*pos]
-    {
-        *pos += 1;
+    if matches!(tokens.get(*pos), Some(Token::Op('^'))) {
+        advance(pos);
         let exp = parse_power(tokens, pos)?; // right-associative
         return Some(base.powf(exp));
     }
@@ -204,37 +212,31 @@ fn parse_power(tokens: &[Token], pos: &mut usize) -> Option<f64> {
 }
 
 fn parse_unary(tokens: &[Token], pos: &mut usize) -> Option<f64> {
-    if *pos < tokens.len() {
-        if let Token::Op('-') = tokens[*pos] {
-            *pos += 1;
-            let val = parse_atom(tokens, pos)?;
-            return Some(-val);
+    match tokens.get(*pos) {
+        Some(Token::Op('-')) => {
+            advance(pos);
+            parse_atom(tokens, pos).map(|val| -val)
         }
-        if let Token::Op('+') = tokens[*pos] {
-            *pos += 1;
-            return parse_atom(tokens, pos);
+        Some(Token::Op('+')) => {
+            advance(pos);
+            parse_atom(tokens, pos)
         }
+        _ => parse_atom(tokens, pos),
     }
-    parse_atom(tokens, pos)
 }
 
 fn parse_atom(tokens: &[Token], pos: &mut usize) -> Option<f64> {
-    if *pos >= tokens.len() {
-        return None;
-    }
-    match &tokens[*pos] {
+    match tokens.get(*pos)? {
         Token::Num(n) => {
             let v = *n;
-            *pos += 1;
+            advance(pos);
             Some(v)
         }
         Token::LParen => {
-            *pos += 1;
+            advance(pos);
             let val = parse_addition(tokens, pos)?;
-            if *pos < tokens.len()
-                && let Token::RParen = tokens[*pos]
-            {
-                *pos += 1;
+            if matches!(tokens.get(*pos), Some(Token::RParen)) {
+                advance(pos);
                 return Some(val);
             }
             None

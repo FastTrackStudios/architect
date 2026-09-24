@@ -1,7 +1,7 @@
 //! Postgres coverage.
 //!
 //! `auth-db`'s support matrix lists Postgres as "planned" — the
-//! migrations are written with SeaORM's backend-agnostic schema builder,
+//! migrations are written with `SeaORM`'s backend-agnostic schema builder,
 //! but nothing had ever run them against a real Postgres. The central
 //! identity server is deployed on Postgres, so that gap is exactly where
 //! a production-only failure would hide.
@@ -15,6 +15,21 @@
 //! AUTH_TEST_POSTGRES_URL=postgres://postgres:test@localhost:55432/authtest \
 //!     cargo test -p auth-server --test postgres
 //! ```
+
+// This is an integration-test crate. `clippy.toml`'s
+// `allow-*-in-tests` only reaches `#[test]` fns and `#[cfg(test)]`
+// modules, so the fixture and helper code below — where an `unwrap()`
+// IS the assertion — still trips the panic lints. Allow them
+// crate-wide here rather than dotting the file with attributes.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::panic
+)]
 
 use architect_auth::db::{AuthSeaOrmStorage, Migrator};
 use auth_server::{ServerConfig, server};
@@ -57,28 +72,9 @@ fn test_config(database_url: String) -> ServerConfig {
     ServerConfig {
         bind_addr: "127.0.0.1:0".into(),
         database_url,
-        secret: "a-secret-at-least-32-bytes-long!!".into(),
         base_url: "https://auth.fasttrackstudio.app".into(),
-        oidc_issuer: None,
         session_ttl_seconds: 3600,
-        require_email_verification: false,
-        passkey_rp_id: None,
-        cors_origins: Vec::new(),
-        oidc_clients: Vec::new(),
-        oidc_allow_dynamic_client_registration: false,
-        run_migrations: true,
-        social: auth_server::SocialConfig::disabled(),
-        // Log mode: these tests assert on the HTTP surface, not on
-        // delivery, and a test that tried to reach an SMTP host would
-        // be testing the network.
-        mail: auth_server::mail::MailConfig {
-            host: None,
-            port: 587,
-            username: None,
-            password: None,
-            from: "noreply@example.com".into(),
-            base_url: "http://localhost:8080".into(),
-        },
+        ..ServerConfig::local()
     }
 }
 
@@ -147,7 +143,7 @@ async fn full_sign_up_and_session_flow_works_on_postgres() {
 
     let config = test_config(scratch);
     let auth = server::build_engine(&config, AuthSeaOrmStorage::new(db)).expect("build engine");
-    let app = server::app_router(&config, auth);
+    let app = server::app_router(&config, auth).expect("router builds with no social providers");
 
     let email = "pg@fasttrackstudio.app";
     let response = app
@@ -156,13 +152,13 @@ async fn full_sign_up_and_session_flow_works_on_postgres() {
             Request::post("/auth/sign-up/email")
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(format!(
-                    r#"{{"email":"{email}","password":"correct-horse-battery-staple"}}"#
+                    r#"{{"input":{{"email":"{email}","password":"correct-horse-battery-staple"}}}}"#
                 )))
                 .unwrap(),
         )
         .await
         .expect("sign up");
-    assert_eq!(response.status(), StatusCode::CREATED);
+    assert_eq!(response.status(), StatusCode::OK);
 
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
@@ -174,7 +170,7 @@ async fn full_sign_up_and_session_flow_works_on_postgres() {
     // the token hash matched on the way out.
     let response = app
         .oneshot(
-            Request::get("/auth/session")
+            Request::post("/auth/session")
                 .header(header::AUTHORIZATION, format!("Bearer {token}"))
                 .body(Body::empty())
                 .unwrap(),

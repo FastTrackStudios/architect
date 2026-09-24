@@ -16,8 +16,10 @@ pub mod backend_db {
 pub mod commands;
 pub mod config;
 pub mod crypto;
+pub mod expiry;
 pub mod flows;
 pub mod identity;
+pub mod percent;
 pub mod plugins;
 pub mod storage;
 pub mod test_utils;
@@ -27,39 +29,46 @@ pub use commands::{
     AcceptInvitation, ActiveDeviceSession, AddTeamMember, AdditionalFieldSpec, AdditionalFieldType,
     AdditionalFieldsConfig, AdditionalFieldsSchema, AdditionalFieldsView, AdminCreateUser,
     AdminHasPermission, AdminSetUserPassword, ApiKeyBundle, ApproveDeviceCode, AuthAuditEvent,
-    AuthenticateApiKey, AuthenticateBearerToken, AuthorizeApiKey, AuthorizeMcpRequest,
-    AuthorizeOidc, AuthorizeOrganizationAction, BanUser, BearerTokenBundle, BearerTokenStrategy,
-    BeginOAuthAuthorization, BeginOAuthProxyAuthorization, BeginPasskeyAuthentication,
-    BeginPasskeyRegistration, CaptchaVerification, ChangeEmail, ChangePassword,
-    CheckPasswordBreach, CleanupAnonymousUsers, CleanupAnonymousUsersResult, ClearLastLoginMethod,
+    AuthenticateApiKey, AuthenticateBearerToken, AuthorizeAdmin, AuthorizeApiKey,
+    AuthorizeMcpRequest, AuthorizeOidc, AuthorizeOrganizationAction, BanUser, BearerTokenBundle,
+    BearerTokenStrategy, BeginOAuthAuthorization, BeginOAuthProxyAuthorization,
+    BeginPasskeyAuthentication, BeginPasskeyRegistration, BeginTwoFactorEnrollment,
+    CancelInvitation, CaptchaVerification, ChangeEmail, ChangePassword, CheckPasswordBreach,
+    ClaimInvitation, CleanupAnonymousUsers, CleanupAnonymousUsersResult, ClearLastLoginMethod,
     CompletePasskeyAuthentication, CompletePasskeyRegistration, CompletePasswordReset,
     ConfirmTwoFactor, ConsumeOAuthProxyCallback, CreateApiKey, CreateDeviceAuthorization,
-    CreateEmailPasswordUser, CreateInvitation, CreateOrganization, CreateOrganizationRole,
-    CreateSession, CreateSiweNonce, CreateTeam, CurrentSession, CustomSessionBundle,
-    CustomSessionEnricher, DeleteApiKey, DeleteOrganizationRole, DeletePasskey, DeleteTeam,
-    DeleteUser, DenyDeviceCode, DeviceAuthorization, DeviceCodeVerification, DeviceSession,
-    DeviceSessions, DisableTwoFactor, EmailOtpVerification, ExchangeOidcToken,
-    ForwardOAuthProxyCallback, GenerateOneTimeToken, GetApiKey, GetLastLoginMethod,
-    GetOAuthAccessToken, GetOidcUserInfo, HasPermissionResult, ImpersonateUser, InvitationToken,
-    IssueJwt, JwtClaims, JwtKeyDescriptor, JwtKeySet, JwtToken, JwtVerification, LastLoginMethod,
-    LastLoginMethodCookieConfig, LinkAnonymousEmailPassword, LinkOAuthAccount, LinkSiweAddress,
-    ListAccounts, ListApiKeys, ListDeviceSessions, ListOrganizationRoles, ListPasskeys,
-    ListSessions, ListTeamMembers, ListTeams, ListUserSessions, ListUsers, ListUsersResult,
-    MagicLinkToken, MagicLinkVerification, McpAuthorization, MigrateUserEmail, OAuthAccessToken,
+    CreateEmailPasswordUser, CreateInvitation, CreateInviteLink, CreateOrganization,
+    CreateOrganizationRole, CreateSession, CreateSiweNonce, CreateTeam, CurrentSession,
+    CustomSessionBundle, CustomSessionEnricher, DeleteApiKey, DeleteOrganization,
+    DeleteOrganizationRole, DeletePasskey, DeleteTeam, DeleteUser, DenyDeviceCode,
+    DeviceAuthorization, DeviceCodeVerification, DeviceSession, DeviceSessions, DisableTwoFactor,
+    EmailOtpVerification, ExchangeOidcToken, ForwardOAuthProxyCallback, GenerateOneTimeToken,
+    GetApiKey, GetLastLoginMethod, GetOAuthAccessToken, GetOidcUserInfo, GetOrganization,
+    HasPermissionResult, ImpersonateUser, InvitationPreview, InvitationToken, InviteLinkPreview,
+    InviteLinkToken, IssueJwt, JwtClaims, JwtKeyDescriptor, JwtKeySet, JwtToken, JwtVerification,
+    LastLoginMethod, LastLoginMethodCookieConfig, LeaveOrganization, LinkAgent,
+    LinkAnonymousEmailPassword, LinkOAuthAccount, LinkSiweAddress, LinkedAgent, ListAccounts,
+    ListAgents, ListApiKeys, ListDeviceSessions, ListInvitations, ListInviteLinks, ListMembers,
+    ListMyInvitations, ListOrganizationRoles, ListOrganizations, ListPasskeys, ListSessions,
+    ListTeamMembers, ListTeams, ListUserSessions, ListUsers, ListUsersResult, MagicLinkToken,
+    MagicLinkVerification, McpAuthorization, MigrateUserEmail, OAuthAccessToken,
     OAuthProviderDescriptor, OAuthProxyAuthorization, OAuthProxyForwarding, OAuthProxyMetadata,
     OAuthProxyProfile, OidcAuthorization, OidcClientRegistration, OidcDiscovery, OidcTokenResponse,
     OidcUserInfo, OneTapCallback, OneTapVerification, OneTimeToken, OneTimeTokenVerification,
-    OrganizationBundle, PasswordBreachCheck, PhoneNumberVerification, PollDeviceToken,
-    RefreshOAuthToken, RefreshSession, RegisterOidcClient, RemoveTeamMember, RemoveUser,
-    RequestEmailVerification, RequestPasswordReset, RequireOrganizationRole, RevokeApiKey,
-    RevokeDeviceSession, RevokeDeviceSessionResult, RevokeOneTimeToken, RevokeOtherSessions,
-    RevokeSession, RevokeUserSession, RevokeUserSessions, SendEmailOtp, SendMagicLink,
-    SendPhoneNumberOtp, SetActiveDeviceSession, SetActiveOrganization, SetMemberRole, SetUserRole,
-    SignInAnonymous, SignInOAuthAccount, SignInUsername, SignOut, StartTwoFactorSetup,
-    StopImpersonating, UnbanUser, UnlinkOAuthAccount, UpdateApiKey, UpdateOrganizationRole,
-    UpdatePhoneNumber, UpdateProfile, UpdateTeam, UpdateUsername, VerificationToken, VerifyApiKey,
-    VerifyCaptcha, VerifyDeviceCode, VerifyEmail, VerifyEmailOtp, VerifyJwt, VerifyMagicLink,
-    VerifyOAuthState, VerifyOneTimeToken, VerifyPhoneNumberOtp, VerifySiweMessage, VerifyTwoFactor,
+    OrganizationBundle, OrganizationMember, PasskeyChallenge, PasswordBreachCheck,
+    PhoneNumberVerification, PollDeviceToken, PreviewInvitation, PreviewInviteLink,
+    RedeemInviteLink, RefreshOAuthToken, RefreshSession, RegisterOidcClient, RejectInvitation,
+    RemoveMember, RemoveTeamMember, RemoveUser, RequestEmailVerification, RequestPasswordReset,
+    RequireOrganizationRole, RevokeApiKey, RevokeDeviceSession, RevokeDeviceSessionResult,
+    RevokeInviteLink, RevokeOneTimeToken, RevokeOtherSessions, RevokeSession, RevokeUserSession,
+    RevokeUserSessions, SendEmailOtp, SendMagicLink, SendPhoneNumberOtp, SetActiveDeviceSession,
+    SetActiveOrganization, SetMemberRole, SetUserRole, SignInAnonymous, SignInOAuthAccount,
+    SignInUsername, SignOut, StartTwoFactorSetup, StopImpersonating, TwoFactorEnrollment,
+    UnbanUser, UnlinkAgent, UnlinkOAuthAccount, UpdateApiKey, UpdateOrganization,
+    UpdateOrganizationRole, UpdatePhoneNumber, UpdateProfile, UpdateTeam, UpdateUsername,
+    VerificationToken, VerifyApiKey, VerifyCaptcha, VerifyDeviceCode, VerifyEmail, VerifyEmailOtp,
+    VerifyJwt, VerifyMagicLink, VerifyOAuthState, VerifyOneTimeToken, VerifyPhoneNumberOtp,
+    VerifySiweMessage, VerifyTwoFactor,
 };
 pub use config::{
     ArchitectAuthBuilder, ArchitectAuthConfig, BreachedPasswordConfig,
@@ -94,6 +103,7 @@ pub struct ArchitectAuth<S> {
 }
 
 impl ArchitectAuth<()> {
+    #[must_use]
     pub fn builder() -> ArchitectAuthBuilder<()> {
         ArchitectAuthBuilder::new(())
     }

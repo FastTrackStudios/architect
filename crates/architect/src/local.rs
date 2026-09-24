@@ -43,10 +43,11 @@ use crate::memory_link::memory_link_pair;
 #[cfg(target_arch = "wasm32")]
 use crate::platform::spawn;
 
-/// A `LayerRouter` served in-process. Each [`establish`](LocalServer::establish)
-/// opens a fresh in-memory link + acceptor task (one client per session,
-/// mirroring the remote per-service connection shape); the task is
-/// aborted when the [`Scope`] closes.
+/// A `LayerRouter` served in-process.
+///
+/// Each [`establish`](LocalServer::establish) opens a fresh in-memory link +
+/// acceptor task (one client per session, mirroring the remote per-service
+/// connection shape); the task is aborted when the [`Scope`] closes.
 #[derive(Clone)]
 pub struct LocalServer {
     router: LayerRouter,
@@ -55,7 +56,7 @@ pub struct LocalServer {
 
 impl LocalServer {
     /// Serve an already-built router in-process.
-    pub fn serve(router: LayerRouter, scope: Arc<Scope>) -> Self {
+    pub const fn serve(router: LayerRouter, scope: Arc<Scope>) -> Self {
         Self { router, scope }
     }
 
@@ -110,11 +111,12 @@ where
     LocalServer::serve(backend.into_router(), Arc::clone(scope))
 }
 
-/// Lane client that captures the raw [`vox_core::Caller`] (plus its
-/// connection handle) — for consumers that construct many per-service
-/// clients over one shared caller (client registries,
-/// `daw_control::Daw`-style facades) instead of establishing one
-/// typed client.
+/// Lane client that captures the raw [`vox_core::Caller`].
+///
+/// Keeps the connection handle alongside it, for consumers that construct
+/// many per-service clients over one shared caller (client registries,
+/// `daw_control::Daw`-style facades) instead of establishing one typed
+/// client.
 #[derive(Clone)]
 pub struct RawLaneCaller {
     /// The established lane's caller.

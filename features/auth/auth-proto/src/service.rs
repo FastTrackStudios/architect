@@ -23,11 +23,13 @@ use crate::email_change::AuthEmailChange;
 use crate::{AuthFlowError, AuthSessionBundle, AuthUser, SignInEmailPassword, SignUpEmailPassword};
 use uuid::Uuid;
 
-/// Flattened membership row for the org-members enumeration RPC: the
-/// member's `role` joined with the user's display `name` + `email`, so
-/// clients (rates editor, owner dashboard) get a ready-to-render list
+/// Flattened membership row for the org-members enumeration RPC.
+///
+/// The member's `role` joined with the user's display `name` + `email`,
+/// so clients (rates editor, owner dashboard) get a ready-to-render list
 /// without a second per-user round-trip.
-#[derive(Clone, Debug, PartialEq, ::facet::Facet)]
+#[architect::wire]
+#[derive(Eq)]
 pub struct OrgMember {
     pub user_id: Uuid,
     pub name: String,
@@ -43,7 +45,8 @@ pub struct OrgMember {
 pub const AUTHORIZATION_METADATA_KEY: &str = "authorization";
 
 /// Wire form of a self-service email change.
-#[derive(Clone, Debug, PartialEq, Eq, ::facet::Facet)]
+#[architect::wire]
+#[derive(Eq)]
 pub struct ChangeEmailRequest {
     /// Identifies the account; the change always applies to the
     /// session's own user.
@@ -52,7 +55,8 @@ pub struct ChangeEmailRequest {
 }
 
 /// Wire form of a self-service password change.
-#[derive(Clone, Debug, PartialEq, Eq, ::facet::Facet)]
+#[architect::wire]
+#[derive(Eq)]
 pub struct ChangePasswordRequest {
     /// Identifies the account. The change always applies to the session's
     /// own user — there is no target parameter, by design.
@@ -64,7 +68,8 @@ pub struct ChangePasswordRequest {
 }
 
 /// Wire form of an operator-performed email migration.
-#[derive(Clone, Debug, PartialEq, Eq, ::facet::Facet)]
+#[architect::wire]
+#[derive(Eq)]
 pub struct MigrateUserEmailRequest {
     /// Authorizes the call AND identifies who to record as `changed_by`.
     pub session_token: String,
@@ -77,34 +82,41 @@ pub struct MigrateUserEmailRequest {
 }
 
 /// Wire form of a history read.
-#[derive(Clone, Debug, PartialEq, Eq, ::facet::Facet)]
+#[architect::wire]
+#[derive(Eq)]
 pub struct EmailHistoryRequest {
     pub session_token: String,
     pub user_id: uuid::Uuid,
 }
 
 // r[impl auth.transport.vox-schema]
-#[architect::rpc]
+#[architect::service]
 pub trait AuthService {
     /// Create an email/password user and sign them in. Returns the
     /// freshly issued session bundle (the raw token is only returned
     /// here — only its hash is stored).
+    /// `/auth/sign-up/email` — the way in nests, so `…/google` and
+    /// `…/phone` can sit beside it rather than each inventing a name.
+    #[http(path = "sign-up/email")]
     async fn sign_up_email_password(
         &self,
         input: SignUpEmailPassword,
     ) -> Result<AuthSessionBundle, AuthFlowError>;
 
     /// Password sign-in for an existing user.
+    #[http(path = "sign-in/email")]
     async fn sign_in_email_password(
         &self,
         input: SignInEmailPassword,
     ) -> Result<AuthSessionBundle, AuthFlowError>;
 
     /// Validate a session token, returning the matching user + session.
+    #[http(path = "session")]
     async fn current_session(&self, token: String) -> Result<AuthSessionBundle, AuthFlowError>;
 
     /// Rotate a valid session: issue a fresh token with a new expiry
     /// and deactivate the old one.
+    #[http(path = "refresh")]
     async fn refresh_session(&self, token: String) -> Result<AuthSessionBundle, AuthFlowError>;
 
     /// Resolve a session token to its user — `current_session` minus
@@ -186,8 +198,8 @@ pub trait AuthService {
 }
 
 /// Wire form of a self-service profile change.
-#[derive(Clone, Debug, PartialEq, Eq, ::facet::Facet)]
-#[repr(C)]
+#[architect::wire]
+#[derive(Eq)]
 pub struct UpdateProfileRequest {
     /// Identifies the account; the change always applies to the
     /// session's own user.

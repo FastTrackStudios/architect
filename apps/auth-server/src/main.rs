@@ -1,4 +1,4 @@
-//! `auth-server` — run the FastTrackStudio identity server.
+//! `auth-server` — run the `FastTrackStudio` identity server.
 //!
 //! Configuration is entirely environmental, so the same image serves
 //! every environment. See [`auth_server::config`] for the full list;
@@ -9,10 +9,9 @@ use auth_server::{ServerConfig, server};
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-    architect::host::init_tracing("info,auth_server=debug");
-    architect::host::install_panic_logger();
+    architect::host::boot("info,auth_server=debug");
 
-    let config = ServerConfig::from_env()?;
+    let config = ServerConfig::load()?;
     tracing::info!(
         base_url = %config.base_url,
         issuer = %config.issuer(),

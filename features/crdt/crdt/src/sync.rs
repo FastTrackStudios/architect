@@ -166,6 +166,7 @@ pub struct DocSyncHost {
 impl DocSyncHost {
     /// Wrap a canonical doc for serving. Server-side writes to the same
     /// doc (in-process repos, other transports) broadcast automatically.
+    #[must_use]
     pub fn new(doc_id: Uuid, doc: CrdtDoc) -> Self {
         use std::sync::atomic::{AtomicU32, Ordering};
         // Unbounded: update bytes must never be dropped (unlike state-
@@ -196,7 +197,7 @@ impl DocSyncHost {
         let every = compact_every.clone();
         let trigger = compact_tx.clone();
         let sub = doc.loro().subscribe_local_update(Box::new(move |bytes| {
-            bridge.publish(SyncDown::Update(bytes.to_vec()));
+            bridge.publish(SyncDown::Update(bytes.clone()));
             if should_compact(&count, every.load(Ordering::Relaxed)) {
                 let _ = trigger.send(());
             }
@@ -220,6 +221,7 @@ impl DocSyncHost {
     /// [`CrdtDoc::compact`]) so server storage stays bounded no matter
     /// how chatty the doc is. Counts both server-local commits and
     /// updates relayed from replicas.
+    #[must_use]
     pub fn with_compaction(self, n: u32) -> Self {
         self.compact_every
             .store(n, std::sync::atomic::Ordering::Relaxed);
@@ -231,19 +233,22 @@ impl DocSyncHost {
     /// log. Right for long-lived docs where a new device doesn't need
     /// to merge against months of edits. Reconnecting replicas (non-
     /// empty version vector) are unaffected and still get exact deltas.
-    pub fn with_shallow_bootstrap(mut self) -> Self {
+    #[must_use]
+    pub const fn with_shallow_bootstrap(mut self) -> Self {
         self.shallow_bootstrap = true;
         self
     }
 
     /// The canonical doc (for mounting entity repos on the server).
-    pub fn doc(&self) -> &CrdtDoc {
+    #[must_use]
+    pub const fn doc(&self) -> &CrdtDoc {
         &self.doc
     }
 
     /// How many sync sessions are currently attached. A session counts
     /// from a successful [`DocSync::sync`] until its up-channel closes
     /// (i.e. the replica's connection tore down).
+    #[must_use]
     pub fn active_sessions(&self) -> usize {
         self.sessions.load(std::sync::atomic::Ordering::Acquire)
     }
@@ -277,7 +282,7 @@ fn should_compact(count: &std::sync::atomic::AtomicU32, every: u32) -> bool {
     if every == 0 {
         return false;
     }
-    if count.fetch_add(1, Ordering::Relaxed) + 1 < every {
+    if count.fetch_add(1, Ordering::Relaxed).saturating_add(1) < every {
         return false;
     }
     count.store(0, Ordering::Relaxed);
@@ -285,9 +290,10 @@ fn should_compact(count: &std::sync::atomic::AtomicU32, every: u32) -> bool {
 }
 
 /// One attached sync session, produced by [`DocSyncHost::attach`] and
-/// driven to completion by [`SyncSession::pump`]. Owns the session's
-/// `SessionGuard`, so the session is counted from the attach (inside
-/// whatever lock the caller holds — see
+/// driven to completion by [`SyncSession::pump`].
+///
+/// Owns the session's `SessionGuard`, so the session is counted from
+/// the attach (inside whatever lock the caller holds — see
 /// [`DocRegistry`](crate::registry::DocRegistry)) until the pump ends.
 #[cfg(not(target_arch = "wasm32"))]
 pub struct SyncSession {
@@ -311,7 +317,7 @@ impl SyncSession {
     pub async fn pump(self, mut up: vox::Rx<Vec<u8>>) {
         while let Ok(Some(update)) = up.recv().await {
             let mut owned: Option<Vec<u8>> = None;
-            let _ = update.map(|u| owned = Some(u.clone()));
+            let _ = update.map(|u| owned = Some(u));
             let Some(bytes) = owned else { continue };
             if let Err(e) = self.doc.apply_remote_durable(self.doc_id, &bytes).await {
                 tracing::warn!("doc-sync: dropping bad update: {e}");
@@ -335,6 +341,9 @@ impl DocSyncHost {
     /// can attach under its lock (session counted before any sweep can
     /// re-check) and pump **after** releasing it — a held-open call must
     /// never keep a lock.
+    // `from` by value: it is the caller's version-vector buffer, handed
+    // over rather than borrowed, and the session may outlive the call.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn attach(
         &self,
         doc_id: Uuid,
@@ -413,11 +422,12 @@ impl DocSync for DocSyncHost {
 
 // ── Presence host ───────────────────────────────────────────────────────
 
-/// The server side of one doc's presence channel: a mirror
-/// [`EphemeralStore`](crate::awareness::EphemeralStore) (so late
-/// joiners get the current picture on attach) + sliding fan-out
-/// (presence is state-shaped — under pressure, dropping a stale cursor
-/// position in favor of a newer one is correct).
+/// The server side of one doc's presence channel.
+///
+/// A mirror [`EphemeralStore`](crate::awareness::EphemeralStore) — so late
+/// joiners get the current picture on attach — plus sliding fan-out:
+/// presence is state-shaped, so under pressure, dropping a stale cursor
+/// position in favour of a newer one is correct.
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone)]
 pub struct PresenceHost {
@@ -435,6 +445,7 @@ pub struct PresenceHost {
 impl PresenceHost {
     /// `timeout_ms` — how long a peer's state survives without an
     /// update before it's considered gone (Loro's ephemeral timeout).
+    #[must_use]
     pub fn new(doc_id: Uuid, timeout_ms: i64) -> Self {
         let store = crate::awareness::EphemeralStore::new(timeout_ms);
         let hub = architect::PubSub::sliding(64);
@@ -458,13 +469,15 @@ impl PresenceHost {
     }
 
     /// The mirror store (e.g. for server-side "who's online" reads).
-    pub fn store(&self) -> &crate::awareness::EphemeralStore {
+    #[must_use]
+    pub const fn store(&self) -> &crate::awareness::EphemeralStore {
         &self.store
     }
 
     /// How many presence sessions are currently attached — counted from
     /// a successful [`DocPresence::presence`] until the peer's up-channel
     /// closes.
+    #[must_use]
     pub fn active_sessions(&self) -> usize {
         self.sessions.load(std::sync::atomic::Ordering::Acquire)
     }
@@ -489,7 +502,7 @@ impl PresenceSession {
     pub async fn pump(self, mut up: vox::Rx<Vec<u8>>) {
         while let Ok(Some(update)) = up.recv().await {
             let mut owned: Option<Vec<u8>> = None;
-            let _ = update.map(|u| owned = Some(u.clone()));
+            let _ = update.map(|u| owned = Some(u));
             let Some(bytes) = owned else { continue };
             if let Err(e) = self.store.apply(&bytes) {
                 tracing::warn!("doc-presence: dropping bad update: {e}");
@@ -548,10 +561,11 @@ impl DocPresence for PresenceHost {
 
 /// One peer's presence: a cloneable handle for reading/writing the
 /// local [`EphemeralStore`](crate::awareness::EphemeralStore), plus a
-/// [`PresenceDriver`] that runs the wire session. Convention: each
-/// peer writes its own key(s) (e.g. its client id); everyone reads
-/// `states()` for the full picture. Values expire on their own after
-/// `timeout_ms` without updates.
+/// [`PresenceDriver`] that runs the wire session.
+///
+/// Convention: each peer writes its own key(s) (e.g. its client id);
+/// everyone reads `states()` for the full picture. Values expire on
+/// their own after `timeout_ms` without updates.
 #[derive(Clone)]
 pub struct PresencePeer {
     store: crate::awareness::EphemeralStore,
@@ -563,16 +577,17 @@ pub struct PresencePeer {
 impl PresencePeer {
     /// Build the handle + its driver. Spawn `driver.run(&client)` (and
     /// re-run on disconnect); keep the handle for reads/writes.
+    #[must_use]
     pub fn new(doc_id: Uuid, timeout_ms: i64) -> (Self, PresenceDriver) {
         let store = crate::awareness::EphemeralStore::new(timeout_ms);
         let (tx, outbox) = tokio::sync::mpsc::unbounded_channel();
         let sub = store.subscribe_local_updates(Box::new(move |bytes| {
-            let _ = tx.send(bytes.to_vec());
+            let _ = tx.send(bytes.clone());
             true
         }));
         let peer = Self {
             store,
-            local_keys: Arc::new(std::sync::Mutex::new(Default::default())),
+            local_keys: Arc::new(std::sync::Mutex::new(std::collections::BTreeSet::new())),
         };
         let driver = PresenceDriver {
             doc_id,
@@ -588,13 +603,13 @@ impl PresencePeer {
     /// connected, re-announced on reconnect, expired by timeout when
     /// this peer vanishes.
     pub fn set(&self, key: &str, value: impl Into<loro::LoroValue>) {
-        self.local_keys.lock().unwrap().insert(key.to_string());
+        architect::lock(&self.local_keys).insert(key.to_string());
         self.store.set(key, value);
     }
 
     /// Withdraw a key explicitly (leaving a page, signing out).
     pub fn delete(&self, key: &str) {
-        self.local_keys.lock().unwrap().remove(key);
+        architect::lock(&self.local_keys).remove(key);
         self.store.delete(key);
     }
 
@@ -602,6 +617,7 @@ impl PresencePeer {
     /// driver's housekeeping (never here — this is called from render
     /// paths, and `remove_outdated` fires subscriber events, which
     /// would feed the change-subscription back into another render).
+    #[must_use]
     pub fn states(&self) -> std::collections::HashMap<String, loro::LoroValue> {
         self.store.get_all_states().into_iter().collect()
     }
@@ -630,7 +646,8 @@ impl PresencePeer {
     }
 
     /// The underlying store — for change subscriptions.
-    pub fn store(&self) -> &crate::awareness::EphemeralStore {
+    #[must_use]
+    pub const fn store(&self) -> &crate::awareness::EphemeralStore {
         &self.store
     }
 }
@@ -666,17 +683,9 @@ impl PresenceDriver {
 
         // Re-announce what we own — after a reconnect the server's
         // mirror may have expired us.
-        let keys: Vec<String> = self
-            .peer
-            .local_keys
-            .lock()
-            .unwrap()
+        let announcements: Vec<Vec<u8>> = architect::lock(&self.peer.local_keys)
             .iter()
-            .cloned()
-            .collect();
-        let announcements: Vec<Vec<u8>> = keys
-            .into_iter()
-            .map(|key| self.peer.store.encode(&key))
+            .map(|key| self.peer.store.encode(key))
             .filter(|encoded| !encoded.is_empty())
             .collect();
 
@@ -694,7 +703,7 @@ impl PresenceDriver {
             }
             // Outbox closed (the peer handle was dropped) — the session
             // stays up for reads until the call or down side ends it.
-            std::future::pending::<()>().await
+            std::future::pending::<()>().await;
         };
 
         let store = self.peer.store.clone();
@@ -703,7 +712,7 @@ impl PresenceDriver {
                 match down_rx.recv().await {
                     Ok(Some(update)) => {
                         let mut owned: Option<Vec<u8>> = None;
-                        let _ = update.map(|u| owned = Some(u.clone()));
+                        let _ = update.map(|u| owned = Some(u));
                         if let Some(bytes) = owned
                             && let Err(e) = store.apply(&bytes)
                         {
@@ -743,10 +752,12 @@ impl PresenceDriver {
 
 // ── Client ──────────────────────────────────────────────────────────────
 
-/// The client driver for one replica: connect a local [`CrdtDoc`] to a
-/// [`DocSyncClient`] and the doc becomes collaborative — local writes
-/// stream up, remote writes merge in, and a dropped connection just means
-/// the next [`SyncedDoc::run`] catches up by version vector.
+/// The client driver for one replica.
+///
+/// Connect a local [`CrdtDoc`] to a [`DocSyncClient`] and the doc becomes
+/// collaborative — local writes stream up, remote writes merge in, and a
+/// dropped connection just means the next [`SyncedDoc::run`] catches up by
+/// version vector.
 pub struct SyncedDoc {
     doc: CrdtDoc,
     doc_id: Uuid,
@@ -757,11 +768,12 @@ pub struct SyncedDoc {
 impl SyncedDoc {
     /// Wire a doc for syncing. Do this **once** per replica, before
     /// making local edits, so every local update lands in the outbox.
+    #[must_use]
     pub fn new(doc_id: Uuid, doc: CrdtDoc) -> Self {
         let (tx, outbox) = tokio::sync::mpsc::unbounded_channel();
         let sub = doc.loro().subscribe_local_update(Box::new(move |bytes| {
             // Buffered while offline; drained by `run` when connected.
-            let _ = tx.send(bytes.to_vec());
+            let _ = tx.send(bytes.clone());
             true
         }));
         Self {
@@ -773,7 +785,8 @@ impl SyncedDoc {
     }
 
     /// The local replica — hand out `doc().repo::<E>()` views to the UI.
-    pub fn doc(&self) -> &CrdtDoc {
+    #[must_use]
+    pub const fn doc(&self) -> &CrdtDoc {
         &self.doc
     }
 
@@ -818,7 +831,7 @@ impl SyncedDoc {
                     let mut owned: Option<SyncDown> = None;
                     match incoming {
                         Ok(Some(frame)) => {
-                            let _ = frame.map(|f| owned = Some(f.clone()));
+                            let _ = frame.map(|f| owned = Some(f));
                         }
                         _ => return Ok(()), // stream ended
                     }

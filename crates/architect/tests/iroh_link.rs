@@ -1,7 +1,21 @@
 //! Loopback test for the iroh transport: two endpoints on 127.0.0.1 with
 //! relays and address lookup disabled (`presets::Minimal`), dialing direct
 //! by full `EndpointAddr` — fully offline.
-
+// Integration-test crate: `clippy.toml`'s `allow-*-in-tests` only reaches
+// `#[test]` fns and `#[cfg(test)]` modules, so the fixture/mock `impl`
+// blocks below still trip the panic lints. See the same block in the
+// other `tests/` crates.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::large_stack_arrays,
+    clippy::future_not_send,
+    clippy::panic
+)]
 #![cfg(feature = "iroh")]
 
 use architect::iroh_link::{self, IrohLink, VOX_ALPN};

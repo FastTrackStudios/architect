@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod permissions_gate_tests;
 
-/// In-memory SQLite `ArchitectAuth` — the storage every vox round-trip
+/// In-memory `SQLite` `ArchitectAuth` — the storage every vox round-trip
 /// test mounts behind the service.
 #[cfg(test)]
 async fn open_auth() -> auth::ArchitectAuth<auth::backend_db::AuthSeaOrmStorage> {
@@ -25,6 +25,18 @@ async fn open_auth() -> auth::ArchitectAuth<auth::backend_db::AuthSeaOrmStorage>
 /// in a private module so the macro-emitted `pub` plumbing stays
 /// crate-internal.
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic,
+    clippy::float_cmp,
+    clippy::string_slice,
+    clippy::significant_drop_tightening,
+    clippy::too_many_lines
+)]
 mod session_probe {
     #[vox::service]
     pub trait SessionProbe {
@@ -47,9 +59,8 @@ mod session_probe {
 // r[verify auth.core.secret-minimum]
 #[test]
 fn builder_rejects_short_secret() {
-    let err = match auth::ArchitectAuth::builder().secret("short").build() {
-        Ok(_) => panic!("short secret should be rejected"),
-        Err(err) => err,
+    let Err(err) = auth::ArchitectAuth::builder().secret("short").build() else {
+        panic!("short secret should be rejected")
     };
     assert!(matches!(err, auth::config::ConfigError::SecretTooShort));
 }

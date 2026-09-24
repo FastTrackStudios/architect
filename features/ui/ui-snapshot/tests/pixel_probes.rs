@@ -10,6 +10,17 @@
 //! `background-color: oklch(...)` inline; row 1 (y=120) exercises
 //! `color: oklch(...)` + inline SVG `fill="currentColor"` (the
 //! `color_to_svg_compatible` substitution path in blitz-dom).
+// Integration-test crate: `clippy.toml`'s `allow-*-in-tests` only reaches
+// `#[test]` fns and `#[cfg(test)]` modules, so helper `impl`s and harness
+// setup below still trip the panic lints.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic
+)]
 
 use ui_snapshot::{SCENES, render_scene, sample_pixel};
 

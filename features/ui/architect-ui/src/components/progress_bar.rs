@@ -1,4 +1,4 @@
-//! ProgressBar — colored fill bar with optional label overlay.
+//! `ProgressBar` — colored fill bar with optional label overlay.
 //!
 //! Supports two orientations:
 //! - **Horizontal** (default): a compact bar with overlaid text label, used in song/section cards.
@@ -11,7 +11,7 @@ use architect_story_runtime::story;
 use dioxus::prelude::*;
 
 /// Orientation for the progress bar.
-#[derive(Clone, Copy, PartialEq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum ProgressBarOrientation {
     #[default]
     Horizontal,
@@ -64,6 +64,9 @@ pub fn ProgressBar(props: ProgressBarProps) -> Element {
     }
 }
 
+// By value: `props` mirrors the component's own `Props` type, so the
+// two render arms take the same shape the component received.
+#[allow(clippy::needless_pass_by_value)]
 fn render_horizontal(props: ProgressBarProps) -> Element {
     let height = props.height.as_deref().unwrap_or("3rem");
     let selected_class = if props.is_selected {
@@ -144,6 +147,7 @@ fn render_horizontal(props: ProgressBarProps) -> Element {
     }
 }
 
+#[allow(clippy::needless_pass_by_value)]
 fn render_vertical(props: ProgressBarProps) -> Element {
     let height = props.height.as_deref().unwrap_or("4rem");
 

@@ -11,9 +11,20 @@
 //! renderer plus a side-by-side composite for human review.
 //!
 //! Headless: spawns its own `Xvfb` instance (display `:99` by
-//! default). Required system tools: `Xvfb`, `xdotool`, ImageMagick
+//! default). Required system tools: `Xvfb`, `xdotool`, `ImageMagick`
 //! (`import`). The test will fail-fast with a useful error message if
 //! any are missing.
+// Integration-test crate: `clippy.toml`'s `allow-*-in-tests` only reaches
+// `#[test]` fns and `#[cfg(test)]` modules, so helper `impl`s and harness
+// setup below still trip the panic lints.
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic
+)]
 
 use architect_story_parity::{ParityConfig, ParityRunner, WryCaptureConfig};
 use architect_ui::prelude::*;

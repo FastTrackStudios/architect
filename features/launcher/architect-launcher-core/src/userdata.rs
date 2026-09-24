@@ -28,11 +28,15 @@ pub struct ItemData {
     pub user_tags: Vec<String>,
 }
 
-fn is_zero(v: &u8) -> bool {
+// By reference: these are `#[serde(skip_serializing_if = "...")]`
+// predicates, and serde's signature for those is `fn(&T) -> bool`.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+const fn is_zero(v: &u8) -> bool {
     *v == 0
 }
-fn is_false(v: &bool) -> bool {
-    !v
+#[allow(clippy::trivially_copy_pass_by_ref)]
+const fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 /// The full user data store.
@@ -43,13 +47,14 @@ pub struct UserDataStore {
     /// Timestamp of the last scan/session, for "recently added" detection.
     #[serde(default)]
     pub last_scan: Option<DateTime<Utc>>,
-    /// Variant groups: group_key -> [item_ids].
+    /// Variant groups: `group_key` -> [`item_ids`].
     /// Items in the same group auto-sync user tags.
     #[serde(default)]
     variant_groups: HashMap<String, Vec<String>>,
 }
 
 impl UserDataStore {
+    #[must_use]
     pub fn load(path: &PathBuf) -> Self {
         std::fs::read_to_string(path)
             .ok()
@@ -76,13 +81,15 @@ impl UserDataStore {
         self.entry(item_id).rating = rating.min(5);
     }
 
+    #[must_use]
     pub fn rating(&self, item_id: &str) -> u8 {
-        self.items.get(item_id).map(|d| d.rating).unwrap_or(0)
+        self.items.get(item_id).map_or(0, |d| d.rating)
     }
 
     /// Score boost from rating: 0-5 stars → 0-50 points.
+    #[must_use]
     pub fn rating_boost(&self, item_id: &str) -> f64 {
-        self.rating(item_id) as f64 * 10.0
+        f64::from(self.rating(item_id)) * 10.0
     }
 
     // ── Notes ──────────────────────────────────────────────
@@ -91,11 +98,9 @@ impl UserDataStore {
         self.entry(item_id).note = note.into();
     }
 
+    #[must_use]
     pub fn note(&self, item_id: &str) -> &str {
-        self.items
-            .get(item_id)
-            .map(|d| d.note.as_str())
-            .unwrap_or("")
+        self.items.get(item_id).map_or("", |d| d.note.as_str())
     }
 
     // ── Hidden ─────────────────────────────────────────────
@@ -110,6 +115,7 @@ impl UserDataStore {
         entry.hidden
     }
 
+    #[must_use]
     pub fn is_hidden(&self, item_id: &str) -> bool {
         self.items.get(item_id).is_some_and(|d| d.hidden)
     }
@@ -133,18 +139,23 @@ impl UserDataStore {
     }
 
     /// Get user tags for an item.
+    #[must_use]
     pub fn user_tags(&self, item_id: &str) -> &[String] {
         self.items
             .get(item_id)
-            .map(|d| d.user_tags.as_slice())
-            .unwrap_or(&[])
+            .map_or(&[][..], |d| d.user_tags.as_slice())
     }
 
     /// Replace a tag across all items (for merge/rename).
     pub fn replace_tag_all(&mut self, old_tag: &str, new_tag: &str) {
         for entry in self.items.values_mut() {
-            if let Some(pos) = entry.user_tags.iter().position(|t| t == old_tag) {
-                entry.user_tags[pos] = new_tag.to_string();
+            if let Some(slot) = entry
+                .user_tags
+                .iter()
+                .position(|t| t == old_tag)
+                .and_then(|pos| entry.user_tags.get_mut(pos))
+            {
+                new_tag.clone_into(slot);
             }
         }
     }
@@ -168,6 +179,7 @@ impl UserDataStore {
     }
 
     /// Get all item IDs in the same variant group.
+    #[must_use]
     pub fn variant_siblings(&self, item_id: &str) -> Vec<String> {
         for members in self.variant_groups.values() {
             if members.contains(&item_id.to_string()) {
@@ -200,6 +212,7 @@ impl UserDataStore {
     }
 
     /// Check if an item was first seen after the given timestamp.
+    #[must_use]
     pub fn is_new_since(&self, item_id: &str, since: DateTime<Utc>) -> bool {
         self.items
             .get(item_id)
@@ -208,11 +221,10 @@ impl UserDataStore {
     }
 
     /// Check if an item was first seen after `last_scan`.
+    #[must_use]
     pub fn is_recently_added(&self, item_id: &str) -> bool {
-        match self.last_scan {
-            Some(scan_time) => self.is_new_since(item_id, scan_time),
-            None => false, // First run — nothing is "new"
-        }
+        self.last_scan
+            .map_or(false, |scan_time| self.is_new_since(item_id, scan_time))
     }
 
     /// Update the scan timestamp to now. Call this at the end of provider setup.
@@ -222,20 +234,21 @@ impl UserDataStore {
 
     // ── Bulk / Export ──────────────────────────────────────
 
-    pub fn all_data(&self) -> &HashMap<String, ItemData> {
+    #[must_use]
+    pub const fn all_data(&self) -> &HashMap<String, ItemData> {
         &self.items
     }
 
     /// Merge data from another store (for import). Existing entries are updated,
-    /// new entries are added. Does NOT overwrite first_seen if already set.
-    pub fn merge(&mut self, other: &UserDataStore) {
+    /// new entries are added. Does NOT overwrite `first_seen` if already set.
+    pub fn merge(&mut self, other: &Self) {
         for (id, other_data) in &other.items {
             let entry = self.entry(id);
             if other_data.rating > 0 {
                 entry.rating = other_data.rating;
             }
             if !other_data.note.is_empty() {
-                entry.note = other_data.note.clone();
+                entry.note.clone_from(&other_data.note);
             }
             if other_data.hidden {
                 entry.hidden = true;
@@ -248,11 +261,12 @@ impl UserDataStore {
 }
 
 pub fn default_userdata_path() -> PathBuf {
-    let base = std::env::var("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
+    let base = std::env::var("XDG_DATA_HOME").map_or_else(
+        |_| {
             let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
             PathBuf::from(home).join(".local/share")
-        });
+        },
+        PathBuf::from,
+    );
     base.join("dioxus-launcher").join("userdata.json")
 }

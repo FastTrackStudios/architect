@@ -1,0 +1,24 @@
+/*
+ * The sheet these pages are drawn with.
+ *
+ * Why this crate compiles its own rather than injecting
+ * `architect_ui::UTILITIES_CSS`: that sheet contains only the classes
+ * architect-ui's *own* components use. A page here that reaches for a
+ * class none of them happens to use — `md:flex`, `max-w-3xl` — gets
+ * nothing, and Tailwind does not warn: the rule is simply absent and
+ * the element renders unstyled. That is how the settings rail first
+ * disappeared.
+ *
+ * So this input scans both trees and produces one complete sheet. The
+ * "a git dependency has no stable path" problem that forced
+ * architect-ui to embed its own does not apply in-tree, where the
+ * relative path below resolves from anywhere in the workspace.
+ *
+ * Rebuild with `just auth-ui-css` after using a new class in either
+ * this crate or a component it renders.
+ */
+@import "tailwindcss";
+@import "../../ui/architect-ui/assets/fts-theme.css";
+
+@source "./src/**/*.rs";
+@source "../../ui/architect-ui/src/**/*.rs";

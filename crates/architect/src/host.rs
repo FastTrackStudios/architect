@@ -19,8 +19,25 @@ use axum::routing::get;
 
 use crate::LayerRouter;
 
-/// Build a multi-thread tokio runtime and block on `fut` until it completes —
-/// the entry point of an engine binary (`fn run() { host::block_on(main()) }`).
+/// The vox WebSocket subprotocol `/vox` selects.
+///
+/// Every client offers it, and a browser client that offers a subprotocol
+/// gets no connection at all unless the server echoes it — so this is not
+/// cosmetic.
+pub const VOX_SUBPROTOCOL: &str = "vox.v1";
+
+/// Build a multi-thread tokio runtime and block on `fut` until it completes.
+///
+/// The entry point of an engine binary
+/// (`fn run() { host::block_on(main()) }`).
+///
+/// # Panics
+///
+/// If the tokio runtime cannot be built — the OS refused to spawn worker
+/// threads or allocate their stacks. There is no engine to run without
+/// it, and no caller that could do anything with the error, so this one
+/// stays a panic and says so.
+#[allow(clippy::expect_used)]
 pub fn block_on<F: Future>(fut: F) -> F::Output {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -45,6 +62,13 @@ pub fn init_tracing(default_filter: &str) {
                 .unwrap_or_else(|_| default.into()),
         )
         .init();
+}
+
+/// The two calls every binary makes first: tracing from `RUST_LOG` (or
+/// `default_filter`) and the panic logger.
+pub fn boot(default_filter: &str) {
+    init_tracing(default_filter);
+    install_panic_logger();
 }
 
 /// Install a panic hook that logs the panicking thread + a backtrace via
@@ -80,6 +104,7 @@ pub struct EngineHost {
     addr: String,
     web: Option<WebBundle>,
     extra: Option<Router>,
+    finish: Vec<Box<dyn FnOnce(Router) -> Router + Send>>,
     cross_origin_isolated: bool,
     #[cfg(feature = "iroh")]
     iroh: Option<IrohConfig>,
@@ -100,15 +125,35 @@ impl EngineHost {
             cross_origin_isolated: false,
             web: None,
             extra: None,
+            finish: Vec::new(),
             #[cfg(feature = "iroh")]
             iroh: None,
         }
+    }
+
+    /// Mount a plugin: any axum router — a generated HTTP face
+    /// (`layers![…].provide_http(&backend)`), hosted pages, an OAuth
+    /// flow, health probes. Alias of [`extend`](Self::extend) that reads
+    /// as what it is at the call site.
+    #[must_use]
+    pub fn plugin(self, routes: Router) -> Self {
+        self.extend(routes)
+    }
+
+    /// Wrap the assembled app once everything is mounted — the place for
+    /// outermost tower layers (CORS, tracing, timeouts) that must see
+    /// every route, including the SPA fallback. Applied in call order.
+    #[must_use]
+    pub fn finish(mut self, wrap: impl FnOnce(Router) -> Router + Send + 'static) -> Self {
+        self.finish.push(Box::new(wrap));
+        self
     }
 
     /// Merge extra axum routes onto the host app (e.g. an HTTP bridge for
     /// clients that can't speak vox over WebSocket — watchOS remotes). The
     /// routes are mounted alongside `/health` + `/vox`, before the SPA
     /// fallback, so they win over the web bundle.
+    #[must_use]
     pub fn extend(mut self, routes: Router) -> Self {
         self.extra = Some(match self.extra {
             Some(existing) => existing.merge(routes),
@@ -121,6 +166,7 @@ impl EngineHost {
     /// `key_path` (stable id across restarts); the endpoint id is written to
     /// `id_path` when given, for other devices/agents to read.
     #[cfg(feature = "iroh")]
+    #[must_use]
     pub fn iroh(mut self, key_path: PathBuf, id_path: Option<PathBuf>) -> Self {
         self.iroh = Some(IrohConfig { key_path, id_path });
         self
@@ -128,6 +174,7 @@ impl EngineHost {
 
     /// Serve `bundle` as the HTTP fallback (the browser remote). `None` leaves
     /// the host headless (only `/health` + `/vox`).
+    #[must_use]
     pub fn web(mut self, bundle: Option<WebBundle>) -> Self {
         self.web = bundle;
         self
@@ -149,90 +196,150 @@ impl EngineHost {
     /// CORP/CORS. Turn it on only for a host whose assets it owns (the
     /// engine serves its own bundle, so it qualifies); a host embedding
     /// third-party iframes or CDN assets must not.
-    pub fn cross_origin_isolated(mut self, on: bool) -> Self {
+    #[must_use]
+    pub const fn cross_origin_isolated(mut self, on: bool) -> Self {
         self.cross_origin_isolated = on;
         self
     }
 
+    /// The assembled axum app — `/health` + `/vox` + every plugin + the
+    /// SPA fallback + the `finish` layers — without binding a listener.
+    /// What an in-process test drives with `tower::ServiceExt::oneshot`,
+    /// and what [`serve`](Self::serve) binds. The iroh side, if
+    /// configured, is not started here: it needs a running server task.
+    #[must_use]
+    pub fn into_app(self) -> Router {
+        let (app, _iroh) = self.assemble();
+        app
+    }
+
+    #[cfg(feature = "iroh")]
+    fn assemble(self) -> (Router, Option<(LayerRouter, IrohConfig)>) {
+        let iroh = self.iroh.map(|cfg| (self.router.clone(), cfg));
+        (
+            assemble_app(
+                self.router,
+                self.web,
+                self.extra,
+                self.finish,
+                self.cross_origin_isolated,
+            ),
+            iroh,
+        )
+    }
+
+    #[cfg(not(feature = "iroh"))]
+    fn assemble(self) -> (Router, Option<()>) {
+        (
+            assemble_app(
+                self.router,
+                self.web,
+                self.extra,
+                self.finish,
+                self.cross_origin_isolated,
+            ),
+            None,
+        )
+    }
+
     /// Bind and serve until the server dies. Never returns on success.
-    pub async fn serve(self) {
-        let router = self.router;
+    pub async fn serve(self) -> std::io::Result<()> {
+        let addr = self.addr.clone();
+        let (app, iroh) = self.assemble();
 
         #[cfg(feature = "iroh")]
-        if let Some(cfg) = self.iroh {
-            tokio::spawn(serve_iroh(router.clone(), cfg));
+        if let Some((router, cfg)) = iroh {
+            tokio::spawn(serve_iroh(router, cfg));
         }
+        #[cfg(not(feature = "iroh"))]
+        let _ = iroh;
 
-        let vox_router = router;
-        let mut app = Router::new()
-            .route("/health", get(|| async { "ok" }))
-            .route(
-                "/vox",
-                get(move |ws: WebSocketUpgrade| {
-                    let router = vox_router.clone();
-                    async move {
-                        ws.on_upgrade(move |socket| crate::axum_ws::serve_router(socket, router))
-                            .into_response()
-                    }
-                }),
-            );
-
-        if let Some(extra) = self.extra {
-            app = app.merge(extra);
-        }
-
-        match self.web {
-            Some(WebBundle::Dir(dir)) => {
-                use tower_http::services::{ServeDir, ServeFile};
-                let index = dir.join("index.html");
-                app = app.fallback_service(ServeDir::new(&dir).fallback(ServeFile::new(index)));
-                tracing::info!("web remote fallback: dir {}", dir.display());
-            }
-            Some(WebBundle::Embedded(dir)) => {
-                app = app.fallback(get(move |uri: axum::http::Uri| async move {
-                    embedded_asset(dir, uri)
-                }));
-                tracing::info!("web remote fallback: embedded bundle");
-            }
-            None => {
-                tracing::warn!("no web bundle — serving /health + /vox only");
-            }
-        }
-
-        if self.cross_origin_isolated {
-            use axum::http::{HeaderName, HeaderValue};
-            use tower_http::set_header::SetResponseHeaderLayer;
-            // `http` has no constants for these three, so name them here.
-            const COOP: HeaderName = HeaderName::from_static("cross-origin-opener-policy");
-            const COEP: HeaderName = HeaderName::from_static("cross-origin-embedder-policy");
-            const CORP: HeaderName = HeaderName::from_static("cross-origin-resource-policy");
-            // `overriding` (not `if_not_present`): isolation is all-or-
-            // nothing — one response without the pair and the whole page
-            // loses `crossOriginIsolated`, taking shared memory with it.
-            // CORP same-origin rides along so the bundle's own assets stay
-            // loadable under require-corp.
-            app = app
-                .layer(SetResponseHeaderLayer::overriding(
-                    COOP,
-                    HeaderValue::from_static("same-origin"),
-                ))
-                .layer(SetResponseHeaderLayer::overriding(
-                    COEP,
-                    HeaderValue::from_static("require-corp"),
-                ))
-                .layer(SetResponseHeaderLayer::overriding(
-                    CORP,
-                    HeaderValue::from_static("same-origin"),
-                ));
-            tracing::info!("cross-origin isolated (COOP/COEP): SharedArrayBuffer enabled");
-        }
-
-        let listener = tokio::net::TcpListener::bind(&self.addr)
-            .await
-            .unwrap_or_else(|e| panic!("bind {}: {e}", self.addr));
-        tracing::info!("engine serving ws://{}/vox", self.addr);
-        axum::serve(listener, app).await.expect("axum serve");
+        // A port already in use is an ordinary operational condition —
+        // another engine is running, or the port is privileged. Returning
+        // it lets the binary print something useful and pick an exit code,
+        // instead of dying with a panic backtrace in the middle of startup.
+        let listener = tokio::net::TcpListener::bind(&addr).await?;
+        tracing::info!("engine serving ws://{addr}/vox");
+        axum::serve(listener, app).await
     }
+}
+
+fn assemble_app(
+    router: LayerRouter,
+    web: Option<WebBundle>,
+    extra: Option<Router>,
+    finish: Vec<Box<dyn FnOnce(Router) -> Router + Send>>,
+    cross_origin_isolated: bool,
+) -> Router {
+    let vox_router = router;
+    let mut app = Router::new()
+        .route("/health", get(|| async { "ok" }))
+        .route(
+            "/vox",
+            get(move |ws: WebSocketUpgrade| {
+                let router = vox_router.clone();
+                async move {
+                    ws.protocols([VOX_SUBPROTOCOL])
+                        .on_upgrade(move |socket| crate::axum_ws::serve_router(socket, router))
+                        .into_response()
+                }
+            }),
+        );
+
+    if let Some(extra) = extra {
+        app = app.merge(extra);
+    }
+
+    match web {
+        Some(WebBundle::Dir(dir)) => {
+            use tower_http::services::{ServeDir, ServeFile};
+            let index = dir.join("index.html");
+            app = app.fallback_service(ServeDir::new(&dir).fallback(ServeFile::new(index)));
+            tracing::info!("web remote fallback: dir {}", dir.display());
+        }
+        Some(WebBundle::Embedded(dir)) => {
+            app = app.fallback(get(move |uri: axum::http::Uri| async move {
+                embedded_asset(dir, &uri)
+            }));
+            tracing::info!("web remote fallback: embedded bundle");
+        }
+        None => {
+            tracing::debug!("no web bundle — serving /health + /vox + plugins");
+        }
+    }
+
+    if cross_origin_isolated {
+        use axum::http::{HeaderName, HeaderValue};
+        use tower_http::set_header::SetResponseHeaderLayer;
+        // `http` has no constants for these three, so name them here.
+        const COOP: HeaderName = HeaderName::from_static("cross-origin-opener-policy");
+        const COEP: HeaderName = HeaderName::from_static("cross-origin-embedder-policy");
+        const CORP: HeaderName = HeaderName::from_static("cross-origin-resource-policy");
+        // `overriding` (not `if_not_present`): isolation is all-or-
+        // nothing — one response without the pair and the whole page
+        // loses `crossOriginIsolated`, taking shared memory with it.
+        // CORP same-origin rides along so the bundle's own assets stay
+        // loadable under require-corp.
+        app = app
+            .layer(SetResponseHeaderLayer::overriding(
+                COOP,
+                HeaderValue::from_static("same-origin"),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                COEP,
+                HeaderValue::from_static("require-corp"),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                CORP,
+                HeaderValue::from_static("same-origin"),
+            ));
+        tracing::info!("cross-origin isolated (COOP/COEP): SharedArrayBuffer enabled");
+    }
+
+    for wrap in finish {
+        app = wrap(app);
+    }
+    app
 }
 
 #[cfg(feature = "iroh")]
@@ -263,7 +370,7 @@ async fn serve_iroh(router: LayerRouter, cfg: IrohConfig) {
 
 /// Serve an embedded SPA bundle from memory: an exact file match, else
 /// `index.html` (client-side routing). Content type is inferred from the path.
-fn embedded_asset(dir: &'static include_dir::Dir<'static>, uri: axum::http::Uri) -> Response {
+fn embedded_asset(dir: &'static include_dir::Dir<'static>, uri: &axum::http::Uri) -> Response {
     let path = uri.path().trim_start_matches('/');
     let (path, file) = match dir.get_file(path) {
         Some(f) if !path.is_empty() => (path, f),

@@ -56,11 +56,14 @@ pub fn use_field<T: 'static>(
     let initial = initial.into();
     let value = use_signal({
         let initial = initial.clone();
-        move || initial.clone()
+        move || initial
     });
-    let initial_sig = use_signal(move || initial.clone());
+    let initial_sig = use_signal(move || initial);
     let error = use_signal(|| None);
     let touched = use_signal(|| false);
+    // `as Parser<T>` is an unsizing coercion to `Rc<dyn Fn(..)>`, not a
+    // numeric cast.
+    #[allow(clippy::as_conversions)]
     let parser = use_hook(|| CopyValue::new(Rc::new(parser) as Parser<T>));
     Field {
         value,
@@ -74,6 +77,7 @@ pub fn use_field<T: 'static>(
 impl<T: 'static> Field<T> {
     /// The current raw (string-encoded) value. Bind this to the input's
     /// `value` attribute.
+    #[must_use]
     pub fn value(&self) -> String {
         self.value.read().clone()
     }
@@ -117,6 +121,7 @@ impl<T: 'static> Field<T> {
     /// The error to display: shown only once the field is touched (or
     /// after [`show_error`](Self::show_error) on a submit attempt), so a
     /// pristine field doesn't shout at the user.
+    #[must_use]
     pub fn error(&self) -> Option<String> {
         if *self.touched.read() {
             self.error.read().clone()
@@ -126,16 +131,19 @@ impl<T: 'static> Field<T> {
     }
 
     /// True once the value differs from its initial value.
+    #[must_use]
     pub fn is_dirty(&self) -> bool {
         *self.value.read() != *self.initial.read()
     }
 
     /// True once the field has been blurred or force-shown.
+    #[must_use]
     pub fn is_touched(&self) -> bool {
         *self.touched.read()
     }
 
     /// True if the current value parses cleanly (does not mutate state).
+    #[must_use]
     pub fn is_valid(&self) -> bool {
         self.parsed().is_ok()
     }

@@ -5,14 +5,14 @@ use dioxus::prelude::*;
 use dioxus_primitives::separator::Separator;
 
 /// Orientation of the divider.
-#[derive(Clone, Copy, PartialEq, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum DividerOrientation {
     #[default]
     Horizontal,
     Vertical,
 }
 
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone, PartialEq, Eq)]
 pub struct DividerProps {
     #[props(default)]
     pub orientation: DividerOrientation,

@@ -123,3 +123,27 @@ against a server or an embedded backend. See
 | `store` | Also emit the Dioxus client state layer (store, typed hooks, optimistic mutations). Requires `repo`; gated on the consumer's `atom` + `vox` features; pk must be `Clone + Eq + Hash + FromStr` (`Uuid`, `String`, integer ids — `Copy` not required). |
 | `form` | Also emit typed form bindings (`<T>CreateFields` / `<T>UpdateFields`, `submit()` → the wire payload). Gated on the consumer's `form` feature. Field attrs: `form(optional)`, `form(label = "…")`. |
 | `events` | Also emit the live-event story: `<T>Event` enum, `<T>Events` subscribe trait, the `<T>Evented<R>` publish-through wrapper (its `Services` bundle mounts CRUD + the event feed), and — with `store` — the `use_<t>_events()` client hook that makes every store-rendered page live. Requires `repo`. Full walkthrough: [server push](@/architecture/streams.md). |
+
+## The attribute form
+
+`#[architect::entity(table_name = "…", repo)]` writes the derive line
+for you — `Entity`, `Facet`, `Clone`, `Debug`, `PartialEq`, the `fake`
+hook — so an entity is its fields and its options and nothing else.
+`#[architect::wire]` does the same for plain wire types (and adds
+`#[repr(u8)]` to enums). Add `Eq` / `Hash` / `Default` / `thiserror::Error`
+as extra `#[derive(…)]` lines when you want them.
+
+## What else comes out
+
+- **The HTTP face**: `<entity>_http::router`, `<Entity>RepoHttpClient`,
+  and with `events` the SSE feed — on the same scheme every
+  `#[architect::service]` uses; `#[architect(path = "…")]` sets the
+  prefix. See [the HTTP face](@/architecture/http.md).
+- **Clients that implement the repo trait**: `<Entity>RepoClient` (vox)
+  and `<Entity>RepoHttpClient` both `impl <Entity>Repo`, so code written
+  against the trait runs over any wire.
+- **The migration** (under `server`): `<Entity>Migration` creates the
+  table from the derived model plus an index per `filterable` /
+  `sortable` column. Collect them with
+  `architect::migrator!(Migrator: [NoteMigration, …])` and run
+  `architect::storage::migrate::<Migrator>(&db)`.

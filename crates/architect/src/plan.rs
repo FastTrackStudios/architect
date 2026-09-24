@@ -16,7 +16,7 @@
 //! // plan.build_order == ["config", "db", "service"]
 //! ```
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// One node: an id, the services it needs from others, and the services
 /// it produces.
@@ -87,14 +87,15 @@ pub enum LayerPlanError {
 }
 
 impl LayerPlanError {
+    #[must_use]
     pub fn diagnostic(&self) -> LayerDiagnostic {
         match self {
-            LayerPlanError::DuplicateNode { id } => LayerDiagnostic {
+            Self::DuplicateNode { id } => LayerDiagnostic {
                 code: "duplicate-node",
                 message: format!("two nodes share the id `{id}`"),
                 suggestion: "give each node a unique id".into(),
             },
-            LayerPlanError::ConflictingProvider {
+            Self::ConflictingProvider {
                 service,
                 first,
                 second,
@@ -105,14 +106,14 @@ impl LayerPlanError {
                 ),
                 suggestion: "have exactly one node provide each service (or merge the two)".into(),
             },
-            LayerPlanError::MissingProvider { node, service } => LayerDiagnostic {
+            Self::MissingProvider { node, service } => LayerDiagnostic {
                 code: "missing-provider",
                 message: format!("`{node}` requires `{service}`, but no node provides it"),
                 suggestion: format!(
                     "add a node that provides `{service}` (or drop the requirement)"
                 ),
             },
-            LayerPlanError::Cycle { nodes } => LayerDiagnostic {
+            Self::Cycle { nodes } => LayerDiagnostic {
                 code: "cycle",
                 message: format!("dependency cycle among: {}", nodes.join(" → ")),
                 suggestion: "break the cycle — one of these requirements must be removed".into(),
@@ -131,6 +132,7 @@ impl core::fmt::Display for LayerPlanError {
 impl std::error::Error for LayerPlanError {}
 
 impl LayerGraph {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -138,6 +140,7 @@ impl LayerGraph {
     // Builder-style append, not arithmetic — the `add` name reads well at
     // the call site (`.add(LayerNode::new(...))`).
     #[allow(clippy::should_implement_trait)]
+    #[must_use]
     pub fn add(mut self, node: LayerNode) -> Self {
         self.nodes.push(node);
         self
@@ -148,9 +151,9 @@ impl LayerGraph {
     /// missing provider → cycle).
     pub fn plan(&self) -> Result<LayerPlan, LayerPlanError> {
         // 1. Unique ids.
-        let mut seen = HashMap::new();
+        let mut seen = HashSet::new();
         for node in &self.nodes {
-            if seen.insert(node.id.as_str(), ()).is_some() {
+            if !seen.insert(node.id.as_str()) {
                 return Err(LayerPlanError::DuplicateNode {
                     id: node.id.clone(),
                 });
@@ -188,9 +191,12 @@ impl LayerGraph {
                     continue; // self-provision is not a dependency
                 }
                 dependents.entry(dep).or_default().push(node.id.as_str());
-                *indegree
-                    .get_mut(node.id.as_str())
-                    .expect("node in indegree") += 1;
+                // `entry` rather than `get_mut().expect()`: the map was
+                // seeded from `self.nodes`, so the key is always there —
+                // but a total expression states that instead of asserting
+                // it, and can never panic if step 3 is ever reordered.
+                let e = indegree.entry(node.id.as_str()).or_insert(0);
+                *e = e.saturating_add(1);
             }
         }
 
@@ -200,18 +206,22 @@ impl LayerGraph {
             .nodes
             .iter()
             .map(|n| n.id.as_str())
-            .filter(|id| indegree[id] == 0)
+            .filter(|id| indegree.get(id) == Some(&0))
             .collect();
         let mut build_order = Vec::with_capacity(self.nodes.len());
-        let mut idx = 0;
-        while idx < order.len() {
-            let id = order[idx];
-            idx += 1;
+        let mut idx = 0usize;
+        // `order` grows while we walk it, so this stays an index loop
+        // rather than an iterator — but the read is fallible-by-shape
+        // (`get`) and the cursor saturates, so neither can panic.
+        while let Some(&id) = order.get(idx) {
+            idx = idx.saturating_add(1);
             build_order.push(id.to_string());
             if let Some(deps) = dependents.get(id) {
                 for &d in deps {
-                    let e = indegree.get_mut(d).expect("dependent in indegree");
-                    *e -= 1;
+                    let Some(e) = indegree.get_mut(d) else {
+                        continue;
+                    };
+                    *e = e.saturating_sub(1);
                     if *e == 0 {
                         order.push(d);
                     }
@@ -224,8 +234,8 @@ impl LayerGraph {
                 .nodes
                 .iter()
                 .map(|n| n.id.as_str())
-                .filter(|id| indegree[id] > 0)
-                .map(|s| s.to_string())
+                .filter(|id| indegree.get(id).is_some_and(|&n| n > 0))
+                .map(std::string::ToString::to_string)
                 .collect();
             nodes.sort();
             return Err(LayerPlanError::Cycle { nodes });
@@ -236,6 +246,18 @@ impl LayerGraph {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic,
+    clippy::float_cmp,
+    clippy::string_slice,
+    clippy::significant_drop_tightening,
+    clippy::too_many_lines
+)]
 mod tests {
     use super::*;
 
@@ -302,7 +324,7 @@ mod tests {
             .unwrap_err();
         match err {
             LayerPlanError::Cycle { nodes } => {
-                assert_eq!(nodes, vec!["a".to_string(), "b".to_string()])
+                assert_eq!(nodes, vec!["a".to_string(), "b".to_string()]);
             }
             other => panic!("expected cycle, got {other:?}"),
         }

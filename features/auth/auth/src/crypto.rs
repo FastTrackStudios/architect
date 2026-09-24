@@ -56,6 +56,7 @@ impl SecretKeyRing {
         }
     }
 
+    #[must_use]
     pub fn with_fallback(mut self, key_id: impl Into<String>, secret: impl Into<String>) -> Self {
         self.fallback.push(SecretKeyMaterial {
             id: key_id.into(),
@@ -64,6 +65,7 @@ impl SecretKeyRing {
         self
     }
 
+    #[must_use]
     pub fn active_key_id(&self) -> &str {
         &self.active.id
     }
@@ -106,6 +108,7 @@ pub fn generate_token() -> Result<String, TokenError> {
 
 // r[impl auth.core.no-plaintext-secrets]
 // r[impl auth.sessions.token-hash-storage]
+#[must_use]
 pub fn hash_token(secret: &str, token: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(secret.as_bytes());
@@ -258,7 +261,7 @@ fn xor_with_secret_stream(secret: &str, nonce: &[u8], input: &[u8]) -> Vec<u8> {
         hasher.update(secret.as_bytes());
         hasher.update(b":secret-box:");
         hasher.update(nonce);
-        hasher.update((counter as u64).to_le_bytes());
+        hasher.update(u64::try_from(counter).unwrap_or(u64::MAX).to_le_bytes());
         let block = hasher.finalize();
         output.extend(chunk.iter().zip(block.iter()).map(|(byte, key)| byte ^ key));
     }
@@ -275,6 +278,18 @@ fn secret_box_tag(secret: &str, nonce: &[u8], ciphertext: &[u8]) -> Vec<u8> {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic,
+    clippy::float_cmp,
+    clippy::string_slice,
+    clippy::significant_drop_tightening,
+    clippy::too_many_lines
+)]
 mod tests {
     use base64::Engine;
 

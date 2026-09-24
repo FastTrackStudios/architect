@@ -87,7 +87,7 @@ pub fn SearchableDropdown(props: SearchableDropdownProps) -> Element {
 
     // Auto-focus the search input on mount.
     let focus_js = format!(
-        r#"(function(){{ var el = document.getElementById('{iid}'); if(el) el.focus(); }})()"#
+        r"(function(){{ var el = document.getElementById('{iid}'); if(el) el.focus(); }})()"
     );
 
     rsx! {
@@ -134,7 +134,7 @@ pub fn SearchableDropdown(props: SearchableDropdownProps) -> Element {
                     r#type: "text",
                     placeholder: "{props.placeholder}",
                     value: "{value}",
-                    oninput: move |evt| value.set(evt.value().clone()),
+                    oninput: move |evt| value.set(evt.value()),
                     autofocus: true,
                     onmounted: move |elem| async move {
                         let _ = elem.set_focus(true).await;
@@ -179,7 +179,7 @@ pub fn searchable_dropdown_default() -> Element {
             }
             SearchableDropdown {
                 open: open(),
-                on_close: move |_| open.set(false),
+                on_close: move |()| open.set(false),
                 value,
                 placeholder: "Search fruit...".to_string(),
                 has_results: !filtered.is_empty(),

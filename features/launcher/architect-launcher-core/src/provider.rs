@@ -57,26 +57,31 @@ impl Item {
         }
     }
 
+    #[must_use]
     pub fn with_sub(mut self, sub: impl Into<String>) -> Self {
         self.sub = sub.into();
         self
     }
 
+    #[must_use]
     pub fn with_icon(mut self, icon: impl Into<String>) -> Self {
         self.icon = icon.into();
         self
     }
 
+    #[must_use]
     pub fn with_search_fields(mut self, fields: Vec<String>) -> Self {
         self.search_fields = fields;
         self
     }
 
+    #[must_use]
     pub fn with_actions(mut self, actions: Vec<ItemAction>) -> Self {
         self.actions = actions;
         self
     }
 
+    #[must_use]
     pub fn with_metadata(mut self, metadata: serde_json::Value) -> Self {
         self.metadata = metadata;
         self
@@ -84,12 +89,14 @@ impl Item {
 
     /// Add hierarchical tags to this item.
     /// Tags are slash-separated paths like `"audio/effects/reverb"`.
+    #[must_use]
     pub fn with_tags(mut self, tags: &[&str]) -> Self {
         self.tags = TagSet::from_strs(tags);
         self
     }
 
     /// Add a single tag to this item.
+    #[must_use]
     pub fn with_tag(mut self, tag: impl Into<String>) -> Self {
         self.tags.add(crate::tags::Tag::new(tag));
         self
@@ -101,7 +108,7 @@ impl Item {
 /// Actions are keyed by modifier combination so a single item can
 /// have different behaviors for Enter, Shift+Enter, Ctrl+Enter, etc.
 /// This is the core of the workflow pack system.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ItemAction {
     /// Display name for this action (shown in action bar).
     pub name: String,
@@ -140,7 +147,8 @@ pub enum ActionModifier {
 
 impl ActionModifier {
     /// Short label for display in the action bar.
-    pub fn label(&self) -> &str {
+    #[must_use]
+    pub const fn label(&self) -> &str {
         match self {
             Self::None => "\u{23CE}",
             Self::Shift => "\u{21E7}\u{23CE}",
@@ -151,14 +159,14 @@ impl ActionModifier {
         }
     }
 
-    /// Match keyboard modifiers to an ActionModifier.
-    pub fn from_modifiers(ctrl: bool, shift: bool, alt: bool) -> Self {
+    /// Match keyboard modifiers to an `ActionModifier`.
+    #[must_use]
+    pub const fn from_modifiers(ctrl: bool, shift: bool, alt: bool) -> Self {
         match (ctrl, shift, alt) {
-            (true, true, false) => Self::CtrlShift,
             (true, false, false) => Self::Ctrl,
             (false, true, false) => Self::Shift,
             (false, false, true) => Self::Alt,
-            (true, true, true) => Self::CtrlShift, // fallback
+            (true, true, false | true) => Self::CtrlShift, // fallback
             (false, true, true) => Self::AltShift,
             _ => Self::None,
         }
@@ -186,16 +194,19 @@ impl ItemAction {
         }
     }
 
-    pub fn with_modifier(mut self, modifier: ActionModifier) -> Self {
+    #[must_use]
+    pub const fn with_modifier(mut self, modifier: ActionModifier) -> Self {
         self.modifier = modifier;
         self
     }
 
-    pub fn with_keep_open(mut self) -> Self {
+    #[must_use]
+    pub const fn with_keep_open(mut self) -> Self {
         self.keep_open = true;
         self
     }
 
+    #[must_use]
     pub fn with_description(mut self, desc: impl Into<String>) -> Self {
         self.description = desc.into();
         self
@@ -239,7 +250,7 @@ impl Default for ProviderConfig {
 /// The core provider trait. Each data source implements this.
 ///
 /// This is the Rust equivalent of Elephant's Go plugin interface.
-/// Providers are registered with the QueryEngine at startup.
+/// Providers are registered with the `QueryEngine` at startup.
 ///
 /// # For library consumers (e.g. Reaper extensions)
 ///

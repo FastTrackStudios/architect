@@ -58,11 +58,19 @@ jobs:
             -p architect -p architect-atom -p architect-form \
             -p architect-permissions -p architect-permissions-proto \
             -p auth-proto -p auth-client -p crdt
-          # auth-http is what a browser app signs in through (Keyflow does),
-          # so its wasm build is load-bearing — with the `browser` feature,
-          # which is the localStorage token store a web app actually uses.
+          # The generated HTTP clients (`<Trait>HttpClient`, over reqwest's
+          # fetch backend) are what a browser app signs in through, so
+          # their wasm build is load-bearing.
           ${NIX_DEV} cargo check --target wasm32-unknown-unknown \
-            -p auth-http --features auth-http/browser
+            -p auth-proto
+
+      # The lint config denies the panic-shaped lints, so a `--all-features`
+      # build would be the stricter gate. It is not run here: turning on
+      # every feature pulls `dioxus/desktop` (tao + wry) into
+      # `architect-atom`, which needs dbus, xdo and appindicator headers
+      # that Task's CI shell does not carry — and no feature combination
+      # the fleet ships pulls them either. `scratchpad/gate.sh` runs it
+      # locally against a shell that does.
 
       # Cargo never collects stale artifacts; bound the persistent dir.
       - name: Bound the target dir
@@ -71,3 +79,20 @@ jobs:
           rm -rf "${CARGO_TARGET_DIR}/debug/incremental"
           ${NIX_DEV} cargo sweep --maxsize 60GB || true
           du -sh "${CARGO_TARGET_DIR}" || true
+
+  # Release tags are the only thing consuming repos can reason about, and
+  # the only useful question they ask is "am I ahead of or behind that
+  # other repo?" — which has an answer only while the numbering matches
+  # what the graph says. `v0.0.2` already names a commit sitting between
+  # v0.5.0 and v0.6.0; this stops the next one.
+  tags:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The check walks every tag, so it needs the whole history.
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: tag ordering
+        run: cargo run -p xtask -- tags --verbose

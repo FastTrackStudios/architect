@@ -11,9 +11,10 @@ pub mod admin {
     };
     use crate::{
         AdminCreateUser, AdminHasPermission, AdminSetUserPassword, ArchitectAuth, AuthAuditEvent,
-        AuthStorage, BanUser, HasPermissionResult, ImpersonateUser, ListUserSessions, ListUsers,
-        ListUsersResult, RemoveUser, RevokeUserSession, RevokeUserSessions, SetUserRole,
-        StopImpersonating, UnbanUser, commands::CurrentSession, crypto::hash_password,
+        AuthStorage, AuthorizeAdmin, BanUser, HasPermissionResult, ImpersonateUser,
+        ListUserSessions, ListUsers, ListUsersResult, RemoveUser, RevokeUserSession,
+        RevokeUserSessions, SetUserRole, StopImpersonating, UnbanUser, commands::CurrentSession,
+        crypto::hash_password,
     };
 
     const ADMIN_ROLE: &str = "admin";
@@ -47,6 +48,20 @@ pub mod admin {
     {
         // r[impl auth.admin.requires-role]
         // r[impl auth.admin.list-users]
+        /// The public face of [`Self::require_admin`].
+        ///
+        /// # Errors
+        ///
+        /// [`AuthFlowError::PermissionDenied`] when the session is not
+        /// an administrator's, and whatever `current_session` returns
+        /// when the token is not a session at all.
+        pub async fn authorize_admin(
+            &self,
+            input: AuthorizeAdmin,
+        ) -> Result<AuthUser, AuthFlowError> {
+            self.require_admin(&input.session_token).await
+        }
+
         pub async fn list_users(&self, input: ListUsers) -> Result<ListUsersResult, AuthFlowError> {
             self.require_admin(&input.session_token).await?;
             let limit = input.limit.clamp(1, 100);
@@ -832,14 +847,15 @@ pub mod api_keys {
             if !api_key.rate_limit_enabled {
                 return Ok(api_key);
             }
-            let remaining = api_key
-                .remaining
-                .unwrap_or(api_key.rate_limit_max.unwrap_or(0));
+            let remaining = api_key.remaining.or(api_key.rate_limit_max).unwrap_or(0);
             if remaining <= 0 {
                 return Err(AuthFlowError::PermissionDenied);
             }
-            let next_count = api_key.request_count.unwrap_or(0) + 1;
-            let next_remaining = remaining - 1;
+            // Saturating: a request counter that wraps at `i64::MAX`
+            // would hand out free quota, and one that panics would take
+            // the handler down.
+            let next_count = api_key.request_count.unwrap_or(0).saturating_add(1);
+            let next_remaining = remaining.saturating_sub(1);
             self.storage
                 .update_api_key_usage(api_key.id, Some(next_count), Some(next_remaining))
                 .await?;
@@ -980,6 +996,9 @@ pub mod captcha {
             })
         }
 
+        // `async` mirrors the other flow entry points, and a real captcha
+        // provider will await an HTTP round-trip here.
+        #[allow(clippy::unused_async)]
         pub(crate) async fn verify_captcha_for_flow(
             &self,
             flow: CaptchaFlow,
@@ -989,8 +1008,7 @@ pub mod captcha {
                 return Ok(());
             }
             match &self.config.captcha.provider {
-                CaptchaProvider::Disabled => Ok(()),
-                CaptchaProvider::Bypass => Ok(()),
+                CaptchaProvider::Disabled | CaptchaProvider::Bypass => Ok(()),
                 CaptchaProvider::Test { valid_token } => {
                     if token == Some(valid_token.as_str()) {
                         Ok(())
@@ -1078,6 +1096,7 @@ pub mod last_login_method {
         }
     }
 
+    #[must_use]
     pub fn default_cookie_config() -> LastLoginMethodCookieConfig {
         LastLoginMethodCookieConfig {
             name: DEFAULT_LAST_LOGIN_METHOD_COOKIE_NAME.into(),
@@ -1219,7 +1238,7 @@ pub mod username {
         // r[impl auth.username.validation]
         /// Set the session owner's display name / avatar.
         ///
-        /// Username, display_username and metadata are read back from
+        /// Username, `display_username` and metadata are read back from
         /// the session's user and written unchanged: the storage
         /// primitive takes the whole profile row, so omitting them
         /// would silently blank an identifier this flow has no
@@ -1457,7 +1476,7 @@ pub mod email_password {
     use auth_proto::{
         AuthAccountCreate, AuthFlowError, AuthSessionBundle, AuthSessionCreate, AuthUserCreate,
     };
-    use chrono::{Duration, Utc};
+    use chrono::Utc;
 
     use crate::{
         ArchitectAuth, AuthService, AuthStorage, ChangeEmail, ChangePassword,
@@ -1564,7 +1583,7 @@ pub mod email_password {
                     AuthSessionCreate {
                         user_id: uuid::Uuid::nil(),
                         token_hash,
-                        expires_at: Utc::now() + Duration::seconds(self.config.session_ttl_seconds),
+                        expires_at: crate::expiry::expires_in(self.config.session_ttl_seconds),
                         ip_address: input.ip_address,
                         user_agent: input.user_agent,
                         impersonated_by: None,
@@ -1599,7 +1618,7 @@ pub mod email_password {
         /// rather than per login: plain-HTTP surfaces where the client
         /// re-presents the same credential every time and has nowhere to
         /// keep a token. HTTP Basic is the case that motivated it (the
-        /// Files WebDAV bridge — Finder re-sends `Authorization: Basic`
+        /// Files `WebDAV` bridge — Finder re-sends `Authorization: Basic`
         /// on every `PROPFIND`).
         ///
         /// Minting a session per such request grows the session table
@@ -1609,7 +1628,7 @@ pub mod email_password {
         /// because the *session* is what gets re-checked rather than the
         /// password. Verifying directly avoids both — every request is
         /// checked against the current stored hash, and no session
-        /// exists to leak or to sweep (FastTrackStudio PR #287 review).
+        /// exists to leak or to sweep (`FastTrackStudio` PR #287 review).
         ///
         /// Emits no audit event and does not touch `last_login_method`:
         /// this is not a login.
@@ -1847,7 +1866,7 @@ pub mod email_password {
                     .create_verification(auth_proto::AuthVerificationCreate {
                         identifier: identifier.clone(),
                         value_hash: hash_token(&self.config.secret, &token),
-                        expires_at: Utc::now() + Duration::seconds(PASSWORD_RESET_TTL_SECONDS),
+                        expires_at: crate::expiry::expires_in(PASSWORD_RESET_TTL_SECONDS),
                     })
                     .await?;
             }
@@ -1908,7 +1927,7 @@ pub mod email_password {
                 .storage
                 .find_latest_verification_by_identifier(&identifier)
                 .await?
-                && existing.created_at + Duration::seconds(EMAIL_VERIFICATION_RESEND_SECONDS)
+                && crate::expiry::after(existing.created_at, EMAIL_VERIFICATION_RESEND_SECONDS)
                     > Utc::now()
             {
                 return Err(AuthFlowError::PermissionDenied);
@@ -1918,7 +1937,7 @@ pub mod email_password {
                 .create_verification(auth_proto::AuthVerificationCreate {
                     identifier: identifier.clone(),
                     value_hash: hash_token(&self.config.secret, &token),
-                    expires_at: Utc::now() + Duration::seconds(EMAIL_VERIFICATION_TTL_SECONDS),
+                    expires_at: crate::expiry::expires_in(EMAIL_VERIFICATION_TTL_SECONDS),
                 })
                 .await?;
             Ok(VerificationToken { identifier, token })
@@ -2137,7 +2156,7 @@ pub mod email_password {
                 .create_session(auth_proto::AuthSessionCreate {
                     user_id: user.id,
                     token_hash,
-                    expires_at: Utc::now() + Duration::seconds(self.config.session_ttl_seconds),
+                    expires_at: crate::expiry::expires_in(self.config.session_ttl_seconds),
                     ip_address,
                     user_agent,
                     impersonated_by,
@@ -2162,7 +2181,7 @@ pub mod email_password {
             &self,
             input: auth_proto::service::ChangeEmailRequest,
         ) -> Result<auth_proto::AuthUser, AuthFlowError> {
-            ArchitectAuth::change_email(
+            Self::change_email(
                 self,
                 ChangeEmail {
                     session_token: input.session_token,
@@ -2176,7 +2195,7 @@ pub mod email_password {
             &self,
             input: auth_proto::service::UpdateProfileRequest,
         ) -> Result<auth_proto::AuthUser, AuthFlowError> {
-            ArchitectAuth::update_profile(
+            Self::update_profile(
                 self,
                 UpdateProfile {
                     session_token: input.session_token,
@@ -2191,7 +2210,7 @@ pub mod email_password {
             &self,
             input: auth_proto::service::ChangePasswordRequest,
         ) -> Result<(), AuthFlowError> {
-            ArchitectAuth::change_password(
+            Self::change_password(
                 self,
                 ChangePassword {
                     session_token: input.session_token,
@@ -2208,14 +2227,14 @@ pub mod email_password {
         ) -> Result<auth_proto::AuthUser, AuthFlowError> {
             // Same contract as the vox transport: the session authorizes
             // the call and names who performed it.
-            let caller = ArchitectAuth::current_session(
+            let caller = Self::current_session(
                 self,
                 CurrentSession {
                     token: input.session_token,
                 },
             )
             .await?;
-            ArchitectAuth::migrate_user_email(
+            Self::migrate_user_email(
                 self,
                 MigrateUserEmail {
                     user_id: input.user_id,
@@ -2231,21 +2250,21 @@ pub mod email_password {
             &self,
             input: auth_proto::service::EmailHistoryRequest,
         ) -> Result<Vec<auth_proto::email_change::AuthEmailChange>, AuthFlowError> {
-            ArchitectAuth::current_session(
+            Self::current_session(
                 self,
                 CurrentSession {
                     token: input.session_token,
                 },
             )
             .await?;
-            ArchitectAuth::list_email_history(self, input.user_id).await
+            Self::list_email_history(self, input.user_id).await
         }
 
         async fn sign_up_email_password(
             &self,
             input: auth_proto::SignUpEmailPassword,
         ) -> Result<AuthSessionBundle, AuthFlowError> {
-            ArchitectAuth::create_email_password_user(
+            Self::create_email_password_user(
                 self,
                 CreateEmailPasswordUser {
                     email: input.email,
@@ -2265,25 +2284,25 @@ pub mod email_password {
             &self,
             input: SignInEmailPassword,
         ) -> Result<AuthSessionBundle, AuthFlowError> {
-            ArchitectAuth::sign_in_email_password(self, input).await
+            Self::sign_in_email_password(self, input).await
         }
 
         async fn current_session(&self, token: String) -> Result<AuthSessionBundle, AuthFlowError> {
-            ArchitectAuth::current_session(self, CurrentSession { token }).await
+            Self::current_session(self, CurrentSession { token }).await
         }
 
         async fn refresh_session(&self, token: String) -> Result<AuthSessionBundle, AuthFlowError> {
-            ArchitectAuth::refresh_session(self, RefreshSession { token }).await
+            Self::refresh_session(self, RefreshSession { token }).await
         }
 
         async fn whoami(&self, token: String) -> Result<auth_proto::AuthUser, AuthFlowError> {
-            ArchitectAuth::current_session(self, CurrentSession { token })
+            Self::current_session(self, CurrentSession { token })
                 .await
                 .map(|bundle| bundle.user)
         }
 
         async fn sign_out(&self, token: String) -> Result<(), AuthFlowError> {
-            ArchitectAuth::sign_out(self, SignOut { token }).await
+            Self::sign_out(self, SignOut { token }).await
         }
 
         async fn list_org_members(
@@ -2333,6 +2352,18 @@ pub mod email_password {
     }
 
     #[cfg(test)]
+    #[allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::indexing_slicing,
+        clippy::arithmetic_side_effects,
+        clippy::as_conversions,
+        clippy::panic,
+        clippy::float_cmp,
+        clippy::string_slice,
+        clippy::significant_drop_tightening,
+        clippy::too_many_lines
+    )]
     mod tests {
         use std::{
             collections::HashMap,
@@ -2364,36 +2395,51 @@ pub mod email_password {
             AuthenticateApiKey, AuthenticateBearerToken, AuthorizeApiKey, AuthorizeMcpRequest,
             AuthorizeOidc, AuthorizeOrganizationAction, BanUser, BearerTokenStrategy,
             BeginOAuthAuthorization, BeginOAuthProxyAuthorization, BeginPasskeyAuthentication,
-            BeginPasskeyRegistration, BreachedPasswordFailurePolicy, BreachedPasswordProvider,
-            CaptchaFlow, ChangeEmail, ChangePassword, CheckPasswordBreach, CleanupAnonymousUsers,
-            ClearLastLoginMethod, CompletePasskeyAuthentication, CompletePasskeyRegistration,
-            CompletePasswordReset, ConfirmTwoFactor, ConsumeOAuthProxyCallback, CreateApiKey,
-            CreateDeviceAuthorization, CreateEmailPasswordUser, CreateInvitation,
-            CreateOrganization, CreateOrganizationRole, CreateSiweNonce, CreateTeam,
-            CurrentSession, CustomSessionEnricher, DeleteApiKey, DeletePasskey, DeleteTeam,
+            BeginPasskeyRegistration, BeginTwoFactorEnrollment, BreachedPasswordFailurePolicy,
+            BreachedPasswordProvider, CancelInvitation, CaptchaFlow, ChangeEmail, ChangePassword,
+            CheckPasswordBreach, CleanupAnonymousUsers, ClearLastLoginMethod,
+            CompletePasskeyAuthentication, CompletePasskeyRegistration, CompletePasswordReset,
+            ConfirmTwoFactor, ConsumeOAuthProxyCallback, CreateApiKey, CreateDeviceAuthorization,
+            CreateEmailPasswordUser, CreateInvitation, CreateInviteLink, CreateOrganization,
+            CreateOrganizationRole, CreateSiweNonce, CreateTeam, CurrentSession,
+            CustomSessionEnricher, DeleteApiKey, DeleteOrganization, DeletePasskey, DeleteTeam,
             DeleteUser, DenyDeviceCode, DisableTwoFactor, ExchangeOidcToken,
             ForwardOAuthProxyCallback, GenerateOneTimeToken, GetApiKey, GetLastLoginMethod,
-            GetOAuthAccessToken, GetOidcUserInfo, ImpersonateUser, IssueJwt,
+            GetOAuthAccessToken, GetOidcUserInfo, ImpersonateUser, IssueJwt, LeaveOrganization,
             LinkAnonymousEmailPassword, LinkOAuthAccount, LinkSiweAddress, ListAccounts,
-            ListApiKeys, ListDeviceSessions, ListPasskeys, ListSessions, ListTeamMembers,
-            ListTeams, ListUserSessions, ListUsers, MigrateUserEmail, OidcClientConfig,
-            OneTapCallback, PollDeviceToken, RefreshOAuthToken, RegisterOidcClient,
+            ListApiKeys, ListDeviceSessions, ListInvitations, ListInviteLinks, ListMembers,
+            ListOrganizations, ListPasskeys, ListSessions, ListTeamMembers, ListTeams,
+            ListUserSessions, ListUsers, MigrateUserEmail, OidcClientConfig, OneTapCallback,
+            OrganizationBundle, PollDeviceToken, PreviewInvitation, PreviewInviteLink,
+            RedeemInviteLink, RefreshOAuthToken, RegisterOidcClient, RemoveMember,
             RemoveTeamMember, RemoveUser, RequestEmailVerification, RequestPasswordReset,
-            RequireOrganizationRole, RevokeApiKey, RevokeDeviceSession, RevokeOneTimeToken,
-            RevokeOtherSessions, RevokeSession, RevokeUserSession, RevokeUserSessions,
-            SendEmailOtp, SendMagicLink, SendPhoneNumberOtp, SetActiveDeviceSession,
-            SetActiveOrganization, SetMemberRole, SetUserRole, SignInAnonymous,
-            SignInEmailPassword, SignInOAuthAccount, SignInUsername, SignOut, SmsProvider,
-            StartTwoFactorSetup, StopImpersonating, UnbanUser, UnlinkOAuthAccount, UpdateApiKey,
-            UpdatePhoneNumber, UpdateTeam, UpdateUsername, VerifyApiKey, VerifyCaptcha,
-            VerifyDeviceCode, VerifyEmail, VerifyEmailOtp, VerifyJwt, VerifyMagicLink,
-            VerifyOAuthState, VerifyOneTimeToken, VerifyPhoneNumberOtp, VerifySiweMessage,
-            VerifyTwoFactor,
+            RequireOrganizationRole, RevokeApiKey, RevokeDeviceSession, RevokeInviteLink,
+            RevokeOneTimeToken, RevokeOtherSessions, RevokeSession, RevokeUserSession,
+            RevokeUserSessions, SendEmailOtp, SendMagicLink, SendPhoneNumberOtp,
+            SetActiveDeviceSession, SetActiveOrganization, SetMemberRole, SetUserRole,
+            SignInAnonymous, SignInEmailPassword, SignInOAuthAccount, SignInUsername, SignOut,
+            SmsProvider, StartTwoFactorSetup, StopImpersonating, UnbanUser, UnlinkOAuthAccount,
+            UpdateApiKey, UpdateOrganization, UpdatePhoneNumber, UpdateTeam, UpdateUsername,
+            VerifyApiKey, VerifyCaptcha, VerifyDeviceCode, VerifyEmail, VerifyEmailOtp, VerifyJwt,
+            VerifyMagicLink, VerifyOAuthState, VerifyOneTimeToken, VerifyPhoneNumberOtp,
+            VerifySiweMessage, VerifyTwoFactor,
         };
 
         #[derive(Clone, Default)]
         struct MemoryStorage {
             inner: Arc<Mutex<State>>,
+        }
+
+        impl MemoryStorage {
+            /// Push the second-factor attempt run into the past, so the
+            /// next attempt starts a fresh window. Stands in for waiting
+            /// fifteen minutes.
+            fn lapse_two_factor_window(&self, user_id: Uuid) {
+                let mut inner = self.inner.lock().expect("lock memory storage");
+                if let Some((last, _)) = inner.two_factor_attempts.get_mut(&user_id) {
+                    *last = Utc::now() - chrono::Duration::hours(1);
+                }
+            }
         }
 
         #[derive(Default)]
@@ -2409,15 +2455,19 @@ pub mod email_password {
             api_keys_by_id: HashMap<Uuid, AuthApiKey>,
             api_keys_by_hash: HashMap<String, AuthApiKey>,
             passkeys_by_credential_id: HashMap<String, AuthPasskey>,
+            passkey_ceremonies: HashMap<Uuid, auth_proto::AuthPasskeyCeremony>,
             organizations: HashMap<Uuid, AuthOrganization>,
             organization_ids_by_slug: HashMap<String, Uuid>,
             members: HashMap<(Uuid, Uuid), AuthMember>,
+            agent_links: HashMap<Uuid, auth_proto::AuthAgentLink>,
             organization_roles: HashMap<(Uuid, String), AuthOrganizationRole>,
             teams: HashMap<Uuid, AuthTeam>,
             team_members: HashMap<(Uuid, Uuid), AuthTeamMember>,
             invitations: HashMap<Uuid, AuthInvitation>,
+            invite_links: HashMap<Uuid, auth_proto::AuthInviteLink>,
             two_factors: HashMap<Uuid, AuthTwoFactor>,
-            two_factor_attempts: HashMap<Uuid, i64>,
+            /// `(when the run of failures last advanced, how many)`.
+            two_factor_attempts: HashMap<Uuid, (DateTime<Utc>, i64)>,
             /// Append-only, in insertion order — mirrors the real store's
             /// "oldest first" ordering without needing timestamps to be
             /// distinct (tests move fast enough to collide on `Utc::now`).
@@ -3379,6 +3429,234 @@ pub mod email_password {
                     .cloned())
             }
 
+            async fn find_organization_by_id(
+                &self,
+                id: Uuid,
+            ) -> Result<Option<AuthOrganization>, AuthFlowError> {
+                let inner = self.inner.lock().expect("lock memory storage");
+                Ok(inner.organizations.get(&id).cloned())
+            }
+
+            async fn list_organizations_for_user(
+                &self,
+                user_id: Uuid,
+            ) -> Result<Vec<(AuthOrganization, AuthMember)>, AuthFlowError> {
+                let inner = self.inner.lock().expect("lock memory storage");
+                let mut out: Vec<(AuthOrganization, AuthMember)> = inner
+                    .members
+                    .values()
+                    .filter(|member| member.user_id == user_id)
+                    .filter_map(|member| {
+                        let org = inner.organizations.get(&member.organization_id)?.clone();
+                        Some((org, member.clone()))
+                    })
+                    .collect();
+                out.sort_by(|a, b| a.0.name.cmp(&b.0.name));
+                Ok(out)
+            }
+
+            async fn update_organization(
+                &self,
+                id: Uuid,
+                name: Option<String>,
+                slug: Option<String>,
+                logo: Option<Option<String>>,
+                metadata_json: Option<Option<String>>,
+            ) -> Result<AuthOrganization, AuthFlowError> {
+                let mut inner = self.inner.lock().expect("lock memory storage");
+                let mut organization = inner
+                    .organizations
+                    .get(&id)
+                    .cloned()
+                    .ok_or(AuthFlowError::InvalidCredentials)?;
+                if let Some(name) = name {
+                    organization.name = name;
+                }
+                if let Some(slug) = slug {
+                    inner.organization_ids_by_slug.remove(&organization.slug);
+                    inner.organization_ids_by_slug.insert(slug.clone(), id);
+                    organization.slug = slug;
+                }
+                if let Some(logo) = logo {
+                    organization.logo = logo;
+                }
+                if let Some(metadata_json) = metadata_json {
+                    organization.metadata_json = metadata_json;
+                }
+                organization.updated_at = Utc::now();
+                inner.organizations.insert(id, organization.clone());
+                Ok(organization)
+            }
+
+            async fn delete_organization(&self, id: Uuid) -> Result<(), AuthFlowError> {
+                let mut inner = self.inner.lock().expect("lock memory storage");
+                if let Some(organization) = inner.organizations.remove(&id) {
+                    inner.organization_ids_by_slug.remove(&organization.slug);
+                }
+                let team_ids: Vec<Uuid> = inner
+                    .teams
+                    .values()
+                    .filter(|team| team.organization_id == id)
+                    .map(|team| team.id)
+                    .collect();
+                inner
+                    .team_members
+                    .retain(|(team_id, _), _| !team_ids.contains(team_id));
+                inner.teams.retain(|_, team| team.organization_id != id);
+                inner
+                    .invite_links
+                    .retain(|_, link| link.organization_id != id);
+                inner
+                    .invitations
+                    .retain(|_, invitation| invitation.organization_id != id);
+                inner
+                    .organization_roles
+                    .retain(|(organization_id, _), _| *organization_id != id);
+                inner
+                    .members
+                    .retain(|(organization_id, _), _| *organization_id != id);
+                Ok(())
+            }
+
+            async fn delete_member(
+                &self,
+                organization_id: Uuid,
+                user_id: Uuid,
+            ) -> Result<(), AuthFlowError> {
+                let mut inner = self.inner.lock().expect("lock memory storage");
+                inner.members.remove(&(organization_id, user_id));
+                Ok(())
+            }
+
+            async fn list_pending_invitations_for_email(
+                &self,
+                email: &str,
+            ) -> Result<Vec<AuthInvitation>, AuthFlowError> {
+                let inner = self.inner.lock().expect("lock memory storage");
+                let mut out: Vec<AuthInvitation> = inner
+                    .invitations
+                    .values()
+                    .filter(|invitation| {
+                        invitation.email == email
+                            && invitation.status == auth_proto::InvitationStatus::Pending.as_str()
+                    })
+                    .cloned()
+                    .collect();
+                out.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                Ok(out)
+            }
+
+            async fn list_invitations_by_organization(
+                &self,
+                organization_id: Uuid,
+            ) -> Result<Vec<AuthInvitation>, AuthFlowError> {
+                let inner = self.inner.lock().expect("lock memory storage");
+                let mut out: Vec<AuthInvitation> = inner
+                    .invitations
+                    .values()
+                    .filter(|invitation| invitation.organization_id == organization_id)
+                    .cloned()
+                    .collect();
+                out.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                Ok(out)
+            }
+
+            async fn find_pending_invitation(
+                &self,
+                organization_id: Uuid,
+                email: &str,
+            ) -> Result<Option<AuthInvitation>, AuthFlowError> {
+                let inner = self.inner.lock().expect("lock memory storage");
+                Ok(inner
+                    .invitations
+                    .values()
+                    .find(|invitation| {
+                        invitation.organization_id == organization_id
+                            && invitation.email == email
+                            && invitation.status == auth_proto::InvitationStatus::Pending.as_str()
+                    })
+                    .cloned())
+            }
+
+            async fn create_invite_link(
+                &self,
+                input: auth_proto::AuthInviteLinkCreate,
+            ) -> Result<auth_proto::AuthInviteLink, AuthFlowError> {
+                let mut inner = self.inner.lock().expect("lock memory storage");
+                let link = auth_proto::AuthInviteLink {
+                    id: Uuid::new_v4(),
+                    organization_id: input.organization_id,
+                    token_hash: input.token_hash,
+                    label: input.label,
+                    role: input.role,
+                    created_by: input.created_by,
+                    expires_at: input.expires_at,
+                    max_uses: input.max_uses,
+                    uses: 0,
+                    revoked_at: input.revoked_at,
+                    created_at: Utc::now(),
+                };
+                inner.invite_links.insert(link.id, link.clone());
+                Ok(link)
+            }
+
+            async fn find_invite_link_by_id(
+                &self,
+                id: Uuid,
+            ) -> Result<Option<auth_proto::AuthInviteLink>, AuthFlowError> {
+                let inner = self.inner.lock().expect("lock memory storage");
+                Ok(inner.invite_links.get(&id).cloned())
+            }
+
+            async fn find_invite_link_by_token_hash(
+                &self,
+                token_hash: &str,
+            ) -> Result<Option<auth_proto::AuthInviteLink>, AuthFlowError> {
+                let inner = self.inner.lock().expect("lock memory storage");
+                Ok(inner
+                    .invite_links
+                    .values()
+                    .find(|link| link.token_hash == token_hash)
+                    .cloned())
+            }
+
+            async fn list_invite_links_by_organization(
+                &self,
+                organization_id: Uuid,
+            ) -> Result<Vec<auth_proto::AuthInviteLink>, AuthFlowError> {
+                let inner = self.inner.lock().expect("lock memory storage");
+                let mut out: Vec<auth_proto::AuthInviteLink> = inner
+                    .invite_links
+                    .values()
+                    .filter(|link| link.organization_id == organization_id)
+                    .cloned()
+                    .collect();
+                out.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                Ok(out)
+            }
+
+            async fn revoke_invite_link(
+                &self,
+                id: Uuid,
+                revoked_at: DateTime<Utc>,
+            ) -> Result<(), AuthFlowError> {
+                let mut inner = self.inner.lock().expect("lock memory storage");
+                let link = inner
+                    .invite_links
+                    .get_mut(&id)
+                    .ok_or(AuthFlowError::InvalidCredentials)?;
+                link.revoked_at = Some(revoked_at);
+                Ok(())
+            }
+
+            async fn increment_invite_link_uses(&self, id: Uuid) -> Result<(), AuthFlowError> {
+                let mut inner = self.inner.lock().expect("lock memory storage");
+                if let Some(link) = inner.invite_links.get_mut(&id) {
+                    link.uses = link.uses.saturating_add(1);
+                }
+                Ok(())
+            }
+
             async fn create_member(
                 &self,
                 input: AuthMemberCreate,
@@ -3403,6 +3681,66 @@ pub mod email_password {
                     .members
                     .insert((member.organization_id, member.user_id), member.clone());
                 Ok(member)
+            }
+
+            async fn create_agent_link(
+                &self,
+                input: auth_proto::AuthAgentLinkCreate,
+            ) -> Result<auth_proto::AuthAgentLink, AuthFlowError> {
+                let mut inner = self.inner.lock().expect("lock memory storage");
+                let link = auth_proto::AuthAgentLink {
+                    id: Uuid::new_v4(),
+                    owner_user_id: input.owner_user_id,
+                    agent_user_id: input.agent_user_id,
+                    max_role: input.max_role,
+                    created_at: Utc::now(),
+                };
+                inner.agent_links.insert(link.id, link.clone());
+                Ok(link)
+            }
+
+            async fn list_agent_links_for_owner(
+                &self,
+                owner_user_id: Uuid,
+            ) -> Result<Vec<auth_proto::AuthAgentLink>, AuthFlowError> {
+                let inner = self.inner.lock().expect("lock memory storage");
+                let mut out: Vec<_> = inner
+                    .agent_links
+                    .values()
+                    .filter(|link| link.owner_user_id == owner_user_id)
+                    .cloned()
+                    .collect();
+                out.sort_by_key(|link| link.created_at);
+                Ok(out)
+            }
+
+            async fn list_agent_links_for_agent(
+                &self,
+                agent_user_id: Uuid,
+            ) -> Result<Vec<auth_proto::AuthAgentLink>, AuthFlowError> {
+                let inner = self.inner.lock().expect("lock memory storage");
+                Ok(inner
+                    .agent_links
+                    .values()
+                    .filter(|link| link.agent_user_id == agent_user_id)
+                    .cloned()
+                    .collect())
+            }
+
+            async fn delete_agent_link(
+                &self,
+                id: Uuid,
+                owner_user_id: Uuid,
+            ) -> Result<bool, AuthFlowError> {
+                let mut inner = self.inner.lock().expect("lock memory storage");
+                let owned = inner
+                    .agent_links
+                    .get(&id)
+                    .is_some_and(|link| link.owner_user_id == owner_user_id);
+                if owned {
+                    inner.agent_links.remove(&id);
+                }
+                Ok(owned)
             }
 
             async fn find_member(
@@ -3722,6 +4060,65 @@ pub mod email_password {
                 Ok(())
             }
 
+            async fn create_passkey_ceremony(
+                &self,
+                input: auth_proto::AuthPasskeyCeremonyCreate,
+            ) -> Result<auth_proto::AuthPasskeyCeremony, AuthFlowError> {
+                let mut inner = self.inner.lock().expect("lock memory storage");
+                let ceremony = auth_proto::AuthPasskeyCeremony {
+                    id: Uuid::new_v4(),
+                    handle_hash: input.handle_hash,
+                    kind: input.kind,
+                    user_id: input.user_id,
+                    state_json: input.state_json,
+                    expires_at: input.expires_at,
+                    created_at: Utc::now(),
+                };
+                inner
+                    .passkey_ceremonies
+                    .insert(ceremony.id, ceremony.clone());
+                Ok(ceremony)
+            }
+
+            async fn find_passkey_ceremony_by_handle_hash(
+                &self,
+                handle_hash: &str,
+            ) -> Result<Option<auth_proto::AuthPasskeyCeremony>, AuthFlowError> {
+                let inner = self.inner.lock().expect("lock memory storage");
+                Ok(inner
+                    .passkey_ceremonies
+                    .values()
+                    .find(|ceremony| ceremony.handle_hash == handle_hash)
+                    .cloned())
+            }
+
+            async fn delete_passkey_ceremony(&self, id: Uuid) -> Result<(), AuthFlowError> {
+                self.inner
+                    .lock()
+                    .expect("lock memory storage")
+                    .passkey_ceremonies
+                    .remove(&id);
+                Ok(())
+            }
+
+            async fn update_passkey_credential(
+                &self,
+                credential_id: &str,
+                public_key: String,
+                counter: i64,
+                backed_up: bool,
+            ) -> Result<AuthPasskey, AuthFlowError> {
+                let mut inner = self.inner.lock().expect("lock memory storage");
+                let passkey = inner
+                    .passkeys_by_credential_id
+                    .get_mut(credential_id)
+                    .ok_or(AuthFlowError::InvalidCredentials)?;
+                passkey.public_key = public_key;
+                passkey.counter = counter;
+                passkey.backed_up = backed_up;
+                Ok(passkey.clone())
+            }
+
             async fn create_two_factor(
                 &self,
                 input: AuthTwoFactorCreate,
@@ -3783,10 +4180,18 @@ pub mod email_password {
             async fn increment_two_factor_attempts(
                 &self,
                 user_id: Uuid,
+                window_start: DateTime<Utc>,
             ) -> Result<i64, AuthFlowError> {
                 let mut inner = self.inner.lock().expect("lock memory storage");
-                let attempts = inner.two_factor_attempts.entry(user_id).or_default();
-                *attempts += 1;
+                let (last, attempts) = inner
+                    .two_factor_attempts
+                    .entry(user_id)
+                    .or_insert_with(|| (Utc::now(), 0));
+                if *last < window_start {
+                    *attempts = 0;
+                }
+                *last = Utc::now();
+                *attempts = attempts.saturating_add(1);
                 Ok(*attempts)
             }
 
@@ -4049,7 +4454,9 @@ pub mod email_password {
             sub: &str,
             audience: &str,
         ) -> String {
-            let now = Utc::now().timestamp() as usize;
+            // Before 1970 (or on a 32-bit target after 2038) the `as`
+            // cast wrapped to an absurd `iat`; clamp instead.
+            let now = usize::try_from(Utc::now().timestamp()).unwrap_or(0);
             let claims = serde_json::json!({
                 "iss": "https://accounts.google.com",
                 "aud": audience,
@@ -5452,8 +5859,8 @@ pub mod email_password {
                     .lock()
                     .expect("lock memory storage");
                 for verification in inner.verifications.values_mut() {
-                    verification.expires_at = Utc::now() - Duration::seconds(1);
-                    verification.created_at = Utc::now() - Duration::seconds(120);
+                    verification.expires_at = crate::expiry::ago(1);
+                    verification.created_at = crate::expiry::ago(120);
                 }
             }
             let expired_result = expired_auth
@@ -5555,7 +5962,7 @@ pub mod email_password {
                     .lock()
                     .expect("lock memory storage");
                 for verification in inner.verifications.values_mut() {
-                    verification.expires_at = Utc::now() - Duration::seconds(1);
+                    verification.expires_at = crate::expiry::ago(1);
                 }
             }
             let expired_result = expired_auth
@@ -5643,7 +6050,8 @@ pub mod email_password {
                 .storage(MemoryStorage::default())
                 .build()
                 .expect("build auth");
-            let address = "0x1111111111111111111111111111111111111111";
+            let (wallet, address) = crate::flows::siwe::test_wallet(7);
+            let address = address.as_str();
             let nonce = auth
                 .create_siwe_nonce(CreateSiweNonce)
                 .await
@@ -5652,8 +6060,7 @@ pub mod email_password {
                 "auth.example.com\nAddress: {address}\nURI: https://auth.example.com\nVersion: 1\nChain ID: 1\nNonce: {}",
                 nonce.token
             );
-            let signature =
-                crate::flows::siwe::test_siwe_signature(&auth.config.secret, &message, address);
+            let signature = crate::flows::siwe::test_sign(&wallet, &message);
             let session = auth
                 .verify_siwe_message(VerifySiweMessage {
                     message: message.clone(),
@@ -5684,11 +6091,7 @@ pub mod email_password {
                 "auth.example.com\nAddress: {address}\nURI: https://auth.example.com\nVersion: 1\nChain ID: 1\nNonce: {}",
                 linked_nonce.token
             );
-            let linked_signature = crate::flows::siwe::test_siwe_signature(
-                &auth.config.secret,
-                &linked_message,
-                address,
-            );
+            let linked_signature = crate::flows::siwe::test_sign(&wallet, &linked_message);
             let linked = auth
                 .verify_siwe_message(VerifySiweMessage {
                     message: linked_message,
@@ -5708,11 +6111,8 @@ pub mod email_password {
                 "evil.example.com\nAddress: {address}\nURI: https://evil.example.com\nVersion: 1\nChain ID: 1\nNonce: {}",
                 wrong_domain_nonce.token
             );
-            let wrong_domain_signature = crate::flows::siwe::test_siwe_signature(
-                &auth.config.secret,
-                &wrong_domain_message,
-                address,
-            );
+            let wrong_domain_signature =
+                crate::flows::siwe::test_sign(&wallet, &wrong_domain_message);
             let wrong_domain = auth
                 .verify_siwe_message(VerifySiweMessage {
                     message: wrong_domain_message,
@@ -5754,7 +6154,8 @@ pub mod email_password {
                 })
                 .await
                 .expect("create password user");
-            let link_address = "0x2222222222222222222222222222222222222222";
+            let (link_wallet, link_address) = crate::flows::siwe::test_wallet(9);
+            let link_address = link_address.as_str();
             let link_nonce = auth
                 .create_siwe_nonce(CreateSiweNonce)
                 .await
@@ -5763,11 +6164,7 @@ pub mod email_password {
                 "auth.example.com\nAddress: {link_address}\nURI: https://auth.example.com\nVersion: 1\nChain ID: 1\nNonce: {}",
                 link_nonce.token
             );
-            let link_signature = crate::flows::siwe::test_siwe_signature(
-                &auth.config.secret,
-                &link_message,
-                link_address,
-            );
+            let link_signature = crate::flows::siwe::test_sign(&link_wallet, &link_message);
             auth.link_siwe_address(LinkSiweAddress {
                 session_token: password_user.token.clone(),
                 message: link_message,
@@ -5784,11 +6181,7 @@ pub mod email_password {
                 "auth.example.com\nAddress: {link_address}\nURI: https://auth.example.com\nVersion: 1\nChain ID: 1\nNonce: {}",
                 relogin_nonce.token
             );
-            let relogin_signature = crate::flows::siwe::test_siwe_signature(
-                &auth.config.secret,
-                &relogin_message,
-                link_address,
-            );
+            let relogin_signature = crate::flows::siwe::test_sign(&link_wallet, &relogin_message);
             let relogin = auth
                 .verify_siwe_message(VerifySiweMessage {
                     message: relogin_message,
@@ -5883,7 +6276,7 @@ pub mod email_password {
                     .lock()
                     .expect("lock memory storage");
                 for verification in inner.verifications.values_mut() {
-                    verification.expires_at = Utc::now() - Duration::seconds(1);
+                    verification.expires_at = crate::expiry::ago(1);
                 }
             }
             let expired_result = expired_auth
@@ -6953,57 +7346,25 @@ pub mod email_password {
                 .expect("upgrade anonymous user");
             assert_last_login_method(&auth, &upgraded.token, Some("email")).await;
 
-            let passkey_challenge = auth
-                .begin_passkey_registration(BeginPasskeyRegistration {
-                    session_token: email.token.clone(),
-                })
-                .await
-                .expect("begin passkey registration");
-            auth.complete_passkey_registration(CompletePasskeyRegistration {
-                session_token: email.token.clone(),
-                challenge: passkey_challenge.token,
-                rp_id: "localhost".into(),
-                origin: "http://localhost:3000".into(),
-                name: "laptop".into(),
-                credential_id: "last-login-passkey".into(),
-                public_key: "public-key".into(),
-                counter: 1,
-                device_type: "platform".into(),
-                backed_up: true,
-                transports: Some("internal".into()),
-            })
-            .await
-            .expect("register passkey");
-            let passkey_challenge = auth
-                .begin_passkey_authentication(BeginPasskeyAuthentication {
-                    credential_id: "last-login-passkey".into(),
-                })
-                .await
-                .expect("begin passkey authentication");
-            let passkey = auth
-                .complete_passkey_authentication(CompletePasskeyAuthentication {
-                    credential_id: "last-login-passkey".into(),
-                    challenge: passkey_challenge.token,
-                    rp_id: "localhost".into(),
-                    origin: "http://localhost:3000".into(),
-                    counter: 2,
-                    ip_address: None,
-                    user_agent: None,
-                })
-                .await
-                .expect("complete passkey authentication");
-            assert_last_login_method(&auth, &passkey.token, Some("passkey")).await;
+            // Passkey sign-in has its own tests, with a software
+            // authenticator that really signs — see
+            // `a_passkey_registers_and_then_actually_signs_you_in`.
+            // Fabricating a credential here is exactly what the old
+            // version of this test did, and it is what made an
+            // unverified sign-in look tested.
 
+            // Clearing works on any session; `upgraded` is the last
+            // one this test signed in with.
             let cleared = auth
                 .clear_last_login_method(ClearLastLoginMethod {
-                    session_token: passkey.token.clone(),
+                    session_token: upgraded.token.clone(),
                 })
                 .await
                 .expect("clear last login method");
             assert_eq!(cleared.method, None);
             assert_eq!(cleared.cookie_name, "better-auth.last_used_login_method");
             assert_eq!(cleared.max_age_seconds, 60 * 60 * 24 * 30);
-            assert_last_login_method(&auth, &passkey.token, None).await;
+            assert_last_login_method(&auth, &upgraded.token, None).await;
         }
 
         // r[verify auth.oauth.link-authenticated]
@@ -7342,148 +7703,503 @@ pub mod email_password {
             assert!(matches!(reused, Err(AuthFlowError::InvalidCredentials)));
         }
 
-        // r[verify auth.passkey.challenge-random]
-        // r[verify auth.passkey.challenge-expiry]
-        // r[verify auth.passkey.rp-origin]
-        // r[verify auth.passkey.credential-unique]
-        // r[verify auth.passkey.user-match]
-        // r[verify auth.passkey.counter]
-        // r[verify auth.passkey.transports]
-        // r[verify auth.passkey.list]
-        #[tokio::test]
-        async fn passkey_registration_and_authentication_enforce_domain_rules() {
-            let auth = auth();
-            let bundle = auth
-                .create_email_password_user(CreateEmailPasswordUser {
-                    email: "user@example.com".into(),
-                    password: "correct horse battery staple".into(),
-                    name: None,
-                    username: None,
-                    image: None,
-                    metadata_json: None,
-                    ip_address: None,
-                    user_agent: None,
-                })
-                .await
-                .expect("create user");
+        /// A software authenticator standing in for a phone or a
+        /// security key. It really does hold a private key and really
+        /// does sign, so these are end-to-end `WebAuthn` ceremonies
+        /// rather than fixtures.
+        fn authenticator() -> webauthn_authenticator_rs::WebauthnAuthenticator<
+            webauthn_authenticator_rs::softpasskey::SoftPasskey,
+        > {
+            webauthn_authenticator_rs::WebauthnAuthenticator::new(
+                webauthn_authenticator_rs::softpasskey::SoftPasskey::new(true),
+            )
+        }
+
+        fn passkey_origin() -> url::Url {
+            url::Url::parse("http://localhost:3000").expect("origin")
+        }
+
+        /// An engine configured for passkeys at `localhost:3000`.
+        fn passkey_auth() -> ArchitectAuth<MemoryStorage> {
+            ArchitectAuth::builder()
+                .secret("a-secret-at-least-32-bytes-long!!")
+                .storage(MemoryStorage::default())
+                .passkey_rp_id("localhost")
+                .passkey_allowed_origin("http://localhost:3000")
+                .passkey_rp_name("FastTrackStudio")
+                .build()
+                .expect("build auth")
+        }
+
+        /// Register a passkey the way a browser would.
+        async fn register_passkey(
+            auth: &ArchitectAuth<MemoryStorage>,
+            authenticator: &mut webauthn_authenticator_rs::WebauthnAuthenticator<
+                webauthn_authenticator_rs::softpasskey::SoftPasskey,
+            >,
+            session_token: &str,
+            name: &str,
+        ) -> Result<auth_proto::AuthPasskey, AuthFlowError> {
             let challenge = auth
                 .begin_passkey_registration(BeginPasskeyRegistration {
-                    session_token: bundle.token.clone(),
+                    session_token: session_token.to_owned(),
                 })
                 .await
-                .expect("begin passkey registration");
-            assert!(challenge.identifier.starts_with("passkey-registration:"));
-            assert!(!challenge.token.is_empty());
+                .expect("begin registration");
+            let options = serde_json::from_str(&challenge.options_json).expect("options");
+            let credential = authenticator
+                .do_registration(passkey_origin(), options)
+                .expect("authenticator registers");
+            auth.complete_passkey_registration(CompletePasskeyRegistration {
+                session_token: session_token.to_owned(),
+                handle: challenge.handle,
+                name: name.to_owned(),
+                credential_json: serde_json::to_string(&credential).expect("serialise"),
+            })
+            .await
+        }
 
-            let bad_origin = auth
-                .complete_passkey_registration(CompletePasskeyRegistration {
-                    session_token: bundle.token.clone(),
-                    challenge: challenge.token.clone(),
-                    rp_id: "localhost".into(),
-                    origin: "https://evil.example".into(),
-                    name: "laptop".into(),
-                    credential_id: "credential-1".into(),
-                    public_key: "public-key".into(),
-                    counter: 1,
-                    device_type: "platform".into(),
-                    backed_up: true,
-                    transports: Some("internal,hybrid".into()),
-                })
-                .await;
-            assert!(matches!(bad_origin, Err(AuthFlowError::PermissionDenied)));
+        // r[verify auth.siwe.verify]
+        #[tokio::test]
+        async fn a_wallet_address_cannot_be_claimed_without_its_key() {
+            // The shape the old placeholder had: the address is read
+            // out of the message text, so if the signature is not
+            // actually checked against it, writing somebody else's
+            // address in is a complete impersonation.
+            let auth = ArchitectAuth::builder()
+                .secret("a-secret-at-least-32-bytes-long!!")
+                .siwe_domain("auth.example.com")
+                .storage(MemoryStorage::default())
+                .build()
+                .expect("build auth");
+            let (mallory_key, _) = crate::flows::siwe::test_wallet(3);
+            let (_, victim) = crate::flows::siwe::test_wallet(5);
 
-            let passkey = auth
-                .complete_passkey_registration(CompletePasskeyRegistration {
-                    session_token: bundle.token.clone(),
-                    challenge: challenge.token,
-                    rp_id: "localhost".into(),
-                    origin: "http://localhost:3000".into(),
-                    name: "laptop".into(),
-                    credential_id: "credential-1".into(),
-                    public_key: "public-key".into(),
-                    counter: 1,
-                    device_type: "platform".into(),
-                    backed_up: true,
-                    transports: Some("internal,hybrid".into()),
-                })
+            let nonce = auth
+                .create_siwe_nonce(CreateSiweNonce)
                 .await
-                .expect("complete passkey registration");
-            assert_eq!(passkey.user_id, bundle.user.id);
-            assert_eq!(passkey.transports.as_deref(), Some("internal,hybrid"));
-            let passkeys = auth
-                .list_passkeys(ListPasskeys {
-                    session_token: bundle.token.clone(),
-                })
-                .await
-                .expect("list passkeys");
-            assert_eq!(passkeys.len(), 1);
-            assert_eq!(passkeys[0].credential_id, "credential-1");
-
-            let duplicate_challenge = auth
-                .begin_passkey_registration(BeginPasskeyRegistration {
-                    session_token: bundle.token.clone(),
-                })
-                .await
-                .expect("begin duplicate passkey registration");
-            let duplicate = auth
-                .complete_passkey_registration(CompletePasskeyRegistration {
-                    session_token: bundle.token.clone(),
-                    challenge: duplicate_challenge.token,
-                    rp_id: "localhost".into(),
-                    origin: "http://localhost:3000".into(),
-                    name: "duplicate".into(),
-                    credential_id: "credential-1".into(),
-                    public_key: "public-key".into(),
-                    counter: 1,
-                    device_type: "platform".into(),
-                    backed_up: true,
-                    transports: None,
-                })
-                .await;
-            assert!(matches!(duplicate, Err(AuthFlowError::InvalidInput(_))));
-
-            let auth_challenge = auth
-                .begin_passkey_authentication(BeginPasskeyAuthentication {
-                    credential_id: "credential-1".into(),
-                })
-                .await
-                .expect("begin passkey authentication");
-            let stale_counter = auth
-                .complete_passkey_authentication(CompletePasskeyAuthentication {
-                    credential_id: "credential-1".into(),
-                    challenge: auth_challenge.token.clone(),
-                    rp_id: "localhost".into(),
-                    origin: "http://localhost:3000".into(),
-                    counter: 1,
+                .expect("nonce");
+            // Mallory's key, the victim's address in the text.
+            let message = format!(
+                "auth.example.com\nAddress: {victim}\nURI: https://auth.example.com\nVersion: 1\nChain ID: 1\nNonce: {}",
+                nonce.token
+            );
+            let signature = crate::flows::siwe::test_sign(&mallory_key, &message);
+            let stolen = auth
+                .verify_siwe_message(VerifySiweMessage {
+                    message,
+                    signature,
                     ip_address: None,
                     user_agent: None,
                 })
                 .await;
-            assert!(matches!(
-                stale_counter,
-                Err(AuthFlowError::InvalidCredentials)
-            ));
+            assert!(
+                matches!(stolen, Err(AuthFlowError::InvalidCredentials)),
+                "signing with one key must not claim another address"
+            );
+        }
 
-            let auth_challenge = auth
-                .begin_passkey_authentication(BeginPasskeyAuthentication {
-                    credential_id: "credential-1".into(),
+        #[tokio::test]
+        async fn a_signature_that_is_not_one_is_refused_rather_than_panicking() {
+            let auth = ArchitectAuth::builder()
+                .secret("a-secret-at-least-32-bytes-long!!")
+                .siwe_domain("auth.example.com")
+                .storage(MemoryStorage::default())
+                .build()
+                .expect("build auth");
+            let (_, address) = crate::flows::siwe::test_wallet(11);
+            let nonce = auth
+                .create_siwe_nonce(CreateSiweNonce)
+                .await
+                .expect("nonce");
+            let message = format!(
+                "auth.example.com\nAddress: {address}\nURI: https://auth.example.com\nVersion: 1\nChain ID: 1\nNonce: {}",
+                nonce.token
+            );
+
+            // Everything a wallet might send when something went wrong,
+            // and everything an attacker sends on purpose.
+            for signature in [
+                "",
+                "0x",
+                "not hex at all",
+                "0xdeadbeef",
+                // Right length, wrong content.
+                &format!("0x{}", "11".repeat(65)),
+                // A valid-looking signature with an impossible `v`.
+                &format!("0x{}ff", "11".repeat(64)),
+                // The old placeholder's shape.
+                "test:whatever",
+            ] {
+                let refused = auth
+                    .verify_siwe_message(VerifySiweMessage {
+                        message: message.clone(),
+                        signature: signature.to_owned(),
+                        ip_address: None,
+                        user_agent: None,
+                    })
+                    .await;
+                assert!(refused.is_err(), "{signature:?} must not verify");
+            }
+        }
+
+        // r[verify auth.twofactor.signin-required]
+        #[tokio::test]
+        async fn every_way_in_owes_the_second_factor_not_just_the_password_form() {
+            // Before this, enabling two-factor protected the password
+            // form and nothing else: an emailed code, an emailed link, a
+            // passkey and a social button each issued an ACTIVE session
+            // and walked straight past the challenge. The spec's MUST is
+            // unqualified, so all of them owe it.
+            let auth = passkey_auth();
+            let person = user(&auth, "ada@example.com").await;
+            let enrollment = auth
+                .begin_two_factor_enrollment(BeginTwoFactorEnrollment {
+                    session_token: person.token.clone(),
+                    account_label: "ada@example.com".into(),
+                    issuer: "FastTrackStudio".into(),
                 })
                 .await
-                .expect("begin second passkey authentication");
-            let session = auth
+                .expect("enrol");
+            auth.confirm_two_factor(ConfirmTwoFactor {
+                session_token: person.token.clone(),
+                code: totp_code(&enrollment.secret),
+            })
+            .await
+            .expect("confirm");
+
+            // A mailed code.
+            let otp = auth
+                .send_email_otp(SendEmailOtp {
+                    email: "ada@example.com".into(),
+                })
+                .await
+                .expect("send code");
+            let bundle = auth
+                .verify_email_otp(VerifyEmailOtp {
+                    email: "ada@example.com".into(),
+                    otp: otp.token,
+                    create_session: true,
+                    ip_address: None,
+                    user_agent: None,
+                })
+                .await
+                .expect("verify code");
+            let session = bundle.session.expect("a session");
+            assert!(
+                !session.active,
+                "an emailed code must not skip the second factor"
+            );
+
+            // A mailed link.
+            let link = auth
+                .send_magic_link(SendMagicLink {
+                    email: "ada@example.com".into(),
+                    callback_url: None,
+                })
+                .await
+                .expect("send link");
+            let verified = auth
+                .verify_magic_link(VerifyMagicLink {
+                    email: "ada@example.com".into(),
+                    token: link.token,
+                    callback_url: None,
+                    ip_address: None,
+                    user_agent: None,
+                })
+                .await
+                .expect("verify link");
+            assert!(
+                !verified.session.active,
+                "an emailed link must not skip the second factor"
+            );
+
+            // A passkey. Debatable — the authenticator did verify the
+            // person — but the spec does not carve it out, and a route
+            // that silently exempts itself is the shape this test
+            // exists to catch.
+            let mut authenticator = authenticator();
+            register_passkey(&auth, &mut authenticator, &person.token, "phone")
+                .await
+                .expect("register");
+            let challenge = auth
+                .begin_passkey_authentication(BeginPasskeyAuthentication {
+                    email: Some("ada@example.com".into()),
+                })
+                .await
+                .expect("begin");
+            let options = serde_json::from_str(&challenge.options_json).expect("options");
+            let assertion = authenticator
+                .do_authentication(passkey_origin(), options)
+                .expect("sign");
+            let signed_in = auth
                 .complete_passkey_authentication(CompletePasskeyAuthentication {
-                    credential_id: "credential-1".into(),
-                    challenge: auth_challenge.token,
-                    rp_id: "localhost".into(),
-                    origin: "http://localhost:3000".into(),
-                    counter: 2,
+                    handle: challenge.handle,
+                    credential_json: serde_json::to_string(&assertion).expect("serialise"),
+                    ip_address: None,
+                    user_agent: None,
+                })
+                .await
+                .expect("passkey sign-in");
+            assert!(
+                !signed_in.session.active,
+                "a passkey must not skip the second factor"
+            );
+
+            // And the challenge really does finish the job.
+            auth.verify_two_factor(VerifyTwoFactor {
+                session_token: signed_in.token.clone(),
+                code: totp_code(&enrollment.secret),
+            })
+            .await
+            .expect("second factor");
+            auth.current_session(CurrentSession {
+                token: signed_in.token,
+            })
+            .await
+            .expect("the session is usable once the factor is given");
+        }
+
+        // r[verify auth.passkey.assertion-signature]
+        // r[verify auth.passkey.challenge-random]
+        // r[verify auth.passkey.rp-origin]
+        #[tokio::test]
+        async fn a_passkey_registers_and_then_actually_signs_you_in() {
+            let auth = passkey_auth();
+            let person = user(&auth, "ada@example.com").await;
+            let mut authenticator = authenticator();
+
+            let passkey = register_passkey(&auth, &mut authenticator, &person.token, "My phone")
+                .await
+                .expect("register");
+            assert_eq!(passkey.name, "My phone");
+            assert_eq!(passkey.user_id, person.user.id);
+            // The stored key is a real serialised credential, not the
+            // literal string the old fabricated test passed in.
+            assert!(
+                passkey.public_key.contains("cred"),
+                "{}",
+                passkey.public_key
+            );
+
+            // Sign in with it. Keyed by address, because the software
+            // authenticator does not make resident keys.
+            let challenge = auth
+                .begin_passkey_authentication(BeginPasskeyAuthentication {
+                    email: Some("ada@example.com".into()),
+                })
+                .await
+                .expect("begin authentication");
+            let options = serde_json::from_str(&challenge.options_json).expect("options");
+            let assertion = authenticator
+                .do_authentication(passkey_origin(), options)
+                .expect("authenticator signs");
+            let bundle = auth
+                .complete_passkey_authentication(CompletePasskeyAuthentication {
+                    handle: challenge.handle,
+                    credential_json: serde_json::to_string(&assertion).expect("serialise"),
                     ip_address: Some("127.0.0.1".into()),
                     user_agent: Some("passkey-test".into()),
                 })
                 .await
-                .expect("complete passkey authentication");
-            assert_eq!(session.user.id, bundle.user.id);
-            assert_eq!(session.session.user_agent.as_deref(), Some("passkey-test"));
+                .expect("a real assertion signs in");
+            assert_eq!(bundle.user.id, person.user.id);
+            assert_eq!(bundle.session.user_agent.as_deref(), Some("passkey-test"));
+        }
+
+        // r[verify auth.passkey.assertion-signature]
+        #[tokio::test]
+        async fn a_credential_id_alone_no_longer_signs_anybody_in() {
+            // The bypass, as a test. Before the assertion was verified,
+            // knowing a credential id was enough: ask for a challenge,
+            // send it back with a higher counter, receive a session.
+            // Now the same moves produce nothing, because none of them
+            // involves a signature.
+            let auth = passkey_auth();
+            let person = user(&auth, "ada@example.com").await;
+            let mut authenticator = authenticator();
+            let passkey = register_passkey(&auth, &mut authenticator, &person.token, "phone")
+                .await
+                .expect("register");
+
+            let challenge = auth
+                .begin_passkey_authentication(BeginPasskeyAuthentication {
+                    email: Some("ada@example.com".into()),
+                })
+                .await
+                .expect("begin authentication");
+
+            // Everything an attacker could know or guess, shaped like a
+            // real credential and signed by nobody.
+            let forged = serde_json::json!({
+                "id": passkey.credential_id,
+                "rawId": passkey.credential_id,
+                "type": "public-key",
+                "extensions": {},
+                "response": {
+                    "authenticatorData": "SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MFAAAAAQ",
+                    "clientDataJSON": "e30",
+                    "signature": "MEUCIQD",
+                    "userHandle": null
+                }
+            });
+            let refused = auth
+                .complete_passkey_authentication(CompletePasskeyAuthentication {
+                    handle: challenge.handle,
+                    credential_json: forged.to_string(),
+                    ip_address: None,
+                    user_agent: None,
+                })
+                .await;
+            assert!(
+                refused.is_err(),
+                "a credential id and a counter must not be enough"
+            );
+        }
+
+        #[tokio::test]
+        async fn a_challenge_is_single_use() {
+            let auth = passkey_auth();
+            let person = user(&auth, "ada@example.com").await;
+            let mut authenticator = authenticator();
+            register_passkey(&auth, &mut authenticator, &person.token, "phone")
+                .await
+                .expect("register");
+
+            let challenge = auth
+                .begin_passkey_authentication(BeginPasskeyAuthentication {
+                    email: Some("ada@example.com".into()),
+                })
+                .await
+                .expect("begin");
+            let options = serde_json::from_str(&challenge.options_json).expect("options");
+            let assertion = authenticator
+                .do_authentication(passkey_origin(), options)
+                .expect("sign");
+            let credential_json = serde_json::to_string(&assertion).expect("serialise");
+
+            auth.complete_passkey_authentication(CompletePasskeyAuthentication {
+                handle: challenge.handle.clone(),
+                credential_json: credential_json.clone(),
+                ip_address: None,
+                user_agent: None,
+            })
+            .await
+            .expect("first use");
+
+            // Replaying the very same assertion must not work: the
+            // ceremony is deleted when it is taken, whatever the
+            // outcome.
+            let replayed = auth
+                .complete_passkey_authentication(CompletePasskeyAuthentication {
+                    handle: challenge.handle,
+                    credential_json,
+                    ip_address: None,
+                    user_agent: None,
+                })
+                .await;
+            assert!(matches!(replayed, Err(AuthFlowError::InvalidCredentials)));
+        }
+
+        #[tokio::test]
+        async fn a_registration_ceremony_cannot_be_finished_by_somebody_else() {
+            let auth = passkey_auth();
+            let ada = user(&auth, "ada@example.com").await;
+            let mallory = user(&auth, "mallory@example.com").await;
+            let mut authenticator = authenticator();
+
+            let challenge = auth
+                .begin_passkey_registration(BeginPasskeyRegistration {
+                    session_token: ada.token.clone(),
+                })
+                .await
+                .expect("begin");
+            let options = serde_json::from_str(&challenge.options_json).expect("options");
+            let credential = authenticator
+                .do_registration(passkey_origin(), options)
+                .expect("register");
+
+            // Ada started it; Mallory tries to finish it, which would
+            // otherwise attach a credential Mallory holds to Ada's
+            // ceremony.
+            let stolen = auth
+                .complete_passkey_registration(CompletePasskeyRegistration {
+                    session_token: mallory.token,
+                    handle: challenge.handle,
+                    name: "not mine".into(),
+                    credential_json: serde_json::to_string(&credential).expect("serialise"),
+                })
+                .await;
+            assert!(matches!(stolen, Err(AuthFlowError::PermissionDenied)));
+        }
+
+        #[tokio::test]
+        async fn an_unknown_address_is_answered_exactly_like_a_known_one() {
+            // Otherwise this endpoint is a way to ask whether somebody
+            // has an account here.
+            let auth = passkey_auth();
+            let person = user(&auth, "ada@example.com").await;
+            let mut authenticator = authenticator();
+            register_passkey(&auth, &mut authenticator, &person.token, "phone")
+                .await
+                .expect("register");
+
+            for email in ["ada@example.com", "nobody@example.com", "not-an-address"] {
+                let challenge = auth
+                    .begin_passkey_authentication(BeginPasskeyAuthentication {
+                        email: Some(email.into()),
+                    })
+                    .await
+                    .expect("every address gets a challenge");
+                assert!(!challenge.handle.is_empty(), "{email}");
+                assert!(challenge.options_json.contains("challenge"), "{email}");
+            }
+        }
+
+        // r[verify auth.passkey.list]
+        #[tokio::test]
+        async fn passkeys_are_listed_and_deleted_only_by_their_owner() {
+            let auth = passkey_auth();
+            let ada = user(&auth, "ada@example.com").await;
+            let mallory = user(&auth, "mallory@example.com").await;
+            let mut authenticator = authenticator();
+            let passkey = register_passkey(&auth, &mut authenticator, &ada.token, "phone")
+                .await
+                .expect("register");
+
+            assert_eq!(
+                auth.list_passkeys(ListPasskeys {
+                    session_token: ada.token.clone(),
+                })
+                .await
+                .expect("list")
+                .len(),
+                1
+            );
+            assert!(
+                auth.list_passkeys(ListPasskeys {
+                    session_token: mallory.token.clone(),
+                })
+                .await
+                .expect("list")
+                .is_empty()
+            );
+
+            let stolen = auth
+                .delete_passkey(DeletePasskey {
+                    session_token: mallory.token,
+                    credential_id: passkey.credential_id.clone(),
+                })
+                .await;
+            assert!(matches!(stolen, Err(AuthFlowError::PermissionDenied)));
+
+            // Ada has a password too, so the passkey is not her last way in.
+            auth.delete_passkey(DeletePasskey {
+                session_token: ada.token,
+                credential_id: passkey.credential_id,
+            })
+            .await
+            .expect("owner deletes their own");
         }
 
         // r[verify auth.passkey.delete-last-credential]
@@ -7512,32 +8228,16 @@ pub mod email_password {
                 .issue_session(user.clone(), None, None, None, None)
                 .await
                 .expect("issue passkey-only setup session");
-            let challenge = auth
-                .begin_passkey_registration(BeginPasskeyRegistration {
-                    session_token: session.token.clone(),
-                })
-                .await
-                .expect("begin registration");
-            auth.complete_passkey_registration(CompletePasskeyRegistration {
-                session_token: session.token.clone(),
-                challenge: challenge.token,
-                rp_id: "localhost".into(),
-                origin: "http://localhost:3000".into(),
-                name: "security key".into(),
-                credential_id: "only-passkey".into(),
-                public_key: "public-key".into(),
-                counter: 1,
-                device_type: "cross-platform".into(),
-                backed_up: false,
-                transports: Some("usb".into()),
-            })
-            .await
-            .expect("complete registration");
+            let mut authenticator = authenticator();
+            let passkey =
+                register_passkey(&auth, &mut authenticator, &session.token, "security key")
+                    .await
+                    .expect("register");
 
             let rejected = auth
                 .delete_passkey(DeletePasskey {
                     session_token: session.token.clone(),
-                    credential_id: "only-passkey".into(),
+                    credential_id: passkey.credential_id.clone(),
                 })
                 .await;
             assert!(matches!(rejected, Err(AuthFlowError::InvalidInput(_))));
@@ -7559,7 +8259,7 @@ pub mod email_password {
                 .expect("add password credential");
             auth.delete_passkey(DeletePasskey {
                 session_token: session.token,
-                credential_id: "only-passkey".into(),
+                credential_id: passkey.credential_id,
             })
             .await
             .expect("delete passkey when password remains");
@@ -7702,7 +8402,7 @@ pub mod email_password {
                     .lock()
                     .expect("lock memory storage");
                 for verification in inner.verifications.values_mut() {
-                    verification.expires_at = Utc::now() - Duration::seconds(1);
+                    verification.expires_at = crate::expiry::ago(1);
                 }
             }
             assert!(matches!(
@@ -8048,13 +8748,13 @@ pub mod email_password {
                     .get_mut(&created.api_key.key_hash)
                     .expect("stored api key");
                 by_hash.enabled = true;
-                by_hash.expires_at = Some(Utc::now() - Duration::seconds(1));
+                by_hash.expires_at = Some(crate::expiry::ago(1));
                 let by_id = inner
                     .api_keys_by_id
                     .get_mut(&created.api_key.id)
                     .expect("stored api key by id");
                 by_id.enabled = true;
-                by_id.expires_at = Some(Utc::now() - Duration::seconds(1));
+                by_id.expires_at = Some(crate::expiry::ago(1));
             }
             let expired = auth
                 .authenticate_api_key(AuthenticateApiKey { key: created.key })
@@ -8285,6 +8985,660 @@ pub mod email_password {
                 })
                 .await;
             assert!(matches!(denied, Err(AuthFlowError::PermissionDenied)));
+        }
+
+        /// A signed-up user, for tests that need several people.
+        async fn user(
+            auth: &ArchitectAuth<MemoryStorage>,
+            email: &str,
+        ) -> crate::AuthSessionBundle {
+            auth.create_email_password_user(CreateEmailPasswordUser {
+                email: email.into(),
+                password: "correct horse battery staple".into(),
+                name: None,
+                username: None,
+                image: None,
+                metadata_json: None,
+                ip_address: None,
+                user_agent: None,
+            })
+            .await
+            .expect("create user")
+        }
+
+        /// An owner with an organization already made.
+        async fn owned_org(
+            auth: &ArchitectAuth<MemoryStorage>,
+        ) -> (crate::AuthSessionBundle, OrganizationBundle) {
+            let owner = user(auth, "owner@example.com").await;
+            let org = auth
+                .create_organization(CreateOrganization {
+                    session_token: owner.token.clone(),
+                    name: "Acme".into(),
+                    slug: "acme".into(),
+                    logo: None,
+                    metadata_json: None,
+                })
+                .await
+                .expect("create org");
+            (owner, org)
+        }
+
+        #[tokio::test]
+        async fn enrolling_in_two_factor_mints_everything_the_page_must_show() {
+            let auth = auth();
+            let person = user(&auth, "ada@example.com").await;
+
+            let enrollment = auth
+                .begin_two_factor_enrollment(BeginTwoFactorEnrollment {
+                    session_token: person.token.clone(),
+                    account_label: "ada@example.com".into(),
+                    issuer: "FastTrackStudio".into(),
+                })
+                .await
+                .expect("begin enrollment");
+
+            assert!(enrollment.otpauth_url.starts_with("otpauth://totp/"));
+            assert!(enrollment.otpauth_url.contains("FastTrackStudio"));
+            assert_eq!(enrollment.backup_codes.len(), 10);
+            // Distinct, and typeable: no separators, because the stored
+            // hash is over exactly the string that was shown.
+            let unique: std::collections::HashSet<_> = enrollment.backup_codes.iter().collect();
+            assert_eq!(unique.len(), 10);
+            for code in &enrollment.backup_codes {
+                assert!(
+                    code.chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()),
+                    "{code:?} is not typeable without thinking"
+                );
+            }
+
+            // Enrolment is not enabled until a code from the app
+            // confirms it, so closing the page leaves nothing switched on.
+            let session = auth
+                .current_session(CurrentSession {
+                    token: person.token.clone(),
+                })
+                .await
+                .expect("session");
+            assert!(!session.user.two_factor_enabled);
+
+            // A backup code does NOT confirm enrolment: confirming has
+            // to prove you hold the app, not the printed sheet.
+            let printed = enrollment.backup_codes.first().expect("a code").clone();
+            let refused = auth
+                .confirm_two_factor(ConfirmTwoFactor {
+                    session_token: person.token.clone(),
+                    code: printed,
+                })
+                .await;
+            assert!(matches!(refused, Err(AuthFlowError::InvalidCredentials)));
+
+            // The secret we handed out really does drive the codes the
+            // server accepts — which is the whole point of the page.
+            auth.confirm_two_factor(ConfirmTwoFactor {
+                session_token: person.token.clone(),
+                code: totp_code(&enrollment.secret),
+            })
+            .await
+            .expect("a code from the app confirms enrolment");
+            let session = auth
+                .current_session(CurrentSession {
+                    token: person.token,
+                })
+                .await
+                .expect("session");
+            assert!(session.user.two_factor_enabled);
+        }
+
+        /// The code an authenticator app would be showing right now for
+        /// this secret.
+        fn totp_code(secret: &str) -> String {
+            use totp_rs::{Algorithm, Secret, TOTP};
+            TOTP::new(
+                Algorithm::SHA1,
+                6,
+                1,
+                30,
+                Secret::Encoded(secret.to_owned())
+                    .to_bytes()
+                    .expect("decode secret"),
+                None,
+                "architect-auth".into(),
+            )
+            .expect("build totp")
+            .generate_current()
+            .expect("generate code")
+        }
+
+        // r[verify auth.twofactor.rate-limit]
+        #[tokio::test]
+        async fn fumbling_the_second_factor_locks_you_out_only_for_a_while() {
+            let auth = auth();
+            let person = user(&auth, "ada@example.com").await;
+            let enrollment = auth
+                .begin_two_factor_enrollment(BeginTwoFactorEnrollment {
+                    session_token: person.token.clone(),
+                    account_label: "ada@example.com".into(),
+                    issuer: "FastTrackStudio".into(),
+                })
+                .await
+                .expect("begin enrollment");
+            auth.confirm_two_factor(ConfirmTwoFactor {
+                session_token: person.token,
+                code: totp_code(&enrollment.secret),
+            })
+            .await
+            .expect("confirm");
+
+            // Sign in: the session is issued but not active until the
+            // second factor is given.
+            let pending = auth
+                .sign_in_email_password(SignInEmailPassword {
+                    email: "ada@example.com".into(),
+                    password: "correct horse battery staple".into(),
+                    ip_address: None,
+                    user_agent: None,
+                })
+                .await
+                .expect("sign in");
+            assert!(!pending.session.active);
+
+            for _ in 0..5 {
+                let wrong = auth
+                    .verify_two_factor(VerifyTwoFactor {
+                        session_token: pending.token.clone(),
+                        code: "000000".into(),
+                    })
+                    .await;
+                assert!(matches!(wrong, Err(AuthFlowError::InvalidCredentials)));
+            }
+            let refused = auth
+                .verify_two_factor(VerifyTwoFactor {
+                    session_token: pending.token.clone(),
+                    code: "000000".into(),
+                })
+                .await;
+            assert!(matches!(refused, Err(AuthFlowError::PermissionDenied)));
+
+            // Even a CORRECT code is refused while the run is live —
+            // that is what the limit is for.
+            let good = enrollment.backup_codes.first().expect("a code").clone();
+            let refused = auth
+                .verify_two_factor(VerifyTwoFactor {
+                    session_token: pending.token.clone(),
+                    code: good.clone(),
+                })
+                .await;
+            assert!(matches!(refused, Err(AuthFlowError::PermissionDenied)));
+
+            // The counter used to be monotonic, so this was the end of
+            // the account: six fumbles and only an operator with
+            // database access could undo it. Once the window lapses,
+            // the run starts again.
+            auth.storage.lapse_two_factor_window(person.user.id);
+            auth.verify_two_factor(VerifyTwoFactor {
+                session_token: pending.token,
+                code: good,
+            })
+            .await
+            .expect("the window lapsed, so this is a fresh run");
+        }
+
+        #[tokio::test]
+        async fn listing_organizations_is_how_a_switcher_finds_the_first_one() {
+            let auth = auth();
+            let (owner, org) = owned_org(&auth).await;
+
+            let mine = auth
+                .list_organizations(ListOrganizations {
+                    session_token: owner.token.clone(),
+                })
+                .await
+                .expect("list organizations");
+            assert_eq!(mine.len(), 1);
+            let first = mine.first().expect("one organization");
+            assert_eq!(first.organization.id, org.organization.id);
+            assert_eq!(first.membership.role, "owner");
+
+            // Somebody else's organization is not in their list.
+            let stranger = user(&auth, "stranger@example.com").await;
+            let theirs = auth
+                .list_organizations(ListOrganizations {
+                    session_token: stranger.token,
+                })
+                .await
+                .expect("list organizations");
+            assert!(theirs.is_empty());
+        }
+
+        // r[verify auth.org.remove-last-owner]
+        #[tokio::test]
+        async fn the_last_owner_can_neither_be_removed_nor_leave() {
+            let auth = auth();
+            let (owner, org) = owned_org(&auth).await;
+
+            let removed = auth
+                .remove_member(RemoveMember {
+                    session_token: owner.token.clone(),
+                    organization_id: org.organization.id,
+                    user_id: owner.user.id,
+                })
+                .await;
+            assert!(matches!(removed, Err(AuthFlowError::InvalidInput(_))));
+
+            let left = auth
+                .leave_organization(LeaveOrganization {
+                    session_token: owner.token.clone(),
+                    organization_id: org.organization.id,
+                })
+                .await;
+            assert!(matches!(left, Err(AuthFlowError::InvalidInput(_))));
+
+            // Still there.
+            assert_eq!(
+                auth.list_members(ListMembers {
+                    session_token: owner.token,
+                    organization_id: org.organization.id,
+                })
+                .await
+                .expect("list members")
+                .len(),
+                1
+            );
+        }
+
+        #[tokio::test]
+        async fn a_member_may_leave_but_may_not_remove_anybody_else() {
+            let auth = auth();
+            let (owner, org) = owned_org(&auth).await;
+            let joiner = user(&auth, "joiner@example.com").await;
+
+            let link = auth
+                .create_invite_link(CreateInviteLink {
+                    session_token: owner.token.clone(),
+                    organization_id: org.organization.id,
+                    role: "member".into(),
+                    label: None,
+                    expires_at: None,
+                    max_uses: None,
+                })
+                .await
+                .expect("create link");
+            auth.redeem_invite_link(RedeemInviteLink {
+                session_token: joiner.token.clone(),
+                token: link.token.clone(),
+            })
+            .await
+            .expect("redeem");
+
+            // No `member:delete` for a plain member.
+            let denied = auth
+                .remove_member(RemoveMember {
+                    session_token: joiner.token.clone(),
+                    organization_id: org.organization.id,
+                    user_id: owner.user.id,
+                })
+                .await;
+            assert!(matches!(denied, Err(AuthFlowError::PermissionDenied)));
+
+            // But nobody needs permission to stop being in a room.
+            auth.leave_organization(LeaveOrganization {
+                session_token: joiner.token,
+                organization_id: org.organization.id,
+            })
+            .await
+            .expect("leave");
+            assert_eq!(
+                auth.list_members(ListMembers {
+                    session_token: owner.token,
+                    organization_id: org.organization.id,
+                })
+                .await
+                .expect("list members")
+                .len(),
+                1
+            );
+        }
+
+        // r[verify auth.org.slug-unique]
+        #[tokio::test]
+        async fn renaming_to_your_own_slug_is_not_a_conflict() {
+            let auth = auth();
+            let (owner, org) = owned_org(&auth).await;
+            auth.create_organization(CreateOrganization {
+                session_token: owner.token.clone(),
+                name: "Other".into(),
+                slug: "other".into(),
+                logo: None,
+                metadata_json: None,
+            })
+            .await
+            .expect("create second org");
+
+            // Its own slug, with only the name changing.
+            let renamed = auth
+                .update_organization(UpdateOrganization {
+                    session_token: owner.token.clone(),
+                    organization_id: org.organization.id,
+                    name: Some("Acme Inc".into()),
+                    slug: Some("acme".into()),
+                    ..UpdateOrganization::default()
+                })
+                .await
+                .expect("rename");
+            assert_eq!(renamed.name, "Acme Inc");
+            assert_eq!(renamed.slug, "acme");
+
+            // Somebody else's slug is still a conflict.
+            let clash = auth
+                .update_organization(UpdateOrganization {
+                    session_token: owner.token,
+                    organization_id: org.organization.id,
+                    slug: Some("other".into()),
+                    ..UpdateOrganization::default()
+                })
+                .await;
+            assert!(matches!(clash, Err(AuthFlowError::InvalidInput(_))));
+        }
+
+        #[tokio::test]
+        async fn deleting_an_organization_takes_its_members_and_links_with_it() {
+            let auth = auth();
+            let (owner, org) = owned_org(&auth).await;
+            let link = auth
+                .create_invite_link(CreateInviteLink {
+                    session_token: owner.token.clone(),
+                    organization_id: org.organization.id,
+                    role: "member".into(),
+                    label: None,
+                    expires_at: None,
+                    max_uses: None,
+                })
+                .await
+                .expect("create link");
+
+            auth.delete_organization(DeleteOrganization {
+                session_token: owner.token.clone(),
+                organization_id: org.organization.id,
+            })
+            .await
+            .expect("delete org");
+
+            assert!(
+                auth.list_organizations(ListOrganizations {
+                    session_token: owner.token,
+                })
+                .await
+                .expect("list")
+                .is_empty()
+            );
+            // The link must not outlive the organization it points at.
+            let orphan = auth
+                .preview_invite_link(PreviewInviteLink { token: link.token })
+                .await;
+            assert!(matches!(orphan, Err(AuthFlowError::InvalidCredentials)));
+        }
+
+        // r[verify auth.org.invite-token]
+        #[tokio::test]
+        async fn an_invite_link_admits_exactly_its_allowance() {
+            let auth = auth();
+            let (owner, org) = owned_org(&auth).await;
+            let link = auth
+                .create_invite_link(CreateInviteLink {
+                    session_token: owner.token.clone(),
+                    organization_id: org.organization.id,
+                    role: "member".into(),
+                    label: Some("launch week".into()),
+                    expires_at: None,
+                    max_uses: Some(1),
+                })
+                .await
+                .expect("create link");
+
+            let preview = auth
+                .preview_invite_link(PreviewInviteLink {
+                    token: link.token.clone(),
+                })
+                .await
+                .expect("preview");
+            assert_eq!(preview.organization_name, "Acme");
+            assert_eq!(preview.role, "member");
+            assert_eq!(preview.uses_remaining, Some(1));
+
+            let first = user(&auth, "first@example.com").await;
+            let member = auth
+                .redeem_invite_link(RedeemInviteLink {
+                    session_token: first.token,
+                    token: link.token.clone(),
+                })
+                .await
+                .expect("first redeem");
+            assert_eq!(member.role, "member");
+
+            // The allowance is spent; the next person is turned away, and
+            // told no more than that.
+            let second = user(&auth, "second@example.com").await;
+            let refused = auth
+                .redeem_invite_link(RedeemInviteLink {
+                    session_token: second.token,
+                    token: link.token,
+                })
+                .await;
+            assert!(matches!(refused, Err(AuthFlowError::InvalidCredentials)));
+        }
+
+        #[tokio::test]
+        async fn following_a_link_you_already_used_does_not_spend_another_use() {
+            let auth = auth();
+            let (owner, org) = owned_org(&auth).await;
+            let link = auth
+                .create_invite_link(CreateInviteLink {
+                    session_token: owner.token.clone(),
+                    organization_id: org.organization.id,
+                    role: "member".into(),
+                    label: None,
+                    expires_at: None,
+                    max_uses: Some(2),
+                })
+                .await
+                .expect("create link");
+
+            let joiner = user(&auth, "joiner@example.com").await;
+            for _ in 0..3 {
+                auth.redeem_invite_link(RedeemInviteLink {
+                    session_token: joiner.token.clone(),
+                    token: link.token.clone(),
+                })
+                .await
+                .expect("redeem is idempotent");
+            }
+
+            // One use spent, not three — otherwise a refresh-happy
+            // browser burns a link nobody else got to use.
+            let links = auth
+                .list_invite_links(ListInviteLinks {
+                    session_token: owner.token.clone(),
+                    organization_id: org.organization.id,
+                })
+                .await
+                .expect("list links");
+            assert_eq!(links.first().expect("one link").uses, 1);
+            assert_eq!(
+                auth.list_members(ListMembers {
+                    session_token: owner.token,
+                    organization_id: org.organization.id,
+                })
+                .await
+                .expect("list members")
+                .len(),
+                2
+            );
+        }
+
+        #[tokio::test]
+        async fn a_revoked_link_stops_admitting_immediately() {
+            let auth = auth();
+            let (owner, org) = owned_org(&auth).await;
+            let link = auth
+                .create_invite_link(CreateInviteLink {
+                    session_token: owner.token.clone(),
+                    organization_id: org.organization.id,
+                    role: "member".into(),
+                    label: None,
+                    expires_at: None,
+                    max_uses: None,
+                })
+                .await
+                .expect("create link");
+
+            auth.revoke_invite_link(RevokeInviteLink {
+                session_token: owner.token.clone(),
+                link_id: link.link.id,
+            })
+            .await
+            .expect("revoke");
+            // Twice, because a second click of a button that worked
+            // should agree rather than error.
+            auth.revoke_invite_link(RevokeInviteLink {
+                session_token: owner.token,
+                link_id: link.link.id,
+            })
+            .await
+            .expect("revoking twice is a no-op");
+
+            let joiner = user(&auth, "joiner@example.com").await;
+            let refused = auth
+                .redeem_invite_link(RedeemInviteLink {
+                    session_token: joiner.token,
+                    token: link.token,
+                })
+                .await;
+            assert!(matches!(refused, Err(AuthFlowError::InvalidCredentials)));
+        }
+
+        #[tokio::test]
+        async fn only_someone_who_can_invite_can_mint_a_link() {
+            let auth = auth();
+            let (owner, org) = owned_org(&auth).await;
+            let link = auth
+                .create_invite_link(CreateInviteLink {
+                    session_token: owner.token.clone(),
+                    organization_id: org.organization.id,
+                    role: "member".into(),
+                    label: None,
+                    expires_at: None,
+                    max_uses: None,
+                })
+                .await
+                .expect("create link");
+            let joiner = user(&auth, "joiner@example.com").await;
+            auth.redeem_invite_link(RedeemInviteLink {
+                session_token: joiner.token.clone(),
+                token: link.token,
+            })
+            .await
+            .expect("redeem");
+
+            // A plain member cannot open the door for anyone else.
+            let denied = auth
+                .create_invite_link(CreateInviteLink {
+                    session_token: joiner.token,
+                    organization_id: org.organization.id,
+                    role: "member".into(),
+                    label: None,
+                    expires_at: None,
+                    max_uses: None,
+                })
+                .await;
+            assert!(matches!(denied, Err(AuthFlowError::PermissionDenied)));
+        }
+
+        // r[verify auth.org.invite-status]
+        #[tokio::test]
+        async fn an_invitation_moves_out_of_pending_exactly_once() {
+            let auth = auth();
+            let (owner, org) = owned_org(&auth).await;
+            let invitation = auth
+                .create_invitation(CreateInvitation {
+                    session_token: owner.token.clone(),
+                    organization_id: org.organization.id,
+                    email: "invitee@example.com".into(),
+                    role: "member".into(),
+                    expires_at: Utc::now() + chrono::Duration::days(7),
+                })
+                .await
+                .expect("create invitation");
+
+            let listed = auth
+                .list_invitations(ListInvitations {
+                    session_token: owner.token.clone(),
+                    organization_id: org.organization.id,
+                })
+                .await
+                .expect("list invitations");
+            assert_eq!(listed.len(), 1);
+
+            auth.cancel_invitation(CancelInvitation {
+                session_token: owner.token.clone(),
+                invitation_id: invitation.invitation.id,
+            })
+            .await
+            .expect("cancel");
+
+            // Cancelled is a terminal state: it cannot be cancelled
+            // again, nor previewed, nor accepted.
+            let again = auth
+                .cancel_invitation(CancelInvitation {
+                    session_token: owner.token,
+                    invitation_id: invitation.invitation.id,
+                })
+                .await;
+            assert!(matches!(again, Err(AuthFlowError::InvalidInput(_))));
+
+            let preview = auth
+                .preview_invitation(PreviewInvitation {
+                    invitation_id: invitation.invitation.id,
+                    token: invitation.token,
+                })
+                .await;
+            assert!(matches!(preview, Err(AuthFlowError::InvalidCredentials)));
+        }
+
+        #[tokio::test]
+        async fn previewing_an_invitation_needs_the_token_not_a_session() {
+            let auth = auth();
+            let (owner, org) = owned_org(&auth).await;
+            let invitation = auth
+                .create_invitation(CreateInvitation {
+                    session_token: owner.token,
+                    organization_id: org.organization.id,
+                    email: "invitee@example.com".into(),
+                    role: "member".into(),
+                    expires_at: Utc::now() + chrono::Duration::days(7),
+                })
+                .await
+                .expect("create invitation");
+
+            // Nobody is signed in here — that is the point.
+            let preview = auth
+                .preview_invitation(PreviewInvitation {
+                    invitation_id: invitation.invitation.id,
+                    token: invitation.token,
+                })
+                .await
+                .expect("preview");
+            assert_eq!(preview.organization_name, "Acme");
+            assert_eq!(preview.email, "invitee@example.com");
+
+            let guessed = auth
+                .preview_invitation(PreviewInvitation {
+                    invitation_id: invitation.invitation.id,
+                    token: "not-the-token".into(),
+                })
+                .await;
+            assert!(matches!(guessed, Err(AuthFlowError::InvalidCredentials)));
         }
 
         // r[verify auth.org.invite-token]
@@ -9287,7 +10641,7 @@ pub mod email_password {
                     user.user.id,
                     true,
                     Some("expired".into()),
-                    Some(Utc::now() - Duration::seconds(1)),
+                    Some(crate::expiry::ago(1)),
                 )
                 .await
                 .expect("expire ban");
@@ -9607,7 +10961,7 @@ pub mod email_password {
 }
 pub mod email_otp {
     use auth_proto::{AuthFlowError, AuthUserCreate, AuthVerificationCreate};
-    use chrono::{Duration, Utc};
+    use chrono::Utc;
 
     use super::email_password::normalize_email;
     use crate::{
@@ -9638,7 +10992,7 @@ pub mod email_otp {
                 .storage
                 .find_latest_verification_by_identifier(&identifier)
                 .await?
-                && existing.created_at + Duration::seconds(EMAIL_OTP_RESEND_SECONDS) > Utc::now()
+                && crate::expiry::after(existing.created_at, EMAIL_OTP_RESEND_SECONDS) > Utc::now()
             {
                 return Err(AuthFlowError::PermissionDenied);
             }
@@ -9647,7 +11001,7 @@ pub mod email_otp {
                 .create_verification(AuthVerificationCreate {
                     identifier: identifier.clone(),
                     value_hash: hash_token(&self.config.secret, &otp),
-                    expires_at: Utc::now() + Duration::seconds(EMAIL_OTP_TTL_SECONDS),
+                    expires_at: crate::expiry::expires_in(EMAIL_OTP_TTL_SECONDS),
                 })
                 .await?;
             Ok(VerificationToken {
@@ -9699,8 +11053,23 @@ pub mod email_otp {
             self.storage.delete_verification(verification.id).await?;
 
             if input.create_session {
+                let second_factor_pending = user.two_factor_enabled;
                 let bundle = self
-                    .issue_session(user, input.ip_address, input.user_agent, None, None)
+                    .issue_session_with_state(
+                        user,
+                        input.ip_address,
+                        input.user_agent,
+                        None,
+                        None,
+                        // r[impl auth.twofactor.signin-required]
+                        // Inactive when a second factor is owed, exactly as
+                        // the password path does. Every one of these routes
+                        // used to issue an ACTIVE session, so enabling
+                        // two-factor protected the password form and
+                        // nothing else — a code, a link, a passkey or a
+                        // social button all walked straight past it.
+                        !second_factor_pending,
+                    )
                     .await?;
                 let bundle = record_last_login_method(self, bundle, "email-otp").await?;
                 Ok(EmailOtpVerification {
@@ -9733,7 +11102,7 @@ pub mod email_otp {
 }
 pub mod phone_number {
     use auth_proto::{AuthFlowError, AuthUser, AuthUserCreate, AuthVerificationCreate};
-    use chrono::{Duration, Utc};
+    use chrono::Utc;
     use serde_json::{Value, json};
 
     use crate::{
@@ -9765,7 +11134,7 @@ pub mod phone_number {
                 .create_verification(AuthVerificationCreate {
                     identifier: phone_identifier(&phone_number),
                     value_hash: hash_token(&self.config.secret, &otp),
-                    expires_at: Utc::now() + Duration::seconds(PHONE_OTP_TTL_SECONDS),
+                    expires_at: crate::expiry::expires_in(PHONE_OTP_TTL_SECONDS),
                 })
                 .await?;
             Ok(VerificationToken {
@@ -9816,8 +11185,23 @@ pub mod phone_number {
             };
 
             if input.create_session {
+                let second_factor_pending = user.two_factor_enabled;
                 let bundle = self
-                    .issue_session(user, input.ip_address, input.user_agent, None, None)
+                    .issue_session_with_state(
+                        user,
+                        input.ip_address,
+                        input.user_agent,
+                        None,
+                        None,
+                        // r[impl auth.twofactor.signin-required]
+                        // Inactive when a second factor is owed, exactly as
+                        // the password path does. Every one of these routes
+                        // used to issue an ACTIVE session, so enabling
+                        // two-factor protected the password form and
+                        // nothing else — a code, a link, a passkey or a
+                        // social button all walked straight past it.
+                        !second_factor_pending,
+                    )
                     .await?;
                 let bundle = record_last_login_method(self, bundle, "phone-number").await?;
                 Ok(PhoneNumberVerification {
@@ -9858,6 +11242,7 @@ pub mod phone_number {
             set_user_phone_number(self, bundle.user, &phone_number, false).await
         }
 
+        #[allow(clippy::unused_async)]
         async fn deliver_phone_otp(&self, _phone_number: &str) -> Result<(), AuthFlowError> {
             match self.config.sms.provider {
                 SmsProvider::Disabled | SmsProvider::Test => Ok(()),
@@ -9881,12 +11266,11 @@ pub mod phone_number {
 
     pub fn normalize_phone_number(phone_number: &str) -> Result<String, AuthFlowError> {
         let trimmed = phone_number.trim();
-        if !trimmed.starts_with('+') {
+        let Some(digits) = trimmed.strip_prefix('+') else {
             return Err(AuthFlowError::InvalidInput(
                 "phone number must be E.164".into(),
             ));
-        }
-        let digits = &trimmed[1..];
+        };
         if digits.len() < 8 || digits.len() > 15 || !digits.chars().all(|ch| ch.is_ascii_digit()) {
             return Err(AuthFlowError::InvalidInput(
                 "phone number must be E.164".into(),
@@ -9926,7 +11310,17 @@ pub mod phone_number {
             .await
     }
 
-    fn user_phone_number(user: &AuthUser) -> Result<Option<String>, AuthFlowError> {
+    /// The phone number on an account, if it has one.
+    ///
+    /// Public for the same reason `last_login_method_from_user` is: it
+    /// reads a field the entity does not have a column for, and a
+    /// consumer that had to re-parse `metadata_json` itself would be
+    /// duplicating a key it could get wrong.
+    ///
+    /// # Errors
+    ///
+    /// If `metadata_json` is not JSON.
+    pub fn user_phone_number(user: &AuthUser) -> Result<Option<String>, AuthFlowError> {
         let metadata = serde_json::from_str::<Value>(&user.metadata_json)
             .map_err(|_| AuthFlowError::InvalidInput("metadata_json must be JSON".into()))?;
         Ok(metadata
@@ -9962,13 +11356,33 @@ pub mod phone_number {
         serde_json::to_string(&metadata).map_err(|err| AuthFlowError::Internal(err.to_string()))
     }
 
+    /// Whether the number on an account has been confirmed.
+    ///
+    /// `update_phone_number` attaches a number *unverified* — the
+    /// engine will not let two accounts claim one, so the number has to
+    /// be taken before a code can prove it. A page that showed the two
+    /// states identically would be telling somebody a recovery route
+    /// works when it has never been tested.
+    ///
+    /// # Errors
+    ///
+    /// If `metadata_json` is not JSON.
+    pub fn user_phone_number_verified(user: &AuthUser) -> Result<bool, AuthFlowError> {
+        let metadata = serde_json::from_str::<Value>(&user.metadata_json)
+            .map_err(|_| AuthFlowError::InvalidInput("metadata_json must be JSON".into()))?;
+        Ok(metadata
+            .get(PHONE_VERIFIED_METADATA_KEY)
+            .and_then(Value::as_bool)
+            .unwrap_or(false))
+    }
+
     fn phone_identifier(phone_number: &str) -> String {
         format!("phone-number:{phone_number}")
     }
 }
 pub mod siwe {
     use auth_proto::{AuthAccountCreate, AuthFlowError, AuthSessionBundle, AuthUserCreate};
-    use chrono::{Duration, Utc};
+    use chrono::Utc;
 
     use crate::{
         ArchitectAuth, AuthStorage, CreateSiweNonce, CurrentSession, LinkSiweAddress,
@@ -10001,7 +11415,7 @@ pub mod siwe {
                 .create_verification(auth_proto::AuthVerificationCreate {
                     identifier: siwe_nonce_identifier(&nonce),
                     value_hash: hash_token(&self.config.secret, &nonce),
-                    expires_at: Utc::now() + Duration::seconds(SIWE_NONCE_TTL_SECONDS),
+                    expires_at: crate::expiry::expires_in(SIWE_NONCE_TTL_SECONDS),
                 })
                 .await?;
             Ok(VerificationToken {
@@ -10069,8 +11483,23 @@ pub mod siwe {
                     .await?;
                 user
             };
+            let second_factor_pending = user.two_factor_enabled;
             let bundle = self
-                .issue_session(user, input.ip_address, input.user_agent, None, None)
+                .issue_session_with_state(
+                    user,
+                    input.ip_address,
+                    input.user_agent,
+                    None,
+                    None,
+                    // r[impl auth.twofactor.signin-required]
+                    // Inactive when a second factor is owed, exactly as
+                    // the password path does. Every one of these routes
+                    // used to issue an ACTIVE session, so enabling
+                    // two-factor protected the password form and
+                    // nothing else — a code, a link, a passkey or a
+                    // social button all walked straight past it.
+                    !second_factor_pending,
+                )
                 .await?;
             record_last_login_method(self, bundle, "siwe").await
         }
@@ -10121,7 +11550,7 @@ pub mod siwe {
             if parsed.domain != self.config.siwe.domain {
                 return Err(AuthFlowError::PermissionDenied);
             }
-            verify_test_signature(&self.config.secret, message, &parsed.address, signature)?;
+            verify_siwe_signature(message, &parsed.address, signature)?;
             let identifier = siwe_nonce_identifier(&parsed.nonce);
             let value_hash = hash_token(&self.config.secret, &parsed.nonce);
             let verification = self
@@ -10137,24 +11566,128 @@ pub mod siwe {
         }
     }
 
-    pub fn test_siwe_signature(secret: &str, message: &str, address: &str) -> String {
-        format!(
-            "test:{}",
-            hash_token(secret, &format!("{message}:{address}"))
-        )
-    }
-
-    fn verify_test_signature(
-        secret: &str,
+    /// Check that `signature` really is `address` signing `message`.
+    ///
+    /// # What this replaces
+    ///
+    /// A placeholder: signatures had to start with `test:` and be an
+    /// HMAC of the server's own secret. That was not exploitable — only
+    /// the server could compute one — but it meant no wallet on earth
+    /// could sign in, because a wallet produces an ECDSA signature and
+    /// not an HMAC of a secret it has never seen. The feature was a
+    /// stub with a working-looking test.
+    ///
+    /// # How it works
+    ///
+    /// A wallet's `personal_sign` does not sign the message directly.
+    /// It signs `keccak256("\x19Ethereum Signed Message:\n" || len ||
+    /// message)` — the EIP-191 prefix, which exists so that a signature
+    /// obtained by tricking somebody into signing a "login message" can
+    /// never also be a valid *transaction*. Getting that prefix wrong
+    /// is the classic way to build a signing oracle, so it is not
+    /// optional.
+    ///
+    /// The signature is 65 bytes: `r || s || v`. `v` names which of the
+    /// two possible public keys to recover, and Ethereum has spelled it
+    /// 27/28 since long before it also spelled it 0/1, so both are
+    /// accepted. The address is the last twenty bytes of the keccak of
+    /// the recovered key.
+    fn verify_siwe_signature(
         message: &str,
         address: &str,
         signature: &str,
     ) -> Result<(), AuthFlowError> {
-        if signature == test_siwe_signature(secret, message, address) {
+        use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
+        use sha3::{Digest as _, Keccak256};
+
+        let bytes = hex::decode(
+            signature
+                .trim()
+                .strip_prefix("0x")
+                .unwrap_or_else(|| signature.trim()),
+        )
+        .map_err(|_| AuthFlowError::InvalidCredentials)?;
+        let Some((v, rs)) = bytes.split_last() else {
+            return Err(AuthFlowError::InvalidCredentials);
+        };
+        if rs.len() != 64 {
+            return Err(AuthFlowError::InvalidCredentials);
+        }
+        // 27/28 is the original spelling and still what most wallets
+        // send; 0/1 is the raw recovery id. Anything else is not a
+        // signature this scheme produced.
+        let recovery = match v {
+            0 | 27 => 0,
+            1 | 28 => 1,
+            _ => return Err(AuthFlowError::InvalidCredentials),
+        };
+        let recovery_id =
+            RecoveryId::from_byte(recovery).ok_or(AuthFlowError::InvalidCredentials)?;
+        let signature = Signature::from_slice(rs).map_err(|_| AuthFlowError::InvalidCredentials)?;
+
+        let digest = Keccak256::new_with_prefix(eip191(message));
+        let key = VerifyingKey::recover_from_digest(digest, &signature, recovery_id)
+            .map_err(|_| AuthFlowError::InvalidCredentials)?;
+
+        // The uncompressed key is `04 || X || Y`; the address is the
+        // last twenty bytes of the keccak of `X || Y`.
+        let encoded = key.to_sec1_point(false);
+        let public = encoded
+            .as_bytes()
+            .get(1..)
+            .ok_or(AuthFlowError::InvalidCredentials)?;
+        let hashed = Keccak256::digest(public);
+        let recovered = hashed.get(12..).ok_or(AuthFlowError::InvalidCredentials)?;
+        let recovered = format!("0x{}", hex::encode(recovered));
+
+        // Constant-time is not the concern — the answer is public — but
+        // case is: an address is hex and wallets disagree about
+        // capitalisation.
+        if recovered.eq_ignore_ascii_case(address) {
             Ok(())
         } else {
             Err(AuthFlowError::InvalidCredentials)
         }
+    }
+
+    /// A wallet, for tests: a real secp256k1 key and its address.
+    ///
+    /// Real rather than a fixture, so these tests exercise the same
+    /// recovery a browser wallet's signature goes through. The previous
+    /// version signed with an HMAC of the server secret, which passed
+    /// while no wallet on earth could have.
+    #[cfg(test)]
+    pub(crate) fn test_wallet(seed: u8) -> (k256::ecdsa::SigningKey, String) {
+        use sha3::{Digest as _, Keccak256};
+
+        let key = k256::ecdsa::SigningKey::from_slice(&[seed.max(1); 32]).expect("a key");
+        let encoded = key.verifying_key().to_sec1_point(false);
+        let public = encoded.as_bytes().get(1..).expect("a public key");
+        let hashed = Keccak256::digest(public);
+        let address = format!("0x{}", hex::encode(hashed.get(12..).expect("an address")));
+        (key, address)
+    }
+
+    /// Sign a message the way `personal_sign` would.
+    #[cfg(test)]
+    pub(crate) fn test_sign(key: &k256::ecdsa::SigningKey, message: &str) -> String {
+        use k256::ecdsa::signature::hazmat::PrehashSigner;
+        use sha3::{Digest as _, Keccak256};
+
+        let digest: [u8; 32] = Keccak256::digest(eip191(message)).into();
+        let (signature, recovery): (k256::ecdsa::Signature, k256::ecdsa::RecoveryId) =
+            key.sign_prehash(&digest).expect("sign");
+        let mut bytes = signature.to_bytes().to_vec();
+        // 27 is the spelling wallets use.
+        bytes.push(recovery.to_byte().saturating_add(27));
+        format!("0x{}", hex::encode(bytes))
+    }
+
+    /// The bytes a wallet's `personal_sign` actually hashes.
+    fn eip191(message: &str) -> Vec<u8> {
+        let mut prefixed = format!("\x19Ethereum Signed Message:\n{}", message.len()).into_bytes();
+        prefixed.extend_from_slice(message.as_bytes());
+        prefixed
     }
 
     fn parse_siwe_message(message: &str) -> Result<ParsedSiweMessage, AuthFlowError> {
@@ -10189,8 +11722,9 @@ pub mod siwe {
 
     fn is_ethereum_address(address: &str) -> bool {
         address.len() == 42
-            && address.starts_with("0x")
-            && address[2..].chars().all(|ch| ch.is_ascii_hexdigit())
+            && address
+                .strip_prefix("0x")
+                .is_some_and(|body| body.chars().all(|ch| ch.is_ascii_hexdigit()))
     }
 
     fn siwe_nonce_identifier(nonce: &str) -> String {
@@ -10212,6 +11746,8 @@ pub mod haveibeenpwned {
     {
         // r[impl auth.hibp.range-check]
         // r[impl auth.hibp.failure-policy]
+        // `async` because the non-test provider is an HTTP range query.
+        #[allow(clippy::unused_async)]
         pub async fn check_password_breach(
             &self,
             input: CheckPasswordBreach,
@@ -10219,6 +11755,7 @@ pub mod haveibeenpwned {
             check_password_breach_with_config(&self.config.breached_passwords, &input.password)
         }
 
+        #[allow(clippy::unused_async)]
         pub(crate) async fn reject_breached_password(
             &self,
             password: &str,
@@ -10235,15 +11772,25 @@ pub mod haveibeenpwned {
         }
     }
 
+    /// The k-anonymity split a Have-I-Been-Pwned range query needs: the
+    /// first 5 hex characters of the password's SHA-1, and the rest.
+    #[must_use]
     pub fn sha1_prefix_suffix(password: &str) -> (String, String) {
+        use std::fmt::Write as _;
         let mut hasher = Sha1::new();
         hasher.update(password.as_bytes());
         let digest = hasher.finalize();
-        let hash = digest
-            .iter()
-            .map(|byte| format!("{byte:02X}"))
-            .collect::<String>();
-        (hash[..5].to_owned(), hash[5..].to_owned())
+        let mut hash = String::with_capacity(40);
+        for byte in &digest {
+            // `write!` to a `String` is infallible; the result is
+            // discarded rather than unwrapped.
+            let _ = write!(hash, "{byte:02X}");
+        }
+        // SHA-1 hex is 40 ASCII characters, so `split_at` can neither
+        // panic on a char boundary nor run past the end — but reading it
+        // fallibly keeps the guarantee local instead of assumed.
+        let (prefix, suffix) = hash.split_at_checked(5).unwrap_or((&hash, ""));
+        (prefix.to_owned(), suffix.to_owned())
     }
 
     fn check_password_breach_with_config(
@@ -10272,7 +11819,8 @@ pub mod haveibeenpwned {
                         let (candidate_prefix, candidate_suffix) = sha1_prefix_suffix(candidate);
                         candidate_prefix == prefix && candidate_suffix == suffix
                     })
-                    .count() as u64;
+                    .count();
+                let count = u64::try_from(count).unwrap_or(u64::MAX);
                 Ok(PasswordBreachCheck {
                     breached: count > 0,
                     count,
@@ -10367,7 +11915,7 @@ pub mod mcp {
 }
 pub mod magic_link {
     use auth_proto::{AuthFlowError, AuthUserCreate, AuthVerificationCreate};
-    use chrono::{Duration, Utc};
+    use chrono::Utc;
 
     use super::email_password::normalize_email;
     use crate::{
@@ -10398,7 +11946,7 @@ pub mod magic_link {
                 .storage
                 .find_latest_verification_by_identifier(&identifier)
                 .await?
-                && existing.created_at + Duration::seconds(MAGIC_LINK_RESEND_SECONDS) > Utc::now()
+                && crate::expiry::after(existing.created_at, MAGIC_LINK_RESEND_SECONDS) > Utc::now()
             {
                 return Err(AuthFlowError::PermissionDenied);
             }
@@ -10408,7 +11956,7 @@ pub mod magic_link {
                 .create_verification(AuthVerificationCreate {
                     identifier: identifier.clone(),
                     value_hash: hash_token(&self.config.secret, &token),
-                    expires_at: Utc::now() + Duration::seconds(MAGIC_LINK_TTL_SECONDS),
+                    expires_at: crate::expiry::expires_in(MAGIC_LINK_TTL_SECONDS),
                 })
                 .await?;
             let url = format!(
@@ -10468,8 +12016,23 @@ pub mod magic_link {
                     .await?
             };
             self.storage.delete_verification(verification.id).await?;
+            let second_factor_pending = user.two_factor_enabled;
             let bundle = self
-                .issue_session(user, input.ip_address, input.user_agent, None, None)
+                .issue_session_with_state(
+                    user,
+                    input.ip_address,
+                    input.user_agent,
+                    None,
+                    None,
+                    // r[impl auth.twofactor.signin-required]
+                    // Inactive when a second factor is owed, exactly as
+                    // the password path does. Every one of these routes
+                    // used to issue an ACTIVE session, so enabling
+                    // two-factor protected the password form and
+                    // nothing else — a code, a link, a passkey or a
+                    // social button all walked straight past it.
+                    !second_factor_pending,
+                )
                 .await?;
             let bundle = record_last_login_method(self, bundle, "magic-link").await?;
             Ok(MagicLinkVerification {
@@ -10502,7 +12065,7 @@ pub mod magic_link {
 }
 pub mod jwt {
     use auth_proto::AuthFlowError;
-    use chrono::{Duration, Utc};
+    use chrono::Utc;
     use jsonwebtoken::{
         Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, decode_header, encode,
     };
@@ -10535,8 +12098,10 @@ pub mod jwt {
                 .find(|key| key.id == self.config.jwt.active_key_id)
                 .ok_or_else(|| AuthFlowError::Internal("active JWT key missing".into()))?;
             let now = Utc::now();
-            let expires_at = now
-                + Duration::seconds(input.expires_in_seconds.unwrap_or(DEFAULT_JWT_TTL_SECONDS));
+            let expires_at = crate::expiry::after(
+                now,
+                input.expires_in_seconds.unwrap_or(DEFAULT_JWT_TTL_SECONDS),
+            );
             let extra = input
                 .claims_json
                 .map(|claims| {
@@ -10645,7 +12210,7 @@ pub mod jwt {
 pub mod oidc_provider {
     use auth_proto::{AuthFlowError, AuthVerificationCreate};
     use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-    use chrono::{Duration, Utc};
+    use chrono::Utc;
     use serde::{Deserialize, Serialize};
     use serde_json::json;
     use sha2::{Digest, Sha256};
@@ -10830,7 +12395,7 @@ pub mod oidc_provider {
                     identifier: oidc_code_identifier(&self.config.secret, &code),
                     value_hash: serde_json::to_string(&state)
                         .map_err(|err| AuthFlowError::Internal(err.to_string()))?,
-                    expires_at: Utc::now() + Duration::seconds(self.config.oidc.code_ttl_seconds),
+                    expires_at: crate::expiry::expires_in(self.config.oidc.code_ttl_seconds),
                 })
                 .await?;
 
@@ -11010,8 +12575,9 @@ pub mod oidc_provider {
                         identifier: oidc_refresh_identifier(&self.config.secret, &token),
                         value_hash: serde_json::to_string(&state)
                             .map_err(|err| AuthFlowError::Internal(err.to_string()))?,
-                        expires_at: Utc::now()
-                            + Duration::seconds(self.config.oidc.refresh_token_ttl_seconds),
+                        expires_at: crate::expiry::expires_in(
+                            self.config.oidc.refresh_token_ttl_seconds,
+                        ),
                     })
                     .await?;
                 Some(token)
@@ -11092,7 +12658,7 @@ pub mod anonymous {
     use auth_proto::{
         AuthAccountCreate, AuthFlowError, AuthSessionBundle, AuthUser, AuthUserCreate,
     };
-    use chrono::{Duration, Utc};
+
     use serde_json::{Value, json};
 
     use super::email_password::{
@@ -11233,13 +12799,13 @@ pub mod anonymous {
             input: CleanupAnonymousUsers,
         ) -> Result<CleanupAnonymousUsersResult, AuthFlowError> {
             self.require_admin(&input.session_token).await?;
-            let older_than = Utc::now() - Duration::seconds(input.older_than_seconds.max(0));
+            let older_than = crate::expiry::ago(input.older_than_seconds.max(0));
             let (users, _) = self.storage.list_users(0, 10_000).await?;
-            let mut deleted = 0;
+            let mut deleted = 0usize;
             for user in users {
                 if user.created_at < older_than && is_anonymous_user(&user) {
                     self.storage.delete_user_by_id(user.id).await?;
-                    deleted += 1;
+                    deleted = deleted.saturating_add(1);
                 }
             }
             Ok(CleanupAnonymousUsersResult { deleted })
@@ -11297,7 +12863,7 @@ pub mod oauth {
     use auth_proto::{
         AuthAccountCreate, AuthFlowError, AuthSessionBundle, AuthUserCreate, AuthVerificationCreate,
     };
-    use chrono::{Duration, Utc};
+    use chrono::Utc;
 
     use crate::{
         ArchitectAuth, AuthStorage, BeginOAuthAuthorization, GetOAuthAccessToken, LinkOAuthAccount,
@@ -11351,7 +12917,7 @@ pub mod oauth {
                 .create_verification(AuthVerificationCreate {
                     identifier: identifier.clone(),
                     value_hash: hash_token(&self.config.secret, &token),
-                    expires_at: Utc::now() + Duration::seconds(OAUTH_STATE_TTL_SECONDS),
+                    expires_at: crate::expiry::expires_in(OAUTH_STATE_TTL_SECONDS),
                 })
                 .await?;
             Ok(VerificationToken { identifier, token })
@@ -11478,8 +13044,23 @@ pub mod oauth {
                     .find_user_by_id(account.user_id)
                     .await?
                     .ok_or(AuthFlowError::InvalidCredentials)?;
+                let second_factor_pending = user.two_factor_enabled;
                 let bundle = self
-                    .issue_session(user, input.ip_address, input.user_agent, None, None)
+                    .issue_session_with_state(
+                        user,
+                        input.ip_address,
+                        input.user_agent,
+                        None,
+                        None,
+                        // r[impl auth.twofactor.signin-required]
+                        // Inactive when a second factor is owed, exactly as
+                        // the password path does. Every one of these routes
+                        // used to issue an ACTIVE session, so enabling
+                        // two-factor protected the password form and
+                        // nothing else — a code, a link, a passkey or a
+                        // social button all walked straight past it.
+                        !second_factor_pending,
+                    )
                     .await?;
                 return record_last_login_method(self, bundle, method).await;
             }
@@ -11526,8 +13107,23 @@ pub mod oauth {
                     password_hash: None,
                 })
                 .await?;
+            let second_factor_pending = user.two_factor_enabled;
             let bundle = self
-                .issue_session(user, input.ip_address, input.user_agent, None, None)
+                .issue_session_with_state(
+                    user,
+                    input.ip_address,
+                    input.user_agent,
+                    None,
+                    None,
+                    // r[impl auth.twofactor.signin-required]
+                    // Inactive when a second factor is owed, exactly as
+                    // the password path does. Every one of these routes
+                    // used to issue an ACTIVE session, so enabling
+                    // two-factor protected the password form and
+                    // nothing else — a code, a link, a passkey or a
+                    // social button all walked straight past it.
+                    !second_factor_pending,
+                )
                 .await?;
             record_last_login_method(self, bundle, method).await
         }
@@ -11614,11 +13210,13 @@ pub mod oauth {
 
     // r[impl auth.oauth.provider-registry]
     // r[impl auth.oauth.generic-provider]
-    pub fn built_in_oauth_providers() -> &'static [OAuthProviderDescriptor] {
+    #[must_use]
+    pub const fn built_in_oauth_providers() -> &'static [OAuthProviderDescriptor] {
         BUILT_IN_OAUTH_PROVIDERS
     }
 
-    pub fn generic_oauth_provider(
+    #[must_use]
+    pub const fn generic_oauth_provider(
         id: &'static str,
         auth_url: &'static str,
         token_url: &'static str,
@@ -11757,6 +13355,9 @@ pub mod oauth_proxy {
         // r[impl auth.oauth-proxy.callback-forwarding]
         // r[impl auth.oauth-proxy.max-age]
         // r[impl auth.oauth-proxy.redirect-policy]
+        // Command structs are handed over by value across the whole flow
+        // surface; taking this one by reference would make it the odd one.
+        #[allow(clippy::needless_pass_by_value)]
         pub fn consume_oauth_proxy_callback(
             &self,
             input: ConsumeOAuthProxyCallback,
@@ -11769,7 +13370,8 @@ pub mod oauth_proxy {
             if payload.callback_url != input.callback_url {
                 return Err(AuthFlowError::PermissionDenied);
             }
-            let age = Utc::now().timestamp() - payload.timestamp;
+            // `saturating_sub`: `payload.timestamp` is attacker-supplied.
+            let age = Utc::now().timestamp().saturating_sub(payload.timestamp);
             if age > self.config.oauth_proxy.max_age_seconds || age < -10 {
                 return Err(AuthFlowError::InvalidCredentials);
             }
@@ -11826,6 +13428,18 @@ pub mod oauth_proxy {
     }
 
     #[cfg(test)]
+    #[allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::indexing_slicing,
+        clippy::arithmetic_side_effects,
+        clippy::as_conversions,
+        clippy::panic,
+        clippy::float_cmp,
+        clippy::string_slice,
+        clippy::significant_drop_tightening,
+        clippy::too_many_lines
+    )]
     mod boundary_tests {
         use proptest::prelude::*;
 
@@ -11844,7 +13458,13 @@ pub mod oauth_proxy {
                     host.to_ascii_lowercase()
                 );
 
-                prop_assert_eq!(super::normalized_origin(&input), expected.clone());
+                // The clone is NOT redundant — `prop_assert_eq!` moves its
+                // operands, and `expected` is used again on the next line.
+                // clippy's `redundant_clone` misreads the macro expansion.
+                #[allow(clippy::redundant_clone)]
+                {
+                    prop_assert_eq!(super::normalized_origin(&input), expected.clone());
+                }
                 prop_assert_eq!(super::normalized_origin(&format!("{input}/")), expected);
             }
 
@@ -12020,7 +13640,7 @@ pub mod one_tap {
 }
 pub mod one_time_token {
     use auth_proto::{AuthFlowError, AuthVerificationCreate};
-    use chrono::{Duration, Utc};
+    use chrono::Utc;
     use serde::{Deserialize, Serialize};
 
     use crate::{
@@ -12059,12 +13679,11 @@ pub mod one_time_token {
                 })?;
             }
             let token = generate_token().map_err(|err| AuthFlowError::Internal(err.to_string()))?;
-            let expires_at = Utc::now()
-                + Duration::seconds(
-                    input
-                        .expires_in_seconds
-                        .unwrap_or(DEFAULT_ONE_TIME_TOKEN_TTL_SECONDS),
-                );
+            let expires_at = crate::expiry::expires_in(
+                input
+                    .expires_in_seconds
+                    .unwrap_or(DEFAULT_ONE_TIME_TOKEN_TTL_SECONDS),
+            );
             let state = OneTimeTokenState {
                 session_token: input.session_token,
                 scope: input.scope.clone(),
@@ -12277,17 +13896,22 @@ pub mod organizations {
 
     use crate::{
         AcceptInvitation, AddTeamMember, ArchitectAuth, AuthStorage, AuthorizeOrganizationAction,
-        CreateInvitation, CreateOrganization, CreateOrganizationRole, CreateTeam,
-        DeleteOrganizationRole, DeleteTeam, InvitationToken, ListOrganizationRoles,
-        ListTeamMembers, ListTeams, OrganizationBundle, RemoveTeamMember, RequireOrganizationRole,
-        SetActiveOrganization, SetMemberRole, UpdateOrganizationRole, UpdateTeam,
+        CancelInvitation, ClaimInvitation, CreateInvitation, CreateInviteLink, CreateOrganization,
+        CreateOrganizationRole, CreateTeam, DeleteOrganization, DeleteOrganizationRole, DeleteTeam,
+        GetOrganization, InvitationPreview, InvitationToken, InviteLinkPreview, InviteLinkToken,
+        LeaveOrganization, LinkAgent, LinkedAgent, ListAgents, ListInvitations, ListInviteLinks,
+        ListMembers, ListMyInvitations, ListOrganizationRoles, ListOrganizations, ListTeamMembers,
+        ListTeams, OrganizationBundle, OrganizationMember, PreviewInvitation, PreviewInviteLink,
+        RedeemInviteLink, RejectInvitation, RemoveMember, RemoveTeamMember,
+        RequireOrganizationRole, RevokeInviteLink, SetActiveOrganization, SetMemberRole,
+        UnlinkAgent, UpdateOrganization, UpdateOrganizationRole, UpdateTeam,
         commands::CurrentSession,
         crypto::{generate_token, hash_token},
     };
     use auth_proto::{
-        AuthFlowError, AuthInvitationCreate, AuthMember, AuthMemberCreate, AuthOrganizationCreate,
-        AuthOrganizationRole, AuthOrganizationRoleCreate, AuthTeam, AuthTeamCreate, AuthTeamMember,
-        AuthTeamMemberCreate,
+        AuthAgentLinkCreate, AuthFlowError, AuthInvitationCreate, AuthMember, AuthMemberCreate,
+        AuthOrganization, AuthOrganizationCreate, AuthOrganizationRole, AuthOrganizationRoleCreate,
+        AuthTeam, AuthTeamCreate, AuthTeamMember, AuthTeamMemberCreate,
     };
 
     impl<S> ArchitectAuth<S>
@@ -12424,6 +14048,375 @@ pub mod organizations {
                 .await
         }
 
+        /// Every organization the caller belongs to, with their role.
+        ///
+        /// The one query an org switcher needs, and the one that did not
+        /// exist: without it a client can only reach an organization it
+        /// already knows the id of, which means the first one is
+        /// unreachable.
+        pub async fn list_organizations(
+            &self,
+            input: ListOrganizations,
+        ) -> Result<Vec<OrganizationBundle>, AuthFlowError> {
+            // The one organization method an OIDC client's access token
+            // may call — see `organization_caller`. Everything that
+            // *changes* an organization still asks for a session.
+            let caller = self.organization_caller(&input.session_token).await?;
+            let mut bundles: Vec<OrganizationBundle> = self
+                .storage
+                .list_organizations_for_user(caller.id)
+                .await?
+                .into_iter()
+                .map(|(organization, membership)| OrganizationBundle {
+                    organization,
+                    membership,
+                })
+                .collect();
+
+            // r[impl auth.org.linked-agent]
+            // What the caller inherits as somebody's agent. Their own
+            // membership in an organization always wins: it was granted
+            // to them by name, and a link must not quietly lower it.
+            // Everything else comes across with the role capped, and
+            // under the caller's own id — the membership is theirs to
+            // act on; only its origin is the owner's.
+            for link in self.storage.list_agent_links_for_agent(caller.id).await? {
+                for (organization, owned) in self
+                    .storage
+                    .list_organizations_for_user(link.owner_user_id)
+                    .await?
+                {
+                    if bundles
+                        .iter()
+                        .any(|bundle| bundle.organization.id == organization.id)
+                    {
+                        continue;
+                    }
+                    let membership = AuthMember {
+                        id: owned.id,
+                        organization_id: owned.organization_id,
+                        user_id: caller.id,
+                        role: inherited_role(&owned.role, &link.max_role).to_owned(),
+                        created_at: link.created_at,
+                    };
+                    bundles.push(OrganizationBundle {
+                        organization,
+                        membership,
+                    });
+                }
+            }
+            Ok(bundles)
+        }
+
+        // r[impl auth.org.active-session]
+        pub async fn get_organization(
+            &self,
+            input: GetOrganization,
+        ) -> Result<OrganizationBundle, AuthFlowError> {
+            let membership = self
+                .require_member(&input.session_token, input.organization_id)
+                .await?;
+            let organization = self
+                .storage
+                .find_organization_by_id(input.organization_id)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            Ok(OrganizationBundle {
+                organization,
+                membership,
+            })
+        }
+
+        // r[impl auth.org.slug-unique]
+        pub async fn update_organization(
+            &self,
+            input: UpdateOrganization,
+        ) -> Result<AuthOrganization, AuthFlowError> {
+            if let Some(metadata_json) = input.metadata_json.as_ref().and_then(Option::as_deref) {
+                validate_json(Some(metadata_json), "metadata_json")?;
+            }
+            self.authorize_member_action(
+                &input.session_token,
+                input.organization_id,
+                "organization",
+                "update",
+            )
+            .await?;
+            let slug = match input.slug {
+                None => None,
+                Some(slug) => {
+                    let slug = normalize_slug(&slug)?;
+                    // Taken by somebody else is a conflict; taken by this
+                    // organization is a no-op rename it should not trip on.
+                    if let Some(existing) = self.storage.find_organization_by_slug(&slug).await? {
+                        if existing.id != input.organization_id {
+                            return Err(AuthFlowError::InvalidInput(
+                                "organization slug already exists".into(),
+                            ));
+                        }
+                    }
+                    Some(slug)
+                }
+            };
+            self.storage
+                .update_organization(
+                    input.organization_id,
+                    input.name,
+                    slug,
+                    input.logo,
+                    input.metadata_json,
+                )
+                .await
+        }
+
+        // r[impl auth.org.remove-last-owner]
+        pub async fn delete_organization(
+            &self,
+            input: DeleteOrganization,
+        ) -> Result<(), AuthFlowError> {
+            // The last-owner rule explicitly does not apply here: an
+            // organization being deleted is meant to end up with no
+            // owners. Requiring `organization:delete` — which only an
+            // owner has by default — is what guards this instead.
+            self.authorize_member_action(
+                &input.session_token,
+                input.organization_id,
+                "organization",
+                "delete",
+            )
+            .await?;
+            self.storage
+                .delete_organization(input.organization_id)
+                .await
+        }
+
+        /// The members of an organization, each with their user record.
+        ///
+        /// Any member may read the roster: knowing who else is in a room
+        /// you are in is not privileged, and a member list gated behind
+        /// `member:read` would be invisible to the `member` role, which
+        /// is everybody.
+        pub async fn list_members(
+            &self,
+            input: ListMembers,
+        ) -> Result<Vec<OrganizationMember>, AuthFlowError> {
+            self.require_member(&input.session_token, input.organization_id)
+                .await?;
+            let members = self
+                .storage
+                .list_members_by_organization(input.organization_id)
+                .await?;
+            let mut out = Vec::with_capacity(members.len());
+            for member in members {
+                // A membership whose user has since been deleted is a
+                // dangling row, not an error worth failing the page over.
+                if let Some(user) = self.storage.find_user_by_id(member.user_id).await? {
+                    out.push(OrganizationMember { member, user });
+                }
+            }
+            Ok(out)
+        }
+
+        // r[impl auth.org.remove-last-owner]
+        pub async fn remove_member(&self, input: RemoveMember) -> Result<(), AuthFlowError> {
+            self.authorize_member_action(
+                &input.session_token,
+                input.organization_id,
+                "member",
+                "delete",
+            )
+            .await?;
+            let member = self
+                .storage
+                .find_member(input.organization_id, input.user_id)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            if member.role == "owner" {
+                reject_if_last_owner(&self.storage, input.organization_id).await?;
+            }
+            self.storage
+                .delete_member(input.organization_id, input.user_id)
+                .await
+        }
+
+        /// Leave under your own steam.
+        ///
+        /// Separate from [`Self::remove_member`] because the permission
+        /// is different: removing *somebody else* needs `member:delete`,
+        /// which a plain member does not have, but nobody should need
+        /// permission to stop being in a room. The last-owner rule still
+        /// applies — an organization with no owner cannot be
+        /// administered or deleted by anyone.
+        // r[impl auth.org.remove-last-owner]
+        pub async fn leave_organization(
+            &self,
+            input: LeaveOrganization,
+        ) -> Result<(), AuthFlowError> {
+            let member = self
+                .require_member(&input.session_token, input.organization_id)
+                .await?;
+            if member.role == "owner" {
+                reject_if_last_owner(&self.storage, input.organization_id).await?;
+            }
+            self.storage
+                .delete_member(input.organization_id, member.user_id)
+                .await
+        }
+
+        pub async fn list_invitations(
+            &self,
+            input: ListInvitations,
+        ) -> Result<Vec<auth_proto::AuthInvitation>, AuthFlowError> {
+            self.authorize_member_action(
+                &input.session_token,
+                input.organization_id,
+                "invitation",
+                "create",
+            )
+            .await?;
+            self.storage
+                .list_invitations_by_organization(input.organization_id)
+                .await
+        }
+
+        /// What the signed-in person has been invited to, anywhere.
+        ///
+        /// No organization parameter and no permission check, because
+        /// the answer is scoped by the caller's own address: the session
+        /// says who they are, and they see invitations addressed to them
+        /// and nothing else. That is the security argument too — the
+        /// address comes from the validated session, never from the
+        /// caller, so this cannot be pointed at somebody else's mail.
+        ///
+        /// An account with no address (a guest) is invited to nothing
+        /// rather than an error: there is no address an invitation could
+        /// have been sent to.
+        pub async fn list_my_invitations(
+            &self,
+            input: ListMyInvitations,
+        ) -> Result<Vec<auth_proto::AuthInvitation>, AuthFlowError> {
+            let session = self
+                .current_session(CurrentSession {
+                    token: input.session_token,
+                })
+                .await?;
+            let Some(email) = session.user.email else {
+                return Ok(Vec::new());
+            };
+            self.storage
+                .list_pending_invitations_for_email(&email)
+                .await
+        }
+
+        // r[impl auth.org.invite-status]
+        pub async fn cancel_invitation(
+            &self,
+            input: CancelInvitation,
+        ) -> Result<(), AuthFlowError> {
+            let invitation = self
+                .storage
+                .find_invitation_by_id(input.invitation_id)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            self.authorize_member_action(
+                &input.session_token,
+                invitation.organization_id,
+                "invitation",
+                "cancel",
+            )
+            .await?;
+            if invitation.status != auth_proto::InvitationStatus::Pending.as_str() {
+                return Err(AuthFlowError::InvalidInput(
+                    "invitation is not pending".into(),
+                ));
+            }
+            self.storage
+                .update_invitation_status(
+                    invitation.id,
+                    auth_proto::InvitationStatus::Canceled.as_str().into(),
+                )
+                .await
+        }
+
+        /// Decline an invitation you were sent.
+        ///
+        /// Authorized by the token, not by a role: the person declining
+        /// is by definition not a member yet, so there is no membership
+        /// to check. Requiring the token stops one person from declining
+        /// invitations addressed to others.
+        // r[impl auth.org.invite-status]
+        // r[impl auth.org.invite-token]
+        pub async fn reject_invitation(
+            &self,
+            input: RejectInvitation,
+        ) -> Result<(), AuthFlowError> {
+            let invitation = self
+                .storage
+                .find_invitation_by_id(input.invitation_id)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            if invitation.status != auth_proto::InvitationStatus::Pending.as_str() {
+                return Err(AuthFlowError::InvalidInput(
+                    "invitation is not pending".into(),
+                ));
+            }
+            let identifier = invitation_identifier(invitation.id);
+            let value_hash = hash_token(&self.config.secret, &input.token);
+            let verification = self
+                .storage
+                .find_verification(&identifier, &value_hash)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            self.storage
+                .update_invitation_status(
+                    invitation.id,
+                    auth_proto::InvitationStatus::Rejected.as_str().into(),
+                )
+                .await?;
+            self.storage.delete_verification(verification.id).await
+        }
+
+        /// What an invitation is *for*, without needing a session.
+        // r[impl auth.org.invite-token]
+        pub async fn preview_invitation(
+            &self,
+            input: PreviewInvitation,
+        ) -> Result<InvitationPreview, AuthFlowError> {
+            let invitation = self
+                .storage
+                .find_invitation_by_id(input.invitation_id)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            if invitation.status != auth_proto::InvitationStatus::Pending.as_str()
+                || invitation.expires_at <= Utc::now()
+            {
+                return Err(AuthFlowError::InvalidCredentials);
+            }
+            let identifier = invitation_identifier(invitation.id);
+            let value_hash = hash_token(&self.config.secret, &input.token);
+            let verification = self
+                .storage
+                .find_verification(&identifier, &value_hash)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            if verification.expires_at <= Utc::now() {
+                return Err(AuthFlowError::InvalidCredentials);
+            }
+            let organization = self
+                .storage
+                .find_organization_by_id(invitation.organization_id)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            Ok(InvitationPreview {
+                invitation_id: invitation.id,
+                organization_name: organization.name,
+                organization_slug: organization.slug,
+                email: invitation.email,
+                role: invitation.role,
+                expires_at: invitation.expires_at,
+            })
+        }
+
         // r[impl auth.org.invite-token]
         pub async fn create_invitation(
             &self,
@@ -12521,6 +14514,252 @@ pub mod organizations {
                     verification.id,
                 )
                 .await
+        }
+
+        /// Accept an invitation addressed to you, without the link.
+        ///
+        /// [`Self::accept_invitation`] proves entitlement with the
+        /// emailed token, which is right for an invite *link*: the token
+        /// is the only thing separating its holder from a stranger. It
+        /// is the wrong proof for a named invitation reached from the
+        /// account page, where there is no link in hand and the person
+        /// is already signed in.
+        ///
+        /// So this proves it the other way round — the invitation's
+        /// address must equal the session's. That is strictly stronger
+        /// than the token path, which never checks the address at all:
+        /// anyone holding a link can accept an invitation meant for
+        /// somebody else. Here only the named person can, and a lost
+        /// link stops being a lost invitation.
+        ///
+        /// The verification row is left to expire rather than deleted.
+        /// The invitation is marked accepted, so the token it belongs to
+        /// cannot be redeemed through the other path either.
+        pub async fn claim_invitation(&self, input: ClaimInvitation) -> Result<(), AuthFlowError> {
+            let session = self
+                .current_session(CurrentSession {
+                    token: input.session_token,
+                })
+                .await?;
+            let invitation = self
+                .storage
+                .find_invitation_by_id(input.invitation_id)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            if invitation.status != auth_proto::InvitationStatus::Pending.as_str() {
+                return Err(AuthFlowError::InvalidInput(
+                    "invitation is not pending".into(),
+                ));
+            }
+            if invitation.expires_at <= Utc::now() {
+                return Err(AuthFlowError::InvalidCredentials);
+            }
+            // The address is the entitlement. Compared case-insensitively
+            // because an operator typing an invitation and an identity
+            // provider reporting an address are two different people's
+            // idea of capitalisation.
+            let addressed_to_me = session
+                .user
+                .email
+                .as_deref()
+                .is_some_and(|mine| mine.eq_ignore_ascii_case(&invitation.email));
+            if !addressed_to_me {
+                return Err(AuthFlowError::InvalidCredentials);
+            }
+            if self
+                .storage
+                .find_member(invitation.organization_id, session.user.id)
+                .await?
+                .is_some()
+            {
+                return Err(AuthFlowError::InvalidInput(
+                    "organization member already exists".into(),
+                ));
+            }
+            self.storage
+                .create_member(AuthMemberCreate {
+                    organization_id: invitation.organization_id,
+                    user_id: session.user.id,
+                    role: invitation.role,
+                })
+                .await?;
+            self.storage
+                .update_invitation_status(
+                    invitation.id,
+                    auth_proto::InvitationStatus::Accepted.as_str().into(),
+                )
+                .await
+        }
+
+        /// Mint a shareable link into this organization.
+        ///
+        /// The token is returned once and stored only as a hash, so this
+        /// return value is the only chance to show it. A caller that
+        /// drops it has to mint another link, which is the correct
+        /// outcome — the alternative is a server that can reconstruct
+        /// every live invite URL from its own database.
+        // r[impl auth.org.invite-token]
+        pub async fn create_invite_link(
+            &self,
+            input: CreateInviteLink,
+        ) -> Result<InviteLinkToken, AuthFlowError> {
+            // A link grants a role, so minting one is `invitation:create`
+            // — the same permission as inviting a named person, because
+            // it is the same act with the address left blank.
+            self.authorize_member_action(
+                &input.session_token,
+                input.organization_id,
+                "invitation",
+                "create",
+            )
+            .await?;
+            let session = self
+                .current_session(CurrentSession {
+                    token: input.session_token,
+                })
+                .await?;
+            if input.max_uses.is_some_and(|max| max < 1) {
+                return Err(AuthFlowError::InvalidInput(
+                    "max_uses must be at least 1".into(),
+                ));
+            }
+            if input.expires_at.is_some_and(|at| at <= Utc::now()) {
+                return Err(AuthFlowError::InvalidInput(
+                    "expires_at is already in the past".into(),
+                ));
+            }
+            let token = generate_token().map_err(|err| AuthFlowError::Internal(err.to_string()))?;
+            let link = self
+                .storage
+                .create_invite_link(auth_proto::AuthInviteLinkCreate {
+                    organization_id: input.organization_id,
+                    token_hash: hash_token(&self.config.secret, &token),
+                    label: input.label,
+                    role: input.role,
+                    created_by: session.user.id,
+                    expires_at: input.expires_at,
+                    max_uses: input.max_uses,
+                    revoked_at: None,
+                })
+                .await?;
+            Ok(InviteLinkToken { link, token })
+        }
+
+        pub async fn list_invite_links(
+            &self,
+            input: ListInviteLinks,
+        ) -> Result<Vec<auth_proto::AuthInviteLink>, AuthFlowError> {
+            self.authorize_member_action(
+                &input.session_token,
+                input.organization_id,
+                "invitation",
+                "create",
+            )
+            .await?;
+            self.storage
+                .list_invite_links_by_organization(input.organization_id)
+                .await
+        }
+
+        pub async fn revoke_invite_link(
+            &self,
+            input: RevokeInviteLink,
+        ) -> Result<(), AuthFlowError> {
+            let link = self
+                .storage
+                .find_invite_link_by_id(input.link_id)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            self.authorize_member_action(
+                &input.session_token,
+                link.organization_id,
+                "invitation",
+                "cancel",
+            )
+            .await?;
+            // Revoking twice is not an error: the second click of a
+            // button whose first click already worked should agree.
+            if link.revoked_at.is_some() {
+                return Ok(());
+            }
+            self.storage.revoke_invite_link(link.id, Utc::now()).await
+        }
+
+        /// Where a link leads, for somebody who is not signed in yet.
+        // r[impl auth.org.invite-token]
+        pub async fn preview_invite_link(
+            &self,
+            input: PreviewInviteLink,
+        ) -> Result<InviteLinkPreview, AuthFlowError> {
+            let link = self.usable_invite_link(&input.token).await?;
+            let organization = self
+                .storage
+                .find_organization_by_id(link.organization_id)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            let uses_remaining = link.uses_remaining();
+            Ok(InviteLinkPreview {
+                organization_name: organization.name,
+                organization_slug: organization.slug,
+                role: link.role,
+                uses_remaining,
+            })
+        }
+
+        /// Join the organization a link points at.
+        // r[impl auth.org.invite-token]
+        // r[impl auth.org.member-unique]
+        pub async fn redeem_invite_link(
+            &self,
+            input: RedeemInviteLink,
+        ) -> Result<AuthMember, AuthFlowError> {
+            let session = self
+                .current_session(CurrentSession {
+                    token: input.session_token,
+                })
+                .await?;
+            let link = self.usable_invite_link(&input.token).await?;
+            if let Some(existing) = self
+                .storage
+                .find_member(link.organization_id, session.user.id)
+                .await?
+            {
+                // Already in: following the link a second time is a
+                // no-op, not a failure, and must not spend a use.
+                return Ok(existing);
+            }
+            self.storage
+                .redeem_invite_link(
+                    link.id,
+                    AuthMemberCreate {
+                        organization_id: link.organization_id,
+                        user_id: session.user.id,
+                        role: link.role,
+                    },
+                )
+                .await
+        }
+
+        /// Resolve a link token to a link that will still admit someone.
+        ///
+        /// Every rejection is the same error on purpose: "revoked",
+        /// "expired" and "used up" would each tell a stranger holding a
+        /// guessed token something true about it.
+        async fn usable_invite_link(
+            &self,
+            token: &str,
+        ) -> Result<auth_proto::AuthInviteLink, AuthFlowError> {
+            let token_hash = hash_token(&self.config.secret, token);
+            let link = self
+                .storage
+                .find_invite_link_by_token_hash(&token_hash)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            if link.is_usable_at(Utc::now()) {
+                Ok(link)
+            } else {
+                Err(AuthFlowError::InvalidCredentials)
+            }
         }
 
         // r[impl auth.org.dynamic-access-control]
@@ -12719,6 +14958,153 @@ pub mod organizations {
             self.storage.list_team_members(input.team_id).await
         }
 
+        /// Let another account act wherever the caller can, up to
+        /// `max_role`. See [`auth_proto::AuthAgentLink`] for why.
+        pub async fn link_agent(
+            &self,
+            input: LinkAgent,
+        ) -> Result<auth_proto::AuthAgentLink, AuthFlowError> {
+            let session = self
+                .current_session(CurrentSession {
+                    token: input.session_token,
+                })
+                .await?;
+            let max_role = input.max_role.trim().to_ascii_lowercase();
+            if !matches!(max_role.as_str(), "admin" | "member") {
+                return Err(AuthFlowError::InvalidInput(
+                    "max_role must be admin or member".into(),
+                ));
+            }
+            let email = normalize_email(&input.agent_email)?;
+            let agent = self
+                .storage
+                .find_user_by_email(&email)
+                .await?
+                .ok_or_else(|| AuthFlowError::InvalidInput("no account has that address".into()))?;
+            if agent.id == session.user.id {
+                return Err(AuthFlowError::InvalidInput(
+                    "an account cannot be its own agent".into(),
+                ));
+            }
+            let already = self
+                .storage
+                .list_agent_links_for_owner(session.user.id)
+                .await?
+                .into_iter()
+                .any(|link| link.agent_user_id == agent.id);
+            if already {
+                return Err(AuthFlowError::InvalidInput(
+                    "that account is already linked".into(),
+                ));
+            }
+            self.storage
+                .create_agent_link(AuthAgentLinkCreate {
+                    owner_user_id: session.user.id,
+                    agent_user_id: agent.id,
+                    max_role,
+                })
+                .await
+        }
+
+        /// Withdraw a link. Only its owner can.
+        pub async fn unlink_agent(&self, input: UnlinkAgent) -> Result<(), AuthFlowError> {
+            let session = self
+                .current_session(CurrentSession {
+                    token: input.session_token,
+                })
+                .await?;
+            if self
+                .storage
+                .delete_agent_link(input.link_id, session.user.id)
+                .await?
+            {
+                Ok(())
+            } else {
+                Err(AuthFlowError::PermissionDenied)
+            }
+        }
+
+        /// The agents the caller has linked, with who they are.
+        pub async fn list_agents(
+            &self,
+            input: ListAgents,
+        ) -> Result<Vec<LinkedAgent>, AuthFlowError> {
+            let session = self
+                .current_session(CurrentSession {
+                    token: input.session_token,
+                })
+                .await?;
+            let links = self
+                .storage
+                .list_agent_links_for_owner(session.user.id)
+                .await?;
+            let mut out = Vec::with_capacity(links.len());
+            for link in links {
+                let agent = self.storage.find_user_by_id(link.agent_user_id).await?;
+                out.push(LinkedAgent {
+                    agent_email: agent.as_ref().and_then(|user| user.email.clone()),
+                    agent_name: agent.and_then(|user| user.name),
+                    link,
+                });
+            }
+            Ok(out)
+        }
+
+        /// The account behind a credential presented to the *read* side of
+        /// the organization surface.
+        ///
+        /// Two kinds of caller reach it. The issuer's own pages and the
+        /// desktop clients hold a **session token**. An OIDC client — a
+        /// web app that signed the person in through `/oauth2/authorize`,
+        /// Keyflow say — holds only the **access token** `/oauth2/token`
+        /// minted, a JWT, and has no session token to present. Both name
+        /// the same account, and "which organizations am I in" is a
+        /// question either has every right to ask; refusing the JWT meant
+        /// every OIDC client saw an empty organization list, and a
+        /// downstream server mirroring memberships from here learned
+        /// nothing about the person.
+        ///
+        /// The session is tried first because it is the common case and
+        /// the cheaper check. A JWT is only verified when the token is
+        /// shaped like one, so a bad session token still fails as a bad
+        /// session token, and the verification is the same one
+        /// `/oauth2/userinfo` performs — this server's own keys, its own
+        /// issuer, expiry honoured.
+        async fn organization_caller(
+            &self,
+            token: &str,
+        ) -> Result<auth_proto::AuthUser, AuthFlowError> {
+            let by_session = self
+                .current_session(CurrentSession {
+                    token: token.to_owned(),
+                })
+                .await;
+            match by_session {
+                Ok(bundle) => Ok(bundle.user),
+                Err(error) => {
+                    let is_jwt = token.split('.').filter(|part| !part.is_empty()).count() == 3;
+                    if !is_jwt {
+                        return Err(error);
+                    }
+                    let verification = self
+                        .verify_jwt(crate::VerifyJwt {
+                            token: token.to_owned(),
+                            audience: None,
+                        })
+                        .await?;
+                    let user_id: uuid::Uuid = verification
+                        .claims
+                        .sub
+                        .parse()
+                        .map_err(|_| AuthFlowError::InvalidCredentials)?;
+                    self.storage
+                        .find_user_by_id(user_id)
+                        .await?
+                        .ok_or(AuthFlowError::InvalidCredentials)
+                }
+            }
+        }
+
         async fn require_member(
             &self,
             session_token: &str,
@@ -12843,22 +15229,77 @@ pub mod organizations {
             .any(|value| value.as_str().is_some_and(|candidate| candidate == action)))
     }
 
+    /// The role an agent holds through a link: the owner's, lowered to
+    /// the link's cap where the owner's is higher. Owner never comes
+    /// across — a cap of `owner` is not offered and would read as
+    /// `member` here — and a role this server does not rank (a custom
+    /// one) is treated as the least, because inheriting an unknown
+    /// amount of power is the one thing a cap must not do.
+    fn inherited_role<'a>(owned: &'a str, max_role: &'a str) -> &'a str {
+        fn rank(role: &str) -> u8 {
+            match role {
+                "owner" => 3,
+                "admin" => 2,
+                _ => 1,
+            }
+        }
+        let cap = if max_role == "admin" {
+            "admin"
+        } else {
+            "member"
+        };
+        if rank(owned) <= rank(cap) && owned != "owner" {
+            owned
+        } else {
+            cap
+        }
+    }
+
+    #[cfg(test)]
+    mod inherited_role_tests {
+        use super::inherited_role;
+
+        /// The owner's role comes across as it is when it fits under the
+        /// cap, and lowered to the cap when it does not.
+        #[test]
+        fn the_cap_lowers_and_never_raises() {
+            assert_eq!(inherited_role("member", "admin"), "member");
+            assert_eq!(inherited_role("admin", "admin"), "admin");
+            assert_eq!(inherited_role("admin", "member"), "member");
+            assert_eq!(inherited_role("member", "member"), "member");
+        }
+
+        /// Owner is never inheritable, whatever the cap says.
+        #[test]
+        fn owner_never_comes_across() {
+            assert_eq!(inherited_role("owner", "admin"), "admin");
+            assert_eq!(inherited_role("owner", "member"), "member");
+            assert_eq!(inherited_role("owner", "owner"), "member");
+            assert_eq!(inherited_role("admin", "owner"), "member");
+        }
+
+        /// A role this server does not rank is the least, not the most.
+        #[test]
+        fn an_unknown_role_is_the_least() {
+            assert_eq!(inherited_role("stagehand", "admin"), "stagehand");
+            assert_eq!(inherited_role("stagehand", "member"), "stagehand");
+        }
+    }
+
     fn default_role_grants(role: &str, resource: &str, action: &str) -> bool {
         match role {
             "owner" => matches!(
                 (resource, action),
                 ("organization", "update" | "delete")
-                    | ("member", "create" | "update" | "delete")
+                    | ("member" | "team", "create" | "update" | "delete")
                     | ("invitation", "create" | "cancel")
-                    | ("team", "create" | "update" | "delete")
                     | ("ac", "create" | "read" | "update" | "delete")
             ),
             "admin" => matches!(
                 (resource, action),
                 ("organization", "update")
-                    | ("member", "create" | "update" | "delete")
+                    | ("member" | "team", "create" | "update" | "delete")
                     | ("invitation", "create" | "cancel")
-                    | ("team", "create" | "update" | "delete")
                     | ("ac", "create" | "read" | "update" | "delete")
             ),
             "member" => matches!((resource, action), ("ac", "read")),
@@ -12904,6 +15345,18 @@ pub mod organizations {
     }
 
     #[cfg(test)]
+    #[allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::indexing_slicing,
+        clippy::arithmetic_side_effects,
+        clippy::as_conversions,
+        clippy::panic,
+        clippy::float_cmp,
+        clippy::string_slice,
+        clippy::significant_drop_tightening,
+        clippy::too_many_lines
+    )]
     mod boundary_tests {
         use proptest::prelude::*;
         use serde_json::json;
@@ -12916,7 +15369,7 @@ pub mod organizations {
                 action in "[a-z][a-z0-9_.:-]{0,24}",
                 other_action in "[A-Z][A-Za-z0-9_.:-]{0,24}",
             ) {
-                let grants = json!({ resource.clone(): [action.clone(), other_action] }).to_string();
+                let grants = json!({ resource.clone(): [action, other_action] }).to_string();
 
                 prop_assert!(
                     super::permissions_json_grants(&grants, &resource, &action)
@@ -12945,16 +15398,64 @@ pub mod organizations {
     }
 }
 pub mod passkeys {
-    use auth_proto::{AuthFlowError, AuthPasskey, AuthPasskeyCreate, AuthSessionBundle};
-    use chrono::{Duration, Utc};
+    //! Passkeys, over `webauthn-rs`.
+    //!
+    //! # What this used to be
+    //!
+    //! An earlier version of this module took `credential_id`,
+    //! `public_key`, `counter` and a challenge as plain fields and
+    //! trusted every one of them. It checked the relying party, the
+    //! challenge and the counter, and never read the stored public key
+    //! — so nothing proved possession of the private key. Since a
+    //! credential id is not a secret and the challenge endpoint needed
+    //! no session, anyone who knew an id could ask for a challenge,
+    //! send it back with `counter + 1`, and be signed in as somebody
+    //! else.
+    //!
+    //! Everything below therefore has one rule: the browser hands over
+    //! one opaque blob, and every field the server records is read out
+    //! of that blob *after* `webauthn-rs` has verified its signature.
+    //! No caller supplies a credential id, a public key or a counter.
+    //!
+    //! # Sign-in is discoverable
+    //!
+    //! [`ArchitectAuth::begin_passkey_authentication`] takes no input.
+    //! The browser offers whichever passkeys it holds for this site and
+    //! the server learns who it is from the signed response. Naming an
+    //! address or a credential up front would tell a stranger whether
+    //! an account exists — and asking for a challenge on somebody
+    //! else's behalf is the exact shape the old bypass exploited.
+    //!
+    //! # Ceremony state
+    //!
+    //! A ceremony is two round trips, and the server has to remember
+    //! precisely what it issued. That state lives in
+    //! `auth_passkey_ceremonies`, keyed by the hash of a handle, and is
+    //! deleted the moment the ceremony ends — successfully or not, so a
+    //! captured assertion cannot be replayed against a challenge that
+    //! stayed open.
+
+    use auth_proto::{AuthFlowError, AuthPasskey, AuthPasskeyCreate, PasskeyCeremonyKind};
+    use chrono::Utc;
+    use serde::{Deserialize, Serialize};
+    use webauthn_rs::prelude::{
+        DiscoverableAuthentication, DiscoverableKey, Passkey, PasskeyAuthentication,
+        PublicKeyCredential, RegisterPublicKeyCredential, Url, Webauthn, WebauthnBuilder,
+    };
 
     use crate::{
-        ArchitectAuth, AuthStorage, BeginPasskeyAuthentication, BeginPasskeyRegistration,
-        CompletePasskeyAuthentication, CompletePasskeyRegistration, DeletePasskey, ListPasskeys,
-        VerificationToken, commands::CurrentSession, crypto::generate_token, crypto::hash_token,
+        ArchitectAuth, AuthSessionBundle, AuthStorage, BeginPasskeyAuthentication,
+        BeginPasskeyRegistration, CompletePasskeyAuthentication, CompletePasskeyRegistration,
+        DeletePasskey, ListPasskeys, PasskeyChallenge, commands::CurrentSession,
+        crypto::generate_token, crypto::hash_token,
         flows::last_login_method::record_last_login_method,
     };
 
+    /// How long a browser has to answer a challenge.
+    ///
+    /// Five minutes covers finding a phone, unlocking it and approving
+    /// the prompt. Longer widens the window in which a stolen handle is
+    /// worth something.
     const PASSKEY_CHALLENGE_TTL_SECONDS: i64 = 300;
 
     impl<S> ArchitectAuth<S>
@@ -12964,151 +15465,352 @@ pub mod passkeys {
         // r[impl auth.passkey.challenge-random]
         // r[impl auth.passkey.challenge-expiry]
         // r[impl auth.passkey.user-match]
+        /// Begin registering a passkey for the signed-in person.
+        ///
+        /// # Errors
+        ///
+        /// If the session is invalid, the relying party is
+        /// misconfigured, or storage fails.
         pub async fn begin_passkey_registration(
             &self,
             input: BeginPasskeyRegistration,
-        ) -> Result<VerificationToken, AuthFlowError> {
+        ) -> Result<PasskeyChallenge, AuthFlowError> {
             let session = self
                 .current_session(CurrentSession {
                     token: input.session_token,
                 })
                 .await?;
-            let challenge =
-                generate_token().map_err(|err| AuthFlowError::Internal(err.to_string()))?;
-            let identifier = registration_identifier(session.user.id);
-            self.storage
-                .create_verification(auth_proto::AuthVerificationCreate {
-                    identifier: identifier.clone(),
-                    value_hash: hash_token(&self.config.secret, &challenge),
-                    expires_at: Utc::now() + Duration::seconds(PASSKEY_CHALLENGE_TTL_SECONDS),
-                })
+            let webauthn = self.webauthn()?;
+
+            // Credentials the person already has, so an authenticator
+            // offers to *replace* rather than silently making a second
+            // entry for the same site.
+            let existing = self
+                .storage
+                .list_passkeys_by_user_id(session.user.id)
                 .await?;
-            Ok(VerificationToken {
-                identifier,
-                token: challenge,
+            let exclude: Vec<_> = existing
+                .iter()
+                .filter_map(|row| stored_passkey(row).ok())
+                .map(|passkey| passkey.cred_id().clone())
+                .collect();
+
+            let label = session
+                .user
+                .email
+                .clone()
+                .or_else(|| session.user.name.clone())
+                .unwrap_or_else(|| session.user.id.to_string());
+            let (options, state) = webauthn
+                .start_passkey_registration(
+                    session.user.id,
+                    &label,
+                    session.user.name.as_deref().unwrap_or(&label),
+                    Some(exclude),
+                )
+                .map_err(|err| webauthn_internal(&err))?;
+
+            let handle = self
+                .park_ceremony(
+                    PasskeyCeremonyKind::Registration,
+                    Some(session.user.id),
+                    to_json(&state)?,
+                )
+                .await?;
+            Ok(PasskeyChallenge {
+                options_json: to_json(&options)?,
+                handle,
             })
         }
 
-        // r[impl auth.passkey.challenge-expiry]
+        // r[impl auth.passkey.assertion-signature]
         // r[impl auth.passkey.rp-origin]
         // r[impl auth.passkey.credential-unique]
         // r[impl auth.passkey.user-match]
-        // r[impl auth.passkey.transports]
+        /// Finish registering.
+        ///
+        /// The credential id, public key, counter and backup state are
+        /// all read out of the verified attestation. Nothing the caller
+        /// sent about the credential is trusted.
+        ///
+        /// # Errors
+        ///
+        /// If the ceremony is unknown, expired, or belongs to somebody
+        /// else; if the attestation does not verify; or if the
+        /// credential is already registered.
         pub async fn complete_passkey_registration(
             &self,
             input: CompletePasskeyRegistration,
         ) -> Result<AuthPasskey, AuthFlowError> {
-            self.validate_passkey_relying_party(&input.rp_id, &input.origin)?;
             let session = self
                 .current_session(CurrentSession {
                     token: input.session_token,
                 })
                 .await?;
+            let webauthn = self.webauthn()?;
+            let ceremony = self
+                .take_ceremony(&input.handle, PasskeyCeremonyKind::Registration)
+                .await?;
+            // The ceremony was started by a session; it must be
+            // finished by the same person, or one person could register
+            // a credential onto another's account.
+            if ceremony.user_id != Some(session.user.id) {
+                return Err(AuthFlowError::PermissionDenied);
+            }
+            let state = from_json(&ceremony.state_json)?;
+
+            let credential: RegisterPublicKeyCredential =
+                serde_json::from_str(&input.credential_json)
+                    .map_err(|err| AuthFlowError::InvalidInput(format!("credential: {err}")))?;
+            // Everything is checked in here: the attestation, the
+            // challenge, the origin, the relying-party id, and that the
+            // credential is not already known to this ceremony.
+            let passkey = webauthn
+                .finish_passkey_registration(&credential, &state)
+                .map_err(|_| AuthFlowError::InvalidCredentials)?;
+
+            let credential_id = encode_credential_id(passkey.cred_id().as_ref());
             if self
                 .storage
-                .find_passkey_by_credential_id(&input.credential_id)
+                .find_passkey_by_credential_id(&credential_id)
                 .await?
                 .is_some()
             {
                 return Err(AuthFlowError::InvalidInput(
-                    "passkey credential already exists".into(),
+                    "passkey is already registered".into(),
                 ));
             }
-            let identifier = registration_identifier(session.user.id);
-            let value_hash = hash_token(&self.config.secret, &input.challenge);
-            let verification = self
-                .storage
-                .find_verification(&identifier, &value_hash)
-                .await?
-                .ok_or(AuthFlowError::InvalidCredentials)?;
-            if verification.expires_at <= Utc::now() {
-                return Err(AuthFlowError::InvalidCredentials);
-            }
-            let passkey = self
-                .storage
+
+            let name = input.name.trim();
+            self.storage
                 .create_passkey(AuthPasskeyCreate {
-                    name: input.name,
+                    name: if name.is_empty() {
+                        "Passkey".to_owned()
+                    } else {
+                        name.to_owned()
+                    },
                     user_id: session.user.id,
-                    public_key: input.public_key,
-                    credential_id: input.credential_id,
-                    counter: input.counter,
-                    device_type: input.device_type,
-                    backed_up: input.backed_up,
-                    transports: input.transports,
+                    public_key: to_json(&passkey)?,
+                    credential_id,
+                    counter: 0,
+                    // Reported by the authenticator, and only meaningful
+                    // as a hint in a list: "the one on my phone".
+                    device_type: if credential.response.transports.is_some() {
+                        "multi-device".to_owned()
+                    } else {
+                        "platform".to_owned()
+                    },
+                    backed_up: false,
+                    transports: credential
+                        .response
+                        .transports
+                        .as_ref()
+                        .and_then(|t| serde_json::to_string(t).ok()),
                 })
-                .await?;
-            self.storage.delete_verification(verification.id).await?;
-            Ok(passkey)
+                .await
         }
 
         // r[impl auth.passkey.challenge-random]
         // r[impl auth.passkey.challenge-expiry]
+        /// Begin a passkey sign-in.
+        ///
+        /// Discoverable when no address is given; narrowed to one
+        /// person's credentials when there is one. An unknown address
+        /// gets a discoverable challenge rather than an error, so the
+        /// two cases are indistinguishable from outside.
+        ///
+        /// # Errors
+        ///
+        /// If the relying party is misconfigured or storage fails.
         pub async fn begin_passkey_authentication(
             &self,
             input: BeginPasskeyAuthentication,
-        ) -> Result<VerificationToken, AuthFlowError> {
-            self.storage
-                .find_passkey_by_credential_id(&input.credential_id)
-                .await?
-                .ok_or(AuthFlowError::InvalidCredentials)?;
-            let challenge =
-                generate_token().map_err(|err| AuthFlowError::Internal(err.to_string()))?;
-            let identifier = authentication_identifier(&input.credential_id);
-            self.storage
-                .create_verification(auth_proto::AuthVerificationCreate {
-                    identifier: identifier.clone(),
-                    value_hash: hash_token(&self.config.secret, &challenge),
-                    expires_at: Utc::now() + Duration::seconds(PASSKEY_CHALLENGE_TTL_SECONDS),
-                })
+        ) -> Result<PasskeyChallenge, AuthFlowError> {
+            let webauthn = self.webauthn()?;
+
+            // An address that does not resolve to somebody with
+            // passkeys falls through to the discoverable branch, which
+            // is the whole point: no answer here distinguishes "no such
+            // account" from "no passkeys" from "here you are".
+            let narrowed = match input.email.as_deref() {
+                None => None,
+                Some(email) => self.passkeys_for_email(email).await?,
+            };
+
+            let (options_json, state_json) = if let Some((user_id, keys)) = narrowed {
+                let (options, state) = webauthn
+                    .start_passkey_authentication(&keys)
+                    .map_err(|err| webauthn_internal(&err))?;
+                (
+                    to_json(&options)?,
+                    to_json(&AuthCeremony::Keyed { user_id, state })?,
+                )
+            } else {
+                let (options, state) = webauthn
+                    .start_discoverable_authentication()
+                    .map_err(|err| webauthn_internal(&err))?;
+                (
+                    to_json(&options)?,
+                    to_json(&AuthCeremony::Discoverable(state))?,
+                )
+            };
+
+            let handle = self
+                .park_ceremony(PasskeyCeremonyKind::Authentication, None, state_json)
                 .await?;
-            Ok(VerificationToken {
-                identifier,
-                token: challenge,
+            Ok(PasskeyChallenge {
+                options_json,
+                handle,
             })
         }
 
-        // r[impl auth.passkey.challenge-expiry]
+        /// The passkeys belonging to an address, if it has any.
+        async fn passkeys_for_email(
+            &self,
+            email: &str,
+        ) -> Result<Option<(uuid::Uuid, Vec<Passkey>)>, AuthFlowError> {
+            let Ok(canonical) = super::email_password::normalize_email(email) else {
+                return Ok(None);
+            };
+            let Some(user) = self.storage.find_user_by_email(&canonical).await? else {
+                return Ok(None);
+            };
+            let keys: Vec<Passkey> = self
+                .storage
+                .list_passkeys_by_user_id(user.id)
+                .await?
+                .iter()
+                .filter_map(|row| stored_passkey(row).ok())
+                .collect();
+            if keys.is_empty() {
+                return Ok(None);
+            }
+            Ok(Some((user.id, keys)))
+        }
+
+        // r[impl auth.passkey.assertion-signature]
         // r[impl auth.passkey.rp-origin]
         // r[impl auth.passkey.counter]
+        /// Finish a passkey sign-in.
+        ///
+        /// The signature is verified against the stored credential, and
+        /// the person signed in is whoever that credential belongs to —
+        /// never whoever the caller said.
+        ///
+        /// # Errors
+        ///
+        /// If the ceremony is unknown or expired, if the assertion does
+        /// not verify, or if the credential is not registered here.
         pub async fn complete_passkey_authentication(
             &self,
             input: CompletePasskeyAuthentication,
         ) -> Result<AuthSessionBundle, AuthFlowError> {
-            self.validate_passkey_relying_party(&input.rp_id, &input.origin)?;
-            let passkey = self
-                .storage
-                .find_passkey_by_credential_id(&input.credential_id)
-                .await?
-                .ok_or(AuthFlowError::InvalidCredentials)?;
-            if input.counter <= passkey.counter {
-                return Err(AuthFlowError::InvalidCredentials);
-            }
-            let identifier = authentication_identifier(&input.credential_id);
-            let value_hash = hash_token(&self.config.secret, &input.challenge);
-            let verification = self
-                .storage
-                .find_verification(&identifier, &value_hash)
-                .await?
-                .ok_or(AuthFlowError::InvalidCredentials)?;
-            if verification.expires_at <= Utc::now() {
-                return Err(AuthFlowError::InvalidCredentials);
-            }
-            let passkey = self
-                .storage
-                .update_passkey_counter(&input.credential_id, input.counter)
+            let webauthn = self.webauthn()?;
+            let ceremony = self
+                .take_ceremony(&input.handle, PasskeyCeremonyKind::Authentication)
                 .await?;
+            let state: AuthCeremony = from_json(&ceremony.state_json)?;
+
+            let credential: PublicKeyCredential = serde_json::from_str(&input.credential_json)
+                .map_err(|err| AuthFlowError::InvalidInput(format!("credential: {err}")))?;
+
+            // THE check, in both branches: `webauthn-rs` verifies the
+            // assertion signature against the stored public key, the
+            // challenge against the parked state, and the origin and
+            // relying-party id against the configuration. Everything
+            // afterwards reads out of the *verified* result.
+            let (result, expected_user) = match state {
+                AuthCeremony::Keyed { user_id, state } => {
+                    let result = webauthn
+                        .finish_passkey_authentication(&credential, &state)
+                        .map_err(|_| AuthFlowError::InvalidCredentials)?;
+                    (result, Some(user_id))
+                }
+                AuthCeremony::Discoverable(state) => {
+                    // Who the authenticator says this is. Unverified so
+                    // far — used only to find the candidate credentials
+                    // the signature is then checked against.
+                    let (claimed, _) = webauthn
+                        .identify_discoverable_authentication(&credential)
+                        .map_err(|_| AuthFlowError::InvalidCredentials)?;
+                    let keys: Vec<DiscoverableKey> = self
+                        .storage
+                        .list_passkeys_by_user_id(claimed)
+                        .await?
+                        .iter()
+                        .filter_map(|row| stored_passkey(row).ok())
+                        .map(|passkey| DiscoverableKey::from(&passkey))
+                        .collect();
+                    if keys.is_empty() {
+                        return Err(AuthFlowError::InvalidCredentials);
+                    }
+                    let result = webauthn
+                        .finish_discoverable_authentication(&credential, state, &keys)
+                        .map_err(|_| AuthFlowError::InvalidCredentials)?;
+                    (result, Some(claimed))
+                }
+            };
+
+            let credential_id = encode_credential_id(result.cred_id().as_ref());
+            let row = self
+                .storage
+                .find_passkey_by_credential_id(&credential_id)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            // The credential the signature proves must belong to the
+            // person the ceremony was for. Without this, a valid
+            // assertion could be paired with somebody else's user
+            // handle and resolve to the wrong account.
+            if expected_user.is_some_and(|expected| expected != row.user_id) {
+                return Err(AuthFlowError::InvalidCredentials);
+            }
+
+            // A counter that moved, or a backup state that changed, has
+            // to be written down: a counter going *backwards* later is
+            // how a cloned authenticator is noticed.
+            if result.needs_update() {
+                let mut passkey = stored_passkey(&row)?;
+                passkey.update_credential(&result);
+                // `u32` into `i64` cannot fail, so the fallible form was
+                // carrying an `unwrap_or` branch nothing could reach.
+                let counter = i64::from(result.counter());
+                self.storage
+                    .update_passkey_credential(
+                        &credential_id,
+                        to_json(&passkey)?,
+                        counter,
+                        result.backup_state(),
+                    )
+                    .await?;
+            }
+
             let user = self
                 .storage
-                .find_user_by_id(passkey.user_id)
+                .find_user_by_id(row.user_id)
                 .await?
                 .ok_or(AuthFlowError::InvalidCredentials)?;
-            self.storage.delete_verification(verification.id).await?;
+            let second_factor_pending = user.two_factor_enabled;
             let bundle = self
-                .issue_session(user, input.ip_address, input.user_agent, None, None)
+                .issue_session_with_state(
+                    user,
+                    input.ip_address,
+                    input.user_agent,
+                    None,
+                    None,
+                    // r[impl auth.twofactor.signin-required]
+                    // Inactive when a second factor is owed, exactly as
+                    // the password path does. Every one of these routes
+                    // used to issue an ACTIVE session, so enabling
+                    // two-factor protected the password form and
+                    // nothing else — a code, a link, a passkey or a
+                    // social button all walked straight past it.
+                    !second_factor_pending,
+                )
                 .await?;
             record_last_login_method(self, bundle, "passkey").await
         }
 
+        // r[impl auth.passkey.list]
         pub async fn list_passkeys(
             &self,
             input: ListPasskeys,
@@ -13136,65 +15838,173 @@ pub mod passkeys {
             if passkey.user_id != session.user.id {
                 return Err(AuthFlowError::PermissionDenied);
             }
-            let has_password = self
-                .storage
-                .find_password_account_by_user_id(session.user.id)
-                .await?
-                .is_some();
-            let oauth_count = self
-                .storage
-                .list_accounts_by_user_id(session.user.id)
-                .await?
-                .into_iter()
-                .filter(|account| account.provider_id != "credential")
-                .count();
-            let passkey_count = self
-                .storage
-                .list_passkeys_by_user_id(session.user.id)
-                .await?
-                .len();
-            if !has_password && oauth_count == 0 && passkey_count <= 1 {
-                return Err(AuthFlowError::InvalidInput(
-                    "cannot delete the last sign-in credential".into(),
-                ));
-            }
+            self.reject_if_last_signin_credential(session.user.id, &input.credential_id)
+                .await?;
             self.storage
                 .delete_passkey_by_credential_id(&input.credential_id)
                 .await
         }
 
-        fn validate_passkey_relying_party(
-            &self,
-            rp_id: &str,
-            origin: &str,
-        ) -> Result<(), AuthFlowError> {
-            if rp_id != self.config.passkey_rp_id {
-                return Err(AuthFlowError::PermissionDenied);
+        /// The configured relying party, as `webauthn-rs` wants it.
+        fn webauthn(&self) -> Result<Webauthn, AuthFlowError> {
+            let origins = &self.config.passkey_allowed_origins;
+            let primary = origins.first().ok_or_else(|| {
+                AuthFlowError::Internal(
+                    "no passkey origin is configured; passkeys cannot be used".into(),
+                )
+            })?;
+            let url = Url::parse(primary).map_err(|err| {
+                AuthFlowError::Internal(format!("passkey origin {primary:?} is not a URL: {err}"))
+            })?;
+            let mut builder = WebauthnBuilder::new(&self.config.passkey_rp_id, &url)
+                .map_err(|err| webauthn_internal(&err))?
+                .rp_name(
+                    self.config
+                        .passkey_rp_name
+                        .as_deref()
+                        .unwrap_or(&self.config.passkey_rp_id),
+                );
+            // Anything after the first is an additional allowed origin —
+            // a staging host, or the same site on another port.
+            for extra in origins.iter().skip(1) {
+                let extra = Url::parse(extra).map_err(|err| {
+                    AuthFlowError::Internal(format!("passkey origin {extra:?} is not a URL: {err}"))
+                })?;
+                builder = builder.append_allowed_origin(&extra);
             }
-            if self
-                .config
-                .passkey_allowed_origins
-                .iter()
-                .any(|allowed| allowed == origin)
-            {
+            builder.build().map_err(|err| webauthn_internal(&err))
+        }
+
+        /// Store ceremony state and return the handle that finds it.
+        ///
+        /// Takes the state already serialised: `webauthn-rs`'s state
+        /// types are not `Send`, and holding one across the storage
+        /// `await` would make every caller's future non-`Send` — which
+        /// an axum handler cannot be.
+        async fn park_ceremony(
+            &self,
+            kind: PasskeyCeremonyKind,
+            user_id: Option<uuid::Uuid>,
+            state_json: String,
+        ) -> Result<String, AuthFlowError> {
+            let handle =
+                generate_token().map_err(|err| AuthFlowError::Internal(err.to_string()))?;
+            self.storage
+                .create_passkey_ceremony(auth_proto::AuthPasskeyCeremonyCreate {
+                    handle_hash: hash_token(&self.config.secret, &handle),
+                    kind: kind.as_str().to_owned(),
+                    user_id,
+                    state_json,
+                    expires_at: crate::expiry::expires_in(PASSKEY_CHALLENGE_TTL_SECONDS),
+                })
+                .await?;
+            Ok(handle)
+        }
+
+        /// Fetch a ceremony and delete it, whatever happens next.
+        ///
+        /// Deleted before the answer is checked, not after: a challenge
+        /// that survived a failed attempt could be tried against again.
+        async fn take_ceremony(
+            &self,
+            handle: &str,
+            expected: PasskeyCeremonyKind,
+        ) -> Result<auth_proto::AuthPasskeyCeremony, AuthFlowError> {
+            let handle_hash = hash_token(&self.config.secret, handle);
+            let ceremony = self
+                .storage
+                .find_passkey_ceremony_by_handle_hash(&handle_hash)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            self.storage.delete_passkey_ceremony(ceremony.id).await?;
+            if ceremony.kind != expected.as_str() {
+                return Err(AuthFlowError::InvalidCredentials);
+            }
+            if ceremony.expires_at <= Utc::now() {
+                return Err(AuthFlowError::InvalidCredentials);
+            }
+            Ok(ceremony)
+        }
+
+        async fn reject_if_last_signin_credential(
+            &self,
+            user_id: uuid::Uuid,
+            credential_id: &str,
+        ) -> Result<(), AuthFlowError> {
+            let remaining = self
+                .storage
+                .list_passkeys_by_user_id(user_id)
+                .await?
+                .into_iter()
+                .filter(|passkey| passkey.credential_id != credential_id)
+                .count();
+            if remaining > 0 {
+                return Ok(());
+            }
+            let has_other = self
+                .storage
+                .list_accounts_by_user_id(user_id)
+                .await?
+                .into_iter()
+                .any(|account| {
+                    account.password_hash.is_some() || account.provider_id != "credential"
+                });
+            if has_other {
                 Ok(())
             } else {
-                Err(AuthFlowError::PermissionDenied)
+                Err(AuthFlowError::InvalidInput(
+                    "cannot delete the last sign-in credential".into(),
+                ))
             }
         }
     }
 
-    fn registration_identifier(user_id: uuid::Uuid) -> String {
-        format!("passkey-registration:{user_id}")
+    /// Which kind of sign-in ceremony is parked.
+    ///
+    /// Both are opaque `webauthn-rs` state; wrapping them in one enum
+    /// keeps the ceremony row a single column and makes it impossible
+    /// to finish a discoverable ceremony with keyed state or the other
+    /// way round — the deserialise simply fails.
+    #[derive(Serialize, Deserialize)]
+    enum AuthCeremony {
+        Discoverable(DiscoverableAuthentication),
+        Keyed {
+            user_id: uuid::Uuid,
+            state: PasskeyAuthentication,
+        },
     }
 
-    fn authentication_identifier(credential_id: &str) -> String {
-        format!("passkey-authentication:{credential_id}")
+    /// The stored credential, back as a `webauthn-rs` type.
+    fn stored_passkey(row: &AuthPasskey) -> Result<Passkey, AuthFlowError> {
+        from_json(&row.public_key)
+    }
+
+    /// Credential ids are bytes; the column is text.
+    ///
+    /// `webauthn-rs` serialises them as base64url, and matching that
+    /// keeps a stored id the same string the browser and the logs use.
+    fn encode_credential_id(bytes: &[u8]) -> String {
+        use base64::Engine as _;
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+    }
+
+    fn to_json<T: serde::Serialize>(value: &T) -> Result<String, AuthFlowError> {
+        serde_json::to_string(value).map_err(|err| AuthFlowError::Internal(err.to_string()))
+    }
+
+    fn from_json<T: serde::de::DeserializeOwned>(json: &str) -> Result<T, AuthFlowError> {
+        serde_json::from_str(json).map_err(|err| AuthFlowError::Internal(err.to_string()))
+    }
+
+    /// A `webauthn-rs` error at *setup* time is a misconfiguration, not
+    /// a bad credential, so it must not be reported as one.
+    fn webauthn_internal(err: &webauthn_rs::prelude::WebauthnError) -> AuthFlowError {
+        AuthFlowError::Internal(format!("webauthn: {err}"))
     }
 }
 pub mod device_authorization {
     use auth_proto::{AuthFlowError, AuthSessionBundle, AuthVerificationCreate};
-    use chrono::{Duration, Utc};
+    use chrono::Utc;
 
     use crate::{
         ApproveDeviceCode, ArchitectAuth, AuthStorage, CreateDeviceAuthorization, DenyDeviceCode,
@@ -13231,7 +16041,7 @@ pub mod device_authorization {
                 generate_token().map_err(|err| AuthFlowError::Internal(err.to_string()))?;
             let user_code = generate_user_code()?;
             let device_hash = hash_token(&self.config.secret, &device_code);
-            let expires_at = Utc::now() + Duration::seconds(expires_in_seconds);
+            let expires_at = crate::expiry::expires_in(expires_in_seconds);
             let value = encode_device_value(
                 &device_hash,
                 &input.client_id,
@@ -13394,7 +16204,7 @@ pub mod device_authorization {
                 .storage
                 .find_latest_verification_by_identifier(&identifier)
                 .await?
-                && last_poll.created_at + Duration::seconds(state.interval_seconds) > Utc::now()
+                && crate::expiry::after(last_poll.created_at, state.interval_seconds) > Utc::now()
             {
                 return Err(AuthFlowError::InvalidInput("slow_down".into()));
             }
@@ -13402,7 +16212,7 @@ pub mod device_authorization {
                 .create_verification(AuthVerificationCreate {
                     identifier,
                     value_hash: "poll".into(),
-                    expires_at: Utc::now() + Duration::seconds(state.interval_seconds),
+                    expires_at: crate::expiry::expires_in(state.interval_seconds),
                 })
                 .await
                 .map(|_| ())
@@ -13420,7 +16230,7 @@ pub mod device_authorization {
         let token = generate_token().map_err(|err| AuthFlowError::Internal(err.to_string()))?;
         Ok(token
             .chars()
-            .filter(|ch| ch.is_ascii_alphanumeric())
+            .filter(char::is_ascii_alphanumeric)
             .take(8)
             .collect::<String>()
             .to_ascii_uppercase())
@@ -13490,6 +16300,18 @@ pub mod device_authorization {
     }
 
     #[cfg(test)]
+    #[allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::indexing_slicing,
+        clippy::arithmetic_side_effects,
+        clippy::as_conversions,
+        clippy::panic,
+        clippy::float_cmp,
+        clippy::string_slice,
+        clippy::significant_drop_tightening,
+        clippy::too_many_lines
+    )]
     mod boundary_tests {
         use proptest::prelude::*;
 
@@ -13545,11 +16367,29 @@ pub mod two_factor {
     use totp_rs::{Algorithm, Secret, TOTP};
 
     use crate::{
-        ArchitectAuth, AuthStorage, ConfirmTwoFactor, DisableTwoFactor, StartTwoFactorSetup,
-        VerifyTwoFactor,
+        ArchitectAuth, AuthStorage, BeginTwoFactorEnrollment, ConfirmTwoFactor, DisableTwoFactor,
+        StartTwoFactorSetup, TwoFactorEnrollment, VerifyTwoFactor,
         commands::CurrentSession,
-        crypto::{decrypt_secret, encrypt_secret, hash_token},
+        crypto::{decrypt_secret, encrypt_secret, generate_token, hash_token},
     };
+
+    /// How many failed second-factor attempts before refusing, and over
+    /// what span.
+    ///
+    /// Five in fifteen minutes stops guessing at a six-digit code — a
+    /// exhaustive search needs 10^6 tries — while letting somebody who
+    /// fumbled their phone try again after a coffee. The window is the
+    /// important half: without one this is not a rate limit but a
+    /// permanent lockout with no self-service way out.
+    /// How many backup codes an enrolment mints.
+    ///
+    /// Ten is the number every other implementation uses, and the
+    /// reason is that people print them: enough that losing a few to a
+    /// bad photocopy does not matter, few enough to fit on a card.
+    const BACKUP_CODE_COUNT: usize = 10;
+
+    const TWO_FACTOR_MAX_ATTEMPTS: i64 = 5;
+    const TWO_FACTOR_WINDOW_SECS: i64 = 15 * 60;
 
     impl<S> ArchitectAuth<S>
     where
@@ -13559,6 +16399,60 @@ pub mod two_factor {
         // r[impl auth.twofactor.secret-encryption]
         // r[impl auth.twofactor.backup-codes-hash]
         // r[impl auth.twofactor.confirm-before-enabled]
+        /// Mint a secret and backup codes, and start enrolment with them.
+        ///
+        /// The return value is the only time any of it is legible: the
+        /// secret is stored encrypted and the codes only as hashes.
+        /// Enrolment is not finished until [`Self::confirm_two_factor`]
+        /// sees a code from the app, so a person who closes the page
+        /// here is left exactly as they were.
+        ///
+        /// # Errors
+        ///
+        /// If the session is not valid, if the platform RNG fails, or
+        /// if storage does.
+        pub async fn begin_two_factor_enrollment(
+            &self,
+            input: BeginTwoFactorEnrollment,
+        ) -> Result<TwoFactorEnrollment, AuthFlowError> {
+            let secret = Secret::generate_secret().to_encoded().to_string();
+            let mut backup_codes = Vec::with_capacity(BACKUP_CODE_COUNT);
+            for _ in 0..BACKUP_CODE_COUNT {
+                backup_codes.push(backup_code()?);
+            }
+
+            // Built only to render the URL. Verification reconstructs
+            // its own from the stored secret, and the issuer and label
+            // are decoration in an app's list — they take no part in
+            // computing a code.
+            let totp = TOTP::new(
+                Algorithm::SHA1,
+                6,
+                1,
+                30,
+                Secret::Encoded(secret.clone())
+                    .to_bytes()
+                    .map_err(|err| AuthFlowError::InvalidInput(err.to_string()))?,
+                Some(input.issuer),
+                input.account_label,
+            )
+            .map_err(|err| AuthFlowError::InvalidInput(err.to_string()))?;
+            let otpauth_url = totp.get_url();
+
+            self.start_two_factor_setup(StartTwoFactorSetup {
+                session_token: input.session_token,
+                secret_ciphertext: secret.clone(),
+                backup_codes: backup_codes.clone(),
+            })
+            .await?;
+
+            Ok(TwoFactorEnrollment {
+                secret,
+                otpauth_url,
+                backup_codes,
+            })
+        }
+
         pub async fn start_two_factor_setup(
             &self,
             input: StartTwoFactorSetup,
@@ -13682,8 +16576,11 @@ pub mod two_factor {
             user_id: uuid::Uuid,
             code: &str,
         ) -> Result<(), AuthFlowError> {
-            let attempts = self.storage.increment_two_factor_attempts(user_id).await?;
-            if attempts > 5 {
+            let attempts = self
+                .storage
+                .increment_two_factor_attempts(user_id, crate::expiry::ago(TWO_FACTOR_WINDOW_SECS))
+                .await?;
+            if attempts > TWO_FACTOR_MAX_ATTEMPTS {
                 return Err(AuthFlowError::PermissionDenied);
             }
             if self.verify_totp_for_user(user_id, code).await.is_ok() {
@@ -13733,6 +16630,32 @@ pub mod two_factor {
                 .await
         }
     }
+
+    /// One backup code: lowercase alphanumerics, no separators.
+    ///
+    /// No dashes or spaces on purpose. The stored value is
+    /// `hash_token(secret, code)` over exactly the string that was
+    /// shown, so any prettifying here becomes a way for somebody to
+    /// type a code that is right and have it rejected.
+    fn backup_code() -> Result<String, AuthFlowError> {
+        let token = generate_token().map_err(|err| AuthFlowError::Internal(err.to_string()))?;
+        let code: String = token
+            .chars()
+            .filter(char::is_ascii_alphanumeric)
+            .map(|c| c.to_ascii_lowercase())
+            .take(BACKUP_CODE_LEN)
+            .collect();
+        if code.chars().count() < BACKUP_CODE_LEN {
+            return Err(AuthFlowError::Internal(
+                "backup code generation produced too few usable characters".into(),
+            ));
+        }
+        Ok(code)
+    }
+
+    /// Ten characters of `[a-z0-9]` — about 51 bits, which is far more
+    /// than the five-attempt window can be walked through.
+    const BACKUP_CODE_LEN: usize = 10;
 
     fn totp_from_encoded_secret(secret: &str) -> Result<TOTP, AuthFlowError> {
         TOTP::new(

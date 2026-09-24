@@ -46,6 +46,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// Size the ring for the worst-case event burst between two drains —
 /// overflow is dropped (and counted via [`RtProducer::dropped`] /
 /// [`RtConsumer::dropped`]), never waited on.
+#[must_use]
 pub fn rt_channel<T: Send>(capacity: usize) -> (RtProducer<T>, RtConsumer<T>) {
     let (tx, rx) = rtrb::RingBuffer::new(capacity.max(1));
     let dropped = Arc::new(AtomicU64::new(0));
@@ -105,10 +106,10 @@ impl<T> RtConsumer<T> {
     /// were delivered. Call at UI rate (the same tick that drives
     /// pollers) — NOT from a real-time thread.
     pub fn drain(&mut self, mut f: impl FnMut(T)) -> usize {
-        let mut n = 0;
+        let mut n = 0usize;
         while let Ok(event) = self.rx.pop() {
             f(event);
-            n += 1;
+            n = n.saturating_add(1);
         }
         n
     }
@@ -145,6 +146,18 @@ impl<T> RtConsumer<T> {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::panic,
+    clippy::float_cmp,
+    clippy::string_slice,
+    clippy::significant_drop_tightening,
+    clippy::too_many_lines
+)]
 mod tests {
     use super::*;
 

@@ -91,7 +91,7 @@
 //! variant.
 
 use core::any::Any;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -187,12 +187,20 @@ where
 
 // ── Mounted ───────────────────────────────────────────────────────────────
 
-/// A service bound to a backend — descriptor + erased handler.
+/// A service bound to a backend — descriptor + erased handler, plus
+/// (when the service has one) its HTTP face, so a merged override
+/// replaces both wires.
 #[derive(Clone)]
 pub struct Mounted {
     descriptor: &'static ServiceDescriptor,
     handler: Arc<dyn DynHandler>,
+    http: Option<HttpMount>,
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+type HttpMount = Arc<dyn Fn(&mut crate::http::HttpRoutes) + Send + Sync>;
+#[cfg(target_arch = "wasm32")]
+type HttpMount = Arc<dyn Fn(&mut crate::http::HttpRoutes)>;
 
 impl Mounted {
     #[cfg(not(target_arch = "wasm32"))]
@@ -203,6 +211,7 @@ impl Mounted {
         Self {
             descriptor,
             handler: Arc::new(handler),
+            http: None,
         }
     }
 
@@ -214,6 +223,7 @@ impl Mounted {
         Self {
             descriptor,
             handler: Arc::new(handler),
+            http: None,
         }
     }
 
@@ -221,17 +231,40 @@ impl Mounted {
         Self {
             descriptor,
             handler,
+            http: None,
         }
     }
 
-    pub fn descriptor(&self) -> &'static ServiceDescriptor {
+    /// Attach the service's HTTP face, so binding this `Mounted` over
+    /// HTTP mounts (or overrides) its routes too. The generated
+    /// `layer(backend)` does this for you.
+    #[must_use]
+    pub fn with_http(
+        mut self,
+        mount: impl Fn(&mut crate::http::HttpRoutes) + crate::MaybeSendSync + 'static,
+    ) -> Self {
+        self.http = Some(Arc::new(mount));
+        self
+    }
+
+    /// Mount the attached HTTP face, if any.
+    pub fn bind_http_into(&self, routes: &mut crate::http::HttpRoutes) {
+        if let Some(mount) = &self.http {
+            mount(routes);
+        }
+    }
+
+    #[must_use]
+    pub const fn descriptor(&self) -> &'static ServiceDescriptor {
         self.descriptor
     }
 
+    #[must_use]
     pub fn handler(&self) -> &Arc<dyn DynHandler> {
         &self.handler
     }
 
+    #[must_use]
     pub fn into_parts(self) -> (&'static ServiceDescriptor, Arc<dyn DynHandler>) {
         (self.descriptor, self.handler)
     }
@@ -318,8 +351,11 @@ where
     R: Bind<B>,
 {
     fn bind_into(self, backend: &B, router: &mut LayerRouter) {
-        self.svc.bind_into(backend, router);
+        // Tail first, head last: `merge` prepends, and the router keeps
+        // the LAST registration per method id — so a merged mock, at the
+        // head, binds after the bundle it overrides and wins.
         self.rest.bind_into(backend, router);
+        self.svc.bind_into(backend, router);
     }
 }
 
@@ -329,6 +365,13 @@ where
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Empty;
 
+impl Empty {
+    /// Start a bundle from a bound service — see [`Cons::merge`].
+    pub fn merge<M: Into<Mounted>>(self, m: M) -> Cons<Mounted, Self> {
+        Cons::new(m.into(), self)
+    }
+}
+
 /// One service cell prepended to a tail layer. Built by
 /// [`Layer::merge`] when a service token is merged into a layer.
 pub struct Cons<S, R> {
@@ -337,8 +380,26 @@ pub struct Cons<S, R> {
 }
 
 impl<S, R> Cons<S, R> {
-    pub fn new(svc: S, rest: R) -> Self {
+    pub const fn new(svc: S, rest: R) -> Self {
         Self { svc, rest }
+    }
+
+    /// Merge a bound service (a mock, an override) into this bundle.
+    /// The merged service wins over anything in the bundle with the
+    /// same methods, on every wire. Inherent, so it needs no backend
+    /// type to be known yet — unlike the `Layer<B>` method it shadows.
+    pub fn merge<M: Into<Mounted>>(self, m: M) -> Cons<Mounted, Self> {
+        Cons::new(m.into(), self)
+    }
+
+    /// The service token at this cell.
+    pub const fn svc(&self) -> &S {
+        &self.svc
+    }
+
+    /// The remaining cells.
+    pub const fn rest(&self) -> &R {
+        &self.rest
     }
 }
 
@@ -360,7 +421,16 @@ impl<S, R> Cons<S, R> {
 ///     layers![transport::Service, project::Service, /* … */]
 /// }
 /// ```
-pub trait Layer<B>: Bind<B> + Descriptors + Sized {
+pub trait Layer<B>: Bind<B> + crate::http::BindHttp<B> + Descriptors + Sized {
+    /// Bind a backend and produce the HTTP router — the HTTP twin of
+    /// [`provide`](Self::provide): every service's routes, in one
+    /// `axum::Router` (or the inert facade router without `http`).
+    fn provide_http(&self, backend: &B) -> crate::http::Router {
+        let mut routes = crate::http::HttpRoutes::default();
+        crate::http::BindHttp::bind_http(self, backend, &mut routes);
+        routes.into_router()
+    }
+
     /// Merge a bound service into this layer. Mirrors Effect-ts's
     /// `Layer.merge` — pass anything convertible into a [`Mounted`]
     /// (a service's `layer(backend)` result, a `mock()` builder,
@@ -406,14 +476,15 @@ pub trait Layer<B>: Bind<B> + Descriptors + Sized {
     }
 }
 
-impl<B, T> Layer<B> for T where T: Bind<B> + Descriptors + Sized {}
+impl<B, T> Layer<B> for T where T: Bind<B> + crate::http::BindHttp<B> + Descriptors + Sized {}
 
 // ── Append<R> ─────────────────────────────────────────────────────────────
 
-/// Type-level concat. `<Cons<A, Cons<B, Empty>> as Append<R>>::Output
-/// = Cons<A, Cons<B, R>>`. Structural — no [`Layer`] bound, so the
-/// `layers!` macro can build cons chains without committing to a
-/// backend at the macro site.
+/// Type-level concat.
+///
+/// `<Cons<A, Cons<B, Empty>> as Append<R>>::Output = Cons<A, Cons<B, R>>`.
+/// Structural — no [`Layer`] bound, so the `layers!` macro can build
+/// cons chains without committing to a backend at the macro site.
 pub trait Append<R>: Sized {
     type Output;
     fn append(self, rhs: R) -> Self::Output;
@@ -440,7 +511,7 @@ where
 }
 
 impl<R> Append<R> for Mounted {
-    type Output = Cons<Mounted, R>;
+    type Output = Cons<Self, R>;
     fn append(self, rhs: R) -> Self::Output {
         Cons {
             svc: self,
@@ -513,10 +584,12 @@ macro_rules! layers {
 }
 
 /// Build a [`LayerRouter`] from a list of backends — the app-level
-/// mount registry. Each entry is a backend implementing [`Services`];
-/// its whole canonical bundle mounts in one line, so registering a new
-/// feature backend is one added expression, not a `.with(descriptor,
-/// serve)` pair per service:
+/// mount registry.
+///
+/// Each entry is a backend implementing [`Services`]; its whole
+/// canonical bundle mounts in one line, so registering a new feature
+/// backend is one added expression, not a `.with(descriptor, serve)`
+/// pair per service:
 ///
 /// ```ignore
 /// let router = architect::router![
@@ -605,6 +678,15 @@ pub trait Services: Sized {
     {
         Self::layers().provide(self)
     }
+
+    /// The HTTP twin of [`into_router`](Self::into_router): the bundle's
+    /// routes, bound to `self`.
+    fn into_http_router(self) -> crate::http::Router
+    where
+        Self: Clone + crate::MaybeSendSync + 'static,
+    {
+        Self::layers().provide_http(&self)
+    }
 }
 
 // ── LayerSink ─────────────────────────────────────────────────────────────
@@ -641,6 +723,7 @@ pub struct LayerRouter {
 }
 
 impl LayerRouter {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -652,6 +735,7 @@ impl LayerRouter {
     /// [`crate::local::LocalServer`] router can be hand-assembled in the
     /// browser from `!Send` service handlers.
     #[cfg(not(target_arch = "wasm32"))]
+    #[must_use]
     pub fn with<H>(mut self, descriptor: &'static ServiceDescriptor, handler: H) -> Self
     where
         H: Handler<DriverReplySink> + Send + Sync + 'static,
@@ -675,6 +759,7 @@ impl LayerRouter {
     /// already-provided-then-extended case, e.g. loading a plugin
     /// service after the main bundle is mounted. Last-merge wins on
     /// duplicate method IDs.
+    #[must_use]
     pub fn merge<M: Into<Mounted>>(mut self, m: M) -> Self {
         let (descriptor, handler) = m.into().into_parts();
         self.register(descriptor, handler);
@@ -687,14 +772,19 @@ impl LayerRouter {
     /// the routers together — one line per backend, see [`router!`].
     /// `other`'s method IDs win on collision, consistent with
     /// [`merge`](Self::merge)'s last-merge-wins.
-    pub fn merge_router(mut self, other: LayerRouter) -> Self {
+    #[must_use]
+    pub fn merge_router(mut self, other: Self) -> Self {
         let base = self.handlers.len();
         self.handlers.extend(other.handlers);
+        // `saturating_add`: rebasing indices can't realistically overflow
+        // (it would need `usize::MAX` handlers), but a router merge is not
+        // a place to leave an arithmetic panic.
         for (id, idx) in other.method_map {
-            self.method_map.insert(id, base + idx);
+            self.method_map.insert(id, base.saturating_add(idx));
         }
         for ((scope, id), idx) in other.scoped_map {
-            self.scoped_map.insert((scope, id), base + idx);
+            self.scoped_map
+                .insert((scope, id), base.saturating_add(idx));
         }
         self.method_names.extend(other.method_names);
         self
@@ -705,14 +795,17 @@ impl LayerRouter {
     /// ([`crate::scoped::ScopeMiddleware`]), so the same service trait can
     /// mount once per instance on one merged router without method-id
     /// collisions. `other`'s already-scoped entries keep their own scopes.
-    pub fn merge_router_scoped(mut self, scope: &str, other: LayerRouter) -> Self {
+    #[must_use]
+    pub fn merge_router_scoped(mut self, scope: &str, other: Self) -> Self {
         let base = self.handlers.len();
         self.handlers.extend(other.handlers);
         for (id, idx) in other.method_map {
-            self.scoped_map.insert((scope.to_string(), id), base + idx);
+            self.scoped_map
+                .insert((scope.to_string(), id), base.saturating_add(idx));
         }
         for ((inner, id), idx) in other.scoped_map {
-            self.scoped_map.insert((inner, id), base + idx);
+            self.scoped_map
+                .insert((inner, id), base.saturating_add(idx));
         }
         self.method_names.extend(other.method_names);
         self
@@ -743,8 +836,7 @@ impl LayerRouter {
         let (service, method) = self
             .method_names
             .get(&method_id)
-            .map(|d| (d.service_name, d.method_name))
-            .unwrap_or(("unknown", "unknown"));
+            .map_or(("unknown", "unknown"), |d| (d.service_name, d.method_name));
         tracing::info_span!(
             "rpc",
             otel.name = format!("{service}/{method}"),
@@ -766,10 +858,71 @@ impl LayerRouter {
         }
     }
 
+    /// Every `(service, method)` this router will dispatch.
+    ///
+    /// Built from the same descriptors [`register`](Self::register) walks,
+    /// so it cannot drift from what is actually mounted — which is the
+    /// point: a permit table, a schema stamp or a coverage report derived
+    /// from a *hand-maintained* list of services silently goes stale the
+    /// first time someone mounts one and forgets the other list.
+    ///
+    /// See [`PermissionsGate::coverage`](crate::permissions_gate::PermissionsGate::coverage).
+    #[must_use]
+    pub fn mounted(&self) -> BTreeMap<&'static str, BTreeSet<&'static str>> {
+        let mut out: BTreeMap<&'static str, BTreeSet<&'static str>> = BTreeMap::new();
+        for descriptor in self.method_names.values() {
+            out.entry(descriptor.service_name)
+                .or_default()
+                .insert(descriptor.method_name);
+        }
+        out
+    }
+
+    /// Services `B`'s canonical bundle declares but this router does
+    /// **not** mount.
+    ///
+    /// The other half of [`mounted`](Self::mounted). A backend can ship a
+    /// service, have it compile, have its tests pass, and never be
+    /// reachable over the wire because the router that serves the app
+    /// mounts a hand-assembled subset. Nothing says so today: the service
+    /// simply answers "unknown method" forever.
+    ///
+    /// Cross-references the two lists that already exist — the bundle's
+    /// [`Layer::descriptors`] and this router's own mounts — so neither
+    /// has to be maintained by hand and neither can go stale.
+    ///
+    /// ```ignore
+    /// let router = org.scheduling.clone().into_router();
+    /// assert!(router.unmounted_from::<VaultScheduler>().is_empty());
+    /// ```
+    #[must_use]
+    pub fn unmounted_from<B: Services>(&self) -> Vec<&'static str> {
+        self.unmounted(&B::layers())
+    }
+
+    /// [`unmounted_from`](Self::unmounted_from) for any bundle — a single
+    /// service token, a `layers![…]` composition, whatever you were about
+    /// to `.provide()`.
+    #[must_use]
+    pub fn unmounted<B, L: Layer<B>>(&self, bundle: &L) -> Vec<&'static str> {
+        let mounted = self.mounted();
+        let mut missing: Vec<&'static str> = bundle
+            .descriptors()
+            .into_iter()
+            .map(|d| d.service_name)
+            .filter(|name| !mounted.contains_key(name))
+            .collect();
+        missing.sort_unstable();
+        missing.dedup();
+        missing
+    }
+
+    #[must_use]
     pub fn len(&self) -> usize {
         self.handlers.len()
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.handlers.is_empty()
     }
@@ -783,6 +936,7 @@ impl LayerRouter {
     /// in-process [`crate::local::LocalServer`] serves a router in the
     /// browser — [`handler_acceptor`] has a wasm arm that drops the thread
     /// bounds (single-threaded wasm vox).
+    #[must_use]
     pub fn acceptor(&self) -> impl vox::LaneAcceptor {
         handler_acceptor(self.clone())
     }
@@ -790,12 +944,13 @@ impl LayerRouter {
 
 /// A lane acceptor that dispatches every incoming lane onto a clone of
 /// `handler` — any vox [`vox::Handler`], whether a [`LayerRouter`] or a wrapper
-/// around one (e.g. a snapshot-gating router). The single home for the
+/// around one (e.g. a snapshot-gating router).
+///
+/// The single home for the
 /// `lane_acceptor_fn(|_, conn| conn.handle_with(handler.clone()))` closure
 /// every transport consumer otherwise repeats; [`crate::axum_ws::serve_router`]
-/// and [`crate::iroh_link::serve_router`] wrap it.
-///
-/// On native the acceptor is moved onto a serving task, so it needs the
+/// and [`crate::iroh_link::serve_router`] wrap it. On native the acceptor is
+/// moved onto a serving task, so it needs the
 /// `Send + Sync` bounds that only hold off wasm; the wasm arm below drops
 /// them (single-threaded wasm vox, where `vox::lane_acceptor_fn`'s bounds
 /// are already `MaybeSend + MaybeSync` = empty). Both arms are otherwise
@@ -848,13 +1003,14 @@ impl LayerRouter {
 impl Handler<DriverReplySink> for LayerRouter {
     fn args_have_channels(&self, method_id: MethodId) -> bool {
         self.shape_handler(method_id)
-            .map(|idx| self.handlers[idx].args_have_channels(method_id))
-            .unwrap_or(false)
+            .and_then(|idx| self.handlers.get(idx))
+            .is_some_and(|h| h.args_have_channels(method_id))
     }
 
     fn response_wire_shape(&self, method_id: MethodId) -> Option<&'static facet::Shape> {
         self.shape_handler(method_id)
-            .and_then(|idx| self.handlers[idx].response_wire_shape(method_id))
+            .and_then(|idx| self.handlers.get(idx))
+            .and_then(|h| h.response_wire_shape(method_id))
     }
 
     async fn handle(
@@ -875,16 +1031,23 @@ impl Handler<DriverReplySink> for LayerRouter {
         let scoped = scope
             .and_then(|scope| self.scoped_map.get(&(scope.to_string(), method_id)))
             .copied();
-        if let Some(idx) = scoped.or_else(|| self.method_map.get(&method_id).copied()) {
+        // Resolve the index to the handler here: the maps are built
+        // alongside `handlers`, so a stale index is a bug — but reading
+        // it fallibly turns that bug into an `unknown method` reply
+        // instead of a panic inside the router's own dispatch.
+        let handler = scoped
+            .or_else(|| self.method_map.get(&method_id).copied())
+            .and_then(|idx| self.handlers.get(idx));
+        if let Some(handler) = handler {
             #[cfg(feature = "telemetry")]
             {
-                self.handlers[idx]
+                handler
                     .handle(call, reply, schemas)
                     .instrument(self.call_span(method_id, scope_owned.as_deref()))
                     .await;
             }
             #[cfg(not(feature = "telemetry"))]
-            self.handlers[idx].handle(call, reply, schemas).await;
+            handler.handle(call, reply, schemas).await;
         } else {
             use vox::ReplySink as _;
             reply
