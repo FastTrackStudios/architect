@@ -20,7 +20,10 @@
 //! new trait methods, no re-mount.
 
 use crate::email_change::AuthEmailChange;
-use crate::{AuthFlowError, AuthSessionBundle, AuthUser, SignInEmailPassword, SignUpEmailPassword};
+use crate::{
+    AuthFlowError, AuthSessionBundle, AuthUser, DeviceSignIn, SignInEmailPassword,
+    SignUpEmailPassword,
+};
 use uuid::Uuid;
 
 /// Flattened membership row for the org-members enumeration RPC.
@@ -108,6 +111,24 @@ pub trait AuthService {
     async fn sign_in_email_password(
         &self,
         input: SignInEmailPassword,
+    ) -> Result<AuthSessionBundle, AuthFlowError>;
+
+    /// Start signing in a device with no browser of its own (a CLI):
+    /// its person approves the code from any signed-in browser — a
+    /// phone — at `verification_uri_complete`, where `client_id` names
+    /// the device asking.
+    #[http(path = "device/code")]
+    async fn start_device_sign_in(&self, client_id: String) -> Result<DeviceSignIn, AuthFlowError>;
+
+    /// Poll a device sign-in: its session once approved. While it waits,
+    /// `VerificationRequired`; polled faster than asked,
+    /// `InvalidInput("slow_down")`; refused, `PermissionDenied`; expired
+    /// or unknown, `InvalidCredentials`.
+    #[http(path = "device/token")]
+    async fn poll_device_sign_in(
+        &self,
+        device_code: String,
+        user_agent: Option<String>,
     ) -> Result<AuthSessionBundle, AuthFlowError>;
 
     /// Validate a session token, returning the matching user + session.

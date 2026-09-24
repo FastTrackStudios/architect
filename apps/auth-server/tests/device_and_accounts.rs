@@ -251,6 +251,59 @@ async fn a_code_typed_with_dashes_and_lowercase_still_works() {
     assert_eq!(polled.user.email.as_deref(), Some("ada@example.com"));
 }
 
+/// A JSON POST, as a device with no browser makes it.
+async fn post_json(app: &axum::Router, uri: &str, body: &str) -> Sent {
+    send(
+        app,
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(body.to_owned()))
+            .unwrap(),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn a_device_signs_in_over_http_while_its_person_approves_from_a_phone() {
+    let (app, _) = app().await;
+    let token = signed_up(&app, "ada@example.com").await;
+
+    // The device (a CLI) asks for a code, with no session of its own.
+    let started = post_json(&app, "/auth/device/code", r#"{"client_id":"task-cli"}"#).await;
+    assert_eq!(started.status, StatusCode::OK, "{}", started.body);
+    let device: serde_json::Value = serde_json::from_str(&started.body).unwrap();
+    let device_code = device["device_code"].as_str().unwrap().to_owned();
+    let user_code = device["user_code"].as_str().unwrap().to_owned();
+    assert!(
+        device["verification_uri_complete"]
+            .as_str()
+            .unwrap()
+            .starts_with("/auth/device?user_code="),
+        "{device}"
+    );
+    let poll = format!(r#"{{"device_code":"{device_code}","user_agent":"task-cli"}}"#);
+
+    // Its person, signed in on a phone, approves the code.
+    let approved = post_form(
+        &app,
+        "/auth/device/approve",
+        Some(&token),
+        None,
+        &format!("user_code={user_code}"),
+    )
+    .await;
+    assert_eq!(approved.status, StatusCode::OK, "{:.400}", approved.body);
+
+    // And the device's next poll is a session for that person.
+    let polled = post_json(&app, "/auth/device/token", &poll).await;
+    assert_eq!(polled.status, StatusCode::OK, "{}", polled.body);
+    let bundle: serde_json::Value = serde_json::from_str(&polled.body).unwrap();
+    assert_eq!(bundle["user"]["email"], "ada@example.com");
+    assert!(bundle["token"].as_str().is_some_and(|t| !t.is_empty()));
+}
+
 #[tokio::test]
 async fn refusing_a_code_needs_no_session_at_all() {
     let (app, auth) = app().await;

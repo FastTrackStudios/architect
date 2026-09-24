@@ -107,6 +107,25 @@ pub struct SignInEmailPassword {
     pub user_agent: Option<String>,
 }
 
+/// A device with no browser of its own being signed in (RFC 8628 —
+/// a CLI, a TV): what it shows its person, and what it polls with.
+#[architect::wire]
+#[derive(Eq)]
+pub struct DeviceSignIn {
+    /// What the device polls with. A secret: never shown.
+    pub device_code: String,
+    /// What its person confirms from a signed-in browser — a phone.
+    pub user_code: String,
+    /// Where they confirm it, relative to the auth server
+    /// (`/auth/device`).
+    pub verification_uri: String,
+    /// The same with the code filled in: the link to open.
+    pub verification_uri_complete: String,
+    pub expires_in_seconds: i64,
+    /// How long to wait between polls.
+    pub interval_seconds: i64,
+}
+
 /// Wire shape of `ArchitectAuth::create_email_password_user` — the
 /// sign-up command, minus nothing: same fields, RPC-serializable.
 #[architect::wire]

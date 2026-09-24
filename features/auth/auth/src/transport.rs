@@ -890,6 +890,43 @@ pub mod vox {
             self.auth.sign_in_email_password(input).await
         }
 
+        async fn start_device_sign_in(
+            &self,
+            client_id: String,
+        ) -> Result<auth_proto::DeviceSignIn, AuthFlowError> {
+            let device = self
+                .auth
+                .create_device_authorization(crate::CreateDeviceAuthorization {
+                    client_id,
+                    scope: None,
+                    expires_in_seconds: None,
+                    interval_seconds: None,
+                })
+                .await?;
+            Ok(auth_proto::DeviceSignIn {
+                device_code: device.device_code,
+                user_code: device.user_code,
+                verification_uri: device.verification_uri,
+                verification_uri_complete: device.verification_uri_complete,
+                expires_in_seconds: device.expires_in_seconds,
+                interval_seconds: device.interval_seconds,
+            })
+        }
+
+        async fn poll_device_sign_in(
+            &self,
+            device_code: String,
+            user_agent: Option<String>,
+        ) -> Result<AuthSessionBundle, AuthFlowError> {
+            self.auth
+                .poll_device_token(crate::PollDeviceToken {
+                    device_code,
+                    ip_address: None,
+                    user_agent,
+                })
+                .await
+        }
+
         async fn current_session(&self, token: String) -> Result<AuthSessionBundle, AuthFlowError> {
             self.auth.current_session(CurrentSession { token }).await
         }
