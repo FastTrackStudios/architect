@@ -944,6 +944,13 @@ fn build_http_block(
                 #events_path
             ];
 
+            // The serving half needs the repo's futures to be `Send` (axum
+            // runs a handler's future on any worker), and the repo trait
+            // only promises that as a `#[vox::service]` — without the
+            // crate's `vox` feature it is a plain async trait. So the
+            // handlers are built with `vox`; the `*Args` above are not,
+            // because the HTTP client sends them from anywhere.
+            #[cfg(feature = "vox")]
             async fn __http_get<B>(
                 ::architect::http::State(backend): ::architect::http::State<::std::sync::Arc<B>>,
                 call: ::architect::http::Call<GetArgs>,
@@ -953,6 +960,7 @@ fn build_http_block(
             {
                 ::architect::http::respond(backend.get(call.args.id).await)
             }
+            #[cfg(feature = "vox")]
             async fn __http_list<B>(
                 ::architect::http::State(backend): ::architect::http::State<::std::sync::Arc<B>>,
                 call: ::architect::http::Call<ListArgs>,
@@ -963,6 +971,7 @@ fn build_http_block(
                 let ListArgs { page, sort, filter } = call.args;
                 ::architect::http::respond(backend.list(page, sort, filter).await)
             }
+            #[cfg(feature = "vox")]
             async fn __http_create<B>(
                 ::architect::http::State(backend): ::architect::http::State<::std::sync::Arc<B>>,
                 call: ::architect::http::Call<CreateArgs>,
@@ -972,6 +981,7 @@ fn build_http_block(
             {
                 ::architect::http::respond(backend.create(call.args.input).await)
             }
+            #[cfg(feature = "vox")]
             async fn __http_update<B>(
                 ::architect::http::State(backend): ::architect::http::State<::std::sync::Arc<B>>,
                 call: ::architect::http::Call<UpdateArgs>,
@@ -982,6 +992,7 @@ fn build_http_block(
                 let UpdateArgs { id, input } = call.args;
                 ::architect::http::respond(backend.update(id, input).await)
             }
+            #[cfg(feature = "vox")]
             async fn __http_delete<B>(
                 ::architect::http::State(backend): ::architect::http::State<::std::sync::Arc<B>>,
                 call: ::architect::http::Call<DeleteArgs>,
@@ -993,6 +1004,7 @@ fn build_http_block(
             }
 
             /// Bind the repo into a route table — see `router`.
+            #[cfg(feature = "vox")]
             pub fn mount<B>(backend: B, routes: &mut ::architect::http::HttpRoutes)
             where
                 #backend_bounds,
@@ -1006,6 +1018,7 @@ fn build_http_block(
             }
 
             /// The repo as `POST /<prefix>/{get,list,create,update,delete}`.
+            #[cfg(feature = "vox")]
             pub fn router<B>(backend: B) -> ::architect::http::Router
             where
                 #backend_bounds,
