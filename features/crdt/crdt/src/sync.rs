@@ -637,7 +637,7 @@ impl PresencePeer {
     /// otherwise vanish while it is still here. The driver does this on
     /// a timer.
     fn refresh(&self) {
-        let keys: Vec<String> = self.local_keys.lock().unwrap().iter().cloned().collect();
+        let keys: Vec<String> = architect::lock(&self.local_keys).iter().cloned().collect();
         for key in keys {
             if let Some(value) = self.store.get(&key) {
                 self.store.set(&key, value);
