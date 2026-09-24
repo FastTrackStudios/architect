@@ -214,7 +214,10 @@ async fn presence_keeps_a_still_peer_and_drops_a_gone_one() {
 
     // Alice goes.
     drivers[0].abort();
-    eventually("bob no longer sees alice", async || !bob.states().contains_key("a")).await;
+    eventually("bob no longer sees alice", async || {
+        !bob.states().contains_key("a")
+    })
+    .await;
     assert!(bob.states().contains_key("b"), "bob keeps himself");
 
     scope.close().await;

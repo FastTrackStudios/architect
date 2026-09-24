@@ -729,7 +729,9 @@ impl PresenceDriver {
         // once they outlive it, so a peer that left goes (subscribers see
         // `Timeout` events — a task, never a render path).
         let peer = self.peer.clone();
-        let period = std::time::Duration::from_millis(u64::try_from(self.timeout_ms / 3).unwrap_or(0).max(1_000));
+        let period = std::time::Duration::from_millis(
+            u64::try_from(self.timeout_ms / 3).unwrap_or(0).max(1_000),
+        );
         let housekeeping = async move {
             loop {
                 architect::platform::sleep(period).await;
