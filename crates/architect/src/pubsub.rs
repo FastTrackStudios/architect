@@ -122,7 +122,7 @@ impl<T> EventSink<T> {
     /// [`SinkClosed`]: the receiving end is gone (or its wire failed).
     pub async fn send(&self, event: T) -> Result<(), SinkClosed>
     where
-        T: facet::Facet<'static> + Send,
+        T: facet::Facet<'static> + Send + Sync,
     {
         match self {
             Self::Vox(tx) => tx.send(event).await.map_err(|_| SinkClosed),
