@@ -472,7 +472,7 @@ impl<T: ?Sized> MaybeSend for T {}
 #[cfg(feature = "vox")]
 pub mod pubsub;
 #[cfg(feature = "vox")]
-pub use pubsub::{EventSink, PendingAttach, PubSub};
+pub use pubsub::{EventSink, PendingAttach, PubSub, SinkClosed};
 
 // Real-time publisher bridge (`rt` feature): wait-free SPSC handoff from
 // an audio callback (or any real-time thread) to a normal thread that

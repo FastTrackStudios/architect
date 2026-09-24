@@ -79,6 +79,18 @@ pub enum EventSink<T> {
     Local(async_channel::Sender<T>),
 }
 
+/// An [`EventSink::send`] whose receiving end is gone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SinkClosed;
+
+impl std::fmt::Display for SinkClosed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the event sink's receiver is gone")
+    }
+}
+
+impl std::error::Error for SinkClosed {}
+
 impl<T> From<vox::Tx<T>> for EventSink<T> {
     fn from(tx: vox::Tx<T>) -> Self {
         Self::Vox(tx)
@@ -99,6 +111,23 @@ impl<T> EventSink<T> {
     pub fn local(capacity: usize) -> (Self, async_channel::Receiver<T>) {
         let (tx, rx) = async_channel::bounded(capacity.max(1));
         (Self::Local(tx), rx)
+    }
+
+    /// Send one event, waiting while the receiver is behind — the flow
+    /// control a producer that streams on its own (a byte stream, a
+    /// filtered relay) wants, where the hub's own mailbox would drop.
+    ///
+    /// # Errors
+    ///
+    /// [`SinkClosed`]: the receiving end is gone (or its wire failed).
+    pub async fn send(&self, event: T) -> Result<(), SinkClosed>
+    where
+        T: facet::Facet<'static> + Send,
+    {
+        match self {
+            Self::Vox(tx) => tx.send(event).await.map_err(|_| SinkClosed),
+            Self::Local(tx) => tx.send(event).await.map_err(|_| SinkClosed),
+        }
     }
 
     fn try_send(&self, event: T) -> Result<(), vox::TrySendError<T>>
