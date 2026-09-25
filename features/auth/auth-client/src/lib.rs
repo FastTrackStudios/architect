@@ -45,6 +45,7 @@
 //! and wasm-clean as the note above promises — an app supplies entropy
 //! and sends the requests itself.
 
+pub mod device;
 pub mod oidc;
 
 use std::sync::{Arc, Mutex};
