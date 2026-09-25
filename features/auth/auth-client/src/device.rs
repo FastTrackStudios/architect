@@ -1,8 +1,9 @@
-//! Signing a device in from another one (RFC 8628, the device authorization
-//! grant): a device with no browser — a CLI, an app on a phone that should
-//! not type a password — asks the auth server for a code, shows it, and
-//! polls until its person approves the code from a browser where they are
-//! signed in.
+//! Signing a device in from another one: RFC 8628, the device authorization
+//! grant.
+//!
+//! A device with no browser — a CLI, an app on a phone that should not type
+//! a password — asks the auth server for a code, shows it, and polls until
+//! its person approves the code from a browser where they are signed in.
 //!
 //! This is the protocol, not a client: the bodies to post and what the
 //! answers mean. Like [`crate::oidc`], it has no HTTP client of its own, so
