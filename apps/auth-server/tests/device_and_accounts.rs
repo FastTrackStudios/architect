@@ -211,8 +211,8 @@ async fn a_code_typed_with_dashes_and_lowercase_still_works() {
     // As read off a screen across the room.
     let typed = format!(
         "{}-{}",
-        &device.user_code[..device.user_code.len() / 2].to_lowercase(),
-        &device.user_code[device.user_code.len() / 2..].to_lowercase()
+        device.user_code[..device.user_code.len() / 2].to_lowercase(),
+        device.user_code[device.user_code.len() / 2..].to_lowercase()
     );
     let looked_up = post_form(
         &app,
