@@ -166,7 +166,13 @@ impl<T: StoreEntity, E: Clone> StoreData<T, E> {
         match (snapshot, server_value) {
             (Snapshot::Inserted(temp_id), Some(v)) => {
                 let real = Id::Real(v.key());
-                if let Some(slot) = self
+                // The server's live event for this create may have
+                // landed first ([`Self::put`]), so the real row can
+                // already be in `order`. Then the draft's slot just
+                // goes: rewriting it would list the row twice.
+                if self.order.contains(&real) {
+                    self.order.retain(|x| *x != temp_id);
+                } else if let Some(slot) = self
                     .order
                     .iter()
                     .position(|x| *x == temp_id)
@@ -234,9 +240,28 @@ impl<T: StoreEntity, E: Clone> StoreData<T, E> {
     /// page) into the cache without disturbing the rest.
     fn put(&mut self, value: T) {
         let id = Id::Real(value.key());
-        if self.items.insert(id.clone(), value).is_none() {
-            self.order.push(id);
+        if self.items.contains_key(&id) {
+            self.items.insert(id, value);
+            return;
         }
+        // A pending optimistic draft of this same row (its key chosen
+        // client-side) is the server's row arriving before the create's
+        // reply: take the draft's place instead of appearing beside it.
+        // The draft's rollback ticket stays; `reconcile` then finds the
+        // real row in place, and `rollback` removes only the draft id.
+        let key = value.key();
+        let draft = self
+            .order
+            .iter()
+            .position(|x| x.is_temp() && self.items.get(x).is_some_and(|v| v.key() == key));
+        match draft.and_then(|pos| self.order.get_mut(pos)) {
+            Some(slot) => {
+                let temp = std::mem::replace(slot, id.clone());
+                self.items.remove(&temp);
+            }
+            None => self.order.push(id.clone()),
+        }
+        self.items.insert(id, value);
     }
 
     /// Remove an authoritative row by its real key (no rollback tracking)
@@ -652,6 +677,63 @@ mod tests {
         assert_eq!(d.get(&temp), None);
         assert_eq!(d.get(&Id::Real(99)).unwrap().id, 99);
         assert_eq!(d.list().len(), 1);
+    }
+
+    /// The create's live event lands before its reply, with the draft
+    /// keyed client-side: the server row takes the draft's place, and
+    /// the reply then changes nothing. One row throughout.
+    #[test]
+    fn an_event_before_the_reply_replaces_a_same_key_draft() {
+        let mut d = data();
+        d.put(Row {
+            id: 1,
+            name: "other".into(),
+        });
+        let (ticket, temp) = d.insert_optimistic(Row {
+            id: 7,
+            name: "draft".into(),
+        });
+        d.put(Row {
+            id: 7,
+            name: "server".into(),
+        });
+        assert_eq!(d.get(&temp), None);
+        assert_eq!(d.list().iter().map(|r| r.id).collect::<Vec<_>>(), [1, 7]);
+
+        d.reconcile(
+            ticket,
+            Some(Row {
+                id: 7,
+                name: "server".into(),
+            }),
+        );
+        assert_eq!(d.list().iter().map(|r| r.id).collect::<Vec<_>>(), [1, 7]);
+        assert_eq!(d.entries().len(), 2);
+    }
+
+    /// The event lands first for a draft whose key the server assigns
+    /// (placeholder `0`): `put` cannot match it and appends, so the
+    /// reply must drop the draft rather than list the row twice.
+    #[test]
+    fn a_reply_after_the_event_does_not_list_the_row_twice() {
+        let mut d = data();
+        let (ticket, _temp) = d.insert_optimistic(Row {
+            id: 0,
+            name: "draft".into(),
+        });
+        d.put(Row {
+            id: 99,
+            name: "draft".into(),
+        });
+        d.reconcile(
+            ticket,
+            Some(Row {
+                id: 99,
+                name: "draft".into(),
+            }),
+        );
+        assert_eq!(d.list().iter().map(|r| r.id).collect::<Vec<_>>(), [99]);
+        assert_eq!(d.order.len(), 1);
     }
 
     #[test]
