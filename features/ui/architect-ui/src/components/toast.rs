@@ -49,9 +49,13 @@ pub fn Toast(props: PrimitiveToastProps) -> Element {
             on_close: props.on_close,
             permanent: props.permanent,
             duration: props.duration,
+            // The toast's action button ("Undo", "Retry") — the
+            // primitive's default layout renders it.
+            action: props.action,
             class: crate::cn::merge_slice(&[
                 "pointer-events-auto relative grid w-full min-w-80 max-w-sm gap-1 rounded-lg border border-border bg-popover p-4 pr-10 text-sm text-popover-foreground shadow-md outline-none",
                 "[&_.toast-content]:grid [&_.toast-content]:gap-1 [&_.toast-title]:font-medium [&_.toast-description]:text-muted-foreground [&_.toast-close]:absolute [&_.toast-close]:right-3 [&_.toast-close]:top-3 [&_.toast-close]:rounded-md [&_.toast-close]:opacity-70 [&_.toast-close]:transition-opacity [&_.toast-close:hover]:opacity-100 [&_.toast-close:focus-visible]:outline-none [&_.toast-close:focus-visible]:ring-2 [&_.toast-close:focus-visible]:ring-ring",
+                "[&_[data-toast-action]]:justify-self-start [&_[data-toast-action]]:rounded-md [&_[data-toast-action]]:px-2 [&_[data-toast-action]]:py-1 [&_[data-toast-action]]:text-sm [&_[data-toast-action]]:font-semibold [&_[data-toast-action]]:text-primary [&_[data-toast-action]:hover]:bg-primary/10",
                 "data-[type=success]:border-l-green-500 data-[type=error]:border-l-destructive data-[type=warning]:border-l-yellow-500",
                 variant_class,
             ]),
