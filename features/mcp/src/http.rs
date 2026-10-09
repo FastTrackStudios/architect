@@ -41,6 +41,20 @@ pub fn router(server: Server, token: Option<String>) -> Router {
     )
 }
 
+/// Serve `server` on `listener` until the task is dropped: what an app
+/// spawns on its runtime to be driven live.
+///
+/// # Errors
+///
+/// The listener failed.
+pub async fn serve(
+    listener: tokio::net::TcpListener,
+    server: Server,
+    token: Option<String>,
+) -> std::io::Result<()> {
+    axum::serve(listener, router(server, token)).await
+}
+
 async fn message(State(shared): State<Arc<Shared>>, headers: HeaderMap, body: Bytes) -> Response {
     if let Some(origin) = headers.get(header::ORIGIN).and_then(|o| o.to_str().ok())
         && !is_local(origin)
