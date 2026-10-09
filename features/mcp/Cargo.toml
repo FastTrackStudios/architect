@@ -1,0 +1,29 @@
+[package]
+name = "architect-mcp"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+# An app's Action List (`architect::action::ActionList`) as a Model
+# Context Protocol server: a model lists, describes, runs and batches
+# every action the app has, and watches what happens — the same actions
+# its keys and menus run. Transport-agnostic at the core
+# (`Server::handle`), with a stdio loop and, behind `http`, an axum route
+# for MCP's Streamable HTTP transport.
+
+[features]
+default = []
+# `POST /mcp` on an axum router, bearer-token guarded: the transport a
+# running app serves on localhost for a model to drive it live.
+http = ["dep:axum", "dep:tokio"]
+
+[dependencies]
+architect = { path = "../../crates/architect", features = ["action-list"] }
+serde_json.workspace = true
+axum = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+
+[dev-dependencies]
+facet.workspace = true
+tokio.workspace = true
