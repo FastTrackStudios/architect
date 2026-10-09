@@ -185,6 +185,12 @@ server = ["vox", "server-seaorm", "server-axum", "dispatch-tokio", "http"]
 # reachable by a plain `fetch`.
 http = ["dep:axum", "dep:facet-json", "dep:async-channel"]
 
+# The Action List (`architect::action::ActionList`): the one registry
+# every key, menu, CLI and MCP server runs an app's commands through,
+# typed by facet and described as JSON Schema (`architect::schema`).
+# Pulls facet-json.
+action-list = ["dep:facet-json"]
+
 # The typed HTTP client the rpc derive emits per service
 # (`<Trait>HttpClient`), over `reqwest` — native and wasm (`fetch`).
 # Implied by `client`.
