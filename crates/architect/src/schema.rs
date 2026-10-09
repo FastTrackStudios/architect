@@ -240,10 +240,7 @@ fn object(out: &mut String, first: &mut bool, fields: &'static [facet::Field], d
     out.push('{');
     let mut required: Vec<&str> = Vec::new();
     let mut i: usize = 0;
-    for field in fields {
-        if field.is_flattened() {
-            continue;
-        }
+    for field in flattened(fields) {
         let name = field.effective_name();
         if i > 0 {
             out.push(',');
@@ -278,6 +275,23 @@ fn object(out: &mut String, first: &mut bool, fields: &'static [facet::Field], d
         }
         out.push(']');
     }
+}
+
+/// `fields` as they are written: a flattened struct's own fields in its
+/// place, as if they were these. A flattened field of any other shape has
+/// none to give, and is left out.
+fn flattened(fields: &'static [facet::Field]) -> Vec<&'static facet::Field> {
+    let mut out = Vec::new();
+    for field in fields {
+        if !field.is_flattened() {
+            out.push(field);
+            continue;
+        }
+        if let Type::User(UserType::Struct(st)) = field.shape().ty {
+            out.extend(flattened(st.fields));
+        }
+    }
+    out
 }
 
 fn key(out: &mut String, first: &mut bool, name: &str) {
@@ -348,6 +362,34 @@ mod tests {
     enum Pick {
         All,
         Strongest { count: u32 },
+    }
+
+    /// Settings a call may carry.
+    #[derive(Facet, Default)]
+    struct Tuning {
+        /// How far under, dB.
+        under_db: Option<f64>,
+    }
+
+    /// A call with its settings written in among its own fields.
+    #[derive(Facet)]
+    struct Tuned {
+        #[facet(flatten)]
+        tuning: Tuning,
+        from: f64,
+    }
+
+    /// A flattened struct's fields are the call's own, documented, and
+    /// the struct itself is no field.
+    #[test]
+    fn a_flattened_struct_is_its_fields() {
+        let schema = json_schema(Tuned::SHAPE);
+        assert!(
+            schema.contains("\"under_db\":{\"description\":\"How far under, dB.\""),
+            "{schema}"
+        );
+        assert!(!schema.contains("\"tuning\""), "{schema}");
+        assert!(schema.contains("\"required\":[\"from\"]"), "{schema}");
     }
 
     /// A struct is an object of its fields, the optional one not
