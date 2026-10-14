@@ -245,7 +245,14 @@ opentelemetry-otlp = { version = "0.30", default-features = false, features = [
   # dedicated OS threads, which have no Tokio reactor — the async client
   # panics them with "there is no reactor running" on first flush.
   "reqwest-blocking-client",
-  "reqwest-rustls",
+  # Bundled Mozilla roots, not the OS's. `reqwest-rustls` turns on
+  # reqwest's `rustls-tls-native-roots`, and features unify: EVERY
+  # reqwest client the application builds then loads the platform's
+  # trust store on construction — on macOS a `trustd` round trip
+  # (`SecTrustSettingsCopyCertificates`) that takes seconds on a busy
+  # machine, paid per client, on the boot path of anything that makes
+  # an HTTP client per tenant. An OTLP exporter needs public roots only.
+  "reqwest-rustls-webpki-roots",
   "trace",
   "logs",
   "metrics",
