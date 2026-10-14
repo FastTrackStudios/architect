@@ -16,12 +16,42 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 # (https://github.com/tim-smart/effect-atom) WITHOUT the `Effect<A,E,R>`
 # monad — expressed as plain Dioxus `Signal`s.
 #
-# Entity-agnostic and wasm-safe: the only dependency is Dioxus core
-# (`lib` feature). It knows nothing about vox, tokio, or any concrete
+# Entity-agnostic and wasm-safe: the only default dependency is Dioxus
+# core (`lib` feature). It knows nothing about vox, tokio, or any concrete
 # entity — consumers implement `StoreEntity` for their own types.
+
+[features]
+default = []
+# Device persistence for stores: the `LocalRows` seam a store's
+# last-seen rows live behind, `use_persisted_store_list` (loads the
+# device copy before the first fetch, marks it stale, writes changes
+# back), and the durable call queue + `Mutation::run_queued` for service
+# calls made offline. Backends: memory (everywhere) and `localStorage`
+# (wasm). Rows are JSON, so a persisted entity must be serde.
+persist = ["dep:serde", "dep:serde_json", "dep:async-trait", "dep:web-sys"]
+# The native backend: `TursoRows`, generic tables in a local Turso
+# database (local engine only, never its sync). Compiles to nothing on
+# wasm, where `persist`'s `localStorage` backend is the one.
+turso = ["persist", "dep:turso", "dep:tokio"]
 
 [dependencies]
 dioxus = { workspace = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+async-trait = { workspace = true, optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+turso = { workspace = true, optional = true }
+# The one connection's lock (async: held across the statements' awaits).
+tokio = { version = "1", default-features = false, features = ["sync"], optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { version = "0.3", optional = true, features = ["Window", "Storage"] }
+
+[dev-dependencies]
+architect-atom = { path = ".", features = ["turso"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tempfile = "3"
 
 [lib]
 doctest = false

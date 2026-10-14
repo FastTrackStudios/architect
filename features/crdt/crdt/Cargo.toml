@@ -42,6 +42,13 @@ dioxus = ["vox", "architect/atom", "architect/platform"]
 # IndexedDB-backed `Persistence` for the browser (wasm only): the
 # replica itself survives restarts offline.
 indexeddb = ["dep:idb", "dep:wasm-bindgen", "dep:js-sys"]
+# Turso-backed `Persistence` for native clients (desktop, iOS) and
+# servers: snapshots + the update log as rows in a local Turso database
+# the caller opens — so one device database can hold a doc store beside
+# whatever else the app keeps there (architect-atom's `turso` rows).
+# Turso's LOCAL engine only; its sync is never used. Native only — on
+# wasm the feature compiles to nothing and `indexeddb` is the backend.
+turso = ["dep:turso"]
 
 [dependencies]
 architect.workspace = true
@@ -69,6 +76,8 @@ tokio = { version = "1", default-features = false, features = ["sync", "macros"]
 # `rt` for the `tokio::spawn` inside `CrdtDoc::open`'s persistence-writer
 # task; `time` for the `DocRegistry` idle-eviction sweeper's timer.
 tokio = { version = "1", default-features = false, features = ["rt", "time"] }
+# The `turso` feature's engine (local only, no sync).
+turso = { workspace = true, optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # `CrdtDoc::open`'s persistence-writer task on the browser's
@@ -87,7 +96,7 @@ doctest = false
 [dev-dependencies]
 # Self-dep so the test targets always see the sync module (cargo enables
 # the feature for tests without making it a default).
-crdt = { path = ".", features = ["vox"] }
+crdt = { path = ".", features = ["vox", "turso"] }
 # The sync convergence test serves DocSyncHost over the in-process vox
 # transport and runs replicas under tokio.
 architect = { workspace = true, features = ["vox", "local"] }
