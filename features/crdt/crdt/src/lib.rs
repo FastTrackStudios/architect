@@ -64,6 +64,14 @@ pub mod fs;
 #[cfg(not(target_arch = "wasm32"))]
 pub use fs::FilePersistence;
 
+// Turso persistence — a device (or server) database holding snapshots +
+// update logs as rows, beside the app's other local tables. Native only,
+// behind a feature (pulls the Turso engine).
+#[cfg(all(not(target_arch = "wasm32"), feature = "turso"))]
+pub mod turso;
+#[cfg(all(not(target_arch = "wasm32"), feature = "turso"))]
+pub use self::turso::TursoPersistence;
+
 // IndexedDB persistence — the browser's way. Wasm only, behind a
 // feature (pulls the `idb` bindings).
 #[cfg(all(target_arch = "wasm32", feature = "indexeddb"))]

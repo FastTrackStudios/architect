@@ -70,6 +70,11 @@ pub struct StoreData<T: StoreEntity, E = String> {
     /// legitimate choice, but it should be a choice — see
     /// [`Store::is_live`].
     live: bool,
+    /// The rows are the device's last copy, not a fresh answer: they came
+    /// from local storage (or a fetch failed after they did). Cleared by
+    /// the next successful [`hydrate`](Store::hydrate). See
+    /// [`Store::is_stale`].
+    stale: bool,
 }
 
 impl<T: StoreEntity, E> Default for StoreData<T, E> {
@@ -82,6 +87,7 @@ impl<T: StoreEntity, E> Default for StoreData<T, E> {
             seq: 0,
             reloader: None,
             live: false,
+            stale: false,
         }
     }
 }
@@ -116,6 +122,32 @@ impl<T: StoreEntity, E: Clone> StoreData<T, E> {
             self.order.push(id);
         }
         self.status = AtomResult::Success(());
+        self.stale = false;
+    }
+
+    /// [`hydrate`](Self::hydrate) from the device's last copy: the same
+    /// replace, but the rows are marked stale.
+    fn hydrate_stale(&mut self, cached: impl IntoIterator<Item = T>) {
+        self.hydrate(cached);
+        self.stale = true;
+    }
+
+    /// Settle a mutation whose server call could not be made (the server
+    /// was unreachable and the call was queued): drop its rollback
+    /// snapshot and **keep** the optimistic state. Returns the temp id of
+    /// an optimistic insert, which stays in the store until the queued
+    /// call lands and the caller removes it ([`remove_id`](Self::remove_id)).
+    fn settle_offline(&mut self, ticket: MutationId) -> Option<Id<T::Key>> {
+        match self.rollback.remove(&ticket)? {
+            Snapshot::Inserted(id) => Some(id),
+            Snapshot::Updated(..) | Snapshot::Removed { .. } => None,
+        }
+    }
+
+    /// Remove the row at `id`, real or temp, without rollback tracking.
+    fn remove_id(&mut self, id: &Id<T::Key>) {
+        self.items.remove(id);
+        self.order.retain(|x| x != id);
     }
 
     /// Optimistically append a row with a forged temp id; returns the
@@ -367,6 +399,65 @@ impl<T: StoreEntity, E: Clone + 'static> Store<T, E> {
     #[must_use]
     pub fn is_live(&self) -> bool {
         self.inner.read().live
+    }
+
+    /// Are the rows the device's last copy rather than a fresh answer?
+    ///
+    /// True after [`hydrate_stale`](Self::hydrate_stale) (rows read from
+    /// local storage at boot) and after [`mark_stale`](Self::mark_stale)
+    /// (a fetch failed while those rows were showing); false again after
+    /// the next successful [`hydrate`](Self::hydrate). A page shows a
+    /// quiet "offline" mark for it — never an empty list or an error.
+    #[must_use]
+    pub fn is_stale(&self) -> bool {
+        self.inner.read().stale
+    }
+
+    /// [`Self::is_stale`] without subscribing the caller — for effects
+    /// that must not re-run on every store change.
+    #[must_use]
+    pub fn peek_is_stale(&self) -> bool {
+        self.inner.peek().stale
+    }
+
+    /// [`Self::is_empty`] without subscribing the caller.
+    #[must_use]
+    pub fn peek_is_empty(&self) -> bool {
+        self.inner.peek().order.is_empty()
+    }
+
+    /// Replace the rows from the device's last copy, marked stale. The
+    /// phase is `Success`: there is something to show.
+    pub fn hydrate_stale(&self, cached: impl IntoIterator<Item = T>) {
+        let mut inner = self.inner;
+        inner.write().hydrate_stale(cached);
+    }
+
+    /// Keep the rows and the `Success` phase, but say they are stale — a
+    /// fetch failed while the device's copy was showing.
+    pub fn mark_stale(&self) {
+        let mut inner = self.inner;
+        let mut data = inner.write();
+        data.stale = true;
+        if !data.status.is_success() {
+            data.status = AtomResult::Success(());
+        }
+    }
+
+    /// Settle a mutation whose call was queued instead of made: drop the
+    /// rollback snapshot, keep the optimistic state. Returns an
+    /// optimistic insert's temp id (see [`Self::remove_id`]).
+    #[must_use = "an insert's placeholder id is what removes it once the queued call lands"]
+    pub fn settle_offline(&self, ticket: MutationId) -> Option<Id<T::Key>> {
+        let mut inner = self.inner;
+        inner.write().settle_offline(ticket)
+    }
+
+    /// Remove the row at `id` (real or temp) without rollback tracking —
+    /// a queued insert's placeholder once the server's row has landed.
+    pub fn remove_id(&self, id: &Id<T::Key>) {
+        let mut inner = self.inner;
+        inner.write().remove_id(id);
     }
 
     /// Re-run the backing fetch — a manual retry/refresh. Drives the
@@ -806,6 +897,49 @@ mod tests {
             "optimistic row must survive a refetch"
         );
         assert_eq!(d.list().len(), 2);
+    }
+
+    #[test]
+    fn a_cached_copy_is_stale_until_a_fresh_hydrate() {
+        let mut d = data();
+        d.hydrate_stale([Row {
+            id: 1,
+            name: "cached".into(),
+        }]);
+        assert!(d.stale);
+        assert!(
+            d.status.is_success(),
+            "a stale list still has something to show"
+        );
+        d.hydrate([Row {
+            id: 1,
+            name: "fresh".into(),
+        }]);
+        assert!(!d.stale);
+        assert_eq!(d.get_real_name(1), "fresh");
+    }
+
+    #[test]
+    fn a_queued_mutation_keeps_its_optimistic_state() {
+        let mut d = data();
+        d.hydrate([Row {
+            id: 1,
+            name: "before".into(),
+        }]);
+        let ticket = d.update_optimistic(Id::Real(1), |r| r.name = "offline edit".into());
+        assert_eq!(d.settle_offline(ticket), None);
+        // The snapshot is gone: a late rollback cannot undo it.
+        d.rollback(ticket);
+        assert_eq!(d.get_real_name(1), "offline edit");
+
+        let (ticket, temp) = d.insert_optimistic(Row {
+            id: 0,
+            name: "started offline".into(),
+        });
+        assert_eq!(d.settle_offline(ticket), Some(temp));
+        assert!(d.get(&temp).is_some(), "the placeholder stays visible");
+        d.remove_id(&temp);
+        assert!(d.get(&temp).is_none());
     }
 
     // test-only helper

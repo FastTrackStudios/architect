@@ -145,6 +145,68 @@ impl<E: Clone + Display + 'static> Mutation<E> {
             }
         });
     }
+
+    /// [`Self::run`], except that a call the server could not be reached
+    /// for is **queued** rather than rolled back: the optimistic state
+    /// stays, `queued` goes into the app's durable
+    /// [`CallQueue`](crate::CallQueue) (replayed in order on reconnect),
+    /// and the store reloads once it lands. A refusal still rolls back and
+    /// notifies, exactly as `run` does. [`classify`](crate::classify)
+    /// decides which an error is, from its `Display`.
+    ///
+    /// Without a provided call queue this *is* `run`.
+    #[cfg(feature = "persist")]
+    pub fn run_queued<F, Fut, T>(
+        self,
+        store: Store<T, E>,
+        patch: impl FnOnce(&Store<T, E>) -> MutationId,
+        call: F,
+        queued: crate::QueuedCall,
+    ) where
+        T: StoreEntity,
+        F: FnOnce() -> Fut + 'static,
+        Fut: Future<Output = Result<Option<T>, E>> + 'static,
+    {
+        let Some(queue) = crate::try_use_call_queue() else {
+            self.run(store, patch, call);
+            return;
+        };
+        let pending = self.pending;
+        let error = self.error;
+        let notify = self.notify;
+        let ticket = patch(&store);
+        quiet_set(pending, true);
+        quiet_set(error, None);
+        spawn_forever(async move {
+            match call().await {
+                Ok(value) => store.reconcile(ticket, value),
+                Err(e) if crate::classify(&e.to_string()).is_unreachable() => {
+                    // Keep what the person did; the queue carries it.
+                    let placeholder = store.settle_offline(ticket);
+                    queue.enqueue(
+                        queued,
+                        Some(Box::new(move |_settled: &crate::Settled| {
+                            // Landed or lost, the server's rows are the
+                            // answer now: drop a placeholder insert and
+                            // refetch.
+                            if let Some(id) = &placeholder {
+                                store.remove_id(id);
+                            }
+                            store.reload();
+                        })),
+                    );
+                }
+                Err(e) => {
+                    store.rollback(ticket);
+                    if let Some(notify) = notify {
+                        notify.error(e.to_string());
+                    }
+                    quiet_set(error, Some(e));
+                }
+            }
+            quiet_set(pending, false);
+        });
+    }
 }
 
 /// Write a signal only if its backing scope is still alive. After the

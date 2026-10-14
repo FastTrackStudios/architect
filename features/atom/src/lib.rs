@@ -55,6 +55,30 @@ mod resource;
 mod result;
 mod store;
 
+// Device persistence: local rows behind stores, and the durable call
+// queue for service calls made offline.
+#[cfg(feature = "persist")]
+mod persist;
+#[cfg(all(feature = "turso", not(target_arch = "wasm32")))]
+mod persist_turso;
+#[cfg(feature = "persist")]
+mod queue;
+
+#[cfg(feature = "persist")]
+pub use persist::{
+    Kv, KvRows, LocalError, LocalRow, LocalRows, LocalRowsCtx, MaybeSendSync, MemoryKv, MemoryRows,
+    provide_local_rows, try_use_local_rows, use_persisted_store_list,
+};
+#[cfg(all(feature = "persist", target_arch = "wasm32"))]
+pub use persist::{LocalStorageKv, LocalStorageRows};
+#[cfg(all(feature = "turso", not(target_arch = "wasm32")))]
+pub use persist_turso::TursoRows;
+#[cfg(feature = "persist")]
+pub use queue::{
+    CallQueue, CallQueueHandle, CallTransport, Failure, QueuedCall, ReplayReport, Settled,
+    classify, provide_call_queue, try_use_call_queue,
+};
+
 pub use actions::{
     ActionInvoker, ActionLike, group_actions, use_action_invoker, use_actions_grouped,
 };

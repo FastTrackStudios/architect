@@ -32,6 +32,14 @@ vox = ["dep:vox", "dep:tracing", "dep:async-channel"]
 # UI crates may also depend on `architect-atom` directly. See
 # `docs/content/architecture/optimistic.md`.
 atom = ["dep:architect-atom"]
+# Device persistence for atom stores (`architect::LocalRows`,
+# `use_persisted_store_list`, the durable `CallQueue` +
+# `Mutation::run_queued`), with memory and browser `localStorage`
+# backends. See architect-atom's `persist` feature.
+atom-persist = ["atom", "architect-atom/persist"]
+# …plus `architect::TursoRows`, the native backend over a local Turso
+# database (local engine only). Compiles to nothing on wasm.
+atom-turso = ["atom-persist", "architect-atom/turso"]
 
 # Typed, validated form state for Dioxus, re-exported as `architect::form`
 # (effect-form analog). Pulls Dioxus via architect-form + architect-atom;
