@@ -297,7 +297,14 @@ impl ActionList {
         } else {
             args
         };
-        let out = handler(args);
+        // One span per action run: the action's wide event. What it does
+        // marks its stages on it (`architect_telemetry::timing`), so where
+        // an action's time went is one record, whoever ran it — a key, a
+        // menu, a model.
+        let span = tracing::info_span!("action", action.id = id, action.ok = tracing::field::Empty);
+        let out = span.in_scope(|| handler(args));
+        span.record("action.ok", out.is_ok());
+        drop(span);
         self.publish(EventKind::Ran {
             id: id.to_owned(),
             ok: out.is_ok(),
