@@ -40,6 +40,12 @@ pub const TARGET: &str = "architect::timing";
 /// `filter.add_directive(timing::DIRECTIVE.parse()?)`.
 pub const DIRECTIVE: &str = "architect::timing=trace";
 
+/// Every directive the recorder needs through a global `EnvFilter`,
+/// whatever the log level: the stage marks, and the Action List's span —
+/// without it, under `RUST_LOG=warn`, no action is timed and the marks
+/// made in one have no span to land on.
+pub const DIRECTIVES: [&str; 2] = [DIRECTIVE, "architect::action_list=info"];
+
 /// A per-layer filter that keeps stage marks out of a layer that would
 /// print them (a console log, a log ring): what they say is the
 /// [`Recorder`]'s to keep, once per span, not a line per mark.
