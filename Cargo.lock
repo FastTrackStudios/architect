@@ -1095,6 +1095,7 @@ dependencies = [
  "sea-orm",
  "sea-orm-migration",
  "tokio",
+ "uuid",
  "vox",
 ]
 
@@ -5370,7 +5371,6 @@ dependencies = [
  "hyper",
  "hyper-util",
  "rustls",
- "rustls-native-certs",
  "tokio",
  "tokio-rustls",
  "tower-service",
@@ -9695,7 +9695,6 @@ dependencies = [
  "pin-project-lite",
  "quinn",
  "rustls",
- "rustls-native-certs",
  "rustls-pki-types",
  "serde",
  "serde_json",

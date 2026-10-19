@@ -7,6 +7,7 @@ pub mod account;
 pub mod agent_link;
 pub mod api_key;
 pub mod audit_event;
+pub mod device;
 pub mod email_change;
 pub mod invitation;
 pub mod invite_link;
@@ -160,6 +161,13 @@ pub use service::OrgMember;
 pub use service::prelude::*;
 #[cfg(feature = "vox")]
 pub use service::{AuthServiceDispatcher, auth_service_service_descriptor};
+
+// The device address book — a third trait, same shape.
+pub use device::prelude::*;
+pub use device::{
+    AccountOrg, AuthAccountOrg, AuthDevice, AuthDeviceCreate, AuthDeviceRepo, DeviceDirectory,
+    DeviceRegistration, PeerDevice,
+};
 
 // The organization surface — same shape, second trait.
 pub use organizations::prelude::*;

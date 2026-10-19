@@ -2500,6 +2500,8 @@ pub mod email_password {
             organization_ids_by_slug: HashMap<String, Uuid>,
             members: HashMap<(Uuid, Uuid), AuthMember>,
             agent_links: HashMap<Uuid, auth_proto::AuthAgentLink>,
+            devices: HashMap<Uuid, auth_proto::AuthDevice>,
+            account_orgs: HashMap<Uuid, auth_proto::AuthAccountOrg>,
             organization_roles: HashMap<(Uuid, String), AuthOrganizationRole>,
             teams: HashMap<Uuid, AuthTeam>,
             team_members: HashMap<(Uuid, Uuid), AuthTeamMember>,
@@ -3781,6 +3783,76 @@ pub mod email_password {
                     inner.agent_links.remove(&id);
                 }
                 Ok(owned)
+            }
+
+            async fn find_device(
+                &self,
+                id: Uuid,
+            ) -> Result<Option<auth_proto::AuthDevice>, AuthFlowError> {
+                let inner = self.inner.lock().expect("lock memory storage");
+                Ok(inner.devices.get(&id).cloned())
+            }
+
+            async fn upsert_device(
+                &self,
+                device: auth_proto::AuthDevice,
+            ) -> Result<auth_proto::AuthDevice, AuthFlowError> {
+                let mut inner = self.inner.lock().expect("lock memory storage");
+                let now = Utc::now();
+                let saved = match inner.devices.get(&device.id) {
+                    Some(held) => auth_proto::AuthDevice {
+                        created_at: held.created_at,
+                        last_seen_at: now,
+                        ..device
+                    },
+                    None => auth_proto::AuthDevice {
+                        created_at: now,
+                        last_seen_at: now,
+                        ..device
+                    },
+                };
+                inner.devices.insert(saved.id, saved.clone());
+                Ok(saved)
+            }
+
+            async fn list_devices_for_user(
+                &self,
+                user_id: Uuid,
+            ) -> Result<Vec<auth_proto::AuthDevice>, AuthFlowError> {
+                let inner = self.inner.lock().expect("lock memory storage");
+                let mut out: Vec<_> = inner
+                    .devices
+                    .values()
+                    .filter(|d| d.user_id == user_id)
+                    .cloned()
+                    .collect();
+                out.sort_by_key(|d| d.created_at);
+                Ok(out)
+            }
+
+            async fn delete_device(&self, id: Uuid, user_id: Uuid) -> Result<bool, AuthFlowError> {
+                let mut inner = self.inner.lock().expect("lock memory storage");
+                let owned = inner.devices.get(&id).is_some_and(|d| d.user_id == user_id);
+                if owned {
+                    inner.devices.remove(&id);
+                }
+                Ok(owned)
+            }
+
+            async fn find_account_org(
+                &self,
+                user_id: Uuid,
+            ) -> Result<Option<auth_proto::AuthAccountOrg>, AuthFlowError> {
+                let inner = self.inner.lock().expect("lock memory storage");
+                Ok(inner.account_orgs.get(&user_id).cloned())
+            }
+
+            async fn claim_account_org(
+                &self,
+                org: auth_proto::AuthAccountOrg,
+            ) -> Result<auth_proto::AuthAccountOrg, AuthFlowError> {
+                let mut inner = self.inner.lock().expect("lock memory storage");
+                Ok(inner.account_orgs.entry(org.user_id).or_insert(org).clone())
             }
 
             async fn find_member(
@@ -15110,7 +15182,7 @@ pub mod organizations {
         /// session token, and the verification is the same one
         /// `/oauth2/userinfo` performs — this server's own keys, its own
         /// issuer, expiry honoured.
-        async fn organization_caller(
+        pub(crate) async fn organization_caller(
             &self,
             token: &str,
         ) -> Result<auth_proto::AuthUser, AuthFlowError> {

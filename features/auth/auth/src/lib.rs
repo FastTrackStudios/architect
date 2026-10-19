@@ -16,6 +16,7 @@ pub mod backend_db {
 pub mod commands;
 pub mod config;
 pub mod crypto;
+pub mod devices;
 pub mod expiry;
 pub mod flows;
 pub mod identity;

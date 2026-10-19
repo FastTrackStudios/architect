@@ -18,10 +18,11 @@ use uuid::Uuid;
 use crate::{
     AuthAuditEvent, AuthStorage, AuthStorageCapabilities, AuthStorageClock,
     backend_db::{
-        AuthAccountActiveModel, AuthAccountColumn, AuthAccountEntity, AuthAgentLinkActiveModel,
-        AuthAgentLinkColumn, AuthAgentLinkEntity, AuthApiKeyActiveModel, AuthApiKeyColumn,
-        AuthApiKeyEntity, AuthAuditEventRecordActiveModel, AuthEmailChange,
-        AuthEmailChangeActiveModel, AuthEmailChangeColumn, AuthEmailChangeEntity,
+        AuthAccountActiveModel, AuthAccountColumn, AuthAccountEntity, AuthAccountOrgActiveModel,
+        AuthAccountOrgColumn, AuthAccountOrgEntity, AuthAgentLinkActiveModel, AuthAgentLinkColumn,
+        AuthAgentLinkEntity, AuthApiKeyActiveModel, AuthApiKeyColumn, AuthApiKeyEntity,
+        AuthAuditEventRecordActiveModel, AuthDeviceActiveModel, AuthDeviceColumn, AuthDeviceEntity,
+        AuthEmailChange, AuthEmailChangeActiveModel, AuthEmailChangeColumn, AuthEmailChangeEntity,
         AuthInvitationActiveModel, AuthInvitationColumn, AuthInvitationEntity,
         AuthInviteLinkActiveModel, AuthInviteLinkColumn, AuthInviteLinkEntity,
         AuthMemberActiveModel, AuthMemberColumn, AuthMemberEntity, AuthOrganizationActiveModel,
@@ -1288,6 +1289,110 @@ impl AuthStorage for AuthSeaOrmStorage {
             .await
             .map(|result| result.rows_affected > 0)
             .map_err(map_db_err)
+    }
+
+    async fn find_device(&self, id: Uuid) -> Result<Option<auth_proto::AuthDevice>, AuthFlowError> {
+        AuthDeviceEntity::find_by_id(id)
+            .one(&self.db)
+            .await
+            .map(|row| row.map(auth_proto::AuthDevice::from))
+            .map_err(map_db_err)
+    }
+
+    async fn upsert_device(
+        &self,
+        device: auth_proto::AuthDevice,
+    ) -> Result<auth_proto::AuthDevice, AuthFlowError> {
+        let now = Utc::now();
+        let existing = AuthDeviceEntity::find_by_id(device.id)
+            .one(&self.db)
+            .await
+            .map_err(map_db_err)?;
+        let saved = if let Some(row) = existing {
+            let mut active: AuthDeviceActiveModel = row.into();
+            active.name = Set(device.name);
+            active.platform = Set(device.platform);
+            active.endpoint_id = Set(device.endpoint_id);
+            active.last_seen_at = Set(now);
+            active.update(&self.db).await
+        } else {
+            AuthDeviceActiveModel {
+                id: Set(device.id),
+                user_id: Set(device.user_id),
+                name: Set(device.name),
+                platform: Set(device.platform),
+                endpoint_id: Set(device.endpoint_id),
+                created_at: Set(now),
+                last_seen_at: Set(now),
+            }
+            .insert(&self.db)
+            .await
+        };
+        saved.map(auth_proto::AuthDevice::from).map_err(map_db_err)
+    }
+
+    async fn list_devices_for_user(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Vec<auth_proto::AuthDevice>, AuthFlowError> {
+        AuthDeviceEntity::find()
+            .filter(AuthDeviceColumn::UserId.eq(user_id))
+            .order_by_asc(AuthDeviceColumn::CreatedAt)
+            .all(&self.db)
+            .await
+            .map(|rows| rows.into_iter().map(auth_proto::AuthDevice::from).collect())
+            .map_err(map_db_err)
+    }
+
+    async fn delete_device(&self, id: Uuid, user_id: Uuid) -> Result<bool, AuthFlowError> {
+        AuthDeviceEntity::delete_many()
+            .filter(AuthDeviceColumn::Id.eq(id))
+            .filter(AuthDeviceColumn::UserId.eq(user_id))
+            .exec(&self.db)
+            .await
+            .map(|result| result.rows_affected > 0)
+            .map_err(map_db_err)
+    }
+
+    async fn find_account_org(
+        &self,
+        user_id: Uuid,
+    ) -> Result<Option<auth_proto::AuthAccountOrg>, AuthFlowError> {
+        AuthAccountOrgEntity::find()
+            .filter(AuthAccountOrgColumn::UserId.eq(user_id))
+            .one(&self.db)
+            .await
+            .map(|row| row.map(auth_proto::AuthAccountOrg::from))
+            .map_err(map_db_err)
+    }
+
+    async fn claim_account_org(
+        &self,
+        org: auth_proto::AuthAccountOrg,
+    ) -> Result<auth_proto::AuthAccountOrg, AuthFlowError> {
+        if let Some(held) = self.find_account_org(org.user_id).await? {
+            return Ok(held);
+        }
+        let inserted = AuthAccountOrgActiveModel {
+            id: Set(org.id),
+            user_id: Set(org.user_id),
+            org_id: Set(org.org_id),
+            slug: Set(org.slug),
+            display_name: Set(org.display_name),
+            first_device_id: Set(org.first_device_id),
+            created_at: Set(Utc::now()),
+        }
+        .insert(&self.db)
+        .await;
+        match inserted {
+            Ok(row) => Ok(auth_proto::AuthAccountOrg::from(row)),
+            // Lost a race to another device (the unique index): theirs
+            // stands.
+            Err(err) => self
+                .find_account_org(org.user_id)
+                .await?
+                .ok_or_else(|| map_db_err(err)),
+        }
     }
 
     async fn find_member(
