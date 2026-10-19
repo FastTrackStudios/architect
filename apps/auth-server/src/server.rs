@@ -27,7 +27,7 @@ use architect_auth::{
     db::{AuthSeaOrmStorage, Migrator},
     transport::{AuthCookieConfig, vox::AuthVoxService},
 };
-use auth_proto::{AuthServiceService, OrganizationServiceService};
+use auth_proto::{AuthServiceService, DeviceServiceService, OrganizationServiceService};
 use axum::{
     Router,
     http::{HeaderValue, Method, header},
@@ -64,7 +64,11 @@ pub fn services<S>() -> impl architect::Layer<AuthVoxService<S>>
 where
     S: AuthStorage,
 {
-    architect::layers![AuthServiceService, OrganizationServiceService]
+    architect::layers![
+        AuthServiceService,
+        OrganizationServiceService,
+        DeviceServiceService
+    ]
 }
 
 /// The vox router — what `/vox`, the iroh endpoint, and an in-process

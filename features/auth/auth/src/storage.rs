@@ -408,6 +408,46 @@ pub trait AuthStorage: Clone + Send + Sync + 'static {
         owner_user_id: uuid::Uuid,
     ) -> Result<bool, AuthFlowError>;
 
+    // ── An account's devices (`auth_proto::device`) ───────────────
+
+    async fn find_device(
+        &self,
+        id: uuid::Uuid,
+    ) -> Result<Option<auth_proto::AuthDevice>, AuthFlowError>;
+
+    /// Insert the device, or update its name, platform, endpoint and
+    /// last-seen time when the row exists. The caller has already checked
+    /// the row belongs to `device.user_id`.
+    async fn upsert_device(
+        &self,
+        device: auth_proto::AuthDevice,
+    ) -> Result<auth_proto::AuthDevice, AuthFlowError>;
+
+    /// The account's devices, oldest first.
+    async fn list_devices_for_user(
+        &self,
+        user_id: uuid::Uuid,
+    ) -> Result<Vec<auth_proto::AuthDevice>, AuthFlowError>;
+
+    /// Remove a device the account holds. `false` when there was none.
+    async fn delete_device(
+        &self,
+        id: uuid::Uuid,
+        user_id: uuid::Uuid,
+    ) -> Result<bool, AuthFlowError>;
+
+    async fn find_account_org(
+        &self,
+        user_id: uuid::Uuid,
+    ) -> Result<Option<auth_proto::AuthAccountOrg>, AuthFlowError>;
+
+    /// Record the account's shared org — unless it has one, in which case
+    /// that one is returned unchanged (the first offer wins).
+    async fn claim_account_org(
+        &self,
+        org: auth_proto::AuthAccountOrg,
+    ) -> Result<auth_proto::AuthAccountOrg, AuthFlowError>;
+
     async fn find_member(
         &self,
         organization_id: uuid::Uuid,

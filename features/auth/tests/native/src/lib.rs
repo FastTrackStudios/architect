@@ -1,6 +1,10 @@
 #[cfg(test)]
 mod permissions_gate_tests;
 
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic, clippy::indexing_slicing)]
+mod devices_tests;
+
 /// In-memory `SQLite` `ArchitectAuth` — the storage every vox round-trip
 /// test mounts behind the service.
 #[cfg(test)]

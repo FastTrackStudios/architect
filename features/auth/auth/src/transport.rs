@@ -1032,6 +1032,31 @@ pub mod vox {
         }
     }
 
+    /// The device address book over the same engine (`crate::devices`).
+    impl<S> auth_proto::DeviceService for AuthVoxService<S>
+    where
+        S: AuthStorage,
+    {
+        async fn register_device(
+            &self,
+            token: String,
+            registration: auth_proto::DeviceRegistration,
+        ) -> Result<auth_proto::DeviceDirectory, AuthFlowError> {
+            self.auth.register_device(&token, registration).await
+        }
+
+        async fn list_devices(
+            &self,
+            token: String,
+        ) -> Result<auth_proto::DeviceDirectory, AuthFlowError> {
+            self.auth.list_devices(&token).await
+        }
+
+        async fn forget_device(&self, token: String, device_id: Uuid) -> Result<(), AuthFlowError> {
+            self.auth.forget_device(&token, device_id).await
+        }
+    }
+
     /// The organization surface over the same engine. Each method
     /// forwards to the engine command of the same name; the session
     /// token is the authorization on every one.

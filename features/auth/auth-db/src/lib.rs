@@ -90,6 +90,14 @@ pub use auth_proto::audit_event::{
     Column as AuthAuditEventRecordColumn, Entity as AuthAuditEventRecordEntity,
     Model as AuthAuditEventRecordModel, Relation as AuthAuditEventRecordRelation,
 };
+pub use auth_proto::device::account_org::{
+    ActiveModel as AuthAccountOrgActiveModel, AuthAccountOrg, Column as AuthAccountOrgColumn,
+    Entity as AuthAccountOrgEntity, Model as AuthAccountOrgModel,
+};
+pub use auth_proto::device::{
+    ActiveModel as AuthDeviceActiveModel, AuthDevice, Column as AuthDeviceColumn,
+    Entity as AuthDeviceEntity, Model as AuthDeviceModel,
+};
 pub use auth_proto::email_change::{
     ActiveModel as AuthEmailChangeActiveModel, AuthEmailChange, AuthEmailChangeCreate,
     AuthEmailChangeList, AuthEmailChangeRepo, AuthEmailChangeRepoStorage, AuthEmailChangeUpdate,

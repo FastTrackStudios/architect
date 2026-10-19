@@ -11,6 +11,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260513_000001_create_auth_tables::Migration),
             Box::new(m20260809_000001_create_email_history::Migration),
             Box::new(m20260914_000001_create_agent_links::Migration),
+            Box::new(m20261019_000001_create_devices::Migration),
         ]
     }
 }
@@ -1241,6 +1242,147 @@ mod m20260914_000001_create_agent_links {
         OwnerUserId,
         AgentUserId,
         MaxRole,
+        CreatedAt,
+    }
+}
+
+/// An account's devices and the org they share (`auth_proto::device`).
+/// `if_not_exists` throughout, so a re-run is a no-op.
+mod m20261019_000001_create_devices {
+    use sea_orm_migration::prelude::*;
+
+    pub struct Migration;
+
+    impl MigrationName for Migration {
+        fn name(&self) -> &'static str {
+            "m20261019_000001_create_devices"
+        }
+    }
+
+    fn ts<T: IntoIden>(col: T) -> ColumnDef {
+        ColumnDef::new(col)
+            .timestamp_with_time_zone()
+            .not_null()
+            .to_owned()
+    }
+
+    #[async_trait::async_trait]
+    impl MigrationTrait for Migration {
+        async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .create_table(
+                    Table::create()
+                        .table(AuthDevices::Table)
+                        .if_not_exists()
+                        .col(
+                            ColumnDef::new(AuthDevices::Id)
+                                .uuid()
+                                .not_null()
+                                .primary_key(),
+                        )
+                        .col(ColumnDef::new(AuthDevices::UserId).uuid().not_null())
+                        .col(ColumnDef::new(AuthDevices::Name).string().not_null())
+                        .col(ColumnDef::new(AuthDevices::Platform).string().not_null())
+                        .col(ColumnDef::new(AuthDevices::EndpointId).string().null())
+                        .col(ts(AuthDevices::CreatedAt))
+                        .col(ts(AuthDevices::LastSeenAt))
+                        .to_owned(),
+                )
+                .await?;
+            manager
+                .create_index(
+                    Index::create()
+                        .name("idx_auth_devices_user")
+                        .table(AuthDevices::Table)
+                        .col(AuthDevices::UserId)
+                        .if_not_exists()
+                        .to_owned(),
+                )
+                .await?;
+            manager
+                .create_table(
+                    Table::create()
+                        .table(AuthAccountOrgs::Table)
+                        .if_not_exists()
+                        .col(
+                            ColumnDef::new(AuthAccountOrgs::Id)
+                                .uuid()
+                                .not_null()
+                                .primary_key(),
+                        )
+                        .col(ColumnDef::new(AuthAccountOrgs::UserId).uuid().not_null())
+                        .col(ColumnDef::new(AuthAccountOrgs::OrgId).uuid().not_null())
+                        .col(ColumnDef::new(AuthAccountOrgs::Slug).string().not_null())
+                        .col(
+                            ColumnDef::new(AuthAccountOrgs::DisplayName)
+                                .string()
+                                .not_null(),
+                        )
+                        .col(
+                            ColumnDef::new(AuthAccountOrgs::FirstDeviceId)
+                                .uuid()
+                                .not_null(),
+                        )
+                        .col(ts(AuthAccountOrgs::CreatedAt))
+                        .to_owned(),
+                )
+                .await?;
+            // One shared org per account: the first offer wins, and a
+            // racing second one fails here rather than replacing it.
+            manager
+                .create_index(
+                    Index::create()
+                        .name("idx_auth_account_orgs_user")
+                        .table(AuthAccountOrgs::Table)
+                        .col(AuthAccountOrgs::UserId)
+                        .unique()
+                        .if_not_exists()
+                        .to_owned(),
+                )
+                .await
+        }
+
+        async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .drop_table(
+                    Table::drop()
+                        .table(AuthAccountOrgs::Table)
+                        .if_exists()
+                        .to_owned(),
+                )
+                .await?;
+            manager
+                .drop_table(
+                    Table::drop()
+                        .table(AuthDevices::Table)
+                        .if_exists()
+                        .to_owned(),
+                )
+                .await
+        }
+    }
+
+    #[derive(Iden)]
+    enum AuthDevices {
+        Table,
+        Id,
+        UserId,
+        Name,
+        Platform,
+        EndpointId,
+        CreatedAt,
+        LastSeenAt,
+    }
+
+    #[derive(Iden)]
+    enum AuthAccountOrgs {
+        Table,
+        Id,
+        UserId,
+        OrgId,
+        Slug,
+        DisplayName,
+        FirstDeviceId,
         CreatedAt,
     }
 }
