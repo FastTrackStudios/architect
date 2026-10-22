@@ -579,6 +579,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-input"
+version = "0.1.0"
+dependencies = [
+ "dioxus",
+ "facet",
+ "gloo-timers",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+]
+
+[[package]]
 name = "architect-launcher-core"
 version = "0.1.0"
 dependencies = [
