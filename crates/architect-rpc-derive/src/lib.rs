@@ -286,9 +286,10 @@ struct RpcArgs {
     ops: Option<Vec<OpsSubst>>,
     /// `actions` / `actions = "NS"` — additionally emit
     /// `http::actions::register(backend, &ActionList)`, every method as an
-    /// async action (`NS_METHOD`). The outer `Option` is whether it was
-    /// asked for; the inner one the namespace, when given.
-    actions: Option<Option<String>>,
+    /// async action (`NS_METHOD`).
+    actions: bool,
+    /// The `NS` of `actions = "NS"`, when given.
+    actions_ns: Option<String>,
 }
 
 /// One `name: Type` scope declaration inside `scopes(...)`.
@@ -334,7 +335,7 @@ impl RpcArgs {
             return Ok(());
         }
         if meta.path.is_ident("actions") {
-            if self.actions.is_some() {
+            if self.actions {
                 return Err(meta.error("duplicate `actions` argument"));
             }
             if meta.input.peek(syn::Token![=]) {
@@ -345,10 +346,9 @@ impl RpcArgs {
                         "`actions = \"NS\"` is SCREAMING_SNAKE_CASE: the ids become `NS_METHOD`",
                     ));
                 }
-                self.actions = Some(Some(ns));
-            } else {
-                self.actions = Some(None);
+                self.actions_ns = Some(ns);
             }
+            self.actions = true;
             return Ok(());
         }
         if meta.path.is_ident("path") {
@@ -511,7 +511,7 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
     }
 
     let shape = classify_shape(&methods);
-    if args.actions.is_none()
+    if !args.actions
         && let Some(m) = methods.iter().find(|m| m.action.given)
     {
         return Err(syn::Error::new_spanned(
@@ -520,7 +520,7 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
              `#[architect::service(actions)]`",
         ));
     }
-    if args.actions.is_some() && (!args.http || args.context.is_some()) {
+    if args.actions && (!args.http || args.context.is_some()) {
         return Err(syn::Error::new_spanned(
             &trait_item.ident,
             "`actions` projects the HTTP face's `<Method>Args` bodies: it needs \
@@ -626,7 +626,7 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
             has_context: args.context.is_some(),
             has_ops: args.ops.is_some(),
             has_http: args.http,
-            has_actions: args.actions.is_some(),
+            has_actions: args.actions,
         },
     );
 
@@ -677,7 +677,11 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
             &subscriptions,
             ctx,
             args.path.as_deref(),
-            args.actions.as_ref().map(Option::as_deref),
+            args.actions.then(|| {
+                args.actions_ns
+                    .clone()
+                    .unwrap_or_else(|| action_namespace(&trait_name.to_string()))
+            }),
         )
     } else {
         quote! {}
@@ -3075,13 +3079,11 @@ fn emit_http_block(
     subs: &[Subscription],
     ctx: Option<&Type>,
     path: Option<&str>,
-    actions: Option<Option<&str>>,
+    action_ns: Option<String>,
 ) -> TokenStream2 {
     if matches!(shape, Shape::Empty) || ctx.is_some() {
         return quote! {};
     }
-    let action_ns = actions
-        .map(|ns| ns.map_or_else(|| action_namespace(&trait_name.to_string()), str::to_owned));
     let mut action_metas = Vec::new();
     let mut action_regs = Vec::new();
     let mut action_ids = Vec::new();
