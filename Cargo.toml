@@ -127,6 +127,10 @@ vox-core = { version = "0.10.0-rc.7" }
 # Styx config language (facet-backed) — the fleet's facet-styx.
 facet-styx = { version = "5.0.0-rc.7" }
 iroh = { version = "1" }
+# LAN address lookup for iroh (mDNS-like, via swarm-discovery): lets two
+# endpoints on one network dial each other by bare EndpointId with no
+# internet. iroh 1.x moved mDNS out of core into this crate.
+iroh-mdns-address-lookup = { version = "0.6.1" }
 
 # ── Server / storage ──────────────────────────────────────────────────
 axum = { version = "0.8", features = ["ws"] }

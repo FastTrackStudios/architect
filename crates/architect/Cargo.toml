@@ -143,6 +143,12 @@ iroh = [
     "dep:vox-core",
     "dep:vox-types",
 ]
+# LAN peer discovery for `iroh_link` (`PeerLookup::Lan` /
+# `PeerLookup::N0AndLan`): mDNS-style address lookup so endpoints on one
+# network dial each other by bare EndpointId with the internet down.
+# Native only (multicast UDP); a no-op on wasm32, where browsers dial
+# relay-only.
+iroh-lan = ["iroh", "dep:iroh-mdns-address-lookup"]
 
 server-seaorm = ["dep:sea-orm", "dep:sea-orm-migration", "dep:async-trait"]
 server-axum = [
@@ -321,6 +327,7 @@ reqwest = { version = "0.12", default-features = false, features = ["stream"], o
 # version with defaults off + a TLS provider (relay-only in browsers).
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 iroh = { workspace = true, optional = true }
+iroh-mdns-address-lookup = { workspace = true, optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"], optional = true }
 # `connect`'s native dial. Native builds its own handshake request so the
 # bearer can ride an `Authorization` header.
@@ -362,6 +369,14 @@ required-features = ["atom", "platform", "local"]
 [[test]]
 name = "iroh_link"
 required-features = ["iroh"]
+
+[[test]]
+name = "iroh_lan"
+required-features = ["iroh-lan"]
+
+[[example]]
+name = "iroh_lan"
+required-features = ["iroh-lan"]
 
 [[test]]
 name = "entity_storage"

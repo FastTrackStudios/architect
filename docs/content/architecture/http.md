@@ -172,6 +172,17 @@ every plugin, an optional SPA bundle, and — with `.iroh(key, id)` — the
 same vox router peer to peer. `into_app()` hands back the axum
 `Router` for in-process tests.
 
+By default the iroh endpoint finds peers through n0's relays and DNS,
+which need the internet. With the `iroh-lan` feature,
+`.iroh_lookup(PeerLookup::N0AndLan)` adds mDNS-style lookup on the local
+network beside n0, so two machines on one LAN dial each other by bare
+endpoint id with the internet down; `PeerLookup::Lan` stays on the LAN
+only (relays off, nothing published to n0). Code that builds its own
+endpoint takes the same choice through `iroh_link::endpoint_builder` /
+`bind_endpoint_with`. `crates/architect/tests/iroh_lan.rs` proves the
+bare-id dial on one host; `examples/iroh_lan.rs` is the two-machine
+check.
+
 ## The client
 
 ```rust,ignore

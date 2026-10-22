@@ -108,12 +108,15 @@ pub struct EngineHost {
     cross_origin_isolated: bool,
     #[cfg(feature = "iroh")]
     iroh: Option<IrohConfig>,
+    #[cfg(feature = "iroh")]
+    iroh_lookup: crate::iroh_link::PeerLookup,
 }
 
 #[cfg(feature = "iroh")]
 struct IrohConfig {
     key_path: PathBuf,
     id_path: Option<PathBuf>,
+    lookup: crate::iroh_link::PeerLookup,
 }
 
 impl EngineHost {
@@ -128,6 +131,8 @@ impl EngineHost {
             finish: Vec::new(),
             #[cfg(feature = "iroh")]
             iroh: None,
+            #[cfg(feature = "iroh")]
+            iroh_lookup: crate::iroh_link::PeerLookup::default(),
         }
     }
 
@@ -168,7 +173,25 @@ impl EngineHost {
     #[cfg(feature = "iroh")]
     #[must_use]
     pub fn iroh(mut self, key_path: PathBuf, id_path: Option<PathBuf>) -> Self {
-        self.iroh = Some(IrohConfig { key_path, id_path });
+        self.iroh = Some(IrohConfig {
+            key_path,
+            id_path,
+            // Replaced by `iroh_lookup` in `assemble`, so call order
+            // between the two builder methods doesn't matter.
+            lookup: crate::iroh_link::PeerLookup::default(),
+        });
+        self
+    }
+
+    /// How the iroh endpoint finds peers and publishes itself (default
+    /// [`PeerLookup::N0`](crate::iroh_link::PeerLookup::N0)). With the
+    /// `iroh-lan` feature, `PeerLookup::N0AndLan` keeps a host dialable
+    /// by bare id from the same LAN when the internet is down. Only takes
+    /// effect together with [`iroh`](Self::iroh), in either order.
+    #[cfg(feature = "iroh")]
+    #[must_use]
+    pub const fn iroh_lookup(mut self, lookup: crate::iroh_link::PeerLookup) -> Self {
+        self.iroh_lookup = lookup;
         self
     }
 
@@ -215,7 +238,10 @@ impl EngineHost {
 
     #[cfg(feature = "iroh")]
     fn assemble(self) -> (Router, Option<(LayerRouter, IrohConfig)>) {
-        let iroh = self.iroh.map(|cfg| (self.router.clone(), cfg));
+        let lookup = self.iroh_lookup;
+        let iroh = self
+            .iroh
+            .map(|cfg| (self.router.clone(), IrohConfig { lookup, ..cfg }));
         (
             assemble_app(
                 self.router,
@@ -352,7 +378,7 @@ async fn serve_iroh(router: LayerRouter, cfg: IrohConfig) {
             return;
         }
     };
-    let endpoint = match iroh_link::bind_endpoint(secret_key).await {
+    let endpoint = match iroh_link::bind_endpoint_with(secret_key, cfg.lookup).await {
         Ok(ep) => ep,
         Err(e) => {
             tracing::error!(error = %e, "iroh endpoint bind failed; p2p transport disabled");
