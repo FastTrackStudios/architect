@@ -556,6 +556,13 @@ pub mod capability;
 #[cfg(all(feature = "blob", not(target_arch = "wasm32")))]
 pub mod blob;
 
+// Signed self-update — check GitHub Releases, verify the minisign-signed
+// `SHA256SUMS` and the asset's sha256, smoke-test `--version`, swap the
+// binary atomically. Native only; see `architect::release` and
+// `docs/content/architecture/release.md`.
+#[cfg(all(feature = "release", not(target_arch = "wasm32")))]
+pub mod release;
+
 // Snapshot quiesce — the `WriteGate`, the `GatedLayer` vox wrapper and the
 // `quiesce` pause → checkpoint → step cycle with a bounded hold. Native
 // only; see `architect::snapshot` and `docs/content/architecture/snapshot.md`.
