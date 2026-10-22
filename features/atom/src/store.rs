@@ -272,8 +272,8 @@ impl<T: StoreEntity, E: Clone> StoreData<T, E> {
     /// page) into the cache without disturbing the rest.
     fn put(&mut self, value: T) {
         let id = Id::Real(value.key());
-        if self.items.contains_key(&id) {
-            self.items.insert(id, value);
+        if let Some(existing) = self.items.get_mut(&id) {
+            *existing = value;
             return;
         }
         // A pending optimistic draft of this same row (its key chosen
