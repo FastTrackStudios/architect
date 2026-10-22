@@ -11,6 +11,9 @@ description = "Behavior tests for the CRDT code `#[architect(crdt)]` emits: an e
 [features]
 default = ["crdt"]
 crdt = ["dep:crdt"]
+# Declared so the derive's `cfg(feature = "atom")` hook blocks are a
+# known cfg here. Never enabled: those hooks need Dioxus.
+atom = []
 
 [dependencies]
 architect.workspace = true

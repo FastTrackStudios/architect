@@ -106,7 +106,7 @@ pub struct MigrationReport {
 impl MigrationReport {
     /// True if the doc was already at the target.
     #[must_use]
-    pub fn is_noop(&self) -> bool {
+    pub const fn is_noop(&self) -> bool {
         self.applied.is_empty()
     }
 }
@@ -244,7 +244,13 @@ pub fn migrate(
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    // Steps keep the `Migration::apply` signature even when infallible.
+    clippy::unnecessary_wraps
+)]
 mod tests {
     use super::*;
     use loro::ExportMode;

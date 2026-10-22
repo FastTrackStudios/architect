@@ -705,11 +705,12 @@ pub fn write_text(m: &LoroMap, key: &str, v: &str) -> Result<(), RepoError> {
     }
 }
 
-/// Turn `map[key]` into a `LoroText` container, seeded with `seed` or —
-/// when `seed` is `None` — with the legacy plain-string value the key
-/// holds (empty if absent). A key that already holds a text container
-/// is returned untouched, so this is safe to run from a migration step
-/// on every peer.
+/// Turn `map[key]` into a `LoroText` container.
+///
+/// Seeded with `seed`, or — when `seed` is `None` — with the legacy
+/// plain-string value the key holds (empty if absent). A key that
+/// already holds a text container is returned untouched (or diffed to
+/// `seed`), so this is safe to run from a migration step on every peer.
 ///
 /// The container is created with `insert_container`, **not**
 /// `ensure_mergeable_text`: concurrent upgrades on two offline peers
