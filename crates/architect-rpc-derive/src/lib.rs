@@ -2373,7 +2373,7 @@ struct Method {
 }
 
 /// A method's `#[action(…)]` options; all default.
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct ActionAttr {
     /// Whether the attribute was written at all.
     given: bool,
