@@ -251,6 +251,21 @@ capability = ["dep:ed25519-dalek", "dep:base64", "dep:getrandom", "dep:zeroize"]
 # backend. Native only for now; the wasm OPFS ledger is a follow-up.
 blob = ["dep:sha2"]
 
+# Signed self-update (`architect::release`): check GitHub Releases for a
+# newer `<prefix>X.Y.Z`, verify the minisign signature over `SHA256SUMS`
+# with the release key the app compiles in, the asset's sha256, a
+# `--version` smoke test, then an atomic rename over the running binary
+# and an optional `--then` hook. Native only. Reuses `blob::Sha256`.
+release = [
+    "blob",
+    "dep:minisign-verify",
+    "dep:reqwest",
+    "dep:facet-json",
+    "dep:tempfile",
+    "tokio/process",
+    "tokio/time",
+]
+
 # Snapshot quiesce (`architect::snapshot`): `WriteGate` (bounded hold,
 # default 30 s), `GatedLayer` / `LayerRouter::gated` parking vox calls at
 # the gate, `quiesce` (pause -> checkpoint -> step), and with
@@ -389,8 +404,11 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 tokio-tungstenite = { version = "0.29", optional = true }
 # `settings`: the platform config dir behind `settings::app_dir`.
 dirs = { version = "6", optional = true }
-# `testing`: the sandbox's tempdir.
+# `testing`: the sandbox's tempdir; `release`: the staged binary.
 tempfile = { version = "3", optional = true }
+# `release`: verify the release key's signature over `SHA256SUMS`
+# (no dependencies of its own; Task's self-update already used it).
+minisign-verify = { version = "0.2", optional = true }
 
 # Wasm-only platform deps. Browser timers (gloo-timers' `TimeoutFuture`
 # is a real async sleep backed by setTimeout) and `spawn_local` for the
@@ -420,6 +438,12 @@ tracing-subscriber = { workspace = true }
 tower = { version = "0.5", features = ["util"] }
 # settings_*.rs, capability.rs and blob.rs: a throwaway directory per test.
 tempfile = "3"
+# release.rs: the fake releases server, and a test signer that writes
+# minisign signatures (Ed25519 over the BLAKE2b-512 prehash).
+axum = { workspace = true }
+ed25519-dalek = "3"
+blake2 = "0.10"
+base64 = { workspace = true }
 
 [[test]]
 name = "reconnect_supervisor"
@@ -440,6 +464,10 @@ required-features = ["capability"]
 [[test]]
 name = "blob"
 required-features = ["blob"]
+
+[[test]]
+name = "release"
+required-features = ["release"]
 
 [[test]]
 name = "snapshot"
