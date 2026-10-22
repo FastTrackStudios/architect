@@ -4,88 +4,83 @@ description = "One contract, swappable storage."
 weight = 20
 +++
 
-> **Layout note (2026-10-22).** This page predates the
-> [one-crate layout](@/architecture/layout.md): read `<feature>-proto` as
-> "the feature crate's default feature set" and each backend sibling
-> crate as a cargo feature (`memory`, `db`, ...) of that one crate.
-> `cargo xtask feature new` scaffolds the new shape.
-
-A feature defines its contract once (in `<feature>-proto`) and ships
-one or more implementations as sibling crates. A facade picks which
-implementation a binary uses via cargo features.
+A feature defines its contract once, in the default feature set of its
+one crate ([layout](@/architecture/layout.md)), and ships each
+implementation as a cargo feature of that same crate. A binary picks
+which implementation it compiles by enabling the flag.
 
 ## Concrete example
 
-The reference template ships two implementations of `ExampleRepo`:
+`cargo xtask feature new inventory` writes one backend; a second one is
+another flag and another module beside it:
 
-| Crate | Implementation | Why |
-|-------|----------------|-----|
-| `example-db` | SeaORM/SQLite | Production storage. |
-| `example-memory` | `RwLock<Vec<Example>>` | Tests, demos, ephemeral processes. No external service needed. |
+<!-- doc-check: off (illustrative names, not paths in this repo) -->
+| Flag | Module | Implementation | Why |
+|------|--------|----------------|-----|
+| `memory` | `inventory::memory` | `Mutex<Vec<Item>>` | Tests, demos, ephemeral processes. No external service needed. |
+| `db` | `inventory::db` | SeaORM/SQLite | Production storage. |
 
-Both implement the same `ExampleRepo` trait that `example-proto` exposes.
-The wasm browser tests don't care which backend the server is running —
-they call `ExampleRepoClient::create / get / list / delete` and the
+Both implement the same `ItemRepo` trait that `lib.rs` declares. The
+wasm browser tests don't care which backend the server is running:
+they call `ItemRepoClient::create / get / list / delete` and the
 contract holds.
 
-## The facade
-
-A feature crate chooses between them with cargo features (one crate per
-feature, [layout](@/architecture/layout.md)):
+## The flags
 
 ```toml
 [features]
-default = []
-backend-db = ["dep:example-db", "example-proto/server"]
-backend-memory = ["dep:example-memory"]
+default = []                                  # the contract, wasm-clean
+vox = ["dep:vox", "architect/vox"]
+memory = []
+db = ["architect/server-seaorm", "dep:sea-orm"]
 ```
 
 Both backends can be enabled in the same compile (e.g. tests). They
-live in different modules to avoid name collisions:
+live in different modules, so their names never collide:
 
 ```rust
-#[cfg(feature = "backend-db")]
-pub mod backend_db {
-    pub use example_db::{ExampleRepoStorage, Migrator};
-}
+#[cfg(feature = "memory")]
+pub mod memory;   // inventory::memory::Memory
 
-#[cfg(feature = "backend-memory")]
-pub mod backend_memory {
-    pub use example_memory::ExampleRepoMemory;
-}
+#[cfg(feature = "db")]
+pub mod db;       // inventory::db::{ItemRepoStorage, Migrator}
 ```
+<!-- doc-check: on -->
+
+There is no facade crate: the feature crate is the facade, and an app
+depends on it with the flags it needs.
 
 ## In-tree vs external implementations
 
 Everything on this page describes the **in-tree** pattern: backends
-live inside the project's `features/<feature>/` tree alongside the
-contract. Third parties can implement the same trait surface from
-their own crates without forking the monorepo — see
-[Extensibility](@/architecture/extensibility.md) for that path. The
-contract (`<feature>-proto`) is what makes both paths interchangeable
-from the running app's perspective.
+live inside the feature's crate, behind flags. Third parties can
+implement the same trait surface from their own crates without forking
+the monorepo; see [Extensibility](@/architecture/extensibility.md) for
+that path. The contract (the crate with no features) is what makes
+both paths interchangeable from the running app's perspective.
 
 ## Pattern for the DAW analogue
 
-Each DAW backend (Reaper, Ableton, Pro Tools) lives as a sibling
-implementation of the relevant feature contracts (a sketch; these crates
-are not in this repo):
+Each DAW backend (Reaper, Ableton, Pro Tools) is a flag of the feature
+crate (a sketch; this crate is not in this repo):
 
 <!-- doc-check: off (illustrative names, not paths in this repo) -->
 ```
 features/timeline/
-  timeline-proto/        contract — `TimelineRepo`, `ClipRepo`, ...
-  timeline-reaper/       Reaper-specific clip + track storage
-  timeline-ableton/      Ableton Live Object Model adapter
-  timeline-protools/     Pro Tools control surface adapter
-  timeline-mock/         in-memory for tests
-  timeline/              facade with backend-reaper / backend-ableton / ...
+  Cargo.toml             package `timeline`: flags reaper / ableton / protools / memory
+  src/
+    lib.rs               contract: `TimelineRepo`, `ClipRepo`, ...
+    reaper.rs            #[cfg(feature = "reaper")]   clip + track storage
+    ableton.rs           #[cfg(feature = "ableton")]  Live Object Model adapter
+    protools.rs          #[cfg(feature = "protools")] control surface adapter
+    memory.rs            #[cfg(feature = "memory")]   in-memory for tests
+  timeline-reaper/       only if REAPER needs its own cdylib (layout: "When a second crate is allowed")
 ```
 
-A `crates/daw-reaper` binary then pulls `timeline` with `backend-reaper`,
-`mixing` with `backend-reaper`, etc. `crates/daw-ableton` does the same
-with `-ableton` features. The same `apps/daw-ui` shell composes both
-because both expose the same `<feature>_proto` types and traits.
+A REAPER extension binary pulls `timeline` with `reaper`, `mixing` with
+`reaper`, etc. An Ableton host does the same with `ableton`. The same
+UI shell composes both because both expose the same `timeline` contract
+types and traits.
 <!-- doc-check: on -->
 
 ## Large payloads
@@ -97,7 +92,7 @@ the allocation in the backend instead:
 
 | Crate side | Type | Role |
 |------------|------|------|
-| proto (wire) | `RawHandle` | Opaque id, facet-serializable (a bare UUID). What service signatures carry. |
+| contract (wire) | `RawHandle` | Opaque id, facet-serializable (a bare UUID). What service signatures carry. |
 | backend | `HandleRegistry<T>` | Thread-safe table owning the values; mints `Handle<T>`s. |
 | backend | `Handle<T>` | Typed wrapper around `RawHandle` — a registry of one type can't deref a handle of another. |
 

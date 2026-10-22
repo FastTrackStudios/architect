@@ -4,12 +4,6 @@ description = "Two ways to add features: in-tree (monorepo) and external (third-
 weight = 25
 +++
 
-> **Layout note (2026-10-22).** This page predates the
-> [one-crate layout](@/architecture/layout.md): read `<feature>-proto` as
-> "the feature crate's default feature set" and each backend sibling
-> crate as a cargo feature (`memory`, `db`, ...) of that one crate.
-> `cargo xtask feature new` scaffolds the new shape.
-
 A project built on architect can be extended along two axes, and both
 are first-class. Understanding the difference is mostly about
 understanding **who depends on what**.
@@ -18,8 +12,8 @@ understanding **who depends on what**.
 
 ```text
        ┌──────────────────┐                  ┌──────────────────┐
-       │  <feature>-proto │ ◄──── contract ──┤  <feature>-proto │
-       │  (trait + types) │                  │  (trait + types) │
+       │  <feature>       │ ◄──── contract ──┤  <feature>       │
+       │  default features│                  │  default features│
        └──────────────────┘                  └──────────────────┘
                 ▲                                     ▲
                 │                                     │
@@ -27,49 +21,39 @@ understanding **who depends on what**.
    │  in-tree implementations│         │  external implementations  │
    │                         │         │                            │
    │  features/<feature>/    │         │  someone-elses-crate       │
-   │    <feature>-<backend>/ │         │  on crates.io              │
+   │    src/<backend>.rs     │         │  on crates.io              │
    │                         │         │                            │
    │  shipped with the app   │         │  brought in à la carte by  │
    │  binary by default      │         │  consumers who want it     │
    └─────────────────────────┘         └────────────────────────────┘
 ```
 
-Both implement the same `#[vox::service]` trait that `<feature>-proto`
-declares. From the trait's perspective, in-tree and external impls are
+Both implement the same `#[architect::service]` trait that the
+feature crate's default feature set (its `lib.rs`) declares. From the trait's perspective, in-tree and external impls are
 indistinguishable.
 
 ## Path 1 — In-tree (monorepo)
 
-Crate sits inside the project's `features/<feature>/` tree alongside
-the contract. Lives in the same workspace, ships from the same
-`Cargo.lock`, gets pulled into the project's app binary directly.
-
-This is what `example-db` and `example-memory` were in the example app
-(no longer in the tree; under the [one-crate layout](@/architecture/layout.md)
-they would be `db` and `memory` cargo features of one crate):
+The implementation is a cargo feature of the feature's own crate
+([layout](@/architecture/layout.md)): a module beside the contract,
+compiled only when its flag is on. It lives in the same workspace,
+ships from the same `Cargo.lock` and is pulled into the app binary
+directly.
 
 <!-- doc-check: off (illustrative names, not paths in this repo) -->
 ```text
-features/example/
-  example-proto/        contract
-  example-db/           in-tree impl  ←
-  example-memory/       in-tree impl  ←
-  example/              facade — pick which in-tree impls to enable
+features/inventory/
+  Cargo.toml          package `inventory`
+  src/lib.rs          contract (default features)
+  src/memory.rs       in-tree impl, flag `memory`  ←
+  src/db.rs           in-tree impl, flag `db`      ←
 ```
 
-The facade crate (`example`) exposes cargo features:
-
-```toml
-[features]
-backend-db = ["dep:example-db", "example-proto/server"]
-backend-memory = ["dep:example-memory"]
-```
-
-The app binary (`app-cli`, `app-server`) opts in:
+The app binary opts in to the flags it needs:
 
 ```toml
 # apps/app/server/Cargo.toml
-example = { workspace = true, features = ["backend-db"] }
+inventory = { workspace = true, features = ["db", "vox"] }
 ```
 <!-- doc-check: on -->
 
@@ -81,37 +65,37 @@ example = { workspace = true, features = ["backend-db"] }
 - Versioning is handled by `git tag` on the monorepo, not crates.io
 
 **DAW analogue**: `daw-reaper`, `daw-protools`, `daw-ableton` —
-written by the team that owns the `daw` repo, all live at
-`features/<feature>/<feature>-reaper/` etc. The `daw` binary builds
+written by the team that owns the `daw` repo, each a flag
+(`reaper`, `protools`, ...) of the feature crate. The `daw` binary builds
 with whichever combination of cargo features that project's release
 needs.
 
 ## Path 2 — External (third-party crate)
 
 Crate lives in someone else's repo, publishes to crates.io, depends
-only on `<feature>-proto`. A consuming project pulls it in like any
+only on the feature crate with its default features (the contract). A
+consuming project pulls it in like any
 other dependency.
 
 **The contract crate is the only required surface.** Everything else
-(facade, in-tree backends, app binary) is convenience — third parties
+(in-tree backend flags, app binary) is convenience — third parties
 can replace any of it.
 
 ```toml
 # Cargo.toml of a project consuming an external impl
 [dependencies]
-example-proto = "0.2"
-daw-logic-backend = "0.1"   # third-party — implements example_proto::ExampleRepo
+inventory = { version = "0.2", default-features = false }
+inventory-redis = "0.1"   # third-party — implements inventory::ItemRepo
 ```
 
 Then in the consumer's binary:
 
 ```rust
-use example_proto::ExampleRepoDispatcher;
-use daw_logic_backend::LogicBackend;
+use inventory_redis::RedisBackend;
 
-let backend = LogicBackend::new(/* … */);
-let dispatcher = ExampleRepoDispatcher::new(backend);
-// mount on vox WebSocket exactly like the in-tree backends
+let backend = RedisBackend::new(/* … */);
+// mount exactly like the in-tree backends (it lists its `Services` bundle)
+EngineHost::new(backend.into_router(), bind).serve().await?;
 ```
 
 **Use this when**:
@@ -124,8 +108,8 @@ let dispatcher = ExampleRepoDispatcher::new(backend);
   without coordinating
 
 **DAW analogue**: someone outside the daw team writes `daw-logic` —
-a Logic Pro backend that implements the same `timeline_proto::TimelineRepo`
-+ `mixing_proto::MixingRepo` traits as `daw-reaper` does in-tree.
+a Logic Pro backend that implements the same `timeline::TimelineRepo`
++ `mixing::MixingRepo` traits as `daw-reaper` does in-tree.
 They publish to crates.io. A user can then build their own `my-daw`
 binary that pulls `daw-cli` (in-tree first-party backends) AND
 `daw-logic` (external) — both implement the same contracts, both
@@ -135,37 +119,35 @@ mount on the same vox dispatcher.
 
 | Concern | In-tree | External |
 |---------|---------|----------|
-| Where does the source live? | `features/<feature>/<feature>-<x>/` | Wherever the author wants |
-| What does it depend on? | `<feature>-proto` (path) | `<feature>-proto` (crates.io) |
-| How is it enabled? | cargo feature on the facade | direct dep + manual wiring in the binary |
+| Where does the source live? | `features/<feature>/src/<x>.rs` | Wherever the author wants |
+| What does it depend on? | the contract in the same crate | `<feature>` with default features (crates.io or git) |
+| How is it enabled? | cargo feature on the feature crate | direct dep + manual wiring in the binary |
 | Who maintains the version? | This project's git history | The author, via crates.io semver |
 | Can it be added without a fork? | No — needs a PR | Yes — `cargo add` and wire it in |
 
-The contract crate (`<feature>-proto`) is the boundary that makes the
+The contract (the feature crate's default feature set) is the boundary that makes the
 difference invisible to the running code. Both paths produce a struct
-that implements the same `#[vox::service]` trait; the vox dispatcher
+that implements the same `#[architect::service]` trait; the vox router
 takes either one and serves it on the same WebSocket.
 
 ## How to design a contract that supports both
 
 Two rules that have to hold for external impls to be possible at all:
 
-**1. `<feature>-proto` must publish without `server` features active.**
+**1. The feature crate's default feature set must build without backend flags.**
 
 If the trait declaration depends on SeaORM or any other server-side
-machinery, external impls inherit that constraint. The proto crate
-should be wasm-clean by default (which architect's `Entity` derive
+machinery, external impls inherit that constraint. The default
+feature set is wasm-clean (which architect's `Entity` derive
 already enforces) so a third party can implement the trait against
 a Redis backend or a remote HTTP API without pulling in a SQL
 dependency they don't want.
 
-**2. The facade is optional, not required.**
+**2. Backend flags are optional, not required.**
 
-`<feature>` (the facade) is a convenience for first-party in-tree
-selection. Third parties should be able to skip it entirely and
-depend only on `<feature>-proto`. The example app's facade is fine
-for first-party builds; consumers who pull in external impls just
-won't use it.
+The in-tree backend flags are a convenience for first-party builds.
+Third parties depend on the feature crate with
+`default-features = false` and no backend flag, and bring their own.
 
 ## Dependency injection: repo *and* service
 
@@ -174,7 +156,7 @@ independently:
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────┐
-│  <feature>-proto declares two traits + the wire types               │
+│  <feature> (default features) declares two traits + the wire types  │
 │                                                                      │
 │    pub trait <T>Repo     { async fn get/list/create/update/delete } │
 │    pub trait <T>Service  { async fn search/duplicate/...           }│
@@ -195,11 +177,11 @@ independently:
 Concrete consequences:
 
 - **A third party can replace the architect-emitted SeaORM repo.**
-  Disable `architect/server-seaorm` on the proto crate and the
+  Leave `architect/server-seaorm` off the contract and the
   derive never compiles in the SeaORM bridge. Write your own struct
   implementing `<T>Repo` against sqlx/postgres/redis/whatever.
 - **A third party can replace the service.** `<T>Service` is a
-  hand-written `#[vox::service]` trait — anyone can write a
+  hand-written `#[architect::service]` trait — anyone can write a
   different impl with different business rules, mount it on the
   same dispatcher.
 - **A binary picks one of each.** No fixed coupling between
@@ -234,10 +216,9 @@ architect = { ..., features = ["vox", "server-axum"] }
 architect = { ..., features = ["full"] }
 ```
 
-Feature crates (e.g. `example-proto`, `example`) carry their own
-`full` features that bundle whatever subset is meaningful for that
-layer. `example-proto/full` = `vox + server`. `example/full` =
-`backend-db + backend-memory + example-proto/full`.
+A feature crate maps its own flags onto these: `vox` turns on
+`architect/vox`, a `db` backend turns on `architect/server-seaorm`, and
+the default set turns on neither.
 
 ## The working example
 
