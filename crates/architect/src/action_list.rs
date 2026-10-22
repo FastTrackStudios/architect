@@ -1050,7 +1050,8 @@ fn probe(entry: &Entry, args: &[u8]) -> Result<(), ActionError> {
     admit_args(entry, args)?;
     match &entry.run {
         Run::Sync(handler) => handler(args).map(drop),
-        Run::Async(handler) => handler(args).map(drop),
+        // Built, never polled: dropping it does nothing it would.
+        Run::Async(handler) => handler(args).map(|_unpolled| ()),
     }
 }
 

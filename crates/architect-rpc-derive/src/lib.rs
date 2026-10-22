@@ -677,7 +677,7 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
             &subscriptions,
             ctx,
             args.path.as_deref(),
-            args.actions.as_ref(),
+            args.actions.as_ref().map(Option::as_deref),
         )
     } else {
         quote! {}
@@ -2977,15 +2977,18 @@ fn display_name(method: &str) -> String {
 /// A method's doc comment as one line of text.
 fn doc_text(docs: &[&syn::Attribute]) -> String {
     docs.iter()
-        .filter_map(|a| match &a.meta {
-            syn::Meta::NameValue(nv) => match &nv.value {
-                syn::Expr::Lit(syn::ExprLit {
-                    lit: syn::Lit::Str(s),
-                    ..
-                }) => Some(s.value().trim().to_owned()),
-                _ => None,
-            },
-            _ => None,
+        .filter_map(|a| {
+            let syn::Meta::NameValue(nv) = &a.meta else {
+                return None;
+            };
+            let syn::Expr::Lit(syn::ExprLit {
+                lit: syn::Lit::Str(s),
+                ..
+            }) = &nv.value
+            else {
+                return None;
+            };
+            Some(s.value().trim().to_owned())
         })
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()
@@ -3072,15 +3075,13 @@ fn emit_http_block(
     subs: &[Subscription],
     ctx: Option<&Type>,
     path: Option<&str>,
-    actions: Option<&Option<String>>,
+    actions: Option<Option<&str>>,
 ) -> TokenStream2 {
     if matches!(shape, Shape::Empty) || ctx.is_some() {
         return quote! {};
     }
-    let action_ns = actions.map(|ns| {
-        ns.clone()
-            .unwrap_or_else(|| action_namespace(&trait_name.to_string()))
-    });
+    let action_ns = actions
+        .map(|ns| ns.map_or_else(|| action_namespace(&trait_name.to_string()), str::to_owned));
     let mut action_metas = Vec::new();
     let mut action_regs = Vec::new();
     let mut action_ids = Vec::new();

@@ -30,7 +30,7 @@ async fn rpc(server: &Server, method: &str, params: &Value) -> Value {
     serde_json::from_str(&reply).expect("json")
 }
 
-async fn call(server: &Server, tool: &str, arguments: Value) -> (bool, Value) {
+async fn call(server: &Server, tool: &str, arguments: &Value) -> (bool, Value) {
     let reply = rpc(
         server,
         "tools/call",
@@ -104,7 +104,7 @@ async fn greet_over_mcp_is_greet_over_http() {
     assert_eq!(greet["annotations"]["readOnlyHint"], false);
 
     let over_http = http.greet("cody".into()).await.expect("greeted over HTTP");
-    let (failed, over_mcp) = call(&server, "greet", json!({"name": "cody"})).await;
+    let (failed, over_mcp) = call(&server, "greet", &json!({"name": "cody"})).await;
     assert!(!failed);
     assert_eq!(over_mcp, json!(over_http));
     assert_eq!(over_mcp, json!("hello cody"));
@@ -114,7 +114,7 @@ async fn greet_over_mcp_is_greet_over_http() {
         .await
         .map_err(architect::ClientError::into_app);
     assert_eq!(refused, Err(GreetError::Unknown("nobody".into())));
-    let (failed, error) = call(&server, "greet", json!({"name": "nobody"})).await;
+    let (failed, error) = call(&server, "greet", &json!({"name": "nobody"})).await;
     assert!(failed);
     assert_eq!(
         error["error"],
@@ -122,7 +122,7 @@ async fn greet_over_mcp_is_greet_over_http() {
     );
 
     // One backend behind both faces: each saw the other's greeting.
-    let (_, count) = call(&server, "count", json!({})).await;
+    let (_, count) = call(&server, "count", &json!({})).await;
     assert_eq!(count, json!(2));
     assert_eq!(http.count().await.expect("counted"), 2);
 }
