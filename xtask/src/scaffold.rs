@@ -108,7 +108,7 @@ layer = "L4"
         at = at.saturating_sub(1);
     }
     let mut out: Vec<String> = lines.iter().map(ToString::to_string).collect();
-    out.insert(at, format!("{rows}"));
+    out.insert(at, rows);
     Ok(join_lines(&out, table))
 }
 
