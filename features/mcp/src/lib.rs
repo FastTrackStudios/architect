@@ -63,6 +63,11 @@
 //! its own MCP endpoint and merges these tools into a larger catalog uses
 //! the per-tool API instead of JSON-RPC text: [`Server::tools_for`] lists
 //! them, [`Server::call_tool`] runs one.
+//!
+//! **Errors.** A tool that fails answers `isError: true` with a JSON
+//! object (`{"error": …}`, and `takes` for bad arguments) by default;
+//! [`Server::with_errors`]`(`[`ErrorStyle::Text`]`)` answers with the
+//! message as plain text instead.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -125,6 +130,19 @@ pub enum Tools {
     Both,
 }
 
+/// How a [`Server`] tells a model that a tool failed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ErrorStyle {
+    /// A JSON object: `{"error": "…"}`, with `takes` (the arguments'
+    /// schema) for bad arguments and `disabled: true` for a disabled
+    /// action.
+    #[default]
+    Json,
+    /// The message as plain text (`bad arguments: … It takes: {schema}`),
+    /// what agents prompted against hand-written tools expect.
+    Text,
+}
+
 /// Why [`Server::call_tool`] did not run a tool: what `tools/call`
 /// answers as a JSON-RPC error. A tool that ran and failed is not this:
 /// it is a result with `isError: true`.
@@ -167,6 +185,7 @@ pub struct Server {
     tools: Tools,
     /// Action id → tool name, where it is not the id in lower case.
     tool_names: BTreeMap<String, String>,
+    errors: ErrorStyle,
 }
 
 impl Server {
@@ -181,7 +200,16 @@ impl Server {
             principal: Principal::Anonymous,
             tools: Tools::Generic,
             tool_names: BTreeMap::new(),
+            errors: ErrorStyle::Json,
         }
+    }
+
+    /// How a failed tool is told to the model ([`ErrorStyle::Json`]
+    /// unless set).
+    #[must_use]
+    pub const fn with_errors(mut self, errors: ErrorStyle) -> Self {
+        self.errors = errors;
+        self
     }
 
     /// Which tools it offers ([`Tools::Generic`] unless set).
@@ -454,7 +482,8 @@ impl Server {
     /// Run tool `name` with `arguments` for `caller` (made as the
     /// server's principal when it names none), as `tools/call` does: the
     /// MCP result (`content`, `isError`) to send back. A tool that ran and
-    /// failed is `Ok`, with `isError: true`.
+    /// failed is `Ok`, with `isError: true`, in the server's
+    /// [`ErrorStyle`].
     ///
     /// # Errors
     ///
@@ -488,7 +517,7 @@ impl Server {
             };
             return Ok(match self.run_one(&caller, &info.id, args.as_ref()).await {
                 Ok(value) => text_result(&value, false),
-                Err(error) => text_result(&failure_json(&error), true),
+                Err(error) => self.failure_result(&error),
             });
         };
         // An argument the tool does not take is a mistake to say, not to
@@ -513,16 +542,21 @@ impl Server {
                 .and_then(|id| self.list.info_for(who, id))
             {
                 Some(info) => text_result(&detail(&info), false),
-                None => text_result(
-                    &json!({"error": "no such action — find it with `actions`"}),
-                    true,
-                ),
+                None => match self.errors {
+                    ErrorStyle::Json => text_result(
+                        &json!({"error": "no such action — find it with `actions`"}),
+                        true,
+                    ),
+                    ErrorStyle::Text => {
+                        content_result("no such action — find it with `actions`".to_owned(), true)
+                    }
+                },
             },
             "run" => {
                 let id = args.get("id").and_then(Value::as_str).unwrap_or_default();
                 match self.run_one(&caller, id, args.get("args")).await {
                     Ok(value) => text_result(&value, false),
-                    Err(error) => text_result(&failure_json(&error), true),
+                    Err(error) => self.failure_result(&error),
                 }
             }
             "batch" => {
@@ -590,6 +624,23 @@ impl Server {
         Ok(serde_json::from_slice(&out).unwrap_or(Value::Null))
     }
 
+    /// What went wrong, as the server tells it: a JSON object, or the
+    /// message as a JSON string ([`ErrorStyle::Text`]).
+    fn failure(&self, error: &ActionError) -> Value {
+        match self.errors {
+            ErrorStyle::Json => failure_json(error),
+            ErrorStyle::Text => Value::String(failure_text(error)),
+        }
+    }
+
+    /// A tool result saying what went wrong, in the server's style.
+    fn failure_result(&self, error: &ActionError) -> Value {
+        match self.errors {
+            ErrorStyle::Json => text_result(&failure_json(error), true),
+            ErrorStyle::Text => content_result(failure_text(error), true),
+        }
+    }
+
     /// Each step runs as `caller`, through the same door as `run` — a
     /// step is authorized on its own. Not atomic: what ran stays done.
     async fn batch(&self, caller: &ActionCaller, args: &Value) -> (Value, bool) {
@@ -625,7 +676,7 @@ impl Server {
                 }
                 Err(error) => {
                     failed = true;
-                    let error = failure_json(&error);
+                    let error = self.failure(&error);
                     results.push(json!({"step": i, "id": id, "ok": false, "error": error}));
                     if stop {
                         break;
@@ -836,8 +887,11 @@ fn named_tool(tool: &str, info: &ActionInfo) -> Value {
 /// arguments and `disabled` for a disabled action.
 fn failure_json(error: &ActionError) -> Value {
     match error {
-        ActionError::Unknown(id) | ActionError::Duplicate(id) => json!({
+        ActionError::Unknown(id) => json!({
             "error": format!("no action {id} — find it with `actions`"),
+        }),
+        ActionError::Duplicate(id) => json!({
+            "error": format!("{id} is registered more than once"),
         }),
         ActionError::BadArgs {
             message, expected, ..
@@ -854,9 +908,32 @@ fn failure_json(error: &ActionError) -> Value {
     }
 }
 
+/// What went wrong, as plain text: a failed handler's own message as it
+/// is; the rest as [`failure_json`]'s `error`, bad arguments followed by
+/// the schema they should match.
+fn failure_text(error: &ActionError) -> String {
+    match error {
+        ActionError::Failed { message, .. } => message.clone(),
+        ActionError::BadArgs {
+            message,
+            expected: Some(schema),
+            ..
+        } => format!("bad arguments: {message}. It takes: {schema}"),
+        other => failure_json(other)
+            .get("error")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+    }
+}
+
 /// A tool's result: `value` as JSON text, cut to [`MAX_TEXT`].
 fn text_result(value: &Value, is_error: bool) -> Value {
-    let mut text = value.to_string();
+    content_result(value.to_string(), is_error)
+}
+
+/// A tool's result: `text` as it is, cut to [`MAX_TEXT`].
+fn content_result(mut text: String, is_error: bool) -> Value {
     if text.len() > MAX_TEXT {
         let mut cut = MAX_TEXT;
         while !text.is_char_boundary(cut) {
@@ -930,7 +1007,7 @@ fn event(e: &ActionEvent) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_BATCH_STEPS, Server, ToolError, Tools};
+    use super::{ErrorStyle, MAX_BATCH_STEPS, Server, ToolError, Tools};
     use architect::action::{ActionCaller, ActionList, ActionMeta, Effect, Principal};
     use architect_permissions::{Action, Decision, PermissionEngine, Resource};
     use facet::Facet;
@@ -1458,5 +1535,36 @@ mod tests {
             futures::executor::block_on(generic.call_tool(&caller, "actions", json!({"x": 1}))),
             Err(ToolError::BadParams(_))
         ));
+    }
+
+    /// (#58 item 4) Plain-text errors: a handler's message as it is, bad
+    /// arguments with the schema they should match; JSON stays the
+    /// default.
+    #[test]
+    fn errors_can_be_plain_text() {
+        let caller = ActionCaller::app();
+        let json_style = org_server();
+        let out = futures::executor::block_on(json_style.call_tool(
+            &caller,
+            "drums_hits",
+            json!({"track": "a"}),
+        ))
+        .expect("a tool");
+        assert_eq!(out["content"][0]["text"], r#"{"error":"no track a"}"#);
+
+        let s = org_server().with_errors(ErrorStyle::Text);
+        let out =
+            futures::executor::block_on(s.call_tool(&caller, "drums_hits", json!({"track": "a"})))
+                .expect("a tool");
+        assert_eq!(out["isError"], true);
+        assert_eq!(out["content"][0]["text"], "no track a");
+        let out = futures::executor::block_on(s.call_tool(&caller, "drums_hits", json!({})))
+            .expect("a tool");
+        let message = out["content"][0]["text"].as_str().expect("text");
+        assert!(message.starts_with("bad arguments: "), "{message}");
+        assert!(message.contains("It takes: {"), "{message}");
+        let out = futures::executor::block_on(s.call_tool(&caller, "where_am_i", json!({})))
+            .expect("a tool");
+        assert_eq!(out["content"][0]["text"], "no org to act in");
     }
 }

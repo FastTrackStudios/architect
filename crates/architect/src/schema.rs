@@ -8,10 +8,18 @@
 //!
 //! - a struct is an object of its fields (by their wire name), the ones
 //!   without a default required; a field's doc comment is its
-//!   `description`;
+//!   `description`, beside the field type's own keys
+//!   (`{"type":"string","description":…}`), as a hand-written schema has
+//!   it;
+//! - an `Option<T>` field is described as `T` and left out of `required`:
+//!   leaving it out is how a caller says "none" (`null` is still read);
+//! - a struct marked `#[facet(deny_unknown_fields)]`, whose decoder
+//!   refuses a field it does not have, says so:
+//!   `"additionalProperties": false`. Without it, unknown fields are
+//!   ignored on decode and the schema leaves them open;
 //! - a unit-only enum is a string, one of its variants; an enum with data
 //!   is one of `"Unit"` or `{"Variant": …}` (externally tagged);
-//! - `Option<T>` is `T` or `null`, a list or set an array, a map an object
+//! - any other `Option<T>` is `T` or `null`, a list or set an array, a map an object
 //!   of its values, a pointer (`Box`, `Arc`) what it points to;
 //! - scalars by kind; a scalar facet knows only as opaque (a path, a
 //!   uuid, a timestamp) is a string, which is how facet-json writes them.
@@ -146,7 +154,13 @@ fn write_body(out: &mut String, first: &mut bool, shape: &'static Shape, depth: 
                 }
                 out.push(']');
             }
-            StructKind::Struct => object(out, first, st.fields, depth),
+            StructKind::Struct => {
+                object(out, first, st.fields, depth);
+                if shape.has_deny_unknown_fields_attr() {
+                    key(out, first, "additionalProperties");
+                    out.push_str("false");
+                }
+            }
         },
         Type::User(UserType::Enum(en)) => {
             let unit_only = en.variants.iter().all(|v| v.data.fields.is_empty());
@@ -248,16 +262,7 @@ fn object(out: &mut String, first: &mut bool, fields: &'static [facet::Field], d
         i = i.saturating_add(1);
         string(out, name);
         out.push(':');
-        if field.doc.is_empty() {
-            write_shape(out, field.shape(), depth.saturating_add(1));
-        } else {
-            // The field's doc over the type's: what this one is FOR.
-            out.push_str("{\"description\":");
-            string(out, &doc(field.doc));
-            out.push_str(",\"allOf\":[");
-            write_shape(out, field.shape(), depth.saturating_add(1));
-            out.push_str("]}");
-        }
+        write_field(out, field, depth.saturating_add(1));
         let optional = field.has_default() || matches!(field.shape().def, Def::Option(_));
         if !optional {
             required.push(name);
@@ -275,6 +280,33 @@ fn object(out: &mut String, first: &mut bool, fields: &'static [facet::Field], d
         }
         out.push(']');
     }
+}
+
+/// One field's schema: its type's (an `Option`'s inner type's, the
+/// field being optional anyway), described by the field's doc over the
+/// type's — what this one is FOR — in the same object.
+fn write_field(out: &mut String, field: &'static facet::Field, depth: usize) {
+    if depth > MAX_DEPTH {
+        out.push_str("{}");
+        return;
+    }
+    let shape = match field.shape().def {
+        Def::Option(option) => option.t(),
+        _ => field.shape(),
+    };
+    let doc_lines = if field.doc.is_empty() {
+        shape.doc
+    } else {
+        field.doc
+    };
+    out.push('{');
+    let mut first = true;
+    if !doc_lines.is_empty() {
+        key(out, &mut first, "description");
+        string(out, &doc(doc_lines));
+    }
+    write_body(out, &mut first, shape, depth);
+    out.push('}');
 }
 
 /// `fields` as they are written: a flattened struct's own fields in its
@@ -379,6 +411,28 @@ mod tests {
         from: f64,
     }
 
+    // A call that refuses fields it does not take (no doc: the test reads
+    // the schema whole).
+    #[derive(Facet)]
+    #[facet(deny_unknown_fields)]
+    struct Strict {
+        /// Who to greet.
+        name: Option<String>,
+    }
+
+    /// A struct whose decoder refuses unknown fields says so; a
+    /// documented optional field is its type, flat, beside its doc.
+    #[test]
+    fn a_strict_struct_closes_its_object() {
+        let schema = json_schema(Strict::SHAPE);
+        assert_eq!(
+            schema,
+            "{\"type\":\"object\",\"properties\":{\"name\":{\"description\":\"Who to greet.\",\"type\":\"string\"}},\"additionalProperties\":false}"
+        );
+        assert!(facet_json::from_str::<Strict>(r#"{"nme":"a"}"#).is_err());
+        assert!(facet_json::from_str::<Strict>(r#"{"name":null}"#).is_ok());
+    }
+
     /// A flattened struct's fields are the call's own, documented, and
     /// the struct itself is no field.
     #[test]
@@ -411,7 +465,15 @@ mod tests {
             "{schema}"
         );
         assert!(
-            schema.contains("\"anyOf\":[{\"type\":\"integer\",\"minimum\":0},{\"type\":\"null\"}]"),
+            schema.contains(
+                "\"limit\":{\"description\":\"How many at most.\",\"type\":\"integer\",\"minimum\":0}"
+            ),
+            "{schema}"
+        );
+        assert!(!schema.contains("allOf"), "{schema}");
+        assert!(!schema.contains("anyOf"), "{schema}");
+        assert!(
+            !schema.contains("\"additionalProperties\":false}"),
             "{schema}"
         );
         assert!(schema.contains("\"enum\":[\"Low\",\"High\"]"), "{schema}");
