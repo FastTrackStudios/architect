@@ -30,8 +30,9 @@ async fn get(app: Router, path: &str) -> (StatusCode, Option<String>, Option<Str
         .await
         .unwrap();
     let status = res.status();
+    let headers = res.headers().clone();
     let header_str = |name| {
-        res.headers()
+        headers
             .get(name)
             .map(|v: &header::HeaderValue| v.to_str().unwrap().to_owned())
     };

@@ -171,8 +171,10 @@ pub enum WebBundle {
     Embedded(&'static include_dir::Dir<'static>),
 }
 
-/// A headless engine host. Serves a vox [`LayerRouter`] over axum with a
-/// `/vox` WebSocket + `/health` + `/version.json` routes, optionally over iroh p2p, and
+/// A headless engine host.
+///
+/// Serves a vox [`LayerRouter`] over axum with a `/vox` WebSocket +
+/// `/health` + `/version.json` routes, optionally over iroh p2p, and
 /// optionally with a static SPA bundle as the HTTP fallback.
 pub struct EngineHost {
     router: LayerRouter,
