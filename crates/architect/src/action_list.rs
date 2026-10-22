@@ -28,6 +28,14 @@
 //!   the thread it was called on. A `#[architect::service(actions)]` trait
 //!   puts every method on the list with one call
 //!   (`http::actions::register(backend, &list)`).
+//! - **Who is calling**: [`ActionList::register_with`] and
+//!   [`ActionList::register_async_with`] take a handler that is handed the
+//!   [`ActionCaller`] too — the principal the call is made as, and a
+//!   context value the door put there (the org it acts in, a session).
+//!   [`ActionList::run_json_with`] / [`ActionList::run_json_async_with`]
+//!   are the doors that pass one; every other door passes
+//!   [`ActionCaller::app`] (or the principal of `run_json_as`), with no
+//!   context.
 //! - **Live updates**: every run, and every [`ActionList::changed`] the
 //!   app reports (a project opened, a track renamed), is an
 //!   [`ActionEvent`] with a sequence number. [`ActionList::events_since`]
@@ -63,6 +71,7 @@
 //! }
 //! ```
 
+use std::any::Any;
 use std::collections::{BTreeMap, VecDeque, btree_map};
 use std::future::Future;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -219,6 +228,101 @@ pub type ActionFuture = futures::future::LocalBoxFuture<'static, Result<Vec<u8>,
 /// the future it gives back.
 pub type AsyncHandler = Arc<dyn Fn(&[u8]) -> Result<ActionFuture, ActionError> + Send + Sync>;
 
+/// A handler that is handed who is calling, once its types are erased:
+/// what [`ActionList::register_with`] stores.
+type CallerHandler =
+    Arc<dyn Fn(&ActionCaller, &[u8]) -> Result<Vec<u8>, ActionError> + Send + Sync>;
+
+/// An async handler that is handed who is calling, once its types are
+/// erased: what [`ActionList::register_async_with`] stores.
+type CallerAsyncHandler =
+    Arc<dyn Fn(&ActionCaller, &[u8]) -> Result<ActionFuture, ActionError> + Send + Sync>;
+
+/// Who runs an action, and what it runs in: what a handler registered
+/// with [`ActionList::register_with`] is handed with its arguments.
+///
+/// - [`Self::principal`]: who the call is made as. `None` is the app
+///   itself ([`Self::app`]) — trusted, so the list's authorizer is not
+///   asked; `Some` is checked against it before the handler runs.
+/// - [`Self::context`]: one value the door that ran the call put there
+///   (the org a multi-tenant server acts in, the caller's session), read
+///   back by its type. Absent unless set: a handler that needs it says
+///   so with an error, as it must when run by a key, a menu or
+///   [`ActionList::probe_hostile_args`], which pass none.
+///
+/// Cheap to clone (the context is shared), so an async handler clones it
+/// into the future it gives back.
+#[derive(Clone)]
+pub struct ActionCaller {
+    principal: Option<Principal>,
+    context: Option<Arc<dyn Any + Send + Sync>>,
+}
+
+impl ActionCaller {
+    /// The app itself — a key, a menu, its own code: trusted, with no
+    /// context. What [`ActionList::run_json`] runs as.
+    #[must_use]
+    pub const fn app() -> Self {
+        Self {
+            principal: None,
+            context: None,
+        }
+    }
+
+    /// A caller from outside (a model, a peer), checked against the
+    /// list's authorizer. What [`ActionList::run_json_as`] runs as.
+    #[must_use]
+    pub const fn new(principal: Principal) -> Self {
+        Self {
+            principal: Some(principal),
+            context: None,
+        }
+    }
+
+    /// This caller, made as `principal` instead.
+    #[must_use]
+    pub fn with_principal(mut self, principal: Principal) -> Self {
+        self.principal = Some(principal);
+        self
+    }
+
+    /// This caller, carrying `context` for the handler to read with
+    /// [`Self::context`]. One value per call: a second replaces the first,
+    /// so put what a call needs in one type of the app's own.
+    #[must_use]
+    pub fn with_context<T: Any + Send + Sync>(mut self, context: T) -> Self {
+        self.context = Some(Arc::new(context));
+        self
+    }
+
+    /// Who the call is made as; `None` for the app itself.
+    #[must_use]
+    pub const fn principal(&self) -> Option<&Principal> {
+        self.principal.as_ref()
+    }
+
+    /// The context the door put on the call, when it is a `T`.
+    #[must_use]
+    pub fn context<T: Any>(&self) -> Option<&T> {
+        self.context.as_deref()?.downcast_ref::<T>()
+    }
+}
+
+impl From<Principal> for ActionCaller {
+    fn from(principal: Principal) -> Self {
+        Self::new(principal)
+    }
+}
+
+impl std::fmt::Debug for ActionCaller {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ActionCaller")
+            .field("principal", &self.principal)
+            .field("has_context", &self.context.is_some())
+            .finish()
+    }
+}
+
 /// Whether an action can run right now: `Err` says why not.
 pub type EnabledCheck = Arc<dyn Fn() -> Result<(), String> + Send + Sync>;
 
@@ -261,8 +365,8 @@ struct Entry {
 /// How an action does its work.
 #[derive(Clone)]
 enum Run {
-    Sync(Handler),
-    Async(AsyncHandler),
+    Sync(CallerHandler),
+    Async(CallerAsyncHandler),
 }
 
 struct Events {
@@ -335,27 +439,7 @@ impl ActionList {
         R: Facet<'static>,
         F: Fn(A) -> Result<R, String> + Send + Sync + 'static,
     {
-        let id = meta.id;
-        let takes = !is_unit(A::SHAPE);
-        let handler: Handler = Arc::new(move |args: &[u8]| {
-            let decoded: A = decode_args::<A>(id, takes, args)?;
-            let out = run(decoded).map_err(|message| ActionError::Failed {
-                id: id.to_owned(),
-                message,
-            })?;
-            facet_json::to_vec(&out).map_err(|e| ActionError::Failed {
-                id: id.to_owned(),
-                message: format!("its result did not encode: {e}"),
-            })
-        });
-        self.insert(Entry {
-            meta,
-            effect,
-            params: takes.then_some(A::SHAPE),
-            result: (!is_unit(R::SHAPE)).then_some(R::SHAPE),
-            run: Run::Sync(handler),
-            enabled: None,
-        })
+        self.register_with(meta, effect, move |_: &ActionCaller, args: A| run(args))
     }
 
     /// Add an action that takes `A` and answers, in time, with `R` — a
@@ -378,20 +462,79 @@ impl ActionList {
         F: Fn(A) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<R, String>> + crate::MaybeSend + 'static,
     {
+        self.register_async_with(meta, effect, move |_: &ActionCaller, args: A| run(args))
+    }
+
+    /// [`Self::register`] for a handler that is handed who is calling:
+    /// the [`ActionCaller`] the door passed (its principal and context)
+    /// with the decoded `A`.
+    ///
+    /// ```ignore
+    /// list.register_with(&LIST, Effect::ReadOnly, |cx: &ActionCaller, args: ListArgs| {
+    ///     let org = cx.context::<Org>().ok_or("no org to act in")?;
+    ///     Ok(org.list(args))
+    /// })?;
+    /// list.run_json_with(&ActionCaller::new(who).with_context(org), "TASKS_LIST", b"{}")?;
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::register`].
+    pub fn register_with<A, R, F>(
+        &self,
+        meta: &'static ActionMeta,
+        effect: Effect,
+        run: F,
+    ) -> Result<(), ActionError>
+    where
+        A: Facet<'static>,
+        R: Facet<'static>,
+        F: Fn(&ActionCaller, A) -> Result<R, String> + Send + Sync + 'static,
+    {
         let id = meta.id;
         let takes = !is_unit(A::SHAPE);
-        let handler: AsyncHandler = Arc::new(move |args: &[u8]| {
+        let handler: CallerHandler = Arc::new(move |caller: &ActionCaller, args: &[u8]| {
             let decoded: A = decode_args::<A>(id, takes, args)?;
-            let work = run(decoded);
+            let out = run(caller, decoded).map_err(|message| failed(id, message))?;
+            encode_output(id, &out)
+        });
+        self.insert(Entry {
+            meta,
+            effect,
+            params: takes.then_some(A::SHAPE),
+            result: (!is_unit(R::SHAPE)).then_some(R::SHAPE),
+            run: Run::Sync(handler),
+            enabled: None,
+        })
+    }
+
+    /// [`Self::register_async`] for a handler that is handed who is
+    /// calling. The caller is lent while the future is built: clone what
+    /// the work needs (the context's `Arc`s) into it.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::register`].
+    pub fn register_async_with<A, R, F, Fut>(
+        &self,
+        meta: &'static ActionMeta,
+        effect: Effect,
+        run: F,
+    ) -> Result<(), ActionError>
+    where
+        A: Facet<'static>,
+        R: Facet<'static>,
+        F: Fn(&ActionCaller, A) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<R, String>> + crate::MaybeSend + 'static,
+    {
+        let id = meta.id;
+        let takes = !is_unit(A::SHAPE);
+        let handler: CallerAsyncHandler = Arc::new(move |caller: &ActionCaller, args: &[u8]| {
+            let decoded: A = decode_args::<A>(id, takes, args)?;
+            let work = run(caller, decoded);
             let future: ActionFuture = Box::pin(async move {
-                let out = work.await.map_err(|message| ActionError::Failed {
-                    id: id.to_owned(),
-                    message,
-                })?;
-                facet_json::to_vec(&out).map_err(|e| ActionError::Failed {
-                    id: id.to_owned(),
-                    message: format!("its result did not encode: {e}"),
-                })
+                let out = work.await.map_err(|message| failed(id, message))?;
+                encode_output(id, &out)
             });
             Ok(future)
         });
@@ -425,7 +568,7 @@ impl ActionList {
             effect,
             params,
             result,
-            run: Run::Sync(handler),
+            run: Run::Sync(Arc::new(move |_: &ActionCaller, args: &[u8]| handler(args))),
             enabled: None,
         })
     }
@@ -449,7 +592,7 @@ impl ActionList {
             effect,
             params,
             result,
-            run: Run::Async(handler),
+            run: Run::Async(Arc::new(move |_: &ActionCaller, args: &[u8]| handler(args))),
             enabled: None,
         })
     }
@@ -610,7 +753,7 @@ impl ActionList {
     /// No such action, it is disabled, arguments it cannot take, or it
     /// failed (or panicked).
     pub fn run_json(&self, id: &str, args: &[u8]) -> Result<Vec<u8>, ActionError> {
-        self.run_checked(None, id, args)
+        self.run_checked(&ActionCaller::app(), id, args)
     }
 
     /// Run `id` for `who`: as [`Self::run_json`], once the list's
@@ -625,7 +768,24 @@ impl ActionList {
         id: &str,
         args: &[u8],
     ) -> Result<Vec<u8>, ActionError> {
-        self.run_checked(Some(who), id, args)
+        self.run_checked(&ActionCaller::new(who.clone()), id, args)
+    }
+
+    /// Run `id` for `caller`, handing it to a handler registered with
+    /// [`Self::register_with`]. The authorizer is asked when the caller
+    /// has a principal ([`ActionCaller::new`]); [`ActionCaller::app`] with
+    /// a context is the app's own trusted door, as [`Self::run_json`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::run_json_as`].
+    pub fn run_json_with(
+        &self,
+        caller: &ActionCaller,
+        id: &str,
+        args: &[u8],
+    ) -> Result<Vec<u8>, ActionError> {
+        self.run_checked(caller, id, args)
     }
 
     /// Run `id` with `args`, awaiting it when it is async — the door for
@@ -637,7 +797,7 @@ impl ActionList {
     ///
     /// As [`Self::run_json`].
     pub async fn run_json_async(&self, id: &str, args: &[u8]) -> Result<Vec<u8>, ActionError> {
-        self.run_async_checked(None, id, args).await
+        self.run_async_checked(&ActionCaller::app(), id, args).await
     }
 
     /// [`Self::run_json_async`] for `who`, once the authorizer lets it.
@@ -651,7 +811,22 @@ impl ActionList {
         id: &str,
         args: &[u8],
     ) -> Result<Vec<u8>, ActionError> {
-        self.run_async_checked(Some(who), id, args).await
+        self.run_async_checked(&ActionCaller::new(who.clone()), id, args)
+            .await
+    }
+
+    /// [`Self::run_json_async`] for `caller`, as [`Self::run_json_with`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::run_json_as`].
+    pub async fn run_json_async_with(
+        &self,
+        caller: &ActionCaller,
+        id: &str,
+        args: &[u8],
+    ) -> Result<Vec<u8>, ActionError> {
+        self.run_async_checked(caller, id, args).await
     }
 
     /// Whether `id` is an async action — one [`Self::run_json`] refuses.
@@ -662,11 +837,11 @@ impl ActionList {
     }
 
     /// The entry for `id`, once `who` may run it.
-    fn admitted(&self, who: Option<&Principal>, id: &str) -> Result<Entry, ActionError> {
+    fn admitted(&self, caller: &ActionCaller, id: &str) -> Result<Entry, ActionError> {
         let Some(entry) = self.entry(id) else {
             return Err(ActionError::Unknown(id.to_owned()));
         };
-        if let Some(who) = who
+        if let Some(who) = caller.principal()
             && let Decision::Deny { reason } = self.authorize(who, id)
         {
             return Err(ActionError::Denied {
@@ -679,22 +854,22 @@ impl ActionList {
 
     async fn run_async_checked(
         &self,
-        who: Option<&Principal>,
+        caller: &ActionCaller,
         id: &str,
         args: &[u8],
     ) -> Result<Vec<u8>, ActionError> {
         use futures::FutureExt as _;
         use tracing::Instrument as _;
-        let entry = self.admitted(who, id)?;
+        let entry = self.admitted(caller, id)?;
         let Run::Async(handler) = &entry.run else {
-            return self.run_checked(who, id, args);
+            return self.run_checked(caller, id, args);
         };
         let args = normalized(&entry, args);
         let span = tracing::info_span!("action", action.id = id, action.ok = tracing::field::Empty);
         let started = span.in_scope(|| match enabled_state(entry.enabled.as_ref()) {
             Ok(()) => guarded_start(id, || {
                 admit_args(&entry, args)?;
-                handler(args)
+                handler(caller, args)
             }),
             Err(reason) => Err(ActionError::Disabled {
                 id: id.to_owned(),
@@ -720,11 +895,11 @@ impl ActionList {
 
     fn run_checked(
         &self,
-        who: Option<&Principal>,
+        caller: &ActionCaller,
         id: &str,
         args: &[u8],
     ) -> Result<Vec<u8>, ActionError> {
-        let entry = self.admitted(who, id)?;
+        let entry = self.admitted(caller, id)?;
         let args = normalized(&entry, args);
         // One span per action run: the action's wide event. What it does
         // marks its stages on it (`architect_telemetry::timing`), so where
@@ -732,7 +907,7 @@ impl ActionList {
         // menu, a model.
         let span = tracing::info_span!("action", action.id = id, action.ok = tracing::field::Empty);
         let out = span.in_scope(|| match enabled_state(entry.enabled.as_ref()) {
-            Ok(()) => guarded(id, || call(&entry, args)),
+            Ok(()) => guarded(id, || call(&entry, caller, args)),
             Err(reason) => Err(ActionError::Disabled {
                 id: id.to_owned(),
                 reason,
@@ -933,7 +1108,7 @@ impl ActionBackend for ActionList {
         handler: Arc<dyn Fn() -> Result<(), String> + Send + Sync>,
     ) {
         let id = meta.id;
-        let erased: Handler = Arc::new(move |_args: &[u8]| {
+        let erased: CallerHandler = Arc::new(move |_: &ActionCaller, _args: &[u8]| {
             handler().map_err(|message| ActionError::Failed {
                 id: id.to_owned(),
                 message,
@@ -1033,10 +1208,10 @@ fn admit_args(entry: &Entry, args: &[u8]) -> Result<(), ActionError> {
 
 /// Hand admitted `args` to a sync action's handler; an async one is
 /// refused, since running it here would block the caller's thread.
-fn call(entry: &Entry, args: &[u8]) -> Result<Vec<u8>, ActionError> {
+fn call(entry: &Entry, caller: &ActionCaller, args: &[u8]) -> Result<Vec<u8>, ActionError> {
     admit_args(entry, args)?;
     match &entry.run {
-        Run::Sync(handler) => handler(args),
+        Run::Sync(handler) => handler(caller, args),
         Run::Async(_) => Err(ActionError::Failed {
             id: entry.meta.id.to_owned(),
             message: "it is async: run it with run_json_async".to_owned(),
@@ -1045,14 +1220,29 @@ fn call(entry: &Entry, args: &[u8]) -> Result<Vec<u8>, ActionError> {
 }
 
 /// What [`ActionList::probe_hostile_args`] does to one action: run a sync
-/// one; decode for an async one and drop its future unpolled.
+/// one; decode for an async one and drop its future unpolled. Run as the
+/// app, with no context.
 fn probe(entry: &Entry, args: &[u8]) -> Result<(), ActionError> {
     admit_args(entry, args)?;
+    let caller = ActionCaller::app();
     match &entry.run {
-        Run::Sync(handler) => handler(args).map(drop),
+        Run::Sync(handler) => handler(&caller, args).map(drop),
         // Built, never polled: dropping it does nothing it would.
-        Run::Async(handler) => handler(args).map(|_unpolled| ()),
+        Run::Async(handler) => handler(&caller, args).map(|_unpolled| ()),
     }
+}
+
+/// A handler's `Err(message)`, as the failure it is.
+fn failed(id: &str, message: String) -> ActionError {
+    ActionError::Failed {
+        id: id.to_owned(),
+        message,
+    }
+}
+
+/// A handler's answer as JSON, or the failure to encode it.
+fn encode_output<R: Facet<'static>>(id: &str, out: &R) -> Result<Vec<u8>, ActionError> {
+    facet_json::to_vec(out).map_err(|e| failed(id, format!("its result did not encode: {e}")))
 }
 
 /// A caught panic, as the failure it is answered with.
@@ -1312,7 +1502,7 @@ fn is_unit(shape: &'static Shape) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{ActionError, ActionList, Effect, EventKind};
+    use super::{ActionCaller, ActionError, ActionList, Effect, EventKind};
     use crate::action::{ActionBackend, ActionMeta};
     use architect_permissions::{
         Action, Decision, PermissionEngine, Principal, Resource, Rule, ScopeEngine,
@@ -1818,5 +2008,83 @@ mod tests {
         list.changed("transport", "play");
         let (woken, _) = waiter.join().expect("joined");
         assert_eq!(woken.len(), 1, "woken by the next event, not the timeout");
+    }
+
+    /// The org a call acts in: what a multi-tenant door puts on the call.
+    struct Org(&'static str);
+
+    static WHERE: ActionMeta = meta("ORG_WHERE");
+    static LATER: ActionMeta = meta("ORG_LATER");
+
+    /// An action that answers with the org and the caller's name, or
+    /// refuses when the door gave it no org.
+    fn caller_aware(list: &ActionList) {
+        list.register_with(&WHERE, Effect::ReadOnly, |cx: &ActionCaller, q: Query| {
+            let org = cx.context::<Org>().ok_or("no org to act in")?;
+            let who = cx
+                .principal()
+                .map_or_else(|| "app".to_owned(), Principal::describe);
+            Ok(format!("{} in {} for {who}", q.track, org.0))
+        })
+        .expect("registered");
+        list.register_async_with(&LATER, Effect::ReadOnly, |cx: &ActionCaller, (): ()| {
+            let cx = cx.clone();
+            async move {
+                let org = cx.context::<Org>().ok_or("no org to act in")?;
+                Ok(org.0.to_owned())
+            }
+        })
+        .expect("registered");
+    }
+
+    /// (#58 item 1) A handler registered `_with` is handed the caller the
+    /// door passed — its context and principal — sync and async; the
+    /// principal is authorized first; the other doors pass the app with
+    /// no context, which the handler refuses; the probe runs it sound.
+    #[test]
+    fn a_handler_sees_who_is_calling() {
+        let list = ActionList::new();
+        caller_aware(&list);
+        let model = Principal::User {
+            user_id: "model".into(),
+        };
+        let as_model = ActionCaller::new(model.clone()).with_context(Org("acme"));
+        let out = list
+            .run_json_with(&as_model, "ORG_WHERE", br#"{"track":"t"}"#)
+            .expect("ran");
+        assert_eq!(out, br#""t in acme for user:model""#.to_vec());
+        let out = futures::executor::block_on(list.run_json_async_with(
+            &ActionCaller::app().with_context(Org("beta")),
+            "ORG_LATER",
+            b"",
+        ))
+        .expect("ran");
+        assert_eq!(out, br#""beta""#.to_vec());
+
+        assert_eq!(
+            list.run_json("ORG_WHERE", br#"{"track":"t"}"#),
+            Err(ActionError::Failed {
+                id: "ORG_WHERE".into(),
+                message: "no org to act in".into()
+            })
+        );
+        assert!(
+            futures::executor::block_on(list.run_json_async_as(&model, "ORG_LATER", b"")).is_err()
+        );
+
+        list.set_authorizer(DrumsOnly);
+        assert!(matches!(
+            list.run_json_with(&as_model, "ORG_WHERE", br#"{"track":"t"}"#),
+            Err(ActionError::Denied { .. })
+        ));
+        list.run_json_with(
+            &ActionCaller::app().with_context(Org("acme")),
+            "ORG_WHERE",
+            br#"{"track":"t"}"#,
+        )
+        .expect("the app with a context is trusted");
+
+        list.validate().expect("valid");
+        list.probe_hostile_args().expect("sound");
     }
 }

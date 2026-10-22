@@ -55,12 +55,20 @@
 //! actions it may run (`actions`, `describe`, the `actions://list`
 //! resource) and is refused the rest, on `run` and on every `batch` step.
 //! A disabled action is listed with `enabled: false` and why.
+//!
+//! **Who is calling, and in what.** [`Server::handle_with`] takes an
+//! [`ActionCaller`]: its principal (the server's own when it has none) and
+//! a context value of the app's (the org a call acts in), which a handler
+//! registered with `ActionList::register_with` reads. An app that keeps
+//! its own MCP endpoint and merges these tools into a larger catalog uses
+//! the per-tool API instead of JSON-RPC text: [`Server::tools_for`] lists
+//! them, [`Server::call_tool`] runs one.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
 
 use architect::action::{
-    ActionError, ActionEvent, ActionInfo, ActionList, Effect, EventKind, Principal,
+    ActionCaller, ActionError, ActionEvent, ActionInfo, ActionList, Effect, EventKind, Principal,
 };
 use serde_json::{Value, json};
 
@@ -115,6 +123,36 @@ pub enum Tools {
     /// Both: the generic five first (a named tool with one of their
     /// names is not listed), then one per action.
     Both,
+}
+
+/// Why [`Server::call_tool`] did not run a tool: what `tools/call`
+/// answers as a JSON-RPC error. A tool that ran and failed is not this:
+/// it is a result with `isError: true`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ToolError {
+    /// No tool has this name (for this caller).
+    NoTool(String),
+    /// The call's arguments are not what the tool takes.
+    BadParams(String),
+}
+
+impl std::fmt::Display for ToolError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoTool(name) => write!(f, "no tool {name}"),
+            Self::BadParams(message) => f.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for ToolError {}
+
+/// Who the server's own calls are made as, when a caller names nobody.
+static ANONYMOUS: Principal = Principal::Anonymous;
+
+/// The principal a call is made as: [`Server::as_model`] always sets one.
+fn principal_of(caller: &ActionCaller) -> &Principal {
+    caller.principal().unwrap_or(&ANONYMOUS)
 }
 
 /// The server: an app's name, what it tells a model on connecting, and
@@ -213,14 +251,30 @@ impl Server {
         futures::executor::block_on(self.handle_as_async(who, message))
     }
 
+    /// One JSON-RPC message in, its reply out, for `caller` — its
+    /// principal (the server's own when it names none: a model is never
+    /// the trusted app) and the context its actions' handlers read
+    /// (`ActionList::register_with`). Blocks as [`Self::handle`] does.
+    #[must_use]
+    pub fn handle_with(&self, caller: &ActionCaller, message: &str) -> Option<String> {
+        futures::executor::block_on(self.handle_with_async(caller, message))
+    }
+
     /// [`Self::handle`], awaiting async actions instead of blocking on
     /// them. A `watch` with a wait still waits on this thread.
     pub async fn handle_async(&self, message: &str) -> Option<String> {
-        self.handle_as_async(&self.principal, message).await
+        self.handle_with_async(&ActionCaller::app(), message).await
     }
 
     /// [`Self::handle_as`], awaiting async actions.
     pub async fn handle_as_async(&self, who: &Principal, message: &str) -> Option<String> {
+        self.handle_with_async(&ActionCaller::new(who.clone()), message)
+            .await
+    }
+
+    /// [`Self::handle_with`], awaiting async actions.
+    pub async fn handle_with_async(&self, caller: &ActionCaller, message: &str) -> Option<String> {
+        let caller = self.as_model(caller);
         let request: Value = match serde_json::from_str(message) {
             Ok(v) => v,
             Err(e) => {
@@ -236,24 +290,45 @@ impl Server {
         let params = request.get("params").cloned().unwrap_or(Value::Null);
         // A notification (no id) is told nothing back.
         let id = id?;
-        let reply = match self.dispatch(who, method, &params).await {
+        let reply = match self.dispatch(&caller, method, &params).await {
             Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
             Err((code, message)) => error_reply(&id, code, &message),
         };
         Some(reply.to_string())
     }
 
+    /// `caller`, made as the server's principal when it names none.
+    fn as_model(&self, caller: &ActionCaller) -> ActionCaller {
+        match caller.principal() {
+            Some(_) => caller.clone(),
+            None => caller.clone().with_principal(self.principal.clone()),
+        }
+    }
+
     async fn dispatch(
         &self,
-        who: &Principal,
+        caller: &ActionCaller,
         method: &str,
         params: &Value,
     ) -> Result<Value, (i64, String)> {
+        let who = principal_of(caller);
         match method {
             "initialize" => Ok(self.initialize(who, params)),
             "ping" => Ok(json!({})),
-            "tools/list" => Ok(json!({ "tools": self.tool_list(who) })),
-            "tools/call" => self.call(who, params).await,
+            "tools/list" => Ok(json!({ "tools": self.tools_for(who) })),
+            "tools/call" => {
+                let name = params
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .ok_or((INVALID_PARAMS, "no tool name".to_owned()))?;
+                let args = params
+                    .get("arguments")
+                    .cloned()
+                    .unwrap_or_else(|| json!({}));
+                self.call_tool(caller, name, args)
+                    .await
+                    .map_err(|e| (INVALID_PARAMS, e.to_string()))
+            }
             "resources/list" => Ok(json!({ "resources": [{
                 "uri": "actions://list",
                 "name": "Action List",
@@ -334,8 +409,11 @@ impl Server {
         })
     }
 
-    /// The tools `who` is offered, as `tools/list` gives them.
-    fn tool_list(&self, who: &Principal) -> Vec<Value> {
+    /// The tools `who` is offered, each as a `tools/list` entry (`name`,
+    /// `description`, `inputSchema`, `annotations`) — for an app that
+    /// merges them into a catalog of its own.
+    #[must_use]
+    pub fn tools_for(&self, who: &Principal) -> Vec<Value> {
         let mut out = match self.tools {
             Tools::Named => Vec::new(),
             Tools::Generic | Tools::Both => match tools() {
@@ -373,34 +451,44 @@ impl Server {
         out
     }
 
-    async fn call(&self, who: &Principal, params: &Value) -> Result<Value, (i64, String)> {
-        let name = params
-            .get("name")
-            .and_then(Value::as_str)
-            .ok_or((INVALID_PARAMS, "no tool name".to_owned()))?;
-        let args = params
-            .get("arguments")
-            .cloned()
-            .unwrap_or_else(|| json!({}));
+    /// Run tool `name` with `arguments` for `caller` (made as the
+    /// server's principal when it names none), as `tools/call` does: the
+    /// MCP result (`content`, `isError`) to send back. A tool that ran and
+    /// failed is `Ok`, with `isError: true`.
+    ///
+    /// # Errors
+    ///
+    /// [`ToolError::NoTool`] when no tool offered to the caller has this
+    /// name; [`ToolError::BadParams`] when a generic tool is passed an
+    /// argument it does not take.
+    pub async fn call_tool(
+        &self,
+        caller: &ActionCaller,
+        name: &str,
+        arguments: Value,
+    ) -> Result<Value, ToolError> {
+        let caller = self.as_model(caller);
+        let who = principal_of(&caller);
+        let args = arguments;
         let generic = match self.tools {
             Tools::Named => None,
             Tools::Generic | Tools::Both => tools_spec().iter().find(|t| t.name == name),
         };
         let Some(spec) = generic else {
             if self.tools == Tools::Generic {
-                return Err((INVALID_PARAMS, format!("no tool {name}")));
+                return Err(ToolError::NoTool(name.to_owned()));
             }
             let Some((_, info)) = self.named(who).into_iter().find(|(tool, _)| tool == name) else {
-                return Err((INVALID_PARAMS, format!("no tool {name}")));
+                return Err(ToolError::NoTool(name.to_owned()));
             };
             let args = if wraps(&info) {
                 args.get("args").cloned()
             } else {
                 Some(args)
             };
-            return Ok(match self.run_one(who, &info.id, args.as_ref()).await {
+            return Ok(match self.run_one(&caller, &info.id, args.as_ref()).await {
                 Ok(value) => text_result(&value, false),
-                Err(error) => text_result(&error, true),
+                Err(error) => text_result(&failure_json(&error), true),
             });
         };
         // An argument the tool does not take is a mistake to say, not to
@@ -411,10 +499,10 @@ impl Server {
                 .filter(|k| !spec.keys.contains(&k.as_str()))
                 .collect();
             if !unknown.is_empty() {
-                return Err((
-                    INVALID_PARAMS,
-                    format!("{name} takes {:?}, not {unknown:?}", spec.keys),
-                ));
+                return Err(ToolError::BadParams(format!(
+                    "{name} takes {:?}, not {unknown:?}",
+                    spec.keys
+                )));
             }
         }
         Ok(match name {
@@ -432,17 +520,17 @@ impl Server {
             },
             "run" => {
                 let id = args.get("id").and_then(Value::as_str).unwrap_or_default();
-                match self.run_one(who, id, args.get("args")).await {
+                match self.run_one(&caller, id, args.get("args")).await {
                     Ok(value) => text_result(&value, false),
-                    Err(error) => text_result(&error, true),
+                    Err(error) => text_result(&failure_json(&error), true),
                 }
             }
             "batch" => {
-                let (value, failed) = self.batch(who, &args).await;
+                let (value, failed) = self.batch(&caller, &args).await;
                 text_result(&value, failed)
             }
             "watch" => text_result(&self.watch(&args), false),
-            _ => return Err((INVALID_PARAMS, format!("no tool {name}"))),
+            _ => return Err(ToolError::NoTool(name.to_owned())),
         })
     }
 
@@ -487,42 +575,24 @@ impl Server {
         json!({ "count": found.len(), "actions": found })
     }
 
-    /// Run one action, its JSON result or what went wrong.
+    /// Run one action as `caller`, its JSON result or what went wrong.
     async fn run_one(
         &self,
-        who: &Principal,
+        caller: &ActionCaller,
         id: &str,
         args: Option<&Value>,
-    ) -> Result<Value, Value> {
+    ) -> Result<Value, ActionError> {
         let bytes = match args {
             None | Some(Value::Null) => Vec::new(),
             Some(v) => v.to_string().into_bytes(),
         };
-        match self.list.run_json_async_as(who, id, &bytes).await {
-            Ok(out) => Ok(serde_json::from_slice(&out).unwrap_or(Value::Null)),
-            Err(ActionError::Unknown(id) | ActionError::Duplicate(id)) => Err(json!({
-                "error": format!("no action {id} — find it with `actions`"),
-            })),
-            Err(ActionError::BadArgs {
-                message, expected, ..
-            }) => Err(json!({
-                "error": format!("bad arguments: {message}"),
-                "takes": expected.and_then(|s| serde_json::from_str::<Value>(&s).ok()),
-            })),
-            Err(ActionError::Failed { message, .. }) => Err(json!({ "error": message })),
-            Err(ActionError::Denied { reason, .. }) => Err(json!({
-                "error": format!("not allowed: {reason}"),
-            })),
-            Err(ActionError::Disabled { reason, .. }) => Err(json!({
-                "error": format!("disabled: {reason}"),
-                "disabled": true,
-            })),
-        }
+        let out = self.list.run_json_async_with(caller, id, &bytes).await?;
+        Ok(serde_json::from_slice(&out).unwrap_or(Value::Null))
     }
 
-    /// Each step runs as `who`, through the same door as `run` — a step
-    /// is authorized on its own. Not atomic: what ran stays done.
-    async fn batch(&self, who: &Principal, args: &Value) -> (Value, bool) {
+    /// Each step runs as `caller`, through the same door as `run` — a
+    /// step is authorized on its own. Not atomic: what ran stays done.
+    async fn batch(&self, caller: &ActionCaller, args: &Value) -> (Value, bool) {
         let stop = args
             .get("stop_on_error")
             .and_then(Value::as_bool)
@@ -549,12 +619,13 @@ impl Server {
         let mut failed = false;
         for (i, step) in steps.iter().enumerate() {
             let id = step.get("id").and_then(Value::as_str).unwrap_or_default();
-            match self.run_one(who, id, step.get("args")).await {
+            match self.run_one(caller, id, step.get("args")).await {
                 Ok(value) => {
                     results.push(json!({"step": i, "id": id, "ok": true, "result": value}))
                 }
                 Err(error) => {
                     failed = true;
+                    let error = failure_json(&error);
                     results.push(json!({"step": i, "id": id, "ok": false, "error": error}));
                     if stop {
                         break;
@@ -761,6 +832,28 @@ fn named_tool(tool: &str, info: &ActionInfo) -> Value {
     })
 }
 
+/// What went wrong, as a JSON object: `error`, with `takes` for bad
+/// arguments and `disabled` for a disabled action.
+fn failure_json(error: &ActionError) -> Value {
+    match error {
+        ActionError::Unknown(id) | ActionError::Duplicate(id) => json!({
+            "error": format!("no action {id} — find it with `actions`"),
+        }),
+        ActionError::BadArgs {
+            message, expected, ..
+        } => json!({
+            "error": format!("bad arguments: {message}"),
+            "takes": expected.as_deref().and_then(|s| serde_json::from_str::<Value>(s).ok()),
+        }),
+        ActionError::Failed { message, .. } => json!({ "error": message }),
+        ActionError::Denied { reason, .. } => json!({ "error": format!("not allowed: {reason}") }),
+        ActionError::Disabled { reason, .. } => json!({
+            "error": format!("disabled: {reason}"),
+            "disabled": true,
+        }),
+    }
+}
+
 /// A tool's result: `value` as JSON text, cut to [`MAX_TEXT`].
 fn text_result(value: &Value, is_error: bool) -> Value {
     let mut text = value.to_string();
@@ -837,8 +930,8 @@ fn event(e: &ActionEvent) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_BATCH_STEPS, Server, Tools};
-    use architect::action::{ActionList, ActionMeta, Effect, Principal};
+    use super::{MAX_BATCH_STEPS, Server, ToolError, Tools};
+    use architect::action::{ActionCaller, ActionList, ActionMeta, Effect, Principal};
     use architect_permissions::{Action, Decision, PermissionEngine, Resource};
     use facet::Facet;
     use serde_json::{Value, json};
@@ -1272,5 +1365,98 @@ mod tests {
         ))
         .expect("a reply");
         assert!(out.contains("hello bo"), "{out}");
+    }
+
+    /// The org a call acts in, as the app's own door puts it on.
+    struct Org(&'static str);
+
+    static WHERE: ActionMeta = ActionMeta {
+        id: "ORG_WHERE",
+        trait_name: "Org",
+        method_name: "where",
+        display_name: "Where am I",
+        description: "The org this call acts in",
+        category: "Org",
+        group: "",
+        shortcut: "",
+        toggleable: false,
+        undo: false,
+    };
+
+    /// A named-mode server whose one tool answers with the org and the
+    /// caller, or refuses when it was given no org.
+    fn org_server() -> Server {
+        let list = ActionList::new();
+        list.register_with(&WHERE, Effect::ReadOnly, |cx: &ActionCaller, (): ()| {
+            let org = cx.context::<Org>().ok_or("no org to act in")?;
+            let who = cx
+                .principal()
+                .map_or_else(|| "app".to_owned(), Principal::describe);
+            Ok(format!("{} for {who}", org.0))
+        })
+        .expect("registered");
+        list.register(&HITS, Effect::ReadOnly, |q: Query| {
+            Err::<(), _>(format!("no track {}", q.track))
+        })
+        .expect("registered");
+        Server::new("Test", "0", list)
+            .with_tools(Tools::Named)
+            .with_tool_name("ORG_WHERE", "where_am_i")
+    }
+
+    /// (#58 item 1) A transport's caller reaches the handler: its context,
+    /// and its principal — the server's own when it names none.
+    #[test]
+    fn the_handler_sees_the_transport_caller() {
+        let s = org_server();
+        let request = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "where_am_i", "arguments": {}}})
+        .to_string();
+        let ada = Principal::User {
+            user_id: "ada".into(),
+        };
+        let reply: Value = serde_json::from_str(
+            &s.handle_with(&ActionCaller::new(ada).with_context(Org("acme")), &request)
+                .expect("a reply"),
+        )
+        .expect("json");
+        assert_eq!(text(&reply), json!("acme for user:ada"));
+        let reply: Value = serde_json::from_str(
+            &s.handle_with(&ActionCaller::app().with_context(Org("beta")), &request)
+                .expect("a reply"),
+        )
+        .expect("json");
+        assert_eq!(text(&reply), json!("beta for anonymous"));
+        let reply: Value =
+            serde_json::from_str(&s.handle(&request).expect("a reply")).expect("json");
+        assert_eq!(reply["result"]["isError"], true);
+        assert_eq!(text(&reply)["error"], "no org to act in");
+    }
+
+    /// (#58 item 2) One tool without JSON-RPC: listed as `tools/list`
+    /// lists it, run as `tools/call` runs it, an unknown name its own
+    /// error rather than a result.
+    #[test]
+    fn one_tool_is_listed_and_called_without_json_rpc() {
+        let s = org_server();
+        let tools = s.tools_for(&Principal::Anonymous);
+        let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
+        assert_eq!(names, ["drums_hits", "where_am_i"]);
+        assert_eq!(tools[1]["description"], "The org this call acts in");
+
+        let caller = ActionCaller::app().with_context(Org("acme"));
+        let out = futures::executor::block_on(s.call_tool(&caller, "where_am_i", json!({})))
+            .expect("a tool");
+        assert_eq!(out["isError"], false);
+        assert_eq!(out["content"][0]["text"], "\"acme for anonymous\"");
+        assert_eq!(
+            futures::executor::block_on(s.call_tool(&caller, "nope", json!({}))),
+            Err(ToolError::NoTool("nope".into()))
+        );
+        let generic = Server::new("Test", "0", s.list().clone());
+        assert!(matches!(
+            futures::executor::block_on(generic.call_tool(&caller, "actions", json!({"x": 1}))),
+            Err(ToolError::BadParams(_))
+        ));
     }
 }
