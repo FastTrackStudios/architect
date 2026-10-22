@@ -54,8 +54,8 @@ pub mod discovery;
 pub mod http;
 
 pub use discovery::{
-    DISABLE_ENV, Discovery, disabled, discovery_path, project_mcp_json, publish, publish_in,
-    read, read_in, unpublish, unpublish_in,
+    DISABLE_ENV, Discovery, disabled, discovery_path, project_mcp_json, publish, publish_in, read,
+    read_in, unpublish, unpublish_in,
 };
 
 /// The protocol revision this server speaks when a client asks for one

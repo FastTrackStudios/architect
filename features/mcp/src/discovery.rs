@@ -324,10 +324,7 @@ pub(crate) mod tests {
         publish_in(&scratch.0, "session", "http://127.0.0.1:2/mcp", None).expect("again");
         let text = fs::read_to_string(&path).expect("text");
         assert!(text.contains(r#""token":null"#), "{text}");
-        assert_eq!(
-            read_in(&scratch.0, "session").expect("read").token,
-            None
-        );
+        assert_eq!(read_in(&scratch.0, "session").expect("read").token, None);
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt as _;
@@ -367,7 +364,9 @@ pub(crate) mod tests {
     fn project_mcp_json_adds_and_keeps_the_rest() {
         let scratch = Scratch::new("project");
         let file = scratch.0.join(".mcp.json");
-        assert!(project_mcp_json(&scratch.0, "session", "http://127.0.0.1:47811/mcp").expect("new"));
+        assert!(
+            project_mcp_json(&scratch.0, "session", "http://127.0.0.1:47811/mcp").expect("new")
+        );
         let first: Value =
             serde_json::from_str(&fs::read_to_string(&file).expect("text")).expect("json");
         assert_eq!(
@@ -375,7 +374,9 @@ pub(crate) mod tests {
             json!({"mcpServers": {"session": {"type": "http", "url": "http://127.0.0.1:47811/mcp"}}})
         );
         // Same again: untouched.
-        assert!(!project_mcp_json(&scratch.0, "session", "http://127.0.0.1:47811/mcp").expect("same"));
+        assert!(
+            !project_mcp_json(&scratch.0, "session", "http://127.0.0.1:47811/mcp").expect("same")
+        );
         // Another server and a foreign key stay.
         fs::write(
             &file,
@@ -396,7 +397,9 @@ pub(crate) mod tests {
         // Not an object: refused, left as it was.
         fs::write(&file, "[1]").expect("seeded");
         assert_eq!(
-            project_mcp_json(&scratch.0, "session", "u").expect_err("refused").kind(),
+            project_mcp_json(&scratch.0, "session", "u")
+                .expect_err("refused")
+                .kind(),
             io::ErrorKind::InvalidData
         );
         assert_eq!(fs::read_to_string(&file).expect("text"), "[1]");
