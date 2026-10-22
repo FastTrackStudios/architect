@@ -550,6 +550,12 @@ pub use lock::{lock, read, write};
 #[cfg(all(feature = "capability", not(target_arch = "wasm32")))]
 pub mod capability;
 
+// Blob lane — resumable, sha256-verified transfer into place and the
+// content-addressed `BlobStore` (`LocalFs`). Native only for now; see
+// `architect::blob` and `docs/content/architecture/blob.md`.
+#[cfg(all(feature = "blob", not(target_arch = "wasm32")))]
+pub mod blob;
+
 // Deterministic jitter — one splitmix64 shared by `schedule` and
 // `reconnect`, which each carried an identical copy. Gated on the same
 // features as its two consumers so it is not dead code without them.

@@ -56,6 +56,7 @@ dispatcher.
 | `sync-client` | `vox` | tokio (rt) | `architect::BlockingCaller` — drives the `#[architect::rpc(sync_client)]`-emitted `<Trait>SyncClient` blocking facades. Native only; for sync code calling a *remote* backend (in-process callers use the sync trait directly). |
 | `fake` | — | fake | `#[derive(fake::Dummy)]` on every emitted struct — trivially seedable test data. |
 | `capability` | — | ed25519-dalek, base64, getrandom, zeroize | `architect::capability` — Ed25519-signed, expiring `purpose\|expiry\|subject` tokens and the `0600` `ServerKeypair` key file. Native only. See [capability tokens](@/architecture/capability.md). |
+| `blob` | — | sha2 | `architect::blob` — `ResumableFetch` (`.part` resume, sha256 verify, `<file>.sha256` sidecar skip, atomic rename, one transfer per file) and the content-addressed `BlobStore` trait with `LocalFs`. Native only. See [blob transfer and storage](@/architecture/blob.md). |
 | `diagnostics` | — | moire/diagnostics | Moiré instrumentation in axum_ws (dashboard at `MOIRE_DASHBOARD`). Zero-cost passthrough when off. Enable only in builds compiled with `-C force-frame-pointers=yes` — moire's trace capture validates frame pointers at runtime and aborts otherwise (which is why it's not in `full`). |
 
 ## Implication graph

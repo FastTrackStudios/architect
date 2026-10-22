@@ -245,6 +245,12 @@ rt = ["dep:rtrb"]
 # file and the OS random source).
 capability = ["dep:ed25519-dalek", "dep:base64", "dep:getrandom", "dep:zeroize"]
 
+# Blob lane (`architect::blob`): `ResumableFetch` (`.part` resume, sha256
+# verify, `<file>.sha256` sidecar skip, atomic rename, one transfer per
+# file) and the content-addressed `BlobStore` trait with its `LocalFs`
+# backend. Native only for now; the wasm OPFS ledger is a follow-up.
+blob = ["dep:sha2"]
+
 # Blocking client facade (`architect::sync_client` + the emitted
 # `<Trait>SyncClient`s): drive the async vox client from sync code over
 # a background tokio runtime. Native only — wasm has no blocking.
@@ -350,6 +356,9 @@ ed25519-dalek = { version = "3", optional = true }
 base64 = { workspace = true, optional = true }
 getrandom = { version = "0.3", optional = true }
 zeroize = { version = "1", optional = true }
+# `blob`: sha256 of every transfer and stored blob (already in the graph
+# through auth).
+sha2 = { workspace = true, optional = true }
 iroh = { workspace = true, optional = true }
 iroh-mdns-address-lookup = { workspace = true, optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"], optional = true }
@@ -387,7 +396,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 tracing-subscriber = { workspace = true }
 # http_face.rs drives the generated axum router in-process (`oneshot`).
 tower = { version = "0.5", features = ["util"] }
-# settings_*.rs and capability.rs: a throwaway directory per test.
+# settings_*.rs, capability.rs and blob.rs: a throwaway directory per test.
 tempfile = "3"
 
 [[test]]
@@ -405,6 +414,10 @@ required-features = ["settings", "atom-persist"]
 [[test]]
 name = "capability"
 required-features = ["capability"]
+
+[[test]]
+name = "blob"
+required-features = ["blob"]
 
 [[test]]
 name = "iroh_link"
