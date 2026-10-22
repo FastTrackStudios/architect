@@ -264,6 +264,20 @@ sync-client = ["vox", "tokio/rt"]
 # architect-atom's `Kv`, so `KvRows<FileKv>` is a native `LocalRows`.
 settings = ["dep:facet-json", "dep:dirs", "dep:web-sys"]
 
+# Test support for an app's own test binaries (`architect::testing`).
+# Both are for `[dev-dependencies]` only.
+#
+#   testing-alloc  `testing::alloc::Counting`, a counting `GlobalAlloc`, and
+#                  its readings (live, peak). std only. architect never
+#                  installs it; a test binary opts in with
+#                  `#[global_allocator]`.
+#   testing        the sandbox boot: `testing::sandbox_server(seed)` points
+#                  HOME and the XDG/AppData dirs inside a tempdir under one
+#                  process-wide env lock, then serves the seeded app on
+#                  127.0.0.1:0. Native only; pulls `host` + tempfile.
+testing-alloc = []
+testing = ["testing-alloc", "host", "dep:tempfile"]
+
 [dependencies]
 architect-derive.workspace = true
 architect-permissions.workspace = true
@@ -369,6 +383,8 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 tokio-tungstenite = { version = "0.29", optional = true }
 # `settings`: the platform config dir behind `settings::app_dir`.
 dirs = { version = "6", optional = true }
+# `testing`: the sandbox's tempdir.
+tempfile = { version = "3", optional = true }
 
 # Wasm-only platform deps. Browser timers (gloo-timers' `TimeoutFuture`
 # is a real async sleep backed by setTimeout) and `spawn_local` for the
@@ -430,6 +446,18 @@ required-features = ["host"]
 [[test]]
 name = "iroh_lan"
 required-features = ["iroh-lan"]
+
+[[test]]
+name = "testing_sandbox"
+required-features = ["testing"]
+
+[[test]]
+name = "testing_alloc"
+required-features = ["testing-alloc"]
+
+[[test]]
+name = "testing_alloc_uninstalled"
+required-features = ["testing-alloc"]
 
 [[example]]
 name = "iroh_lan"
