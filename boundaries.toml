@@ -24,7 +24,7 @@
 
 contract-target = "wasm32-unknown-unknown"
 host-dirs = ["apps"]
-unmapped-ok = ["features/auth/tests"]
+unmapped-ok = ["features/auth/tests", "features/crdt/tests"]
 single-source = ["architect", "architect-*", "auth", "auth-*", "crdt", "crdt-*", "ui-snapshot"]
 
 [forbidden]

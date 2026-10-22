@@ -2421,6 +2421,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "crdt-derive-tests"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "crdt",
+ "facet",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "crdt-seaorm"
 version = "0.1.0"
 dependencies = [

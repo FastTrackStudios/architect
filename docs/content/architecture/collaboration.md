@@ -209,24 +209,73 @@ windows, type, kill the server, keep typing, restart it.
   callbacks only push into channels; signal writes happen in Dioxus
   tasks.
 
-## Text fields are LWW today
+## Text fields: LWW by default, `crdt(text)` to merge
 
 A `String` field on a `#[architect(crdt)]` entity is stored as a plain
-`LoroValue::String` in the row's `LoroMap` — **last-writer-wins on the
-whole string**. If two peers edit the same text field concurrently, the
-merge keeps one peer's entire value and the other's edit is **lost**
-(the row converges, but not character-by-character). That's fine for
-short, rarely-contended fields (a title, an author name); it is the
-wrong tool for collaborative prose.
+`LoroValue::String` in the row's `LoroMap`, which is **last-writer-wins
+on the whole string**. If two peers edit the same field concurrently,
+the merge keeps one peer's entire value and the other's edit is
+**lost**. The row still converges, just not character by character.
+That's fine for short, rarely-contended fields (a title, an author
+name), but it's the wrong tool for collaborative prose.
 
-The planned fix is an opt-in attribute — `#[architect(crdt(text))]` —
-mapping the field to a child `LoroText` container instead, so
-concurrent edits merge at character level. The runtime support already
-exists (`crdt::codec::{text_child, read_text, apply_text_ops,
-apply_text_diff}`, including migration from legacy LWW strings via
-`read_text_with_migration`); the derive just doesn't emit it yet. Until
-it lands, treat every derived text field as LWW and reach for the codec
-helpers directly where character-level merging matters.
+Mark those fields `#[architect(crdt(text))]`:
+
+```rust
+#[architect::entity(table_name = "notes", repo, crdt)]
+pub struct Note {
+    #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
+    pub id: Uuid,
+    pub title: String,          // LWW
+    #[architect(crdt(text))]
+    pub body: String,           // LoroText: concurrent edits merge
+}
+```
+
+The wire type stays `String`. The derive writes the field through
+`crdt::codec::write_text` (a minimal prefix/suffix diff into a child
+`LoroText`, so only the changed span becomes ops) and reads it through
+`read_text_or_legacy`. If peer A appends while peer B prepends, both
+edits survive the merge. `features/crdt/tests/derive` proves this
+through the emitted `NoteRepoLoro`.
+
+- `String` only. `Option<String>` and other types are a derive-time
+  error, as is `crdt(text)` without the container's `crdt`.
+- Rows written before the field became `crdt(text)` still decode: the
+  legacy string is read as-is, and the next write upgrades it to a
+  container.
+- The **first** write into a key that isn't text yet creates a plain
+  (non-mergeable) `LoroText` (`codec::upgrade_to_text`). Concurrent
+  first writes therefore resolve LWW, like the string they replace,
+  instead of concatenating both seeds. Every write after that merges.
+
+## Schema versions and migrations (`crdt::schema`)
+
+A replica carries its layout version in a root map. By default that's
+`__architect_meta.schema_version`. `crdt::schema::migrate(doc, TARGET,
+MIGRATIONS)` runs each `Migration { to, name, apply }` step in order
+from the stamped version (`0` if unstamped), bumping and committing the
+stamp after each step. A gap in the list is an error. A doc stamped
+*newer* than the app is refused with `RepoError::Conflict`. A doc that
+already keeps its stamp elsewhere names that location, e.g. Session's
+`meta.schema`:
+
+```rust
+const SCHEMA: u32 = 3;
+const MIGRATIONS: &[Migration] = &[
+    Migration { to: 1, name: "seed roots", apply: v1 },
+    Migration { to: 2, name: "chart → text", apply: v2 },
+    Migration { to: 3, name: "drop legacy keys", apply: v3 },
+];
+SchemaStamp::new("meta", "schema").migrate(doc.loro(), SCHEMA, MIGRATIONS)?;
+```
+
+Two offline peers can migrate the same old doc, so steps must be
+idempotent. Steps also must not seed content into *mergeable*
+containers: both peers' seeds would survive the merge, and the content
+would appear twice. Use `codec::upgrade_to_text` (or `insert_container`)
+for those steps. Run `migrate` after the initial load/sync, because
+stamping an empty joiner doc looks like "a session has arrived".
 
 ## What this means for Task and DAW
 

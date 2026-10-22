@@ -38,6 +38,7 @@ members = [
     "features/crdt/crdt",
     "features/crdt/crdt-derive",
     "features/crdt/crdt-seaorm",
+    "features/crdt/tests/derive",
     # ── ui ────────────────────────────────────────────────────────────
     "features/ui/architect-ui",
     "features/ui/showcase",
