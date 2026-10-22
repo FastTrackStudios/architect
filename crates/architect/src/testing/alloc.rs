@@ -1,8 +1,9 @@
-//! A counting global allocator for a **test binary**: live heap bytes and
-//! their high-water mark, so a test can hold a server to a memory budget
-//! in bytes the *program* asked for (the number a regression moves),
-//! rather than RSS, which also counts what the allocator kept, the
-//! binary's own pages and every other test's leftovers.
+//! A counting global allocator for a **test binary**.
+//!
+//! It reads live heap bytes and their high-water mark, so a test can hold
+//! a server to a memory budget in bytes the *program* asked for (the
+//! number a regression moves), rather than RSS, which also counts what the
+//! allocator kept, the binary's own pages and every other test's leftovers.
 //!
 //! architect never installs it. It is a type, not a `#[global_allocator]`:
 //! a library that installed one would impose it on every process that

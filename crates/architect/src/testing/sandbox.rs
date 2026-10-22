@@ -164,9 +164,10 @@ fn fresh_sandbox() -> std::io::Result<(Sandbox, Option<tempfile::TempDir>)> {
     Ok((sandbox, Some(dir)))
 }
 
-/// A sandboxed boot's result: the value `seed` built, and the sandbox it
-/// was built over. Dropping it deletes the directory (unless it boots
-/// over a sandbox another value owns, see [`SandboxBuilder::over`]).
+/// A sandboxed boot's result: the value `seed` built, and its sandbox.
+///
+/// Dropping it deletes the directory, unless it booted over a sandbox
+/// another value owns (see [`SandboxBuilder::over`]).
 #[derive(Debug)]
 pub struct Sandboxed<T> {
     /// What `seed` returned.
