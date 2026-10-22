@@ -192,8 +192,10 @@ fn repo_path<'a>(token: &'a str, facts: &Facts) -> Option<&'a str> {
 fn strip_line_suffix(token: &str) -> &str {
     let mut path = token;
     while let Some((head, tail)) = path.rsplit_once(':') {
-        let is_lines =
-            !tail.is_empty() && tail.chars().all(|c| c.is_ascii_digit() || c == '-' || c == ',');
+        let is_lines = !tail.is_empty()
+            && tail
+                .chars()
+                .all(|c| c.is_ascii_digit() || c == '-' || c == ',');
         if !is_lines {
             break;
         }
@@ -290,7 +292,10 @@ fn walk(root: &Path, rel: &str, facts: &mut Facts) -> Result<(), String> {
         } else {
             format!("{rel}/{name}")
         };
-        let is_dir = entry.file_type().map_err(|e| format!("{path}: {e}"))?.is_dir();
+        let is_dir = entry
+            .file_type()
+            .map_err(|e| format!("{path}: {e}"))?
+            .is_dir();
         if is_dir {
             if skip_dir(&name) {
                 continue;
@@ -300,8 +305,7 @@ fn walk(root: &Path, rel: &str, facts: &mut Facts) -> Result<(), String> {
                 facts.top_dirs.insert(name);
             }
         } else if name == "Cargo.toml" {
-            let text =
-                std::fs::read_to_string(entry.path()).map_err(|e| format!("{path}: {e}"))?;
+            let text = std::fs::read_to_string(entry.path()).map_err(|e| format!("{path}: {e}"))?;
             let manifest: toml::Value =
                 toml::from_str(&text).map_err(|e| format!("{path}: {e}"))?;
             if let Some(package) = manifest
@@ -335,7 +339,11 @@ fn markdown_files(facts: &Facts) -> Vec<String> {
         .paths
         .iter()
         .filter(|p| {
-            (p.starts_with("docs/content/") && p.ends_with(".md")) || p.as_str() == "README.md"
+            (p.starts_with("docs/content/")
+                && Path::new(p.as_str())
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("md")))
+                || p.as_str() == "README.md"
         })
         .cloned()
         .collect()
@@ -354,8 +362,7 @@ pub fn run_cli(root: &Path, xtask: BTreeSet<String>) -> Result<(), String> {
     let files = markdown_files(&facts);
     let mut findings = Vec::new();
     for file in &files {
-        let text =
-            std::fs::read_to_string(root.join(file)).map_err(|e| format!("{file}: {e}"))?;
+        let text = std::fs::read_to_string(root.join(file)).map_err(|e| format!("{file}: {e}"))?;
         findings.extend(check_text(file, &text, &facts));
     }
     for finding in &findings {
@@ -478,7 +485,8 @@ mod tests {
 
     #[test]
     fn a_span_that_wraps_keeps_its_parity() {
-        let text = "There is no `cargo\nxtask` here, and `crates/gone` is code.\n\nprose crates/nope\n";
+        let text =
+            "There is no `cargo\nxtask` here, and `crates/gone` is code.\n\nprose crates/nope\n";
         assert_eq!(names(text), vec![(Kind::Path, "crates/gone".to_owned())]);
     }
 
