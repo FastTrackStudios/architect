@@ -544,6 +544,12 @@ pub use connect::{ConnectError, Endpoint, Pool, pool};
 pub mod lock;
 pub use lock::{lock, read, write};
 
+// Capability tokens — Ed25519-signed, expiring `purpose|expiry|subject`
+// grants (signed URLs), and the 0600 server key file behind them.
+// Native only; see `architect::capability`.
+#[cfg(all(feature = "capability", not(target_arch = "wasm32")))]
+pub mod capability;
+
 // Deterministic jitter — one splitmix64 shared by `schedule` and
 // `reconnect`, which each carried an identical copy. Gated on the same
 // features as its two consumers so it is not dead code without them.

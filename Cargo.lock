@@ -475,8 +475,10 @@ dependencies = [
  "async-channel",
  "async-trait",
  "axum",
+ "base64 0.22.1",
  "dioxus",
  "dirs",
+ "ed25519-dalek",
  "eyre",
  "facet",
  "facet-json",
@@ -484,6 +486,7 @@ dependencies = [
  "fake",
  "futures",
  "futures-lite",
+ "getrandom 0.3.4",
  "gloo-timers",
  "include_dir",
  "iroh",
@@ -510,6 +513,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
  "web-time",
+ "zeroize",
 ]
 
 [[package]]
