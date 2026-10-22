@@ -1,0 +1,190 @@
+# `cargo xtask boundaries`: the layer table for docs/content/architecture/layout.md.
+#
+# A feature is one crate; its roles are cargo features. Each [[row]] is a
+# package resolved with a feature set (`cargo tree -p <package>`, so cargo's
+# per-package resolution), checked at its layer:
+#
+#   L0  contract (default set, `vox`): resolved for `contract-target`, must not
+#       reach [forbidden] engine / ui packages, a tokio runtime, or a
+#       transport-host / server `architect` feature.
+#   L4  ui: must not reach engine packages or a transport-host / server
+#       `architect` feature. Dioxus and `architect/client` are fine.
+#   L1-L3 rows are recorded (and keep `unmapped` honest) but not constrained.
+#
+# Workspace-wide rules: no member outside `host-dirs` enables a transport host
+# in its default set; every member has `[lints] workspace = true`; Cargo.lock
+# has one source for every `single-source` package; every non-proc-macro
+# crate under features/ has a row here.
+#
+# Sibling crates that predate the one-crate ADR (auth-*, launcher-*,
+# crdt-seaorm, permissions/proto) keep explicit rows until they fold in.
+#
+# [baseline] holds today's count per rule. A count above it fails; a count
+# below it fails until you lower it here, so numbers only go down.
+
+contract-target = "wasm32-unknown-unknown"
+host-dirs = ["apps"]
+unmapped-ok = ["features/auth/tests"]
+single-source = ["architect", "architect-*", "auth", "auth-*", "crdt", "crdt-*", "ui-snapshot"]
+
+[forbidden]
+engine = [
+    "sea-orm", "sea-orm-migration", "sqlx", "rusqlite", "libsql", "turso",
+    "axum", "tower-http", "iroh", "tokio-tungstenite",
+]
+ui = ["dioxus", "dioxus-core", "dioxus-web", "dioxus-desktop", "blitz-dom", "vello"]
+tokio-runtime = ["rt", "rt-multi-thread"]
+transport-host = ["host", "server", "server-axum", "http", "iroh", "dispatch-tokio"]
+architect-server = ["server-seaorm"]
+
+[baseline]
+# 2026-10-21 first run. ui-reach: auth-ui pulls the auth server stack (7);
+# story fuzz/parity/snapshots and ui-snapshot reach tower-http (4).
+# transport-host: auth-ui (server-axum), example-greeter (host, http,
+# server-axum). lints: architect-mcp.
+ui-reach = 11
+transport-host = 4
+lints = 1
+# hand-routes: auth-ui 67, auth-server 23, mock-oauth 5, mcp 1, auth example 1.
+hand-routes = 97
+
+# ── L0 contracts ──────────────────────────────────────────────────────────
+[[row]]
+package = "architect"
+layer = "L0"
+
+[[row]]
+package = "architect"
+features = ["vox"]
+layer = "L0"
+
+[[row]]
+package = "architect-permissions"
+layer = "L0"
+
+[[row]]
+package = "architect-permissions-proto"
+layer = "L0"
+note = "sibling of architect-permissions; fold in"
+
+[[row]]
+package = "auth-proto"
+layer = "L0"
+note = "sibling of auth; fold in"
+
+[[row]]
+package = "auth-client"
+layer = "L0"
+note = "sibling of auth; fold in as a client flag"
+
+[[row]]
+package = "crdt"
+layer = "L0"
+
+# ── L4 ui ─────────────────────────────────────────────────────────────────
+[[row]]
+package = "crdt"
+features = ["dioxus"]
+layer = "L4"
+
+[[row]]
+package = "architect-atom"
+layer = "L4"
+
+[[row]]
+package = "architect-form"
+layer = "L4"
+
+[[row]]
+package = "architect-ui"
+layer = "L4"
+
+[[row]]
+package = "architect-ui-showcase"
+layer = "L4"
+
+[[row]]
+package = "ui-snapshot"
+layer = "L4"
+
+[[row]]
+package = "auth-ui"
+layer = "L4"
+note = "sibling of auth; fold in as a ui flag"
+
+[[row]]
+package = "architect-launcher-ui"
+layer = "L4"
+note = "sibling of launcher; fold in as a ui flag"
+
+[[row]]
+package = "architect-story-core"
+layer = "L4"
+
+[[row]]
+package = "architect-story-runtime"
+layer = "L4"
+
+[[row]]
+package = "architect-story-shell"
+layer = "L4"
+
+[[row]]
+package = "architect-story-snapshots"
+layer = "L4"
+
+[[row]]
+package = "architect-story-parity"
+layer = "L4"
+
+[[row]]
+package = "architect-story-fuzz"
+layer = "L4"
+
+# ── L1 engine / L2 storage / L3 host glue ─────────────────────────────────
+[[row]]
+package = "auth"
+layer = "L1"
+
+[[row]]
+package = "architect-auth"
+layer = "L1"
+note = "sibling of auth; fold in"
+
+[[row]]
+package = "auth-db"
+layer = "L2"
+note = "sibling of auth; fold in as a db flag"
+
+[[row]]
+package = "crdt-seaorm"
+layer = "L2"
+note = "sibling of crdt; fold in as a seaorm flag"
+
+[[row]]
+package = "architect-launcher-core"
+layer = "L1"
+note = "sibling of launcher; fold in"
+
+[[row]]
+package = "architect-launcher-providers"
+layer = "L1"
+note = "sibling of launcher; fold in"
+
+[[row]]
+package = "architect-telemetry"
+layer = "L1"
+
+[[row]]
+package = "architect-mcp"
+layer = "L3"
+
+# ── idioms (ratcheted counts) ─────────────────────────────────────────────
+# A hand-written axum route describes a capability a second time; the trait
+# (#[architect::service] / #[architect::rpc], mounted by EngineHost) is the
+# one description. architect's axum adapter and derives are where routes are built.
+[[idiom]]
+name = "hand-routes"
+pattern = ".route("
+allow = ["crates/architect", "crates/architect-derive", "crates/architect-rpc-derive"]
+instead = "a #[architect::service] trait mounted by EngineHost"
