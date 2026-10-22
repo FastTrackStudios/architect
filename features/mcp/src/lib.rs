@@ -816,7 +816,11 @@ mod tests {
         assert_eq!(found["actions"][0]["disabled_reason"], "no project is open");
         let described = text(&call(&s, "describe", &json!({"id": "DRUMS_HITS"})));
         assert_eq!(described["disabled_reason"], "no project is open");
-        let ran = call(&s, "run", &json!({"id": "DRUMS_HITS", "args": {"track": "a"}}));
+        let ran = call(
+            &s,
+            "run",
+            &json!({"id": "DRUMS_HITS", "args": {"track": "a"}}),
+        );
         assert_eq!(ran["result"]["isError"], true);
         assert_eq!(text(&ran)["error"], "disabled: no project is open");
     }
@@ -862,15 +866,16 @@ mod tests {
         let anyone = Principal::Service { name: "app".into() };
         let as_model: Value =
             serde_json::from_str(&s.handle(&listing.to_string()).expect("reply")).expect("json");
-        let as_app: Value = serde_json::from_str(
-            &s.handle_as(&anyone, &listing.to_string()).expect("reply"),
-        )
-        .expect("json");
+        let as_app: Value =
+            serde_json::from_str(&s.handle_as(&anyone, &listing.to_string()).expect("reply"))
+                .expect("json");
         let count = |v: &Value| -> usize {
-            serde_json::from_str::<Value>(v["result"]["contents"][0]["text"].as_str().expect("text"))
-                .expect("json")
-                .as_array()
-                .map_or(0, Vec::len)
+            serde_json::from_str::<Value>(
+                v["result"]["contents"][0]["text"].as_str().expect("text"),
+            )
+            .expect("json")
+            .as_array()
+            .map_or(0, Vec::len)
         };
         assert_eq!(count(&as_model), 1);
         assert_eq!(count(&as_app), 2);

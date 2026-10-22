@@ -683,12 +683,6 @@ mod tests {
     /// engine overrides it, and an `Arc` forwards the override.
     #[test]
     fn authorize_defaults_to_check_on_the_action_resource() {
-        let rules = ScopeEngine::new(vec![Rule::new("action/DRUMS_HITS", &[Action::RUN])]);
-        let anyone = Principal::Anonymous;
-        assert!(rules.authorize(&anyone, "DRUMS_HITS").allowed());
-        assert!(!rules.authorize(&anyone, "PROJECT_DELETE").allowed());
-        assert_eq!(action_resource("X").as_str(), "action/X");
-
         struct OnlyReads;
         impl PermissionEngine for OnlyReads {
             fn check(&self, _: &Principal, _: &Resource, _: &Action) -> Decision {
@@ -702,6 +696,13 @@ mod tests {
                 }
             }
         }
+
+        let rules = ScopeEngine::new(vec![Rule::new("action/DRUMS_HITS", &[Action::RUN])]);
+        let anyone = Principal::Anonymous;
+        assert!(rules.authorize(&anyone, "DRUMS_HITS").allowed());
+        assert!(!rules.authorize(&anyone, "PROJECT_DELETE").allowed());
+        assert_eq!(action_resource("X").as_str(), "action/X");
+
         let shared: Arc<dyn PermissionEngine> = Arc::new(OnlyReads);
         assert!(shared.authorize(&anyone, "A_READ").allowed());
         assert_eq!(

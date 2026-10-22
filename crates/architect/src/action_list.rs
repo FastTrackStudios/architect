@@ -146,11 +146,7 @@ pub struct ValidationError {
 
 impl std::fmt::Display for ValidationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "the Action List has {} problem(s):",
-            self.problems.len()
-        )?;
+        write!(f, "the Action List has {} problem(s):", self.problems.len())?;
         for problem in &self.problems {
             write!(f, "\n- {problem}")?;
         }
@@ -222,6 +218,10 @@ pub const HOSTILE_ARGS: &[&[u8]] = &[
 
 /// How deep the nested openings [`ActionList::probe_hostile_args`] sends go.
 pub const HOSTILE_DEPTH: usize = 4096;
+
+/// The deepest nesting of arrays and objects an action's arguments may
+/// have; deeper is refused before any decoder recurses into it.
+pub const MAX_ARGS_DEPTH: usize = 128;
 
 #[derive(Clone)]
 struct Entry {
@@ -566,7 +566,7 @@ impl ActionList {
         // menu, a model.
         let span = tracing::info_span!("action", action.id = id, action.ok = tracing::field::Empty);
         let out = span.in_scope(|| match enabled_state(entry.enabled.as_ref()) {
-            Ok(()) => guarded(id, &entry.handler, args),
+            Ok(()) => guarded(id, || call(&entry, args)),
             Err(reason) => Err(ActionError::Disabled {
                 id: id.to_owned(),
                 reason,
@@ -663,7 +663,7 @@ impl ActionList {
                 continue;
             }
             let id = entry.meta.id;
-            if let Err(panic) = catch_unwind(AssertUnwindSafe(|| (entry.handler)(b"{}"))) {
+            if let Err(panic) = catch_unwind(AssertUnwindSafe(|| call(&entry, b"{}"))) {
                 problems.push(format!(
                     "{id}: panicked on {{}}: {}",
                     panic_message(panic.as_ref())
@@ -675,7 +675,7 @@ impl ActionList {
                 .chain([deep_array.as_bytes(), deep_object.as_bytes()]);
             for args in hostile {
                 let shown = String::from_utf8_lossy(args.get(..24).unwrap_or(args)).into_owned();
-                match catch_unwind(AssertUnwindSafe(|| (entry.handler)(args))) {
+                match catch_unwind(AssertUnwindSafe(|| call(&entry, args))) {
                     Ok(Ok(_)) => problems.push(format!("{id}: took malformed JSON {shown:?}")),
                     Ok(Err(_)) => {}
                     Err(panic) => problems.push(format!(
@@ -819,9 +819,28 @@ fn enabled_state(check: Option<&EnabledCheck>) -> Result<(), String> {
     })
 }
 
-/// Run a handler, a panic in it answered as [`ActionError::Failed`].
-fn guarded(id: &str, handler: &Handler, args: &[u8]) -> Result<Vec<u8>, ActionError> {
-    catch_unwind(AssertUnwindSafe(|| handler(args))).unwrap_or_else(|panic| {
+/// Hand `args` to an action's handler — once they are one well-formed
+/// JSON value, no deeper than [`MAX_ARGS_DEPTH`], with nothing after it
+/// (`facet_json` alone takes `{} junk`), when it takes any.
+fn call(entry: &Entry, args: &[u8]) -> Result<Vec<u8>, ActionError> {
+    if let Some(params) = entry.params
+        && let Err(message) = check_json(args)
+    {
+        return Err(ActionError::BadArgs {
+            id: entry.meta.id.to_owned(),
+            message,
+            expected: Some(crate::schema::json_schema(params)),
+        });
+    }
+    (entry.handler)(args)
+}
+
+/// Run `f`, a panic in it answered as [`ActionError::Failed`].
+fn guarded(
+    id: &str,
+    f: impl FnOnce() -> Result<Vec<u8>, ActionError>,
+) -> Result<Vec<u8>, ActionError> {
+    catch_unwind(AssertUnwindSafe(f)).unwrap_or_else(|panic| {
         let message = panic_message(panic.as_ref());
         tracing::error!(action.id = id, %message, "an action panicked");
         Err(ActionError::Failed {
@@ -829,6 +848,193 @@ fn guarded(id: &str, handler: &Handler, args: &[u8]) -> Result<Vec<u8>, ActionEr
             message: format!("panicked: {message}"),
         })
     })
+}
+
+/// A container the JSON check is inside.
+enum Frame {
+    Array,
+    Object,
+}
+
+/// Bytes of JSON, read once front to back.
+struct Scan<'a> {
+    bytes: std::iter::Peekable<std::slice::Iter<'a, u8>>,
+}
+
+impl Scan<'_> {
+    fn peek(&mut self) -> Option<u8> {
+        self.bytes.peek().copied().copied()
+    }
+
+    fn eat(&mut self, byte: u8) -> bool {
+        self.bytes.next_if(|b| **b == byte).is_some()
+    }
+
+    fn skip_space(&mut self) {
+        while self
+            .bytes
+            .next_if(|b| matches!(b, b' ' | b'\t' | b'\n' | b'\r'))
+            .is_some()
+        {}
+    }
+
+    fn word(&mut self, rest: &[u8]) -> Result<(), String> {
+        if rest.iter().all(|b| self.eat(*b)) {
+            Ok(())
+        } else {
+            Err("a misspelt true, false or null".to_owned())
+        }
+    }
+
+    fn digits(&mut self) -> usize {
+        let mut n = 0_usize;
+        while self.bytes.next_if(|b| b.is_ascii_digit()).is_some() {
+            n = n.saturating_add(1);
+        }
+        n
+    }
+
+    fn number(&mut self) -> Result<(), String> {
+        self.eat(b'-');
+        if !self.eat(b'0') && self.digits() == 0 {
+            return Err("a number without digits".to_owned());
+        }
+        if self.eat(b'.') && self.digits() == 0 {
+            return Err("a number with nothing after its point".to_owned());
+        }
+        if self.eat(b'e') || self.eat(b'E') {
+            if !self.eat(b'+') {
+                self.eat(b'-');
+            }
+            if self.digits() == 0 {
+                return Err("a number with an empty exponent".to_owned());
+            }
+        }
+        Ok(())
+    }
+
+    /// A string, its opening quote already read.
+    fn string(&mut self) -> Result<(), String> {
+        loop {
+            match self.bytes.next().copied() {
+                None => return Err("a string that never ends".to_owned()),
+                Some(b'"') => return Ok(()),
+                Some(b'\\') => match self.bytes.next().copied() {
+                    Some(b'"' | b'\\' | b'/' | b'b' | b'f' | b'n' | b'r' | b't') => {}
+                    Some(b'u') => {
+                        for _ in 0..4 {
+                            if self.bytes.next_if(|b| b.is_ascii_hexdigit()).is_none() {
+                                return Err("a \\u escape without four hex digits".to_owned());
+                            }
+                        }
+                    }
+                    _ => return Err("an unknown escape in a string".to_owned()),
+                },
+                Some(b) if b < 0x20 => return Err("a control character in a string".to_owned()),
+                Some(_) => {}
+            }
+        }
+    }
+
+    /// An object's key and its colon.
+    fn key(&mut self) -> Result<(), String> {
+        self.skip_space();
+        if !self.eat(b'"') {
+            return Err("an object key that is not a string".to_owned());
+        }
+        self.string()?;
+        self.skip_space();
+        if self.eat(b':') {
+            Ok(())
+        } else {
+            Err("an object key without a colon".to_owned())
+        }
+    }
+
+    fn scalar(&mut self) -> Result<(), String> {
+        match self.peek() {
+            Some(b'"') => {
+                self.bytes.next();
+                self.string()
+            }
+            Some(b't') => self.word(b"true"),
+            Some(b'f') => self.word(b"false"),
+            Some(b'n') => self.word(b"null"),
+            Some(b'-' | b'0'..=b'9') => self.number(),
+            Some(_) => Err("something that is not a JSON value".to_owned()),
+            None => Err("nothing where a value should be".to_owned()),
+        }
+    }
+}
+
+/// Whether `input` is one well-formed JSON value, at most
+/// [`MAX_ARGS_DEPTH`] deep, with only whitespace after it. Iterative: a
+/// hostile depth costs a refusal, not the stack.
+fn check_json(input: &[u8]) -> Result<(), String> {
+    std::str::from_utf8(input).map_err(|e| format!("not UTF-8: {e}"))?;
+    let mut scan = Scan {
+        bytes: input.iter().peekable(),
+    };
+    let mut stack: Vec<Frame> = Vec::new();
+    'value: loop {
+        scan.skip_space();
+        let opened = match scan.peek() {
+            Some(b'[') => Some(Frame::Array),
+            Some(b'{') => Some(Frame::Object),
+            _ => None,
+        };
+        if let Some(frame) = opened {
+            scan.bytes.next();
+            if stack.len() >= MAX_ARGS_DEPTH {
+                return Err(format!("nested deeper than {MAX_ARGS_DEPTH}"));
+            }
+            scan.skip_space();
+            let empty = match frame {
+                Frame::Array => scan.eat(b']'),
+                Frame::Object => scan.eat(b'}'),
+            };
+            if !empty {
+                if matches!(frame, Frame::Object) {
+                    scan.key()?;
+                }
+                stack.push(frame);
+                continue 'value;
+            }
+        } else {
+            scan.scalar()?;
+        }
+        // A value ended: what may follow it depends on what holds it.
+        loop {
+            scan.skip_space();
+            match stack.last() {
+                None => {
+                    return if scan.peek().is_none() {
+                        Ok(())
+                    } else {
+                        Err("something after the value".to_owned())
+                    };
+                }
+                Some(Frame::Array) => {
+                    if scan.eat(b',') {
+                        continue 'value;
+                    }
+                    if !scan.eat(b']') {
+                        return Err("an array without , or ]".to_owned());
+                    }
+                }
+                Some(Frame::Object) => {
+                    if scan.eat(b',') {
+                        scan.key()?;
+                        continue 'value;
+                    }
+                    if !scan.eat(b'}') {
+                        return Err("an object without , or }".to_owned());
+                    }
+                }
+            }
+            stack.pop();
+        }
+    }
 }
 
 /// What a panic said, when it said it as text.
@@ -1063,7 +1269,10 @@ mod tests {
         let model = Principal::User {
             user_id: "model".into(),
         };
-        assert!(list.authorize(&model, "PROJECT_DELETE").allowed(), "no engine: allowed");
+        assert!(
+            list.authorize(&model, "PROJECT_DELETE").allowed(),
+            "no engine: allowed"
+        );
 
         list.set_authorizer(DrumsOnly);
         list.run_json_as(&model, "DRUMS_HITS", br#"{"track":"a"}"#)
@@ -1077,7 +1286,8 @@ mod tests {
         );
         list.run_as(&Principal::Service { name: "app".into() }, "PROJECT_DELETE")
             .expect("a service may");
-        list.run("PROJECT_DELETE").expect("the app itself is not asked");
+        list.run("PROJECT_DELETE")
+            .expect("the app itself is not asked");
 
         list.set_authorizer(ScopeEngine::new(vec![Rule::new(
             "action/PROJECT_DELETE",
@@ -1149,7 +1359,11 @@ mod tests {
         ActionBackend::register(&list, &HITS, Arc::new(|| Ok(())));
         let problems = list.validate().expect_err("duplicates").problems;
         assert_eq!(problems.len(), 2, "{problems:?}");
-        assert!(problems.iter().all(|p| p.starts_with("DRUMS_HITS: registered more than once")));
+        assert!(
+            problems
+                .iter()
+                .all(|p| p.starts_with("DRUMS_HITS: registered more than once"))
+        );
     }
 
     /// (e) `validate` finds a bad id and two actions on one shortcut, and
@@ -1178,22 +1392,48 @@ mod tests {
     /// malformed JSON — and one that panics on `{}` is named.
     #[test]
     fn hostile_arguments_are_refused() {
-        let list = ActionList::new();
-        hits(&list);
-        unit(&list, &PLAY);
-        list.probe_hostile_args().expect("sound");
-
         #[derive(Facet)]
         struct Anything {
             n: Option<u32>,
         }
-        list.register(&BOOM, Effect::Mutating, |a: Anything| -> Result<(), String> {
-            panic!("no n: {:?}", a.n)
-        })
+
+        let list = ActionList::new();
+        hits(&list);
+        unit(&list, &PLAY);
+        list.probe_hostile_args().expect("sound");
+        for junk in [
+            &br#"{"track":"a"} trailing"#[..],
+            br#"{"track":"a",}"#,
+            "[".repeat(200).as_bytes(),
+        ] {
+            assert!(
+                matches!(
+                    list.run_json("DRUMS_HITS", junk),
+                    Err(ActionError::BadArgs { .. })
+                ),
+                "{}",
+                String::from_utf8_lossy(junk)
+            );
+        }
+        list.run_json(
+            "DRUMS_HITS",
+            br#" {"track":"a\u00e9
+","limit":null} "#,
+        )
+        .expect("well-formed, with an escape and spaces");
+        list.register(
+            &BOOM,
+            Effect::Mutating,
+            |a: Anything| -> Result<(), String> { panic!("no n: {:?}", a.n) },
+        )
         .expect("registered");
         let problems = list.probe_hostile_args().expect_err("boom").problems;
         assert_eq!(problems.len(), 1, "{problems:?}");
-        assert!(problems.iter().all(|p| p.starts_with("DRUMS_BOOM: panicked on {}")));
+        assert!(
+            problems
+                .iter()
+                .all(|p| p.starts_with("DRUMS_BOOM: panicked on {}"))
+        );
     }
 
     /// A watcher reads what happened after where it left off, and waits
