@@ -57,9 +57,30 @@ lint:
 tags:
     cargo run -p xtask -- tags --verbose
 
-# Every path and command the docs name must exist (CI runs this).
+# Every path and command the docs and skills name must exist (CI runs this).
 docs-check:
     cargo run -q -p xtask -- docs
+
+# Link this checkout's architect skill into Claude Code and Codex, for a
+# machine the fleet-skills sync doesn't reach. Replaces an existing
+# symlink; refuses to touch a real file or directory.
+skill-install:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    src="$(pwd)/skills/architect"
+    dirs=("$HOME/.claude/skills" "$HOME/.codex/skills")
+    for dir in "${dirs[@]}"; do
+        if [ -e "$dir/architect" ] && [ ! -L "$dir/architect" ]; then
+            echo "$dir/architect exists and is not a symlink; move it aside first" >&2
+            exit 1
+        fi
+    done
+    for dir in "${dirs[@]}"; do
+        dest="$dir/architect"
+        mkdir -p "$dir"
+        ln -sfn "$src" "$dest"
+        echo "$dest -> $src"
+    done
 
 # Repoint every architect-owned git dep in a consumer at ONE tag.
 # Bumping them one at a time is how `signal` ended up with three

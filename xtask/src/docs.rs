@@ -2,8 +2,10 @@
 //!
 //! The docs once described an `examples/app/`, an `architect-cli` and
 //! `cargo xtask idioms` years after none of them existed, and nothing
-//! noticed. This check reads `docs/content/**/*.md` and `README.md` and
-//! fails on any of these that does not resolve in the working tree:
+//! noticed. This check reads `docs/content/**/*.md`, `README.md` and the
+//! agent skills under `skills/**/*.md` (an agent acts on a dead path as
+//! readily as a person reads one) and fails on any of these that does not
+//! resolve in the working tree:
 //!
 //! - a repo path in a code span or a fenced block (`crates/architect`,
 //!   `examples/greeter/src/lib.rs:22-40`): a token whose first segment is
@@ -334,12 +336,15 @@ fn recipes(justfile: &str) -> BTreeSet<String> {
         .collect()
 }
 
+/// The trees whose markdown is checked, besides `README.md`.
+const CHECKED_DIRS: &[&str] = &["docs/content/", "skills/"];
+
 fn markdown_files(facts: &Facts) -> Vec<String> {
     facts
         .paths
         .iter()
         .filter(|p| {
-            (p.starts_with("docs/content/")
+            (CHECKED_DIRS.iter().any(|dir| p.starts_with(dir))
                 && Path::new(p.as_str())
                     .extension()
                     .is_some_and(|e| e.eq_ignore_ascii_case("md")))
@@ -488,6 +493,42 @@ mod tests {
         let text =
             "There is no `cargo\nxtask` here, and `crates/gone` is code.\n\nprose crates/nope\n";
         assert_eq!(names(text), vec![(Kind::Path, "crates/gone".to_owned())]);
+    }
+
+    #[test]
+    fn docs_pages_skills_and_the_readme_are_checked() {
+        let set = |items: &[&str]| items.iter().map(|s| (*s).to_owned()).collect();
+        let facts = Facts {
+            paths: set(&[
+                "README.md",
+                "CHANGELOG.md",
+                "docs/content/architecture/peers.md",
+                "docs/content/static/logo.svg",
+                "skills/architect/SKILL.md",
+                "skills/architect/references/commands-mcp.md",
+                "crates/architect/README.md",
+            ]),
+            ..Facts::default()
+        };
+        assert_eq!(
+            markdown_files(&facts),
+            vec![
+                "README.md",
+                "docs/content/architecture/peers.md",
+                "skills/architect/SKILL.md",
+                "skills/architect/references/commands-mcp.md",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_skill_cites_paths_with_symbols_not_lines() {
+        let text = "| Need | `crates/architect/src/lib.rs` `ActionList::register_with` |\n\
+                    Old style `crates/architect/src/gone.rs:252`, Task's `task:apps/server/src/mcp.rs`.\n";
+        assert_eq!(
+            names(text),
+            vec![(Kind::Path, "crates/architect/src/gone.rs".to_owned())]
+        );
     }
 
     #[test]

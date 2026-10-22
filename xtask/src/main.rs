@@ -85,9 +85,9 @@ enum Command {
     },
     /// Check that every path and command the docs name exists.
     ///
-    /// Reads `docs/content/**/*.md` and `README.md`: repo paths in code,
-    /// page links, source links into `main`, `just` recipes, `cargo xtask`
-    /// commands and `cargo -p` packages. Other repos' paths are written
+    /// Reads `docs/content/**/*.md`, `README.md` and `skills/**/*.md`:
+    /// repo paths in code, page links, source links into `main`, `just`
+    /// recipes, `cargo xtask` commands and `cargo -p` packages. Other repos' paths are written
     /// `task:apps/…`; sketches sit between `<!-- doc-check: off -->` and
     /// `<!-- doc-check: on -->`.
     Docs,
