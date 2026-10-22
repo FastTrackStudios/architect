@@ -844,7 +844,7 @@ impl ActionList {
             for args in hostile {
                 let shown = String::from_utf8_lossy(args.get(..24).unwrap_or(args)).into_owned();
                 match catch_unwind(AssertUnwindSafe(|| probe(&entry, args))) {
-                    Ok(Ok(_)) => problems.push(format!("{id}: took malformed JSON {shown:?}")),
+                    Ok(Ok(())) => problems.push(format!("{id}: took malformed JSON {shown:?}")),
                     Ok(Err(_)) => {}
                     Err(panic) => problems.push(format!(
                         "{id}: panicked on {shown:?}: {}",
@@ -1668,6 +1668,8 @@ mod tests {
     /// for the next when there is nothing yet.
     static ASK: ActionMeta = meta("PEER_ASK");
 
+    /// A handler that panics instead of answering: what the guard catches.
+    #[allow(clippy::panic_in_result_fn)]
     fn explode() -> Result<(), String> {
         panic!("kaboom")
     }
