@@ -59,38 +59,71 @@ struct Hits {
     times: Vec<f64>,
 }
 
-pub fn register(list: &ActionList) {
+pub fn register(list: &ActionList) -> Result<(), ActionError> {
     list.register(&DRUMS_HITS, Effect::ReadOnly, |q: Query| {
         let n = q.limit.unwrap_or(10);
         Ok(Hits { times: hits(&q.track, n) })
-    });
+    })?;
+    list.set_enabled("DRUMS_HITS", || {
+        project_open().then_some(()).ok_or_else(|| "no project is open".to_owned())
+    })?;
+    Ok(())
 }
 ```
 
 - `register::<A, R, _>(meta, effect, |A| -> Result<R, String>)` adds a
-  typed action.
+  typed action. A second registration of an id is refused with
+  `ActionError::Duplicate` and the first stays.
 - `register_dynamic(meta, effect, params, result, handler)` adds one
   whose handler is already JSON in, JSON out (an rpc method, a script).
 - Existing `#[architect::actions]` traits plug in unchanged: `ActionList`
   implements `ActionBackend`, so the generated
   `register_<trait>_actions(&list, imp)` lands every action in the list
-  (as `Mutating`, no args, no result).
+  (as `Mutating`, no args, no result). A duplicate id that comes this
+  way is logged and kept out; `validate()` reports it.
+- `set_enabled(id, || Result<(), String>)` says when an action can run.
+  `Err(why)` disables it: `ActionInfo` shows `enabled: false` and
+  `disabled_reason`, and a run answers `ActionError::Disabled`.
 - Keep one `register(list)` function per area module and call them all
-  from one place at startup. A registry test then asserts the ids the
-  app expects are all there.
+  from one place at startup. The registry test builds the list and runs
+  the list's own checks:
+
+```rust
+#[test]
+fn the_action_list_is_sound() {
+    let list = ActionList::new();
+    my_app::actions::register(&list).unwrap();
+    list.validate().unwrap();          // unique ids + shortcuts, AREA_VERB ids, schemas are JSON objects
+    list.probe_hostile_args().unwrap(); // `{}` never panics; malformed JSON is always refused
+}
+```
+
+  `probe_hostile_args` runs handlers, so build the list against test
+  doubles, not a live app.
 
 ## 3. Running
 
 - `run_json(id, args) -> Result<Vec<u8>, ActionError>` is the one door:
   JSON in, JSON out. An action that takes nothing accepts empty input or
   `{}`; one that gives nothing answers `null`.
+  It runs as the app itself: the authorizer is not asked.
 - `run(id)` is what a key or a menu calls: no arguments.
+- `run_json_as(principal, id, args)` / `run_as(principal, id)` run for a
+  caller from outside (a model, a peer). With an authorizer set
+  (`set_authorizer(engine)`), `PermissionEngine::authorize(principal, id)`
+  decides first; its default is `check(principal, "action/<id>", "run")`,
+  so existing rule sets answer it.
 - `infos()` / `info(id)` describe the list: id, labels, category, group,
-  shortcut, effect, and `params_schema` / `result_schema` as JSON Schema
-  text.
+  shortcut, effect, `enabled` / `disabled_reason`, and `params_schema` /
+  `result_schema` as JSON Schema text. `infos_for(principal)` /
+  `info_for(principal, id)` show only what that caller may run.
 - `ActionError` is one of `Unknown(id)`, `BadArgs { expected, .. }`
-  (carries the params schema so the caller can correct itself) or
-  `Failed { message }`.
+  (carries the params schema so the caller can correct itself),
+  `Failed { message }`, `Denied { reason }`, `Disabled { reason }` or
+  `Duplicate(id)`.
+- A handler that panics is caught and answered as `Failed` with
+  `message` `"panicked: ..."` (in `panic = "unwind"` builds, the
+  default); the list keeps working.
 
 Every run is one `tracing` span named `action` with `action.id` and
 `action.ok`. Stages marked inside it with
@@ -119,7 +152,7 @@ hundreds):
 | `actions` | the list, filtered by text, category or effect |
 | `describe` | one action: what it does, takes and gives (JSON Schema) |
 | `run` | run one action with its arguments |
-| `batch` | run several in order, stopping at the first failure |
+| `batch` | run several in order, stopping at the first failure (at most `MAX_BATCH_STEPS`, 64; not atomic) |
 | `watch` | runs and state changes since a point, long-polling |
 
 ```rust
@@ -136,6 +169,14 @@ tokio::spawn(architect_mcp::http::serve(listener, server, Some(token)));
 
 - `Server::handle(message)` is the whole protocol (one JSON-RPC message
   in, the reply out), so other transports are a thin loop around it.
+- Every call runs as a `Principal`: `with_principal(p)` for the server
+  (`Anonymous` unless set), or `handle_as(p, message)` per request. With
+  an authorizer on the list, `actions`, `describe` and `actions://list`
+  show that principal only what it may run, and `run` and each `batch`
+  step are authorized on their own.
+- A `batch` is not atomic: steps that ran stay done when a later one
+  fails. Over `MAX_BATCH_STEPS` steps it is refused whole.
+- `actions` and `describe` carry `enabled` and `disabled_reason`.
 - The HTTP face refuses any browser `Origin` that isn't localhost (the
   MCP DNS-rebinding guard) and requires the bearer token when one is
   given. Bind to loopback, make it opt-in, and generate the token.
@@ -157,9 +198,9 @@ tokio::spawn(architect_mcp::http::serve(listener, server, Some(token)));
 
 These are tracked in the Architect project. Until they land:
 
-- Registering an id twice silently **replaces** the first action.
-- No enabled/disabled state with a reason, no authorize hook, no panic
-  guard, and handlers are sync only.
-- The router's `PermissionsGate` does not cover in-process
-  `ActionList` runs. Don't expose the list beyond loopback without a
-  token.
+- Handlers are sync only.
+- The router's `PermissionsGate` and the list's authorizer are separate
+  planes: give the list the same engine (`set_authorizer`) the router's
+  gate uses. Don't expose the list beyond loopback without a token.
+- The MCP HTTP face has one principal per server; a transport that
+  resolves a caller per request calls `Server::handle_as`.

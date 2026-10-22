@@ -25,5 +25,6 @@ axum = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 
 [dev-dependencies]
+architect-permissions.workspace = true
 facet.workspace = true
 tokio.workspace = true

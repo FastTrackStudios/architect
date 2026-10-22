@@ -1352,8 +1352,14 @@ pub mod action {
 
     #[cfg(feature = "action-list")]
     pub use crate::action_list::{
-        ActionError, ActionEvent, ActionInfo, ActionList, EVENT_HISTORY, Effect, EventKind, Handler,
+        ActionError, ActionEvent, ActionInfo, ActionList, Authorizer, EVENT_HISTORY, Effect,
+        EnabledCheck, EventKind, HOSTILE_ARGS, HOSTILE_DEPTH, Handler, MAX_ARGS_DEPTH,
+        ValidationError,
     };
+    /// Who runs an action and what may: the permissions nouns the list's
+    /// authorizer speaks.
+    #[cfg(feature = "action-list")]
+    pub use architect_permissions::{Decision, PermissionEngine, Principal};
 
     /// Static metadata for one action, emitted by `#[architect::actions]`
     /// for every `#[action(...)]`-decorated trait method.

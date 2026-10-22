@@ -16,6 +16,7 @@
 //! | `describe` | one action: what it does, takes (JSON Schema) and gives    |
 //! | `run`      | run one action with its arguments                          |
 //! | `batch`    | run several in order, stopping at the first failure        |
+//! |            | (at most [`MAX_BATCH_STEPS`]; not atomic)                  |
 //! | `watch`    | what happened since a point — runs and state changes —     |
 //! |            | waiting a while for the next when nothing has yet          |
 //!
@@ -27,10 +28,20 @@
 //! What a model is told is held to a size ([`MAX_TEXT`]): an action that
 //! answers with a song's every hit should page, and when one does not,
 //! the answer is cut and says so rather than flooding the context.
+//!
+//! Every call is made as a [`Principal`] — the server's own
+//! ([`Server::with_principal`], `Anonymous` unless set) or one a transport
+//! resolved per request ([`Server::handle_as`]). When the list has an
+//! authorizer (`ActionList::set_authorizer`), that principal sees only the
+//! actions it may run (`actions`, `describe`, the `actions://list`
+//! resource) and is refused the rest, on `run` and on every `batch` step.
+//! A disabled action is listed with `enabled: false` and why.
 
 use std::time::Duration;
 
-use architect::action::{ActionError, ActionEvent, ActionInfo, ActionList, Effect, EventKind};
+use architect::action::{
+    ActionError, ActionEvent, ActionInfo, ActionList, Effect, EventKind, Principal,
+};
 use serde_json::{Value, json};
 
 #[cfg(feature = "http")]
@@ -52,6 +63,9 @@ pub const MAX_WAIT: Duration = Duration::from_secs(30);
 /// The most events one `watch` returns.
 pub const MAX_EVENTS: usize = 500;
 
+/// The most steps one `batch` runs; a longer one is refused whole.
+pub const MAX_BATCH_STEPS: usize = 64;
+
 /// A JSON-RPC error code: the method is not one this server has.
 const METHOD_NOT_FOUND: i64 = -32_601;
 /// A JSON-RPC error code: the parameters are wrong.
@@ -69,6 +83,7 @@ pub struct Server {
     version: String,
     instructions: String,
     list: ActionList,
+    principal: Principal,
 }
 
 impl Server {
@@ -80,7 +95,16 @@ impl Server {
             version: version.into(),
             instructions: String::new(),
             list,
+            principal: Principal::Anonymous,
         }
+    }
+
+    /// Who the model is, as the list's authorizer sees it, for every
+    /// message [`Self::handle`] answers. `Anonymous` unless set.
+    #[must_use]
+    pub fn with_principal(mut self, principal: Principal) -> Self {
+        self.principal = principal;
+        self
     }
 
     /// What a model is told when it connects, before the generic part:
@@ -98,9 +122,16 @@ impl Server {
     }
 
     /// One JSON-RPC message in, its reply out — `None` for a
-    /// notification, which wants none.
+    /// notification, which wants none — as the server's principal.
     #[must_use]
     pub fn handle(&self, message: &str) -> Option<String> {
+        self.handle_as(&self.principal, message)
+    }
+
+    /// One JSON-RPC message in, its reply out, as `who` — for a transport
+    /// that knows who is on the other end of each request.
+    #[must_use]
+    pub fn handle_as(&self, who: &Principal, message: &str) -> Option<String> {
         let request: Value = match serde_json::from_str(message) {
             Ok(v) => v,
             Err(e) => {
@@ -116,19 +147,24 @@ impl Server {
         let params = request.get("params").cloned().unwrap_or(Value::Null);
         // A notification (no id) is told nothing back.
         let id = id?;
-        let reply = match self.dispatch(method, &params) {
+        let reply = match self.dispatch(who, method, &params) {
             Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
             Err((code, message)) => error_reply(&id, code, &message),
         };
         Some(reply.to_string())
     }
 
-    fn dispatch(&self, method: &str, params: &Value) -> Result<Value, (i64, String)> {
+    fn dispatch(
+        &self,
+        who: &Principal,
+        method: &str,
+        params: &Value,
+    ) -> Result<Value, (i64, String)> {
         match method {
-            "initialize" => Ok(self.initialize(params)),
+            "initialize" => Ok(self.initialize(who, params)),
             "ping" => Ok(json!({})),
             "tools/list" => Ok(json!({ "tools": tools() })),
-            "tools/call" => self.call(params),
+            "tools/call" => self.call(who, params),
             "resources/list" => Ok(json!({ "resources": [{
                 "uri": "actions://list",
                 "name": "Action List",
@@ -143,7 +179,7 @@ impl Server {
                 if uri != "actions://list" {
                     return Err((INVALID_PARAMS, format!("no resource {uri}")));
                 }
-                let all: Vec<Value> = self.list.infos().iter().map(summary).collect();
+                let all: Vec<Value> = self.list.infos_for(who).iter().map(summary).collect();
                 Ok(json!({ "contents": [{
                     "uri": uri,
                     "mimeType": "application/json",
@@ -154,7 +190,7 @@ impl Server {
         }
     }
 
-    fn initialize(&self, params: &Value) -> Value {
+    fn initialize(&self, who: &Principal, params: &Value) -> Value {
         let asked = params
             .get("protocolVersion")
             .and_then(Value::as_str)
@@ -171,13 +207,15 @@ impl Server {
         instructions.push_str(&format!(
             "Everything {} can do is an action in its Action List ({} of them) — the same \
              actions its keys and menus run. Find one with `actions` (filter by text), read what \
-             it takes with `describe`, run it with `run`, or several in order with `batch`. \
-             Read-only actions are safe to run freely; mutating ones change the open project; \
+             it takes with `describe`, run it with `run`, or several in order with `batch` \
+             (at most {} steps, not atomic: steps that ran stay done when a later one fails). \
+             An action listed `enabled: false` says why it cannot run now. Read-only actions are safe to run freely; mutating ones change the open project; \
              destructive ones may not be undoable — say what you are about to do first. \
              `watch` tells you what has happened since a point (pass back the `next` it \
              returns), and waits for the next change when you ask it to.",
             self.name,
-            self.list.len()
+            self.list.infos_for(who).len(),
+            MAX_BATCH_STEPS,
         ));
         json!({
             "protocolVersion": version,
@@ -190,7 +228,7 @@ impl Server {
         })
     }
 
-    fn call(&self, params: &Value) -> Result<Value, (i64, String)> {
+    fn call(&self, who: &Principal, params: &Value) -> Result<Value, (i64, String)> {
         let name = params
             .get("name")
             .and_then(Value::as_str)
@@ -217,11 +255,11 @@ impl Server {
             }
         }
         Ok(match name {
-            "actions" => text_result(&self.actions(&args), false),
+            "actions" => text_result(&self.actions(who, &args), false),
             "describe" => match args
                 .get("id")
                 .and_then(Value::as_str)
-                .and_then(|id| self.list.info(id))
+                .and_then(|id| self.list.info_for(who, id))
             {
                 Some(info) => text_result(&detail(&info), false),
                 None => text_result(
@@ -231,13 +269,13 @@ impl Server {
             },
             "run" => {
                 let id = args.get("id").and_then(Value::as_str).unwrap_or_default();
-                match self.run_one(id, args.get("args")) {
+                match self.run_one(who, id, args.get("args")) {
                     Ok(value) => text_result(&value, false),
                     Err(error) => text_result(&error, true),
                 }
             }
             "batch" => {
-                let (value, failed) = self.batch(&args);
+                let (value, failed) = self.batch(who, &args);
                 text_result(&value, failed)
             }
             "watch" => text_result(&self.watch(&args), false),
@@ -245,7 +283,7 @@ impl Server {
         })
     }
 
-    fn actions(&self, args: &Value) -> Value {
+    fn actions(&self, who: &Principal, args: &Value) -> Value {
         let text = args
             .get("filter")
             .and_then(Value::as_str)
@@ -260,7 +298,7 @@ impl Server {
             .map(str::to_lowercase);
         let found: Vec<Value> = self
             .list
-            .infos()
+            .infos_for(who)
             .iter()
             .filter(|i| {
                 text.as_deref().is_none_or(|t| {
@@ -287,14 +325,14 @@ impl Server {
     }
 
     /// Run one action, its JSON result or what went wrong.
-    fn run_one(&self, id: &str, args: Option<&Value>) -> Result<Value, Value> {
+    fn run_one(&self, who: &Principal, id: &str, args: Option<&Value>) -> Result<Value, Value> {
         let bytes = match args {
             None | Some(Value::Null) => Vec::new(),
             Some(v) => v.to_string().into_bytes(),
         };
-        match self.list.run_json(id, &bytes) {
+        match self.list.run_json_as(who, id, &bytes) {
             Ok(out) => Ok(serde_json::from_slice(&out).unwrap_or(Value::Null)),
-            Err(ActionError::Unknown(id)) => Err(json!({
+            Err(ActionError::Unknown(id) | ActionError::Duplicate(id)) => Err(json!({
                 "error": format!("no action {id} — find it with `actions`"),
             })),
             Err(ActionError::BadArgs {
@@ -304,10 +342,19 @@ impl Server {
                 "takes": expected.and_then(|s| serde_json::from_str::<Value>(&s).ok()),
             })),
             Err(ActionError::Failed { message, .. }) => Err(json!({ "error": message })),
+            Err(ActionError::Denied { reason, .. }) => Err(json!({
+                "error": format!("not allowed: {reason}"),
+            })),
+            Err(ActionError::Disabled { reason, .. }) => Err(json!({
+                "error": format!("disabled: {reason}"),
+                "disabled": true,
+            })),
         }
     }
 
-    fn batch(&self, args: &Value) -> (Value, bool) {
+    /// Each step runs as `who`, through the same door as `run` — a step
+    /// is authorized on its own. Not atomic: what ran stays done.
+    fn batch(&self, who: &Principal, args: &Value) -> (Value, bool) {
         let stop = args
             .get("stop_on_error")
             .and_then(Value::as_bool)
@@ -317,11 +364,24 @@ impl Server {
             .and_then(Value::as_array)
             .cloned()
             .unwrap_or_default();
+        if steps.len() > MAX_BATCH_STEPS {
+            return (
+                json!({
+                    "error": format!(
+                        "{} steps; a batch runs at most {MAX_BATCH_STEPS} — split it",
+                        steps.len()
+                    ),
+                    "ran": 0,
+                    "of": steps.len(),
+                }),
+                true,
+            );
+        }
         let mut results = Vec::with_capacity(steps.len());
         let mut failed = false;
         for (i, step) in steps.iter().enumerate() {
             let id = step.get("id").and_then(Value::as_str).unwrap_or_default();
-            match self.run_one(id, step.get("args")) {
+            match self.run_one(who, id, step.get("args")) {
                 Ok(value) => {
                     results.push(json!({"step": i, "id": id, "ok": true, "result": value}))
                 }
@@ -461,9 +521,9 @@ fn tools() -> Value {
         },
         {
             "name": "batch",
-            "description": "Run several actions in order — each `{id, args}` — stopping at the first that fails unless `stop_on_error` is false. Gives back each step's result.",
+            "description": format!("Run several actions in order — each `{{id, args}}` — stopping at the first that fails unless `stop_on_error` is false. At most {MAX_BATCH_STEPS} steps. Not atomic: steps that ran stay done when a later one fails, and nothing is rolled back. Gives back each step's result."),
             "inputSchema": {"type": "object", "required": ["steps"], "properties": {
-                "steps": {"type": "array", "items": {"type": "object", "required": ["id"], "properties": {
+                "steps": {"type": "array", "maxItems": MAX_BATCH_STEPS, "items": {"type": "object", "required": ["id"], "properties": {
                     "id": {"type": "string"},
                     "args": {"type": "object"},
                 }}},
@@ -522,6 +582,8 @@ fn summary(info: &ActionInfo) -> Value {
         "effect": effect_name(info.effect),
         "takes_args": info.params_schema.is_some(),
         "shortcut": (!info.shortcut.is_empty()).then_some(&info.shortcut),
+        "enabled": info.enabled,
+        "disabled_reason": info.disabled_reason,
     })
 }
 
@@ -541,6 +603,8 @@ fn detail(info: &ActionInfo) -> Value {
         "shortcut": (!info.shortcut.is_empty()).then_some(&info.shortcut),
         "takes": schema(&info.params_schema),
         "gives": schema(&info.result_schema),
+        "enabled": info.enabled,
+        "disabled_reason": info.disabled_reason,
     })
 }
 
@@ -556,8 +620,9 @@ fn event(e: &ActionEvent) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::Server;
-    use architect::action::{ActionList, ActionMeta, Effect};
+    use super::{MAX_BATCH_STEPS, Server};
+    use architect::action::{ActionList, ActionMeta, Effect, Principal};
+    use architect_permissions::{Action, Decision, PermissionEngine, Resource};
     use facet::Facet;
     use serde_json::{Value, json};
 
@@ -586,7 +651,8 @@ mod tests {
                 return Err("no such track".to_owned());
             }
             Ok(vec![0.5_f64, 1.0])
-        });
+        })
+        .expect("registered");
         Server::new("Test", "0", list)
     }
 
@@ -695,5 +761,151 @@ mod tests {
         let out = text(&reply);
         assert_eq!(out["ran"], 2);
         assert_eq!(reply["result"]["isError"], true);
+    }
+
+    static DELETE: ActionMeta = ActionMeta {
+        id: "PROJECT_DELETE",
+        trait_name: "Project",
+        method_name: "delete",
+        display_name: "Delete project",
+        description: "Delete the open project",
+        category: "Project",
+        group: "File",
+        shortcut: "",
+        toggleable: false,
+        undo: false,
+    };
+
+    /// A user may run what `action/DRUMS_HITS` + `run` allows; a service
+    /// anything.
+    struct UsersRunDrums;
+    impl PermissionEngine for UsersRunDrums {
+        fn check(&self, who: &Principal, what: &Resource, action: &Action) -> Decision {
+            let drums = what.as_str() == "action/DRUMS_HITS" && action.as_str() == Action::RUN;
+            if drums || matches!(who, Principal::Service { .. }) {
+                Decision::Allow
+            } else {
+                Decision::deny("users run drums only")
+            }
+        }
+    }
+
+    /// A server whose list lets a user run `DRUMS_HITS` and nothing else,
+    /// speaking for a user.
+    fn guarded() -> Server {
+        let s = server();
+        s.list()
+            .register(&DELETE, Effect::Destructive, |(): ()| Ok(()))
+            .expect("registered");
+        s.list().set_authorizer(UsersRunDrums);
+        s.with_principal(Principal::User {
+            user_id: "model".into(),
+        })
+    }
+
+    /// (a) A disabled action is listed and described as such, with why,
+    /// and running it says why not.
+    #[test]
+    fn a_disabled_action_is_listed_with_why() {
+        let s = server();
+        s.list()
+            .set_enabled("DRUMS_HITS", || Err("no project is open".to_owned()))
+            .expect("set");
+        let found = text(&call(&s, "actions", &json!({})));
+        assert_eq!(found["actions"][0]["enabled"], false);
+        assert_eq!(found["actions"][0]["disabled_reason"], "no project is open");
+        let described = text(&call(&s, "describe", &json!({"id": "DRUMS_HITS"})));
+        assert_eq!(described["disabled_reason"], "no project is open");
+        let ran = call(
+            &s,
+            "run",
+            &json!({"id": "DRUMS_HITS", "args": {"track": "a"}}),
+        );
+        assert_eq!(ran["result"]["isError"], true);
+        assert_eq!(text(&ran)["error"], "disabled: no project is open");
+    }
+
+    /// (b) + (g) The model sees only what it may run, is refused the rest
+    /// on `run` and on a `batch` step (which stops there), and a
+    /// transport's per-request principal sees what that one may.
+    #[test]
+    fn the_model_sees_and_runs_only_what_it_may() {
+        let s = guarded();
+        let found = text(&call(&s, "actions", &json!({})));
+        assert_eq!(found["count"], 1);
+        assert_eq!(found["actions"][0]["id"], "DRUMS_HITS");
+        let hidden = call(&s, "describe", &json!({"id": "PROJECT_DELETE"}));
+        assert_eq!(hidden["result"]["isError"], true);
+
+        let refused = call(&s, "run", &json!({"id": "PROJECT_DELETE"}));
+        assert_eq!(refused["result"]["isError"], true);
+        assert!(
+            text(&refused)["error"]
+                .as_str()
+                .is_some_and(|e| e.starts_with("not allowed"))
+        );
+
+        let start = s.list().latest();
+        let batch = call(
+            &s,
+            "batch",
+            &json!({"steps": [
+                {"id": "DRUMS_HITS", "args": {"track": "a"}},
+                {"id": "PROJECT_DELETE"},
+                {"id": "DRUMS_HITS", "args": {"track": "b"}},
+            ]}),
+        );
+        let out = text(&batch);
+        assert_eq!(out["ran"], 2);
+        assert_eq!(out["results"][1]["ok"], false);
+        let (events, _) = s.list().events_since(start, 10, std::time::Duration::ZERO);
+        assert_eq!(events.len(), 1, "only the allowed step ran: {events:?}");
+
+        let listing = json!({"jsonrpc": "2.0", "id": 1, "method": "resources/read",
+            "params": {"uri": "actions://list"}});
+        let anyone = Principal::Service { name: "app".into() };
+        let as_model: Value =
+            serde_json::from_str(&s.handle(&listing.to_string()).expect("reply")).expect("json");
+        let as_app: Value =
+            serde_json::from_str(&s.handle_as(&anyone, &listing.to_string()).expect("reply"))
+                .expect("json");
+        let count = |v: &Value| -> usize {
+            serde_json::from_str::<Value>(
+                v["result"]["contents"][0]["text"].as_str().expect("text"),
+            )
+            .expect("json")
+            .as_array()
+            .map_or(0, Vec::len)
+        };
+        assert_eq!(count(&as_model), 1);
+        assert_eq!(count(&as_app), 2);
+    }
+
+    /// (f) A batch longer than the cap is refused whole: nothing runs.
+    #[test]
+    fn a_batch_over_the_cap_runs_nothing() {
+        let s = server();
+        let start = s.list().latest();
+        let steps: Vec<Value> = (0..=MAX_BATCH_STEPS)
+            .map(|_| json!({"id": "DRUMS_HITS", "args": {"track": "a"}}))
+            .collect();
+        let reply = call(&s, "batch", &json!({ "steps": steps }));
+        assert_eq!(reply["result"]["isError"], true);
+        assert_eq!(text(&reply)["ran"], 0);
+        assert_eq!(s.list().latest(), start, "nothing ran");
+        let tools: Value = serde_json::from_str(
+            &s.handle(r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#)
+                .expect("reply"),
+        )
+        .expect("json");
+        let batch = tools["result"]["tools"]
+            .as_array()
+            .and_then(|t| t.iter().find(|t| t["name"] == "batch"))
+            .expect("batch tool");
+        assert!(
+            batch["description"]
+                .as_str()
+                .is_some_and(|d| d.contains("Not atomic"))
+        );
     }
 }
