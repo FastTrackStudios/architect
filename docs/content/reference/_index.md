@@ -38,11 +38,13 @@ scaffolds one.
 | `architect` | `schedule` | Retry/repeat policies — `architect::{Schedule, retry, repeat}` (implies `platform`). |
 | `architect` | `fake` | `#[derive(fake::Dummy)]` on emitted structs for seeding. |
 | any `*-proto` | `vox` (default) / `server` | **The whole proto-crate profile.** `vox` is the RPC face; `server` adds the SeaORM storage + migration. HTTP, the HTTP client and `fake` need no forwarding. |
+| a feature crate (`feature new`) | none (default) / `vox` / `memory` / `ui` | **The one-crate profile** ([layout](@/architecture/layout.md)). No features is the wasm-clean contract; `vox` the RPC face; each backend and the UI are their own flag. The `*-proto` row above is for sibling crates not folded in yet. |
 
 ## Vox dependency convention
 
 `vox = { default-features = false, features = ["runtime"] }` is the
-wasm-clean baseline used in every `*-proto` and shared library crate.
+wasm-clean baseline used in every contract (a feature crate's default
+set, or a `*-proto`) and shared library crate.
 Native servers add `transport-websocket` if they go through
 `vox::serve` directly (architect's bundled `axum_ws` adapter doesn't
 need it). Wasm test/client crates depend on `vox-core` and
