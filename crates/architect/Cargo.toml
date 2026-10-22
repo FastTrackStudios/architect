@@ -244,6 +244,14 @@ rt = ["dep:rtrb"]
 # a background tokio runtime. Native only — wasm has no blocking.
 sync-client = ["vox", "tokio/rt"]
 
+# App settings on the device (`architect::settings`): `Store<T>`, one
+# facet value as JSON in the app's config dir (`$<APP>_CONFIG_DIR`
+# override; atomic write-then-rename, skipped when unchanged; optional
+# 0600) or `localStorage` on wasm, and `FileKv`, the directory-of-files
+# key/value store under it. With `atom-persist` too, `FileKv` implements
+# architect-atom's `Kv`, so `KvRows<FileKv>` is a native `LocalRows`.
+settings = ["dep:facet-json", "dep:dirs", "dep:web-sys"]
+
 [dependencies]
 architect-derive.workspace = true
 architect-permissions.workspace = true
@@ -336,6 +344,8 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 # Must track `vox-websocket`'s own tungstenite: `WsLink::new` takes
 # that crate's stream type, so a version skew is a type mismatch.
 tokio-tungstenite = { version = "0.29", optional = true }
+# `settings`: the platform config dir behind `settings::app_dir`.
+dirs = { version = "6", optional = true }
 
 # Wasm-only platform deps. Browser timers (gloo-timers' `TimeoutFuture`
 # is a real async sleep backed by setTimeout) and `spawn_local` for the
@@ -346,7 +356,7 @@ wasm-bindgen-futures = { version = "0.4", optional = true }
 # `connect`'s browser dial. A browser cannot set request headers, so the
 # bearer rides the subprotocol list — see `connect::ws`.
 wasm-bindgen = { version = "0.2", optional = true }
-web-sys = { version = "0.3.98", features = ["WebSocket", "BinaryType", "Event", "CloseEvent", "MessageEvent"], optional = true }
+web-sys = { version = "0.3.98", features = ["WebSocket", "BinaryType", "Event", "CloseEvent", "MessageEvent", "Window", "Storage"], optional = true }
 js-sys = { version = "0.3", optional = true }
 iroh = { version = "1", default-features = false, features = ["tls-ring"], optional = true }
 
@@ -363,10 +373,20 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 tracing-subscriber = { workspace = true }
 # http_face.rs drives the generated axum router in-process (`oneshot`).
 tower = { version = "0.5", features = ["util"] }
+# settings_*.rs: a throwaway app dir per test.
+tempfile = "3"
 
 [[test]]
 name = "reconnect_supervisor"
 required-features = ["atom", "platform", "local"]
+
+[[test]]
+name = "settings_store"
+required-features = ["settings"]
+
+[[test]]
+name = "settings_file_kv"
+required-features = ["settings", "atom-persist"]
 
 [[test]]
 name = "iroh_link"
