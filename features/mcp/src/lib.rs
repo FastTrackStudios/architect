@@ -23,7 +23,12 @@
 //! The protocol is one function, [`Server::handle`]: a JSON-RPC message
 //! in, the reply (if it wants one) out. [`serve_stdio`] runs it over
 //! stdin/stdout; behind the `http` feature, [`http::router`] serves it as
-//! MCP's Streamable HTTP transport, for a running app on localhost.
+//! MCP's Streamable HTTP transport, for a running app on localhost, and
+//! `Server::serve_loopback` binds it on `127.0.0.1` from the app's port and
+//! token variables (`FTS_MCP=0` for none). [`publish`] writes where it is
+//! to `<config>/fts/<name>-mcp.json` (mode `0600`) for any client, and
+//! [`project_mcp_json`] names it in a project's `.mcp.json` for Claude
+//! Code ([`discovery`]).
 //!
 //! What a model is told is held to a size ([`MAX_TEXT`]): an action that
 //! answers with a song's every hit should page, and when one does not,
@@ -44,8 +49,14 @@ use architect::action::{
 };
 use serde_json::{Value, json};
 
+pub mod discovery;
 #[cfg(feature = "http")]
 pub mod http;
+
+pub use discovery::{
+    DISABLE_ENV, Discovery, disabled, discovery_path, project_mcp_json, publish, publish_in, read,
+    read_in, unpublish, unpublish_in,
+};
 
 /// The protocol revision this server speaks when a client asks for one
 /// it does not know.

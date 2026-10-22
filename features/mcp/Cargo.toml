@@ -21,6 +21,8 @@ http = ["dep:axum", "dep:tokio"]
 [dependencies]
 architect = { path = "../../crates/architect", features = ["action-list"] }
 serde_json.workspace = true
+# `<config>/fts/<name>-mcp.json`: the platform config directory.
+dirs = "6"
 axum = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 
