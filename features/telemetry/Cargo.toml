@@ -23,6 +23,11 @@ otel = [
   "dep:tracing-opentelemetry",
 ]
 
+# The crash flight recorder (`flight`): a `tracing` ring layer, a panic
+# hook that writes `crash.log` + `flight-log.txt` into the app dir, and
+# `restore_previous`. Native only; adds no dependency.
+flight = []
+
 [dependencies]
 tracing.workspace = true
 
@@ -35,6 +40,16 @@ opentelemetry_sdk = { workspace = true, optional = true }
 opentelemetry-otlp = { workspace = true, optional = true }
 opentelemetry-appender-tracing = { workspace = true, optional = true }
 tracing-opentelemetry = { workspace = true, optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+# tests/flight.rs: the recorder alongside `host::install_panic_logger`.
+architect = { workspace = true, features = ["host"] }
+tempfile = "3"
+tracing-subscriber = { workspace = true, features = ["registry"] }
+
+[[test]]
+name = "flight"
+required-features = ["flight"]
 
 [lints]
 workspace = true
