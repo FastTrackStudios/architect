@@ -35,6 +35,7 @@ would copy.
 - **Backends are swappable behind a trait the macro emits.** Same
   code, same wasm tests, different storage.
 - **Multi-target by construction.** wasm32, native server, desktop —
-  all linked by the same `<feature>-proto` crate.
+  all linked by the same feature crate, whose default feature set is
+  the contract ([layout](@/architecture/layout.md)).
 - **Monorepo template.** `apps/<app>/<role>` + `features/<feature>/`
   scales to many apps and features without crate name collisions.

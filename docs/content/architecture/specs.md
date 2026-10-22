@@ -22,16 +22,20 @@ features/
     tests/native/        # verification referenced by `// r[verify repo.*]`
 ```
 
-A new feature `foo` follows the same shape:
+A new feature `foo` is one crate ([layout](@/architecture/layout.md));
+`cargo xtask feature new foo` writes this shape with one rule already
+implemented and verified:
 
 ```
 features/
   foo/
     spec/
-      service.md         # FooService contract rules
-    foo-proto/
-    foo-memory/          # impl annotated `// r[impl foo.service.*]`
-    tests/native/        # tests annotated `// r[verify foo.service.*]`
+      service.md         # FooService contract rules (r[foo.service.find], …)
+    src/
+      lib.rs             # the contract
+      memory.rs          # `memory` flag; impl annotated `// r[impl foo.service.*]`
+    tests/
+      memory.rs          # tests annotated `// r[verify foo.service.*]`
 ```
 
 ## Wiring tracey

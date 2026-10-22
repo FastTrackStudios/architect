@@ -25,9 +25,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Scaffold a feature: `features/<name>/<name>-proto` (entity, service,
-    /// error) and `features/<name>/<name>-memory` (an in-memory backend
-    /// with passing tests). Add both to the workspace members and go.
+    /// Scaffold a feature: ONE crate at `features/<name>/` (layout ADR,
+    /// `docs/content/architecture/layout.md`). The contract in `src/lib.rs`
+    /// (default features, wasm-clean), an in-memory backend behind
+    /// `memory`, `vox` and `ui` flags, a `spec/` and a passing test. Adds
+    /// it to the workspace members and `[workspace.dependencies]`.
     Feature {
         #[command(subcommand)]
         action: FeatureAction,
@@ -98,7 +100,7 @@ enum Command {
 
 #[derive(Subcommand)]
 enum FeatureAction {
-    /// Create the crates for a new feature.
+    /// Create the crate for a new feature.
     New {
         /// Lowercase kebab-case crate name (`inventory`, `tour-dates`).
         name: String,
@@ -122,8 +124,8 @@ fn main() -> ExitCode {
                     println!("wrote {}", path.display());
                 }
                 println!(
-                    "next: add \"features/{name}/{name}-proto\" and \"features/{name}/{name}-memory\" \
-                     to [workspace] members, then `cargo test -p {name}-memory`"
+                    "next: `cargo test -p {name}`; the contract alone: \
+                     `cargo check -p {name} --target wasm32-unknown-unknown`"
                 );
             })
         }

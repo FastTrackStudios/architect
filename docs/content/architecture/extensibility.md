@@ -4,6 +4,12 @@ description = "Two ways to add features: in-tree (monorepo) and external (third-
 weight = 25
 +++
 
+> **Layout note (2026-10-22).** This page predates the
+> [one-crate layout](@/architecture/layout.md): read `<feature>-proto` as
+> "the feature crate's default feature set" and each backend sibling
+> crate as a cargo feature (`memory`, `db`, ...) of that one crate.
+> `cargo xtask feature new` scaffolds the new shape.
+
 A project built on architect can be extended along two axes, and both
 are first-class. Understanding the difference is mostly about
 understanding **who depends on what**.
