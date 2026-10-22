@@ -29,6 +29,15 @@
 //! let client = vox_core::initiator_on(link).establish::<RigClient>().await?;
 //! ```
 //!
+//! ## Finding peers
+//!
+//! [`bind_endpoint`] uses n0's relays and DNS, which need the internet.
+//! With `--features iroh-lan`, [`bind_endpoint_with`] /
+//! [`endpoint_builder`] take a [`PeerLookup`]: `N0AndLan` adds
+//! mDNS-style lookup on the local network beside n0 (peers on one LAN
+//! dial by bare id with the internet down), `Lan` uses only the local
+//! network. `EngineHost::iroh_lookup` picks it for a host.
+//!
 //! Gated behind `--features iroh`. The client side (`connect`,
 //! [`IrohLink`], [`iroh_link_source`]) also compiles on
 //! wasm32-unknown-unknown — browsers dial relay-only (no UDP in the
@@ -118,17 +127,72 @@ pub fn secret_key_to_hex(key: &iroh::SecretKey) -> String {
     })
 }
 
+/// Re-export of the LAN address-lookup crate (feature `iroh-lan`, native
+/// only), for consumers that subscribe to discovery events or tune the
+/// service themselves.
+#[cfg(all(feature = "iroh-lan", not(target_arch = "wasm32")))]
+pub use iroh_mdns_address_lookup;
+
+/// How an endpoint turns a bare [`iroh::EndpointId`] into addresses it
+/// can dial, and where it publishes its own.
+///
+/// ADR 0006: a directory (n0's DNS, a relay) must never be the only way
+/// to find a peer. `PeerLookup::N0AndLan` keeps the internet path and
+/// adds the local network; `PeerLookup::Lan` never leaves it (both need
+/// the `iroh-lan` feature).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum PeerLookup {
+    /// The n0 preset: relay servers, pkarr publishing and DNS lookup on
+    /// n0's servers. Dials from anywhere, but needs the internet.
+    #[default]
+    N0,
+    /// [`PeerLookup::N0`] plus mDNS-style lookup on the local network:
+    /// peers on the same LAN still find each other when the internet is
+    /// down. Feature `iroh-lan`, native only.
+    #[cfg(all(feature = "iroh-lan", not(target_arch = "wasm32")))]
+    N0AndLan,
+    /// Local network only: mDNS-style lookup, relays off, nothing
+    /// published to n0. Feature `iroh-lan`, native only.
+    #[cfg(all(feature = "iroh-lan", not(target_arch = "wasm32")))]
+    Lan,
+}
+
+/// An endpoint builder speaking [`VOX_ALPN`] that resolves peers the
+/// way `lookup` says. Callers add a secret key, extra lookups (iroh's
+/// `MemoryLookup`) or a bind address, then `.bind()`.
+#[must_use]
+pub fn endpoint_builder(lookup: PeerLookup) -> iroh::endpoint::Builder {
+    let builder = match lookup {
+        PeerLookup::N0 => iroh::Endpoint::builder(iroh::endpoint::presets::N0),
+        #[cfg(all(feature = "iroh-lan", not(target_arch = "wasm32")))]
+        PeerLookup::N0AndLan => iroh::Endpoint::builder(iroh::endpoint::presets::N0)
+            .address_lookup(iroh_mdns_address_lookup::MdnsAddressLookup::builder()),
+        #[cfg(all(feature = "iroh-lan", not(target_arch = "wasm32")))]
+        PeerLookup::Lan => iroh::Endpoint::builder(iroh::endpoint::presets::Minimal)
+            .relay_mode(iroh::RelayMode::Disabled)
+            .address_lookup(iroh_mdns_address_lookup::MdnsAddressLookup::builder()),
+    };
+    builder.alpns(vec![VOX_ALPN.to_vec()])
+}
+
 /// Bind an iroh endpoint speaking [`VOX_ALPN`] with the n0 defaults
 /// (relay servers + DNS address lookup + pkarr publishing), so remotes
 /// can dial it by bare [`iroh::EndpointId`] from anywhere.
 pub async fn bind_endpoint(
     secret_key: iroh::SecretKey,
 ) -> Result<iroh::Endpoint, iroh::endpoint::BindError> {
-    iroh::Endpoint::builder(iroh::endpoint::presets::N0)
-        .secret_key(secret_key)
-        .alpns(vec![VOX_ALPN.to_vec()])
-        .bind()
-        .await
+    bind_endpoint_with(secret_key, PeerLookup::N0).await
+}
+
+/// [`bind_endpoint`] with an explicit [`PeerLookup`] — e.g.
+/// `PeerLookup::N0AndLan` (feature `iroh-lan`) so two machines on one LAN dial each other
+/// by bare id with no route to the internet.
+pub async fn bind_endpoint_with(
+    secret_key: iroh::SecretKey,
+    lookup: PeerLookup,
+) -> Result<iroh::Endpoint, iroh::endpoint::BindError> {
+    endpoint_builder(lookup).secret_key(secret_key).bind().await
 }
 
 /// Accept vox connections on an iroh endpoint until the endpoint closes.
