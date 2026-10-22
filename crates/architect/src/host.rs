@@ -7,6 +7,11 @@
 //! owns all of it; a binary supplies only its router (business logic) and
 //! calls [`EngineHost::serve`].
 //!
+//! Every host also answers `GET /version.json` with the binary's
+//! [`BuildInfo`] (`{"rev", "version", "built_at"}`), mounted before the SPA
+//! fallback so the bundle can never answer it. A binary fills it from its
+//! own build-time env with [`build_info!`](crate::build_info).
+//!
 //! Native only (the `host` feature); the wasm client build never sees it.
 
 use std::future::Future;
@@ -87,6 +92,76 @@ pub fn install_panic_logger() {
     }));
 }
 
+/// The build-time env [`build_info!`](crate::build_info) reads for the
+/// commit a binary was built from (e.g. `git rev-parse HEAD`).
+pub const BUILD_REV_ENV: &str = "ARCHITECT_BUILD_REV";
+
+/// The build-time env [`build_info!`](crate::build_info) reads for when a
+/// binary was built (RFC 3339 UTC, e.g. `date -u +%Y-%m-%dT%H:%M:%SZ`).
+pub const BUILT_AT_ENV: &str = "ARCHITECT_BUILT_AT";
+
+/// What `GET /version.json` answers: which build of the binary is running.
+///
+/// A field the build did not set is `null` in the JSON, never a guess.
+/// Build one with [`build_info!`](crate::build_info), which reads the
+/// calling crate's version and the [`BUILD_REV_ENV`] / [`BUILT_AT_ENV`]
+/// variables at compile time, and hand it to [`EngineHost::build_info`].
+#[derive(Debug, Clone, PartialEq, Eq, Default, facet::Facet)]
+pub struct BuildInfo {
+    /// The commit the binary was built from.
+    pub rev: Option<String>,
+    /// The binary crate's version (`CARGO_PKG_VERSION`).
+    pub version: Option<String>,
+    /// When the binary was built, RFC 3339 UTC.
+    pub built_at: Option<String>,
+}
+
+impl BuildInfo {
+    /// A `BuildInfo` from the three values; empty strings count as unset,
+    /// so a CI step that exports an empty variable still serves `null`.
+    #[must_use]
+    pub fn new(version: Option<&str>, rev: Option<&str>, built_at: Option<&str>) -> Self {
+        let set = |v: Option<&str>| v.filter(|s| !s.is_empty()).map(str::to_owned);
+        Self {
+            rev: set(rev),
+            version: set(version),
+            built_at: set(built_at),
+        }
+    }
+
+    /// The JSON `/version.json` serves.
+    ///
+    /// # Errors
+    ///
+    /// If facet-json cannot encode the struct (it has only optional
+    /// strings, so this is not expected).
+    pub fn to_json(&self) -> Result<String, String> {
+        facet_json::to_string(self).map_err(|e| e.to_string())
+    }
+}
+
+/// The calling crate's [`BuildInfo`](crate::host::BuildInfo), read at
+/// compile time: `version` from its `CARGO_PKG_VERSION`, `rev` from
+/// `ARCHITECT_BUILD_REV` and `built_at` from `ARCHITECT_BUILT_AT`.
+///
+/// Call it in the binary crate, not a library, so the version is the
+/// binary's. Cargo tracks both variables, so changing either rebuilds the
+/// crate that expands the macro.
+///
+/// ```ignore
+/// EngineHost::new(router, bind).build_info(architect::build_info!())
+/// ```
+#[macro_export]
+macro_rules! build_info {
+    () => {
+        $crate::host::BuildInfo::new(
+            ::core::option_env!("CARGO_PKG_VERSION"),
+            ::core::option_env!("ARCHITECT_BUILD_REV"),
+            ::core::option_env!("ARCHITECT_BUILT_AT"),
+        )
+    };
+}
+
 /// A resolved static web (SPA) bundle to serve as the app's fallback route.
 pub enum WebBundle {
     /// A directory on disk; served with an `index.html` SPA fallback.
@@ -97,12 +172,13 @@ pub enum WebBundle {
 }
 
 /// A headless engine host. Serves a vox [`LayerRouter`] over axum with a
-/// `/vox` WebSocket + a `/health` route, optionally over iroh p2p, and
+/// `/vox` WebSocket + `/health` + `/version.json` routes, optionally over iroh p2p, and
 /// optionally with a static SPA bundle as the HTTP fallback.
 pub struct EngineHost {
     router: LayerRouter,
     addr: String,
     web: Option<WebBundle>,
+    build: BuildInfo,
     extra: Option<Router>,
     finish: Vec<Box<dyn FnOnce(Router) -> Router + Send>>,
     cross_origin_isolated: bool,
@@ -127,6 +203,7 @@ impl EngineHost {
             addr: addr.into(),
             cross_origin_isolated: false,
             web: None,
+            build: BuildInfo::default(),
             extra: None,
             finish: Vec::new(),
             #[cfg(feature = "iroh")]
@@ -134,6 +211,15 @@ impl EngineHost {
             #[cfg(feature = "iroh")]
             iroh_lookup: crate::iroh_link::PeerLookup::default(),
         }
+    }
+
+    /// What `GET /version.json` answers; pass
+    /// [`build_info!()`](crate::build_info) from the binary crate. Without
+    /// it the route still answers, with every field `null`.
+    #[must_use]
+    pub fn build_info(mut self, info: BuildInfo) -> Self {
+        self.build = info;
+        self
     }
 
     /// Mount a plugin: any axum router — a generated HTTP face
@@ -225,7 +311,7 @@ impl EngineHost {
         self
     }
 
-    /// The assembled axum app — `/health` + `/vox` + every plugin + the
+    /// The assembled axum app — `/health` + `/version.json` + `/vox` + every plugin + the
     /// SPA fallback + the `finish` layers — without binding a listener.
     /// What an in-process test drives with `tower::ServiceExt::oneshot`,
     /// and what [`serve`](Self::serve) binds. The iroh side, if
@@ -246,6 +332,7 @@ impl EngineHost {
             assemble_app(
                 self.router,
                 self.web,
+                self.build,
                 self.extra,
                 self.finish,
                 self.cross_origin_isolated,
@@ -260,6 +347,7 @@ impl EngineHost {
             assemble_app(
                 self.router,
                 self.web,
+                self.build,
                 self.extra,
                 self.finish,
                 self.cross_origin_isolated,
@@ -293,6 +381,7 @@ impl EngineHost {
 fn assemble_app(
     router: LayerRouter,
     web: Option<WebBundle>,
+    build: BuildInfo,
     extra: Option<Router>,
     finish: Vec<Box<dyn FnOnce(Router) -> Router + Send>>,
     cross_origin_isolated: bool,
@@ -300,6 +389,11 @@ fn assemble_app(
     let vox_router = router;
     let mut app = Router::new()
         .route("/health", get(|| async { "ok" }))
+        // A real route, not a fallback, so a SPA bundle never answers it.
+        .route(
+            "/version.json",
+            get(move || std::future::ready(version_json(&build))),
+        )
         .route(
             "/vox",
             get(move |ws: WebSocketUpgrade| {
@@ -366,6 +460,26 @@ fn assemble_app(
         app = wrap(app);
     }
     app
+}
+
+/// The `/version.json` response: the encoded [`BuildInfo`], never cached
+/// (a deploy changes it under the same URL).
+fn version_json(build: &BuildInfo) -> Response {
+    use axum::http::{StatusCode, header};
+    match build.to_json() {
+        Ok(body) => (
+            [
+                (header::CONTENT_TYPE, "application/json"),
+                (header::CACHE_CONTROL, "no-store"),
+            ],
+            body,
+        )
+            .into_response(),
+        Err(e) => {
+            tracing::error!("encode /version.json: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
 }
 
 #[cfg(feature = "iroh")]

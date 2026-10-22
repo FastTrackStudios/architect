@@ -168,9 +168,48 @@ EngineHost::new(vox, "0.0.0.0:8080")
 ```
 
 `EngineHost` serves `/vox` (echoing the `vox.v1` subprotocol), `/health`,
-every plugin, an optional SPA bundle, and — with `.iroh(key, id)` — the
-same vox router peer to peer. `into_app()` hands back the axum
-`Router` for in-process tests.
+`/version.json`, every plugin, an optional SPA bundle, and — with
+`.iroh(key, id)` — the same vox router peer to peer. `into_app()` hands
+back the axum `Router` for in-process tests.
+
+### `/version.json`
+
+`GET /version.json` says which build is running:
+
+```json
+{"rev": "32997aa…", "version": "0.4.2", "built_at": "2026-10-22T08:00:00Z"}
+```
+
+It is a real route mounted beside `/health`, so a SPA bundle's
+`index.html` fallback can never answer it, and it is sent with
+`Cache-Control: no-store`. The values come from the binary's build-time
+env through `architect::build_info!()`, expanded in the **binary** crate:
+
+| Field | Source (read at compile time) |
+|---|---|
+| `version` | the binary crate's `CARGO_PKG_VERSION` |
+| `rev` | `ARCHITECT_BUILD_REV`, e.g. `git rev-parse HEAD` |
+| `built_at` | `ARCHITECT_BUILT_AT`, RFC 3339 UTC, e.g. `date -u +%Y-%m-%dT%H:%M:%SZ` |
+
+```rust,ignore
+EngineHost::new(vox, bind)
+    .build_info(architect::build_info!())
+    .serve()
+    .await?;
+```
+
+```sh
+ARCHITECT_BUILD_REV=$(git rev-parse HEAD) \
+ARCHITECT_BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+cargo build --release -p my-engine
+```
+
+A variable that is unset or empty is `null` in the JSON, never a guess;
+without `.build_info(..)` every field is `null`. Cargo tracks both
+variables, so changing one rebuilds the crate that expands the macro.
+Don't mount a plugin at `/version.json`: axum refuses the duplicate route
+at startup. `crates/architect/tests/version_json.rs` asserts the JSON and
+that an unknown path still reaches the SPA.
 
 By default the iroh endpoint finds peers through n0's relays and DNS,
 which need the internet. With the `iroh-lan` feature,

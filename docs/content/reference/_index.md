@@ -32,7 +32,7 @@ scaffolds one.
 | `architect` | `server-axum` | axum adapter — `architect::axum_ws` (Link + `serve`). |
 | `architect` | `http` | The HTTP+JSON face over axum. Off, `architect::http` is an inert facade with the same names, so derive-emitted routers still compile (a wasm client, a proto crate on its own). Implied by `server` and `host`. |
 | `architect` | `http-client` | `architect::http::HttpClient` over reqwest (native + wasm). Off, the generated `<Trait>HttpClient`s exist but answer every call with a `Transport` error. |
-| `architect` | `host` | `architect::host::EngineHost` — `/vox` + `/health` + plugins + optional iroh + SPA bundle from one router. |
+| `architect` | `host` | `architect::host::EngineHost` — `/vox` + `/health` + `/version.json` (`build_info!`) + plugins + optional iroh + SPA bundle from one router. |
 | `architect` | `local` | In-process transport — `architect::{LocalServer, serve_local}` (native). |
 | `architect` | `platform` | Portable clock/sleep/spawn — `architect::platform` (native tokio ↔ wasm browser timers). |
 | `architect` | `schedule` | Retry/repeat policies — `architect::{Schedule, retry, repeat}` (implies `platform`). |
