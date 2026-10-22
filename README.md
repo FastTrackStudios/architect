@@ -130,3 +130,13 @@ backends (`crdt`), a REAPER-style action registry, real-time-safe event
 publishing, reconnecting connection pools, retry and supervision
 policies, and a permissions gate — each behind a feature, each generated
 from the same declarations.
+
+## The agent skill
+
+`skills/architect/` is the architect skill agents load when building on
+the framework: the rules, an API map and recipes, with every repo path
+checked by `cargo xtask docs`. It is the source of truth; the fleet's
+skill sync vendors it from each release tag, and working in this repo
+loads it through `.claude/skills/architect`. On a machine the sync
+doesn't reach, `just skill-install` links this checkout's copy into
+`~/.claude/skills` and `~/.codex/skills`.

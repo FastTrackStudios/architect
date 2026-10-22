@@ -56,7 +56,8 @@ jobs:
         run: ${NIX_DEV} cargo run -q -p xtask -- boundaries
 
       # Every path, page link, `just` recipe, `cargo xtask` command and
-      # `-p` package the docs name must exist (docs/content, README.md).
+      # `-p` package the docs name must exist (docs/content, README.md,
+      # skills/).
       - name: docs
         if: ${{ !cancelled() }}
         run: ${NIX_DEV} cargo run -q -p xtask -- docs
