@@ -4,6 +4,7 @@
 //! consume it — the release tags they pin, and the manifests they pin
 //! them in. Nothing here is part of the published crate surface.
 
+mod boundaries;
 mod fleet;
 mod git;
 mod mirror;
@@ -63,6 +64,22 @@ enum Command {
         #[arg(long)]
         redact_emails: bool,
     },
+    /// Check the crate-layout boundaries in `boundaries.toml`.
+    ///
+    /// Resolves every layer-table row with `cargo tree -p` and fails when
+    /// a contract or ui feature set reaches an engine, storage or host
+    /// dependency, a crate outside `apps/` turns a transport host on, a
+    /// member lacks workspace lints, the lockfile pins architect twice,
+    /// or a feature crate has no row. Counts are ratcheted against the
+    /// table's `[baseline]`. See `docs/content/architecture/layout.md`.
+    Boundaries {
+        /// The layer table.
+        #[arg(long, default_value = "boundaries.toml")]
+        config: PathBuf,
+        /// Also print the rows and the rules that held.
+        #[arg(short, long)]
+        verbose: bool,
+    },
     /// Repoint every architect-owned git dep in a manifest at one tag.
     ///
     /// Bumping these one crate at a time is how a consumer ends up with
@@ -92,6 +109,10 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
         Command::Tags { verbose } => tags::run(verbose),
+        Command::Boundaries { config, verbose } => {
+            let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            boundaries::run_cli(&root, &config, verbose)
+        }
         Command::Feature {
             action: FeatureAction::New { name },
         } => {

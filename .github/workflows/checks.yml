@@ -49,6 +49,12 @@ jobs:
         if: ${{ !cancelled() }}
         run: ${NIX_DEV} cargo test --workspace
 
+      # The crate-layout ADR (docs/content/architecture/layout.md) as a
+      # check: layer table in boundaries.toml, counts ratcheted.
+      - name: boundaries
+        if: ${{ !cancelled() }}
+        run: ${NIX_DEV} cargo run -q -p xtask -- boundaries
+
       # The framework half must stay wasm-clean; the ui/story crates pull
       # native rendering (blitz/vello) and are checked natively only.
       - name: check wasm
