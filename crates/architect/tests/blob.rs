@@ -382,7 +382,10 @@ async fn local_fs_puts_by_hash_streams_gets_and_answers_has() {
     let hex = hash.to_hex();
     assert_eq!(
         fs.path_for(&hash),
-        dir.path().join("blobs").join(&hex[..2]).join(&hex)
+        dir.path()
+            .join("blobs")
+            .join(hex.get(..2).unwrap())
+            .join(&hex)
     );
 
     let mut blob = store.get(hash).await.unwrap();
@@ -449,7 +452,7 @@ fn sha256_hex_round_trips_and_rejects_junk() {
     assert_eq!(Sha256::from_hex(&h.to_hex().to_uppercase()).unwrap(), h);
     assert_eq!(Sha256::from_bytes(*h.as_bytes()), h);
     let not_hex = "g".repeat(64);
-    let signed = format!("+{}", &h.to_hex()[1..]);
+    let signed = format!("+{}", h.to_hex().get(1..).unwrap());
     for junk in ["", "abc", not_hex.as_str(), signed.as_str()] {
         assert!(
             matches!(Sha256::from_hex(junk), Err(BlobError::BadHash(_))),
