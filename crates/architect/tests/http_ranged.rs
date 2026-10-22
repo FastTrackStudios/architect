@@ -85,7 +85,7 @@ async fn fetch(app: &Router, path: &str, range: Option<&str>) -> (Response, Byte
     (Response::from_parts(parts, Body::empty()), bytes)
 }
 
-fn header_of<'a>(resp: &'a Response, name: header::HeaderName) -> Option<&'a str> {
+fn header_of(resp: &Response, name: header::HeaderName) -> Option<&str> {
     resp.headers().get(name).map(|v| v.to_str().unwrap())
 }
 
