@@ -124,6 +124,40 @@ pub struct Table {
     /// The layer table.
     #[serde(default, rename = "row")]
     pub rows: Vec<Row>,
+    /// Source idioms to count and ratchet (hand routes, bespoke tools, ...).
+    #[serde(default, rename = "idiom")]
+    pub idioms: Vec<Idiom>,
+}
+
+/// A source idiom the repo is moving away from, counted line by line.
+///
+/// Rule 1 of the architect way says a capability is described once, by a
+/// trait; every hand-written `.route(` is a second description. The count
+/// can't go to zero in one PR, so it is ratcheted like the layer rules.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Idiom {
+    /// Baseline key, e.g. `hand-routes`.
+    pub name: String,
+    /// Substring that marks one occurrence on a line.
+    pub pattern: String,
+    /// Workspace-relative directories to scan for `*.rs`.
+    #[serde(default = "default_idiom_dirs")]
+    pub dirs: Vec<String>,
+    /// Workspace-relative paths (files or directories) that are exempt.
+    #[serde(default)]
+    pub allow: Vec<String>,
+    /// What to do instead, printed with each hit.
+    #[serde(default)]
+    pub instead: Option<String>,
+}
+
+fn default_idiom_dirs() -> Vec<String> {
+    vec![
+        "apps".to_owned(),
+        "crates".to_owned(),
+        "features".to_owned(),
+    ]
 }
 
 fn default_contract_target() -> String {
@@ -150,6 +184,8 @@ pub enum Rule {
     SingleSource,
     /// A feature crate has no row in the layer table.
     Unmapped,
+    /// A counted source idiom; ratcheted per `[[idiom]]` name, not here.
+    Idiom,
 }
 
 impl Rule {
@@ -173,6 +209,7 @@ impl Rule {
             Self::Lints => "lints",
             Self::SingleSource => "single-source",
             Self::Unmapped => "unmapped",
+            Self::Idiom => "idiom",
         }
     }
 }
@@ -225,6 +262,29 @@ pub struct Facts {
     pub default_graphs: BTreeMap<String, Vec<Resolved>>,
     /// `(package, source)` pairs from `Cargo.lock`.
     pub lock_sources: Vec<(String, String)>,
+    /// `path:line` hits per idiom name.
+    pub idiom_hits: BTreeMap<String, Vec<String>>,
+}
+
+impl Violation {
+    /// The `[baseline]` key: the rule id, or the idiom's name.
+    #[must_use]
+    pub fn key(&self) -> &str {
+        match self.rule {
+            Rule::Idiom => self.detail.split(": ").next().unwrap_or(""),
+            rule => rule.id(),
+        }
+    }
+}
+
+/// 1-based numbers of the lines in `text` containing `pattern`, skipping
+/// `//` comment lines.
+fn idiom_lines(text: &str, pattern: &str) -> Vec<usize> {
+    text.lines()
+        .zip(1_usize..)
+        .filter(|(line, _)| !line.trim_start().starts_with("//") && line.contains(pattern))
+        .map(|(_, n)| n)
+        .collect()
 }
 
 fn reached<'a>(graph: &'a [Resolved], names: &'a [String]) -> impl Iterator<Item = &'a Resolved> {
@@ -377,6 +437,20 @@ pub fn check(table: &Table, facts: &Facts) -> Vec<Violation> {
         }
     }
 
+    for idiom in &table.idioms {
+        for at in facts.idiom_hits.get(&idiom.name).into_iter().flatten() {
+            let instead = idiom
+                .instead
+                .as_deref()
+                .map(|i| format!(" (instead: {i})"))
+                .unwrap_or_default();
+            out.push(Violation {
+                rule: Rule::Idiom,
+                detail: format!("{}: {at}{instead}", idiom.name),
+            });
+        }
+    }
+
     out.sort();
     out
 }
@@ -405,20 +479,30 @@ pub enum Ratchet {
     Better { allowed: usize, found: usize },
 }
 
-/// Compare per-rule counts with `[baseline]`.
+/// Every `[baseline]` key the table can use: the rule ids, then the idioms.
 #[must_use]
-pub fn ratchet(table: &Table, violations: &[Violation]) -> Vec<(Rule, Ratchet)> {
+pub fn keys(table: &Table) -> Vec<String> {
     Rule::ALL
         .iter()
-        .map(|&rule| {
-            let found = violations.iter().filter(|v| v.rule == rule).count();
-            let allowed = table.baseline.get(rule.id()).copied().unwrap_or(0);
+        .map(|r| r.id().to_owned())
+        .chain(table.idioms.iter().map(|i| i.name.clone()))
+        .collect()
+}
+
+/// Compare per-key counts with `[baseline]`.
+#[must_use]
+pub fn ratchet(table: &Table, violations: &[Violation]) -> Vec<(String, Ratchet)> {
+    keys(table)
+        .into_iter()
+        .map(|key| {
+            let found = violations.iter().filter(|v| v.key() == key).count();
+            let allowed = table.baseline.get(&key).copied().unwrap_or(0);
             let verdict = match found.cmp(&allowed) {
                 std::cmp::Ordering::Equal => Ratchet::Held,
                 std::cmp::Ordering::Greater => Ratchet::Worse { allowed, found },
                 std::cmp::Ordering::Less => Ratchet::Better { allowed, found },
             };
-            (rule, verdict)
+            (key, verdict)
         })
         .collect()
 }
@@ -588,12 +672,64 @@ fn gather(root: &Path, table: &Table) -> Result<Facts, String> {
     }
     let lock =
         std::fs::read_to_string(root.join("Cargo.lock")).map_err(|e| format!("Cargo.lock: {e}"))?;
+    let mut idiom_hits = BTreeMap::new();
+    for idiom in &table.idioms {
+        idiom_hits.insert(idiom.name.clone(), scan_idiom(root, idiom)?);
+    }
     Ok(Facts {
         members,
         row_graphs,
         default_graphs,
         lock_sources: parse_lock(&lock)?,
+        idiom_hits,
     })
+}
+
+/// Every `*.rs` file under `dir`, skipping `target/` and dot-directories.
+fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(format!("{}: {e}", dir.display())),
+    };
+    for entry in entries {
+        let path = entry.map_err(|e| format!("{}: {e}", dir.display()))?.path();
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if path.is_dir() {
+            if name != "target" && !name.starts_with('.') {
+                rust_files(&path, out)?;
+            }
+        } else if path.extension().is_some_and(|e| e == "rs") {
+            out.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn scan_idiom(root: &Path, idiom: &Idiom) -> Result<Vec<String>, String> {
+    let mut files = Vec::new();
+    for dir in &idiom.dirs {
+        rust_files(&root.join(dir), &mut files)?;
+    }
+    files.sort();
+    let mut hits = Vec::new();
+    for file in files {
+        let rel = file
+            .strip_prefix(root)
+            .map(|r| r.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        if in_dirs(&rel, &idiom.allow) {
+            continue;
+        }
+        let text =
+            std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+        hits.extend(
+            idiom_lines(&text, &idiom.pattern)
+                .into_iter()
+                .map(|n| format!("{rel}:{n}")),
+        );
+    }
+    Ok(hits)
 }
 
 /// Load the table at `config`.
@@ -617,27 +753,22 @@ pub fn run_cli(root: &Path, config: &Path, verbose: bool) -> Result<(), String> 
         println!("{v}");
     }
     let mut failed = Vec::new();
-    for (rule, verdict) in ratchet(&table, &violations) {
+    for (key, verdict) in ratchet(&table, &violations) {
         match verdict {
             Ratchet::Held => {
                 if verbose {
-                    println!("ok    {}", rule.id());
+                    println!("ok    {key}");
                 }
             }
             Ratchet::Worse { allowed, found } => {
-                println!(
-                    "FAIL  {}: {found} violations, baseline {allowed}",
-                    rule.id()
-                );
-                failed.push(rule.id());
+                println!("FAIL  {key}: {found} violations, baseline {allowed}");
+                failed.push(key);
             }
             Ratchet::Better { allowed, found } => {
                 println!(
-                    "FAIL  {}: {found} violations, baseline {allowed}: lower [baseline] {} to {found}",
-                    rule.id(),
-                    rule.id()
+                    "FAIL  {key}: {found} violations, baseline {allowed}: lower [baseline] {key} to {found}"
                 );
-                failed.push(rule.id());
+                failed.push(key);
             }
         }
     }
@@ -678,6 +809,11 @@ mod tests {
         package = "greeter"
         features = ["ui"]
         layer = "L4"
+
+        [[idiom]]
+        name = "hand-routes"
+        pattern = ".route("
+        instead = "a #[architect::service] trait"
     "#;
 
     fn table() -> Table {
@@ -727,6 +863,7 @@ mod tests {
                 ("architect".to_owned(), "path".to_owned()),
                 ("auth".to_owned(), "path".to_owned()),
             ],
+            idiom_hits: BTreeMap::from([("hand-routes".to_owned(), Vec::new())]),
         }
     }
 
@@ -854,7 +991,7 @@ mod tests {
         assert_eq!(
             ratchet(&t, &check(&t, &facts))[3],
             (
-                Rule::Lints,
+                "lints".to_owned(),
                 Ratchet::Better {
                     allowed: 1,
                     found: 0
@@ -864,19 +1001,61 @@ mod tests {
         facts.members[0].workspace_lints = false;
         assert_eq!(
             ratchet(&t, &check(&t, &facts))[3],
-            (Rule::Lints, Ratchet::Held)
+            ("lints".to_owned(), Ratchet::Held)
         );
         facts.members[1].workspace_lints = false;
         assert_eq!(
             ratchet(&t, &check(&t, &facts))[3],
             (
-                Rule::Lints,
+                "lints".to_owned(),
                 Ratchet::Worse {
                     allowed: 1,
                     found: 2
                 }
             )
         );
+    }
+
+    #[test]
+    fn a_hand_route_is_counted_and_ratcheted_by_name() {
+        let mut t = table();
+        let mut facts = clean();
+        facts.idiom_hits.insert(
+            "hand-routes".to_owned(),
+            vec![
+                "apps/server/src/lib.rs:12".to_owned(),
+                "apps/server/src/lib.rs:13".to_owned(),
+            ],
+        );
+        let v = check(&t, &facts);
+        assert_eq!(rules(&v), vec![Rule::Idiom; 2], "{v:?}");
+        assert_eq!(v[0].key(), "hand-routes");
+        assert!(
+            v[0].detail
+                .contains("instead: a #[architect::service] trait")
+        );
+        let verdict = |t: &Table| {
+            ratchet(t, &v)
+                .into_iter()
+                .find(|(k, _)| k == "hand-routes")
+                .unwrap()
+                .1
+        };
+        assert_eq!(
+            verdict(&t),
+            Ratchet::Worse {
+                allowed: 0,
+                found: 2
+            }
+        );
+        t.baseline.insert("hand-routes".to_owned(), 2);
+        assert_eq!(verdict(&t), Ratchet::Held);
+    }
+
+    #[test]
+    fn idiom_lines_skip_comments() {
+        let text = "fn a() {\n    r.route(\"/x\", get(x))\n    // .route(\"/old\")\n    .route(\"/y\", post(y));\n}\n";
+        assert_eq!(idiom_lines(text, ".route("), vec![2, 4]);
     }
 
     #[test]
@@ -911,9 +1090,9 @@ mod tests {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../boundaries.toml");
         let t = load(&path).unwrap();
         assert!(!t.rows.is_empty());
-        let ids: BTreeSet<&str> = Rule::ALL.iter().map(|r| r.id()).collect();
+        let ids = keys(&t);
         for key in t.baseline.keys() {
-            assert!(ids.contains(key.as_str()), "unknown baseline rule {key}");
+            assert!(ids.contains(key), "unknown baseline rule {key}");
         }
     }
 }

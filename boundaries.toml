@@ -45,6 +45,8 @@ architect-server = ["server-seaorm"]
 ui-reach = 11
 transport-host = 4
 lints = 1
+# hand-routes: auth-ui 67, auth-server 23, mock-oauth 5, mcp 1, auth example 1.
+hand-routes = 97
 
 # ── L0 contracts ──────────────────────────────────────────────────────────
 [[row]]
@@ -176,3 +178,13 @@ layer = "L1"
 [[row]]
 package = "architect-mcp"
 layer = "L3"
+
+# ── idioms (ratcheted counts) ─────────────────────────────────────────────
+# A hand-written axum route describes a capability a second time; the trait
+# (#[architect::service] / #[architect::rpc], mounted by EngineHost) is the
+# one description. architect's axum adapter and derives are where routes are built.
+[[idiom]]
+name = "hand-routes"
+pattern = ".route("
+allow = ["crates/architect", "crates/architect-derive", "crates/architect-rpc-derive"]
+instead = "a #[architect::service] trait mounted by EngineHost"
