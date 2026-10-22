@@ -424,6 +424,10 @@ name = "iroh_link"
 required-features = ["iroh"]
 
 [[test]]
+name = "version_json"
+required-features = ["host"]
+
+[[test]]
 name = "iroh_lan"
 required-features = ["iroh-lan"]
 
