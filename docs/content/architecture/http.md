@@ -230,12 +230,12 @@ the byte-range rules under them are not app code. `architect::http::ranged`
   streamed body (`.take(len)` to stop at the range's end).
 
 ```rust,ignore
-async fn download(headers: HeaderMap, Path(id): Path<String>) -> Response {
-    let total = store.len(&id).await?;
+async fn download(headers: HeaderMap, Path(id): Path<String>) -> Result<Response, StoreError> {
+    let (total, mime) = store.stat(&id).await?;
     serve_body(&headers, total, &mime, |offset, len| async move {
         store.read_range(&id, offset, len).await.map(Body::from)
     })
-    .await?
+    .await
 }
 ```
 
