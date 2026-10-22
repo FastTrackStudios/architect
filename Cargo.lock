@@ -2377,6 +2377,7 @@ name = "crdt"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "architect-permissions",
  "async-trait",
  "chrono",
  "crdt",
@@ -2386,6 +2387,7 @@ dependencies = [
  "js-sys",
  "loro",
  "loro-internal",
+ "proptest",
  "tempfile",
  "thiserror 2.0.20",
  "tokio",

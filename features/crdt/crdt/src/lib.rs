@@ -43,6 +43,11 @@ pub mod registry;
 #[cfg(all(feature = "vox", not(target_arch = "wasm32")))]
 pub use registry::DocRegistry;
 
+// Pairwise document exchange between nodes (no hub): the `DocPeer` lane,
+// `exchange`, `pull`. Native only, like the registry it serves.
+#[cfg(all(feature = "vox", not(target_arch = "wasm32")))]
+pub mod peer;
+
 // Dioxus hooks (`use_synced_doc`, `use_crdt_list`, `use_crdt_entry`,
 // `use_presence_channel`) — the client-side bridge from a syncing
 // replica to `AtomResult` phase rendering. Pulls Dioxus via
