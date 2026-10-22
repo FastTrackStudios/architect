@@ -205,9 +205,60 @@ and vox over iroh (loopback). A behaviour that holds on one transport
 and not another is a bug in the framework's face, not in the engine —
 which is exactly what a per-transport hand-written test never notices.
 
+## Byte ranges (`Range` → 206)
+
+Media and downloads are HTTP by nature and stay hand-written routes, but
+the byte-range rules under them are not app code. `architect::http::ranged`
+(`crates/architect/src/http/ranged.rs`) has them once:
+
+| `Range` | answer |
+|---|---|
+| absent, malformed, another unit, several ranges | `200`, whole body |
+| `bytes=a-b`, `bytes=a-`, `bytes=-n` that selects bytes | `206` + `Content-Range: bytes a-b/total` |
+| a well-formed `bytes=` spec that selects nothing | `416` + `Content-Range: bytes */total` |
+
+- `parse_range(raw, total) -> ByteRange` is pure and builds in every
+  configuration, wasm included. `ByteRange::window(total)` is the
+  `(offset, len)` the body must carry.
+- Under `http`: `serve_body(&headers, total, mime, |offset, len| …)` calls
+  your reader once with exactly the selected window (never for a `416`),
+  so a blob or object store reads only those bytes; `serve_bytes` slices an
+  in-memory `Bytes`; `respond(range, total, mime, body)` is the response
+  assembly on its own.
+- Natively: `serve_file(&headers, &path, mime)` streams a file from disk,
+  and `reader_body(reader)` turns any `tokio::io::AsyncRead` into a
+  streamed body (`.take(len)` to stop at the range's end).
+
+```rust,ignore
+async fn download(headers: HeaderMap, Path(id): Path<String>) -> Response {
+    let total = store.len(&id).await?;
+    serve_body(&headers, total, &mime, |offset, len| async move {
+        store.read_range(&id, offset, len).await.map(Body::from)
+    })
+    .await?
+}
+```
+
+**Against `tower_http::services::ServeFile` / `ServeDir`.** For a file
+on disk mounted at a path with nothing of yours in front of it (the SPA
+bundle `EngineHost` serves, a static asset dir), use `tower-http`: it
+also answers `HEAD`, conditional requests (`If-Range`, `If-None-Match`,
+`If-Modified-Since` with `ETag` / `Last-Modified`), guesses the content
+type and serves precompressed variants, none of which `ranged` does.
+Reach for `ranged` when the bytes do not come from a path `ServeFile` can
+open (a content-addressed blob store, S3, a database, a CRDT attachment),
+when the route has to authorize or look the resource up first and wants
+to set the content type itself, or when the total length is known before
+the bytes are. `serve_file` is for the in-between case: a file whose path
+the handler computes, served with the same response shape as the
+store-backed routes.
+
 ## Not yet
 
 - Traits with an ambient `context = T` have no HTTP face: there is no
   transport-neutral way to pull `T` out of a request yet.
+- `ranged` serves one range per request (no `multipart/byteranges`) and
+  checks no validators: an `If-Range` that no longer matches still gets
+  the range.
 - Streams flow server → client only, as vox channels do; there is no
   client-push channel over HTTP.
