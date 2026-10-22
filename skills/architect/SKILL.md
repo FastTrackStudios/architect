@@ -65,12 +65,12 @@ Use these before writing your own. Each is behind a cargo feature and has a docs
 | Signed self-update from GitHub Releases | `architect::release` (feature `release`, native only) | `crates/architect/src/release.rs` `Updater`, `Target`, `Options`, `Outcome`; refuses `/nix/store`, a `None` key checks and refuses to install | `release.md` |
 | Keymap engine (chords, trie, modes, which-key) | `architect-input` (`features/input`; feature `dioxus` for DOM events and `use_input_processor`) | `features/input/src/processor.rs` `InputProcessor`; `features/input/src/which_key.rs` `WhichKey`; keys bind to Action List ids | `input.md` |
 
-Still not in architect: remote token introspection (I34). Until it lands, Task's `task:apps/server/src/central_auth.rs` is the only implementation.
+Still not in architect: remote token introspection (I34). Until it lands, Task's `task:apps/server/src/central_auth.rs` `CentralAuth` is the only implementation.
 
 ## Rules
 
 1. **Contract first, once.** Every capability is a Rust type or trait: `#[architect::entity]`, `#[architect::error]`, `#[architect::service]` (vox + HTTP, optionally `actions`) or `#[architect::rpc]` (vox only). Never write a second DTO, a hand axum route or a Dioxus server function for something a trait already describes. Wire types are facet-only (no serde next to them; the Entity `json` option and an action's `RawJson` reply are the documented exceptions). One error enum per service. Keep a method to at most 4 params (a convention, not compiler-enforced); more go in one facet struct. Subscriptions are sync `#[subscribe]` markers, not `async fn`.
-2. **One command per capability.** Anything a person or an agent can do is an action in the app's `ActionList`: id `AREA_VERB`, facet `Args`/`Out`, an `Effect` (ReadOnly/Mutating/Destructive). Keys (`architect-input`), menus, palette, MCP, CLI and REAPER named commands all run it by id. A service's methods become actions with `#[architect::service(actions)]`. No bespoke MCP tool, menu handler or palette entry. UI-only effects use the queued-window pattern (`studio:apps/session/daw/src/actions.rs`); a programmatic `run` never opens a dialog. Register at startup and call `list.validate()` in a test.
+2. **One command per capability.** Anything a person or an agent can do is an action in the app's `ActionList`: id `AREA_VERB`, facet `Args`/`Out`, an `Effect` (ReadOnly/Mutating/Destructive). Keys (`architect-input`), menus, palette, MCP, CLI and REAPER named commands all run it by id. A service's methods become actions with `#[architect::service(actions)]`. No bespoke MCP tool, menu handler or palette entry. UI-only effects use the queued-window pattern (`studio:apps/session/daw/src/actions.rs` `take_window`); a programmatic `run` never opens a dialog. Register at startup and call `list.validate()` in a test.
 3. **Pick the state model per datum.**
 
    | Data | Model |

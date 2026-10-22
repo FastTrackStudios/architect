@@ -11,7 +11,7 @@ Source: the STA-219 architecture report and the `architect` wiki page `fts-auth`
 
 - An app is a **public OIDC client**: authorization code + PKCE, `offline_access` for a 7-day rotating refresh token. CLIs and headless windows use the **device-code** flow.
 - The app server turns the bearer into a person by calling the issuer (`/auth/session` or `/oauth2/userinfo`), then applies **its own** membership fence and permit table (`architect-permissions`). Orgs and roles (owner/admin/member plus custom roles) live at the issuer; what a role may *do* inside an app lives in that app.
-- **Offline:** tokens are HS256 with an empty JWKS, so nothing can validate them offline. Local-first works because each native install runs its own node with a local account, using the issuer only to sign in, list orgs and keep the device address book (`DeviceService`). Peers then authenticate each other by **iroh endpoint key**, not by fts-auth tokens.
+- **Offline:** tokens are HS256 (a shared secret only the issuer holds) with an empty JWKS, so no app, client or peer can validate them offline. Local-first works because each native install runs its own node with a local account, using the issuer only to sign in, list orgs and keep the device address book (`features/auth/auth-proto/src/device.rs` `DeviceService`). Peers then authenticate each other by **iroh endpoint key**, not by fts-auth tokens.
 - Task is the only app wired end to end. Copy its account sync pass and `DeviceService` use when you wire Signal or Session.
 
 ## Known gaps (don't trip on them)

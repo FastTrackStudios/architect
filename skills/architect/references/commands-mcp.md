@@ -88,4 +88,4 @@ if let Some(serving) = server.serve_loopback_or(47_811, "FTS_MCP_PORT", "FTS_MCP
 6. `#[architect::service(actions)]` handlers do not see the caller; a per-org service registers by hand with `register_async_with`. A projected failure is the error's `Display`, not the HTTP face's `{code, message}`.
 7. `validate()` checks schemas are JSON objects only; it does not prove the decoder and schema agree beyond that.
 8. Menu and palette adapters from `ActionInfo` are not in architect (I13). architect-ui `Command*` / `Menubar*` take their own items; Session builds its menu from `infos()` (`studio:apps/session/daw/src/app_menu.rs`). The launcher (`features/launcher/architect-launcher-core`) is a separate catalogue with no architect dependency and no bridge to the list.
-9. The queued-window pattern for UI-only effects is Session's (`studio:apps/session/daw/src/actions.rs`): a programmatic run never opens a dialog.
+9. The queued-window pattern for UI-only effects is Session's (`studio:apps/session/daw/src/actions.rs` `WINDOW`, `take_window`): a programmatic run never opens a dialog.

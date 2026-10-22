@@ -98,4 +98,4 @@ Tests to copy: `features/auth/tests/native/src/permissions_gate_tests.rs` (`esta
 - **wasm:** the gate and `caller()` are excluded on wasm32; the engine crate switches its `Send` bounds; `auth-client` is wasm-clean.
 - **Two authorization planes:** the router gate does not cover in-process `ActionList` runs. Give the list the gate's engine with `set_authorizer`.
 - **mock-oauth is not an OAuth server** (no client secret, PKCE or expiry checks). Never point a production auth server at it.
-- **Auth-server JWTs are HS256 with an empty JWKS:** nothing can validate them offline (consequences in `references/fts-auth.md`). Remote token introspection (I34) is not in architect yet; Task's `task:apps/server/src/central_auth.rs` is the only implementation.
+- **Auth-server JWTs are HS256 with an empty JWKS:** only the issuer holds the secret, so no app, client or peer can validate them offline (consequences in `references/fts-auth.md`). Remote token introspection (I34) is not in architect yet; Task's `task:apps/server/src/central_auth.rs` `CentralAuth` is the only implementation.

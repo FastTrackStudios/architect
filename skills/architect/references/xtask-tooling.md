@@ -6,12 +6,12 @@ Subcommands are declared in `xtask/src/main.rs` (`Command`); `cargo xtask --help
 
 | Command | What it does | Code |
 |---|---|---|
-| `cargo xtask feature new <name>` | writes ONE crate `features/<name>/` (contract as the default feature set, wasm-clean; in-memory backend behind `memory`; `vox` and `ui` flags; a `spec/`; a passing test), registers it in workspace members and `[workspace.dependencies]`, adds boundaries rows, runs rustfmt | `xtask/src/scaffold.rs`; acceptance test `xtask/tests/feature_new.rs` |
-| `cargo xtask tags [-v]` | every `vX.Y.Z` tag must descend from every lower-numbered one | `xtask/src/tags.rs` |
-| `cargo xtask boundaries [--config F] [-v]` | resolves each `boundaries.toml` row with `cargo tree`, runs the layer rules, ratchets counts | `xtask/src/boundaries.rs` |
-| `cargo xtask docs` | every repo path, page link, `just` recipe, `cargo xtask` command and `-p` package named in `docs/content/**/*.md`, `README.md` and `skills/**/*.md` must exist | `xtask/src/docs.rs` |
-| `cargo xtask fleet-bump <TAG> <MANIFEST or DIR>... [-n]` | rewrites architect-owned git dep lines to `tag = "<TAG>"` | `xtask/src/fleet.rs` |
-| `cargo xtask auth-mirror --from URL [--out F] [--redact-emails]` | pulls a server-side-scrubbed copy of an auth server's org graph (needs `AUTH_ADMIN_TOKEN`) | `xtask/src/mirror.rs` |
+| `cargo xtask feature new <name>` | writes ONE crate `features/<name>/` (contract as the default feature set, wasm-clean; in-memory backend behind `memory`; `vox` and `ui` flags; a `spec/`; a passing test), registers it in workspace members and `[workspace.dependencies]`, adds boundaries rows, runs rustfmt | `xtask/src/scaffold.rs` `feature_new`; acceptance test `xtask/tests/feature_new.rs` |
+| `cargo xtask tags [-v]` | every `vX.Y.Z` tag must descend from every lower-numbered one | `xtask/src/tags.rs` `run`, `GRANDFATHERED` |
+| `cargo xtask boundaries [--config F] [-v]` | resolves each `boundaries.toml` row with `cargo tree`, runs the layer rules, ratchets counts | `xtask/src/boundaries.rs` `run_cli` |
+| `cargo xtask docs` | every repo path, page link, `just` recipe, `cargo xtask` command and `-p` package named in `docs/content/**/*.md`, `README.md` and `skills/**/*.md` must exist | `xtask/src/docs.rs` `run_cli`, `check_text` |
+| `cargo xtask fleet-bump <TAG> <MANIFEST or DIR>... [-n]` | rewrites architect-owned git dep lines to `tag = "<TAG>"` | `xtask/src/fleet.rs` `run`, `OWNED_PREFIXES` |
+| `cargo xtask auth-mirror --from URL [--out F] [--redact-emails]` | pulls a server-side-scrubbed copy of an auth server's org graph (needs `AUTH_ADMIN_TOKEN`) | `xtask/src/mirror.rs` `run` |
 
 In the architect repo `cargo xtask` is `cargo run -p xtask --`. Consumers build the binary from the tag they pin (`cargo install --locked --git https://github.com/FastTrackStudios/architect --tag <TAG> xtask`) and run it from their own root. Task aliases `cargo xtask` to its own codegen xtask, so call architect's binary by path there.
 
