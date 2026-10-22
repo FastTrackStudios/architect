@@ -65,6 +65,10 @@
 
 use core::fmt::Display;
 
+// `Range: bytes=…` → `206 Partial Content`: the pure parser in every
+// build, the axum response helpers under `http`.
+pub mod ranged;
+
 /// How an application error appears on the HTTP face.
 ///
 /// Implemented by the error type of every `Result`-returning method the
