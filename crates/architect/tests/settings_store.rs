@@ -1,7 +1,7 @@
 //! `architect::settings::Store<T>`: round-trip, skip-if-equal, 0600, and
 //! crash safety (a torn temp file from a dead writer never wins).
 
-use architect::facet::{self, Facet};
+use architect::facet::Facet;
 use architect::settings::{FileKv, SettingsError, Store, write_atomic};
 
 #[derive(Facet, Debug, Default, Clone, PartialEq)]
@@ -55,7 +55,10 @@ fn equal_write_is_skipped() {
     assert!(s.save(&sample()).unwrap());
     let before = std::fs::metadata(s.path()).unwrap();
     std::thread::sleep(std::time::Duration::from_millis(20));
-    assert!(!s.save(&sample()).unwrap(), "unchanged value must not be rewritten");
+    assert!(
+        !s.save(&sample()).unwrap(),
+        "unchanged value must not be rewritten"
+    );
     let after = std::fs::metadata(s.path()).unwrap();
     assert_eq!(before.modified().unwrap(), after.modified().unwrap());
     #[cfg(unix)]
@@ -137,7 +140,11 @@ fn private_files_are_0600() {
     // Non-private files keep the umask default.
     let kv = FileKv::new(dir.path());
     kv.write("plain", "x").unwrap();
-    let mode = std::fs::metadata(kv.path("plain")).unwrap().permissions().mode() & 0o777;
+    let mode = std::fs::metadata(kv.path("plain"))
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o777;
     assert_ne!(mode, 0o600);
 }
 

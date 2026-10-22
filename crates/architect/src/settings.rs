@@ -207,13 +207,14 @@ fn encode_key(key: &str) -> String {
         }
     }
     if out.is_empty() {
-        out.push_str("%");
+        out.push('%');
     }
     out
 }
 
-/// Write `body` to `path` so a crash leaves the old file or the new one:
-/// a temp file in the same directory (same filesystem, so the rename is
+/// Write `body` to `path` so a crash leaves the old file or the new one.
+///
+/// The body goes to a temp file in the same directory (same filesystem, so the rename is
 /// atomic), `fsync`, rename over `path`, then `fsync` the directory
 /// (unix). Skipped — returning `false` — when `path` already holds
 /// `body`. `private` creates the temp file `0600` (unix).
@@ -234,7 +235,9 @@ pub fn write_atomic(path: &std::path::Path, body: &[u8], private: bool) -> std::
         .filter(|d| !d.as_os_str().is_empty())
         .unwrap_or_else(|| std::path::Path::new("."));
     std::fs::create_dir_all(dir)?;
-    let name = path.file_name().map_or_else(Default::default, |n| n.to_string_lossy().into_owned());
+    let name = path
+        .file_name()
+        .map_or_else(Default::default, |n| n.to_string_lossy().into_owned());
     let tmp = dir.join(format!(
         ".{name}.tmp-{}-{}",
         std::process::id(),
@@ -307,8 +310,23 @@ impl<T> std::fmt::Debug for Store<T> {
         let mut d = f.debug_struct("Store");
         d.field("app", &self.app).field("name", &self.name);
         #[cfg(not(target_arch = "wasm32"))]
-        d.field("path", &self.path());
-        d.finish()
+        d.field("kv", &self.kv);
+        d.finish_non_exhaustive()
+    }
+}
+
+impl<T> Store<T> {
+    /// The key, `"{name}.json"` on every target.
+    #[must_use]
+    pub fn key(&self) -> String {
+        format!("{}.json", self.name)
+    }
+
+    /// The file this setting lives in.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[must_use]
+    pub fn path(&self) -> std::path::PathBuf {
+        self.kv.path(&self.key())
     }
 }
 
@@ -356,30 +374,19 @@ where
         }
     }
 
-    /// The key, `"{name}.json"` on every target.
-    #[must_use]
-    pub fn key(&self) -> String {
-        format!("{}.json", self.name)
-    }
-
-    /// The file this setting lives in.
-    #[cfg(not(target_arch = "wasm32"))]
-    #[must_use]
-    pub fn path(&self) -> std::path::PathBuf {
-        self.kv.path(&self.key())
-    }
-
     /// The stored value; `T::default()` when nothing is stored yet. A
     /// body that does not decode is an error, never silently replaced.
     pub fn load(&self) -> Result<T, SettingsError> {
         let key = self.key();
-        match self.read_body(&key)? {
-            None => Ok(T::default()),
-            Some(body) => facet_json::from_str::<T>(&body).map_err(|e| SettingsError::Decode {
-                key,
-                message: e.to_string(),
-            }),
-        }
+        self.read_body(&key)?.map_or_else(
+            || Ok(T::default()),
+            |body| {
+                facet_json::from_str::<T>(&body).map_err(|e| SettingsError::Decode {
+                    key,
+                    message: e.to_string(),
+                })
+            },
+        )
     }
 
     /// Store `value`. Returns `false` when the stored body was already
@@ -428,10 +435,12 @@ where
 
     #[cfg(not(target_arch = "wasm32"))]
     fn write_body(&self, key: &str, body: &str) -> Result<bool, SettingsError> {
-        self.kv.write(key, body).map_err(|source| SettingsError::Io {
-            key: key.to_owned(),
-            source,
-        })
+        self.kv
+            .write(key, body)
+            .map_err(|source| SettingsError::Io {
+                key: key.to_owned(),
+                source,
+            })
     }
 
     #[cfg(target_arch = "wasm32")]

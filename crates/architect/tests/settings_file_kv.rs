@@ -34,17 +34,23 @@ fn kv_rows_over_files_round_trip_and_match_memory_keys() {
     let memory = KvRows::new(MemoryKv::default(), "app/");
 
     block_on(async {
-        for rows in [&files as &dyn LocalRows, &memory as &dyn LocalRows] {
+        let both: [&dyn LocalRows; 2] = [&files, &memory];
+        for rows in both {
             rows.replace("task", "org-1", vec![row("a", "{\"n\":1}")])
                 .await
                 .unwrap();
-            rows.upsert("task", "org-1", row("b", "{\"n\":2}")).await.unwrap();
+            rows.upsert("task", "org-1", row("b", "{\"n\":2}"))
+                .await
+                .unwrap();
             rows.queue_push("call-1".into()).await.unwrap();
         }
         let got = files.load("task", "org-1").await.unwrap().unwrap();
         assert_eq!(got, vec![row("a", "{\"n\":1}"), row("b", "{\"n\":2}")]);
         assert_eq!(files.load("task", "other").await.unwrap(), None);
-        assert_eq!(files.queue_list().await.unwrap(), memory.queue_list().await.unwrap());
+        assert_eq!(
+            files.queue_list().await.unwrap(),
+            memory.queue_list().await.unwrap()
+        );
 
         // A fresh handle on the same dir sees everything: it is durable.
         let reopened = KvRows::new(FileKv::new(dir.path()), "app/");
