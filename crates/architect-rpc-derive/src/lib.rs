@@ -3354,7 +3354,16 @@ fn emit_http_block(
         }
         let attach = if sub.arg_idents.is_empty() {
             let hub_fn = format_ident!("{}_hub", name);
-            quote! { backend.#hub_fn().attach(sink) }
+            let intro_fn = format_ident!("{}_intro", name);
+            quote! {{
+                // Same two-step attach as the stream host (see
+                // emit_stream_block): the intro goes at the FRONT of this
+                // subscriber's mailbox, ahead of anything published between
+                // the attach and the client learning about it.
+                let hub = backend.#hub_fn();
+                let pending = hub.begin_attach(sink);
+                hub.complete_attach(pending, backend.#intro_fn());
+            }}
         } else {
             let attach_fn = format_ident!("{}_attach", name);
             let call_args =

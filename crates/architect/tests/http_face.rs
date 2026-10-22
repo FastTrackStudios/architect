@@ -125,6 +125,50 @@ mod greeter {
     }
 }
 
+/// One argless subscription that introduces itself: the regression for the
+/// SSE path's attach (the stream host already did the two-step attach).
+mod herald {
+    /// The frame every new `news` subscriber gets first.
+    pub const INTRO: u32 = u32::MAX;
+
+    #[architect::service]
+    pub trait Herald {
+        /// Takes nothing, never fails.
+        async fn ping(&self) -> u32;
+        /// Every headline, as it happens.
+        #[subscribe]
+        fn news(&self) -> u32;
+    }
+
+    #[derive(Clone)]
+    pub struct Backend {
+        pub news: architect::PubSub<u32>,
+    }
+
+    impl Default for Backend {
+        fn default() -> Self {
+            Self {
+                news: architect::PubSub::sliding(16),
+            }
+        }
+    }
+
+    impl HeraldStreamSource for Backend {
+        fn news_hub(&self) -> &architect::PubSub<u32> {
+            &self.news
+        }
+        fn news_intro(&self) -> Option<u32> {
+            Some(INTRO)
+        }
+    }
+
+    impl Herald for Backend {
+        async fn ping(&self) -> u32 {
+            1
+        }
+    }
+}
+
 mod widget {
     use std::sync::{Arc, Mutex};
 
@@ -536,6 +580,26 @@ async fn subscriptions_stream_as_server_sent_events() {
     backend.ticks.publish(4);
     backend.ticks.publish(5);
     assert_eq!(backend.ticks.subscriber_count(), 0);
+}
+
+#[tokio::test]
+async fn an_argless_subscription_introduces_itself_over_sse() {
+    use futures::StreamExt as _;
+
+    let backend = herald::Backend::default();
+    let app = architect::layers![herald::Service, herald::StreamService].provide_http(&backend);
+    let client = herald::HeraldHttpClient::at(serve(app).await);
+
+    let mut news = client.news().await.expect("subscribe");
+    // Published straight after `subscribe` returns, with no settling sleep:
+    // whatever the attach timing, the intro must still be the first frame.
+    backend.news.publish(1);
+    let first = tokio::time::timeout(std::time::Duration::from_secs(5), news.next())
+        .await
+        .expect("a frame within 5s")
+        .unwrap()
+        .unwrap();
+    assert_eq!(first, herald::INTRO, "the intro is the first SSE frame");
 }
 
 #[tokio::test]
