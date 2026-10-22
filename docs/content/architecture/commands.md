@@ -302,7 +302,6 @@ well. The vox items keep their names, so the switch is a short recipe.
 is served over HTTP through the dispatcher bridge, so the backend needs
 `HasDispatcher` (`#[derive(architect::HasDispatcher)]`).
 
-
 **The crate's features.** `http` (architect's `http`) compiles the router
 and `http-client` compiles `<Trait>HttpClient`. With `actions`, the crate
 also needs architect's `action-list`. Mount the router with

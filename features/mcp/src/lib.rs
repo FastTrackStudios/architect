@@ -304,9 +304,7 @@ impl Server {
             return self.initialized(version, instructions);
         }
         if self.tools == Tools::Both {
-            instructions.push_str(
-                "Each action is also a tool of its own, named after it. ",
-            );
+            instructions.push_str("Each action is also a tool of its own, named after it. ");
         }
         instructions.push_str(&format!(
             "Everything {} can do is an action in its Action List ({} of them) — the same \
@@ -346,7 +344,11 @@ impl Server {
             },
         };
         if self.tools != Tools::Generic {
-            out.extend(self.named(who).into_iter().map(|(tool, info)| named_tool(&tool, &info)));
+            out.extend(
+                self.named(who)
+                    .into_iter()
+                    .map(|(tool, info)| named_tool(&tool, &info)),
+            );
         }
         out
     }
@@ -486,7 +488,12 @@ impl Server {
     }
 
     /// Run one action, its JSON result or what went wrong.
-    async fn run_one(&self, who: &Principal, id: &str, args: Option<&Value>) -> Result<Value, Value> {
+    async fn run_one(
+        &self,
+        who: &Principal,
+        id: &str,
+        args: Option<&Value>,
+    ) -> Result<Value, Value> {
         let bytes = match args {
             None | Some(Value::Null) => Vec::new(),
             Some(v) => v.to_string().into_bytes(),
@@ -1188,7 +1195,10 @@ mod tests {
         let ask = &tools[1];
         assert_eq!(ask["description"], "Ask a peer by name");
         assert_eq!(ask["inputSchema"]["type"], "object");
-        assert!(ask["inputSchema"]["properties"]["name"].is_object(), "{ask}");
+        assert!(
+            ask["inputSchema"]["properties"]["name"].is_object(),
+            "{ask}"
+        );
         assert_eq!(ask["annotations"]["readOnlyHint"], false);
         assert_eq!(tools[0]["annotations"]["readOnlyHint"], true);
         assert_eq!(tools[2]["annotations"]["destructiveHint"], true);
@@ -1205,7 +1215,11 @@ mod tests {
         assert_eq!(reply["result"]["isError"], true);
         assert!(text(&reply)["takes"].is_object());
         let reply = call(&s, "actions", &json!({}));
-        assert!(reply["error"]["message"].as_str().is_some_and(|m| m.contains("no tool")));
+        assert!(
+            reply["error"]["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("no tool"))
+        );
     }
 
     /// Both: the generic five first, then one per action — and an action
@@ -1219,9 +1233,21 @@ mod tests {
             .collect();
         assert_eq!(
             names,
-            ["actions", "describe", "run", "batch", "watch", "drums_hits", "ask"]
+            [
+                "actions",
+                "describe",
+                "run",
+                "batch",
+                "watch",
+                "drums_hits",
+                "ask"
+            ]
         );
-        let reply = call(&s, "run", &json!({"id": "PEER_ASK", "args": {"name": "cy"}}));
+        let reply = call(
+            &s,
+            "run",
+            &json!({"id": "PEER_ASK", "args": {"name": "cy"}}),
+        );
         assert_eq!(text(&reply), json!("hello cy"));
         let reply = call(&s, "ask", &json!({"name": "cy"}));
         assert_eq!(text(&reply), json!("hello cy"));
@@ -1233,7 +1259,11 @@ mod tests {
     fn generic_mode_runs_async_actions() {
         let s = named_server(Tools::Generic);
         assert_eq!(listed(&s).len(), 5);
-        let reply = call(&s, "run", &json!({"id": "PEER_ASK", "args": {"name": "ada"}}));
+        let reply = call(
+            &s,
+            "run",
+            &json!({"id": "PEER_ASK", "args": {"name": "ada"}}),
+        );
         assert_eq!(text(&reply), json!("hello ada"));
         let reply = call(&s, "ask", &json!({"name": "ada"}));
         assert!(reply["error"].is_object());

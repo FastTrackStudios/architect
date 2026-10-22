@@ -2390,7 +2390,10 @@ fn action_attr(method: &TraitItemFn) -> syn::Result<ActionAttr> {
     let mut out = ActionAttr::default();
     for attr in method.attrs.iter().filter(|a| a.path().is_ident("action")) {
         if out.given {
-            return Err(syn::Error::new_spanned(attr, "one `#[action(...)]` per method"));
+            return Err(syn::Error::new_spanned(
+                attr,
+                "one `#[action(...)]` per method",
+            ));
         }
         out.given = true;
         attr.parse_nested_meta(|meta| {
@@ -3074,7 +3077,10 @@ fn emit_http_block(
     if matches!(shape, Shape::Empty) || ctx.is_some() {
         return quote! {};
     }
-    let action_ns = actions.map(|ns| ns.clone().unwrap_or_else(|| action_namespace(&trait_name.to_string())));
+    let action_ns = actions.map(|ns| {
+        ns.clone()
+            .unwrap_or_else(|| action_namespace(&trait_name.to_string()))
+    });
     let mut action_metas = Vec::new();
     let mut action_regs = Vec::new();
     let mut action_ids = Vec::new();
@@ -3238,9 +3244,17 @@ fn emit_http_block(
                 .clone()
                 .unwrap_or_else(|| format!("{ns}_{}", name_str.to_uppercase()));
             let meta_name = format_ident!("{}", name_str.to_uppercase());
-            let display = m.action.name.clone().unwrap_or_else(|| display_name(&name_str));
+            let display = m
+                .action
+                .name
+                .clone()
+                .unwrap_or_else(|| display_name(&name_str));
             let description = doc_text(&docs);
-            let category = m.action.category.clone().unwrap_or_else(|| trait_name.to_string());
+            let category = m
+                .action
+                .category
+                .clone()
+                .unwrap_or_else(|| trait_name.to_string());
             let trait_str = trait_name.to_string();
             let effect = m
                 .action

@@ -1701,12 +1701,14 @@ mod tests {
         assert!(list.is_async("PEER_ASK"));
         assert!(!list.is_async("DRUMS_HITS"));
 
-        let out = futures::executor::block_on(list.run_json_async("PEER_ASK", br#"{"name":"ada"}"#))
-            .expect("ran");
+        let out =
+            futures::executor::block_on(list.run_json_async("PEER_ASK", br#"{"name":"ada"}"#))
+                .expect("ran");
         assert_eq!(out, br#""hello ada""#);
         assert!(ran.load(Ordering::SeqCst));
 
-        let failed = futures::executor::block_on(list.run_json_async("PEER_ASK", br#"{"name":""}"#));
+        let failed =
+            futures::executor::block_on(list.run_json_async("PEER_ASK", br#"{"name":""}"#));
         assert_eq!(
             failed,
             Err(ActionError::Failed {
@@ -1715,7 +1717,16 @@ mod tests {
             })
         );
         let bad = futures::executor::block_on(list.run_json_async("PEER_ASK", br#"{"nom":1}"#));
-        assert!(matches!(bad, Err(ActionError::BadArgs { expected: Some(_), .. })), "{bad:?}");
+        assert!(
+            matches!(
+                bad,
+                Err(ActionError::BadArgs {
+                    expected: Some(_),
+                    ..
+                })
+            ),
+            "{bad:?}"
+        );
 
         let refused = list.run_json("PEER_ASK", br#"{"name":"ada"}"#);
         assert!(
@@ -1723,8 +1734,10 @@ mod tests {
             "{refused:?}"
         );
 
-        let sync = futures::executor::block_on(list.run_json_async("DRUMS_HITS", br#"{"track":"t","limit":1}"#))
-            .expect("a sync action runs through the async door");
+        let sync = futures::executor::block_on(
+            list.run_json_async("DRUMS_HITS", br#"{"track":"t","limit":1}"#),
+        )
+        .expect("a sync action runs through the async door");
         assert_eq!(sync, br#"{"times":[0.5]}"#);
 
         let (events, _) = list.events_since(0, 100, Duration::ZERO);
@@ -1740,7 +1753,9 @@ mod tests {
     #[test]
     fn the_async_door_is_guarded_like_the_sync_one() {
         let list = ActionList::new();
-        list.register_async(&SLOW_BOOM, Effect::Destructive, |(): ()| async { explode() })
+        list.register_async(&SLOW_BOOM, Effect::Destructive, |(): ()| async {
+            explode()
+        })
         .expect("registered");
         let out = futures::executor::block_on(list.run_json_async("PEER_BOOM", b""));
         assert!(
