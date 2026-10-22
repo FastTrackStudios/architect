@@ -76,6 +76,9 @@ pub fn register(list: &ActionList) -> Result<(), ActionError> {
   `ActionError::Duplicate` and the first stays.
 - `register_dynamic(meta, effect, params, result, handler)` adds one
   whose handler is already JSON in, JSON out (an rpc method, a script).
+- `register_with(meta, effect, |&ActionCaller, A| -> Result<R, String>)`
+  and `register_async_with` add an action whose handler is also handed
+  who is calling (see [Who is calling](#who-is-calling)).
 - Existing `#[architect::actions]` traits plug in unchanged: `ActionList`
   implements `ActionBackend`, so the generated
   `register_<trait>_actions(&list, imp)` lands every action in the list
@@ -124,6 +127,40 @@ fn the_action_list_is_sound() {
 - A handler that panics is caught and answered as `Failed` with
   `message` `"panicked: ..."` (in `panic = "unwind"` builds, the
   default); the list keeps working.
+
+### Who is calling
+
+A handler registered with `register_with` / `register_async_with` gets
+an `ActionCaller` beside its arguments: the principal the call is made
+as, and one context value the door put on the call (the org a
+multi-tenant server acts in, a session). Doors that pass one are
+`run_json_with(&caller, id, args)` and `run_json_async_with`; every
+other door passes `ActionCaller::app()` (or `ActionCaller::new(who)` for
+`run_json_as`), with no context.
+
+```rust
+use architect::action::ActionCaller;
+
+struct Org(Arc<OrgState>); // the app's own type
+
+list.register_with(&TASKS_LIST, Effect::ReadOnly, |cx: &ActionCaller, args: ListArgs| {
+    let Org(org) = cx.context::<Org>().ok_or("no org to act in")?;
+    org.list_tasks(args) // -> Result<Tasks, String>, Tasks a facet type
+})?;
+
+let caller = ActionCaller::new(principal).with_context(Org(org));
+list.run_json_with(&caller, "TASKS_LIST", br#"{"status":"open"}"#)?;
+```
+
+- `ActionCaller::app()` is the trusted app: the authorizer is not
+  asked. `ActionCaller::new(principal)` is checked against it before the
+  handler runs. `with_context(value)` adds the context, `context::<T>()`
+  reads it back by type; a second `with_context` replaces the first, so
+  put what a call needs in one type.
+- A handler that needs a context must refuse without one: keys, menus
+  and `probe_hostile_args` pass none.
+- An async handler is lent the caller while it builds its future: clone
+  the caller (cheap, the context is shared) into the `async move`.
 
 Every run is one `tracing` span named `action` with `action.id` and
 `action.ok`. Stages marked inside it with
@@ -211,6 +248,10 @@ tokio::spawn(architect_mcp::http::serve(listener, server, Some(token)));
   given. Bind to loopback, make it opt-in, and generate the token.
 - Tool results are capped at `MAX_TEXT`. An action that can answer with
   a lot should page.
+- `handle_with(&caller, message)` runs the request for an
+  `ActionCaller`: its context reaches `register_with` handlers. A caller
+  with no principal runs as the server's (`with_principal`), never as
+  the trusted app.
 - Async actions are awaited. `Server::handle_async` is the core;
   `Server::handle` drives it to the end on the calling thread, which is
   what `serve_stdio` and the HTTP transport (on a blocking-pool thread of
@@ -238,6 +279,30 @@ let server = architect_mcp::Server::new("greeter", "0", list)
 - `Tools::Both` offers the five generic tools first and the named ones
   after; an action whose tool name is a generic tool's is not offered
   by name. `Tools::Generic` (the default) is the five alone.
+
+### One tool from Rust
+
+An app that keeps its own MCP endpoint (and merges these tools into a
+larger catalog) calls the server per tool instead of building JSON-RPC
+text:
+
+```rust
+// tools/list entries for this principal: name, description, inputSchema, annotations
+let tools: Vec<serde_json::Value> = server.tools_for(&principal);
+
+// tools/call: the result (content + isError) to send back
+let caller = ActionCaller::new(principal).with_context(Org(org));
+match server.call_tool(&caller, "list_tasks", args).await {
+    Ok(result) => result,
+    Err(architect_mcp::ToolError::NoTool(_)) => my_other_tools(name, args),
+    Err(architect_mcp::ToolError::BadParams(message)) => refuse(message),
+}
+```
+
+`call_tool` is what `tools/call` runs: the same authorization, named and
+generic tools. A tool that ran and failed is `Ok` with
+`isError: true`; `Err` is only "no such tool" or a generic tool given an
+argument it does not take.
 
 ## 6. A service as actions
 
@@ -399,4 +464,8 @@ These are tracked in the Architect project. Until they land:
   planes: give the list the same engine (`set_authorizer`) the router's
   gate uses. Don't expose the list beyond loopback without a token.
 - The MCP HTTP face has one principal per server; a transport that
-  resolves a caller per request calls `Server::handle_as`.
+  resolves a caller per request calls `Server::handle_as` /
+  `Server::handle_with`.
+- `#[architect::service(actions)]` handlers do not see the caller: the
+  projection registers through `register_async`. A per-org service is
+  registered by hand with `register_async_with`.
