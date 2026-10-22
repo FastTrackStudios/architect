@@ -1415,12 +1415,8 @@ mod tests {
                 String::from_utf8_lossy(junk)
             );
         }
-        list.run_json(
-            "DRUMS_HITS",
-            br#" {"track":"a\u00e9
-","limit":null} "#,
-        )
-        .expect("well-formed, with an escape and spaces");
+        list.run_json("DRUMS_HITS", br#" {"track":"a\u00e9\n","limit":null} "#)
+            .expect("well-formed, with an escape and spaces");
         list.register(
             &BOOM,
             Effect::Mutating,
