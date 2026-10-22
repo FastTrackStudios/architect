@@ -666,6 +666,11 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
     // HTTP face — the axum router + typed HTTP client, gated on the
     // consumer's `http` / `http-client` features exactly as the vox
     // items are gated on `vox`.
+    let action_ns = args.actions.then(|| {
+        args.actions_ns
+            .clone()
+            .unwrap_or_else(|| action_namespace(&trait_name.to_string()))
+    });
     let http_block = if args.http {
         emit_http_block(
             trait_name,
@@ -677,11 +682,7 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
             &subscriptions,
             ctx,
             args.path.as_deref(),
-            args.actions.then(|| {
-                args.actions_ns
-                    .clone()
-                    .unwrap_or_else(|| action_namespace(&trait_name.to_string()))
-            }),
+            action_ns.as_deref(),
         )
     } else {
         quote! {}
@@ -3079,7 +3080,7 @@ fn emit_http_block(
     subs: &[Subscription],
     ctx: Option<&Type>,
     path: Option<&str>,
-    action_ns: Option<String>,
+    action_ns: Option<&str>,
 ) -> TokenStream2 {
     if matches!(shape, Shape::Empty) || ctx.is_some() {
         return quote! {};
