@@ -1324,6 +1324,11 @@ pub mod dispatch {
     }
 }
 
+// App settings on the device: `Store<T>` (facet JSON, atomic writes) and
+// `FileKv`. See `docs/content/architecture/settings.md`.
+#[cfg(feature = "settings")]
+pub mod settings;
+
 #[cfg(feature = "action-list")]
 pub mod schema;
 
