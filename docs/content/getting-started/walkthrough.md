@@ -162,8 +162,9 @@ See [testing strata](@/architecture/testing.md). Run `cargo nextest run
 
 ## Scaffolding your own feature
 
-`just scaffold-feature <name>` (or `cargo run -p architect-cli -- feature
-new <name>`) drops the canonical proto + memory backend + facade + spec +
-native tests into `features/<name>/` and wires the workspace. Rename the
+`cargo xtask feature new <name>` writes one crate at `features/<name>/`
+([the layout](@/architecture/layout.md)): the contract in `src/lib.rs`, an
+in-memory backend behind the `memory` flag, `vox` / `ui` flags, a `spec/`
+and a passing scenario test, and wires it into the workspace. Rename the
 placeholder entity, flesh out the backend, and you have the same surface
 this walkthrough used.

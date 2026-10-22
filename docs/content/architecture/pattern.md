@@ -10,7 +10,7 @@ with `#[derive(architect::Entity)]`. The derive emits everything else.
 ## What you write per entity
 
 ```rust
-// features/<feature>/<feature>-proto/src/lib.rs
+// features/<feature>/src/lib.rs  (the contract: default features, wasm-clean)
 
 use chrono::{DateTime, Utc};
 use uuid::Uuid;

@@ -20,8 +20,9 @@ architect-emitted `<Entity>Repo` (CRUD) or a hand-written `<Entity>Service`
 `dioxus-fullstack`). They'd introduce a second, parallel RPC mechanism
 with its own serialization, defeating the facet-only wire.
 
-> Enforced: `cargo xtask idioms` greps `examples/app/` for `#[server]`,
-> `use_server_future`, and `dioxus(_|::)fullstack` and fails CI on a hit.
+> Not yet automated: there is no `cargo xtask idioms` (an earlier
+> version of this page named one). Review catches `#[server]`,
+> `use_server_future` and `dioxus(_|::)fullstack`.
 
 ## 2. Wire types are facet-only
 
@@ -80,9 +81,9 @@ call, or (worse) a silent desync. The example pins one rev in the root
 
 | Rule | Gate |
 | --- | --- |
-| No Dioxus server fns (§1) | `cargo xtask idioms` (CI) |
+| No Dioxus server fns (§1) | review (no automated gate yet) |
 | facet-only wire (§2) | the `Entity` derive emits facet; serde derive would be redundant |
-| Excluded crates still build (§3–4) | `cargo xtask ci` checks `ui` / `web` (wasm) / `desktop` |
+| Wasm-clean contracts (§3–4) | CI `check wasm` step: `cargo check --target wasm32-unknown-unknown` on the framework crates; `cargo xtask feature new` scaffolds contracts its test checks for wasm |
 | Real wire round-trips (§5) | `app-tests-e2e` + `just test-e2e` (browser) |
 | Hand-rolled widgets, signal/prop misuse | dioxus-MCP audits — run manually |
 
@@ -95,10 +96,14 @@ the UI:
   `components_audit`, …) in one call.
 - `route_map` — sanity-check the route table after editing `Route`.
 
-CI runs `cargo xtask ci`: `fmt --check` → `clippy -D warnings` →
-`check --workspace` → target-cfg crate checks → `nextest` →
-doctests → `app-ui` smoke test → `idioms` → `tracey validate`. The
-browser e2e runs in a separate job (`just test-e2e` / `test-e2e-memory`).
+CI (`.github/workflows/checks.yml`) runs `cargo check --workspace
+--all-targets` → `cargo clippy --workspace --all-targets` → `cargo test
+--workspace` → `cargo xtask boundaries` (the layer table and ratcheted
+source idioms in `boundaries.toml`) → `cargo check --target
+wasm32-unknown-unknown` on the framework crates, with
+`RUSTFLAGS=-D warnings`. There is no `cargo xtask
+ci`; the xtask commands are `feature new`, `boundaries`, `tags`,
+`fleet-bump` and `auth-mirror`.
 
 ## 6. Composing & building backends — the layer system
 

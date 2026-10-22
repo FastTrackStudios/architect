@@ -4,6 +4,12 @@ description = "One contract, swappable storage."
 weight = 20
 +++
 
+> **Layout note (2026-10-22).** This page predates the
+> [one-crate layout](@/architecture/layout.md): read `<feature>-proto` as
+> "the feature crate's default feature set" and each backend sibling
+> crate as a cargo feature (`memory`, `db`, ...) of that one crate.
+> `cargo xtask feature new` scaffolds the new shape.
+
 A feature defines its contract once (in `<feature>-proto`) and ships
 one or more implementations as sibling crates. A facade picks which
 implementation a binary uses via cargo features.

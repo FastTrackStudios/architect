@@ -68,8 +68,11 @@ consume it remote *or* in-process) against the reference example.
 cargo xtask feature new inventory
 ```
 
-writes `features/inventory/inventory-proto` (an entity, a service, its
-error) and `features/inventory/inventory-memory` (an in-memory backend
-whose tests already pass over vox). Add both to the workspace members
-and `cargo test -p inventory-memory`. `examples/greeter` is the same
-shape with a server on top — copy it when you need one.
+writes one crate, `features/inventory/` ([the layout](@/architecture/layout.md)):
+the contract in `src/lib.rs` (an entity, a service, its error; the
+default feature set, wasm-clean), an in-memory backend behind the
+`memory` flag, empty `vox` / `ui` flags, a `spec/` and a scenario test
+that already passes in process and over vox. It adds the crate to the
+workspace `members` and to `[workspace.dependencies]` (with
+`default-features = false`). Then `cargo test -p inventory`. `examples/greeter` is the same contract with a server on
+top: copy it when you need one.
