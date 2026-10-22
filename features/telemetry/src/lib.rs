@@ -150,6 +150,7 @@ pub type OtelHandle = Option<()>;
 pub mod timing;
 
 /// The crash flight recorder: log ring, `crash.log`, `flight-log.txt`.
+///
 /// Feature `flight`, native only.
 #[cfg(all(not(target_arch = "wasm32"), feature = "flight"))]
 pub mod flight;

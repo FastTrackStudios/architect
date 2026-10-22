@@ -740,12 +740,14 @@ dependencies = [
 name = "architect-telemetry"
 version = "0.1.0"
 dependencies = [
+ "architect",
  "opentelemetry",
  "opentelemetry-appender-tracing",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "sentry",
  "sentry-tracing",
+ "tempfile",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",

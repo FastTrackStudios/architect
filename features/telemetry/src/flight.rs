@@ -64,6 +64,9 @@ const CRASH_LOG_KEEP: u64 = 512 * 1024;
 /// Lines of the ring copied under each crash in `crash.log`.
 const CRASH_TAIL: usize = 40;
 
+/// Ring lines searched for a panic another hook already logged.
+const PANIC_LOOKBACK: usize = 8;
+
 /// Lines of the previous flight log [`restore_previous`] puts back.
 const RESTORE_TAIL: usize = 200;
 
@@ -135,15 +138,18 @@ pub fn install_panic_recorder(app_dir: impl Into<PathBuf>) -> bool {
     }
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        PANIC_RECORDED.with(|seen| seen.set(false));
         previous(info);
-        let already_in_ring = PANIC_RECORDED.with(Cell::take);
+        let what = info.to_string();
+        // A hook that ran before this one (either side of the chain) may
+        // already have logged this panic into a `RingLayer`.
+        let flagged = PANIC_RECORDED.with(Cell::take);
+        let already_in_ring = flagged && tail(PANIC_LOOKBACK).iter().any(|l| l.contains(&what));
         let thread = std::thread::current();
         let thread = thread.name().unwrap_or("<unnamed>");
         if !already_in_ring {
-            push(format!("PANIC on {thread}: {info}"));
+            push(format!("PANIC on {thread}: {what}"));
         }
-        record_crash(thread, &info.to_string());
+        record_crash(thread, &what);
         persist();
     }));
     true
@@ -188,10 +194,13 @@ pub fn persist() {
     let _ = std::fs::write(path, snapshot().join("\n"));
 }
 
-/// At launch: put the previous run's last lines into the ring under a
-/// marker, then move its flight log aside to `flight-log-previous.txt` so
-/// the next crash writes fresh. Returns how many lines came back (0 when
-/// there was no flight log, or before [`install_panic_recorder`]).
+/// At launch: put the previous run's last lines back into the ring.
+///
+/// They go in under a marker, then the flight log moves aside to
+/// `flight-log-previous.txt` so the next crash writes fresh. Returns how
+/// many lines came back (0 when there was no flight log, or before
+/// [`install_panic_recorder`]); ignoring it is fine.
+#[allow(clippy::must_use_candidate)]
 pub fn restore_previous() -> usize {
     let Some(path) = flight_log() else { return 0 };
     let Ok(text) = std::fs::read_to_string(&path) else {
@@ -244,7 +253,11 @@ impl tracing::field::Visit for LineVisitor<'_> {
 }
 
 impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for RingLayer {
-    fn on_event(&self, event: &tracing::Event<'_>, _ctx: tracing_subscriber::layer::Context<'_, S>) {
+    fn on_event(
+        &self,
+        event: &tracing::Event<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
         let mut message = String::new();
         event.record(&mut LineVisitor(&mut message));
         let meta = event.metadata();
@@ -255,9 +268,10 @@ impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for RingLayer {
             meta.target(),
             message.trim_end(),
         ));
-        if std::thread::panicking() {
-            PANIC_RECORDED.with(|seen| seen.set(true));
-        }
+        // Set while panicking (the hooks run then); any later ordinary
+        // event clears a flag left by logging during an unwind.
+        let panicking = std::thread::panicking();
+        PANIC_RECORDED.with(|seen| seen.set(panicking));
     }
 }
 

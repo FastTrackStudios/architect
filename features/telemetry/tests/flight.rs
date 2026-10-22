@@ -27,13 +27,18 @@ const BEFORE: &str = "before the fall";
 /// test run passes over it.
 #[test]
 fn child() {
-    let Ok(mode) = std::env::var(MODE) else { return };
+    let Ok(mode) = std::env::var(MODE) else {
+        return;
+    };
     let dir = std::env::var(DIR).expect("FLIGHT_DIR");
     tracing_subscriber::registry().with(RingLayer::new()).init();
     match mode.as_str() {
         "alone" => {
             assert!(flight::install_panic_recorder(&dir));
-            assert!(!flight::install_panic_recorder(&dir), "second install is a no-op");
+            assert!(
+                !flight::install_panic_recorder(&dir),
+                "second install is a no-op"
+            );
         }
         "logger-first" => {
             architect::host::install_panic_logger();
@@ -48,9 +53,18 @@ fn child() {
             let restored = flight::restore_previous();
             assert!(restored > 0, "the previous flight log came back");
             let ring = flight::snapshot();
-            assert!(ring.iter().any(|l| l.contains("the previous run's last lines")));
-            assert!(ring.iter().any(|l| l.starts_with("prev| ") && l.contains(BEFORE)));
-            assert!(ring.iter().any(|l| l.starts_with("prev| ") && l.contains(BOOM)));
+            assert!(
+                ring.iter()
+                    .any(|l| l.contains("the previous run's last lines"))
+            );
+            assert!(
+                ring.iter()
+                    .any(|l| l.starts_with("prev| ") && l.contains(BEFORE))
+            );
+            assert!(
+                ring.iter()
+                    .any(|l| l.starts_with("prev| ") && l.contains(BOOM))
+            );
             assert!(!Path::new(&dir).join(FLIGHT_LOG).exists());
             assert!(Path::new(&dir).join(FLIGHT_LOG_PREVIOUS).exists());
             println!("restored {restored}");
@@ -76,17 +90,29 @@ fn crash_in(mode: &str, dir: &Path) -> String {
     let out = run_child(mode, dir);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success(), "{mode}: the child panicked");
-    assert!(stderr.contains(BOOM), "{mode}: the panic reached the default hook: {stderr}");
+    assert!(
+        stderr.contains(BOOM),
+        "{mode}: the panic reached the default hook: {stderr}"
+    );
 
     let crash = std::fs::read_to_string(dir.join(CRASH_LOG)).unwrap();
     assert!(crash.contains("=== crash at unix "), "{mode}: {crash}");
     assert!(crash.contains(BOOM), "{mode}: {crash}");
-    assert!(crash.contains("--- logged before it ---"), "{mode}: {crash}");
-    assert!(crash.contains(BEFORE), "{mode}: the lines before the panic: {crash}");
+    assert!(
+        crash.contains("--- logged before it ---"),
+        "{mode}: {crash}"
+    );
+    assert!(
+        crash.contains(BEFORE),
+        "{mode}: the lines before the panic: {crash}"
+    );
 
     let flight = std::fs::read_to_string(dir.join(FLIGHT_LOG)).unwrap();
     assert!(flight.contains(BEFORE), "{mode}: {flight}");
-    assert!(flight.contains("step=1"), "{mode}: fields are kept: {flight}");
+    assert!(
+        flight.contains("step=1"),
+        "{mode}: fields are kept: {flight}"
+    );
     assert_eq!(
         flight.matches(BOOM).count(),
         1,
@@ -99,7 +125,10 @@ fn crash_in(mode: &str, dir: &Path) -> String {
 fn recorder_alone_writes_crash_and_flight_logs() {
     let dir = tempfile::tempdir().unwrap();
     let flight = crash_in("alone", dir.path());
-    assert!(flight.contains("PANIC on "), "the recorder's own line: {flight}");
+    assert!(
+        flight.contains("PANIC on "),
+        "the recorder's own line: {flight}"
+    );
 }
 
 #[test]
@@ -107,7 +136,10 @@ fn composes_with_install_panic_logger_in_either_order() {
     for mode in ["logger-first", "recorder-first"] {
         let dir = tempfile::tempdir().unwrap();
         let flight = crash_in(mode, dir.path());
-        assert!(flight.contains("panic: "), "{mode}: the logger's line: {flight}");
+        assert!(
+            flight.contains("panic: "),
+            "{mode}: the logger's line: {flight}"
+        );
         assert!(
             !flight.contains("PANIC on "),
             "{mode}: no second line from the recorder: {flight}"
