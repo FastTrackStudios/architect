@@ -16,6 +16,7 @@ members = [
     "features/form",
     "features/permissions",
     "features/permissions/proto",
+    "features/mcp",
     # ── proc-macros ───────────────────────────────────────────────────
     "crates/architect-derive",
     "crates/architect-rpc-derive",
