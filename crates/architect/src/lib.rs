@@ -1324,6 +1324,12 @@ pub mod dispatch {
     }
 }
 
+#[cfg(feature = "action-list")]
+pub mod schema;
+
+#[cfg(feature = "action-list")]
+mod action_list;
+
 pub mod action {
     //! Runtime support for `#[architect::actions]` — named-command
     //! traits (REAPER-style: a stable id, a human description, a
@@ -1343,6 +1349,11 @@ pub mod action {
     //! `ActionBackend` the caller supplies.
 
     use std::sync::Arc;
+
+    #[cfg(feature = "action-list")]
+    pub use crate::action_list::{
+        ActionError, ActionEvent, ActionInfo, ActionList, EVENT_HISTORY, Effect, EventKind, Handler,
+    };
 
     /// Static metadata for one action, emitted by `#[architect::actions]`
     /// for every `#[action(...)]`-decorated trait method.

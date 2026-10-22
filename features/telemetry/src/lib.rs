@@ -147,6 +147,9 @@ pub type OtelHandle = Option<()>;
 /// - Never put a secret, token, or password in a field. These are
 ///   exported off-box.
 #[cfg(not(target_arch = "wasm32"))]
+pub mod timing;
+
+#[cfg(not(target_arch = "wasm32"))]
 pub mod wide {
     /// Attach a field to the current unit of work.
     ///

@@ -49,3 +49,6 @@ distinction visible at a glance.
 - [Async diagnostics](@/architecture/diagnostics.md) — opt-in moiré
   instrumentation for the axum_ws adapter; see what every task is
   waiting on via the live dashboard.
+- [Commands: the Action List](@/architecture/commands.md) — one
+  registry every key, menu, palette, CLI and MCP model runs an app's
+  commands through; `architect-mcp`; per-action timings.
