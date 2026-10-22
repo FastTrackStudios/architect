@@ -110,7 +110,8 @@ impl Sha256 {
             return Err(bad());
         }
         let mut out = [0u8; 32];
-        for (slot, pair) in out.iter_mut().zip(hex.as_bytes().chunks_exact(2)) {
+        let (pairs, _) = hex.as_bytes().as_chunks::<2>();
+        for (slot, pair) in out.iter_mut().zip(pairs) {
             let pair = std::str::from_utf8(pair).map_err(|_| bad())?;
             *slot = u8::from_str_radix(pair, 16).map_err(|_| bad())?;
         }
