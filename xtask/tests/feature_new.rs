@@ -8,6 +8,8 @@
 //! builds into this repo's own target dir, so it reuses the warm cache
 //! instead of creating a second one.
 
+#![allow(clippy::expect_used)]
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;

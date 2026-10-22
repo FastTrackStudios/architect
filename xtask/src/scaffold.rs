@@ -47,8 +47,28 @@ pub fn feature_new(repo: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
         written.push(path);
     }
     fs::write(&manifest, registered).map_err(|e| format!("{}: {e}", manifest.display()))?;
+    format_rust(&written);
     written.push(manifest);
     Ok(written)
+}
+
+/// Run rustfmt over the generated sources, so the templates do not have
+/// to guess where a long type name wraps. Best effort: a missing rustfmt
+/// leaves correct, merely unformatted code.
+fn format_rust(paths: &[PathBuf]) {
+    let sources: Vec<&PathBuf> = paths
+        .iter()
+        .filter(|p| p.extension().is_some_and(|e| e == "rs"))
+        .collect();
+    let rustfmt = std::env::var_os("RUSTFMT").unwrap_or_else(|| "rustfmt".into());
+    let formatted = std::process::Command::new(rustfmt)
+        .args(["--edition", "2024"])
+        .args(&sources)
+        .status()
+        .is_ok_and(|s| s.success());
+    if !formatted {
+        eprintln!("note: rustfmt did not run; `cargo fmt` the new crate");
+    }
 }
 
 /// Feature names are lowercase kebab-case crate names.
@@ -228,11 +248,16 @@ fn lib_rs(name: &str, snake: &str, pascal: &str, service: &str) -> String {
 //! `wasm32-unknown-unknown` with no features. Backends and UI are cargo
 //! features of this crate (`memory`, `ui`), not sibling crates.
 
+// Without `vox` the service trait is a plain `async fn` trait, which
+// rustc flags on wasm; the generated clients add the bounds they need.
+#![allow(async_fn_in_trait)]
+
 use uuid::Uuid;
 
 /// The entity. `{pascal}Create` / `Update` / `List`, the `{pascal}Repo`
 /// trait, its clients and its storage all come from this.
 #[architect::entity(table_name = "{snake}s", repo, events)]
+#[derive(Eq)]
 pub struct {pascal} {{
     #[architect(primary_key, auto_increment = false, on_create = Uuid::new_v4())]
     pub id: Uuid,
@@ -349,10 +374,9 @@ impl {pascal}Repo for Memory {{
         let mut rows = architect::lock(&self.rows);
         let before = rows.len();
         rows.retain(|r| r.id != id);
-        if rows.len() == before {{
-            return Err(RepoError::NotFound);
-        }}
-        Ok(())
+        let removed = rows.len() != before;
+        drop(rows);
+        if removed {{ Ok(()) }} else {{ Err(RepoError::NotFound) }}
     }}
 }}
 
@@ -393,6 +417,8 @@ fn test_rs(name: &str, snake: &str, pascal: &str, service: &str) -> String {
     format!(
         r#"//! The scenario, against the in-memory backend: in process and over vox.
 //! It is generic over the traits, so every wire runs the same checks.
+
+#![allow(clippy::expect_used)]
 
 use architect::{{LocalServer, Scope, Services as _}};
 use {snake}::memory::Memory;
@@ -476,7 +502,10 @@ uuid = "1"
         assert!(out.contains(
             "uuid = \"1\"\ntour-dates = { path = \"features/tour-dates\", default-features = false }\n\n# ── Patches ──"
         ));
-        assert!(register(&out, "tour-dates").is_err(), "a second run refuses");
+        assert!(
+            register(&out, "tour-dates").is_err(),
+            "a second run refuses"
+        );
     }
 
     #[test]
