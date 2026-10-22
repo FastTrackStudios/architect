@@ -622,6 +622,7 @@ dependencies = [
  "axum",
  "dirs",
  "facet",
+ "futures",
  "serde_json",
  "tokio",
 ]
@@ -3870,11 +3871,13 @@ name = "example-greeter"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "architect-mcp",
  "chrono",
  "eyre",
  "facet",
  "futures",
  "sea-orm",
+ "serde_json",
  "thiserror 2.0.20",
  "tokio",
  "uuid",

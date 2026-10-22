@@ -6,7 +6,7 @@ publish = false
 description = "The whole architect flow in one small crate: an entity, a service, a backend, a server — and the tests that prove every wire agrees."
 
 [dependencies]
-architect = { workspace = true, features = ["host", "http-client", "local"] }
+architect = { workspace = true, features = ["host", "http-client", "local", "action-list"] }
 vox.workspace = true
 chrono.workspace = true
 eyre.workspace = true
@@ -29,6 +29,9 @@ optional = true
 
 [dev-dependencies]
 futures = "0.3"
+# tests/mcp.rs: the Action List face, driven as a model would.
+architect-mcp = { path = "../../features/mcp" }
+serde_json.workspace = true
 
 [[bin]]
 name = "greeter"

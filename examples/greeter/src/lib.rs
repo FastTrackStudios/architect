@@ -46,12 +46,16 @@ pub enum GreetError {
 
 /// One `#[architect::service]` and you have the vox service, the axum
 /// routes at `/greeter/…`, both clients — and both clients implement
-/// this very trait.
-#[architect::service]
+/// this very trait. `actions` adds the third face: every method an
+/// Action List action (`GREETER_GREET`, `GREETER_COUNT`), registered with
+/// one call (`greeter_actions::register`), which keys, menus and an MCP
+/// model run the same as the wire.
+#[architect::service(actions)]
 pub trait Greeter {
     /// Greets a known name.
     async fn greet(&self, name: String) -> Result<String, GreetError>;
     /// How many greetings so far.
+    #[action(effect = read_only)]
     async fn count(&self) -> Result<u32, GreetError>;
     /// Every greeting, as it happens.
     #[subscribe]

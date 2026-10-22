@@ -18,6 +18,16 @@
 //!   plain one through [`crate::action::ActionBackend`], which the
 //!   `register_*_actions` functions `#[architect::actions]` emits already
 //!   take — every existing action trait lands here unchanged.
+//! - **Async actions**: [`ActionList::register_async`] takes a handler
+//!   that answers with a future (a service call, a query, a peer), run
+//!   with [`ActionList::run_json_async`]. Arguments are still decoded
+//!   before the future exists, so a bad call is refused without running
+//!   anything. `run_json_async` runs sync actions too, so a caller that can
+//!   await (an MCP transport, a script) uses it for everything; the sync
+//!   [`ActionList::run_json`] refuses an async action rather than block
+//!   the thread it was called on. A `#[architect::service(actions)]` trait
+//!   puts every method on the list with one call
+//!   (`http::actions::register(backend, &list)`).
 //! - **Live updates**: every run, and every [`ActionList::changed`] the
 //!   app reports (a project opened, a track renamed), is an
 //!   [`ActionEvent`] with a sequence number. [`ActionList::events_since`]
@@ -54,6 +64,7 @@
 //! ```
 
 use std::collections::{BTreeMap, VecDeque, btree_map};
+use std::future::Future;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Arc, Condvar, Mutex, PoisonError, RwLock};
 use std::time::Duration;
@@ -194,6 +205,20 @@ pub const EVENT_HISTORY: usize = 4096;
 /// What a handler is, once its types are erased: JSON in, JSON out.
 pub type Handler = Arc<dyn Fn(&[u8]) -> Result<Vec<u8>, ActionError> + Send + Sync>;
 
+/// The future an async action answers with: its result as JSON. `Send`
+/// natively; on wasm, where nothing is, it need not be.
+#[cfg(not(target_arch = "wasm32"))]
+pub type ActionFuture = futures::future::BoxFuture<'static, Result<Vec<u8>, ActionError>>;
+/// The future an async action answers with: its result as JSON. `Send`
+/// natively; on wasm, where nothing is, it need not be.
+#[cfg(target_arch = "wasm32")]
+pub type ActionFuture = futures::future::LocalBoxFuture<'static, Result<Vec<u8>, ActionError>>;
+
+/// An async handler, once its types are erased: the arguments are decoded
+/// at once (`Err` refuses the call before anything runs) and the work is
+/// the future it gives back.
+pub type AsyncHandler = Arc<dyn Fn(&[u8]) -> Result<ActionFuture, ActionError> + Send + Sync>;
+
 /// Whether an action can run right now: `Err` says why not.
 pub type EnabledCheck = Arc<dyn Fn() -> Result<(), String> + Send + Sync>;
 
@@ -229,8 +254,15 @@ struct Entry {
     effect: Effect,
     params: Option<&'static Shape>,
     result: Option<&'static Shape>,
-    handler: Handler,
+    run: Run,
     enabled: Option<EnabledCheck>,
+}
+
+/// How an action does its work.
+#[derive(Clone)]
+enum Run {
+    Sync(Handler),
+    Async(AsyncHandler),
 }
 
 struct Events {
@@ -306,19 +338,7 @@ impl ActionList {
         let id = meta.id;
         let takes = !is_unit(A::SHAPE);
         let handler: Handler = Arc::new(move |args: &[u8]| {
-            let decoded: A = if takes {
-                facet_json::from_slice::<A>(args).map_err(|e| ActionError::BadArgs {
-                    id: id.to_owned(),
-                    message: e.to_string(),
-                    expected: Some(crate::schema::json_schema(A::SHAPE)),
-                })?
-            } else {
-                facet_json::from_slice::<A>(b"null").map_err(|e| ActionError::BadArgs {
-                    id: id.to_owned(),
-                    message: e.to_string(),
-                    expected: None,
-                })?
-            };
+            let decoded: A = decode_args::<A>(id, takes, args)?;
             let out = run(decoded).map_err(|message| ActionError::Failed {
                 id: id.to_owned(),
                 message,
@@ -333,7 +353,54 @@ impl ActionList {
             effect,
             params: takes.then_some(A::SHAPE),
             result: (!is_unit(R::SHAPE)).then_some(R::SHAPE),
-            handler,
+            run: Run::Sync(handler),
+            enabled: None,
+        })
+    }
+
+    /// Add an action that takes `A` and answers, in time, with `R` — a
+    /// service call, a query, anything that awaits. `A` is decoded when
+    /// the action is called, before `run` is; the future `run` gives
+    /// back is the work, run by [`Self::run_json_async`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::register`].
+    pub fn register_async<A, R, F, Fut>(
+        &self,
+        meta: &'static ActionMeta,
+        effect: Effect,
+        run: F,
+    ) -> Result<(), ActionError>
+    where
+        A: Facet<'static>,
+        R: Facet<'static>,
+        F: Fn(A) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<R, String>> + crate::MaybeSend + 'static,
+    {
+        let id = meta.id;
+        let takes = !is_unit(A::SHAPE);
+        let handler: AsyncHandler = Arc::new(move |args: &[u8]| {
+            let decoded: A = decode_args::<A>(id, takes, args)?;
+            let work = run(decoded);
+            let future: ActionFuture = Box::pin(async move {
+                let out = work.await.map_err(|message| ActionError::Failed {
+                    id: id.to_owned(),
+                    message,
+                })?;
+                facet_json::to_vec(&out).map_err(|e| ActionError::Failed {
+                    id: id.to_owned(),
+                    message: format!("its result did not encode: {e}"),
+                })
+            });
+            Ok(future)
+        });
+        self.insert(Entry {
+            meta,
+            effect,
+            params: takes.then_some(A::SHAPE),
+            result: (!is_unit(R::SHAPE)).then_some(R::SHAPE),
+            run: Run::Async(handler),
             enabled: None,
         })
     }
@@ -358,7 +425,31 @@ impl ActionList {
             effect,
             params,
             result,
-            handler,
+            run: Run::Sync(handler),
+            enabled: None,
+        })
+    }
+
+    /// [`Self::register_dynamic`] for a handler that answers with a
+    /// future: what a projection built at run time registers.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::register`].
+    pub fn register_dynamic_async(
+        &self,
+        meta: &'static ActionMeta,
+        effect: Effect,
+        params: Option<&'static Shape>,
+        result: Option<&'static Shape>,
+        handler: AsyncHandler,
+    ) -> Result<(), ActionError> {
+        self.insert(Entry {
+            meta,
+            effect,
+            params,
+            result,
+            run: Run::Async(handler),
             enabled: None,
         })
     }
@@ -537,12 +628,41 @@ impl ActionList {
         self.run_checked(Some(who), id, args)
     }
 
-    fn run_checked(
+    /// Run `id` with `args`, awaiting it when it is async — the door for
+    /// a caller that can await (an MCP transport, a script). A sync
+    /// action runs as [`Self::run_json`] would; the app's trusted door,
+    /// so the authorizer is not asked.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::run_json`].
+    pub async fn run_json_async(&self, id: &str, args: &[u8]) -> Result<Vec<u8>, ActionError> {
+        self.run_async_checked(None, id, args).await
+    }
+
+    /// [`Self::run_json_async`] for `who`, once the authorizer lets it.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::run_json_as`].
+    pub async fn run_json_async_as(
         &self,
-        who: Option<&Principal>,
+        who: &Principal,
         id: &str,
         args: &[u8],
     ) -> Result<Vec<u8>, ActionError> {
+        self.run_async_checked(Some(who), id, args).await
+    }
+
+    /// Whether `id` is an async action — one [`Self::run_json`] refuses.
+    #[must_use]
+    pub fn is_async(&self, id: &str) -> bool {
+        self.entry(id)
+            .is_some_and(|e| matches!(e.run, Run::Async(_)))
+    }
+
+    /// The entry for `id`, once `who` may run it.
+    fn admitted(&self, who: Option<&Principal>, id: &str) -> Result<Entry, ActionError> {
         let Some(entry) = self.entry(id) else {
             return Err(ActionError::Unknown(id.to_owned()));
         };
@@ -554,12 +674,58 @@ impl ActionList {
                 reason,
             });
         }
-        let takes = entry.params.is_some();
-        let args: &[u8] = if !takes || args.iter().all(u8::is_ascii_whitespace) {
-            if takes { b"{}" } else { b"null" }
-        } else {
-            args
+        Ok(entry)
+    }
+
+    async fn run_async_checked(
+        &self,
+        who: Option<&Principal>,
+        id: &str,
+        args: &[u8],
+    ) -> Result<Vec<u8>, ActionError> {
+        use futures::FutureExt as _;
+        use tracing::Instrument as _;
+        let entry = self.admitted(who, id)?;
+        let Run::Async(handler) = &entry.run else {
+            return self.run_checked(who, id, args);
         };
+        let args = normalized(&entry, args);
+        let span = tracing::info_span!("action", action.id = id, action.ok = tracing::field::Empty);
+        let started = span.in_scope(|| match enabled_state(entry.enabled.as_ref()) {
+            Ok(()) => guarded_start(id, || {
+                admit_args(&entry, args)?;
+                handler(args)
+            }),
+            Err(reason) => Err(ActionError::Disabled {
+                id: id.to_owned(),
+                reason,
+            }),
+        });
+        let out = match started {
+            Ok(work) => std::panic::AssertUnwindSafe(work)
+                .catch_unwind()
+                .instrument(span.clone())
+                .await
+                .unwrap_or_else(|panic| Err(panicked(id, panic.as_ref()))),
+            Err(error) => Err(error),
+        };
+        span.record("action.ok", out.is_ok());
+        drop(span);
+        self.publish(EventKind::Ran {
+            id: id.to_owned(),
+            ok: out.is_ok(),
+        });
+        out
+    }
+
+    fn run_checked(
+        &self,
+        who: Option<&Principal>,
+        id: &str,
+        args: &[u8],
+    ) -> Result<Vec<u8>, ActionError> {
+        let entry = self.admitted(who, id)?;
+        let args = normalized(&entry, args);
         // One span per action run: the action's wide event. What it does
         // marks its stages on it (`architect_telemetry::timing`), so where
         // an action's time went is one record, whoever ran it — a key, a
@@ -648,8 +814,10 @@ impl ActionList {
     /// must refuse without panicking. Actions that take nothing never see
     /// their arguments and are not run.
     ///
-    /// This RUNS handlers (straight, past the enabled check and the
+    /// This RUNS sync handlers (straight, past the enabled check and the
     /// authorizer): call it on a list built for a test, not on a live app.
+    /// An async action is only decoded: the future its handler gives back
+    /// is dropped unpolled, so nothing it would do happens.
     ///
     /// # Errors
     ///
@@ -663,7 +831,7 @@ impl ActionList {
                 continue;
             }
             let id = entry.meta.id;
-            if let Err(panic) = catch_unwind(AssertUnwindSafe(|| call(&entry, b"{}"))) {
+            if let Err(panic) = catch_unwind(AssertUnwindSafe(|| probe(&entry, b"{}"))) {
                 problems.push(format!(
                     "{id}: panicked on {{}}: {}",
                     panic_message(panic.as_ref())
@@ -675,8 +843,8 @@ impl ActionList {
                 .chain([deep_array.as_bytes(), deep_object.as_bytes()]);
             for args in hostile {
                 let shown = String::from_utf8_lossy(args.get(..24).unwrap_or(args)).into_owned();
-                match catch_unwind(AssertUnwindSafe(|| call(&entry, args))) {
-                    Ok(Ok(_)) => problems.push(format!("{id}: took malformed JSON {shown:?}")),
+                match catch_unwind(AssertUnwindSafe(|| probe(&entry, args))) {
+                    Ok(Ok(())) => problems.push(format!("{id}: took malformed JSON {shown:?}")),
                     Ok(Err(_)) => {}
                     Err(panic) => problems.push(format!(
                         "{id}: panicked on {shown:?}: {}",
@@ -777,7 +945,7 @@ impl ActionBackend for ActionList {
             effect: Effect::Mutating,
             params: None,
             result: None,
-            handler: erased,
+            run: Run::Sync(erased),
             enabled: None,
         });
         // The trait cannot say no; `validate` will.
@@ -819,10 +987,38 @@ fn enabled_state(check: Option<&EnabledCheck>) -> Result<(), String> {
     })
 }
 
-/// Hand `args` to an action's handler — once they are one well-formed
+/// Empty arguments, as the action expects them: `{}` for one that takes
+/// some, `null` for one that takes none (whatever was sent).
+fn normalized<'a>(entry: &Entry, args: &'a [u8]) -> &'a [u8] {
+    let takes = entry.params.is_some();
+    if !takes || args.iter().all(u8::is_ascii_whitespace) {
+        if takes { b"{}" } else { b"null" }
+    } else {
+        args
+    }
+}
+
+/// Decode an action's arguments into `A`: `null` when it takes none.
+fn decode_args<A: Facet<'static>>(id: &str, takes: bool, args: &[u8]) -> Result<A, ActionError> {
+    if takes {
+        facet_json::from_slice::<A>(args).map_err(|e| ActionError::BadArgs {
+            id: id.to_owned(),
+            message: e.to_string(),
+            expected: Some(crate::schema::json_schema(A::SHAPE)),
+        })
+    } else {
+        facet_json::from_slice::<A>(b"null").map_err(|e| ActionError::BadArgs {
+            id: id.to_owned(),
+            message: e.to_string(),
+            expected: None,
+        })
+    }
+}
+
+/// `args` may reach an action's handler when they are one well-formed
 /// JSON value, no deeper than [`MAX_ARGS_DEPTH`], with nothing after it
-/// (`facet_json` alone takes `{} junk`), when it takes any.
-fn call(entry: &Entry, args: &[u8]) -> Result<Vec<u8>, ActionError> {
+/// (`facet_json` alone takes `{} junk`) — checked only when it takes any.
+fn admit_args(entry: &Entry, args: &[u8]) -> Result<(), ActionError> {
     if let Some(params) = entry.params
         && let Err(message) = check_json(args)
     {
@@ -832,7 +1028,41 @@ fn call(entry: &Entry, args: &[u8]) -> Result<Vec<u8>, ActionError> {
             expected: Some(crate::schema::json_schema(params)),
         });
     }
-    (entry.handler)(args)
+    Ok(())
+}
+
+/// Hand admitted `args` to a sync action's handler; an async one is
+/// refused, since running it here would block the caller's thread.
+fn call(entry: &Entry, args: &[u8]) -> Result<Vec<u8>, ActionError> {
+    admit_args(entry, args)?;
+    match &entry.run {
+        Run::Sync(handler) => handler(args),
+        Run::Async(_) => Err(ActionError::Failed {
+            id: entry.meta.id.to_owned(),
+            message: "it is async: run it with run_json_async".to_owned(),
+        }),
+    }
+}
+
+/// What [`ActionList::probe_hostile_args`] does to one action: run a sync
+/// one; decode for an async one and drop its future unpolled.
+fn probe(entry: &Entry, args: &[u8]) -> Result<(), ActionError> {
+    admit_args(entry, args)?;
+    match &entry.run {
+        Run::Sync(handler) => handler(args).map(drop),
+        // Built, never polled: dropping it does nothing it would.
+        Run::Async(handler) => handler(args).map(|_unpolled| ()),
+    }
+}
+
+/// A caught panic, as the failure it is answered with.
+fn panicked(id: &str, panic: &(dyn std::any::Any + Send)) -> ActionError {
+    let message = panic_message(panic);
+    tracing::error!(action.id = id, %message, "an action panicked");
+    ActionError::Failed {
+        id: id.to_owned(),
+        message: format!("panicked: {message}"),
+    }
 }
 
 /// Run `f`, a panic in it answered as [`ActionError::Failed`].
@@ -840,14 +1070,16 @@ fn guarded(
     id: &str,
     f: impl FnOnce() -> Result<Vec<u8>, ActionError>,
 ) -> Result<Vec<u8>, ActionError> {
-    catch_unwind(AssertUnwindSafe(f)).unwrap_or_else(|panic| {
-        let message = panic_message(panic.as_ref());
-        tracing::error!(action.id = id, %message, "an action panicked");
-        Err(ActionError::Failed {
-            id: id.to_owned(),
-            message: format!("panicked: {message}"),
-        })
-    })
+    catch_unwind(AssertUnwindSafe(f)).unwrap_or_else(|panic| Err(panicked(id, panic.as_ref())))
+}
+
+/// Start an async action — decode and build its future — a panic in that
+/// answered as [`ActionError::Failed`].
+fn guarded_start(
+    id: &str,
+    f: impl FnOnce() -> Result<ActionFuture, ActionError>,
+) -> Result<ActionFuture, ActionError> {
+    catch_unwind(AssertUnwindSafe(f)).unwrap_or_else(|panic| Err(panicked(id, panic.as_ref())))
 }
 
 /// A container the JSON check is inside.
@@ -1434,6 +1666,139 @@ mod tests {
 
     /// A watcher reads what happened after where it left off, and waits
     /// for the next when there is nothing yet.
+    static ASK: ActionMeta = meta("PEER_ASK");
+
+    /// A handler that panics instead of answering: what the guard catches.
+    #[allow(clippy::panic_in_result_fn)]
+    fn explode() -> Result<(), String> {
+        panic!("kaboom")
+    }
+    static SLOW_BOOM: ActionMeta = meta("PEER_BOOM");
+
+    #[derive(Facet)]
+    struct Ask {
+        name: String,
+    }
+
+    /// An async action is decoded at once and awaited by
+    /// `run_json_async`; the sync door refuses it rather than block; a
+    /// sync action runs through the async door too; the run is an event.
+    #[test]
+    fn an_async_action_is_awaited() {
+        let list = ActionList::new();
+        let ran = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&ran);
+        list.register_async(&ASK, Effect::ReadOnly, move |a: Ask| {
+            let flag = Arc::clone(&flag);
+            async move {
+                flag.store(true, Ordering::SeqCst);
+                if a.name.is_empty() {
+                    Err("nobody".to_owned())
+                } else {
+                    Ok(format!("hello {}", a.name))
+                }
+            }
+        })
+        .expect("registered");
+        hits(&list);
+        assert!(list.is_async("PEER_ASK"));
+        assert!(!list.is_async("DRUMS_HITS"));
+
+        let out =
+            futures::executor::block_on(list.run_json_async("PEER_ASK", br#"{"name":"ada"}"#))
+                .expect("ran");
+        assert_eq!(out, br#""hello ada""#);
+        assert!(ran.load(Ordering::SeqCst));
+
+        let failed =
+            futures::executor::block_on(list.run_json_async("PEER_ASK", br#"{"name":""}"#));
+        assert_eq!(
+            failed,
+            Err(ActionError::Failed {
+                id: "PEER_ASK".into(),
+                message: "nobody".into()
+            })
+        );
+        let bad = futures::executor::block_on(list.run_json_async("PEER_ASK", br#"{"nom":1}"#));
+        assert!(
+            matches!(
+                bad,
+                Err(ActionError::BadArgs {
+                    expected: Some(_),
+                    ..
+                })
+            ),
+            "{bad:?}"
+        );
+
+        let refused = list.run_json("PEER_ASK", br#"{"name":"ada"}"#);
+        assert!(
+            matches!(&refused, Err(ActionError::Failed { message, .. }) if message.contains("run_json_async")),
+            "{refused:?}"
+        );
+
+        let sync = futures::executor::block_on(
+            list.run_json_async("DRUMS_HITS", br#"{"track":"t","limit":1}"#),
+        )
+        .expect("a sync action runs through the async door");
+        assert_eq!(sync, br#"{"times":[0.5]}"#);
+
+        let (events, _) = list.events_since(0, 100, Duration::ZERO);
+        assert!(events.iter().any(|e| e.kind
+            == EventKind::Ran {
+                id: "PEER_ASK".into(),
+                ok: true
+            }));
+    }
+
+    /// A panic inside an async action's future is a failure; the
+    /// authorizer and the enabled check guard the async door as the sync.
+    #[test]
+    fn the_async_door_is_guarded_like_the_sync_one() {
+        let list = ActionList::new();
+        list.register_async(&SLOW_BOOM, Effect::Destructive, |(): ()| async {
+            explode()
+        })
+        .expect("registered");
+        let out = futures::executor::block_on(list.run_json_async("PEER_BOOM", b""));
+        assert!(
+            matches!(&out, Err(ActionError::Failed { message, .. }) if message.starts_with("panicked: ")),
+            "{out:?}"
+        );
+        list.set_enabled("PEER_BOOM", || Err("not now".into()))
+            .expect("known");
+        let out = futures::executor::block_on(list.run_json_async("PEER_BOOM", b""));
+        assert_eq!(
+            out,
+            Err(ActionError::Disabled {
+                id: "PEER_BOOM".into(),
+                reason: "not now".into()
+            })
+        );
+        let unknown = futures::executor::block_on(list.run_json_async("NOPE", b""));
+        assert_eq!(unknown, Err(ActionError::Unknown("NOPE".into())));
+    }
+
+    /// The probe decodes an async action's arguments but never polls its
+    /// future, so nothing it would do happens.
+    #[test]
+    fn the_probe_never_runs_an_async_action() {
+        let list = ActionList::new();
+        let ran = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&ran);
+        list.register_async(&ASK, Effect::Mutating, move |_: Ask| {
+            let flag = Arc::clone(&flag);
+            async move {
+                flag.store(true, Ordering::SeqCst);
+                Ok(())
+            }
+        })
+        .expect("registered");
+        list.validate().expect("sound");
+        list.probe_hostile_args().expect("refuses garbage");
+        assert!(!ran.load(Ordering::SeqCst));
+    }
+
     #[test]
     fn a_watcher_hears_what_happens() {
         let list = ActionList::new();

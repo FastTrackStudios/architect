@@ -20,6 +20,20 @@
 //! | `watch`    | what happened since a point — runs and state changes —     |
 //! |            | waiting a while for the next when nothing has yet          |
 //!
+//! **Named tools.** An agent that already calls an app by tool names
+//! (`create_task`, `greet`) keeps them: [`Server::with_tools`]`(`[`Tools::Named`]`)`
+//! lists every action as a tool of its own — its description, its
+//! arguments' JSON Schema as the tool's input, its effect as the tool's
+//! hints — named its id in lower case (`GREETER_GREET` → `greeter_greet`)
+//! unless [`Server::with_tool_name`] says otherwise. [`Tools::Both`] serves
+//! the five generic tools beside them.
+//!
+//! **Async actions** (`ActionList::register_async`, and every method of a
+//! `#[architect::service(actions)]` trait) are awaited:
+//! [`Server::handle_async`] is the core; [`Server::handle`] drives it to the
+//! end on the calling thread, which is what [`serve_stdio`] and the HTTP
+//! transport (on a blocking thread of its runtime) do.
+//!
 //! The protocol is one function, [`Server::handle`]: a JSON-RPC message
 //! in, the reply (if it wants one) out. [`serve_stdio`] runs it over
 //! stdin/stdout; behind the `http` feature, [`http::router`] serves it as
@@ -42,6 +56,7 @@
 //! resource) and is refused the rest, on `run` and on every `batch` step.
 //! A disabled action is listed with `enabled: false` and why.
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use architect::action::{
@@ -86,6 +101,22 @@ const INVALID_REQUEST: i64 = -32_600;
 /// A JSON-RPC error code: the message is not JSON.
 const PARSE_ERROR: i64 = -32_700;
 
+/// Which tools a [`Server`] offers a model.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Tools {
+    /// The five generic tools (`actions`, `describe`, `run`, `batch`,
+    /// `watch`) over the whole list: what an app with hundreds of actions
+    /// wants.
+    #[default]
+    Generic,
+    /// Every action as a tool of its own, named after it — what keeps an
+    /// agent's existing tool names working.
+    Named,
+    /// Both: the generic five first (a named tool with one of their
+    /// names is not listed), then one per action.
+    Both,
+}
+
 /// The server: an app's name, what it tells a model on connecting, and
 /// its Action List.
 #[derive(Clone, Debug)]
@@ -95,6 +126,9 @@ pub struct Server {
     instructions: String,
     list: ActionList,
     principal: Principal,
+    tools: Tools,
+    /// Action id → tool name, where it is not the id in lower case.
+    tool_names: BTreeMap<String, String>,
 }
 
 impl Server {
@@ -107,7 +141,35 @@ impl Server {
             instructions: String::new(),
             list,
             principal: Principal::Anonymous,
+            tools: Tools::Generic,
+            tool_names: BTreeMap::new(),
         }
+    }
+
+    /// Which tools it offers ([`Tools::Generic`] unless set).
+    #[must_use]
+    pub const fn with_tools(mut self, tools: Tools) -> Self {
+        self.tools = tools;
+        self
+    }
+
+    /// Name action `id`'s tool `tool` (in [`Tools::Named`] /
+    /// [`Tools::Both`]) instead of the id in lower case — the name an
+    /// agent already calls it by. A name two actions would share goes to
+    /// the first, by id.
+    #[must_use]
+    pub fn with_tool_name(mut self, id: impl Into<String>, tool: impl Into<String>) -> Self {
+        self.tool_names.insert(id.into(), tool.into());
+        self
+    }
+
+    /// The tool name action `id` is offered as.
+    #[must_use]
+    pub fn tool_name(&self, id: &str) -> String {
+        self.tool_names
+            .get(id)
+            .cloned()
+            .unwrap_or_else(|| id.to_ascii_lowercase())
     }
 
     /// Who the model is, as the list's authorizer sees it, for every
@@ -134,15 +196,31 @@ impl Server {
 
     /// One JSON-RPC message in, its reply out — `None` for a
     /// notification, which wants none — as the server's principal.
+    ///
+    /// Blocks the calling thread until an async action it runs is done:
+    /// call it where blocking is fine (stdio, a blocking-pool thread), or
+    /// await [`Self::handle_async`].
     #[must_use]
     pub fn handle(&self, message: &str) -> Option<String> {
         self.handle_as(&self.principal, message)
     }
 
     /// One JSON-RPC message in, its reply out, as `who` — for a transport
-    /// that knows who is on the other end of each request.
+    /// that knows who is on the other end of each request. Blocks as
+    /// [`Self::handle`] does.
     #[must_use]
     pub fn handle_as(&self, who: &Principal, message: &str) -> Option<String> {
+        futures::executor::block_on(self.handle_as_async(who, message))
+    }
+
+    /// [`Self::handle`], awaiting async actions instead of blocking on
+    /// them. A `watch` with a wait still waits on this thread.
+    pub async fn handle_async(&self, message: &str) -> Option<String> {
+        self.handle_as_async(&self.principal, message).await
+    }
+
+    /// [`Self::handle_as`], awaiting async actions.
+    pub async fn handle_as_async(&self, who: &Principal, message: &str) -> Option<String> {
         let request: Value = match serde_json::from_str(message) {
             Ok(v) => v,
             Err(e) => {
@@ -158,14 +236,14 @@ impl Server {
         let params = request.get("params").cloned().unwrap_or(Value::Null);
         // A notification (no id) is told nothing back.
         let id = id?;
-        let reply = match self.dispatch(who, method, &params) {
+        let reply = match self.dispatch(who, method, &params).await {
             Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
             Err((code, message)) => error_reply(&id, code, &message),
         };
         Some(reply.to_string())
     }
 
-    fn dispatch(
+    async fn dispatch(
         &self,
         who: &Principal,
         method: &str,
@@ -174,8 +252,8 @@ impl Server {
         match method {
             "initialize" => Ok(self.initialize(who, params)),
             "ping" => Ok(json!({})),
-            "tools/list" => Ok(json!({ "tools": tools() })),
-            "tools/call" => self.call(who, params),
+            "tools/list" => Ok(json!({ "tools": self.tool_list(who) })),
+            "tools/call" => self.call(who, params).await,
             "resources/list" => Ok(json!({ "resources": [{
                 "uri": "actions://list",
                 "name": "Action List",
@@ -215,6 +293,19 @@ impl Server {
         if !instructions.is_empty() {
             instructions.push_str("\n\n");
         }
+        if self.tools == Tools::Named {
+            instructions.push_str(&format!(
+                "Each of {}'s actions ({} of them) is a tool of its own — the same actions its \
+                 keys and menus run. A tool's hints say whether it only reads, changes the app, \
+                 or may not be undoable: say what you are about to do before a destructive one.",
+                self.name,
+                self.list.infos_for(who).len(),
+            ));
+            return self.initialized(version, instructions);
+        }
+        if self.tools == Tools::Both {
+            instructions.push_str("Each action is also a tool of its own, named after it. ");
+        }
         instructions.push_str(&format!(
             "Everything {} can do is an action in its Action List ({} of them) — the same \
              actions its keys and menus run. Find one with `actions` (filter by text), read what \
@@ -228,6 +319,10 @@ impl Server {
             self.list.infos_for(who).len(),
             MAX_BATCH_STEPS,
         ));
+        self.initialized(version, instructions)
+    }
+
+    fn initialized(&self, version: &str, instructions: String) -> Value {
         json!({
             "protocolVersion": version,
             "capabilities": {
@@ -239,7 +334,46 @@ impl Server {
         })
     }
 
-    fn call(&self, who: &Principal, params: &Value) -> Result<Value, (i64, String)> {
+    /// The tools `who` is offered, as `tools/list` gives them.
+    fn tool_list(&self, who: &Principal) -> Vec<Value> {
+        let mut out = match self.tools {
+            Tools::Named => Vec::new(),
+            Tools::Generic | Tools::Both => match tools() {
+                Value::Array(generic) => generic,
+                _ => Vec::new(),
+            },
+        };
+        if self.tools != Tools::Generic {
+            out.extend(
+                self.named(who)
+                    .into_iter()
+                    .map(|(tool, info)| named_tool(&tool, &info)),
+            );
+        }
+        out
+    }
+
+    /// The actions `who` may run, each with its tool name: the first by
+    /// id wins a shared name, and none takes a generic tool's name while
+    /// those are offered.
+    fn named(&self, who: &Principal) -> Vec<(String, ActionInfo)> {
+        let mut taken: Vec<String> = match self.tools {
+            Tools::Both => tools_spec().iter().map(|t| t.name.to_owned()).collect(),
+            Tools::Generic | Tools::Named => Vec::new(),
+        };
+        let mut out = Vec::new();
+        for info in self.list.infos_for(who) {
+            let tool = self.tool_name(&info.id);
+            if taken.contains(&tool) {
+                continue;
+            }
+            taken.push(tool.clone());
+            out.push((tool, info));
+        }
+        out
+    }
+
+    async fn call(&self, who: &Principal, params: &Value) -> Result<Value, (i64, String)> {
         let name = params
             .get("name")
             .and_then(Value::as_str)
@@ -248,8 +382,26 @@ impl Server {
             .get("arguments")
             .cloned()
             .unwrap_or_else(|| json!({}));
-        let Some(spec) = tools_spec().iter().find(|t| t.name == name) else {
-            return Err((INVALID_PARAMS, format!("no tool {name}")));
+        let generic = match self.tools {
+            Tools::Named => None,
+            Tools::Generic | Tools::Both => tools_spec().iter().find(|t| t.name == name),
+        };
+        let Some(spec) = generic else {
+            if self.tools == Tools::Generic {
+                return Err((INVALID_PARAMS, format!("no tool {name}")));
+            }
+            let Some((_, info)) = self.named(who).into_iter().find(|(tool, _)| tool == name) else {
+                return Err((INVALID_PARAMS, format!("no tool {name}")));
+            };
+            let args = if wraps(&info) {
+                args.get("args").cloned()
+            } else {
+                Some(args)
+            };
+            return Ok(match self.run_one(who, &info.id, args.as_ref()).await {
+                Ok(value) => text_result(&value, false),
+                Err(error) => text_result(&error, true),
+            });
         };
         // An argument the tool does not take is a mistake to say, not to
         // ignore: the caller meant something by it.
@@ -280,13 +432,13 @@ impl Server {
             },
             "run" => {
                 let id = args.get("id").and_then(Value::as_str).unwrap_or_default();
-                match self.run_one(who, id, args.get("args")) {
+                match self.run_one(who, id, args.get("args")).await {
                     Ok(value) => text_result(&value, false),
                     Err(error) => text_result(&error, true),
                 }
             }
             "batch" => {
-                let (value, failed) = self.batch(who, &args);
+                let (value, failed) = self.batch(who, &args).await;
                 text_result(&value, failed)
             }
             "watch" => text_result(&self.watch(&args), false),
@@ -336,12 +488,17 @@ impl Server {
     }
 
     /// Run one action, its JSON result or what went wrong.
-    fn run_one(&self, who: &Principal, id: &str, args: Option<&Value>) -> Result<Value, Value> {
+    async fn run_one(
+        &self,
+        who: &Principal,
+        id: &str,
+        args: Option<&Value>,
+    ) -> Result<Value, Value> {
         let bytes = match args {
             None | Some(Value::Null) => Vec::new(),
             Some(v) => v.to_string().into_bytes(),
         };
-        match self.list.run_json_as(who, id, &bytes) {
+        match self.list.run_json_async_as(who, id, &bytes).await {
             Ok(out) => Ok(serde_json::from_slice(&out).unwrap_or(Value::Null)),
             Err(ActionError::Unknown(id) | ActionError::Duplicate(id)) => Err(json!({
                 "error": format!("no action {id} — find it with `actions`"),
@@ -365,7 +522,7 @@ impl Server {
 
     /// Each step runs as `who`, through the same door as `run` — a step
     /// is authorized on its own. Not atomic: what ran stays done.
-    fn batch(&self, who: &Principal, args: &Value) -> (Value, bool) {
+    async fn batch(&self, who: &Principal, args: &Value) -> (Value, bool) {
         let stop = args
             .get("stop_on_error")
             .and_then(Value::as_bool)
@@ -392,7 +549,7 @@ impl Server {
         let mut failed = false;
         for (i, step) in steps.iter().enumerate() {
             let id = step.get("id").and_then(Value::as_str).unwrap_or_default();
-            match self.run_one(who, id, step.get("args")) {
+            match self.run_one(who, id, step.get("args")).await {
                 Ok(value) => {
                     results.push(json!({"step": i, "id": id, "ok": true, "result": value}))
                 }
@@ -555,6 +712,55 @@ fn tools() -> Value {
     ])
 }
 
+/// Whether an action's arguments are not an object — so its named tool
+/// takes them as `{"args": …}`, MCP's input being an object always.
+fn wraps(info: &ActionInfo) -> bool {
+    info.params_schema
+        .as_deref()
+        .and_then(|s| serde_json::from_str::<Value>(s).ok())
+        .is_some_and(|schema| schema.get("type").and_then(Value::as_str) != Some("object"))
+}
+
+/// One action as a tool of its own: its description, its arguments'
+/// schema as the input, its effect as the hints.
+fn named_tool(tool: &str, info: &ActionInfo) -> Value {
+    let params = info
+        .params_schema
+        .as_deref()
+        .and_then(|s| serde_json::from_str::<Value>(s).ok());
+    let input = match params {
+        None => json!({"type": "object", "properties": {}}),
+        Some(schema) if wraps(info) => json!({
+            "type": "object",
+            "required": ["args"],
+            "properties": {"args": schema},
+        }),
+        Some(schema) => schema,
+    };
+    let mut description = if info.description.is_empty() {
+        info.display_name.clone()
+    } else {
+        info.description.clone()
+    };
+    if !info.enabled
+        && let Some(reason) = &info.disabled_reason
+    {
+        description.push_str(&format!(" (Disabled now: {reason}.)"));
+    }
+    json!({
+        "name": tool,
+        "title": info.display_name,
+        "description": description,
+        "inputSchema": input,
+        "annotations": {
+            "title": info.display_name,
+            "readOnlyHint": info.effect == Effect::ReadOnly,
+            "destructiveHint": info.effect == Effect::Destructive,
+            "openWorldHint": false,
+        },
+    })
+}
+
 /// A tool's result: `value` as JSON text, cut to [`MAX_TEXT`].
 fn text_result(value: &Value, is_error: bool) -> Value {
     let mut text = value.to_string();
@@ -631,7 +837,7 @@ fn event(e: &ActionEvent) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_BATCH_STEPS, Server};
+    use super::{MAX_BATCH_STEPS, Server, Tools};
     use architect::action::{ActionList, ActionMeta, Effect, Principal};
     use architect_permissions::{Action, Decision, PermissionEngine, Resource};
     use facet::Facet;
@@ -918,5 +1124,153 @@ mod tests {
                 .as_str()
                 .is_some_and(|d| d.contains("Not atomic"))
         );
+    }
+
+    static ASK: ActionMeta = ActionMeta {
+        id: "PEER_ASK",
+        trait_name: "Peer",
+        method_name: "ask",
+        display_name: "Ask",
+        description: "Ask a peer by name",
+        category: "Peer",
+        group: "",
+        shortcut: "",
+        toggleable: false,
+        undo: false,
+    };
+
+    static ECHO: ActionMeta = ActionMeta {
+        id: "RUN",
+        trait_name: "Peer",
+        method_name: "run",
+        display_name: "Echo",
+        description: "Echo a word",
+        category: "Peer",
+        group: "",
+        shortcut: "",
+        toggleable: false,
+        undo: false,
+    };
+
+    #[derive(Facet)]
+    struct Ask {
+        name: String,
+    }
+
+    fn named_server(tools: Tools) -> Server {
+        let list = ActionList::new();
+        list.register(&HITS, Effect::ReadOnly, |q: Query| Ok(vec![q.track.len()]))
+            .expect("registered");
+        list.register_async(&ASK, Effect::Mutating, |a: Ask| async move {
+            Ok(format!("hello {}", a.name))
+        })
+        .expect("registered");
+        list.register(&ECHO, Effect::Destructive, |word: String| Ok(word))
+            .expect("registered");
+        Server::new("Test", "0", list)
+            .with_tools(tools)
+            .with_tool_name("PEER_ASK", "ask")
+    }
+
+    fn listed(server: &Server) -> Vec<Value> {
+        let reply: Value = serde_json::from_str(
+            &server
+                .handle(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#)
+                .expect("a reply"),
+        )
+        .expect("json");
+        reply["result"]["tools"].as_array().cloned().expect("tools")
+    }
+
+    /// In named mode every action is its own tool: named by its id in
+    /// lower case or the name it was given, described, its arguments as
+    /// the input schema, its effect as the hints; and it runs by that
+    /// name, an async action awaited, a non-object argument wrapped.
+    #[test]
+    fn named_mode_lists_each_action_as_a_tool() {
+        let s = named_server(Tools::Named);
+        let tools = listed(&s);
+        let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
+        assert_eq!(names, ["drums_hits", "ask", "run"]);
+        let ask = &tools[1];
+        assert_eq!(ask["description"], "Ask a peer by name");
+        assert_eq!(ask["inputSchema"]["type"], "object");
+        assert!(
+            ask["inputSchema"]["properties"]["name"].is_object(),
+            "{ask}"
+        );
+        assert_eq!(ask["annotations"]["readOnlyHint"], false);
+        assert_eq!(tools[0]["annotations"]["readOnlyHint"], true);
+        assert_eq!(tools[2]["annotations"]["destructiveHint"], true);
+        assert_eq!(tools[2]["inputSchema"]["required"], json!(["args"]));
+
+        let reply = call(&s, "ask", &json!({"name": "ada"}));
+        assert_eq!(reply["result"]["isError"], false);
+        assert_eq!(text(&reply), json!("hello ada"));
+        let reply = call(&s, "drums_hits", &json!({"track": "kick"}));
+        assert_eq!(text(&reply), json!([4]));
+        let reply = call(&s, "run", &json!({"args": "word"}));
+        assert_eq!(text(&reply), json!("word"));
+        let reply = call(&s, "ask", &json!({"nom": 1}));
+        assert_eq!(reply["result"]["isError"], true);
+        assert!(text(&reply)["takes"].is_object());
+        let reply = call(&s, "actions", &json!({}));
+        assert!(
+            reply["error"]["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("no tool"))
+        );
+    }
+
+    /// Both: the generic five first, then one per action — and an action
+    /// whose tool name is a generic tool's is not listed by it.
+    #[test]
+    fn both_keeps_the_generic_tools_first() {
+        let s = named_server(Tools::Both);
+        let names: Vec<String> = listed(&s)
+            .iter()
+            .filter_map(|t| t["name"].as_str().map(str::to_owned))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "actions",
+                "describe",
+                "run",
+                "batch",
+                "watch",
+                "drums_hits",
+                "ask"
+            ]
+        );
+        let reply = call(
+            &s,
+            "run",
+            &json!({"id": "PEER_ASK", "args": {"name": "cy"}}),
+        );
+        assert_eq!(text(&reply), json!("hello cy"));
+        let reply = call(&s, "ask", &json!({"name": "cy"}));
+        assert_eq!(text(&reply), json!("hello cy"));
+    }
+
+    /// The generic `run` awaits an async action too, and the default
+    /// lists no named tools.
+    #[test]
+    fn generic_mode_runs_async_actions() {
+        let s = named_server(Tools::Generic);
+        assert_eq!(listed(&s).len(), 5);
+        let reply = call(
+            &s,
+            "run",
+            &json!({"id": "PEER_ASK", "args": {"name": "ada"}}),
+        );
+        assert_eq!(text(&reply), json!("hello ada"));
+        let reply = call(&s, "ask", &json!({"name": "ada"}));
+        assert!(reply["error"].is_object());
+        let out = futures::executor::block_on(s.handle_async(
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"run","arguments":{"id":"PEER_ASK","args":{"name":"bo"}}}}"#,
+        ))
+        .expect("a reply");
+        assert!(out.contains("hello bo"), "{out}");
     }
 }

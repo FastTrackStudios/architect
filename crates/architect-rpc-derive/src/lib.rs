@@ -113,6 +113,34 @@ pub fn rpc(args: TokenStream, input: TokenStream) -> TokenStream {
 /// Accepts every `#[architect::rpc(...)]` option (`context = T`,
 /// `scopes(...)`, `ops`, `sync_client`). `#[rpc]` remains the vox-only
 /// spelling and `#[http]` the explicit opt-in; this is both.
+///
+/// # Actions: `actions`
+///
+/// `#[architect::service(actions)]` (or `actions = "NS"` for the id
+/// namespace) also projects every method into an Action List, so keys,
+/// menus, scripts and MCP run the same call the wire does:
+///
+/// ```ignore
+/// #[architect::service(actions)]
+/// pub trait Greeter {
+///     /// Greets a known name.
+///     async fn greet(&self, name: String) -> Result<String, GreetError>;
+///     /// How many greetings so far.
+///     #[action(effect = read_only)]
+///     async fn count(&self) -> Result<u32, GreetError>;
+/// }
+///
+/// greeter_actions::register(backend, &list)?; // GREETER_GREET, GREETER_COUNT
+/// ```
+///
+/// Each method is an async action: id `<NS>_<METHOD>` (NS defaults to the
+/// trait name in `SCREAMING_SNAKE`, minus a trailing `Service`), its doc
+/// comment the description, `http::<Method>Args` what it takes, its `Ok`
+/// type what it gives, its error's `Display` the failure. Per method,
+/// `#[action(effect = read_only | mutating | destructive, id = "...",
+/// name = "...", category = "...", skip)]` adjusts it; the effect defaults
+/// to `mutating`. Needs architect's `action-list` feature and the HTTP
+/// face (it reuses the `Args` bodies); not with `context = T`.
 #[proc_macro_attribute]
 pub fn service(args: TokenStream, input: TokenStream) -> TokenStream {
     let mut rpc_args = RpcArgs {
@@ -256,6 +284,12 @@ struct RpcArgs {
     /// for a deferred wire representation resolved at apply time via
     /// `architect::ops::ResolveArg`.
     ops: Option<Vec<OpsSubst>>,
+    /// `actions` / `actions = "NS"` — additionally emit
+    /// `http::actions::register(backend, &ActionList)`, every method as an
+    /// async action (`NS_METHOD`).
+    actions: bool,
+    /// The `NS` of `actions = "NS"`, when given.
+    actions_ns: Option<String>,
 }
 
 /// One `name: Type` scope declaration inside `scopes(...)`.
@@ -298,6 +332,23 @@ impl RpcArgs {
         }
         if meta.path.is_ident("http") {
             self.http = true;
+            return Ok(());
+        }
+        if meta.path.is_ident("actions") {
+            if self.actions {
+                return Err(meta.error("duplicate `actions` argument"));
+            }
+            if meta.input.peek(syn::Token![=]) {
+                let lit: syn::LitStr = meta.value()?.parse()?;
+                let ns = lit.value();
+                if !is_screaming_snake(&ns) {
+                    return Err(meta.error(
+                        "`actions = \"NS\"` is SCREAMING_SNAKE_CASE: the ids become `NS_METHOD`",
+                    ));
+                }
+                self.actions_ns = Some(ns);
+            }
+            self.actions = true;
             return Ok(());
         }
         if meta.path.is_ident("path") {
@@ -355,7 +406,8 @@ impl RpcArgs {
              (ambient per-call context threaded through every method), \
              `scopes(name: Type, ...)` (leveled local scope views over the \
              direct view), `ops` / `ops(Src as Dst, ...)` (emit the \
-             <Trait>Op reified-call enum + apply). Backend requirements are \
+             <Trait>Op reified-call enum + apply), `actions` / `actions = \"NS\"` \
+             (project every method into an Action List). Backend requirements are \
              declared per backend at the bundle site, not on the trait.",
         ))
     }
@@ -459,6 +511,23 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
     }
 
     let shape = classify_shape(&methods);
+    if !args.actions
+        && let Some(m) = methods.iter().find(|m| m.action.given)
+    {
+        return Err(syn::Error::new_spanned(
+            &m.decl.sig.ident,
+            "`#[action(...)]` on a method needs `actions` on the trait: \
+             `#[architect::service(actions)]`",
+        ));
+    }
+    if args.actions && (!args.http || args.context.is_some()) {
+        return Err(syn::Error::new_spanned(
+            &trait_item.ident,
+            "`actions` projects the HTTP face's `<Method>Args` bodies: it needs \
+             `#[architect::service]` (or `#[architect::rpc(http)]`), and cannot be \
+             combined with `context = ...` yet",
+        ));
+    }
 
     // Always emit the user's trait — adding the `Send + Sync + 'static`
     // bound so it's safe to share through `Arc<dyn Trait>` from inside
@@ -557,6 +626,7 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
             has_context: args.context.is_some(),
             has_ops: args.ops.is_some(),
             has_http: args.http,
+            has_actions: args.actions,
         },
     );
 
@@ -596,6 +666,11 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
     // HTTP face — the axum router + typed HTTP client, gated on the
     // consumer's `http` / `http-client` features exactly as the vox
     // items are gated on `vox`.
+    let action_ns = args.actions.then(|| {
+        args.actions_ns
+            .clone()
+            .unwrap_or_else(|| action_namespace(&trait_name.to_string()))
+    });
     let http_block = if args.http {
         emit_http_block(
             trait_name,
@@ -607,6 +682,7 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
             &subscriptions,
             ctx,
             args.path.as_deref(),
+            action_ns.as_deref(),
         )
     } else {
         quote! {}
@@ -1117,6 +1193,7 @@ struct PreludeExtras {
     has_context: bool,
     has_ops: bool,
     has_http: bool,
+    has_actions: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1135,6 +1212,7 @@ fn emit_prelude(
         has_context,
         has_ops,
         has_http,
+        has_actions,
     } = extras;
     let snake = to_snake_case(&trait_name.to_string());
     let service_alias = format_ident!("{}Service", trait_name);
@@ -1174,9 +1252,16 @@ fn emit_prelude(
     } else {
         let http_client = format_ident!("{}HttpClient", trait_name);
         let http_mod = format_ident!("{snake}_http");
+        let actions_mod = format_ident!("{snake}_actions");
+        let actions = if has_actions {
+            quote! { pub use super::http::actions as #actions_mod; }
+        } else {
+            quote! {}
+        };
         quote! {
             pub use super::http as #http_mod;
             pub use super::#http_client;
+            #actions
         }
     };
 
@@ -2287,6 +2372,95 @@ struct Method {
     /// `#[http(path = "…")]` — the HTTP tail, in place of the
     /// kebab-cased method name. HTTP only; see [`http_path_attr`].
     http_path: Option<String>,
+    /// `#[action(…)]` — how the method shows as an action, under
+    /// `actions`. See [`action_attr`].
+    action: ActionAttr,
+}
+
+/// A method's `#[action(…)]` options; all default.
+#[derive(Debug, Default)]
+struct ActionAttr {
+    /// Whether the attribute was written at all.
+    given: bool,
+    effect: Option<syn::Ident>,
+    id: Option<String>,
+    name: Option<String>,
+    category: Option<String>,
+    skip: bool,
+}
+
+/// `#[action(effect = read_only, id = "…", name = "…", category = "…",
+/// skip)]` on a trait method.
+fn action_attr(method: &TraitItemFn) -> syn::Result<ActionAttr> {
+    let mut out = ActionAttr::default();
+    for attr in method.attrs.iter().filter(|a| a.path().is_ident("action")) {
+        if out.given {
+            return Err(syn::Error::new_spanned(
+                attr,
+                "one `#[action(...)]` per method",
+            ));
+        }
+        out.given = true;
+        attr.parse_nested_meta(|meta| {
+            let text = |meta: &syn::meta::ParseNestedMeta| -> syn::Result<String> {
+                Ok(meta.value()?.parse::<syn::LitStr>()?.value())
+            };
+            if meta.path.is_ident("effect") {
+                let effect: syn::Ident = meta.value()?.parse()?;
+                if effect_tokens(&effect).is_none() {
+                    return Err(syn::Error::new_spanned(
+                        &effect,
+                        "`effect` is `read_only`, `mutating` or `destructive`",
+                    ));
+                }
+                out.effect = Some(effect);
+            } else if meta.path.is_ident("id") {
+                let id = text(&meta)?;
+                if !is_screaming_snake(&id) {
+                    return Err(meta.error("an action id is SCREAMING_SNAKE_CASE (`AREA_VERB`)"));
+                }
+                out.id = Some(id);
+            } else if meta.path.is_ident("name") {
+                out.name = Some(text(&meta)?);
+            } else if meta.path.is_ident("category") {
+                out.category = Some(text(&meta)?);
+            } else if meta.path.is_ident("skip") {
+                out.skip = true;
+            } else {
+                return Err(meta.error(
+                    "unknown `#[action(...)]` option; expected `effect`, `id`, `name`, \
+                     `category` or `skip`",
+                ));
+            }
+            Ok(())
+        })?;
+    }
+    Ok(out)
+}
+
+/// `read_only` / `mutating` / `destructive` (or the `Effect` variant
+/// names) as the `architect::action::Effect` they mean.
+fn effect_tokens(effect: &syn::Ident) -> Option<TokenStream2> {
+    let variant = match effect.to_string().as_str() {
+        "read_only" | "ReadOnly" => quote! { ReadOnly },
+        "mutating" | "Mutating" => quote! { Mutating },
+        "destructive" | "Destructive" => quote! { Destructive },
+        _ => return None,
+    };
+    Some(quote! { ::architect::action::Effect::#variant })
+}
+
+/// `AREA_VERB`: upper-case ASCII letters, digits and `_`, from a letter.
+fn is_screaming_snake(id: &str) -> bool {
+    id.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+        && id
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+}
+
+/// Strip the method-level `#[action(…)]` marker before re-emitting.
+fn strip_action_attrs(method: &mut TraitItemFn) {
+    method.attrs.retain(|a| !a.path().is_ident("action"));
 }
 
 fn classify_method(method: &TraitItemFn) -> syn::Result<Method> {
@@ -2369,9 +2543,11 @@ fn classify_method(method: &TraitItemFn) -> syn::Result<Method> {
 
     let ops_skip = has_ops_skip_attr(method);
     let http_path = http_path_attr(method)?;
+    let action = action_attr(method)?;
     let mut decl = method.clone();
     strip_ops_attrs(&mut decl);
     strip_http_attrs(&mut decl);
+    strip_action_attrs(&mut decl);
 
     Ok(Method {
         decl,
@@ -2382,6 +2558,7 @@ fn classify_method(method: &TraitItemFn) -> syn::Result<Method> {
         return_ty: method.sig.output.clone(),
         ops_skip,
         http_path,
+        action,
     })
 }
 
@@ -2461,6 +2638,8 @@ fn emit_user_trait(trait_item: &ItemTrait, shape: Shape, ctx: Option<&Type>) -> 
     for item in &mut out.items {
         if let TraitItem::Fn(f) = item {
             strip_ops_attrs(f);
+            strip_http_attrs(f);
+            strip_action_attrs(f);
         }
     }
     // Ambient context: declared once on the attribute, threaded here
@@ -2781,6 +2960,46 @@ fn http_prefix(trait_name: &str) -> String {
     to_kebab_case(&to_snake_case(base))
 }
 
+/// The default action-id namespace for a trait: `SCREAMING_SNAKE`, minus
+/// a trailing `Service` (`AuthService` → `AUTH`, `Greeter` → `GREETER`).
+fn action_namespace(trait_name: &str) -> String {
+    let base = match trait_name.strip_suffix("Service") {
+        Some(stripped) if !stripped.is_empty() => stripped,
+        _ => trait_name,
+    };
+    to_snake_case(base).to_uppercase()
+}
+
+/// `sign_in_email` → `Sign in email`: a method name as a label.
+fn display_name(method: &str) -> String {
+    let words = method.replace('_', " ");
+    let mut chars = words.chars();
+    chars.next().map_or_else(String::new, |first| {
+        first.to_uppercase().chain(chars).collect()
+    })
+}
+
+/// A method's doc comment as one line of text.
+fn doc_text(docs: &[&syn::Attribute]) -> String {
+    docs.iter()
+        .filter_map(|a| {
+            let syn::Meta::NameValue(nv) = &a.meta else {
+                return None;
+            };
+            let syn::Expr::Lit(syn::ExprLit {
+                lit: syn::Lit::Str(s),
+                ..
+            }) = &nv.value
+            else {
+                return None;
+            };
+            Some(s.value().trim().to_owned())
+        })
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// `snake_case` → `kebab-case`.
 fn to_kebab_case(input: &str) -> String {
     input.replace('_', "-")
@@ -2861,10 +3080,14 @@ fn emit_http_block(
     subs: &[Subscription],
     ctx: Option<&Type>,
     path: Option<&str>,
+    action_ns: Option<&str>,
 ) -> TokenStream2 {
     if matches!(shape, Shape::Empty) || ctx.is_some() {
         return quote! {};
     }
+    let mut action_metas = Vec::new();
+    let mut action_regs = Vec::new();
+    let mut action_ids = Vec::new();
     let source_trait = format_ident!("{}StreamSource", trait_name);
     let prefix = path.map_or_else(|| http_prefix(&trait_name.to_string()), str::to_owned);
     let client_name = format_ident!("{}HttpClient", trait_name);
@@ -3015,6 +3238,72 @@ fn emit_http_block(
                 self.inner.call(#path, &args).await
             }
         });
+
+        if let Some(ns) = &action_ns
+            && !m.action.skip
+        {
+            let id = m
+                .action
+                .id
+                .clone()
+                .unwrap_or_else(|| format!("{ns}_{}", name_str.to_uppercase()));
+            let meta_name = format_ident!("{}", name_str.to_uppercase());
+            let display = m
+                .action
+                .name
+                .clone()
+                .unwrap_or_else(|| display_name(&name_str));
+            let description = doc_text(&docs);
+            let category = m
+                .action
+                .category
+                .clone()
+                .unwrap_or_else(|| trait_name.to_string());
+            let trait_str = trait_name.to_string();
+            let effect = m
+                .action
+                .effect
+                .as_ref()
+                .and_then(effect_tokens)
+                .unwrap_or_else(|| quote! { ::architect::action::Effect::Mutating });
+            let meta_doc = format!("`{id}`: `{trait_str}::{name_str}` as an action.");
+            action_metas.push(quote! {
+                #[doc = #meta_doc]
+                pub static #meta_name: ::architect::action::ActionMeta = ::architect::action::ActionMeta {
+                    id: #id,
+                    trait_name: #trait_str,
+                    method_name: #name_str,
+                    display_name: #display,
+                    description: #description,
+                    category: #category,
+                    group: "",
+                    shortcut: "",
+                    toggleable: false,
+                    undo: false,
+                };
+            });
+            let finish = if result_parts(&m.return_ty).is_some() {
+                quote! { result.map_err(|e| ::std::string::ToString::to_string(&e)) }
+            } else {
+                quote! { ::core::result::Result::<_, ::std::string::String>::Ok(result) }
+            };
+            action_regs.push(quote! {
+                {
+                    let host = ::std::sync::Arc::clone(&host);
+                    list.register_async(&#meta_name, #effect, move |args: super::#args_name| {
+                        let host = ::std::sync::Arc::clone(&host);
+                        async move {
+                            let result = <#host_ty as #async_face>::#name(
+                                host.as_ref(),
+                                #(args.#field_names),*
+                            ).await;
+                            #finish
+                        }
+                    })?;
+                }
+            });
+            action_ids.push(id);
+        }
 
         if all_fallible {
             let output = &m.return_ty;
@@ -3177,6 +3466,46 @@ fn emit_http_block(
         }
     };
 
+    let actions_block = if action_ns.is_some() {
+        let doc = format!(
+            "`{trait_name}` as Action List actions: every method an async action \
+             (its `<Method>Args` in, its `Ok` value out), so keys, menus, scripts and \
+             MCP run the same call the wire does."
+        );
+        quote! {
+            #[doc = #doc]
+            pub mod actions {
+                use super::*;
+
+                #(#action_metas)*
+
+                /// Every action id this registers, in trait order.
+                pub const IDS: &[&str] = &[#(#action_ids),*];
+
+                /// Put every method on `list`, served by `backend`.
+                ///
+                /// # Errors
+                ///
+                /// An id already on the list (`ActionError::Duplicate`); the
+                /// ones before it stay registered.
+                pub fn register<S>(
+                    backend: S,
+                    list: &::architect::action::ActionList,
+                ) -> ::core::result::Result<(), ::architect::action::ActionError>
+                where
+                    #backend_bounds,
+                {
+                    let host = ::std::sync::Arc::new(#make_host);
+                    #(#action_regs)*
+                    let _ = (&host, list);
+                    ::core::result::Result::Ok(())
+                }
+            }
+        }
+    } else {
+        quote! {}
+    };
+
     let router_doc = format!(
         "Every `{trait_name}` method as `POST /{prefix}/<method-kebab>` with a JSON \
          body of named arguments. Nest it wherever the app wants \
@@ -3238,6 +3567,8 @@ fn emit_http_block(
             }
 
             #stream_block
+
+            #actions_block
         }
 
         #stream_bind

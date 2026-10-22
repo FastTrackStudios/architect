@@ -21,6 +21,8 @@ http = ["dep:axum", "dep:tokio"]
 [dependencies]
 architect = { path = "../../crates/architect", features = ["action-list"] }
 serde_json.workspace = true
+# `Server::handle` drives an async action to its end on the calling thread.
+futures = "0.3"
 # `<config>/fts/<name>-mcp.json`: the platform config directory.
 dirs = "6"
 axum = { workspace = true, optional = true }
