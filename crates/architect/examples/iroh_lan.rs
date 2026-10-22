@@ -65,10 +65,13 @@ async fn dial(lookup: PeerLookup, id: &str) -> Result<(), String> {
     let endpoint = iroh_link::bind_endpoint_with(iroh::SecretKey::generate(), lookup)
         .await
         .map_err(|e| format!("bind: {e}"))?;
-    let link = tokio::time::timeout(Duration::from_secs(30), iroh_link::connect(&endpoint, remote))
-        .await
-        .map_err(|_| "lookup + dial timed out after 30 s".to_owned())?
-        .map_err(|e| format!("dial: {e}"))?;
+    let link = tokio::time::timeout(
+        Duration::from_secs(30),
+        iroh_link::connect(&endpoint, remote),
+    )
+    .await
+    .map_err(|_| "lookup + dial timed out after 30 s".to_owned())?
+    .map_err(|e| format!("dial: {e}"))?;
     let connection = vox_core::initiator_on(link)
         .establish_connection()
         .await
