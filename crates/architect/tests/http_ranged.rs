@@ -3,7 +3,12 @@
 //! `Range` with `206` + `Content-Range`, `416` when nothing is selected,
 //! and the whole body without a range.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
 
 use architect::http::axum::body::{Body, Bytes, to_bytes};
 use architect::http::axum::http::{HeaderMap, Request, StatusCode, header};
@@ -90,7 +95,10 @@ async fn file_range_0_1_is_206_with_content_range() {
     let app = app(tmp.0.clone());
     let (resp, body) = fetch(&app, "/file", Some("bytes=0-1")).await;
     assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT);
-    assert_eq!(header_of(&resp, header::CONTENT_RANGE), Some("bytes 0-1/10"));
+    assert_eq!(
+        header_of(&resp, header::CONTENT_RANGE),
+        Some("bytes 0-1/10")
+    );
     assert_eq!(header_of(&resp, header::CONTENT_LENGTH), Some("2"));
     assert_eq!(header_of(&resp, header::ACCEPT_RANGES), Some("bytes"));
     assert_eq!(header_of(&resp, header::CONTENT_TYPE), Some("audio/wav"));
@@ -115,12 +123,18 @@ async fn file_suffix_and_open_ranges() {
     let app = app(tmp.0.clone());
     let (resp, body) = fetch(&app, "/file", Some("bytes=-3")).await;
     assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT);
-    assert_eq!(header_of(&resp, header::CONTENT_RANGE), Some("bytes 7-9/10"));
+    assert_eq!(
+        header_of(&resp, header::CONTENT_RANGE),
+        Some("bytes 7-9/10")
+    );
     assert_eq!(&body[..], b"789");
 
     let (resp, body) = fetch(&app, "/file", Some("bytes=4-")).await;
     assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT);
-    assert_eq!(header_of(&resp, header::CONTENT_RANGE), Some("bytes 4-9/10"));
+    assert_eq!(
+        header_of(&resp, header::CONTENT_RANGE),
+        Some("bytes 4-9/10")
+    );
     assert_eq!(&body[..], b"456789");
 }
 
@@ -131,7 +145,11 @@ async fn unsatisfiable_is_416_on_every_helper() {
     for path in ["/file", "/bytes", "/stream"] {
         let (resp, body) = fetch(&app, path, Some("bytes=10-")).await;
         assert_eq!(resp.status(), StatusCode::RANGE_NOT_SATISFIABLE, "{path}");
-        assert_eq!(header_of(&resp, header::CONTENT_RANGE), Some("bytes */10"), "{path}");
+        assert_eq!(
+            header_of(&resp, header::CONTENT_RANGE),
+            Some("bytes */10"),
+            "{path}"
+        );
         assert!(body.is_empty(), "{path}");
     }
 }
@@ -154,8 +172,16 @@ async fn bytes_and_stream_slice_the_same_window() {
     for path in ["/bytes", "/stream"] {
         let (resp, body) = fetch(&app, path, Some("bytes=2-5")).await;
         assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT, "{path}");
-        assert_eq!(header_of(&resp, header::CONTENT_RANGE), Some("bytes 2-5/10"), "{path}");
-        assert_eq!(header_of(&resp, header::CONTENT_LENGTH), Some("4"), "{path}");
+        assert_eq!(
+            header_of(&resp, header::CONTENT_RANGE),
+            Some("bytes 2-5/10"),
+            "{path}"
+        );
+        assert_eq!(
+            header_of(&resp, header::CONTENT_LENGTH),
+            Some("4"),
+            "{path}"
+        );
         assert_eq!(&body[..], b"2345", "{path}");
     }
 }
@@ -163,8 +189,12 @@ async fn bytes_and_stream_slice_the_same_window() {
 #[tokio::test]
 async fn missing_file_is_not_found_error() {
     let headers = HeaderMap::new();
-    let err = serve_file(&headers, std::path::Path::new("/nonexistent/architect-ranged"), "x/y")
-        .await
-        .unwrap_err();
+    let err = serve_file(
+        &headers,
+        std::path::Path::new("/nonexistent/architect-ranged"),
+        "x/y",
+    )
+    .await
+    .unwrap_err();
     assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
 }

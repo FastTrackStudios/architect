@@ -147,9 +147,11 @@ mod serve {
             .map_or(ByteRange::Absent, |raw| parse_range(raw, total))
     }
 
-    /// Wrap `body` in the response `range` calls for: `200` with the whole
-    /// length, `206` with `Content-Range`, or a bodiless `416` (whatever
-    /// `body` holds is dropped). `body` must already be exactly the bytes
+    /// Wrap `body` in the response `range` calls for.
+    ///
+    /// That is `200` with the whole length, `206` with `Content-Range`, or
+    /// a bodiless `416` (whatever `body` holds is dropped). `body` must
+    /// already be exactly the bytes
     /// [`ByteRange::window`] selects. Every answer says
     /// `Accept-Ranges: bytes`. A `content_type` that is not a valid header
     /// value is sent as `application/octet-stream`.
@@ -159,7 +161,13 @@ mod serve {
         let Some((_, len)) = range.window(total) else {
             return (
                 StatusCode::RANGE_NOT_SATISFIABLE,
-                [accept, (header::CONTENT_RANGE, header_value(&unsatisfied_range(total)))],
+                [
+                    accept,
+                    (
+                        header::CONTENT_RANGE,
+                        header_value(&unsatisfied_range(total)),
+                    ),
+                ],
             )
                 .into_response();
         };
@@ -174,7 +182,10 @@ mod serve {
             ByteRange::Satisfiable(first, last) => (
                 StatusCode::PARTIAL_CONTENT,
                 headers,
-                [(header::CONTENT_RANGE, header_value(&content_range(first, last, total)))],
+                [(
+                    header::CONTENT_RANGE,
+                    header_value(&content_range(first, last, total)),
+                )],
                 body,
             )
                 .into_response(),
@@ -185,7 +196,9 @@ mod serve {
     }
 
     /// Serve a resource of `total` bytes whose contents the caller reads
-    /// itself. `read(offset, len)` is called once, with exactly the window
+    /// itself.
+    ///
+    /// `read(offset, len)` is called once, with exactly the window
     /// the request selects (`(0, total)` without a range), and not at all
     /// for a `416`; hand back a buffered or a streamed [`Body`]
     /// ([`super::reader_body`], `Body::from_stream`). Its error is returned
@@ -216,8 +229,9 @@ mod serve {
         Ok(respond(range, total, content_type, body))
     }
 
-    /// Serve an in-memory body, sliced to the request's range. `Bytes`
-    /// slices share the buffer; nothing is copied.
+    /// Serve an in-memory body, cut to the request's range.
+    ///
+    /// The cut shares the buffer; nothing is copied.
     #[must_use]
     pub fn serve_bytes(headers: &HeaderMap, bytes: Bytes, content_type: &str) -> Response {
         let total = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
@@ -227,9 +241,13 @@ mod serve {
             .and_then(|(offset, len)| {
                 let start = usize::try_from(offset).ok()?;
                 let end = start.checked_add(usize::try_from(len).ok()?)?;
-                (end <= bytes.len()).then(|| bytes.slice(start..end))
+                (end <= bytes.len()).then_some((start, end))
             })
-            .unwrap_or_default();
+            .map_or_else(Bytes::new, |(start, end)| {
+                let mut cut = bytes;
+                cut.truncate(end);
+                cut.split_off(start)
+            });
         respond(range, total, content_type, Body::from(body))
     }
 
@@ -252,7 +270,9 @@ mod serve {
         use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncSeekExt as _};
 
         /// Stream any `AsyncRead` as a response body, [`CHUNK`] bytes
-        /// at a time. A read error ends the body with that error
+        /// at a time.
+        ///
+        /// A read error ends the body with that error
         /// (the connection is cut; the status line is already sent). Pair
         /// it with `AsyncReadExt::take` to stop at a range's end.
         #[must_use]
@@ -275,7 +295,9 @@ mod serve {
             Body::from_stream(chunks)
         }
 
-        /// Serve a file from disk, streamed, honouring `Range`. The length
+        /// Serve a file from disk, streamed, honouring `Range`.
+        ///
+        /// The length
         /// comes from the file's metadata at open time. Errors are opening,
         /// stat-ing or seeking the file (a missing file is
         /// `io::ErrorKind::NotFound`; map it to `404` in the route).
@@ -312,14 +334,32 @@ mod tests {
 
     #[test]
     fn plain_ranges_resolve() {
-        assert_eq!(parse_range("bytes=0-499", 1000), ByteRange::Satisfiable(0, 499));
-        assert_eq!(parse_range("bytes=500-", 1000), ByteRange::Satisfiable(500, 999));
-        assert_eq!(parse_range("bytes=-200", 1000), ByteRange::Satisfiable(800, 999));
+        assert_eq!(
+            parse_range("bytes=0-499", 1000),
+            ByteRange::Satisfiable(0, 499)
+        );
+        assert_eq!(
+            parse_range("bytes=500-", 1000),
+            ByteRange::Satisfiable(500, 999)
+        );
+        assert_eq!(
+            parse_range("bytes=-200", 1000),
+            ByteRange::Satisfiable(800, 999)
+        );
         // A last byte past the end is clamped.
-        assert_eq!(parse_range("bytes=900-2000", 1000), ByteRange::Satisfiable(900, 999));
+        assert_eq!(
+            parse_range("bytes=900-2000", 1000),
+            ByteRange::Satisfiable(900, 999)
+        );
         // A suffix longer than the resource is the whole resource.
-        assert_eq!(parse_range("bytes=-5000", 1000), ByteRange::Satisfiable(0, 999));
-        assert_eq!(parse_range(" bytes= 0 - 1 ", 1000), ByteRange::Satisfiable(0, 1));
+        assert_eq!(
+            parse_range("bytes=-5000", 1000),
+            ByteRange::Satisfiable(0, 999)
+        );
+        assert_eq!(
+            parse_range(" bytes= 0 - 1 ", 1000),
+            ByteRange::Satisfiable(0, 1)
+        );
     }
 
     #[test]
