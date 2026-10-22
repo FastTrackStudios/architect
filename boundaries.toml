@@ -38,6 +38,13 @@ transport-host = ["host", "server", "server-axum", "http", "iroh", "dispatch-tok
 architect-server = ["server-seaorm"]
 
 [baseline]
+# 2026-10-21 first run. ui-reach: auth-ui pulls the auth server stack (7);
+# story fuzz/parity/snapshots and ui-snapshot reach tower-http (4).
+# transport-host: auth-ui (server-axum), example-greeter (host, http,
+# server-axum). lints: architect-mcp.
+ui-reach = 11
+transport-host = 4
+lints = 1
 
 # ── L0 contracts ──────────────────────────────────────────────────────────
 [[row]]

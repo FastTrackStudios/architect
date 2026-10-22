@@ -228,9 +228,7 @@ pub struct Facts {
 }
 
 fn reached<'a>(graph: &'a [Resolved], names: &'a [String]) -> impl Iterator<Item = &'a Resolved> {
-    graph
-        .iter()
-        .filter(move |r| names.iter().any(|n| *n == r.name))
+    graph.iter().filter(move |r| names.contains(&r.name))
 }
 
 fn features_hit<'a>(
@@ -277,7 +275,11 @@ pub fn check(table: &Table, facts: &Facts) -> Vec<Violation> {
                 found.extend(reached(graph, &forbidden.ui).map(|r| r.name.clone()));
                 found.extend(features_hit(graph, "tokio", &forbidden.tokio_runtime));
                 found.extend(features_hit(graph, "architect", &forbidden.transport_host));
-                found.extend(features_hit(graph, "architect", &forbidden.architect_server));
+                found.extend(features_hit(
+                    graph,
+                    "architect",
+                    &forbidden.architect_server,
+                ));
                 for name in sorted_unique(found) {
                     out.push(Violation {
                         rule: Rule::ContractClean,
@@ -291,7 +293,11 @@ pub fn check(table: &Table, facts: &Facts) -> Vec<Violation> {
             }
             Layer::L4 => {
                 found.extend(features_hit(graph, "architect", &forbidden.transport_host));
-                found.extend(features_hit(graph, "architect", &forbidden.architect_server));
+                found.extend(features_hit(
+                    graph,
+                    "architect",
+                    &forbidden.architect_server,
+                ));
                 for name in sorted_unique(found) {
                     out.push(Violation {
                         rule: Rule::UiReach,
@@ -304,9 +310,8 @@ pub fn check(table: &Table, facts: &Facts) -> Vec<Violation> {
     }
 
     for (package, graph) in &facts.default_graphs {
-        let hosts = sorted_unique(
-            features_hit(graph, "architect", &forbidden.transport_host).collect(),
-        );
+        let hosts =
+            sorted_unique(features_hit(graph, "architect", &forbidden.transport_host).collect());
         for feature in hosts {
             out.push(Violation {
                 rule: Rule::TransportHost,
@@ -322,14 +327,21 @@ pub fn check(table: &Table, facts: &Facts) -> Vec<Violation> {
         if !member.workspace_lints {
             out.push(Violation {
                 rule: Rule::Lints,
-                detail: format!("{} ({}) has no `[lints] workspace = true`", member.name, member.dir),
+                detail: format!(
+                    "{} ({}) has no `[lints] workspace = true`",
+                    member.name, member.dir
+                ),
             });
         }
     }
 
     let mut sources: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
     for (name, source) in &facts.lock_sources {
-        if table.single_source.iter().any(|pattern| name_matches(pattern, name)) {
+        if table
+            .single_source
+            .iter()
+            .any(|pattern| name_matches(pattern, name))
+        {
             sources
                 .entry(name.as_str())
                 .or_default()
@@ -351,10 +363,16 @@ pub fn check(table: &Table, facts: &Facts) -> Vec<Violation> {
     let mapped: BTreeSet<&str> = table.rows.iter().map(|r| r.package.as_str()).collect();
     for member in &facts.members {
         let candidate = member.dir.starts_with("features/") && !member.proc_macro;
-        if candidate && !mapped.contains(member.name.as_str()) && !in_dirs(&member.dir, &table.unmapped_ok) {
+        if candidate
+            && !mapped.contains(member.name.as_str())
+            && !in_dirs(&member.dir, &table.unmapped_ok)
+        {
             out.push(Violation {
                 rule: Rule::Unmapped,
-                detail: format!("{} ({}) has no row in boundaries.toml", member.name, member.dir),
+                detail: format!(
+                    "{} ({}) has no row in boundaries.toml",
+                    member.name, member.dir
+                ),
             });
         }
     }
@@ -474,19 +492,15 @@ fn run(cmd: &mut Command, what: &str) -> Result<String, String> {
     String::from_utf8(output.stdout).map_err(|e| format!("{what}: {e}"))
 }
 
-fn tree(root: &Path, package: &str, row: Option<&Row>, target: Option<&str>) -> Result<Vec<Resolved>, String> {
+fn tree(
+    root: &Path,
+    package: &str,
+    row: Option<&Row>,
+    target: Option<&str>,
+) -> Result<Vec<Resolved>, String> {
     let mut cmd = cargo();
     cmd.current_dir(root).args([
-        "tree",
-        "--locked",
-        "-p",
-        package,
-        "-e",
-        "normal",
-        "--prefix",
-        "none",
-        "-f",
-        "{p}|{f}",
+        "tree", "--locked", "-p", package, "-e", "normal", "--prefix", "none", "-f", "{p}|{f}",
     ]);
     if let Some(target) = target {
         cmd.args(["--target", target]);
@@ -572,8 +586,8 @@ fn gather(root: &Path, table: &Table) -> Result<Facts, String> {
             default_graphs.insert(member.name.clone(), tree(root, &member.name, None, None)?);
         }
     }
-    let lock = std::fs::read_to_string(root.join("Cargo.lock"))
-        .map_err(|e| format!("Cargo.lock: {e}"))?;
+    let lock =
+        std::fs::read_to_string(root.join("Cargo.lock")).map_err(|e| format!("Cargo.lock: {e}"))?;
     Ok(Facts {
         members,
         row_graphs,
@@ -584,8 +598,7 @@ fn gather(root: &Path, table: &Table) -> Result<Facts, String> {
 
 /// Load the table at `config`.
 pub fn load(config: &Path) -> Result<Table, String> {
-    let text =
-        std::fs::read_to_string(config).map_err(|e| format!("{}: {e}", config.display()))?;
+    let text = std::fs::read_to_string(config).map_err(|e| format!("{}: {e}", config.display()))?;
     toml::from_str(&text).map_err(|e| format!("{}: {e}", config.display()))
 }
 
@@ -612,7 +625,10 @@ pub fn run_cli(root: &Path, config: &Path, verbose: bool) -> Result<(), String> 
                 }
             }
             Ratchet::Worse { allowed, found } => {
-                println!("FAIL  {}: {found} violations, baseline {allowed}", rule.id());
+                println!(
+                    "FAIL  {}: {found} violations, baseline {allowed}",
+                    rule.id()
+                );
                 failed.push(rule.id());
             }
             Ratchet::Better { allowed, found } => {
@@ -687,10 +703,21 @@ mod tests {
     /// A clean world: every rule passes.
     fn clean() -> Facts {
         Facts {
-            members: vec![member("greeter", "features/greeter"), member("app-server", "apps/app/server")],
+            members: vec![
+                member("greeter", "features/greeter"),
+                member("app-server", "apps/app/server"),
+            ],
             row_graphs: vec![
-                vec![pkg("greeter", &[]), pkg("architect", &["vox"]), pkg("tokio", &["sync"])],
-                vec![pkg("greeter", &["ui"]), pkg("architect", &["vox", "client"]), pkg("dioxus", &[])],
+                vec![
+                    pkg("greeter", &[]),
+                    pkg("architect", &["vox"]),
+                    pkg("tokio", &["sync"]),
+                ],
+                vec![
+                    pkg("greeter", &["ui"]),
+                    pkg("architect", &["vox", "client"]),
+                    pkg("dioxus", &[]),
+                ],
             ],
             default_graphs: BTreeMap::from([(
                 "greeter".to_owned(),
@@ -711,7 +738,11 @@ mod tests {
     fn a_clean_workspace_passes_every_rule() {
         let v = check(&table(), &clean());
         assert!(v.is_empty(), "{v:?}");
-        assert!(ratchet(&table(), &v).iter().all(|(_, r)| *r == Ratchet::Held));
+        assert!(
+            ratchet(&table(), &v)
+                .iter()
+                .all(|(_, r)| *r == Ratchet::Held)
+        );
     }
 
     #[test]
@@ -722,14 +753,19 @@ mod tests {
         facts.row_graphs[0].push(pkg("dioxus", &[]));
         let v = check(&table(), &facts);
         assert_eq!(rules(&v), vec![Rule::ContractClean; 3], "{v:?}");
-        assert!(v.iter().any(|v| v.detail.ends_with("reaches tokio/rt-multi-thread")));
+        assert!(
+            v.iter()
+                .any(|v| v.detail.ends_with("reaches tokio/rt-multi-thread"))
+        );
     }
 
     #[test]
     fn ui_reaching_an_engine_or_server_architect_is_caught() {
         let mut facts = clean();
         facts.row_graphs[1].push(pkg("axum", &[]));
-        facts.row_graphs[1][1].features.insert("server-seaorm".to_owned());
+        facts.row_graphs[1][1]
+            .features
+            .insert("server-seaorm".to_owned());
         let v = check(&table(), &facts);
         assert_eq!(rules(&v), vec![Rule::UiReach; 2], "{v:?}");
     }
@@ -763,9 +799,19 @@ mod tests {
     fn two_architect_pins_in_one_lock_are_caught() {
         let mut facts = clean();
         facts.lock_sources = vec![
-            ("architect".to_owned(), "git+https://github.com/FastTrackStudios/architect?tag=v0.9.6#aaa".to_owned()),
-            ("auth".to_owned(), "git+https://github.com/FastTrackStudios/architect?branch=action-list#bbb".to_owned()),
-            ("serde".to_owned(), "registry+https://github.com/rust-lang/crates.io-index".to_owned()),
+            (
+                "architect".to_owned(),
+                "git+https://github.com/FastTrackStudios/architect?tag=v0.9.6#aaa".to_owned(),
+            ),
+            (
+                "auth".to_owned(),
+                "git+https://github.com/FastTrackStudios/architect?branch=action-list#bbb"
+                    .to_owned(),
+            ),
+            (
+                "serde".to_owned(),
+                "registry+https://github.com/rust-lang/crates.io-index".to_owned(),
+            ),
         ];
         assert_eq!(rules(&check(&table(), &facts)), vec![Rule::SingleSource]);
     }
@@ -774,16 +820,26 @@ mod tests {
     fn one_tag_resolved_at_one_commit_is_one_source() {
         let mut facts = clean();
         let pin = "git+https://github.com/FastTrackStudios/architect?tag=v0.9.6#aaa";
-        facts.lock_sources = vec![("architect".to_owned(), pin.to_owned()), ("auth".to_owned(), pin.to_owned())];
+        facts.lock_sources = vec![
+            ("architect".to_owned(), pin.to_owned()),
+            ("auth".to_owned(), pin.to_owned()),
+        ];
         assert!(check(&table(), &facts).is_empty());
     }
 
     #[test]
     fn a_feature_crate_with_no_row_is_caught() {
         let mut facts = clean();
-        facts.members.push(member("auth-proto", "features/auth/auth-proto"));
-        facts.members.push(member("auth-tests", "features/auth/tests/native"));
-        facts.members.push(Member { proc_macro: true, ..member("crdt-derive", "features/crdt/crdt-derive") });
+        facts
+            .members
+            .push(member("auth-proto", "features/auth/auth-proto"));
+        facts
+            .members
+            .push(member("auth-tests", "features/auth/tests/native"));
+        facts.members.push(Member {
+            proc_macro: true,
+            ..member("crdt-derive", "features/crdt/crdt-derive")
+        });
         let v = check(&table(), &facts);
         assert_eq!(rules(&v), vec![Rule::Unmapped], "{v:?}");
         assert!(v[0].detail.starts_with("auth-proto"));
@@ -797,14 +853,29 @@ mod tests {
         // Below baseline: must be lowered.
         assert_eq!(
             ratchet(&t, &check(&t, &facts))[3],
-            (Rule::Lints, Ratchet::Better { allowed: 1, found: 0 })
+            (
+                Rule::Lints,
+                Ratchet::Better {
+                    allowed: 1,
+                    found: 0
+                }
+            )
         );
         facts.members[0].workspace_lints = false;
-        assert_eq!(ratchet(&t, &check(&t, &facts))[3], (Rule::Lints, Ratchet::Held));
+        assert_eq!(
+            ratchet(&t, &check(&t, &facts))[3],
+            (Rule::Lints, Ratchet::Held)
+        );
         facts.members[1].workspace_lints = false;
         assert_eq!(
             ratchet(&t, &check(&t, &facts))[3],
-            (Rule::Lints, Ratchet::Worse { allowed: 1, found: 2 })
+            (
+                Rule::Lints,
+                Ratchet::Worse {
+                    allowed: 1,
+                    found: 2
+                }
+            )
         );
     }
 
@@ -826,7 +897,10 @@ mod tests {
         let lock = "version = 4\n[[package]]\nname = \"a\"\nversion = \"1.0.0\"\n\n[[package]]\nname = \"b\"\nversion = \"1.0.0\"\nsource = \"registry+x\"\n";
         assert_eq!(
             parse_lock(lock).unwrap(),
-            vec![("a".to_owned(), "path".to_owned()), ("b".to_owned(), "registry+x".to_owned())]
+            vec![
+                ("a".to_owned(), "path".to_owned()),
+                ("b".to_owned(), "registry+x".to_owned())
+            ]
         );
         assert!(has_workspace_lints("[package]\nname='a'\n[lints]\nworkspace = true\n").unwrap());
         assert!(!has_workspace_lints("[package]\nname='a'\n").unwrap());
