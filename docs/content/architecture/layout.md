@@ -1,17 +1,17 @@
 +++
 title = "Monorepo layout"
-description = "apps/<app>/<role> + features/<feature>/<feature>-<role>."
+description = "apps/<app>/<role> + features/<feature>: one crate per feature, roles as cargo features."
 weight = 30
 +++
 
-The template's directory shape is built so a project can host multiple
-apps and an unlimited number of features without naming collisions or
-ambiguity about what each crate is.
-
-> In **this** repo (the framework itself), the reference project lives
-> under `examples/app/` so the framework crates and the demo that
-> consumes them stay clearly separated. A real consumer applies the shape
-> below at its own repo root — `apps/` and `features/` directly.
+> **Decision (ADR, accepted 2026-10-22 by the Captain, STA-257).** One
+> layout for every FastTrackStudio Rust repo: architect, Task and studio
+> (Session, Signal). **One crate per feature, with cargo features.** A
+> feature's contract, backends, UI and engine are cargo features of its
+> one crate, not `-proto` / `-ui` / `-<backend>` sibling crates. This
+> replaces the sibling-crate shape this page used to prescribe and the
+> Session "facade crate" pattern. Existing sibling crates migrate one
+> feature at a time; new features start in the new shape.
 
 ## The shape
 
@@ -26,107 +26,104 @@ apps/
     tests/
       e2e/                     package: <app>-tests-e2e
 
-crates/                        publishable libraries. architect's own
-                                user-facing facade crate (`crates/architect`)
-                                lives here too — it isn't a proc-macro
-                                itself, just a regular lib that re-exports
-                                the derives + runtime traits.
+crates/                        shared libraries that are not a feature.
+                               architect's own `crates/architect` facade and
+                               its proc-macro crates (`architect-derive`,
+                               `architect-rpc-derive`, ...) live here.
 
 features/
-  <feature>/                   one feature = one capability.
-    <feature>/                 facade — selects backend via cargo features.
-    <feature>-proto/           wire contract.
-    <feature>-<backend>/       one impl per backend (db, memory, ...).
-    <feature>-ui/              feature-scoped Dioxus components.
+  <feature>/                   one feature = one capability = ONE crate.
+    Cargo.toml                 package: <feature>
+    src/
+      lib.rs                   the contract: entities, wire types, service
+                               traits, error enum, action declarations.
+                               Always compiled; wasm-clean.
+      memory.rs                #[cfg(feature = "memory")]  in-memory backend
+      db.rs                    #[cfg(feature = "db")]      SeaORM backend
+      ui/                      #[cfg(feature = "ui")]      Dioxus components
     spec/                      tracey-tracked rules for this feature.
-    tests/
-      native/                  cargo test against in-memory backend.
-      web/                     wasm-bindgen browser tests against a server.
+    tests/                     cargo test against the memory backend.
 ```
 
-There is no top-level `macros/` or `libs/` directory. The proc-macro
-crates that the `architect` crate itself is built out of —
-`architect-derive`, `architect-rpc-derive`, `architect-action-derive` —
-live in `crates/`, beside `crates/architect`. They are not optional
-capabilities you opt into; `#[architect::rpc]` and friends are the crate,
-so they belong with it rather than in `features/`.
+Studio already uses this shape: `features/dsp/eq` (`native`, `ui`,
+`profiles`, ...), `features/patchbay` (`server`, `ui`, `vox`),
+`features/session` (one crate; no `session-proto` / `session-ui`).
 
-A proc-macro scoped to a *single* feature nests inside that feature
-instead — `crdt-derive` lives at `features/crdt/crdt-derive`, next to
-`crdt` and `crdt-seaorm`.
+## Roles are cargo features
 
-The architect repo itself follows the same convention for its **built-in
-features**: `features/atom` and `features/form` (the Dioxus client-state
-primitives, re-exported on the `architect` crate behind the `atom` /
-`form` features), `features/crdt/` (the local-first CRDT layer —
-`crdt` + `crdt-seaorm` + `crdt-derive`), and `features/auth/` — the full
-auth feature (`auth-proto` / `auth` / `auth-db` / the `architect-auth`
-facade + `spec/` + `tests/`), folded in from the former architect-auth
-repo. Auth is built *on* architect (its proto uses the Entity derive),
-so it's consumed as the `architect-auth` crate rather than re-exported —
-re-exporting would be a dependency cycle.
+| Feature | Layer | Contains | May pull in |
+|---|---|---|---|
+| none (default) | L0 contract | entities, wire types, service traits, error enum, action ids | `facet`, `uuid`, `chrono`, `thiserror`, `architect` without server flags |
+| `vox` | L0 | RPC client/server stubs for the traits | `architect/vox` |
+| `memory`, `db`, `<backend>` | L1 engine + L2 storage | one backend per flag | `architect/server-seaorm`, tokio, Loro, file IO |
+| `server` | L3 glue the feature needs | router wiring for the backend | `architect/server` |
+| `ui` | L4 | Dioxus components for this feature | `architect/client`, `dioxus` |
+| `native`, `dsp`, ... | as named | platform or engine code | as needed |
+
+Rules:
+
+1. **The default feature set is the contract, and it is wasm-clean.** No
+   `tokio` runtime, `sea-orm`, `axum`, `iroh`, `dioxus` or `reaper-*`
+   without a flag. CI checks each feature crate with
+   `--no-default-features --target wasm32-unknown-unknown`, and with
+   `ui` / `vox` where the crate has them.
+2. **Flags compose one way.** `ui` never implies a backend; a backend
+   never implies `ui`. Apps choose: a server binary enables `db` +
+   `server`; a wasm shell enables `ui` + `vox`.
+3. **`default-features = false` goes on the `[workspace.dependencies]`
+   entry**, because cargo cannot set it on a workspace-inherited dep.
+   Consumers add flags with `x = { workspace = true, features = [...] }`.
+4. **Apps depend on the feature crate.** There is no separate facade
+   crate; the feature crate is the facade.
+5. **Every crate has `[lints] workspace = true`.**
+
+## When a second crate is allowed
+
+Only where cargo or the build forces it. It is named `<feature>-<role>`
+and lives inside the feature directory:
+
+- a **proc-macro** (`features/crdt/crdt-derive`);
+- a separate **binary or process** (a daemon, a REAPER/SHM extension, a
+  FUSE or FileProvider host, a CLI);
+- a **plugin / cdylib** target;
+- a **different target** that cannot share the crate graph (a wasm-only
+  browser test crate kept in workspace `exclude`).
+
+"The UI is big" and "it keeps the contract wasm-clean" are not reasons:
+the `ui` flag and rule 1 handle both. "It compiles faster" needs a
+measured number in the PR.
+
+## Boundary checks read features, not crate names
+
+`cargo xtask boundaries` (STA-268) maps each layer above to a crate
+**or a cargo feature of a crate** and checks the resolved graph from
+`cargo metadata` per feature set: the default set and `ui` must not
+reach L1-L3 dependencies, and nothing outside `apps/*` enables a
+transport host. A sibling crate that has not been folded in yet gets a
+layer entry in `boundaries.toml` until it is.
+
+## Migration
+
+- **New features:** one crate from day one. `cargo xtask feature new
+  <name>` scaffolds the one-crate shape (contract in `lib.rs`, a
+  `memory` flag, a passing test).
+- **Existing sibling crates** (architect `auth-*`, `launcher-*`,
+  `crdt-seaorm`, `permissions/proto`; Task `*-proto` / `*-ui` /
+  `*-<backend>`; any studio leftovers) fold in one feature per PR: move
+  the proto into `lib.rs`, put the backend and UI behind flags, update
+  dependents, delete the old crate. A fold-in PR changes no behaviour.
+  Proc-macro and binary crates stay separate.
+- Repo `CLAUDE.md` files point here instead of restating a layout.
 
 ## Naming rules
 
-- **Path prefix matches package name prefix.** A crate at
-  `apps/<app>/<role>/` is named `<app>-<role>`; a crate at
-  `features/<feature>/<feature>-<role>/` is named `<feature>-<role>`.
-- **Cargo names use only `[a-z0-9_-]`.** The `<>` notation in this
-  template is documentation shorthand for "fill in the blank" — Cargo
-  itself rejects literal angle brackets in names.
-- **App names and feature names live in different namespaces.** It's
-  legal for an app to share a name with a feature, but the prefix split
-  (`<app>-` vs `<feature>-`) keeps packages disambiguated.
-
-## Why duplicate the prefix in the path *and* the name
-
-Glanceability. Reading `features/timeline/timeline-reaper/Cargo.toml`
-tells you (a) this is the `timeline` feature and (b) the package is
-named `timeline-reaper` without opening the file. The slight redundancy
-pays back in PR diffs, `cargo tree` output, and crate-graph thinking.
-
-## Scaffolding a new feature
-
-The mechanical churn of dropping in a new feature is automated:
-
-```sh
-just scaffold-feature mixing
-# or directly:
-cargo run -p architect-cli -- feature new mixing
-```
-
-That command writes the canonical layout into `features/mixing/`:
-
-```
-features/mixing/
-  mixing-proto/        Cargo.toml + src/lib.rs with a placeholder Mixing entity
-  mixing-memory/       in-tree HashMap impl
-  mixing/              facade (vox + server-* + backend-memory features)
-  spec/mixing.md       tracey rule stub
-  tests/native/        sample round-trip test
-```
-
-It also updates the workspace `Cargo.toml` (members, default-members,
-workspace.dependencies) and appends a spec block to
-`.config/tracey/config.styx`. Rename the placeholder `Mixing` entity
-to the real one for that feature, flesh out the memory backend, and
-you're ready to consume it from an app via
-`features = ["full"]` on the facade.
-
-## Adding a second app
-
-Same shape, different prefix:
-
-```
-apps/daw-reaper/
-  server/                      package: daw-reaper-server
-  ui/                          package: daw-reaper-ui
-  ...
-```
-
-The `daw-reaper-ui` shell composes whichever `<feature>-ui` crates the
-Reaper build needs; `daw-ableton-ui` composes the same feature-ui
-crates (or a different set, if Ableton exposes a different surface).
+- **Package name = directory name.** `features/timeline/` is the
+  `timeline` crate; an allowed second crate at
+  `features/timeline/timeline-reaper/` is `timeline-reaper`.
+- **Cargo names use only `[a-z0-9_-]`.** The `<>` notation here is
+  shorthand for "fill in the blank".
+- **App names and feature names live in different namespaces.** App
+  crates are prefixed (`<app>-server`); feature crates are not.
 
 ## Workspace `members` vs `exclude`
 
@@ -134,5 +131,13 @@ The root `Cargo.toml`'s workspace `members` list everything that
 compiles for the host target. Crates with target-cfg deps (wasm-only
 test crates, Dioxus apps that pull `dioxus-web`/`dioxus-desktop`) sit
 in `exclude` and are invoked with `cargo` directly from inside their
-own directory. The `just check` recipe wraps this so a single command
-verifies both.
+own directory.
+
+## Superseded
+
+Before 2026-10-22 this page prescribed `features/<f>/<f>-proto`,
+`<f>-<backend>`, `<f>-ui` and a `<f>` facade as sibling crates (and an
+`architect-cli feature new` command that does not exist), and Session's
+`CLAUDE.md` prescribed a facade crate over internal `session-proto`.
+Both are replaced by the one-crate shape above, which studio's
+`CLAUDE.md` ("Crate rules") already follows.
