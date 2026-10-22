@@ -3,7 +3,12 @@
 //! mode offers each as its own tool — so a model calling `greet` gets
 //! what an HTTP client calling `/greeter/greet` gets, from the same
 //! backend.
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
 use architect::Services as _;
 use architect::action::{ActionList, Effect};
