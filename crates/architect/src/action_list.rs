@@ -35,7 +35,8 @@
 //!   [`ActionList::run_json_with`] / [`ActionList::run_json_async_with`]
 //!   are the doors that pass one; every other door passes
 //!   [`ActionCaller::app`] (or the principal of `run_json_as`), with no
-//!   context.
+//!   context. Such a handler may answer with [`RawJson`]: JSON another
+//!   serializer (`serde_json`) already wrote, passed on as it is.
 //! - **Live updates**: every run, and every [`ActionList::changed`] the
 //!   app reports (a project opened, a track renamed), is an
 //!   [`ActionEvent`] with a sequence number. [`ActionList::events_since`]
@@ -323,6 +324,79 @@ impl std::fmt::Debug for ActionCaller {
     }
 }
 
+/// JSON another serializer already wrote (`serde_json::to_vec`), which an
+/// action answers with as it is.
+///
+/// A handler registered with [`ActionList::register_with`] may return it
+/// instead of a facet type. It must be one well-formed JSON value — checked before it leaves the
+/// action, so a caller never gets half a document. The action has no
+/// result schema.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RawJson(Vec<u8>);
+
+impl RawJson {
+    /// `json`, to be checked when the action answers with it.
+    #[must_use]
+    pub fn new(json: impl Into<Vec<u8>>) -> Self {
+        Self(json.into())
+    }
+
+    /// The JSON bytes.
+    #[must_use]
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl From<Vec<u8>> for RawJson {
+    fn from(json: Vec<u8>) -> Self {
+        Self(json)
+    }
+}
+
+impl From<String> for RawJson {
+    fn from(json: String) -> Self {
+        Self(json.into_bytes())
+    }
+}
+
+/// What a handler registered with [`ActionList::register_with`] may
+/// answer with: any facet type (encoded with `facet_json`, its shape the
+/// action's result schema), or [`RawJson`].
+pub trait ActionOutput {
+    /// The shape the action's result schema is written from; `None` for
+    /// none (`()`, [`RawJson`]).
+    fn result_shape() -> Option<&'static Shape>;
+
+    /// The answer as JSON.
+    ///
+    /// # Errors
+    ///
+    /// It could not be encoded, or (for [`RawJson`]) is not JSON.
+    fn into_json(self) -> Result<Vec<u8>, String>;
+}
+
+impl<T: Facet<'static>> ActionOutput for T {
+    fn result_shape() -> Option<&'static Shape> {
+        (!is_unit(T::SHAPE)).then_some(T::SHAPE)
+    }
+
+    fn into_json(self) -> Result<Vec<u8>, String> {
+        facet_json::to_vec(&self).map_err(|e| e.to_string())
+    }
+}
+
+impl ActionOutput for RawJson {
+    fn result_shape() -> Option<&'static Shape> {
+        None
+    }
+
+    fn into_json(self) -> Result<Vec<u8>, String> {
+        check_json(&self.0).map_err(|problem| format!("it is not one JSON value: {problem}"))?;
+        Ok(self.0)
+    }
+}
+
 /// Whether an action can run right now: `Err` says why not.
 pub type EnabledCheck = Arc<dyn Fn() -> Result<(), String> + Send + Sync>;
 
@@ -467,7 +541,8 @@ impl ActionList {
 
     /// [`Self::register`] for a handler that is handed who is calling:
     /// the [`ActionCaller`] the door passed (its principal and context)
-    /// with the decoded `A`.
+    /// with the decoded `A`. It may answer with a facet type or
+    /// [`RawJson`].
     ///
     /// ```ignore
     /// list.register_with(&LIST, Effect::ReadOnly, |cx: &ActionCaller, args: ListArgs| {
@@ -488,7 +563,7 @@ impl ActionList {
     ) -> Result<(), ActionError>
     where
         A: Facet<'static>,
-        R: Facet<'static>,
+        R: ActionOutput,
         F: Fn(&ActionCaller, A) -> Result<R, String> + Send + Sync + 'static,
     {
         let id = meta.id;
@@ -496,13 +571,13 @@ impl ActionList {
         let handler: CallerHandler = Arc::new(move |caller: &ActionCaller, args: &[u8]| {
             let decoded: A = decode_args::<A>(id, takes, args)?;
             let out = run(caller, decoded).map_err(|message| failed(id, message))?;
-            encode_output(id, &out)
+            encode_output(id, out)
         });
         self.insert(Entry {
             meta,
             effect,
             params: takes.then_some(A::SHAPE),
-            result: (!is_unit(R::SHAPE)).then_some(R::SHAPE),
+            result: R::result_shape(),
             run: Run::Sync(handler),
             enabled: None,
         })
@@ -523,7 +598,7 @@ impl ActionList {
     ) -> Result<(), ActionError>
     where
         A: Facet<'static>,
-        R: Facet<'static>,
+        R: ActionOutput,
         F: Fn(&ActionCaller, A) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<R, String>> + crate::MaybeSend + 'static,
     {
@@ -534,7 +609,7 @@ impl ActionList {
             let work = run(caller, decoded);
             let future: ActionFuture = Box::pin(async move {
                 let out = work.await.map_err(|message| failed(id, message))?;
-                encode_output(id, &out)
+                encode_output(id, out)
             });
             Ok(future)
         });
@@ -542,7 +617,7 @@ impl ActionList {
             meta,
             effect,
             params: takes.then_some(A::SHAPE),
-            result: (!is_unit(R::SHAPE)).then_some(R::SHAPE),
+            result: R::result_shape(),
             run: Run::Async(handler),
             enabled: None,
         })
@@ -1241,8 +1316,9 @@ fn failed(id: &str, message: String) -> ActionError {
 }
 
 /// A handler's answer as JSON, or the failure to encode it.
-fn encode_output<R: Facet<'static>>(id: &str, out: &R) -> Result<Vec<u8>, ActionError> {
-    facet_json::to_vec(out).map_err(|e| failed(id, format!("its result did not encode: {e}")))
+fn encode_output<R: ActionOutput>(id: &str, out: R) -> Result<Vec<u8>, ActionError> {
+    out.into_json()
+        .map_err(|e| failed(id, format!("its result did not encode: {e}")))
 }
 
 /// A caught panic, as the failure it is answered with.
@@ -1502,7 +1578,7 @@ fn is_unit(shape: &'static Shape) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{ActionCaller, ActionError, ActionList, Effect, EventKind};
+    use super::{ActionCaller, ActionError, ActionList, Effect, EventKind, RawJson};
     use crate::action::{ActionBackend, ActionMeta};
     use architect_permissions::{
         Action, Decision, PermissionEngine, Principal, Resource, Rule, ScopeEngine,
@@ -2015,6 +2091,7 @@ mod tests {
 
     static WHERE: ActionMeta = meta("ORG_WHERE");
     static LATER: ActionMeta = meta("ORG_LATER");
+    static RAW: ActionMeta = meta("ORG_RAW");
 
     /// An action that answers with the org and the caller's name, or
     /// refuses when the door gave it no org.
@@ -2086,5 +2163,29 @@ mod tests {
 
         list.validate().expect("valid");
         list.probe_hostile_args().expect("sound");
+    }
+
+    /// (#58 item 5) A handler may answer with JSON another serializer
+    /// wrote: passed on byte for byte, no result schema; JSON that is not
+    /// one value is a failure, not half a document.
+    #[test]
+    fn raw_json_passes_through_and_is_checked() {
+        let list = ActionList::new();
+        list.register_with(&RAW, Effect::ReadOnly, |_: &ActionCaller, q: Query| {
+            Ok(RawJson::from(q.track))
+        })
+        .expect("registered");
+        let out = list
+            .run_json("ORG_RAW", br#"{"track":"{\"rows\": [1, 2]}"}"#)
+            .expect("ran");
+        assert_eq!(out, br#"{"rows": [1, 2]}"#.to_vec());
+        assert!(
+            list.info("ORG_RAW")
+                .is_some_and(|i| i.result_schema.is_none())
+        );
+        assert!(matches!(
+            list.run_json("ORG_RAW", br#"{"track":"{\"rows\""}"#),
+            Err(ActionError::Failed { message, .. }) if message.contains("not one JSON value")
+        ));
     }
 }

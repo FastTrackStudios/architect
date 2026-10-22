@@ -78,7 +78,8 @@ pub fn register(list: &ActionList) -> Result<(), ActionError> {
   whose handler is already JSON in, JSON out (an rpc method, a script).
 - `register_with(meta, effect, |&ActionCaller, A| -> Result<R, String>)`
   and `register_async_with` add an action whose handler is also handed
-  who is calling (see [Who is calling](#who-is-calling)).
+  who is calling (see [Who is calling](#who-is-calling)). `R` is any
+  facet type or `RawJson`.
 - Existing `#[architect::actions]` traits plug in unchanged: `ActionList`
   implements `ActionBackend`, so the generated
   `register_<trait>_actions(&list, imp)` lands every action in the list
@@ -139,13 +140,14 @@ other door passes `ActionCaller::app()` (or `ActionCaller::new(who)` for
 `run_json_as`), with no context.
 
 ```rust
-use architect::action::ActionCaller;
+use architect::action::{ActionCaller, RawJson};
 
 struct Org(Arc<OrgState>); // the app's own type
 
 list.register_with(&TASKS_LIST, Effect::ReadOnly, |cx: &ActionCaller, args: ListArgs| {
     let Org(org) = cx.context::<Org>().ok_or("no org to act in")?;
-    org.list_tasks(args) // -> Result<Tasks, String>, Tasks a facet type
+    let rows: serde_json::Value = org.list_tasks(args)?;
+    serde_json::to_vec(&rows).map(RawJson::from).map_err(|e| e.to_string())
 })?;
 
 let caller = ActionCaller::new(principal).with_context(Org(org));
@@ -161,6 +163,12 @@ list.run_json_with(&caller, "TASKS_LIST", br#"{"status":"open"}"#)?;
   and `probe_hostile_args` pass none.
 - An async handler is lent the caller while it builds its future: clone
   the caller (cheap, the context is shared) into the `async move`.
+- `RawJson` is JSON another serializer (`serde_json`) already wrote,
+  answered as it is, with no result schema. It is checked to be one JSON
+  value before it leaves the action. Arguments are still facet types, so
+  the params schema comes from the type the call is decoded into. Wire
+  types between services stay facet-only; `RawJson` is for an app whose
+  replies are built with serde already.
 
 Every run is one `tracing` span named `action` with `action.id` and
 `action.ok`. Stages marked inside it with
@@ -252,6 +260,11 @@ tokio::spawn(architect_mcp::http::serve(listener, server, Some(token)));
   `ActionCaller`: its context reaches `register_with` handlers. A caller
   with no principal runs as the server's (`with_principal`), never as
   the trusted app.
+- A failed tool answers `isError: true` with a JSON object
+  (`{"error": …}`, plus `takes` for bad arguments) by default.
+  `with_errors(ErrorStyle::Text)` answers with the plain message instead:
+  a handler's `Err` text as it is, bad arguments as `bad arguments: …
+  It takes: {schema}`.
 - Async actions are awaited. `Server::handle_async` is the core;
   `Server::handle` drives it to the end on the calling thread, which is
   what `serve_stdio` and the HTTP transport (on a blocking-pool thread of
@@ -300,9 +313,23 @@ match server.call_tool(&caller, "list_tasks", args).await {
 ```
 
 `call_tool` is what `tools/call` runs: the same authorization, named and
-generic tools. A tool that ran and failed is `Ok` with
+generic tools, and error style. A tool that ran and failed is `Ok` with
 `isError: true`; `Err` is only "no such tool" or a generic tool given an
 argument it does not take.
+
+### Schemas a model reads
+
+`params_schema` (and so a named tool's `inputSchema`) is written from
+the argument type by `architect::schema::json_schema`:
+
+- A documented field is its type's schema with the field's doc beside
+  it: `{"type": "string", "description": "…"}`.
+- An `Option<T>` field is `T`'s schema, not in `required`: a caller
+  leaves it out for none (an explicit `null` is still read).
+- `#[facet(deny_unknown_fields)]` on the argument struct makes its
+  decoder refuse unknown fields, and its schema says so with
+  `"additionalProperties": false`. Without it, unknown fields are
+  ignored and the schema leaves the object open.
 
 ## 6. A service as actions
 

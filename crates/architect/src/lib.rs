@@ -1388,9 +1388,9 @@ pub mod action {
 
     #[cfg(feature = "action-list")]
     pub use crate::action_list::{
-        ActionCaller, ActionError, ActionEvent, ActionFuture, ActionInfo, ActionList, AsyncHandler,
-        Authorizer, EVENT_HISTORY, Effect, EnabledCheck, EventKind, HOSTILE_ARGS, HOSTILE_DEPTH,
-        Handler, MAX_ARGS_DEPTH, ValidationError,
+        ActionCaller, ActionError, ActionEvent, ActionFuture, ActionInfo, ActionList, ActionOutput,
+        AsyncHandler, Authorizer, EVENT_HISTORY, Effect, EnabledCheck, EventKind, HOSTILE_ARGS,
+        HOSTILE_DEPTH, Handler, MAX_ARGS_DEPTH, RawJson, ValidationError,
     };
     /// Who runs an action and what may: the permissions nouns the list's
     /// authorizer speaks.
