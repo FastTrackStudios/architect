@@ -20,7 +20,7 @@ There are exactly two layers, and a hard rule that keeps them honest:
 | Layer | Crate | Owns |
 | --- | --- | --- |
 | **Feature** | `features/<f>/<f>-ui` | state (data + mutation hooks), presentation (dumb components), the data-wiring context |
-| **Shell** | `examples/app/ui` (`app-ui`) | transport (where clients connect), the typed `Route`, and pages that compose features |
+| **Shell** | the app's `apps/<app>/ui` crate | transport (where clients connect), the typed `Route`, and pages that compose features |
 
 A feature knows nothing about routes; the shell knows nothing about vox
 clients, stores, or fetches. They meet at two thin interfaces: the feature
@@ -61,14 +61,16 @@ optimistic writes against the server exactly as described in
 ## Anatomy of a feature crate
 
 With the CRUD layer derived, the feature crate only holds what the derive
-**can't** know:
+**can't** know (a sketch for a feature called `example`):
 
+<!-- doc-check: off (illustrative names, not paths in this repo) -->
 ```
 features/example/example-ui/src/
   data.rs        use_examples (search-aware list), use_example_live (refreshable read)
   mutations.rs   ExampleActions — the service verb `duplicate`
   components/    dumb: ExampleCard, ExampleRow, ExampleList, SearchBar, forms/
 ```
+<!-- doc-check: on -->
 
 ### Hand-written data hooks
 
@@ -275,6 +277,6 @@ independent sections are the default and usually what you want.
 4. **Writes are optimistic.** Mutations patch the store instantly and
    reconcile/roll back ([optimistic state](@/architecture/optimistic.md)).
 
-The worked reference is the example app:
-`examples/app/features/example/example-ui/` (feature) +
-`examples/app/ui/src/pages/` (shell).
+The worked reference was the example app, which is no longer in the
+tree; Task's feature `-ui` crates and its `task:apps/web` shell follow the same
+split.

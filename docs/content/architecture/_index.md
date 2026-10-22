@@ -20,9 +20,8 @@ distinction visible at a glance.
 - [Construction: Resource & Scope](@/architecture/construction.md) —
   build the backend (`config → pool → repo`) with dependent
   composition, memoization, and LIFO teardown.
-- [Monorepo layout](@/architecture/layout.md) — `<role>` crates per
-  feature/app and why the prefixes are duplicated in both the directory
-  and the package name.
+- [Monorepo layout](@/architecture/layout.md) — one crate per feature,
+  with its layers as cargo features; apps under `apps/<app>/`.
 - [The in-process transport](@/architecture/local.md) —
   `LocalServer`: typed clients over a vox memory link; desktop, CLI,
   and tests with no server.
@@ -46,9 +45,14 @@ distinction visible at a glance.
   retry/repeat policies (exponential backoff, jitter, caps) and the
   `platform` clock they run on (deterministic `TestClock` included);
   how clients tolerate a flaky server.
-- [Async diagnostics](@/architecture/diagnostics.md) — opt-in moiré
-  instrumentation for the axum_ws adapter; see what every task is
-  waiting on via the live dashboard.
+- [Collaboration](@/architecture/collaboration.md) — Loro CRDT
+  documents, `DocSync` over vox, the multi-doc `DocRegistry`, presence
+  and persistence.
+- [Peers: documents between nodes](@/architecture/peers.md) —
+  `crdt::peer`: pairwise exchange with no hub, and per-document access
+  checked by every node.
+- [Async diagnostics](@/architecture/diagnostics.md) — a design note for
+  moiré instrumentation of the axum_ws adapter (not in the tree today).
 - [Commands: the Action List](@/architecture/commands.md) — one
   registry every key, menu, palette, CLI and MCP model runs an app's
   commands through; `architect-mcp`; per-action timings.

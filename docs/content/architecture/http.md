@@ -180,8 +180,8 @@ endpoint id with the internet down; `PeerLookup::Lan` stays on the LAN
 only (relays off, nothing published to n0). Code that builds its own
 endpoint takes the same choice through `iroh_link::endpoint_builder` /
 `bind_endpoint_with`. `crates/architect/tests/iroh_lan.rs` proves the
-bare-id dial on one host; `examples/iroh_lan.rs` is the two-machine
-check.
+bare-id dial on one host; `crates/architect/examples/iroh_lan.rs` is the
+two-machine check.
 
 ## The client
 

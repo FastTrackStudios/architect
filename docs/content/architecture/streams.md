@@ -95,7 +95,7 @@ Two rules, learned the hard way:
 Hand-written services declare streams inline. A method marked
 `#[subscribe]` is a **declaration, not a callable method** — it names
 an event type and is stripped from the trait
-(`examples/layered-services/src/main.rs`, the ticker):
+(`examples/greeter/src/lib.rs` declares `greeted` this way; a ticker):
 
 ```rust,ignore
 #[derive(Clone, Debug, PartialEq, facet::Facet)]
@@ -181,8 +181,8 @@ writes overlay incoming server truth exactly as they do over fetches.
 
 With the Entity `events` + `store` flags you don't even write that:
 the derive emits `use_example_events()`, folded into the one-call
-`provide_example()` (store + live events) the app root mounts — that
-single line in `examples/app/ui/src/lib.rs` is the whole client-side
+`provide_example()` (store + live events) the app root mounts; that
+single line in the app's root component is the whole client-side
 wiring.
 
 Subscriptions work identically over the in-process transport — the

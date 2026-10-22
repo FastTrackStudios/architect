@@ -57,6 +57,10 @@ lint:
 tags:
     cargo run -p xtask -- tags --verbose
 
+# Every path and command the docs name must exist (CI runs this).
+docs-check:
+    cargo run -q -p xtask -- docs
+
 # Repoint every architect-owned git dep in a consumer at ONE tag.
 # Bumping them one at a time is how `signal` ended up with three
 # different checkouts of this repo in one lockfile.

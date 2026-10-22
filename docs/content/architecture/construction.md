@@ -44,10 +44,11 @@ a server's shutdown path — share the same one.
 | `.memoize()` | build **once**, share — see below |
 | `.into_router(&scope)` | terminal step on the server: build a `Services` backend and mount its bundle → `LayerRouter` |
 
-## The real thing: the example server
+## The real thing: a server
 
-`examples/app/server/src/main.rs` builds its sqlite backend exactly
-this way — the pool is acquired under the scope so Ctrl-C closes it
+A server builds its sqlite backend exactly
+this way (the example server this snippet comes from is no longer in
+the tree) — the pool is acquired under the scope so Ctrl-C closes it
 gracefully:
 
 ```rust,ignore
@@ -133,7 +134,7 @@ chosen last** — axum WebSocket for a server, the
 For multi-node backend graphs there's also a pure-data planner —
 `LayerGraph`/`LayerNode::plan()` returns a topological build order or a
 precise diagnostic (missing provider, conflict, cycle, duplicate). See
-the end of `examples/layered-services/src/main.rs`.
+`crates/architect/src/plan.rs` and its tests.
 
 ## Scope rules of thumb
 

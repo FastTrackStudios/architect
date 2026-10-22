@@ -19,6 +19,7 @@ profiles; the à la carte flags below them exist for fine-grained builds.
 
 A typical app:
 
+<!-- doc-check: off (illustrative names, not paths in this repo) -->
 ```toml
 # apps/web (wasm UI)
 architect = { workspace = true, features = ["client"] }
@@ -31,6 +32,7 @@ architect = { workspace = true, features = ["server"] }
 [features]
 vox = ["dep:vox", "dep:vox-types", "architect/vox"]
 ```
+<!-- doc-check: on -->
 
 `server` is a strict superset of the old `server = ["server-seaorm"]`
 back-compat alias — consumers that wrote `features = ["server"]` for

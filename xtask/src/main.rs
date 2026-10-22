@@ -5,6 +5,7 @@
 //! them in. Nothing here is part of the published crate surface.
 
 mod boundaries;
+mod docs;
 mod fleet;
 mod git;
 mod mirror;
@@ -14,7 +15,7 @@ mod tags;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(name = "xtask", about = "architect repo tooling", version)]
@@ -82,6 +83,14 @@ enum Command {
         #[arg(short, long)]
         verbose: bool,
     },
+    /// Check that every path and command the docs name exists.
+    ///
+    /// Reads `docs/content/**/*.md` and `README.md`: repo paths in code,
+    /// page links, source links into `main`, `just` recipes, `cargo xtask`
+    /// commands and `cargo -p` packages. Other repos' paths are written
+    /// `task:apps/…`; sketches sit between `<!-- doc-check: off -->` and
+    /// `<!-- doc-check: on -->`.
+    Docs,
     /// Repoint every architect-owned git dep in a manifest at one tag.
     ///
     /// Bumping these one crate at a time is how a consumer ends up with
@@ -114,6 +123,14 @@ fn main() -> ExitCode {
         Command::Boundaries { config, verbose } => {
             let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
             boundaries::run_cli(&root, &config, verbose)
+        }
+        Command::Docs => {
+            let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            let commands = Cli::command()
+                .get_subcommands()
+                .map(|c| c.get_name().to_owned())
+                .collect();
+            docs::run_cli(&root, commands)
         }
         Command::Feature {
             action: FeatureAction::New { name },

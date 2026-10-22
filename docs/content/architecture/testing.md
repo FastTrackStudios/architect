@@ -34,7 +34,8 @@ async fn list_sorted_by_name_ascending() {
 }
 ```
 
-Run with `cargo test -p example-tests-native`.
+Run with `cargo test -p example-greeter` (the reference feature's
+`tests/round_trip.rs`).
 
 ### One scenario, every wire
 
@@ -109,7 +110,8 @@ whole transport-and-dispatcher pipeline without involving a browser.
 This is where you put tests that span features (auth + multi-row
 updates + permission checks together).
 
-Run with `cargo test -p app-tests-e2e`.
+Run with `cargo test -p auth-server` (`apps/auth-server/tests/`: real
+clients against a real server).
 
 ## Layer 3: real browser, real server
 
@@ -124,8 +126,9 @@ This is the test that proves "wasm-clean" is more than aspirational —
 every byte goes through facet encoding on a real transport, into a real
 database, and back.
 
-Run with `just test-e2e` (sqlite-backed server) or `just test-e2e-memory`
-(in-memory backend). Both run the same three browser tests.
+architect itself has no browser suite since the example app left the
+tree; `just auth-e2e` runs the identity server's end-to-end flow, and
+Task carries the wasm tests of its features. Both run the same three browser tests.
 
 ## What goes where
 

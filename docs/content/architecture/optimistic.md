@@ -241,15 +241,14 @@ The primitives are the floor you drop to for feature-specific hooks.
 None. architect's UI is client-side-rendered and talks to the server only
 through vox ([idioms §1](@/architecture/idioms.md)), so the Dioxus
 fullstack hooks (`use_server_future`, `use_loader`, `#[server]`,
-`dioxus::serve`, `Lazy<T>`) are deliberately unused — `cargo xtask idioms`
-fails CI on them. `architect-atom` covers the same ground those hooks would
+`dioxus::serve`, `Lazy<T>`) are deliberately unused (review enforces it;
+the xtask has no idioms command yet). `architect-atom` covers the same ground those hooks would
 (data loading, refresh, optimistic mutation) without a second RPC stack:
 isomorphic loading → `use_async`; server state → the vox `Resource`/`Layer`
 graph; error pages → `match` on `AtomResult` + Dioxus `ErrorBoundary`.
 
 > Enforced: the primitives are unit-tested in `features/atom`
 > (`AtomResult` SWR transitions, store insert→reconcile temp→real swap,
-> update/remove→rollback, hydrate-preserves-temp). The worked reference is
-> the example feature's state hooks
-> (`example-ui/src/data.rs` + `mutations.rs`), which the shell's route pages
-> (`examples/app/ui/src/pages/`) `match` and compose.
+> update/remove→rollback, hydrate-preserves-temp). In an app, a
+> feature's state hooks (`data.rs` + `mutations.rs` in its `ui` module)
+> are what the shell's route pages `match` and compose.

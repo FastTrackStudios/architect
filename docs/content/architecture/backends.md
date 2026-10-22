@@ -30,8 +30,8 @@ contract holds.
 
 ## The facade
 
-`examples/app/features/example/example/src/lib.rs` chooses between them
-with cargo features:
+A feature crate chooses between them with cargo features (one crate per
+feature, [layout](@/architecture/layout.md)):
 
 ```toml
 [features]
@@ -68,8 +68,10 @@ from the running app's perspective.
 ## Pattern for the DAW analogue
 
 Each DAW backend (Reaper, Ableton, Pro Tools) lives as a sibling
-implementation of the relevant feature contracts:
+implementation of the relevant feature contracts (a sketch; these crates
+are not in this repo):
 
+<!-- doc-check: off (illustrative names, not paths in this repo) -->
 ```
 features/timeline/
   timeline-proto/        contract — `TimelineRepo`, `ClipRepo`, ...
@@ -84,6 +86,7 @@ A `crates/daw-reaper` binary then pulls `timeline` with `backend-reaper`,
 `mixing` with `backend-reaper`, etc. `crates/daw-ableton` does the same
 with `-ableton` features. The same `apps/daw-ui` shell composes both
 because both expose the same `<feature>_proto` types and traits.
+<!-- doc-check: on -->
 
 ## Large payloads
 

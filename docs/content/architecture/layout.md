@@ -45,9 +45,9 @@ features/
     tests/                     cargo test against the memory backend.
 ```
 
-Studio already uses this shape: `features/dsp/eq` (`native`, `ui`,
-`profiles`, ...), `features/patchbay` (`server`, `ui`, `vox`),
-`features/session` (one crate; no `session-proto` / `session-ui`).
+Studio already uses this shape: `studio:features/dsp/eq` (`native`, `ui`,
+`profiles`, ...), `studio:features/patchbay` (`server`, `ui`, `vox`),
+`studio:features/session` (one crate; no `session-proto` / `session-ui`).
 
 ## Roles are cargo features
 
@@ -117,9 +117,9 @@ layer entry in `boundaries.toml` until it is.
 
 ## Naming rules
 
-- **Package name = directory name.** `features/timeline/` is the
-  `timeline` crate; an allowed second crate at
-  `features/timeline/timeline-reaper/` is `timeline-reaper`.
+- **Package name = directory name.** `features/<f>/` is the
+  `<f>` crate; an allowed second crate at
+  `features/<f>/<f>-reaper/` is `<f>-reaper`.
 - **Cargo names use only `[a-z0-9_-]`.** The `<>` notation here is
   shorthand for "fill in the blank".
 - **App names and feature names live in different namespaces.** App
@@ -136,8 +136,8 @@ own directory.
 ## Superseded
 
 Before 2026-10-22 this page prescribed `features/<f>/<f>-proto`,
-`<f>-<backend>`, `<f>-ui` and a `<f>` facade as sibling crates (and an
-`architect-cli feature new` command that does not exist), and Session's
+`<f>-<backend>`, `<f>-ui` and a `<f>` facade as sibling crates (and a
+separate CLI's `feature new` command that never existed), and Session's
 `CLAUDE.md` prescribed a facade crate over internal `session-proto`.
 Both are replaced by the one-crate shape above, which studio's
 `CLAUDE.md` ("Crate rules") already follows.

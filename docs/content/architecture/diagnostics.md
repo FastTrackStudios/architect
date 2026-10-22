@@ -4,6 +4,11 @@ description = "moiré runtime instrumentation — see what every task is waiting
 weight = 60
 +++
 
+> **Not in the tree.** The moiré integration described here is not in
+> this workspace (no `diagnostics` cargo feature, no moiré dependency,
+> no `moire-web` recipe). The page is kept as a design note for
+> reinstating it; nothing below can be run as written.
+
 When an async system hangs, the question is usually "which task is
 stuck and what is it waiting on?" architect's `diagnostics` feature
 wires up [moiré](https://github.com/bearcove/moire) to make that
@@ -39,6 +44,8 @@ hasn't fired but the task chain is parked, you can see exactly which
 `await` point is holding it.
 
 ## Enabling
+
+<!-- doc-check: off (design note; the feature and recipes are not in this repo) -->
 
 The `diagnostics` cargo feature on `architect` (or the `example`
 facade) flips moiré from passthrough mode to instrumented mode:
@@ -115,3 +122,5 @@ them transitively); enabling `diagnostics` doesn't grow the workspace.
 
 For garden-variety contract testing (the kind covered by `tests/native`),
 `diagnostics` is overkill — keep it off.
+
+<!-- doc-check: on -->
