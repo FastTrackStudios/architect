@@ -14,6 +14,7 @@ members = [
     # ── core features ─────────────────────────────────────────────────
     "features/atom",
     "features/form",
+    "features/input",
     "features/permissions",
     "features/permissions/proto",
     "features/mcp",
@@ -77,6 +78,7 @@ lettre = { version = "0.11", default-features = false, features = ["smtp-transpo
 architect = { path = "crates/architect" }
 architect-atom = { path = "features/atom" }
 architect-form = { path = "features/form" }
+architect-input = { path = "features/input" }
 architect-permissions = { path = "features/permissions" }
 architect-permissions-proto = { path = "features/permissions/proto" }
 architect-derive = { path = "crates/architect-derive" }

@@ -69,12 +69,15 @@ jobs:
           ${NIX_DEV} cargo check --target wasm32-unknown-unknown \
             -p architect -p architect-atom -p architect-form \
             -p architect-permissions -p architect-permissions-proto \
-            -p auth-proto -p auth-client -p crdt
+            -p auth-proto -p auth-client -p crdt -p architect-input
           # The generated HTTP clients (`<Trait>HttpClient`, over reqwest's
           # fetch backend) are what a browser app signs in through, so
           # their wasm build is load-bearing.
           ${NIX_DEV} cargo check --target wasm32-unknown-unknown \
             -p auth-proto
+          # The keymap engine's Dioxus hook runs in browser shells.
+          ${NIX_DEV} cargo check --target wasm32-unknown-unknown \
+            -p architect-input --features dioxus
 
       # The lint config denies the panic-shaped lints, so a `--all-features`
       # build would be the stricter gate. It is not run here: turning on

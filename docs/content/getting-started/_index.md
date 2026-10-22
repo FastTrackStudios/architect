@@ -32,7 +32,7 @@ The framework half must stay wasm-clean; CI checks it with:
 cargo check --target wasm32-unknown-unknown \
   -p architect -p architect-atom -p architect-form \
   -p architect-permissions -p architect-permissions-proto \
-  -p auth-proto -p auth-client -p crdt
+  -p auth-proto -p auth-client -p crdt -p architect-input
 ```
 
 ## Run the tests

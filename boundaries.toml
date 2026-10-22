@@ -81,6 +81,10 @@ note = "sibling of auth; fold in as a client flag"
 package = "crdt"
 layer = "L0"
 
+[[row]]
+package = "architect-input"
+layer = "L0"
+
 # ── L4 ui ─────────────────────────────────────────────────────────────────
 [[row]]
 package = "crdt"
@@ -93,6 +97,11 @@ layer = "L4"
 
 [[row]]
 package = "architect-form"
+layer = "L4"
+
+[[row]]
+package = "architect-input"
+features = ["dioxus"]
 layer = "L4"
 
 [[row]]
