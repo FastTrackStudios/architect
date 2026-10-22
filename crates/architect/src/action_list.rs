@@ -24,11 +24,41 @@
 //!   reads them from where a watcher left off, waiting a while for the
 //!   next if there are none yet — what a long-poll or an MCP `watch`
 //!   tool is built on.
+//! - **Guarding**: an action can be *disabled* with a reason
+//!   ([`ActionList::set_enabled`]; it shows in [`ActionInfo`] and refuses
+//!   to run with [`ActionError::Disabled`]); a list can carry a
+//!   [`PermissionEngine`] ([`ActionList::set_authorizer`]) whose
+//!   [`PermissionEngine::authorize`] decides who may see
+//!   ([`ActionList::infos_for`]) and run ([`ActionList::run_json_as`])
+//!   which action; a handler that panics is caught and answered as
+//!   [`ActionError::Failed`], never a dead host (under `panic = "unwind"`,
+//!   the default — a `panic = "abort"` build has nothing to catch).
+//! - **Checking**: a second registration of an id is refused
+//!   ([`ActionError::Duplicate`]) and the first stays.
+//!   [`ActionList::validate`] reports what is wrong with a whole list
+//!   (duplicate ids, ids that are not `AREA_VERB`, two actions on one
+//!   shortcut, a schema that is not a JSON object) and
+//!   [`ActionList::probe_hostile_args`] runs every action that takes
+//!   arguments with `{}` and with malformed JSON ([`HOSTILE_ARGS`]),
+//!   reporting any that panics or accepts garbage. An app's registry test
+//!   is those two on its list:
+//!
+//! ```ignore
+//! #[test]
+//! fn the_action_list_is_sound() {
+//!     let list = ActionList::new();
+//!     my_app::actions::register(&list);
+//!     list.validate().unwrap();
+//!     list.probe_hostile_args().unwrap();
+//! }
+//! ```
 
-use std::collections::{BTreeMap, VecDeque};
-use std::sync::{Arc, Condvar, Mutex, RwLock};
+use std::collections::{BTreeMap, VecDeque, btree_map};
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::{Arc, Condvar, Mutex, PoisonError, RwLock};
 use std::time::Duration;
 
+use architect_permissions::{Decision, PermissionEngine, Principal};
 use facet::{Facet, Shape};
 
 use crate::action::{ActionBackend, ActionMeta};
@@ -64,6 +94,10 @@ pub struct ActionInfo {
     pub params_schema: Option<String>,
     /// The JSON Schema of what it gives back; `None` gives nothing.
     pub result_schema: Option<String>,
+    /// Whether it can run right now ([`ActionList::set_enabled`]).
+    pub enabled: bool,
+    /// Why not, when it cannot (`"no project is open"`).
+    pub disabled_reason: Option<String>,
 }
 
 /// Why an action did not run, or failed.
@@ -78,8 +112,14 @@ pub enum ActionError {
         message: String,
         expected: Option<String>,
     },
-    /// It ran and said no.
+    /// It ran and said no — or panicked (`message` starts `panicked: `).
     Failed { id: String, message: String },
+    /// The list's [`PermissionEngine`] does not let this caller run it.
+    Denied { id: String, reason: String },
+    /// It cannot run right now, and says why.
+    Disabled { id: String, reason: String },
+    /// An action with this id is already registered; the first stays.
+    Duplicate(String),
 }
 
 impl std::fmt::Display for ActionError {
@@ -88,11 +128,47 @@ impl std::fmt::Display for ActionError {
             Self::Unknown(id) => write!(f, "no action {id}"),
             Self::BadArgs { id, message, .. } => write!(f, "{id}: bad arguments: {message}"),
             Self::Failed { id, message } => write!(f, "{id}: {message}"),
+            Self::Denied { id, reason } => write!(f, "{id}: not allowed: {reason}"),
+            Self::Disabled { id, reason } => write!(f, "{id}: disabled: {reason}"),
+            Self::Duplicate(id) => write!(f, "{id}: already registered"),
         }
     }
 }
 
 impl std::error::Error for ActionError {}
+
+/// Everything [`ActionList::validate`] or [`ActionList::probe_hostile_args`]
+/// found wrong, one line each.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ValidationError {
+    pub problems: Vec<String>,
+}
+
+impl std::fmt::Display for ValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "the Action List has {} problem(s):",
+            self.problems.len()
+        )?;
+        for problem in &self.problems {
+            write!(f, "\n- {problem}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for ValidationError {}
+
+impl ValidationError {
+    fn result(problems: Vec<String>) -> Result<(), Self> {
+        if problems.is_empty() {
+            Ok(())
+        } else {
+            Err(Self { problems })
+        }
+    }
+}
 
 /// Something that happened, as a watcher sees it.
 #[derive(Clone, Debug, PartialEq, Eq, Facet)]
@@ -122,12 +198,39 @@ pub const EVENT_HISTORY: usize = 4096;
 /// What a handler is, once its types are erased: JSON in, JSON out.
 pub type Handler = Arc<dyn Fn(&[u8]) -> Result<Vec<u8>, ActionError> + Send + Sync>;
 
+/// Whether an action can run right now: `Err` says why not.
+pub type EnabledCheck = Arc<dyn Fn() -> Result<(), String> + Send + Sync>;
+
+/// The engine a list asks who may see and run what.
+pub type Authorizer = Arc<dyn PermissionEngine + Send + Sync>;
+
+/// Malformed JSON no action may accept: what
+/// [`ActionList::probe_hostile_args`] sends (with two deeply nested
+/// openings it builds itself).
+pub const HOSTILE_ARGS: &[&[u8]] = &[
+    b"{",
+    b"}",
+    b"[1,2",
+    b"{\"a\":",
+    b"{\"a\" 1}",
+    b"nul",
+    b"\"unterminated",
+    b"{} trailing",
+    b"\xff\xfe\xfd",
+    b"{\"\xff\": 1}",
+];
+
+/// How deep the nested openings [`ActionList::probe_hostile_args`] sends go.
+pub const HOSTILE_DEPTH: usize = 4096;
+
+#[derive(Clone)]
 struct Entry {
     meta: &'static ActionMeta,
     effect: Effect,
     params: Option<&'static Shape>,
     result: Option<&'static Shape>,
     handler: Handler,
+    enabled: Option<EnabledCheck>,
 }
 
 struct Events {
@@ -137,6 +240,9 @@ struct Events {
 
 struct Inner {
     entries: RwLock<BTreeMap<String, Entry>>,
+    /// Ids registered a second time, for [`ActionList::validate`].
+    duplicates: Mutex<Vec<String>>,
+    authorizer: RwLock<Option<Authorizer>>,
     events: Mutex<Events>,
     arrived: Condvar,
 }
@@ -155,9 +261,8 @@ impl Default for ActionList {
 
 impl std::fmt::Debug for ActionList {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let count = self.inner.entries.read().map_or(0, |e| e.len());
         f.debug_struct("ActionList")
-            .field("actions", &count)
+            .field("actions", &self.len())
             .finish()
     }
 }
@@ -169,6 +274,8 @@ impl ActionList {
         Self {
             inner: Arc::new(Inner {
                 entries: RwLock::new(BTreeMap::new()),
+                duplicates: Mutex::new(Vec::new()),
+                authorizer: RwLock::new(None),
                 events: Mutex::new(Events {
                     next: 1,
                     kept: VecDeque::new(),
@@ -179,9 +286,18 @@ impl ActionList {
     }
 
     /// Add an action that takes `A` and gives back `R` (each a facet
-    /// type; `()` for nothing). A second registration of the same id
-    /// replaces the first.
-    pub fn register<A, R, F>(&self, meta: &'static ActionMeta, effect: Effect, run: F)
+    /// type; `()` for nothing).
+    ///
+    /// # Errors
+    ///
+    /// [`ActionError::Duplicate`] when the id is already registered: the
+    /// first registration stays, and [`Self::validate`] reports it too.
+    pub fn register<A, R, F>(
+        &self,
+        meta: &'static ActionMeta,
+        effect: Effect,
+        run: F,
+    ) -> Result<(), ActionError>
     where
         A: Facet<'static>,
         R: Facet<'static>,
@@ -218,12 +334,17 @@ impl ActionList {
             params: takes.then_some(A::SHAPE),
             result: (!is_unit(R::SHAPE)).then_some(R::SHAPE),
             handler,
-        });
+            enabled: None,
+        })
     }
 
     /// Add an action whose handler is already JSON in, JSON out — one
     /// built at run time (an rpc method, a script). `params` and `result`
     /// say what it takes and gives, for its schema.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::register`].
     pub fn register_dynamic(
         &self,
         meta: &'static ActionMeta,
@@ -231,44 +352,154 @@ impl ActionList {
         params: Option<&'static Shape>,
         result: Option<&'static Shape>,
         handler: Handler,
-    ) {
+    ) -> Result<(), ActionError> {
         self.insert(Entry {
             meta,
             effect,
             params,
             result,
             handler,
-        });
+            enabled: None,
+        })
     }
 
-    fn insert(&self, entry: Entry) {
+    fn insert(&self, entry: Entry) -> Result<(), ActionError> {
         let id = entry.meta.id.to_owned();
-        if let Ok(mut entries) = self.inner.entries.write() {
-            entries.insert(id.clone(), entry);
+        let added = match self
+            .inner
+            .entries
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .entry(id.clone())
+        {
+            btree_map::Entry::Vacant(slot) => {
+                slot.insert(entry);
+                true
+            }
+            btree_map::Entry::Occupied(_) => false,
+        };
+        if !added {
+            self.inner
+                .duplicates
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(id.clone());
+            return Err(ActionError::Duplicate(id));
         }
         self.publish(EventKind::Registered { id });
+        Ok(())
     }
 
-    /// Every action, by id.
+    /// Say when `id` can run: `check` answers `Err(why)` while it cannot
+    /// (`"no project is open"`). Asked before every run and whenever the
+    /// action is described; a check that panics counts as disabled.
+    ///
+    /// # Errors
+    ///
+    /// [`ActionError::Unknown`] when there is no such action.
+    pub fn set_enabled<F>(&self, id: &str, check: F) -> Result<(), ActionError>
+    where
+        F: Fn() -> Result<(), String> + Send + Sync + 'static,
+    {
+        let mut entries = self
+            .inner
+            .entries
+            .write()
+            .unwrap_or_else(PoisonError::into_inner);
+        let entry = entries
+            .get_mut(id)
+            .ok_or_else(|| ActionError::Unknown(id.to_owned()))?;
+        entry.enabled = Some(Arc::new(check));
+        drop(entries);
+        Ok(())
+    }
+
+    /// Who may see and run what: from now on [`Self::infos_for`] shows a
+    /// caller only what `engine` lets it run, and [`Self::run_json_as`]
+    /// refuses the rest ([`PermissionEngine::authorize`]). Without one,
+    /// every caller may run everything.
+    pub fn set_authorizer(&self, engine: impl PermissionEngine + Send + Sync + 'static) {
+        *self
+            .inner
+            .authorizer
+            .write()
+            .unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(engine));
+    }
+
+    /// May `who` run `id`? [`Decision::Allow`] when the list has no
+    /// authorizer.
     #[must_use]
-    pub fn infos(&self) -> Vec<ActionInfo> {
+    pub fn authorize(&self, who: &Principal, id: &str) -> Decision {
+        let engine = self
+            .inner
+            .authorizer
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        engine.map_or(Decision::Allow, |engine| engine.authorize(who, id))
+    }
+
+    /// The entries, copied out so no lock is held while an enabled check
+    /// or a handler runs (either may use the list itself).
+    fn snapshot(&self) -> Vec<Entry> {
         self.inner
             .entries
             .read()
-            .map(|entries| entries.values().map(info).collect())
-            .unwrap_or_default()
+            .unwrap_or_else(PoisonError::into_inner)
+            .values()
+            .cloned()
+            .collect()
+    }
+
+    fn entry(&self, id: &str) -> Option<Entry> {
+        self.inner
+            .entries
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(id)
+            .cloned()
+    }
+
+    /// Every action, by id — the app's own, trusted view. A caller from
+    /// outside sees [`Self::infos_for`].
+    #[must_use]
+    pub fn infos(&self) -> Vec<ActionInfo> {
+        self.snapshot().iter().map(info).collect()
+    }
+
+    /// The actions `who` may run, by id.
+    #[must_use]
+    pub fn infos_for(&self, who: &Principal) -> Vec<ActionInfo> {
+        self.snapshot()
+            .iter()
+            .filter(|e| self.authorize(who, e.meta.id).allowed())
+            .map(info)
+            .collect()
     }
 
     /// One action.
     #[must_use]
     pub fn info(&self, id: &str) -> Option<ActionInfo> {
-        self.inner.entries.read().ok()?.get(id).map(info)
+        self.entry(id).as_ref().map(info)
+    }
+
+    /// One action, if `who` may run it.
+    #[must_use]
+    pub fn info_for(&self, who: &Principal, id: &str) -> Option<ActionInfo> {
+        if !self.authorize(who, id).allowed() {
+            return None;
+        }
+        self.info(id)
     }
 
     /// How many actions there are.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.inner.entries.read().map_or(0, |e| e.len())
+        self.inner
+            .entries
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .len()
     }
 
     /// Whether there are none.
@@ -278,20 +509,52 @@ impl ActionList {
     }
 
     /// Run `id` with `args` (JSON; empty for an action that takes
-    /// nothing), giving back its result as JSON (`null` for nothing).
+    /// nothing), giving back its result as JSON (`null` for nothing) —
+    /// as the app itself (a key, a menu), so the authorizer is not asked.
+    /// A caller from outside (a model, a peer) runs through
+    /// [`Self::run_json_as`].
     ///
     /// # Errors
     ///
-    /// No such action, arguments it cannot take, or it failed.
+    /// No such action, it is disabled, arguments it cannot take, or it
+    /// failed (or panicked).
     pub fn run_json(&self, id: &str, args: &[u8]) -> Result<Vec<u8>, ActionError> {
-        let handler = self.inner.entries.read().ok().and_then(|entries| {
-            entries
-                .get(id)
-                .map(|e| (Arc::clone(&e.handler), e.params.is_some()))
-        });
-        let Some((handler, takes)) = handler else {
+        self.run_checked(None, id, args)
+    }
+
+    /// Run `id` for `who`: as [`Self::run_json`], once the list's
+    /// authorizer lets `who` run it.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::run_json`], and [`ActionError::Denied`].
+    pub fn run_json_as(
+        &self,
+        who: &Principal,
+        id: &str,
+        args: &[u8],
+    ) -> Result<Vec<u8>, ActionError> {
+        self.run_checked(Some(who), id, args)
+    }
+
+    fn run_checked(
+        &self,
+        who: Option<&Principal>,
+        id: &str,
+        args: &[u8],
+    ) -> Result<Vec<u8>, ActionError> {
+        let Some(entry) = self.entry(id) else {
             return Err(ActionError::Unknown(id.to_owned()));
         };
+        if let Some(who) = who
+            && let Decision::Deny { reason } = self.authorize(who, id)
+        {
+            return Err(ActionError::Denied {
+                id: id.to_owned(),
+                reason,
+            });
+        }
+        let takes = entry.params.is_some();
         let args: &[u8] = if !takes || args.iter().all(u8::is_ascii_whitespace) {
             if takes { b"{}" } else { b"null" }
         } else {
@@ -302,7 +565,13 @@ impl ActionList {
         // an action's time went is one record, whoever ran it — a key, a
         // menu, a model.
         let span = tracing::info_span!("action", action.id = id, action.ok = tracing::field::Empty);
-        let out = span.in_scope(|| handler(args));
+        let out = span.in_scope(|| match enabled_state(entry.enabled.as_ref()) {
+            Ok(()) => guarded(id, &entry.handler, args),
+            Err(reason) => Err(ActionError::Disabled {
+                id: id.to_owned(),
+                reason,
+            }),
+        });
         span.record("action.ok", out.is_ok());
         drop(span);
         self.publish(EventKind::Ran {
@@ -321,6 +590,104 @@ impl ActionList {
         self.run_json(id, b"").map(|_| ())
     }
 
+    /// Run `id`, which takes nothing, for `who`.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::run_json_as`].
+    pub fn run_as(&self, who: &Principal, id: &str) -> Result<(), ActionError> {
+        self.run_json_as(who, id, b"").map(|_| ())
+    }
+
+    /// What is wrong with the list as a whole: an id registered twice, an
+    /// id that is not `AREA_VERB` (`SCREAMING_SNAKE_CASE`), two actions
+    /// on one shortcut, a params or result schema that is not a JSON
+    /// object. Runs nothing.
+    ///
+    /// # Errors
+    ///
+    /// Every problem found, one line each.
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        let mut problems: Vec<String> = self
+            .inner
+            .duplicates
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .map(|id| format!("{id}: registered more than once (the first registration stays)"))
+            .collect();
+        let mut shortcuts: BTreeMap<String, &'static str> = BTreeMap::new();
+        for entry in self.snapshot() {
+            let id = entry.meta.id;
+            if !is_action_id(id) {
+                problems.push(format!(
+                    "{id:?}: an id is SCREAMING_SNAKE_CASE, `AREA_VERB`"
+                ));
+            }
+            let shortcut = entry.meta.shortcut.trim().to_lowercase();
+            if !shortcut.is_empty()
+                && let Some(other) = shortcuts.insert(shortcut, id)
+            {
+                problems.push(format!(
+                    "{id}: its shortcut {:?} is also {other}'s",
+                    entry.meta.shortcut
+                ));
+            }
+            for (what, shape) in [("params", entry.params), ("result", entry.result)] {
+                if let Some(problem) = shape.and_then(schema_problem) {
+                    problems.push(format!("{id}: its {what} schema {problem}"));
+                }
+            }
+        }
+        ValidationError::result(problems)
+    }
+
+    /// Run every action that takes arguments with `{}` — which it may
+    /// take or refuse, but must not panic on — and with each of
+    /// [`HOSTILE_ARGS`] and two [`HOSTILE_DEPTH`]-deep nestings, which it
+    /// must refuse without panicking. Actions that take nothing never see
+    /// their arguments and are not run.
+    ///
+    /// This RUNS handlers (straight, past the enabled check and the
+    /// authorizer): call it on a list built for a test, not on a live app.
+    ///
+    /// # Errors
+    ///
+    /// Every action that panicked or took malformed JSON, one line each.
+    pub fn probe_hostile_args(&self) -> Result<(), ValidationError> {
+        let deep_array = "[".repeat(HOSTILE_DEPTH);
+        let deep_object = "{\"a\":".repeat(HOSTILE_DEPTH);
+        let mut problems = Vec::new();
+        for entry in self.snapshot() {
+            if entry.params.is_none() {
+                continue;
+            }
+            let id = entry.meta.id;
+            if let Err(panic) = catch_unwind(AssertUnwindSafe(|| (entry.handler)(b"{}"))) {
+                problems.push(format!(
+                    "{id}: panicked on {{}}: {}",
+                    panic_message(panic.as_ref())
+                ));
+            }
+            let hostile = HOSTILE_ARGS
+                .iter()
+                .copied()
+                .chain([deep_array.as_bytes(), deep_object.as_bytes()]);
+            for args in hostile {
+                let shown = String::from_utf8_lossy(args.get(..24).unwrap_or(args)).into_owned();
+                match catch_unwind(AssertUnwindSafe(|| (entry.handler)(args))) {
+                    Ok(Ok(_)) => problems.push(format!("{id}: took malformed JSON {shown:?}")),
+                    Ok(Err(_)) => {}
+                    Err(panic) => problems.push(format!(
+                        "{id}: panicked on {shown:?}: {}",
+                        panic_message(panic.as_ref())
+                    )),
+                }
+            }
+        }
+        ValidationError::result(problems)
+    }
+
     /// Say the app's state changed — `topic` what (`tracks`), `detail`
     /// which — so whoever watches hears it.
     pub fn changed(&self, topic: &str, detail: &str) {
@@ -331,9 +698,11 @@ impl ActionList {
     }
 
     fn publish(&self, kind: EventKind) {
-        let Ok(mut events) = self.inner.events.lock() else {
-            return;
-        };
+        let mut events = self
+            .inner
+            .events
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
         let seq = events.next;
         events.next = seq.saturating_add(1);
         events.kept.push_back(ActionEvent { seq, kind });
@@ -386,7 +755,9 @@ impl ActionList {
 
 /// Every `#[architect::actions]` trait registers through this, so its
 /// actions — which take nothing and give nothing — land in the list as
-/// they are. Marked [`Effect::Mutating`]: an action is a command.
+/// they are. Marked [`Effect::Mutating`]: an action is a command. A
+/// duplicate id is logged and kept out (the trait has no way to refuse);
+/// [`ActionList::validate`] reports it.
 impl ActionBackend for ActionList {
     fn register(
         &self,
@@ -401,18 +772,24 @@ impl ActionBackend for ActionList {
             })?;
             Ok(b"null".to_vec())
         });
-        self.insert(Entry {
+        let added = self.insert(Entry {
             meta,
             effect: Effect::Mutating,
             params: None,
             result: None,
             handler: erased,
+            enabled: None,
         });
+        // The trait cannot say no; `validate` will.
+        if let Err(error) = added {
+            tracing::error!(%error, "an action id was registered twice; the first stays");
+        }
     }
 }
 
 fn info(entry: &Entry) -> ActionInfo {
     let m = entry.meta;
+    let disabled_reason = enabled_state(entry.enabled.as_ref()).err();
     ActionInfo {
         id: m.id.to_owned(),
         display_name: m.display_name.to_owned(),
@@ -423,6 +800,70 @@ fn info(entry: &Entry) -> ActionInfo {
         effect: entry.effect,
         params_schema: entry.params.map(crate::schema::json_schema),
         result_schema: entry.result.map(crate::schema::json_schema),
+        enabled: disabled_reason.is_none(),
+        disabled_reason,
+    }
+}
+
+/// Whether an action may run now: its enabled check, a panic in it
+/// counted as a reason.
+fn enabled_state(check: Option<&EnabledCheck>) -> Result<(), String> {
+    let Some(check) = check else {
+        return Ok(());
+    };
+    catch_unwind(AssertUnwindSafe(|| check())).unwrap_or_else(|panic| {
+        Err(format!(
+            "its enabled check panicked: {}",
+            panic_message(panic.as_ref())
+        ))
+    })
+}
+
+/// Run a handler, a panic in it answered as [`ActionError::Failed`].
+fn guarded(id: &str, handler: &Handler, args: &[u8]) -> Result<Vec<u8>, ActionError> {
+    catch_unwind(AssertUnwindSafe(|| handler(args))).unwrap_or_else(|panic| {
+        let message = panic_message(panic.as_ref());
+        tracing::error!(action.id = id, %message, "an action panicked");
+        Err(ActionError::Failed {
+            id: id.to_owned(),
+            message: format!("panicked: {message}"),
+        })
+    })
+}
+
+/// What a panic said, when it said it as text.
+fn panic_message(panic: &(dyn std::any::Any + Send)) -> String {
+    panic
+        .downcast_ref::<&str>()
+        .map(|s| (*s).to_owned())
+        .or_else(|| panic.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "(no message)".to_owned())
+}
+
+/// `AREA_VERB`: upper-case ASCII letters, digits and `_`, starting with a
+/// letter.
+fn is_action_id(id: &str) -> bool {
+    id.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+        && id
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+}
+
+/// What is wrong with the JSON Schema of `shape`, if anything.
+fn schema_problem(shape: &'static Shape) -> Option<String> {
+    let schema = match catch_unwind(|| crate::schema::json_schema(shape)) {
+        Ok(schema) => schema,
+        Err(panic) => {
+            return Some(format!(
+                "could not be written: {}",
+                panic_message(panic.as_ref())
+            ));
+        }
+    };
+    match facet_json::from_str::<facet_value::Value>(&schema) {
+        Ok(value) if value.is_object() => None,
+        Ok(_) => Some(format!("is not a JSON object: {schema}")),
+        Err(e) => Some(format!("is not JSON ({e}): {schema}")),
     }
 }
 
@@ -435,8 +876,12 @@ fn is_unit(shape: &'static Shape) -> bool {
 mod tests {
     use super::{ActionError, ActionList, Effect, EventKind};
     use crate::action::{ActionBackend, ActionMeta};
+    use architect_permissions::{
+        Action, Decision, PermissionEngine, Principal, Resource, Rule, ScopeEngine,
+    };
     use facet::Facet;
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
 
     const fn meta(id: &'static str) -> ActionMeta {
@@ -454,8 +899,20 @@ mod tests {
         }
     }
 
+    const fn keyed(id: &'static str, shortcut: &'static str) -> ActionMeta {
+        ActionMeta {
+            shortcut,
+            ..meta(id)
+        }
+    }
+
     static HITS: ActionMeta = meta("DRUMS_HITS");
     static PLAY: ActionMeta = meta("PLAY");
+    static SAVE: ActionMeta = keyed("PROJECT_SAVE", "Ctrl+S");
+    static SAVE_AS: ActionMeta = keyed("PROJECT_SAVE_AS", "ctrl+s");
+    static DELETE: ActionMeta = meta("PROJECT_DELETE");
+    static BOOM: ActionMeta = meta("DRUMS_BOOM");
+    static LOWER: ActionMeta = meta("drums.hits");
 
     #[derive(Facet)]
     struct Query {
@@ -479,7 +936,8 @@ mod tests {
             Ok(Hits {
                 times: (0..n).map(f64::from).collect(),
             })
-        });
+        })
+        .expect("registered");
         let played = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let flag = Arc::clone(&played);
         ActionBackend::register(
@@ -515,6 +973,227 @@ mod tests {
                 .is_some_and(|s| s.contains("\"required\":[\"track\"]"))
         );
         assert!(list.info("PLAY").is_some_and(|p| p.params_schema.is_none()));
+    }
+
+    fn hits(list: &ActionList) {
+        list.register(&HITS, Effect::ReadOnly, |q: Query| {
+            if q.track == "none" {
+                return Err("no such track".to_owned());
+            }
+            Ok(Hits { times: vec![0.5] })
+        })
+        .expect("registered");
+    }
+
+    fn unit(list: &ActionList, meta: &'static ActionMeta) {
+        list.register(meta, Effect::Mutating, |(): ()| Ok(()))
+            .expect("registered");
+    }
+
+    /// (a) A disabled action says why — in its info and when run — and
+    /// runs again once its check says yes; a check that panics counts as
+    /// disabled; there is no check to set on an unknown id.
+    #[test]
+    fn a_disabled_action_says_why() {
+        let list = ActionList::new();
+        unit(&list, &SAVE);
+        let open = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&open);
+        list.set_enabled("PROJECT_SAVE", move || {
+            if flag.load(Ordering::SeqCst) {
+                Ok(())
+            } else {
+                Err("no project is open".to_owned())
+            }
+        })
+        .expect("set");
+
+        let info = list.info("PROJECT_SAVE").expect("listed");
+        assert!(!info.enabled);
+        assert_eq!(info.disabled_reason.as_deref(), Some("no project is open"));
+        assert_eq!(
+            list.run("PROJECT_SAVE"),
+            Err(ActionError::Disabled {
+                id: "PROJECT_SAVE".into(),
+                reason: "no project is open".into()
+            })
+        );
+
+        open.store(true, Ordering::SeqCst);
+        assert!(list.info("PROJECT_SAVE").is_some_and(|i| i.enabled));
+        list.run("PROJECT_SAVE").expect("enabled now");
+
+        list.set_enabled("PROJECT_SAVE", || panic!("check blew up"))
+            .expect("set");
+        let info = list.info("PROJECT_SAVE").expect("listed");
+        assert!(
+            info.disabled_reason
+                .is_some_and(|r| r.contains("check blew up"))
+        );
+        assert_eq!(
+            list.set_enabled("NOPE", || Ok(())),
+            Err(ActionError::Unknown("NOPE".into()))
+        );
+    }
+
+    /// The test engine: users may run read-only drum actions only; a
+    /// service may run anything.
+    struct DrumsOnly;
+    impl PermissionEngine for DrumsOnly {
+        fn check(&self, _: &Principal, _: &Resource, _: &Action) -> Decision {
+            Decision::deny("ask authorize")
+        }
+        fn authorize(&self, who: &Principal, id: &str) -> Decision {
+            match who {
+                Principal::Service { .. } => Decision::Allow,
+                _ if id.starts_with("DRUMS_") => Decision::Allow,
+                _ => Decision::deny(format!("{} may not run {id}", who.describe())),
+            }
+        }
+    }
+
+    /// (b) With an authorizer, a caller runs only what it is allowed and
+    /// is told why not; the app's own `run_json` is not asked; the
+    /// default `authorize` goes through `check` on `action/<id>`.
+    #[test]
+    fn the_authorizer_decides_who_runs_what() {
+        let list = ActionList::new();
+        hits(&list);
+        unit(&list, &DELETE);
+        let model = Principal::User {
+            user_id: "model".into(),
+        };
+        assert!(list.authorize(&model, "PROJECT_DELETE").allowed(), "no engine: allowed");
+
+        list.set_authorizer(DrumsOnly);
+        list.run_json_as(&model, "DRUMS_HITS", br#"{"track":"a"}"#)
+            .expect("allowed");
+        assert_eq!(
+            list.run_as(&model, "PROJECT_DELETE"),
+            Err(ActionError::Denied {
+                id: "PROJECT_DELETE".into(),
+                reason: "user:model may not run PROJECT_DELETE".into()
+            })
+        );
+        list.run_as(&Principal::Service { name: "app".into() }, "PROJECT_DELETE")
+            .expect("a service may");
+        list.run("PROJECT_DELETE").expect("the app itself is not asked");
+
+        list.set_authorizer(ScopeEngine::new(vec![Rule::new(
+            "action/PROJECT_DELETE",
+            &[Action::RUN],
+        )]));
+        list.run_as(&model, "PROJECT_DELETE").expect("rule allows");
+        assert!(matches!(
+            list.run_json_as(&model, "DRUMS_HITS", br#"{"track":"a"}"#),
+            Err(ActionError::Denied { .. })
+        ));
+    }
+
+    /// (g) A caller sees only the actions it may run.
+    #[test]
+    fn a_caller_sees_only_what_it_may_run() {
+        let list = ActionList::new();
+        hits(&list);
+        unit(&list, &DELETE);
+        let model = Principal::User {
+            user_id: "model".into(),
+        };
+        assert_eq!(list.infos_for(&model).len(), 2, "no engine: everything");
+        list.set_authorizer(DrumsOnly);
+        let seen: Vec<String> = list.infos_for(&model).into_iter().map(|i| i.id).collect();
+        assert_eq!(seen, vec!["DRUMS_HITS".to_owned()]);
+        assert!(list.info_for(&model, "PROJECT_DELETE").is_none());
+        assert!(list.info_for(&model, "DRUMS_HITS").is_some());
+        assert_eq!(list.infos().len(), 2, "the app sees everything");
+    }
+
+    /// (c) A handler that panics is a `Failed`, not a dead host, and the
+    /// list goes on working.
+    #[test]
+    fn a_panicking_handler_is_a_failure() {
+        let list = ActionList::new();
+        list.register(&BOOM, Effect::Mutating, |(): ()| -> Result<(), String> {
+            panic!("boom")
+        })
+        .expect("registered");
+        hits(&list);
+        match list.run("DRUMS_BOOM") {
+            Err(ActionError::Failed { id, message }) => {
+                assert_eq!(id, "DRUMS_BOOM");
+                assert_eq!(message, "panicked: boom");
+            }
+            other => panic!("a failure: {other:?}"),
+        }
+        let start = list.latest();
+        list.run_json("DRUMS_HITS", br#"{"track":"a"}"#)
+            .expect("still works");
+        let (events, _) = list.events_since(start, 10, Duration::ZERO);
+        assert_eq!(events.len(), 1);
+    }
+
+    /// (d) A second registration of an id is refused and the first stays;
+    /// through the old trait path it is kept out and `validate` says so.
+    #[test]
+    fn a_duplicate_id_is_an_error() {
+        let list = ActionList::new();
+        hits(&list);
+        let again = list.register(&HITS, Effect::Destructive, |(): ()| Ok(()));
+        assert_eq!(again, Err(ActionError::Duplicate("DRUMS_HITS".into())));
+        assert_eq!(list.len(), 1);
+        assert_eq!(
+            list.info("DRUMS_HITS").map(|i| i.effect),
+            Some(Effect::ReadOnly),
+            "the first stays"
+        );
+        ActionBackend::register(&list, &HITS, Arc::new(|| Ok(())));
+        let problems = list.validate().expect_err("duplicates").problems;
+        assert_eq!(problems.len(), 2, "{problems:?}");
+        assert!(problems.iter().all(|p| p.starts_with("DRUMS_HITS: registered more than once")));
+    }
+
+    /// (e) `validate` finds a bad id and two actions on one shortcut, and
+    /// passes a sound list; every schema it reads back is a JSON object.
+    #[test]
+    fn validate_reports_what_is_wrong() {
+        let sound = ActionList::new();
+        hits(&sound);
+        unit(&sound, &SAVE);
+        unit(&sound, &PLAY);
+        sound.validate().expect("sound");
+
+        let list = ActionList::new();
+        unit(&list, &SAVE);
+        unit(&list, &SAVE_AS);
+        unit(&list, &LOWER);
+        let problems = list.validate().expect_err("problems").problems;
+        assert_eq!(problems.len(), 2, "{problems:?}");
+        assert!(problems.iter().any(|p| p.contains("\"drums.hits\"")));
+        assert!(problems.iter().any(|p| p.contains("is also PROJECT_SAVE")));
+        let shown = list.validate().expect_err("problems").to_string();
+        assert!(shown.starts_with("the Action List has 2 problem(s):"));
+    }
+
+    /// (e) Every action that takes arguments survives `{}` and refuses
+    /// malformed JSON — and one that panics on `{}` is named.
+    #[test]
+    fn hostile_arguments_are_refused() {
+        let list = ActionList::new();
+        hits(&list);
+        unit(&list, &PLAY);
+        list.probe_hostile_args().expect("sound");
+
+        #[derive(Facet)]
+        struct Anything {
+            n: Option<u32>,
+        }
+        list.register(&BOOM, Effect::Mutating, |a: Anything| -> Result<(), String> {
+            panic!("no n: {:?}", a.n)
+        })
+        .expect("registered");
+        let problems = list.probe_hostile_args().expect_err("boom").problems;
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(problems.iter().all(|p| p.starts_with("DRUMS_BOOM: panicked on {}")));
     }
 
     /// A watcher reads what happened after where it left off, and waits

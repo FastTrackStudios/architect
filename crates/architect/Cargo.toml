@@ -202,8 +202,9 @@ http = ["dep:axum", "dep:facet-json", "dep:async-channel"]
 # The Action List (`architect::action::ActionList`): the one registry
 # every key, menu, CLI and MCP server runs an app's commands through,
 # typed by facet and described as JSON Schema (`architect::schema`).
-# Pulls facet-json.
-action-list = ["dep:facet-json", "dep:tracing"]
+# Pulls facet-json, and facet-value (`ActionList::validate` reads the
+# schemas back).
+action-list = ["dep:facet-json", "dep:facet-value", "dep:tracing"]
 
 # The typed HTTP client the rpc derive emits per service
 # (`<Trait>HttpClient`), over `reqwest` — native and wasm (`fetch`).
@@ -317,6 +318,7 @@ vox-core = { workspace = true, optional = true }
 vox-types = { workspace = true, optional = true }
 vox-websocket = { version = "0.10.0-rc.5", optional = true }
 facet-json = { version = "0.50.0-rc.5", optional = true }
+facet-value = { version = "0.50.0-rc.7", optional = true }
 # `default-features = false` keeps the wasm build free of the native TLS
 # and blocking stacks; the browser target goes through `fetch` anyway.
 reqwest = { version = "0.12", default-features = false, features = ["stream"], optional = true }

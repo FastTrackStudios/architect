@@ -129,6 +129,9 @@ impl Action {
     pub const COMMENT: &'static str = "comment";
     pub const ADMIN: &'static str = "admin";
     pub const DOWNLOAD: &'static str = "download";
+    /// Running a command from an app's Action List — what
+    /// [`PermissionEngine::authorize`] checks by default.
+    pub const RUN: &'static str = "run";
 
     pub fn new(s: impl Into<String>) -> Self {
         Self(s.into())
@@ -199,6 +202,25 @@ pub trait PermissionEngine: MaybeSendSync {
     fn survey(&self, _who: &Principal, _prefix: &Resource) -> Vec<(Resource, Vec<Action>)> {
         Vec::new()
     }
+
+    /// May `who` run the Action List command `action_id`
+    /// (`SESSION_GAIN_STAGE`)? What `ActionList::run_json_as` asks before
+    /// every run — a `run`, each step of an MCP `batch` — and what hides an
+    /// action from `ActionList::infos_for`.
+    ///
+    /// By default the same question as everything else:
+    /// `check(who, "action/<id>", "run")` ([`action_resource`],
+    /// [`Action::RUN`]), so an engine's existing rules (`action/**`,
+    /// `action/SESSION_*`) answer it. Override it to decide by id alone.
+    fn authorize(&self, who: &Principal, action_id: &str) -> Decision {
+        self.check(who, &action_resource(action_id), &Action::new(Action::RUN))
+    }
+}
+
+/// The resource an Action List command is checked as: `action/<id>`.
+#[must_use]
+pub fn action_resource(action_id: &str) -> Resource {
+    Resource(format!("action/{action_id}"))
 }
 
 /// WHO is on the other end of this request. Async (token validation may hit
@@ -214,6 +236,9 @@ impl<T: PermissionEngine + ?Sized> PermissionEngine for Arc<T> {
     }
     fn survey(&self, who: &Principal, prefix: &Resource) -> Vec<(Resource, Vec<Action>)> {
         (**self).survey(who, prefix)
+    }
+    fn authorize(&self, who: &Principal, action_id: &str) -> Decision {
+        (**self).authorize(who, action_id)
     }
 }
 
@@ -652,6 +677,37 @@ mod tests {
 
     fn user(id: &str) -> Principal {
         Principal::User { user_id: id.into() }
+    }
+
+    /// `authorize` asks `check` about `action/<id>` + `run` unless an
+    /// engine overrides it, and an `Arc` forwards the override.
+    #[test]
+    fn authorize_defaults_to_check_on_the_action_resource() {
+        let rules = ScopeEngine::new(vec![Rule::new("action/DRUMS_HITS", &[Action::RUN])]);
+        let anyone = Principal::Anonymous;
+        assert!(rules.authorize(&anyone, "DRUMS_HITS").allowed());
+        assert!(!rules.authorize(&anyone, "PROJECT_DELETE").allowed());
+        assert_eq!(action_resource("X").as_str(), "action/X");
+
+        struct OnlyReads;
+        impl PermissionEngine for OnlyReads {
+            fn check(&self, _: &Principal, _: &Resource, _: &Action) -> Decision {
+                Decision::Allow
+            }
+            fn authorize(&self, _: &Principal, id: &str) -> Decision {
+                if id.ends_with("_READ") {
+                    Decision::Allow
+                } else {
+                    Decision::deny("reads only")
+                }
+            }
+        }
+        let shared: Arc<dyn PermissionEngine> = Arc::new(OnlyReads);
+        assert!(shared.authorize(&anyone, "A_READ").allowed());
+        assert_eq!(
+            shared.authorize(&anyone, "A_WRITE"),
+            Decision::deny("reads only")
+        );
     }
 
     #[test]
