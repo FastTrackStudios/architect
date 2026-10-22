@@ -86,10 +86,8 @@ async fn dial(node: &Node, who: Principal) -> (DocPeerClient, tokio::task::JoinH
         OpenDocs(node.registry.clone()),
         move |endpoint| admitted.contains(endpoint),
     );
-    let router = LayerRouter::new().with(
-        doc_peer_service_descriptor(),
-        DocPeerDispatcher::new(host),
-    );
+    let router =
+        LayerRouter::new().with(doc_peer_service_descriptor(), DocPeerDispatcher::new(host));
     let gated = PermissionsGate::new(Arc::new(AllowAll), Arc::new(StaticPrincipal(who)))
         .permit(doc_peer_service_descriptor(), &PEER_PERMITS)
         .wrap(router);
@@ -279,15 +277,27 @@ async fn the_registry_authorizer_sees_the_gates_caller() {
         },
     )
     .await;
-    assert!(matches!(refused, Err(SessionEnd::Refused(_))), "got {refused:?}");
+    assert!(
+        matches!(refused, Err(SessionEnd::Refused(_))),
+        "got {refused:?}"
+    );
     assert_eq!(value(&b, private, "k").await, None);
     server.abort();
 
     let seen = a.seen.lock().unwrap().clone();
-    assert!(seen.iter().any(|p| p == "host:b"), "a's authorizer saw {seen:?}");
-    assert!(!seen.iter().any(|p| p == "none"), "a lane without a caller: {seen:?}");
+    assert!(
+        seen.iter().any(|p| p == "host:b"),
+        "a's authorizer saw {seen:?}"
+    );
+    assert!(
+        !seen.iter().any(|p| p == "none"),
+        "a lane without a caller: {seen:?}"
+    );
     let seen_b = b.seen.lock().unwrap().clone();
-    assert!(seen_b.iter().all(|p| p == "service:b"), "b's self lane: {seen_b:?}");
+    assert!(
+        seen_b.iter().all(|p| p == "service:b"),
+        "b's self lane: {seen_b:?}"
+    );
 }
 
 // t[verify crdt.peer.lineage] — two documents made separately under one

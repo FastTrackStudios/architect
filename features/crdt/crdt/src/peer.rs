@@ -60,6 +60,7 @@
 
 use std::collections::HashMap;
 use std::future::Future;
+use std::hash::BuildHasher;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -91,8 +92,10 @@ pub fn is_foreign_lineage(client: &VersionVector, server: &VersionVector) -> boo
         .any(|(peer, c)| *c > 0 && server.get(peer).is_some_and(|s| *s > 0))
 }
 
-/// Refuse an attach whose history (`from`, an encoded version vector)
-/// shares nothing with `registry`'s document of `doc_id`. An empty or
+/// Refuse an attach whose history shares nothing with the served doc.
+///
+/// `from` is the caller's encoded version vector; the served doc is
+/// `registry`'s document of `doc_id`. An empty or
 /// undecodable `from`, or a document the registry will not open, passes:
 /// the registry's own attach reports those.
 pub async fn check_lineage(
@@ -119,7 +122,9 @@ pub async fn check_lineage(
 
 // ── The wire ───────────────────────────────────────────────────────────
 
-/// One document a node holds. `name` is the app's own address for it
+/// One document a node holds.
+///
+/// `name` is the app's own address for it
 /// (a vault path, a project key) from which both nodes derive `doc_id`
 /// (UUID v5); `digest` is whatever cheap fingerprint the app keeps (a
 /// file's sha, [`vv_digest`]): equal non-empty digests are skipped.
@@ -210,7 +215,9 @@ pub fn vv_digest(vv: &VersionVector) -> String {
 
 type PeerCheck = dyn Fn(&str) -> bool + Send + Sync;
 
-/// The [`DocPeer`] lane over a node's [`DocRegistry`]. Mount it on the
+/// The [`DocPeer`] lane over a node's [`DocRegistry`].
+///
+/// Mount it on the
 /// router the node serves over iroh, behind a gate whose identity
 /// resolver yields `Principal::Host { endpoint }` from the proved
 /// connection.
@@ -242,7 +249,9 @@ impl<C: DocCatalog> DocPeerHost<C> {
             Some(Principal::Host { endpoint }) if (self.admit_peer)(&endpoint) => Ok(()),
             who => {
                 tracing::debug!(
-                    caller = who.as_ref().map_or_else(|| "none".to_owned(), Principal::describe),
+                    caller = who
+                        .as_ref()
+                        .map_or_else(|| "none".to_owned(), Principal::describe),
                     "doc-peer: refused a caller that is not an admitted node"
                 );
                 Err(SyncError::Internal(
@@ -276,8 +285,9 @@ impl<C: DocCatalog + Clone> DocPeer for DocPeerHost<C> {
 
 // ── Lanes ──────────────────────────────────────────────────────────────
 
-/// Something a session can run over: the `DocSync` call, whoever answers
-/// it. A node's own registry ([`SelfLane`], or any [`DocSyncClient`]) and
+/// Something a session can run over: the `DocSync` call, whoever answers.
+///
+/// A node's own registry ([`SelfLane`], or any [`DocSyncClient`]) and
 /// a peer's document lane ([`PeerLane`]) are both lanes, so one session
 /// shape carries every guarantee on both.
 pub trait SyncLane: Sync {
@@ -298,7 +308,7 @@ impl SyncLane for DocSyncClient {
         up: vox::Rx<Vec<u8>>,
         down: vox::Tx<SyncDown>,
     ) -> Result<(), vox::VoxError<SyncError>> {
-        DocSyncClient::sync(self, doc_id, from, up, down).await
+        Self::sync(self, doc_id, from, up, down).await
     }
 }
 
@@ -331,8 +341,10 @@ const SELF_LANE_PERMITS: ServicePermits = ServicePermits {
     methods: &[MethodPermit::new("sync", "write", "docs/**")],
 };
 
-/// This node's own registry as a client of itself, behind a gate that
-/// presents `who` on every call, so the registry's authorizer sees a
+/// This node's own registry as a client of itself.
+///
+/// It sits behind a gate that presents `who` on every call, so the
+/// registry's authorizer sees a
 /// principal (typically `Principal::Service { name: "doc-peer" }`)
 /// rather than `None`. The in-process server task stops when this drops.
 pub struct SelfLane {
@@ -348,7 +360,10 @@ impl SelfLane {
             crate::sync::DocSyncDispatcher::new(registry),
         );
         let gated = PermissionsGate::new(Arc::new(AllowAll), Arc::new(StaticPrincipal(who)))
-            .permit(crate::sync::doc_sync_service_descriptor(), &SELF_LANE_PERMITS)
+            .permit(
+                crate::sync::doc_sync_service_descriptor(),
+                &SELF_LANE_PERMITS,
+            )
             .wrap(router);
         let (client_link, server_link) = vox::memory_link_pair(16);
         let server = tokio::spawn(async move {
@@ -575,8 +590,10 @@ pub struct PullReport {
     pub failed: usize,
 }
 
-/// Pull `peer`'s documents into this node (through `local`, its own
-/// registry) and, in the same sessions, push ours to it. `ours` maps
+/// Pull `peer`'s documents into this node and push ours to it.
+///
+/// Runs through `local` (this node's own registry); both directions
+/// travel in the same sessions. `ours` maps
 /// this node's doc ids to their digests; an entry whose non-empty digest
 /// matches is skipped. Each exchange is bounded by `per_doc`, so one
 /// stuck session cannot stall the sweep.
@@ -584,10 +601,10 @@ pub struct PullReport {
 /// # Errors
 ///
 /// The peer's `list` failed: unreachable, or this node is not admitted.
-pub async fn pull(
+pub async fn pull<S: BuildHasher + Sync>(
     local: &impl SyncLane,
     peer: &DocPeerClient,
-    ours: &HashMap<Uuid, String>,
+    ours: &HashMap<Uuid, String, S>,
     per_doc: Duration,
 ) -> Result<PullReport, SessionEnd> {
     let theirs = peer.list().await.map_err(classify_err)?;

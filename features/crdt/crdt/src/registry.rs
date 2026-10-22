@@ -213,7 +213,9 @@ impl DocRegistry {
         if !(self.authorizer)(who.as_ref(), doc_id) {
             tracing::debug!(
                 ?doc_id,
-                caller = who.as_ref().map_or_else(|| "none".to_owned(), Principal::describe),
+                caller = who
+                    .as_ref()
+                    .map_or_else(|| "none".to_owned(), Principal::describe),
                 "doc-registry: attach refused by the authorizer"
             );
             return Err(SyncError::UnknownDoc);
