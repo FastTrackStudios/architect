@@ -4,8 +4,8 @@ description = "The bearcove/vox + Dioxus conventions architect follows, and what
 weight = 50
 +++
 
-architect's client/server story is opinionated. These are the rules the
-example app (`examples/app/`) follows, why they exist, and how each one
+architect's client/server story is opinionated. These are the rules
+architect's apps (`apps/auth-server`, Task, Session) follow, why they exist, and how each one
 is kept from drifting. Copy them into your own project.
 
 ## 1. All client↔server data flows through vox services
@@ -20,9 +20,10 @@ architect-emitted `<Entity>Repo` (CRUD) or a hand-written `<Entity>Service`
 `dioxus-fullstack`). They'd introduce a second, parallel RPC mechanism
 with its own serialization, defeating the facet-only wire.
 
-> Not yet automated: there is no `cargo xtask idioms` (an earlier
-> version of this page named one). Review catches `#[server]`,
-> `use_server_future` and `dioxus(_|::)fullstack`.
+> Not yet automated: the xtask has no idioms command (an earlier
+> version of this page named one). `cargo xtask boundaries` ratchets
+> hand-written axum routes (`[[idiom]]` in `boundaries.toml`); review
+> catches `#[server]`, `use_server_future` and `dioxus(_|::)fullstack`.
 
 ## 2. Wire types are facet-only
 
@@ -36,8 +37,8 @@ storage-column concern, not the wire, so it's fine.)
 
 ## 3. The client is established once and shared via context
 
-The app root (`examples/app/ui/src/lib.rs`, with the connection machinery
-in `transport.rs`) establishes the typed clients **once**, stores them in a
+The app root (in Task, `task:apps/web`'s root component, with the connection machinery
+beside it) establishes the typed clients **once**, stores them in a
 `Signal<ConnState>`, and provides it with `use_context_provider`. The
 context *shapes* (`ConnState`, `ExampleClients`, `use_conn`,
 `use_example_store`) live with the feature in `example-ui`'s `context.rs`,
@@ -84,11 +85,11 @@ call, or (worse) a silent desync. The example pins one rev in the root
 | No Dioxus server fns (§1) | review (no automated gate yet) |
 | facet-only wire (§2) | the `Entity` derive emits facet; serde derive would be redundant |
 | Wasm-clean contracts (§3–4) | CI `check wasm` step: `cargo check --target wasm32-unknown-unknown` on the framework crates; `cargo xtask feature new` scaffolds contracts its test checks for wasm |
-| Real wire round-trips (§5) | `app-tests-e2e` + `just test-e2e` (browser) |
+| Real wire round-trips (§5) | `examples/greeter/tests/round_trip.rs`, `apps/auth-server/tests/surfaces.rs` |
 | Hand-rolled widgets, signal/prop misuse | dioxus-MCP audits — run manually |
 
 The dioxus-MCP audits aren't CLI-runnable, so they're a manual companion
-to the automated gates. Run them against `examples/app/ui` when touching
+to the automated gates. Run them against the app's UI crate when touching
 the UI:
 
 - `lint_project` — the full sweep (`check_rsx`, `dead_components`,
@@ -99,11 +100,12 @@ the UI:
 CI (`.github/workflows/checks.yml`) runs `cargo check --workspace
 --all-targets` → `cargo clippy --workspace --all-targets` → `cargo test
 --workspace` → `cargo xtask boundaries` (the layer table and ratcheted
-source idioms in `boundaries.toml`) → `cargo check --target
+source idioms in `boundaries.toml`) → `cargo xtask docs` (every path and
+command these pages name exists) → `cargo check --target
 wasm32-unknown-unknown` on the framework crates, with
-`RUSTFLAGS=-D warnings`. There is no `cargo xtask
-ci`; the xtask commands are `feature new`, `boundaries`, `tags`,
-`fleet-bump` and `auth-mirror`.
+`RUSTFLAGS=-D warnings`. The xtask has no CI or idioms command; its
+commands are `feature new`, `boundaries`, `docs`, `tags`, `fleet-bump`
+and `auth-mirror`.
 
 ## 6. Composing & building backends — the layer system
 
@@ -115,7 +117,7 @@ the `Resource` construction layer. Keep the two straight:
   `layers![…]` / `.merge(…)`, then `.provide(backend)` (or
   `backend.into_router()`) to get a `LayerRouter`. Backends are
   interchangeable at the `.provide` site — swap the backend, change no
-  consumer code (see `examples/layered-services`).
+  consumer code (see `crates/architect/tests/layer_override.rs`).
 
 - **`Resource<T, E = eyre::Report>` (backend construction).** A lazy
   builder for the backends a layer binds — `config → pool → repo`:
@@ -123,8 +125,7 @@ the `Resource` construction layer. Keep the two straight:
   - `.zip(other)` — independent pair. `.map` / `.map_err` — transform.
   - `Resource::acquire_release(acquire, release)` — register cleanup on a
     `Scope`; finalizers run **LIFO** on `scope.close().await` (graceful
-    shutdown — see `examples/app/server`, which closes its db pool this
-    way on Ctrl-C).
+    shutdown — a server closes its db pool this way on Ctrl-C).
   - `.memoize()` — build once, share across dependents (a pool built once
     for several repos).
   - `.into_router(&scope)` — build a `Services` backend and mount it.
@@ -183,12 +184,12 @@ Same screens, same client types — only the root differs:
 | desktop | `Local(service_router(ExampleRepoMemory))` | **whole stack in-process, no server** |
 | e2e `local_transport_round_trip` | `Local(…)` | identical asserts to the WS path, no server spawned |
 
-The desktop app (`examples/app/desktop`) is the headline: it serves the
+A desktop app is the headline: it serves the
 exact `app_server::service_router` (repo CRUD + `ExampleService`) the axum
 server mounts, just over an in-memory link — proving remote and local are
 behaviour-identical from the UI's point of view. `LocalServer` is native
 only (vox's in-memory link isn't compiled for wasm), so the browser stays
-remote; `examples/app/ui` cfg-gates the `Transport::Local` arm accordingly.
+remote; the shared UI crate cfg-gates the `Transport::Local` arm accordingly.
 
 This is the consumer-facing tip of the layer/construction system: build
 the backend with `Resource`/`Scope`, compose its services with `Layer`,
@@ -201,8 +202,8 @@ one set of screens. Full `LocalServer` walkthrough:
 A vox connect can fail transiently — the server is still booting, a
 WebSocket blips. Don't let that fail the first frame: wrap the
 connect+handshake in `architect::schedule::retry` under an
-exponential-backoff-with-jitter policy. The example client does exactly
-this (`examples/app/ui/src/transport.rs`):
+exponential-backoff-with-jitter policy. A client does exactly
+this:
 
 ```rust
 architect::schedule::retry(

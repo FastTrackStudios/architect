@@ -71,8 +71,8 @@ domain failures `RepoError` shouldn't absorb (remember: extending
 `RepoError` changes the wire for *every* repo). The pattern: **one
 dedicated error enum per service**, `facet::Facet` so it travels the
 vox wire, `thiserror::Error` for ergonomic `?` on the server, kept
-separate from `RepoError`. From
-`examples/app/features/example/example-proto/src/error.rs`:
+separate from `RepoError`. A full example (`examples/greeter/src/lib.rs`
+has the minimal one, `GreetError`):
 
 ```rust
 //! Error type for the custom [`ExampleService`](crate::ExampleService).

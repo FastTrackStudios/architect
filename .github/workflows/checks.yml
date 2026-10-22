@@ -55,6 +55,12 @@ jobs:
         if: ${{ !cancelled() }}
         run: ${NIX_DEV} cargo run -q -p xtask -- boundaries
 
+      # Every path, page link, `just` recipe, `cargo xtask` command and
+      # `-p` package the docs name must exist (docs/content, README.md).
+      - name: docs
+        if: ${{ !cancelled() }}
+        run: ${NIX_DEV} cargo run -q -p xtask -- docs
+
       # The framework half must stay wasm-clean; the ui/story crates pull
       # native rendering (blitz/vello) and are checked natively only.
       - name: check wasm

@@ -11,9 +11,10 @@ and (under `--features server`) a SeaORM-backed implementation.
 
 The repo doubles as a working **reference monorepo**: the facade crate
 lives in `crates/architect`, its proc-macros in `crates/`, and
-`examples/app/` (a full-stack demo with `features/` + Dioxus
-web/desktop apps) shows the layout and testing patterns a real project
-would copy.
+`examples/greeter` is the reference feature (an entity, a service, its
+error, a backend and a server, tested over every wire) that a real
+project copies. `apps/auth-server` is the full-size app built the same
+way.
 
 ## Where to start
 

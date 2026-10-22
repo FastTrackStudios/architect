@@ -44,9 +44,11 @@ Crate sits inside the project's `features/<feature>/` tree alongside
 the contract. Lives in the same workspace, ships from the same
 `Cargo.lock`, gets pulled into the project's app binary directly.
 
-This is what `example-db` and `example-memory` already are in this
-repo:
+This is what `example-db` and `example-memory` were in the example app
+(no longer in the tree; under the [one-crate layout](@/architecture/layout.md)
+they would be `db` and `memory` cargo features of one crate):
 
+<!-- doc-check: off (illustrative names, not paths in this repo) -->
 ```text
 features/example/
   example-proto/        contract
@@ -69,6 +71,7 @@ The app binary (`app-cli`, `app-server`) opts in:
 # apps/app/server/Cargo.toml
 example = { workspace = true, features = ["backend-db"] }
 ```
+<!-- doc-check: on -->
 
 **Use this when**:
 
@@ -236,78 +239,20 @@ Feature crates (e.g. `example-proto`, `example`) carry their own
 layer. `example-proto/full` = `vox + server`. `example/full` =
 `backend-db + backend-memory + example-proto/full`.
 
-## The working examples
+## The working example
 
-Two demonstrators live in `examples/`:
+`examples/greeter` is the live demonstrator. Its backend (`Memory`) is a
+plain struct that implements the contract traits, and
+`examples/greeter/tests/round_trip.rs` runs one generic scenario,
+`async fn scenario(client: &impl Greeter)`, against it in process, over
+vox and over HTTP. The test body never names the concrete backend or
+wire, which is the proof that the contract is the only thing a consumer
+depends on. An out-of-tree backend is the same shape in another
+repository: depend on the contract crate and `architect`, implement the
+trait, list the `Services` bundle.
 
-### `examples/external-stub/` — third-party repo shape
-
-```text
-examples/external-stub/
-  Cargo.toml      depends only on example-proto + architect
-                  (no server-seaorm, no in-tree backend)
-  src/lib.rs      pub struct StubBackend impls ExampleRepo
-```
-
-```text
-examples/
-  external-stub/
-    Cargo.toml      depends only on example-proto + architect
-    src/lib.rs      pub struct StubBackend impls ExampleRepo
-```
-
-It sits **outside** `features/` on purpose — that's the visual cue
-this isn't a first-party impl. Its `Cargo.toml` would look identical
-if it lived in a separate repository and pulled its deps from
-crates.io; only the path-vs-version of two dep lines changes.
-
-### `examples/custom-server/` — binary assembled by hand
-
-```text
-examples/custom-server/
-  Cargo.toml      depends on example-proto + example-stub-backend +
-                  architect[server-axum]
-                  NOTHING from sea-orm, the `example` facade, or
-                  any in-tree backend.
-  src/main.rs     - pick repo (StubBackend::with_seed_data)
-                  - write a service impl (CustomExampleService<R>,
-                    generic over any ExampleRepo)
-                  - mount both dispatchers on /vox via architect::axum_ws
-```
-
-Smoke test that confirms the wiring is genuinely backend-agnostic:
-
-```sh
-$ cargo run -p example-custom-server &
-$ cargo run -q -p app-cli -- list --url ws://127.0.0.1:4041/vox
-3 examples
-  385ae81f-...  stub.alpha
-  062e7e27-...  stub.bravo
-  ed8bc20b-...  stub.charlie
-```
-
-`app-cli` was built against the first-party (SeaORM-aware) workspace,
-but the server it's talking to has *zero* SeaORM in its dependency
-graph. The contract is what holds it together.
-
-### Contract test
-
-`features/example/tests/native/` exercises both `ExampleRepoMemory`
-and `StubBackend` through the same trait surface — and the test
-bodies don't reference the concrete backend type:
-
-```rust
-async fn external_backend_round_trip() {
-    let r = example_stub_backend::StubBackend::new();
-    let created = r.create(ExampleCreate { /* ... */ }).await.unwrap();
-    let got = r.get(created.id).await.unwrap();
-    assert_eq!(got.id, created.id);
-}
-```
-
-The test body never references which concrete backend it's running
-against — proof that the contract is the only thing that matters
-at the consumer's call site.
+(Earlier versions of this page described `external-stub` and
+`custom-server` demonstrators; they left the tree with the example app.)
 
 ## When you want both at once
 

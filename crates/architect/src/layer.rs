@@ -86,9 +86,9 @@
 //!    intra-doc link wouldn't resolve under every feature combo). Browser
 //!    clients use the same `<T>Client` types compiled for wasm.
 //!
-//! See `examples/layered-services/` for a runnable composition
-//! walkthrough and `examples/custom-server/` for the axum mount
-//! variant.
+//! See `examples/greeter/` for a runnable composition (one backend,
+//! `layers![…]`, mounted by `EngineHost` over vox and HTTP) and
+//! `tests/layer_override.rs` for swapping a backend under one router.
 
 use core::any::Any;
 use std::collections::{BTreeMap, BTreeSet, HashMap};

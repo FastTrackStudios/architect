@@ -41,9 +41,9 @@ over `vox_core::memory_link_pair` instead of a socket.
 
 ## Full round-trip, no server
 
-From the e2e suite (`examples/app/tests/e2e`,
-`local_transport_round_trip`) — the **same** `service_router` the axum
-server mounts, identical asserts to the WebSocket path:
+The **same** router the axum server mounts, identical asserts to the
+WebSocket path (the live, minimal version is `over_vox` in
+`examples/greeter/tests/round_trip.rs`):
 
 ```rust,ignore
 use app_server::service_router;
@@ -85,7 +85,7 @@ streaming subscriptions are tested: establish a `<T>EventsClient` /
 | **Tests** | full-wire coverage at unit-test speed; see [testing strata](@/architecture/testing.md) |
 | **Servers, internally** | a server-side consumer of its own services without loopback HTTP |
 
-The desktop app (`examples/app/desktop`) is the headline use. Its root
+A desktop app is the headline use. Its root
 is the entire difference from the web build:
 
 ```rust,ignore

@@ -128,10 +128,8 @@ decode to any type (`u8`, a domain enum, …).
 
 Hand-write fields only for forms that don't mirror a payload (login,
 search, settings); payload-shaped forms come from the derive. The worked
-references: derived —
-`examples/app/features/example/example-ui/src/components/forms/`; the
-primitive — the same files, since the components are now just `TextField`
-layout over the generated fields.
+references: the derive in `crates/architect-derive` (the `form`
+attribute) and the primitives in `features/form`.
 
 ## Field components
 

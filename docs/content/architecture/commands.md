@@ -190,7 +190,7 @@ tokio::spawn(architect_mcp::http::serve(listener, server, Some(token)));
    handler or palette entry beside it.
 2. **A programmatic run never opens a dialog.** UI-only effects queue a
    window for the UI to open (Session's
-   `apps/session/daw/src/actions.rs` is the reference).
+   `studio:apps/session/daw/src/actions.rs` is the reference).
 3. **Pick the effect honestly.** A model decides what it may run without
    asking from `Effect`.
 
