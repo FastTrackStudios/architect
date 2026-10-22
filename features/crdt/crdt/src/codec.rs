@@ -547,6 +547,10 @@ pub fn read_text(m: &LoroMap, key: &str) -> Result<String, RepoError> {
 
 /// Read text with migration from a legacy string `LoroValue`.
 ///
+/// Not concurrent-safe: it seeds a *mergeable* container, so two peers
+/// migrating the same key offline end up with the content twice. Use
+/// [`upgrade_to_text`] where that can happen.
+///
 /// If `key` holds a plain string (from older snapshots), seeds a
 /// `LoroText` container with that content and returns the value.
 /// Idempotent after the first call: subsequent reads hit the
@@ -668,6 +672,100 @@ pub fn apply_text_diff(m: &LoroMap, key: &str, old: &str, new: &str) -> Result<(
         ops.push(TextOp::Insert { pos, text: ins });
     }
     apply_text_ops(m, key, &ops)
+}
+
+/// Write `v` into the `LoroText` child at `map[key]` by minimal diff
+/// against what the container holds now — the writer behind
+/// `#[architect(crdt(text))]` fields.
+///
+/// Because only the changed span becomes ops, a concurrent edit by
+/// another peer elsewhere in the text survives the merge (a plain
+/// `write_str` would be last-writer-wins on the whole value).
+///
+/// The **first** write into a key that isn't a text container yet
+/// (absent, `Null`, or a legacy plain string from before the field
+/// became `crdt(text)`) goes through [`upgrade_to_text`]: a fresh,
+/// non-mergeable `LoroText` seeded with `v`. Two peers doing that first
+/// write concurrently resolve last-writer-wins — exactly the semantics
+/// of the string being replaced — instead of a mergeable container
+/// concatenating both seeds ("hellohello"). Every write after that
+/// merges.
+///
+/// # Errors
+///
+/// [`RepoError::Internal`] if `key` holds something that is neither a
+/// text container nor a legacy string, or Loro rejects the ops.
+pub fn write_text(m: &LoroMap, key: &str, v: &str) -> Result<(), RepoError> {
+    match m.get(key) {
+        Some(loro::ValueOrContainer::Container(Container::Text(t))) => {
+            let current = t.to_string();
+            apply_text_diff(m, key, &current, v)
+        }
+        _ => upgrade_to_text(m, key, Some(v)).map(|_| ()),
+    }
+}
+
+/// Turn `map[key]` into a `LoroText` container, seeded with `seed` or —
+/// when `seed` is `None` — with the legacy plain-string value the key
+/// holds (empty if absent). A key that already holds a text container
+/// is returned untouched, so this is safe to run from a migration step
+/// on every peer.
+///
+/// The container is created with `insert_container`, **not**
+/// `ensure_mergeable_text`: concurrent upgrades on two offline peers
+/// then resolve last-writer-wins (one seed survives, whole) rather than
+/// merging into a duplicated seed. Use this, not
+/// [`read_text_with_migration`], in anything two peers may run
+/// concurrently (e.g. `crate::schema` migrations).
+///
+/// # Errors
+///
+/// [`RepoError::Internal`] if `key` holds a value that is neither a
+/// string nor a text container, or Loro rejects the writes.
+pub fn upgrade_to_text(m: &LoroMap, key: &str, seed: Option<&str>) -> Result<LoroText, RepoError> {
+    let legacy = match m.get(key) {
+        Some(loro::ValueOrContainer::Container(Container::Text(t))) => {
+            if let Some(v) = seed {
+                let current = t.to_string();
+                apply_text_diff(m, key, &current, v)?;
+            }
+            return Ok(t);
+        }
+        Some(loro::ValueOrContainer::Value(LoroValue::String(s))) => (*s).clone(),
+        Some(loro::ValueOrContainer::Value(LoroValue::Null)) | None => String::new(),
+        Some(other) => {
+            return Err(RepoError::Internal(format!(
+                "expected text container or legacy string at `{key}`, got {other:?}"
+            )));
+        }
+    };
+    let content = seed.unwrap_or(&legacy);
+    let t = m.insert_container(key, LoroText::new()).map_err(loro_err)?;
+    if !content.is_empty() {
+        t.insert(0, content).map_err(loro_err)?;
+    }
+    Ok(t)
+}
+
+/// Read a `crdt(text)` field without mutating the doc: a text container
+/// reads as its content, a legacy plain-string value as that string, an
+/// absent key (or `Null`) as `""`.
+///
+/// The derive's `decode_from` uses this so reads stay side-effect free;
+/// the upgrade to a container happens on the next [`write_text`].
+///
+/// # Errors
+///
+/// [`RepoError::Internal`] if `key` holds any other value.
+pub fn read_text_or_legacy(m: &LoroMap, key: &str) -> Result<String, RepoError> {
+    match m.get(key) {
+        Some(loro::ValueOrContainer::Container(Container::Text(t))) => Ok(t.to_string()),
+        Some(loro::ValueOrContainer::Value(LoroValue::String(s))) => Ok((*s).clone()),
+        Some(loro::ValueOrContainer::Value(LoroValue::Null)) | None => Ok(String::new()),
+        Some(other) => Err(RepoError::Internal(format!(
+            "expected text container or legacy string at `{key}`, got {other:?}"
+        ))),
+    }
 }
 
 #[cfg(test)]
@@ -946,5 +1044,55 @@ mod text_tests {
         apply_text_diff(&m, "c", "", "same").unwrap();
         apply_text_diff(&m, "c", "same", "same").unwrap();
         assert_eq!(read_text(&m, "c").unwrap(), "same");
+    }
+    #[test]
+    fn concurrent_legacy_upgrades_do_not_duplicate_the_seed() {
+        let a = LoroDoc::new();
+        a.set_peer_id(1).unwrap();
+        write_str(&root(&a), "c", "hello").unwrap();
+        a.commit();
+        let b = LoroDoc::new();
+        b.set_peer_id(2).unwrap();
+        b.import(&a.export(ExportMode::all_updates()).unwrap())
+            .unwrap();
+
+        upgrade_to_text(&root(&a), "c", None).unwrap();
+        upgrade_to_text(&root(&b), "c", None).unwrap();
+        a.commit();
+        b.commit();
+        let a_to_b = a.export(ExportMode::updates(&b.oplog_vv())).unwrap();
+        let b_to_a = b.export(ExportMode::updates(&a.oplog_vv())).unwrap();
+        b.import(&a_to_b).unwrap();
+        a.import(&b_to_a).unwrap();
+
+        assert_eq!(read_text(&root(&a), "c").unwrap(), "hello");
+        assert_eq!(read_text(&root(&b), "c").unwrap(), "hello");
+        // And from here on, edits merge.
+        write_text(&root(&a), "c", "hello!").unwrap();
+        write_text(&root(&b), "c", ">hello").unwrap();
+        a.commit();
+        b.commit();
+        let a_to_b = a.export(ExportMode::updates(&b.oplog_vv())).unwrap();
+        let b_to_a = b.export(ExportMode::updates(&a.oplog_vv())).unwrap();
+        b.import(&a_to_b).unwrap();
+        a.import(&b_to_a).unwrap();
+        assert_eq!(read_text(&root(&a), "c").unwrap(), ">hello!");
+        assert_eq!(read_text(&root(&b), "c").unwrap(), ">hello!");
+    }
+
+    #[test]
+    fn write_text_upgrades_a_legacy_string_and_reads_stay_pure() {
+        let doc = LoroDoc::new();
+        let m = root(&doc);
+        write_str(&m, "c", "old").unwrap();
+        // Reading a legacy value doesn't touch the doc.
+        let before = doc.oplog_vv();
+        assert_eq!(read_text_or_legacy(&m, "c").unwrap(), "old");
+        assert_eq!(doc.oplog_vv(), before);
+        // Writing upgrades to a container.
+        write_text(&m, "c", "old!").unwrap();
+        assert_eq!(read_text(&m, "c").unwrap(), "old!");
+        assert_eq!(read_text_or_legacy(&m, "c").unwrap(), "old!");
+        assert_eq!(read_text_or_legacy(&m, "absent").unwrap(), "");
     }
 }

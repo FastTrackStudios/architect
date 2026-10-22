@@ -102,6 +102,7 @@ use uuid::Uuid;
 pub mod codec;
 pub mod in_memory;
 pub mod persistence;
+pub mod schema;
 
 pub use persistence::{PersistError, Persistence};
 

@@ -74,6 +74,13 @@ struct FieldAttrs {
     /// `#[architect(form(label = "…"))]` — display label for the
     /// generated form field (default: Title Case of the field name).
     form_label: Option<String>,
+    /// `#[architect(crdt(text))]` — under the container's `crdt` story,
+    /// store this `String` field as a `LoroText` child container instead
+    /// of a last-writer-wins string value, so concurrent character-level
+    /// edits from different peers merge instead of one overwriting the
+    /// other. String fields only (a derive-time error otherwise), and
+    /// only with the container's `#[architect(crdt)]`.
+    crdt_text: bool,
 }
 
 fn parse_container_attrs(attrs: &[syn::Attribute]) -> Result<ContainerAttrs> {
@@ -154,6 +161,17 @@ fn parse_field_attrs(field: &Field) -> Result<FieldAttrs> {
                         out.form_label = Some(s.value());
                     } else {
                         return Err(inner.error("unknown architect form attribute"));
+                    }
+                    Ok(())
+                })?;
+            } else if p.is_ident("crdt") {
+                meta.parse_nested_meta(|inner| {
+                    if inner.path.is_ident("text") {
+                        out.crdt_text = true;
+                    } else {
+                        return Err(inner.error(
+                            "unknown architect crdt field attribute (supported: `crdt(text)`)",
+                        ));
                     }
                     Ok(())
                 })?;
@@ -2542,9 +2560,23 @@ enum CrdtKind {
     U32,
     Dt,
     StringList,
+    /// `#[architect(crdt(text))]` on a `String`: a `LoroText` child
+    /// container, written by minimal diff so concurrent edits merge.
+    Text,
 }
 
 impl CrdtKind {
+    /// `(kind, optional)` for a parsed field, honouring
+    /// `#[architect(crdt(text))]`. None if the type is unsupported (or
+    /// `crdt(text)` sits on anything but a plain `String`).
+    fn of_field(f: &ParsedField) -> Option<(Self, bool)> {
+        if f.attrs.crdt_text {
+            return (type_last_ident(f.ty).as_deref() == Some("String"))
+                .then_some((Self::Text, false));
+        }
+        Self::of(f.ty)
+    }
+
     /// `(kind, optional)` for a field type, or None if unsupported.
     fn of(ty: &Type) -> Option<(Self, bool)> {
         let last = type_last_ident(ty)?;
@@ -2583,6 +2615,7 @@ impl CrdtKind {
             Self::U32 => "u32",
             Self::Dt => "dt",
             Self::StringList => "string_list",
+            Self::Text => "text",
         };
         if optional {
             format!("opt_{base}")
@@ -2591,11 +2624,21 @@ impl CrdtKind {
         }
     }
 
+    /// Codec reader. Text reads through `read_text_or_legacy` so rows
+    /// written before the field became `crdt(text)` (a plain string
+    /// value) still decode; the next write upgrades them in place.
+    fn reader(self, optional: bool) -> String {
+        match self {
+            Self::Text => "read_text_or_legacy".to_string(),
+            _ => format!("read_{}", self.suffix(optional)),
+        }
+    }
+
     /// Shape a value expression for the writer's parameter type.
     fn write_arg(self, optional: bool, value: TokenStream2) -> TokenStream2 {
         match (self, optional) {
-            (Self::Str | Self::StringList, true) => quote! { #value.as_deref() },
-            (Self::Str | Self::StringList, false) => quote! { &#value },
+            (Self::Str | Self::StringList | Self::Text, true) => quote! { #value.as_deref() },
+            (Self::Str | Self::StringList | Self::Text, false) => quote! { &#value },
             _ => value,
         }
     }
@@ -2631,6 +2674,13 @@ fn build_crdt_block(
     update_fields: &[&ParsedField],
 ) -> Result<TokenStream2> {
     if !container.emit_crdt {
+        if let Some(f) = parsed.iter().find(|f| f.attrs.crdt_text) {
+            return Err(syn::Error::new_spanned(
+                f.ty,
+                "#[architect(crdt(text))] needs the container's #[architect(crdt)] \
+                 (it picks the field's LoroMap codec)",
+            ));
+        }
         return Ok(quote! {});
     }
 
@@ -2649,7 +2699,15 @@ fn build_crdt_block(
     // fail with a pointed error instead of a generated-code mismatch.
     let mut kinds: Vec<(CrdtKind, bool)> = Vec::with_capacity(parsed.len());
     for f in parsed {
-        let Some(kind) = CrdtKind::of(f.ty) else {
+        if f.attrs.crdt_text && CrdtKind::of_field(f).is_none() {
+            return Err(syn::Error::new_spanned(
+                f.ty,
+                "#[architect(crdt(text))] maps a `String` onto a LoroText \
+                 container; it is not supported on other types (including \
+                 Option<String>)",
+            ));
+        }
+        let Some(kind) = CrdtKind::of_field(f) else {
             return Err(syn::Error::new_spanned(
                 f.ty,
                 "#[architect(crdt)]: unsupported field type for the LoroMap \
@@ -2688,7 +2746,7 @@ fn build_crdt_block(
     let decode_assigns = parsed.iter().zip(&kinds).map(|(f, (kind, opt))| {
         let id = f.ident;
         let key = LitStr::new(&id.to_string(), id.span());
-        let reader = format_ident!("read_{}", kind.suffix(*opt));
+        let reader = format_ident!("{}", kind.reader(*opt));
         quote! { #id: ::crdt::codec::#reader(m, #key)? }
     });
 
@@ -2700,7 +2758,7 @@ fn build_crdt_block(
         // does run earlier, but re-deriving the kind here means a future
         // reorder degrades to "field omitted from apply_update" rather
         // than a panic inside the compiler.
-        let (kind, opt) = CrdtKind::of(f.ty)?;
+        let (kind, opt) = CrdtKind::of_field(f)?;
         let writer = format_ident!("write_{}", kind.suffix(opt));
         let arg = kind.write_arg(opt, quote! { v });
         Some(quote! {
@@ -3550,5 +3608,80 @@ mod tests {
             }
         });
         assert!(err.contains("requires a `Uuid` primary key"), "got: {err}");
+    }
+
+    // ── #[architect(crdt(text))] ──
+
+    #[test]
+    fn crdt_text_emits_the_loro_text_codec() {
+        let out = expand_ok(parse_quote! {
+            #[architect(repo, crdt)]
+            pub struct Note {
+                #[architect(primary_key)]
+                pub id: Uuid,
+                pub title: String,
+                #[architect(crdt(text))]
+                pub body: String,
+            }
+        });
+        // body → LoroText; title stays a plain LWW string.
+        assert!(out.contains("write_text (m , \"body\""), "got: {out}");
+        assert!(
+            out.contains("read_text_or_legacy (m , \"body\""),
+            "got: {out}"
+        );
+        assert!(out.contains("write_str (m , \"title\""), "got: {out}");
+        assert!(!out.contains("write_str (m , \"body\""), "got: {out}");
+    }
+
+    #[test]
+    fn crdt_text_rejects_non_string_fields() {
+        let err = expand_err(parse_quote! {
+            #[architect(repo, crdt)]
+            pub struct Note {
+                #[architect(primary_key)]
+                pub id: Uuid,
+                #[architect(crdt(text))]
+                pub body: Option<String>,
+            }
+        });
+        assert!(
+            err.contains("maps a `String` onto a LoroText"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn crdt_text_requires_the_container_crdt_story() {
+        let err = expand_err(parse_quote! {
+            #[architect(repo)]
+            pub struct Note {
+                #[architect(primary_key)]
+                pub id: Uuid,
+                #[architect(crdt(text))]
+                pub body: String,
+            }
+        });
+        assert!(
+            err.contains("needs the container's #[architect(crdt)]"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn crdt_field_attr_rejects_unknown_kinds() {
+        let err = expand_err(parse_quote! {
+            #[architect(repo, crdt)]
+            pub struct Note {
+                #[architect(primary_key)]
+                pub id: Uuid,
+                #[architect(crdt(list))]
+                pub body: String,
+            }
+        });
+        assert!(
+            err.contains("unknown architect crdt field attribute"),
+            "got: {err}"
+        );
     }
 }

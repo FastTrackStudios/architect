@@ -1,0 +1,25 @@
+[package]
+name = "crdt-derive-tests"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "Behavior tests for the CRDT code `#[architect(crdt)]` emits: an entity crate with the `crdt` feature convention, driven through real Loro replicas."
+
+# The proto-crate convention the derive's `#[cfg(feature = "crdt")]`
+# blocks key off: `crdt = ["dep:crdt"]`. On by default here — the whole
+# point of this crate is to compile and run that emitted code.
+[features]
+default = ["crdt"]
+crdt = ["dep:crdt"]
+
+[dependencies]
+architect.workspace = true
+crdt = { workspace = true, optional = true }
+facet.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
+
+[lints]
+workspace = true
