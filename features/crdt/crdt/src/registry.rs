@@ -22,6 +22,7 @@
 //! .with_compaction(64)
 //! .with_presence_timeout(30_000)
 //! .with_admission(|doc_id| known_projects.contains(&doc_id))
+//! .with_authorizer(|who, doc_id| may_open(who, doc_id))
 //! .with_idle_eviction(Duration::from_secs(900));
 //!
 //! router
@@ -62,6 +63,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use architect_permissions::Principal;
 use uuid::Uuid;
 
 use crate::sync::{DocPresence, DocSync, DocSyncHost, PresenceHost, SyncError};
@@ -74,6 +76,7 @@ pub type DocFuture = Pin<Box<dyn Future<Output = Result<CrdtDoc, PersistError>> 
 
 type Factory = dyn Fn(Uuid) -> DocFuture + Send + Sync;
 type AdmissionHook = dyn Fn(Uuid) -> bool + Send + Sync;
+type Authorizer = dyn Fn(Option<&Principal>, Uuid) -> bool + Send + Sync;
 
 /// One open doc: its sync host, its presence host, and when the
 /// registry last touched it (attach or [`DocRegistry::doc`]).
@@ -104,6 +107,7 @@ struct Shared {
 pub struct DocRegistry {
     shared: Arc<Shared>,
     admission: Arc<AdmissionHook>,
+    authorizer: Arc<Authorizer>,
     compact_every: u32,
     shallow_bootstrap: bool,
     presence_timeout_ms: i64,
@@ -126,6 +130,7 @@ impl DocRegistry {
                 docs: tokio::sync::Mutex::new(HashMap::new()),
             }),
             admission: Arc::new(|_| true),
+            authorizer: Arc::new(|_, _| true),
             compact_every: 0,
             shallow_bootstrap: false,
             presence_timeout_ms: 30_000,
@@ -162,10 +167,9 @@ impl DocRegistry {
     /// are real. Default: allow all.
     ///
     /// This is **coarse server-side scoping** (e.g. "only docs this
-    /// deployment owns"), not authorization: the hook sees only the doc
-    /// id, not who is asking. Real per-user authz needs caller identity
-    /// threaded through the transport (future work — vox middleware
-    /// context).
+    /// deployment owns"), not authorization: it sees only the doc
+    /// id, not who is asking. Per-caller decisions go in
+    /// [`Self::with_authorizer`].
     #[must_use]
     pub fn with_admission<H>(mut self, hook: H) -> Self
     where
@@ -173,6 +177,48 @@ impl DocRegistry {
     {
         self.admission = Arc::new(hook);
         self
+    }
+
+    /// Decide, per attach, whether **the caller** may sync or watch
+    /// presence on `doc_id`. The hook receives the principal the
+    /// router's [`PermissionsGate`](architect::permissions_gate::PermissionsGate)
+    /// resolved for this call ([`architect::permissions_gate::caller`]) —
+    /// a user, a peer node (`Principal::Host`, its iroh endpoint id), a
+    /// service — or `None` when no gate stands in front of the lane.
+    /// Treat `None` as "no identity": refuse it unless the lane is
+    /// in-process by construction (see [`crate::peer::SelfLane`], which
+    /// presents a fixed principal instead).
+    ///
+    /// Runs on every [`DocSync::sync`] and [`DocPresence::presence`]
+    /// attach, after [`Self::with_admission`]. A refusal is
+    /// [`SyncError::UnknownDoc`], the same answer as a doc that does not
+    /// exist, so the hook leaks nothing about which ids are real.
+    /// Server-side [`Self::doc`] is not a caller's request and does not
+    /// consult it. Default: allow every caller.
+    #[must_use]
+    pub fn with_authorizer<A>(mut self, authorize: A) -> Self
+    where
+        A: Fn(Option<&Principal>, Uuid) -> bool + Send + Sync + 'static,
+    {
+        self.authorizer = Arc::new(authorize);
+        self
+    }
+
+    /// Admission, then the caller's authorization, for one attach.
+    fn admit_caller(&self, doc_id: Uuid) -> Result<(), SyncError> {
+        if !(self.admission)(doc_id) {
+            return Err(SyncError::UnknownDoc);
+        }
+        let who = architect::permissions_gate::caller();
+        if !(self.authorizer)(who.as_ref(), doc_id) {
+            tracing::debug!(
+                ?doc_id,
+                caller = who.as_ref().map_or_else(|| "none".to_owned(), Principal::describe),
+                "doc-registry: attach refused by the authorizer"
+            );
+            return Err(SyncError::UnknownDoc);
+        }
+        Ok(())
     }
 
     /// Evict docs that have had **zero live sessions** (sync and
@@ -306,9 +352,7 @@ impl DocSync for DocRegistry {
         up: vox::Rx<Vec<u8>>,
         down: vox::Tx<crate::sync::SyncDown>,
     ) -> Result<(), SyncError> {
-        if !(self.admission)(doc_id) {
-            return Err(SyncError::UnknownDoc);
-        }
+        self.admit_caller(doc_id)?;
         // Attach while holding the registry lock — the session is
         // counted before any sweep can re-check — but pump the held-open
         // call AFTER releasing it: `sync` now stays in flight for the
@@ -335,9 +379,7 @@ impl DocPresence for DocRegistry {
         up: vox::Rx<Vec<u8>>,
         down: vox::Tx<Vec<u8>>,
     ) -> Result<(), SyncError> {
-        if !(self.admission)(doc_id) {
-            return Err(SyncError::UnknownDoc);
-        }
+        self.admit_caller(doc_id)?;
         // Same attach-under-lock / pump-after-release split as `sync`.
         let session = {
             let mut docs = self.shared.docs.lock().await;

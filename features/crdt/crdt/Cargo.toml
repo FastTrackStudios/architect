@@ -52,6 +52,10 @@ turso = ["dep:turso"]
 
 [dependencies]
 architect.workspace = true
+# `Principal` — who the router's permissions gate says is calling, handed
+# to `DocRegistry::with_authorizer` and the `peer` lane's peer check.
+# Already in architect's own tree (wasm-clean).
+architect-permissions.workspace = true
 vox = { workspace = true, optional = true }
 facet = { workspace = true, optional = true }
 loro.workspace = true
@@ -102,6 +106,8 @@ crdt = { path = ".", features = ["vox", "turso"] }
 architect = { workspace = true, features = ["vox", "local"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 tempfile = "3"
+# `crdt::peer`'s convergence property over random edit orders.
+proptest.workspace = true
 
 [lints]
 workspace = true
