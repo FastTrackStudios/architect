@@ -1341,6 +1341,12 @@ pub mod dispatch {
 #[cfg(feature = "settings")]
 pub mod settings;
 
+// Test support for an app's own test binaries: the counting allocator
+// (`testing-alloc`) and the sandbox boot (`testing`). Dev-dependencies
+// only; see `architect::testing`.
+#[cfg(feature = "testing-alloc")]
+pub mod testing;
+
 #[cfg(feature = "action-list")]
 pub mod schema;
 

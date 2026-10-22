@@ -130,6 +130,63 @@ architect itself has no browser suite since the example app left the
 tree; `just auth-e2e` runs the identity server's end-to-end flow, and
 Task carries the wasm tests of its features. Both run the same three browser tests.
 
+## Booting an app in a sandbox (`architect::testing`)
+
+A test that boots an app as-is boots it over whatever the machine's
+environment says: on a developer's laptop that is the real home, the
+real config dir and the real data. Task's e2e suite once booted every
+real org that way and wrote markers into real vaults.
+`architect::testing::sandbox_server(seed)` (feature `testing`, a
+dev-dependency) closes that door:
+
+```rust,ignore
+let server = architect::testing::sandbox_server(|sb| async move {
+    plant_fixtures(&sb.data())?;              // the seed: write the world
+    let backend = Backend::open(&sb.data()).await?;
+    Ok(backend.into_router())                 // a LayerRouter, EngineHost or axum Router
+})
+.await?;
+let client = connect(&server.url()).await?;   // ws://127.0.0.1:<port>/vox
+```
+
+Under one process-wide env lock (`testing::env_lock`) it points `HOME`,
+`USERPROFILE`, the `XDG_*` dirs, `APPDATA` and `LOCALAPPDATA` inside a
+fresh tempdir, runs `seed`, then serves the result on `127.0.0.1:0`.
+`testing::sandbox()` is the builder: `.clear("APP_VAR")` removes a
+variable a developer's shell may set, `.data_env("APP_DATA_ROOT")` names
+the sandbox's data dir to the app, `.env(k, v)` sets anything else,
+`.boot(seed)` builds without serving, and `.over(&sandbox)` boots again
+over a previous boot's directory (the restart shape). The variables stay
+set after the boot, which is sound one test per process (nextest).
+`crates/architect/tests/testing_sandbox.rs` sets `HOME` to a poisoned
+directory first and asserts the boot never touches it.
+
+### Holding a memory budget
+
+`architect::testing::alloc::Counting` (feature `testing-alloc`, std only)
+is a `GlobalAlloc` over `System` that counts live heap bytes and their
+peak, so a test can assert a budget in bytes the program asked for
+instead of RSS. architect never installs it; the test binary does:
+
+```rust,ignore
+#[global_allocator]
+static ALLOC: architect::testing::alloc::Counting = architect::testing::alloc::Counting;
+
+alloc::reset_peak();
+let before = alloc::live();
+run_the_thing().await;
+assert!(alloc::peak() - before < 64 << 20, "{}", alloc::mib(alloc::peak() - before));
+```
+
+The counters are process-wide: guard a budget test with
+`alloc::counters_are_this_tests()`, which is true under nextest and
+skips (with a line saying why) under plain `cargo test`.
+`crates/architect/tests/testing_alloc_uninstalled.rs` pins that linking
+the feature installs nothing.
+
+Run them with
+`cargo test -p architect --features testing --test testing_sandbox --test testing_alloc --test testing_alloc_uninstalled`.
+
 ## What goes where
 
 | Test concern | Layer |
@@ -139,6 +196,8 @@ Task carries the wasm tests of its features. Both run the same three browser tes
 | Wire round-trips, middleware, streams | 1 — `LocalServer` |
 | rpc sync→async marshaling | 1 — `__<T>Bridge` |
 | Cross-feature integration | 2 — native, real server |
+| App boot that must not see the developer's home | 2 — `testing::sandbox_server` |
+| Memory budget in heap bytes | 2 — `testing::alloc::Counting` |
 | Auth + permission flows | 2 |
 | Wire format compatibility | 3 — browser |
 | Wasm32 build correctness | 3 |
