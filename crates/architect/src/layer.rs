@@ -978,6 +978,27 @@ where
     })
 }
 
+#[cfg(all(feature = "snapshot", not(target_arch = "wasm32")))]
+impl LayerRouter {
+    /// Park every call this router dispatches at `gate` first (see
+    /// [`crate::snapshot`]). Wraps each mounted handler in a
+    /// [`GatedLayer`](crate::snapshot::GatedLayer) and keeps the router
+    /// type, so the result mounts on `EngineHost`, `LocalServer` and every
+    /// transport unchanged. Call it last: routers
+    /// merged in afterwards are not gated.
+    #[must_use]
+    pub fn gated(mut self, gate: &crate::snapshot::WriteGate) -> Self {
+        self.handlers = self
+            .handlers
+            .into_iter()
+            .map(|h| -> Arc<dyn DynHandler> {
+                Arc::new(crate::snapshot::GatedLayer::from_dyn(h, gate.clone()))
+            })
+            .collect();
+        self
+    }
+}
+
 impl LayerSink for LayerRouter {
     fn add_mounted(&mut self, mounted: Mounted) {
         let (descriptor, handler) = mounted.into_parts();

@@ -251,6 +251,12 @@ capability = ["dep:ed25519-dalek", "dep:base64", "dep:getrandom", "dep:zeroize"]
 # backend. Native only for now; the wasm OPFS ledger is a follow-up.
 blob = ["dep:sha2"]
 
+# Snapshot quiesce (`architect::snapshot`): `WriteGate` (bounded hold,
+# default 30 s), `GatedLayer` / `LayerRouter::gated` parking vox calls at
+# the gate, `quiesce` (pause -> checkpoint -> step), and with
+# `server-seaorm` the sqlite `wal_checkpoint` callback. Native only.
+snapshot = ["vox", "tokio/time", "dep:tracing"]
+
 # Blocking client facade (`architect::sync_client` + the emitted
 # `<Trait>SyncClient`s): drive the async vox client from sync code over
 # a background tokio runtime. Native only — wasm has no blocking.
@@ -434,6 +440,10 @@ required-features = ["capability"]
 [[test]]
 name = "blob"
 required-features = ["blob"]
+
+[[test]]
+name = "snapshot"
+required-features = ["snapshot", "local", "server-seaorm"]
 
 [[test]]
 name = "iroh_link"
