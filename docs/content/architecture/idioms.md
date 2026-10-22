@@ -98,10 +98,12 @@ the UI:
 
 CI (`.github/workflows/checks.yml`) runs `cargo check --workspace
 --all-targets` → `cargo clippy --workspace --all-targets` → `cargo test
---workspace` → `cargo check --target wasm32-unknown-unknown` on the
-framework crates, with `RUSTFLAGS=-D warnings`. There is no `cargo xtask
-ci`; the xtask commands are `feature new`, `tags`, `fleet-bump` and
-`auth-mirror`.
+--workspace` → `cargo xtask boundaries` (the layer table and ratcheted
+source idioms in `boundaries.toml`) → `cargo check --target
+wasm32-unknown-unknown` on the framework crates, with
+`RUSTFLAGS=-D warnings`. There is no `cargo xtask
+ci`; the xtask commands are `feature new`, `boundaries`, `tags`,
+`fleet-bump` and `auth-mirror`.
 
 ## 6. Composing & building backends — the layer system
 

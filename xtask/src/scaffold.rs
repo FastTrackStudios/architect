@@ -36,6 +36,12 @@ pub fn feature_new(repo: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
         return Err(format!("{} already exists", root.display()));
     }
     let registered = register(&workspace, name)?;
+    let table_path = repo.join("boundaries.toml");
+    let table = match fs::read_to_string(&table_path) {
+        Ok(text) => Some(add_boundary_rows(&text, name)?),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(format!("{}: {e}", table_path.display())),
+    };
 
     let mut written = Vec::new();
     for (relative, contents) in files(name) {
@@ -49,7 +55,61 @@ pub fn feature_new(repo: &Path, name: &str) -> Result<Vec<PathBuf>, String> {
     fs::write(&manifest, registered).map_err(|e| format!("{}: {e}", manifest.display()))?;
     format_rust(&written);
     written.push(manifest);
+    if let Some(table) = table {
+        fs::write(&table_path, table).map_err(|e| format!("{}: {e}", table_path.display()))?;
+        written.push(table_path);
+    }
     Ok(written)
+}
+
+/// `boundaries.toml` with a row per role of the new crate, so `cargo xtask
+/// boundaries` checks it from its first commit (it fails on a feature
+/// crate without a row). Inserted above the `[[idiom]]` tables, or at the
+/// end when there are none.
+fn add_boundary_rows(table: &str, name: &str) -> Result<String, String> {
+    if table.contains(&format!("package = \"{name}\"")) {
+        return Err(format!("boundaries.toml already has rows for `{name}`"));
+    }
+    let rows = format!(
+        r#"# ── {name} (cargo xtask feature new) ─────────────────────────────────────
+[[row]]
+package = "{name}"
+layer = "L0"
+
+[[row]]
+package = "{name}"
+features = ["vox"]
+layer = "L0"
+
+[[row]]
+package = "{name}"
+features = ["memory"]
+layer = "L1"
+
+[[row]]
+package = "{name}"
+features = ["ui"]
+layer = "L4"
+"#
+    );
+    let lines: Vec<&str> = table.lines().collect();
+    let Some(first_idiom) = lines.iter().position(|l| l.trim() == "[[idiom]]") else {
+        let mut out = table.trim_end().to_string();
+        out.push_str("\n\n");
+        out.push_str(&rows);
+        return Ok(out);
+    };
+    let mut at = first_idiom;
+    while at > 0
+        && lines
+            .get(at.saturating_sub(1))
+            .is_some_and(|l| l.trim().is_empty() || l.trim_start().starts_with('#'))
+    {
+        at = at.saturating_sub(1);
+    }
+    let mut out: Vec<String> = lines.iter().map(ToString::to_string).collect();
+    out.insert(at, format!("{rows}"));
+    Ok(join_lines(&out, table))
 }
 
 /// Run rustfmt over the generated sources, so the templates do not have
@@ -512,6 +572,20 @@ uuid = "1"
     fn registers_into_an_inline_members_list() {
         let out = add_member("[workspace]\nmembers = []\n", "features/x").expect("member");
         assert_eq!(out, "[workspace]\nmembers = [\n    \"features/x\",\n]\n");
+    }
+
+    #[test]
+    fn adds_boundary_rows_above_the_idioms() {
+        let table = "[[row]]\npackage = \"crdt\"\nlayer = \"L0\"\n\n# ── idioms ──\n[[idiom]]\nname = \"x\"\n";
+        let out = add_boundary_rows(table, "tour-dates").expect("rows");
+        let rows = out.find("package = \"tour-dates\"").expect("rows added");
+        let idioms = out.find("# ── idioms ──").expect("idioms kept");
+        assert!(rows < idioms, "rows go above the idiom tables:\n{out}");
+        assert_eq!(out.matches("package = \"tour-dates\"").count(), 4);
+        assert!(out.contains("features = [\"memory\"]\nlayer = \"L1\""));
+        assert!(add_boundary_rows(&out, "tour-dates").is_err());
+        let appended = add_boundary_rows("[[row]]\npackage = \"crdt\"\n", "x").expect("rows");
+        assert!(appended.ends_with("features = [\"ui\"]\nlayer = \"L4\"\n"));
     }
 
     #[test]

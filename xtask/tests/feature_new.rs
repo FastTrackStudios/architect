@@ -61,6 +61,15 @@ fn scaffolds_one_crate_that_checks_natively_and_for_wasm() {
         "{NAME} = {{ path = \"features/{NAME}\", default-features = false }}"
     )));
 
+    if repo.join("boundaries.toml").exists() {
+        let table = fs::read_to_string(workspace.join("boundaries.toml")).expect("read table");
+        assert_eq!(
+            table.matches(&format!("package = \"{NAME}\"")).count(),
+            4,
+            "one boundaries row per role"
+        );
+    }
+
     // The contract alone, natively and for the browser.
     cargo_check(&repo, &workspace, &[]);
     cargo_check(&repo, &workspace, &["--target", "wasm32-unknown-unknown"]);
@@ -82,7 +91,7 @@ fn fresh_workspace(repo: &Path) -> PathBuf {
     let absolute = format!("path = \"{}/", repo.display());
     let manifest = without_members(&root).replace("path = \"", &absolute);
     fs::write(dir.join("Cargo.toml"), manifest).expect("write manifest");
-    for file in ["Cargo.lock", "rust-toolchain.toml"] {
+    for file in ["Cargo.lock", "rust-toolchain.toml", "boundaries.toml"] {
         let from = repo.join(file);
         if from.exists() {
             fs::copy(&from, dir.join(file)).expect("copy workspace file");
