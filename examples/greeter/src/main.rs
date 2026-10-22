@@ -25,6 +25,7 @@ async fn main() -> eyre::Result<()> {
     let backend = Memory::default();
     EngineHost::new(backend.clone().into_router(), config.bind)
         .plugin(backend.into_http_router())
+        .build_info(architect::build_info!())
         .serve()
         .await?;
     Ok(())
