@@ -26,8 +26,8 @@ architect = { workspace = true, features = ["client"] }
 # apps/server (axum binary)
 architect = { workspace = true, features = ["server"] }
 
-# features/foo/foo-proto (contract crate) — forward vox so each
-# consumer decides whether the RPC stack compiles:
+# features/foo (one crate per feature, see layout.md) — forward vox so
+# each consumer decides whether the RPC stack compiles:
 [features]
 vox = ["dep:vox", "dep:vox-types", "architect/vox"]
 ```
