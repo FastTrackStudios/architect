@@ -183,6 +183,43 @@ tokio::spawn(architect_mcp::http::serve(listener, server, Some(token)));
 - Tool results are capped at `MAX_TEXT`. An action that can answer with
   a lot should page.
 
+### Serving on loopback and being found
+
+An app that serves its list live does three things: bind loopback,
+say where it is, and name it for Claude Code. `architect-mcp` does all
+three, so the app does not hand-roll port, token or file handling:
+
+```rust
+// feature `http`; on the app's tokio runtime
+let server = architect_mcp::Server::new("session", env!("CARGO_PKG_VERSION"), list.clone());
+// 127.0.0.1, port from FTS_MCP_PORT (else 47811), token from FTS_MCP_TOKEN
+// when non-empty; Ok(None) when FTS_MCP=0.
+if let Some(serving) = server
+    .serve_loopback_or(47_811, "FTS_MCP_PORT", "FTS_MCP_TOKEN")
+    .await?
+{
+    // ~/.config/fts/session-mcp.json: {"url": ..., "token": ...}, mode 0600
+    serving.publish("session")?;
+}
+// a dev tool or build step, not every launch: the repo's .mcp.json
+architect_mcp::project_mcp_json(repo_root, "session", "http://127.0.0.1:47811/mcp")?;
+```
+
+- `serve_loopback(port_env, token_env)` takes any free port when the
+  variable is unset; `serve_loopback_or` gives a fixed default, which a
+  committed `.mcp.json` needs. A port variable that is not a port is an
+  error, as is a port already taken.
+- The discovery file `<config>/fts/<name>-mcp.json` is how any client
+  finds the port and the token (`architect_mcp::read(name)`). It is
+  written to a `0600` temporary file and renamed into place, so the
+  token is never readable by another user. Call `unpublish(name)` when
+  the app stops serving.
+- `.mcp.json` carries the URL only, never the token: it is committed.
+  `project_mcp_json` keeps the other servers in the file and writes
+  nothing when the entry already matches.
+- The token stays optional. Without one, anything on this machine can
+  run every action; set a token for an app with destructive actions.
+
 ## Rules
 
 1. **One command per capability.** If a person or an agent can do it, it
