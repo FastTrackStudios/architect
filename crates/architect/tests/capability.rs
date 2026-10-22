@@ -6,13 +6,18 @@ use architect::capability::{
     Capability, CapabilityError, MAX_TOKEN_LEN, ServerKeypair, TOKEN_VERSION,
 };
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use std::fmt::Write as _;
 
 const NOW: i64 = 1_800_000_000;
 
+// Helpers are not `#[test]` fns, so clippy's in-test unwrap allowance
+// does not reach them; an unwrap here is still the assertion.
+#[allow(clippy::unwrap_used)]
 fn kp() -> ServerKeypair {
     ServerKeypair::generate().unwrap()
 }
 
+#[allow(clippy::unwrap_used)]
 fn grant() -> Capability {
     Capability::expiring_in("blob.dn", "sha256:deadbeef", NOW, 300).unwrap()
 }
@@ -89,7 +94,7 @@ fn truncated_garbage_and_oversized_tokens_are_rejected() {
         kp.verify("", "blob.dn", NOW),
         Err(CapabilityError::Malformed)
     ));
-    assert!(matches!(kp.verify(&tok[..40], "blob.dn", NOW), Err(_)));
+    assert!(kp.verify(tok.get(..40).unwrap(), "blob.dn", NOW).is_err());
     assert!(matches!(
         kp.verify("not base64!", "blob.dn", NOW),
         Err(CapabilityError::BadBase64)
@@ -188,7 +193,10 @@ fn debug_does_not_print_the_seed() {
 }
 
 fn hex(b: &[u8]) -> String {
-    b.iter().map(|x| format!("{x:02x}")).collect()
+    b.iter().fold(String::new(), |mut s, x| {
+        let _ = write!(s, "{x:02x}");
+        s
+    })
 }
 
 // ── key file ───────────────────────────────────────────────────────────
