@@ -556,6 +556,12 @@ pub mod capability;
 #[cfg(all(feature = "blob", not(target_arch = "wasm32")))]
 pub mod blob;
 
+// Snapshot quiesce — the `WriteGate`, the `GatedLayer` vox wrapper and the
+// `quiesce` pause → checkpoint → step cycle with a bounded hold. Native
+// only; see `architect::snapshot` and `docs/content/architecture/snapshot.md`.
+#[cfg(all(feature = "snapshot", not(target_arch = "wasm32")))]
+pub mod snapshot;
+
 // Deterministic jitter — one splitmix64 shared by `schedule` and
 // `reconnect`, which each carried an identical copy. Gated on the same
 // features as its two consumers so it is not dead code without them.
