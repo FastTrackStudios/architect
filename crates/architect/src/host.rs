@@ -26,6 +26,10 @@ use crate::LayerRouter;
 
 mod mount;
 pub use mount::{BEARER_SUBPROTOCOL_PREFIX, DavRequest, RequestHead};
+#[cfg(feature = "otlp-forward")]
+mod otlp;
+#[cfg(feature = "otlp-forward")]
+pub use otlp::OTLP_SIGNALS;
 
 /// The vox WebSocket subprotocol `/vox` selects.
 ///

@@ -89,7 +89,9 @@ EngineHost::new(backend.clone().into_router(), config.bind)
   - `.vox_at("/org/{slug}/vox", |head| async { Ok(handler) / Err(impl IntoResponse) })`: vox WS at a parameterised path; the resolver picks the handler (identity) per connection before the upgrade. `vox_at("/vox", …)` replaces the built-in `/vox`.
   - `.document(path, |head| async { Ok(impl IntoResponse) / Err(impl IntoResponse) })`: a `GET` document (`/.well-known/…`, `/org/{slug}/api`, a per-org probe).
   - `.dav(mount, |dav: DavRequest| async { response })`: WebDAV, every verb at `mount`, `mount/` and below, mounted outside `finish` (outside CORS); `DavRequest { head, mount, rel, request }`.
-  - Tests: `crates/architect/tests/host_mounts.rs`.
+  - `.otlp_forward("/otlp", upstream, |head| async { Ok(()) / Err(impl IntoResponse) })` (architect feature `otlp-forward`, `crates/architect/src/host/otlp.rs`): `POST /otlp/v1/{traces,logs,metrics}` forwarded with its content type; other signals `404`, collector down `502`.
+  - `.mcp(server, token)` / `.mcp_at(path, resolve)`: `architect_mcp::host::McpHost` (feature `host`); see `references/commands-mcp.md`.
+  - Tests: `crates/architect/tests/host_mounts.rs`, `examples/greeter/tests/host_mounts.rs`.
 - `serve()` binds TCP and spawns iroh if configured: `.iroh(key_path, id_path)` + optional `.iroh_lookup(PeerLookup::N0AndLan)`. Real use: `apps/auth-server/src/server.rs`. The key file is created 0600 on unix.
 
 ## 4. Connect

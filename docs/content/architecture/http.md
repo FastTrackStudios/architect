@@ -263,13 +263,25 @@ EngineHost::new(vox, bind)
   every `OPTIONS` itself, and a file manager opens a mount with a bare
   `OPTIONS` and reads `DAV:` and `Allow:` off the reply. WebDAV clients
   are not browsers, so the handler authenticates them itself.
+- Two more mounts live behind features. `.otlp_forward(at, upstream,
+  authorize)` (architect feature `otlp-forward`,
+  `crates/architect/src/host/otlp.rs`) accepts
+  `POST {at}/v1/{traces,logs,metrics}` and forwards each body, with its
+  content type, to the collector at `upstream`, once `authorize(head)`
+  says `Ok`. Clients reuse the host's auth and TLS instead of reaching a
+  public collector. Any other signal is `404`, and an unreachable
+  collector is `502`. `.mcp(…)` / `.mcp_at(path, resolve)` come from
+  `architect_mcp::host::McpHost` (feature `host`), an extension trait,
+  because architect cannot depend on its MCP crate. See
+  [commands](@/architecture/commands.md).
 - `.plugin(Router)` stays as the escape hatch, for what neither a service
   trait nor a builder method covers yet. Every route in it still counts
   toward `cargo xtask boundaries`' `hand-routes`.
 
 `crates/architect/tests/host_mounts.rs` drives all three: a real
 upgrade per bearer and org, WebDAV verbs past a CORS-like layer, and
-documents ahead of the SPA.
+documents ahead of the SPA. `examples/greeter/tests/host_mounts.rs`
+drives MCP and OTLP forwarding against a fake collector.
 
 ### `/version.json`
 
