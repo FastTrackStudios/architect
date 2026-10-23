@@ -27,6 +27,12 @@
 //! method name, the generated client methods and the schema stamp all
 //! stay the identifier.
 //!
+//! The same attribute picks a verb other than `POST` and a body cap
+//! (`#[http(get, path = "notes/{id}", limit = "1GiB")]`), and a `{name}` /
+//! `{*name}` segment, in the method's path or the service's, binds the
+//! argument called `name`. Those routes take the [`RawCall`] extractor;
+//! the rest keep [`Call`].
+//!
 //! What the derive emits under the consumer's `http` feature, per trait
 //! module:
 //!
@@ -138,38 +144,88 @@ pub fn path(prefix: &str, method: &str) -> String {
 
 /// The route table a bundle binds into before it becomes a router.
 ///
-/// Keyed by path, later inserts replace earlier ones — which is how a
-/// merged mock overrides a service's HTTP face the way it overrides the
-/// vox one (an axum `Router::merge` would panic on the duplicate).
+/// Keyed by path (and verb, for [`route_verb`](Self::route_verb)), later
+/// inserts replace earlier ones — which is how a merged mock overrides a
+/// service's HTTP face the way it overrides the vox one (an axum
+/// `Router::merge` would panic on the duplicate). Handlers for different
+/// verbs at one path (`GET` and `DELETE /files/{id}`) share the route.
 #[derive(Default)]
 pub struct HttpRoutes {
     // Zero-sized in a build without `http` (the stub router), hence the allow.
     #[allow(clippy::zero_sized_map_values)]
-    routes: std::collections::BTreeMap<String, MethodRouter>,
+    routes: std::collections::BTreeMap<(String, &'static str), MethodRouter>,
 }
 
 impl HttpRoutes {
-    /// Mount (or replace) the handler at `path`.
+    /// Mount (or replace) the handler at `path`, whatever verbs it answers.
     pub fn route(&mut self, path: &str, handler: MethodRouter) -> &mut Self {
-        self.routes.insert(path.to_owned(), handler);
+        self.routes.insert((path.to_owned(), ""), handler);
+        self
+    }
+
+    /// Mount (or replace) the handler for one verb (`"GET"`, `"PUT"`, …)
+    /// at `path`, leaving the other verbs at that path alone.
+    pub fn route_verb(
+        &mut self,
+        verb: &'static str,
+        path: &str,
+        handler: MethodRouter,
+    ) -> &mut Self {
+        self.routes.insert((path.to_owned(), verb), handler);
         self
     }
 
     /// The paths mounted so far, sorted.
     #[must_use]
     pub fn paths(&self) -> Vec<&str> {
-        self.routes.keys().map(String::as_str).collect()
+        let mut paths: Vec<&str> = self.routes.keys().map(|(path, _)| path.as_str()).collect();
+        paths.dedup();
+        paths
     }
 
     /// Turn the table into a router.
     #[must_use]
     pub fn into_router(self) -> Router {
         let mut router = Router::new();
-        for (path, handler) in self.routes {
+        for ((path, _), handler) in self.routes {
             router = router.route(&path, handler);
         }
         router
     }
+}
+
+/// The body cap a route has without `limit = …`: axum's default, 2 MiB.
+pub const DEFAULT_BODY_LIMIT: usize = 2 * 1024 * 1024;
+
+/// One path parameter as a client writes it into a URL: every byte
+/// outside the RFC 3986 unreserved set (`A-Z a-z 0-9 - . _ ~`) is
+/// percent-encoded, `/` included. The router decodes it again.
+#[must_use]
+pub fn encode_segment(value: &dyn Display) -> String {
+    encode(&value.to_string(), false)
+}
+
+/// A `{*rest}` parameter as a client writes it: [`encode_segment`], except
+/// that `/` stays, so `a/b c.txt` becomes `a/b%20c.txt`.
+#[must_use]
+pub fn encode_rest(value: &dyn Display) -> String {
+    encode(&value.to_string(), true)
+}
+
+fn encode(raw: &str, keep_slash: bool) -> String {
+    use core::fmt::Write as _;
+    let mut out = String::with_capacity(raw.len());
+    for byte in raw.bytes() {
+        if byte.is_ascii_alphanumeric()
+            || matches!(byte, b'-' | b'.' | b'_' | b'~')
+            || (keep_slash && byte == b'/')
+        {
+            out.push(char::from(byte));
+        } else {
+            let _ = write!(out, "%{byte:02X}");
+        }
+    }
+    out
 }
 
 /// Bind a backend's HTTP face into a route table — the HTTP twin of [`crate::Bind`].
@@ -219,21 +275,139 @@ pub fn token_or_bearer(from_body: String, bearer: Option<String>) -> String {
     }
 }
 
+// A ready `Response` is the rejection type of every extractor here (axum's
+// own idiom): the handler returns it as is, so boxing it buys nothing.
 #[cfg(feature = "http")]
+#[allow(clippy::result_large_err)]
 mod server {
     use super::{ErrorBody, HttpError};
     use axum::body::Bytes;
-    use axum::extract::{FromRequest, Request};
-    use axum::http::{StatusCode, header};
+    use axum::extract::rejection::PathRejection;
+    use axum::extract::{FromRequest, FromRequestParts as _, Path, Request};
+    use axum::http::{HeaderMap, StatusCode, header};
     use axum::response::IntoResponse;
+    use std::collections::HashMap;
 
     pub use axum;
     pub use axum::Router;
     pub use axum::extract::State;
     pub use axum::response::Response;
-    pub use axum::routing::{get, post};
+    pub use axum::routing::{any, delete, get, post, put};
     /// A route's handler set, state already applied.
     pub type MethodRouter = axum::routing::MethodRouter<()>;
+
+    /// Raise (or lower) the body cap of one route: axum's `DefaultBodyLimit`.
+    #[must_use]
+    pub fn with_limit(handler: MethodRouter, bytes: usize) -> MethodRouter {
+        handler.layer(axum::extract::DefaultBodyLimit::max(bytes))
+    }
+
+    /// `Authorization: Bearer <token>`, trimmed; `None` when absent or empty.
+    fn bearer_of(headers: &HeaderMap) -> Option<String> {
+        headers
+            .get(header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "))
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_owned)
+    }
+
+    /// A JSON body as the argument struct; empty means `{}`.
+    fn decode_args<A: facet::Facet<'static>>(bytes: &[u8]) -> Result<A, Response> {
+        let body: &[u8] = if bytes.is_empty() { b"{}" } else { bytes };
+        facet_json::from_slice::<A>(body).map_err(|err| {
+            plain_error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_body",
+                &format!("could not decode request body: {err}"),
+            )
+        })
+    }
+
+    /// The extractor of a route with path parameters, a verb other than
+    /// `POST`, or a body limit: the path parameters, the bearer token, and
+    /// the rest of the request for the handler to take what it needs from.
+    pub struct RawCall {
+        params: HashMap<String, String>,
+        bearer: Option<String>,
+        request: Option<Request>,
+    }
+
+    impl<S> FromRequest<S> for RawCall
+    where
+        S: Send + Sync,
+    {
+        type Rejection = Response;
+
+        async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
+            let (mut parts, body) = req.into_parts();
+            let params = match Path::<HashMap<String, String>>::from_request_parts(
+                &mut parts, state,
+            )
+            .await
+            {
+                Ok(Path(params)) => params,
+                // A route with no `{param}` at all.
+                Err(PathRejection::MissingPathParams(_)) => HashMap::new(),
+                Err(other) => {
+                    return Err(plain_error(
+                        StatusCode::BAD_REQUEST,
+                        "invalid_path",
+                        &other.body_text(),
+                    ));
+                }
+            };
+            let bearer = bearer_of(&parts.headers);
+            Ok(Self {
+                params,
+                bearer,
+                request: Some(Request::from_parts(parts, body)),
+            })
+        }
+    }
+
+    impl RawCall {
+        /// The path parameter `name`, parsed; `400` when it does not parse.
+        pub fn param<T>(&self, name: &str) -> Result<T, Response>
+        where
+            T: core::str::FromStr,
+            T::Err: core::fmt::Display,
+        {
+            let Some(raw) = self.params.get(name) else {
+                return Err(plain_error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_path",
+                    &format!("the path has no `{name}`"),
+                ));
+            };
+            raw.parse::<T>().map_err(|err| {
+                plain_error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_path",
+                    &format!("path parameter `{name}`: {err}"),
+                )
+            })
+        }
+
+        /// The request's bearer token, if any.
+        #[must_use]
+        pub fn bearer(&self) -> Option<String> {
+            self.bearer.clone()
+        }
+
+        /// Decode the body as the JSON argument struct, under the route's
+        /// body limit. Empty (or already taken) reads as `{}`.
+        pub async fn json<A: facet::Facet<'static>>(&mut self) -> Result<A, Response> {
+            let Some(request) = self.request.take() else {
+                return decode_args(b"");
+            };
+            let bytes = Bytes::from_request(request, &())
+                .await
+                .map_err(IntoResponse::into_response)?;
+            decode_args(&bytes)
+        }
+    }
 
     /// One decoded call: the argument struct plus the bearer token the
     /// request carried, if any. The generated handlers take this as their
@@ -256,25 +430,11 @@ mod server {
         type Rejection = Response;
 
         async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
-            let bearer = req
-                .headers()
-                .get(header::AUTHORIZATION)
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.strip_prefix("Bearer "))
-                .map(str::trim)
-                .filter(|v| !v.is_empty())
-                .map(str::to_owned);
+            let bearer = bearer_of(req.headers());
             let bytes = Bytes::from_request(req, state)
                 .await
                 .map_err(IntoResponse::into_response)?;
-            let body: &[u8] = if bytes.is_empty() { b"{}" } else { &bytes };
-            let args = facet_json::from_slice::<A>(body).map_err(|err| {
-                plain_error(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    "invalid_body",
-                    &format!("could not decode request body: {err}"),
-                )
-            })?;
+            let args = decode_args::<A>(&bytes)?;
             Ok(Self { args, bearer })
         }
     }
@@ -461,6 +621,22 @@ mod server {
     pub fn get<H>(_handler: H) -> MethodRouter {
         MethodRouter
     }
+    #[must_use]
+    pub fn put<H>(_handler: H) -> MethodRouter {
+        MethodRouter
+    }
+    #[must_use]
+    pub fn delete<H>(_handler: H) -> MethodRouter {
+        MethodRouter
+    }
+    #[must_use]
+    pub fn any<H>(_handler: H) -> MethodRouter {
+        MethodRouter
+    }
+    #[must_use]
+    pub const fn with_limit(handler: MethodRouter, _bytes: usize) -> MethodRouter {
+        handler
+    }
     /// axum's `State` extractor, shape only.
     pub struct State<T>(pub T);
     /// axum's `Response`, shape only.
@@ -471,6 +647,22 @@ mod server {
         pub args: A,
         pub bearer: Option<String>,
         _p: PhantomData<A>,
+    }
+    /// The raw-call extractor, shape only.
+    pub struct RawCall {
+        _p: (),
+    }
+    impl RawCall {
+        pub const fn param<T>(&self, _name: &str) -> Result<T, Response> {
+            Err(Response)
+        }
+        #[must_use]
+        pub const fn bearer(&self) -> Option<String> {
+            None
+        }
+        pub fn json<A>(&mut self) -> impl core::future::Future<Output = Result<A, Response>> {
+            core::future::ready(Err(Response))
+        }
     }
     #[must_use]
     pub fn respond<T, E>(_result: Result<T, E>) -> Response {
@@ -499,7 +691,10 @@ mod server {
     }
 }
 
-pub use server::{Call, MethodRouter, Response, Router, State, err, get, ok, post, respond};
+pub use server::{
+    Call, MethodRouter, RawCall, Response, Router, State, any, delete, err, get, ok, post, put,
+    respond, with_limit,
+};
 #[cfg(feature = "http")]
 pub use server::{axum, plain_error};
 #[cfg(feature = "vox")]
@@ -568,6 +763,19 @@ mod client {
         }
         pub fn call<'a, A, T, E>(
             &'a self,
+            path: &str,
+            _args: &A,
+        ) -> impl ::core::future::Future<Output = Result<T, ClientError<E>>> + crate::MaybeSend + 'a
+        where
+            T: crate::MaybeSend + 'a,
+            E: crate::MaybeSend + 'a,
+        {
+            let err = Self::off(path);
+            async move { Err(err) }
+        }
+        pub fn call_to<'a, A, T, E>(
+            &'a self,
+            _verb: &'static str,
             path: &str,
             _args: &A,
         ) -> impl ::core::future::Future<Output = Result<T, ClientError<E>>> + crate::MaybeSend + 'a
@@ -716,6 +924,48 @@ mod client {
             }
         }
 
+        /// [`call`](Self::call) with another verb: `verb <base>/<path>`.
+        /// `GET` sends no body (a browser's `fetch` refuses one), so a
+        /// `GET` route's arguments all ride its path; every other verb
+        /// sends `args` as JSON, like `call`.
+        pub fn call_to<'a, A, T, E>(
+            &'a self,
+            verb: &'static str,
+            path: &str,
+            args: &A,
+        ) -> impl ::core::future::Future<Output = Result<T, ClientError<E>>> + crate::MaybeSend + 'a
+        where
+            A: for<'f> facet::Facet<'f>,
+            T: facet::Facet<'static> + crate::MaybeSend,
+            E: facet::Facet<'static> + crate::MaybeSend,
+        {
+            let path = path.to_owned();
+            let encoded = if verb == "GET" {
+                Ok(None)
+            } else {
+                facet_json::to_vec(args)
+                    .map(Some)
+                    .map_err(|err| ClientError::Transport {
+                        detail: format!("encode {path} args: {err}"),
+                        retryable: false,
+                    })
+            };
+            async move {
+                let body = encoded?;
+                let method =
+                    reqwest::Method::from_bytes(verb.as_bytes()).unwrap_or(reqwest::Method::POST);
+                let mut request = self
+                    .http
+                    .request(method, format!("{}{path}", self.base_url));
+                if let Some(body) = body {
+                    request = request
+                        .header("content-type", "application/json")
+                        .body(body);
+                }
+                self.send(&path, request).await
+            }
+        }
+
         /// Open a subscription: `POST <base>/<path>` with `args`, reading
         /// the Server-Sent-Events reply as a stream of `T`. Ends when the
         /// server closes it; drop the stream to unsubscribe.
@@ -829,11 +1079,24 @@ mod client {
             T: facet::Facet<'static>,
             E: facet::Facet<'static>,
         {
-            let mut request = self
+            let request = self
                 .http
                 .post(format!("{}{path}", self.base_url))
                 .header("content-type", "application/json")
                 .body(body);
+            self.send(path, request).await
+        }
+
+        /// Send a built request (adding the bearer) and decode the reply.
+        async fn send<T, E>(
+            &self,
+            path: &str,
+            mut request: reqwest::RequestBuilder,
+        ) -> Result<T, ClientError<E>>
+        where
+            T: facet::Facet<'static>,
+            E: facet::Facet<'static>,
+        {
             if let Some(token) = &self.bearer {
                 request = request.bearer_auth(token);
             }
