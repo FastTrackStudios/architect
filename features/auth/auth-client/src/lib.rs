@@ -4,7 +4,8 @@
 //! auth service issued one, and to present it on later vox calls:
 //!
 //! - [`StoredSession`] — the token plus the metadata worth keeping
-//!   around between runs (user id, email, expiry).
+//!   around between runs (user id, email, expiry, and the refresh token
+//!   that renews an OIDC access token without signing in again).
 //! - [`TokenStore`] — save / load / clear of one stored session, behind
 //!   a trait so the persistence strategy is swappable.
 //! - [`FileTokenStore`] — native persistence: one JSON file, written
@@ -44,6 +45,10 @@
 //! HTTP and touches no browser, which is what keeps this crate as small
 //! and wasm-clean as the note above promises — an app supplies entropy
 //! and sends the requests itself.
+//!
+//! The same goes for keeping a native session alive past its access
+//! token's hour: [`oidc::refresh_if_needed`] rotates the stored session
+//! through a refresh-token grant the app posts itself.
 
 pub mod device;
 pub mod oidc;
@@ -79,6 +84,15 @@ pub struct StoredSession {
     /// authority on whether the token is still valid.
     #[serde(default)]
     pub expires_at_unix: Option<i64>,
+    /// The OIDC refresh token that came with the access token, when the
+    /// sign-in asked for `offline_access`.
+    ///
+    /// A bearer credential like [`Self::token`], and longer-lived, which
+    /// is why [`FileTokenStore`] writes it into the same `0600` file
+    /// rather than a sidecar. Absent in sessions saved before this field
+    /// existed; those load with `None`.
+    #[serde(default)]
+    pub refresh_token: Option<String>,
 }
 
 impl StoredSession {
@@ -89,6 +103,7 @@ impl StoredSession {
             user_id: None,
             email: None,
             expires_at_unix: None,
+            refresh_token: None,
         }
     }
 
@@ -111,6 +126,44 @@ impl StoredSession {
     pub const fn with_expires_at_unix(mut self, expires_at_unix: i64) -> Self {
         self.expires_at_unix = Some(expires_at_unix);
         self
+    }
+
+    /// Attach the refresh token.
+    #[must_use]
+    pub fn with_refresh_token(mut self, refresh_token: impl Into<String>) -> Self {
+        self.refresh_token = Some(refresh_token.into());
+        self
+    }
+
+    /// Whether the token expires within `margin_secs` of `now_unix` (or
+    /// already has).
+    ///
+    /// `false` when the expiry is unknown: there is nothing to act on,
+    /// and the server's 401 remains the authority.
+    #[must_use]
+    pub const fn expires_within(&self, now_unix: i64, margin_secs: i64) -> bool {
+        match self.expires_at_unix {
+            Some(at) => at.saturating_sub(margin_secs) <= now_unix,
+            None => false,
+        }
+    }
+
+    /// This session after a refresh: the new access token and expiry,
+    /// the same user id and email.
+    ///
+    /// The issuer rotates refresh tokens, so the response's one replaces
+    /// the stored one. A response without one keeps the old (RFC 6749
+    /// §6 lets an issuer reuse it), since dropping it would end the
+    /// session at the next expiry for no reason.
+    #[must_use]
+    pub fn rotated(self, response: oidc::TokenResponse, now_unix: i64) -> Self {
+        let expires_at_unix = response.expires_at_unix(now_unix);
+        Self {
+            token: response.access_token,
+            refresh_token: response.refresh_token.or(self.refresh_token),
+            expires_at_unix,
+            ..self
+        }
     }
 }
 
@@ -384,6 +437,84 @@ mod tests {
         assert_eq!(store.load().expect("load cleared"), None);
         store.clear().expect("clear is idempotent");
         std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    /// A session file written before `refresh_token` existed must still
+    /// load, or every upgraded install is signed out.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_session_saved_without_a_refresh_token_still_loads() {
+        let old = r#"{
+  "token": "tok-123",
+  "user_id": "9f2c",
+  "email": "user@example.com",
+  "expires_at_unix": 4102444800
+}"#;
+        let parsed: StoredSession = serde_json::from_str(old).expect("old json parses");
+        assert_eq!(parsed, sample());
+        assert_eq!(parsed.refresh_token, None);
+
+        let dir = temp_session_path("legacy");
+        let path = dir.join("session.json");
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        std::fs::write(&path, old).expect("write legacy file");
+        let store = FileTokenStore::new(&path);
+        assert_eq!(store.load().expect("load legacy file"), Some(sample()));
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn file_store_persists_the_refresh_token() {
+        let dir = temp_session_path("refresh");
+        let path = dir.join("session.json");
+        let store = FileTokenStore::new(&path);
+        let session = sample().with_refresh_token("rt-1");
+        store.save(&session).expect("save");
+        assert_eq!(store.load().expect("load"), Some(session));
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let mode = std::fs::metadata(&path).expect("metadata").permissions();
+            assert_eq!(
+                mode.mode() & 0o777,
+                0o600,
+                "refresh token file must be 0600"
+            );
+        }
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[test]
+    fn expiry_is_checked_with_a_margin() {
+        let session = StoredSession::new("t").with_expires_at_unix(1_000);
+        assert!(!session.expires_within(900, 60));
+        assert!(session.expires_within(940, 60));
+        assert!(session.expires_within(2_000, 60));
+        // Unknown expiry: nothing to act on.
+        assert!(!StoredSession::new("t").expires_within(i64::MAX, 60));
+    }
+
+    #[test]
+    fn rotation_replaces_the_tokens_and_keeps_the_user() {
+        let before = sample().with_refresh_token("rt-old");
+        let response = oidc::token_response_from(
+            r#"{"access_token":"tok-new","refresh_token":"rt-new","expires_in":3600}"#,
+        )
+        .unwrap();
+        let after = before.clone().rotated(response, 1_000);
+        assert_eq!(after.token, "tok-new");
+        assert_eq!(after.refresh_token.as_deref(), Some("rt-new"));
+        assert_eq!(after.expires_at_unix, Some(4_600));
+        assert_eq!(after.user_id, before.user_id);
+        assert_eq!(after.email, before.email);
+
+        // An issuer that does not rotate leaves the old refresh token in place.
+        let response = oidc::token_response_from(r#"{"access_token":"tok-2"}"#).unwrap();
+        let kept = before.rotated(response, 1_000);
+        assert_eq!(kept.refresh_token.as_deref(), Some("rt-old"));
+        assert_eq!(kept.expires_at_unix, None);
     }
 
     #[cfg(unix)]

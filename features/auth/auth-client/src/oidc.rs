@@ -27,16 +27,57 @@
 //!   app cannot reach for `Math.random` without noticing.
 //! * **the two requests** — build them with [`authorize_url`] and
 //!   [`token_request_body`], send them however the app already sends
-//!   things, then read the answers with [`access_token_from`] and
+//!   things, then read the answers with [`token_response_from`] (or
+//!   [`access_token_from`] when only the access token matters) and
 //!   [`user_from`].
 //! * **somewhere to park the verifier** while the browser is away.
 //!   `sessionStorage` is the right answer on web: the verifier is
 //!   meaningful for one attempt in one tab, and `localStorage` would
 //!   leave it readable by every later page load in the origin.
+//!
+//! # Staying signed in
+//!
+//! An access token lasts about an hour. A sign-in that asked for
+//! `offline_access` also gets a refresh token, which
+//! [`TokenResponse::into_session`] keeps in the [`StoredSession`]. Before
+//! a call, [`refresh_if_needed`] trades it for a new pair when the access
+//! token is about to expire, and saves the result; after a 401,
+//! [`refresh_now`] does the same unconditionally. Both take the app's
+//! HTTP as a closure, like everything else here:
+//!
+//! ```ignore
+//! let now = unix_now();
+//! let refreshed = oidc::refresh_if_needed(&*store, "signal", now, |body| async move {
+//!     http.post(format!("{issuer}{}", oidc::TOKEN_PATH))
+//!         .header("content-type", "application/x-www-form-urlencoded")
+//!         .body(body)
+//!         .send()
+//!         .await?
+//!         .text()
+//!         .await
+//! })
+//! .await?;
+//! ```
+//!
+//! The issuer rotates refresh tokens: each one redeems once. Two
+//! refreshes racing on the same store means the loser presents a spent
+//! token and is refused, so an app runs at most one refresh per store at
+//! a time.
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use sha2::{Digest, Sha256};
+
+use crate::{StoredSession, TokenStore, TokenStoreError};
+
+/// Where codes and refresh tokens are redeemed, relative to the issuer.
+pub const TOKEN_PATH: &str = "/oauth2/token";
+
+/// How long before its expiry [`refresh_if_needed`] renews a token.
+///
+/// A minute covers clock skew between the device and the issuer and the
+/// time the call that follows takes to arrive.
+pub const REFRESH_MARGIN_SECS: i64 = 60;
 
 /// What went wrong reading the issuer's answer.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -52,6 +93,16 @@ pub enum OidcError {
     /// here, and treating a forgery as staleness is the dangerous half.
     #[error("sign-in state did not match")]
     StateMismatch,
+    /// The issuer answered with an OAuth error (RFC 6749 §5.2), e.g.
+    /// `invalid_grant` for a spent or revoked refresh token. For a
+    /// refresh, that means signing in again.
+    #[error("the issuer refused: {error}")]
+    Refused {
+        /// The OAuth error code (`invalid_grant`, `invalid_client`, …).
+        error: String,
+        /// The issuer's `error_description`, if it sent one.
+        description: Option<String>,
+    },
 }
 
 /// One sign-in attempt's secrets.
@@ -207,21 +258,232 @@ fn encode(raw: &str) -> String {
     out
 }
 
-/// Read the access token out of a `/oauth2/token` response.
+/// The form-encoded body that trades a refresh token for a new access
+/// token: `grant_type=refresh_token`, as a public client (no secret).
+///
+/// Post it to [`TOKEN_PATH`] with
+/// `content-type: application/x-www-form-urlencoded`, and read the answer
+/// with [`token_response_from`].
+#[must_use]
+pub fn refresh_request_body(client_id: &str, refresh_token: &str) -> String {
+    format!(
+        "grant_type=refresh_token\
+         &refresh_token={}\
+         &client_id={}",
+        encode(refresh_token),
+        encode(client_id),
+    )
+}
+
+/// A `/oauth2/token` answer, for a code redemption or a refresh.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TokenResponse {
+    /// The bearer token to present on calls. Never empty.
+    pub access_token: String,
+    /// Present when the sign-in asked for `offline_access`. Rotated on
+    /// every refresh: keep the newest one.
+    pub refresh_token: Option<String>,
+    /// Seconds until `access_token` expires, from when it was issued.
+    pub expires_in: Option<u64>,
+    /// Normally `Bearer`.
+    pub token_type: Option<String>,
+    /// The scopes granted, space separated.
+    pub scope: Option<String>,
+    /// The OIDC ID token, on a code redemption that asked for `openid`.
+    pub id_token: Option<String>,
+}
+
+impl TokenResponse {
+    /// When `access_token` expires, given the unix time the answer
+    /// arrived. `None` when the issuer did not say.
+    #[must_use]
+    pub fn expires_at_unix(&self, now_unix: i64) -> Option<i64> {
+        let secs = i64::try_from(self.expires_in?).unwrap_or(i64::MAX);
+        Some(now_unix.saturating_add(secs))
+    }
+
+    /// A session to save after signing in: the access token, its expiry
+    /// and the refresh token. Add the user with
+    /// [`StoredSession::with_user_id`] / [`StoredSession::with_email`]
+    /// from [`user_from`].
+    #[must_use]
+    pub fn into_session(self, now_unix: i64) -> StoredSession {
+        let expires_at_unix = self.expires_at_unix(now_unix);
+        StoredSession {
+            token: self.access_token,
+            user_id: None,
+            email: None,
+            expires_at_unix,
+            refresh_token: self.refresh_token,
+        }
+    }
+}
+
+/// Parse a `/oauth2/token` response.
+///
+/// Blank strings count as absent, and `expires_in` is accepted as a
+/// number or a numeric string (some issuers send the latter).
 ///
 /// # Errors
-/// [`OidcError::Malformed`] if it is not JSON, [`OidcError::Missing`] if
-/// there is no usable `access_token` — including one present but empty,
-/// which would otherwise pass for a signed-in session.
-pub fn access_token_from(body: &str) -> Result<String, OidcError> {
+/// [`OidcError::Malformed`] if it is not JSON, [`OidcError::Refused`] if
+/// it is an OAuth error answer, [`OidcError::Missing`] if there is no
+/// usable `access_token` — including one present but empty, which would
+/// otherwise pass for a signed-in session.
+pub fn token_response_from(body: &str) -> Result<TokenResponse, OidcError> {
     let value: serde_json::Value =
         serde_json::from_str(body).map_err(|e| OidcError::Malformed(e.to_string()))?;
-    value
-        .get("access_token")
-        .and_then(serde_json::Value::as_str)
-        .filter(|t| !t.trim().is_empty())
-        .map(std::borrow::ToOwned::to_owned)
-        .ok_or(OidcError::Missing("access_token"))
+    let text = |key: &str| {
+        value
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .filter(|s| !s.trim().is_empty())
+            .map(std::borrow::ToOwned::to_owned)
+    };
+    let Some(access_token) = text("access_token") else {
+        return Err(
+            text("error").map_or(OidcError::Missing("access_token"), |error| {
+                OidcError::Refused {
+                    error,
+                    description: text("error_description"),
+                }
+            }),
+        );
+    };
+    let expires_in = value.get("expires_in").and_then(|v| {
+        v.as_u64()
+            .or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))
+    });
+    Ok(TokenResponse {
+        access_token,
+        refresh_token: text("refresh_token"),
+        expires_in,
+        token_type: text("token_type"),
+        scope: text("scope"),
+        id_token: text("id_token"),
+    })
+}
+
+/// Read the access token out of a `/oauth2/token` response.
+///
+/// The access token alone; [`token_response_from`] has the rest, which a
+/// native app that wants to stay signed in needs.
+///
+/// # Errors
+/// As [`token_response_from`].
+pub fn access_token_from(body: &str) -> Result<String, OidcError> {
+    token_response_from(body).map(|response| response.access_token)
+}
+
+/// What [`refresh_if_needed`] / [`refresh_now`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Refresh {
+    /// Nothing is stored: there is no session to keep alive.
+    SignedOut,
+    /// The stored token is not close to expiry (or its expiry is
+    /// unknown); nothing was sent.
+    Fresh(StoredSession),
+    /// The token is due but there is no refresh token to renew it with:
+    /// the session ends at its expiry, and only signing in again helps.
+    NoRefreshToken(StoredSession),
+    /// Renewed, and the new session saved.
+    Refreshed(StoredSession),
+}
+
+/// Why a refresh did not complete.
+///
+/// `E` is the app's own transport error, from its `send` closure.
+#[derive(Debug, thiserror::Error)]
+pub enum RefreshError<E> {
+    /// Loading or saving the session failed.
+    #[error(transparent)]
+    Store(#[from] TokenStoreError),
+    /// Posting the refresh failed before the issuer answered.
+    #[error("the refresh request failed: {0}")]
+    Send(E),
+    /// The issuer's answer was a refusal or unreadable. A refusal
+    /// ([`OidcError::Refused`], typically `invalid_grant`) means the
+    /// refresh token is spent or revoked: sign in again. The stored
+    /// session is left as it was.
+    #[error(transparent)]
+    Oidc(#[from] OidcError),
+}
+
+/// Renew the stored session if its access token expires within
+/// [`REFRESH_MARGIN_SECS`] of `now_unix`, and save the rotated session.
+///
+/// `send` posts the form body it is given to the issuer's [`TOKEN_PATH`]
+/// and returns the response body, whatever the status: an error answer
+/// is read as one. See the module docs for an example.
+///
+/// Returns without sending anything when nothing is stored, when the
+/// token is not due, and when there is no refresh token.
+#[allow(clippy::future_not_send)] // as `Send` as the caller's `send`; wasm fetch futures are not
+pub async fn refresh_if_needed<S, F, Fut, E>(
+    store: &S,
+    client_id: &str,
+    now_unix: i64,
+    send: F,
+) -> Result<Refresh, RefreshError<E>>
+where
+    S: TokenStore + ?Sized,
+    F: FnOnce(String) -> Fut,
+    Fut: std::future::Future<Output = Result<String, E>>,
+{
+    let Some(session) = store.load()? else {
+        return Ok(Refresh::SignedOut);
+    };
+    if !session.expires_within(now_unix, REFRESH_MARGIN_SECS) {
+        return Ok(Refresh::Fresh(session));
+    }
+    rotate(store, session, client_id, now_unix, send).await
+}
+
+/// Renew the stored session now, whatever its expiry says, and save the
+/// rotated session — the retry after a call came back 401.
+///
+/// Same `send` contract as [`refresh_if_needed`].
+#[allow(clippy::future_not_send)] // as `Send` as the caller's `send`; wasm fetch futures are not
+pub async fn refresh_now<S, F, Fut, E>(
+    store: &S,
+    client_id: &str,
+    now_unix: i64,
+    send: F,
+) -> Result<Refresh, RefreshError<E>>
+where
+    S: TokenStore + ?Sized,
+    F: FnOnce(String) -> Fut,
+    Fut: std::future::Future<Output = Result<String, E>>,
+{
+    let Some(session) = store.load()? else {
+        return Ok(Refresh::SignedOut);
+    };
+    rotate(store, session, client_id, now_unix, send).await
+}
+
+#[allow(clippy::future_not_send)] // as `Send` as the caller's `send`
+async fn rotate<S, F, Fut, E>(
+    store: &S,
+    session: StoredSession,
+    client_id: &str,
+    now_unix: i64,
+    send: F,
+) -> Result<Refresh, RefreshError<E>>
+where
+    S: TokenStore + ?Sized,
+    F: FnOnce(String) -> Fut,
+    Fut: std::future::Future<Output = Result<String, E>>,
+{
+    let Some(body) = session
+        .refresh_token
+        .as_deref()
+        .map(|refresh_token| refresh_request_body(client_id, refresh_token))
+    else {
+        return Ok(Refresh::NoRefreshToken(session));
+    };
+    let answer = send(body).await.map_err(RefreshError::Send)?;
+    let rotated = session.rotated(token_response_from(&answer)?, now_unix);
+    store.save(&rotated)?;
+    Ok(Refresh::Refreshed(rotated))
 }
 
 /// Who a token belongs to, per `/oauth2/userinfo`.
@@ -263,9 +525,11 @@ pub fn user_from(body: &str) -> Result<UserInfo, OidcError> {
 #[cfg(test)]
 mod tests {
     use super::{
-        DEFAULT_SCOPE, OidcError, Pkce, access_token_from, authorize_url, challenge_for, encode,
-        token_request_body, user_from,
+        DEFAULT_SCOPE, OidcError, Pkce, Refresh, RefreshError, access_token_from, authorize_url,
+        challenge_for, encode, refresh_if_needed, refresh_now, refresh_request_body,
+        token_request_body, token_response_from, user_from,
     };
+    use crate::{MemoryTokenStore, StoredSession, TokenStore};
 
     fn pkce() -> Pkce {
         Pkce::from_entropy([7u8; 32], [9u8; 16])
@@ -402,6 +666,174 @@ mod tests {
             access_token_from("not json"),
             Err(OidcError::Malformed(_))
         ));
+    }
+
+    #[test]
+    fn the_whole_token_response_is_read_out() {
+        let response = token_response_from(
+            r#"{"access_token":"at","refresh_token":"rt","expires_in":3600,
+                "token_type":"Bearer","scope":"openid offline_access","id_token":"idt"}"#,
+        )
+        .unwrap();
+        assert_eq!(response.access_token, "at");
+        assert_eq!(response.refresh_token.as_deref(), Some("rt"));
+        assert_eq!(response.expires_in, Some(3600));
+        assert_eq!(response.token_type.as_deref(), Some("Bearer"));
+        assert_eq!(response.scope.as_deref(), Some("openid offline_access"));
+        assert_eq!(response.id_token.as_deref(), Some("idt"));
+        assert_eq!(response.expires_at_unix(1_000), Some(4_600));
+
+        let session = response.into_session(1_000);
+        assert_eq!(session.token, "at");
+        assert_eq!(session.refresh_token.as_deref(), Some("rt"));
+        assert_eq!(session.expires_at_unix, Some(4_600));
+    }
+
+    /// Only the access token is required; a blank refresh token is none,
+    /// and a string `expires_in` still counts.
+    #[test]
+    fn a_minimal_token_response_is_enough() {
+        let response = token_response_from(r#"{"access_token":"at"}"#).unwrap();
+        assert_eq!(response.refresh_token, None);
+        assert_eq!(response.expires_in, None);
+        assert_eq!(response.expires_at_unix(1_000), None);
+
+        let response =
+            token_response_from(r#"{"access_token":"at","refresh_token":" ","expires_in":"60"}"#)
+                .unwrap();
+        assert_eq!(response.refresh_token, None);
+        assert_eq!(response.expires_in, Some(60));
+    }
+
+    /// An OAuth error answer says what the issuer said, so a caller can
+    /// tell a dead refresh token from a broken response.
+    #[test]
+    fn an_error_answer_is_a_refusal() {
+        assert_eq!(
+            token_response_from(
+                r#"{"error":"invalid_grant","error_description":"refresh token reused"}"#
+            ),
+            Err(OidcError::Refused {
+                error: "invalid_grant".into(),
+                description: Some("refresh token reused".into()),
+            })
+        );
+        assert_eq!(
+            token_response_from("{}"),
+            Err(OidcError::Missing("access_token"))
+        );
+    }
+
+    #[test]
+    fn the_refresh_body_is_a_public_client_refresh_grant() {
+        let body = refresh_request_body("signal", "rt+/=");
+        assert_eq!(
+            body,
+            "grant_type=refresh_token&refresh_token=rt%2B%2F%3D&client_id=signal"
+        );
+        // A public client: no secret goes out.
+        assert!(!body.contains("client_secret"));
+    }
+
+    const ROTATED: &str = r#"{"access_token":"at-2","refresh_token":"rt-2","expires_in":3600}"#;
+
+    fn due_session() -> StoredSession {
+        StoredSession::new("at-1")
+            .with_user_id("u1")
+            .with_email("u@x.test")
+            .with_expires_at_unix(1_030)
+            .with_refresh_token("rt-1")
+    }
+
+    #[tokio::test]
+    async fn a_due_token_is_rotated_and_saved() {
+        let store = MemoryTokenStore::new();
+        store.save(&due_session()).unwrap();
+
+        let mut sent = None;
+        let outcome = refresh_if_needed(&store, "signal", 1_000, |body| {
+            sent = Some(body);
+            async { Ok::<_, String>(ROTATED.to_owned()) }
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(
+            sent.as_deref(),
+            Some("grant_type=refresh_token&refresh_token=rt-1&client_id=signal")
+        );
+        let saved = store.load().unwrap().unwrap();
+        assert_eq!(outcome, Refresh::Refreshed(saved.clone()));
+        assert_eq!(saved.token, "at-2");
+        assert_eq!(saved.refresh_token.as_deref(), Some("rt-2"));
+        assert_eq!(saved.expires_at_unix, Some(4_600));
+        assert_eq!(saved.user_id.as_deref(), Some("u1"));
+        assert_eq!(saved.email.as_deref(), Some("u@x.test"));
+    }
+
+    #[tokio::test]
+    async fn nothing_is_sent_when_no_refresh_is_possible_or_needed() {
+        let never = |_: String| async { Err::<String, _>("must not send") };
+
+        let store = MemoryTokenStore::new();
+        assert_eq!(
+            refresh_if_needed(&store, "c", 1_000, never).await.unwrap(),
+            Refresh::SignedOut
+        );
+
+        let fresh = due_session().with_expires_at_unix(10_000);
+        store.save(&fresh).unwrap();
+        assert_eq!(
+            refresh_if_needed(&store, "c", 1_000, never).await.unwrap(),
+            Refresh::Fresh(fresh)
+        );
+
+        let no_refresh = StoredSession::new("at").with_expires_at_unix(1_000);
+        store.save(&no_refresh).unwrap();
+        assert_eq!(
+            refresh_if_needed(&store, "c", 1_000, never).await.unwrap(),
+            Refresh::NoRefreshToken(no_refresh)
+        );
+    }
+
+    /// After a 401 the token is renewed whatever its expiry says.
+    #[tokio::test]
+    async fn refresh_now_ignores_the_expiry() {
+        let store = MemoryTokenStore::new();
+        store
+            .save(&due_session().with_expires_at_unix(10_000))
+            .unwrap();
+        let outcome = refresh_now(&store, "c", 1_000, |_| async {
+            Ok::<_, String>(ROTATED.to_owned())
+        })
+        .await
+        .unwrap();
+        assert!(matches!(outcome, Refresh::Refreshed(ref s) if s.token == "at-2"));
+        assert_eq!(store.load().unwrap().unwrap().token, "at-2");
+    }
+
+    /// A refused or failed refresh leaves the stored session as it was.
+    #[tokio::test]
+    async fn a_failed_refresh_leaves_the_store_alone() {
+        let store = MemoryTokenStore::new();
+        store.save(&due_session()).unwrap();
+
+        let refused = refresh_if_needed(&store, "c", 1_000, |_| async {
+            Ok::<_, String>(r#"{"error":"invalid_grant"}"#.to_owned())
+        })
+        .await;
+        assert!(matches!(
+            refused,
+            Err(RefreshError::Oidc(OidcError::Refused { ref error, .. })) if error == "invalid_grant"
+        ));
+
+        let failed = refresh_if_needed(&store, "c", 1_000, |_| async {
+            Err::<String, _>("offline".to_owned())
+        })
+        .await;
+        assert!(matches!(failed, Err(RefreshError::Send(ref e)) if e == "offline"));
+
+        assert_eq!(store.load().unwrap(), Some(due_session()));
     }
 
     /// A person with no display name still signs in.
