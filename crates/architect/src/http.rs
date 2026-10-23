@@ -78,6 +78,8 @@ pub mod ranged;
 // Streamed request bodies, request heads and ranged byte responses: what
 // an HTTP-only service method takes and returns instead of JSON.
 mod body;
+#[cfg(feature = "http")]
+pub use body::BEARER_SUBPROTOCOL_PREFIX;
 pub use body::{BodyStream, ByteBody, RequestHead, reply_bytes, respond_bytes};
 
 /// How an application error appears on the HTTP face.
@@ -369,6 +371,7 @@ mod server {
                 method: parts.method.clone(),
                 uri: parts.uri.clone(),
                 headers: parts.headers.clone(),
+                params: params.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
             };
             Ok(Self {
                 params,

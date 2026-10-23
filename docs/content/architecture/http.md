@@ -151,7 +151,7 @@ that with three types from `architect::http`
 | type | where | what the handler does |
 |---|---|---|
 | `BodyStream` | argument | hands over the request body as a stream of chunks, capped at the route's `limit` |
-| `RequestHead` | argument | hands over the method, URI and headers (`bearer()`, `header(..)`, `query()`) |
+| `RequestHead` | argument | hands over the method, URI, headers and path params (`bearer()`, `header(..)`, `query()`, `param(..)`) |
 | `ByteBody` | `Ok` value (or the return) | serves it through `ranged::serve_body`: `200`, `206` + `Content-Range`, or `416` |
 
 ```rust,ignore
@@ -322,8 +322,9 @@ EngineHost::new(vox, bind)
 | `document(path, describe)` | `GET path`, before the SPA fallback | `RequestHead` | `Ok(impl IntoResponse)` or `Err(impl IntoResponse)` |
 | `dav(mount, handle)` | every verb at `mount`, `mount/` and below it, **outside** `finish` | `DavRequest`: `head`, `mount` as addressed (`/org/acme/dav`), `rel` (decoded, no leading `/`), the whole `request` | a `Response` |
 
-- `RequestHead` (`crates/architect/src/host/mount.rs` `RequestHead`)
-  carries the matched route's path params (`param("slug")`, decoded),
+- `RequestHead` (`crates/architect/src/http/body.rs` `RequestHead`, also
+  exported as `architect::host::RequestHead`) is the same type a byte
+  method takes as an argument. It carries the matched route's path params (`param("slug")`, decoded),
   the headers and the path. `bearer()` reads `Authorization: Bearer …`,
   then the `vox.bearer.<token>` subprotocol a browser dial sends.
 - The resolver runs before the upgrade is accepted, so a refusal is a
