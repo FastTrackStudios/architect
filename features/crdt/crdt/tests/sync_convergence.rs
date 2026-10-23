@@ -208,6 +208,58 @@ async fn single_replica_attach_returns() {
     scope.close().await;
 }
 
+/// A host that refuses every attach, the way a server's write guard does.
+#[derive(Clone)]
+struct Refusing;
+
+impl crdt::sync::DocSync for Refusing {
+    async fn sync(
+        &self,
+        _doc_id: Uuid,
+        _from: Vec<u8>,
+        _up: vox::Rx<Vec<u8>>,
+        _down: vox::Tx<crdt::sync::SyncDown>,
+    ) -> Result<(), crdt::sync::SyncError> {
+        Err(crdt::sync::SyncError::Internal(
+            "Refused: open an Edit Request".into(),
+        ))
+    }
+}
+
+/// A refused attach is an error from `run`, every time. The refusal
+/// arrives as the call's response, which also closes the down channel;
+/// `run` once raced the two and, about a third of the time, read the
+/// closed channel as a clean session end and returned `Ok(())`. Also with
+/// a local edit already waiting, which once took the outbox branch first.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refused_attach_is_an_error_every_time() {
+    let scope = Scope::new();
+    let router = LayerRouter::new().with(
+        doc_sync_service_descriptor(),
+        crdt::sync::DocSyncDispatcher::new(Refusing),
+    );
+    let local = LocalServer::serve(router, scope.clone());
+    let client: DocSyncClient = local.establish().await.expect("client");
+
+    for i in 0..200 {
+        let doc = CrdtDoc::ephemeral();
+        let mut synced = SyncedDoc::new(Uuid::new_v4(), doc.clone());
+        if i % 2 == 1 {
+            doc.loro().get_map("root").insert("k", "v").unwrap();
+            doc.loro().commit();
+        }
+        let res = tokio::time::timeout(Duration::from_secs(5), synced.run(&client))
+            .await
+            .unwrap_or_else(|_| panic!("attempt {i}: a refused attach hung"));
+        let err = res.expect_err("a refused attach returned Ok");
+        assert!(
+            err.to_string().contains("Edit Request"),
+            "attempt {i}: the refusal's reason was lost: {err}"
+        );
+    }
+    scope.close().await;
+}
+
 /// Shutdown regression guard: a host + established client must tear
 /// down promptly. This once deadlocked — the compaction bridge closure
 /// owned a strong `CrdtDoc`, so the doc's final drop happened inside

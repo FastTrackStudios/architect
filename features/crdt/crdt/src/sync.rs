@@ -767,6 +767,12 @@ pub struct SyncedDoc {
     _local_sub: loro::Subscription,
 }
 
+/// How a [`SyncedDoc::run`] session ended, from its held-open call: `Ok`
+/// when the server closed the session, the attach error when it refused.
+fn attach_result<E: std::fmt::Display>(res: Result<(), E>) -> Result<(), PersistError> {
+    res.map_err(|e| PersistError::Backend(format!("doc sync attach: {e}")))
+}
+
 impl SyncedDoc {
     /// Wire a doc for syncing. Do this **once** per replica, before
     /// making local edits, so every local update lands in the outbox.
@@ -813,19 +819,23 @@ impl SyncedDoc {
 
         loop {
             tokio::select! {
+                // The call first, always: it sends nothing until polled,
+                // and its request is what binds `up_tx`. Polled in random
+                // order, a replica with edits already waiting could take
+                // the outbox branch first and await a send on an unbound
+                // channel while the request that would bind it never went
+                // out.
+                biased;
                 // The held-open call resolved: attach failed, or the
                 // server ended the session. Either way this session is
                 // over; the caller re-runs with a fresh client.
-                res = &mut call => {
-                    return match res {
-                        Ok(()) => Ok(()),
-                        Err(e) => Err(PersistError::Backend(format!("doc sync attach: {e}"))),
-                    };
-                }
+                res = &mut call => return attach_result(res),
                 // Local edits (live, or buffered while offline) go up.
                 Some(update) = self.outbox.recv() => {
                     if up_tx.send(update).await.is_err() {
-                        return Ok(()); // connection gone; caller re-runs
+                        // Connection gone, or the attach was refused:
+                        // the call says which.
+                        return attach_result(call.await);
                     }
                 }
                 // Attach frame, then remote history + live peer updates.
@@ -835,7 +845,10 @@ impl SyncedDoc {
                         Ok(Some(frame)) => {
                             let _ = frame.map(|f| owned = Some(f));
                         }
-                        _ => return Ok(()), // stream ended
+                        // The stream ended: a refused attach delivers its
+                        // error as the response, which also closes the
+                        // channels — read the call to say which it was.
+                        _ => return attach_result(call.await),
                     }
                     match owned {
                         Some(SyncDown::Attached { server_vv, backlog }) => {
@@ -862,7 +875,7 @@ impl SyncedDoc {
                                         ))
                                     })?;
                                 if up_tx.send(missing).await.is_err() {
-                                    return Ok(()); // connection gone; caller re-runs
+                                    return attach_result(call.await);
                                 }
                             }
                         }
