@@ -21,7 +21,7 @@ In the architect repo `cargo xtask` is `cargo run -p xtask --`. Consumers build 
 - Other repos' paths take a repo prefix and are skipped: `task:apps/server/src/mcp.rs`, `studio:apps/session/daw/src/actions.rs`.
 - Placeholders (`<name>`, `*`, `{x}`, `…`, `$X`, `|`) are skipped; so is anything between `<!-- doc-check: off -->` and `<!-- doc-check: on -->`.
 - `just <recipe>`, `cargo xtask <cmd>`, `cargo run -p xtask -- <cmd>` and `cargo … -p <package>` are checked against the justfile, the xtask binary and the workspace packages.
-- CI runs it on every PR (job `check`, step `docs`); `just docs-check` runs it locally.
+- CI runs it on every PR (job `lint`, step `docs`); `just docs-check` runs it locally.
 
 ## boundaries
 
@@ -39,7 +39,7 @@ In the architect repo `cargo xtask` is `cargo run -p xtask --`. Consumers build 
 
 ## CI (`.github/workflows/checks.yml`)
 
-- `RUSTFLAGS: -D warnings`. Job `check` runs on the self-hosted `architect` runner inside Task's `ci` dev shell (`nix develop github:FastTrackStudios/task#ci`): fmt, `check --workspace --all-targets`, `clippy --workspace --all-targets` (no `--all-features`), `test --workspace` (includes xtask tests), `boundaries`, `docs`, and wasm checks of the framework crates (architect, atom, form, permissions, auth-proto, auth-client, crdt, architect-input, plus architect-input with `dioxus`).
+- `RUSTFLAGS: -D warnings`. Jobs run on GitHub-hosted `ubuntu-latest` (setup in `.github/actions/hosted-rust`: apt native libs, rust 1.98.1 via `RUSTUP_TOOLCHAIN`, rust-cache saved only on main), in parallel: `lint` (fmt, `clippy --workspace --all-targets` with no `--all-features`, `boundaries`, `docs`), `test` (`test --workspace`, includes xtask tests) and `wasm`, the wasm checks of the framework crates (architect, atom, form, permissions, auth-proto, auth-client, crdt, architect-input, plus architect-input with `dioxus`).
 - Job `tags` (ubuntu, full history) runs `cargo run -p xtask -- tags --verbose`.
 - Not in CI: clippy `--all-features` (`just lint` runs it), `just ui-css-check`, `just auth-ui-css-check`, `just auth-e2e`, ui-snapshot and parity tests.
 
