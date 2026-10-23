@@ -38,6 +38,15 @@
 //! dial by bare id with the internet down), `Lan` uses only the local
 //! network. `EngineHost::iroh_lookup` picks it for a host.
 //!
+//! ## Dialling a restarted peer
+//!
+//! [`connect`] is bounded ([`DIAL_TIMEOUT`]) and survives the peer
+//! restarting on new addresses. If the first attempt fails, the dial
+//! closes the stale connections to that peer, looks it up again and
+//! retries once (see [`connect_with`]). A failure carries a
+//! [`DialError`]: [`DialErrorKind::PeerUnreachable`] means the retry
+//! failed too.
+//!
 //! Gated behind `--features iroh`. The client side (`connect`,
 //! [`IrohLink`], [`iroh_link_source`]) also compiles on
 //! wasm32-unknown-unknown — browsers dial relay-only (no UDP in the

@@ -83,5 +83,5 @@ let report = crdt::schema::migrate(doc.loro(), SCHEMA, MIGRATIONS)?;
 ## iroh seam
 
 - `PeerLookup`: `N0` (default), `N0AndLan`, `Lan`; the last two need `iroh-lan` (native only). `Lan` turns relays off and publishes nothing: a LAN-only node cannot reach internet peers.
-- `bind_endpoint` is `N0`; `bind_endpoint_with` takes a lookup; `EngineHost::iroh_lookup` sets it. Dial by bare id with `iroh_link::connect(endpoint, remote)`.
+- `bind_endpoint` is `N0`; `bind_endpoint_with` takes a lookup; `EngineHost::iroh_lookup` sets it. Dial by bare id with `iroh_link::connect(endpoint, remote)`. It redials a restarted peer once and reports `DialErrorKind::PeerUnreachable` when that fails too (`crates/architect/src/iroh_link.rs` `connect_with`).
 - Test: `crates/architect/tests/iroh_lan.rs` (needs a multicast interface); manual two-machine check `crates/architect/examples/iroh_lan.rs`.
