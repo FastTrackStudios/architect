@@ -103,6 +103,22 @@ jobs:
           cargo check --target wasm32-unknown-unknown \
             -p architect-input --features dioxus
 
+  # The one status main's branch protection requires (context `check`).
+  # It passes only when every job above succeeded; a skipped or cancelled
+  # job fails it, so a skip never counts as a pass.
+  check:
+    name: check
+    if: ${{ always() }}
+    needs: [lint, test, wasm]
+    runs-on: ubuntu-latest
+    steps:
+      - name: all checks passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "lint/test/wasm: $RESULTS"
+          for r in $RESULTS; do [ "$r" = success ] || exit 1; done
+
   # The lint config denies the panic-shaped lints, so a `--all-features`
   # build would be the stricter gate. It is not run here: turning on every
   # feature pulls `dioxus/desktop` (tao + wry) into `architect-atom`, and no
