@@ -237,7 +237,7 @@ async fn redial_after_restarts(restart: Restart) {
         drop(peer);
         if matches!(restart, Restart::CrashBlackhole) {
             for addr in &old_sockets {
-                blackholes.push(std::net::UdpSocket::bind(addr).expect("hold the old port"));
+                blackholes.push(hold_port(*addr).await);
             }
         }
         peer = bind_keyed(key.clone()).await;
@@ -261,6 +261,22 @@ async fn redial_after_restarts(restart: Restart) {
         failures.len(),
         failures.join("\n")
     );
+}
+
+/// Bind a socket that never answers on `addr`, once the aborted endpoint
+/// has let go of it (its runtime shuts down asynchronously).
+async fn hold_port(addr: std::net::SocketAddr) -> std::net::UdpSocket {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        match std::net::UdpSocket::bind(addr) {
+            Ok(socket) => return socket,
+            Err(e) if std::time::Instant::now() < deadline => {
+                assert_eq!(e.kind(), std::io::ErrorKind::AddrInUse, "{e}");
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            Err(e) => panic!("old port {addr} still held: {e}"),
+        }
+    }
 }
 
 async fn dial(dialler: &iroh::Endpoint, peer: iroh::EndpointId) -> std::io::Result<IrohLink> {
