@@ -352,7 +352,9 @@ async fn a_silent_peer_times_out_without_retry_and_is_unreachable_with_it() {
     let nobody = iroh::SecretKey::generate().public();
     lookup.set_endpoint_info(iroh::EndpointAddr::from_parts(
         nobody,
-        [iroh::TransportAddr::Ip(silent.local_addr().expect("silent addr"))],
+        [iroh::TransportAddr::Ip(
+            silent.local_addr().expect("silent addr"),
+        )],
     ));
     let options = iroh_link::DialOptions::default().timeout(std::time::Duration::from_secs(1));
 

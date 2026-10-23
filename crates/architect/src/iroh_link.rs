@@ -454,9 +454,8 @@ impl std::fmt::Display for DialError {
 
 impl std::error::Error for DialError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.source
-            .as_deref()
-            .map(|e| e as &(dyn std::error::Error + 'static))
+        let source: &(dyn std::error::Error + Send + Sync + 'static) = self.source.as_deref()?;
+        Some(source)
     }
 }
 
@@ -578,7 +577,10 @@ async fn dial(
     }
 }
 
-async fn dial_once(endpoint: &iroh::Endpoint, remote: iroh::EndpointAddr) -> Result<IrohLink, Attempt> {
+async fn dial_once(
+    endpoint: &iroh::Endpoint,
+    remote: iroh::EndpointAddr,
+) -> Result<IrohLink, Attempt> {
     let connection = endpoint
         .connect(remote, VOX_ALPN)
         .await
