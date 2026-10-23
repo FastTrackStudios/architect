@@ -18,7 +18,7 @@ Entity/derive, storage, the permissions gate, crdt/atom and the Action List have
 | `connect::pool` | shared, single-flight, liveness-checked connections keyed by (target, bearer) | `crates/architect/src/connect/mod.rs` `pool`, `caller_with`, `evict_all` |
 | `connect::ws` | WebSocket dial; native header / browser subprotocol bearer | `crates/architect/src/connect/ws.rs` |
 | `axum_ws` | server half of vox over an axum WebSocket | `crates/architect/src/axum_ws.rs` |
-| `iroh_link` | vox over QUIC, bare `EndpointId` dial, ALPN `architect/vox/1`, LAN lookup | `crates/architect/src/iroh_link.rs` `connect`, `PeerLookup`, `bind_endpoint_with` |
+| `iroh_link` | vox over QUIC, bare `EndpointId` dial (bounded, one retry after a peer restart), ALPN `architect/vox/1`, LAN lookup | `crates/architect/src/iroh_link.rs` `connect`, `connect_with`, `DialError`, `PeerLookup`, `bind_endpoint_with` |
 | HTTP face (server/client) | `POST /<prefix>/<method>` JSON, SSE; `<Trait>HttpClient` (reqwest, wasm fetch) | `crates/architect/src/http.rs` `HttpError`, `respond`, `sse`, `HttpClient` |
 | Error envelope | `TransportError`, `ClientError<E>`, `vox_into_app` | `crates/architect/src/lib.rs` `TransportError`, `ClientError`, `vox_into_app` |
 | `PubSub` / `EventSink` | server fan-out with overflow strategies, replay, buffered attach | `crates/architect/src/pubsub.rs` `PubSub` |
@@ -99,6 +99,8 @@ EngineHost::new(backend.clone().into_router(), config.bind)
 - Native vox: `let caller = pool().caller(&Endpoint::url(&vox_url).with_bearer(token)).await?;` then `TaskServiceClient::new(caller.clone())`.
 - In-process: `LocalServer::serve(router, scope).establish::<GreeterClient>()` (`examples/greeter/tests/round_trip.rs`).
 - iroh: `iroh_link::connect(&endpoint, remote_id)` then `vox_core::initiator_on(link).establish::<C>()`; through the pool with `Pool::caller_with(endpoint, dial)` (Task keys iroh peers `iroh://<id>`).
+- An iroh dial survives the peer restarting on new addresses. `connect` is bounded by `DIAL_TIMEOUT` (10 s, retry included). If the first attempt fails, the dial closes the stale connections `iroh_link` holds to that peer, runs address lookup again and retries once (`crates/architect/src/iroh_link.rs` `connect_with`). Tune it with `DialOptions` (`.timeout(..)`, `.retry(false)`); for a supervisor, use `iroh_link_source(..).with_dial_options(..)`. Don't wrap `connect` in your own timeout and redial loop.
+- Branch on why a dial failed with `DialError::of(&io_err)`, never on the message text. `DialErrorKind::PeerUnreachable` means the retry also failed: the peer is down. `Timeout` means one attempt ran out of time with retry off. `Failed` means the dial was refused or could not start.
 - HTTP: `GreeterHttpClient::at(base)`; streams are `client.greeted().await`.
 - wasm: the same `pool()`, the browser dial carries the bearer as subprotocol `vox.bearer.<token>`; the HTTP client's `EventStream` drops `Send`; `LocalServer` uses architect's own memory link; iroh is client-only (relay dial); `EngineHost` is native (`host` feature).
 - For an all-async trait whose methods all return `Result`, both `<Trait>Client` and `<Trait>HttpClient` implement the trait: delete any hand-written `impl Trait for TraitClient`.
@@ -135,6 +137,7 @@ Cannot:
 | named MCP = HTTP | `examples/greeter/tests/mcp.rs` `greet_over_mcp_is_greet_over_http` |
 | vox over WebSocket and iroh, one suite | `apps/auth-server/tests/surfaces.rs` `websocket_vox_stack`, `iroh_vox_stack` |
 | vox over iroh | `crates/architect/tests/iroh_link.rs` `vox_connection_over_iroh` |
+| iroh redial after a peer restart, dial error kinds | `crates/architect/tests/iroh_link.rs` `redial_by_id_after_crash_restart_behind_a_blackhole`, `a_silent_peer_times_out_without_retry_and_is_unreachable_with_it` |
 | iroh LAN, bare id | `crates/architect/tests/iroh_lan.rs` (needs a multicast interface) |
 | reconnect | `crates/architect/tests/reconnect_supervisor.rs` |
 | dispatch span | `crates/architect/tests/rpc_spans.rs` `dispatch_span_names_the_method` |
