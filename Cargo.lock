@@ -494,6 +494,7 @@ dependencies = [
  "iroh-mdns-address-lookup",
  "js-sys",
  "minisign-verify",
+ "n0-future",
  "reqwest 0.12.28",
  "rtrb",
  "sea-orm",
