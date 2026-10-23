@@ -21,7 +21,7 @@ In the architect repo `cargo xtask` is `cargo run -p xtask --`. Consumers build 
 - Other repos' paths take a repo prefix and are skipped: `task:apps/server/src/mcp.rs`, `studio:apps/session/daw/src/actions.rs`.
 - Placeholders (`<name>`, `*`, `{x}`, `…`, `$X`, `|`) are skipped; so is anything between `<!-- doc-check: off -->` and `<!-- doc-check: on -->`.
 - `just <recipe>`, `cargo xtask <cmd>`, `cargo run -p xtask -- <cmd>` and `cargo … -p <package>` are checked against the justfile, the xtask binary and the workspace packages.
-- CI runs it on every PR (job `check`, step `docs`); `just docs-check` runs it locally.
+- CI runs it on every PR (job `lint`, step `docs`); `just docs-check` runs it locally.
 
 ## boundaries
 
