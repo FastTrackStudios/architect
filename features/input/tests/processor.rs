@@ -2,7 +2,8 @@
 
 use architect_input::{
     InputCommand, InputContext, InputEvent, InputProcessor, KeyChord, KeyCode, KeyEvent, KeyTrie,
-    ModeDefinition, ModeId, Modifiers, WhenExpr, parse_key_sequence, which_key,
+    KeymapConfig, MacroKeys, ModeDefinition, ModeId, Modifiers, WhenExpr, parse_key_sequence,
+    which_key,
 };
 
 type Proc = InputProcessor;
@@ -433,4 +434,147 @@ fn a_typed_action_id_works() {
     assert_eq!(save, vec![InputCommand::Action(Act::Save)]);
     let other = proc.process(char_event('x'), &ctx);
     assert_eq!(other, vec![InputCommand::Action(Act::Other("NOPE".into()))]);
+}
+
+/// A leader keymap like Task's: `space space` searches, `space g h` goes
+/// home.
+fn leader_processor() -> Proc {
+    let mut normal = KeyTrie::new();
+    let space = KeyChord::plain(KeyCode::char(' '));
+    normal.bind_sequence(&[space.clone(), space.clone()], "SEARCH_ALL".into());
+    normal.bind_sequence(&[space, chord('g'), chord('h')], "NAV_HOME".into());
+    let mut proc = Proc::new();
+    proc.set_keymap(ModeId::normal(), normal);
+    proc
+}
+
+fn space_event() -> InputEvent {
+    char_event(' ')
+}
+
+#[test]
+fn space_space_with_releases_fires_once() {
+    let mut proc = leader_processor();
+    let ctx = InputContext::new();
+    let space = KeyChord::plain(KeyCode::char(' '));
+
+    assert!(matches!(
+        proc.process(space_event(), &ctx).as_slice(),
+        [InputCommand::Pending { .. }]
+    ));
+    assert!(!proc.notify_key_release(&space));
+    assert_eq!(ids(&proc.process(space_event(), &ctx)), vec!["SEARCH_ALL"]);
+    assert!(!proc.notify_key_release(&space));
+    assert!(!proc.needs_timeout(), "nothing left pending");
+    assert!(
+        ids(&proc.process(space_event(), &ctx)).is_empty(),
+        "a third space starts a new leader, it does not fire again"
+    );
+    assert!(proc.needs_timeout());
+}
+
+#[test]
+fn space_space_without_releases_reads_as_auto_repeat() {
+    let mut proc = leader_processor();
+    let ctx = InputContext::new();
+    proc.process(space_event(), &ctx);
+    assert!(ids(&proc.process(space_event(), &ctx)).is_empty());
+}
+
+#[test]
+fn a_ticket_expires_the_sequence_it_was_issued_for() {
+    let mut proc = make_processor();
+    assert_eq!(proc.sequence_timeout(), None, "nothing pending");
+    proc.process(char_event('g'), &InputContext::new());
+    let ticket = proc.sequence_timeout().expect("g is pending");
+    assert_eq!(ticket.after(), proc.timeout_duration());
+    assert_eq!(proc.sequence_timeout(), Some(ticket), "stable until a key");
+
+    assert_eq!(
+        proc.expire_sequence(ticket),
+        vec![InputCommand::Unhandled(char_event('g'))]
+    );
+    assert!(!proc.needs_timeout());
+    assert!(proc.expire_sequence(ticket).is_empty(), "spent");
+}
+
+#[test]
+fn a_key_after_the_ticket_makes_it_stale() {
+    let mut proc = make_processor();
+    let ctx = InputContext::new();
+    proc.process(char_event('g'), &ctx);
+    let first = proc.sequence_timeout().expect("g is pending");
+    let _ = proc.notify_key_release(&chord('g'));
+    proc.process(char_event('z'), &ctx);
+    proc.process(char_event('g'), &ctx);
+    let second = proc.sequence_timeout().expect("g is pending again");
+    assert_ne!(first, second);
+
+    assert!(
+        proc.expire_sequence(first).is_empty(),
+        "the old timer fired late"
+    );
+    assert_eq!(proc.pending_display(), Some("g".to_owned()));
+    assert_eq!(proc.expire_sequence(second).len(), 1);
+}
+
+#[test]
+fn a_reload_makes_the_ticket_stale() {
+    let mut proc = Proc::from_config(
+        KeymapConfig::from_json_str(r#"{ "keymap": { "normal": { "g g": "cursor.top" } } }"#)
+            .expect("config parses"),
+    )
+    .expect("config compiles");
+    proc.process(char_event('g'), &InputContext::new());
+    let ticket = proc.sequence_timeout().expect("g is pending");
+    let config =
+        KeymapConfig::from_json_str(r#"{ "keymap": { "normal": {} } }"#).expect("config parses");
+    proc.reload_config(config).expect("reloads");
+    proc.process(char_event('x'), &InputContext::new());
+    assert!(proc.expire_sequence(ticket).is_empty());
+}
+
+#[test]
+fn macro_keys_default_to_vim() {
+    assert_eq!(make_processor().macro_keys(), MacroKeys::Vim);
+}
+
+#[test]
+fn with_macro_keys_off_q_and_at_are_plain_keys() {
+    let mut proc = make_processor().with_macro_keys(MacroKeys::Off);
+    let ctx = InputContext::new();
+
+    let q = proc.process(char_event('q'), &ctx);
+    assert_eq!(q, vec![InputCommand::Unhandled(char_event('q'))]);
+    assert_eq!(
+        ids(&proc.process(char_event('j'), &ctx)),
+        vec!["cursor.down"],
+        "the key after `q` is not taken as a register"
+    );
+    assert!(!proc.is_recording_macro());
+
+    let at = proc.process(char_event('@'), &ctx);
+    assert_eq!(at, vec![InputCommand::Unhandled(char_event('@'))]);
+    assert_eq!(ids(&proc.process(char_event('k'), &ctx)), vec!["cursor.up"]);
+}
+
+#[test]
+fn turning_macro_keys_off_stops_a_recording() {
+    let mut proc = make_processor();
+    let ctx = InputContext::new();
+    proc.process(char_event('q'), &ctx);
+    proc.process(char_event('a'), &ctx);
+    assert!(proc.is_recording_macro());
+    proc.set_macro_keys(MacroKeys::Off);
+    assert!(!proc.is_recording_macro());
+}
+
+#[test]
+fn a_reload_keeps_macro_keys_off() {
+    let mut proc = Proc::new().with_macro_keys(MacroKeys::Off);
+    let config =
+        KeymapConfig::from_json_str(r#"{ "keymap": { "normal": { "j": "cursor.down" } } }"#)
+            .expect("config parses");
+    proc.reload_config(config).expect("reloads");
+    assert_eq!(proc.macro_keys(), MacroKeys::Off);
 }

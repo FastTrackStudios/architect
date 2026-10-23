@@ -1,6 +1,8 @@
 //! Dioxus DOM events as input events.
 
-use crate::{InputEvent, KeyCode, KeyEvent, Modifiers, MouseAction, MouseButton, ScrollEvent};
+use crate::{
+    InputEvent, KeyChord, KeyCode, KeyEvent, Modifiers, MouseAction, MouseButton, ScrollEvent,
+};
 use dioxus::prelude::{
     InteractionLocation, Key, KeyboardEvent, Modifiers as DioxusModifiers, ModifiersInteraction,
     MouseEvent, PointerInteraction, WheelEvent,
@@ -57,6 +59,17 @@ pub fn convert_keyboard_event(e: &KeyboardEvent) -> Option<InputEvent> {
         key,
         modifiers: convert_modifiers(&e.modifiers()),
     }))
+}
+
+/// The chord of a Dioxus keyboard event (a keydown or a keyup).
+///
+/// Returns `None` for unrecognized keys.
+#[must_use]
+pub fn keyboard_chord(e: &KeyboardEvent) -> Option<KeyChord> {
+    Some(KeyChord::new(
+        convert_key(&e.key())?,
+        convert_modifiers(&e.modifiers()),
+    ))
 }
 
 /// Convert a Dioxus mouse event to an input mouse event with explicit action.
