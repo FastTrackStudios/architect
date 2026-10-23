@@ -23,10 +23,10 @@ mod imp {
     use axum::extract::{FromRequestParts, RawPathParams};
     use axum::http::request::Parts;
     use axum::http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, header};
-    use std::collections::BTreeMap;
     use core::future::Future;
     use core::pin::Pin;
     use core::task::{Context, Poll};
+    use std::collections::BTreeMap;
     use std::io;
 
     /// Prefix of the WebSocket subprotocol that carries a session token.

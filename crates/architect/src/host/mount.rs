@@ -125,8 +125,7 @@ impl EngineHost {
         let mount = mount.trim_end_matches('/').to_owned();
         let depth = mount.split('/').filter(|s| !s.is_empty()).count();
         let serve = move |params: RawPathParams, request: Request| {
-            let mut head =
-                RequestHead::from_raw(&params, request.headers().clone(), request.uri());
+            let mut head = RequestHead::from_raw(&params, request.headers().clone(), request.uri());
             head.method = request.method().clone();
             let rel = head.params.remove(DAV_PATH).unwrap_or_default();
             let mount = addressed_mount(request.uri().path(), depth);
