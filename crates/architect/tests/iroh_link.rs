@@ -234,8 +234,12 @@ impl Peer {
         if matches!(restart, Restart::CrashBlackhole) {
             for addr in old_sockets {
                 // Leaked on purpose: the old port stays silent for the
-                // rest of the test process.
-                std::mem::forget(hold_port(addr).await);
+                // rest of the test process. Another test in this binary
+                // may take the freed port first; then it is just as dead
+                // to B's key, and we leave it to them.
+                if let Some(socket) = try_hold_port(addr).await {
+                    std::mem::forget(socket);
+                }
             }
         }
     }
@@ -294,18 +298,25 @@ async fn redial_after_restarts(restart: Restart) {
     );
 }
 
-/// Bind a socket that never answers on `addr`, once a crashed endpoint
-/// has let go of it (its runtime shuts down asynchronously).
+/// Bind a socket that never answers on `addr`.
 async fn hold_port(addr: std::net::SocketAddr) -> std::net::UdpSocket {
+    std::net::UdpSocket::bind(addr).unwrap_or_else(|e| panic!("bind {addr}: {e}"))
+}
+
+/// Bind a socket that never answers on `addr` once a crashed endpoint has
+/// let go of it (its runtime shuts down asynchronously). `None` if the
+/// port is still taken after a while: a parallel test can grab a freed
+/// ephemeral port before we do.
+async fn try_hold_port(addr: std::net::SocketAddr) -> Option<std::net::UdpSocket> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
         match std::net::UdpSocket::bind(addr) {
-            Ok(socket) => return socket,
+            Ok(socket) => return Some(socket),
             Err(e) if std::time::Instant::now() < deadline => {
                 assert_eq!(e.kind(), std::io::ErrorKind::AddrInUse, "{e}");
                 tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             }
-            Err(e) => panic!("old port {addr} still held: {e}"),
+            Err(_) => return None,
         }
     }
 }
