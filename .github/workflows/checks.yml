@@ -6,95 +6,108 @@ on:
   pull_request:
   workflow_dispatch:
 
+# A PR's new push supersedes its old run. A push to main never cancels a
+# running check: it waits as the one pending run, so every run that starts
+# on main finishes and says whether that commit is green.
 concurrency:
   group: checks-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
+  # The fleet toolchain the consumers build with (Task's `.#ci` shell),
+  # which is what the self-hosted runner used. It overrides
+  # rust-toolchain.toml's older pin for CI only.
+  RUSTUP_TOOLCHAIN: "1.98.1"
+  # Debug info is most of a cold target dir and nobody reads it in CI.
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+  CARGO_INCREMENTAL: "0"
 
+# Every job runs on GitHub-hosted ubuntu-latest: the repo is public, so
+# the runners cost nothing, and three jobs run side by side instead of one
+# serial job queued behind the other repos on THEBATTLESHIP.
+#
+# CACHE BUDGET: the repo has 10 GB of Actions cache, evicted LRU across
+# branches. rust-cache SAVES only on main; PRs restore main's entry. Each
+# job has its own shared-key, so check-mode (lint), test and wasm32
+# artifacts never overwrite each other.
 jobs:
-  # architect's own self-hosted runner (label `architect`, THEBATTLESHIP):
-  # a warm, persistent target dir instead of a cold ubuntu-latest build
-  # every push. The toolchain and native libraries come from Task's CI
-  # dev shell — the same 1.94.0 pin rust-toolchain.toml names, with the
-  # gtk/webkit/alsa/udev headers the desktop crates link against and the
-  # wasm32 target — so this repo carries no flake of its own.
-  check:
-    runs-on: [self-hosted, architect]
-    timeout-minutes: 60
-    env:
-      NIX_DEV: nix develop --accept-flake-config github:FastTrackStudios/task#ci -c
+  lint:
+    name: Lint (fmt + clippy + boundaries + docs)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      - name: Persistent target dir
-        run: |
-          dir="${CI_CACHE_DIR:-$HOME/cargo-target}/architect"
-          mkdir -p "$dir"
-          echo "CARGO_TARGET_DIR=$dir" >> "$GITHUB_ENV"
-          echo "target dir: $dir ($(du -sh "$dir" 2>/dev/null | cut -f1))"
+      - uses: ./.github/actions/hosted-rust
+        with:
+          kind: lint
 
       - name: fmt
-        run: ${NIX_DEV} cargo fmt --all -- --check
-
-      - name: check
-        run: ${NIX_DEV} cargo check --workspace --all-targets
+        run: cargo fmt --all -- --check
 
       - name: clippy
         if: ${{ !cancelled() }}
-        run: ${NIX_DEV} cargo clippy --workspace --all-targets
-
-      - name: test
-        if: ${{ !cancelled() }}
-        run: ${NIX_DEV} cargo test --workspace
+        run: cargo clippy --workspace --all-targets
 
       # The crate-layout ADR (docs/content/architecture/layout.md) as a
       # check: layer table in boundaries.toml, counts ratcheted.
       - name: boundaries
         if: ${{ !cancelled() }}
-        run: ${NIX_DEV} cargo run -q -p xtask -- boundaries
+        run: cargo run -q -p xtask -- boundaries
 
       # Every path, page link, `just` recipe, `cargo xtask` command and
       # `-p` package the docs name must exist (docs/content, README.md,
       # skills/).
       - name: docs
         if: ${{ !cancelled() }}
-        run: ${NIX_DEV} cargo run -q -p xtask -- docs
+        run: cargo run -q -p xtask -- docs
 
-      # The framework half must stay wasm-clean; the ui/story crates pull
-      # native rendering (blitz/vello) and are checked natively only.
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/hosted-rust
+        with:
+          kind: test
+
+      - name: test
+        run: cargo test --workspace
+
+  # The framework half must stay wasm-clean; the ui/story crates pull
+  # native rendering (blitz/vello) and are checked natively only.
+  wasm:
+    name: wasm check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/hosted-rust
+        with:
+          kind: wasm
+
       - name: check wasm
-        if: ${{ !cancelled() }}
         run: |
-          ${NIX_DEV} cargo check --target wasm32-unknown-unknown \
+          cargo check --target wasm32-unknown-unknown \
             -p architect -p architect-atom -p architect-form \
             -p architect-permissions -p architect-permissions-proto \
             -p auth-proto -p auth-client -p crdt -p architect-input
           # The generated HTTP clients (`<Trait>HttpClient`, over reqwest's
           # fetch backend) are what a browser app signs in through, so
           # their wasm build is load-bearing.
-          ${NIX_DEV} cargo check --target wasm32-unknown-unknown \
-            -p auth-proto
+          cargo check --target wasm32-unknown-unknown -p auth-proto
           # The keymap engine's Dioxus hook runs in browser shells.
-          ${NIX_DEV} cargo check --target wasm32-unknown-unknown \
+          cargo check --target wasm32-unknown-unknown \
             -p architect-input --features dioxus
 
-      # The lint config denies the panic-shaped lints, so a `--all-features`
-      # build would be the stricter gate. It is not run here: turning on
-      # every feature pulls `dioxus/desktop` (tao + wry) into
-      # `architect-atom`, which needs dbus, xdo and appindicator headers
-      # that Task's CI shell does not carry — and no feature combination
-      # the fleet ships pulls them either. `scratchpad/gate.sh` runs it
-      # locally against a shell that does.
-
-      # Cargo never collects stale artifacts; bound the persistent dir.
-      - name: Bound the target dir
-        if: ${{ always() }}
-        run: |
-          rm -rf "${CARGO_TARGET_DIR}/debug/incremental"
-          ${NIX_DEV} cargo sweep --maxsize 60GB || true
-          du -sh "${CARGO_TARGET_DIR}" || true
+  # The lint config denies the panic-shaped lints, so a `--all-features`
+  # build would be the stricter gate. It is not run here: turning on every
+  # feature pulls `dioxus/desktop` (tao + wry) into `architect-atom`, and no
+  # feature combination the fleet ships pulls that in. `scratchpad/gate.sh`
+  # runs it locally.
 
   # Release tags are the only thing consuming repos can reason about, and
   # the only useful question they ask is "am I ahead of or behind that
@@ -108,7 +121,12 @@ jobs:
         with:
           # The check walks every tag, so it needs the whole history.
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: checks-tags
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: tag ordering
         run: cargo run -p xtask -- tags --verbose

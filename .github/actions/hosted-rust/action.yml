@@ -1,0 +1,51 @@
+# Set up a GitHub-hosted ubuntu runner for one job of checks.yml: free
+# disk, the native libraries the workspace links against, the pinned rust
+# toolchain, and a rust-cache of that job's dependencies.
+#
+# The native list mirrors flake.nix's `linux` set: the Dioxus desktop
+# crates (`architect-atom`, `architect-form`, the story workbench, the
+# launcher UI, the ui showcase) link against the GUI stack even in their
+# unit tests, and fail at link time with `-lxdo` without it.
+name: Hosted rust
+description: Free disk, install native libs and the pinned toolchain, restore the rust cache for one job.
+inputs:
+  kind:
+    description: Job kind; the rust-cache shared-key (lint, test, wasm).
+    required: true
+runs:
+  using: composite
+  steps:
+    # The image's unused toolchains (Android SDK, .NET, GHC, CodeQL, ~30 GB)
+    # are deleted in the background: the space is free before the build
+    # needs it, and nothing waits on it.
+    - name: Free disk (background)
+      shell: bash
+      run: |
+        nohup sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+          /usr/local/.ghcup /opt/hostedtoolcache/CodeQL </dev/null >/dev/null 2>&1 &
+        df -h / | tail -1
+
+    - name: Native libraries
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq --no-install-recommends \
+          pkg-config libssl-dev libsqlite3-dev zlib1g-dev \
+          libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
+          libxdo-dev libayatana-appindicator3-dev libdbus-1-dev \
+          libx11-dev libxcb1-dev
+
+    # RUSTUP_TOOLCHAIN (checks.yml env) picks the version; this installs it
+    # with the components and target every job uses.
+    - uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
+        components: rustfmt, clippy
+        targets: wasm32-unknown-unknown
+
+    # Dependencies only: rust-cache drops the workspace's own crates.
+    - uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: checks-${{ inputs.kind }}
+        save-if: ${{ github.ref == 'refs/heads/main' }}
+        cache-on-failure: true
