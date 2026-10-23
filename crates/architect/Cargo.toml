@@ -534,5 +534,9 @@ required-features = ["http", "http-client", "vox", "local", "dispatch-tokio"]
 name = "http_routes"
 required-features = ["http", "http-client", "vox", "local", "dispatch-tokio"]
 
+[[test]]
+name = "http_bytes"
+required-features = ["http", "http-client", "vox", "local", "dispatch-tokio"]
+
 [lints]
 workspace = true

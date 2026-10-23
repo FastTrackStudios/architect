@@ -16,124 +16,20 @@
 //! Every hook sees the request through a [`RequestHead`]: its path
 //! params, headers and bearer token.
 
-use std::collections::BTreeMap;
 use std::future::Future;
 
 use axum::Router;
-use axum::extract::rejection::RawPathParamsRejection;
-use axum::extract::{FromRequestParts, RawPathParams, Request, WebSocketUpgrade};
-use axum::http::request::Parts;
-use axum::http::{HeaderMap, Uri, header};
+use axum::extract::{RawPathParams, Request, WebSocketUpgrade};
+use axum::http::{HeaderMap, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get};
 
 use super::{EngineHost, VOX_SUBPROTOCOL};
 
-/// Prefix of the WebSocket subprotocol that carries a session token.
-///
-/// A browser cannot set `Authorization` on an upgrade, so it offers
-/// `vox.bearer.<token>` instead. The same value as
-/// `architect::connect::ws::BEARER_SUBPROTOCOL_PREFIX`, the client side.
-pub const BEARER_SUBPROTOCOL_PREFIX: &str = "vox.bearer.";
+pub use crate::http::{BEARER_SUBPROTOCOL_PREFIX, RequestHead};
 
 /// The path param [`EngineHost::dav`] binds the in-mount path to.
 const DAV_PATH: &str = "dav_path";
-
-/// What a mount's hook decides on: the matched route's path params, the
-/// request headers and the request path.
-#[derive(Debug, Clone, Default)]
-pub struct RequestHead {
-    params: BTreeMap<String, String>,
-    headers: HeaderMap,
-    path: String,
-}
-
-impl RequestHead {
-    /// A head from its parts: what a test, or a transport other than
-    /// axum, hands a resolver.
-    #[must_use]
-    pub fn new(
-        params: BTreeMap<String, String>,
-        headers: HeaderMap,
-        path: impl Into<String>,
-    ) -> Self {
-        Self {
-            params,
-            headers,
-            path: path.into(),
-        }
-    }
-
-    fn from_request(params: &RawPathParams, headers: HeaderMap, uri: &Uri) -> Self {
-        let params = params
-            .iter()
-            .map(|(k, v)| (k.to_owned(), v.to_owned()))
-            .collect();
-        Self::new(params, headers, uri.path())
-    }
-
-    /// The path param `name` (`slug` in `/org/{slug}/vox`), percent-decoded.
-    #[must_use]
-    pub fn param(&self, name: &str) -> Option<&str> {
-        self.params.get(name).map(String::as_str)
-    }
-
-    /// Every path param of the matched route.
-    #[must_use]
-    pub const fn params(&self) -> &BTreeMap<String, String> {
-        &self.params
-    }
-
-    /// The request headers.
-    #[must_use]
-    pub const fn headers(&self) -> &HeaderMap {
-        &self.headers
-    }
-
-    /// The request path as sent (not percent-decoded).
-    #[must_use]
-    pub fn path(&self) -> &str {
-        &self.path
-    }
-
-    /// The session token the caller presented: `Authorization: Bearer …`,
-    /// else a `vox.bearer.…` WebSocket subprotocol (how a browser sends
-    /// it). `None` when neither carries a non-empty token.
-    #[must_use]
-    pub fn bearer(&self) -> Option<&str> {
-        let from_header = self
-            .headers
-            .get(header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.strip_prefix("Bearer "))
-            .map(str::trim)
-            .filter(|t| !t.is_empty());
-        from_header.or_else(|| {
-            self.headers
-                .get_all(header::SEC_WEBSOCKET_PROTOCOL)
-                .iter()
-                .filter_map(|v| v.to_str().ok())
-                .flat_map(|v| v.split(','))
-                .filter_map(|p| p.trim().strip_prefix(BEARER_SUBPROTOCOL_PREFIX))
-                .find(|t| !t.is_empty())
-        })
-    }
-}
-
-/// A [`RequestHead`] is also an axum extractor, for a protocol adapter
-/// built outside this crate (`architect-mcp`'s `McpHost::mcp_at`).
-impl<S: Send + Sync> FromRequestParts<S> for RequestHead {
-    type Rejection = RawPathParamsRejection;
-
-    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let params = RawPathParams::from_request_parts(parts, state).await?;
-        Ok(Self::from_request(
-            &params,
-            parts.headers.clone(),
-            &parts.uri,
-        ))
-    }
-}
 
 /// One `WebDAV` request, as [`EngineHost::dav`] hands it over.
 #[derive(Debug)]
@@ -188,7 +84,7 @@ impl EngineHost {
     {
         let upgrade =
             move |params: RawPathParams, uri: Uri, headers: HeaderMap, ws: WebSocketUpgrade| {
-                let head = RequestHead::from_request(&params, headers, &uri);
+                let head = RequestHead::from_raw(&params, headers, &uri);
                 let resolved = resolve(head);
                 async move {
                     match resolved.await {
@@ -229,8 +125,8 @@ impl EngineHost {
         let mount = mount.trim_end_matches('/').to_owned();
         let depth = mount.split('/').filter(|s| !s.is_empty()).count();
         let serve = move |params: RawPathParams, request: Request| {
-            let mut head =
-                RequestHead::from_request(&params, request.headers().clone(), request.uri());
+            let mut head = RequestHead::from_raw(&params, request.headers().clone(), request.uri());
+            head.method = request.method().clone();
             let rel = head.params.remove(DAV_PATH).unwrap_or_default();
             let mount = addressed_mount(request.uri().path(), depth);
             handle(DavRequest {
@@ -275,7 +171,7 @@ impl EngineHost {
         E: IntoResponse,
     {
         let answer = move |params: RawPathParams, uri: Uri, headers: HeaderMap| {
-            let described = describe(RequestHead::from_request(&params, headers, &uri));
+            let described = describe(RequestHead::from_raw(&params, headers, &uri));
             async move {
                 match described.await {
                     Ok(document) => document.into_response(),
@@ -303,6 +199,7 @@ fn addressed_mount(path: &str, depth: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
 
     fn headers(pairs: &[(&'static str, &str)]) -> HeaderMap {
         let mut h = HeaderMap::new();
