@@ -299,7 +299,7 @@ async fn redial_after_restarts(restart: Restart) {
 }
 
 /// Bind a socket that never answers on `addr`.
-async fn hold_port(addr: std::net::SocketAddr) -> std::net::UdpSocket {
+fn hold_port(addr: std::net::SocketAddr) -> std::net::UdpSocket {
     std::net::UdpSocket::bind(addr).unwrap_or_else(|e| panic!("bind {addr}: {e}"))
 }
 
@@ -359,7 +359,7 @@ async fn an_unknown_peer_is_unreachable() {
 async fn a_silent_peer_times_out_without_retry_and_is_unreachable_with_it() {
     let lookup = iroh::address_lookup::MemoryLookup::new();
     let dialler = bind_with_lookup(lookup.clone()).await;
-    let silent = hold_port("127.0.0.1:0".parse().expect("addr")).await;
+    let silent = hold_port("127.0.0.1:0".parse().expect("addr"));
     let nobody = iroh::SecretKey::generate().public();
     lookup.set_endpoint_info(iroh::EndpointAddr::from_parts(
         nobody,
