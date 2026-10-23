@@ -93,13 +93,16 @@ if let Some(ticket) = keys.borrow().sequence_timeout() {
     let keys = keys.clone();
     let ms = u32::try_from(ticket.after().as_millis()).unwrap_or(u32::MAX);
     gloo_timers::callback::Timeout::new(ms, move || {
-        let _ = keys.borrow_mut().expire_sequence(ticket);
+        // The expired prefix comes back as `Unhandled`: dispatch it like
+        // any other command.
+        dispatch(&list, keys.borrow_mut().expire_sequence(ticket));
     })
     .forget();
 }
 ```
 
-A host that sees key releases calls `notify_key_release(&chord)`.
+A host that sees key releases calls `notify_key_release(&chord)` (a
+release matches by key, so a keyup that lost its modifier still counts).
 Without releases a second press of the same key reads as OS auto-repeat
 inside a sequence, so `space space` never fires. With them, holding a
 which-key prefix keeps it live across several leaf keys, and a `true`

@@ -578,3 +578,24 @@ fn a_reload_keeps_macro_keys_off() {
     proc.reload_config(config).expect("reloads");
     assert_eq!(proc.macro_keys(), MacroKeys::Off);
 }
+
+#[test]
+fn releasing_the_modifier_first_still_releases_the_chord() {
+    let ctrl_g = KeyChord::new(KeyCode::char('g'), Modifiers::CTRL);
+    let mut normal = KeyTrie::new();
+    normal.bind_sequence(&[ctrl_g.clone(), ctrl_g], "DOUBLE".into());
+    let mut proc = Proc::new();
+    proc.set_keymap(ModeId::normal(), normal);
+    let ctx = InputContext::new();
+    let press = || {
+        InputEvent::Key(KeyEvent {
+            key: KeyCode::char('g'),
+            modifiers: Modifiers::CTRL,
+        })
+    };
+
+    proc.process(press(), &ctx);
+    // Ctrl came up first, so the keyup carries no modifier.
+    let _ = proc.notify_key_release(&chord('g'));
+    assert_eq!(ids(&proc.process(press(), &ctx)), vec!["DOUBLE"]);
+}

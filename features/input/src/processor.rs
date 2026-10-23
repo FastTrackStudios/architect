@@ -345,16 +345,20 @@ impl<A: ActionKey> InputProcessor<A> {
 
     /// The host saw `chord` released.
     ///
+    /// A release matches by key, not modifiers: letting go of Ctrl before
+    /// `g` reports a plain `g`, and that still releases a held `Ctrl+g`.
+    ///
     /// Returns `true` when the host should hide a lingering which-key
     /// overlay: a held (sticky) prefix that fired at least one action has
     /// just been let go. A bare hold-and-release returns `false`, so the
     /// overlay keeps guiding the user.
     pub fn notify_key_release(&mut self, chord: &KeyChord) -> bool {
-        self.held_keys.remove(chord);
-        if self.sequence.first() == Some(chord) {
+        let released = |held: &KeyChord| held.key == chord.key;
+        self.held_keys.retain(|held| !released(held));
+        if self.sequence.first().is_some_and(released) {
             self.anchor_released_during_sequence = true;
         }
-        if self.sticky_anchor.as_ref() != Some(chord) {
+        if !self.sticky_anchor.as_ref().is_some_and(released) {
             return false;
         }
         let fired = self.sticky_actions_fired > 0;
