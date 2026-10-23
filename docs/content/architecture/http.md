@@ -60,8 +60,9 @@ or `code = "…"`), and a `Transport(String)` variant with the `From`.
 
 ## The wire
 
-Every method is `POST /<prefix>/<method-kebab>` with a JSON object of
-named arguments. The prefix is the trait name in kebab-case minus a
+By default every method is `POST /<prefix>/<method-kebab>` with a JSON
+object of named arguments (other verbs and path parameters: see
+[Routes](#routes-verbs-path-parameters-body-limits)). The prefix is the trait name in kebab-case minus a
 trailing `Service` — `AuthService` → `/auth`, `OrganizationService` →
 `/organization`, `Greeter` → `/greeter` — or whatever
 `#[architect::service(path = "…")]` says:
@@ -95,6 +96,51 @@ content-type: application/json
 
 `http::PATHS` lists every `(method, path)` pair the router mounts, for
 tests and docs.
+
+## Routes: verbs, path parameters, body limits
+
+`POST` with a JSON body is the default, not the only shape. A method's
+`#[http(…)]` names its verb, its path and its body cap; the service's
+`path` may nest and hold parameters too:
+
+```rust,ignore
+#[architect::service(path = "org/{slug}")]
+pub trait Notes {
+    #[http(get, path = "notes/{id}")]                 // GET    /org/{slug}/notes/{id}
+    async fn note(&self, slug: String, id: u32) -> Result<String, NoteError>;
+    #[http(put, path = "notes/{id}")]                 // PUT    /org/{slug}/notes/{id}  {"text": …}
+    async fn set_note(&self, slug: String, id: u32, text: String) -> Result<(), NoteError>;
+    #[http(delete, path = "notes/{id}")]              // DELETE /org/{slug}/notes/{id}
+    async fn drop_note(&self, slug: String, id: u32) -> Result<(), NoteError>;
+    #[http(get, path = "files/{*path}")]              // GET    /org/{slug}/files/a/b.md
+    async fn file(&self, slug: String, path: String) -> Result<String, NoteError>;
+    #[http(post, path = "bulk", limit = "4MiB")]      // a JSON body past the 2 MiB default
+    async fn bulk(&self, slug: String, text: String) -> Result<u64, NoteError>;
+}
+```
+
+- Verbs: `get`, `put`, `post` (the default), `delete`, `any`. Several
+  verbs may share a path; each reaches its own method.
+- `{name}` is one segment and `{*name}` the rest of the path (last
+  segment only, slashes kept). Each binds the argument of the same name:
+  parsed with `FromStr` (a `400` with code `invalid_path` when it does not
+  parse) and written by the client with `Display`, percent-encoded
+  (`architect::http::encode_segment` / `encode_rest`). A `{param}` in the
+  service `path` binds that argument on every method, so every method
+  must take it. The derive refuses a parameter that names no argument.
+- The other arguments are the JSON body, as before. A `get` route has no
+  body (a browser's `fetch` will not send one), so all its arguments come
+  from the path, or the bearer header for `token`; the derive says so at
+  compile time otherwise.
+- `limit = "1GiB"` raises the route's body cap: axum's `DefaultBodyLimit`
+  on that route (units `B`, `KB`, `MB`, `GB`, `KiB`, `MiB`, `GiB`).
+  Without it the cap is axum's 2 MiB (`architect::http::DEFAULT_BODY_LIMIT`),
+  and a bigger body is a `413`.
+- These methods keep their vox face and their typed clients: the HTTP
+  client fills in the path and sends the verb, and `http::PATHS` lists
+  the templates (`/org/{slug}/notes/{id}`).
+- A method with none of this keeps the exact `POST` route it always had.
+  `crates/architect/tests/http_routes.rs` drives all of it over a socket.
 
 ## Streams
 
@@ -296,6 +342,9 @@ store-backed routes.
 
 - Traits with an ambient `context = T` have no HTTP face: there is no
   transport-neutral way to pull `T` out of a request yet.
+- Arguments come from the path, the bearer header or a JSON body, never
+  a query string; a `#[subscribe]` stream cannot sit under a service
+  `path` with parameters.
 - `ranged` serves one range per request (no `multipart/byteranges`) and
   checks no validators: an `If-Range` that no longer matches still gets
   the range.

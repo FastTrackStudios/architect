@@ -99,14 +99,15 @@ EngineHost::new(backend.clone().into_router(), config.bind)
 ## 5. HTTP face: what it can and cannot express
 
 Can:
-- Route `POST /<prefix>/<method-kebab>`; prefix = trait minus `Service`, kebab-cased; `path = "x"` overrides it; `#[http(path = "sign-in/email")]` sets the method tail (literal segments only).
-- Body: one JSON key per argument (`http::<Method>Args`); empty body = `{}`; content type not checked.
+- Route `POST /<prefix>/<method-kebab>` by default; prefix = trait minus `Service`, kebab-cased; `path = "org/{slug}"` overrides it (may nest, may hold `{param}`s); `#[http(path = "sign-in/email")]` sets the method tail.
+- `#[http(get | put | post | delete | any, path = "notes/{id}", limit = "1GiB")]`: verb, path, body cap (axum `DefaultBodyLimit`; default 2 MiB). `{name}` / `{*name}` (last segment) bind the same-named argument via `FromStr`, `400 invalid_path` if it does not parse; a service-prefix `{param}` must be an argument of every method. Several verbs may share a path. The typed client percent-encodes params (`architect::http::encode_segment`, `encode_rest`) and sends the verb. Test: `crates/architect/tests/http_routes.rs`.
+- Body: one JSON key per non-path argument (`http::<Method>Args`); empty body = `{}`; content type not checked. A `get` route has no body: every argument comes from the path (or `token` from the bearer), else a compile error.
 - `200` + JSON on success; errors via `HttpError::status()` (default 400, clamped ≥ 400), body `{code, message, error}`; the client decodes `ClientError::App(E)`.
 - An argument named `token` may come from `Authorization: Bearer`.
 - `#[subscribe]` → SSE `text/event-stream`, POST and GET. An argless subscription delivers its `{name}_intro` frame first over SSE (fixed in v0.9.24), as the vox stream host does.
 
 Cannot:
-- Path parameters or query strings; request streaming or multipart; custom success status (always 200).
+- Query strings; request streaming or multipart; custom success status (always 200). `#[subscribe]` under a service `path` with params.
 - Auth beyond `Bearer` / `token`: no cookie, no per-route guard. Use `plugin` / `finish` tower layers.
 - `context = T` traits: the HTTP face (and the action projection) is skipped.
 - Generic methods, `&mut self`, borrowed or `Self` returns: compile errors.

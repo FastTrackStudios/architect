@@ -258,7 +258,9 @@ struct RpcArgs {
     /// `path = "auth"` — the HTTP mount prefix. Defaults to the trait name
     /// in kebab-case with a trailing `Service` dropped (`AuthService` →
     /// `/auth`, `OrganizationService` → `/organization`, `Greeter` →
-    /// `/greeter`); methods are kebab-cased under it.
+    /// `/greeter`); methods are kebab-cased under it. May nest and hold
+    /// `{param}` segments (`org/{slug}`), each bound to the same-named
+    /// argument of every method.
     path: Option<String>,
     /// `sync_client` — additionally emit the `<Trait>SyncClient`
     /// blocking facade (vox-gated, native only). Opt-in so consumers
@@ -355,10 +357,13 @@ impl RpcArgs {
             let lit: syn::LitStr = meta.value()?.parse()?;
             let raw = lit.value();
             let trimmed = raw.trim_matches('/');
-            if trimmed.is_empty() || trimmed.contains('/') {
+            if trimmed.is_empty() {
+                return Err(meta.error("`path` is the mount prefix (`path = \"auth\"`); not empty"));
+            }
+            let params = path_params(trimmed).map_err(|e| meta.error(e))?;
+            if params.iter().any(|p| p.rest) {
                 return Err(meta.error(
-                    "`path` is one segment, the mount prefix (`path = \"auth\"`); nest the router \
-                     in axum for anything deeper",
+                    "`{*name}` cannot be in the service prefix: every method's path follows it",
                 ));
             }
             self.path = Some(trimmed.to_owned());
@@ -527,6 +532,13 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
              `#[architect::service]` (or `#[architect::rpc(http)]`), and cannot be \
              combined with `context = ...` yet",
         ));
+    }
+    if args.http && args.context.is_none() {
+        let prefix = args
+            .path
+            .clone()
+            .unwrap_or_else(|| http_prefix(&trait_name.to_string()));
+        check_http_routes(&prefix, &methods, &subscriptions)?;
     }
 
     // Always emit the user's trait — adding the `Send + Sync + 'static`
@@ -1835,14 +1847,30 @@ fn strip_ops_attrs(method: &mut TraitItemFn) {
 /// vox method name, the generated client methods and the schema stamp
 /// all stay the identifier, so renaming a path breaks HTTP callers and
 /// nothing else.
-fn http_path_attr(method: &TraitItemFn) -> syn::Result<Option<String>> {
+///
+/// The same attribute picks the verb (`get`, `put`, `post`, `delete`,
+/// `any`; `post` by default) and the body cap (`limit = "1GiB"`). A
+/// `{name}` / `{*name}` segment binds the argument called `name`.
+fn http_attr(method: &TraitItemFn) -> syn::Result<HttpSpec> {
+    let mut spec = HttpSpec::default();
     let Some(attr) = method.attrs.iter().find(|a| a.path().is_ident("http")) else {
-        return Ok(None);
+        return Ok(spec);
     };
-    let mut found: Option<String> = None;
     attr.parse_nested_meta(|meta| {
+        if let Some(verb) = Verb::from_path(&meta.path) {
+            spec.verb = verb;
+            return Ok(());
+        }
+        if meta.path.is_ident("limit") {
+            let lit: syn::LitStr = meta.value()?.parse()?;
+            spec.limit = Some(parse_limit(&lit.value()).map_err(|e| meta.error(e))?);
+            return Ok(());
+        }
         if !meta.path.is_ident("path") {
-            return Err(meta.error("unknown `#[http(…)]` option; expected `path = \"…\"`"));
+            return Err(meta.error(
+                "unknown `#[http(…)]` option; expected a verb (`get`, `put`, `post`, \
+                 `delete`, `any`), `path = \"…\"` or `limit = \"…\"`",
+            ));
         }
         let lit: syn::LitStr = meta.value()?.parse()?;
         let raw = lit.value();
@@ -1850,25 +1878,158 @@ fn http_path_attr(method: &TraitItemFn) -> syn::Result<Option<String>> {
         if trimmed.is_empty() {
             return Err(meta.error("`path` cannot be empty"));
         }
-        // Each segment must actually be one. An empty segment is a
-        // doubled slash, which mounts at a path no caller can type; a
-        // `{param}` segment would promise dynamic routing this face does
-        // not do, since arguments arrive in the JSON body.
-        for segment in trimmed.split('/') {
-            if segment.is_empty() {
-                return Err(meta.error("`path` has an empty segment (a doubled `/`)"));
-            }
-            if segment.contains('{') || segment.contains('}') {
-                return Err(meta.error(
-                    "`path` segments are literal — arguments arrive in the JSON body, not \
-                     in the path",
-                ));
-            }
-        }
-        found = Some(trimmed.to_owned());
+        // Each segment must actually be one: an empty segment is a
+        // doubled slash, which mounts at a path no caller can type.
+        path_params(trimmed).map_err(|e| meta.error(e))?;
+        spec.path = Some(trimmed.to_owned());
         Ok(())
     })?;
-    Ok(found)
+    Ok(spec)
+}
+
+/// A method's `#[http(…)]` options.
+#[derive(Debug, Default)]
+struct HttpSpec {
+    verb: Verb,
+    /// The tail under the service prefix; the kebab-cased name otherwise.
+    path: Option<String>,
+    /// `limit = "1GiB"`, in bytes.
+    limit: Option<u64>,
+}
+
+/// The HTTP verb a method answers.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum Verb {
+    Get,
+    Put,
+    #[default]
+    Post,
+    Delete,
+    Any,
+}
+
+impl Verb {
+    fn from_path(path: &syn::Path) -> Option<Self> {
+        let ident = path.get_ident()?.to_string();
+        Some(match ident.as_str() {
+            "get" => Self::Get,
+            "put" => Self::Put,
+            "post" => Self::Post,
+            "delete" => Self::Delete,
+            "any" => Self::Any,
+            _ => return None,
+        })
+    }
+
+    /// The `architect::http` routing function.
+    fn route_fn(self) -> syn::Ident {
+        format_ident!(
+            "{}",
+            match self {
+                Self::Get => "get",
+                Self::Put => "put",
+                Self::Post => "post",
+                Self::Delete => "delete",
+                Self::Any => "any",
+            }
+        )
+    }
+
+    /// The `HttpRoutes::route_verb` key (`""` = every verb).
+    const fn key(self) -> &'static str {
+        match self {
+            Self::Get => "GET",
+            Self::Put => "PUT",
+            Self::Post => "POST",
+            Self::Delete => "DELETE",
+            Self::Any => "",
+        }
+    }
+
+    /// What the generated client sends; `any` routes take a `POST`.
+    const fn client(self) -> &'static str {
+        match self {
+            Self::Get => "GET",
+            Self::Put => "PUT",
+            Self::Delete => "DELETE",
+            Self::Post | Self::Any => "POST",
+        }
+    }
+}
+
+/// One `{name}` (or `{*name}`, `rest`) segment of a route path.
+struct PathParam {
+    name: String,
+    rest: bool,
+}
+
+/// Check a route path's segments and list its parameters in order. A
+/// parameter is a whole segment; `{*name}` takes the rest of the path, so
+/// it comes last.
+fn path_params(path: &str) -> Result<Vec<PathParam>, String> {
+    let segments: Vec<&str> = path.split('/').collect();
+    let mut params = Vec::new();
+    for (i, segment) in segments.iter().enumerate() {
+        if segment.is_empty() {
+            return Err("`path` has an empty segment (a doubled `/`)".to_owned());
+        }
+        if !segment.contains(['{', '}']) {
+            continue;
+        }
+        let inner = segment
+            .strip_prefix('{')
+            .and_then(|s| s.strip_suffix('}'))
+            .ok_or_else(|| {
+                format!("`{segment}`: a parameter is a whole segment, `{{name}}` or `{{*name}}`")
+            })?;
+        let (name, rest) = inner
+            .strip_prefix('*')
+            .map_or((inner, false), |name| (name, true));
+        if syn::parse_str::<syn::Ident>(name).is_err() {
+            return Err(format!("`{segment}`: the parameter names an argument"));
+        }
+        if rest && i.checked_add(1) != Some(segments.len()) {
+            return Err(format!(
+                "`{segment}` takes the rest of the path: it comes last"
+            ));
+        }
+        if params.iter().any(|p: &PathParam| p.name == name) {
+            return Err(format!("`{segment}` appears twice"));
+        }
+        params.push(PathParam {
+            name: name.to_owned(),
+            rest,
+        });
+    }
+    Ok(params)
+}
+
+/// `"1GiB"` → bytes. Units: none (bytes), `KB`/`MB`/`GB` (powers of 1000)
+/// and `KiB`/`MiB`/`GiB` (powers of 1024).
+fn parse_limit(raw: &str) -> Result<u64, String> {
+    let raw = raw.trim();
+    let split = raw.find(|c: char| !c.is_ascii_digit()).unwrap_or(raw.len());
+    let (digits, unit) = raw.split_at(split);
+    let scale: u64 = match unit.trim() {
+        "" | "B" => 1,
+        "KB" => 1_000,
+        "MB" => 1_000_000,
+        "GB" => 1_000_000_000,
+        "KiB" => 1 << 10,
+        "MiB" => 1 << 20,
+        "GiB" => 1 << 30,
+        other => {
+            return Err(format!(
+                "`limit` unit `{other}`: use B, KB, MB, GB, KiB, MiB or GiB (\"1GiB\")"
+            ));
+        }
+    };
+    digits
+        .parse::<u64>()
+        .ok()
+        .and_then(|n| n.checked_mul(scale))
+        .filter(|n| *n > 0)
+        .ok_or_else(|| format!("`limit = \"{raw}\"` is not a byte count (\"1GiB\")"))
 }
 
 /// Strip the method-level `#[http(…)]` marker before re-emitting.
@@ -2369,9 +2530,10 @@ struct Method {
     /// `#[ops(skip)]` — excluded from the `<Trait>Op` reified-call
     /// enum (e.g. a return type phon cannot lower, like a tuple).
     ops_skip: bool,
-    /// `#[http(path = "…")]` — the HTTP tail, in place of the
-    /// kebab-cased method name. HTTP only; see [`http_path_attr`].
-    http_path: Option<String>,
+    /// `#[http(verb, path = "…", limit = "…")]` — the HTTP route, in
+    /// place of `POST` at the kebab-cased method name. HTTP only; see
+    /// [`http_attr`].
+    http: HttpSpec,
     /// `#[action(…)]` — how the method shows as an action, under
     /// `actions`. See [`action_attr`].
     action: ActionAttr,
@@ -2542,7 +2704,7 @@ fn classify_method(method: &TraitItemFn) -> syn::Result<Method> {
     }
 
     let ops_skip = has_ops_skip_attr(method);
-    let http_path = http_path_attr(method)?;
+    let http = http_attr(method)?;
     let action = action_attr(method)?;
     let mut decl = method.clone();
     strip_ops_attrs(&mut decl);
@@ -2557,7 +2719,7 @@ fn classify_method(method: &TraitItemFn) -> syn::Result<Method> {
         arg_was_ref,
         return_ty: method.sig.output.clone(),
         ops_skip,
-        http_path,
+        http,
         action,
     })
 }
@@ -3039,6 +3201,59 @@ fn value_type(ret: &ReturnType) -> Type {
     }
 }
 
+/// Every route's parameters must name one of its method's arguments, and
+/// a `get` route (no body) must take all of its arguments from the path
+/// or the bearer header.
+fn check_http_routes(prefix: &str, methods: &[Method], subs: &[Subscription]) -> syn::Result<()> {
+    let prefix_params = path_params(prefix).unwrap_or_default();
+    if let (Some(p), Some(sub)) = (prefix_params.first(), subs.first()) {
+        return Err(syn::Error::new_spanned(
+            &sub.name,
+            format!(
+                "`#[subscribe]` streams cannot take `{{{}}}` from the service path yet; \
+                 move the stream to a trait with a literal `path`",
+                p.name
+            ),
+        ));
+    }
+    for m in methods {
+        let name = &m.decl.sig.ident;
+        let tail = m
+            .http
+            .path
+            .clone()
+            .unwrap_or_else(|| to_kebab_case(&name.to_string()));
+        let params = path_params(&format!("{prefix}/{tail}"))
+            .map_err(|e| syn::Error::new_spanned(name, e))?;
+        for p in &params {
+            if !m.arg_idents.iter().any(|id| id == p.name.as_str()) {
+                return Err(syn::Error::new_spanned(
+                    name,
+                    format!(
+                        "the HTTP path binds `{{{}}}`, but `{name}` has no argument `{}`",
+                        p.name, p.name
+                    ),
+                ));
+            }
+        }
+        if m.http.verb == Verb::Get
+            && let Some(id) = m
+                .arg_idents
+                .iter()
+                .find(|id| *id != "token" && !params.iter().any(|p| *id == p.name.as_str()))
+        {
+            return Err(syn::Error::new_spanned(
+                id,
+                format!(
+                    "a `get` route has no body: `{id}` must come from the path \
+                     (`{{{id}}}`), or the method must use `post` / `put`"
+                ),
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Emit the HTTP face:
 ///
 /// - `http::<Method>Args` — one named-field `Facet` struct per method;
@@ -3138,13 +3353,21 @@ fn emit_http_block(
         let name = &m.decl.sig.ident;
         let name_str = name.to_string();
         // `#[http(path = "…")]` wins over the derived name; see
-        // `http_path_attr` for why an identifier cannot express a
-        // nested path on its own.
+        // `http_attr` for why an identifier cannot express a nested path
+        // on its own.
         let tail = m
-            .http_path
+            .http
+            .path
             .clone()
             .unwrap_or_else(|| to_kebab_case(&name_str));
         let path = format!("/{prefix}/{tail}");
+        // Checked in `check_http_routes` before emission.
+        let params = path_params(path.trim_start_matches('/')).unwrap_or_default();
+        let is_param = |id: &syn::Ident| params.iter().any(|p| id == p.name.as_str());
+        // Anything but a plain `POST` at a literal path takes the raw
+        // extractor; the plain case keeps the `Call` handler it always had.
+        let verb = m.http.verb;
+        let extended = verb != Verb::Post || !params.is_empty() || m.http.limit.is_some();
         let args_name = format_ident!("{}Args", to_pascal_case(&name_str));
         let handler_name = format_ident!("__http_{}", name);
         let docs: Vec<&syn::Attribute> = m
@@ -3158,6 +3381,10 @@ fn emit_http_block(
         let mut field_names = Vec::new();
         let mut client_params = Vec::new();
         let mut token_fixups = Vec::new();
+        // The extended handler: one binding per argument, from the path,
+        // the bearer header or the JSON body.
+        let has_body = verb != Verb::Get && m.arg_idents.iter().any(|id| !is_param(id));
+        let mut binds = Vec::new();
         for input in m.mirror_inputs.iter().skip(1) {
             let FnArg::Typed(pat_ty) = input else {
                 continue;
@@ -3167,7 +3394,8 @@ fn emit_http_block(
             };
             let ty = &pat_ty.ty;
             let is_token = ident == "token";
-            let attr = if is_token {
+            // A path parameter need not repeat in the body.
+            let attr = if is_token || is_param(ident) {
                 quote! { #[facet(default)] }
             } else {
                 quote! {}
@@ -3180,6 +3408,19 @@ fn emit_http_block(
                     args.#ident = ::architect::http::token_or_bearer(args.#ident, bearer.clone());
                 });
             }
+            let ident_str = ident.to_string();
+            binds.push(if is_param(ident) {
+                quote! { let #ident = raw.param::<#ty>(#ident_str)?; }
+            } else if is_token {
+                let from_body = if has_body {
+                    quote! { __args.#ident }
+                } else {
+                    quote! { ::std::string::String::new() }
+                };
+                quote! { let #ident = ::architect::http::token_or_bearer(#from_body, raw.bearer()); }
+            } else {
+                quote! { let #ident = __args.#ident; }
+            });
         }
 
         let reply = if result_parts(&m.return_ty).is_some() {
@@ -3200,42 +3441,114 @@ fn emit_http_block(
             }
         });
 
-        handlers.push(quote! {
-            async fn #handler_name<S>(
-                ::architect::http::State(host): ::architect::http::State<::std::sync::Arc<#host_ty>>,
-                call: ::architect::http::Call<#args_name>,
-            ) -> ::architect::http::Response
-            where
-                #backend_bounds,
-            {
-                let ::architect::http::Call { mut args, bearer, .. } = call;
-                let _ = &mut args;
-                let _ = &bearer;
-                #(#token_fixups)*
-                let result = <#host_ty as #async_face>::#name(
-                    host.as_ref(),
-                    #(args.#field_names),*
-                ).await;
-                #reply
+        if extended {
+            let decode = has_body.then(|| {
+                quote! { let __args: #args_name = raw.json().await?; }
+            });
+            handlers.push(quote! {
+                async fn #handler_name<S>(
+                    ::architect::http::State(host): ::architect::http::State<::std::sync::Arc<#host_ty>>,
+                    mut raw: ::architect::http::RawCall,
+                ) -> ::architect::http::Response
+                where
+                    #backend_bounds,
+                {
+                    let reply = async move {
+                        let _ = &mut raw;
+                        #decode
+                        #(#binds)*
+                        let result = <#host_ty as #async_face>::#name(
+                            host.as_ref(),
+                            #(#field_names),*
+                        ).await;
+                        ::core::result::Result::<_, ::architect::http::Response>::Ok(#reply)
+                    };
+                    match reply.await {
+                        ::core::result::Result::Ok(r) | ::core::result::Result::Err(r) => r,
+                    }
+                }
+            });
+            let verb_fn = verb.route_fn();
+            let key = verb.key();
+            let mut handler = quote! {
+                ::architect::http::#verb_fn(#handler_name::<S>).with_state(host.clone())
+            };
+            if let Some(limit) = m.http.limit {
+                let limit = proc_macro2::Literal::u64_unsuffixed(limit);
+                handler = quote! { ::architect::http::with_limit(#handler, #limit) };
             }
-        });
-
-        routes.push(quote! {
-            routes.route(
-                #path,
-                ::architect::http::post(#handler_name::<S>).with_state(host.clone()),
-            );
-        });
+            routes.push(quote! { routes.route_verb(#key, #path, #handler); });
+        } else {
+            handlers.push(quote! {
+                async fn #handler_name<S>(
+                    ::architect::http::State(host): ::architect::http::State<::std::sync::Arc<#host_ty>>,
+                    call: ::architect::http::Call<#args_name>,
+                ) -> ::architect::http::Response
+                where
+                    #backend_bounds,
+                {
+                    let ::architect::http::Call { mut args, bearer, .. } = call;
+                    let _ = &mut args;
+                    let _ = &bearer;
+                    #(#token_fixups)*
+                    let result = <#host_ty as #async_face>::#name(
+                        host.as_ref(),
+                        #(args.#field_names),*
+                    ).await;
+                    #reply
+                }
+            });
+            routes.push(quote! {
+                routes.route(
+                    #path,
+                    ::architect::http::post(#handler_name::<S>).with_state(host.clone()),
+                );
+            });
+        }
         path_pairs.push(quote! { (#name_str, #path) });
 
+        let make_args = quote! { let args = http::#args_name { #(#field_names),* }; };
+        let client_body = if !extended {
+            quote! {
+                #make_args
+                self.inner.call(#path, &args).await
+            }
+        } else if params.is_empty() {
+            let client_verb = verb.client();
+            quote! {
+                #make_args
+                self.inner.call_to(#client_verb, #path, &args).await
+            }
+        } else {
+            let client_verb = verb.client();
+            // The path with each parameter percent-encoded in place,
+            // written before the arguments move into `args`.
+            let fmt = path
+                .split('/')
+                .map(|s| if s.starts_with('{') { "{}" } else { s })
+                .collect::<Vec<_>>()
+                .join("/");
+            let encoded = params.iter().map(|p| {
+                let id = format_ident!("{}", p.name);
+                if p.rest {
+                    quote! { ::architect::http::encode_rest(&#id) }
+                } else {
+                    quote! { ::architect::http::encode_segment(&#id) }
+                }
+            });
+            quote! {
+                let __path = ::std::format!(#fmt, #(#encoded),*);
+                #make_args
+                self.inner.call_to(#client_verb, &__path, &args).await
+            }
+        };
         client_methods.push(quote! {
             #(#docs)*
             pub async fn #name(
                 &self,
                 #(#client_params),*
             ) -> ::core::result::Result<#client_ok, ::architect::ClientError<#client_err>> {
-                let args = http::#args_name { #(#field_names),* };
-                self.inner.call(#path, &args).await
+                #client_body
             }
         });
 
