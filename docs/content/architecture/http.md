@@ -348,8 +348,7 @@ EngineHost::new(vox, bind)
   because architect cannot depend on its MCP crate. See
   [commands](@/architecture/commands.md).
 - `.plugin(Router)` stays as the escape hatch, for what neither a service
-  trait nor a builder method covers yet. Every route in it still counts
-  toward `cargo xtask boundaries`' `hand-routes`.
+  trait nor a builder method covers yet.
 
 `crates/architect/tests/host_mounts.rs` drives all three: a real
 upgrade per bearer and org, WebDAV verbs past a CORS-like layer, and
