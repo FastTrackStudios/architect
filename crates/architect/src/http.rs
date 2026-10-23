@@ -75,6 +75,11 @@ use core::fmt::Display;
 // build, the axum response helpers under `http`.
 pub mod ranged;
 
+// Streamed request bodies, request heads and ranged byte responses: what
+// an HTTP-only service method takes and returns instead of JSON.
+mod body;
+pub use body::{BodyStream, ByteBody, RequestHead, reply_bytes, respond_bytes};
+
 /// How an application error appears on the HTTP face.
 ///
 /// Implemented by the error type of every `Result`-returning method the
@@ -331,6 +336,7 @@ mod server {
     pub struct RawCall {
         params: HashMap<String, String>,
         bearer: Option<String>,
+        head: super::RequestHead,
         request: Option<Request>,
     }
 
@@ -359,9 +365,15 @@ mod server {
                 }
             };
             let bearer = bearer_of(&parts.headers);
+            let head = super::RequestHead {
+                method: parts.method.clone(),
+                uri: parts.uri.clone(),
+                headers: parts.headers.clone(),
+            };
             Ok(Self {
                 params,
                 bearer,
+                head,
                 request: Some(Request::from_parts(parts, body)),
             })
         }
@@ -406,6 +418,42 @@ mod server {
                 .await
                 .map_err(IntoResponse::into_response)?;
             decode_args(&bytes)
+        }
+
+        /// The request line and headers.
+        #[must_use]
+        pub fn head(&self) -> super::RequestHead {
+            self.head.clone()
+        }
+
+        /// The `Range` header, kept for the byte reply.
+        #[must_use]
+        pub fn range(&self) -> Option<axum::http::HeaderValue> {
+            self.head.headers.get(header::RANGE).cloned()
+        }
+
+        /// The body as a stream capped at `limit` bytes; a declared
+        /// `Content-Length` over the cap is a `413` now.
+        pub fn body(&mut self, limit: usize) -> Result<super::BodyStream, Response> {
+            let declared = self
+                .head
+                .headers
+                .get(header::CONTENT_LENGTH)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<u64>().ok());
+            if declared.is_some_and(|n| n > u64::try_from(limit).unwrap_or(u64::MAX)) {
+                return Err(plain_error(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    "payload_too_large",
+                    &format!("the request body is over this route's {limit}-byte limit"),
+                ));
+            }
+            let body = self
+                .request
+                .take()
+                .map(Request::into_body)
+                .unwrap_or_default();
+            Ok(super::BodyStream::new(body, limit))
         }
     }
 
@@ -662,6 +710,17 @@ mod server {
         }
         pub fn json<A>(&mut self) -> impl core::future::Future<Output = Result<A, Response>> {
             core::future::ready(Err(Response))
+        }
+        #[must_use]
+        pub fn head(&self) -> super::RequestHead {
+            super::RequestHead::default()
+        }
+        #[must_use]
+        pub const fn range(&self) -> Option<()> {
+            None
+        }
+        pub const fn body(&mut self, _limit: usize) -> Result<super::BodyStream, Response> {
+            Err(Response)
         }
     }
     #[must_use]

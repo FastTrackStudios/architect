@@ -53,7 +53,8 @@ Use these before writing your own. Each is behind a cargo feature and has a docs
 
 | Need | Module / feature | Entry points | Docs page |
 |---|---|---|---|
-| Serve files/audio with Range/206 | `architect::http::ranged` (feature `http`) | `crates/architect/src/http/ranged.rs` `parse_range`, `serve_bytes`, `serve_body`, `serve_file` | `http.md` |
+| Serve files/audio with Range/206 | a service method returning `architect::http::ByteBody` (HTTP-only service) | `crates/architect/src/http/body.rs` `ByteBody`; helpers `crates/architect/src/http/ranged.rs` `serve_body`, `serve_file` | `http.md` |
+| Streamed upload, request headers | `architect::http::BodyStream` / `RequestHead` arguments, `#[http(put, limit = "1GiB")]` | `crates/architect/src/http/body.rs` `BodyStream`, `RequestHead` | `http.md` |
 | Typed settings file / device KV | `architect::settings` (feature `settings`) | `crates/architect/src/settings.rs` `Store`, `FileKv` (implements atom `Kv`) | `settings.md` |
 | Crash log + last-run flight log | `architect_telemetry::flight` (feature `flight`, native only) | `features/telemetry/src/flight.rs` `install_panic_recorder`, `RingLayer`, `restore_previous`; one hook per process | `flight-recorder.md` |
 | Let agents find an app's MCP server | `architect_mcp::discovery` + `Server::serve_loopback` | `features/mcp/src/discovery.rs` `publish`, `project_mcp_json`; `features/mcp/src/http.rs` `serve_loopback_or` (honours `FTS_MCP=0`) | `commands.md` |
