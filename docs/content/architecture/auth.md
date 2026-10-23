@@ -119,9 +119,19 @@ context's token is simply `None`, and the policy is the service's.
 Everything a downstream app needs to hold a session and present it on
 later calls — wasm-clean, engine-free:
 
-- **`StoredSession`** — token + optional user id / email / expiry.
-  `architect_auth::client::stored_session(&bundle)` builds one from a
-  sign-in's `AuthSessionBundle`.
+- **`StoredSession`** — token + optional user id / email / expiry /
+  refresh token. `architect_auth::client::stored_session(&bundle)`
+  builds one from a sign-in's `AuthSessionBundle`; an OIDC sign-in
+  builds one with `oidc::token_response_from(body)?.into_session(now)`,
+  which keeps the `offline_access` refresh token. Session files saved
+  before `refresh_token` existed load with `None`.
+- **Refresh** — `oidc::refresh_if_needed(&store, client_id, now, send)`
+  renews the access token when it is within `REFRESH_MARGIN_SECS` of
+  expiry; `oidc::refresh_now` renews it after a 401. Either posts
+  `oidc::refresh_request_body` (a public client's
+  `grant_type=refresh_token`) through the app's `send` closure and
+  saves the rotated session. The issuer rotates refresh tokens, so
+  serialize refreshes per store; a `Refused` answer means sign in again.
 - **`TokenStore`** — save/load/clear behind a trait.
   **`FileTokenStore`** (native): one JSON file, atomic write
   (temp + rename), `0600` on unix — the token is a bearer credential.
