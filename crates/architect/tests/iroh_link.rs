@@ -148,6 +148,11 @@ enum Restart {
     /// The endpoint is dropped without closing (a killed process): the
     /// dialler's old connection lingers until its idle timeout.
     Crash,
+    /// A crash whose old address then swallows packets without an ICMP
+    /// reply — the redeployed pod with a new IP, a firewall drop. On
+    /// loopback a closed port answers port-unreachable, which hides the
+    /// stale path; a silent socket on the old port does not.
+    CrashBlackhole,
 }
 
 async fn bind_keyed(secret_key: iroh::SecretKey) -> iroh::Endpoint {
@@ -221,6 +226,7 @@ async fn redial_after_restarts(restart: Restart) {
     let mut held = echo_once(dial(&dialler, peer_id).await.expect("first dial")).await;
 
     let mut failures = Vec::new();
+    let mut blackholes = Vec::new();
     for round in 0..ROUNDS {
         let old_sockets = peer.bound_sockets();
         if matches!(restart, Restart::Graceful) {
@@ -229,6 +235,11 @@ async fn redial_after_restarts(restart: Restart) {
         server.abort();
         let _ = server.await;
         drop(peer);
+        if matches!(restart, Restart::CrashBlackhole) {
+            for addr in &old_sockets {
+                blackholes.push(std::net::UdpSocket::bind(addr).expect("hold the old port"));
+            }
+        }
         peer = bind_keyed(key.clone()).await;
         assert_ne!(peer.bound_sockets(), old_sockets, "rebound on new ports");
         lookup.set_endpoint_info(direct_addr(&peer));
@@ -269,4 +280,13 @@ async fn redial_by_id_after_graceful_restart() {
 #[tokio::test]
 async fn redial_by_id_after_crash_restart() {
     redial_after_restarts(Restart::Crash).await;
+}
+
+#[tokio::test]
+async fn redial_by_id_after_crash_restart_behind_a_blackhole() {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_test_writer()
+        .try_init();
+    redial_after_restarts(Restart::CrashBlackhole).await;
 }
