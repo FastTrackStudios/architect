@@ -29,8 +29,10 @@ optional = true
 
 [dev-dependencies]
 futures = "0.3"
-# tests/mcp.rs: the Action List face, driven as a model would.
-architect-mcp = { path = "../../features/mcp" }
+# tests/mcp.rs: the Action List face, driven as a model would;
+# tests/host_mounts.rs: MCP and OTLP mounted on an EngineHost.
+architect-mcp = { path = "../../features/mcp", features = ["host"] }
+architect = { workspace = true, features = ["otlp-forward"] }
 serde_json.workspace = true
 
 [[bin]]

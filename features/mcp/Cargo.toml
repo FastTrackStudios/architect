@@ -17,6 +17,9 @@ default = []
 # `POST /mcp` on an axum router, bearer-token guarded: the transport a
 # running app serves on localhost for a model to drive it live.
 http = ["dep:axum", "dep:tokio"]
+# `McpHost` (`.mcp(…)`, `.mcp_at(…)`): MCP mounted on architect's
+# `EngineHost`, per path, with a resolver for the server and caller.
+host = ["http", "architect/host"]
 
 [dependencies]
 architect = { path = "../../crates/architect", features = ["action-list"] }

@@ -468,6 +468,31 @@ architect_mcp::project_mcp_json(repo_root, "session", "http://127.0.0.1:47811/mc
 - The token stays optional. Without one, anything on this machine can
   run every action; set a token for an app with destructive actions.
 
+### Serving on an engine host
+
+A server on the network mounts MCP on its `EngineHost` instead (feature
+`host`, `features/mcp/src/host.rs` `McpHost`). `.mcp(server, token)` is
+the loopback router above on the host. `.mcp_at(path, resolve)` serves
+a path (`/org/{slug}/mcp`, an account-wide `/mcp`) and asks `resolve`,
+per request, which server to answer from and who the request runs as:
+
+```rust,ignore
+use architect_mcp::host::{McpHost, McpTarget};
+
+host.mcp_at("/org/{slug}/mcp", move |head: RequestHead| {
+    let orgs = orgs.clone();
+    async move {
+        let org = orgs.get(head.param("slug").unwrap_or_default()).ok_or(StatusCode::NOT_FOUND)?;
+        let who = org.principal_for(head.bearer()).await.ok_or(StatusCode::UNAUTHORIZED)?;
+        Ok(McpTarget::new(org.mcp.clone(), ActionCaller::new(who)))
+    }
+})
+```
+
+There is no origin check on `mcp_at`: authentication is the resolver's,
+and the caller's principal goes through the list's authorizer as for
+`handle_as`. `examples/greeter/tests/host_mounts.rs` drives both.
+
 ## Rules
 
 1. **One command per capability.** If a person or an agent can do it, it

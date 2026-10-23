@@ -224,6 +224,11 @@ host = [
     "dep:include_dir",
 ]
 
+# `EngineHost::otlp_forward`: authenticated OTLP/HTTP ingest that a host
+# forwards to an in-cluster collector, so clients reuse the host's auth,
+# TLS and CORS instead of a public collector. Native only (reqwest).
+otlp-forward = ["host", "dep:reqwest"]
+
 # Dispatcher impls (see `architect::dispatch`). The current-thread
 # dispatcher is always available; runtime-specific impls are gated.
 #

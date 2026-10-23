@@ -23,23 +23,32 @@ use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::post;
+use axum::routing::{MethodRouter, post};
+
+use architect::action::ActionCaller;
 
 use crate::Server;
 
 struct Shared {
-    server: Server,
+    server: Arc<Server>,
     token: Option<String>,
 }
 
 /// `POST /mcp` serving `server`, guarded by `token` when there is one.
 pub fn router(server: Server, token: Option<String>) -> Router {
-    let shared = Arc::new(Shared { server, token });
+    let shared = Arc::new(Shared {
+        server: Arc::new(server),
+        token,
+    });
+    mount("/mcp", post(message).with_state(shared))
+}
+
+/// `messages` at `path`; `GET` is `405` (there is no server-to-client
+/// stream). Every MCP route is built here.
+pub(crate) fn mount(path: &str, messages: MethodRouter) -> Router {
     Router::new().route(
-        "/mcp",
-        post(message)
-            .get(|| async { StatusCode::METHOD_NOT_ALLOWED })
-            .with_state(shared),
+        path,
+        messages.get(|| async { StatusCode::METHOD_NOT_ALLOWED }),
     )
 }
 
@@ -184,11 +193,19 @@ async fn message(State(shared): State<Arc<Shared>>, headers: HeaderMap, body: By
             return (StatusCode::UNAUTHORIZED, "a bearer token is needed").into_response();
         }
     }
+    answer(Arc::clone(&shared.server), ActionCaller::app(), &body).await
+}
+
+/// Answer one JSON-RPC message in `body` as `caller`: its reply as JSON,
+/// or `202 Accepted` and nothing for a notification.
+pub(crate) async fn answer(server: Arc<Server>, caller: ActionCaller, body: &[u8]) -> Response {
     let Ok(text) = String::from_utf8(body.to_vec()) else {
         return (StatusCode::BAD_REQUEST, "not UTF-8").into_response();
     };
     // `watch` may wait for the app: off the async threads.
-    let handled = tokio::task::spawn_blocking(move || shared.server.handle(&text)).await;
+    // An `app()` caller names no principal, so it runs as the server's
+    // own, exactly as `Server::handle` does.
+    let handled = tokio::task::spawn_blocking(move || server.handle_with(&caller, &text)).await;
     match handled {
         Ok(Some(reply)) => ([(header::CONTENT_TYPE, "application/json")], reply).into_response(),
         Ok(None) => StatusCode::ACCEPTED.into_response(),

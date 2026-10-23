@@ -14,6 +14,7 @@ The full guide is `docs/content/architecture/commands.md`; this page is what an 
 | Authorize hook | `PermissionEngine::authorize(principal, id)` → `check(principal, "action/<id>", "run")` | `features/permissions/src/lib.rs` `authorize`, `action_resource` |
 | MCP server | JSON-RPC over the list: generic and/or named tools | `features/mcp/src/lib.rs` `Server`, `Tools`, `ErrorStyle`, `ToolError`, `serve_stdio` |
 | MCP HTTP | `POST /mcp`, origin guard, optional bearer, loopback serve | `features/mcp/src/http.rs` `router`, `serve`, `serve_loopback_or` |
+| MCP on `EngineHost` | feature `host`: `.mcp(server, token)` (loopback guard) and `.mcp_at("/org/{slug}/mcp", \|head\| async { Ok(McpTarget::new(server, caller)) / Err(impl IntoResponse) })` (no origin check; the resolver authenticates) | `features/mcp/src/host.rs` `McpHost`, `McpTarget`; `examples/greeter/tests/host_mounts.rs` |
 | MCP discovery | `<config>/fts/<name>-mcp.json` and a project's `.mcp.json` | `features/mcp/src/discovery.rs` `publish`, `read`, `unpublish`, `project_mcp_json` |
 | Keys | keymap bindings name action ids | `features/input/src/processor.rs` `InputProcessor` (see `docs/content/architecture/input.md`) |
 | Telemetry | one `action` span per run, stage timings | `features/telemetry/src/timing.rs` `Stages`, `DIRECTIVES` |

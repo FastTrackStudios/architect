@@ -78,6 +78,9 @@ use architect::action::{
 use serde_json::{Value, json};
 
 pub mod discovery;
+// `.mcp(…)` / `.mcp_at(…)` on architect's `EngineHost`.
+#[cfg(feature = "host")]
+pub mod host;
 #[cfg(feature = "http")]
 pub mod http;
 
