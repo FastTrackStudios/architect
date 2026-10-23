@@ -27,6 +27,7 @@ In the architect repo `cargo xtask` is `cargo run -p xtask --`. Consumers build 
 
 - Each row: `cargo tree --locked -p <pkg> -e normal` with the row's features; L0 rows resolve for `wasm32-unknown-unknown`.
 - Rules: `contract-clean` (L0 must not reach engine or ui packages, a tokio runtime, or a transport-host/server `architect` feature), `ui-reach` (L4 must not reach engine packages or transport/server features; Dioxus is fine), `transport-host` (no member outside `apps/` enables a host in its default set), `lints` (`[lints] workspace = true`), `single-source` (one lock source per architect-family package), `unmapped` (every non-proc-macro crate under `features/` has a row), plus ratcheted `[[idiom]]` source counts (`hand-routes`).
+- An `[[idiom]]` `pattern` matches code only (never comments or string/char literal contents). `path-arg = true` counts a call only when its first argument is a `/`-rooted string literal (axum's `.route("/…", …)`, even with the path on the next line), so `fn route()`, `x.route(path)` and Dioxus helpers don't count. `skip-tests = true` ignores `tests/`, `benches/` and `#[cfg(test)]` items. `allow` exempts paths. Matcher: `xtask/src/boundaries.rs` `idiom_lines`.
 - Output: `[rule-id] detail` per violation. `FAIL key: N violations, baseline M` means the count went up: fix it, never raise the baseline. `lower [baseline] key to N` means it went down: lower it in the same PR.
 - It reads `Cargo.lock` with `--locked`: a stale lock fails the run.
 

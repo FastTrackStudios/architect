@@ -22,7 +22,8 @@ with its own serialization, defeating the facet-only wire.
 
 > Not yet automated: the xtask has no idioms command (an earlier
 > version of this page named one). `cargo xtask boundaries` ratchets
-> hand-written axum routes (`[[idiom]]` in `boundaries.toml`); review
+> hand-written axum routes (`[[idiom]]` in `boundaries.toml`, matching
+> `.route("/…"` calls in non-test code, `path-arg` and `skip-tests`); review
 > catches `#[server]`, `use_server_future` and `dioxus(_|::)fullstack`.
 
 ## 2. Wire types are facet-only

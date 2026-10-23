@@ -139,8 +139,23 @@ pub struct Table {
 pub struct Idiom {
     /// Baseline key, e.g. `hand-routes`.
     pub name: String,
-    /// Substring that marks one occurrence on a line.
+    /// Text that marks one occurrence. Matched in code only: comments
+    /// and the inside of string and char literals are never searched.
     pub pattern: String,
+    /// Count an occurrence only when the call's first argument is a
+    /// string literal starting with `/`: the shape of an axum
+    /// `.route("/path", ...)`, which axum itself requires. With
+    /// `pattern = ".route("` this skips `fn route()` dispatchers,
+    /// `x.route(path)` builders and Dioxus helpers like
+    /// `vault.route("Plans.md".into())`, and still counts a call whose
+    /// path is on the next line.
+    #[serde(default, rename = "path-arg")]
+    pub path_arg: bool,
+    /// Skip test code: files under a `tests/` or `benches/` directory and
+    /// the body of any item marked `#[cfg(test)]`. Test stubs (a fake
+    /// Tempo server, say) are not routes the app serves.
+    #[serde(default, rename = "skip-tests")]
+    pub skip_tests: bool,
     /// Workspace-relative directories to scan for `*.rs`.
     #[serde(default = "default_idiom_dirs")]
     pub dirs: Vec<String>,
@@ -277,14 +292,276 @@ impl Violation {
     }
 }
 
-/// 1-based numbers of the lines in `text` containing `pattern`, skipping
-/// `//` comment lines.
-fn idiom_lines(text: &str, pattern: &str) -> Vec<usize> {
-    text.lines()
-        .zip(1_usize..)
-        .filter(|(line, _)| !line.trim_start().starts_with("//") && line.contains(pattern))
-        .map(|(_, n)| n)
-        .collect()
+/// How an idiom matches inside one file: see [`Idiom`].
+#[derive(Debug, Clone, Copy, Default)]
+struct Matcher<'a> {
+    pattern: &'a str,
+    path_arg: bool,
+    skip_tests: bool,
+}
+
+impl<'a> Matcher<'a> {
+    fn of(idiom: &'a Idiom) -> Self {
+        Self {
+            pattern: &idiom.pattern,
+            path_arg: idiom.path_arg,
+            skip_tests: idiom.skip_tests,
+        }
+    }
+}
+
+/// 1-based numbers of the lines in `text` with an occurrence of the
+/// idiom, each line counted once. Comments and the inside of string and
+/// char literals never match.
+fn idiom_lines(text: &str, m: Matcher<'_>) -> Vec<usize> {
+    if m.pattern.is_empty() {
+        return Vec::new();
+    }
+    let code = mask(text);
+    let skipped = if m.skip_tests {
+        cfg_test_spans(&code)
+    } else {
+        Vec::new()
+    };
+    let mut lines = Vec::new();
+    for (at, _) in code.match_indices(m.pattern) {
+        if skipped.iter().any(|span| span.contains(&at)) {
+            continue;
+        }
+        let after = at.saturating_add(m.pattern.len());
+        if m.path_arg && !path_literal_at(text, &code, after) {
+            continue;
+        }
+        let line = code
+            .get(..at)
+            .map_or(0, |before| before.matches('\n').count())
+            .saturating_add(1);
+        if lines.last() != Some(&line) {
+            lines.push(line);
+        }
+    }
+    lines
+}
+
+/// Whether the code at byte `at`, after whitespace, opens a string
+/// literal whose text starts with `/`. `src` is the unmasked text, `code`
+/// its [`mask`].
+fn path_literal_at(src: &str, code: &str, at: usize) -> bool {
+    let Some(after) = code.get(at..) else {
+        return false;
+    };
+    let ws = after.len().saturating_sub(after.trim_start().len());
+    src.get(at.saturating_add(ws)..)
+        .map(|s| s.strip_prefix('r').map_or(s, |s| s.trim_start_matches('#')))
+        .and_then(|s| s.strip_prefix('"'))
+        .is_some_and(|s| s.starts_with('/'))
+}
+
+const fn is_ident(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_'
+}
+
+/// Push `s` with every char but `\n` turned into spaces, byte for byte.
+fn push_blank(out: &mut String, s: &str) {
+    for c in s.chars() {
+        if c == '\n' {
+            out.push('\n');
+        } else {
+            out.extend(std::iter::repeat_n(' ', c.len_utf8()));
+        }
+    }
+}
+
+/// One lexed piece of source: `keep` stays as it is, then `blank` is
+/// masked, then `close` stays.
+struct Piece<'a> {
+    keep: &'a str,
+    blank: &'a str,
+    close: &'a str,
+}
+
+/// `text` with every comment and the inside of every string and char
+/// literal replaced by spaces (newlines kept). Byte offsets and line
+/// numbers line up with `text`, and a match in the result is a match in
+/// code. Quote characters stay, so a pattern may end in `("`.
+fn mask(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    let mut prev: Option<char> = None;
+    while let Some(c) = rest.chars().next() {
+        let after_ident = prev.is_some_and(is_ident);
+        let (piece, tail) = comment(rest)
+            .or_else(|| (!after_ident).then(|| raw_string(rest)).flatten())
+            .or_else(|| string(rest))
+            .or_else(|| char_literal(rest))
+            .unwrap_or_else(|| {
+                let (keep, tail) = rest.split_at(c.len_utf8());
+                let piece = Piece {
+                    keep,
+                    blank: "",
+                    close: "",
+                };
+                (piece, tail)
+            });
+        out.push_str(piece.keep);
+        push_blank(&mut out, piece.blank);
+        out.push_str(piece.close);
+        prev = piece
+            .close
+            .chars()
+            .next_back()
+            .or_else(|| piece.blank.chars().next_back())
+            .or_else(|| piece.keep.chars().next_back());
+        rest = tail;
+    }
+    out
+}
+
+/// A `//` comment up to the newline, or a (nested) `/* */` comment.
+fn comment(rest: &str) -> Option<(Piece<'_>, &str)> {
+    let end = if rest.starts_with("//") {
+        rest.find('\n').unwrap_or(rest.len())
+    } else if rest.starts_with("/*") {
+        block_comment_len(rest)
+    } else {
+        return None;
+    };
+    let (blank, tail) = rest.split_at_checked(end)?;
+    Some((
+        Piece {
+            keep: "",
+            blank,
+            close: "",
+        },
+        tail,
+    ))
+}
+
+/// The byte length of the (possibly nested) block comment `rest` opens.
+fn block_comment_len(rest: &str) -> usize {
+    let mut depth = 0_usize;
+    let mut at = 0_usize;
+    while let Some(tail) = rest.get(at..) {
+        if tail.is_empty() {
+            break;
+        }
+        if tail.starts_with("/*") {
+            depth = depth.saturating_add(1);
+            at = at.saturating_add(2);
+        } else if tail.starts_with("*/") {
+            depth = depth.saturating_sub(1);
+            at = at.saturating_add(2);
+            if depth == 0 {
+                return at;
+            }
+        } else {
+            at = at.saturating_add(tail.chars().next().map_or(1, char::len_utf8));
+        }
+    }
+    rest.len()
+}
+
+/// `r"…"`, `r#"…"#`, `br"…"`, `cr"…"`: the caller has checked no
+/// identifier char comes right before `rest`.
+fn raw_string(rest: &str) -> Option<(Piece<'_>, &str)> {
+    let r = rest
+        .strip_prefix('r')
+        .or_else(|| rest.strip_prefix("br"))
+        .or_else(|| rest.strip_prefix("cr"))?;
+    let body = r.trim_start_matches('#').strip_prefix('"')?;
+    let hashes = r.len().saturating_sub(r.trim_start_matches('#').len());
+    let close = format!("\"{}", "#".repeat(hashes));
+    let keep_len = rest.len().saturating_sub(body.len());
+    let body_len = body.find(&close).unwrap_or(body.len());
+    let (keep, tail) = rest.split_at_checked(keep_len)?;
+    let (blank, tail) = tail.split_at_checked(body_len)?;
+    let (close, tail) = tail.split_at_checked(close.len().min(tail.len()))?;
+    Some((Piece { keep, blank, close }, tail))
+}
+
+/// A `"…"` string, escapes honoured.
+fn string(rest: &str) -> Option<(Piece<'_>, &str)> {
+    let body = rest.strip_prefix('"')?;
+    let mut escaped = false;
+    let len = body
+        .char_indices()
+        .find(|(_, c)| {
+            let end = !escaped && *c == '"';
+            escaped = !escaped && *c == '\\';
+            end
+        })
+        .map_or(body.len(), |(i, _)| i);
+    let (keep, tail) = rest.split_at_checked(1)?;
+    let (blank, tail) = tail.split_at_checked(len)?;
+    let (close, tail) = tail.split_at_checked(1.min(tail.len()))?;
+    Some((Piece { keep, blank, close }, tail))
+}
+
+/// A char literal (`'x'`, `'\''`, `'\u{1F600}'`); `None` for a lifetime
+/// or label (`'a`, `'static`), which stays code.
+fn char_literal(rest: &str) -> Option<(Piece<'_>, &str)> {
+    let body = rest.strip_prefix('\'')?;
+    let len = if let Some(escape) = body.strip_prefix('\\') {
+        // The escaped char itself may be `'`, so look past it.
+        let first = escape.chars().next()?.len_utf8();
+        let close = escape.get(first..)?.find('\'')?;
+        close.saturating_add(first).saturating_add(1)
+    } else {
+        let mut chars = body.chars();
+        let c = chars.next()?;
+        if chars.next() != Some('\'') {
+            return None;
+        }
+        c.len_utf8()
+    };
+    let (keep, tail) = rest.split_at_checked(1)?;
+    let (blank, tail) = tail.split_at_checked(len)?;
+    let (close, tail) = tail.split_at_checked(1)?;
+    Some((Piece { keep, blank, close }, tail))
+}
+
+/// Byte spans of every item marked `#[cfg(test)]` in masked `code`: from
+/// the attribute to the `}` closing the item's first `{` block, or to its
+/// `;` (`#[cfg(test)] use ...;`).
+fn cfg_test_spans(code: &str) -> Vec<std::ops::Range<usize>> {
+    const ATTR: &str = "#[cfg(test)]";
+    let mut spans: Vec<std::ops::Range<usize>> = Vec::new();
+    for (at, _) in code.match_indices(ATTR) {
+        if spans.last().is_some_and(|s| s.contains(&at)) {
+            continue;
+        }
+        let item = at.saturating_add(ATTR.len());
+        let tail = code.get(item..).unwrap_or("");
+        let mut depth = 0_usize;
+        let end = tail
+            .char_indices()
+            .find(|(_, c)| match c {
+                ';' if depth == 0 => true,
+                '{' => {
+                    depth = depth.saturating_add(1);
+                    false
+                }
+                '}' => {
+                    depth = depth.saturating_sub(1);
+                    depth == 0
+                }
+                _ => false,
+            })
+            .map_or(code.len(), |(i, _)| {
+                item.saturating_add(i).saturating_add(1)
+            });
+        spans.push(at..end);
+    }
+    spans
+}
+
+/// Whether a workspace-relative file sits under a `tests/` or `benches/`
+/// directory.
+fn is_test_path(rel: &str) -> bool {
+    rel.split('/')
+        .rev()
+        .skip(1)
+        .any(|dir| dir == "tests" || dir == "benches")
 }
 
 fn reached<'a>(graph: &'a [Resolved], names: &'a [String]) -> impl Iterator<Item = &'a Resolved> {
@@ -718,13 +995,13 @@ fn scan_idiom(root: &Path, idiom: &Idiom) -> Result<Vec<String>, String> {
             .strip_prefix(root)
             .map(|r| r.to_string_lossy().replace('\\', "/"))
             .unwrap_or_default();
-        if in_dirs(&rel, &idiom.allow) {
+        if in_dirs(&rel, &idiom.allow) || (idiom.skip_tests && is_test_path(&rel)) {
             continue;
         }
         let text =
             std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
         hits.extend(
-            idiom_lines(&text, &idiom.pattern)
+            idiom_lines(&text, Matcher::of(idiom))
                 .into_iter()
                 .map(|n| format!("{rel}:{n}")),
         );
@@ -1052,10 +1329,93 @@ mod tests {
         assert_eq!(verdict(&t), Ratchet::Held);
     }
 
+    fn substring(pattern: &str) -> Matcher<'_> {
+        Matcher {
+            pattern,
+            ..Matcher::default()
+        }
+    }
+
+    /// The matcher `hand-routes` uses: axum route calls outside tests.
+    const AXUM_ROUTES: Matcher<'static> = Matcher {
+        pattern: ".route(",
+        path_arg: true,
+        skip_tests: true,
+    };
+
     #[test]
     fn idiom_lines_skip_comments() {
         let text = "fn a() {\n    r.route(\"/x\", get(x))\n    // .route(\"/old\")\n    .route(\"/y\", post(y));\n}\n";
-        assert_eq!(idiom_lines(text, ".route("), vec![2, 4]);
+        assert_eq!(idiom_lines(text, substring(".route(")), vec![2, 4]);
+    }
+
+    #[test]
+    fn idiom_lines_skip_block_comments_and_string_contents() {
+        let text = r##"/* r.route("/a")
+   /* nested */ .route("/b") */
+let doc = "use .route(\"/c\") here";
+let raw = r#"x.route("/d")"#;
+let c = '"'; let l: &'static str = "x"; app.route("/e", get(e));
+"##;
+        assert_eq!(idiom_lines(text, substring(".route(")), vec![5]);
+    }
+
+    #[test]
+    fn a_route_call_counts_only_with_a_path_literal() {
+        let text = r#"pub fn route(&self) -> Option<Route> { None }
+if let Some(route) = f.route() {}
+nav.push(row_scope.route(path.clone()));
+vault.route("Plans.md".into());
+#[route("/home")]
+Router::new().route("/vox", get(vox))
+    .route(
+        "/org/{slug}/api",
+        get(api),
+    )
+    .route(r"/raw", any(raw));
+"#;
+        assert_eq!(idiom_lines(text, AXUM_ROUTES), vec![6, 7, 11]);
+        assert_eq!(
+            idiom_lines(text, substring(".route(")),
+            vec![2, 3, 4, 6, 7, 11]
+        );
+    }
+
+    #[test]
+    fn a_cfg_test_item_is_skipped_when_asked() {
+        let text = r#"fn app() -> Router { Router::new().route("/a", get(a)) }
+
+#[cfg(test)]
+mod tests {
+    fn stub() -> Router {
+        let s = "}";
+        Router::new().route("/api/search", get(fake)) // '{'
+    }
+}
+
+fn more() -> Router { Router::new().route("/b", get(b)) }
+"#;
+        assert_eq!(idiom_lines(text, AXUM_ROUTES), vec![1, 11]);
+        let with_tests = Matcher {
+            skip_tests: false,
+            ..AXUM_ROUTES
+        };
+        assert_eq!(idiom_lines(text, with_tests), vec![1, 7, 11]);
+    }
+
+    #[test]
+    fn test_directories_are_test_code() {
+        assert!(is_test_path("apps/server/tests/it/mcp_telemetry_e2e.rs"));
+        assert!(is_test_path("crates/x/benches/b.rs"));
+        assert!(!is_test_path("apps/server/src/lib.rs"));
+        assert!(!is_test_path("apps/server/src/tests.rs"));
+    }
+
+    #[test]
+    fn lifetimes_and_char_literals_do_not_derail_the_mask() {
+        let text = "fn f<'a>(x: &'a str) -> char { let q = '\\''; let u = '\\u{1F600}'; let e = '\u{e9}'; e }\nr.route(\"/x\", g)\n";
+        assert_eq!(idiom_lines(text, AXUM_ROUTES), vec![2]);
+        assert_eq!(idiom_lines("x.route(", AXUM_ROUTES), Vec::<usize>::new());
     }
 
     #[test]
