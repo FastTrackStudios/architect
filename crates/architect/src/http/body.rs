@@ -368,6 +368,7 @@ mod imp {
             None
         }
         #[must_use]
+        #[allow(clippy::unnecessary_literal_bound)] // same signature as with `http`
         pub const fn path(&self) -> &str {
             ""
         }
