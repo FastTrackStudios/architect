@@ -142,6 +142,78 @@ pub trait Notes {
 - A method with none of this keeps the exact `POST` route it always had.
   `crates/architect/tests/http_routes.rs` drives all of it over a socket.
 
+## Bytes: uploads and ranged downloads
+
+Media, blob downloads and uploads are bytes, not JSON. A method declares
+that with three types from `architect::http`
+(`crates/architect/src/http/body.rs`):
+
+| type | where | what the handler does |
+|---|---|---|
+| `BodyStream` | argument | hands over the request body as a stream of chunks, capped at the route's `limit` |
+| `RequestHead` | argument | hands over the method, URI and headers (`bearer()`, `header(..)`, `query()`) |
+| `ByteBody` | `Ok` value (or the return) | serves it through `ranged::serve_body`: `200`, `206` + `Content-Range`, or `416` |
+
+```rust,ignore
+#[architect::service(path = "org/{slug}")]
+pub trait Media {
+    #[http(get, path = "blobs/{hash}")]
+    async fn blob(&self, slug: String, hash: String) -> Result<ByteBody, MediaError>;
+
+    #[http(get, path = "media/{*path}")]
+    async fn media(&self, slug: String, path: String, head: RequestHead)
+        -> Result<ByteBody, MediaError>;
+
+    #[http(put, path = "blobs/upload", limit = "1GiB")]
+    async fn upload(&self, slug: String, body: BodyStream) -> Result<BlobRef, MediaError>;
+}
+
+impl Media for Store {
+    async fn blob(&self, slug: String, hash: String) -> Result<ByteBody, MediaError> {
+        let (total, mime) = self.stat(&slug, &hash).await?;
+        let store = self.clone();
+        // Called once, with exactly the window the `Range` selects.
+        Ok(ByteBody::new(total, mime, move |offset, len| async move {
+            store.read_range(&slug, &hash, offset, len).await.map(Body::from)
+        }))
+    }
+    …
+}
+```
+
+- `ByteBody::new(total, mime, read)` takes a windowed reader;
+  `ByteBody::from_bytes(bytes, mime)` serves memory (a range shares the
+  buffer); natively `ByteBody::file(path, mime)` streams a file. A failed
+  read is a `500`; an `Err(E)` from the method is the usual envelope.
+- `BodyStream` is a `futures::Stream` of `io::Result<Bytes>` (or call
+  `chunk()` / `to_vec()`). A declared `Content-Length` over the route's
+  cap is a `413` before the method runs; a chunked body that grows past
+  it ends the stream with `io::ErrorKind::FileTooLarge`, which the method
+  maps to its own error. Its other arguments come from the path.
+- Path parameters, verbs and `limit` work exactly as for JSON methods.
+
+**These methods are HTTP-only.** vox has no byte-stream argument to carry
+them, and a mapping onto vox channels would be a second wire protocol to
+keep in step for every route. So a trait with any such method is an
+*HTTP-only service*: no vox client, dispatcher, descriptor or `serve`; no
+typed client method for the byte methods (any HTTP client calls them;
+its JSON methods keep theirs); and none of `context`, `ops`,
+`sync_client`, `actions` or `scopes` (the derive says which). Keep the
+methods a vox client needs in their own trait. Every method is
+`async fn`, and the HTTP face calls the backend directly. Its `Service`
+token is still a `Layer`, so it mounts like any other:
+
+```rust,ignore
+let http = layers![MediaService, NotesService].provide_http(&backend);
+EngineHost::new(vox, bind).plugin(http).serve().await?;
+```
+
+On vox the token binds nothing (an empty descriptor, which
+`LayerRouter::unmounted` ignores). `crates/architect/tests/http_bytes.rs`
+uploads 3 MiB through `limit = "1GiB"`, refuses one past the default cap
+(declared and chunked), downloads by range, and reads the bearer through
+`RequestHead` on a `{*path}` route, all over a socket.
+
 ## Streams
 
 A `#[subscribe]` declaration gets a route too — as **Server-Sent
@@ -206,7 +278,7 @@ let http = layers![AuthServiceService, OrganizationServiceService].provide_http(
 
 EngineHost::new(vox, "0.0.0.0:8080")
     .plugin(http)                  // the generated face
-    .plugin(oauth::router(state))  // anything that is HTTP by nature
+    .plugin(oauth::router(state))  // the escape hatch: a hand-built router
     .plugin(auth_ui::router(ui))   // hosted pages
     .finish(|app| app.layer(cors)) // outermost layers
     .serve()
@@ -345,9 +417,10 @@ which is exactly what a per-transport hand-written test never notices.
 
 ## Byte ranges (`Range` → 206)
 
-Media and downloads are HTTP by nature and stay hand-written routes, but
-the byte-range rules under them are not app code. `architect::http::ranged`
-(`crates/architect/src/http/ranged.rs`) has them once:
+A method that returns a `ByteBody` gets all of this without asking (see
+above). The rules live once in `architect::http::ranged`
+(`crates/architect/src/http/ranged.rs`), and a route built outside the
+derive uses the same helpers:
 
 | `Range` | answer |
 |---|---|

@@ -107,12 +107,13 @@ Can:
 - Route `POST /<prefix>/<method-kebab>` by default; prefix = trait minus `Service`, kebab-cased; `path = "org/{slug}"` overrides it (may nest, may hold `{param}`s); `#[http(path = "sign-in/email")]` sets the method tail.
 - `#[http(get | put | post | delete | any, path = "notes/{id}", limit = "1GiB")]`: verb, path, body cap (axum `DefaultBodyLimit`; default 2 MiB). `{name}` / `{*name}` (last segment) bind the same-named argument via `FromStr`, `400 invalid_path` if it does not parse; a service-prefix `{param}` must be an argument of every method. Several verbs may share a path. The typed client percent-encodes params (`architect::http::encode_segment`, `encode_rest`) and sends the verb. Test: `crates/architect/tests/http_routes.rs`.
 - Body: one JSON key per non-path argument (`http::<Method>Args`); empty body = `{}`; content type not checked. A `get` route has no body: every argument comes from the path (or `token` from the bearer), else a compile error.
+- Bytes: a `BodyStream` argument (streamed upload, capped at `limit`; `413` on a declared length over it, `io::ErrorKind::FileTooLarge` mid-stream), a `RequestHead` argument (`bearer()`, `header()`, `query()`), a `ByteBody` result (`ByteBody::new(total, mime, |offset, len| …)`, `from_bytes`, `file`; served via `ranged::serve_body`, so `206`/`416` for free). Any of these makes the trait an **HTTP-only service**: no vox client/dispatcher/descriptor, no typed client method for byte methods, all `async fn`, no `context`/`ops`/`sync_client`/`actions`/`scopes`. Its `Service` token still mounts with `provide_http`. Test: `crates/architect/tests/http_bytes.rs`.
 - `200` + JSON on success; errors via `HttpError::status()` (default 400, clamped ≥ 400), body `{code, message, error}`; the client decodes `ClientError::App(E)`.
 - An argument named `token` may come from `Authorization: Bearer`.
 - `#[subscribe]` → SSE `text/event-stream`, POST and GET. An argless subscription delivers its `{name}_intro` frame first over SSE (fixed in v0.9.24), as the vox stream host does.
 
 Cannot:
-- Query strings; request streaming or multipart; custom success status (always 200). `#[subscribe]` under a service `path` with params.
+- Query strings as arguments (read them via `RequestHead`); multipart; custom success status (always 200). `#[subscribe]` under a service `path` with params. A byte method on vox (split vox methods into their own trait).
 - Auth beyond `Bearer` / `token`: no cookie, no per-route guard. Use `plugin` / `finish` tower layers.
 - `context = T` traits: the HTTP face (and the action projection) is skipped.
 - Generic methods, `&mut self`, borrowed or `Self` returns: compile errors.

@@ -909,6 +909,8 @@ impl LayerRouter {
         let mut missing: Vec<&'static str> = bundle
             .descriptors()
             .into_iter()
+            // An HTTP-only service has nothing to mount on vox.
+            .filter(|d| !d.methods.is_empty())
             .map(|d| d.service_name)
             .filter(|name| !mounted.contains_key(name))
             .collect();
