@@ -482,6 +482,10 @@ name = "version_json"
 required-features = ["host"]
 
 [[test]]
+name = "host_mounts"
+required-features = ["host"]
+
+[[test]]
 name = "iroh_lan"
 required-features = ["iroh-lan"]
 

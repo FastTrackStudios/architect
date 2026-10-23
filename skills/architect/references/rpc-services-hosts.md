@@ -84,7 +84,12 @@ EngineHost::new(backend.clone().into_router(), config.bind)
 
 - `into_router()` = vox `LayerRouter`; `into_http_router()` = axum router.
 - `/health` and `/vox` (WS, subprotocol `vox.v1`) are always mounted; `/version.json` (`{rev, version, built_at}`, `no-store`) is mounted before the SPA fallback.
-- `plugin` is an alias of `extend`; plugins merge before the SPA fallback. `finish(wrap)` wraps the assembled app after plugins and the SPA fallback.
+- `plugin` is an alias of `extend`; plugins merge before the SPA fallback. `finish(wrap)` wraps the assembled app after plugins and the SPA fallback. `plugin` is the escape hatch: its routes still count as `hand-routes`.
+- Protocol mounts (`crates/architect/src/host/mount.rs`), each hook seeing a `RequestHead` (path params, headers, `bearer()` from `Authorization` or the `vox.bearer.` subprotocol):
+  - `.vox_at("/org/{slug}/vox", |head| async { Ok(handler) / Err(impl IntoResponse) })`: vox WS at a parameterised path; the resolver picks the handler (identity) per connection before the upgrade. `vox_at("/vox", …)` replaces the built-in `/vox`.
+  - `.document(path, |head| async { Ok(impl IntoResponse) / Err(impl IntoResponse) })`: a `GET` document (`/.well-known/…`, `/org/{slug}/api`, a per-org probe).
+  - `.dav(mount, |dav: DavRequest| async { response })`: WebDAV, every verb at `mount`, `mount/` and below, mounted outside `finish` (outside CORS); `DavRequest { head, mount, rel, request }`.
+  - Tests: `crates/architect/tests/host_mounts.rs`.
 - `serve()` binds TCP and spawns iroh if configured: `.iroh(key_path, id_path)` + optional `.iroh_lookup(PeerLookup::N0AndLan)`. Real use: `apps/auth-server/src/server.rs`. The key file is created 0600 on unix.
 
 ## 4. Connect

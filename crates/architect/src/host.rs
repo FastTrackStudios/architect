@@ -24,6 +24,9 @@ use axum::routing::get;
 
 use crate::LayerRouter;
 
+mod mount;
+pub use mount::{BEARER_SUBPROTOCOL_PREFIX, DavRequest, RequestHead};
+
 /// The vox WebSocket subprotocol `/vox` selects.
 ///
 /// Every client offers it, and a browser client that offers a subprotocol
@@ -182,6 +185,10 @@ pub struct EngineHost {
     web: Option<WebBundle>,
     build: BuildInfo,
     extra: Option<Router>,
+    /// Routes merged after the `finish` layers (WebDAV): see [`EngineHost::dav`].
+    outside: Option<Router>,
+    /// `vox_at("/vox", …)` replaced the built-in `/vox`.
+    root_vox_resolved: bool,
     finish: Vec<Box<dyn FnOnce(Router) -> Router + Send>>,
     cross_origin_isolated: bool,
     #[cfg(feature = "iroh")]
@@ -207,6 +214,8 @@ impl EngineHost {
             web: None,
             build: BuildInfo::default(),
             extra: None,
+            outside: None,
+            root_vox_resolved: false,
             finish: Vec::new(),
             #[cfg(feature = "iroh")]
             iroh: None,
@@ -226,8 +235,15 @@ impl EngineHost {
 
     /// Mount a plugin: any axum router — a generated HTTP face
     /// (`layers![…].provide_http(&backend)`), hosted pages, an OAuth
-    /// flow, health probes. Alias of [`extend`](Self::extend) that reads
-    /// as what it is at the call site.
+    /// flow. Alias of [`extend`](Self::extend) that reads as what it is
+    /// at the call site.
+    ///
+    /// The escape hatch. A capability is a service trait mounted through
+    /// `provide_http`; a protocol endpoint has a builder method
+    /// ([`vox_at`](Self::vox_at), [`dav`](Self::dav),
+    /// [`document`](Self::document)). Reach for a raw router only for
+    /// what neither covers yet, so `cargo xtask boundaries` (`hand-routes`)
+    /// keeps counting it.
     #[must_use]
     pub fn plugin(self, routes: Router) -> Self {
         self.extend(routes)
@@ -332,10 +348,11 @@ impl EngineHost {
             .map(|cfg| (self.router.clone(), IrohConfig { lookup, ..cfg }));
         (
             assemble_app(
-                self.router,
+                (!self.root_vox_resolved).then_some(self.router),
                 self.web,
                 self.build,
                 self.extra,
+                self.outside,
                 self.finish,
                 self.cross_origin_isolated,
             ),
@@ -347,10 +364,11 @@ impl EngineHost {
     fn assemble(self) -> (Router, Option<()>) {
         (
             assemble_app(
-                self.router,
+                (!self.root_vox_resolved).then_some(self.router),
                 self.web,
                 self.build,
                 self.extra,
+                self.outside,
                 self.finish,
                 self.cross_origin_isolated,
             ),
@@ -381,22 +399,24 @@ impl EngineHost {
 }
 
 fn assemble_app(
-    router: LayerRouter,
+    router: Option<LayerRouter>,
     web: Option<WebBundle>,
     build: BuildInfo,
     extra: Option<Router>,
+    outside: Option<Router>,
     finish: Vec<Box<dyn FnOnce(Router) -> Router + Send>>,
     cross_origin_isolated: bool,
 ) -> Router {
-    let vox_router = router;
     let mut app = Router::new()
         .route("/health", get(|| async { "ok" }))
         // A real route, not a fallback, so a SPA bundle never answers it.
         .route(
             "/version.json",
             get(move || std::future::ready(version_json(&build))),
-        )
-        .route(
+        );
+    // `None` when `vox_at("/vox", …)` resolves `/vox` per connection instead.
+    if let Some(vox_router) = router {
+        app = app.route(
             "/vox",
             get(move |ws: WebSocketUpgrade| {
                 let router = vox_router.clone();
@@ -407,6 +427,7 @@ fn assemble_app(
                 }
             }),
         );
+    }
 
     if let Some(extra) = extra {
         app = app.merge(extra);
@@ -460,6 +481,11 @@ fn assemble_app(
 
     for wrap in finish {
         app = wrap(app);
+    }
+    // After the layers on purpose: `dav` routes must not answer through
+    // CORS (see `EngineHost::dav`).
+    if let Some(outside) = outside {
+        app = app.merge(outside);
     }
     app
 }

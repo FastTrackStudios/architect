@@ -218,6 +218,59 @@ EngineHost::new(vox, "0.0.0.0:8080")
 `.iroh(key, id)` — the same vox router peer to peer. `into_app()` hands
 back the axum `Router` for in-process tests.
 
+### Protocol mounts
+
+Some endpoints are adapters, not capabilities: a vox WebSocket per org,
+a WebDAV bridge, a discovery document. They belong to the host the way
+`/vox` does, so each has a builder method instead of a hand-written
+route (`crates/architect/src/host/mount.rs`):
+
+```rust,ignore
+EngineHost::new(vox, bind)
+    // A vox WebSocket at a parameterised path. The resolver picks the
+    // handler (and so the identity) per connection, or refuses it.
+    .vox_at("/org/{slug}/vox", move |head: RequestHead| {
+        let orgs = orgs.clone();
+        async move {
+            let org = orgs.get(head.param("slug").unwrap_or_default())
+                .ok_or(StatusCode::NOT_FOUND)?;
+            Ok(org.router_for(head.bearer()))
+        }
+    })
+    // A GET document: discovery, a per-org API description, a probe.
+    .document("/.well-known/app.json", move |head| discovery(head.bearer()))
+    // WebDAV: every verb, outside the `finish` layers.
+    .dav("/org/{slug}/dav", move |dav: DavRequest| files.handle(dav))
+    .finish(|app| app.layer(cors))
+```
+
+| Method | Serves | The hook gets | The hook answers |
+|---|---|---|---|
+| `vox_at(path, resolve)` | a vox WebSocket at `path` (`any` verb; `vox.v1` echoed) | `RequestHead` | `Ok(handler)` (a `LayerRouter` or a gated wrapper), or `Err(impl IntoResponse)` to refuse the upgrade |
+| `document(path, describe)` | `GET path`, before the SPA fallback | `RequestHead` | `Ok(impl IntoResponse)` or `Err(impl IntoResponse)` |
+| `dav(mount, handle)` | every verb at `mount`, `mount/` and below it, **outside** `finish` | `DavRequest`: `head`, `mount` as addressed (`/org/acme/dav`), `rel` (decoded, no leading `/`), the whole `request` | a `Response` |
+
+- `RequestHead` (`crates/architect/src/host/mount.rs` `RequestHead`)
+  carries the matched route's path params (`param("slug")`, decoded),
+  the headers and the path. `bearer()` reads `Authorization: Bearer …`,
+  then the `vox.bearer.<token>` subprotocol a browser dial sends.
+- The resolver runs before the upgrade is accepted, so a refusal is a
+  plain HTTP status the client sees, not a dropped socket.
+- `vox_at("/vox", …)` replaces the built-in `/vox`, for a host whose root
+  lane is resolved per connection too (a single-org client's legacy URL).
+  The router given to `EngineHost::new` then serves only iroh peers.
+- `dav` sits outside the `finish` layers on purpose. A CORS layer answers
+  every `OPTIONS` itself, and a file manager opens a mount with a bare
+  `OPTIONS` and reads `DAV:` and `Allow:` off the reply. WebDAV clients
+  are not browsers, so the handler authenticates them itself.
+- `.plugin(Router)` stays as the escape hatch, for what neither a service
+  trait nor a builder method covers yet. Every route in it still counts
+  toward `cargo xtask boundaries`' `hand-routes`.
+
+`crates/architect/tests/host_mounts.rs` drives all three: a real
+upgrade per bearer and org, WebDAV verbs past a CORS-like layer, and
+documents ahead of the SPA.
+
 ### `/version.json`
 
 `GET /version.json` says which build is running:
