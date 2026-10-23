@@ -145,13 +145,13 @@ fn secret_key_persists() {
 enum Restart {
     /// `Endpoint::close`: the dialler gets a CONNECTION_CLOSE.
     Graceful,
-    /// The endpoint is dropped without closing (a killed process): the
-    /// dialler's old connection lingers until its idle timeout.
+    /// The process dies: nothing is sent, so the dialler's old
+    /// connection lingers until its idle timeout. On loopback the old
+    /// port then answers ICMP port-unreachable.
     Crash,
-    /// A crash whose old address then swallows packets without an ICMP
-    /// reply — the redeployed pod with a new IP, a firewall drop. On
-    /// loopback a closed port answers port-unreachable, which hides the
-    /// stale path; a silent socket on the old port does not.
+    /// A crash whose old address then swallows packets with no ICMP
+    /// reply at all, like a redeployed pod on a new IP or a firewall
+    /// drop. A silent socket holds the old port.
     CrashBlackhole,
 }
 
@@ -177,27 +177,68 @@ async fn bind_with_lookup(lookup: iroh::address_lookup::MemoryLookup) -> iroh::E
         .expect("bind endpoint")
 }
 
-/// Echo every frame on every bi-stream. Aborting the task drops the
-/// endpoint clone and every connection it accepted.
-fn serve_echo(endpoint: iroh::Endpoint) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let mut connections = tokio::task::JoinSet::new();
-        while let Some(incoming) = endpoint.accept().await {
-            connections.spawn(async move {
-                let Ok(connection) = incoming.await else {
-                    return;
-                };
-                while let Ok((send, recv)) = connection.accept_bi().await {
-                    let (tx, mut rx) = IrohLink::new(connection.clone(), send, recv).split();
-                    while let Ok(Some(frame)) = rx.recv().await {
-                        if tx.send(frame.as_bytes().to_vec()).await.is_err() {
-                            break;
-                        }
+/// Echo every frame on every bi-stream until the endpoint closes.
+async fn serve_echo(endpoint: iroh::Endpoint) {
+    let mut connections = tokio::task::JoinSet::new();
+    while let Some(incoming) = endpoint.accept().await {
+        connections.spawn(async move {
+            let Ok(connection) = incoming.await else {
+                return;
+            };
+            while let Ok((send, recv)) = connection.accept_bi().await {
+                let (tx, mut rx) = IrohLink::new(connection.clone(), send, recv).split();
+                while let Ok(Some(frame)) = rx.recv().await {
+                    if tx.send(frame.as_bytes().to_vec()).await.is_err() {
+                        break;
                     }
                 }
-            });
+            }
+        });
+    }
+}
+
+/// Peer B, on a runtime of its own so a crash can stop it dead:
+/// shutting that runtime down drops every task without a packet sent.
+struct Peer {
+    runtime: tokio::runtime::Runtime,
+    endpoint: iroh::Endpoint,
+}
+
+impl Peer {
+    async fn start(secret_key: iroh::SecretKey) -> Self {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .expect("peer runtime");
+        let endpoint = runtime
+            .spawn(bind_keyed(secret_key))
+            .await
+            .expect("bind peer");
+        runtime.spawn(serve_echo(endpoint.clone()));
+        Self { runtime, endpoint }
+    }
+
+    async fn stop(self, restart: Restart) {
+        let Self { runtime, endpoint } = self;
+        let old_sockets = endpoint.bound_sockets();
+        if matches!(restart, Restart::Graceful) {
+            let closing = endpoint.clone();
+            runtime
+                .spawn(async move { closing.close().await })
+                .await
+                .expect("close peer");
         }
-    })
+        runtime.shutdown_background();
+        drop(endpoint);
+        if matches!(restart, Restart::CrashBlackhole) {
+            for addr in old_sockets {
+                // Leaked on purpose: the old port stays silent for the
+                // rest of the test process.
+                std::mem::forget(hold_port(addr).await);
+            }
+        }
+    }
 }
 
 async fn echo_once(link: IrohLink) -> (iroh_link::IrohLinkTx, iroh_link::IrohLinkRx) {
@@ -218,32 +259,23 @@ async fn redial_after_restarts(restart: Restart) {
     let key = iroh::SecretKey::generate();
     let peer_id = key.public();
 
-    let mut peer = bind_keyed(key.clone()).await;
-    lookup.set_endpoint_info(direct_addr(&peer));
-    let mut server = serve_echo(peer.clone());
+    let mut peer = Peer::start(key.clone()).await;
+    lookup.set_endpoint_info(direct_addr(&peer.endpoint));
     // Keep the pre-restart link open on A, the way a long-lived client
     // holds its session while its server is redeployed.
     let mut held = echo_once(dial(&dialler, peer_id).await.expect("first dial")).await;
 
     let mut failures = Vec::new();
-    let mut blackholes = Vec::new();
     for round in 0..ROUNDS {
-        let old_sockets = peer.bound_sockets();
-        if matches!(restart, Restart::Graceful) {
-            peer.close().await;
-        }
-        server.abort();
-        let _ = server.await;
-        drop(peer);
-        if matches!(restart, Restart::CrashBlackhole) {
-            for addr in &old_sockets {
-                blackholes.push(hold_port(*addr).await);
-            }
-        }
-        peer = bind_keyed(key.clone()).await;
-        assert_ne!(peer.bound_sockets(), old_sockets, "rebound on new ports");
-        lookup.set_endpoint_info(direct_addr(&peer));
-        server = serve_echo(peer.clone());
+        let old_sockets = peer.endpoint.bound_sockets();
+        peer.stop(restart).await;
+        peer = Peer::start(key.clone()).await;
+        assert_ne!(
+            peer.endpoint.bound_sockets(),
+            old_sockets,
+            "rebound on new ports"
+        );
+        lookup.set_endpoint_info(direct_addr(&peer.endpoint));
 
         let started = std::time::Instant::now();
         match dial(&dialler, peer_id).await {
@@ -252,8 +284,7 @@ async fn redial_after_restarts(restart: Restart) {
         }
     }
     drop(held);
-    server.abort();
-    peer.close().await;
+    peer.stop(Restart::Graceful).await;
     dialler.close().await;
     assert!(
         failures.is_empty(),
