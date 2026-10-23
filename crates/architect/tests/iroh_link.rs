@@ -1,6 +1,6 @@
-//! Loopback test for the iroh transport: two endpoints on 127.0.0.1 with
-//! relays and address lookup disabled (`presets::Minimal`), dialing direct
-//! by full `EndpointAddr` — fully offline.
+//! Loopback test for the iroh transport: endpoints on 127.0.0.1 with
+//! relays off (`presets::Minimal`), dialing direct by full `EndpointAddr`
+//! or by bare id through an in-memory address lookup — fully offline.
 // Integration-test crate: `clippy.toml`'s `allow-*-in-tests` only reaches
 // `#[test]` fns and `#[cfg(test)]` modules, so the fixture/mock `impl`
 // blocks below still trip the panic lints. See the same block in the
@@ -294,7 +294,7 @@ async fn redial_after_restarts(restart: Restart) {
     );
 }
 
-/// Bind a socket that never answers on `addr`, once the aborted endpoint
+/// Bind a socket that never answers on `addr`, once a crashed endpoint
 /// has let go of it (its runtime shuts down asynchronously).
 async fn hold_port(addr: std::net::SocketAddr) -> std::net::UdpSocket {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
@@ -310,13 +310,71 @@ async fn hold_port(addr: std::net::SocketAddr) -> std::net::UdpSocket {
     }
 }
 
+/// The dial budget the restart tests hold every redial to. A crash costs
+/// the first attempt (half of it) before the retry gets through.
+const DIAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// One dial that must finish inside `DIAL_TIMEOUT`.
 async fn dial(dialler: &iroh::Endpoint, peer: iroh::EndpointId) -> std::io::Result<IrohLink> {
-    tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        iroh_link::connect(dialler, peer),
-    )
-    .await
-    .map_err(|_| std::io::Error::from(std::io::ErrorKind::TimedOut))?
+    let options = iroh_link::DialOptions::default().timeout(DIAL_TIMEOUT);
+    let started = std::time::Instant::now();
+    let link = iroh_link::connect_with(dialler, peer, options).await?;
+    let took = started.elapsed();
+    if took > DIAL_TIMEOUT {
+        return Err(std::io::Error::other(format!(
+            "connected after {took:?}, past the {DIAL_TIMEOUT:?} dial timeout"
+        )));
+    }
+    Ok(link)
+}
+
+#[tokio::test]
+async fn an_unknown_peer_is_unreachable() {
+    let dialler = bind_with_lookup(iroh::address_lookup::MemoryLookup::new()).await;
+    let nobody = iroh::SecretKey::generate().public();
+    let options = iroh_link::DialOptions::default().timeout(std::time::Duration::from_secs(1));
+
+    let Err(error) = iroh_link::connect_with(&dialler, nobody, options).await else {
+        panic!("dialled a peer nobody published");
+    };
+    assert_eq!(error.kind(), std::io::ErrorKind::HostUnreachable);
+    let dial_error = iroh_link::DialError::of(&error).expect("a DialError inside");
+    assert_eq!(dial_error.kind(), iroh_link::DialErrorKind::PeerUnreachable);
+    assert_eq!(dial_error.remote(), nobody);
+    dialler.close().await;
+}
+
+#[tokio::test]
+async fn a_silent_peer_times_out_without_retry_and_is_unreachable_with_it() {
+    let lookup = iroh::address_lookup::MemoryLookup::new();
+    let dialler = bind_with_lookup(lookup.clone()).await;
+    let silent = hold_port("127.0.0.1:0".parse().expect("addr")).await;
+    let nobody = iroh::SecretKey::generate().public();
+    lookup.set_endpoint_info(iroh::EndpointAddr::from_parts(
+        nobody,
+        [iroh::TransportAddr::Ip(silent.local_addr().expect("silent addr"))],
+    ));
+    let options = iroh_link::DialOptions::default().timeout(std::time::Duration::from_secs(1));
+
+    let error = iroh_link::connect_with(&dialler, nobody, options.retry(false))
+        .await
+        .err()
+        .expect("nothing answers");
+    assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+    assert_eq!(
+        iroh_link::DialError::of(&error).map(iroh_link::DialError::kind),
+        Some(iroh_link::DialErrorKind::Timeout)
+    );
+
+    let error = iroh_link::connect_with(&dialler, nobody, options)
+        .await
+        .err()
+        .expect("nothing answers");
+    assert_eq!(
+        iroh_link::DialError::of(&error).map(iroh_link::DialError::kind),
+        Some(iroh_link::DialErrorKind::PeerUnreachable)
+    );
+    dialler.close().await;
 }
 
 #[tokio::test]
@@ -331,9 +389,5 @@ async fn redial_by_id_after_crash_restart() {
 
 #[tokio::test]
 async fn redial_by_id_after_crash_restart_behind_a_blackhole() {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .with_test_writer()
-        .try_init();
     redial_after_restarts(Restart::CrashBlackhole).await;
 }

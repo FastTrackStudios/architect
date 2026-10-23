@@ -50,6 +50,7 @@
 use std::io;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
+use std::time::Duration;
 
 #[cfg(not(target_arch = "wasm32"))]
 use tracing::{debug, warn};
@@ -207,6 +208,7 @@ where
     A: vox_core::LaneAcceptor,
 {
     let acceptor = SharedAcceptor(std::sync::Arc::new(acceptor));
+    let local = endpoint.id();
     while let Some(incoming) = endpoint.accept().await {
         let acceptor = acceptor.clone();
         tokio::task::spawn(async move {
@@ -217,6 +219,9 @@ where
                     return;
                 }
             };
+            // An inbound connection pins iroh's path to the peer just
+            // like an outbound one; a redial may need to drop it.
+            tracked::insert(local, &connection);
             loop {
                 match connection.accept_bi().await {
                     Ok((send, recv)) => {
@@ -300,24 +305,383 @@ where
 /// Dial a remote vox endpoint and open one bi-stream — one vox
 /// connection. Accepts a bare [`iroh::EndpointId`] (resolved through the
 /// endpoint's address lookup) or a full [`iroh::EndpointAddr`].
+///
+/// [`connect_with`] with the default [`DialOptions`]: the whole dial,
+/// one retry included, is bounded by [`DIAL_TIMEOUT`]. A failure carries
+/// a [`DialError`] (see [`DialError::of`]).
 pub async fn connect(
     endpoint: &iroh::Endpoint,
     remote: impl Into<iroh::EndpointAddr>,
 ) -> io::Result<IrohLink> {
+    connect_with(endpoint, remote, DialOptions::default()).await
+}
+
+/// [`connect`] with explicit [`DialOptions`].
+///
+/// The first attempt gets half the budget. If it times out or loses the
+/// path (reset, closed, no address), the dial drops this endpoint's
+/// stale state for the peer and tries once more with what is left:
+///
+/// - It closes every connection to the peer that `iroh_link` opened or
+///   accepted on this endpoint. While any connection to a peer is open,
+///   iroh keeps sending new handshakes down that connection's path and
+///   skips address lookup. After the peer restarts on new addresses, that
+///   path leads nowhere. Those connections are already dead: nothing
+///   reached the peer on that path for the whole first attempt.
+/// - It runs the endpoint's address lookup again and dials the addresses
+///   it returns as well as any given in `remote`.
+///
+/// If the retry fails too, the error is [`DialErrorKind::PeerUnreachable`].
+pub async fn connect_with(
+    endpoint: &iroh::Endpoint,
+    remote: impl Into<iroh::EndpointAddr>,
+    options: DialOptions,
+) -> io::Result<IrohLink> {
+    dial(endpoint, remote.into(), options)
+        .await
+        .map_err(io::Error::from)
+}
+
+/// The default budget for a whole [`connect`], retry included.
+pub const DIAL_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How [`connect_with`] dials: the time budget and whether to retry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DialOptions {
+    timeout: Duration,
+    retry: bool,
+}
+
+impl Default for DialOptions {
+    fn default() -> Self {
+        Self {
+            timeout: DIAL_TIMEOUT,
+            retry: true,
+        }
+    }
+}
+
+impl DialOptions {
+    /// Budget for the whole dial, retry included (default
+    /// [`DIAL_TIMEOUT`]). With retry on, the first attempt gets half.
+    #[must_use]
+    pub const fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
+
+    /// Whether a failed attempt is retried once after dropping stale
+    /// state for the peer (default on). With it off, an attempt that runs
+    /// out of time fails with [`DialErrorKind::Timeout`].
+    #[must_use]
+    pub const fn retry(mut self, retry: bool) -> Self {
+        self.retry = retry;
+        self
+    }
+}
+
+/// Why a dial failed. See [`DialError::kind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum DialErrorKind {
+    /// One attempt ran out of time and was not retried
+    /// ([`DialOptions::retry`] off). The peer may still be up, behind
+    /// stale path state on this endpoint. `io::ErrorKind::TimedOut`.
+    Timeout,
+    /// Nothing reached the peer, even on the retry after dropping stale
+    /// connections and re-running address lookup. Either the peer is
+    /// down, or none of its published addresses reach it from here.
+    /// `io::ErrorKind::HostUnreachable`.
+    PeerUnreachable,
+    /// The dial could not start, or the peer refused it: endpoint closed,
+    /// own id, TLS or ALPN rejected. Not retried. `io::ErrorKind::Other`.
+    Failed,
+}
+
+/// A failed [`connect`] / [`connect_with`] / [`IrohLinkSource`] dial,
+/// carried inside the returned `io::Error` — get it back with
+/// [`DialError::of`].
+#[derive(Debug)]
+pub struct DialError {
+    kind: DialErrorKind,
+    remote: iroh::EndpointId,
+    source: Option<Box<dyn std::error::Error + Send + Sync>>,
+}
+
+impl DialError {
+    /// What went wrong.
+    #[must_use]
+    pub const fn kind(&self) -> DialErrorKind {
+        self.kind
+    }
+
+    /// The peer that was dialled.
+    #[must_use]
+    pub const fn remote(&self) -> iroh::EndpointId {
+        self.remote
+    }
+
+    /// The `DialError` inside an `io::Error` a dial returned, if any.
+    #[must_use]
+    pub fn of(error: &io::Error) -> Option<&Self> {
+        error.get_ref()?.downcast_ref()
+    }
+}
+
+impl std::fmt::Display for DialError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let what = match self.kind {
+            DialErrorKind::Timeout => "timed out",
+            DialErrorKind::PeerUnreachable => "peer unreachable",
+            DialErrorKind::Failed => "failed",
+        };
+        write!(f, "dial {}: {what}", self.remote.fmt_short())?;
+        if let Some(source) = &self.source {
+            write!(f, ": {source}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for DialError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.source
+            .as_deref()
+            .map(|e| e as &(dyn std::error::Error + 'static))
+    }
+}
+
+impl From<DialError> for io::Error {
+    fn from(error: DialError) -> Self {
+        let kind = match error.kind {
+            DialErrorKind::Timeout => io::ErrorKind::TimedOut,
+            DialErrorKind::PeerUnreachable => io::ErrorKind::HostUnreachable,
+            DialErrorKind::Failed => io::ErrorKind::Other,
+        };
+        Self::new(kind, error)
+    }
+}
+
+type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
+/// How one dial attempt failed.
+enum Attempt {
+    /// Ran out of its time budget.
+    Elapsed,
+    /// Lost the path: no address, reset, closed or timed out by QUIC.
+    Lost(BoxError),
+    /// Could not start, or the peer refused.
+    Refused(BoxError),
+}
+
+impl Attempt {
+    fn from_connect(error: iroh::endpoint::ConnectError) -> Self {
+        use iroh::endpoint::{ConnectError, ConnectWithOptsError, ConnectingError};
+        let lost = match &error {
+            ConnectError::Connect {
+                source: ConnectWithOptsError::NoAddress { .. },
+                ..
+            } => true,
+            ConnectError::Connecting {
+                source: ConnectingError::ConnectionError { source, .. },
+                ..
+            }
+            | ConnectError::Connection { source, .. } => path_lost(source),
+            _ => false,
+        };
+        if lost {
+            Self::Lost(Box::new(error))
+        } else {
+            Self::Refused(Box::new(error))
+        }
+    }
+
+    fn from_connection(error: iroh::endpoint::ConnectionError) -> Self {
+        if path_lost(&error) {
+            Self::Lost(Box::new(error))
+        } else {
+            Self::Refused(Box::new(error))
+        }
+    }
+
+    fn into_error(self, remote: iroh::EndpointId, retried: bool) -> DialError {
+        let (kind, source) = match self {
+            Self::Elapsed if retried => (DialErrorKind::PeerUnreachable, None),
+            Self::Elapsed => (DialErrorKind::Timeout, None),
+            Self::Lost(e) => (DialErrorKind::PeerUnreachable, Some(e)),
+            Self::Refused(e) => (DialErrorKind::Failed, Some(e)),
+        };
+        DialError {
+            kind,
+            remote,
+            source,
+        }
+    }
+}
+
+/// A QUIC error that means "the path to the peer is gone", not "the peer
+/// said no".
+const fn path_lost(error: &iroh::endpoint::ConnectionError) -> bool {
+    use iroh::endpoint::ConnectionError;
+    matches!(
+        error,
+        ConnectionError::TimedOut | ConnectionError::Reset | ConnectionError::ApplicationClosed(_)
+    )
+}
+
+async fn dial(
+    endpoint: &iroh::Endpoint,
+    remote: iroh::EndpointAddr,
+    options: DialOptions,
+) -> Result<IrohLink, DialError> {
+    use n0_future::time::{Instant, timeout};
+
+    let id = remote.id;
+    let started = Instant::now();
+    let first_budget = if options.retry {
+        options.timeout.checked_div(2).unwrap_or(options.timeout)
+    } else {
+        options.timeout
+    };
+    let first = match timeout(first_budget, dial_once(endpoint, remote.clone())).await {
+        Ok(Ok(link)) => return Ok(link),
+        Ok(Err(attempt)) => attempt,
+        Err(_) => Attempt::Elapsed,
+    };
+    if !options.retry || matches!(first, Attempt::Refused(_)) {
+        return Err(first.into_error(id, false));
+    }
+
+    let closed = close_tracked(endpoint, id).await;
+    let left = options.timeout.saturating_sub(started.elapsed());
+    let remote = with_fresh_lookup(endpoint, remote, left.checked_div(4).unwrap_or(left)).await;
+    tracing::debug!(
+        remote = %id.fmt_short(),
+        closed,
+        addrs = remote.addrs.len(),
+        "iroh dial failed; redialling after dropping stale connections"
+    );
+    let left = options.timeout.saturating_sub(started.elapsed());
+    match timeout(left, dial_once(endpoint, remote)).await {
+        Ok(Ok(link)) => Ok(link),
+        Ok(Err(attempt)) => Err(attempt.into_error(id, true)),
+        Err(_) => Err(Attempt::Elapsed.into_error(id, true)),
+    }
+}
+
+async fn dial_once(endpoint: &iroh::Endpoint, remote: iroh::EndpointAddr) -> Result<IrohLink, Attempt> {
     let connection = endpoint
         .connect(remote, VOX_ALPN)
         .await
-        .map_err(io::Error::other)?;
-    let (send, recv) = connection.open_bi().await.map_err(io::Error::other)?;
+        .map_err(Attempt::from_connect)?;
+    tracked::insert(endpoint.id(), &connection);
+    let (send, recv) = connection
+        .open_bi()
+        .await
+        .map_err(Attempt::from_connection)?;
     Ok(IrohLink::new(connection, send, recv))
+}
+
+/// Close every tracked connection from `endpoint` to `remote`, so iroh
+/// drops the path it selected for the peer and looks it up again.
+/// Returns how many were closed.
+async fn close_tracked(endpoint: &iroh::Endpoint, remote: iroh::EndpointId) -> usize {
+    let stale = tracked::take(endpoint.id(), remote);
+    for connection in &stale {
+        connection.close(
+            iroh::endpoint::VarInt::from_u32(0),
+            b"architect: redialling a stale peer",
+        );
+    }
+    // A local close completes at once; bounded all the same.
+    let _ = n0_future::time::timeout(Duration::from_millis(250), async {
+        for connection in &stale {
+            connection.closed().await;
+        }
+    })
+    .await;
+    stale.len()
+}
+
+/// `remote` plus the first answer the endpoint's address lookup gives
+/// within `budget`.
+async fn with_fresh_lookup(
+    endpoint: &iroh::Endpoint,
+    mut remote: iroh::EndpointAddr,
+    budget: Duration,
+) -> iroh::EndpointAddr {
+    use n0_future::StreamExt as _;
+
+    let Ok(lookup) = endpoint.address_lookup() else {
+        return remote;
+    };
+    let mut answers = lookup.resolve(remote.id);
+    let _ = n0_future::time::timeout(budget, async {
+        while let Some(answer) = answers.next().await {
+            if let Ok(Ok(item)) = answer {
+                remote.addrs.extend(item.into_endpoint_addr().addrs);
+                return;
+            }
+        }
+    })
+    .await;
+    remote
+}
+
+/// Weak handles to every connection `iroh_link` dialled or accepted,
+/// keyed by (local endpoint, remote endpoint): the only per-peer state a
+/// redial can drop, since iroh 1.0 has no call to make an endpoint
+/// forget one remote's paths.
+mod tracked {
+    use std::collections::HashMap;
+    use std::sync::{LazyLock, Mutex, MutexGuard, PoisonError};
+
+    use iroh::EndpointId;
+    use iroh::endpoint::{Connection, WeakConnectionHandle};
+
+    type Tracked = HashMap<(EndpointId, EndpointId), Vec<WeakConnectionHandle>>;
+
+    static TRACKED: LazyLock<Mutex<Tracked>> = LazyLock::new(Mutex::default);
+
+    fn lock() -> MutexGuard<'static, Tracked> {
+        TRACKED.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn is_open(handle: &WeakConnectionHandle) -> bool {
+        handle
+            .upgrade()
+            .is_some_and(|connection| connection.close_reason().is_none())
+    }
+
+    pub(super) fn insert(local: EndpointId, connection: &Connection) {
+        let mut tracked = lock();
+        tracked.retain(|_, handles| {
+            handles.retain(is_open);
+            !handles.is_empty()
+        });
+        tracked
+            .entry((local, connection.remote_id()))
+            .or_default()
+            .push(connection.weak_handle());
+    }
+
+    pub(super) fn take(local: EndpointId, remote: EndpointId) -> Vec<Connection> {
+        let handles = lock().remove(&(local, remote));
+        handles
+            .into_iter()
+            .flatten()
+            .filter_map(|handle| handle.upgrade())
+            .collect()
+    }
 }
 
 /// A [`vox_core::LinkSource`] that dials the same remote afresh on every
 /// `next_link` — what reconnect-capable clients hand to the connection
-/// supervisor.
+/// supervisor. Each dial is a [`connect_with`].
 pub struct IrohLinkSource {
     endpoint: iroh::Endpoint,
     remote: iroh::EndpointAddr,
+    options: DialOptions,
 }
 
 /// Create an [`IrohLinkSource`] dialing `remote` from `endpoint`.
@@ -328,6 +692,16 @@ pub fn iroh_link_source(
     IrohLinkSource {
         endpoint,
         remote: remote.into(),
+        options: DialOptions::default(),
+    }
+}
+
+impl IrohLinkSource {
+    /// Dial with `options` instead of the defaults.
+    #[must_use]
+    pub const fn with_dial_options(mut self, options: DialOptions) -> Self {
+        self.options = options;
+        self
     }
 }
 
@@ -335,7 +709,7 @@ impl vox_core::LinkSource for IrohLinkSource {
     type Link = IrohLink;
 
     async fn next_link(&mut self) -> io::Result<vox_core::Attachment<Self::Link>> {
-        let link = connect(&self.endpoint, self.remote.clone()).await?;
+        let link = connect_with(&self.endpoint, self.remote.clone(), self.options).await?;
         Ok(vox_core::Attachment::initiator(link))
     }
 }
