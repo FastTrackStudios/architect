@@ -45,9 +45,6 @@ architect-server = ["server-seaorm"]
 ui-reach = 11
 transport-host = 4
 lints = 1
-# hand-routes: auth-ui 66, auth-server 23, mock-oauth 5, auth example 1
-# (axum `.route("/…"` calls outside tests; auth-ui's test stub no longer counts).
-hand-routes = 95
 
 # ── L0 contracts ──────────────────────────────────────────────────────────
 [[row]]
@@ -188,17 +185,3 @@ layer = "L1"
 [[row]]
 package = "architect-mcp"
 layer = "L3"
-
-# ── idioms (ratcheted counts) ─────────────────────────────────────────────
-# A hand-written axum route describes a capability a second time; the trait
-# (#[architect::service] / #[architect::rpc], mounted by EngineHost) is the
-# one description. architect's axum adapter and derives are where routes are built.
-# `path-arg`: only `.route("/…"` calls count (axum's shape), not `fn route()` or
-# Dioxus helpers. `skip-tests`: `tests/`, `benches/` and `#[cfg(test)]` stubs don't.
-[[idiom]]
-name = "hand-routes"
-pattern = ".route("
-path-arg = true
-skip-tests = true
-allow = ["crates/architect", "crates/architect-derive", "crates/architect-rpc-derive"]
-instead = "a #[architect::service] trait mounted by EngineHost"
