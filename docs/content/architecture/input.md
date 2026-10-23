@@ -19,7 +19,7 @@ handlers of its own.
 | Feature | Layer | Adds |
 |---|---|---|
 | none (default) | L0 | the engine. No clock, no file IO, no runtime, no UI framework; builds for `wasm32-unknown-unknown` |
-| `dioxus` | L4 | `dioxus::convert_*` (DOM events to `InputEvent`) and `dioxus::use_input_processor`, a reactive `InputHandle` that arms the sequence timeout itself |
+| `dioxus` | L4 | `dioxus::convert_*` and `dioxus::keyboard_chord` (DOM events to `InputEvent` / `KeyChord`) and `dioxus::use_input_processor`, a reactive `InputHandle` that arms the sequence timeout itself and works from outside the Dioxus runtime |
 
 The which-key popup is a model (`WhichKey`), not a component: each app
 draws it in its own design system.
@@ -78,12 +78,75 @@ draws it in its own design system.
    dispatch(&list, keys.process(event, &ctx));
    ```
 
-The processor owns no clock. When `needs_timeout()` is true, arm a timer
-of `timeout_duration()` and call `timeout_expired()` when it fires (the
-`dioxus` hook does this). A host that sees key releases calls
-`notify_key_release(&chord)`: holding a which-key prefix then keeps it
-live across several leaf keys, and a `true` return means "hide the
-overlay".
+The processor owns no clock. After each key, `sequence_timeout()` gives
+a `SequenceTimeout` ticket while a sequence is pending: arm a timer of
+`ticket.after()` with whatever timer the host has, and call
+`expire_sequence(ticket)` when it fires. A key that arrived in between
+made the ticket stale, so a late timer expires nothing; the host keeps no
+epoch counter and never cancels a timer. (`needs_timeout()` /
+`timeout_expired()` remain for hosts that track that themselves.) The
+`dioxus` hook does all of this.
+
+```rust,ignore
+// A browser host with no Dioxus runtime at hand (gloo-timers).
+if let Some(ticket) = keys.borrow().sequence_timeout() {
+    let keys = keys.clone();
+    let ms = u32::try_from(ticket.after().as_millis()).unwrap_or(u32::MAX);
+    gloo_timers::callback::Timeout::new(ms, move || {
+        // The expired prefix comes back as `Unhandled`: dispatch it like
+        // any other command.
+        dispatch(&list, keys.borrow_mut().expire_sequence(ticket));
+    })
+    .forget();
+}
+```
+
+A host that sees key releases calls `notify_key_release(&chord)` (a
+release matches by key, so a keyup that lost its modifier still counts).
+Without releases a second press of the same key reads as OS auto-repeat
+inside a sequence, so `space space` never fires. With them, holding a
+which-key prefix keeps it live across several leaf keys, and a `true`
+return means "hide the overlay".
+
+### Vim macro keys
+
+By default an unbound `q` or `@` starts vim's macro handling: `q<reg>`
+records, `q` stops, `@<reg>` / `@@` plays, and the key after them names
+a register instead of running. An app that is not vim-shaped turns that
+off, and `q` / `@` become ordinary keys:
+
+```rust,ignore
+use architect_input::MacroKeys;
+
+let keys = InputProcessor::from_config(config)?.with_macro_keys(MacroKeys::Off);
+```
+
+`set_macro_keys` changes it later; `reload_config` keeps the setting.
+
+### In Dioxus
+
+`use_input_processor(init)` owns the processor for the component's
+lifetime and returns an `InputHandle`: `handle_key` / `handle_mouse` /
+`handle_wheel` / `process_event` for presses, `handle_key_release`
+(a DOM keyup) or `notify_key_release(&chord)` for releases, and reactive
+`current_mode()`, `pending_display()` and `is_recording()`. It arms the
+sequence timeout itself.
+
+The handle remembers the runtime and scope it was made in and re-enters
+them, so it can be driven from outside the Dioxus runtime. A
+capture-phase `web_sys` listener that must `preventDefault()` in the same
+tick calls the handle directly:
+
+```rust,ignore
+let keys = use_input_processor(|| InputProcessor::from_config(config).unwrap());
+// in the document `keydown` closure:
+let commands = keys.process_event(InputEvent::Key(key), &ctx);
+if claims(&commands) || keys.processor().needs_timeout() {
+    e.prevent_default();
+}
+// in the document `keyup` closure:
+let hide = keys.notify_key_release(&chord);
+```
 
 ### Keep the keymap and the list in step
 

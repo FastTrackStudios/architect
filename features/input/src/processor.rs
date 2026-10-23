@@ -34,13 +34,49 @@ enum RegisterPrompt {
     Play,
 }
 
+/// Whether `q` and `@` drive vim macros.
+///
+/// [`MacroKeys::Vim`] (the default): an unbound `q<reg>` records, `q`
+/// stops, `@<reg>` / `@@` plays, so the key after an unbound `q` or `@`
+/// names a register and runs nothing else. [`MacroKeys::Off`]: `q` and
+/// `@` are ordinary keys, unbound ones come back
+/// [`InputCommand::Unhandled`], and nothing is recorded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MacroKeys {
+    #[default]
+    Vim,
+    Off,
+}
+
+/// A pending sequence's timer, from
+/// [`InputProcessor::sequence_timeout`].
+///
+/// Arm a timer of [`after`](Self::after) and hand the ticket back to
+/// [`InputProcessor::expire_sequence`] when it fires. A ticket goes stale
+/// when the processor takes another key, the sequence times out, or the
+/// config reloads; a stale ticket expires nothing, so a host needs no
+/// epoch counter of its own and never has to cancel a timer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SequenceTimeout {
+    after: Duration,
+    generation: u64,
+}
+
+impl SequenceTimeout {
+    /// How long to wait before expiring the sequence.
+    #[must_use]
+    pub const fn after(&self) -> Duration {
+        self.after
+    }
+}
+
 /// The input state machine.
 ///
 /// Feed it events with [`process`](Self::process); it answers with the
 /// commands they produce. It owns no clock: when
-/// [`needs_timeout`](Self::needs_timeout) is true the host arms a timer of
-/// [`timeout_duration`](Self::timeout_duration) and calls
-/// [`timeout_expired`](Self::timeout_expired) when it fires. Hosts that
+/// [`sequence_timeout`](Self::sequence_timeout) gives a ticket the host
+/// arms a timer of [`SequenceTimeout::after`] and calls
+/// [`expire_sequence`](Self::expire_sequence) when it fires. Hosts that
 /// see key releases call [`notify_key_release`](Self::notify_key_release),
 /// which powers hold-to-keep-prefix (sticky which-key prefixes).
 pub struct InputProcessor<A = String> {
@@ -68,6 +104,10 @@ pub struct InputProcessor<A = String> {
     /// Leaf actions fired during the current sticky sequence, so releasing
     /// the anchor can tell "done" (hide the overlay) from "exploring".
     sticky_actions_fired: u32,
+    macro_keys: MacroKeys,
+    /// Bumped on every key event, timeout and reload: a
+    /// [`SequenceTimeout`] from an older generation is stale.
+    generation: u64,
 }
 
 impl<A: ActionKey> InputProcessor<A> {
@@ -91,7 +131,31 @@ impl<A: ActionKey> InputProcessor<A> {
             anchor_released_during_sequence: false,
             sticky_anchor: None,
             sticky_actions_fired: 0,
+            macro_keys: MacroKeys::Vim,
+            generation: 0,
         }
+    }
+
+    /// This processor with `q` / `@` macro handling set to `keys`.
+    #[must_use]
+    pub const fn with_macro_keys(mut self, keys: MacroKeys) -> Self {
+        self.set_macro_keys(keys);
+        self
+    }
+
+    /// Turn vim macro keys on or off. Turning them off drops a half-typed
+    /// `q` / `@` and stops a recording.
+    pub const fn set_macro_keys(&mut self, keys: MacroKeys) {
+        self.macro_keys = keys;
+        if matches!(keys, MacroKeys::Off) {
+            self.register_prompt = None;
+            self.macro_recorder.stop_recording();
+        }
+    }
+
+    #[must_use]
+    pub const fn macro_keys(&self) -> MacroKeys {
+        self.macro_keys
     }
 
     /// A processor built from a config. A `normal` mode is defined if the
@@ -130,10 +194,15 @@ impl<A: ActionKey> InputProcessor<A> {
         Ok(proc)
     }
 
-    /// Replace all state with a processor built from `config`. On error
-    /// the processor is unchanged.
+    /// Replace all state with a processor built from `config`, keeping
+    /// the [`MacroKeys`] setting. On error the processor is unchanged.
     pub fn reload_config(&mut self, config: KeymapConfig) -> Result<(), ConfigError> {
-        *self = Self::from_config(config)?;
+        let fresh = Self::from_config(config)?.with_macro_keys(self.macro_keys);
+        let generation = self.generation.wrapping_add(1);
+        *self = Self {
+            generation,
+            ..fresh
+        };
         Ok(())
     }
 
@@ -183,6 +252,30 @@ impl<A: ActionKey> InputProcessor<A> {
     #[must_use]
     pub const fn needs_timeout(&self) -> bool {
         !self.sequence.is_empty()
+    }
+
+    /// The timer to arm for the pending sequence, or `None` when nothing
+    /// is pending. Ask after each key; the same ticket comes back until
+    /// the next key, so a host may skip arming one it already armed.
+    #[must_use]
+    pub const fn sequence_timeout(&self) -> Option<SequenceTimeout> {
+        if self.sequence.is_empty() {
+            return None;
+        }
+        Some(SequenceTimeout {
+            after: self.timeout,
+            generation: self.generation,
+        })
+    }
+
+    /// `timeout`'s timer fired: expire the sequence as
+    /// [`timeout_expired`](Self::timeout_expired) does, unless the ticket
+    /// is stale (a key arrived since), in which case nothing happens.
+    pub fn expire_sequence(&mut self, timeout: SequenceTimeout) -> Vec<InputCommand<A>> {
+        if timeout.generation != self.generation {
+            return Vec::new();
+        }
+        self.timeout_expired()
     }
 
     /// Whether the pending sequence's anchor is still physically held.
@@ -252,16 +345,20 @@ impl<A: ActionKey> InputProcessor<A> {
 
     /// The host saw `chord` released.
     ///
+    /// A release matches by key, not modifiers: letting go of Ctrl before
+    /// `g` reports a plain `g`, and that still releases a held `Ctrl+g`.
+    ///
     /// Returns `true` when the host should hide a lingering which-key
     /// overlay: a held (sticky) prefix that fired at least one action has
     /// just been let go. A bare hold-and-release returns `false`, so the
     /// overlay keeps guiding the user.
     pub fn notify_key_release(&mut self, chord: &KeyChord) -> bool {
-        self.held_keys.remove(chord);
-        if self.sequence.first() == Some(chord) {
+        let released = |held: &KeyChord| held.key == chord.key;
+        self.held_keys.retain(|held| !released(held));
+        if self.sequence.first().is_some_and(released) {
             self.anchor_released_during_sequence = true;
         }
-        if self.sticky_anchor.as_ref() != Some(chord) {
+        if !self.sticky_anchor.as_ref().is_some_and(released) {
             return false;
         }
         let fired = self.sticky_actions_fired > 0;
@@ -278,6 +375,7 @@ impl<A: ActionKey> InputProcessor<A> {
     pub fn process(&mut self, event: InputEvent, ctx: &InputContext) -> Vec<InputCommand<A>> {
         match event {
             InputEvent::Key(ref key) => {
+                self.generation = self.generation.wrapping_add(1);
                 let chord = KeyChord::new(key.key.clone(), key.modifiers);
                 self.process_key_chord(chord, event, ctx, Origin::Typed)
             }
@@ -292,6 +390,7 @@ impl<A: ActionKey> InputProcessor<A> {
     /// The pending sequence timed out: it is dropped, and its first chord
     /// comes back as [`InputCommand::Unhandled`].
     pub fn timeout_expired(&mut self) -> Vec<InputCommand<A>> {
+        self.generation = self.generation.wrapping_add(1);
         let Some(first) = self.sequence.first().cloned() else {
             return Vec::new();
         };
@@ -515,7 +614,7 @@ impl<A: ActionKey> InputProcessor<A> {
         chord: &KeyChord,
         ctx: &InputContext,
     ) -> Option<Vec<InputCommand<A>>> {
-        if chord.modifiers != Modifiers::NONE {
+        if self.macro_keys == MacroKeys::Off || chord.modifiers != Modifiers::NONE {
             return None;
         }
         let ch = chord.key.single_char()?;

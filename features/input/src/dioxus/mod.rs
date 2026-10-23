@@ -9,6 +9,6 @@ pub mod hook;
 
 pub use convert::{
     convert_key, convert_keyboard_event, convert_modifiers, convert_mouse_event,
-    convert_wheel_event,
+    convert_wheel_event, keyboard_chord,
 };
 pub use hook::{InputHandle, use_input_processor};
