@@ -143,7 +143,7 @@ fn secret_key_persists() {
 /// How the peer goes away before it comes back on the same key.
 #[derive(Debug, Clone, Copy)]
 enum Restart {
-    /// `Endpoint::close`: the dialler gets a CONNECTION_CLOSE.
+    /// `Endpoint::close`: the dialler gets a `CONNECTION_CLOSE`.
     Graceful,
     /// The process dies: nothing is sent, so the dialler's old
     /// connection lingers until its idle timeout. On loopback the old
