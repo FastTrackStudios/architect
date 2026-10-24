@@ -43,6 +43,13 @@ pub mod registry;
 #[cfg(all(feature = "vox", not(target_arch = "wasm32")))]
 pub use registry::DocRegistry;
 
+// A catalog of schema-agnostic documents (`Docs`), its host and the
+// device-side driver: what lets an app keep its data as docs on every
+// device. The wire and stores compile everywhere; host and driver are
+// native.
+#[cfg(feature = "vox")]
+pub mod docs;
+
 // Pairwise document exchange between nodes (no hub): the `DocPeer` lane,
 // `exchange`, `pull`. Native only, like the registry it serves.
 #[cfg(all(feature = "vox", not(target_arch = "wasm32")))]
@@ -209,7 +216,16 @@ impl CrdtDoc {
     /// spawned writer task (tokio native, `spawn_local` wasm) owns the
     /// persistence handle and drains it in commit order.
     pub async fn open<P: Persistence>(doc_id: Uuid, persistence: P) -> Result<Self, PersistError> {
-        let persistence: Arc<dyn Persistence> = Arc::new(persistence);
+        Self::open_shared(doc_id, Arc::new(persistence)).await
+    }
+
+    /// [`Self::open`] over a persistence handle the caller already shares:
+    /// one device database behind many docs, or a resolver that picks a
+    /// store per doc (`crdt::docs::DocsDriver`).
+    pub async fn open_shared(
+        doc_id: Uuid,
+        persistence: Arc<dyn Persistence>,
+    ) -> Result<Self, PersistError> {
         let doc = LoroDoc::new();
 
         if let Some(snap) = persistence.load_snapshot(doc_id).await? {
@@ -345,6 +361,16 @@ impl CrdtDoc {
         bytes: &[u8],
     ) -> Result<(), PersistError> {
         self.apply_remote(bytes)?;
+        self.persist_update(doc_id, bytes).await
+    }
+
+    /// Write already-imported update bytes through this doc's
+    /// persistence (the second half of [`Self::apply_remote_durable`]).
+    pub(crate) async fn persist_update(
+        &self,
+        doc_id: Uuid,
+        bytes: &[u8],
+    ) -> Result<(), PersistError> {
         self.inner.persistence.append_update(doc_id, bytes).await
     }
 }

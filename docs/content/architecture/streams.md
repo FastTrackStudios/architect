@@ -119,9 +119,11 @@ The macro emits a vox **stream sibling** next to the base service:
   asks for `fn ticks_hub(&self) -> &PubSub<TickEvent>`: the backend
   owns the hub, publishes into it on every state change, and the
   emitted host attaches each subscriber sink.
-- `stream_serve` / `stream_layer` / `TickerStreamService` — mount
-  verbs, parallel to the base trait's `serve`/`layer`/`Service`. The
-  sibling is one more token in the bundle:
+- `stream_serve` / `stream_layer` / `StreamService` — mount verbs,
+  parallel to the base trait's `serve`/`layer`/`Service`, emitted
+  unqualified at module level (one rpc trait per module); the
+  `prelude` re-exports the token as `TickerStreamService`. The sibling
+  is one more token in the bundle:
 
 ```rust,ignore
 impl Services for LiveBackend {
@@ -132,7 +134,7 @@ impl Services for LiveBackend {
 
 impl Ticker for LiveBackend {
     fn tick(&self) -> i64 {
-        let mut g = self.counter.lock().expect("counter poisoned");
+        let mut g = architect::lock(&self.counter);   // poison-tolerant
         *g += 1;
         self.ticks.publish(TickEvent { value: *g });   // publish-on-write
         *g
@@ -150,6 +152,23 @@ contract to the **attach form**: `fn events_attach(&self, filter: F,
 sink: Tx<E>)`. Filtering, per-filter hubs, and snapshot-then-changes
 (`begin_attach`/`complete_attach`) stay backend-owned; the emitted host
 just forwards.
+
+### The intro frame
+
+The client cannot tell when its sink reached the hub: `subscribe`
+returning does not mean attached, and anything published in between
+reaches nobody. A hub-form source closes that gap by overriding
+`fn ticks_intro(&self) -> Option<TickEvent>` (default `None`). The
+emitted host attaches with `begin_attach` and `complete_attach(pending,
+intro)`, so the intro is the subscriber's first frame, ahead of
+anything published after the attach, over vox and SSE alike
+(`crates/architect/tests/http_face.rs`
+`an_argless_subscription_introduces_itself_over_sse`).
+
+The usual recipe: the intro is a marker variant carrying the current
+head revision. The client waits for it, then lists from its cursor;
+everything after the marker arrives live. An attach-form source does
+the same by hand with `begin_attach` / `complete_attach`.
 
 ## 3. The client side
 
@@ -185,10 +204,35 @@ the derive emits `use_example_events()`, folded into the one-call
 single line in the app's root component is the whole client-side
 wiring.
 
-Subscriptions work identically over the in-process transport — the
-layered-services example drives `TickerStreamClient` through
-`LocalServer::establish` and asserts publish-on-write delivery, no
-socket involved.
+Without Dioxus, drive the stream client by hand. The call is held in
+flight for the subscription's whole life (vox ends a request's
+channels when its response is delivered, so the server never
+responds), and it sends nothing until polled:
+
+```rust,ignore
+let (tx, mut rx) = vox::channel::<TickEvent>();
+let mut call = std::pin::pin!(stream_client.ticks(tx));
+loop {
+    tokio::select! {
+        biased;                                   // the call first: it binds the channel
+        res = &mut call => break res,             // resolved: the stream ended
+        frame = rx.recv() => match frame {
+            Ok(Some(frame)) => {
+                let mut ev = None;
+                let _ = frame.map(|f| ev = Some(f)); // take the owned value out
+                // fold ev
+            }
+            _ => break call.await,                // closed: the call says why
+        },
+    }
+}
+```
+
+Dropping `call` unsubscribes. `features/crdt/crdt/src/sync.rs`
+`SyncedDoc::run` is the same loop on `DocSync`.
+
+Subscriptions work identically over the in-process transport
+(`LocalServer`), no socket involved.
 
 ## Real-time safety: never publish from an audio thread
 

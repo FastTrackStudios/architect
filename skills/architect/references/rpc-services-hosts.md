@@ -7,7 +7,9 @@ Entity/derive, storage, the permissions gate, crdt/atom and the Action List have
 | Piece | What it does | Entry points |
 |---|---|---|
 | `#[architect::rpc]` / `service` / `http` | one trait → vox service, client, host, HTTP router, HTTP client, SSE streams, optionally Action List projection | `crates/architect-rpc-derive/src/lib.rs` `rpc`, `service`, `http` |
-| `#[subscribe]` streams | sync marker → `<T>Stream` sibling + `<T>StreamSource` backend contract | `crates/architect-rpc-derive/src/lib.rs` `subscribe` |
+| `#[subscribe]` streams | sync marker → `<T>Stream` sibling + `<T>StreamSource` backend contract (`<name>_hub` + optional `<name>_intro`, or `<name>_attach`) | `crates/architect-rpc-derive/src/lib.rs` `rpc` |
+| `#[architect::error]` | wire derives, `HttpError`, `Transport(String)` + `From<TransportError>` | `crates/architect-derive/src/lib.rs` `error` |
+| Lock helpers | poison-tolerant `lock` / `read` / `write` for backend state | `crates/architect/src/lock.rs` |
 | Options | `sync_client`, `context`, `scopes`, `ops`, `path`, `actions` on the attribute | `crates/architect-rpc-derive/src/lib.rs` |
 | `Layer` / `Bind` / `Services` / `layers!` / `router!` | deferred bundle of service tokens, bound at `.provide(B)` | `crates/architect/src/layer.rs` `Layer`, `Services`, `layers`, `router` |
 | `LayerRouter` | method-id dispatch, last-merge-wins, mount coverage, `gated(&gate)` | `crates/architect/src/layer.rs` `LayerRouter`, `unmounted_from` |
@@ -50,9 +52,21 @@ pub trait Greeter {
 ```
 
 - `#[architect::service]` = rpc + HTTP; `#[architect::rpc]` is vox only; `(actions)` adds the Action List projection (`references/commands-mcp.md`).
-- All-async traits need no dispatcher; sync or mixed ones need `HasDispatcher` (`#[derive(architect::HasDispatcher)]`).
+- All-async traits need no dispatcher; sync or mixed ones need `HasDispatcher` (`#[derive(architect::HasDispatcher)]`). `#[subscribe]` declarations are stripped from the trait and do not count toward its shape.
 - Subscriptions are sync markers; `async fn` is rejected.
-- Generated tokens come through `prelude` with the trait name baked in: `GreeterService`, `greeter_layer`, `greeter_serve`, `GreeterStreamService`, `greeter_http`, `greeter_actions`.
+- `#[architect::error]` adds the wire derives (`Facet`, `Clone`, `Debug`, `PartialEq`, `thiserror::Error`, `#[repr(u8)]`), an `architect::http::HttpError` impl (code = variant in `snake_case`; status by variant name: `NotFound` 404, `Unauthenticated`/`InvalidCredentials`/`SessionExpired` 401, `Forbidden`/`PermissionDenied` 403, `Conflict` 409, `Internal` 500, else 400; `http_status = N` / `code = "…"` override) and a `Transport(String)` variant (503) with `From<architect::TransportError>`; `#[architect(transport)]` names your own one-`String` variant instead (`crates/architect-derive/src/lib.rs` `error`). `architect::http::HttpError` needs no feature, so the macro works in a crate that only enables `architect/vox`; the crate must depend on `thiserror` itself (the derive names `::thiserror::Error`).
+
+Generated names (`crates/architect-rpc-derive/src/lib.rs` `rpc`) are emitted at **module level, unqualified**, so keep **one rpc trait per module** (a second one collides on `Service`, `serve`, `layer`):
+
+| Item | Names (vox feature unless noted) |
+|---|---|
+| base service | `serve(backend)`, `layer(backend)` (a `Mounted`; carries the HTTP routes under `service`), `Service` token, `<Trait>Client`, `<Trait>RpcDispatcher`, `<snake>_rpc_service_descriptor()`, bare aliases `Dispatcher` and `descriptor`; sync/mixed traits also `<Trait>Rpc` (hidden async mirror) |
+| with `#[subscribe]` | `stream_serve(backend)`, `stream_layer(backend)`, `StreamService`, `<Trait>Stream`, `<Trait>StreamClient`, `<Trait>StreamDispatcher`, `<Trait>StreamSource`, `<snake>_stream_service_descriptor()` |
+| HTTP face (`service`) | module `http` (`router`, `<Method>Args`, `actions` with `(actions)`), `<Trait>HttpClient` (feature `http-client`) |
+| options | `<Trait>SyncClient` (`sync_client`), `<Trait>ScopedClient` (`context`), `<Trait>Op` / `<Trait>OpOutput` (`ops`); always `<Trait>Direct` / `<Trait>DirectExt` |
+| `prelude` submodule | the same items renamed with the trait baked in: `GreeterService`, `greeter_layer`, `greeter_serve`, `GreeterStreamService`, `greeter_stream_layer`, `greeter_stream_serve`, `greeter_http`, `greeter_actions`; `pub use service::prelude::*;` at the crate root |
+
+Without the prelude, re-export by hand with renames: `task:features/contacts/contacts-proto/src/lib.rs` re-exports `layer as contacts_layer`, `stream_layer as contacts_stream_layer`, `Service as ContactsService`. Mount on a bare router: `LayerRouter::new().with(<snake>_rpc_service_descriptor(), serve(backend.clone())).merge(stream_layer(backend))`; through `Services` it is `layers![Service, StreamService]`.
 
 ## 2. Implement the backend, then bundle it
 
@@ -69,6 +83,8 @@ impl architect::Services for Memory {
 ```
 
 - A `StreamSource` provides `<name>_hub` (no filter args) or `<name>_attach(filter, sink)` (with args).
+- **`<name>_intro`** (hub form only): override `fn <name>_intro(&self) -> Option<Ev>` (default `None`) and the host puts that frame at the front of each new subscriber's mailbox (`PubSub::begin_attach` + `complete_attach(pending, intro)`), over vox and SSE. It closes the gap between "subscribe returned" and "the hub has the sink": without it, anything published in between reaches nobody. Recipe: the intro is a marker carrying the current head revision; the client waits for it, then lists from its cursor. The attach form does the same by hand with `begin_attach` / `complete_attach`.
+- Backend state behind a `Mutex`/`RwLock`: use the poison-tolerant `architect::lock` / `architect::read` / `architect::write` (`crates/architect/src/lock.rs`), not `.lock().unwrap()`.
 - `layers![]` terminates in `Empty` and cons-chains via `Append`.
 
 ## 3. Mount on an EngineHost
@@ -103,7 +119,26 @@ EngineHost::new(backend.clone().into_router(), config.bind)
 - Branch on why a dial failed with `DialError::of(&io_err)`, never on the message text. `DialErrorKind::PeerUnreachable` means the retry also failed: the peer is down. `Timeout` means one attempt ran out of time with retry off. `Failed` means the dial was refused or could not start.
 - HTTP: `GreeterHttpClient::at(base)`; streams are `client.greeted().await`.
 - wasm: the same `pool()`, the browser dial carries the bearer as subprotocol `vox.bearer.<token>`; the HTTP client's `EventStream` drops `Send`; `LocalServer` uses architect's own memory link; iroh is client-only (relay dial); `EngineHost` is native (`host` feature).
-- For an all-async trait whose methods all return `Result`, both `<Trait>Client` and `<Trait>HttpClient` implement the trait: delete any hand-written `impl Trait for TraitClient`.
+- For an all-async `#[architect::service]` trait whose methods all return `Result`, both `<Trait>Client` and `<Trait>HttpClient` implement the trait: delete any hand-written `impl Trait for TraitClient`. `#[subscribe]` declarations don't block this (they are stripped from the trait).
+- Otherwise `<Trait>Client` does **not** implement the trait: a vox-only `#[architect::rpc]` trait never gets the impl (it is emitted with the HTTP face), nor does a sync or mixed trait. Call its inherent async methods, which return `Result<T, vox::VoxError<E>>`, and fold with `.map_err(architect::vox_into_app)` (`crates/architect/src/lib.rs` `vox_into_app`; `E: From<TransportError>`, which `#[architect::error]` gives).
+- **Consume a `#[subscribe]` stream over vox** (`features/crdt/crdt/src/sync.rs` `SyncedDoc::run` is the same pattern on `DocSync`):
+
+  ```rust
+  let (tx, mut rx) = vox::channel::<Ev>();
+  let mut call = std::pin::pin!(stream_client.events(tx));
+  loop {
+      tokio::select! {
+          biased;
+          res = &mut call => break res,          // resolved = stream ended (or attach refused)
+          frame = rx.recv() => match frame {
+              Ok(Some(frame)) => { let mut ev = None; let _ = frame.map(|f| ev = Some(f)); /* handle ev */ }
+              _ => break call.await,             // channel closed: the call says why
+          },
+      }
+  }
+  ```
+
+  The call stays in flight for the subscription's whole life (the server holds the request open; vox ends a request's channels when its response is delivered), so poll it alongside `rx.recv()`, call first (`biased`): it sends nothing until polled. Dropping the call future unsubscribes. `frame.map(..)` is how the owned value leaves the received frame.
 
 ## 5. HTTP face: what it can and cannot express
 
@@ -148,7 +183,9 @@ Cannot:
 ## Pitfalls
 
 - **vox revision match.** Client and server pin the same vox rc or the handshake fails ("schema decode consumed N of M bytes"). Pin in the root manifest, not per crate.
-- **One error enum per service.** Generated clients implement the trait only when it is all-async, every method is fallible, and the error absorbs `TransportError` via `From`. Transport failures are never application errors.
+- **One error enum per service.** Generated clients implement the trait only for `#[architect::service]` (not vox-only `rpc`), all-async, every method returning a literal `Result`, the error absorbing `TransportError` via `From`. Transport failures are never application errors.
+- **One rpc trait per module.** `serve`, `layer`, `Service`, `stream_layer`, … are unqualified module items; two traits in one module collide. Re-export through `prelude` or with renames.
+- **A subscription is a held-open call.** `stream_client.<name>(tx).await` on its own never returns while the stream lives, so `rx` is never read; its resolving means the stream is over, so resubscribe from there. Subscribers attached late miss earlier publishes unless the source has an `<name>_intro` or replay.
 - **Pool keys include the bearer**, so a signed-in socket is never anonymous. Concurrent callers share one dial. Call `evict_all()` on sign-in/out.
 - **Reconnect is lazy.** The pool drops a dead root on the next `caller()`; a held dead `Caller` fails. The supervised hook needs `atom` + `platform`; `use_app_pooled` evicts before redial. dioxus `use_resource` tracks signal reads inside the future: drive loops read `generation_now()`.
 - **Backoff:** full jitter, floor 250 ms, cap 10 s, reset on success; one `warn` per outage, `debug` after.

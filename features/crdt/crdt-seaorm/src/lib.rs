@@ -1,7 +1,8 @@
 //! `SeaOrmPersistence` — server-side `Persistence` impl backed by
 //! two generic tables (`crdt_doc`, `crdt_update`). The same impl
 //! handles every feature in the workspace; each feature just picks a
-//! `doc_id` namespace and goes.
+//! `doc_id` namespace and goes. [`SeaOrmDocsStore`] keeps the
+//! `crdt::docs` catalog beside them (`crdt_doc_meta`).
 
 use async_trait::async_trait;
 use crdt::{PersistError, Persistence};
@@ -11,9 +12,11 @@ use sea_orm::{
 };
 use uuid::Uuid;
 
+mod docs;
 pub mod entities;
 pub mod migrations;
 
+pub use docs::SeaOrmDocsStore;
 pub use migrations::Migrator;
 
 #[derive(Clone)]
