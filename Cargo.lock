@@ -2457,6 +2457,7 @@ dependencies = [
  "crdt",
  "sea-orm",
  "sea-orm-migration",
+ "tokio",
  "uuid",
 ]
 

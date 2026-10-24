@@ -118,6 +118,19 @@ The checklist for your own service error:
    ExampleServiceError::Internal(other.to_string()) })?`) so the repo's
    wire contract and the service's stay independently evolvable.
 
+`#[architect::error]` (`crates/architect-derive/src/lib.rs` `error`)
+writes all of that for you: the wire derives above, an
+`architect::http::HttpError` impl (code = the variant in `snake_case`,
+status by variant name: `NotFound` 404, `Unauthenticated` /
+`InvalidCredentials` / `SessionExpired` 401, `Forbidden` /
+`PermissionDenied` 403, `Conflict` 409, `Internal` 500, else 400;
+`#[architect(http_status = N, code = "…")]` overrides), and a
+`Transport(String)` variant (503) with `From<architect::TransportError>`,
+which is what lets a generated client implement the service trait and
+`architect::vox_into_app` fold a `VoxError<E>`. `HttpError` needs no
+cargo feature, so the macro works in a crate that enables only
+`architect/vox`; the crate depends on `thiserror` itself.
+
 On the client the same envelope applies — the hook fails with
 `ClientError<ExampleServiceError>`, and pages branch on
 `App(ExampleServiceError::NotFound)` exactly as they do for repos.

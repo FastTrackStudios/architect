@@ -1,6 +1,8 @@
-//! Migrator + the two table definitions. Plug into your feature's
-//! migrator (or just run this Migrator directly if the only thing
-//! you persist is CRDT bytes).
+//! Migrator + the table definitions.
+//!
+//! The two persistence tables, then the `crdt::docs` catalog. Plug
+//! into your feature's migrator (or just run this Migrator directly if
+//! the only thing you persist is CRDT bytes and their catalog).
 
 use sea_orm_migration::prelude::*;
 
@@ -9,7 +11,96 @@ pub struct Migrator;
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![Box::new(m_initial::Migration)]
+        vec![
+            Box::new(m_initial::Migration),
+            Box::new(m_doc_catalog::Migration),
+        ]
+    }
+}
+
+mod m_doc_catalog {
+    use sea_orm_migration::prelude::*;
+
+    pub struct Migration;
+
+    // Named by hand: `DeriveMigrationName` names a migration after its
+    // file, and this one shares the file with `m_initial`.
+    impl MigrationName for Migration {
+        fn name(&self) -> &'static str {
+            "m_crdt_doc_catalog"
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl MigrationTrait for Migration {
+        async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .create_table(
+                    Table::create()
+                        .table(CrdtDocMeta::Table)
+                        .if_not_exists()
+                        .col(
+                            ColumnDef::new(CrdtDocMeta::DocId)
+                                .uuid()
+                                .not_null()
+                                .primary_key(),
+                        )
+                        .col(ColumnDef::new(CrdtDocMeta::Kind).string().not_null())
+                        .col(ColumnDef::new(CrdtDocMeta::Name).string().not_null())
+                        .col(ColumnDef::new(CrdtDocMeta::Parent).uuid().null())
+                        .col(ColumnDef::new(CrdtDocMeta::CreatedBy).string().not_null())
+                        .col(ColumnDef::new(CrdtDocMeta::Origin).string().null())
+                        .col(
+                            ColumnDef::new(CrdtDocMeta::CreatedUs)
+                                .big_integer()
+                                .not_null(),
+                        )
+                        .col(
+                            ColumnDef::new(CrdtDocMeta::UpdatedUs)
+                                .big_integer()
+                                .not_null(),
+                        )
+                        .col(
+                            ColumnDef::new(CrdtDocMeta::Rev)
+                                .big_integer()
+                                .not_null()
+                                .unique_key(),
+                        )
+                        .col(ColumnDef::new(CrdtDocMeta::Deleted).boolean().not_null())
+                        .to_owned(),
+                )
+                .await?;
+            manager
+                .create_index(
+                    Index::create()
+                        .name("idx_crdt_doc_meta_kind")
+                        .table(CrdtDocMeta::Table)
+                        .col(CrdtDocMeta::Kind)
+                        .to_owned(),
+                )
+                .await
+        }
+
+        async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .drop_table(Table::drop().table(CrdtDocMeta::Table).to_owned())
+                .await
+        }
+    }
+
+    #[derive(Iden)]
+    enum CrdtDocMeta {
+        Table,
+        DocId,
+        Kind,
+        Name,
+        Parent,
+        CreatedBy,
+        Origin,
+        CreatedUs,
+        UpdatedUs,
+        Rev,
+        Deleted,
     }
 }
 

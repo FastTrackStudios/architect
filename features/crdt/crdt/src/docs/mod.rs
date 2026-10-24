@@ -43,8 +43,18 @@ use uuid::Uuid;
 use crate::persistence::MaybeSendSync;
 
 #[cfg(not(target_arch = "wasm32"))]
+mod driver;
+#[cfg(not(target_arch = "wasm32"))]
 mod host;
+#[cfg(all(not(target_arch = "wasm32"), feature = "turso"))]
+mod turso;
 
+#[cfg(all(not(target_arch = "wasm32"), feature = "turso"))]
+pub use self::turso::TursoDocsIndex;
+#[cfg(not(target_arch = "wasm32"))]
+pub use driver::{
+    DocStorage, DocsDriver, DocsIndex, DocsLane, InMemoryDocsIndex, LocalDoc, SharedStorage,
+};
 #[cfg(not(target_arch = "wasm32"))]
 pub use host::{DocAccess, DocsHost};
 
@@ -367,7 +377,7 @@ impl DocsStore for InMemoryDocsStore {
         if current != expect {
             return Err(DocsError::Stale(current.unwrap_or(0)));
         }
-        guard.head += 1;
+        guard.head = guard.head.saturating_add(1);
         row.rev = guard.head;
         guard.rows.insert(row.doc_id, row.clone());
         drop(guard);

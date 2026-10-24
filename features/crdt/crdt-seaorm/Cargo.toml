@@ -25,15 +25,18 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 # Persistence impl.
 
 [dependencies]
-crdt.workspace = true
+# `vox` for `crdt::docs` (the catalog `SeaOrmDocsStore` keeps).
+crdt = { workspace = true, features = ["vox"] }
 sea-orm.workspace = true
 sea-orm-migration.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
 uuid.workspace = true
 
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
 [lib]
-test = false
 doctest = false
 
 [lints]

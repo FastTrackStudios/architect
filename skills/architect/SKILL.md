@@ -111,6 +111,8 @@ Still not in architect: remote token introspection (I34). Until it lands, Task's
 - `#[architect(crdt)]` needs `repo` and a `Uuid` pk; a plain `String` field is whole-string last-writer-wins, so mark prose `crdt(text)`. `crdt::sync` (`DocSync`) is hub-shaped; `crdt::peer` is the pairwise path. `DocRegistry` admission sees only the doc id; use the authorizer.
 - LAN discovery needs feature `iroh-lan` (native, multicast UDP; no-op on wasm).
 - `architect::host::init_tracing` (fmt only) is not `architect_telemetry::init_tracing` (Sentry); `wide::set` is a silent no-op without the `otel` feature; telemetry is native only.
+- `#[architect::rpc]` / `service` emit `serve`, `layer`, `Service`, `stream_layer`, … unqualified at module level: one rpc trait per module, re-export via `prelude` or renames. `<Trait>Client` implements the trait only for an all-async, all-`Result` `#[architect::service]`; otherwise map its `VoxError<E>` with `architect::vox_into_app`. A `#[subscribe]` call stays in flight for the stream's life: poll it beside `rx.recv()` (`references/rpc-services-hosts.md`).
+- `SyncedDoc` does not persist what it receives unless `.durable()`; device replicas want it.
 - Generated HTTP face is JSON `POST /<prefix>/<method>` plus SSE; subscriptions carry no typed errors. Share pages, media, OAuth and webhooks are HTTP by nature and stay hand-written.
 - Boundaries ratchets go one way: when a count drops, lower its baseline in the same PR. Do not grandfather tags to pass the tag-order check; re-pin to a correctly numbered tag.
 - Crate layout (STA-257): one crate per feature, layers as cargo features. Don't create new `-proto`/`-<backend>`/`-ui` siblings; don't split or merge existing crates as a side effect.

@@ -85,7 +85,18 @@ pluggable `Persistence`, and typed `LoroRepo<E>` CRUD views per entity.
 - **`SyncedDoc`** — the client driver: outbox-buffers local updates
   while offline, runs one `sync` session per connection, merges
   everything that comes down. `run()` is a plain future — spawn it with
-  tokio, `dioxus::spawn`, or wasm-bindgen.
+  tokio, `dioxus::spawn`, or wasm-bindgen. By default what comes down is
+  imported with `apply_remote` and not persisted (the replica keeps its
+  own edits and re-learns the rest on the next attach, enough for a
+  browser tab); a device replica uses `SyncedDoc::new(..).durable()` so
+  received edits survive an offline restart.
+- **Opening** — `CrdtDoc::open(doc_id, persistence)` for one store per
+  doc; `CrdtDoc::open_shared(doc_id, Arc<dyn Persistence>)` when one
+  device database sits behind many docs. On a SeaORM server,
+  `crdt-seaorm` (`features/crdt/crdt-seaorm`) provides
+  `SeaOrmPersistence` over its own `crdt_doc` / `crdt_update` tables;
+  compose its `Migrator` into the feature's migrator (or run it alone
+  when CRDT bytes are all the database holds).
 - **`DocPresence` / `PresenceHost` / `PresencePeer`** — who's here,
   over Loro's `EphemeralStore` (timestamp-LWW, auto-expiring) and a
   *sliding* PubSub: presence is state-shaped and droppable, unlike doc
