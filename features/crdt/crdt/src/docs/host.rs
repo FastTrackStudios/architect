@@ -1,6 +1,6 @@
 //! [`DocsHost`]: a catalog served, with its documents' content lane.
 
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
@@ -47,7 +47,11 @@ const PUT_ATTEMPTS: usize = 8;
 pub struct DocsHost {
     store: Arc<dyn DocsStore>,
     registry: DocRegistry,
-    live: Arc<RwLock<HashSet<Uuid>>>,
+    /// Each catalogued id: the revision of the last row applied here and
+    /// whether that row is a tombstone. Ordered by revision, so a commit
+    /// that reaches the lock late cannot undo a newer one (a rename
+    /// re-admitting a doc deleted after it).
+    live: Arc<RwLock<HashMap<Uuid, (u64, bool)>>>,
     head: Arc<AtomicU64>,
     hub: PubSub<DocChange>,
     authorize: Arc<Authorizer>,
@@ -58,17 +62,18 @@ impl DocsHost {
     /// catalog once, to know which ids are live.
     pub async fn open(store: impl DocsStore, registry: DocRegistry) -> Result<Self, DocsError> {
         let store: Arc<dyn DocsStore> = Arc::new(store);
-        let mut live = HashSet::new();
+        let mut live = HashMap::new();
         let mut since_rev = 0;
         loop {
             let page = store
                 .list(&DocQuery {
                     since_rev,
+                    include_deleted: true,
                     limit: 1024,
                     ..DocQuery::default()
                 })
                 .await?;
-            live.extend(page.docs.iter().map(|d| d.doc_id));
+            live.extend(page.docs.iter().map(|d| (d.doc_id, (d.rev, d.deleted))));
             since_rev = page.cursor;
             if !page.more {
                 break;
@@ -109,7 +114,7 @@ impl DocsHost {
     /// host: what a router uses to send a `DocSync` here.
     #[must_use]
     pub fn admits(&self, doc_id: Uuid) -> bool {
-        architect::read(&self.live).contains(&doc_id)
+        matches!(architect::read(&self.live).get(&doc_id), Some((_, false)))
     }
 
     fn allowed(&self, doc_id: Uuid, access: DocAccess) -> bool {
@@ -136,10 +141,11 @@ impl DocsHost {
         let stored = self.store.put(row, expect).await?;
         {
             let mut live = architect::write(&self.live);
-            if stored.deleted {
-                live.remove(&stored.doc_id);
-            } else {
-                live.insert(stored.doc_id);
+            let newer = live
+                .get(&stored.doc_id)
+                .is_none_or(|(rev, _)| *rev < stored.rev);
+            if newer {
+                live.insert(stored.doc_id, (stored.rev, stored.deleted));
             }
         }
         self.head.fetch_max(stored.rev, Ordering::SeqCst);

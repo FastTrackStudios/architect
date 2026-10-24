@@ -83,9 +83,13 @@ impl DocsStore for SeaOrmDocsStore {
     }
 
     async fn list(&self, query: &DocQuery) -> Result<DocPage, DocsError> {
+        // The head first, and rows only up to it: a row committed between
+        // the two reads must not be skipped by a cursor already past it.
+        let head = head_of(&self.db).await.map_err(internal)?;
         let since = i64::try_from(query.since_rev).unwrap_or(i64::MAX);
         let mut find = Entity::find()
             .filter(Column::Rev.gt(since))
+            .filter(Column::Rev.lte(head))
             .order_by_asc(Column::Rev);
         if let Some(kind) = &query.kind {
             find = find.filter(Column::Kind.eq(kind.clone()));
@@ -114,10 +118,9 @@ impl DocsStore for SeaOrmDocsStore {
                 more: true,
             });
         }
-        let head = rev_of(head_of(&self.db).await.map_err(internal)?);
         Ok(DocPage {
             docs,
-            cursor: head.max(query.since_rev),
+            cursor: rev_of(head).max(query.since_rev),
             more: false,
         })
     }
@@ -145,7 +148,19 @@ impl DocsStore for SeaOrmDocsStore {
                 })
             })
             .await
-            .map_err(|e| DocsError::Internal(e.to_string()))?
+            .map_err(|e| match e {
+                // Another writer took the same next revision first: a
+                // revision race, which the host retries.
+                sea_orm::TransactionError::Transaction(ref db)
+                    if matches!(
+                        db.sql_err(),
+                        Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
+                    ) =>
+                {
+                    DocsError::Stale(0)
+                }
+                other => DocsError::Internal(other.to_string()),
+            })?
     }
 
     async fn head(&self) -> Result<u64, DocsError> {

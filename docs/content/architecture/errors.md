@@ -119,14 +119,23 @@ The checklist for your own service error:
    wire contract and the service's stay independently evolvable.
 
 `#[architect::error]` (`crates/architect-derive/src/lib.rs` `error`)
-writes all of that for you: the wire derives above, an
-`architect::http::HttpError` impl (code = the variant in `snake_case`,
-status by variant name: `NotFound` 404, `Unauthenticated` /
-`InvalidCredentials` / `SessionExpired` 401, `Forbidden` /
-`PermissionDenied` 403, `Conflict` 409, `Internal` 500, else 400;
-`#[architect(http_status = N, code = "…")]` overrides), and a
-`Transport(String)` variant (503) with `From<architect::TransportError>`,
-which is what lets a generated client implement the service trait and
+writes most of that for you:
+- the derives `Facet`, `Clone`, `Debug`, `PartialEq`, `thiserror::Error`
+  and `#[repr(u8)]` (add `Eq` yourself with a `#[derive(Eq)]` under the
+  attribute, as the examples do);
+- an `architect::http::HttpError` impl. Its code is the variant name in
+  `snake_case`. Its status follows the variant name: `NotFound` 404;
+  `Unauthenticated`, `InvalidCredentials` and `SessionExpired` 401;
+  `Forbidden` and `PermissionDenied` 403; `Conflict` 409; `Internal` 500;
+  anything else 400. `#[architect(http_status = N, code = "…")]`
+  overrides either;
+- a transport variant with `From<architect::TransportError>`. It is an
+  added `Transport(String)` (503) unless you mark one of your own
+  single-`String` variants `#[architect(transport)]`, in which case yours
+  is used and there is no `Transport` variant.
+
+The transport variant is what lets a generated client implement the
+service trait and
 `architect::vox_into_app` fold a `VoxError<E>`. `HttpError` needs no
 cargo feature, so the macro works in a crate that enables only
 `architect/vox`; the crate depends on `thiserror` itself.

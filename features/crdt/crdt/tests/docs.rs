@@ -374,3 +374,64 @@ async fn branches_made_offline_register_and_arrive_parent_first() {
     run_b.abort();
     scope.close().await;
 }
+
+/// A store whose first `append_update` fails.
+#[derive(Clone, Default)]
+struct FailsFirstWrite {
+    inner: InMemoryPersistence,
+    failed: Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[async_trait::async_trait]
+impl Persistence for FailsFirstWrite {
+    async fn load_snapshot(&self, doc_id: Uuid) -> Result<Option<Vec<u8>>, PersistError> {
+        self.inner.load_snapshot(doc_id).await
+    }
+    async fn write_snapshot(&self, doc_id: Uuid, bytes: &[u8]) -> Result<(), PersistError> {
+        self.inner.write_snapshot(doc_id, bytes).await
+    }
+    async fn append_update(&self, doc_id: Uuid, bytes: &[u8]) -> Result<(), PersistError> {
+        if !self.failed.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return Err(PersistError::Backend("disk full".into()));
+        }
+        self.inner.append_update(doc_id, bytes).await
+    }
+    async fn load_updates(&self, doc_id: Uuid) -> Result<Vec<Vec<u8>>, PersistError> {
+        self.inner.load_updates(doc_id).await
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_received_edit_whose_write_failed_is_written_on_the_retry() {
+    let host = host().await;
+    let scope = Scope::new();
+    let local = LocalServer::serve(router(&host), scope.clone());
+    let laptop = memory_device();
+    let req = session("Takes");
+    let id = req.doc_id;
+    write(&laptop.create(req).await.unwrap(), "take three");
+    let run_laptop = online(&laptop, lane(&local).await);
+    eventually("registered", async || host.admits(id)).await;
+
+    // The phone's first write of what it receives fails; the session
+    // ends, and the retry writes it before attaching again.
+    let disk = FailsFirstWrite::default();
+    let index = InMemoryDocsIndex::new();
+    let phone = DocsDriver::new(index.clone(), SharedStorage(Arc::new(disk.clone())));
+    let run_phone = online(&phone, lane(&local).await);
+    eventually("the edit is on the phone's disk", async || {
+        disk.inner
+            .load_updates(id)
+            .await
+            .is_ok_and(|u| !u.is_empty())
+    })
+    .await;
+    run_phone.abort();
+    let _ = run_phone.await;
+    run_laptop.abort();
+    scope.close().await;
+
+    // Restarted offline: the edit is there.
+    let reopened = DocsDriver::new(index, SharedStorage(Arc::new(disk.inner.clone())));
+    assert_eq!(read(&reopened.open(id).await.unwrap()), "take three");
+}

@@ -361,6 +361,16 @@ impl CrdtDoc {
         bytes: &[u8],
     ) -> Result<(), PersistError> {
         self.apply_remote(bytes)?;
+        self.persist_update(doc_id, bytes).await
+    }
+
+    /// Write already-imported update bytes through this doc's
+    /// persistence (the second half of [`Self::apply_remote_durable`]).
+    pub(crate) async fn persist_update(
+        &self,
+        doc_id: Uuid,
+        bytes: &[u8],
+    ) -> Result<(), PersistError> {
         self.inner.persistence.append_update(doc_id, bytes).await
     }
 }

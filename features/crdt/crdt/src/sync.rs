@@ -765,6 +765,11 @@ pub struct SyncedDoc {
     doc_id: Uuid,
     outbox: tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>,
     durable: bool,
+    /// Received bytes imported into the doc but not yet written through
+    /// its persistence ([`Self::durable`]): held until the write lands, so
+    /// a failed or cancelled write is retried before the next attach
+    /// reports them as held.
+    unpersisted: Vec<Vec<u8>>,
     _local_sub: loro::Subscription,
 }
 
@@ -790,6 +795,7 @@ impl SyncedDoc {
             doc_id,
             outbox,
             durable: false,
+            unpersisted: Vec::new(),
             _local_sub: sub,
         }
     }
@@ -806,13 +812,26 @@ impl SyncedDoc {
         self
     }
 
-    /// Import remote bytes, persisting them when [`Self::durable`].
-    async fn import(&self, bytes: &[u8]) -> Result<(), PersistError> {
+    /// Import remote bytes, persisting them when [`Self::durable`]. The
+    /// import comes first (it rejects malformed bytes, which must never
+    /// reach the log); the bytes then wait in `unpersisted` until written.
+    async fn import(&mut self, bytes: &[u8]) -> Result<(), PersistError> {
+        self.doc.apply_remote(bytes)?;
         if self.durable {
-            self.doc.apply_remote_durable(self.doc_id, bytes).await
-        } else {
-            self.doc.apply_remote(bytes)
+            self.unpersisted.push(bytes.to_vec());
+            self.persist_pending().await?;
         }
+        Ok(())
+    }
+
+    /// Write every imported-but-unwritten update, oldest first. An update
+    /// leaves the queue only once its write has landed.
+    async fn persist_pending(&mut self) -> Result<(), PersistError> {
+        while let Some(bytes) = self.unpersisted.first() {
+            self.doc.persist_update(self.doc_id, bytes).await?;
+            self.unpersisted.remove(0);
+        }
+        Ok(())
     }
 
     /// The local replica — hand out `doc().repo::<E>()` views to the UI.
@@ -835,6 +854,9 @@ impl SyncedDoc {
     /// the call future only resolves when the session ends (server gone,
     /// or an attach error).
     pub async fn run(&mut self, client: &DocSyncClient) -> Result<(), PersistError> {
+        // What an earlier session received but could not write: written
+        // now, before our version vector claims it.
+        self.persist_pending().await?;
         let (up_tx, up_rx) = vox::channel::<Vec<u8>>();
         let (down_tx, mut down_rx) = vox::channel::<SyncDown>();
         let our_vv = self.doc.loro().oplog_vv();
