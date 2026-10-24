@@ -764,6 +764,7 @@ pub struct SyncedDoc {
     doc: CrdtDoc,
     doc_id: Uuid,
     outbox: tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>,
+    durable: bool,
     _local_sub: loro::Subscription,
 }
 
@@ -788,7 +789,29 @@ impl SyncedDoc {
             doc,
             doc_id,
             outbox,
+            durable: false,
             _local_sub: sub,
+        }
+    }
+
+    /// Write what arrives from the server (the attach backlog and every
+    /// live update) through the doc's persistence too, not only the
+    /// local commits. A device replica wants this: an edit received and
+    /// then a restart while offline must still be there. Without it the
+    /// replica keeps only its own edits and re-learns the rest by
+    /// version vector on the next attach (enough for a browser tab).
+    #[must_use]
+    pub const fn durable(mut self) -> Self {
+        self.durable = true;
+        self
+    }
+
+    /// Import remote bytes, persisting them when [`Self::durable`].
+    async fn import(&self, bytes: &[u8]) -> Result<(), PersistError> {
+        if self.durable {
+            self.doc.apply_remote_durable(self.doc_id, bytes).await
+        } else {
+            self.doc.apply_remote(bytes)
         }
     }
 
@@ -853,7 +876,7 @@ impl SyncedDoc {
                     match owned {
                         Some(SyncDown::Attached { server_vv, backlog }) => {
                             if !backlog.is_empty() {
-                                self.doc.apply_remote(&backlog)?;
+                                self.import(&backlog).await?;
                             }
                             // Bidirectional catch-up: if we hold history
                             // the server lacks (edited offline, restarted
@@ -880,7 +903,7 @@ impl SyncedDoc {
                             }
                         }
                         Some(SyncDown::Update(bytes)) => {
-                            self.doc.apply_remote(&bytes)?;
+                            self.import(&bytes).await?;
                         }
                         None => {}
                     }
