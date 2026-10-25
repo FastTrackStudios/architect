@@ -1313,6 +1313,7 @@ impl AuthStorage for AuthSeaOrmStorage {
             active.name = Set(device.name);
             active.platform = Set(device.platform);
             active.endpoint_id = Set(device.endpoint_id);
+            active.relay_url = Set(device.relay_url);
             active.last_seen_at = Set(now);
             active.update(&self.db).await
         } else {
@@ -1322,6 +1323,7 @@ impl AuthStorage for AuthSeaOrmStorage {
                 name: Set(device.name),
                 platform: Set(device.platform),
                 endpoint_id: Set(device.endpoint_id),
+                relay_url: Set(device.relay_url),
                 created_at: Set(now),
                 last_seen_at: Set(now),
             }

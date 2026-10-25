@@ -63,6 +63,23 @@ fn clean_endpoint(raw: Option<String>) -> Result<Option<String>, AuthFlowError> 
     }
 }
 
+/// Longest relay URL a device may register.
+const RELAY_URL_MAX: usize = 512;
+
+/// An iroh relay's URL: `https://` (or `http://` for a local relay), no
+/// whitespace. Only its shape is checked; the dialler connects to it.
+fn clean_relay(raw: Option<String>) -> Result<Option<String>, AuthFlowError> {
+    let Some(url) = raw.map(|u| u.trim().to_owned()).filter(|u| !u.is_empty()) else {
+        return Ok(None);
+    };
+    let scheme = url.starts_with("https://") || url.starts_with("http://");
+    if scheme && url.len() <= RELAY_URL_MAX && !url.bytes().any(|b| b.is_ascii_whitespace()) {
+        Ok(Some(url))
+    } else {
+        Err(invalid("relay_url is an http(s) URL"))
+    }
+}
+
 fn clean_org(org: &AccountOrg) -> Result<AccountOrg, AuthFlowError> {
     let slug = org.slug.trim().to_ascii_lowercase();
     let slug_ok = !slug.is_empty()
@@ -112,6 +129,7 @@ where
         let name = clean_name(&registration.name)?;
         let platform = clean_platform(&registration.platform)?;
         let endpoint_id = clean_endpoint(registration.endpoint_id)?;
+        let relay_url = clean_relay(registration.relay_url)?;
         let offer = registration.offer_org.as_ref().map(clean_org).transpose()?;
 
         if let Some(held) = self.storage.find_device(registration.device_id).await? {
@@ -142,6 +160,7 @@ where
                 name,
                 platform,
                 endpoint_id,
+                relay_url,
                 created_at: now,
                 last_seen_at: now,
             })

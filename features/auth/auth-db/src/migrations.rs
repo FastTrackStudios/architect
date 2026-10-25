@@ -12,7 +12,53 @@ impl MigratorTrait for Migrator {
             Box::new(m20260809_000001_create_email_history::Migration),
             Box::new(m20260914_000001_create_agent_links::Migration),
             Box::new(m20261019_000001_create_devices::Migration),
+            Box::new(m20261024_000001_device_relay_url::Migration),
         ]
+    }
+}
+
+/// A device says which iroh relay it is reachable through, so another
+/// device dials it without a discovery round.
+mod m20261024_000001_device_relay_url {
+    use sea_orm_migration::prelude::*;
+
+    pub struct Migration;
+
+    impl MigrationName for Migration {
+        fn name(&self) -> &'static str {
+            "m20261024_000001_device_relay_url"
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl MigrationTrait for Migration {
+        async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .alter_table(
+                    Table::alter()
+                        .table(AuthDevices::Table)
+                        .add_column(ColumnDef::new(AuthDevices::RelayUrl).string().null())
+                        .to_owned(),
+                )
+                .await
+        }
+
+        async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .alter_table(
+                    Table::alter()
+                        .table(AuthDevices::Table)
+                        .drop_column(AuthDevices::RelayUrl)
+                        .to_owned(),
+                )
+                .await
+        }
+    }
+
+    #[derive(Iden)]
+    enum AuthDevices {
+        Table,
+        RelayUrl,
     }
 }
 
