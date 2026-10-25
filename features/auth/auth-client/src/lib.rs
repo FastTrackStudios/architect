@@ -52,6 +52,8 @@
 
 pub mod device;
 pub mod oidc;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod this_device;
 
 use std::sync::{Arc, Mutex};
 

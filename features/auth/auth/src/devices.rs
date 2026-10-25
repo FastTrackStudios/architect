@@ -136,13 +136,21 @@ where
         }
         let name = clean_name(&registration.name)?;
         let platform = clean_platform(&registration.platform)?;
-        let endpoint_id = clean_endpoint(registration.endpoint_id)?;
-        let relay_url = clean_relay(registration.relay_url)?;
+        let mut endpoint_id = clean_endpoint(registration.endpoint_id)?;
+        let mut relay_url = clean_relay(registration.relay_url)?;
         let offer = registration.offer_org.as_ref().map(clean_org).transpose()?;
 
         if let Some(held) = self.storage.find_device(registration.device_id).await? {
             if held.user_id != user.id {
                 return Err(AuthFlowError::PermissionDenied);
+            }
+            // Every app on a device registers it under the one id
+            // (`auth_client::this_device`); one that holds no node of the
+            // org (Studio beside Task) says nothing of an endpoint, which
+            // must not take the node's away from its peers.
+            if endpoint_id.is_none() {
+                endpoint_id = held.endpoint_id;
+                relay_url = relay_url.or(held.relay_url);
             }
         }
         if let Some(org) = offer {
