@@ -315,8 +315,12 @@ mod tests {
         let path = path.to_str().unwrap();
         let pending = Uuid::new_v4();
         {
-            let db = turso::Builder::new_local(path).build().await.unwrap();
-            let conn = db.connect().unwrap();
+            let conn = turso::Builder::new_local(path)
+                .build()
+                .await
+                .unwrap()
+                .connect()
+                .unwrap();
             conn.execute("CREATE TABLE crdt_docs_index (doc TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL, parent TEXT, created_by TEXT NOT NULL, origin TEXT, created_us INTEGER NOT NULL, updated_us INTEGER NOT NULL, rev INTEGER NOT NULL, deleted INTEGER NOT NULL, pending INTEGER NOT NULL)", ()).await.unwrap();
             conn.execute(
                 "INSERT INTO crdt_docs_index VALUES (?1, 'session', 'Made offline', NULL, '', NULL, 1, 1, 0, 0, 1)",
