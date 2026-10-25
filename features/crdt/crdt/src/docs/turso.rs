@@ -1,28 +1,30 @@
 //! [`TursoDocsIndex`]: a device's [`DocsIndex`] in a local Turso database.
 //!
 //! ```text
-//! crdt_docs_index  (doc TEXT PRIMARY KEY, kind, name, parent, created_by,
-//!                   origin, created_us, updated_us, rev, deleted, pending)
-//! crdt_docs_cursor (id INTEGER PRIMARY KEY CHECK (id = 0), rev INTEGER)
+//! crdt_doc_index   (doc TEXT PRIMARY KEY, kind, name, parent, created_by,
+//!                   origin, created_us, updated_us, rev, deleted, pending,
+//!                   lineage, seq UNIQUE)
+//! crdt_doc_cursors (lane TEXT PRIMARY KEY, rev INTEGER)
 //! ```
 //!
 //! Beside [`TursoPersistence`](crate::TursoPersistence)'s tables when the
-//! app keeps both in one device database.
+//! app keeps both in one device database. (0.9.28's `crdt_docs_index` /
+//! `crdt_docs_cursor`, which carried no lineage, seq or lanes, are not
+//! read.)
 
 use async_trait::async_trait;
 use tokio::sync::Mutex;
 use turso::Value;
 use uuid::Uuid;
 
-use super::{DocMeta, DocsError, DocsIndex, LocalDoc};
+use super::{DocMeta, DocsError, DocsIndex, Lineage, LocalDoc};
 
 const SCHEMA: &[&str] = &[
-    "CREATE TABLE IF NOT EXISTS crdt_docs_index (doc TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL, parent TEXT, created_by TEXT NOT NULL, origin TEXT, created_us INTEGER NOT NULL, updated_us INTEGER NOT NULL, rev INTEGER NOT NULL, deleted INTEGER NOT NULL, pending INTEGER NOT NULL)",
-    "CREATE TABLE IF NOT EXISTS crdt_docs_cursor (id INTEGER PRIMARY KEY CHECK (id = 0), rev INTEGER NOT NULL)",
+    "CREATE TABLE IF NOT EXISTS crdt_doc_index (doc TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL, parent TEXT, created_by TEXT NOT NULL, origin TEXT, created_us INTEGER NOT NULL, updated_us INTEGER NOT NULL, rev INTEGER NOT NULL, deleted INTEGER NOT NULL, pending INTEGER NOT NULL, lineage TEXT NOT NULL, seq INTEGER NOT NULL UNIQUE)",
+    "CREATE TABLE IF NOT EXISTS crdt_doc_cursors (lane TEXT PRIMARY KEY, rev INTEGER NOT NULL)",
 ];
 
-const COLUMNS: &str =
-    "doc, kind, name, parent, created_by, origin, created_us, updated_us, rev, deleted, pending";
+const COLUMNS: &str = "doc, kind, name, parent, created_by, origin, created_us, updated_us, rev, deleted, pending, lineage, seq";
 
 /// A device's catalog of docs in a Turso database.
 pub struct TursoDocsIndex {
@@ -47,12 +49,20 @@ const fn int(v: &Value) -> i64 {
     }
 }
 
+fn uint(v: &Value) -> u64 {
+    u64::try_from(int(v)).unwrap_or(0)
+}
+
 fn uuid(v: &Value) -> Option<Uuid> {
     text(v).and_then(|s| s.parse().ok())
 }
 
 fn opt(v: Option<String>) -> Value {
     v.map_or(Value::Null, Value::Text)
+}
+
+fn big(n: u64) -> Value {
+    Value::Integer(i64::try_from(n).unwrap_or(i64::MAX))
 }
 
 fn row_of(values: &[Value]) -> Option<LocalDoc> {
@@ -68,6 +78,8 @@ fn row_of(values: &[Value]) -> Option<LocalDoc> {
         rev,
         deleted,
         pending,
+        lineage,
+        seq,
     ] = values
     else {
         return None;
@@ -82,10 +94,12 @@ fn row_of(values: &[Value]) -> Option<LocalDoc> {
             origin: text(origin),
             created_us: int(created),
             updated_us: int(updated),
-            rev: u64::try_from(int(rev)).unwrap_or(0),
+            rev: uint(rev),
             deleted: int(deleted) != 0,
+            lineage: Lineage::parse(&text(lineage).unwrap_or_default()),
         },
         pending: int(pending) != 0,
+        seq: uint(seq),
     })
 }
 
@@ -110,8 +124,11 @@ impl TursoDocsIndex {
         Self::open(&db).await
     }
 
-    async fn rows(&self, sql: &str, params: Vec<Value>) -> Result<Vec<Vec<Value>>, DocsError> {
-        let conn = self.conn.lock().await;
+    async fn rows_on(
+        conn: &turso::Connection,
+        sql: &str,
+        params: Vec<Value>,
+    ) -> Result<Vec<Vec<Value>>, DocsError> {
         let mut rows = conn.query(sql, params).await.map_err(|e| backend(&e))?;
         let mut out = Vec::new();
         while let Some(row) = rows.next().await.map_err(|e| backend(&e))? {
@@ -121,8 +138,14 @@ impl TursoDocsIndex {
             }
             out.push(values);
         }
-        drop(conn);
         Ok(out)
+    }
+
+    async fn rows(&self, sql: &str, params: Vec<Value>) -> Result<Vec<Vec<Value>>, DocsError> {
+        let conn = self.conn.lock().await;
+        let out = Self::rows_on(&conn, sql, params).await;
+        drop(conn);
+        out
     }
 }
 
@@ -130,7 +153,7 @@ impl TursoDocsIndex {
 impl DocsIndex for TursoDocsIndex {
     async fn docs(&self) -> Result<Vec<LocalDoc>, DocsError> {
         let rows = self
-            .rows(&format!("SELECT {COLUMNS} FROM crdt_docs_index"), vec![])
+            .rows(&format!("SELECT {COLUMNS} FROM crdt_doc_index"), vec![])
             .await?;
         Ok(rows.iter().filter_map(|r| row_of(r)).collect())
     }
@@ -138,14 +161,28 @@ impl DocsIndex for TursoDocsIndex {
     async fn get(&self, doc_id: Uuid) -> Result<Option<LocalDoc>, DocsError> {
         let rows = self
             .rows(
-                &format!("SELECT {COLUMNS} FROM crdt_docs_index WHERE doc = ?1"),
+                &format!("SELECT {COLUMNS} FROM crdt_doc_index WHERE doc = ?1"),
                 vec![Value::Text(doc_id.to_string())],
             )
             .await?;
         Ok(rows.first().and_then(|r| row_of(r)))
     }
 
-    async fn upsert(&self, doc: &LocalDoc) -> Result<(), DocsError> {
+    // The connection's lock is the transaction: the next seq is read and
+    // the row written under it.
+    #[allow(clippy::significant_drop_tightening)]
+    async fn upsert(&self, mut doc: LocalDoc) -> Result<LocalDoc, DocsError> {
+        let conn = self.conn.lock().await;
+        let head = Self::rows_on(
+            &conn,
+            "SELECT COALESCE(MAX(seq), 0) FROM crdt_doc_index",
+            vec![],
+        )
+        .await?
+        .first()
+        .and_then(|r| r.first())
+        .map_or(0, uint);
+        doc.seq = head.saturating_add(1);
         let m = &doc.meta;
         let params = vec![
             Value::Text(m.doc_id.to_string()),
@@ -156,39 +193,39 @@ impl DocsIndex for TursoDocsIndex {
             opt(m.origin.clone()),
             Value::Integer(m.created_us),
             Value::Integer(m.updated_us),
-            Value::Integer(i64::try_from(m.rev).unwrap_or(i64::MAX)),
+            big(m.rev),
             Value::Integer(i64::from(m.deleted)),
             Value::Integer(i64::from(doc.pending)),
+            Value::Text(m.lineage.as_str().to_owned()),
+            big(doc.seq),
         ];
-        let conn = self.conn.lock().await;
-        let done = conn
-            .execute(
-                &format!(
-                    "INSERT OR REPLACE INTO crdt_docs_index ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"
-                ),
-                params,
-            )
-            .await;
-        drop(conn);
-        done.map(|_| ()).map_err(|e| backend(&e))
+        conn.execute(
+            &format!(
+                "INSERT OR REPLACE INTO crdt_doc_index ({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)"
+            ),
+            params,
+        )
+        .await
+        .map_err(|e| backend(&e))?;
+        Ok(doc)
     }
 
-    async fn cursor(&self) -> Result<u64, DocsError> {
+    async fn cursor(&self, lane: &str) -> Result<u64, DocsError> {
         let rows = self
-            .rows("SELECT rev FROM crdt_docs_cursor WHERE id = 0", vec![])
+            .rows(
+                "SELECT rev FROM crdt_doc_cursors WHERE lane = ?1",
+                vec![Value::Text(lane.to_owned())],
+            )
             .await?;
-        Ok(rows
-            .first()
-            .and_then(|r| r.first())
-            .map_or(0, |v| u64::try_from(int(v)).unwrap_or(0)))
+        Ok(rows.first().and_then(|r| r.first()).map_or(0, uint))
     }
 
-    async fn set_cursor(&self, rev: u64) -> Result<(), DocsError> {
+    async fn set_cursor(&self, lane: &str, rev: u64) -> Result<(), DocsError> {
         let conn = self.conn.lock().await;
         let done = conn
             .execute(
-                "INSERT OR REPLACE INTO crdt_docs_cursor (id, rev) VALUES (0, ?1)",
-                (i64::try_from(rev).unwrap_or(i64::MAX),),
+                "INSERT OR REPLACE INTO crdt_doc_cursors (lane, rev) VALUES (?1, ?2)",
+                vec![Value::Text(lane.to_owned()), big(rev)],
             )
             .await;
         drop(conn);
@@ -201,7 +238,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn rows_and_cursor_survive_reopening() {
+    async fn rows_seqs_and_cursors_survive_reopening() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("device.db");
         let path = path.to_str().unwrap();
@@ -217,17 +254,29 @@ mod tests {
                 updated_us: 8,
                 rev: 0,
                 deleted: false,
+                lineage: Lineage::Merge,
             },
             pending: true,
+            seq: 0,
         };
-        {
+        let stored = {
             let index = TursoDocsIndex::open_path(path).await.unwrap();
-            index.upsert(&doc).await.unwrap();
-            index.set_cursor(41).await.unwrap();
-        }
+            let first = index.upsert(doc.clone()).await.unwrap();
+            assert_eq!(first.seq, 1);
+            let second = index.upsert(first).await.unwrap();
+            assert_eq!(second.seq, 2, "every write takes the next seq");
+            index.set_cursor("hub", 41).await.unwrap();
+            index.set_cursor("peer-a", 3).await.unwrap();
+            second
+        };
         let index = TursoDocsIndex::open_path(path).await.unwrap();
-        assert_eq!(index.get(doc.meta.doc_id).await.unwrap(), Some(doc.clone()));
-        assert_eq!(index.docs().await.unwrap(), vec![doc]);
-        assert_eq!(index.cursor().await.unwrap(), 41);
+        assert_eq!(
+            index.get(doc.meta.doc_id).await.unwrap(),
+            Some(stored.clone())
+        );
+        assert_eq!(index.docs().await.unwrap(), vec![stored]);
+        assert_eq!(index.cursor("hub").await.unwrap(), 41);
+        assert_eq!(index.cursor("peer-a").await.unwrap(), 3);
+        assert_eq!(index.cursor("never").await.unwrap(), 0);
     }
 }

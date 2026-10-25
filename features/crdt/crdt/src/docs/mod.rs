@@ -43,6 +43,8 @@ use uuid::Uuid;
 use crate::persistence::MaybeSendSync;
 
 #[cfg(not(target_arch = "wasm32"))]
+mod device_host;
+#[cfg(not(target_arch = "wasm32"))]
 mod driver;
 #[cfg(not(target_arch = "wasm32"))]
 mod host;
@@ -52,8 +54,11 @@ mod turso;
 #[cfg(all(not(target_arch = "wasm32"), feature = "turso"))]
 pub use self::turso::TursoDocsIndex;
 #[cfg(not(target_arch = "wasm32"))]
+pub use device_host::DriverHost;
+#[cfg(not(target_arch = "wasm32"))]
 pub use driver::{
-    DocStorage, DocsDriver, DocsIndex, DocsLane, InMemoryDocsIndex, LocalDoc, SharedStorage,
+    DocStorage, DocSyncEvent, DocsDriver, DocsIndex, DocsLane, HUB, InMemoryDocsIndex, LocalDoc,
+    Refusal, SharedStorage,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use host::{DocAccess, DocsHost};
@@ -92,6 +97,9 @@ pub struct DocMeta {
     pub rev: u64,
     /// A tombstone: kept so an offline device learns of the delete.
     pub deleted: bool,
+    /// What a replica with no history in common with this one meets
+    /// ([`Lineage`]). Set by the first registration.
+    pub lineage: Lineage,
 }
 
 /// A doc to register. The id is the caller's.
@@ -101,6 +109,49 @@ pub struct CreateDoc {
     pub kind: String,
     pub name: String,
     pub parent: Option<Uuid>,
+    /// Set once: a later registration with another policy is
+    /// [`DocsError::LineageMismatch`].
+    pub lineage: Lineage,
+}
+
+/// What a doc's host does with a replica whose history shares nothing
+/// with the doc it serves (two copies made apart under one id).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, facet::Facet)]
+#[repr(u8)]
+pub enum Lineage {
+    /// Refuse it ([`crate::peer::FOREIGN_LINEAGE`]): the copies are two
+    /// documents. Right for a doc whose content would duplicate when two
+    /// histories merge (text seeded on both sides, a list built twice),
+    /// and for anything forked from another doc's history.
+    #[default]
+    Strict,
+    /// Merge it: Loro joins two independently made docs whose content is
+    /// root containers by name (a map keyed by entry, say), field by
+    /// field. Right for a doc every device makes under one derived id,
+    /// offline, before any of them has synced.
+    Merge,
+}
+
+impl Lineage {
+    /// The stored word: `strict`, `merge`.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Strict => "strict",
+            Self::Merge => "merge",
+        }
+    }
+
+    /// Parse the stored word; anything unknown is [`Self::Strict`], the
+    /// safe answer.
+    #[must_use]
+    pub fn parse(word: &str) -> Self {
+        if word == "merge" {
+            Self::Merge
+        } else {
+            Self::Strict
+        }
+    }
 }
 
 /// Which rows a [`Docs::list`] returns, in revision order.
@@ -166,6 +217,10 @@ pub enum DocsError {
     #[error("the id is registered as a `{0}`")]
     #[architect(http_status = 409)]
     KindMismatch(String),
+    /// The id is registered with another [`Lineage`] (the held one).
+    #[error("the id is registered with lineage {0:?}")]
+    #[architect(http_status = 409)]
+    LineageMismatch(Lineage),
     /// The row moved on (its current revision).
     #[error("the doc changed (now at revision {0})")]
     #[architect(http_status = 409)]
@@ -431,6 +486,7 @@ mod tests {
             updated_us: 0,
             rev: 0,
             deleted: false,
+            lineage: Lineage::Strict,
         }
     }
 

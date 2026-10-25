@@ -158,6 +158,8 @@ pub struct DocSyncHost {
     /// long-lived docs. Replicas that already hold history still get
     /// exact deltas.
     shallow_bootstrap: bool,
+    /// Told every update a replica sends up ([`Self::on_import`]).
+    on_import: Option<Arc<ImportHook>>,
     // Keeps the server-local-update → hub bridge alive.
     _local_sub: Arc<loro::Subscription>,
 }
@@ -212,8 +214,25 @@ impl DocSyncHost {
             compact_every,
             compact_tx,
             shallow_bootstrap: false,
+            on_import: None,
             _local_sub: Arc::new(sub),
         }
+    }
+
+    /// Call `hook` with every update an attached replica sends up, after
+    /// it is applied: how a node that serves a doc it also syncs
+    /// elsewhere passes those updates on.
+    #[must_use]
+    pub fn on_import(mut self, hook: Arc<ImportHook>) -> Self {
+        self.on_import = Some(hook);
+        self
+    }
+
+    /// Send `bytes` (an update that reached this doc another way, e.g.
+    /// imported over a client connection) to every attached replica.
+    /// Applying them to the doc is the caller's business.
+    pub fn publish(&self, bytes: Vec<u8>) {
+        self.hub.publish(SyncDown::Update(bytes));
     }
 
     /// Compact the canonical doc's persistence every `n` updates: fold
@@ -303,6 +322,7 @@ pub struct SyncSession {
     count: Arc<std::sync::atomic::AtomicU32>,
     every: Arc<std::sync::atomic::AtomicU32>,
     trigger: tokio::sync::mpsc::UnboundedSender<()>,
+    on_import: Option<Arc<ImportHook>>,
     _session: SessionGuard,
 }
 
@@ -322,6 +342,9 @@ impl SyncSession {
             if let Err(e) = self.doc.apply_remote_durable(self.doc_id, &bytes).await {
                 tracing::warn!("doc-sync: dropping bad update: {e}");
                 continue;
+            }
+            if let Some(hook) = &self.on_import {
+                hook(&bytes);
             }
             self.hub.publish(SyncDown::Update(bytes));
             if should_compact(
@@ -397,6 +420,7 @@ impl DocSyncHost {
             count: self.update_count.clone(),
             every: self.compact_every.clone(),
             trigger: self.compact_tx.clone(),
+            on_import: self.on_import.clone(),
             _session: SessionGuard::new(self.sessions.clone()),
         })
     }
@@ -770,8 +794,21 @@ pub struct SyncedDoc {
     /// a failed or cancelled write is retried before the next attach
     /// reports them as held.
     unpersisted: Vec<Vec<u8>>,
+    /// The outbox's sending half, for bytes relayed in from elsewhere
+    /// ([`Self::outbox`]).
+    outbox_tx: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
+    /// Told every update this replica imports ([`Self::on_import`]).
+    on_import: Option<Arc<ImportHook>>,
+    /// Told when a session has caught up ([`Self::on_attached`]).
+    on_attached: Option<Arc<AttachedHook>>,
     _local_sub: loro::Subscription,
 }
+
+/// What [`SyncedDoc::on_import`] and [`DocSyncHost::on_import`] call with
+/// each imported update.
+pub type ImportHook = dyn Fn(&[u8]) + Send + Sync;
+/// What [`SyncedDoc::on_attached`] calls once a session has caught up.
+pub type AttachedHook = dyn Fn() + Send + Sync;
 
 /// How a [`SyncedDoc::run`] session ended, from its held-open call: `Ok`
 /// when the server closed the session, the attach error when it refused.
@@ -785,6 +822,7 @@ impl SyncedDoc {
     #[must_use]
     pub fn new(doc_id: Uuid, doc: CrdtDoc) -> Self {
         let (tx, outbox) = tokio::sync::mpsc::unbounded_channel();
+        let outbox_tx = tx.clone();
         let sub = doc.loro().subscribe_local_update(Box::new(move |bytes| {
             // Buffered while offline; drained by `run` when connected.
             let _ = tx.send(bytes.clone());
@@ -796,8 +834,36 @@ impl SyncedDoc {
             outbox,
             durable: false,
             unpersisted: Vec::new(),
+            outbox_tx,
+            on_import: None,
+            on_attached: None,
             _local_sub: sub,
         }
+    }
+
+    /// The outbox's sending half: bytes sent here go up like local edits.
+    /// What relays updates that arrived over another connection (imports
+    /// fire no local-update subscription, so they reach no other outbox
+    /// on their own).
+    #[must_use]
+    pub fn outbox(&self) -> tokio::sync::mpsc::UnboundedSender<Vec<u8>> {
+        self.outbox_tx.clone()
+    }
+
+    /// Call `hook` with every update this replica imports (the attach
+    /// backlog and live updates), after the import.
+    #[must_use]
+    pub fn on_import(mut self, hook: Arc<ImportHook>) -> Self {
+        self.on_import = Some(hook);
+        self
+    }
+
+    /// Call `hook` once per session, when it has caught up: the backlog
+    /// is applied and what the server lacked has been sent.
+    #[must_use]
+    pub fn on_attached(mut self, hook: Arc<AttachedHook>) -> Self {
+        self.on_attached = Some(hook);
+        self
     }
 
     /// Write what arrives from the server (the attach backlog and every
@@ -820,6 +886,9 @@ impl SyncedDoc {
         if self.durable {
             self.unpersisted.push(bytes.to_vec());
             self.persist_pending().await?;
+        }
+        if let Some(hook) = &self.on_import {
+            hook(bytes);
         }
         Ok(())
     }
@@ -922,6 +991,9 @@ impl SyncedDoc {
                                 if up_tx.send(missing).await.is_err() {
                                     return attach_result(call.await);
                                 }
+                            }
+                            if let Some(hook) = &self.on_attached {
+                                hook();
                             }
                         }
                         Some(SyncDown::Update(bytes)) => {

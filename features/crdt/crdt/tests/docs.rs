@@ -8,9 +8,10 @@ use std::time::Duration;
 
 use architect::{LayerRouter, LocalServer, Scope};
 use crdt::docs::{
-    CreateDoc, DocChange, DocMeta, DocQuery, DocStorage, DocsClient, DocsDriver, DocsError,
-    DocsHost, DocsLane, DocsStreamClient, InMemoryDocsIndex, InMemoryDocsStore, SharedStorage,
-    TursoDocsIndex, docs_rpc_service_descriptor, serve, stream_layer,
+    CreateDoc, DocChange, DocMeta, DocQuery, DocStorage, DocSyncEvent, DocsClient, DocsDriver,
+    DocsError, DocsHost, DocsLane, DocsStreamClient, DriverHost, InMemoryDocsIndex,
+    InMemoryDocsStore, Lineage, Refusal, SharedStorage, TursoDocsIndex,
+    docs_rpc_service_descriptor, serve, stream_layer,
 };
 use crdt::in_memory::InMemoryPersistence;
 use crdt::sync::{DocSyncClient, DocSyncDispatcher, SyncDown, doc_sync_service_descriptor};
@@ -69,6 +70,7 @@ fn session(name: &str) -> CreateDoc {
         kind: "session".into(),
         name: name.into(),
         parent: None,
+        lineage: Lineage::Strict,
     }
 }
 
@@ -434,4 +436,326 @@ async fn a_received_edit_whose_write_failed_is_written_on_the_retry() {
     // Restarted offline: the edit is there.
     let reopened = DocsDriver::new(index, SharedStorage(Arc::new(disk.inner.clone())));
     assert_eq!(read(&reopened.open(id).await.unwrap()), "take three");
+}
+
+// ── Lineage, sync events, peers ────────────────────────────────────────
+
+/// One root map, entries by key: the shape that merges per field.
+const LIBRARY: &str = "library";
+
+fn put_entry(doc: &CrdtDoc, key: &str, value: &str) {
+    doc.loro().get_map(LIBRARY).insert(key, value).unwrap();
+    doc.loro().commit();
+}
+
+fn entry(doc: &CrdtDoc, key: &str) -> Option<String> {
+    doc.loro()
+        .get_map(LIBRARY)
+        .get(key)
+        .and_then(|v| v.into_value().ok())
+        .and_then(|v| v.into_string().ok())
+        .map(|s| s.to_string())
+}
+
+fn rig(doc_id: Uuid, lineage: Lineage) -> CreateDoc {
+    CreateDoc {
+        doc_id,
+        kind: "rig".into(),
+        name: "Bass rig".into(),
+        parent: None,
+        lineage,
+    }
+}
+
+/// Every sync event a device has seen so far.
+fn seen(rx: &mut tokio::sync::broadcast::Receiver<DocSyncEvent>, log: &mut Vec<DocSyncEvent>) {
+    while let Ok(ev) = rx.try_recv() {
+        log.push(ev);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_merge_doc_made_on_two_devices_offline_converges_with_both_edits() {
+    let host = host().await;
+    let scope = Scope::new();
+    let local = LocalServer::serve(router(&host), scope.clone());
+    let (a, b) = (memory_device(), memory_device());
+    let (mut a_events, mut b_events) = (a.sync_events(), b.sync_events());
+
+    // One derived id, made on both with nothing attached, each editing
+    // its own entry.
+    let id = Uuid::new_v4();
+    let on_a = a.create(rig(id, Lineage::Merge)).await.unwrap();
+    put_entry(&on_a, "amp", "from the laptop");
+    let on_b = b.create(rig(id, Lineage::Merge)).await.unwrap();
+    put_entry(&on_b, "cab", "from the phone");
+
+    let run_a = online(&a, lane(&local).await);
+    let run_b = online(&b, lane(&local).await);
+    eventually("both copies hold both entries", async || {
+        [&on_a, &on_b].iter().all(|d| {
+            entry(d, "amp").as_deref() == Some("from the laptop")
+                && entry(d, "cab").as_deref() == Some("from the phone")
+        })
+    })
+    .await;
+    let mut log = Vec::new();
+    seen(&mut a_events, &mut log);
+    seen(&mut b_events, &mut log);
+    assert!(
+        !log.iter()
+            .any(|e| matches!(e, DocSyncEvent::Refused { .. })),
+        "nothing refused: {log:?}"
+    );
+    assert!(
+        log.iter()
+            .any(|e| matches!(e, DocSyncEvent::Attached { doc_id, .. } if *doc_id == id)),
+        "both sessions attached: {log:?}"
+    );
+
+    // The policy is the first registration's.
+    let docs: DocsClient = local.establish().await.unwrap();
+    let clash = docs.create(rig(id, Lineage::Strict)).await.unwrap_err();
+    assert!(
+        matches!(clash, vox::VoxError::User(ref e) if **e == DocsError::LineageMismatch(Lineage::Merge)),
+        "{clash:?}"
+    );
+    run_a.abort();
+    run_b.abort();
+    scope.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_strict_doc_made_twice_is_refused_and_reset_takes_the_hosts() {
+    let host = host().await;
+    let scope = Scope::new();
+    let local = LocalServer::serve(router(&host), scope.clone());
+    let (a, b) = (memory_device(), memory_device());
+    let id = Uuid::new_v4();
+    put_entry(
+        &a.create(rig(id, Lineage::Strict)).await.unwrap(),
+        "amp",
+        "a",
+    );
+    let run_a = online(&a, lane(&local).await);
+    eventually("the host holds the laptop's copy", async || {
+        host.registry()
+            .doc(id)
+            .await
+            .is_ok_and(|d| entry(&d, "amp").is_some())
+    })
+    .await;
+
+    // The same id made apart on the phone: another history.
+    put_entry(
+        &b.create(rig(id, Lineage::Strict)).await.unwrap(),
+        "cab",
+        "b",
+    );
+    let mut b_events = b.sync_events();
+    let run_b = online(&b, lane(&local).await);
+    let mut log = Vec::new();
+    eventually("the phone's copy is refused", async || {
+        seen(&mut b_events, &mut log);
+        log.iter().any(|e| {
+            matches!(e, DocSyncEvent::Refused { doc_id, reason: Refusal::ForeignLineage, .. } if *doc_id == id)
+        })
+    })
+    .await;
+
+    // Reset: the phone drops its copy and takes the host's.
+    b.reset(id).await.unwrap();
+    eventually("the phone holds the host's copy", async || {
+        b.open(id)
+            .await
+            .is_ok_and(|d| entry(&d, "amp").as_deref() == Some("a") && entry(&d, "cab").is_none())
+    })
+    .await;
+    seen(&mut b_events, &mut log);
+    assert!(log.contains(&DocSyncEvent::Reset { doc_id: id }));
+    run_a.abort();
+    run_b.abort();
+    scope.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn attached_comes_once_the_hosts_history_is_applied() {
+    let host = host().await;
+    let scope = Scope::new();
+    let local = LocalServer::serve(router(&host), scope.clone());
+    let (a, b) = (memory_device(), memory_device());
+    let req = session("Setlist");
+    let id = req.doc_id;
+    write(&a.create(req).await.unwrap(), "opener");
+    let run_a = online(&a, lane(&local).await);
+    eventually("registered", async || host.admits(id)).await;
+    eventually("the host holds the text", async || {
+        host.registry()
+            .doc(id)
+            .await
+            .is_ok_and(|d| read(&d) == "opener")
+    })
+    .await;
+
+    let mut events = b.sync_events();
+    let run_b = online(&b, lane(&local).await);
+    let attached = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Ok(DocSyncEvent::Attached { doc_id, lane }) = events.recv().await {
+                if doc_id == id {
+                    return lane;
+                }
+            }
+        }
+    })
+    .await
+    .expect("attached in time");
+    assert_eq!(attached, crdt::docs::HUB);
+    assert_eq!(
+        read(&b.open(id).await.unwrap()),
+        "opener",
+        "the backlog is applied when Attached arrives"
+    );
+    run_a.abort();
+    run_b.abort();
+    scope.close().await;
+}
+
+fn device_router(host: &DriverHost) -> LayerRouter {
+    LayerRouter::new()
+        .with(docs_rpc_service_descriptor(), serve(host.clone()))
+        .merge(stream_layer(host.clone()))
+        .with(
+            doc_sync_service_descriptor(),
+            DocSyncDispatcher::new(host.clone()),
+        )
+}
+
+/// A device's session with another device, until the handle is aborted.
+fn online_peer(driver: &DocsDriver, key: &str, lane: DocsLane) -> tokio::task::JoinHandle<()> {
+    let (driver, key) = (driver.clone(), key.to_owned());
+    tokio::spawn(async move {
+        let _ = driver.run_peer(&key, &lane).await;
+    })
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn devices_sync_each_other_while_the_hub_is_down_and_the_hub_catches_up() {
+    let task = host().await;
+    let scope = Scope::new();
+    let task_lanes = LocalServer::serve(router(&task), scope.clone());
+    let (a, b, c) = (memory_device(), memory_device(), memory_device());
+
+    // The phone (B) serves its docs to the laptop (A).
+    let b_host = b.host(|_| true).await.unwrap();
+    let b_lanes = LocalServer::serve(device_router(&b_host), scope.clone());
+
+    // A project made on the laptop, everyone on the hub.
+    let req = session("Album");
+    let id = req.doc_id;
+    let on_a = a.create(req).await.unwrap();
+    write(&on_a, "a1 ");
+    let a_hub = online(&a, lane(&task_lanes).await);
+    let b_hub = online(&b, lane(&task_lanes).await);
+    let c_hub = online(&c, lane(&task_lanes).await);
+    eventually("the phone and the desktop hold it", async || {
+        b.open(id).await.is_ok_and(|d| read(&d) == "a1 ")
+            && c.open(id).await.is_ok_and(|d| read(&d) == "a1 ")
+    })
+    .await;
+    let on_b = b.open(id).await.unwrap();
+    let on_c = c.open(id).await.unwrap();
+
+    // The laptop also dials the phone directly.
+    let a_peer = online_peer(&a, "phone", lane(&b_lanes).await);
+
+    // The hub goes away for both. An edit on the laptop reaches the
+    // phone over the peer lane alone.
+    a_hub.abort();
+    b_hub.abort();
+    let _ = (a_hub.await, b_hub.await);
+    write(&on_a, "a2 ");
+    eventually(
+        "the phone gets the laptop's edit peer to peer",
+        async || read(&on_b).contains("a2 "),
+    )
+    .await;
+    assert!(
+        !read(&on_c).contains("a2 "),
+        "the hub has not seen it yet: nobody is on it"
+    );
+
+    // A doc made on the laptop while only the peer lane is up: the
+    // phone adopts it.
+    let fresh = session("B-sides");
+    let fresh_id = fresh.doc_id;
+    write(&a.create(fresh).await.unwrap(), "demo ");
+    eventually("the phone adopts the laptop's new doc", async || {
+        b.open(fresh_id).await.is_ok_and(|d| read(&d) == "demo ")
+    })
+    .await;
+
+    // The phone comes back to the hub: the laptop's edit and its new doc
+    // reach the hub through the phone, and on to the desktop.
+    let b_hub = online(&b, lane(&task_lanes).await);
+    eventually(
+        "the desktop gets the laptop's edit through the phone",
+        async || read(&on_c).contains("a2 "),
+    )
+    .await;
+    eventually("the hub registered the doc the phone adopted", async || {
+        task.admits(fresh_id) && c.open(fresh_id).await.is_ok_and(|d| read(&d) == "demo ")
+    })
+    .await;
+
+    // An edit from the hub side reaches the laptop, which is on the peer
+    // lane only: the phone relays it.
+    write(&on_c, "c1 ");
+    eventually(
+        "the laptop gets the desktop's edit through the phone",
+        async || read(&on_a).contains("c1 "),
+    )
+    .await;
+
+    // Everyone back: one history.
+    let a_hub = online(&a, lane(&task_lanes).await);
+    eventually("all three converge", async || {
+        let (laptop, phone, desktop) = (read(&on_a), read(&on_b), read(&on_c));
+        laptop == phone && phone == desktop && laptop.contains("a2 ") && laptop.contains("c1 ")
+    })
+    .await;
+    for run in [a_hub, b_hub, c_hub, a_peer] {
+        run.abort();
+    }
+    scope.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_device_host_refuses_a_peer_it_does_not_admit() {
+    let b = memory_device();
+    let id = Uuid::new_v4();
+    put_entry(
+        &b.create(rig(id, Lineage::Merge)).await.unwrap(),
+        "amp",
+        "b",
+    );
+    let allowed = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let gate = allowed.clone();
+    let b_host = b
+        .host(move |_| gate.load(std::sync::atomic::Ordering::SeqCst))
+        .await
+        .unwrap();
+    let scope = Scope::new();
+    let b_lanes = LocalServer::serve(device_router(&b_host), scope.clone());
+    let docs: DocsClient = b_lanes.establish().await.unwrap();
+    assert_eq!(docs.list(DocQuery::default()).await.unwrap().docs.len(), 1);
+
+    // Taken off the account: refused on the next call, no restart.
+    allowed.store(false, std::sync::atomic::Ordering::SeqCst);
+    let refused = docs.list(DocQuery::default()).await.unwrap_err();
+    assert!(
+        matches!(refused, vox::VoxError::User(ref e) if **e == DocsError::Forbidden),
+        "{refused:?}"
+    );
+    scope.close().await;
 }

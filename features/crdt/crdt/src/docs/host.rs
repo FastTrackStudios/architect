@@ -10,10 +10,28 @@ use uuid::Uuid;
 
 use super::{
     CreateDoc, DocChange, DocMeta, DocPage, DocQuery, Docs, DocsError, DocsStore, DocsStreamSource,
-    check_create, check_name, now_us,
+    Lineage, check_create, check_name, now_us,
 };
 use crate::registry::DocRegistry;
 use crate::sync::{DocPresence, DocSync, SyncDown, SyncError};
+
+/// What the content lane keeps of a catalogued id.
+#[derive(Debug, Clone, Copy)]
+struct Held {
+    rev: u64,
+    deleted: bool,
+    lineage: Lineage,
+}
+
+impl Held {
+    const fn of(m: &DocMeta) -> Self {
+        Self {
+            rev: m.rev,
+            deleted: m.deleted,
+            lineage: m.lineage,
+        }
+    }
+}
 
 /// What a caller asks to do to a doc, for [`DocsHost::with_authorizer`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,8 +68,9 @@ pub struct DocsHost {
     /// Each catalogued id: the revision of the last row applied here and
     /// whether that row is a tombstone. Ordered by revision, so a commit
     /// that reaches the lock late cannot undo a newer one (a rename
-    /// re-admitting a doc deleted after it).
-    live: Arc<RwLock<HashMap<Uuid, (u64, bool)>>>,
+    /// re-admitting a doc deleted after it). The lineage rides along:
+    /// the content lane needs it on every attach.
+    live: Arc<RwLock<HashMap<Uuid, Held>>>,
     head: Arc<AtomicU64>,
     hub: PubSub<DocChange>,
     authorize: Arc<Authorizer>,
@@ -73,7 +92,7 @@ impl DocsHost {
                     ..DocQuery::default()
                 })
                 .await?;
-            live.extend(page.docs.iter().map(|d| (d.doc_id, (d.rev, d.deleted))));
+            live.extend(page.docs.iter().map(|d| (d.doc_id, Held::of(d))));
             since_rev = page.cursor;
             if !page.more {
                 break;
@@ -114,7 +133,9 @@ impl DocsHost {
     /// host: what a router uses to send a `DocSync` here.
     #[must_use]
     pub fn admits(&self, doc_id: Uuid) -> bool {
-        matches!(architect::read(&self.live).get(&doc_id), Some((_, false)))
+        architect::read(&self.live)
+            .get(&doc_id)
+            .is_some_and(|h| !h.deleted)
     }
 
     fn allowed(&self, doc_id: Uuid, access: DocAccess) -> bool {
@@ -141,11 +162,9 @@ impl DocsHost {
         let stored = self.store.put(row, expect).await?;
         {
             let mut live = architect::write(&self.live);
-            let newer = live
-                .get(&stored.doc_id)
-                .is_none_or(|(rev, _)| *rev < stored.rev);
+            let newer = live.get(&stored.doc_id).is_none_or(|h| h.rev < stored.rev);
             if newer {
-                live.insert(stored.doc_id, (stored.rev, stored.deleted));
+                live.insert(stored.doc_id, Held::of(&stored));
             }
         }
         self.head.fetch_max(stored.rev, Ordering::SeqCst);
@@ -194,6 +213,9 @@ impl Docs for DocsHost {
                 if held.kind != req.kind {
                     return Err(DocsError::KindMismatch(held.kind));
                 }
+                if held.lineage != req.lineage {
+                    return Err(DocsError::LineageMismatch(held.lineage));
+                }
                 if held.deleted {
                     return Err(DocsError::Deleted);
                 }
@@ -213,6 +235,7 @@ impl Docs for DocsHost {
                 updated_us: now,
                 rev: 0,
                 deleted: false,
+                lineage: req.lineage,
             };
             match self.commit(row, None, DocChange::Created).await {
                 // Another create of this id won the race: answer as it.
@@ -302,7 +325,14 @@ impl DocSync for DocsHost {
             tracing::debug!(doc.id = %doc_id, "docs: attach refused");
             return Err(SyncError::UnknownDoc);
         }
-        crate::peer::check_lineage(&self.registry, doc_id, &from).await?;
+        let lineage = architect::read(&self.live)
+            .get(&doc_id)
+            .map_or(Lineage::Strict, |h| h.lineage);
+        // A Merge doc takes a replica made apart under its id: Loro joins
+        // the two histories.
+        if lineage == Lineage::Strict {
+            crate::peer::check_lineage(&self.registry, doc_id, &from).await?;
+        }
         self.registry.sync(doc_id, from, up, down).await
     }
 }

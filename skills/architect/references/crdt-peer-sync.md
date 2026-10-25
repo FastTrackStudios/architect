@@ -17,7 +17,7 @@ Crate `crdt` (`features/crdt/crdt`); guides `docs/content/architecture/collabora
 | Presence | `EphemeralStore` presence; sliding fan-out | `features/crdt/crdt/src/sync.rs` `DocPresence`, `PresenceHost`, `PresencePeer`, `PresenceDriver` |
 | `DocRegistry` | many docs on one dispatcher pair; admission, authorizer, eviction | `features/crdt/crdt/src/registry.rs` `DocRegistry`, `with_admission`, `with_authorizer`, `with_idle_eviction` |
 | `crdt::peer` | pairwise exchange, `DocPeer` lane, `SelfLane`, `pull`, lineage check | `features/crdt/crdt/src/peer.rs` `DocPeer`, `DocPeerHost`, `SelfLane`, `exchange`, `pull`, `is_foreign_lineage` |
-| `crdt::docs` | catalog of schema-agnostic app docs (client-chosen id, opaque `kind`, `parent`, tombstones, contiguous `rev`); its host; the device driver | `features/crdt/crdt/src/docs/mod.rs` `Docs`, `DocMeta`, `DocChange`, `DocsStore`, `InMemoryDocsStore`; `features/crdt/crdt/src/docs/host.rs` `DocsHost`; `features/crdt/crdt/src/docs/driver.rs` `DocsDriver`, `DocsIndex`, `DocStorage`; `features/crdt/crdt/src/docs/turso.rs` `TursoDocsIndex`; `features/crdt/crdt-seaorm/src/docs.rs` `SeaOrmDocsStore` |
+| `crdt::docs` | catalog of schema-agnostic app docs (client-chosen id, opaque `kind`, `parent`, tombstones, contiguous `rev`); its host; the device driver | `features/crdt/crdt/src/docs/mod.rs` `Docs`, `DocMeta`, `DocChange`, `DocsStore`, `InMemoryDocsStore`; `features/crdt/crdt/src/docs/host.rs` `DocsHost`; `features/crdt/crdt/src/docs/driver.rs` `DocsDriver`, `DocsIndex`, `DocStorage`, `DocSyncEvent`, `Refusal`; `features/crdt/crdt/src/docs/device_host.rs` `DriverHost`; `features/crdt/crdt/src/docs/turso.rs` `TursoDocsIndex`; `features/crdt/crdt-seaorm/src/docs.rs` `SeaOrmDocsStore` |
 | Hooks | Dioxus bridge: synced doc, crdt list/entry, presence | `features/crdt/crdt/src/hooks.rs` `use_synced_doc_keyed_with`, `use_crdt_list`, `use_crdt_entry` |
 | iroh seam | peer lookup modes; `Principal::Host` identity | `crates/architect/src/iroh_link.rs` `PeerLookup`; `features/permissions/src/lib.rs` `Principal` |
 
@@ -60,6 +60,22 @@ The host stores and relays Loro bytes and a catalog row (`DocMeta`); it never re
 - Per-caller rules: `.with_authorizer(|who, doc_id, DocAccess::Read | DocAccess::Write| ..)`; default allow, leaving it to the permissions gate. The `changes` hub is not filtered per caller: one host per audience.
 - Device: `DocsDriver::new(index, storage)` per owner (personal space, each org), with `TursoDocsIndex` (or `InMemoryDocsIndex`) and a `DocStorage` resolving each doc's `Arc<dyn Persistence>` from its `DocMeta` (`SharedStorage` for one database). Open docs only through `create` / `open`, so each replica is wired for sync before it is edited. `run(&DocsLane { docs, changes, sync })` is one connected session; loop it with backoff.
 - What `run` does: subscribe, wait for `DocChange::Attached`, register pending creates (`parent_first`), list from the index's cursor (tombstones included), adopt new rows through `DocStorage` (parent first), then sync every live doc with `SyncedDoc::durable` and follow `changes`. A frame whose `rev` skips one triggers a re-list.
+- Lineage (`CreateDoc.lineage`, set by the first registration; a different one later is `DocsError::LineageMismatch`):
+  - `Lineage::Strict` (default) refuses a replica with no shared history (`FOREIGN_LINEAGE`). Use it for docs made once and adopted elsewhere, for anything forked, and for text that would duplicate.
+  - `Lineage::Merge` imports it, and Loro joins the two histories. Use it for a doc every device makes offline under one derived id (UUID v5), whose content is root containers by name (one root map keyed by entry), so two copies merge per key or field.
+- Sync state: `driver.sync_events()` sends `DocSyncEvent`:
+  - `Attached { doc_id, lane }` once a session has applied the host's backlog and pushed what the host lacked (gate first-run seeding on it);
+  - `Refused { reason: Refusal::ForeignLineage | NotServed | Other }`;
+  - `Detached`;
+  - `Reset`.
+
+  `driver.reset(doc_id)` drops a `Strict` doc's local copy (`DocStorage::discard`; the default compacts it to an empty snapshot) and takes the hosts'. Open the doc again after `Reset`.
+- Peer to peer, with devices as hosts:
+  - `driver.host(|who| ..).await` is a `DriverHost`, the same `Docs` + stream + `DocSync` traits backed by the driver's index and open docs, so there is no second writer. Mount it like `DocsHost` on the device's iroh router behind a gate that yields `Principal::Host`. `admit` runs on every call.
+  - Another device runs `driver.run_peer(key, &lane)` against it. Sessions run concurrently, one per lane key; `run` is the key `HUB`.
+  - Each doc has a relay: an update imported on one lane goes to every other lane and to the device's host, never back to its source.
+  - A peer's catalog rows merge in: a tombstone wins and the later rename wins. The hub's `rev` is never overwritten; the peer lane's `rev` is the index's `LocalDoc::seq`.
+  - A doc learned from a peer stays pending until the hub session registers it. Rename and delete go through the hub.
 - Raw clients: `DocsClient` / `DocsStreamClient` inherent methods return `VoxError<DocsError>`; fold with `architect::vox_into_app`.
 
 ## Recipe C: version a document
@@ -80,7 +96,7 @@ let report = crdt::schema::migrate(doc.loro(), SCHEMA, MIGRATIONS)?;
 
 ## Pitfalls
 
-- **A `crdt::docs` host must never write into a doc.** A doc made offline meets an empty one on the host; anything the host wrote would make it a different lineage, refused as `FOREIGN_LINEAGE`. Create a doc on one device and let others adopt it; two devices each creating "the same" doc offline are two docs.
+- **A `crdt::docs` host must never write into a `Strict` doc.** A doc made offline meets an empty one on the host; anything the host wrote would make it a different lineage, refused as `FOREIGN_LINEAGE`. Create a `Strict` doc on one device and let others adopt it: two devices each creating "the same" `Strict` doc offline are two docs, and the second is refused until `reset`. A doc every device makes under one derived id must be `Lineage::Merge`.
 - **Loro subscription closures must hold `WeakCrdtDoc`.** A strong `CrdtDoc` dropped inside Loro's unsubscribe path deadlocks.
 - **Imports don't fire local-update subscriptions.** `apply_remote` is not persisted; relaying hosts use `apply_remote_durable`. `SyncedDoc` imports with `apply_remote` by default, so a hub client keeps only its own edits and re-learns the rest by version-vector catch-up (fine for a browser tab). A device replica, which must still show a received edit after an offline restart, uses `SyncedDoc::new(..).durable()`.
 - **Status flashes Live before attach succeeds** in the hook's drive loop; a failed attach then sets `Offline`.

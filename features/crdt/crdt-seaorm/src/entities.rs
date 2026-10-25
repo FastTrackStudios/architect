@@ -38,6 +38,8 @@ pub mod crdt_doc_meta {
         #[sea_orm(unique)]
         pub rev: i64,
         pub deleted: bool,
+        /// `strict` or `merge` (`crdt::docs::Lineage::as_str`).
+        pub lineage: String,
     }
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
