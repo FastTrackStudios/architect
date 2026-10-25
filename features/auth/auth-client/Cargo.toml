@@ -28,6 +28,18 @@ serde_json.workspace = true
 thiserror.workspace = true
 vox.workspace = true
 
+# `this_device`: native only, so the wasm build stays as above.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+uuid = { version = "1", default-features = false, features = ["v5", "std"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSUUID"] }
+objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "UIDevice"] }
+
 [dev-dependencies]
 tokio.workspace = true
 

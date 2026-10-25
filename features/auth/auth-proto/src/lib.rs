@@ -163,10 +163,12 @@ pub use service::prelude::*;
 pub use service::{AuthServiceDispatcher, auth_service_service_descriptor};
 
 // The device address book — a third trait, same shape.
+#[cfg(feature = "vox")]
+pub use device::ensure_registered;
 pub use device::prelude::*;
 pub use device::{
     AccountOrg, AuthAccountOrg, AuthDevice, AuthDeviceCreate, AuthDeviceRepo, DeviceDirectory,
-    DeviceRegistration, PeerDevice,
+    DeviceRegistration, PeerDevice, Registered,
 };
 
 // The organization surface — same shape, second trait.

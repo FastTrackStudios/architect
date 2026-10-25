@@ -189,6 +189,99 @@ async fn a_devices_relay_reaches_its_peers() {
 }
 
 #[tokio::test]
+async fn two_apps_on_one_device_are_one_device() {
+    let auth = super::open_auth().await;
+    let router = LayerRouter::new()
+        .merge(auth::auth_service_layer(AuthVoxService::new(auth.clone())))
+        .merge(auth::device_service_layer(AuthVoxService::new(auth)));
+    let local = LocalServer::serve(router, Scope::new());
+    let session: AuthServiceClient = local.establish().await.expect("auth client");
+    let devices: DeviceServiceClient = local.establish().await.expect("device client");
+    let me = sign_up(&session, "one-ipad@example.com").await;
+
+    // Both apps derive the id from the device (`auth_client::this_device`).
+    let ipad = Uuid::new_v4();
+    let mut task = registration(ipad, "iPad", "taskendpoint0001", None);
+    task.relay_url = Some("https://use1-1.relay.example/".into());
+    devices
+        .register_device(me.clone(), task)
+        .await
+        .expect("task registers");
+    // Studio holds no node: it says nothing of an endpoint.
+    let mut studio = registration(ipad, "iPad", "unused", None);
+    studio.endpoint_id = None;
+    let listed = devices
+        .register_device(me, studio)
+        .await
+        .expect("studio registers");
+
+    assert_eq!(listed.devices.len(), 1, "one iPad, not two");
+    let only = &listed.devices[0];
+    assert_eq!(
+        only.endpoint_id.as_deref(),
+        Some("taskendpoint0001"),
+        "the node's endpoint stays"
+    );
+    assert_eq!(
+        only.relay_url.as_deref(),
+        Some("https://use1-1.relay.example/")
+    );
+}
+
+#[tokio::test]
+async fn an_app_without_a_node_adds_its_device_only_once() {
+    let auth = super::open_auth().await;
+    let router = LayerRouter::new()
+        .merge(auth::auth_service_layer(AuthVoxService::new(auth.clone())))
+        .merge(auth::device_service_layer(AuthVoxService::new(auth)));
+    let local = LocalServer::serve(router, Scope::new());
+    let session: AuthServiceClient = local.establish().await.expect("auth client");
+    let devices: DeviceServiceClient = local.establish().await.expect("device client");
+    let me = sign_up(&session, "apps@example.com").await;
+
+    let quiet = |id: Uuid, name: &str| {
+        let mut r = registration(id, name, "unused", None);
+        r.endpoint_id = None;
+        r
+    };
+    // Task's node registered the iPad under an id from before this_device.
+    devices
+        .register_device(
+            me.clone(),
+            registration(Uuid::new_v4(), "Cody's iPad", "taskendpoint0001", None),
+        )
+        .await
+        .expect("task");
+
+    let ipad = Uuid::new_v4();
+    let studio = auth::ensure_registered(&devices, &me, quiet(ipad, "cody's ipad"))
+        .await
+        .expect("studio");
+    assert_eq!(
+        studio,
+        auth::Registered::Listed,
+        "named the same: left as Task made it"
+    );
+
+    let phone = Uuid::new_v4();
+    let first = auth::ensure_registered(&devices, &me, quiet(phone, "iPhone"))
+        .await
+        .expect("studio on the phone");
+    assert_eq!(first, auth::Registered::Sent);
+    let again = auth::ensure_registered(&devices, &me, quiet(phone, "iPhone"))
+        .await
+        .expect("ignition on the phone");
+    assert_eq!(
+        again,
+        auth::Registered::Listed,
+        "a second app is the same device"
+    );
+
+    let listed = devices.list_devices(me).await.expect("list");
+    assert_eq!(listed.devices.len(), 2, "the iPad and the phone, once each");
+}
+
+#[tokio::test]
 async fn a_registration_is_checked_before_it_is_stored() {
     let auth = super::open_auth().await;
     let router = LayerRouter::new()

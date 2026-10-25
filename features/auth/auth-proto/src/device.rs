@@ -177,3 +177,55 @@ pub trait DeviceService {
         device_id: Uuid,
     ) -> Result<(), crate::AuthFlowError>;
 }
+
+/// What [`ensure_registered`] did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Registered {
+    /// The device was on the list already and this app has nothing to add.
+    Listed,
+    /// The registration was sent.
+    Sent,
+}
+
+impl DeviceRegistration {
+    /// Whether `listed` already names this device: under its id, or under
+    /// the same name and platform (a row an app made before every app took
+    /// its id from `auth_client::this_device`).
+    #[must_use]
+    pub fn is_listed(&self, listed: &[PeerDevice]) -> bool {
+        listed.iter().any(|d| {
+            d.device_id == self.device_id
+                || (d.platform == self.platform && d.name.eq_ignore_ascii_case(self.name.trim()))
+        })
+    }
+}
+
+/// Put this device on the account's list, once for every app on it.
+///
+/// Every FTS app on a device registers under the one device id
+/// (`auth_client::this_device`), so it is one row however many apps run
+/// there. An app with a node of the org (an `endpoint_id`) always
+/// registers, keeping its endpoint current. An app without one (Studio,
+/// Ignition) only adds the row when nothing names the device yet, so it
+/// never renames a row another app made.
+///
+/// # Errors
+///
+/// What the account server said, or the call not reaching it.
+#[cfg(feature = "vox")]
+pub async fn ensure_registered(
+    devices: &DeviceServiceClient,
+    token: &str,
+    registration: DeviceRegistration,
+) -> Result<Registered, vox::VoxError<crate::AuthFlowError>> {
+    if registration.endpoint_id.is_none() {
+        let listed = devices.list_devices(token.to_owned()).await?;
+        if registration.is_listed(&listed.devices) {
+            return Ok(Registered::Listed);
+        }
+    }
+    devices
+        .register_device(token.to_owned(), registration)
+        .await?;
+    Ok(Registered::Sent)
+}

@@ -1116,11 +1116,16 @@ name = "auth-client"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "libc",
+ "objc2 0.6.4",
+ "objc2-foundation 0.3.2",
+ "objc2-ui-kit",
  "serde",
  "serde_json",
  "sha2 0.10.9",
  "thiserror 2.0.20",
  "tokio",
+ "uuid",
  "vox",
 ]
 
