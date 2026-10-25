@@ -211,11 +211,16 @@ async fn a_registration_is_checked_before_it_is_stored() {
         Err(vox::VoxError::User(b)) if matches!(**b, AuthFlowError::InvalidInput(_))
     ));
     nameless.endpoint_id = None;
-    nameless.relay_url = Some("ftp://relay.example".into());
-    assert!(matches!(
-        &devices.register_device(me.clone(), nameless.clone()).await,
-        Err(vox::VoxError::User(b)) if matches!(**b, AuthFlowError::InvalidInput(_))
-    ));
+    for bad in ["ftp://relay.example", "https://", "https:///path"] {
+        nameless.relay_url = Some(bad.into());
+        assert!(
+            matches!(
+                &devices.register_device(me.clone(), nameless.clone()).await,
+                Err(vox::VoxError::User(b)) if matches!(**b, AuthFlowError::InvalidInput(_))
+            ),
+            "{bad} is refused"
+        );
+    }
     nameless.relay_url = None;
     nameless.offer_org = Some(AccountOrg {
         id: Uuid::new_v4(),

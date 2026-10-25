@@ -8,9 +8,10 @@
 //! ```
 //!
 //! Beside [`TursoPersistence`](crate::TursoPersistence)'s tables when the
-//! app keeps both in one device database. (0.9.28's `crdt_docs_index` /
-//! `crdt_docs_cursor`, which carried no lineage, seq or lanes, are not
-//! read.)
+//! app keeps both in one device database. A 0.9.28 index
+//! (`crdt_docs_index`, no lineage, seq or lanes) is copied in on first
+//! open, its pending rows included; its single cursor is not, so each
+//! lane's catalog is read once more.
 
 use async_trait::async_trait;
 use tokio::sync::Mutex;
@@ -110,9 +111,36 @@ impl TursoDocsIndex {
         for stmt in SCHEMA {
             conn.execute(*stmt, ()).await.map_err(|e| backend(&e))?;
         }
+        Self::adopt_v0928(&conn).await?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
+    }
+
+    /// Carry a 0.9.28 index (`crdt_docs_index`) into the new table once,
+    /// while it is empty: the rows keep their `pending` (docs made
+    /// offline and not registered have no other record), become
+    /// `strict` (what they were served as) and take their row number as
+    /// `seq`. Cursors start over, so every lane's catalog is read again.
+    async fn adopt_v0928(conn: &turso::Connection) -> Result<(), DocsError> {
+        let legacy = Self::rows_on(
+            conn,
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'crdt_docs_index'",
+            vec![],
+        )
+        .await?;
+        if legacy.is_empty() {
+            return Ok(());
+        }
+        conn.execute(
+            "INSERT OR IGNORE INTO crdt_doc_index (doc, kind, name, parent, created_by, origin, created_us, updated_us, rev, deleted, pending, lineage, seq) \
+             SELECT doc, kind, name, parent, created_by, origin, created_us, updated_us, rev, deleted, pending, 'strict', rowid FROM crdt_docs_index \
+             WHERE NOT EXISTS (SELECT 1 FROM crdt_doc_index)",
+            (),
+        )
+        .await
+        .map_err(|e| backend(&e))?;
+        Ok(())
     }
 
     /// Open (or create) the database file at `path` and keep the index in it.
@@ -278,5 +306,33 @@ mod tests {
         assert_eq!(index.cursor("hub").await.unwrap(), 41);
         assert_eq!(index.cursor("peer-a").await.unwrap(), 3);
         assert_eq!(index.cursor("never").await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_0928_index_keeps_its_pending_docs() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("device.db");
+        let path = path.to_str().unwrap();
+        let pending = Uuid::new_v4();
+        {
+            let db = turso::Builder::new_local(path).build().await.unwrap();
+            let conn = db.connect().unwrap();
+            conn.execute("CREATE TABLE crdt_docs_index (doc TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL, parent TEXT, created_by TEXT NOT NULL, origin TEXT, created_us INTEGER NOT NULL, updated_us INTEGER NOT NULL, rev INTEGER NOT NULL, deleted INTEGER NOT NULL, pending INTEGER NOT NULL)", ()).await.unwrap();
+            conn.execute(
+                "INSERT INTO crdt_docs_index VALUES (?1, 'session', 'Made offline', NULL, '', NULL, 1, 1, 0, 0, 1)",
+                vec![Value::Text(pending.to_string())],
+            )
+            .await
+            .unwrap();
+        }
+        let index = TursoDocsIndex::open_path(path).await.unwrap();
+        let held = index.get(pending).await.unwrap().expect("carried over");
+        assert!(held.pending, "still waiting to be registered");
+        assert_eq!(held.meta.lineage, Lineage::Strict);
+        assert_eq!(held.seq, 1);
+        drop(index);
+        // Once only: reopening does not copy again.
+        let again = TursoDocsIndex::open_path(path).await.unwrap();
+        assert_eq!(again.docs().await.unwrap().len(), 1);
     }
 }

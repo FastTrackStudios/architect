@@ -72,8 +72,16 @@ fn clean_relay(raw: Option<String>) -> Result<Option<String>, AuthFlowError> {
     let Some(url) = raw.map(|u| u.trim().to_owned()).filter(|u| !u.is_empty()) else {
         return Ok(None);
     };
-    let scheme = url.starts_with("https://") || url.starts_with("http://");
-    if scheme && url.len() <= RELAY_URL_MAX && !url.bytes().any(|b| b.is_ascii_whitespace()) {
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"));
+    // A host to dial: the part before any path, query or fragment.
+    let host = rest.map_or("", |r| r.split(['/', '?', '#']).next().unwrap_or(""));
+    let host_ok = !host.is_empty()
+        && host
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b':' | b'[' | b']'));
+    if host_ok && url.len() <= RELAY_URL_MAX && !url.bytes().any(|b| b.is_ascii_whitespace()) {
         Ok(Some(url))
     } else {
         Err(invalid("relay_url is an http(s) URL"))
