@@ -39,6 +39,9 @@ pub struct AuthDevice {
     /// The device's iroh endpoint id for the account's org, once it holds
     /// a node of it.
     pub endpoint_id: Option<String>,
+    /// The iroh relay the device is reachable through (`https://…`), so a
+    /// peer dials it without a discovery round.
+    pub relay_url: Option<String>,
     #[architect(exclude(create, update), on_create = Utc::now())]
     pub created_at: DateTime<Utc>,
     #[architect(exclude(create, update), on_create = Utc::now(), on_update = Utc::now())]
@@ -96,6 +99,8 @@ pub struct DeviceRegistration {
     pub platform: String,
     /// Its endpoint id for the account's org, if it holds a node of it.
     pub endpoint_id: Option<String>,
+    /// The iroh relay it is reachable through ([`AuthDevice::relay_url`]).
+    pub relay_url: Option<String>,
     /// The org this device would share, if the account has none yet —
     /// its own personal org. Ignored once the account has one.
     pub offer_org: Option<AccountOrg>,
@@ -109,6 +114,7 @@ pub struct PeerDevice {
     pub name: String,
     pub platform: String,
     pub endpoint_id: Option<String>,
+    pub relay_url: Option<String>,
     pub last_seen_at: DateTime<Utc>,
 }
 
@@ -128,6 +134,7 @@ impl From<AuthDevice> for PeerDevice {
             name: d.name,
             platform: d.platform,
             endpoint_id: d.endpoint_id,
+            relay_url: d.relay_url,
             last_seen_at: d.last_seen_at,
         }
     }

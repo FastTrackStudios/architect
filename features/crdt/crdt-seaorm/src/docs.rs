@@ -2,7 +2,7 @@
 //! table, beside the persistence tables in the same database.
 
 use async_trait::async_trait;
-use crdt::docs::{DocMeta, DocPage, DocQuery, DocsError, DocsStore};
+use crdt::docs::{DocMeta, DocPage, DocQuery, DocsError, DocsStore, Lineage};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter,
     QueryOrder, QuerySelect, TransactionTrait,
@@ -46,6 +46,7 @@ fn meta(m: Model) -> DocMeta {
         updated_us: m.updated_us,
         rev: rev_of(m.rev),
         deleted: m.deleted,
+        lineage: Lineage::parse(&m.lineage),
     }
 }
 
@@ -61,6 +62,7 @@ fn active(row: &DocMeta, rev: i64) -> ActiveModel {
         updated_us: Set(row.updated_us),
         rev: Set(rev),
         deleted: Set(row.deleted),
+        lineage: Set(row.lineage.as_str().to_owned()),
     }
 }
 
@@ -186,6 +188,7 @@ mod tests {
             updated_us: 2,
             rev: 0,
             deleted: false,
+            lineage: Lineage::Merge,
         }
     }
 

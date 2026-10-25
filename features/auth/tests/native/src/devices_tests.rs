@@ -37,6 +37,7 @@ fn registration(
         name: name.into(),
         platform: "ios".into(),
         endpoint_id: Some(endpoint.into()),
+        relay_url: None,
         offer_org: offer,
     }
 }
@@ -154,6 +155,40 @@ async fn an_accounts_devices_find_each_other_and_share_the_first_org() {
 }
 
 #[tokio::test]
+async fn a_devices_relay_reaches_its_peers() {
+    let auth = super::open_auth().await;
+    let router = LayerRouter::new()
+        .merge(auth::auth_service_layer(AuthVoxService::new(auth.clone())))
+        .merge(auth::device_service_layer(AuthVoxService::new(auth)));
+    let local = LocalServer::serve(router, Scope::new());
+    let session: AuthServiceClient = local.establish().await.expect("auth client");
+    let devices: DeviceServiceClient = local.establish().await.expect("device client");
+    let me = sign_up(&session, "relay@example.com").await;
+
+    let mut phone = registration(Uuid::new_v4(), "Phone", "phoneendpoint01", None);
+    phone.relay_url = Some(" https://use1-1.relay.example/ ".into());
+    devices
+        .register_device(me.clone(), phone.clone())
+        .await
+        .expect("register");
+    let listed = devices.list_devices(me.clone()).await.expect("list");
+    assert_eq!(
+        listed.devices[0].relay_url.as_deref(),
+        Some("https://use1-1.relay.example/"),
+        "trimmed and kept"
+    );
+
+    // Registering again without one clears it: the device moved off it.
+    phone.relay_url = None;
+    devices
+        .register_device(me.clone(), phone)
+        .await
+        .expect("again");
+    let listed = devices.list_devices(me).await.expect("list");
+    assert_eq!(listed.devices[0].relay_url, None);
+}
+
+#[tokio::test]
 async fn a_registration_is_checked_before_it_is_stored() {
     let auth = super::open_auth().await;
     let router = LayerRouter::new()
@@ -176,6 +211,17 @@ async fn a_registration_is_checked_before_it_is_stored() {
         Err(vox::VoxError::User(b)) if matches!(**b, AuthFlowError::InvalidInput(_))
     ));
     nameless.endpoint_id = None;
+    for bad in ["ftp://relay.example", "https://", "https:///path"] {
+        nameless.relay_url = Some(bad.into());
+        assert!(
+            matches!(
+                &devices.register_device(me.clone(), nameless.clone()).await,
+                Err(vox::VoxError::User(b)) if matches!(**b, AuthFlowError::InvalidInput(_))
+            ),
+            "{bad} is refused"
+        );
+    }
+    nameless.relay_url = None;
     nameless.offer_org = Some(AccountOrg {
         id: Uuid::new_v4(),
         slug: "Has Spaces".into(),

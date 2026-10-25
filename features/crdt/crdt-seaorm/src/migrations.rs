@@ -14,7 +14,58 @@ impl MigratorTrait for Migrator {
         vec![
             Box::new(m_initial::Migration),
             Box::new(m_doc_catalog::Migration),
+            Box::new(m_doc_lineage::Migration),
         ]
+    }
+}
+
+/// Each catalogued doc's `Lineage` (rows from before it are `strict`,
+/// which is what they were served as).
+mod m_doc_lineage {
+    use sea_orm_migration::prelude::*;
+
+    pub struct Migration;
+
+    impl MigrationName for Migration {
+        fn name(&self) -> &'static str {
+            "m_crdt_doc_lineage"
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl MigrationTrait for Migration {
+        async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .alter_table(
+                    Table::alter()
+                        .table(CrdtDocMeta::Table)
+                        .add_column(
+                            ColumnDef::new(CrdtDocMeta::Lineage)
+                                .string()
+                                .not_null()
+                                .default("strict"),
+                        )
+                        .to_owned(),
+                )
+                .await
+        }
+
+        async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .alter_table(
+                    Table::alter()
+                        .table(CrdtDocMeta::Table)
+                        .drop_column(CrdtDocMeta::Lineage)
+                        .to_owned(),
+                )
+                .await
+        }
+    }
+
+    #[derive(Iden)]
+    enum CrdtDocMeta {
+        Table,
+        Lineage,
     }
 }
 
