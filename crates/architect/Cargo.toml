@@ -171,8 +171,11 @@ server-axum = [
 # this, and that feature already pulls `tracing`. Separate so an
 # in-process router (a DAW dispatcher, a wasm LocalServer) can opt in or
 # stay out. Costs a disabled-span check per call when no subscriber is
-# installed.
-telemetry = ["vox", "dep:tracing"]
+# installed. It also records each call's duration as the OpenTelemetry
+# metric `rpc.server.duration` (`dep:opentelemetry`, the API only: a no-op
+# until the app installs a meter provider, as `architect-telemetry`'s OTLP
+# setup does).
+telemetry = ["vox", "dep:tracing", "dep:opentelemetry", "dep:web-time"]
 
 # ── Umbrella features — the two common consumer profiles ─────────────
 #
@@ -351,6 +354,8 @@ rtrb = { version = "0.3", optional = true }
 # feature adds `tokio/time` + `tokio/rt`); the wasm path uses the
 # target-cfg deps below.
 web-time = { version = "1", optional = true }
+# The calls' metrics (`telemetry`): the API alone, the app picks the SDK.
+opentelemetry = { workspace = true, optional = true }
 # Runtime-agnostic MPMC channel backing `platform::Queue` — wasm-clean
 # (no executor assumptions), unlike tokio's single-consumer mpsc. The
 # rest of `platform`'s primitives (Deferred/Semaphore/CancellationToken)
@@ -443,6 +448,9 @@ vox-types = { workspace = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 # rpc_spans.rs installs a capturing subscriber to assert the dispatch span.
 tracing-subscriber = { workspace = true }
+# rpc_metrics.rs reads the calls' metrics back from an in-memory exporter.
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true, features = ["metrics", "testing"] }
 # http_face.rs drives the generated axum router in-process (`oneshot`).
 tower = { version = "0.5", features = ["util"] }
 # settings_*.rs, capability.rs and blob.rs: a throwaway directory per test.

@@ -849,6 +849,45 @@ impl LayerRouter {
         )
     }
 
+    /// Record a call's duration as `rpc.server.duration` (milliseconds,
+    /// OpenTelemetry's RPC conventions), by its system, service, method and
+    /// scope: what a call that comes many times a second is read by — a
+    /// rate and its timings — where its spans would be a stream of
+    /// thousands.
+    ///
+    /// The instrument is made on the first call, from the meter provider
+    /// installed then: an app installs its telemetry before it serves.
+    #[cfg(feature = "telemetry")]
+    fn record_call(&self, method_id: MethodId, scope: Option<&str>, took: core::time::Duration) {
+        use opentelemetry::KeyValue;
+        static DURATION: std::sync::OnceLock<opentelemetry::metrics::Histogram<f64>> =
+            std::sync::OnceLock::new();
+        let duration = DURATION.get_or_init(|| {
+            opentelemetry::global::meter("architect")
+                .f64_histogram("rpc.server.duration")
+                .with_unit("ms")
+                .with_description("How long each vox call took to handle")
+                .with_boundaries(vec![
+                    0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0,
+                    1000.0, 2500.0, 5000.0,
+                ])
+                .build()
+        });
+        let (service, method) = self
+            .method_names
+            .get(&method_id)
+            .map_or(("unknown", "unknown"), |d| (d.service_name, d.method_name));
+        let mut attributes = vec![
+            KeyValue::new("rpc.system", "vox"),
+            KeyValue::new("rpc.service", service),
+            KeyValue::new("rpc.method", method),
+        ];
+        if let Some(scope) = scope.filter(|s| !s.is_empty()) {
+            attributes.push(KeyValue::new("rpc.scope", scope.to_owned()));
+        }
+        duration.record(took.as_secs_f64() * 1000.0, &attributes);
+    }
+
     fn register(&mut self, descriptor: &ServiceDescriptor, handler: Arc<dyn DynHandler>) {
         let idx = self.handlers.len();
         self.handlers.push(handler);
@@ -1064,10 +1103,12 @@ impl Handler<DriverReplySink> for LayerRouter {
         if let Some(handler) = handler {
             #[cfg(feature = "telemetry")]
             {
+                let began = web_time::Instant::now();
                 handler
                     .handle(call, reply, schemas)
                     .instrument(self.call_span(method_id, scope_owned.as_deref()))
                     .await;
+                self.record_call(method_id, scope_owned.as_deref(), began.elapsed());
             }
             #[cfg(not(feature = "telemetry"))]
             handler.handle(call, reply, schemas).await;
