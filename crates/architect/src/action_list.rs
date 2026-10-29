@@ -455,18 +455,18 @@ impl Entry {
 
     /// The JSON Schema of what it takes, when it takes anything.
     fn params_schema(&self) -> Option<String> {
-        match &self.forwarded {
-            Some(forwarded) => forwarded.params.clone(),
-            None => self.params.map(crate::schema::json_schema),
-        }
+        self.forwarded.as_ref().map_or_else(
+            || self.params.map(crate::schema::json_schema),
+            |forwarded| forwarded.params.clone(),
+        )
     }
 
     /// The JSON Schema of what it gives back, when it gives anything.
     fn result_schema(&self) -> Option<String> {
-        match &self.forwarded {
-            Some(forwarded) => forwarded.result.clone(),
-            None => self.result.map(crate::schema::json_schema),
-        }
+        self.forwarded.as_ref().map_or_else(
+            || self.result.map(crate::schema::json_schema),
+            |forwarded| forwarded.result.clone(),
+        )
     }
 }
 
@@ -2297,7 +2297,8 @@ mod tests {
         };
         let forwarded: super::AsyncHandler = Arc::new(|args: &[u8]| {
             let echoed = [b"{\"got\":".as_slice(), args, b"}"].concat();
-            Ok(Box::pin(async move { Ok(echoed) }) as super::ActionFuture)
+            let reply: super::ActionFuture = Box::pin(async move { Ok(echoed) });
+            Ok(reply)
         });
         list.register_forwarded(&described, Arc::clone(&forwarded))
             .expect("registered");
