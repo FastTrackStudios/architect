@@ -67,7 +67,7 @@ use std::time::Duration;
 use architect::layer::{LayerRouter, handler_acceptor};
 use architect::permissions_gate::{PermissionsGate, StaticPrincipal};
 use architect_permissions::{AllowAll, MethodPermit, Principal, ServicePermits};
-use loro::{ExportMode, LoroDoc, VersionVector};
+use loro::{LoroDoc, VersionVector};
 use uuid::Uuid;
 
 use crate::CrdtDoc;
@@ -506,13 +506,18 @@ async fn sync_once(doc: &CrdtDoc, doc_id: Uuid, lane: &impl SyncLane) -> Result<
                         };
                         if !server_vv.includes_vv(&ours) {
                             // History the far side lacks: push exactly it.
-                            let missing = doc.loro().export(ExportMode::Updates {
-                                from: std::borrow::Cow::Owned(server_vv.clone()),
-                            });
+                            // In frames the link takes.
+                            let missing = crate::sync::backlog_chunks(
+                                doc.loro(),
+                                &server_vv,
+                                crate::sync::MAX_FRAME,
+                            );
                             match missing {
-                                Ok(bytes) => {
-                                    if up_tx.send(bytes).await.is_err() {
-                                        return Err(SessionEnd::Dropped);
+                                Ok(chunks) => {
+                                    for bytes in chunks {
+                                        if up_tx.send(bytes).await.is_err() {
+                                            return Err(SessionEnd::Dropped);
+                                        }
                                     }
                                 }
                                 Err(e) => {

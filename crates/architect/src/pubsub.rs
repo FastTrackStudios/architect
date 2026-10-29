@@ -303,6 +303,22 @@ where
         inner.subscribers.retain(|s| !s.dead);
     }
 
+    /// [`complete_attach`](Self::complete_attach) with several intros —
+    /// a snapshot sent in parts — delivered in order, ahead of everything
+    /// the mailbox collected.
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn complete_attach_all(&self, pending: PendingAttach, intros: Vec<T>) {
+        let mut inner = lock(&self.inner);
+        if let Some(sub) = inner.subscribers.iter_mut().find(|s| s.id == pending.0) {
+            for intro in intros.into_iter().rev() {
+                sub.mailbox.push_front(intro);
+            }
+            sub.parked = false;
+            Self::drain_one(sub);
+        }
+        inner.subscribers.retain(|s| !s.dead);
+    }
+
     /// Abandon a buffered attach (e.g. the snapshot read failed) — the
     /// subscriber is removed without receiving anything.
     // By value for the same reason as `complete_attach`.

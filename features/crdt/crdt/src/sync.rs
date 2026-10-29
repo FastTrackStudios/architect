@@ -395,12 +395,11 @@ impl DocSyncHost {
                 .export(loro::ExportMode::ShallowSnapshot(std::borrow::Cow::Owned(
                     self.doc.loro().oplog_frontiers(),
                 )))
+                .map(|b| vec![b])
         } else {
-            self.doc.loro().export(loro::ExportMode::Updates {
-                from: std::borrow::Cow::Owned(from),
-            })
+            backlog_chunks(self.doc.loro(), &from, MAX_FRAME)
         };
-        let backlog = match backlog {
+        let mut backlog = match backlog {
             Ok(b) => b,
             Err(e) => {
                 self.hub.abort_attach(pending);
@@ -410,8 +409,17 @@ impl DocSyncHost {
         // The server's frontier *at attach* — the client diffs its own
         // doc against this and pushes back whatever the server lacks.
         let server_vv = self.doc.loro().oplog_vv().encode();
-        self.hub
-            .complete_attach(pending, Some(SyncDown::Attached { server_vv, backlog }));
+        // The first chunk with the attach, the rest as updates after it —
+        // all ahead of anything published since the park.
+        let rest = backlog.split_off(backlog.len().min(1));
+        let first = backlog.pop().unwrap_or_default();
+        let intros = std::iter::once(SyncDown::Attached {
+            server_vv,
+            backlog: first,
+        })
+        .chain(rest.into_iter().map(SyncDown::Update))
+        .collect();
+        self.hub.complete_attach_all(pending, intros);
 
         Ok(SyncSession {
             doc: self.doc.clone(),
@@ -424,6 +432,72 @@ impl DocSyncHost {
             _session: SessionGuard::new(self.sessions.clone()),
         })
     }
+}
+
+/// The most a backlog frame holds, bytes: a quarter of a link's message limit.
+///
+/// A WebSocket link takes 64 MiB. A long-edited doc's history since an old
+/// replica is hundreds of MB (a song's: 600 MB) — sent as one frame it is
+/// refused, and the replica retries it forever.
+pub const MAX_FRAME: usize = 16 * 1024 * 1024;
+
+/// The history `doc` holds past `from`, as updates in chunks of at most `max` bytes.
+///
+/// Cut as fine as it takes: by peer, then each peer's span halved until it
+/// fits. A single op over `max` is a chunk of its own. Imported in any
+/// order they merge into the same doc.
+///
+/// # Errors
+///
+/// Loro could not export a range.
+pub fn backlog_chunks(
+    doc: &loro::LoroDoc,
+    from: &loro::VersionVector,
+    max: usize,
+) -> Result<Vec<Vec<u8>>, loro::LoroEncodeError> {
+    let whole = doc.export(loro::ExportMode::Updates {
+        from: std::borrow::Cow::Borrowed(from),
+    })?;
+    if whole.len() <= max {
+        return Ok(vec![whole]);
+    }
+    let spans: Vec<loro::IdSpan> = doc
+        .oplog_vv()
+        .iter()
+        .filter_map(|(peer, end)| {
+            let start = from.get(peer).copied().unwrap_or(0);
+            (*end > start).then(|| loro::IdSpan::new(*peer, start, *end))
+        })
+        .collect();
+    let mut chunks = Vec::new();
+    let mut todo = vec![spans];
+    while let Some(spans) = todo.pop() {
+        let bytes = doc.export(loro::ExportMode::UpdatesInRange {
+            spans: std::borrow::Cow::Borrowed(&spans),
+        })?;
+        if bytes.len() <= max {
+            chunks.push(bytes);
+            continue;
+        }
+        match spans.as_slice() {
+            [] => {}
+            [one] if one.counter.end.saturating_sub(one.counter.start) <= 1 => chunks.push(bytes),
+            [one] => {
+                let mid = one
+                    .counter
+                    .start
+                    .saturating_add(one.counter.end.saturating_sub(one.counter.start) / 2);
+                todo.push(vec![loro::IdSpan::new(one.peer, mid, one.counter.end)]);
+                todo.push(vec![loro::IdSpan::new(one.peer, one.counter.start, mid)]);
+            }
+            many => {
+                let (a, b) = many.split_at(many.len() / 2);
+                todo.push(b.to_vec());
+                todo.push(a.to_vec());
+            }
+        }
+    }
+    Ok(chunks)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -977,19 +1051,17 @@ impl SyncedDoc {
                                 |e| PersistError::Backend(format!("doc sync: bad server vv: {e}")),
                             )?;
                             if !server_vv.includes_vv(&our_vv) {
-                                let missing = self
-                                    .doc
-                                    .loro()
-                                    .export(loro::ExportMode::Updates {
-                                        from: std::borrow::Cow::Owned(server_vv),
-                                    })
+                                // In frames the link takes (MAX_FRAME).
+                                let missing = backlog_chunks(self.doc.loro(), &server_vv, MAX_FRAME)
                                     .map_err(|e| {
                                         PersistError::Backend(format!(
                                             "doc sync: export delta: {e}"
                                         ))
                                     })?;
-                                if up_tx.send(missing).await.is_err() {
-                                    return attach_result(call.await);
+                                for chunk in missing {
+                                    if up_tx.send(chunk).await.is_err() {
+                                        return attach_result(call.await);
+                                    }
                                 }
                             }
                             if let Some(hook) = &self.on_attached {
