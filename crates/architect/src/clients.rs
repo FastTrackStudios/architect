@@ -27,6 +27,10 @@
 //! (via a `caller()` accessor) so consumers can build further service
 //! clients over the same connection, and derives `Clone` — every vox
 //! client is a cheap handle.
+//!
+//! In a `telemetry` build every client it makes carries the caller's trace
+//! context ([`TraceContextMiddleware`](crate::trace_context::TraceContextMiddleware)),
+//! so the services' spans join the caller's trace.
 
 /// Generate a client-registry struct: one field per vox client type,
 /// a `new(Caller)` that fans the caller out to every client, and the
@@ -60,7 +64,12 @@ macro_rules! clients {
             $vis fn new(caller: $crate::vox::Caller) -> Self {
                 Self {
                     $(
-                        $field: <$client>::new(caller.clone()),
+                        $field: if $crate::trace_context::PROPAGATES {
+                            <$client>::new(caller.clone())
+                                .with_middleware($crate::trace_context::TraceContextMiddleware)
+                        } else {
+                            <$client>::new(caller.clone())
+                        },
                     )*
                     __caller: caller,
                 }

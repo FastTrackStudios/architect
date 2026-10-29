@@ -509,6 +509,7 @@ dependencies = [
  "tower",
  "tower-http",
  "tracing",
+ "tracing-opentelemetry",
  "tracing-subscriber",
  "uuid",
  "vox",
@@ -766,6 +767,7 @@ name = "architect-telemetry"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "libc",
  "opentelemetry",
  "opentelemetry-appender-tracing",
  "opentelemetry-otlp",
@@ -8225,6 +8227,7 @@ dependencies = [
  "opentelemetry",
  "tracing",
  "tracing-core",
+ "tracing-opentelemetry",
  "tracing-subscriber",
 ]
 

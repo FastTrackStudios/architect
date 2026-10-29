@@ -174,8 +174,11 @@ server-axum = [
 # installed. It also records each call's duration as the OpenTelemetry
 # metric `rpc.server.duration` (`dep:opentelemetry`, the API only: a no-op
 # until the app installs a meter provider, as `architect-telemetry`'s OTLP
-# setup does).
-telemetry = ["vox", "dep:tracing", "dep:opentelemetry", "dep:web-time"]
+# setup does). Calls also carry W3C trace context (`trace_context`): the
+# caller's span rides as `traceparent` metadata and the call's span is its
+# child, which takes `tracing-opentelemetry` to read and set a span's
+# OpenTelemetry context.
+telemetry = ["vox", "dep:tracing", "dep:opentelemetry", "dep:tracing-opentelemetry", "dep:web-time"]
 
 # ── Umbrella features — the two common consumer profiles ─────────────
 #
@@ -356,6 +359,8 @@ rtrb = { version = "0.3", optional = true }
 web-time = { version = "1", optional = true }
 # The calls' metrics (`telemetry`): the API alone, the app picks the SDK.
 opentelemetry = { workspace = true, optional = true }
+# Trace context over vox (`telemetry`): a span's OpenTelemetry context.
+tracing-opentelemetry = { workspace = true, optional = true }
 # Runtime-agnostic MPMC channel backing `platform::Queue` — wasm-clean
 # (no executor assumptions), unlike tokio's single-consumer mpsc. The
 # rest of `platform`'s primitives (Deferred/Semaphore/CancellationToken)
@@ -451,6 +456,8 @@ tracing-subscriber = { workspace = true }
 # rpc_metrics.rs reads the calls' metrics back from an in-memory exporter.
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true, features = ["metrics", "testing"] }
+# trace_context.rs: the dispatch spans' OpenTelemetry parents.
+tracing-opentelemetry = { workspace = true }
 # http_face.rs drives the generated axum router in-process (`oneshot`).
 tower = { version = "0.5", features = ["util"] }
 # settings_*.rs, capability.rs and blob.rs: a throwaway directory per test.

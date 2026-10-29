@@ -831,13 +831,23 @@ impl LayerRouter {
     /// handler error is not visible here. Errors surface as `tracing`
     /// events emitted inside the handler, which land as child log records
     /// of this span and so carry its trace id.
+    ///
+    /// A call carrying its caller's trace context (`traceparent` metadata,
+    /// see [`crate::trace_context`]) opens its span as the child of the
+    /// caller's, so a caller's calls are one trace with it.
     #[cfg(feature = "telemetry")]
-    fn call_span(&self, method_id: MethodId, scope: Option<&str>) -> tracing::Span {
+    fn call_span(
+        &self,
+        method_id: MethodId,
+        scope: Option<&str>,
+        parent: Option<opentelemetry::Context>,
+    ) -> tracing::Span {
+        use tracing_opentelemetry::OpenTelemetrySpanExt as _;
         let (service, method) = self
             .method_names
             .get(&method_id)
             .map_or(("unknown", "unknown"), |d| (d.service_name, d.method_name));
-        tracing::info_span!(
+        let span = tracing::info_span!(
             "rpc",
             otel.name = format!("{service}/{method}"),
             rpc.system = "vox",
@@ -846,7 +856,14 @@ impl LayerRouter {
             // Which rig/instance answered, when the same trait is mounted
             // more than once (see `merge_router_scoped`).
             rpc.scope = scope.unwrap_or_default(),
-        )
+            // A call that takes a channel (a `#[subscribe]` stream) lasts as
+            // long as its subscription: its span's length is not a latency.
+            rpc.streaming = <Self as Handler<DriverReplySink>>::args_have_channels(self, method_id),
+        );
+        if let Some(parent) = parent {
+            span.set_parent(parent);
+        }
+        span
     }
 
     /// Record a call's duration as `rpc.server.duration` (milliseconds,
@@ -1090,6 +1107,8 @@ impl Handler<DriverReplySink> for LayerRouter {
         // builds pay for it.
         #[cfg(feature = "telemetry")]
         let scope_owned = scope.map(str::to_owned);
+        #[cfg(feature = "telemetry")]
+        let parent = crate::trace_context::parent_of(&call.get().metadata);
         let scoped = scope
             .and_then(|scope| self.scoped_map.get(&(scope.to_string(), method_id)))
             .copied();
@@ -1106,7 +1125,7 @@ impl Handler<DriverReplySink> for LayerRouter {
                 let began = web_time::Instant::now();
                 handler
                     .handle(call, reply, schemas)
-                    .instrument(self.call_span(method_id, scope_owned.as_deref()))
+                    .instrument(self.call_span(method_id, scope_owned.as_deref(), parent))
                     .await;
                 self.record_call(method_id, scope_owned.as_deref(), began.elapsed());
             }

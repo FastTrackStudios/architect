@@ -92,8 +92,49 @@ impl Stages {
 
 /// Record `ms` as `key` on the current span — a duration measured some
 /// other way (another thread's, a callback's).
+///
+/// With the `otel` feature it is also a sample of the
+/// `app.stage.duration` histogram ([`stage_metric`]), so a stage reads as
+/// a distribution over every run of it, not only as a field of one span.
 pub fn record(key: &'static str, ms: f64) {
     tracing::trace!(target: TARGET, stage = key, ms);
+    #[cfg(feature = "otel")]
+    stage_metric(key, ms);
+}
+
+/// Record a stage's time as `app.stage.duration` (ms), by `stage` (its
+/// key) and `span.name` (the unit of work it was marked in, when there is
+/// one). Both are static names, so the series stay few.
+///
+/// The instrument is made on the first mark, from the meter provider
+/// installed then: an app installs its telemetry (`otel::init`) first.
+#[cfg(feature = "otel")]
+fn stage_metric(key: &'static str, ms: f64) {
+    use opentelemetry::KeyValue;
+    use opentelemetry::metrics::Histogram;
+    static DURATION: std::sync::OnceLock<Histogram<f64>> = std::sync::OnceLock::new();
+    let duration = DURATION.get_or_init(|| {
+        opentelemetry::global::meter("architect-telemetry")
+            .f64_histogram("app.stage.duration")
+            .with_unit("ms")
+            .with_description("How long each named stage of a unit of work took")
+            .with_boundaries(vec![
+                0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0,
+                2500.0, 5000.0, 10000.0,
+            ])
+            .build()
+    });
+    let span = tracing::Span::current();
+    match span.metadata() {
+        Some(meta) => duration.record(
+            ms,
+            &[
+                KeyValue::new("stage", key),
+                KeyValue::new("span.name", meta.name()),
+            ],
+        ),
+        None => duration.record(ms, &[KeyValue::new("stage", key)]),
+    }
 }
 
 /// One unit of work, as the [`Recorder`] kept it.

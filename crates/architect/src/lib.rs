@@ -661,6 +661,9 @@ pub mod schedule;
 // which merges two summary sentences into one over-long paragraph.
 #[cfg(feature = "vox")]
 pub mod scoped;
+// W3C trace context over vox: one trace across a caller and its calls.
+#[cfg(feature = "vox")]
+pub mod trace_context;
 #[cfg(feature = "platform")]
 pub use schedule::{Schedule, repeat, retry};
 
