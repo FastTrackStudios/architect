@@ -71,5 +71,9 @@ required-features = ["otel"]
 name = "calls"
 required-features = ["otel"]
 
+[[test]]
+name = "stages"
+required-features = ["otel"]
+
 [lints]
 workspace = true
