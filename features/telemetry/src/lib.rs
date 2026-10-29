@@ -155,6 +155,20 @@ pub mod timing;
 #[cfg(all(not(target_arch = "wasm32"), feature = "flight"))]
 pub mod flight;
 
+/// The process's CPU, memory and threads as `OTel` metrics, registered by
+/// [`otel::init`].
+///
+/// Feature `otel`, native only.
+#[cfg(all(not(target_arch = "wasm32"), feature = "otel"))]
+pub mod process;
+
+/// Which vox calls are exported as spans: the slow, the failed and the
+/// ones that logged ([`calls::QuietCalls`], installed by [`otel::init`]).
+///
+/// Feature `otel`, native only.
+#[cfg(all(not(target_arch = "wasm32"), feature = "otel"))]
+pub mod calls;
+
 #[cfg(not(target_arch = "wasm32"))]
 pub mod wide {
     /// Attach a field to the current unit of work.
@@ -269,7 +283,8 @@ pub mod otel {
     ///
     /// - a `tracing-opentelemetry` layer — spans become `OTel` traces;
     /// - the appender bridge — `tracing` events become `OTel` log
-    ///   records (queryable in Loki alongside pod stdout).
+    ///   records (queryable in Loki alongside pod stdout), each with the
+    ///   trace and span ids of the span it was logged in.
     ///
     /// The meter provider is installed globally
     /// (`opentelemetry::global::meter`), so instruments work from
@@ -299,12 +314,23 @@ pub mod otel {
             .build()
             .map_err(|e| eprintln!("otel: span exporter: {e}"))
             .ok()?;
+        // A vox call is a span only when it was slow, failed or logged;
+        // the rest are `rpc.server.duration` alone (see `calls`).
+        let span_processor = crate::calls::QuietCalls::new(
+            opentelemetry_sdk::trace::BatchSpanProcessor::builder(span_exporter).build(),
+            crate::calls::min_call_from_env(),
+        );
         let tracer_provider = SdkTracerProvider::builder()
-            .with_batch_exporter(span_exporter)
+            .with_span_processor(span_processor)
             .with_resource(resource.clone())
             .build();
         let tracer = tracer_provider.tracer(service);
         global::set_tracer_provider(tracer_provider.clone());
+        // W3C trace context: what carries a caller's trace into the
+        // services it calls (`architect::trace_context`).
+        global::set_text_map_propagator(
+            opentelemetry_sdk::propagation::TraceContextPropagator::new(),
+        );
 
         let log_exporter = opentelemetry_otlp::LogExporter::builder()
             .with_http()
@@ -326,6 +352,8 @@ pub mod otel {
             .with_resource(resource)
             .build();
         global::set_meter_provider(meter_provider.clone());
+        // Every app that exports: its CPU, memory and threads.
+        crate::process::register(&global::meter("architect-telemetry"));
 
         // The log bridge MUST NOT ingest the OTel SDK's own diagnostics.
         // The SDK reports export problems through `tracing`; if the

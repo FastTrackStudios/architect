@@ -75,11 +75,17 @@ impl Stages {
 
     /// The time since the last mark (or the start), recorded on the
     /// current span as `key` (`edit.detect_ms`). Returns it, ms.
+    ///
+    /// With the `otel` feature the stage is also a span of its own under
+    /// the current one ([`stage_span`]), over the time it took: a trace
+    /// shows a unit of work's stages as its waterfall.
     pub fn mark(&mut self, key: &'static str) -> f64 {
         let now = Instant::now();
         let ms = now.duration_since(self.last).as_secs_f64() * 1e3;
         self.last = now;
         record(key, ms);
+        #[cfg(feature = "otel")]
+        stage_span(key, ms);
         ms
     }
 
@@ -92,8 +98,84 @@ impl Stages {
 
 /// Record `ms` as `key` on the current span — a duration measured some
 /// other way (another thread's, a callback's).
+///
+/// With the `otel` feature it is also a sample of the
+/// `app.stage.duration` histogram ([`stage_metric`]), so a stage reads as
+/// a distribution over every run of it, not only as a field of one span.
 pub fn record(key: &'static str, ms: f64) {
     tracing::trace!(target: TARGET, stage = key, ms);
+    #[cfg(feature = "otel")]
+    stage_metric(key, ms);
+}
+
+/// Stages quicker than this are not spans of their own (ms): a unit of
+/// work can mark dozens, most of them nothing; their time is still in
+/// `app.stage.duration`.
+#[cfg(feature = "otel")]
+pub const MIN_STAGE_SPAN_MS: f64 = 1.0;
+
+/// A stage that just ended, `ms` long, as a span under the current one:
+/// named for its key without the unit (`edit.detect_ms` → `edit.detect`),
+/// from `ms` ago to now. Nothing when there is no current span exported
+/// to put it under, or it was quicker than [`MIN_STAGE_SPAN_MS`].
+#[cfg(feature = "otel")]
+fn stage_span(key: &'static str, ms: f64) {
+    use opentelemetry::KeyValue;
+    use opentelemetry::trace::{Span as _, TraceContextExt as _, Tracer as _};
+    use tracing_opentelemetry::OpenTelemetrySpanExt as _;
+    if ms < MIN_STAGE_SPAN_MS {
+        return;
+    }
+    let parent = tracing::Span::current().context();
+    if !parent.span().span_context().is_valid() {
+        return;
+    }
+    let end = SystemTime::now();
+    let start = end
+        .checked_sub(std::time::Duration::from_secs_f64(ms / 1e3))
+        .unwrap_or(end);
+    let tracer = opentelemetry::global::tracer("architect-telemetry");
+    let mut span = tracer
+        .span_builder(key.strip_suffix("_ms").unwrap_or(key))
+        .with_start_time(start)
+        .with_attributes([KeyValue::new("stage", key), KeyValue::new("stage.ms", ms)])
+        .start_with_context(&tracer, &parent);
+    span.end_with_timestamp(end);
+}
+
+/// Record a stage's time as `app.stage.duration` (ms), by `stage` (its
+/// key) and `span.name` (the unit of work it was marked in, when there is
+/// one). Both are static names, so the series stay few.
+///
+/// The instrument is made on the first mark, from the meter provider
+/// installed then: an app installs its telemetry (`otel::init`) first.
+#[cfg(feature = "otel")]
+fn stage_metric(key: &'static str, ms: f64) {
+    use opentelemetry::KeyValue;
+    use opentelemetry::metrics::Histogram;
+    static DURATION: std::sync::OnceLock<Histogram<f64>> = std::sync::OnceLock::new();
+    let duration = DURATION.get_or_init(|| {
+        opentelemetry::global::meter("architect-telemetry")
+            .f64_histogram("app.stage.duration")
+            .with_unit("ms")
+            .with_description("How long each named stage of a unit of work took")
+            .with_boundaries(vec![
+                0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0,
+                2500.0, 5000.0, 10000.0,
+            ])
+            .build()
+    });
+    let span = tracing::Span::current();
+    match span.metadata() {
+        Some(meta) => duration.record(
+            ms,
+            &[
+                KeyValue::new("stage", key),
+                KeyValue::new("span.name", meta.name()),
+            ],
+        ),
+        None => duration.record(ms, &[KeyValue::new("stage", key)]),
+    }
 }
 
 /// One unit of work, as the [`Recorder`] kept it.

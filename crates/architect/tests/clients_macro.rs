@@ -5,7 +5,8 @@
 
 use vox::Caller;
 
-/// Stand-in for a vox-generated `<Trait>Client`: `new(Caller)` + Clone.
+/// Stand-in for a vox-generated `<Trait>Client`: `new(Caller)`,
+/// `with_middleware` (what carries the trace context) + Clone.
 #[derive(Clone)]
 struct FakeClient {
     _caller: Caller,
@@ -14,6 +15,10 @@ struct FakeClient {
 impl FakeClient {
     const fn new(caller: Caller) -> Self {
         Self { _caller: caller }
+    }
+
+    fn with_middleware(self, _middleware: impl vox::ClientMiddleware) -> Self {
+        self
     }
 }
 

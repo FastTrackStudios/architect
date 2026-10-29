@@ -432,8 +432,42 @@ struct Entry {
     effect: Effect,
     params: Option<&'static Shape>,
     result: Option<&'static Shape>,
+    /// The schemas of an action registered from its description alone
+    /// ([`ActionList::register_forwarded`]): what it takes and gives, as
+    /// JSON Schema, where there is no shape to derive them from.
+    forwarded: Option<ForwardedSchemas>,
     run: Run,
     enabled: Option<EnabledCheck>,
+}
+
+/// A forwarded action's schemas, as its own list described them.
+#[derive(Clone)]
+struct ForwardedSchemas {
+    params: Option<String>,
+    result: Option<String>,
+}
+
+impl Entry {
+    /// Whether it takes arguments.
+    fn takes(&self) -> bool {
+        self.params.is_some() || self.forwarded.as_ref().is_some_and(|f| f.params.is_some())
+    }
+
+    /// The JSON Schema of what it takes, when it takes anything.
+    fn params_schema(&self) -> Option<String> {
+        self.forwarded.as_ref().map_or_else(
+            || self.params.map(crate::schema::json_schema),
+            |forwarded| forwarded.params.clone(),
+        )
+    }
+
+    /// The JSON Schema of what it gives back, when it gives anything.
+    fn result_schema(&self) -> Option<String> {
+        self.forwarded.as_ref().map_or_else(
+            || self.result.map(crate::schema::json_schema),
+            |forwarded| forwarded.result.clone(),
+        )
+    }
 }
 
 /// How an action does its work.
@@ -578,6 +612,7 @@ impl ActionList {
             effect,
             params: takes.then_some(A::SHAPE),
             result: R::result_shape(),
+            forwarded: None,
             run: Run::Sync(handler),
             enabled: None,
         })
@@ -618,6 +653,7 @@ impl ActionList {
             effect,
             params: takes.then_some(A::SHAPE),
             result: R::result_shape(),
+            forwarded: None,
             run: Run::Async(handler),
             enabled: None,
         })
@@ -643,6 +679,7 @@ impl ActionList {
             effect,
             params,
             result,
+            forwarded: None,
             run: Run::Sync(Arc::new(move |_: &ActionCaller, args: &[u8]| handler(args))),
             enabled: None,
         })
@@ -667,6 +704,55 @@ impl ActionList {
             effect,
             params,
             result,
+            forwarded: None,
+            run: Run::Async(Arc::new(move |_: &ActionCaller, args: &[u8]| handler(args))),
+            enabled: None,
+        })
+    }
+
+    /// Add an action known only by its description — another process's
+    /// (a window's, offered on its engine's list): `info` says what it is
+    /// and, as JSON Schema, what it takes and gives; `handler` does it,
+    /// JSON in, JSON out (forwarding it to where it runs). Listed, checked
+    /// and run like any other.
+    ///
+    /// Its description is kept for the list's life: register an action once
+    /// (a second time is [`ActionError::Duplicate`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::register`].
+    pub fn register_forwarded(
+        &self,
+        info: &ActionInfo,
+        handler: AsyncHandler,
+    ) -> Result<(), ActionError> {
+        if self.info(&info.id).is_some() {
+            return Err(ActionError::Duplicate(info.id.clone()));
+        }
+        let kept = |text: &str| -> &'static str { Box::leak(text.to_owned().into_boxed_str()) };
+        let id = kept(&info.id);
+        let meta: &'static ActionMeta = Box::leak(Box::new(ActionMeta {
+            id,
+            trait_name: "",
+            method_name: id,
+            display_name: kept(&info.display_name),
+            description: kept(&info.description),
+            category: kept(&info.category),
+            group: kept(&info.group),
+            shortcut: kept(&info.shortcut),
+            toggleable: false,
+            undo: false,
+        }));
+        self.insert(Entry {
+            meta,
+            effect: info.effect,
+            params: None,
+            result: None,
+            forwarded: Some(ForwardedSchemas {
+                params: info.params_schema.clone(),
+                result: info.result_schema.clone(),
+            }),
             run: Run::Async(Arc::new(move |_: &ActionCaller, args: &[u8]| handler(args))),
             enabled: None,
         })
@@ -1077,7 +1163,7 @@ impl ActionList {
         let deep_object = "{\"a\":".repeat(HOSTILE_DEPTH);
         let mut problems = Vec::new();
         for entry in self.snapshot() {
-            if entry.params.is_none() {
+            if !entry.takes() {
                 continue;
             }
             let id = entry.meta.id;
@@ -1195,6 +1281,7 @@ impl ActionBackend for ActionList {
             effect: Effect::Mutating,
             params: None,
             result: None,
+            forwarded: None,
             run: Run::Sync(erased),
             enabled: None,
         });
@@ -1216,8 +1303,8 @@ fn info(entry: &Entry) -> ActionInfo {
         group: m.group.to_owned(),
         shortcut: m.shortcut.to_owned(),
         effect: entry.effect,
-        params_schema: entry.params.map(crate::schema::json_schema),
-        result_schema: entry.result.map(crate::schema::json_schema),
+        params_schema: entry.params_schema(),
+        result_schema: entry.result_schema(),
         enabled: disabled_reason.is_none(),
         disabled_reason,
     }
@@ -1240,7 +1327,7 @@ fn enabled_state(check: Option<&EnabledCheck>) -> Result<(), String> {
 /// Empty arguments, as the action expects them: `{}` for one that takes
 /// some, `null` for one that takes none (whatever was sent).
 fn normalized<'a>(entry: &Entry, args: &'a [u8]) -> &'a [u8] {
-    let takes = entry.params.is_some();
+    let takes = entry.takes();
     if !takes || args.iter().all(u8::is_ascii_whitespace) {
         if takes { b"{}" } else { b"null" }
     } else {
@@ -1269,13 +1356,13 @@ fn decode_args<A: Facet<'static>>(id: &str, takes: bool, args: &[u8]) -> Result<
 /// JSON value, no deeper than [`MAX_ARGS_DEPTH`], with nothing after it
 /// (`facet_json` alone takes `{} junk`) — checked only when it takes any.
 fn admit_args(entry: &Entry, args: &[u8]) -> Result<(), ActionError> {
-    if let Some(params) = entry.params
+    if entry.takes()
         && let Err(message) = check_json(args)
     {
         return Err(ActionError::BadArgs {
             id: entry.meta.id.to_owned(),
             message,
-            expected: Some(crate::schema::json_schema(params)),
+            expected: entry.params_schema(),
         });
     }
     Ok(())
@@ -2186,6 +2273,54 @@ mod tests {
         assert!(matches!(
             list.run_json("ORG_RAW", br#"{"track":"{\"rows\""}"#),
             Err(ActionError::Failed { message, .. }) if message.contains("not one JSON value")
+        ));
+    }
+
+    /// An action known only by its description (another process's) is
+    /// listed with the schemas it came with, takes its arguments as sent,
+    /// refuses what is not JSON, and is registered once.
+    #[test]
+    fn a_forwarded_action_is_listed_and_run_as_described() {
+        let list = ActionList::new();
+        let described = super::ActionInfo {
+            id: "WINDOW_ZOOM".to_owned(),
+            display_name: "Zoom".to_owned(),
+            description: "the window's".to_owned(),
+            category: "Window".to_owned(),
+            group: "View".to_owned(),
+            shortcut: String::new(),
+            effect: Effect::Mutating,
+            params_schema: Some(r#"{"type":"object"}"#.to_owned()),
+            result_schema: Some(r#"{"type":"number"}"#.to_owned()),
+            enabled: true,
+            disabled_reason: None,
+        };
+        let forwarded: super::AsyncHandler = Arc::new(|args: &[u8]| {
+            let echoed = [b"{\"got\":".as_slice(), args, b"}"].concat();
+            let reply: super::ActionFuture = Box::pin(async move { Ok(echoed) });
+            Ok(reply)
+        });
+        list.register_forwarded(&described, Arc::clone(&forwarded))
+            .expect("registered");
+
+        let info = list.info("WINDOW_ZOOM").expect("listed");
+        assert_eq!(info.params_schema, described.params_schema);
+        assert_eq!(info.result_schema, described.result_schema);
+        assert_eq!(info.category, "Window");
+
+        let out = futures::executor::block_on(list.run_json_async("WINDOW_ZOOM", br#"{"by":2}"#))
+            .expect("ran");
+        assert_eq!(out, br#"{"got":{"by":2}}"#);
+        assert!(matches!(
+            futures::executor::block_on(list.run_json_async("WINDOW_ZOOM", b"{nope")),
+            Err(ActionError::BadArgs {
+                expected: Some(_),
+                ..
+            })
+        ));
+        assert!(matches!(
+            list.register_forwarded(&described, forwarded),
+            Err(ActionError::Duplicate(_))
         ));
     }
 }
