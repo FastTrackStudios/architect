@@ -82,6 +82,71 @@ Everything Obsidian's workspace does, and REAPER's screensets on top:
   can be dragged or right-clicked anywhere, even a pane whose view has no
   tab bar (a full-bleed rig face).
 
+## Floating windows
+
+Any pane can float — a plugin's editor, a script's panel, a meter, a
+chart on a second screen — and floating is one system everywhere, so
+custom plugin support arrives on it.
+
+**Inside the window** (every platform, and the only kind on the web —
+odysseus's model, AGPL there, so its behaviour, not its code):
+
+- drag by its title bar; near an edge a ghost shows where it would go:
+  the **top** maximises it, the **left or right** half-tiles it, or
+  docks it as a full-height side panel the page makes room for (a wide
+  sidebar folding to its rail when the page would get too narrow); drag
+  away restores its size;
+- resize from any edge; it keeps inside the window;
+- a press brings it to the front;
+- **minimise** keeps it alive as a chip in a dock of minimised windows
+  (the dock can be dragged and is remembered); a press on the chip
+  restores it where it was;
+- close; reopen puts it back where it last was.
+
+**As its own OS window** (desk): a float can pop out into a real window
+— another screen, kept above the main window or not — and back in.
+
+**Plugin editors:** a CLAP or VST3 editor is a native view the plugin
+draws itself (an `NSView`, an `HWND`, an X11 window), which nothing
+painted can host inside: on a desk it opens as its own OS window, a child
+of the app's (above it, closed with it, remembered where it was), with
+the app's title strip (bypass, presets, the parameter panel) beside it.
+A plugin with no editor, or a JSFX, or a web build, shows the generated
+parameter panel or its canvas as an in-window float. Opening a track's
+plugin from the FX row opens its window; the same plugin again brings it
+to the front.
+
+### Window ids: anything can find a window
+
+Every pane and every window has an **id that stays the same**: the one
+its maker gave it (a script's `"timer"`, a plugin window's
+`fx:<track>/<slot>`), or its view and subject (`session.mixer`,
+`studio.song:<id>`). Opening an id that is already open brings that one
+forward instead of making another. So other scripts, actions, keys and
+outside tools can target it:
+
+<!-- doc-check: off (proposed names) -->
+```lua
+-- A script makes a floating timer panel; reopening it finds the same one.
+local w = workspace.open{ id = "timer", title = "Timer", view = timer_view,
+                          float = { size = {220, 90} } }
+-- Pin it to the top right, above everything, from this script or any other.
+workspace.window("timer"):pin{ corner = "top-right", above = "all" }
+```
+<!-- doc-check: on -->
+
+- **Actions** take window ids: `workspace.focus { id }`,
+  `.float { id, at }`, `.pin { id, corner, above }`, `.minimise`,
+  `.close`, `.toggle` — bindable, in ⌘K, runnable by scripts and agents.
+- **Outside tools see them:** a popped-out window carries its id to the
+  platform — the window's app id and role on Linux (so Loft, or a
+  Hyprland rule, can place it: "float `timer` top-right, always on top"),
+  its identifier on macOS — so a window manager or an automation pins
+  it the same way a script does.
+- **Script and extension panels** are panes like any other: docked, in a
+  tab group, stacked, floating, minimised, in screensets — and found by
+  their id.
+
 ## The model
 
 Pure data (no Dioxus, no I/O), facet-serialised, one per window — the
@@ -99,11 +164,22 @@ pub struct Workspace {
 }
 
 pub struct Window {
-    pub id: WindowId,
+    pub id: WindowId,                  // stable: the one its maker gave, or its view and subject
     pub bounds: Option<Rect>,          // None: the main window, sized by the OS
     pub maximized: bool,
     pub center: Node,                  // the main area
     pub docks: Docks,                  // the main window only
+    pub floats: Vec<Float>,            // floating inside this window
+    pub minimised: Vec<PaneId>,        // the dock of minimised windows, in order
+}
+
+/// A pane floating inside a window.
+pub struct Float {
+    pub pane: PaneId,
+    pub rect: Rect,                    // or snapped:
+    pub snap: Option<Snap>,            // Maximised | Half(Side) | EdgeDock(Side, width)
+    pub pin: Option<Pin>,              // a corner, and above what
+    pub restore: Rect,                 // where it goes when it unsnaps
 }
 
 pub enum Node {
@@ -137,7 +213,7 @@ pub struct Ribbon {
 
 /// One tab: a view and its state.
 pub struct Pane {
-    pub id: PaneId,
+    pub id: PaneId,                    // stable and addressable ("timer", "fx:<track>/<slot>")
     pub view: ViewKind,                // what shows it ("session.mixer")
     pub state: String,                 // the view's own, opaque (facet JSON)
     pub title: String, pub icon: Option<String>, // cached, to draw a tab without building the view
