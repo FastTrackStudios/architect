@@ -8,6 +8,7 @@ publish = false
 
 [dependencies]
 architect-lab-ui = { workspace = true }
+architect-workspace = { workspace = true, features = ["native", "hot-reload"] }
 dioxus = { workspace = true }
 dioxus-native = { workspace = true, features = ["vello", "hot-reload"] }
 
