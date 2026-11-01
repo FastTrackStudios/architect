@@ -1,0 +1,26 @@
+[package]
+name = "architect-settings-derive"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Proc-macro for architect-settings' #[derive(Settings)]: a facet struct as a settings section"
+repository.workspace = true
+
+# The proc-macro half of `architect_settings::Settings`. It reads only the
+# `#[settings(..)]` and `#[setting(..)]` attributes; the words (doc
+# comments), the types and the defaults are read at run time from the
+# struct's facet shape, so this crate stays small.
+
+[lib]
+proc-macro = true
+test = false
+doctest = false
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full", "extra-traits"] }
+
+[lints]
+workspace = true

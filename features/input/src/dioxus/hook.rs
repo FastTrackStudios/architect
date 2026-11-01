@@ -15,7 +15,7 @@ use crate::dioxus::convert::{
 };
 use crate::{
     ActionKey, ConfigError, InputCommand, InputContext, InputEvent, InputProcessor, KeyChord,
-    KeymapConfig, ModeId, MouseAction, SequenceTimeout,
+    KeymapConfig, ModeId, MouseAction, Released, SequenceTimeout,
 };
 
 /// Sleep for the sequence timeout: tokio's timer on native, the browser
@@ -125,6 +125,29 @@ impl<A: ActionKey + 'static> InputHandle<A> {
         let hide = self.processor.borrow_mut().notify_key_release(chord);
         self.after_event();
         hide
+    }
+
+    /// The host saw `chord` go up in `ctx`: [`InputProcessor::release`],
+    /// which also ends a held-letter tool (and runs its tap when nothing
+    /// came while it was down).
+    #[must_use = "what the release did: an Unhold, a tap's commands"]
+    pub fn release(&self, chord: &KeyChord, ctx: &InputContext) -> Released<A> {
+        let released = self.processor.borrow_mut().release(chord, ctx);
+        self.after_event();
+        released
+    }
+
+    /// A DOM `keyup` in `ctx`: [`release`](Self::release) for its chord.
+    /// Keys the processor has no code for release nothing.
+    #[must_use = "what the release did: an Unhold, a tap's commands"]
+    pub fn handle_key_up(&self, e: &KeyboardEvent, ctx: &InputContext) -> Released<A> {
+        keyboard_chord(e).map_or_else(
+            || Released {
+                commands: Vec::new(),
+                hide_which_key: false,
+            },
+            |chord| self.release(&chord, ctx),
+        )
     }
 
     /// Report a DOM `keyup`: [`notify_key_release`](Self::notify_key_release)

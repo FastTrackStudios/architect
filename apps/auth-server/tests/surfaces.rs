@@ -532,6 +532,62 @@ async fn org_isolation() {
     .await;
 }
 
+/// architect-orgs' live fetch: two apps signed in with the one session
+/// show the same orgs, with the person's role in each.
+async fn every_app_reads_the_same_orgs_from_one_sign_in<A: AuthService, O: OrganizationService>(
+    auth: &A,
+    orgs: &O,
+) {
+    use architect_orgs::{Orgs, Role};
+
+    let me = signed_up(auth, "owner@example.com").await;
+    let band = orgs
+        .create_organization(me.token.clone(), new_org("The Band", "the-band"))
+        .await
+        .expect("create");
+    let session =
+        auth_client::StoredSession::new(me.token.clone()).with_user_id(me.user.id.to_string());
+
+    let task = Orgs::new(architect_orgs::fetch(orgs, &session).await.expect("fetch"));
+    let studio = Orgs::new(architect_orgs::fetch(orgs, &session).await.expect("fetch"));
+    assert_eq!(task, studio);
+    let org = task.current().expect("one org, selected");
+    assert_eq!(org.id.0, band.organization.id.to_string());
+    assert_eq!(org.name, "The Band");
+    assert_eq!(org.role, Role::Owner);
+
+    // Signed out: the fetch says so, and the app keeps its cached list.
+    auth.sign_out(me.token).await.expect("sign out");
+    assert!(architect_orgs::fetch(orgs, &session).await.is_err());
+}
+
+#[tokio::test]
+async fn orgs_fetched_live() {
+    on_every_transport(scenario!(every_app_reads_the_same_orgs_from_one_sign_in)).await;
+}
+
+/// A server confining its services to the caller's org learns the same
+/// orgs from the caller's token as the apps do.
+#[tokio::test]
+async fn a_confining_server_learns_the_callers_orgs_from_the_identity_server() {
+    use architect_orgs::server::{Directory as _, IdentityServer};
+
+    let stack = local_vox_stack().await;
+    let me = signed_up(&stack.auth, "owner@example.com").await;
+    stack
+        .orgs
+        .create_organization(me.token.clone(), new_org("The Band", "the-band"))
+        .await
+        .expect("create");
+    let session = auth_client::StoredSession::new(me.token.clone());
+    let apps = architect_orgs::fetch(&stack.orgs, &session)
+        .await
+        .expect("fetch");
+    let directory = IdentityServer(stack.orgs.clone());
+    assert_eq!(directory.orgs(&me.token).await.expect("directory"), apps);
+    assert!(directory.orgs("not-a-session").await.is_err());
+}
+
 async fn an_invitation_puts_the_invitee_in_the_org_and_roles_change<
     A: AuthService,
     O: OrganizationService,

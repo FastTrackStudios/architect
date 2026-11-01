@@ -111,7 +111,7 @@ impl Modifiers {
     };
 
     /// The held modifiers paired with a name each, in display order.
-    const fn named(self) -> [(bool, &'static str); 4] {
+    pub(crate) const fn named(self) -> [(bool, &'static str); 4] {
         [
             (self.ctrl, "Ctrl"),
             (self.alt, "Alt"),

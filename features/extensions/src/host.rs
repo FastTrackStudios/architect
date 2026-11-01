@@ -738,6 +738,7 @@ fn info(manifest: &Manifest, decl: &ActionDecl) -> ActionInfo {
         result_schema: None,
         enabled: true,
         disabled_reason: None,
+        checked: None,
     }
 }
 

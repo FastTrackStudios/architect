@@ -18,6 +18,7 @@ architect-scripting = { workspace = true, features = ["luau"] }
 serde_json = { workspace = true }
 architect = { workspace = true, features = ["action-list", "settings"] }
 dioxus = { workspace = true }
+facet = { workspace = true }
 dioxus-native = { workspace = true }
 lucide-dioxus = { workspace = true }
 futures-timer = { workspace = true }

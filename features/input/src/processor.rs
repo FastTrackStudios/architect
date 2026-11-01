@@ -9,7 +9,8 @@ use crate::config::{
     parse_mouse_pattern, parse_scroll_pattern, parse_when_expr,
 };
 use crate::context::{InputContext, WhenExpr};
-use crate::event::{InputEvent, KeyEvent, MouseEvent, ScrollEvent};
+use crate::control::{ControlBindings, parse_midi_pattern};
+use crate::event::{InputEvent, KeyEvent, MidiEvent, MouseEvent, OscEvent, ScrollEvent};
 use crate::key::{KeyChord, KeyCode, Modifiers};
 use crate::macros::MacroRecorder;
 use crate::mode::{ModeDefinition, ModeId, ModeStack};
@@ -48,6 +49,37 @@ pub enum MacroKeys {
     Off,
 }
 
+/// A key held down as a modifier, waiting to see what comes next.
+#[derive(Debug, Clone)]
+struct Hold {
+    chord: KeyChord,
+    /// Another input arrived while it was down: it was a modifier, not a
+    /// tap.
+    used: bool,
+}
+
+/// What a key going up did, from [`InputProcessor::release`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct Released<A = String> {
+    /// [`InputCommand::Unhold`] when a held-letter key went up, and the
+    /// tap's own commands when nothing came while it was down.
+    pub commands: Vec<InputCommand<A>>,
+    /// Hide a lingering which-key overlay (see
+    /// [`InputProcessor::notify_key_release`]).
+    pub hide_which_key: bool,
+}
+
+/// What a held key does while it is down: the gestures it enables, for
+/// its cursor and the which-key hint ("Z: drag — zoom to box · click —
+/// zoom in").
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeldTool<A = String> {
+    pub key: KeyChord,
+    /// Each gesture (`z+Left.Drag`) with its action, the most specific
+    /// context's first.
+    pub gestures: Vec<(String, A)>,
+}
+
 /// A pending sequence's timer, from
 /// [`InputProcessor::sequence_timeout`].
 ///
@@ -77,14 +109,34 @@ impl SequenceTimeout {
 /// [`sequence_timeout`](Self::sequence_timeout) gives a ticket the host
 /// arms a timer of [`SequenceTimeout::after`] and calls
 /// [`expire_sequence`](Self::expire_sequence) when it fires. Hosts that
-/// see key releases call [`notify_key_release`](Self::notify_key_release),
-/// which powers hold-to-keep-prefix (sticky which-key prefixes).
+/// see key releases call [`release`](Self::release) (or
+/// [`notify_key_release`](Self::notify_key_release)), which powers
+/// hold-to-keep-prefix (sticky which-key prefixes) and held-letter tools.
+///
+/// # Held-letter tools
+///
+/// A key a pointer or wheel pattern names as held (`Z+Left.Drag`) is a
+/// modifier while it is down. Its press runs nothing: it comes back as
+/// [`InputCommand::Hold`], and the pointer gestures that follow match
+/// the patterns that name it. Its release says what it was, by what
+/// arrived in between, not by a timer: if another input came (a gesture,
+/// another key) it was a modifier and the release gives
+/// [`InputCommand::Unhold`]; if nothing did, it was a tap and runs
+/// whatever the key is bound to, after the `Unhold`.
 pub struct InputProcessor<A = String> {
     modes: ModeStack<A>,
     keymaps: HashMap<ModeId, KeyTrie<A>>,
     context_keymaps: HashMap<ModeId, Vec<(WhenExpr, KeyTrie<A>)>>,
     mouse_bindings: HashMap<ModeId, MouseBindingTable<A>>,
     scroll_bindings: HashMap<ModeId, ScrollBindingTable<A>>,
+    /// Each named context's keys, mouse and wheel bindings.
+    context_keys: HashMap<String, KeyTrie<A>>,
+    context_mouse: HashMap<String, MouseBindingTable<A>>,
+    context_scroll: HashMap<String, ScrollBindingTable<A>>,
+    /// MIDI and OSC, in every mode.
+    controls: ControlBindings<A>,
+    /// The held-letter key down now, if any.
+    holding: Option<Hold>,
     sequence: Vec<KeyChord>,
     timeout: Duration,
     count_prefix: Option<u32>,
@@ -120,6 +172,11 @@ impl<A: ActionKey> InputProcessor<A> {
             context_keymaps: HashMap::new(),
             mouse_bindings: HashMap::new(),
             scroll_bindings: HashMap::new(),
+            context_keys: HashMap::new(),
+            context_mouse: HashMap::new(),
+            context_scroll: HashMap::new(),
+            controls: ControlBindings::new(),
+            holding: None,
             sequence: Vec::new(),
             timeout: DEFAULT_TIMEOUT,
             count_prefix: None,
@@ -191,6 +248,22 @@ impl<A: ActionKey> InputProcessor<A> {
             proc.scroll_bindings
                 .insert(ModeId::new(name), scroll_table(&bindings)?);
         }
+        for (name, context) in config.contexts {
+            proc.context_keys
+                .insert(name.clone(), trie_from_bindings(&context.keys)?);
+            proc.context_mouse
+                .insert(name.clone(), mouse_table(&context.mouse)?);
+            proc.context_scroll
+                .insert(name, scroll_table(&context.scroll)?);
+        }
+        for (pattern, action) in &config.midi {
+            proc.controls
+                .bind_midi(parse_midi_pattern(pattern)?, A::from(action.clone()));
+        }
+        for (address, action) in &config.osc {
+            proc.controls
+                .bind_osc(address.trim(), A::from(action.clone()));
+        }
         Ok(proc)
     }
 
@@ -212,6 +285,38 @@ impl<A: ActionKey> InputProcessor<A> {
 
     pub fn set_keymap(&mut self, mode: ModeId, trie: KeyTrie<A>) {
         self.keymaps.insert(mode, trie);
+    }
+
+    /// Set context `name`'s keys (see [`KeymapConfig::contexts`]).
+    pub fn set_context_keymap(&mut self, name: impl Into<String>, trie: KeyTrie<A>) {
+        self.context_keys.insert(name.into(), trie);
+    }
+
+    /// Set context `name`'s mouse bindings.
+    pub fn set_context_mouse(&mut self, name: impl Into<String>, table: MouseBindingTable<A>) {
+        self.context_mouse.insert(name.into(), table);
+    }
+
+    /// Set context `name`'s wheel bindings.
+    pub fn set_context_scroll(&mut self, name: impl Into<String>, table: ScrollBindingTable<A>) {
+        self.context_scroll.insert(name.into(), table);
+    }
+
+    /// Set the MIDI and OSC bindings.
+    pub fn set_controls(&mut self, controls: ControlBindings<A>) {
+        self.controls = controls;
+    }
+
+    /// Every context's keys, by name.
+    #[must_use]
+    pub const fn context_tries(&self) -> &HashMap<String, KeyTrie<A>> {
+        &self.context_keys
+    }
+
+    /// The MIDI and OSC bindings.
+    #[must_use]
+    pub const fn controls(&self) -> &ControlBindings<A> {
+        &self.controls
     }
 
     /// Add a conditional layer to `mode`, checked (in insertion order)
@@ -371,20 +476,167 @@ impl<A: ActionKey> InputProcessor<A> {
         fired
     }
 
+    /// The held-letter key down now, if any.
+    #[must_use]
+    pub fn holding(&self) -> Option<&KeyChord> {
+        self.holding.as_ref().map(|h| &h.chord)
+    }
+
+    /// What the held key does in `ctx` (its gestures, for the cursor and
+    /// the which-key hint); `None` when no key is held.
+    #[must_use]
+    pub fn held_tool(&self, ctx: &InputContext) -> Option<HeldTool<A>> {
+        let key = self.holding.as_ref()?.chord.clone();
+        let mut gestures: Vec<(String, A)> = Vec::new();
+        let mut add = |pattern: String, action: &A| {
+            if !gestures.iter().any(|(p, _)| *p == pattern) {
+                gestures.push((pattern, action.clone()));
+            }
+        };
+        for table in self.live_mouse_tables(ctx) {
+            for (pattern, when, action) in table.bindings() {
+                if pattern.held.as_ref() == Some(&key.key) && when.evaluate(ctx) {
+                    add(pattern.to_string(), action);
+                }
+            }
+        }
+        for table in self.live_scroll_tables(ctx) {
+            for (pattern, when, action) in table.bindings() {
+                if pattern.held.as_ref() == Some(&key.key) && when.evaluate(ctx) {
+                    add(pattern.to_string(), action);
+                }
+            }
+        }
+        Some(HeldTool { key, gestures })
+    }
+
+    /// The host saw `chord` go up: [`notify_key_release`](Self::notify_key_release),
+    /// and the end of a held-letter key (see the type's docs). Hosts that
+    /// see keyups call this rather than `notify_key_release`.
+    #[must_use = "what the release did: an Unhold, a tap's commands"]
+    pub fn release(&mut self, chord: &KeyChord, ctx: &InputContext) -> Released<A> {
+        let hide_which_key = self.notify_key_release(chord);
+        let mut commands = Vec::new();
+        if let Some(hold) = self.holding.take_if(|hold| hold.chord.key == chord.key) {
+            commands.push(InputCommand::Unhold(hold.chord.clone()));
+            if !hold.used {
+                // Nothing came while it was down: it was a tap.
+                self.generation = self.generation.wrapping_add(1);
+                let event = InputEvent::Key(KeyEvent {
+                    key: hold.chord.key.clone(),
+                    modifiers: hold.chord.modifiers,
+                });
+                commands.extend(self.process_key_chord(hold.chord, event, ctx, Origin::Typed));
+                self.held_keys.retain(|held| held.key != chord.key);
+            }
+        }
+        Released {
+            commands,
+            hide_which_key,
+        }
+    }
+
     /// Process one event in `ctx`.
     pub fn process(&mut self, event: InputEvent, ctx: &InputContext) -> Vec<InputCommand<A>> {
         match event {
             InputEvent::Key(ref key) => {
                 self.generation = self.generation.wrapping_add(1);
                 let chord = KeyChord::new(key.key.clone(), key.modifiers);
+                if let Some(commands) = self.hold_key(&chord, ctx) {
+                    return commands;
+                }
                 self.process_key_chord(chord, event, ctx, Origin::Typed)
             }
             InputEvent::Mouse(ref mouse) => self.process_mouse_event(mouse, ctx),
             InputEvent::Scroll(ref scroll) => self.process_scroll_event(scroll, ctx),
+            InputEvent::Midi(midi) => self.process_midi_event(midi),
+            InputEvent::Osc(ref osc) => self.process_osc_event(osc),
             InputEvent::FocusGained | InputEvent::FocusLost => {
                 vec![InputCommand::Unhandled(event)]
             }
         }
+    }
+
+    /// A key while a held-letter key is down, or the press of one: `Some`
+    /// when the key was taken (a held key's press, or its auto-repeat).
+    fn hold_key(&mut self, chord: &KeyChord, ctx: &InputContext) -> Option<Vec<InputCommand<A>>> {
+        if let Some(hold) = &mut self.holding {
+            if hold.chord.key == chord.key {
+                return Some(Vec::new());
+            }
+            // Another key came: the held one was a modifier for it.
+            hold.used = true;
+            return None;
+        }
+        let idle = self.sequence.is_empty()
+            && self.register_prompt.is_none()
+            && chord.modifiers == Modifiers::NONE;
+        if !idle || !self.hold_keys(ctx).contains(&chord.key) {
+            return None;
+        }
+        self.held_keys.insert(chord.clone());
+        self.holding = Some(Hold {
+            chord: chord.clone(),
+            used: false,
+        });
+        Some(vec![InputCommand::Hold(chord.clone())])
+    }
+
+    /// Every key a live pointer or wheel pattern holds as a modifier.
+    fn hold_keys(&self, ctx: &InputContext) -> HashSet<KeyCode> {
+        let mouse = self
+            .live_mouse_tables(ctx)
+            .flat_map(|t| t.bindings().iter().filter_map(|(p, _, _)| p.held.clone()));
+        let scroll = self
+            .live_scroll_tables(ctx)
+            .flat_map(|t| t.bindings().iter().filter_map(|(p, _, _)| p.held.clone()));
+        mouse.chain(scroll).collect()
+    }
+
+    /// Whether the current mode takes plain keys as text (no context
+    /// bindings while typing).
+    fn typing(&self) -> bool {
+        self.modes
+            .definition(self.modes.current())
+            .is_some_and(|def| def.passthrough_text)
+    }
+
+    /// The live contexts' names, innermost first; none while typing.
+    fn live_contexts<'a>(&self, ctx: &'a InputContext) -> impl Iterator<Item = &'a String> {
+        let contexts = if self.typing() {
+            &[][..]
+        } else {
+            ctx.contexts()
+        };
+        contexts.iter().rev()
+    }
+
+    /// The mouse tables live in `ctx`: the contexts' innermost first, then
+    /// the mode's.
+    fn live_mouse_tables<'a>(
+        &'a self,
+        ctx: &'a InputContext,
+    ) -> impl Iterator<Item = &'a MouseBindingTable<A>> {
+        self.live_contexts(ctx)
+            .filter_map(|name| self.context_mouse.get(name))
+            .chain(self.mouse_bindings.get(self.modes.current()))
+    }
+
+    /// The wheel tables live in `ctx`, as [`Self::live_mouse_tables`].
+    fn live_scroll_tables<'a>(
+        &'a self,
+        ctx: &'a InputContext,
+    ) -> impl Iterator<Item = &'a ScrollBindingTable<A>> {
+        self.live_contexts(ctx)
+            .filter_map(|name| self.context_scroll.get(name))
+            .chain(self.scroll_bindings.get(self.modes.current()))
+    }
+
+    /// The held key, marked used: an input arrived while it was down.
+    fn use_held(&mut self) -> Option<KeyCode> {
+        let hold = self.holding.as_mut()?;
+        hold.used = true;
+        Some(hold.chord.key.clone())
     }
 
     /// The pending sequence timed out: it is dropped, and its first chord
@@ -402,30 +654,38 @@ impl<A: ActionKey> InputProcessor<A> {
         }))]
     }
 
-    fn process_mouse_event(&self, event: &MouseEvent, ctx: &InputContext) -> Vec<InputCommand<A>> {
+    fn process_mouse_event(
+        &mut self,
+        event: &MouseEvent,
+        ctx: &InputContext,
+    ) -> Vec<InputCommand<A>> {
+        let held = self.use_held();
         let action = self
-            .mouse_bindings
-            .get(self.modes.current())
-            .and_then(|table| table.match_event(event, ctx));
-        vec![action.map_or_else(
-            || InputCommand::Unhandled(InputEvent::Mouse(event.clone())),
-            plain_args,
-        )]
+            .live_mouse_tables(ctx)
+            .find_map(|table| table.match_held(event, held.as_ref(), ctx));
+        vec![gesture(action, InputEvent::Mouse(event.clone()))]
     }
 
     fn process_scroll_event(
-        &self,
+        &mut self,
         event: &ScrollEvent,
         ctx: &InputContext,
     ) -> Vec<InputCommand<A>> {
+        let held = self.use_held();
         let action = self
-            .scroll_bindings
-            .get(self.modes.current())
-            .and_then(|table| table.match_event(event, ctx));
-        vec![action.map_or_else(
-            || InputCommand::Unhandled(InputEvent::Scroll(event.clone())),
-            plain_args,
-        )]
+            .live_scroll_tables(ctx)
+            .find_map(|table| table.match_held(event, held.as_ref(), ctx));
+        vec![gesture(action, InputEvent::Scroll(event.clone()))]
+    }
+
+    fn process_midi_event(&self, event: MidiEvent) -> Vec<InputCommand<A>> {
+        let action = self.controls.match_midi(&event);
+        vec![gesture(action, InputEvent::Midi(event))]
+    }
+
+    fn process_osc_event(&self, event: &OscEvent) -> Vec<InputCommand<A>> {
+        let action = self.controls.match_osc(event);
+        vec![gesture(action, InputEvent::Osc(event.clone()))]
     }
 
     fn process_key_chord(
@@ -538,7 +798,9 @@ impl<A: ActionKey> InputProcessor<A> {
         self.pending_operator = None;
     }
 
-    /// The base keymap and the layers live in `ctx`, layers first.
+    /// The tries live in `ctx`, in the order they win: the mode's `when`
+    /// layers, then the live contexts innermost first, then the mode's
+    /// base keymap.
     fn live_tries<'a>(
         &'a self,
         mode: &ModeId,
@@ -551,7 +813,10 @@ impl<A: ActionKey> InputProcessor<A> {
             .flatten()
             .filter(move |(when, _)| when.evaluate(ctx))
             .map(|(_, trie)| trie);
-        layers.chain(self.keymaps.get(mode))
+        let contexts = self
+            .live_contexts(ctx)
+            .filter_map(|name| self.context_keys.get(name));
+        layers.chain(contexts).chain(self.keymaps.get(mode))
     }
 
     /// The first match among the live tries; a prefix anywhere otherwise.
@@ -808,11 +1073,12 @@ fn with_count<A>(action: A, count: Option<u32>) -> InputCommand<A> {
     }
 }
 
-/// A pointer action: always [`InputCommand::ActionWithArgs`], args empty.
-fn plain_args<A>(action: A) -> InputCommand<A> {
-    InputCommand::ActionWithArgs {
-        action,
-        args: InputArgs::default(),
+/// A pointer, wheel or control match: the action with the input that
+/// triggered it; no match is the input, unhandled.
+fn gesture<A>(action: Option<A>, event: InputEvent) -> InputCommand<A> {
+    match action {
+        Some(action) => InputCommand::Gesture { action, event },
+        None => InputCommand::Unhandled(event),
     }
 }
 

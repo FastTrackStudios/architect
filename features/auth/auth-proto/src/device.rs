@@ -140,6 +140,21 @@ impl From<AuthDevice> for PeerDevice {
     }
 }
 
+impl DeviceDirectory {
+    /// The endpoint ids of every device here but `this_device` that holds
+    /// a node: the peers this device serves its documents to and syncs
+    /// with directly (`crdt::p2p::Devices::replace`).
+    #[must_use]
+    pub fn peer_endpoints(&self, this_device: Uuid) -> Vec<String> {
+        self.devices
+            .iter()
+            .filter(|d| d.device_id != this_device)
+            .filter_map(|d| d.endpoint_id.as_deref())
+            .map(str::to_ascii_lowercase)
+            .collect()
+    }
+}
+
 impl From<AuthAccountOrg> for AccountOrg {
     fn from(o: AuthAccountOrg) -> Self {
         Self {

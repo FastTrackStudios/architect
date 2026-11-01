@@ -102,6 +102,13 @@ impl Screenset {
     }
 }
 
+/// What an app's recall action takes: the set to recall. A screenset's
+/// row in a menu ([`Screensets::menu_rows`]) runs it with this.
+#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+pub struct Recall {
+    pub id: String,
+}
+
 /// Every screenset, which is active, and the live (working) layout per
 /// form class.
 #[derive(Debug, Clone, PartialEq, Default, Facet)]
@@ -249,5 +256,32 @@ impl Screensets {
             layout.workspace.repair();
         }
         Ok(sets)
+    }
+}
+
+/// The View menu's live list of screensets.
+impl Screensets {
+    /// The sets as a live menu section's rows
+    /// (`architect_commands::Menu::section`), in order: each runs the
+    /// app's `recall` action with a [`Recall`] of its id, and the active
+    /// one is ticked. Called from the section, so it is the list as it
+    /// is when the menu is drawn:
+    ///
+    /// ```ignore
+    /// .menu("View", |m| m.section("Screensets", move || sets.read().menu_rows("VIEW_RECALL_SCREENSET")))
+    /// ```
+    #[must_use]
+    pub fn menu_rows(&self, recall: &str) -> Vec<architect_commands::Live> {
+        self.sets
+            .iter()
+            .filter_map(|set| {
+                let args = facet_json::to_string(&Recall { id: set.id.clone() }).ok()?;
+                Some(
+                    architect_commands::Live::new(set.name.clone(), recall)
+                        .args(args)
+                        .checked(self.active.as_deref() == Some(set.id.as_str())),
+                )
+            })
+            .collect()
     }
 }

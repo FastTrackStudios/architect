@@ -42,6 +42,14 @@ impl Route {
     }
 }
 
+/// The lab's tabs: the command that goes to each, its label, its id.
+const TABS: [(&str, &str, &str); 4] = [
+    ("LAB_GO_INBOX", "Go to Inbox", "inbox"),
+    ("LAB_GO_TASKS", "Go to Tasks", "tasks"),
+    ("LAB_GO_SCHEDULE", "Go to Schedule", "schedule"),
+    ("LAB_GO_VAULT", "Go to Vault", "vault"),
+];
+
 /// The lab's state, shared with its pages.
 #[derive(Clone, Copy)]
 pub struct Lab {
@@ -114,12 +122,20 @@ pub fn LabApp() -> Element {
     let save = store.clone();
     let settings = architect_settings::use_settings_provider(
         settings::registry,
-        || store.as_ref().map(|s| s.load()).unwrap_or_default(),
-        Some(Callback::new(move |values: architect_settings::Values| {
-            if let Some(s) = save.as_ref() {
-                let _ = s.save(&values);
-            }
-        })),
+        || architect_settings::ScopedValues {
+            device: store.as_ref().map(|s| s.load()).unwrap_or_default(),
+            ..Default::default()
+        },
+        Some(Callback::new(
+            move |change: architect_settings::SettingsChange| {
+                // The lab's sections are all this device's.
+                if change.scope == architect_settings::Scope::Device {
+                    if let Some(s) = save.as_ref() {
+                        let _ = s.save(&change.values);
+                    }
+                }
+            },
+        )),
     );
     let lab = use_context_provider(|| Lab {
         route: Signal::new(Route::Tab("inbox")),
@@ -157,20 +173,16 @@ pub fn LabApp() -> Element {
         .unwrap_or(false);
     // Commands: the palette (⌘K), quick open (⌘O), and every command's key.
     let commands = architect_commands::use_commands_provider();
-    for (id, label, to) in [
-        ("LAB_GO_INBOX", "Go to Inbox", "inbox"),
-        ("LAB_GO_TASKS", "Go to Tasks", "tasks"),
-        ("LAB_GO_SCHEDULE", "Go to Schedule", "schedule"),
-        ("LAB_GO_VAULT", "Go to Vault", "vault"),
-    ] {
+    for (id, label, to) in TABS {
         architect_commands::use_command(
             architect_commands::Command::new(id, label).group("Go"),
             move || lab.jump(Route::Tab(to)),
         );
     }
     architect_commands::use_command(
-        architect_commands::Command::new("LAB_TOGGLE_DETAILS", "Show or hide the details")
-            .group("View"),
+        architect_commands::Command::new("LAB_TOGGLE_DETAILS", "Details")
+            .group("View")
+            .checked((lab.right)()),
         move || lab.put_bool("workspace.details", !(lab.right)()),
     );
     architect_commands::use_command(
@@ -210,7 +222,18 @@ pub fn LabApp() -> Element {
                 .group("Docks")
         })
         .menu("Go", |m| {
-            m.group("Go").separator().commands([
+            // The tabs, the one showing ticked: a live section, read again
+            // whenever the bar is drawn.
+            m.section("Tabs", move || {
+                let on = (lab.route)().tab();
+                TABS.iter()
+                    .map(|(id, label, to)| {
+                        architect_commands::Live::new(*label, *id).checked(*to == on)
+                    })
+                    .collect()
+            })
+            .separator()
+            .commands([
                 "WORKSPACE_NEXT_TAB",
                 "WORKSPACE_PREVIOUS_TAB",
                 "WORKSPACE_GO_BACK",
@@ -343,15 +366,15 @@ fn Brand() -> Element {
     }
 }
 
-/// The menu bar where there is a native one (macOS); elsewhere the same
-/// commands are in the palette.
+/// The menu bar: the platform's where there is one (macOS, a Linux shell
+/// that takes dbusmenu, iPadOS), else the app's own in the window.
 #[component]
 fn NativeMenus(bar: architect_commands::MenuBar) -> Element {
-    #[cfg(target_os = "macos")]
-    return rsx! { architect_commands::NativeMenus { bar } };
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = bar;
-        rsx! {}
-    }
+    #[cfg(any(target_os = "macos", target_os = "linux", target_os = "ios"))]
+    return rsx! {
+        architect_commands::NativeMenus { bar: bar.clone() }
+        architect_commands::InWindowMenus { bar }
+    };
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "ios")))]
+    rsx! { architect_commands::InWindowMenus { bar } }
 }

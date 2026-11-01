@@ -28,6 +28,14 @@
 //!   ([`DocStorage`]), creates offline, and on each connection registers
 //!   pending creates (parent first), catches the catalog up, and syncs
 //!   every doc durably until the connection drops.
+//! - **`OrgDocs`** (native): one org's driver, kept connected — dial the
+//!   org's lane, run a session until the connection closes, back off,
+//!   dial again — with its documents placed by a **`Placement`** (each a
+//!   document file, `crate::file`). **`OrgSyncs`** keeps one per org
+//!   and follows the person's current org (`architect_orgs::Orgs`).
+//! - **`DocPermissions`** (native): the org's permission engine, asked
+//!   about the caller on every catalog call and every content attach
+//!   (`DocsHost::with_permissions`, `DocRegistry::with_permissions`).
 //!
 //! ## Revisions
 //!
@@ -48,11 +56,17 @@ mod device_host;
 mod driver;
 #[cfg(not(target_arch = "wasm32"))]
 mod host;
+#[cfg(not(target_arch = "wasm32"))]
+mod org;
+#[cfg(not(target_arch = "wasm32"))]
+mod placement;
 #[cfg(all(not(target_arch = "wasm32"), feature = "turso"))]
 mod turso;
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "turso"))]
 pub use self::turso::TursoDocsIndex;
+#[cfg(not(target_arch = "wasm32"))]
+pub use crate::registry::{DocAccess, DocPermissions};
 #[cfg(not(target_arch = "wasm32"))]
 pub use device_host::DriverHost;
 #[cfg(not(target_arch = "wasm32"))]
@@ -61,7 +75,11 @@ pub use driver::{
     Refusal, SharedStorage,
 };
 #[cfg(not(target_arch = "wasm32"))]
-pub use host::{DocAccess, DocsHost};
+pub use host::DocsHost;
+#[cfg(not(target_arch = "wasm32"))]
+pub use org::{Dialed, OrgDocs, OrgLink, OrgSyncs};
+#[cfg(not(target_arch = "wasm32"))]
+pub use placement::Placement;
 
 /// Longest `kind` a catalog accepts.
 pub const MAX_KIND_LEN: usize = 64;

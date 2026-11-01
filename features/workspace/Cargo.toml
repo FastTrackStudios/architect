@@ -14,7 +14,7 @@ description = "The workspace: tab groups in splits, docks with ribbons, stacked 
 
 [features]
 default = []
-ui = ["dep:dioxus", "dep:architect-shell", "architect-shell/ui", "dep:futures-timer", "dep:lucide-dioxus", "dep:architect-commands", "architect-commands/ui"]
+ui = ["dep:dioxus", "dep:architect-shell", "architect-shell/ui", "dep:futures-timer", "dep:lucide-dioxus", "architect-commands/ui"]
 
 [dependencies]
 facet = { workspace = true }
@@ -23,8 +23,9 @@ thiserror = { workspace = true }
 dioxus = { workspace = true, optional = true }
 architect-shell = { workspace = true, optional = true }
 lucide-dioxus = { workspace = true, optional = true }
-# The workspace's commands, in the app's palette.
-architect-commands = { workspace = true, optional = true }
+# The workspace's commands, in the app's palette; by default the model
+# (the screensets as a menu's live rows), wasm-clean.
+architect-commands = { workspace = true }
 # A measurement mid-drag finds the document busy and asks again shortly.
 futures-timer = { workspace = true, optional = true }
 

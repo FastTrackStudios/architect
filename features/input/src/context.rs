@@ -3,6 +3,13 @@
 //! The app describes where the user is (tags such as `panel:focused`,
 //! variables such as `tab = performance`); a [`WhenExpr`] on a binding
 //! layer decides from that whether the layer is live.
+//!
+//! It also says which **contexts** are live, outermost first: the
+//! workspace view with the focus (`session.arrange`), then the target
+//! under the pointer (`session.arrange.item`). A context's bindings
+//! ([`crate::KeymapConfig::contexts`]) beat the mode's own keymap, the
+//! innermost first, so the most specific context that binds a key wins
+//! and the rest fall back outward (REAPER's sections, made a tree).
 
 use std::collections::{HashMap, HashSet};
 
@@ -12,6 +19,8 @@ use std::collections::{HashMap, HashSet};
 pub struct InputContext {
     tags: HashSet<String>,
     vars: HashMap<String, String>,
+    /// The live contexts, outermost first.
+    contexts: Vec<String>,
 }
 
 /// A binding layer's condition, parsed from a tiny expression language.
@@ -64,6 +73,35 @@ impl InputContext {
     /// Set the `mode` variable.
     pub fn set_mode(&mut self, mode: &str) {
         self.set_var("mode", mode);
+    }
+
+    /// The live contexts are `path` and every dotted prefix of it, outermost
+    /// first: `session.arrange.item` is `session`, `session.arrange`,
+    /// `session.arrange.item`. An empty path leaves only the app's keymap.
+    pub fn set_context(&mut self, path: &str) {
+        self.contexts = path
+            .match_indices('.')
+            .filter_map(|(at, _)| path.get(..at))
+            .chain(std::iter::once(path))
+            .filter(|c| !c.is_empty())
+            .map(str::to_owned)
+            .collect();
+    }
+
+    /// The live contexts are exactly `chain`, outermost first (contexts
+    /// whose names do not nest by dots: `arrange`, then `item`).
+    pub fn set_contexts<I, S>(&mut self, chain: I)
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.contexts = chain.into_iter().map(Into::into).collect();
+    }
+
+    /// The live contexts, outermost first.
+    #[must_use]
+    pub fn contexts(&self) -> &[String] {
+        &self.contexts
     }
 
     /// Set the active tab: the `tab` variable, and the one `tab:<name>`
@@ -157,6 +195,20 @@ mod tests {
         assert!(!ctx.has_tag("tab:a"));
         assert!(ctx.has_tag("tab:b"));
         assert_eq!(ctx.var("tab"), Some("b"));
+    }
+
+    #[test]
+    fn a_dotted_context_is_live_with_every_context_around_it() {
+        let mut ctx = InputContext::new();
+        ctx.set_context("session.arrange.item");
+        assert_eq!(
+            ctx.contexts(),
+            ["session", "session.arrange", "session.arrange.item"]
+        );
+        ctx.set_context("");
+        assert!(ctx.contexts().is_empty());
+        ctx.set_contexts(["arrange", "item"]);
+        assert_eq!(ctx.contexts(), ["arrange", "item"]);
     }
 
     #[test]

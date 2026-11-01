@@ -1,0 +1,342 @@
+//! The files feature a server mounts (feature `server`, native).
+//!
+//! [`FilesServer`] keeps every org's files: each org's roots, trees,
+//! versions, labels, grants, uploads in flight and quota under
+//! `<data>/org/<id>/files/` ([`OrgId::path`]), written atomically after
+//! every change; the bytes in a content-addressed [`LocalFs`] blob store,
+//! which a server shares with its documents' blobs.
+//!
+//! A call runs in the org of the lane it arrived on
+//! ([`architect_orgs::server::confine`]; a server for one org may name a
+//! [`FilesServer::default_org`] instead) and acts for the principal the
+//! permissions gate resolved ([`architect::permissions_gate::caller`]).
+//! What that person may do is their role in the org — from
+//! [`Members`], which the gate's `MembersResolver` fills from the
+//! identity server — and their grants ([`crate::access`]). A call with no
+//! principal is refused, never treated as the server's own.
+//!
+//! ```ignore
+//! let files = FilesServer::new(data_dir, LocalFs::new(data_dir.join("blobs")), members.clone());
+//! let router = LayerRouter::new()
+//!     .with(files_service_rpc_service_descriptor(), architect_files::serve(files.clone()))
+//!     .merge(architect_files::stream_layer(files.clone()));
+//! let gate = PermissionsGate::new(engine, identity)
+//!     .permit(files_service_rpc_service_descriptor(), &architect_files::PERMITS)
+//!     .permit(files_service_stream_service_descriptor(), &architect_files::STREAM_PERMITS);
+//! // per connection, at `/org/{slug}/vox`:
+//! let handler = confine(org, PermissionsGate::wrap_shared_with_bearer(gate, router, bearer));
+//! ```
+//!
+//! In process (a server's own job, a test), [`FilesServer::acting`] is
+//! the same service for an explicit org and principal.
+
+mod acting;
+mod state;
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use architect::PubSub;
+use architect::blob::LocalFs;
+use architect_orgs::OrgId;
+use architect_orgs::server::Members;
+use architect_permissions::Principal;
+
+use crate::access::{ALL, Access, Capability, resolve, role_capabilities, stewards};
+use crate::error::FilesFault;
+use crate::id::RootId;
+use crate::model::{FilesEvent, Usage};
+use crate::path::RootPath;
+
+pub use acting::Acting;
+use state::State;
+
+/// How many events a slow subscriber may fall behind before it loses the
+/// oldest.
+const EVENT_BACKLOG: usize = 1024;
+
+/// Every org's files.
+#[derive(Clone)]
+pub struct FilesServer {
+    inner: Arc<Inner>,
+    default_org: Option<OrgId>,
+}
+
+struct Inner {
+    data: PathBuf,
+    blobs: LocalFs,
+    members: Members,
+    orgs: Mutex<HashMap<OrgId, Arc<OrgFiles>>>,
+}
+
+/// One org's files, loaded.
+pub(crate) struct OrgFiles {
+    dir: PathBuf,
+    state: tokio::sync::Mutex<State>,
+    hub: PubSub<FilesEvent>,
+}
+
+/// Who a call acts for, in its org.
+#[derive(Debug, Clone)]
+pub(crate) struct Actor {
+    /// Their user id; `None` for an in-process service.
+    user: Option<String>,
+    /// What versions and roots record as their author.
+    label: String,
+    /// What their role holds everywhere in the org.
+    baseline: Vec<Capability>,
+    /// Whether they keep the org's roots.
+    steward: bool,
+}
+
+impl FilesServer {
+    /// Files under `data` (`<data>/org/<id>/files/`), bytes in `blobs`,
+    /// roles from `members` (the gate's `MembersResolver` fills it).
+    pub fn new(data: impl Into<PathBuf>, blobs: LocalFs, members: Members) -> Self {
+        Self {
+            inner: Arc::new(Inner {
+                data: data.into(),
+                blobs,
+                members,
+                orgs: Mutex::new(HashMap::new()),
+            }),
+            default_org: None,
+        }
+    }
+
+    /// The org a call on a lane in no org is in: a server that serves one
+    /// org. Without it such a call is [`FilesFault::NoOrg`].
+    #[must_use]
+    pub fn default_org(mut self, org: OrgId) -> Self {
+        self.default_org = Some(org);
+        self
+    }
+
+    /// The service for `who` in `org`, called directly.
+    #[must_use]
+    pub fn acting(&self, org: OrgId, who: Principal) -> Acting {
+        Acting::new(self.clone(), org, who)
+    }
+
+    /// The service for the call running now: its lane's org (or the
+    /// default) and the gate's principal.
+    fn for_call(&self) -> Result<Acting, FilesFault> {
+        let org = architect_orgs::server::current_org()
+            .or_else(|| self.default_org.clone())
+            .ok_or(FilesFault::NoOrg)?;
+        let who = architect::permissions_gate::caller().ok_or(FilesFault::Unauthenticated)?;
+        Ok(self.acting(org, who))
+    }
+
+    /// Bound the bytes `org`'s live files may hold (`None`: unbounded).
+    /// The deployment's call, not a member's.
+    pub async fn set_quota(&self, org: &OrgId, quota: Option<u64>) -> Result<Usage, FilesFault> {
+        let files = self.org(org).await?;
+        let mut state = files.state.lock().await;
+        let mut next = state.clone();
+        next.quota = quota;
+        files.save(&next).await?;
+        *state = next;
+        Ok(Usage {
+            used: state.used(),
+            quota,
+        })
+    }
+
+    /// `org`'s files, loaded from disk the first time.
+    pub(crate) async fn org(&self, org: &OrgId) -> Result<Arc<OrgFiles>, FilesFault> {
+        if let Some(files) = self.loaded(org) {
+            return Ok(files);
+        }
+        let dir = self.inner.data.join(org.path("files"));
+        let state = load(&dir).await?;
+        let mut orgs = self
+            .inner
+            .orgs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        Ok(Arc::clone(orgs.entry(org.clone()).or_insert_with(|| {
+            Arc::new(OrgFiles {
+                dir,
+                state: tokio::sync::Mutex::new(state),
+                hub: PubSub::sliding(EVENT_BACKLOG),
+            })
+        })))
+    }
+
+    fn loaded(&self, org: &OrgId) -> Option<Arc<OrgFiles>> {
+        self.inner
+            .orgs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(org)
+            .cloned()
+    }
+
+    pub(crate) fn blobs(&self) -> &LocalFs {
+        &self.inner.blobs
+    }
+
+    /// Who `who` is in `org`, for the files feature.
+    pub(crate) fn actor(&self, org: &OrgId, who: &Principal) -> Result<Actor, FilesFault> {
+        match who {
+            Principal::Service { name } => Ok(Actor {
+                user: None,
+                label: format!("service:{name}"),
+                baseline: ALL.to_vec(),
+                steward: true,
+            }),
+            Principal::User { user_id } => {
+                let role = self.inner.members.role(who, org);
+                Ok(Actor {
+                    user: Some(user_id.clone()),
+                    label: user_id.clone(),
+                    baseline: role
+                        .as_ref()
+                        .map(|r| role_capabilities(r).to_vec())
+                        .unwrap_or_default(),
+                    steward: role.as_ref().is_some_and(stewards),
+                })
+            }
+            Principal::Guest { .. } | Principal::Host { .. } | Principal::Anonymous => {
+                Err(FilesFault::Unauthenticated)
+            }
+        }
+    }
+
+    /// What `event` a subscriber acting as `actor` may hear, narrowed to
+    /// what it may see (`None`: nothing of it).
+    fn visible(
+        actor: &Actor,
+        state: &State,
+        only: Option<RootId>,
+        event: FilesEvent,
+    ) -> Option<FilesEvent> {
+        let now = now_us();
+        let at = |root: RootId, path: &RootPath| {
+            resolve(
+                &actor.baseline,
+                &state.grants,
+                actor.user.as_deref(),
+                root,
+                path,
+                now,
+            )
+        };
+        let in_scope = |root: RootId| only.is_none_or(|o| o == root);
+        match event {
+            FilesEvent::Attached => Some(FilesEvent::Attached),
+            FilesEvent::RootCreated(ref root) | FilesEvent::RootRenamed(ref root) => {
+                (in_scope(root.id) && actor.sees_root(state, root.id, now)).then_some(event)
+            }
+            FilesEvent::RootReleased(id) => {
+                (in_scope(id) && !actor.baseline.is_empty()).then_some(event)
+            }
+            FilesEvent::Changed { root_id, entries } => {
+                let entries: Vec<_> = entries
+                    .into_iter()
+                    .filter(|e| at(root_id, &e.path).allows(Capability::Read))
+                    .collect();
+                (in_scope(root_id) && !entries.is_empty())
+                    .then_some(FilesEvent::Changed { root_id, entries })
+            }
+            FilesEvent::Removed { root_id, paths } => {
+                let paths: Vec<_> = paths
+                    .into_iter()
+                    .filter(|p| at(root_id, p).is_visible())
+                    .collect();
+                (in_scope(root_id) && !paths.is_empty())
+                    .then_some(FilesEvent::Removed { root_id, paths })
+            }
+            FilesEvent::Labelled(ref l) | FilesEvent::Unlabelled(ref l) => (in_scope(l.root_id)
+                && at(l.root_id, &l.path).allows(Capability::History))
+            .then_some(event),
+            FilesEvent::Granted(ref g) | FilesEvent::Revoked(ref g) => (in_scope(g.root_id)
+                && (actor.user.as_deref() == Some(g.user.as_str())
+                    || at(g.root_id, &g.path).allows(Capability::Share)))
+            .then_some(event),
+        }
+    }
+}
+
+impl Actor {
+    /// What this actor holds at `path`.
+    pub(crate) fn at(&self, state: &State, root: RootId, path: &RootPath) -> Access {
+        resolve(
+            &self.baseline,
+            &state.grants,
+            self.user.as_deref(),
+            root,
+            path,
+            now_us(),
+        )
+    }
+
+    /// Refuse unless this actor may do `cap` at `path`: a path they hold
+    /// nothing over is absent, one they may see and not do this at is
+    /// denied.
+    pub(crate) fn need(
+        &self,
+        state: &State,
+        root: RootId,
+        path: &RootPath,
+        cap: Capability,
+    ) -> Result<(), FilesFault> {
+        state.root(root)?;
+        match self.at(state, root, path) {
+            Access::Absent => Err(FilesFault::PathNotFound(path.clone())),
+            access if access.allows(cap) => Ok(()),
+            Access::Holds(_) => Err(FilesFault::denied(format!("{cap:?}"), path.clone())),
+        }
+    }
+
+    /// Whether this actor can name `root` at all: a role in the org, or a
+    /// grant in it.
+    pub(crate) fn sees_root(&self, state: &State, root: RootId, now: i64) -> bool {
+        !self.baseline.is_empty()
+            || state.grants.iter().any(|g| {
+                g.root_id == root && self.user.as_deref() == Some(g.user.as_str()) && g.is_live(now)
+            })
+    }
+}
+
+impl OrgFiles {
+    /// Write `state` atomically: a temporary file renamed over the last.
+    async fn save(&self, state: &State) -> Result<(), FilesFault> {
+        let json = facet_json::to_string(state).map_err(|e| FilesFault::Internal(e.to_string()))?;
+        tokio::fs::create_dir_all(&self.dir).await.map_err(io)?;
+        let path = self.dir.join(STATE_FILE);
+        let tmp = self.dir.join(format!("{STATE_FILE}.tmp"));
+        tokio::fs::write(&tmp, json).await.map_err(io)?;
+        tokio::fs::rename(&tmp, &path).await.map_err(io)
+    }
+
+    /// Where an upload's bytes wait.
+    fn staging(&self, upload: crate::id::UploadId) -> PathBuf {
+        self.dir.join("uploads").join(format!("{upload}.part"))
+    }
+}
+
+const STATE_FILE: &str = "state.json";
+
+async fn load(dir: &Path) -> Result<State, FilesFault> {
+    match tokio::fs::read_to_string(dir.join(STATE_FILE)).await {
+        Ok(json) => facet_json::from_str(&json)
+            .map_err(|e| FilesFault::Internal(format!("{}: {e}", dir.display()))),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(State::default()),
+        Err(e) => Err(io(e)),
+    }
+}
+
+/// Microseconds since the Unix epoch.
+pub(crate) fn now_us() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_micros()).unwrap_or(i64::MAX))
+}
+
+pub(crate) fn io(e: impl std::fmt::Display) -> FilesFault {
+    FilesFault::Io(e.to_string())
+}
