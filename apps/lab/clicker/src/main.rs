@@ -18,7 +18,7 @@ fn Counter() -> Element {
         div { style: "display: flex; flex-direction: column; gap: 12px; padding: 20px; \
                       font-family: -apple-system, system-ui, sans-serif; color: #e4e4e7;",
             div { style: "font-size: 12px; color: #a1a1aa;",
-                "Drawn by process {pid}, over vox"
+                "An extension's view, drawn by its own process ({pid})"
             }
             div { style: "font-size: 28px; font-weight: 700;", "{n}" }
             button {
