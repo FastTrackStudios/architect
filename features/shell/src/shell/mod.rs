@@ -248,6 +248,8 @@ pub struct ShellTheme {
     pub active: &'static str,
     pub ink: &'static str,
     pub ink_2: &'static str,
+    /// The quietest text (a row's detail, a count): at least 4.5:1 on
+    /// every fill it sits on, the pill and the accent's wash too.
     pub ink_3: &'static str,
     /// Badges.
     pub accent: &'static str,
@@ -280,7 +282,7 @@ impl Default for ShellTheme {
             active: "rgba(255,255,255,0.10)",
             ink: "#e4e4e7",
             ink_2: "#a1a1aa",
-            ink_3: "#80808a",
+            ink_3: "#8f8f99",
             // Signal teal: a meter's green, FastTrackStudio's accent.
             accent: "#2dd4bf",
             accent_ink: "#04201c",
@@ -593,7 +595,7 @@ pub mod layer {
 /// app on the shell.
 fn shell_css(t: &ShellTheme) -> String {
     // A tip: an icon-only control's name, drawn by the shell on hover
-    // after a beat (Blitz draws no `title`). Its host is
+    // (or keyboard focus) after a beat (Blitz draws no `title`). Its host is
     // `position: relative` and places it.
     format!(
         "button, [role=tab], [role=button] {{ cursor: pointer; }} \
@@ -601,7 +603,7 @@ fn shell_css(t: &ShellTheme) -> String {
          .tip {{ position: absolute; z-index: {z}; white-space: nowrap; padding: 4px 8px; border-radius: 6px; \
                  background: {pill}; border: 1px solid {rule}; color: {ink}; font-family: {font}; font-size: 12px; \
                  font-weight: 500; pointer-events: none; opacity: 0; transition: opacity 100ms ease-out; }} \
-         .tip-host:hover > .tip {{ opacity: 1; transition: opacity 120ms ease-out 450ms; }}",
+         .tip-host:hover > .tip, .tip-host:focus-visible > .tip {{ opacity: 1; transition: opacity 120ms ease-out 450ms; }}",
         accent = t.accent,
         z = layer::POPOVER,
         pill = t.pill,
@@ -694,7 +696,8 @@ pub fn AppShell(
     let all_status: Vec<StatusItem> = page_status().into_iter().chain(status).collect();
     let rail_extra = use_signal(|| None::<Element>);
     // A page that claims the sidebar draws it from the top (its tabs in the
-    // title row); the switcher then sits at the sidebar's foot.
+    // title row). On a desk the switcher sits at the sidebar's foot either
+    // way, so it stays put when such a page comes and goes.
     let page_side = page_left.read().is_some();
     let left = page_left().or(left);
     let has_left = left.is_some();
@@ -998,7 +1001,7 @@ pub fn AppShell(
                         } else {
                             span { style: "flex: 1;" }
                         }
-                        if desk && page_side {
+                        if desk {
                             if let Some(workspaces) = workspaces.clone() {
                                 div { style: "display: flex; align-items: center; padding: 6px 10px; border-top: 1px solid {t.rule};",
                                     Switcher { workspaces, place: Place::Head }
@@ -1183,7 +1186,7 @@ fn SidebarHead(title: Option<String>) -> Element {
 
 /// A desk's sidebar head: the title row (the window's buttons and the
 /// sidebar's button over its start, then the app's name, the rest moving
-/// the window), and the workspace switcher under it.
+/// the window). The workspace switcher is at the sidebar's foot.
 #[component]
 fn DeskSidebarHead(title: Option<String>) -> Element {
     let shell = use_shell();
@@ -1191,7 +1194,7 @@ fn DeskSidebarHead(title: Option<String>) -> Element {
     let row = shell.title_row();
     let top = shell.screen.insets.top;
     let start = shell.sidebar_title_left();
-    let chrome = shell.window.clone();
+    let chrome = shell.window;
     rsx! {
         div { style: "height: {row + top}px; flex-shrink: 0; box-sizing: border-box; display: flex; align-items: center; \
                       padding: {top}px 10px 0 {start}px; background: {t.title_bar}; border-bottom: 1px solid {t.rule};",
@@ -1203,11 +1206,6 @@ fn DeskSidebarHead(title: Option<String>) -> Element {
             }
             if let Some(c) = chrome {
                 DragStrip { chrome: c, width: None }
-            }
-        }
-        if let Some(workspaces) = shell.workspaces {
-            div { style: "display: flex; align-items: center; padding: 8px 10px 4px;",
-                Switcher { workspaces, place: Place::Head }
             }
         }
     }
