@@ -105,10 +105,14 @@ Same `App`, same screens, same client types as the browser — only the
 `Transport` differs, proving remote and local are behaviour-identical
 from the UI's point of view.
 
-## Native only
+## Native and wasm
 
-vox's `MemoryLink` isn't compiled for wasm, so `architect::local` is
-cfg'd off on `wasm32` — browser clients stay remote
-(`Transport::Remote(url)` over `WsLink`). The example UI cfg-gates its
-`Transport::Local` arm accordingly; copy that pattern in shells that
-build for both targets.
+`architect::local` builds on both targets. Native serves over
+`vox_core::memory_link_pair`; vox's `MemoryLink` isn't compiled for
+wasm, so on `wasm32` it serves over architect's own in-memory link
+(`crates/architect/src/memory_link.rs`, a port of vox's channel logic
+without fd passing) and spawns with `spawn_local`
+(`crates/architect/src/local.rs` `LocalServer`). A browser client can
+run a backend in the page the same way a desktop shell does; a shell
+that only talks to a server keeps `Transport::Remote(url)` over
+`WsLink`.

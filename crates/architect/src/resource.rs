@@ -23,8 +23,8 @@
 //! ```
 //!
 //! Backends often share a resource (one pool, many repos) — wrap the
-//! shared step in [`Resource::memoize`] so it builds once and every
-//! dependent gets the same instance.
+//! shared step in [`SharedResource::from_fn`] so it builds once and every
+//! dependent (each `.resource()` view) gets the same instance.
 
 use std::future::Future;
 use std::sync::{Arc, Mutex};
@@ -248,7 +248,7 @@ where
 // ── SharedResource (memoized) ───────────────────────────────────────────
 
 /// A memoized [`Resource`] — cloneable, builds at most once. Created by
-/// [`Resource::memoize`].
+/// [`SharedResource::from_fn`].
 pub struct SharedResource<T, E = eyre::Report> {
     cell: Arc<tokio::sync::OnceCell<T>>,
     builder: Arc<RebuildFn<T, E>>,

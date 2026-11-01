@@ -184,9 +184,14 @@ builder with dependent composition, memoization and scoped teardown
 
 ```rust
 let scope = Scope::new();
-let repo = Resource::from_fn(|_| async { load_config() })
-    .and_then(|cfg| Resource::acquire_release(connect_pool(cfg), |p| async move { p.close().await }))
-    .memoize()                       // built once, shared
+let pool = SharedResource::from_fn(|scope| async move {
+    Resource::from_fn(|_| async { load_config() })
+        .and_then(|cfg| Resource::acquire_release(connect_pool(cfg), |p| async move { p.close().await }))
+        .build(&scope)
+        .await
+});                                  // built once, shared by every `.resource()`
+let repo = pool
+    .resource()
     .map(make_repo)                  // e.g. the derive's SeaORM storage over the pool
     .build(&scope).await?;
 // … serve repo.into_router() …

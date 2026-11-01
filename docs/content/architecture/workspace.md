@@ -282,25 +282,43 @@ cursor) is the view's business and not part of the layout.
 
 ## The operations
 
-Every gesture and every key comes down to a few operations, and each is
-an action in the app's [Action List](@/architecture/commands.md) — so a
-menu, a key, the palette and a model over MCP all arrange the workspace
-the same way:
+Every gesture and every key comes down to a few operations, methods on
+`Workspace` (`features/workspace/src/ops.rs`: `open`, `move_pane`,
+`close`, `set_stacked`, `set_shares`, `pop_out_dock`, `dock_back`, …),
+and the host names each one as a **view command**: an
+`architect_commands::Command` it registers with `use_command` while it
+is mounted (`features/workspace/src/host/commands.rs`
+`WorkspaceCommands`, and `features/workspace/src/host/screens.rs` for
+the screensets). Those are what the palette (⌘K), the menus and the
+keys run, so a menu, a key and the palette arrange the workspace the
+same way.
 
-| Action | What it does |
-|---|---|
-| `workspace.open { view, state, where }` | `where` is here, a new tab, a split (side), a new window, or a dock (side) |
-| `workspace.move { pane, to }` | to a group (and index), a group's edge, a new window, a dock |
-| `workspace.close` / `.close_others` / `.close_group` / `.reopen` | |
-| `workspace.split { side }` | split the active group, moving or duplicating its tab |
-| `workspace.activate` / `.focus { direction }` / `.tab { n }` / `.next_tab` / `.prev_tab` | |
-| `workspace.back` / `.forward` | the active pane's history |
-| `workspace.pin` / `.link { with }` / `.stack { group }` | toggles |
-| `workspace.dock { side, shown }` / `.resize { node, share }` | |
-| `workspace.pop_out_dock { side }` / `.dock_back { side }` | the dock, ribbon and groups, into a window of its own and back (`WORKSPACE_POP_OUT_LEFT_DOCK`, `WORKSPACE_DOCK_BACK_LEFT_DOCK`, and the same for `RIGHT` and `BOTTOM`; which of the pair is enabled says where the dock is) |
-| `workspace.maximize` | the active pane fills the window; again restores |
-| `screenset.recall { id }` / `.save` / `.save_as { name }` / `.reset` / `.delete` | |
-| `workspace.arrange` | arrange mode, latched (for touch) |
+They are not Action List actions one by one. Two actions put the
+workspace on the app's [Action List](@/architecture/commands.md), for
+scripts, guide scenarios and a model over MCP:
+
+- `WORKSPACE_LAYOUT` (`features/workspace/src/host/actions.rs`
+  `use_workspace_actions`, read-only): the arrangement, every window's
+  groups and splits, and a `Changed { topic: "workspace" }` event on
+  each change;
+- `COMMANDS_RUN` (`features/commands/src/bridge.rs`
+  `use_command_actions`): runs any command by id, so every command below
+  is reachable from a script or MCP through it.
+
+| Operation | Commands | What it does |
+|---|---|---|
+| `open` | (⌘O, the views) | here, a new tab, a split (side), a new window, or a dock (side) |
+| `move_pane` | `WORKSPACE_MOVE_TO_LEFT_DOCK` / `_RIGHT_DOCK` / `_BOTTOM_DOCK` / `_CENTER`, `WORKSPACE_MOVE_TO_NEW_WINDOW`, `WORKSPACE_MOVE_TO_MAIN_WINDOW`, `WORKSPACE_FLOAT_TAB` | to a group (and index), a group's edge, a new window, a dock |
+| `close` / `close_others` / `reopen` | `WORKSPACE_CLOSE_TAB`, `WORKSPACE_CLOSE_OTHER_TABS`, `WORKSPACE_REOPEN_TAB` | |
+| a split | `WORKSPACE_SPLIT_RIGHT`, `WORKSPACE_SPLIT_DOWN` | split the active group, moving its tab |
+| `activate` / `goto_tab` / `cycle_tab` | `WORKSPACE_FOCUS_LEFT` / `_RIGHT` / `_UP` / `_DOWN`, `WORKSPACE_NEXT_TAB`, `WORKSPACE_PREVIOUS_TAB` | |
+| `go` | `WORKSPACE_GO_BACK`, `WORKSPACE_GO_FORWARD` | the active pane's history |
+| `set_pinned` / `set_stacked` / `set_chrome` | `WORKSPACE_PIN_TAB`, `WORKSPACE_STACK_TABS`, `WORKSPACE_TAB_BAR` | toggles |
+| `set_dock_shown` / `set_shares` | `WORKSPACE_TOGGLE_RIGHT_DOCK`, `WORKSPACE_TOGGLE_BOTTOM_DOCK`; dragging a divider | |
+| `pop_out_dock` / `dock_back` | `WORKSPACE_POP_OUT_LEFT_DOCK`, `WORKSPACE_DOCK_BACK_LEFT_DOCK`, and the same for `RIGHT` and `BOTTOM` | the dock, ribbon and groups, into a window of its own and back; which of the pair is enabled says where the dock is |
+| screensets (`recall`, `save`, `save_as`, `reset`) | `SCREENSET_SAVE`, `SCREENSET_RESET` | |
+| | `WORKSPACE_ARRANGE` | arrange mode, latched (for touch) |
+| | `WORKSPACE_EVERY_PANE` | every open pane, to pick one |
 
 Opening by kind follows Obsidian: a plain open reuses the active tab
 unless it is pinned; ⌘ opens a new tab, ⌘⌥ a split, ⌘⌥⇧ a window.
@@ -417,7 +435,7 @@ lives there).
 | `Float` (inside the window) | a real window; an in-window float stays as an option |
 | `Panel { kind, state, link }` | `Pane`, plus `pinned`, `history`, cached `icon` |
 | `Screenset { variants: FormClass → Dockspace }` | the same, over `Workspace` |
-| `DockRequest` queue polled by Session | actions on the Action List |
+| `DockRequest` queue polled by Session | view commands, run by id (`COMMANDS_RUN` on the Action List) |
 | persisted by Session (`utils::prefs`) | a store the app passes |
 | `HostPanels { kinds, scope }` (in Session) | `Views` (here) |
 

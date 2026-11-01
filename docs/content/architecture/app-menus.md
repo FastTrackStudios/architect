@@ -90,7 +90,7 @@ standard item; the root is 0) and each backend draws that; a pick is a
 
 ## From what exists
 
-- Session's dbusmenu server (`studio:apps/session/ui/src/app_menu/bus.rs`)
+- Session's dbusmenu server (`studio:apps/session/daw/src/app_menu/bus.rs`)
   is the Linux backend, now fed a tree that changes (it announces each
   new one with `LayoutUpdated`) and carrying `enabled` and
   `toggle-state`. Its `app_menu::{entries, layout, Node}` and `MENUS`
