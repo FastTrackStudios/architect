@@ -16,6 +16,7 @@ ui = [
     "dep:dioxus",
     "dep:lucide-dioxus",
     "dep:futures-timer",
+    "dep:web-time",
     "dep:objc2-app-kit",
     "dep:objc2-foundation",
     "dep:raw-window-handle",
@@ -26,17 +27,21 @@ dioxus = { workspace = true, optional = true }
 lucide-dioxus = { workspace = true, optional = true }
 # The drawers ease in a frame at a time (src/shell/motion.rs).
 futures-timer = { workspace = true, optional = true }
+# The motion clock's wall time, a browser's too.
+web-time = { version = "1.1", optional = true }
 
 # A Mac window's own title bar: the traffic lights placed in the shell's
 # title row (src/shell/mac.rs).
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.3", optional = true, default-features = false, features = [
     "std",
+    "NSAccessibility",
     "NSButton",
     "NSControl",
     "NSResponder",
     "NSView",
     "NSWindow",
+    "NSWorkspace",
 ] }
 objc2-foundation = { version = "0.3", optional = true, default-features = false, features = [
     "std",

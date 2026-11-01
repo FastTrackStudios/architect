@@ -14,11 +14,13 @@
 //! 3. waits for `done`: one of its events on the Action List, then every
 //!    check — a read-only action whose JSON result must contain `has`.
 //!
-//! Time is virtual: frame *n* is `n / fps` seconds, and Stylo's animations
-//! and transitions are resolved at that time, so a film is the same on
-//! every run. (A Dioxus task's own timers still run on the wall clock; the
-//! runner waits on state for those, never on time.) A [`Film`] is shown
-//! each frame kept; with none, the run is a test.
+//! Time is virtual: frame *n* is `n / fps` seconds. Stylo's animations
+//! and transitions are resolved at that time, and the app's motions
+//! (`architect_shell::motion`) run on it — a [`VirtualClock`] the runner
+//! moves on each frame — so a film is the same on every run and shows a
+//! motion's in-between frames. (A Dioxus task's own timers still run on
+//! the wall clock; the runner waits on state for those, never on time.) A
+//! [`Film`] is shown each frame kept; with none, the run is a test.
 
 // Geometry reads plainer as `a + b * c`; its precision is a pixel's.
 #![allow(clippy::suboptimal_flops)]
@@ -32,6 +34,7 @@ use std::task::{Context, Poll, Waker};
 use std::time::{Duration, Instant};
 
 use architect::action::{ActionError, ActionList, Effect, EventKind};
+use architect_shell::motion::VirtualClock;
 use architect_workspace::{Popout, Rect, WindowId, WindowSystem, Windows};
 use blitz_dom::{Document as _, DocumentConfig, FontContext};
 use blitz_traits::events::{
@@ -446,6 +449,8 @@ pub fn run(
     scenario: &Scenario,
     film: Option<&mut dyn Film>,
 ) -> Result<Report, RunError> {
+    // Before the documents: a motion started as they build is on it too.
+    let clock = VirtualClock::start();
     let desk = Desktop::open(app, scenario);
     let main = desk
         .windows
@@ -466,6 +471,7 @@ pub fn run(
         captured: None,
         focused: 0,
         film,
+        clock,
         recording: false,
         pending: None,
         report: Report::default(),
@@ -497,6 +503,8 @@ struct Runner<'a, 'f> {
     /// The window keys go to: the last one pressed in.
     focused: usize,
     film: Option<&'f mut dyn Film>,
+    /// The app's motions' clock, moved on with the frames.
+    clock: VirtualClock,
     recording: bool,
     /// An async action under way.
     pending: Option<(String, Pending)>,
@@ -545,6 +553,7 @@ impl Runner<'_, '_> {
     /// One frame of the virtual clock: settle, then show it to the film.
     fn tick(&mut self) -> Result<(), RunError> {
         let time = self.time();
+        self.clock.advance_to(time);
         self.quiesce(time);
         self.poll_pending()?;
         self.show();
