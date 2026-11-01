@@ -95,11 +95,15 @@ the desktop's windows (`architect_workspace::Windows`) in root context.
   `handle_ui_event`, the path a window's shell drives: the pointer travels
   eased over frames, presses, moves, lets go. A drag goes through the
   app's real drag path, so its drop zones and its animations play.
-- **Time is virtual**: frame *n* is `n / fps` seconds and Stylo's
-  animations and transitions are resolved at it, so a film is the same each
-  run. A Dioxus task's own timers run on the wall clock; each frame waits
-  until the documents have been idle for a few milliseconds before it is
-  taken (`Runner::quiesce`), and `done` waits on state, never on time.
+- **Time is virtual**: frame *n* is `n / fps` seconds. Stylo's
+  animations and transitions are resolved at it, and the app's motions
+  (`architect_shell::motion`, [Motion](@/architecture/motion.md)) run on
+  it: the runner moves a `VirtualClock` to each frame's time, so a film
+  shows every in-between frame and is the same each run. A Dioxus task's
+  own timers run on the wall clock; each frame waits until the documents
+  have been idle for a few milliseconds before it is taken
+  (`Runner::quiesce`), and `done` waits on state, never on time (while a
+  motion runs, the wait is frames).
 - **Every window**: the runner is the app's `WindowSystem`
   (`features/workspace/src/host/windows.rs`). A tab or a dock dragged out
   opens a pop-out, a second document on the desktop at the place the

@@ -1215,6 +1215,10 @@ pub fn WorkspaceView(
             if os_windows.is_some() && !phone {
                 windows::PopoutSync { bridge }
             }
+            // Under the app's shell, the shell's keeps the frames coming.
+            if !in_shell {
+                architect_shell::motion::MotionFrames {}
+            }
             DropHighlight {}
             DragLayer {}
             MenuLayer {}

@@ -678,8 +678,11 @@ fn Stacked(group: Group, current: PaneId) -> Element {
                 },
                 onwheel: move |e| {
                     let shift = e.modifiers().shift();
-                    // Sideways, or a plain wheel turned with ⇧ held.
-                    let along = |x: f64, y: f64| super::narrow(if x == 0.0 && shift { y } else { x });
+                    // Sideways, or a plain wheel turned with ⇧ held; signed
+                    // as Blitz scrolls a box (a delta to the right brings
+                    // the start into view), so a swipe moves it the way it
+                    // moves everything else.
+                    let along = |x: f64, y: f64| -super::narrow(if x == 0.0 && shift { y } else { x });
                     match e.data().delta() {
                         // A trackpad (and its coasting): point for point.
                         WheelDelta::Pixels(d) => {

@@ -245,6 +245,83 @@ impl Future for NextFrame {
     }
 }
 
+// ── Drawn at the display's rate ────────────────────────────────────────────
+
+thread_local! {
+    /// Motions running on this thread.
+    static RUNNING: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    /// Every mounted [`MotionFrames`]' switch.
+    static PACERS: RefCell<Vec<Signal<bool>>> = const { RefCell::new(Vec::new()) };
+}
+
+/// A running motion, counted while its frames run (dropped with them).
+struct Running;
+
+impl Running {
+    fn start() -> Self {
+        let was = RUNNING.with(|r| {
+            let n = r.get();
+            r.set(n.saturating_add(1));
+            n
+        });
+        if was == 0 {
+            PACERS.with(|p| {
+                for mut on in p.borrow().iter().copied() {
+                    if on.try_peek().is_ok_and(|v| !*v) {
+                        on.set(true);
+                    }
+                }
+            });
+        }
+        Self
+    }
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        RUNNING.with(|r| r.set(r.get().saturating_sub(1)));
+    }
+}
+
+/// Keeps the window drawing at the display's rate while a motion runs.
+///
+/// Blitz (the FTS fork) draws a document's own updates at most 30 times a
+/// second (`FTS_MAX_FPS`) but a running CSS animation at the display's
+/// rate: while any [`Motion`] moves this draws an invisible one, and takes
+/// it away when they rest. Mount it once in each window's root (the
+/// shell's [`AppShell`](crate::AppShell) and the workspace's pop-outs do).
+#[component]
+pub fn MotionFrames() -> Element {
+    let mut on = use_signal(|| RUNNING.with(std::cell::Cell::get) > 0);
+    use_hook(move || PACERS.with(|p| p.borrow_mut().push(on)));
+    use_drop(move || PACERS.with(|p| p.borrow_mut().retain(|s| *s != on)));
+    // On: watch for the last motion to rest, then go off.
+    use_effect(move || {
+        if !on() {
+            return;
+        }
+        spawn(async move {
+            loop {
+                next_frame().await;
+                if RUNNING.with(std::cell::Cell::get) == 0 {
+                    on.set(false);
+                    return;
+                }
+            }
+        });
+    });
+    if !on() || is_virtual() {
+        return rsx! {};
+    }
+    rsx! {
+        document::Style { "@keyframes architect-motion-frames {{ from {{ opacity: 0; }} to {{ opacity: 0.01; }} }}" }
+        div {
+            style: "position:absolute; left:0; top:0; width:1px; height:1px; opacity:0; pointer-events:none; \
+                    animation: architect-motion-frames 1s linear infinite;",
+        }
+    }
+}
+
 // ── Reduced motion ─────────────────────────────────────────────────────────
 
 /// 0: as the OS says; 1: full motion; 2: reduced.
@@ -421,9 +498,12 @@ impl Track {
     }
 }
 
-/// A value that moves: read it in a render with [`Motion::value`], send
-/// it with [`Motion::to`], hold it with [`Motion::hold`]. Copy it into any
-/// handler; its frames run in the component that made it.
+/// A value that moves.
+///
+/// Read it in a render with [`Motion::value`], send it with [`Motion::to`],
+/// hold it with [`Motion::hold`]. Copy it into any handler; its values
+/// belong to the component that made it, its frames run in the window's
+/// root and end when that component goes.
 #[derive(Clone, Copy)]
 pub struct Motion {
     value: Signal<f64>,
@@ -433,7 +513,6 @@ pub struct Motion {
     /// Called once it comes to rest where it was sent (replaced by the
     /// next send, dropped by a hold).
     done: CopyValue<Option<Rc<RefCell<dyn FnMut()>>>>,
-    owner: CopyValue<ScopeId>,
 }
 
 impl PartialEq for Motion {
@@ -459,7 +538,6 @@ impl Motion {
             track: CopyValue::new(Track::new(at, spring, rest)),
             running: CopyValue::new(false),
             done: CopyValue::new(None),
-            owner: CopyValue::new(dioxus::core::current_scope_id()),
         }
     }
 
@@ -472,30 +550,42 @@ impl Motion {
     /// Where it is now, without subscribing.
     #[must_use]
     pub fn peek(self) -> f64 {
-        *self.value.peek()
+        self.value.try_peek().map_or(0.0, |v| *v)
+    }
+
+    /// Its state, if its component is still there.
+    fn state(self) -> Option<Track> {
+        self.track.try_peek().ok().map(|t| *t)
+    }
+
+    /// Changes its state, if its component is still there.
+    fn update(mut self, f: impl FnOnce(&mut Track)) {
+        if let Ok(mut t) = self.track.try_write() {
+            f(&mut t);
+        }
     }
 
     /// Where it is headed.
     #[must_use]
     pub fn target(self) -> f64 {
-        self.track.peek().target()
+        self.state().map_or(0.0, |t| t.target())
     }
 
     /// Whether it is moving on its own.
     #[must_use]
     pub fn moving(self) -> bool {
-        self.track.peek().moving()
+        self.state().is_some_and(|t| t.moving())
     }
 
     /// Its speed, in its units a second.
     #[must_use]
     pub fn velocity(self) -> f64 {
-        self.track.peek().velocity
+        self.state().map_or(0.0, |t| t.velocity)
     }
 
     /// Changes the spring for what it is sent to next.
-    pub fn set_spring(mut self, spring: Spring) {
-        self.track.write().spring = spring;
+    pub fn set_spring(self, spring: Spring) {
+        self.update(|t| t.spring = spring);
     }
 
     /// Sends it to `to` on its spring, keeping the velocity it has.
@@ -509,65 +599,74 @@ impl Motion {
         self.send(to, Some(Rc::new(RefCell::new(done))));
     }
 
-    fn send(mut self, to: f64, done: Option<Rc<RefCell<dyn FnMut()>>>) {
+    fn send(self, to: f64, done: Option<Rc<RefCell<dyn FnMut()>>>) {
         let mut d = self.done;
-        d.set(done);
+        let Ok(mut slot) = d.try_write() else {
+            return;
+        };
+        *slot = done;
+        drop(slot);
         if reduced_motion() {
             self.jump(to);
             self.finish();
             return;
         }
-        let same = { *self.track.peek() };
+        let Some(same) = self.state() else {
+            return;
+        };
         if !same.moving() && (same.at - to).abs() < same.rest {
             self.jump(to);
             self.finish();
             return;
         }
-        self.track.write().to(to, now());
+        self.update(|t| t.to(to, now()));
         self.run();
     }
 
     /// Lets it coast from the speed it was held at, kept within
     /// `min..=max` (a scroll flicked).
-    pub fn coast(mut self, min: f64, max: f64) {
+    pub fn coast(self, min: f64, max: f64) {
         self.forget();
         if reduced_motion() {
-            let to = self.track.peek().at.clamp(min, max);
+            let to = self.state().map_or(min, |t| t.at).clamp(min, max);
             self.jump(to);
             return;
         }
-        self.track.write().coast(min, max, now());
+        self.update(|t| t.coast(min, max, now()));
         self.run();
     }
 
     /// Puts it at `at` and keeps it there (a finger has it), measuring the
     /// finger's speed for a [`Motion::to`] or [`Motion::coast`] after.
-    pub fn hold(mut self, at: f64) {
+    pub fn hold(self, at: f64) {
         self.forget();
-        self.track.write().hold(at, now());
+        self.update(|t| t.hold(at, now()));
         self.show(at);
     }
 
     /// Puts it at `at`, still: no motion, no speed.
-    pub fn jump(mut self, at: f64) {
-        self.track.write().jump(at, now());
+    pub fn jump(self, at: f64) {
+        self.update(|t| t.jump(at, now()));
         self.show(at);
     }
 
     /// Moves it by `by` at once, still headed where it was (a layout
     /// change under it: what moves is the distance left to go).
-    pub fn shift(mut self, by: f64) {
-        let mut track = self.track.write();
-        track.at += by;
-        let at = track.at;
-        drop(track);
-        self.show(at);
+    pub fn shift(self, by: f64) {
+        let mut at = None;
+        self.update(|t| {
+            t.at += by;
+            at = Some(t.at);
+        });
+        if let Some(at) = at {
+            self.show(at);
+        }
     }
 
     /// Drops what was to run when the last send got there.
     fn forget(self) {
         let mut d = self.done;
-        if d.peek().is_some() {
+        if d.try_peek().is_ok_and(|v| v.is_some()) {
             d.set(None);
         }
     }
@@ -584,7 +683,11 @@ impl Motion {
 
     fn finish(self) {
         let mut d = self.done;
-        let done = d.write().take();
+        let Ok(mut slot) = d.try_write() else {
+            return;
+        };
+        let done = slot.take();
+        drop(slot);
         if let Some(done) = done {
             (done.borrow_mut())();
         }
@@ -592,13 +695,13 @@ impl Motion {
 
     /// Starts its frames, unless they are running.
     fn run(mut self) {
-        if *self.running.peek() {
-            return;
-        }
         let mut running = self.running;
-        running.set(true);
-        let owner = *self.owner.peek();
+        match running.try_write() {
+            Ok(mut r) if !*r => *r = true,
+            _ => return,
+        }
         let frames = async move {
+            let _running = Running::start();
             loop {
                 next_frame().await;
                 let Ok(mut track) = self.track.try_write() else {
@@ -610,13 +713,18 @@ impl Motion {
                 self.show(at);
                 if rested {
                     let mut running = self.running;
-                    running.set(false);
+                    if let Ok(mut r) = running.try_write() {
+                        *r = false;
+                    }
                     self.finish();
                     return;
                 }
             }
         };
-        dioxus::core::Runtime::current().spawn(owner, frames);
+        // In the window's root: a motion may be sent from a component that
+        // is going (a tab dropped into another bar); its frames end when
+        // its own component goes, and its values with it.
+        dioxus::core::Runtime::current().spawn(ScopeId::ROOT, frames);
     }
 }
 

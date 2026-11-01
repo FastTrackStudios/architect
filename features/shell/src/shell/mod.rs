@@ -979,6 +979,7 @@ pub fn AppShell(
             onpointerup,
             onpointercancel,
             document::Style { {shell_css(&t)} }
+            crate::motion::MotionFrames {}
             if frame == Frame::Sidebar && desk {
                 DeskRibbon { tabs: tabs.clone(), current, on_tab: pick }
             }

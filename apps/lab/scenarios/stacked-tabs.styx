@@ -38,14 +38,14 @@ steps (
         id nudge
         text "A little scroll moves it a little: the next pane starts to slide over."
         target @group"note-welcome"
-        do @scroll{dx 90, seconds 0.5}
+        do @scroll{dx -90, seconds 0.5}
         hold 0.6
     }
     {
         id slide
         text "Scroll sideways: the strip slides, each pane's spine stays in view."
         target @group"note-welcome"
-        do @scroll{dx 520, seconds 1.2}
+        do @scroll{dx -520, seconds 1.2}
         hold 1.0
     }
     {

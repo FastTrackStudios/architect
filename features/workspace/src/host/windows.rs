@@ -449,6 +449,7 @@ fn PopoutView(props: PopoutProps) -> Element {
                     DockView { side, dock, fill: true }
                 }
             }
+            architect_shell::motion::MotionFrames {}
             DropHighlight {}
             DragLayer {}
             MenuLayer {}

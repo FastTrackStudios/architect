@@ -192,7 +192,14 @@ pub(super) fn landed(host: Host, pane: &PaneId, rows: &[Row], landing: Landing, 
         }
         return;
     };
-    let to = bar_index(dest);
+    // Into a group's middle, it goes after its last tab.
+    let to = match dest {
+        Some(Dest::Group { group, index: None }) => rows
+            .iter()
+            .find(|r| r.group == group)
+            .map(|r| (group, r.tabs.len())),
+        other => bar_index(other),
+    };
     let was = |p: &PaneId| {
         rows.iter()
             .flat_map(|r| r.tabs.iter())
@@ -352,5 +359,15 @@ mod tests {
         assert_eq!(by(&out, "c"), 101.0);
         assert_eq!(by(&out, "b"), 801.0);
         assert_eq!(by(&out, "y"), 902.0);
+    }
+
+    #[test]
+    fn into_its_own_groups_middle_it_goes_last() {
+        let rows = [row(1, 0.0, &["a", "b", "c"])];
+        let a = PaneId::new("a");
+        let out = after(&rows, &a, Some((GroupId(1), 3)));
+        assert_eq!(by(&out, "b"), 0.0);
+        assert_eq!(by(&out, "c"), 101.0);
+        assert_eq!(by(&out, "a"), 202.0);
     }
 }
