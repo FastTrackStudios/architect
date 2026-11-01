@@ -128,19 +128,52 @@ pub trait Notes {
   (`architect::http::encode_segment` / `encode_rest`). A `{param}` in the
   service `path` binds that argument on every method, so every method
   must take it. The derive refuses a parameter that names no argument.
-- The other arguments are the JSON body, as before. A `get` route has no
-  body (a browser's `fetch` will not send one), so all its arguments come
-  from the path, or the bearer header for `token`; the derive says so at
-  compile time otherwise.
+- The other arguments are the JSON body, as before, except on a `get`
+  route, which has no body (a browser's `fetch` will not send one): its
+  other arguments are the query string (see below).
 - `limit = "1GiB"` raises the route's body cap: axum's `DefaultBodyLimit`
   on that route (units `B`, `KB`, `MB`, `GB`, `KiB`, `MiB`, `GiB`).
   Without it the cap is axum's 2 MiB (`architect::http::DEFAULT_BODY_LIMIT`),
   and a bigger body is a `413`.
 - These methods keep their vox face and their typed clients: the HTTP
-  client fills in the path and sends the verb, and `http::PATHS` lists
-  the templates (`/org/{slug}/notes/{id}`).
+  client fills in the path and the query and sends the verb, and
+  `http::PATHS` lists the templates (`/org/{slug}/notes/{id}`).
 - A method with none of this keeps the exact `POST` route it always had.
-  `crates/architect/tests/http_routes.rs` drives all of it over a socket.
+  `crates/architect/tests/http_routes.rs` drives all of it over a socket,
+  and runs one scenario on every face: in process, over HTTP and over vox.
+
+### Query arguments
+
+A route with no JSON body (a `get`, or a method that takes a
+`BodyStream`) reads the arguments its path does not bind from the query
+string:
+
+```rust,ignore
+#[http(get, path = "search")]          // GET /org/{slug}/search?q=apple%20pie&limit=10
+async fn search(&self, slug: String, q: String, limit: u32, after: Option<u32>)
+    -> Result<Vec<u32>, NoteError>;
+
+#[http(get, path = "share/{hash}")]    // GET /org/{slug}/share/{hash}?pw=…  (ranged)
+async fn shared(&self, slug: String, hash: String, pw: Option<String>)
+    -> Result<ByteBody, MediaError>;
+```
+
+- Each argument parses with `FromStr` from its decoded value (`+` is a
+  space, `%XX` a byte). An `Option<T>` that is absent reads as `None`;
+  any other argument that is absent, or a value that does not parse, is a
+  `400` with code `invalid_query` before the method runs. The first of a
+  repeated name wins, and names the method does not take are ignored
+  (`utm_source` and the like).
+- `token` follows the body's rule with the query in its place: `?token=`
+  wins when it says something, `Authorization: Bearer` fills in. A media
+  URL in an `<img src>` cannot set a header, so it carries the token in
+  the query.
+- The typed client writes each argument with `Display`, percent-encoded
+  (`architect::http::QueryString`), and leaves out a `None` and an empty
+  `token`, so a client built `with_bearer` keeps the credential out of
+  the URL.
+- A hand-written hook reads the same values through
+  `RequestHead::query_param(name)`.
 
 ## Bytes: uploads and ranged downloads
 
@@ -151,7 +184,7 @@ that with three types from `architect::http`
 | type | where | what the handler does |
 |---|---|---|
 | `BodyStream` | argument | hands over the request body as a stream of chunks, capped at the route's `limit` |
-| `RequestHead` | argument | hands over the method, URI, headers and path params (`bearer()`, `header(..)`, `query()`, `param(..)`) |
+| `RequestHead` | argument | hands over the method, URI, headers and path params (`bearer()`, `header(..)`, `query()`, `query_param(..)`, `param(..)`) |
 | `ByteBody` | `Ok` value (or the return) | serves it through `ranged::serve_body`: `200`, `206` + `Content-Range`, or `416` |
 
 ```rust,ignore
@@ -189,7 +222,8 @@ impl Media for Store {
   `chunk()` / `to_vec()`). A declared `Content-Length` over the route's
   cap is a `413` before the method runs; a chunked body that grows past
   it ends the stream with `io::ErrorKind::FileTooLarge`, which the method
-  maps to its own error. Its other arguments come from the path.
+  maps to its own error. Its other arguments come from the path and the
+  query string (`PUT …/files?name=a.txt&part=2`).
 - Path parameters, verbs and `limit` work exactly as for JSON methods.
 
 **These methods are HTTP-only.** vox has no byte-stream argument to carry
@@ -480,9 +514,9 @@ store-backed routes.
 
 - Traits with an ambient `context = T` have no HTTP face: there is no
   transport-neutral way to pull `T` out of a request yet.
-- Arguments come from the path, the bearer header or a JSON body, never
-  a query string; a `#[subscribe]` stream cannot sit under a service
-  `path` with parameters.
+- A route with a JSON body takes no query arguments (they go in the
+  body), and a `#[subscribe]` stream cannot sit under a service `path`
+  with parameters.
 - `ranged` serves one range per request (no `multipart/byteranges`) and
   checks no validators: an `If-Range` that no longer matches still gets
   the range.

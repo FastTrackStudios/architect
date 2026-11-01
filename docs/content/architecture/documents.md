@@ -4,12 +4,28 @@ description = "What an app's work is saved as, how it is undone, versioned, sync
 weight = 57
 +++
 
-> **Status: kinds and named undo landed (2026-11-01)** in `crdt`:
-> `features/crdt/crdt/src/kinds.rs` `DocKind` (an id, a name, a file
-> extension, a schema stamp and migrations; `stamp`, `upgrade`),
+> **Status: kinds, named undo and the file landed (2026-11-01)** in
+> `crdt`: `features/crdt/crdt/src/kinds.rs` `DocKind` (an id, a name, a
+> file extension, a schema stamp and migrations; `stamp`, `upgrade`),
 > `DocKinds`; `features/crdt/crdt/src/history.rs` `History`
-> (`transact` — one named step — `undo`, `redo`, local only). Next in
-> the order of work: the file format, blobs, the org driver. Proposed
+> (`transact` — one named step — `undo`, `redo`, local only).
+> **Blob transfer landed:** `DocKind::blobs` (which blobs a document
+> points at), `features/crdt/crdt/src/blobs.rs` (`live`, `keep_offline`)
+> and `architect::blob`'s `Fetcher` (on demand by hash over vox, iroh or
+> HTTP, resumable, streamed), pins and collection ([blobs](@/architecture/blob.md)).
+> Next in the order of work: the file format, the org driver. Proposed
+> (`transact` — one named step — `undo`, `redo`, local only);
+> `features/crdt/crdt/src/file/mod.rs` `DocFile` and
+> `features/crdt/crdt/src/file/branch.rs` `Branch` (the file, below).
+> The org driver landed (2026-11-01):
+> `features/crdt/crdt/src/docs/org.rs` `OrgDocs` (one org's driver,
+> kept connected under a `Backoff`) and `OrgSyncs` (one per org,
+> following the person's current org);
+> `features/crdt/crdt/src/docs/placement.rs` `Placement` (each document
+> in its file); `features/crdt/crdt/src/registry.rs` `DocPermissions`
+> (the org's permission on every call). Next in the order of work:
+> blobs. Studio's
+> `session-format` moving onto the file is Studio's work. Proposed
 > (2026-10-31): most of
 > the pieces exist ([collaboration](@/architecture/collaboration.md),
 > [peers](@/architecture/peers.md), [blobs](@/architecture/blob.md)); the
@@ -50,7 +66,9 @@ In Studio, generic and moving here:
   (`signal/proto/src/doc/codec.rs`), better than the hand-written one
   here.
 - **The org driver:** one sync driver per org, reconnecting, placing
-  each document by policy (`studio:features/account/src/sync.rs`).
+  each document by policy (`studio:features/account/src/sync.rs`) —
+  now architect's (below, "The org driver"); Studio moving onto it is
+  Studio's work.
 - **Live sessions:** a host serves its documents over iroh; a link
   (`fts-session:<endpoint>/<set>`) joins it; presence (pointers, who is
   here) rides beside the document.
@@ -88,10 +106,49 @@ since the last snapshot. Every finished undo step is on disk the moment
 it finishes: there is no "unsaved" state to lose, and "Save" means
 "name this version".
 
+Built (`features/crdt/crdt/src/file/mod.rs`): Studio's five tables are
+records in one append-only file rather than tables in a database
+(`features/crdt/crdt/src/file/format.rs`): a 12-byte header, then each
+record framed by its length and a CRC-32. Nothing in it is native, so a
+browser reads a file it was handed (`DocFile::from_bytes`) as a desktop
+reads one from disk (`DiskStorage`); where the bytes live is a `Storage`
+(`MemoryStorage` and `DiskStorage` today).
+
+```rust,ignore
+let file = DocFile::create(DiskStorage::open(path)?, &kind).await?; // meta + `main`, stamped
+let mut main = file.open_branch(MAIN).await?;
+main.transact("Split item", |doc| { /* edit */ }).await?;   // on disk when it returns
+main.save("Mix sent to Dan").await?;                       // a checkpoint, and a fold
+let mut alt = main.fork("acoustic").await?;                // open side by side
+main.merge(&alt).await?;                                   // a step, "Merge acoustic"
+let v = &file.versions(MAIN).await?[3];
+let old = file.open_version(v).await?;                     // read-only
+let back = file.restore(v, "from v3").await?;              // a new branch
+```
+
+| | How |
+|---|---|
+| A step | `Branch::transact`, `undo`, `redo` append the step's Loro update (its name, time and frontiers) and sync it before returning |
+| Crash | the write it cut short is a torn last record; opening drops it (`DocFile::recovered`) and replays the steps after the last snapshot. `features/crdt/crdt/tests/file.rs` `kill_9_mid_edit_reopens_with_every_finished_step` kills a writer mid-edit |
+| Save | `Branch::save` names a checkpoint and folds the branch into a snapshot built from the file (another handle's steps are kept); the file is rewritten beside itself and renamed over. Folded steps keep their names and places, so every one still opens |
+| Branches | forked at a point (`parent`, `base` frontiers), sharing the history before it; deleting one folds its children first so they stand alone; `main` cannot be deleted |
+| Kind | `meta` holds `kind`, `schema` and `id`; opening refuses another kind or a newer schema, and `open_branch` runs migrations as a step |
+| Blobs | `DocFile::put_blob` keeps bytes once by SHA-256 (the name `architect::blob` uses) |
+| Sync | `DocFile::persistence` is a branch as a `Persistence`, so a `CrdtDoc` (and `DocSync` on it) keeps its replica in the file |
+
+Not yet: blobs beside the file and their reachability, an IndexedDB
+`Storage`, undo that survives reopening (Loro's `UndoManager` cannot be
+seeded), and one writer per file (two processes appending would
+interleave).
+
 Large media — audio a song records, images a note embeds — are blobs: by
 reference, by content hash, stored beside the document (a folder next to
 the file, or the store's blob table for small ones), fetched on demand
-on another device, pinned to keep offline.
+on another device, pinned to keep offline. The kind says which blobs a
+document points at (`DocKind::blobs`); `architect::blob::Fetcher` reads
+one from the peer the document came from or the org's server when it is
+played, streaming it as it arrives; `crdt::blobs::live` is what keeps a
+blob from collection ([blobs](@/architecture/blob.md)).
 
 ### Undo and transactions
 
@@ -119,13 +176,37 @@ Three ways a document reaches other devices, all `DocSync` underneath:
 | | To | Over |
 |---|---|---|
 | **Your devices and your org** | the org's server (Task's), which keeps the canonical copy | vox over WebSocket, reconnecting; offline edits merge when back |
-| **Live, peer to peer** | someone you share a link with, or a device on the same network | vox over iroh: a link, or found on the local network (mDNS, `_fts._tcp` — reserved today, not yet browsed) |
-| **Device to device** | your own devices without a server | iroh, the device registry admitting them |
+| **Live, peer to peer** | someone you share a link with, or a device on the same network | vox over iroh: a link (`fts-doc:<endpoint>/<doc>?key=…`, `crdt::link`), or found on the local network (`_fts._udp`, `iroh_link::LanBrowser`) |
+| **Device to device** | your own devices without a server | iroh, the device registry admitting them (`crdt::p2p`) |
 
 Presence — who is here, where their pointer is, what they have selected
 — rides beside each document on every one of them. Who may read, edit,
 or administer a document is the org's permission, checked on every
-call (caller identity in the registry: the gap collaboration.md names).
+call: `DocPermissions` (`features/crdt/crdt/src/registry.rs`) asks the
+org's permission engine about the caller the gate resolved, `read` or
+`write` on `org/<org>/doc/<id>`, in `DocRegistry` and `DocsHost` alike
+([collaboration](@/architecture/collaboration.md), "Who may").
+
+### The org driver
+
+A device keeps one driver per org that owns something on it
+(`features/crdt/crdt/src/docs/org.rs`):
+
+| Piece | What it does |
+|---|---|
+| `OrgDocs` | one org's `DocsDriver` (the device's index of the org's documents and their sync) and its `Placement`. `stay_connected(dial)` is the loop: dial the org's lane, run a session until a connection closes (`Caller::closed`), wait under architect's `Backoff` (full jitter, 250 ms to 10 s, reset by every connection), dial again; `Dialed::Stop` (signed out) ends it. `run_on(&lane)` is one session, for an app whose connection is already supervised (`use_app_supervised`: run it once per `Connection::generation`). `link()` is `Connecting`, `Live`, `Offline` or `Stopped` |
+| `OrgSyncs` | one `OrgDocs` per org, made on first ask by the app's `open` and kept connected through its `dial`; `current(&Orgs)` is the window's org (`architect-orgs`), `follow(&Orgs)` stops the orgs the person left |
+| `Placement` | each document in a document file: where the app placed it (`place(id, path)`), else `<dir>/<id>.<extension>` by its kind; synced through the file's `main` (`DocFile::persistence`), so every step that arrives is durable in the file the person opens. A new file is stamped for a document made here and left empty for one made elsewhere (`DocFile::adopt`), so it is never another lineage |
+
+Offline, every document edits locally; the next session is a delta
+both ways. Proven by `features/crdt/crdt/tests/org_sync.rs`
+(`a_members_doc_syncs_through_a_dropped_connection_and_merges_offline_edits`).
+
+Confining every service to the caller's org, with membership learnt
+from the identity server, is `architect-orgs`' server side (in review,
+PR #111): `DocPermissions::in_org` names a document by the same
+`org/<id>/…` resource that layer keys an org's data by, so its engine
+is the one to hand `DocPermissions`.
 
 ### The catalogue
 
@@ -141,6 +222,18 @@ belongs to (the project, a track, an item), saved, undone, versioned and
 synced with it.
 
 ## Files
+
+> **Status: the core landed (2026-11-01)** in `architect-files`
+> (`features/files`): the store (`features/files/src/server/mod.rs`
+> `FilesServer`: every org's roots, trees, versions, labels, grants,
+> uploads and quota under `OrgId::path`, bytes in the `architect::blob`
+> store), the wire (`features/files/src/service.rs` `FilesService`, bytes
+> over vox channels, its events per subscriber), access by the caller's
+> role in the org and per-folder grants (`features/files/src/access.rs`
+> `resolve`), version labels, and the client
+> (`features/files/src/client.rs` `FilesClient`). Next: client sync,
+> the browser and desktop integrations, adopting on-disk folders, the
+> HTTP byte face; then Task and Studio move over.
 
 Task's Files platform (`task:features/files`, about 38,600 lines) is the
 file layer every app needs: roots of files and folders, versions,
@@ -176,9 +269,10 @@ Task and Studio are both its clients, as any architect app is.
 | ffmpeg proxies (`files-transcode`) | a feature of the server, behind a cargo feature |
 
 **One store with documents:** a document's blobs (above) and files are
-the same store — BLAKE3 both — so a song's audio is a file in its root
-and a blob its document points at, fetched, pinned and kept offline the
-same way.
+the same store — `architect::blob`, addressed by sha256 (Task's Files
+used BLAKE3; a file's `ContentId` is now the blob's sha256) — so a song's
+audio is a file in its root and a blob its document points at, fetched,
+pinned and kept offline the same way.
 
 ## Collaborative text
 

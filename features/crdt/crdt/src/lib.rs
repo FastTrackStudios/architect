@@ -32,10 +32,17 @@ pub use loro;
 // Real-time, offline-first sync over vox (`DocSync` + `DocSyncHost` +
 // `SyncedDoc`, plus the presence channel). Gated: the core stays
 // transport-free.
+pub mod file;
 pub mod history;
 pub mod kinds;
+pub use file::{Branch, DocFile};
 pub use history::History;
-pub use kinds::{DocKind, DocKinds, Migration};
+pub use kinds::{BlobRefs, DocKind, DocKinds, Migration};
+
+// The blobs documents point at: fetched on demand by hash, kept offline,
+// collected when nothing points at them (`architect::blob`). Native.
+#[cfg(all(feature = "blob", not(target_arch = "wasm32")))]
+pub mod blobs;
 
 // Who is here and where (pointers as places in a view's coordinate
 // space, selections, carets, playheads) and the text binding that puts
@@ -68,6 +75,17 @@ pub mod docs;
 // `exchange`, `pull`. Native only, like the registry it serves.
 #[cfg(all(feature = "vox", not(target_arch = "wasm32")))]
 pub mod peer;
+
+// A link to a live document (`fts-doc:<endpoint>/<doc>?key=…`): parsed
+// everywhere, a browser included.
+pub mod link;
+pub use link::DocLink;
+
+// Who a node serves its documents to, peer to peer: the owner's devices
+// (from the device registry) and live links, and the router one caller
+// gets. Native only, like the peer lane.
+#[cfg(all(feature = "vox", not(target_arch = "wasm32")))]
+pub mod p2p;
 
 // Dioxus hooks (`use_synced_doc`, `use_crdt_list`, `use_crdt_entry`,
 // `use_presence_channel`) — the client-side bridge from a syncing
