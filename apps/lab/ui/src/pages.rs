@@ -7,8 +7,8 @@ use architect_shell::{
 };
 use dioxus::prelude::*;
 use lucide_dioxus::{
-    Building2, Check, CheckCheck, Circle, CircleCheck, FlaskConical, FolderInput, Hash, Inbox,
-    Plus, Search, Trash2, Undo2,
+    Building2, Check, CheckCheck, Circle, CircleCheck, Feather, FlaskConical, FolderInput, Hash,
+    Inbox, Plus, Search, Trash2, Undo2,
 };
 
 use crate::items::{Item, PROJECTS};
@@ -147,14 +147,15 @@ pub fn ListPage(tab: &'static str) -> Element {
     let (new_label, _) = new_one(tab);
     // The page's action named, its order in ⋯, the lab's switches apart
     // (the search is the left side's, ⌘O).
-    let mut toolbar = Toolbar::new();
-    // The Inbox's add is the shell's own Capture button; another would be
-    // a second way to say the same.
-    if tab != "inbox" {
-        toolbar = toolbar
-            .separate(Action::new(new_label, icon!(Plus), move |()| lab.capture(tab)).with_label());
-    }
-    let toolbar = toolbar
+    // Every list names its add, the Inbox's Capture too (the floating
+    // button is the same, from anywhere).
+    let add_icon = if tab == "inbox" {
+        icon!(Feather)
+    } else {
+        icon!(Plus)
+    };
+    let toolbar = Toolbar::new()
+        .separate(Action::new(new_label, add_icon, move |()| lab.capture(tab)).with_label())
         .joined([Tool::more(sort_menu(lab))])
         .separate(lab_tool(lab));
     let lists = lab.lists.read();
@@ -171,6 +172,7 @@ pub fn ListPage(tab: &'static str) -> Element {
         .cloned();
     let selected = (lab.selected)();
     let completing = (lab.completing)();
+    let undid = (lab.undid)();
     let can_finish = tab != "schedule";
     let mut crumbs = vec![org_crumb()];
     if project.is_some() {
@@ -245,6 +247,24 @@ pub fn ListPage(tab: &'static str) -> Element {
                         Undo2 { size: 14, color: t.ink }
                         "Undo"
                         span { style: "font-size: 12px; font-weight: 500; color: {t.ink_3};", "⌘Z" }
+                    }
+                }
+            }
+            // What Undo just did, with the way to do it again.
+            if let Some(said) = undid {
+                div { style: "display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 8px 8px 8px 14px; \
+                              border-radius: 10px; border: 1px solid {t.rule}; font-family: {t.font}; font-size: 14px; color: {t.ink};",
+                    span { style: "flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;",
+                        "{said}"
+                    }
+                    button {
+                        class: "lp",
+                        style: "flex-shrink: 0; height: 30px; display: flex; align-items: center; gap: 6px; padding: 0 12px; \
+                                border: none; border-radius: 8px; background: {t.pill}; color: {t.ink}; \
+                                font-family: {t.font}; font-size: 13px; font-weight: 600;",
+                        onclick: move |_| lab.redo(),
+                        "Redo"
+                        span { style: "font-size: 12px; font-weight: 500; color: {t.ink_3};", "⇧⌘Z" }
                     }
                 }
             }
@@ -629,7 +649,10 @@ fn SideRow(
             onclick: move |_| on_press.call(()),
             {icon}
             span { style: "flex: 1; text-align: left;", "{label}" }
-            span { style: "font-size: 12px; color: {t.ink_3};", "{count}" }
+            // Nothing in it: no count.
+            if count > 0 {
+                span { style: "font-size: 12px; color: {t.ink_3};", "{count}" }
+            }
         }
     }
 }
@@ -718,6 +741,7 @@ const KEYS: [(&str, &[(&str, &str)]); 3] = [
             ("↵", "Open it (or double-click)"),
             ("⌘↵", "Mark it done"),
             ("⇧⌘M", "Move it to a project or the Inbox"),
+            ("⌘⌫", "Delete it"),
         ],
     ),
     (

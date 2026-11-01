@@ -115,6 +115,8 @@ pub struct Lab {
     /// What Undo puts back, the last at the end (⌘Z steps back through
     /// it).
     pub undone: Signal<Vec<Undone>>,
+    /// What the last Undo put back, said until the next change or move.
+    pub undid: Signal<Option<String>>,
     /// What Undo put back, for Redo (⇧⌘Z); a new change lets it go.
     pub redone: Signal<Vec<Undone>>,
     /// Whether the last change is still said over its list (until the
@@ -165,6 +167,7 @@ impl Lab {
         self.fresh.set(None);
         self.notice.set(false);
         self.typing.set(false);
+        self.undid.set(None);
         self.route.set(to);
         self.select_first();
     }
@@ -185,6 +188,7 @@ impl Lab {
         undone.drain(..over);
         drop(undone);
         self.redone.write().clear();
+        self.undid.set(None);
         self.notice.set(true);
     }
 
@@ -456,12 +460,14 @@ impl Lab {
             drop(lists);
             let back = matches!(u.change, Change::Removed | Change::Moved(..));
             let added = u.change == Change::Added;
+            self.undid
+                .set(Some(format!("Undid {} on “{}”", u.action, u.item.name)));
             self.redone.write().push(u);
             if back || added {
                 self.fresh.set(back.then_some(id));
                 self.selected.set(back.then_some(id));
             }
-            // The notice said what is now undone: the row's mark says it.
+            // The notice now says what Undo did, with the way to do it again.
             self.notice.set(false);
         }
     }
@@ -495,7 +501,7 @@ impl Lab {
     /// did (not for a blank one).
     #[must_use = "false when nothing was added"]
     pub fn note(self, id: usize, text: &str) -> bool {
-        self.change_notes(id, "Noted", "Note", |lists| lists.note(id, text))
+        self.change_notes(id, "Added a note", "Note", |lists| lists.note(id, text))
     }
 
     /// Takes `id`'s note `at` away, for Undo to put back.
@@ -529,7 +535,7 @@ impl Lab {
         self.did(Undone {
             verb,
             action,
-            said: format!("{verb} on “{}”", before.name),
+            said: format!("{verb} to “{}”", before.name),
             at,
             item: before,
             change: Change::Noted(after),
@@ -595,10 +601,19 @@ fn edit_command(
     typing: bool,
     detail: &str,
     none: &str,
+    here: &str,
 ) -> architect_commands::Command {
     let c = match change {
-        Some(u) if !typing => architect_commands::Command::new(id, format!("{verb} {}", u.action))
-            .detail(format!("{detail} “{}”", u.item.name)),
+        Some(u) if !typing => {
+            // A change made in another tab says where: "Undo Done in Inbox".
+            let place = if u.item.tab == here {
+                String::new()
+            } else {
+                format!(" in {}", pages::title(u.item.tab))
+            };
+            architect_commands::Command::new(id, format!("{verb} {}{place}", u.action))
+                .detail(format!("{detail} “{}”", u.item.name))
+        }
         Some(_) => architect_commands::Command::new(id, verb).disabled("this page's field has it"),
         None => architect_commands::Command::new(id, verb).disabled(none),
     };
@@ -680,6 +695,7 @@ pub fn LabApp() -> Element {
             notice: Signal::new(false),
             completing: Signal::new(Vec::new()),
             typing: Signal::new(false),
+            undid: Signal::new(None),
             selected: Signal::new(first),
             settings: Some(settings),
         }
@@ -751,6 +767,24 @@ pub fn LabApp() -> Element {
         move || lab.open_selected(),
     );
     architect_commands::use_command(
+        {
+            let c = architect_commands::Command::new("LAB_DELETE", "Delete")
+                .group("Edit")
+                .shortcut("⌘⌫");
+            // A field with text has ⌘⌫ (delete to the line's start).
+            if lab.target().is_some() && !(lab.typing)() {
+                c
+            } else {
+                c.disabled("select an item first")
+            }
+        },
+        move || {
+            if let Some(id) = lab.target() {
+                lab.remove(id, "Deleted");
+            }
+        },
+    );
+    architect_commands::use_command(
         architect_commands::Command::new("LAB_DONE", "Mark done")
             .group("Edit")
             .shortcut("⌘↵"),
@@ -764,6 +798,7 @@ pub fn LabApp() -> Element {
     // change; on a page with a field to type in (Capture, an item's
     // notes), they stand aside for it.
     let typing = (lab.typing)();
+    let here_tab = (lab.route)().tab();
     let last = (lab.undone)().last().cloned();
     let again = (lab.redone)().last().cloned();
     architect_commands::use_command(
@@ -774,6 +809,7 @@ pub fn LabApp() -> Element {
             typing,
             "Put back",
             "nothing to undo yet",
+            here_tab,
         )
         .shortcut("⌘Z"),
         move || lab.undo(),
@@ -786,6 +822,7 @@ pub fn LabApp() -> Element {
             typing,
             "Again:",
             "nothing undone to redo",
+            here_tab,
         )
         .shortcut("⇧⌘Z"),
         move || lab.redo(),
@@ -866,7 +903,7 @@ pub fn LabApp() -> Element {
             m.instead(architect_commands::Standard::Undo, "LAB_UNDO")
                 .instead(architect_commands::Standard::Redo, "LAB_REDO")
                 .separator()
-                .commands(["LAB_DONE", "LAB_MOVE"])
+                .commands(["LAB_DONE", "LAB_MOVE", "LAB_DELETE"])
         })
         .menu("View", |m| {
             m.command("LAB_TOGGLE_DETAILS")
@@ -994,6 +1031,18 @@ pub fn LabApp() -> Element {
             .icon(icon!(Undo2))
             .hint(format!("Put back “{}”", u.item.name))
             .on_press(move |()| lab.undo()),
+        );
+    }
+    // What the last Undo did, with the way to do it again, where no
+    // notice over a list says it.
+    let undid = (lab.undid)();
+    if let Some(said) = undid.filter(|_| !matches!(route, Route::Tab(_))) {
+        status.retain(|s| s.id != "undo");
+        status.insert(
+            0,
+            shell::StatusItem::new("undo", format!("{said} · Redo ⇧⌘Z"))
+                .icon(icon!(Undo2))
+                .on_press(move |()| lab.redo()),
         );
     }
     rsx! {
