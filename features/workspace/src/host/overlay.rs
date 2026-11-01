@@ -142,6 +142,10 @@ pub(super) fn DragLayer() -> Element {
     let Some(drag) = (host.drag)() else {
         return rsx! {};
     };
+    // A grip pressed is not yet a drag: nothing covers it.
+    if matches!(drag, Drag::DockGrip { moved: false, .. }) {
+        return rsx! {};
+    }
     let highlight = match &drag {
         Drag::Pane {
             at: Some(d),
@@ -180,7 +184,7 @@ pub(super) fn DragLayer() -> Element {
         _ => None,
     };
     let cursor = match drag {
-        Drag::Pane { .. } | Drag::Float { .. } => "grabbing",
+        Drag::Pane { .. } | Drag::Float { .. } | Drag::DockGrip { moved: true, .. } => "grabbing",
         Drag::Split {
             axis: Axis::Row, ..
         }
@@ -245,6 +249,9 @@ pub(super) fn on_move(mut host: Host, (x, y): (f32, f32)) {
             }));
         }
         Drag::Pane { .. } => {}
+        // Heard here when the drag layer is over the grip (a dock's own
+        // window); in the shell's ribbon the grip hears it itself.
+        Drag::DockGrip { .. } => super::dock::grip_moved(host, (x, y)),
         Drag::Split {
             id,
             index,
@@ -462,7 +469,16 @@ fn cover(groups: &[(crate::GroupId, Rect)]) -> Option<Rect> {
 /// The platform saw the pointer let go at `(x, y)`, outside the window: a
 /// tab being dragged ends there (in another window, or a new one).
 pub(super) fn release_outside(mut host: Host, (x, y): (f32, f32)) {
-    let Some(Drag::Pane { pane, geometry, .. }) = host.drag.peek().clone() else {
+    // A dock's grip let go outside: it pops out there, or docks back.
+    let drag = host.drag.peek().clone();
+    if let Some(Drag::DockGrip { side, .. }) = drag {
+        host.drag.set(None);
+        if let Some(op) = super::windows::dock_outside(host, side, (x, y)) {
+            host.run(op);
+        }
+        return;
+    }
+    let Some(Drag::Pane { pane, geometry, .. }) = drag else {
         return;
     };
     host.drag.set(Some(Drag::Pane {
@@ -477,6 +493,10 @@ pub(super) fn release_outside(mut host: Host, (x, y): (f32, f32)) {
 
 pub(super) fn on_up(mut host: Host) {
     let drag = host.drag.peek().clone();
+    if matches!(drag, Some(Drag::DockGrip { .. })) {
+        super::dock::grip_up(host);
+        return;
+    }
     host.drag.set(None);
     match drag {
         Some(Drag::Pane {
@@ -649,6 +669,22 @@ fn pane_items(host: Host, pane: &PaneId) -> Vec<Item> {
     ] {
         if loc.area != Area::Dock(side) {
             items.push(act(label, Op::Move(pane.clone(), Dest::Dock(side))));
+        }
+    }
+    // A dock's tab: its whole dock to a window of its own, or back.
+    if let Area::Dock(side) = loc.area {
+        let name = match side {
+            Side::Left => "sidebar",
+            Side::Right => "right sidebar",
+            _ => "bottom panel",
+        };
+        if loc.window > 0 {
+            items.push(act(&format!("Dock the {name} back"), Op::DockBack(side)));
+        } else if host.has_windows() && !*host.phone.peek() {
+            items.push(act(
+                &format!("Move the {name} to its own window"),
+                Op::PopOutDock(side, None),
+            ));
         }
     }
     let popped = loc.window > 0;

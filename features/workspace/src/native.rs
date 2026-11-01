@@ -250,7 +250,11 @@ impl WindowSystem for Desk {
     }
 
     fn origin(&self, window: &WindowId) -> Option<(f32, f32)> {
-        let rect = if *window == WindowId::main() {
+        self.content(window).map(|r| (r.x, r.y))
+    }
+
+    fn content(&self, window: &WindowId) -> Option<Rect> {
+        if *window == WindowId::main() {
             self.main
                 .borrow()
                 .as_ref()
@@ -261,8 +265,7 @@ impl WindowSystem for Desk {
                 .iter()
                 .find(|(id, _)| id == window)
                 .and_then(|(_, w)| content_rect(w.as_ref()))
-        }?;
-        Some((rect.x, rect.y))
+        }
     }
 
     fn on_release_outside(&self, window: &WindowId, release: Rc<dyn Fn(f32, f32)>) {

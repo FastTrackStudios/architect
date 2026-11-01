@@ -17,10 +17,11 @@ use architect_shell::{ShellTheme, StatusItem};
 use dioxus::prelude::*;
 use futures_util::StreamExt as _;
 
+use super::dock::DockView;
 use super::group::NodeView;
 use super::overlay::{DragLayer, MenuLayer};
-use super::{Drag, Host, Mount, Op, Sizes, Views, overlay, point, use_host};
-use crate::model::{GroupId, PaneId, Rect, WindowId, Workspace};
+use super::{Command, Drag, Host, Mount, Op, Sizes, Views, overlay, point, use_host};
+use crate::model::{Docks, GroupId, PaneId, Rect, Side, Window, WindowId, Workspace};
 use crate::screenset::{FormClass, Screensets};
 
 /// What the platform does with windows.
@@ -38,6 +39,13 @@ pub trait WindowSystem {
     fn close(&self, window: &WindowId);
     /// Where `window`'s content (its document's top left) is on screen.
     fn origin(&self, window: &WindowId) -> Option<(f32, f32)>;
+    /// Where `window`'s content is on screen, and its size (a dock popped
+    /// out goes over where it was, as tall as the window). `None` when the
+    /// platform does not say.
+    fn content(&self, window: &WindowId) -> Option<Rect> {
+        let _ = window;
+        None
+    }
     /// The window whose content is under the screen point, front first.
     fn window_at(&self, x: f32, y: f32) -> Option<WindowId>;
     /// Call `release` with the point (`window`'s logical points) where the
@@ -58,9 +66,11 @@ pub(super) fn use_release_outside(host: Host) {
     use_hook(move || {
         if let Some(windows) = host.windows.peek().clone() {
             let tx = heard.tx();
+            let released = host.released.peek().clone();
             windows.0.on_release_outside(
                 &host.window_id(),
                 Rc::new(move |x, y| {
+                    released.set(Some((x, y)));
                     let _ = tx.unbounded_send((x, y));
                 }),
             );
@@ -205,6 +215,9 @@ pub(super) struct PopoutProps {
     screensets: Signal<Screensets>,
     windows: Windows,
     bridge: Bridge,
+    /// What a popped-out dock's ribbon may pin, and where a press goes.
+    commands: Vec<Command>,
+    pressed: Signal<Option<String>>,
 }
 
 impl PartialEq for PopoutProps {
@@ -234,16 +247,7 @@ pub(super) fn PopoutSync(bridge: Bridge) -> Element {
         .windows
         .iter()
         .skip(1)
-        .map(|win| {
-            let title = win
-                .center
-                .as_ref()
-                .and_then(crate::model::Node::first_group)
-                .and_then(|g| g.current_tab())
-                .and_then(|p| w.pane(p))
-                .map_or_else(String::new, |p| host.title(p));
-            (win.id.clone(), title, win.bounds)
-        })
+        .map(|win| (win.id.clone(), window_title(host, &w, win), win.bounds))
         .collect();
     drop(w);
     let Some(windows) = host.windows.peek().clone() else {
@@ -279,6 +283,8 @@ pub(super) fn PopoutSync(bridge: Bridge) -> Element {
                 screensets: host.screensets,
                 windows: windows.clone(),
                 bridge: carried.clone(),
+                commands: host.commands.peek().clone(),
+                pressed: host.pressed,
             },
             title,
             bounds,
@@ -303,8 +309,33 @@ pub(super) fn PopoutSync(bridge: Bridge) -> Element {
     rsx! {}
 }
 
-/// A pop-out's root: its window's tree of splits and groups (no docks,
-/// no floats), with its own drag and menu layers.
+/// A window's title: its center's tab on show, or, for a dock's own
+/// window, the dock's name (the OS window's title, for a person and a
+/// script to find it by).
+fn window_title(host: Host, w: &Workspace, win: &Window) -> String {
+    if let Some(p) = win
+        .center
+        .as_ref()
+        .and_then(crate::model::Node::first_group)
+        .and_then(|g| g.current_tab())
+        .and_then(|p| w.pane(p))
+    {
+        return host.title(p);
+    }
+    let side = Docks::SIDES
+        .into_iter()
+        .find(|&s| win.docks.get(s).is_some_and(|d| !d.is_empty()));
+    match side {
+        Some(Side::Left) => "Sidebar".to_owned(),
+        Some(Side::Right) => "Right sidebar".to_owned(),
+        Some(_) => "Bottom panel".to_owned(),
+        None => String::new(),
+    }
+}
+
+/// A pop-out's root: its window's tree of splits and groups, and a dock
+/// popped out into it filling it (no floats), with its own drag and menu
+/// layers.
 #[allow(clippy::needless_pass_by_value)]
 #[component]
 fn PopoutView(props: PopoutProps) -> Element {
@@ -312,7 +343,7 @@ fn PopoutView(props: PopoutProps) -> Element {
     let host = use_context_provider(|| Host {
         workspace: props.workspace,
         views: CopyValue::new(props.views.clone()),
-        commands: CopyValue::new(Vec::new()),
+        commands: CopyValue::new(props.commands.clone()),
         on_command: CopyValue::new(None),
         theme: CopyValue::new(props.theme),
         sizes: Signal::new(props.sizes),
@@ -336,21 +367,30 @@ fn PopoutView(props: PopoutProps) -> Element {
         form: Signal::new(FormClass::Desk),
         scrolls: Signal::new(HashMap::new()),
         windows: CopyValue::new(Some(props.windows.clone())),
+        pressed: props.pressed,
+        released: CopyValue::new(Rc::default()),
     });
     use_release_outside(host);
     let mut host = host;
     let t = props.theme;
     let w = host.workspace.read();
     let index = host.window_index(&w);
-    let center = index
-        .and_then(|i| w.windows.get(i))
-        .and_then(|win| win.center.clone());
-    let title = center
-        .as_ref()
-        .and_then(crate::model::Node::first_group)
-        .and_then(|g| g.current_tab())
-        .and_then(|p| w.pane(p))
-        .map_or_else(String::new, |p| host.title(p));
+    let window = index.and_then(|i| w.windows.get(i));
+    let center = window.and_then(|win| win.center.clone());
+    let title = window.map_or_else(String::new, |win| window_title(host, &w, win));
+    let docks: Vec<(Side, crate::model::Dock)> = window
+        .map(|win| {
+            Docks::SIDES
+                .into_iter()
+                .filter_map(|s| {
+                    win.docks
+                        .get(s)
+                        .filter(|d| !d.is_empty())
+                        .map(|d| (s, d.clone()))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     drop(w);
     let edges = super::group::Edges::default();
     let ground = format!(
@@ -389,9 +429,24 @@ fn PopoutView(props: PopoutProps) -> Element {
                 }
             },
             {center.map_or_else(|| rsx! {}, |node| rsx! { NodeView { node, edges } })}
+            for (side, dock) in docks {
+                div {
+                    key: "{side:?}",
+                    style: "flex:1 1 0; min-width:0; min-height:0; display:flex; flex-direction:{dock_flow(side)};",
+                    DockView { side, dock, fill: true }
+                }
+            }
             DragLayer {}
             MenuLayer {}
         }
+    }
+}
+
+/// How a dock filling a window lays out its ribbon and its groups.
+const fn dock_flow(side: Side) -> &'static str {
+    match side {
+        Side::Left | Side::Right => "row",
+        Side::Top | Side::Bottom => "column",
     }
 }
 
@@ -416,8 +471,7 @@ pub(super) fn drop_outside(
                 .workspace
                 .peek()
                 .window(&there)
-                .and_then(|w| w.center.as_ref())
-                .and_then(crate::model::Node::first_group)
+                .and_then(Window::first_group)
                 .map(|g| g.id)?;
             Some(Op::Move(
                 pane.clone(),
@@ -431,4 +485,29 @@ pub(super) fn drop_outside(
             Some(Op::Move(pane.clone(), crate::ops::Dest::Window(Some(at))))
         }
     }
+}
+
+/// Where a dock's grip let go at `(x, y)` (this host's window points)
+/// outside its window takes the dock: from the main window, a window of
+/// its own there; from its own window, onto the main one, back to its side.
+pub(super) fn dock_outside(host: Host, side: Side, (x, y): (f32, f32)) -> Option<Op> {
+    let windows = host.windows.peek().clone()?;
+    let here = host.window_id();
+    let (ox, oy) = windows.0.origin(&here)?;
+    let (sx, sy) = (ox + x, oy + y);
+    let there = windows.0.window_at(sx, sy);
+    if here == WindowId::main() {
+        if there.is_some() {
+            return None;
+        }
+        let (w, h) = host
+            .dock_bounds(side)
+            .map_or((300.0, 600.0), |r| (r.w, r.h));
+        // Under the pointer, as if it carried the dock by its grip.
+        return Some(Op::PopOutDock(
+            side,
+            Some(Rect::new(sx - 20.0, sy - 20.0, w, h)),
+        ));
+    }
+    (there == Some(WindowId::main())).then_some(Op::DockBack(side))
 }

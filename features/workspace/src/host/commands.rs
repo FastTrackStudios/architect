@@ -33,6 +33,21 @@ pub(super) fn WorkspaceCommands() -> Element {
         .as_ref()
         .and_then(|p| w.pane(p))
         .is_some_and(|p| !p.history.forward.is_empty());
+    // Each dock: in the main window with groups to pop out, or out.
+    let dock_state = |side: Side| {
+        let out = w.dock_window(side).is_some();
+        let full = w
+            .windows
+            .first()
+            .and_then(|m| m.docks.get(side))
+            .is_some_and(|d| d.root.is_some());
+        (full, out)
+    };
+    let docks = [
+        dock_state(Side::Left),
+        dock_state(Side::Right),
+        dock_state(Side::Bottom),
+    ];
     drop(w);
 
     let none = "no tab is active";
@@ -304,25 +319,31 @@ pub(super) fn WorkspaceCommands() -> Element {
         .group("Docks"),
         move || to_center(host),
     );
-    for (id, label, side) in [
+    for (id, label, side, out) in [
         (
             "WORKSPACE_TOGGLE_RIGHT_DOCK",
             "Show or hide the right dock",
             Side::Right,
+            docks[1].1,
         ),
         (
             "WORKSPACE_TOGGLE_BOTTOM_DOCK",
             "Show or hide the bottom dock",
             Side::Bottom,
+            docks[2].1,
         ),
     ] {
-        use_command(Command::new(id, label).group("Docks"), move || {
+        let command = Command::new(id, label).group("Docks");
+        let command = if out {
+            command.disabled("it is in its own window")
+        } else {
+            command
+        };
+        use_command(command, move || {
             let shown = host
                 .workspace
                 .peek()
-                .windows
-                .first()
-                .and_then(|w| w.docks.get(side))
+                .dock(side)
                 .map_or(Shown::Hidden, |d| d.shown);
             let next = if shown == Shown::Open {
                 Shown::Collapsed
@@ -331,6 +352,51 @@ pub(super) fn WorkspaceCommands() -> Element {
             };
             host.run(Op::Dock(side, next));
         });
+    }
+
+    // A dock into a window of its own, and back: one pair per side. Which
+    // of the two is enabled says where the dock is (for a scenario to
+    // check, as for a person).
+    for ((pop_id, pop_label, back_id, back_label, side), (full, out)) in [
+        (
+            "WORKSPACE_POP_OUT_LEFT_DOCK",
+            "Move the sidebar to its own window",
+            "WORKSPACE_DOCK_BACK_LEFT_DOCK",
+            "Dock the sidebar back",
+            Side::Left,
+        ),
+        (
+            "WORKSPACE_POP_OUT_RIGHT_DOCK",
+            "Move the right sidebar to its own window",
+            "WORKSPACE_DOCK_BACK_RIGHT_DOCK",
+            "Dock the right sidebar back",
+            Side::Right,
+        ),
+        (
+            "WORKSPACE_POP_OUT_BOTTOM_DOCK",
+            "Move the bottom panel to its own window",
+            "WORKSPACE_DOCK_BACK_BOTTOM_DOCK",
+            "Dock the bottom panel back",
+            Side::Bottom,
+        ),
+    ]
+    .into_iter()
+    .zip(docks)
+    {
+        let pop = Command::new(pop_id, pop_label).group("Docks");
+        let pop = if out {
+            pop.disabled("it is in its own window")
+        } else if !full {
+            pop.disabled("the dock is empty")
+        } else {
+            pop.enabled_if(host.has_windows(), "this app opens no other windows")
+        };
+        use_command(pop, move || host.run(Op::PopOutDock(side, None)));
+        let back = Command::new(back_id, back_label).group("Docks");
+        use_command(
+            back.enabled_if(out, "it is in the main window"),
+            move || host.run(Op::DockBack(side)),
+        );
     }
 
     // Views: one "Open …" each. The views are fixed for a host's life, so

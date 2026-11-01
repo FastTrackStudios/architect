@@ -1,12 +1,15 @@
 //! A dock on a side of the main window: its ribbon (the views it switches
 //! between, then the commands pinned to it), its groups, and the divider
 //! that sizes it. Collapsed, a dock is its ribbon, or a rail of its tabs'
-//! icons when it has none.
+//! icons when it has none. Popped out, it fills a window of its own; the
+//! grip at its ribbon's foot pops it out and docks it back, pressed or
+//! dragged out of the window.
 
 use architect_shell::{Icon, IconFn};
 use dioxus::prelude::*;
+use lucide_dioxus::{ExternalLink, PanelLeftOpen};
 
-use super::{Drag, Host, Mount, Op, use_host};
+use super::{DRAG_SLOP, Drag, Host, Mount, Op, point, use_host};
 use crate::model::{Area, Axis, Dock, Node, PaneId, Shown, Side};
 use crate::ops::Target;
 
@@ -14,9 +17,16 @@ use crate::ops::Target;
 const DOCK_MIN: f32 = 140.0;
 
 #[component]
-pub(super) fn DockView(side: Side, dock: Dock) -> Element {
+pub(super) fn DockView(
+    side: Side,
+    dock: Dock,
+    /// In a window of its own: it fills the window, open, no divider.
+    #[props(default)]
+    fill: bool,
+) -> Element {
     let host = use_host();
-    if dock.shown == Shown::Hidden || (dock.root.is_none() && dock.ribbon.is_none()) {
+    let shown = if fill { Shown::Open } else { dock.shown };
+    if shown == Shown::Hidden || dock.is_empty() {
         return rsx! {};
     }
     let across = side.axis() == Axis::Row;
@@ -24,7 +34,20 @@ pub(super) fn DockView(side: Side, dock: Dock) -> Element {
         .ribbon
         .clone()
         .map(|_| rsx! { Ribbon { side, dock: dock.clone() } });
-    let body = match (dock.shown, dock.root.clone()) {
+    let body = match (shown, dock.root.clone()) {
+        (Shown::Open, Some(root)) if fill => {
+            let edges = super::group::Edges {
+                top: true,
+                left: true,
+                right: dock.ribbon.is_none(),
+                covered: 0.0,
+            };
+            rsx! {
+                div { style: "flex:1 1 0; min-width:0; min-height:0; display:flex; position:relative; overflow:hidden;",
+                    super::NodeView { node: root, edges }
+                }
+            }
+        }
         (Shown::Open, Some(root)) => {
             let size = if across {
                 format!(
@@ -184,14 +207,129 @@ fn Ribbon(
                     label,
                     icon: Some(icon),
                     on: false,
-                    onpress: move |()| {
-                        if let Some(on) = *host.on_command.read() {
-                            on.call(id.clone());
-                        }
-                    },
+                    onpress: move |()| host.press_command(id.clone()),
                 }
             }
+            if !bare {
+                div { style: "flex:1 1 0;" }
+            }
+            DockGrip { side }
         }
+    }
+}
+
+/// The grip at a ribbon's foot: a press pops the dock out into a window of
+/// its own (or, there, docks it back); dragged out of the window it pops
+/// out where it is let go, and out of its own window onto the main one it
+/// docks back. Only where pop-outs are OS windows. The drag layer comes
+/// only once it is dragged, so a press reaches the grip itself.
+#[component]
+fn DockGrip(side: Side) -> Element {
+    let mut host = use_host();
+    let t = *host.theme.read();
+    let s = (host.sizes)();
+    if !host.has_windows() || (host.phone)() {
+        return rsx! {};
+    }
+    let out = host.window_id() != crate::model::WindowId::main();
+    let label = match (out, side) {
+        (true, _) => "Dock it back",
+        (false, Side::Left) => "Move the sidebar to its own window",
+        (false, _) => "Move the dock to its own window",
+    };
+    let pressed = matches!((host.drag)(), Some(Drag::DockGrip { side: d, .. }) if d == side);
+    let fill = if pressed { t.active } else { "transparent" };
+    // The pointer's moves and its release come to the element pressed
+    // (Blitz's); in the shell's ribbon that is outside the host's root, so
+    // the grip hears them itself. Let go outside the window, the platform
+    // says where (`overlay::release_outside`).
+    rsx! {
+        button {
+            style: "flex:0 0 auto; width:{s.button}px; height:{s.button}px; border:none; border-radius:8px; \
+                    display:flex; align-items:center; justify-content:center; background:{fill}; \
+                    cursor:grab; touch-action:none;",
+            title: "{label}",
+            "aria-label": "{label}",
+            "data-testid": "dock-grip-{side_name(side)}",
+            onpointerdown: move |e| {
+                e.stop_propagation();
+                let (x, y) = point(&e);
+                host.released.peek().set(None);
+                host.drag.set(Some(Drag::DockGrip { side, x, y, last: (x, y), moved: false }));
+            },
+            onpointermove: move |e| {
+                e.stop_propagation();
+                grip_moved(host, point(&e));
+            },
+            onpointerup: move |e| {
+                e.stop_propagation();
+                grip_up(host);
+            },
+            onclick: move |e| {
+                e.stop_propagation();
+                host.run(if out { Op::DockBack(side) } else { Op::PopOutDock(side, None) });
+            },
+            if out {
+                PanelLeftOpen { size: 16, color: t.ink_3 }
+            } else {
+                ExternalLink { size: 16, color: t.ink_3 }
+            }
+        }
+    }
+}
+
+/// The pointer held on a grip moved: past the slop it is a drag.
+pub(super) fn grip_moved(mut host: Host, (x, y): (f32, f32)) {
+    let Some(Drag::DockGrip {
+        side,
+        x: x0,
+        y: y0,
+        moved,
+        ..
+    }) = host.drag.peek().clone()
+    else {
+        return;
+    };
+    host.drag.set(Some(Drag::DockGrip {
+        side,
+        x: x0,
+        y: y0,
+        last: (x, y),
+        moved: moved || (x - x0).hypot(y - y0) > DRAG_SLOP,
+    }));
+}
+
+/// The pointer held on a grip let go, as the document heard it (on the
+/// grip, or on the drag layer over it once dragged). A drag let go
+/// outside the window takes the dock there (the platform may say so too,
+/// later: the drag is over by then); inside, it ends. A press is the
+/// grip's click (a pointer's, a key's, accessibility's).
+pub(super) fn grip_up(mut host: Host) {
+    let drag = host.drag.peek().clone();
+    let Some(Drag::DockGrip {
+        side, last, moved, ..
+    }) = drag
+    else {
+        return;
+    };
+    host.drag.set(None);
+    // Outside the window, where the platform says (the document may not
+    // have seen the pointer leave).
+    let at = host.released.peek().take().unwrap_or(last);
+    if moved {
+        if let Some(op) = super::windows::dock_outside(host, side, at) {
+            host.run(op);
+        }
+    }
+}
+
+/// A side as a word, for ids.
+const fn side_name(side: Side) -> &'static str {
+    match side {
+        Side::Left => "left",
+        Side::Right => "right",
+        Side::Top => "top",
+        Side::Bottom => "bottom",
     }
 }
 
@@ -199,9 +337,7 @@ fn Ribbon(
 fn showing_kind(host: &Host, side: Side) -> Option<String> {
     let workspace = host.workspace.peek();
     workspace
-        .windows
-        .first()
-        .and_then(|w| w.docks.get(side))
+        .dock(side)
         .and_then(|d| d.root.as_ref())
         .and_then(Node::first_group)
         .and_then(|g| g.current_tab())
@@ -215,12 +351,15 @@ fn press_view(host: &Host, side: Side, kind: &str, on_side: Option<Callback<bool
     let open = host
         .workspace
         .peek()
-        .windows
-        .first()
-        .and_then(|w| w.docks.get(side))
+        .dock(side)
         .is_some_and(|d| d.shown == Shown::Open)
         && !folded;
+    // In a window of its own the dock does not fold: it is the window.
+    let out = host.workspace.peek().dock_window(side).is_some();
     if open && showing_kind(host, side).as_deref() == Some(kind) {
+        if out {
+            return;
+        }
         match on_side {
             Some(fold) => fold.call(false),
             None => host.run(Op::Dock(side, Shown::Collapsed)),
@@ -356,10 +495,29 @@ fn DockDivider(side: Side) -> Element {
 }
 
 /// The left dock in the shell's sidebar: its groups, their top tab bars in
-/// the title row clear of the window's buttons and the sidebar's.
+/// the title row clear of the window's buttons and the sidebar's. Popped
+/// out, the sidebar says so and offers it back.
 #[component]
 pub(super) fn ShellLeftDock() -> Element {
     let host = use_host();
+    let t = *host.theme.read();
+    let s = (host.sizes)();
+    if host.workspace.read().dock_window(Side::Left).is_some() {
+        let top = (host.title_row)().map_or(12.0, |r| r.height + 12.0);
+        return rsx! {
+            div {
+                style: "flex:1 1 0; min-height:0; display:flex; flex-direction:column; align-items:center; \
+                        gap:10px; padding:{top}px 12px 12px; color:{t.ink_3}; font-size:12px; text-align:center;",
+                div { "The sidebar is in its own window." }
+                button {
+                    style: "padding:0 12px; min-height:{s.button}px; border-radius:8px; border:1px solid {t.rule}; \
+                            background:{t.pill}; color:{t.ink}; font-size:12px;",
+                    onclick: move |_| host.run(Op::DockBack(Side::Left)),
+                    "Dock it back"
+                }
+            }
+        };
+    }
     let workspace = host.workspace.read();
     let root = workspace
         .windows
