@@ -9,6 +9,7 @@
 //! left side and the selection's details in the right. Its ⋯ menu switches
 //! the shell's style live.
 
+mod arrange;
 mod extensions;
 mod pages;
 mod screen;
