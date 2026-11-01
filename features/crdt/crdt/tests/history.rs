@@ -26,7 +26,7 @@ fn a_transaction_is_one_named_step_undone_and_redone_as_one() {
         t.insert(3, "lo").unwrap();
     });
     h.transact(&doc, "Type world", |d| {
-        d.get_text("body").insert(5, " world").unwrap()
+        d.get_text("body").insert(5, " world").unwrap();
     });
     assert_eq!(text(&doc), "hello world");
     assert_eq!(h.next_undo(), Some("Type world"));
@@ -62,7 +62,7 @@ fn undo_is_local_a_collaborators_change_stays() {
     theirs.set_peer_id(2).unwrap();
     let mut h = History::new(&mine, 100);
     h.transact(&mine, "Mine", |d| {
-        d.get_text("body").insert(0, "mine ").unwrap()
+        d.get_text("body").insert(0, "mine ").unwrap();
     });
     theirs
         .import(&mine.export(loro::ExportMode::all_updates()).unwrap())
