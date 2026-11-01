@@ -504,7 +504,7 @@ fn ToolButton(tool: Tool, size: ToolSize, side: f64, framed: bool) -> Element {
                                 style: "position: absolute; top: -3px; right: -3px; min-width: 16px; height: 16px; padding: 0 4px; \
                                         box-sizing: border-box; border-radius: 8px; display: flex; align-items: center; \
                                         justify-content: center; background: {t.accent}; color: {t.accent_ink}; \
-                                        font-size: 10px; font-weight: 700;",
+                                        font-size: 11px; font-weight: 700;",
                                 "{badge}"
                             }
                         }
