@@ -144,6 +144,21 @@ pub struct DocsLane {
     pub sync: DocSyncClient,
 }
 
+impl DocsLane {
+    /// The three clients over one connection's caller: what an app with
+    /// one supervised connection (`use_app_supervised`) hands
+    /// [`OrgDocs::run_on`](super::OrgDocs::run_on). The connection is the
+    /// caller's owner's to keep open.
+    #[must_use]
+    pub fn over(caller: &vox::Caller) -> Self {
+        Self {
+            docs: DocsClient::new(caller.clone()),
+            changes: DocsStreamClient::new(caller.clone()),
+            sync: DocSyncClient::new(caller.clone()),
+        }
+    }
+}
+
 /// The lane key [`DocsDriver::run`] uses for the hub.
 pub const HUB: &str = "hub";
 

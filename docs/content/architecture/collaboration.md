@@ -155,6 +155,7 @@ let registry = DocRegistry::new(move |doc_id| {
 .with_shallow_bootstrap()                             // per created host
 .with_presence_timeout(30_000)                        // per created PresenceHost
 .with_admission(|doc_id| known.contains(&doc_id))     // gate before open/serve
+.with_permissions(DocPermissions::new(org_engine).in_org(&org.id)) // who may
 .with_idle_eviction(Duration::from_secs(900));        // compact + drop idle docs
 
 router = router
@@ -169,9 +170,21 @@ router = router
 - **Admission** — `Fn(Uuid) -> bool`, checked before a doc is opened
   *or* served; rejected ids fail with `UnknownDoc` (indistinguishable
   from a doc that doesn't exist). This is coarse server-side *scoping*,
-  not authorization — the hook sees only the doc id, not who's asking;
-  real per-user authz needs caller identity threaded through the
-  transport (future work: vox middleware context).
+  not authorization — the hook sees only the doc id, not who's asking.
+- **Who may** — every attach knows its caller: the principal the
+  router's `PermissionsGate` resolved (`architect::permissions_gate::caller`).
+  `with_permissions(DocPermissions)` asks the org's `PermissionEngine`
+  about it on every call: `write` on `org/<org>/doc/<id>` to sync,
+  `read` to watch presence (`doc/<id>`, org-relative, without
+  `in_org`). A person who is not a member of the org, or whose role does
+  not reach the doc, is refused with the same `UnknownDoc`, before
+  anything is opened. `DocsHost::with_permissions` makes the same check
+  on the catalog (`read` to see a row, `write` to register, rename or
+  delete), so what a person may not open is not listed to them either.
+  `with_authorizer(|who, doc_id| …)` is the closure form, for a rule no
+  engine holds (a peer's endpoint id). Proven by
+  `features/crdt/crdt/tests/org_sync.rs`
+  (`a_person_who_is_not_a_member_is_refused_on_the_server`).
 - **Idle eviction** — a sweeper compacts and drops docs with zero live
   sessions and no activity for the configured window; the next attach
   reopens from persistence (one snapshot import, thanks to the

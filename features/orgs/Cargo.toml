@@ -8,14 +8,19 @@ description = "The organization as everything's scope: a person's orgs from the 
 
 # docs/content/architecture/organizations.md. The default set is the model
 # — the orgs, the selection (one, or All), roles, the app's capabilities by
-# role, a JSON cache for offline — pure data, wasm-clean. `auth` reads the
-# identity server's answer (auth-proto's OrganizationBundle); `ui` is the
-# hook and the shell's switcher.
+# role, a JSON cache for offline, the scope a read or write is in and the
+# All-organizations aggregate read — pure data, wasm-clean. `auth` reads
+# the identity server's answer (auth-proto's OrganizationBundle) and fetches
+# it with the stored session; `ui` is the hook, the shell's switcher and
+# the live refresh on every (re)connect; `commands` is ⌘O across orgs;
+# `server` (native) confines every service to the caller's org.
 
 [features]
 default = []
-auth = ["dep:auth-proto"]
-ui = ["dep:dioxus", "dep:architect-shell", "architect-shell/ui"]
+auth = ["dep:auth-proto", "dep:auth-client"]
+ui = ["dep:dioxus", "dep:architect-shell", "architect-shell/ui", "dep:architect-atom"]
+commands = ["dep:architect-commands"]
+server = ["dep:architect-permissions", "dep:vox", "dep:tokio"]
 
 [dependencies]
 facet = { workspace = true }
@@ -23,6 +28,26 @@ facet-json = { version = "0.50.0-rc.5" }
 auth-proto = { workspace = true, optional = true }
 dioxus = { workspace = true, optional = true }
 architect-shell = { workspace = true, optional = true }
+architect-atom = { workspace = true, optional = true }
+architect-commands = { workspace = true, optional = true }
+auth-client = { workspace = true, optional = true }
+# The All-organizations read asks every org at once.
+futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
+# An org's own documents (its roster, its catalogue): a v5 id from the org's.
+uuid = { version = "1", default-features = false, features = ["v5"] }
+
+# `server`: the gate's engine and identity traits, a vox handler wrapper,
+# and the task-local the confined org rides in.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+architect-permissions = { workspace = true, optional = true }
+vox = { workspace = true, optional = true }
+tokio = { version = "1", default-features = false, features = ["rt", "sync", "time"], optional = true }
+
+[dev-dependencies]
+architect = { workspace = true, features = ["vox", "local"] }
+architect-permissions = { workspace = true }
+tokio = { workspace = true }
+vox = { workspace = true }
 
 [lib]
 doctest = false
