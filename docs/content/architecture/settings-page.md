@@ -12,11 +12,21 @@ weight = 56
 > `Registry::remove_owner`; `features/settings/src/ui.rs` `use_section`) as the app does at
 > launch; `Values` checks, resets and restores them; `DeviceValues`
 > (feature `store`) keeps the device's; `SettingsPage` (feature `ui`) is
-> T3 Code's page, opened by the `APP_SETTINGS` command (⌘,). Still to
-> come: the derive (a struct as a section), the `Synced` and `Project`
-> scopes' stores, a search hit scrolling to its row. T3 Code's
-> settings are the design to match; [app settings](@/architecture/settings.md)
-> (`Store<T>`, per device) is the storage that exists.
+> T3 Code's page, opened by the `APP_SETTINGS` command (⌘,).
+>
+> **The derive, the scopes and search to the row landed (2026-11-01).**
+> `#[derive(Settings)]` (`features/settings/src/derive.rs` `Settings`)
+> makes a facet struct a section, and `use_settings::<T>()`
+> (`features/settings/src/ui.rs` `use_settings`) its typed value;
+> `ScopedValues` (`features/settings/src/values.rs`) holds values by
+> scope over an org's `OrgSettings`; `ProjectValues`
+> (`features/settings/src/store.rs`) and `DocValues`
+> (`features/settings/src/synced.rs`, feature `synced`) store the
+> `Project` and `Synced` scopes; a search hit opens its section, scrolls
+> to its row and pulses it (`SettingsHandle::show_setting`). Still to
+> come: Task's and Studio's panels as structs; `Option<T>` and `KeyChord`
+> fields; which org's settings apply (the current org, with
+> organizations' scoping); an admin's page to edit them.
 
 Every app has a Settings page and every app writes it by hand: Task's six
 panels, Studio's and Session's `SettingsPanel`s, T3 Code's twenty
@@ -72,12 +82,39 @@ pub struct Editing { /* … */ }
   `Option<T>` → T with an off; a `KeyChord` → a shortcut recorder;
   a struct → a nested group.
 - **Scope** is where a value lives: `Device` (this device:
-  [`Store<T>`](@/architecture/settings.md)), `Synced` (the person's, on
-  every device: an architect service like Task's `UserPrefs`, cached
-  locally, saved coalesced), or `Project`.
+  [`Store<T>`](@/architecture/settings.md), `DeviceValues`), `Synced`
+  (the person's, on every device: `DocValues`, below), or `Project`
+  (the open project's: `ProjectValues` in the project's directory, or a
+  `DocValues` over the project's own document).
 - The derive also gives typed access: `use_settings::<Audio>()` returns a
-  signal of the value and `update(|a| a.buffer = 256)`; a change is
-  stored and seen by everything reading it.
+  memo of the value and `update(|a| a.buffer = 256)`; each field that
+  changed is stored in its scope and seen by everything reading it.
+  Outside the UI, `Audio::read(&registry, &values)` is the same value
+  (the audio engine reads its buffer that way, before any page exists).
+- Today the derive takes `bool`, integers, floats, `String`, enums of
+  unit variants and one level of nested struct; a field of any other
+  type is left off the page and keeps its default.
+
+## Scopes, synced, and the org
+
+`ScopedValues` holds the three scopes' values and the org's
+`OrgSettings` under them. A value reads, in order: the org's lock, its
+own scope's value, the org's default, the declared default. A locked
+row stays on the page, dimmed, saying "Set by your organization";
+setting it is refused (`ValueError::Locked`). Which org's settings
+apply is the app's to say (`SettingsHandle::set_org` when the window's
+org changes).
+
+Every change reaches the provider's `on_change` as a `SettingsChange`
+(the scope, its values, the keys that changed), so the app sends it to
+that scope's store. The `Synced` store is a CRDT document: `DocValues`
+keeps the values in its root map, one entry per key, so two devices
+that changed different settings offline both keep theirs, and a key
+changed on both takes the later write. Every device opens the person's
+document under the same id (`synced_doc_id(app, person)`) with
+`crdt::docs`' `Lineage::Merge`, syncs it like any app document, writes
+only the changed keys (`save_keys`), and on `on_remote_change` puts
+`load()` back with `SettingsHandle::replace`.
 - An app adds a hand-written section where a generated one cannot do
   (Account, About, a theme library): `Section::custom("Account", icon,
   || rsx! { … })`, in the same page and search.
@@ -134,12 +171,11 @@ to record, chips for keys).
 - architect-form's `Field` gives the text and number controls their
   parse-and-validate behaviour.
 
-## Open questions
+## Decided
 
-1. **Synced settings' storage:** one generic per-user document of all
-   synced sections (a CRDT doc), or a service per app?
-2. **Per-project overrides** (T3 Code's "Applying settings for [project]"
-   sentence): needed now, or later?
-3. **Settings an app reads before the UI exists** (the audio engine's
-   buffer): read from the store directly with the same type — confirm
-   that is enough.
+1. **Synced settings' storage:** one per-person CRDT document per app
+   (`DocValues`), synced as an app document; no service per app.
+2. **Per-project values:** a setting declared `Project` lives in the
+   project's store, not as an override of a device value.
+3. **Settings an app reads before the UI exists:** `T::read` over the
+   values loaded from the stores, the same type the page uses.
