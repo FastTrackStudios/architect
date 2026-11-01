@@ -24,6 +24,7 @@ members = [
     "crates/architect-action-derive",
     # ── the reference example ─────────────────────────────────────────
     "examples/greeter",
+    "examples/scripting",
     "examples/extension/host",
     "examples/extension/counter",
     # ── apps ──────────────────────────────────────────────────────────
