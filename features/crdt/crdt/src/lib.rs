@@ -37,6 +37,15 @@ pub mod kinds;
 pub use history::History;
 pub use kinds::{DocKind, DocKinds, Migration};
 
+// Who is here and where (pointers as places in a view's coordinate
+// space, selections, carets, playheads) and the text binding that puts
+// others' edits and carets in an editor. Plain data over Loro: they ride
+// the presence channel and the doc, and compile everywhere.
+pub mod presence;
+pub mod text;
+pub use presence::{Here, PeerState, Place, PresenceSink, Roster};
+pub use text::{EditorBinding, RemoteCaret, TextBinding};
+
 #[cfg(feature = "vox")]
 pub mod sync;
 
@@ -69,9 +78,10 @@ pub mod hooks;
 #[cfg(feature = "dioxus")]
 pub use hooks::{
     DocHandle, Presence, SyncStatus, use_crdt_entry, use_crdt_list, use_doc_handle, use_doc_slot,
-    use_presence, use_presence_channel, use_presence_channel_into, use_presence_channel_keyed,
-    use_presence_slot, use_synced_doc, use_synced_doc_into, use_synced_doc_into_with,
-    use_synced_doc_keyed, use_synced_doc_keyed_with, use_synced_doc_with,
+    use_here, use_presence, use_presence_channel, use_presence_channel_into,
+    use_presence_channel_keyed, use_presence_frame, use_presence_slot, use_roster, use_synced_doc,
+    use_synced_doc_into, use_synced_doc_into_with, use_synced_doc_keyed, use_synced_doc_keyed_with,
+    use_synced_doc_with,
 };
 
 // File-backed persistence — the desktop client's (and a small server's)
