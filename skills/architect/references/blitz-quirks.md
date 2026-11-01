@@ -50,6 +50,8 @@ To check a face really loaded, put a different generic last in the stack for one
 | With a transparent, full-size title bar, AppKit moves the window for a drag that starts anywhere in its title bar, over the page or not, and swallows the release: a tab dragged in the top row moved the window. | Make the window not movable by AppKit (`setMovable(false)`) and move it from the row's empty space yourself (`drag_window`, which is `performWindowDrag`). | `features/shell/src/shell/mac.rs` `fit_traffic_lights`; `features/shell/src/shell/mod.rs` `DragStrip` |
 | `window.fullscreen()` still reports full screen during the resize that leaves it, so a title row read while drawing stays without its traffic lights. | Follow full screen through the window's events (`use_window_event`), into a signal. | `apps/lab/ui/src/screen.rs` `use_window_chrome` |
 | AppKit lays its title bar out again on every resize and on entering or leaving full screen. | Place the traffic lights again after each, and leave AppKit's own bar alone in full screen. | `features/shell/src/shell/mac.rs` `fit_traffic_lights` |
+| A Dock badge set while the app is an accessory, or in the same turn it becomes a regular app again, is not drawn on the tile the Dock makes, and setting the same label again draws nothing. | Put the badge back a run-loop turn later, clearing it first (`performSelector:withObject:afterDelay:`). | `features/presence/src/mac.rs` `restore_tile` |
+| winit registers no `NSApplicationDelegate`, so reopen on a Dock click, the Dock menu and URLs to open are the app's to hear. | Set one delegate for the app (`architect-presence` does; a second one replaces it). | `features/presence/src/mac.rs` `Delegate` |
 
 ## Accessibility
 
@@ -68,4 +70,5 @@ None of this can be fixed from architect: the tree is built from the DOM inside 
 
 - Because the accessibility tree has no names, bounds or actions (above), a GUI-testing tool's background click, which goes through the accessibility tree, lands on the window instead of the page. With cua-driver, click and drag with `delivery_mode: "foreground"` (real HID events), at pixel positions read from a screenshot. Its first read of the window can list no page nodes at all: that read is what starts the adapter.
 - A window capture of a full-screen Blitz window can show a blank band along the top and right that is not on the screen. Check with a capture of the whole display.
+- A synthetic click (cua-driver's, at a pixel) on a row of an open `NSMenu` (the Dock's menu, a status item's) only highlights it; press Return to choose it.
 - The impeccable detector (`impeccable detect`) reads only web files (html, jsx, tsx, vue, svelte, astro, css, scss, js, ts). It skips `.rs` silently and exits 0, which looks like a clean scan. To get any deterministic signal from `rsx!`, extract the `style:` literals into an HTML file and scan that, then discount the contrast findings the flattening causes (the parents' colours are lost).
