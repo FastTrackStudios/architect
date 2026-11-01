@@ -161,6 +161,29 @@ pub struct ViewDecl {
     pub document: Option<String>,
 }
 
+/// A layer it draws over a kind of view (`session.arrange`).
+///
+/// A live Luau script with `Canvas` and `ImGui` (`architect-canvas`),
+/// started while the extension is loaded, drawing in the view's
+/// coordinates on one of its planes. The app's canvas host runs it; the
+/// script may open tool windows too.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct OverlayDecl {
+    /// Unique among its contributions.
+    pub id: String,
+    /// The kind of view it draws over.
+    pub view: String,
+    /// `under` the view's items, `over` them (the default), or `top`.
+    #[serde(default = "over")]
+    pub plane: String,
+    /// The script that draws it, in the package.
+    pub script: String,
+}
+
+fn over() -> String {
+    "over".to_owned()
+}
+
 /// An opener for ⌘O: items of `kind`, found by the action `action`
 /// (`{query}` in, a list of `{id, title}` out).
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
@@ -293,6 +316,8 @@ pub struct Manifest {
     #[serde(default)]
     pub views: Vec<ViewDecl>,
     #[serde(default)]
+    pub overlays: Vec<OverlayDecl>,
+    #[serde(default)]
     pub openers: Vec<OpenerDecl>,
     #[serde(default)]
     pub data: Vec<DataDecl>,
@@ -334,6 +359,8 @@ pub enum ManifestError {
     BadSetting { key: String, why: String },
     /// Two of its contributions share an id.
     Duplicate(String),
+    /// An overlay on a plane that is not `under`, `over` or `top`.
+    BadPlane { overlay: String, plane: String },
 }
 
 impl std::fmt::Display for ManifestError {
@@ -349,10 +376,16 @@ impl std::fmt::Display for ManifestError {
             }
             Self::SettingNamespace(key) => write!(f, "setting {key} is not in its namespace"),
             Self::NoRun(id) => write!(f, "action {id} has no script and no preset"),
-            Self::ScriptKind(id) => write!(f, "action {id} has a script, but this is not Luau"),
+            Self::ScriptKind(id) => write!(f, "{id} has a script, but this is not Luau"),
             Self::BadPath(p) => write!(f, "{p} is outside the package"),
             Self::BadSetting { key, why } => write!(f, "setting {key}: {why}"),
             Self::Duplicate(id) => write!(f, "{id} is declared twice"),
+            Self::BadPlane { overlay, plane } => {
+                write!(
+                    f,
+                    "overlay {overlay}: {plane:?} is not a plane (under, over, top)"
+                )
+            }
         }
     }
 }
@@ -432,6 +465,21 @@ impl Manifest {
             if let Some(doc) = &view.document {
                 inside(doc)?;
             }
+        }
+        for overlay in &self.overlays {
+            if self.kind != Kind::Luau {
+                return Err(ManifestError::ScriptKind(overlay.id.clone()));
+            }
+            if !seen.insert(overlay.id.as_str()) {
+                return Err(ManifestError::Duplicate(overlay.id.clone()));
+            }
+            if !matches!(overlay.plane.as_str(), "under" | "over" | "top") {
+                return Err(ManifestError::BadPlane {
+                    overlay: overlay.id.clone(),
+                    plane: overlay.plane.clone(),
+                });
+            }
+            inside(&overlay.script)?;
         }
         let keys = format!("{}.", self.id);
         for section in &self.sections {
@@ -722,6 +770,31 @@ choices = [{ value = "wood", label = "Woodblock" }, { value = "beep", label = "B
         assert!(matches!(
             bad("id = \"fts.metronome\"", "id = \"FTS\""),
             Err(ManifestError::BadId(_))
+        ));
+    }
+
+    #[test]
+    fn an_overlay_is_a_script_on_a_plane_of_a_view() {
+        let with =
+            |overlay: &str| Manifest::parse(&format!("{METRONOME}\n[[overlays]]\n{overlay}"));
+        let m =
+            with("id = \"clicks\"\nview = \"session.arrange\"\nscript = \"clicks.luau\"").unwrap();
+        let o = &m.overlays[0];
+        assert_eq!(
+            (o.view.as_str(), o.plane.as_str()),
+            ("session.arrange", "over")
+        );
+        assert!(matches!(
+            with("id = \"c\"\nview = \"v\"\nplane = \"side\"\nscript = \"c.luau\""),
+            Err(ManifestError::BadPlane { .. })
+        ));
+        assert!(matches!(
+            with("id = \"c\"\nview = \"v\"\nscript = \"/etc/c.luau\""),
+            Err(ManifestError::BadPath(_))
+        ));
+        assert!(matches!(
+            with("id = \"metronome\"\nview = \"v\"\nscript = \"c.luau\""),
+            Err(ManifestError::Duplicate(_))
         ));
     }
 

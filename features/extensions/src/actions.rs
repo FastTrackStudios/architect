@@ -199,6 +199,7 @@ impl Extensions {
                     "actions": actions,
                     "settings": m.sections.iter().map(|s| s.id.clone()).collect::<Vec<_>>(),
                     "views": m.views.iter().map(|v| v.id.clone()).collect::<Vec<_>>(),
+                    "overlays": m.overlays.iter().map(|o| o.id.clone()).collect::<Vec<_>>(),
                 })
             })
             .collect();
