@@ -119,8 +119,8 @@ Three ways a document reaches other devices, all `DocSync` underneath:
 | | To | Over |
 |---|---|---|
 | **Your devices and your org** | the org's server (Task's), which keeps the canonical copy | vox over WebSocket, reconnecting; offline edits merge when back |
-| **Live, peer to peer** | someone you share a link with, or a device on the same network | vox over iroh: a link, or found on the local network (mDNS, `_fts._tcp` — reserved today, not yet browsed) |
-| **Device to device** | your own devices without a server | iroh, the device registry admitting them |
+| **Live, peer to peer** | someone you share a link with, or a device on the same network | vox over iroh: a link (`fts-doc:<endpoint>/<doc>?key=…`, `crdt::link`), or found on the local network (`_fts._udp`, `iroh_link::LanBrowser`) |
+| **Device to device** | your own devices without a server | iroh, the device registry admitting them (`crdt::p2p`) |
 
 Presence — who is here, where their pointer is, what they have selected
 — rides beside each document on every one of them. Who may read, edit,
