@@ -78,7 +78,7 @@ dependencies = [
 [[package]]
 name = "accesskit_xplat"
 version = "0.1.1"
-source = "git+https://github.com/FastTrackStudios/blitz?tag=fts-safe-area-2026-10#de6820611bd386097ac13860bb4146d854ce6395"
+source = "git+https://github.com/FastTrackStudios/blitz?tag=fts-measure-2026-11#d9dd4ee3819a6cca25c045dc692e962d574f7a03"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -337,7 +337,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 [[package]]
 name = "anyrender"
 version = "0.11.1"
-source = "git+https://github.com/FastTrackStudios/blitz?tag=fts-safe-area-2026-10#de6820611bd386097ac13860bb4146d854ce6395"
+source = "git+https://github.com/FastTrackStudios/blitz?tag=fts-measure-2026-11#d9dd4ee3819a6cca25c045dc692e962d574f7a03"
 dependencies = [
  "kurbo",
  "peniko",
@@ -1758,7 +1758,7 @@ dependencies = [
  "bitflags 2.13.1",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.11.0",
  "lazy_static",
  "lazycell",
  "log",
@@ -1876,7 +1876,7 @@ dependencies = [
 [[package]]
 name = "blitz-dom"
 version = "0.3.0-beta.1"
-source = "git+https://github.com/FastTrackStudios/blitz?tag=fts-safe-area-2026-10#de6820611bd386097ac13860bb4146d854ce6395"
+source = "git+https://github.com/FastTrackStudios/blitz?tag=fts-measure-2026-11#d9dd4ee3819a6cca25c045dc692e962d574f7a03"
 dependencies = [
  "accesskit",
  "anyrender",
@@ -1887,7 +1887,7 @@ dependencies = [
  "color",
  "cssparser 0.37.0",
  "cursor-icon",
- "debug_timer 0.1.3 (git+https://github.com/FastTrackStudios/blitz?tag=fts-safe-area-2026-10)",
+ "debug_timer 0.1.3 (git+https://github.com/FastTrackStudios/blitz?tag=fts-measure-2026-11)",
  "euclid",
  "html-escape",
  "image",
@@ -1919,7 +1919,7 @@ dependencies = [
 [[package]]
 name = "blitz-html"
 version = "0.3.0-beta.1"
-source = "git+https://github.com/FastTrackStudios/blitz?tag=fts-safe-area-2026-10#de6820611bd386097ac13860bb4146d854ce6395"
+source = "git+https://github.com/FastTrackStudios/blitz?tag=fts-measure-2026-11#d9dd4ee3819a6cca25c045dc692e962d574f7a03"
 dependencies = [
  "blitz-dom",
  "blitz-traits",
@@ -1930,7 +1930,7 @@ dependencies = [
 [[package]]
 name = "blitz-net"
 version = "0.3.0-beta.1"
-source = "git+https://github.com/FastTrackStudios/blitz?tag=fts-safe-area-2026-10#de6820611bd386097ac13860bb4146d854ce6395"
+source = "git+https://github.com/FastTrackStudios/blitz?tag=fts-measure-2026-11#d9dd4ee3819a6cca25c045dc692e962d574f7a03"
 dependencies = [
  "blitz-traits",
  "data-url",
@@ -1942,7 +1942,7 @@ dependencies = [
 [[package]]
 name = "blitz-paint"
 version = "0.3.0-beta.1"
-source = "git+https://github.com/FastTrackStudios/blitz?tag=fts-safe-area-2026-10#de6820611bd386097ac13860bb4146d854ce6395"
+source = "git+https://github.com/FastTrackStudios/blitz?tag=fts-measure-2026-11#d9dd4ee3819a6cca25c045dc692e962d574f7a03"
 dependencies = [
  "anyrender",
  "anyrender_svg",
@@ -1962,7 +1962,7 @@ dependencies = [
 [[package]]
 name = "blitz-shell"
 version = "0.3.0-beta.1"
-source = "git+https://github.com/FastTrackStudios/blitz?tag=fts-safe-area-2026-10#de6820611bd386097ac13860bb4146d854ce6395"
+source = "git+https://github.com/FastTrackStudios/blitz?tag=fts-measure-2026-11#d9dd4ee3819a6cca25c045dc692e962d574f7a03"
 dependencies = [
  "accesskit",
  "accesskit_xplat",
@@ -1986,7 +1986,7 @@ dependencies = [
 [[package]]
 name = "blitz-traits"
 version = "0.3.0-beta.1"
-source = "git+https://github.com/FastTrackStudios/blitz?tag=fts-safe-area-2026-10#de6820611bd386097ac13860bb4146d854ce6395"
+source = "git+https://github.com/FastTrackStudios/blitz?tag=fts-measure-2026-11#d9dd4ee3819a6cca25c045dc692e962d574f7a03"
 dependencies = [
  "atomic_refcell",
  "bitflags 2.13.1",
@@ -2487,7 +2487,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -3103,7 +3103,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c54e03a951783e8b327515db3f2a2fd0e3bed362a96b066f341ce66ed49b4ead"
 dependencies = [
  "data-encoding",
- "syn 3.0.3",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -3132,7 +3132,7 @@ checksum = "da220af51a1a335e9a930beaaef53d261e41ea9eecfb3d973a3ddae1a7284b9c"
 [[package]]
 name = "debug_timer"
 version = "0.1.3"
-source = "git+https://github.com/FastTrackStudios/blitz?tag=fts-safe-area-2026-10#de6820611bd386097ac13860bb4146d854ce6395"
+source = "git+https://github.com/FastTrackStudios/blitz?tag=fts-measure-2026-11#d9dd4ee3819a6cca25c045dc692e962d574f7a03"
 
 [[package]]
 name = "debugid"
@@ -3842,7 +3842,7 @@ version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab8ecd87370524b461f8557c119c405552c396ed91fc0a8eec68679eab26f94a"
 dependencies = [
- "libloading 0.8.9",
+ "libloading 0.7.4",
 ]
 
 [[package]]
@@ -5070,8 +5070,8 @@ dependencies = [
  "libc",
  "log",
  "rustversion",
- "windows-link 0.2.1",
- "windows-result 0.4.1",
+ "windows-link 0.1.3",
+ "windows-result 0.3.4",
 ]
 
 [[package]]
@@ -5380,7 +5380,7 @@ dependencies = [
  "log",
  "presser",
  "thiserror 2.0.20",
- "windows 0.62.2",
+ "windows 0.61.3",
 ]
 
 [[package]]
@@ -5965,7 +5965,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.61.2",
 ]
 
 [[package]]
@@ -8216,7 +8216,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate 3.5.0",
+ "proc-macro-crate 1.3.1",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -9787,7 +9787,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -9800,7 +9800,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b570b25f7617e43d59005d0990ccb79e950a423952cea19671b7a876da390adf"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -12252,7 +12252,7 @@ dependencies = [
 [[package]]
 name = "stylo_taffy"
 version = "0.3.0-beta.1"
-source = "git+https://github.com/FastTrackStudios/blitz?tag=fts-safe-area-2026-10#de6820611bd386097ac13860bb4146d854ce6395"
+source = "git+https://github.com/FastTrackStudios/blitz?tag=fts-measure-2026-11#d9dd4ee3819a6cca25c045dc692e962d574f7a03"
 dependencies = [
  "stylo",
  "stylo_atoms",
@@ -14970,7 +14970,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -15763,8 +15763,8 @@ dependencies = [
  "log",
  "serde",
  "thiserror 2.0.20",
- "windows 0.62.2",
- "windows-core 0.62.2",
+ "windows 0.61.3",
+ "windows-core 0.61.2",
 ]
 
 [[package]]
