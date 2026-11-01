@@ -85,6 +85,9 @@ pub struct Commands {
     pub(crate) query: Signal<String>,
     /// An action's arguments being asked for in the palette.
     pub(crate) asking: Signal<Option<Asking>>,
+    /// The one group the palette lists, and its field's prompt
+    /// ([`Commands::show_group`]).
+    pub(crate) only: Signal<Option<(String, String)>>,
     /// A binding being recorded in the action list window.
     pub(crate) recording: Signal<Option<Recording>>,
     /// The `@` (this page's targets) and `#` (settings) finders.
@@ -116,6 +119,7 @@ pub fn use_commands_provider() -> Commands {
         held: Signal::new(None),
         query: Signal::new(String::new()),
         asking: Signal::new(None),
+        only: Signal::new(None),
         recording: Signal::new(None),
         targets: CopyValue::new(Rc::new(RefCell::new(Openers::new()))),
         settings: CopyValue::new(Rc::new(RefCell::new(Openers::new()))),
@@ -439,8 +443,19 @@ impl Commands {
             query.set(String::new());
             let mut asking = self.asking;
             asking.set(None);
+            let mut only = self.only;
+            only.set(None);
         }
         o.set(Some(overlay));
+    }
+
+    /// The palette on `group`'s commands only, its field empty with
+    /// `prompt` in it: a command that asks where or which (⇧⌘M's "Move
+    /// to…" lists the `Move` group), the person narrowing it by typing.
+    pub fn show_group(&self, group: &str, prompt: &str) {
+        self.show(Overlay::Palette);
+        let mut only = self.only;
+        only.set(Some((group.to_owned(), prompt.to_owned())));
     }
 
     pub fn close(&self) {
@@ -448,6 +463,8 @@ impl Commands {
         o.set(None);
         let mut asking = self.asking;
         asking.set(None);
+        let mut only = self.only;
+        only.set(None);
     }
 
     /// A key at the app's root: ⌘K (or ⌘⇧P) the palette, ⌘O quick open,
@@ -568,7 +585,7 @@ pub fn CommandLayer() -> Element {
 /// The overlay's frame: a scrim, and a panel near the top with a field.
 #[component]
 pub(crate) fn Frame(
-    placeholder: &'static str,
+    placeholder: String,
     query: Signal<String>,
     on_key: EventHandler<KeyboardEvent>,
     children: Element,
@@ -697,8 +714,13 @@ pub fn CommandPalette() -> Element {
     let query = commands.query;
     let mut selected = use_signal(|| 0usize);
     let q = Query::parse(&query.read());
+    let only = (commands.only)();
+    let mut all = commands.all();
+    if let Some((group, _)) = &only {
+        all.retain(|c| c.group == *group);
+    }
     let (rows, picks): (Vec<Ranked>, Vec<Pick>) = match q.scope {
-        Scope::Commands => rank(&commands.all(), &q.text, &commands.recents.read())
+        Scope::Commands => rank(&all, &q.text, &commands.recents.read())
             .into_iter()
             .map(|r| {
                 let pick = Pick::Run(r.command.id.clone());
@@ -748,7 +770,7 @@ pub fn CommandPalette() -> Element {
         Scope::Help => "Nothing is bound to that",
     };
     rsx! {
-        Frame { placeholder: "Type a command…", query, on_key,
+        Frame { placeholder: only.map_or_else(|| "Type a command…".to_owned(), |(_, prompt)| prompt), query, on_key,
             if rows.is_empty() {
                 div { style: "padding: 18px 12px; color: {t.ink_3}; font-size: 13px;", "{empty}" }
             }
