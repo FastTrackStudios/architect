@@ -46,6 +46,7 @@ members = [
     "features/commands",
     "features/settings",
     "features/orgs",
+    "features/files",
     "features/ui/showcase",
     "features/ui/ui-snapshot",
     "features/shell",
@@ -207,6 +208,7 @@ architect-workspace = { path = "features/workspace" }
 architect-commands = { path = "features/commands" }
 architect-settings = { path = "features/settings" }
 architect-orgs = { path = "features/orgs" }
+architect-files = { path = "features/files" }
 architect-lab-ui = { path = "apps/lab/ui" }
 # iOS: the UIScene lifecycle the lab app adopts (apps/lab/mobile).
 objc2 = "0.6"

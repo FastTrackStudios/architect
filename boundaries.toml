@@ -103,6 +103,15 @@ layer = "L0"
 package = "architect-orgs"
 layer = "L0"
 
+[[row]]
+package = "architect-files"
+layer = "L0"
+
+[[row]]
+package = "architect-files"
+features = ["vox"]
+layer = "L0"
+
 # ── L4 ui ─────────────────────────────────────────────────────────────────
 [[row]]
 package = "crdt"
@@ -205,6 +214,11 @@ note = "sibling of auth; fold in"
 
 [[row]]
 package = "architect-orgs"
+features = ["server"]
+layer = "L1"
+
+[[row]]
+package = "architect-files"
 features = ["server"]
 layer = "L1"
 

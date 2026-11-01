@@ -615,6 +615,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-files"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-files",
+ "architect-orgs",
+ "architect-permissions",
+ "facet",
+ "facet-json",
+ "futures-util",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "uuid",
+ "vox",
+]
+
+[[package]]
 name = "architect-form"
 version = "0.1.0"
 dependencies = [
