@@ -204,6 +204,11 @@ layer = "L1"
 note = "sibling of auth; fold in"
 
 [[row]]
+package = "architect-orgs"
+features = ["server"]
+layer = "L1"
+
+[[row]]
 package = "auth-db"
 layer = "L2"
 note = "sibling of auth; fold in as a db flag"
