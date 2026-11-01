@@ -8,6 +8,8 @@ publish = false
 
 [dependencies]
 architect-lab-ui = { workspace = true }
+# One instance, and a `--background` launch starting with no window.
+architect-presence = { workspace = true, features = ["native"] }
 architect-workspace = { workspace = true, features = ["native", "hot-reload"] }
 dioxus = { workspace = true }
 dioxus-native = { workspace = true, features = ["vello", "hot-reload"] }
