@@ -99,6 +99,7 @@ scripting.install()?;  // SCRIPT_* actions + every saved script
 - A single-person list: on a multi-tenant server every person's saved scripts would share one list; give each its own list there.
 - Live scripts: `Runtime::start(caller, source, args, step)` runs the first part and gives a `Live`; each `Live::frame()` runs what the script handed `defer(fn)` (ReaScript's `reaper.defer`), one step each, the step limit reset. A frame that fails stops it. One-off runs have no `defer`.
 - Modules: `Runtime::with_module(Arc<dyn Module>)` adds a global and a `require` path (`require` finds nothing else). A module keeps its state in an `Arc` shared with its host, never as a Luau value (that would keep the state alive); `raise(lua, msg)` fails the script at its line. `mlua` is re-exported from `architect_scripting::luau`.
+- Worked example to copy: `examples/scripting` (`examples/scripting/src/lib.rs` `App`: actions + `RoleEngine` authorizer + `Scripting` with `HistoryTransactions` + named-mode MCP; scripts in `examples/scripting/scripts`; `examples/scripting/tests/scripts.rs`, `examples/scripting/tests/mcp.rs`), walked in `docs/content/getting-started/scripting.md`.
 
 ## Canvases (`architect-canvas`)
 
