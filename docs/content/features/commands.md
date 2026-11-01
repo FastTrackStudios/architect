@@ -20,9 +20,9 @@ Use one action per capability; never a bespoke MCP tool, menu handler or
 palette entry. Design: [The Action List](@/architecture/commands.md) and
 [Actions everywhere](@/architecture/actions-everywhere.md).
 
-<!-- media: palette-run-action — ⌘K opens the palette, typing "gre" ranks Greet first with its shortcut, Return runs it -->
-<!-- media: action-list-window — the action list window: searching, a disabled action showing why it cannot run, running one -->
-<!-- media: quick-open — ⌘O listing notes and files across the org and opening one in a new tab -->
+![⌘K opens the palette, typing "gre" ranks Greet first with its shortcut, Return runs it](https://raw.githubusercontent.com/FastTrackStudios/architect/media/palette-run.gif)
+![the action list window: searching, a disabled action showing why it cannot run, running one](https://raw.githubusercontent.com/FastTrackStudios/architect/media/action-list-window.gif)
+![⌘O listing notes and files across the org and opening one in a new tab](https://raw.githubusercontent.com/FastTrackStudios/architect/media/quick-open-note.gif)
 
 ## A minimal example
 

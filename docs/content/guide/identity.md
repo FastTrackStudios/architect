@@ -128,7 +128,7 @@ let router = router.with_permissions(gate);
   dim what the person cannot do, and the answer cannot disagree with
   enforcement.
 
-<!-- media: action-disabled-by-role — a viewer's palette and ⋯ menu with Invite people dimmed and the reason shown -->
+![a viewer's palette and ⋯ menu with Invite people dimmed and the reason shown](https://raw.githubusercontent.com/FastTrackStudios/architect/media/action-disabled-by-role.gif)
 
 While migrating an existing server, `observe_only(true)` audits what would
 be denied and lets everything through.
@@ -178,7 +178,7 @@ The shell's switcher is `org.switcher(Some("All organizations"))`, a
 `Workspaces` to pass to `AppShell { workspaces }`
 ([UI chapter](@/guide/ui.md)); picking one calls `OrgHandle::switch`.
 
-<!-- media: org-switcher-all — the organization switcher: picking an org, then All organizations with items tagged by org -->
+![the organization switcher: picking an org, then All organizations with items tagged by org](https://raw.githubusercontent.com/FastTrackStudios/architect/media/org-switcher.gif)
 
 ## 5. The org as the scope of everything
 

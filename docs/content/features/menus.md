@@ -18,7 +18,7 @@ global menu.
 Use it for every app's menu bar. Design: [App menus](@/architecture/app-menus.md).
 
 <!-- media: menu-bar-view-menu — the View menu open: a ticked toggle, a disabled item with its shortcut, and the Screensets section with the current one ticked -->
-<!-- media: in-window-menus — the in-window menu bar on a platform without a global menu, opening File and running an item -->
+![the in-window menu bar on a platform without a global menu, opening File and running an item](https://raw.githubusercontent.com/FastTrackStudios/architect/media/menu-bar-in-window.gif)
 
 ## A minimal example
 

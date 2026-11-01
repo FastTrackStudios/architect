@@ -220,7 +220,7 @@ organization switcher is a `Workspaces` passed to `AppShell` (the
 <!-- media: shell-phone-drawers — on a phone, a swipe right opens the left drawer, a swipe left the right one -->
 <!-- media: shell-styles — one app in FloatingPill, TabBar and RailOnly -->
 <!-- media: shell-form-factors — the lab resized from a desk window to a tablet and a phone -->
-<!-- media: shell-workspace-switcher — the organization switcher opened at the sidebar's head -->
+![the organization switcher opened at the sidebar's head](https://raw.githubusercontent.com/FastTrackStudios/architect/media/shell-workspace-switcher.png)
 
 ## The workspace's primitives: every kind of tab
 
@@ -237,7 +237,7 @@ as a tab beside the active one:
 let _ = w.open(Pane::new("note-1", "note", "Today"), Target::Tab);
 ```
 
-<!-- media: workspace-tab-group — a tab group's bar: open a tab with +, switch, close one -->
+![a tab group's bar: open a tab with +, switch, close one](https://raw.githubusercontent.com/FastTrackStudios/architect/media/workspace-tab-group.gif)
 
 **Splits.** Drag a tab to a group's edge, or Split right from its menu:
 
@@ -247,12 +247,12 @@ let _ = w.open(Pane::new("graph", "graph", "Graph"), Target::Split(Side::Right))
 
 Dividers drag; a double click evens them (`even`).
 
-<!-- media: workspace-split-drag — a tab dragged to a group's right edge splits it, then the divider is dragged -->
+![a tab dragged to a group's right edge splits it, then the divider is dragged](https://raw.githubusercontent.com/FastTrackStudios/architect/media/workspace-split-drag.gif)
 
 **Reorder and move.** Drag a tab along its bar, or onto another group's bar
 or middle (`move_pane(&pane, Dest::Group { group, index })`).
 
-<!-- media: workspace-tab-reorder — a tab dragged along its bar, then onto another group -->
+![a tab dragged along its bar, then onto another group](https://raw.githubusercontent.com/FastTrackStudios/architect/media/tab-reorder.gif)
 
 **Stacked tabs.** A group's menu turns stacking on: its tabs become panes
 side by side in a strip that scrolls sideways, each sliding over the ones
@@ -266,7 +266,7 @@ if let Some(g) = w.active_group() {
 
 That is the lab's "Mix" screenset (`apps/lab/ui/src/vault.rs` `mix_workspace`).
 
-<!-- media: workspace-stacked-tabs — a stacked group scrolled sideways, panes sliding over each other and leaving their spines -->
+![a stacked group scrolled sideways, panes sliding over each other and leaving their spines](https://raw.githubusercontent.com/FastTrackStudios/architect/media/stacked-tabs.gif)
 
 **Docks and the ribbon.** Left, right and bottom docks hold groups of their
 own behind a ribbon of view icons and pinned commands; each docks open,
@@ -277,7 +277,7 @@ let _ = w.open(Pane::new("files", "files", "Files"), Target::Dock(Side::Left));
 let _ = w.set_dock_shown(Side::Bottom, Shown::Collapsed);
 ```
 
-<!-- media: workspace-docks-ribbon — the ribbon showing a view in the left dock, collapsing it, and a pinned command run from it -->
+![the ribbon showing a view in the left dock, collapsing it, and a pinned command run from it](https://raw.githubusercontent.com/FastTrackStudios/architect/media/workspace-docks-ribbon.gif)
 
 **Floats.** A pane floating over the window: drag by its title, snap to the
 top (maximised) or an edge (half, or a docked panel), minimise to a chip:
@@ -297,7 +297,7 @@ launcher); dragged back, or closed, its tabs return:
 let _ = w.open(pane, Target::Window(None));
 ```
 
-<!-- media: workspace-pop-out-window — a tab dragged out of the main window becomes its own window, then dragged back -->
+![a tab dragged out of the main window becomes its own window, then dragged back](https://raw.githubusercontent.com/FastTrackStudios/architect/media/workspace-pop-out-window.gif)
 
 **Pin, link, history.** `set_pinned` keeps a tab from being reused;
 `set_link` makes tabs follow each other; `navigate`, `go` are a tab's own
@@ -318,7 +318,7 @@ Screensets::default().with_builtins([
 ])
 ```
 
-<!-- media: workspace-screenset-recall — ⌘1 and ⌘2 switching between the Write and Mix screensets -->
+![⌘1 and ⌘2 switching between the Write and Mix screensets](https://raw.githubusercontent.com/FastTrackStudios/architect/media/workspace-screenset-recall.gif)
 
 **On a phone** a workspace is one pane at a time with a switcher listing
 every pane.
@@ -354,12 +354,12 @@ commands.show(architect_commands::Overlay::QuickOpen);
 - `WhichKeyPanel`: what can follow a pending key sequence or a held tool.
 - `InWindowMenus` / `NativeMenus`: the menu bar from a `MenuBar`.
 
-<!-- media: palette-run-action — ⌘K opened, "done" typed, Mark done run from the palette -->
+![⌘K opened, "done" typed, Mark done run from the palette](https://raw.githubusercontent.com/FastTrackStudios/architect/media/palette-run.gif)
 <!-- media: palette-ask-arguments — an action with arguments asking for them a step at a time in the palette -->
-<!-- media: quick-open-note — ⌘O finding a note and opening it in a split with ⌘⌥ -->
+![⌘O finding a note and opening it in a split with ⌘⌥](https://raw.githubusercontent.com/FastTrackStudios/architect/media/quick-open-note.gif)
 <!-- media: action-list-binding-editor — the action list window recording a new chord, a conflict shown -->
 <!-- media: which-key-panel — a key sequence pending, the which-key panel listing what can follow -->
-<!-- media: menu-bar-in-window — the in-window menu bar, a ticked toggle and a live section -->
+![the in-window menu bar, a ticked toggle and a live section](https://raw.githubusercontent.com/FastTrackStudios/architect/media/menu-bar-in-window.gif)
 
 ## The settings page
 
@@ -378,9 +378,9 @@ Every row is drawn from its `Setting`'s `Control`: a switch, a select, a
 segmented control, a slider with its value in a chip, cards, a stepper, a
 text field, a shortcut recorder.
 
-<!-- media: settings-page-desk — the settings modal on a desk: sections on the left, a section's rows, a changed row's dot and reset arrow -->
+![the settings modal on a desk: sections on the left, a section's rows, a changed row's dot and reset arrow](https://raw.githubusercontent.com/FastTrackStudios/architect/media/settings-page-desk.gif)
 <!-- media: settings-page-phone — the settings page on a phone as an iOS grouped list, a section pushed -->
-<!-- media: settings-search-to-row — "# dark" typed in the palette, the Appearance section opened, the Theme row pulsing -->
+!["# dark" typed in the palette, the Appearance section opened, the Theme row pulsing](https://raw.githubusercontent.com/FastTrackStudios/architect/media/settings-search-to-row.gif)
 
 ## Browsing them: architect-story
 

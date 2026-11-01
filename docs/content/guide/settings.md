@@ -208,8 +208,8 @@ It registers two things itself:
 Open it from code with `settings.show(None)` or `settings.show(Some("editor"))`
 (the lab's account menu does).
 
-<!-- media: settings-page-desk — the settings modal on a desk: sections on the left, a changed row's dot, its reset arrow, Restore defaults -->
-<!-- media: settings-search-to-row — "# dark" typed in the palette, the Appearance section opened, the Theme row pulsing -->
+![the settings modal on a desk: sections on the left, a changed row's dot, its reset arrow, Restore defaults](https://raw.githubusercontent.com/FastTrackStudios/architect/media/settings-page-desk.gif)
+!["# dark" typed in the palette, the Appearance section opened, the Theme row pulsing](https://raw.githubusercontent.com/FastTrackStudios/architect/media/settings-search-to-row.gif)
 
 ### Extensions' sections
 

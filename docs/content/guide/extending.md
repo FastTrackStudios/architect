@@ -186,7 +186,7 @@ let extensions = use_hook(|| {
 `features/extensions/tests/metronome.rs` installs, runs, edits and reloads
 the metronome.
 
-<!-- media: extension-metronome-load — the metronome switched on: its section on the settings page and its action in ⌘K -->
+![the metronome switched on: its section on the settings page and its action in ⌘K](https://raw.githubusercontent.com/FastTrackStudios/architect/media/extension-metronome-load.gif)
 <!-- media: extension-hot-reload — the metronome's extension.toml edited and saved while the lab runs, its settings section changing without a restart -->
 
 Example: `examples/extension`, a registry with a Luau extension and a process extension loaded by a small host, hot-reloaded on save; walked through in [Write an extension, end to end](@/getting-started/extension.md).
@@ -301,7 +301,7 @@ plane, script`, Luau only). Today the app starts it as a `Session` itself;
 the host starting overlays is still to come.
 
 <!-- media: canvas-marker-lane-overlay — the marker lane drawn over the arrangement: flags at markers, a lane wash, a flag clicked moving the playhead -->
-<!-- media: canvas-tool-window-docked — the marker lane's ImGui window floating, then docked as a pane, its sliders changing the overlay -->
+![the marker lane's ImGui window floating, then docked as a pane, its sliders changing the overlay](https://raw.githubusercontent.com/FastTrackStudios/architect/media/canvas-tool-window-docked.gif)
 
 Shapes are drawn as boxes: Blitz has no texture widget yet, so there is no
 egui or `<canvas>` behind the API.
