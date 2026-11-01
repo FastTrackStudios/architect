@@ -379,12 +379,12 @@ Two things decide how the workspace looks, separately:
 | | Desk (fine) | Touchscreen PC (coarse) | iPad | Phone |
 |---|---|---|---|---|
 | Groups and splits | as arranged | as arranged | as arranged | one pane at a time: the active group's current tab |
-| Tab bars | each group's, 32pt | each group's, 44pt | each group's, 44pt | a tab switcher (the tab count, or the shell's ⋯) listing every pane |
+| Tab bars | each group's, 32pt | each group's, 44pt | each group's, 44pt | the tab switcher: a grid of cards (live previews), two columns (more on an iPad in compact width), opened from the action bar's tabs button |
 | Stacked group | the sliding strip | the strip, swiped | the strip, swiped | its panes one after another, swiped |
 | Two-stage sidebar | ribbon + dock | ribbon + dock | ribbon + dock; upright, the dock opens over the page | the ribbon becomes the drawer's header (its icons switch the drawer's view), the dock the drawer |
 | Docks | docked, resizable, collapsible | the same, wider handles | docked sideways, over the page upright | the shell's drawers: left, right; the bottom dock a sheet |
 | Arrange | hold W, or right-click | long-press a tab, or the ⋯ | long-press, or the ⋯ | the tab switcher's edit mode |
-| Windows | real OS windows | real OS windows | iPadOS windows where the platform gives them | none: a pop-out's panes join the switcher |
+| Windows | real OS windows | real OS windows | iPadOS windows where the platform gives them | none: a pop-out's tabs are a place of their own in the switcher's menu |
 | Screensets | one layout per form class (desk; tablet upright and sideways; phone upright and sideways) | the desk's | the tablet's | the phone's |
 
 ## It renders in Blitz

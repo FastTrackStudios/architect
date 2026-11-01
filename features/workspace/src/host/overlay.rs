@@ -890,33 +890,33 @@ fn open_items(host: Host) -> Vec<Item> {
 }
 
 /// On a phone: the active pane alone, under a bar with its name and the
-/// count of panes (the switcher).
+/// count of tabs (the switcher).
 #[component]
 pub(super) fn PhoneBody() -> Element {
     let mut host = use_host();
     let t = *host.theme.read();
     let workspace = host.workspace.read();
-    let pane = workspace
-        .active
-        .clone()
-        .filter(|p| workspace.locate(p).is_some_and(|l| l.area == Area::Center))
-        .or_else(|| workspace.current_document().cloned());
+    let pane = super::switcher::phone_pane(&workspace);
     let title = pane
         .as_ref()
         .and_then(|p| workspace.pane(p))
         .map(|p| host.title(p))
         .unwrap_or_default();
-    let count = workspace.panes.len();
+    let count = workspace.tab_count();
     drop(workspace);
     // The app may show the pane's title and the switcher in its own bar
     // (`phone_header: false`); else this one: the title on the page's
     // left edge, the switcher a labelled pill.
     let own_bar = (host.phone_header)();
+    let header = super::switcher::PHONE_HEADER;
+    let tabs = if count == 1 { "tab" } else { "tabs" };
+    let closes = (host.switch.closes)();
     rsx! {
-        div { style: "flex:1 1 0; min-width:0; min-height:0; display:flex; flex-direction:column;",
+        div {
+            style: "flex:1 1 0; min-width:0; min-height:0; display:flex; flex-direction:column;",
             if own_bar {
                 div {
-                    style: "flex:0 0 56px; display:flex; align-items:center; gap:10px; padding:0 12px 0 20px; \
+                    style: "flex:0 0 {header}px; display:flex; align-items:center; gap:10px; padding:0 12px 0 20px; \
                             border-bottom:1px solid {t.rule}; background:{t.desk};",
                     div { style: "flex:1; min-width:0; overflow:hidden; white-space:nowrap; font-size:17px; font-weight:650;",
                         "{title}"
@@ -925,91 +925,22 @@ pub(super) fn PhoneBody() -> Element {
                         style: "height:44px; display:flex; align-items:center; gap:7px; padding:0 14px; border-radius:22px; \
                                 border:1px solid {t.rule}; background:{t.pill}; color:{t.ink}; font-size:14px; \
                                 font-weight:600; cursor:pointer;",
-                        title: "Every open pane",
-                        "aria-label": "{count} open panes",
+                        "aria-label": "{count} {tabs}",
                         onclick: move |_| host.switcher.set(true),
                         Layers { size: 16, color: t.ink_2 }
-                        "{count} open"
+                        "{count} {tabs}"
                     }
                 }
             }
-            div { style: "flex:1 1 0; min-width:0; min-height:0; display:flex; position:relative;",
+            // Drawn afresh once the switcher has gone: laid out while its
+            // layer was over it, Blitz collapsed the pane's box.
+            div {
+                key: "{closes}",
+                style: "flex:1 1 0; min-width:0; min-height:0; display:flex; position:relative;",
                 match pane {
                     Some(pane) => rsx! { PaneSlot { key: "{pane.0}", pane } },
                     None => rsx! { super::EmptyCenter {} },
                 }
-            }
-        }
-        if (host.switcher)() {
-            Switcher {}
-        }
-    }
-}
-
-/// A phone's list of every pane, by where it is: a press shows it (a
-/// docked one as a sheet), a long list scrolls.
-#[component]
-fn Switcher() -> Element {
-    let mut host = use_host();
-    let t = *host.theme.read();
-    let workspace = host.workspace.read();
-    let rows: Vec<(PaneId, String, &'static str)> = workspace
-        .panes
-        .iter()
-        .filter_map(|p| {
-            let place = match workspace.locate(&p.id)?.area {
-                Area::Center => "Open",
-                Area::Dock(Side::Left) => "Left side",
-                Area::Dock(Side::Right) => "Right side",
-                Area::Dock(_) => "Bottom",
-                Area::Float(_) => "Floating",
-            };
-            Some((p.id.clone(), host.title(p), place))
-        })
-        .collect();
-    drop(workspace);
-    let sheet_top = layer::SHEET.saturating_add(1);
-    rsx! {
-        div {
-            style: "position:absolute; top:0; left:0; right:0; bottom:0; z-index:{layer::SHEET}; background:{t.scrim};",
-            onclick: move |_| host.switcher.set(false),
-        }
-        div {
-            style: "position:absolute; left:0; right:0; bottom:0; max-height:80%; z-index:{sheet_top}; \
-                    display:flex; flex-direction:column; padding:8px; border-radius:16px 16px 0 0; \
-                    background:{t.sheet}; overflow-y:scroll;",
-            for (pane, title, place) in rows {
-                button {
-                    key: "{pane.0}",
-                    style: "display:flex; align-items:center; gap:8px; min-height:48px; padding:0 12px; \
-                            border:none; border-radius:10px; background:transparent; color:{t.ink}; \
-                            font-size:15px; text-align:left;",
-                    onclick: move |_| {
-                        host.switcher.set(false);
-                        let docked = host
-                            .workspace
-                            .peek()
-                            .locate(&pane)
-                            .is_some_and(|l| l.area != Area::Center);
-                        if docked {
-                            host.sheet.set(Some(pane.clone()));
-                        } else {
-                            host.run(Op::Show(pane.clone()));
-                        }
-                    },
-                    span { style: "flex:1; min-width:0; overflow:hidden; white-space:nowrap;", "{title}" }
-                    span { style: "color:{t.ink_3}; font-size:12px;", "{place}" }
-                }
-            }
-            button {
-                style: "min-height:48px; margin-top:4px; border:none; border-radius:10px; \
-                        background:{t.pill}; color:{t.ink}; font-size:15px;",
-                onclick: move |e| {
-                    e.stop_propagation();
-                    host.switcher.set(false);
-                    host.show_open_menu();
-                },
-                "Open a view"
             }
         }
     }

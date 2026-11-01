@@ -345,6 +345,9 @@ pub struct Shell {
     page_left: Signal<Option<Element>>,
     /// What the page adds to a desk's ribbon, under the app's sections.
     rail_extra: Signal<Option<Element>>,
+    /// What the page draws over the whole shell, its bars too:
+    /// [`use_shell_cover`].
+    cover: Signal<Option<Element>>,
     /// The page's status items: [`use_status`].
     page_status: Signal<Vec<StatusItem>>,
     pub status_style: StatusStyle,
@@ -382,6 +385,38 @@ pub fn use_shell_slots(left: Option<Element>, rail: Option<Element>) {
             };
             l.set(None);
             r.set(None);
+        }
+    });
+}
+
+/// Puts the page's own layer over the whole shell (the page's bar, the
+/// action bar and the tabs too) while the page is mounted: a phone's tab
+/// switcher, which takes the screen as Obsidian's does.
+///
+/// The layer is laid out against the shell's own box, which is the
+/// window's: place it with `position: absolute` and keep clear of the
+/// screen's insets ([`Shell::screen`]). Give an element that reads its
+/// state itself and draws nothing while it is closed; it is set when
+/// `cover` comes or goes (`None` takes it away), not on every render.
+pub fn use_shell_cover(cover: Option<Element>) {
+    let shell = try_use_context::<Signal<Shell>>();
+    let mut had = use_hook(|| CopyValue::new(false));
+    let has = cover.is_some();
+    if let Some(shell) = shell
+        && *had.peek() != has
+    {
+        had.set(has);
+        let mut slot = shell.peek().cover;
+        slot.set(cover);
+    }
+    use_drop(move || {
+        if let Some(shell) = shell
+            && let Ok(s) = shell.try_peek()
+        {
+            let mut slot = s.cover;
+            if slot.try_peek().is_ok_and(|c| c.is_some()) {
+                slot.set(None);
+            }
         }
     });
 }
@@ -711,6 +746,7 @@ pub fn AppShell(
     // The page's items first (its own, at a bar's left), then the app's.
     let all_status: Vec<StatusItem> = page_status().into_iter().chain(status).collect();
     let rail_extra = use_signal(|| None::<Element>);
+    let cover = use_signal(|| None::<Element>);
     let bars = use_signal(BarModel::default);
     // A page that claims the sidebar draws it from the top (its tabs in the
     // title row). On a desk the switcher sits at the sidebar's foot either
@@ -736,6 +772,7 @@ pub fn AppShell(
         floats_separate: frame(screen, style) == Frame::Sidebar,
         page_left,
         rail_extra,
+        cover,
         page_status,
         status_style,
         bar_actions: actions,
@@ -1162,6 +1199,8 @@ pub fn AppShell(
                     None => rsx! {},
                 }
             }
+            // The page's layer over everything (`use_shell_cover`).
+            {cover()}
         }
     }
 }

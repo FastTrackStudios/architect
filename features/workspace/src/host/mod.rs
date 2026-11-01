@@ -38,6 +38,7 @@ mod overlay;
 mod presence;
 mod screens;
 mod slide;
+mod switcher;
 mod windows;
 
 use std::collections::HashMap;
@@ -75,6 +76,10 @@ pub struct View {
     /// At most one open: its pane id is its kind, so opening it again
     /// brings it forward.
     pub single: bool,
+    /// Its icon in a phone's tab switcher, not a live preview: a view
+    /// that is costly to draw twice, or that says so to others as it
+    /// mounts and goes (a published canvas, a remote process's view).
+    pub still: bool,
     render: Rc<dyn Fn(PaneId) -> Element>,
 }
 
@@ -93,6 +98,7 @@ impl View {
             icon: None,
             home: Target::Tab,
             single: true,
+            still: false,
             render: Rc::new(render),
         }
     }
@@ -113,6 +119,15 @@ impl View {
     #[must_use]
     pub const fn many(mut self) -> Self {
         self.single = false;
+        self
+    }
+
+    /// Shows its icon in a phone's tab switcher instead of a live preview
+    /// (see [`View::still`](Self#structfield.still)); a view that draws
+    /// itself twice safely can check [`PaneHandle::is_preview`] instead.
+    #[must_use]
+    pub const fn still(mut self) -> Self {
+        self.still = true;
         self
     }
 }
@@ -180,6 +195,8 @@ enum Mount {
     Tab(PaneId),
     /// A stacked group's strip.
     Strip(GroupId),
+    /// A phone's tab switcher's layer.
+    Switcher,
 }
 
 /// What a pane drag measured when it began: the host, its groups (the
@@ -344,6 +361,8 @@ pub struct Host {
     /// A phone's pane opened over the one on show (a docked one).
     sheet: Signal<Option<PaneId>>,
     switcher: Signal<bool>,
+    /// The switcher's zoom, grid and gestures.
+    switch: switcher::Switch,
     /// The host's rectangle, as last measured (a snapped float's area).
     float_area: Signal<Option<Rect>>,
     /// Where the menu on show was asked for (window points); `None` puts it
@@ -411,12 +430,18 @@ pub fn use_host() -> Host {
 #[derive(Clone, Copy)]
 struct ThisPane(Signal<PaneId>);
 
+/// Under a card in a phone's tab switcher: the view drawn again, scaled
+/// down, while the pane itself may be drawn too.
+#[derive(Clone, Copy)]
+struct Previewing;
+
 /// The pane this component draws, inside a [`View`]'s render.
 #[must_use]
 pub fn use_pane() -> PaneHandle {
     PaneHandle {
         id: use_context::<ThisPane>().0(),
         host: use_host(),
+        preview: try_use_context::<Previewing>().is_some(),
     }
 }
 
@@ -425,9 +450,18 @@ pub fn use_pane() -> PaneHandle {
 pub struct PaneHandle {
     pub id: PaneId,
     host: Host,
+    preview: bool,
 }
 
 impl PaneHandle {
+    /// Whether this is its card's preview in a phone's tab switcher (the
+    /// view drawn a second time, scaled down): a view that tells others
+    /// it is there as it mounts or goes leaves that to the pane itself.
+    #[must_use]
+    pub const fn is_preview(&self) -> bool {
+        self.preview
+    }
+
     /// Its saved state ("" when it has none). Read in a render, the pane
     /// redraws when it changes.
     #[must_use]
@@ -553,8 +587,16 @@ pub fn use_pane_status(items: Vec<StatusItem>) {
         next.set(n);
         n
     });
-    pane.put_status(by, items);
-    use_drop(move || pane.take_status(by));
+    // A card's preview leaves them to the pane.
+    let preview = pane.preview;
+    if !preview {
+        pane.put_status(by, items);
+    }
+    use_drop(move || {
+        if !preview {
+            pane.take_status(by);
+        }
+    });
 }
 
 impl Host {
@@ -1083,6 +1125,7 @@ pub fn WorkspaceView(
         menu: Signal::new(None),
         sheet: Signal::new(None),
         switcher: switcher.unwrap_or_else(|| Signal::new(false)),
+        switch: switcher::Switch::new(),
         float_area: Signal::new(None),
         menu_at: Signal::new(None),
         mounts: CopyValue::new(HashMap::new()),
@@ -1156,6 +1199,12 @@ pub fn WorkspaceView(
             out.set(items);
         }
     }
+    // A phone's tab switcher takes the whole screen in a shell (its bars
+    // too), else the host.
+    let shell_cover = phone && architect_shell::try_use_shell().is_some();
+    architect_shell::use_shell_cover(
+        shell_cover.then(|| rsx! { HostScope { host, switcher::SwitcherLayer { cover: true } } }),
+    );
     let t = theme;
     let body = if phone {
         rsx! { PhoneBody {} }
@@ -1223,6 +1272,9 @@ pub fn WorkspaceView(
             DragLayer {}
             MenuLayer {}
             SheetLayer {}
+            if phone && !shell_cover {
+                switcher::SwitcherLayer { cover: false }
+            }
         }
     }
 }

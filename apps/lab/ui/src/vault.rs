@@ -76,9 +76,11 @@ fn views() -> Views {
         )
         .view(
             View::new("arrange", "Arrangement", |_| rsx! { crate::arrange::ArrangeView {} })
-                .icon(icon!(AudioLines)),
+                .icon(icon!(AudioLines))
+                // It publishes its spaces for the marker lane as it mounts.
+                .still(),
         )
-        .view(architect_canvas::ui::window_view().icon(icon!(SlidersHorizontal)))
+        .view(architect_canvas::ui::window_view().icon(icon!(SlidersHorizontal)).still())
         .view(
             View::new("note", "Untitled", |_| rsx! { NoteView {} })
                 .icon(icon!(FileText))
@@ -97,7 +99,8 @@ fn views() -> Views {
                 }
             })
             .icon(icon!(MousePointerClick))
-            .home(Target::Split(Side::Right)),
+            .home(Target::Split(Side::Right))
+            .still(),
         )
 }
 
@@ -300,10 +303,10 @@ pub fn VaultPage() -> Element {
             .and_then(|id| w.pane(id))
             .map_or_else(|| "Vault".to_owned(), |p| p.title.clone())
     };
-    // A phone's pane switcher: how many there are to switch between.
-    let open = workspace.read().panes.len();
+    // A phone's tab switcher: how many tabs there are to switch between.
+    let open = workspace.read().tab_count();
     let panes = Toolbar::new().separate(
-        Action::new(format!("{open} open"), icon!(Layers), move |()| {
+        Action::new(format!("{open} tabs"), icon!(Layers), move |()| {
             switcher.set(true);
         })
         .with_label(),

@@ -355,6 +355,7 @@ fn PopoutView(props: PopoutProps) -> Element {
         menu: Signal::new(None),
         sheet: Signal::new(None),
         switcher: Signal::new(false),
+        switch: super::switcher::Switch::new(),
         float_area: Signal::new(None),
         menu_at: Signal::new(None),
         mounts: CopyValue::new(HashMap::new()),
