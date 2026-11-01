@@ -615,6 +615,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-extensions"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-commands",
+ "architect-extensions",
+ "architect-orgs",
+ "architect-scripting",
+ "architect-settings",
+ "crdt",
+ "dioxus",
+ "facet",
+ "futures",
+ "roxmltree 0.21.1",
+ "semver",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml 0.8.2",
+ "tracing",
+]
+
+[[package]]
 name = "architect-form"
 version = "0.1.0"
 dependencies = [
@@ -639,7 +662,9 @@ dependencies = [
 name = "architect-lab-ui"
 version = "0.1.0"
 dependencies = [
+ "architect",
  "architect-commands",
+ "architect-extensions",
  "architect-orgs",
  "architect-settings",
  "architect-shell",
