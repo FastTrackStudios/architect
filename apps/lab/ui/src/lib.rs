@@ -759,6 +759,21 @@ pub fn LabApp() -> Element {
     // lab's list; the lab's own state beside them.
     architect_commands::use_command_actions(list.clone());
     guide::use_lab_actions(&list, &lab);
+    // Guided tours of two of the lab's scenarios, from ⌘K (Help) or the
+    // Action List (`GUIDE_TOUR_START`).
+    let tours = architect_guide::tour::use_tours(list, use_hook(guide::tours));
+    for (id, title) in use_hook(move || tours.offered()) {
+        architect_commands::use_command(
+            architect_commands::Command::new(
+                format!("LAB_TOUR_{}", id.to_uppercase().replace('-', "_")),
+                format!("Tour: {title}"),
+            )
+            .group("Help"),
+            move || {
+                let _ = tours.start(&id);
+            },
+        );
+    }
     for (n, (id, label, to)) in TABS.into_iter().enumerate() {
         // ⌃⌘1–4: ⌘1–9 are the Vault's screensets, and ⌥ changes the digit.
         architect_commands::use_command(
@@ -1160,6 +1175,7 @@ pub fn LabApp() -> Element {
             architect_commands::CommandLayer {}
             architect_settings::SettingsPage {}
             extensions::LabExtensions { metronome }
+            architect_guide::tour::TourLayer {}
             screen::DeviceChrome {}
         }
     }

@@ -33,7 +33,7 @@ use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 use std::time::{Duration, Instant};
 
-use architect::action::{ActionError, ActionList, Effect, EventKind};
+use architect::action::{ActionError, ActionList};
 use architect_shell::motion::VirtualClock;
 use architect_workspace::{Popout, Rect, WindowId, WindowSystem, Windows};
 use blitz_dom::{Document as _, DocumentConfig, FontContext};
@@ -46,11 +46,9 @@ use blitz_traits::shell::{ColorScheme, Viewport};
 use dioxus::prelude::{Element, VirtualDom};
 use dioxus_native_dom::DioxusDocument;
 
-use crate::{Do, Modifier, Scenario, Step, Target, Wake, contains, to_json};
-
-/// Turns a target's kind and name into a CSS selector, or says it is not
-/// its kind (`None`): `("tab", "files")` → `[data-pane-tab="files"]`.
-pub type Resolver = fn(kind: &str, name: &str) -> Option<String>;
+pub use crate::locate::Resolver;
+use crate::predicate::{Failed, checks, woke};
+use crate::{Do, Modifier, Scenario, Step, Target, to_json};
 
 /// An app, as the runner opens it: its root and its Action List.
 #[derive(Clone)]
@@ -68,6 +66,8 @@ pub struct App {
     pub fonts: Option<FontContext>,
     /// What turns targets into selectors, tried in order.
     pub resolvers: Vec<Resolver>,
+    /// What else the root finds in context: [`App::context`].
+    contexts: Vec<Rc<dyn Fn(&VirtualDom)>>,
 }
 
 impl App {
@@ -79,7 +79,18 @@ impl App {
             list,
             fonts: None,
             resolvers: standard(),
+            contexts: Vec::new(),
         }
+    }
+
+    /// Puts `value` in the root's context too: what the root needs beside
+    /// the list (a story's root, the story it draws).
+    #[must_use]
+    pub fn context<T: Clone + 'static>(mut self, value: T) -> Self {
+        self.contexts.push(Rc::new(move |dom: &VirtualDom| {
+            dom.provide_root_context(value.clone());
+        }));
+        self
     }
 
     #[must_use]
@@ -106,18 +117,10 @@ impl App {
 #[must_use]
 pub fn standard() -> Vec<Resolver> {
     vec![
-        builtin,
+        crate::locate::builtin,
         architect_workspace::target_selector,
         architect_commands::target_selector,
     ]
-}
-
-fn builtin(kind: &str, name: &str) -> Option<String> {
-    match kind {
-        "testid" => Some(format!("[data-testid=\"{name}\"]")),
-        "css" => Some(name.to_owned()),
-        _ => None,
-    }
 }
 
 /// Why a scenario stopped.
@@ -255,6 +258,9 @@ impl Desktop {
             .with_root_context(app.list.clone())
             .with_root_context(Windows::new(HeadlessWindows(shared.clone())))
             .with_root_context(scenario.view);
+        for provide in &app.contexts {
+            provide(&vdom);
+        }
         let rect = content_rect(&scenario.view);
         let scale = scenario.view.scale;
         let doc = document(vdom, rect, scale, app.fonts.clone());
@@ -365,48 +371,12 @@ impl Desktop {
         if let Target::At { x, y } = target {
             return Some(Rect::new(*x, *y, 0.0, 0.0));
         }
-        let (kind, name) = target.kind_and_name()?;
-        let selector = if matches!(kind, "id" | "text") {
-            None
-        } else {
-            Some(resolvers.iter().find_map(|r| r(kind, name))?)
-        };
         self.windows.iter().rev().find_map(|w| {
             let doc = w.doc.inner.borrow();
-            let node = match &selector {
-                Some(s) => doc.query_selector(s).ok().flatten(),
-                None if kind == "text" => by_text(&doc, name),
-                None => doc.get_element_by_id(name),
-            }?;
-            let r = doc.get_client_bounding_rect(node)?;
-            (r.width > 0.0 && r.height > 0.0).then(|| {
-                Rect::new(
-                    w.rect.x + to_f32_wide(r.x),
-                    w.rect.y + to_f32_wide(r.y),
-                    to_f32_wide(r.width),
-                    to_f32_wide(r.height),
-                )
-            })
+            let r = crate::locate::find_in(&doc, target, resolvers, None)?;
+            Some(Rect::new(w.rect.x + r.x, w.rect.y + r.y, r.w, r.h))
         })
     }
-}
-
-/// The element whose whole text, trimmed, is `text` and that has a size:
-/// the last in the page, which is the innermost of a chain of them nested
-/// (a button, its label) and, of the rest, the one drawn over the others
-/// (a menu or a popover comes after the page it opens over).
-fn by_text(doc: &blitz_dom::BaseDocument, text: &str) -> Option<usize> {
-    doc.query_selector_all("*")
-        .ok()?
-        .into_iter()
-        .rev()
-        .find(|id| {
-            doc.get_node(*id)
-                .is_some_and(|n| n.text_content().trim() == text)
-                && doc
-                    .get_client_bounding_rect(*id)
-                    .is_some_and(|r| r.width > 0.0 && r.height > 0.0)
-        })
 }
 
 /// How many times a frame polls the documents for work before it lays
@@ -603,7 +573,13 @@ impl Runner<'_, '_> {
         };
         let since = self.app.list.latest();
         match &step.act {
-            None => {}
+            // A step that only points at something (a tour's "this is
+            // the trigger") is done once it is on screen.
+            None => {
+                if let Some(target) = &step.target {
+                    self.wait_found(step, target)?;
+                }
+            }
             Some(Do::Run { id, args }) => {
                 let args = args.as_ref().map(to_json);
                 self.run_action(id, args).map_err(fail)?;
@@ -706,6 +682,34 @@ impl Runner<'_, '_> {
         Ok(())
     }
 
+    /// Waits (as long as the step's `done` allows) for `target` to be on
+    /// screen, keeping a frame whenever a document changed.
+    fn wait_found(&mut self, step: &Step, target: &Target) -> Result<(), RunError> {
+        let timeout = step.done.as_ref().map_or(5.0, |d| d.timeout);
+        let deadline = Instant::now()
+            .checked_add(Duration::from_secs_f32(timeout.clamp(0.05, 3600.0)))
+            .unwrap_or_else(Instant::now);
+        loop {
+            let Err(reason) = self.find(target) else {
+                return Ok(());
+            };
+            if Instant::now() > deadline {
+                return Err(RunError::Step {
+                    step: step.id.clone(),
+                    reason: format!("{reason} (in {timeout}s)"),
+                    actual: None,
+                });
+            }
+            let time = self.time();
+            if self.desk.settle(time) {
+                self.show();
+                self.frame = self.frame.saturating_add(1);
+            } else {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+    }
+
     fn find(&self, target: &Target) -> Result<Rect, String> {
         self.desk
             .find(target, &self.app.resolvers)
@@ -716,16 +720,7 @@ impl Runner<'_, '_> {
     /// have itself: a view's own, `architect_commands`').
     fn run_action(&mut self, id: &str, args: Option<serde_json::Value>) -> Result<(), String> {
         let list = &self.app.list;
-        let (id, args) =
-            if list.info(id).is_none() && list.info(architect_commands::RUN_ACTION).is_some() {
-                let call = args.map_or_else(
-                    || serde_json::json!({ "id": id }),
-                    |a| serde_json::json!({ "id": id, "args": a.to_string() }),
-                );
-                (architect_commands::RUN_ACTION.to_owned(), call)
-            } else {
-                (id.to_owned(), args.unwrap_or_else(|| serde_json::json!({})))
-            };
+        let (id, args) = crate::predicate::call(list, id, args);
         let bytes = args.to_string().into_bytes();
         if list.is_async(&id) {
             let list = Arc::clone(list);
@@ -803,7 +798,7 @@ impl Runner<'_, '_> {
             }
             let mut failing = None;
             if heard && self.pending.is_none() {
-                match self.checks(&done.check) {
+                match checks(&self.app.list, &done.check) {
                     Ok(()) => return Ok(()),
                     Err(Failed::Hard(reason)) => return Err(fail(reason, None)),
                     Err(Failed::Not(reason, actual)) => failing = Some((reason, actual)),
@@ -824,38 +819,6 @@ impl Runner<'_, '_> {
                 std::thread::sleep(Duration::from_millis(1));
             }
         }
-    }
-
-    fn checks(&self, checks: &[crate::Check]) -> Result<(), Failed> {
-        let list = &self.app.list;
-        for check in checks {
-            let info = list
-                .info(&check.id)
-                .ok_or_else(|| Failed::Hard(format!("check {}: no such action", check.id)))?;
-            if info.effect != Effect::ReadOnly {
-                return Err(Failed::Hard(format!(
-                    "check {}: a check must be a read-only action",
-                    check.id
-                )));
-            }
-            let args = check
-                .args
-                .as_ref()
-                .map_or_else(|| serde_json::json!({}), to_json);
-            let out = list
-                .run_json(&check.id, args.to_string().as_bytes())
-                .map_err(|e| Failed::Not(format!("check {} failed: {e}", check.id), None))?;
-            let actual: serde_json::Value =
-                serde_json::from_slice(&out).unwrap_or(serde_json::Value::Null);
-            let has = to_json(&check.has);
-            if !contains(&actual, &has) {
-                return Err(Failed::Not(
-                    format!("check {} wants {has}", check.id),
-                    Some(actual.to_string()),
-                ));
-            }
-        }
-        Ok(())
     }
 
     // ── The pointer ───────────────────────────────────────────────────
@@ -1007,20 +970,6 @@ impl Runner<'_, '_> {
     }
 }
 
-/// Why the checks did not pass: not yet (try again), or never.
-enum Failed {
-    Not(String, Option<String>),
-    Hard(String),
-}
-
-fn woke(on: &[Wake], kind: &EventKind) -> bool {
-    on.iter().any(|w| match (w, kind) {
-        (Wake::Ran(want), EventKind::Ran { id, ok }) => *ok && id == want,
-        (Wake::Changed(want), EventKind::Changed { topic, .. }) => topic == want,
-        _ => false,
-    })
-}
-
 /// A key by its `KeyboardEvent.key` name (`Enter`, `ArrowDown`) or as the
 /// one character it types.
 fn parse_key(name: &str) -> Key {
@@ -1065,11 +1014,6 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 #[allow(clippy::cast_precision_loss, clippy::as_conversions)]
 const fn to_f32(n: u32) -> f32 {
     n as f32
-}
-
-#[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
-const fn to_f32_wide(v: f64) -> f32 {
-    v as f32
 }
 
 #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
@@ -1131,5 +1075,16 @@ pub fn test_dir(make: impl Fn() -> App, dir: &std::path::Path) -> Result<usize, 
         Ok(scenarios.len())
     } else {
         Err(failed.join("\n"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_commands_run_action_is_the_one_a_step_goes_through() {
+        assert_eq!(
+            crate::predicate::RUN_COMMAND,
+            architect_commands::RUN_ACTION
+        );
     }
 }

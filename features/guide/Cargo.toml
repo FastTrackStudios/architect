@@ -9,22 +9,34 @@ description = "Guide media: one scenario file run as a headless film (GIF, WebM,
 # docs/content/architecture/guide-media.md. The default set is the model:
 # the scenario's facet types, read from styx, and the predicates'
 # matching — no Dioxus, wasm-clean, so a browser tour reads the same file.
-# `run` is the headless runner on Blitz (native only): a document of the
-# app's root, a virtual clock, tweened pointer events, the app's Action
-# List. `capture` films it: frames, a drawn pointer, ffmpeg and gifski.
+# `ui` is the in-app tour (src/tour.rs) and the live target→rect path
+# (src/locate.rs): a Dioxus overlay over a running Blitz window, the
+# app's Action List in process, the shell's motion. `run` is the headless
+# runner on Blitz (native only): a document of the app's root, a virtual
+# clock, tweened pointer events, the app's Action List. `capture` films
+# it: frames, a drawn pointer, ffmpeg and gifski. `story` plays a story's
+# scenarios (`architect-story`) through the runner.
 
 [features]
 default = []
-run = [
+ui = [
     "dep:architect",
     "dep:dioxus",
     "dep:dioxus-native-dom",
     "dep:blitz-dom",
-    "dep:blitz-traits",
     "dep:architect-workspace",
-    "dep:architect-commands",
     "dep:architect-shell",
+    "dep:futures-channel",
+    "dep:futures-timer",
+    "dep:futures-util",
 ]
+run = [
+    "ui",
+    "dep:blitz-traits",
+    "architect-workspace/ui",
+    "dep:architect-commands",
+]
+story = ["run", "dep:architect-story-runtime"]
 capture = [
     "run",
     "dep:blitz-paint",
@@ -50,13 +62,22 @@ dioxus = { workspace = true, optional = true }
 dioxus-native-dom = { workspace = true, optional = true }
 blitz-dom = { workspace = true, optional = true }
 blitz-traits = { workspace = true, optional = true }
-# The workspace's windows (a pop-out is a second document on the
-# desktop) and the resolvers for its tabs, panes and dividers; the
-# commands' resolver for palette rows and their bridge onto the list.
-architect-workspace = { workspace = true, optional = true, features = ["ui"] }
+# A rectangle (the model's); with `run`, the workspace's windows (a
+# pop-out is a second document on the desktop) and the resolvers for its
+# tabs, panes and dividers; the commands' resolver for palette rows and
+# their bridge onto the list.
+architect-workspace = { workspace = true, optional = true }
 architect-commands = { workspace = true, optional = true, features = ["ui"] }
-# The motion clock: a run drives it, so the app's motions are filmed frame by frame.
+# The motion clock: a run drives it, so the app's motions are filmed frame
+# by frame; a tour's cutout moves on it.
 architect-shell = { workspace = true, optional = true, features = ["ui"] }
+# The tour's actions hand their asks to the window's thread; it looks
+# again every few frames on the wall clock.
+futures-channel = { version = "0.3", optional = true }
+futures-timer = { workspace = true, optional = true }
+futures-util = { version = "0.3", default-features = false, optional = true }
+# A story's scenarios, played by the runner.
+architect-story-runtime = { workspace = true, optional = true }
 
 # The film: Blitz's painter on the CPU rasteriser (no GPU), as
 # architect-story-snapshots and ui-snapshot render.

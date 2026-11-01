@@ -83,3 +83,18 @@ pub fn use_lab_actions(list: &Arc<ActionList>, lab: &Lab) {
         }
     });
 }
+
+/// The lab's guided tours: two of its scenarios (`apps/lab/scenarios`),
+/// played live. The lab's data is all made up, so it is its own
+/// playground: every tour may play.
+#[must_use]
+pub fn tours() -> architect_guide::tour::TourSet {
+    architect_guide::tour::TourSet::from_sources([
+        include_str!("../../scenarios/palette-run.styx"),
+        include_str!("../../scenarios/stacked-tabs.styx"),
+    ])
+    .unwrap_or_default()
+    .resolver(architect_workspace::target_selector)
+    .resolver(architect_commands::target_selector)
+    .playground(|_| Ok(()))
+}

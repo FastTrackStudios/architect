@@ -1,0 +1,44 @@
+// The ⌘K tour (palette-run, played live by architect-guide's tour) over
+// the lab: started from the Action List, then followed — each step done
+// as a person would, the tour moving on when it hears it. Films the tour
+// itself: its popover, its cutout over the palette's row.
+id tour-palette-run
+title "A guided tour: run any command from ⌘K"
+view {width 1280, height 800}
+capture {fps 20, width 960, outputs (gif png)}
+steps (
+    {
+        id start
+        do @run{id GUIDE_TOUR_START, args {id palette-run}}
+        done {
+            on (@changed"guide")
+            check ({id GUIDE_TOUR_STATE, has {scenario palette-run, step open, index 1, of 3}})
+        }
+        hold 1.2
+    }
+    {
+        id open
+        do @run{id LAB_SHOW_COMMANDS}
+        done {
+            on (@changed"guide")
+            check ({id GUIDE_TOUR_STATE, has {step find, index 2}})
+        }
+        hold 1.2
+    }
+    {
+        id find
+        do @type{text "sched"}
+        done {check ({id GUIDE_TOUR_STATE, has {step run, index 3, found true}})}
+        hold 1.2
+    }
+    {
+        id pick
+        target @palette-row"LAB_GO_SCHEDULE"
+        do @click{}
+        done {
+            on (@changed"guide")
+            check ({id GUIDE_TOUR_STATE, has {scenario ""}} {id LAB_STATE, has {tab schedule}})
+        }
+        hold 0.6
+    }
+)

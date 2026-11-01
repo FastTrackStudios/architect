@@ -65,6 +65,10 @@ pub struct Story {
     /// the cartesian product of the listed knob values and snapshots each.
     /// `None` means "use defaults only".
     pub auto_states: Option<&'static [StateAssignment]>,
+    /// Guide scenarios over this story (`architect-guide`), as styx
+    /// source: `#[story(scenario = "x.styx")]` includes each file. The
+    /// story shell tours them; the guide's runner films and tests them.
+    pub scenarios: &'static [&'static str],
 }
 
 // SAFETY: the `render` pointer is to a `'static` fn item; sharing across

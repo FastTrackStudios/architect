@@ -175,7 +175,8 @@ pub struct Step {
     /// What the tour says while it waits for it.
     #[facet(default)]
     pub text: String,
-    /// What it acts on (a gesture's start) and what a tour rings.
+    /// What it acts on (a gesture's start) and what a tour rings. With
+    /// no `do`, the step only points at it: done once it is on screen.
     #[facet(default)]
     pub target: Option<Target>,
     /// What is done. Unset: nothing (a step that only waits, or a tour's
