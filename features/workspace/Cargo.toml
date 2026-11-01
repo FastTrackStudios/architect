@@ -1,0 +1,26 @@
+[package]
+name = "architect-workspace"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "The workspace: tab groups in splits, docks with ribbons, stacked tabs, floats and windows, stable pane ids, and screensets"
+
+# The default set is the model (docs/content/architecture/workspace.md):
+# pure data and the operations on it — no Dioxus, no I/O, wasm-clean.
+# `ui` (the host: tab bars, drag and drop, floats) and `native` (pop-out
+# windows, plugin views) come later, as flags of this one crate.
+
+[features]
+default = []
+
+[dependencies]
+facet = { workspace = true }
+facet-json = { version = "0.50.0-rc.5" }
+thiserror = { workspace = true }
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
