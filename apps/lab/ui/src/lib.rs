@@ -6,8 +6,8 @@
 //!
 //! The app is Task's shape (the shell's reference): Inbox, Tasks, Schedule
 //! and Vault as the tabs, Capture as the separate button, projects in the
-//! left side and the selection's details in the right. Its ⋯ menu switches
-//! the shell's style live.
+//! left side and the selection's details in the right. Its own menu (the
+//! flask) switches the shell's style live.
 
 mod items;
 mod pages;
@@ -20,8 +20,8 @@ use architect_shell::icon;
 use architect_shell::{self as shell, AppShell, ShellStyle};
 use dioxus::prelude::*;
 use lucide_dioxus::{
-    CalendarDays, CheckCheck, CircleUser, Feather, Inbox, Keyboard, ListTodo, LogOut, NotebookText,
-    Plus, Settings2, Undo2, Users,
+    CalendarDays, CheckCheck, Feather, Inbox, Keyboard, ListTodo, NotebookText, Plus, Settings2,
+    Undo2, Users,
 };
 
 pub use screen::{Device, use_window_chrome, use_window_screen};
@@ -84,6 +84,8 @@ pub struct Lab {
     pub fresh: Signal<Option<usize>>,
     /// What Undo would put back.
     pub undone: Signal<Option<Undone>>,
+    /// The row the keys act on in a list (the one focused).
+    pub selected: Signal<Option<usize>>,
     settings: Option<architect_settings::SettingsHandle>,
 }
 
@@ -149,17 +151,82 @@ impl Lab {
     }
 
     /// Takes the item away (`verb`: "Completed", "Deleted"), for Undo to
-    /// put back, and goes back to its list.
+    /// put back; from the item's own page, back to its list.
     pub fn remove(mut self, id: usize, verb: &'static str) {
         let removed = self.lists.write().remove(id);
         if let Some((at, item)) = removed {
             let tab = item.tab;
             self.undone.set(Some(Undone { verb, at, item }));
-            if self.can_go_back() {
-                self.go_back();
-            } else {
-                self.route.set(Route::Tab(tab));
+            if *self.selected.peek() == Some(id) {
+                self.selected.set(None);
             }
+            if matches!(*self.route.peek(), Route::Item(_, on) if on == id) {
+                if self.can_go_back() {
+                    self.go_back();
+                } else {
+                    self.route.set(Route::Tab(tab));
+                }
+            }
+        }
+    }
+
+    /// Files the item in `tab`'s list, in `project` (triage), and shows it
+    /// there, marked.
+    pub fn move_item(mut self, id: usize, tab: &'static str, project: Option<&'static str>) {
+        if self.lists.write().move_to(id, tab, project) {
+            self.jump(Route::Tab(tab));
+            self.project.set(project);
+            self.fresh.set(Some(id));
+        }
+    }
+
+    /// Picks the row `by` rows on from the selected one in the list on
+    /// show (the first, when none is).
+    pub fn step(self, by: isize) {
+        let Route::Tab(tab) = *self.route.peek() else {
+            return;
+        };
+        let project = if tab == "tasks" {
+            *self.project.peek()
+        } else {
+            None
+        };
+        let ids: Vec<usize> = self
+            .lists
+            .read()
+            .of(tab, project, *self.oldest.peek())
+            .iter()
+            .map(|i| i.id)
+            .collect();
+        let at = (*self.selected.peek()).and_then(|id| ids.iter().position(|i| *i == id));
+        let next = at.map_or(0, |at| {
+            at.saturating_add_signed(by)
+                .min(ids.len().saturating_sub(1))
+        });
+        if let Some(id) = ids.get(next) {
+            let mut selected = self.selected;
+            selected.set(Some(*id));
+        }
+    }
+
+    /// Opens the list's selected row.
+    pub fn open_selected(self) {
+        // Read, then let go of the signals before `go` writes the route.
+        let here = *self.route.peek();
+        let selected = *self.selected.peek();
+        if let (Route::Tab(tab), Some(id)) = (here, selected) {
+            self.go(Route::Item(tab, id));
+        }
+    }
+
+    /// The item Done and the keys act on: the page's, or the list's
+    /// selected row.
+    #[must_use]
+    pub fn target(self) -> Option<usize> {
+        match *self.route.peek() {
+            Route::Item(_, id) => Some(id),
+            Route::Tab(_) => *self.selected.peek(),
+            Route::Capture(_) => None,
         }
     }
 
@@ -186,10 +253,12 @@ impl Lab {
     }
 }
 
-/// The stylesheet: the page's ground, and press feedback (`.lp`).
+/// The stylesheet: the page's ground, and hover and press feedback
+/// (`.lp`; an inset shadow, so it shows over a row's own background).
 const CSS: &str = "\
 html, body { margin: 0; padding: 0; background: #09090b; }\
 button { cursor: pointer; }\
+.lp:hover { box-shadow: inset 0 0 0 999px rgba(255,255,255,0.035); }\
 .lp:active { background-color: rgba(255,255,255,0.07); }\
 ";
 
@@ -243,6 +312,7 @@ pub fn LabApp() -> Element {
         oldest: Signal::new(false),
         fresh: Signal::new(None),
         undone: Signal::new(None),
+        selected: Signal::new(None),
         settings: Some(settings),
     });
     // The lab's signals follow the settings.
@@ -294,6 +364,33 @@ pub fn LabApp() -> Element {
             .group("Inbox")
             .shortcut("⇧⌘N"),
         move || lab.capture("inbox"),
+    );
+    for (id, label, by) in [
+        ("LAB_NEXT", "Select the next item", 1),
+        ("LAB_PREVIOUS", "Select the previous item", -1),
+    ] {
+        architect_commands::use_command(
+            architect_commands::Command::new(id, label)
+                .group("Go")
+                .shortcut(if by > 0 { "⌃N" } else { "⌃P" }),
+            move || lab.step(by),
+        );
+    }
+    architect_commands::use_command(
+        architect_commands::Command::new("LAB_OPEN_SELECTED", "Open the selected item")
+            .group("Go")
+            .shortcut("⌘↓"),
+        move || lab.open_selected(),
+    );
+    architect_commands::use_command(
+        architect_commands::Command::new("LAB_DONE", "Mark done")
+            .group("Edit")
+            .shortcut("⌘↵"),
+        move || {
+            if let Some(id) = lab.target() {
+                lab.remove(id, "Completed");
+            }
+        },
     );
     let undone = (lab.undone)();
     let undo =
@@ -439,14 +536,12 @@ pub fn LabApp() -> Element {
                     .detail("cody@fasttrackstudio.app")
                     .presence("#22c55e")
                     .menu(
+                        // The lab has no account to leave: only what works.
                         shell::Menu::new()
-                            .item("Profile", icon!(CircleUser), |()| {})
                             .item("Settings", icon!(Settings2), move |()| settings.show(None))
                             .item("Keyboard shortcuts", icon!(Keyboard), move |()| {
                                 commands.show(architect_commands::Overlay::Palette);
-                            })
-                            .divider()
-                            .item("Sign out", icon!(LogOut), |()| {}),
+                            }),
                     ),
                 workspaces,
                 left: rsx! { pages::LeftSide {} },

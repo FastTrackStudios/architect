@@ -6,7 +6,9 @@ use architect_shell::{
     Action, Crumb, Menu, Page, ShellStyle, StatusStyle, Tool, Toolbar, use_shell,
 };
 use dioxus::prelude::*;
-use lucide_dioxus::{Building2, Check, Copy, Funnel, Hash, Inbox, Plus, Search, Share, Trash2};
+use lucide_dioxus::{
+    Building2, Check, Circle, FlaskConical, FolderInput, Hash, Inbox, Plus, Search, Trash2, Undo2,
+};
 
 use crate::items::{Item, PROJECTS};
 use crate::screen::{Device, set_device};
@@ -38,26 +40,18 @@ fn org_crumb() -> Crumb {
     Crumb::new(name).icon(icon!(Building2))
 }
 
-/// What every lab page adds to its ⋯: the order of the list, the right
-/// side, the shell's style and (off a real device) which device the window
-/// stands in for. Every choice is a check at the row's start.
+/// The lab's own switches, in a menu of their own beside the page's:
+/// the right side, the shell's style, the status line and (off a real
+/// device) which device the window stands in for. Every choice is a check
+/// at the row's start.
 // `Lab` is a handful of signals, copied into every closure below.
 #[allow(clippy::large_types_passed_by_value)]
-fn lab_menu(menu: Menu, lab: Lab, sorts: bool) -> Menu {
+fn lab_menu(lab: Lab) -> Menu {
     let style = (lab.style)();
-    let oldest = (lab.oldest)();
-    let mut sort = lab.oldest;
     // The settings are the truth; the lab's signals follow them.
     let pick =
         move |s: ShellStyle| move |()| lab.put("workspace.shell", crate::settings::shell_id(s));
-    let mut menu = menu;
-    if sorts {
-        menu = menu
-            .heading("Sort")
-            .check("Newest first", !oldest, move |()| sort.set(false))
-            .check("Oldest first", oldest, move |()| sort.set(true))
-            .divider();
-    }
+    let menu = Menu::new();
     let mut menu = menu
         .heading("View")
         .check("Details on the right", (lab.right)(), move |()| {
@@ -100,7 +94,51 @@ fn lab_menu(menu: Menu, lab: Lab, sorts: bool) -> Menu {
     menu
 }
 
-/// A tab's page: its list (on Tasks, the picked project's).
+/// The lab's switches as a toolbar button.
+#[allow(clippy::large_types_passed_by_value)]
+fn lab_tool(lab: Lab) -> Tool {
+    Tool::menu("Lab", icon!(FlaskConical), lab_menu(lab))
+}
+
+/// A list's order.
+#[allow(clippy::large_types_passed_by_value)]
+fn sort_menu(lab: Lab) -> Menu {
+    let oldest = (lab.oldest)();
+    let mut sort = lab.oldest;
+    Menu::new()
+        .heading("Sort")
+        .check("Newest first", !oldest, move |()| sort.set(false))
+        .check("Oldest first", oldest, move |()| sort.set(true))
+}
+
+/// Where an item can be filed: the Inbox, a project's tasks, the
+/// schedule; all but where it is.
+#[allow(clippy::large_types_passed_by_value)]
+fn move_menu(lab: Lab, item: &Item) -> Menu {
+    let id = item.id;
+    let mut menu = Menu::new().heading("Move to");
+    if item.tab != "inbox" {
+        menu = menu.item("Inbox", icon!(Inbox), move |()| {
+            lab.move_item(id, "inbox", None);
+        });
+    }
+    for p in PROJECTS {
+        if !(item.tab == "tasks" && item.project == Some(p)) {
+            menu = menu.item(format!("Tasks in {p}"), icon!(Hash), move |()| {
+                lab.move_item(id, "tasks", Some(p));
+            });
+        }
+    }
+    if item.tab != "schedule" {
+        menu = menu.item("Schedule", icon!(FolderInput), move |()| {
+            lab.move_item(id, "schedule", None);
+        });
+    }
+    menu
+}
+
+/// A tab's page: its list (on Tasks, the picked project's). ⌃N and ⌃P
+/// pick the next and previous row, ⌘↓ opens it and ⌘↵ marks it done.
 #[component]
 pub fn ListPage(tab: &'static str) -> Element {
     let t = use_shell().theme;
@@ -110,27 +148,17 @@ pub fn ListPage(tab: &'static str) -> Element {
     } else {
         None
     };
-    // T3 Code's: the scope and the search each on its own, the page's
-    // actions joined in one pill.
-    let mut scope = use_signal(|| "All");
-    let pick = move |s: &'static str| move |()| scope.set(s);
-    let scope_menu = Menu::new()
-        .heading("Show")
-        .check("All", scope() == "All", pick("All"))
-        .check("Mine", scope() == "Mine", pick("Mine"))
-        .check("Flagged", scope() == "Flagged", pick("Flagged"));
+    let commands = use_context::<architect_commands::Commands>();
     let (new_label, _) = new_one(tab);
+    // The search on its own, the page's action named, its order in ⋯,
+    // the lab's switches apart.
     let toolbar = Toolbar::new()
-        .separate(
-            Tool::menu("Scope", icon!(Funnel), scope_menu).badge(usize::from(scope() != "All")),
-        )
-        .separate(Action::new("Search", icon!(Search), |()| {}))
-        .joined([
-            Tool::action(Action::new(new_label, icon!(Plus), move |()| {
-                lab.capture(tab);
-            })),
-            Tool::more(lab_menu(Menu::new(), lab, true)),
-        ]);
+        .separate(Action::new("Search", icon!(Search), move |()| {
+            commands.show(architect_commands::Overlay::QuickOpen);
+        }))
+        .separate(Action::new(new_label, icon!(Plus), move |()| lab.capture(tab)).with_label())
+        .joined([Tool::more(sort_menu(lab))])
+        .separate(lab_tool(lab));
     let lists = lab.lists.read();
     let rows: Vec<Item> = lists
         .of(tab, project, (lab.oldest)())
@@ -139,6 +167,9 @@ pub fn ListPage(tab: &'static str) -> Element {
         .collect();
     drop(lists);
     let fresh = (lab.fresh)();
+    let undone = (lab.undone)().filter(|u| u.item.tab == tab);
+    let selected = (lab.selected)();
+    let can_finish = tab != "schedule";
     let mut crumbs = vec![org_crumb()];
     if project.is_some() {
         crumbs.push(Crumb::new(title(tab)).on_press(move |()| lab.jump(Route::Tab(tab))));
@@ -151,6 +182,24 @@ pub fn ListPage(tab: &'static str) -> Element {
             span { style: "font-size: 13px; color: {t.ink_3}; font-family: {t.font}; padding-bottom: 10px;",
                 {crate::count(rows.len(), "item")}
             }
+            // Done and Delete answer where they were asked, with the way back.
+            if let Some(u) = undone {
+                div { style: "display: flex; align-items: center; gap: 10px; margin-bottom: 10px; padding: 8px 8px 8px 14px; \
+                              border-radius: 10px; background: {t.accent_soft}; font-family: {t.font}; font-size: 14px; color: {t.ink};",
+                    span { style: "flex: 1; min-width: 0; white-space: nowrap; overflow: hidden;",
+                        "{u.verb} “{u.item.name}”"
+                    }
+                    button {
+                        class: "lp",
+                        style: "flex-shrink: 0; height: 30px; display: flex; align-items: center; gap: 6px; padding: 0 12px; \
+                                border: none; border-radius: 8px; background: {t.pill}; color: {t.ink}; \
+                                font-family: {t.font}; font-size: 13px; font-weight: 600;",
+                        onclick: move |_| lab.undo(),
+                        Undo2 { size: 14, color: t.ink }
+                        "Undo"
+                    }
+                }
+            }
             if rows.is_empty() {
                 Empty { tab, project }
             }
@@ -161,7 +210,13 @@ pub fn ListPage(tab: &'static str) -> Element {
                         fresh: fresh == Some(item.id),
                         name: item.name.clone(),
                         detail: if project.is_some() { item.detail.clone() } else { item.meta() },
-                        on_press: move |()| lab.go(Route::Item(tab, item.id)),
+                        selected: selected == Some(item.id),
+                        on_press: move |()| {
+                            let mut selected = lab.selected;
+                            selected.set(Some(item.id));
+                            lab.go(Route::Item(tab, item.id));
+                        },
+                        on_done: can_finish.then(|| EventHandler::new(move |()| lab.remove(item.id, "Completed"))),
                     }
                 }
             }
@@ -195,20 +250,54 @@ fn Empty(tab: &'static str, project: Option<&'static str>) -> Element {
     }
 }
 
+/// One row: the circle that marks it done (where a list has done), then
+/// its name over its detail, which opens it.
 #[component]
-fn Row(name: String, detail: String, fresh: bool, on_press: EventHandler<()>) -> Element {
+fn Row(
+    name: String,
+    detail: String,
+    fresh: bool,
+    selected: bool,
+    on_press: EventHandler<()>,
+    on_done: Option<EventHandler<()>>,
+) -> Element {
     let t = use_shell().theme;
-    // The row just added: the accent's edge until the lab moves on.
-    let edge = if fresh { t.accent } else { t.rule };
+    // The row just added or put back: the accent's wash until the lab
+    // moves on (its edge would read as the focus ring). The row the keys
+    // act on: the current fill, and an edge in ink.
+    let fill = if fresh {
+        t.accent_soft
+    } else if selected {
+        t.active
+    } else {
+        t.sheet
+    };
+    let edge = if selected { t.ink_3 } else { t.rule };
+    let lead = if on_done.is_some() { 0 } else { 16 };
     rsx! {
-        button {
-            class: "lp",
-            style: "display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 14px 16px; \
-                    border-radius: 14px; border: 1px solid {edge}; background: {t.sheet}; color: {t.ink}; \
-                    font-family: {t.font}; text-align: left;",
-            onclick: move |_| on_press.call(()),
-            span { style: "font-size: 16px; font-weight: 650;", "{name}" }
-            span { style: "font-size: 13px; color: {t.ink_3};", "{detail}" }
+        div {
+            style: "display: flex; align-items: stretch; border-radius: 14px; border: 1px solid {edge}; \
+                    background: {fill}; overflow: hidden;",
+            if let Some(done) = on_done {
+                button {
+                    class: "lp",
+                    title: "Mark done",
+                    "aria-label": "Mark “{name}” done",
+                    style: "flex-shrink: 0; width: 48px; display: flex; align-items: center; justify-content: center; \
+                            border: none; background: transparent; padding: 0;",
+                    onclick: move |_| done.call(()),
+                    Circle { size: 20, color: t.ink_3 }
+                }
+            }
+            button {
+                class: "lp",
+                style: "flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; \
+                        padding: 14px 16px 14px {lead}px; border: none; \
+                        background: transparent; color: {t.ink}; font-family: {t.font}; text-align: left;",
+                onclick: move |_| on_press.call(()),
+                span { style: "font-size: 16px; font-weight: 650;", "{name}" }
+                span { style: "font-size: 13px; color: {t.ink_3};", "{detail}" }
+            }
         }
     }
 }
@@ -248,23 +337,23 @@ pub fn ItemPage(tab: &'static str, id: usize) -> Element {
             }
         };
     };
+    let moves = move_menu(lab, &item);
     let menu = Menu::new()
-        .item("Duplicate", icon!(Copy), |()| {})
-        .divider()
         .item("Delete", icon!(Trash2), move |()| lab.remove(id, "Deleted"))
-        .danger()
-        .divider();
+        .danger();
+    // Done names itself: the page's one verb (⌘↵).
+    let done =
+        Action::new("Done", icon!(Check), move |()| lab.remove(id, "Completed")).with_label();
     rsx! {
         Page {
             title: item.name.clone(),
             crumbs,
             on_back,
-            // T3 Code's thread: three buttons in one pill.
-            toolbar: Toolbar::new().joined([
-                Tool::action(Action::new("Share", icon!(Share), |()| {})),
-                Tool::action(Action::new("Done", icon!(Check), move |()| lab.remove(id, "Completed"))),
-                Tool::more(lab_menu(menu, lab, false)),
-            ]),
+            // Triage, the verb, the rest; the lab's switches apart.
+            toolbar: Toolbar::new()
+                .separate(Tool::menu("Move to", icon!(FolderInput), moves))
+                .joined([Tool::action(done), Tool::more(menu)])
+                .separate(lab_tool(lab)),
             div { style: "display: flex; flex-direction: column; gap: 14px; font-family: {t.font}; color: {t.ink};",
                 span { style: "font-size: 14px; color: {t.ink_3};", "{item.meta()}" }
                 div { style: "height: 1px; background: {t.rule};" }
@@ -301,7 +390,7 @@ pub fn CapturePage(tab: &'static str) -> Element {
             title: heading,
             crumbs: vec![org_crumb(), Crumb::new(title(tab)).on_press(move |()| lab.jump(Route::Tab(tab)))],
             on_back,
-            toolbar: Toolbar::new().joined([Tool::action(Action::new("Save", icon!(Check), move |()| save()))]),
+            toolbar: Toolbar::new().separate(Action::new("Add", icon!(Plus), move |()| save()).with_label()),
             div { style: "display: flex; flex-direction: column; gap: 10px; font-family: {t.font}; color: {t.ink};",
                 // Blitz draws no `placeholder`: the question is a label.
                 label { r#for: "lab-capture", style: "font-size: 14px; font-weight: 600; color: {t.ink_2};", "{ask}" }
@@ -337,6 +426,7 @@ pub fn CapturePage(tab: &'static str) -> Element {
 pub fn LeftSide() -> Element {
     let t = use_shell().theme;
     let lab = use_context::<Lab>();
+    let commands = use_context::<architect_commands::Commands>();
     let route = (lab.route)();
     let project = (lab.project)();
     let lists = lab.lists.read();
@@ -348,10 +438,16 @@ pub fn LeftSide() -> Element {
         Route::Tab("inbox") | Route::Item("inbox", _) | Route::Capture("inbox")
     );
     rsx! {
-        div { style: "margin: 0 12px 10px; height: 38px; border-radius: 10px; background: {t.pill}; border: 1px solid {t.rule}; \
-                      display: flex; align-items: center; gap: 8px; padding: 0 12px; font-family: {t.font};",
+        // Opens ⌘O's quick open: a field that is a button, as Linear's.
+        button {
+            class: "lp",
+            style: "margin: 0 12px 10px; height: 38px; border-radius: 10px; background: {t.pill}; border: 1px solid {t.rule}; \
+                    display: flex; align-items: center; justify-content: flex-start; gap: 8px; padding: 0 12px; \
+                    font-family: {t.font}; text-align: left;",
+            onclick: move |_| commands.show(architect_commands::Overlay::QuickOpen),
             Search { size: 16, color: t.ink_3 }
-            span { style: "font-size: 14px; color: {t.ink_3};", "Search" }
+            span { style: "flex: 1; font-size: 14px; color: {t.ink_3};", "Search" }
+            span { style: "font-size: 12px; color: {t.ink_3};", "⌘O" }
         }
         div { style: "display: flex; flex-direction: column; gap: 2px; padding: 4px 8px; font-family: {t.font};",
             SideRow { label: "Inbox", count: inbox, on: in_inbox,
@@ -400,9 +496,11 @@ fn SideRow(
 pub fn RightSide() -> Element {
     let t = use_shell().theme;
     let lab = use_context::<Lab>();
+    // The item on show, or the list's selected row.
     let item = match (lab.route)() {
         Route::Item(_, id) => lab.lists.read().get(id).cloned(),
-        _ => None,
+        Route::Tab(_) => (lab.selected)().and_then(|id| lab.lists.read().get(id).cloned()),
+        Route::Capture(_) => None,
     };
     let Some(item) = item else {
         return rsx! {
@@ -410,7 +508,7 @@ pub fn RightSide() -> Element {
                 span { style: "font-size: 12px; font-weight: 650; color: {t.ink_3};", "Details" }
                 span { style: "font-size: 15px; font-weight: 650; color: {t.ink_2};", "Nothing selected" }
                 span { style: "font-size: 13px; line-height: 1.5; color: {t.ink_3};",
-                    "Open an item to see its project, its date and who has it."
+                    "Pick an item (⌃N, ⌃P) to see its project, its date and who has it."
                 }
             }
         };

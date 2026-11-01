@@ -9,7 +9,8 @@ running app without a rebuild (a change to Rust logic rebuilds).
 
 The lab is Task's shape: Inbox, Tasks, Schedule and Vault as the tabs,
 Capture as the separate button, projects on the left, details on the
-right. Its ⋯ menu switches the shell's style (Floating pill, Tab bar, Rail
+right. The lab's own menu (the flask beside a page's ⋯) switches the
+shell's style (Floating pill, Tab bar, Rail
 only) and the right side live. The Vault tab is the workspace host
 (`architect-workspace`'s `ui`), Obsidian's shape: on a desk its tabs are
 the window's title row; drag a tab to a group's middle or edge or the
@@ -17,8 +18,10 @@ window's edge, hold W to grab a pane without tabs, right-click a tab (or
 ⋯) for the rest.
 
 The lab's lists are live: Capture (⇧⌘N, or the feather) and a list's +
-write a new row, Done and Delete take one away with Undo on the status
-line, and a project on the left shows its tasks. Its face, Inter, is
+write a new row; a row's circle, Done or ⌘↵ completes one and Delete
+deletes it, with Undo beside the list; Move to files a capture in a
+project; ⌃N and ⌃P pick a row, ⌘↓ opens it; a project on the left shows
+its tasks. Its face, Inter, is
 bundled (`ui/assets/fonts`, OFL) and handed to Blitz at launch
 (`FONTS`): Blitz does not load an `@font-face` from a `data:` URI. What
 else Blitz does differently is in the skill's
@@ -35,8 +38,8 @@ ARCHITECT_DEVICE=iphone dx serve --platform desktop --renderer native
 
 `ARCHITECT_DEVICE` is `iphone`, `iphone-side`, `ipad` or `ipad-side`: the
 window takes that device's size, touch and safe area, with its status bar,
-camera housing and home indicator drawn over the page. The ⋯ menu changes
-it live. A mouse drag stands in for a swipe (the shell hears pointer
+camera housing and home indicator drawn over the page. The lab's menu (the
+flask) changes it live. A mouse drag stands in for a swipe (the shell hears pointer
 events).
 
 ## On the iOS simulator

@@ -65,18 +65,23 @@ impl Lists {
             (
                 "tasks",
                 "Send stems to Jess",
-                "today",
+                "due today",
                 Some("Harbor & Pine"),
             ),
             (
                 "tasks",
                 "Book the Grey Eagle",
-                "next week",
+                "due next week",
                 Some("Album release"),
             ),
-            ("tasks", "Rewire the keys rig", "someday", Some("Signal")),
-            ("tasks", "Chart Late Train in C", "Thursday", Some("Studio")),
-            ("tasks", "Renew the Task plan", "Nov 3", Some("Admin")),
+            ("tasks", "Rewire the keys rig", "no date", Some("Signal")),
+            (
+                "tasks",
+                "Chart Late Train in C",
+                "due Thursday",
+                Some("Studio"),
+            ),
+            ("tasks", "Renew the Task plan", "due Nov 3", Some("Admin")),
             (
                 "schedule",
                 "Rehearsal",
@@ -186,6 +191,26 @@ impl Lists {
         Some(id)
     }
 
+    /// Files `id` in `tab`'s list, in `project` (an Inbox capture made a
+    /// task): at the top there, with its date kept. Whether it moved.
+    pub fn move_to(&mut self, id: usize, tab: &'static str, project: Option<&'static str>) -> bool {
+        let Some((_, mut item)) = self.remove(id) else {
+            return false;
+        };
+        if item.tab == "inbox" && tab != "inbox" {
+            "no date".clone_into(&mut item.detail);
+        }
+        item.tab = tab;
+        item.project = project;
+        let at = self
+            .items
+            .iter()
+            .position(|i| i.tab == tab)
+            .unwrap_or(self.items.len());
+        self.items.insert(at, item);
+        true
+    }
+
     /// Takes `id` out; where it was and what it was, for [`Lists::restore`].
     pub fn remove(&mut self, id: usize) -> Option<(usize, Item)> {
         let at = self.items.iter().position(|i| i.id == id)?;
@@ -256,6 +281,17 @@ mod tests {
         assert!(lists.get(id).is_none());
         lists.restore(at, item);
         assert_eq!(lists, before);
+    }
+
+    #[test]
+    fn a_capture_filed_in_a_project_becomes_its_task() {
+        let mut lists = Lists::sample();
+        let id = lists.of("inbox", None, false)[0].id;
+        assert!(lists.move_to(id, "tasks", Some("Signal")));
+        assert_eq!(lists.count("inbox"), 4);
+        let first = lists.of("tasks", Some("Signal"), false)[0];
+        assert_eq!((first.id, first.detail.as_str()), (id, "no date"));
+        assert!(!lists.move_to(9999, "tasks", None));
     }
 
     #[test]

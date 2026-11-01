@@ -1,8 +1,8 @@
 //! The app shell's lab in a desk window, painted by Blitz as the apps
 //! are. `ARCHITECT_DEVICE=iphone|iphone-side|ipad|ipad-side` opens it
 //! standing in for that device (its size, touch and insets, with its
-//! status bar and housing drawn over the page); the ⋯ menu changes it
-//! live. Served with `dx serve`, an `rsx!` edit in the lab or in
+//! status bar and housing drawn over the page); the lab's menu (the flask) changes
+//! it live. Served with `dx serve`, an `rsx!` edit in the lab or in
 //! `architect-shell` shows at once. Launched by the workspace's
 //! launcher, so a Vault tab dragged out of the window opens a window of
 //! its own.
