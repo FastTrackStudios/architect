@@ -128,6 +128,8 @@ let router = router.with_permissions(gate);
   dim what the person cannot do, and the answer cannot disagree with
   enforcement.
 
+<!-- media: action-disabled-by-role — a viewer's palette and ⋯ menu with Invite people dimmed and the reason shown -->
+
 While migrating an existing server, `observe_only(true)` audits what would
 be denied and lets everything through.
 
@@ -175,6 +177,8 @@ let can_invite = org.is_some_and(|o| o.can("org.invite"));
 The shell's switcher is `org.switcher(Some("All organizations"))`, a
 `Workspaces` to pass to `AppShell { workspaces }`
 ([UI chapter](@/guide/ui.md)); picking one calls `OrgHandle::switch`.
+
+<!-- media: org-switcher-all — the organization switcher: picking an org, then All organizations with items tagged by org -->
 
 ## 5. The org as the scope of everything
 

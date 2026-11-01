@@ -155,6 +155,8 @@ offline both keep theirs, and a key changed on both takes the later write.
 `a_synced_setting_follows_the_person_to_another_device` in
 `features/settings/tests/derive.rs` is that loop over two Loro documents.
 
+<!-- media: settings-synced-two-devices — a setting changed on a laptop appearing on a phone's settings page -->
+
 ## 4. An organization's defaults and locks
 
 An org can set its own default for a key and lock keys its members cannot
@@ -174,6 +176,8 @@ Choosing the org's default is not a change (no dot, nothing to reset).
 When the window's org changes, hand the new one over with
 `SettingsHandle::set_org`. Which org's settings apply, and the admin's page
 to edit them, are not built yet: today the app supplies `OrgSettings`.
+
+<!-- media: settings-org-locked-row — a locked row dimmed, saying Set by your organization -->
 
 ## 5. The settings page
 
@@ -203,6 +207,9 @@ It registers two things itself:
 
 Open it from code with `settings.show(None)` or `settings.show(Some("editor"))`
 (the lab's account menu does).
+
+<!-- media: settings-page-desk — the settings modal on a desk: sections on the left, a changed row's dot, its reset arrow, Restore defaults -->
+<!-- media: settings-search-to-row — "# dark" typed in the palette, the Appearance section opened, the Theme row pulsing -->
 
 ### Extensions' sections
 

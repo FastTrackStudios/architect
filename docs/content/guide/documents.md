@@ -205,6 +205,9 @@ iroh_link::serve_peers(&endpoint, move |remote| {
 
 `features/crdt/crdt/tests/p2p.rs` is all three over real iroh endpoints.
 
+<!-- media: doc-share-link-join — a share link copied on one device and opened on another, the document joining live -->
+<!-- media: lan-device-found — a device on the same network appearing by name, ready to sync -->
+
 ## 5. Presence and collaborative text
 
 ### Who is here
@@ -228,6 +231,8 @@ let marks = roster.pointers(clock_ms(), |place| arrange_pixels(place));
 Draw them with the workspace's `PresenceLayer` as the view's last child
 (the [UI chapter](@/guide/ui.md)). Never call `sweep()` in a render.
 
+<!-- media: presence-pointers-overlay — two people in one arrangement: the other's named pointer and selection wash drawn over the pane -->
+
 ### Collaborative text
 
 A `LoroText` bound to an editor (`features/crdt/crdt/src/text.rs`
@@ -248,6 +253,8 @@ let others = binding.remote_carets(&roster);
 `set_offset` hides a prefix the editor does not show (a note's
 frontmatter); `set_composing` brackets IME composition. Positions are
 Unicode scalars, so an editor in UTF-16 translates at its edge.
+
+<!-- media: collab-text-two-carets — two people typing into one note at once, each other's named caret and selection shown -->
 
 ## 6. Blobs by hash
 

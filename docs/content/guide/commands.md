@@ -113,6 +113,9 @@ What you get:
   params schema (`features/commands/src/params.rs`). Prefixes narrow it:
   `@` this page's targets, `#` settings, `?` help for a key. Open it with
   `commands.show(Overlay::Palette)`.
+
+<!-- media: palette-run-action — ⌘K opened, "done" typed, Mark done run from the palette -->
+
 - **⌘O, quick open** (`QuickOpen`): every opener at once. A feature
   registers one with `use_opener`; the lab's Vault registers its notes and
   opens the picked one where the person asked (here, a new tab, a split):
@@ -137,6 +140,9 @@ What you get:
 
   `use_palette_opener(Scope::Targets, …)` fills the palette's `@` the same
   way; the settings page registers `#` itself.
+
+<!-- media: quick-open-note — ⌘O finding a note and opening it in a split -->
+
 - **The action list window** (`ActionListView`): REAPER's. Every action,
   searchable by name, id, group and binding; for each its bindings by
   context, with the **binding editor** (`BindingEditor`: press the chord to
@@ -147,6 +153,8 @@ What you get:
   ```rust
   View::new("actions", "Action list", |_| rsx! { architect_commands::ActionListView {} })
   ```
+
+<!-- media: action-list-binding-editor — the action list window: an action searched, a new chord recorded, a conflict shown -->
 
 ## 3. Keys through `architect-input`
 
@@ -176,10 +184,16 @@ context's bindings beat the mode's own, innermost first:
 
 - **Sequences** (`g g`) wait for the next key; while one is pending,
   `WhichKeyPanel` shows what can follow, with each entry's label.
+
+<!-- media: which-key-panel — a key sequence pending, the which-key panel listing what can follow -->
+
 - **Held-letter tools.** A key a pointer or wheel pattern names as held
   (`Z+Left.Drag`) is a modifier while it is down: its press shows the tool's
   gestures and runs nothing, and a release with nothing in between is a tap
   that runs what the key is bound to.
+
+<!-- media: held-letter-zoom-tool — Z held over the arrangement: the tool's gestures shown, a drag zooming to a box -->
+
 - **MIDI and OSC** bindings are matched here; the sources are the app's: it
   hands each message in as `InputEvent::Midi` / `InputEvent::Osc` through
   `commands.handle_input(event)`.
@@ -274,6 +288,9 @@ rsx! {
 | Phone | none: the palette and each page's ⋯ |
 
 The Linux and iPad bars are checked to build, not yet run on a device.
+
+<!-- media: menu-bar-native-macos — the macOS menu bar built from the lab's MenuBar: a ticked Details toggle and the live Tabs section -->
+<!-- media: menu-bar-in-window — the in-window menu bar on Linux without a global menu, a menu opened with its shortcuts -->
 
 ## 5. MCP
 

@@ -119,6 +119,8 @@ an app can switch style without touching a page (the lab does it from a
 setting). Routing stays yours: the shell is told the current tab and calls
 `on_tab`.
 
+<!-- media: shell-app-shell-desk — the lab on a desk: title row, ribbon, sidebar with tabs and projects, page, right side, status bar -->
+
 A `Tab` is an id, a label and an icon: `Tab::new("inbox", "Inbox",
 icon!(Inbox)).badge(5)`. An `Action` is a label, an icon and a press:
 `Action::new("Capture", icon!(Feather), move |()| capture())`.
@@ -134,6 +136,8 @@ draws its own bar; the lab builds it in `apps/lab/ui/src/screen.rs`
 `use_window_chrome`, which also follows full screen through window events
 (a Blitz quirk). The window itself is created with a transparent,
 full-size title bar (`apps/lab/desktop/src/main.rs`).
+
+<!-- media: shell-desk-title-row — a macOS window whose title row holds the traffic lights, the sidebar button and the workspace's tabs; dragging its empty part moves the window -->
 
 ## 3. A page
 
@@ -299,6 +303,8 @@ from it without the app writing any of it:
   which a menu or a key can name;
 - on a phone, one pane at a time with a switcher.
 
+<!-- media: workspace-vault-tour — the lab's Vault: tabs in the title row, files in the left dock, a split, a tab dragged to a new group -->
+
 ### Persistence through a store
 
 The host reads the store once when it mounts and writes it when the
@@ -344,6 +350,8 @@ The layer covers exactly the pane and takes no pointer events. Where the
 marks come from (a document's roster) is in the
 [documents chapter](@/guide/documents.md).
 
+<!-- media: presence-pointers-overlay — two people in one arrangement: the other's named pointer and selection wash drawn over the pane -->
+
 ## 6. Pop-out windows: the desk launcher
 
 dioxus-native opens one window, at start. To let a tab dragged out of the
@@ -367,6 +375,8 @@ and `VirtualDom`, its root the host's `Popout`, reading the main window's
 `Signal<Workspace>`; the shell's and the commands' contexts are carried
 into it, and an app's own go through `WorkspaceView { bridge }` (`Bridge`).
 
+<!-- media: workspace-pop-out-window — a tab dragged out of the main window becomes its own window, then dragged back -->
+
 Limits today, from the code: chords (`WindowKeys`) are heard in the main
 window only; pop-outs have no docks; a tab dragged onto a group in another
 window joins that window's first group.
@@ -381,6 +391,9 @@ time.
 
 ## Where to read more
 
+- [The UI primitives](@/guide/ui-primitives.md): the next chapter, every
+  part the shell, the workspace, the commands, settings and `architect-ui`
+  ship, one `rsx!` each.
 - [The app shell](@/architecture/app-shell.md): the slots, every form
   factor's layout, the desk frame, touch in Blitz on iOS.
 - [The workspace](@/architecture/workspace.md): the model, the operations,

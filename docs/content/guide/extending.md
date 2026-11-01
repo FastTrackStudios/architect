@@ -80,6 +80,8 @@ undoes as one. That only works if the actions and the scripting share the
 app's one `Arc<Mutex<History>>` (the [documents chapter](@/guide/documents.md)).
 `a_saved_script_runs_from_the_palette_and_undoes_as_one_step` is the proof.
 
+<!-- media: script-run-from-palette-undo — a saved script run from ⌘K arming two tracks, then one ⌘Z undoing both -->
+
 ### Over MCP
 
 Nothing extra: `SCRIPT_RUN`, `SCRIPT_SAVE` and `SCRIPT_DESCRIBE` are
@@ -184,6 +186,9 @@ let extensions = use_hook(|| {
 `features/extensions/tests/metronome.rs` installs, runs, edits and reloads
 the metronome.
 
+<!-- media: extension-metronome-load — the metronome switched on: its section on the settings page and its action in ⌘K -->
+<!-- media: extension-hot-reload — the metronome's extension.toml edited and saved while the lab runs, its settings section changing without a restart -->
+
 <!-- example: extension -->
 
 ### Process extensions and remote views
@@ -227,6 +232,8 @@ vox as frames that `RemoteView` applies to a Blitz sub-document, and the
 pane's keys and clicks go back. The applier trusts nothing: an edit naming
 a node it does not have fails the view, not the app.
 `features/extensions/tests/remote_view.rs` drives it end to end.
+
+<!-- media: remote-view-clicker-restart — the Clicker pane drawn by another process: clicked, its process killed, the pane saying why, Start again restoring it -->
 
 Not yet: pointer, wheel and scroll events and IME into a remote view, stdio
 as a transport, state handed over on a reload, Windows.
@@ -292,6 +299,9 @@ and the view being drawn over publishes its spaces
 An extension declares an overlay in its manifest (`[[overlays]] id, view,
 plane, script`, Luau only). Today the app starts it as a `Session` itself;
 the host starting overlays is still to come.
+
+<!-- media: canvas-marker-lane-overlay — the marker lane drawn over the arrangement: flags at markers, a lane wash, a flag clicked moving the playhead -->
+<!-- media: canvas-tool-window-docked — the marker lane's ImGui window floating, then docked as a pane, its sliders changing the overlay -->
 
 Shapes are drawn as boxes: Blitz has no texture widget yet, so there is no
 egui or `<canvas>` behind the API.
