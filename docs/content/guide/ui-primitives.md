@@ -322,7 +322,10 @@ Screensets::default().with_builtins([
 
 **On a phone** a workspace is one pane at a time, with Obsidian's tab
 switcher: the action bar's tabs button (`use_tabs_button`, counting the
-tabs) zooms the pane out into its card in a grid of every tab, each
+tabs), or a pull up from the grip along the pane's foot, zooms the
+pane out into its card in a grid of every tab (a pull follows the
+finger, and settles open past halfway or flicked up, else springs back),
+each
 card a live preview of its pane (the view drawn again, scaled down) or
 its view's icon (`View::still`, for a view that registers itself as it
 mounts). A card's ✕ or a swipe across it closes the tab and the others
@@ -335,6 +338,8 @@ plain data: `features/workspace/src/switcher.rs` (`Place`,
 `Workspace::cards`, `CardGrid`, `reorder_dest`).
 
 ![On a phone, the tab switcher opened from the tabs button and a card chosen](https://raw.githubusercontent.com/FastTrackStudios/architect/media/phone-tab-switcher-open.gif)
+
+![On a phone, a short pull up from the pane's foot springing back, then a longer one opening the tab switcher](https://raw.githubusercontent.com/FastTrackStudios/architect/media/phone-tab-switcher-pull.gif)
 
 ![Closing a tab from its card: the others slide together](https://raw.githubusercontent.com/FastTrackStudios/architect/media/phone-tab-switcher-close-card.gif)
 

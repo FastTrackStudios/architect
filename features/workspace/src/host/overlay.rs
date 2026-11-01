@@ -910,7 +910,7 @@ pub(super) fn PhoneBody() -> Element {
     let own_bar = (host.phone_header)();
     let header = super::switcher::PHONE_HEADER;
     let tabs = if count == 1 { "tab" } else { "tabs" };
-    let closes = (host.switch.closes)();
+    let grip = super::switcher::GRIP;
     rsx! {
         div {
             style: "flex:1 1 0; min-width:0; min-height:0; display:flex; flex-direction:column;",
@@ -932,14 +932,25 @@ pub(super) fn PhoneBody() -> Element {
                     }
                 }
             }
-            // Drawn afresh once the switcher has gone: laid out while its
-            // layer was over it, Blitz collapsed the pane's box.
             div {
-                key: "{closes}",
                 style: "flex:1 1 0; min-width:0; min-height:0; display:flex; position:relative;",
                 match pane {
                     Some(pane) => rsx! { PaneSlot { key: "{pane.0}", pane } },
                     None => rsx! { super::EmptyCenter {} },
+                }
+                // The grip along the pane's foot: a pull up from it opens
+                // the switcher, the pane zooming out into its card as the
+                // finger goes (the moves are the host's and the layer's).
+                div {
+                    "data-switcher": "grip",
+                    "aria-label": "Show tabs",
+                    style: "position:absolute; left:0; right:0; bottom:0; height:{grip}px; z-index:2; \
+                            display:flex; align-items:center; justify-content:center; touch-action:none;",
+                    onpointerdown: move |e| {
+                        e.stop_propagation();
+                        super::switcher::start_pull(host, super::point(&e).1);
+                    },
+                    div { style: "width:36px; height:4px; border-radius:2px; background:{t.ink_3}; opacity:0.6;" }
                 }
             }
         }

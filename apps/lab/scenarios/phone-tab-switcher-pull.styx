@@ -1,0 +1,37 @@
+// A phone's tab switcher opened by a pull up from the grip along the
+// pane's foot: the pane zooms out into its card as the finger goes, and
+// settles open once let go past halfway (short of it, it springs back).
+id phone-tab-switcher-pull
+title "Pull up for the tab switcher on a phone"
+view {width 402, height 874}
+capture {fps 20, width 402, outputs (gif png)}
+steps (
+    {
+        id vault
+        do @run{id LAB_GO_VAULT}
+        done {on (@changed"lab"), check ({id LAB_STATE, has {tab vault, bar actions}})}
+        hide true
+    }
+    {
+        id peek
+        text "Pull up a little from the pane's foot: let go short of halfway and it springs back."
+        target @css"[data-switcher=\"grip\"]"
+        do @drag{dy -60, seconds 0.8}
+        hold 0.8
+    }
+    {
+        id pull
+        text "Pull further: the tab zooms out into the grid as your finger goes, and settles open."
+        target @css"[data-switcher=\"grip\"]"
+        do @drag{dy -300, seconds 1.2}
+        hold 0.8
+    }
+    {
+        id choose
+        text "Press a card to zoom into its tab."
+        target @app{kind card, name graph}
+        do @click{}
+        done {on (@changed"workspace"), check ({id WORKSPACE_LAYOUT, has {active graph}})}
+        hold 0.8
+    }
+)

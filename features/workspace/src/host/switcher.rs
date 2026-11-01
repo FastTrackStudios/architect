@@ -5,6 +5,8 @@
 //!
 //! Every move is on `architect_shell::motion`: opening zooms out from the
 //! pane on show into its card (`Switch::zoom`, 0 the pane, 1 the grid),
+//! or a pull up from the grip along the pane's foot holds the zoom where
+//! the finger is and settles it open or back when let go,
 //! choosing a card zooms into it, a closed card's neighbours slide
 //! together (each card's place is a pair of motions following its slot),
 //! a card swiped sideways is held by the finger and flung or sprung back,
@@ -44,6 +46,17 @@ const SWIPE_SHARE: f32 = 0.45;
 const FLING: f64 = 900.0;
 /// How many frames the layer's box is waited for.
 const LAYER_TRIES: u32 = 30;
+/// The grip along a phone's pane's foot that a pull up starts from
+/// (points).
+pub(super) const GRIP: f32 = 22.0;
+/// How far a pull goes to open the grid whole, as a share of the pane's
+/// height.
+const PULL_SHARE: f32 = 0.4;
+/// A pull let go past this much of the way open opens; short of it, it
+/// springs back. A flick (points a second) opens or closes whatever the
+/// share.
+const PULL_OPEN: f64 = 0.5;
+const PULL_FLICK: f64 = 400.0;
 
 /// Where the switcher is drawn, as it last was: its layer's size and
 /// place in the window, the safe area, and the pane on show (in the
@@ -158,11 +171,10 @@ pub(super) struct Switch {
     lifted: Signal<Option<Lifted>>,
     menu: Signal<Option<SwitchMenu>>,
     press: CopyValue<Option<Press>>,
+    /// A pull up from the pane's grip: where the finger went down and
+    /// where it last was (window points).
+    pull: CopyValue<Option<(f32, f32)>>,
     serial: CopyValue<u64>,
-    /// Counts the switcher's closes: the phone's pane is drawn afresh
-    /// after each (a pane mounted while the layer was over it was laid
-    /// out at its narrowest by Blitz, and stayed so).
-    pub(super) closes: Signal<u64>,
 }
 
 impl Switch {
@@ -183,8 +195,8 @@ impl Switch {
             lifted: Signal::new(None),
             menu: Signal::new(None),
             press: CopyValue::new(None),
+            pull: CopyValue::new(None),
             serial: CopyValue::new(0),
-            closes: Signal::new(0),
         }
     }
 }
@@ -246,21 +258,8 @@ fn zoom_in(host: Host, then: impl FnOnce() + 'static) {
     menu.set(None);
     s.zoom.to_then(0.0, move || {
         switcher.set(false);
-        closed(host);
         if let Some(then) = then.take() {
             then();
-        }
-    });
-}
-
-/// The layer has gone: the phone's pane is drawn afresh, a frame on (in
-/// a layout the layer is no longer in).
-fn closed(host: Host) {
-    spawn(async move {
-        architect_shell::motion::next_frame().await;
-        let mut closes = host.switch.closes;
-        if let Ok(n) = closes.try_peek().map(|n| n.wrapping_add(1)) {
-            closes.set(n);
         }
     });
 }
@@ -309,6 +308,72 @@ fn close_card(host: Host, pane: PaneId) {
         closing.set(None);
         s.fade.jump(1.0);
     });
+}
+
+/// A finger down on the pane's grip: a pull starts, and the grid is
+/// readied from the pane's real box.
+pub(super) fn start_pull(host: Host, y: f32) {
+    let s = host.switch;
+    if *host.switcher.peek() || s.zoom.target() > 0.0 {
+        return;
+    }
+    let mut pull = s.pull;
+    pull.set(Some((y, y)));
+    measure_then(host, move || prepare(host));
+}
+
+/// Whether a finger is pulling the switcher up.
+pub(super) fn pulling(host: Host) -> bool {
+    host.switch.pull.peek().is_some()
+}
+
+/// The pulling finger moved (window points): the pane zooms out into its
+/// card as far as the finger has come up.
+pub(super) fn pull_move(host: Host, y: f32) {
+    let s = host.switch;
+    let mut pull = s.pull;
+    // A move that goes nowhere (a finger come to rest, a repeated last
+    // point) would read as a stop and hide a flick.
+    let Some((y0, last)) = *pull.peek() else {
+        return;
+    };
+    if (y - last).abs() < f32::EPSILON {
+        return;
+    }
+    pull.set(Some((y0, y)));
+    let range = (s.geo.peek().pane.h * PULL_SHARE).max(1.0);
+    s.zoom.hold(f64::from(((y0 - y) / range).clamp(0.0, 1.0)));
+}
+
+/// The pull let go (`released`) or cancelled: past halfway, or flicked
+/// up, the switcher settles open from where the finger left it; else it
+/// springs back into the pane.
+pub(super) fn pull_end(host: Host, released: bool) {
+    let s = host.switch;
+    let mut pull = s.pull;
+    if pull.peek().is_none() {
+        return;
+    }
+    pull.set(None);
+    let range = f64::from(s.geo.peek().pane.h * PULL_SHARE);
+    let (at, v) = (s.zoom.peek(), s.zoom.velocity() * range);
+    if released && opens(at, v) {
+        let mut switcher = host.switcher;
+        switcher.set(true);
+        s.zoom.to(1.0);
+    } else if at > 0.0 {
+        s.zoom.to(0.0);
+    }
+}
+
+/// Whether a pull let go `at` (0 the pane, 1 the grid) at speed `v`
+/// (points a second, up) opens the switcher.
+fn opens(at: f64, v: f64) -> bool {
+    if v.abs() > PULL_FLICK {
+        v > 0.0
+    } else {
+        at > PULL_OPEN
+    }
 }
 
 /// Measures the host again, then runs `then`: the zoom starts from the
@@ -362,7 +427,7 @@ fn use_open_close(host: Host) {
                 }
             }
         } else if s.zoom.target() > 0.0 {
-            s.zoom.to_then(0.0, move || closed(host));
+            s.zoom.to(0.0);
         }
     });
 }
@@ -521,9 +586,28 @@ pub(super) fn SwitcherLayer(cover: bool) -> Element {
             serial: 0,
         }));
     };
-    let onpointermove = move |e: PointerEvent| on_move(host, geo.local(point(&e)));
-    let onpointerup = move |_: PointerEvent| on_up(host, true);
-    let onpointercancel = move |_: PointerEvent| on_up(host, false);
+    // A pull from the pane's grip goes on over the layer it opens.
+    let onpointermove = move |e: PointerEvent| {
+        if pulling(host) {
+            pull_move(host, point(&e).1);
+        } else {
+            on_move(host, geo.local(point(&e)));
+        }
+    };
+    let onpointerup = move |_: PointerEvent| {
+        if pulling(host) {
+            pull_end(host, true);
+        } else {
+            on_up(host, true);
+        }
+    };
+    let onpointercancel = move |_: PointerEvent| {
+        if pulling(host) {
+            pull_end(host, false);
+        } else {
+            on_up(host, false);
+        }
+    };
 
     rsx! {
         div {
@@ -1262,5 +1346,21 @@ fn MenuRow(row: Row) -> Element {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::opens;
+
+    #[test]
+    fn a_pull_let_go_opens_past_halfway_or_flicked_up() {
+        // Slow: where it was let go decides.
+        assert!(opens(0.6, 0.0));
+        assert!(!opens(0.4, 300.0));
+        // A flick up opens from a little way; a flick down springs back
+        // from most of the way.
+        assert!(opens(0.15, 800.0));
+        assert!(!opens(0.85, -800.0));
     }
 }
