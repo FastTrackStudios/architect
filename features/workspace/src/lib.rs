@@ -40,4 +40,4 @@ pub use model::{
     SplitId, ViewKind, Window, WindowId, Workspace,
 };
 pub use ops::{Dest, Target, WorkspaceError};
-pub use screenset::{FormClass, Layout, Screenset, Screensets};
+pub use screenset::{FormClass, Layout, Recall, Screenset, Screensets};
