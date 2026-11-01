@@ -166,6 +166,13 @@ impl VirtualClock {
         }
     }
 
+    /// Whether a motion waits for the clock's next frame.
+    #[must_use]
+    #[allow(clippy::unused_self)]
+    pub fn waiting(&self) -> bool {
+        CLOCK.with(|c| !c.borrow().waiting.is_empty())
+    }
+
     /// Moves the clock to `seconds` and wakes every motion waiting for its
     /// next frame. Poll the documents after, then lay them out.
     #[allow(clippy::unused_self)]
@@ -567,7 +574,10 @@ impl Motion {
 
     fn show(self, at: f64) {
         let mut value = self.value;
-        if value.try_peek().is_ok_and(|v| (*v - at).abs() > f64::EPSILON) {
+        if value
+            .try_peek()
+            .is_ok_and(|v| (*v - at).abs() > f64::EPSILON)
+        {
             value.set(at);
         }
     }

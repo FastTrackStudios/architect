@@ -53,7 +53,10 @@ fn appearance() -> Section {
                     Control::Switch,
                     Value::Bool(false),
                 )
-                .describe("Drawers and menus appear without moving.")
+                .describe(
+                    "Sidebars, tabs, splits and drawers go straight to where they end. \
+                     Off, the lab follows the Mac's own setting.",
+                )
                 .aliases(["animation"]),
             ],
         )

@@ -19,7 +19,7 @@ use futures_util::StreamExt as _;
 
 use super::dock::DockView;
 use super::group::NodeView;
-use super::overlay::{DragLayer, MenuLayer};
+use super::overlay::{DragLayer, DropHighlight, MenuLayer};
 use super::{Command, Drag, Host, Mount, Op, Sizes, Views, overlay, point, use_host};
 use crate::model::{Docks, GroupId, PaneId, Rect, Side, Window, WindowId, Workspace};
 use crate::screenset::{FormClass, Screensets};
@@ -366,6 +366,19 @@ fn PopoutView(props: PopoutProps) -> Element {
         screensets: props.screensets,
         form: Signal::new(FormClass::Desk),
         scrolls: Signal::new(HashMap::new()),
+        strips: CopyValue::new(HashMap::new()),
+        tab_shift: CopyValue::new(HashMap::new()),
+        tab_from: CopyValue::new(HashMap::new()),
+        lifted: Signal::new(None),
+        growing: Signal::new(None),
+        grow: architect_shell::motion::Motion::new(
+            1.0,
+            architect_shell::motion::Spring::PANEL,
+            0.001,
+        ),
+        grow_size: CopyValue::new(None),
+        split_sizes: CopyValue::new(HashMap::new()),
+        closing: CopyValue::new(None),
         windows: CopyValue::new(Some(props.windows.clone())),
         pressed: props.pressed,
         released: CopyValue::new(Rc::default()),
@@ -436,6 +449,7 @@ fn PopoutView(props: PopoutProps) -> Element {
                     DockView { side, dock, fill: true }
                 }
             }
+            DropHighlight {}
             DragLayer {}
             MenuLayer {}
         }

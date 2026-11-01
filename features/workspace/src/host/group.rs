@@ -1,6 +1,8 @@
 //! A tree of splits and tab groups: the dividers, the tab bars (names,
 //! icons, or none), stacked tabs, and the pane on show.
 
+use architect_shell::motion::{Motion, Spring};
+use dioxus::html::geometry::WheelDelta;
 use dioxus::prelude::*;
 use lucide_dioxus::{ArrowLeft, ArrowRight, ChevronDown, Ellipsis, Pin, Plus, X};
 
@@ -10,6 +12,8 @@ use crate::model::{Axis, Chrome, Group, Node, PaneId, Split};
 
 /// How far a named tab gives way before the bar clips, points.
 const TAB_MIN: f32 = 72.0;
+/// A split's child's box, filling its share.
+const FILL: &str = "flex:1 1 0; min-width:0; min-height:0; display:flex;";
 /// How wide a named tab grows, points (Obsidian's).
 const TAB_MAX: f32 = 200.0;
 /// How wide a stacked pane is, points (narrower where the strip is).
@@ -20,6 +24,8 @@ const STACKED_MIN: f32 = 240.0;
 const SPINE: f32 = 32.0;
 /// A stacked strip's scrollbar, points.
 const STRIP_BAR: f32 = 8.0;
+/// How far a wheel's notch scrolls a stacked strip, points.
+const WHEEL_LINE: f32 = 40.0;
 
 /// A tab (or a spine) pressed: it may become a drag; under a finger or a
 /// pen, held still long enough, it opens the tab's menu (a right click's).
@@ -104,11 +110,66 @@ fn SplitView(split: Split, edges: Edges) -> Element {
     };
     let (hair_line, hair_grip) = hairline(axis, s.divider, t.rule, cursor);
     let shares: Vec<f32> = split.children.iter().map(|c| c.share).collect();
+    // A child group growing in (a split just made) or giving its room up
+    // (closing) takes that share of its own.
+    let growing = (host.growing)();
+    // Where it is held while it grows: the drop's edge, else (closing) the
+    // end away from the sibling that takes its room.
+    let held = |index: usize, last: usize| -> Option<String> {
+        let (r, side) = (*host.grow_size.peek())?;
+        let side = side.unwrap_or(match (axis, index == last) {
+            (Axis::Row, true) => crate::model::Side::Right,
+            (Axis::Row, false) => crate::model::Side::Left,
+            (Axis::Column, true) => crate::model::Side::Bottom,
+            (Axis::Column, false) => crate::model::Side::Top,
+        });
+        Some(match side {
+            crate::model::Side::Left => format!("left:0; top:0; bottom:0; width:{}px;", r.w),
+            crate::model::Side::Right => format!("right:0; top:0; bottom:0; width:{}px;", r.w),
+            crate::model::Side::Top => format!("top:0; left:0; right:0; height:{}px;", r.h),
+            crate::model::Side::Bottom => format!("bottom:0; left:0; right:0; height:{}px;", r.h),
+        })
+    };
+    let grown: Vec<f32> = split
+        .children
+        .iter()
+        .map(|c| match (&c.node, growing) {
+            (Node::Group(g), Some(id)) if g.id == id => c.share * super::narrow(host.grow.value()),
+            _ => c.share,
+        })
+        .collect();
+    // Flex shares that add up to less than one leave room unfilled: the
+    // others take up what the growing one has not.
+    let sum: f32 = grown.iter().sum();
+    let grown: Vec<f32> = grown
+        .iter()
+        .map(|g| if sum > 0.0 { g / sum } else { *g })
+        .collect();
     // Each divider names the panes before it, for a guide scenario's
     // `@split"<pane>"` (`crate::target_selector`).
     let befores: Vec<String> = split.children.iter().map(|c| pane_names(&c.node)).collect();
     let count = split.children.len();
     let last = count.saturating_sub(1);
+    let ids: Vec<Option<crate::model::GroupId>> = split
+        .children
+        .iter()
+        .map(|c| match &c.node {
+            Node::Group(g) => Some(g.id),
+            Node::Split(_) => None,
+        })
+        .collect();
+    let boxes: Vec<String> = split
+        .children
+        .iter()
+        .enumerate()
+        .map(|(index, c)| match (&c.node, growing) {
+            (Node::Group(g), Some(id)) if g.id == id => held(index, last).map_or_else(
+                || FILL.to_owned(),
+                |at| format!("position:absolute; {at} display:flex;"),
+            ),
+            _ => FILL.to_owned(),
+        })
+        .collect();
     rsx! {
         div {
             style: "flex:1 1 0; min-width:0; min-height:0; display:flex; flex-direction:{dir};",
@@ -116,9 +177,24 @@ fn SplitView(split: Split, edges: Edges) -> Element {
             for (index, child) in split.children.into_iter().enumerate() {
                 div {
                     key: "{index}",
-                    style: "flex:{child.share} 1 0; min-width:0; min-height:0; display:flex; \
+                    onresize: {
+                        let group = ids.get(index).copied().flatten();
+                        move |e: Event<ResizeData>| {
+                            if let (Some(g), Ok(size)) = (group, e.get_content_box_size()) {
+                                let mut sizes = host.split_sizes;
+                                let r = crate::model::Rect::new(0.0, 0.0, super::narrow(size.width), super::narrow(size.height));
+                                sizes.write().insert(g, r);
+                            }
+                        }
+                    },
+                    style: "flex:{grown.get(index).copied().unwrap_or(child.share)} 1 0; min-width:0; min-height:0; display:flex; \
                             position:relative; overflow:hidden;",
-                    NodeView { node: child.node, edges: edges.child(axis, index, count) }
+                    // One box either way, so the tree is not drawn afresh
+                    // when it has grown.
+                    div {
+                        style: boxes.get(index).cloned().unwrap_or_else(|| FILL.to_owned()),
+                        NodeView { node: child.node, edges: edges.child(axis, index, count) }
+                    }
                 }
                 if index < last {
                     div {
@@ -385,6 +461,23 @@ fn Tab(
 ) -> Element {
     let tab_id = pane.0.clone();
     let mut host = use_host();
+    // Its shift along the bar while a tab is dragged (`super::slide`).
+    let shift = use_hook(|| super::slide::tab_motion(host, &pane));
+    let registered = pane.clone();
+    use_drop(move || super::slide::forget(host, &registered, shift));
+    use_effect(move || {
+        if shift.peek().abs() > 0.01 && !shift.moving() {
+            shift.to(0.0);
+        }
+    });
+    let dx = shift.value();
+    let lifted = (host.lifted)();
+    let (dragged, off_bar) = match &lifted {
+        Some((p, own)) if *p == pane => (true, !*own),
+        _ => (false, false),
+    };
+    let lift = if dragged { 4 } else { u8::from(on) };
+    let shown = u8::from(!off_bar);
     let t = *host.theme.read();
     let s = (host.sizes)();
     let ink = if on { t.ink } else { t.ink_3 };
@@ -416,7 +509,8 @@ fn Tab(
                     box-sizing:border-box; display:flex; align-items:center; gap:6px; padding:{pad}; \
                     border-radius:8px 8px 0 0; white-space:nowrap; overflow:hidden; touch-action:none; \
                     user-select:none; color:{ink}; background:{fill}; border-right:1px solid {hairline}; \
-                    position:relative; z-index:{u8::from(on)}; cursor:pointer;",
+                    position:relative; z-index:{lift}; cursor:pointer; opacity:{shown}; \
+                    transform:translateX({dx}px);",
             title: "{title}",
             role: "tab",
             "data-tab": "{tab_id}",
@@ -468,7 +562,7 @@ fn Tab(
                         onpointerdown: move |e| e.stop_propagation(),
                         onclick: move |e| {
                             e.stop_propagation();
-                            host.run(Op::Close(close.clone()));
+                            host.close_from_tab(close.clone());
                         },
                         X { size: 14, color: t.ink_3 }
                     }
@@ -499,26 +593,55 @@ fn Stacked(group: Group, current: PaneId) -> Element {
     drop(workspace);
     let id = group.id;
     let mut view = use_signal(|| 0.0_f32);
+    // The strip's scroll moves: a trackpad's every point at once, a wheel's
+    // notch and a spine's press eased there, a flicked scrollbar coasting.
+    let strip = use_hook(|| {
+        let from = host.scrolls.peek().get(&id).copied().unwrap_or(0.0);
+        let m = Motion::new(f64::from(from), Spring::PANEL, 0.25);
+        let mut strips = host.strips;
+        strips.write().insert(id, m);
+        m
+    });
+    use_drop(move || {
+        let mut strips = host.strips;
+        if let Ok(mut all) = strips.try_write() {
+            if all.get(&id) == Some(&strip) {
+                all.remove(&id);
+            }
+        }
+    });
     let shown = view();
     let count = panes.len();
     let width = STACKED_W.min(shown).max(STACKED_MIN);
     let total = width * super::count_f32(count);
     let most = (total - shown).max(0.0);
-    let scroll = host
-        .scrolls
-        .read()
-        .get(&id)
-        .copied()
-        .unwrap_or(0.0)
-        .clamp(0.0, most);
+    let scroll = super::narrow(strip.value()).clamp(0.0, most);
     let placed = slides(count, width, SPINE, shown, scroll);
-    let set_scroll = move |to: f32| {
-        let to = to.clamp(0.0, most);
+    // Kept for a strip drawn afresh (the group moved in the tree).
+    let keep = move |to: f32| {
         let mut scrolls = host.scrolls;
         if scrolls.peek().get(&id) != Some(&to) {
             scrolls.write().insert(id, to);
         }
     };
+    let set_scroll = move |to: f32| {
+        let to = to.clamp(0.0, most);
+        keep(to);
+        strip.to(f64::from(to));
+    };
+    // How far each pane lies over the one before it, 0 to 1: its shadow
+    // deepens as it slides over.
+    let covers: Vec<f32> = placed
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            i.checked_sub(1)
+                .and_then(|p| placed.get(p))
+                .map_or(0.0, |prev| {
+                    ((prev.x + width - s.x) / (width * 0.25)).clamp(0.0, 1.0)
+                })
+        })
+        .collect();
     let thumb_w = if total > 0.0 {
         shown * shown / total
     } else {
@@ -554,18 +677,40 @@ fn Stacked(group: Group, current: PaneId) -> Element {
                     }
                 },
                 onwheel: move |e| {
-                    let d = e.data().delta().strip_units();
-                    let dx = super::narrow(d.x);
-                    if dx != 0.0 {
-                        set_scroll(scroll + dx);
+                    let shift = e.modifiers().shift();
+                    // Sideways, or a plain wheel turned with ⇧ held.
+                    let along = |x: f64, y: f64| super::narrow(if x == 0.0 && shift { y } else { x });
+                    match e.data().delta() {
+                        // A trackpad (and its coasting): point for point.
+                        WheelDelta::Pixels(d) => {
+                            let dx = along(d.x, d.y);
+                            if dx != 0.0 {
+                                let to = (super::narrow(strip.peek()) + dx).clamp(0.0, most);
+                                keep(to);
+                                strip.hold(f64::from(to));
+                            }
+                        }
+                        // A wheel's notches: eased, from where it is headed.
+                        WheelDelta::Lines(d) => {
+                            let dx = along(d.x, d.y) * WHEEL_LINE;
+                            if dx != 0.0 {
+                                set_scroll(super::narrow(strip.target()) + dx);
+                            }
+                        }
+                        WheelDelta::Pages(d) => {
+                            let dx = along(d.x, d.y) * shown;
+                            if dx != 0.0 {
+                                set_scroll(super::narrow(strip.target()) + dx);
+                            }
+                        }
                     }
                 },
-                for (i, ((pane, title, icon), slide)) in panes.into_iter().zip(placed).enumerate() {
+                for (i, ((pane, title, icon), (slide, cover))) in panes.into_iter().zip(placed.iter().copied().zip(covers.iter().copied())).enumerate() {
                     div {
                         key: "{pane.0}",
                         style: "position:absolute; top:0; bottom:0; left:{slide.x}px; width:{width}px; \
                                 z-index:{i}; display:flex; flex-direction:row; background:{t.sheet}; \
-                                border-right:1px solid {t.rule}; box-shadow:{slide_shadow(slide.over)};",
+                                border-right:1px solid {t.rule}; box-shadow:{slide_shadow(cover)};",
                         div {
                             style: "flex:0 0 {SPINE}px; display:flex; flex-direction:column; align-items:center; \
                                     gap:8px; padding-top:8px; touch-action:none; user-select:none; cursor:pointer; \
@@ -633,12 +778,13 @@ fn Stacked(group: Group, current: PaneId) -> Element {
     }
 }
 
-/// A stacked pane lying over the one before it casts a shadow on it.
-const fn slide_shadow(over: bool) -> &'static str {
-    if over {
-        "-6px 0 12px rgba(0,0,0,0.18)"
+/// A stacked pane lying over the one before it casts a shadow on it, the
+/// deeper the further over it is (`cover`, 0 to 1).
+fn slide_shadow(cover: f32) -> String {
+    if cover <= 0.0 {
+        "none".to_owned()
     } else {
-        "none"
+        format!("-6px 0 12px rgba(0,0,0,{:.3})", 0.18 * cover)
     }
 }
 

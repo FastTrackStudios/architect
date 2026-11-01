@@ -37,11 +37,13 @@ mod group;
 mod overlay;
 mod presence;
 mod screens;
+mod slide;
 mod windows;
 
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use architect_shell::motion::{Motion, Spring};
 use architect_shell::{IconFn, ShellTheme, StatusItem};
 use dioxus::prelude::*;
 
@@ -55,7 +57,7 @@ use crate::screenset::{FormClass, Screensets};
 
 use dock::DockView;
 use group::NodeView;
-use overlay::{DragLayer, FloatView, MenuLayer, PhoneBody, SheetLayer};
+use overlay::{DragLayer, DropHighlight, FloatView, MenuLayer, PhoneBody, SheetLayer};
 pub use presence::{PresenceLayer, PresenceOverlay, use_presence_overlay};
 
 pub use actions::use_workspace_actions;
@@ -187,6 +189,8 @@ struct Geometry {
     host: Rect,
     groups: Vec<(GroupId, Rect)>,
     bars: Vec<Bar>,
+    /// The bars again, each tab named: what makes room as the tab moves.
+    rows: Vec<slide::Row>,
 }
 
 /// A drag in progress.
@@ -194,11 +198,13 @@ struct Geometry {
 enum Drag {
     /// A tab pressed, not yet moved far enough to drag.
     Pressed { pane: PaneId, x: f32, y: f32 },
-    /// A tab being dragged; `geometry` is `None` until measured.
+    /// A tab being dragged from `x0` (where it was pressed); `geometry`
+    /// is `None` until measured.
     Pane {
         pane: PaneId,
         geometry: Option<Geometry>,
         at: Option<Drop>,
+        x0: f32,
         x: f32,
         y: f32,
     },
@@ -359,8 +365,29 @@ pub struct Host {
     /// The screensets, and the class of screen they are recalled for.
     screensets: Signal<Screensets>,
     form: Signal<FormClass>,
-    /// Each stacked group's scroll along its strip, points.
+    /// Each stacked group's scroll along its strip, points: where it was
+    /// last sent, for a strip drawn afresh.
     scrolls: Signal<HashMap<GroupId, f32>>,
+    /// Each stacked strip's scroll as it moves (a scrollbar's drag holds it).
+    strips: CopyValue<HashMap<GroupId, Motion>>,
+    /// Each tab's shift along its bar while a tab is dragged (`slide`).
+    tab_shift: CopyValue<HashMap<PaneId, Motion>>,
+    /// Where a tab landed from another bar starts, from its new place.
+    tab_from: CopyValue<HashMap<PaneId, f64>>,
+    /// The tab being dragged, and whether it is over its own bar (drawn
+    /// there, following the pointer) or off it (its place closed up).
+    lifted: Signal<Option<(PaneId, bool)>>,
+    /// A split's new group growing in from the edge it was dropped on, or
+    /// a closing one giving its room up: which, and how far (0–1).
+    growing: Signal<Option<GroupId>>,
+    grow: Motion,
+    /// The size the growing group is laid out at (it is clipped, not
+    /// squeezed), and the edge it is held to (`None`: its own far edge).
+    grow_size: CopyValue<Option<(Rect, Option<Side>)>>,
+    /// Each group's size in its split, as its box last said.
+    split_sizes: CopyValue<HashMap<GroupId, Rect>>,
+    /// The pane whose close waits for its group to give its room up.
+    closing: CopyValue<Option<PaneId>>,
     /// The platform's windows, where pop-outs are real OS windows.
     windows: CopyValue<Option<Windows>>,
     /// A ribbon's pinned command pressed in a pop-out, for the main
@@ -758,10 +785,9 @@ impl Host {
     fn run(&self, op: Op) {
         let mut sheet = self.sheet;
         match op {
-            Op::Move(pane, dest) => {
-                let _ = self.edit(|w| w.move_pane(&pane, dest));
-            }
+            Op::Move(pane, dest) => self.move_pane(&pane, dest, None),
             Op::Close(pane) => {
+                self.finish_closing();
                 let _ = self.edit(|w| w.close(&pane));
                 if sheet.peek().as_ref() == Some(&pane) {
                     sheet.set(None);
@@ -819,6 +845,113 @@ impl Host {
             Op::Recall(slot) => screens::recall(*self, slot),
             Op::SaveSet => screens::save(*self),
             Op::ResetSet => screens::reset(*self),
+        }
+    }
+}
+
+impl Host {
+    /// Moves a pane; a split's new group grows in from the edge it was
+    /// dropped on, laid out at `size` (where the drop lit) on the way.
+    fn move_pane(&self, pane: &PaneId, dest: Dest, size: Option<Rect>) {
+        self.finish_closing();
+        let edge = match dest {
+            Dest::Edge { side, .. } => Some(side),
+            _ => None,
+        };
+        let moved = self.edit(|w| w.move_pane(pane, dest)).is_ok();
+        let group = self.workspace.peek().locate(pane).map(|l| l.group);
+        if let (Some(side), true, Some(group)) = (edge, moved, group) {
+            let mut grow_size = self.grow_size;
+            grow_size.set(size.map(|r| (r, Some(side))));
+            self.grow_in(group);
+        }
+    }
+
+    /// A group that just took a split's place grows into it.
+    fn grow_in(&self, group: GroupId) {
+        let mut growing = self.growing;
+        growing.set(Some(group));
+        self.grow.jump(0.0);
+        let mut done = self.growing;
+        self.grow.to_then(1.0, move || done.set(None));
+    }
+
+    /// Closes `pane` from its tab's ✕: the last tab of a group beside
+    /// others gives its room up first, then closes.
+    fn close_from_tab(&self, pane: PaneId) {
+        let lone = {
+            let w = self.workspace.peek();
+            w.locate(&pane).is_some_and(|l| {
+                w.group(l.group).is_some_and(|g| g.tabs.len() == 1)
+                    && w.windows.get(l.window).is_some_and(|win| {
+                        l.area == Area::Center && matches!(win.center, Some(Node::Split(_)))
+                    })
+            })
+        };
+        let group = self.workspace.peek().locate(&pane).map(|l| l.group);
+        let (true, Some(group)) = (lone, group) else {
+            self.run(Op::Close(pane));
+            return;
+        };
+        self.finish_closing();
+        let mut closing = self.closing;
+        closing.set(Some(pane));
+        // Laid out at the size it has as it goes (a group drawn since the
+        // split was made may not be measurable: its box's last size).
+        let size = self
+            .split_sizes
+            .peek()
+            .get(&group)
+            .copied()
+            .or_else(|| self.estimate(group));
+        let mut grow_size = self.grow_size;
+        grow_size.set(size.map(|r| (r, None)));
+        let mut growing = self.growing;
+        growing.set(Some(group));
+        let host = *self;
+        self.grow.to_then(0.0, move || {
+            let mut growing = host.growing;
+            growing.set(None);
+            host.finish_closing();
+        });
+    }
+
+    /// Where a center group sits by its splits' shares, in the host's area
+    /// less the side docks open beside the center.
+    fn estimate(&self, group: GroupId) -> Option<Rect> {
+        let area = (*self.float_area.peek())?;
+        let w = self.workspace.peek();
+        let main = w.windows.first()?;
+        let ribbon = self.sizes.peek().ribbon;
+        let beside = |d: &crate::Dock| {
+            let open = d.shown == Shown::Open && d.root.is_some();
+            let strip = if d.ribbon.is_some() { ribbon } else { 0.0 };
+            if open { d.size + strip } else { strip }
+        };
+        let side = if *self.in_shell.peek() {
+            0.0
+        } else {
+            beside(&main.docks.left)
+        };
+        let width = area.w - side - beside(&main.docks.right);
+        let center = main.center.as_ref()?;
+        crate::layout::area_rects(center, Rect::new(0.0, 0.0, width, area.h))
+            .into_iter()
+            .find(|p| p.group == group)
+            .map(|p| p.rect)
+    }
+
+    /// A close still waiting for its group to give its room up: now.
+    fn finish_closing(&self) {
+        let mut closing = self.closing;
+        let pane = closing.write().take();
+        if let Some(pane) = pane {
+            let mut growing = self.growing;
+            if growing.peek().is_some() {
+                growing.set(None);
+            }
+            self.grow.jump(1.0);
+            let _ = self.edit(|w| w.close(&pane));
         }
     }
 }
@@ -961,6 +1094,15 @@ pub fn WorkspaceView(
         screensets: screensets.unwrap_or_else(|| Signal::new(Screensets::default())),
         form: Signal::new(FormClass::Desk),
         scrolls: Signal::new(HashMap::new()),
+        strips: CopyValue::new(HashMap::new()),
+        tab_shift: CopyValue::new(HashMap::new()),
+        tab_from: CopyValue::new(HashMap::new()),
+        lifted: Signal::new(None),
+        growing: Signal::new(None),
+        grow: Motion::new(1.0, Spring::PANEL, 0.001),
+        grow_size: CopyValue::new(None),
+        split_sizes: CopyValue::new(HashMap::new()),
+        closing: CopyValue::new(None),
         windows: CopyValue::new(os_windows.clone()),
         pressed: Signal::new(None),
         released: CopyValue::new(Rc::default()),
@@ -1059,6 +1201,7 @@ pub fn WorkspaceView(
                 if e.key() == Key::Escape {
                     host.drag.set(None);
                     host.menu.set(None);
+                    slide::cancel(host);
                 }
             },
             onkeyup: move |e| {
@@ -1072,6 +1215,7 @@ pub fn WorkspaceView(
             if os_windows.is_some() && !phone {
                 windows::PopoutSync { bridge }
             }
+            DropHighlight {}
             DragLayer {}
             MenuLayer {}
             SheetLayer {}

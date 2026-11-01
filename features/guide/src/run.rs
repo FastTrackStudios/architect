@@ -683,10 +683,15 @@ impl Runner<'_, '_> {
                     }
                     Do::Scroll { dx, dy, seconds } => {
                         self.travel(x, y, APPROACH_SECONDS)?;
+                        // A trackpad's flick: quick at first, coasting to a
+                        // stop, in pixel deltas as macOS sends them.
                         let frames = self.frames_for(*seconds).max(1);
-                        let n = to_f32_wide(to_f64(frames));
-                        for _ in 0..frames {
-                            self.wheel(x, y, *dx / n, *dy / n);
+                        let mut done = 0.0_f32;
+                        for n in 1..=frames {
+                            let p = flick(to_f64(n) / to_f64(frames));
+                            let step = p - done;
+                            done = p;
+                            self.wheel(x, y, *dx * step, *dy * step);
                             self.tick()?;
                         }
                     }
@@ -777,11 +782,17 @@ impl Runner<'_, '_> {
         let mut cursor = since;
         loop {
             let time = self.time();
+            // A motion under way (a closing split folding before the close
+            // lands) needs time to pass: the wait is frames then.
+            let moving = self.clock.waiting();
+            if moving {
+                self.clock.advance_to(time);
+            }
             let changed = self.desk.settle(time);
             self.poll_pending().map_err(|e| match e {
                 RunError::Step { reason, actual, .. } => fail(reason, actual),
             })?;
-            if changed {
+            if changed || moving {
                 self.show();
                 self.frame = self.frame.saturating_add(1);
             }
@@ -1036,6 +1047,12 @@ fn centre(r: Rect) -> (f32, f32) {
 fn ease(t: f64) -> f32 {
     let t = t.clamp(0.0, 1.0);
     narrow(t * t * 2.0f64.mul_add(-t, 3.0))
+}
+
+/// How far a flick has gone at `t` of its time: a cubic ease-out.
+fn flick(t: f64) -> f32 {
+    let rest = 1.0 - t.clamp(0.0, 1.0);
+    narrow(rest.mul_add(-(rest * rest), 1.0))
 }
 
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
