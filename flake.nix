@@ -35,6 +35,9 @@
           ];
           common = with pkgs; [
             pkg-config
+            # Stylo's native build script generates Rust from Python.
+            # GitHub's Ubuntu image supplied this implicitly; NixOS does not.
+            python3
             openssl
             zlib
             sqlite
