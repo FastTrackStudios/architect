@@ -1,0 +1,35 @@
+// The Collapsible story's guide scenario (`#[story(scenario = …)]` on
+// `collapsible_default`): toured in the story shell, filmed and tested by
+// architect-guide's runner (features/ui/architect-ui/tests/scenarios.rs).
+id collapsible-toggle
+title "Fold a collapsible's details away and back"
+view {width 640, height 360}
+capture {fps 20}
+safe true
+steps (
+    {
+        id look
+        text "A collapsible keeps its details a press away. This is its trigger."
+        target @text"Toggle details"
+        hold 0.4
+    }
+    {
+        id hide
+        text "Press the trigger: the details fold away."
+        target @text"Toggle details"
+        do @click{}
+        hold 0.6
+    }
+    {
+        id show
+        text "Press it again to bring them back."
+        target @text"Toggle details"
+        do @click{}
+    }
+    {
+        id back
+        text "There they are."
+        target @text"Collapsible content body. Press the trigger to hide or reveal this panel."
+        hold 0.6
+    }
+)

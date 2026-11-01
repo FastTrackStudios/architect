@@ -1,6 +1,6 @@
 +++
 title = "Guide media"
-description = "One scenario file, three outputs: a headless film (GIF, WebM, MP4, poster), a test, and (next) an in-app tour."
+description = "One scenario file, three outputs: a headless film (GIF, WebM, MP4, poster), a test, and an in-app tour; a story carries its own."
 weight = 66
 +++
 
@@ -12,8 +12,11 @@ steps over an app. The same steps are
 - **filmed**, headlessly on Blitz with a virtual clock, a drawn pointer and
   every window on one desktop, into a GIF, WebM, MP4 and a poster PNG;
 - **played as a test** with no frames, every step's `done` asserted;
-- **toured** in the app, its target ringed and its text shown, moving on
-  when `done` holds (the overlay is next; see Status).
+- **toured** live in the app: the window dimmed around its target, its
+  text in a popover, moving on when `done` holds.
+
+A story (`architect-story`) carries scenarios too, toured in the story
+shell and filmed and tested as the lab's are.
 
 The design generalises Studio's proposal (`studio:docs/design/guide-media.md`,
 studio#330) to any architect app: no DAW and no `.session`. The "app" is
@@ -72,6 +75,8 @@ A step (`features/guide/src/model.rs` `Step`) is:
   objects by key, arrays by position and length). There is no second query
   language: a predicate is an action. Unset, the step is done when its
   `do` is.
+- A step with a `target` and no `do` points at it (a tour's "this is the
+  trigger"): it is done once the target is on screen.
 - **capture directives**: `text` (the tour's copy), `hold` (seconds kept
   after), `hide` (setup, left out of the film); per scenario `capture`
   sets `fps`, `crop` (a target), `pad`, `width`, `outputs`
@@ -160,6 +165,74 @@ tab-reorder: step "drag": check WORKSPACE_LAYOUT wants {"windows":[…]} (in 5s)
 
 `apps/lab/media/tests/scenarios.rs` runs the lab's under `cargo test`.
 
+## The tour
+
+`features/guide/src/tour.rs` (feature `ui`) plays a scenario live, over
+the running app, for a person to follow. An app offers its tours with
+`use_tours(list, TourSet)` and mounts `TourLayer` once, the last thing in
+its root: an absolute layer against the root (Blitz has no `position:
+fixed`), always mounted and drawn only while a tour plays (an overlay
+inserted over panes as they mount collapses them; see
+`skills/architect/references/blitz-quirks.md`).
+
+- **Starting one** is an action: `GUIDE_TOUR_START {id}` on the app's
+  Action List, so a model over MCP, a scenario and a palette that lists
+  the list can; `GUIDE_TOUR_LIST` lists them. The lab also gives each a
+  ⌘K row (Help › Tour: …) that calls `Tours::start`.
+- **The overlay** dims the window around a cutout over the step's target
+  (four dim pieces, so the target shows through untouched) and rings it;
+  a drag's `to` is ringed dashed. A gesture is *shown*, never performed:
+  the popover says what to do ("Drag what is highlighted onto the dashed
+  outline", "Press ⇧⌘K", an action by its name and key) under the step's
+  `text`, with Back, Skip and Next. The layer takes no presses but the
+  popover's (`pointer-events: none`), so the person acts on the app
+  itself. The cutout and the popover glide on the shell's motion
+  (`architect_shell::motion`, [Motion](@/architecture/motion.md)): a
+  filmed tour shows them move.
+- **Finding the target in a live window** is
+  `features/guide/src/locate.rs` `find_live`: the layer's own mounted
+  element is a Blitz node handle (`dioxus_native_dom::NodeHandle`), which
+  reaches its document; the target is resolved there as the runner
+  resolves it (`find_in`, the same resolvers), and measured from the
+  layer's top left. The tour's own layer is left out of an `@text`
+  search.
+- **Moving on**: the tour watches the Action List in process
+  (`ActionList::events_since`), a look a frame. A step with a `done` moves
+  on when one of its events is heard and every check holds (the same
+  predicates as the test: `features/guide/src/predicate.rs`); a step with
+  none moves on at Next. A hidden step is setup: the tour runs its `@run`
+  itself and moves on when its `done` holds (or its timeout passes).
+  `GUIDE_TOUR_STATE` says where it is, and each move is a `guide` change
+  event; `GUIDE_TOUR_NEXT`, `GUIDE_TOUR_BACK` and `GUIDE_TOUR_SKIP` move
+  it from outside.
+- **Safety**: a scenario not marked `safe` never plays over the person's
+  own data. `TourSet::playground` sets up the app's playground first (a
+  sample document, a scratch session); an app with none cannot start
+  it. The lab's data is all made up, so it is its own playground.
+
+`apps/lab/scenarios/tour-palette-run.styx` films the tour itself: it
+starts the `palette-run` tour from the Action List and follows it, each
+step done as a person would, checking the tour moved on after each.
+
+## A story's scenarios
+
+`#[story(scenario = "file.styx")]` (once per file, relative to the
+story's source) includes a scenario into the story
+(`features/story/architect-story-core/src/lib.rs` `Story`, its
+`scenarios`). Then:
+
+- `architect-story-shell` with feature `tours` offers every story's
+  scenarios as tours over the Lookbook and puts a button per scenario on
+  its story;
+- `features/guide/src/story.rs` (feature `story`) runs them over the
+  story alone (`app`: its render with its knobs' defaults, an Action
+  List, its scenarios as tours): `test_stories` plays them as tests,
+  `features/guide/src/cli.rs` `main_stories` films them.
+
+The proof is the Collapsible story's
+(`features/ui/architect-ui/src/components/collapsible.styx`), played by
+`features/ui/architect-ui/tests/scenarios.rs`.
+
 ## Where the media live
 
 Not in git on `main`. An orphan `media` branch holds only the generated
@@ -190,19 +263,13 @@ extension's view, and headless its program is not running.
 Built: the model and its loader (wasm-clean), the runner with multiple
 windows, the film and its encoders, the CLI and recipes, the test mode,
 the workspace's and the commands' resolvers and actions, the text target,
-the lab's scenarios.
+the lab's scenarios, the in-app tour and its live target path, a story's
+scenarios (toured in the story shell, filmed and tested by the runner).
 
 Next:
 
-- **The in-app tour**: an overlay in `architect-shell` (root-absolute: no
-  `position: fixed` on Blitz) that rings the resolved target, shows the
-  step's `text`, and moves on when `done` holds, watching the Action List
-  in process (`ActionList::events_since`). Resolving a target in a live
-  window needs the document's rects, which a component cannot reach today.
-  A scenario's `safe` already says whether a tour may run it over a
-  person's own data.
-- **A story's scenarios**: a story carrying scenarios, played in the story
-  shell. The runner already takes any root.
+- **A tour in a browser**: `find_live` reaches a Blitz document; a web
+  build needs the same over the DOM (`getBoundingClientRect`).
 - **Keys through the window**: a headless document has no window, so
   window-level chords (`WindowKeys`) do not fire; a scenario runs the
   command (`@run{id LAB_SHOW_COMMANDS}`) where a person presses ⌘K.

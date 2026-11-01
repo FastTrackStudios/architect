@@ -88,6 +88,13 @@ grouped by hairlines; picking a row closes it. On a tablet or desk the
 same items are also commands in the app's command palette, so nothing
 in the ⋯ is mouse-only.
 
+On an upright phone the bar's buttons say their icons alone, whatever
+the page asked for (their words stay their names): the title, or the
+app's brand on a root page, has the rest of the row, and a title too
+long for it is cut at the buttons. Keys shown beside what they do
+(`⌘O`, "↵ open") are a desk's: a page asks `Shell::shows_keys` before
+drawing one, which is false on a touch screen.
+
 ### The bottom bar
 
 Task's `BottomTabBar`: a pill 54pt tall floating 12pt above the
@@ -154,7 +161,9 @@ another screen. A pull down from the top bar opens the command palette.
 A stroke is never taken from something that needs the drag itself (a
 horizontally scrolling strip, a slider, a dialog, anything marked
 `data-no-swipe`, a long press). On a tablet and a desk the drawers are
-sidebars, and nothing listens for the strokes.
+sidebars, and nothing listens for the strokes. As a phone's drawer comes
+in, the page gives way by about a fifth of the drawer's width, moved by `left`
+(Blitz moves a `translate` by device pixels; see `blitz-quirks.md`).
 
 A page that fills a side claims it while it is mounted, and the app's
 default for that side steps aside: the content is rendered inside the
