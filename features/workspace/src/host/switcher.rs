@@ -181,8 +181,8 @@ impl Switch {
     /// Made in the host's own scope.
     pub(super) fn new() -> Self {
         Self {
-            zoom: Motion::new(0.0, Spring::PANEL, 0.001),
-            scroll: Motion::new(0.0, Spring::PANEL, 0.5),
+            zoom: Motion::new(0.0, Spring::SHEET, 0.001),
+            scroll: Motion::new(0.0, Spring::SHEET, 0.5),
             focus: Signal::new(None),
             place: Signal::new(Place::Main),
             geo: CopyValue::new(Geo::default()),

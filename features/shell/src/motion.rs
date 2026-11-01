@@ -43,20 +43,30 @@ pub struct Spring {
 }
 
 impl Spring {
-    /// A sidebar, a dock, a split: there in about a quarter of a second,
-    /// no overshoot.
+    /// A sidebar, a dock, a split: Obsidian's sidebar, measured. Half way
+    /// in its first frame at 30 fps, there in about 0.14 s, no overshoot.
     pub const PANEL: Self = Self {
-        response: 0.32,
+        response: 0.12,
         damping: 1.0,
     };
-    /// A tab making room, a dropped tab settling: quicker.
+    /// A tab making room, a dropped tab settling, a stacked strip's wheel
+    /// notch or spine: Obsidian's tab growing in or closing and its wheel's
+    /// smooth scroll (about 0.2 s, slow at both ends), measured.
     pub const SNAPPY: Self = Self {
         response: 0.22,
         damping: 1.0,
     };
-    /// A highlight tracking the pointer: quicker still.
+    /// A highlight tracking the pointer: Obsidian's drop highlight moving
+    /// from target to target (about 0.1 s), measured.
     pub const TRACK: Self = Self {
-        response: 0.16,
+        response: 0.11,
+        damping: 1.0,
+    };
+    /// A phone's drawer, its tab switcher, the keyboard's lift, a tour's
+    /// spotlight: not measured against Obsidian (the study was on a
+    /// desk), so they keep the timing they shipped with.
+    pub const SHEET: Self = Self {
+        response: 0.32,
         damping: 1.0,
     };
 
@@ -783,13 +793,13 @@ mod tests {
     fn sent_elsewhere_midway_it_keeps_its_velocity() {
         let mut t = Track::new(0.0, Spring::PANEL, 0.001);
         t.to(1.0, 0.0);
-        t.advance(0.08);
+        t.advance(0.02);
         let (at, v) = (t.at, t.velocity);
         assert!(v > 0.0);
         // Turned back: it carries on forward a little before it turns.
-        t.to(0.0, 0.08);
+        t.to(0.0, 0.02);
         assert!((t.velocity - v).abs() < f64::EPSILON);
-        t.advance(0.09);
+        t.advance(0.025);
         assert!(t.at > at);
     }
 
@@ -841,5 +851,38 @@ mod tests {
         let at = frames(&mut t, 0.0, 180);
         assert!(at.iter().all(|x| *x <= 1.0 + 1e-9));
         assert!((t.at - 1.0).abs() < 0.002);
+    }
+
+    /// Where a spring sent from 0 to 1 is `seconds` on.
+    fn sent(spring: Spring, seconds: f64) -> f64 {
+        1.0 + spring.step(-1.0, 0.0, seconds).0
+    }
+
+    #[test]
+    fn a_panel_moves_as_obsidians_sidebar() {
+        // Obsidian's sidebar filmed at 30 fps (`motion.md`): 43–60% of the
+        // way in its first frame, 76–87% in its second, at rest by its
+        // fourth or fifth (about 0.14 s), never past its end.
+        let at = |frame: f64| sent(Spring::PANEL, frame / 30.0);
+        assert!((0.43..0.65).contains(&at(1.0)), "{}", at(1.0));
+        assert!((0.76..0.92).contains(&at(2.0)), "{}", at(2.0));
+        assert!(at(4.0) > 0.98, "{}", at(4.0));
+        assert!((1..=30).all(|f| at(f64::from(f)) <= 1.0 + 1e-9));
+    }
+
+    #[test]
+    fn a_snappy_spring_eases_as_obsidians_tabs_and_wheel() {
+        // Obsidian's tab growing in and its wheel's notch: about 0.2 s,
+        // slow to start (an ease-in-out, not a jump).
+        assert!(sent(Spring::SNAPPY, 0.035) < 0.3);
+        assert!(sent(Spring::SNAPPY, 0.2) > 0.95);
+        assert!(sent(Spring::SNAPPY, 0.25) > 0.99);
+    }
+
+    #[test]
+    fn a_track_spring_moves_as_obsidians_drop_highlight() {
+        // From target to target in about 0.1 s.
+        assert!(sent(Spring::TRACK, 0.1) > 0.85);
+        assert!(sent(Spring::TRACK, 0.15) > 0.98);
     }
 }

@@ -167,7 +167,7 @@ impl KeyboardLift {
 /// Hears the feed (and, in a browser or a web view, the page's keyboard)
 /// while the calling component is mounted.
 pub(super) fn use_keyboard_lift() -> KeyboardLift {
-    let lift = use_motion(0.0, Spring::PANEL, 0.5);
+    let lift = use_motion(0.0, Spring::SHEET, 0.5);
     let mut now = use_signal(keyboard);
     use_hook(move || {
         let (first, mut heard) = subscribe();

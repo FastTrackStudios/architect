@@ -873,12 +873,12 @@ fn card_of(set: &TourSet, list: &ActionList, playing: Playing) -> Option<Card> {
 #[component]
 pub fn TourLayer() -> Element {
     let tours = try_use_context::<Tours>();
-    let x = use_motion(0.0, Spring::PANEL, 0.5);
-    let y = use_motion(0.0, Spring::PANEL, 0.5);
-    let w = use_motion(0.0, Spring::PANEL, 0.5);
-    let h = use_motion(0.0, Spring::PANEL, 0.5);
-    let px = use_motion(0.0, Spring::PANEL, 0.5);
-    let py = use_motion(0.0, Spring::PANEL, 0.5);
+    let x = use_motion(0.0, Spring::SHEET, 0.5);
+    let y = use_motion(0.0, Spring::SHEET, 0.5);
+    let w = use_motion(0.0, Spring::SHEET, 0.5);
+    let h = use_motion(0.0, Spring::SHEET, 0.5);
+    let px = use_motion(0.0, Spring::SHEET, 0.5);
+    let py = use_motion(0.0, Spring::SHEET, 0.5);
     let fade = use_motion(0.0, Spring::SNAPPY, 0.01);
     let mut placed = use_hook(|| CopyValue::new(false));
     // The cutout follows the target: it jumps to the first, glides after.

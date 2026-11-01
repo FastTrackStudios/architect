@@ -797,7 +797,7 @@ pub fn AppShell(
 
     // The drawer's travel, 0 (away) to 1 (open), and which side it is:
     // driven by the finger while a swipe lasts, animated otherwise.
-    let motion = use_motion(0.0, Spring::PANEL, 0.001);
+    let motion = use_motion(0.0, Spring::SHEET, 0.001);
     let mut shown = use_signal(|| None::<Side>);
     use_effect(move || {
         let target = drawer();
