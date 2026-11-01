@@ -10,12 +10,6 @@ weight = 57
 > `DocKinds`; `features/crdt/crdt/src/history.rs` `History`
 > (`transact` — one named step — `begin`/`commit`/`abort` for a step
 > that spans many transactions, `undo`, `redo`, local only). Next in
-> (`transact` — one named step — `undo`, `redo`, local only).
-> **Blob transfer landed:** `DocKind::blobs` (which blobs a document
-> points at), `features/crdt/crdt/src/blobs.rs` (`live`, `keep_offline`)
-> and `architect::blob`'s `Fetcher` (on demand by hash over vox, iroh or
-> HTTP, resumable, streamed), pins and collection ([blobs](@/architecture/blob.md)).
-> Next in the order of work: the file format, the org driver. Proposed
 > (`transact` — one named step — `undo`, `redo`, local only);
 > `features/crdt/crdt/src/file/mod.rs` `DocFile` and
 > `features/crdt/crdt/src/file/branch.rs` `Branch` (the file, below).
@@ -25,8 +19,12 @@ weight = 57
 > following the person's current org);
 > `features/crdt/crdt/src/docs/placement.rs` `Placement` (each document
 > in its file); `features/crdt/crdt/src/registry.rs` `DocPermissions`
-> (the org's permission on every call). Next in the order of work:
-> blobs. Studio's
+> (the org's permission on every call).
+> **Blob transfer landed:** `DocKind::blobs` (which blobs a document
+> points at), `features/crdt/crdt/src/blobs.rs` (`live`, `keep_offline`)
+> and `architect::blob`'s `Fetcher` (on demand by hash over vox, iroh or
+> HTTP, resumable, streamed), pins and collection ([blobs](@/architecture/blob.md)).
+> Studio's
 > `session-format` moving onto the file is Studio's work. Proposed
 > (2026-10-31): most of
 > the pieces exist ([collaboration](@/architecture/collaboration.md),
