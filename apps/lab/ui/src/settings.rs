@@ -1,15 +1,19 @@
 //! The lab's settings: what it registers (Appearance, Workspace, Editor,
 //! Keyboard) and a pretend extension that registers its own section while
-//! it is loaded — the way a real one will.
+//! it is loaded — the way a real one will. Editor is a struct
+//! (`#[derive(Settings)]`); the rest are written out as data.
 
-use architect_settings::{Choice, Control, Registry, Section, Setting, Value, use_section};
+use architect_settings::{
+    Choice, Control, Registry, Section, Setting, Settings, Value, use_section,
+};
 use architect_shell::{ShellStyle, StatusStyle};
 use dioxus::prelude::*;
+use facet::Facet;
 
 /// Every section the lab itself declares.
 pub fn registry() -> Registry {
     let mut r = Registry::new();
-    for section in [appearance(), workspace(), editor(), keyboard()] {
+    for section in [appearance(), workspace(), Editor::section(), keyboard()] {
         let _ = r.register(section);
     }
     r
@@ -108,40 +112,31 @@ fn workspace() -> Section {
         )
 }
 
-fn editor() -> Section {
-    Section::new("editor", "Editor").icon("type").block(
-        None,
-        vec![
-            Setting::new(
-                "editor.vim",
-                "Vim keys",
-                Control::Switch,
-                Value::Bool(false),
-            )
-            .describe("Move and edit with Vim's keys.")
-            .aliases(["modal", "hjkl"]),
-            Setting::new(
-                "editor.width",
-                "Line width",
-                Control::Slider {
-                    min: 40.0,
-                    max: 120.0,
-                    step: 1.0,
-                    unit: " ch".into(),
-                },
-                Value::Float(72.0),
-            )
-            .describe("How wide a line of a note runs."),
-            Setting::new(
-                "editor.new_title",
-                "A new note's title",
-                Control::Text {
-                    placeholder: "Untitled".into(),
-                },
-                Value::Text("Untitled".into()),
-            ),
-        ],
-    )
+/// Editor
+#[derive(Facet, Settings, Clone, PartialEq)]
+#[settings(icon = "type")]
+pub struct Editor {
+    /// Vim keys
+    /// Move and edit with Vim's keys.
+    #[setting(aliases = ["modal", "hjkl"])]
+    pub vim: bool,
+    /// Line width
+    /// How wide a line of a note runs.
+    #[setting(control = slider(40..=120, step = 1), unit = " ch")]
+    pub width: f64,
+    /// A new note's title
+    #[setting(placeholder = "Untitled")]
+    pub new_title: String,
+}
+
+impl Default for Editor {
+    fn default() -> Self {
+        Self {
+            vim: false,
+            width: 72.0,
+            new_title: "Untitled".to_owned(),
+        }
+    }
 }
 
 fn keyboard() -> Section {

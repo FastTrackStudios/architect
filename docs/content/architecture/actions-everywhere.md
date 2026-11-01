@@ -110,7 +110,11 @@ read-only actions and runs others, with conditions and loops (REAPER's
 ReaScript). Scripts and the extensions that add actions, views, settings
 and openers at runtime are one design, settled separately
 ([extensions](@/architecture/extensibility.md); the runtime half is
-proposed).
+proposed). Scripts have landed: `architect-scripting`
+(`features/scripting/src/actions.rs` `Scripting`) runs Luau over the
+Action List as one undo step, and keeps saved scripts — the person's and
+the organization's — as actions of their own (`SCRIPT_MY_…`,
+`SCRIPT_ORG_…`).
 
 ## 6. Which-key
 

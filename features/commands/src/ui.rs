@@ -224,7 +224,9 @@ impl Commands {
         all
     }
 
-    /// Runs command `id`. False when there is none, or it is disabled.
+    /// Runs command `id`. False when there is none, or it is disabled. An
+    /// async action from a list (a saved script) is spawned, and counts as
+    /// run once started.
     #[must_use = "false when there is no such command, or it cannot run"]
     pub fn run(&self, id: &str) -> bool {
         let found = {
@@ -250,7 +252,16 @@ impl Commands {
             .cloned();
         list.is_some_and(|list| {
             recents.write().touch(id);
-            list.run(id).is_ok()
+            if !list.is_async(id) {
+                return list.run(id).is_ok();
+            }
+            // An async action (a saved script, a service call) is awaited
+            // off the key's turn; started is all a key can know.
+            let id = id.to_owned();
+            spawn(async move {
+                let _ = list.run_json_async(&id, b"").await;
+            });
+            true
         })
     }
 

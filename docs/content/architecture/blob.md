@@ -1,12 +1,13 @@
 +++
 title = "Blob transfer and storage"
-description = "Resumable, sha256-verified fetch into place, and a content-addressed blob store."
+description = "Resumable, sha256-verified fetch into place, a content-addressed blob store, and blobs by hash on demand from peers and servers: streamed, pinned, collected."
 weight = 63
 +++
 
 `architect::blob` (feature `blob`, native only) is the byte lane: getting a
 file from somewhere else onto this device without corrupt or half-written
-files, and keeping blobs by their hash.
+files, keeping blobs by their hash, and fetching the blobs a document
+points at from another device or a server when they are read.
 
 ## Fetch one file: `ResumableFetch`
 
@@ -58,12 +59,68 @@ the caller's expected hash differs, and renames it to
 body is not read at all. `BlobStore` is object-safe, so an app can hold an
 `Arc<dyn BlobStore>` and add other backends (S3, Nextcloud) later.
 
+## Blobs by hash, on demand: `Fetcher`
+
+A [document](@/architecture/documents.md) holds its audio and images by
+sha256 (its kind's `DocKind::blobs` reads them out). On another device the
+document opens at once; a blob is fetched when it is read.
+
+```rust,ignore
+use architect::blob::{Fetcher, HttpRemote, LocalFs, VoxRemote};
+
+let fetcher = Fetcher::new(LocalFs::new(data_dir.join("blobs")))
+    .with_remote(Arc::new(VoxRemote::new(peer_client)))     // the peer the song came from
+    .with_remote(Arc::new(HttpRemote::new(server_blobs)));  // the org server's copy
+
+let blob = fetcher.open_at(hash, seek_to).await?;  // streams as it arrives
+fetcher.fetch(hash).await?;                         // or: wait until it is whole
+```
+
+| | |
+|---|---|
+| Remotes | Anything that implements `Remote` (a blob's size by hash, its bytes from an offset), tried in order. `VoxRemote` reads a peer's `BlobTransfer` service over any vox link (iroh, WebSocket, in-process); `HttpRemote` sends `GET <base>/<hex>` with a `Range`; a `LocalFs` (a mounted drive) is one too. |
+| One transfer | However many readers open the same hash, one transfer runs; `progress(hash)` watches it (`Progress`). |
+| Resume | A transfer is a `ResumableFetch` into `<root>/.partial/<hex>`: a dropped link keeps the `.part`; the next fetch, from the same remote or the next one, asks for the rest. After a reconnect, `set_remotes` swaps the lane. |
+| Streamed | `open` / `open_at` hand back a reader at once; it yields bytes as they land, so playback starts before the end arrives. |
+| Verified | The whole blob is hashed before it moves to `<root>/<hex[0..2]>/<hex>`. Streamed bytes are checked only then: a corrupt transfer that restarts ends a reader with `InvalidData`. |
+
+A transfer runs on its own task: dropping the reader does not stop it.
+
+### Serving
+
+A node serves its store to peers with `BlobTransferHost`, mounted like any
+vox service (behind the lane's permissions gate); `.allow(|hash| ..)`
+narrows which blobs it sends. A server's HTTP route answers with
+`serve_http(&store, &headers, &hash)`, ranged by
+[`architect::http::ranged`](@/architecture/http.md), which a browser's
+`<audio>` seeks against too.
+
+```rust,ignore
+router.with(blob_transfer_service_descriptor(), BlobTransferDispatcher::new(
+    BlobTransferHost::new(Arc::new(store.clone())).allow(move |hash| shared.contains(&hash)),
+));
+```
+
+## Keep offline, collect the rest
+
+- `LocalFs::pin(hash)` keeps a blob whatever points at it (`<root>/.pins/<hex>`,
+  an empty file); `unpin`, `is_pinned`, `pinned`.
+  `crdt::blobs::keep_offline(kind, doc, &fetcher)` pins and fetches every
+  blob a document points at; `crdt::blobs::release` unpins them.
+- `LocalFs::collect(&live, grace)` removes every blob that is not in `live`
+  and not pinned, and abandoned partial fetches; `live` is
+  `crdt::blobs::live(&kinds, docs)` over every document on the device.
+  Anything younger than `grace` stays, so a blob stored since the set was
+  computed survives.
+
 ## Not yet
 
 - The wasm side: an OPFS file plus an `IndexedDB` ledger for the resume
   state, as Signal's web packs keep today. It is a follow-up.
-- A ready-made HTTP `Source`. Wrap your client's `Range` request in a
-  `Source` impl for now.
+- Fetching from several remotes at once (ranges split across peers); a
+  transfer reads one remote at a time and falls through on failure.
+- Task's Files platform (BLAKE3 chunks) is a separate store today;
+  [documents](@/architecture/documents.md) plans one store for both.
 
 Extracted from Signal's content client and pack downloads and the Task
 server's attachment object store (STA-388).

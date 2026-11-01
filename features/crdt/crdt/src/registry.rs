@@ -23,6 +23,7 @@
 //! .with_presence_timeout(30_000)
 //! .with_admission(|doc_id| known_projects.contains(&doc_id))
 //! .with_authorizer(|who, doc_id| may_open(who, doc_id))
+//! .with_permissions(DocPermissions::new(org_engine).in_org(&org))
 //! .with_idle_eviction(Duration::from_secs(900));
 //!
 //! router
@@ -53,6 +54,18 @@
 //! (sessions > 0 → no evict) or starts after the entry is gone (and
 //! re-opens it from persistence).
 //!
+//! ## Who may
+//!
+//! Every attach knows who is asking: the principal the router's
+//! permissions gate resolved ([`architect::permissions_gate::caller`]).
+//! [`DocRegistry::with_permissions`] asks the org's
+//! [`PermissionEngine`] about it on every call — `write` on
+//! `org/<org>/doc/<id>` to sync, `read` to watch presence
+//! ([`DocPermissions`]) — so a person who is not a member of the org, or
+//! whose role there does not reach the doc, is refused before anything
+//! is opened. [`DocRegistry::with_authorizer`] is the closure form, for a
+//! rule that is not an engine's.
+//!
 //! Session counts come from the hosts themselves (incremented on
 //! attach, decremented when a session's up-channel closes), not from
 //! `PubSub::subscriber_count` — the hub only sweeps dead sinks on
@@ -63,7 +76,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use architect_permissions::Principal;
+use architect_orgs::OrgId;
+use architect_permissions::{Action, PermissionEngine, Principal, Resource};
 use uuid::Uuid;
 
 use crate::sync::{DocPresence, DocSync, DocSyncHost, PresenceHost, SyncError};
@@ -77,6 +91,92 @@ pub type DocFuture = Pin<Box<dyn Future<Output = Result<CrdtDoc, PersistError>> 
 type Factory = dyn Fn(Uuid) -> DocFuture + Send + Sync;
 type AdmissionHook = dyn Fn(Uuid) -> bool + Send + Sync;
 type Authorizer = dyn Fn(Option<&Principal>, Uuid) -> bool + Send + Sync;
+
+/// What a caller asks to do to a doc: what [`DocPermissions`] checks and
+/// [`crate::docs::DocsHost::with_authorizer`] is told.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocAccess {
+    /// See it in the catalog, watch its presence.
+    Read,
+    /// Register, rename, delete, sync its content.
+    Write,
+}
+
+impl DocAccess {
+    /// The permission action it is: `read` or `write`.
+    #[must_use]
+    pub fn action(self) -> Action {
+        match self {
+            Self::Read => Action::read(),
+            Self::Write => Action::write(),
+        }
+    }
+}
+
+/// Who may do what to an org's documents: the org's
+/// [`PermissionEngine`], asked on every call about the caller and the
+/// doc.
+///
+/// A doc's resource is `org/<org>/doc/<id>` once [`Self::in_org`] names
+/// the org (the key every layer keeps an org's data under), or the
+/// org-relative `doc/<id>` without it, for an engine that already
+/// answers for one org (the lane's). Reading is [`Action::read`],
+/// writing [`Action::write`]. A call with no principal (no gate in front
+/// of the lane) is asked about as [`Principal::Anonymous`], which an
+/// org's engine refuses.
+#[derive(Clone)]
+pub struct DocPermissions {
+    engine: Arc<dyn PermissionEngine>,
+    org: Option<OrgId>,
+}
+
+impl DocPermissions {
+    /// Ask `engine`, about org-relative resources (`doc/<id>`).
+    #[must_use]
+    pub fn new(engine: Arc<dyn PermissionEngine>) -> Self {
+        Self { engine, org: None }
+    }
+
+    /// Name the org the docs are in: resources become
+    /// `org/<org>/doc/<id>`.
+    #[must_use]
+    pub fn in_org(mut self, org: &OrgId) -> Self {
+        self.org = Some(org.clone());
+        self
+    }
+
+    /// The resource `doc_id` is checked as.
+    #[must_use]
+    pub fn resource(&self, doc_id: Uuid) -> Resource {
+        let path = self.org.as_ref().map_or_else(
+            || format!("doc/{doc_id}"),
+            |org| format!("org/{}/doc/{doc_id}", org.0),
+        );
+        Resource::new(path)
+    }
+
+    /// Whether `who` may do `access` to `doc_id`; the engine's reason
+    /// when not.
+    ///
+    /// # Errors
+    ///
+    /// The engine's deny reason.
+    pub fn check(
+        &self,
+        who: Option<&Principal>,
+        doc_id: Uuid,
+        access: DocAccess,
+    ) -> Result<(), String> {
+        let who = who.unwrap_or(&Principal::Anonymous);
+        let decision = self
+            .engine
+            .check(who, &self.resource(doc_id), &access.action());
+        match decision {
+            architect_permissions::Decision::Allow => Ok(()),
+            architect_permissions::Decision::Deny { reason } => Err(reason),
+        }
+    }
+}
 
 /// One open doc: its sync host, its presence host, and when the
 /// registry last touched it (attach or [`DocRegistry::doc`]).
@@ -108,6 +208,7 @@ pub struct DocRegistry {
     shared: Arc<Shared>,
     admission: Arc<AdmissionHook>,
     authorizer: Arc<Authorizer>,
+    permissions: Option<DocPermissions>,
     compact_every: u32,
     shallow_bootstrap: bool,
     presence_timeout_ms: i64,
@@ -131,6 +232,7 @@ impl DocRegistry {
             }),
             admission: Arc::new(|_| true),
             authorizer: Arc::new(|_, _| true),
+            permissions: None,
             compact_every: 0,
             shallow_bootstrap: false,
             presence_timeout_ms: 30_000,
@@ -204,12 +306,44 @@ impl DocRegistry {
         self
     }
 
-    /// Admission, then the caller's authorization, for one attach.
-    fn admit_caller(&self, doc_id: Uuid) -> Result<(), SyncError> {
+    /// Check every call against the org's permissions: a sync attach
+    /// needs `write` on the doc, a presence attach `read`
+    /// ([`DocPermissions`]). Runs after [`Self::with_admission`] and
+    /// before [`Self::with_authorizer`]; a refusal is
+    /// [`SyncError::UnknownDoc`], like a doc that does not exist.
+    /// Server-side [`Self::doc`] is not a caller's request and is not
+    /// checked. Default: none (the gate in front of the lane decides
+    /// alone).
+    #[must_use]
+    pub fn with_permissions(mut self, permissions: DocPermissions) -> Self {
+        self.permissions = Some(permissions);
+        self
+    }
+
+    /// The permissions [`Self::with_permissions`] set.
+    #[must_use]
+    pub const fn permissions(&self) -> Option<&DocPermissions> {
+        self.permissions.as_ref()
+    }
+
+    /// Admission, then the org's permissions, then the caller's
+    /// authorization, for one attach.
+    fn admit_caller(&self, doc_id: Uuid, access: DocAccess) -> Result<(), SyncError> {
         if !(self.admission)(doc_id) {
             return Err(SyncError::UnknownDoc);
         }
         let who = architect::permissions_gate::caller();
+        if let Some(permissions) = &self.permissions
+            && let Err(reason) = permissions.check(who.as_ref(), doc_id, access)
+        {
+            tracing::debug!(
+                ?doc_id,
+                ?access,
+                %reason,
+                "doc-registry: attach refused by the org's permissions"
+            );
+            return Err(SyncError::UnknownDoc);
+        }
         if !(self.authorizer)(who.as_ref(), doc_id) {
             tracing::debug!(
                 ?doc_id,
@@ -354,7 +488,7 @@ impl DocSync for DocRegistry {
         up: vox::Rx<Vec<u8>>,
         down: vox::Tx<crate::sync::SyncDown>,
     ) -> Result<(), SyncError> {
-        self.admit_caller(doc_id)?;
+        self.admit_caller(doc_id, DocAccess::Write)?;
         // Attach while holding the registry lock — the session is
         // counted before any sweep can re-check — but pump the held-open
         // call AFTER releasing it: `sync` now stays in flight for the
@@ -381,7 +515,7 @@ impl DocPresence for DocRegistry {
         up: vox::Rx<Vec<u8>>,
         down: vox::Tx<Vec<u8>>,
     ) -> Result<(), SyncError> {
-        self.admit_caller(doc_id)?;
+        self.admit_caller(doc_id, DocAccess::Read)?;
         // Same attach-under-lock / pump-after-release split as `sync`.
         let session = {
             let mut docs = self.shared.docs.lock().await;

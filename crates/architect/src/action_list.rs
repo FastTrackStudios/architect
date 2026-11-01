@@ -212,6 +212,8 @@ pub enum EventKind {
     Changed { topic: String, detail: String },
     /// An action joined the list.
     Registered { id: String },
+    /// An action left the list ([`ActionList::unregister`]).
+    Unregistered { id: String },
 }
 
 /// How many events the list keeps for a watcher that falls behind.
@@ -797,6 +799,23 @@ impl ActionList {
         }
         self.publish(EventKind::Registered { id });
         Ok(())
+    }
+
+    /// Take `id` off the list — an action that was only ever there for a
+    /// while (a saved script deleted, an extension unloaded). False when
+    /// there was no such action. A call already running finishes.
+    pub fn unregister(&self, id: &str) -> bool {
+        let removed = self
+            .inner
+            .entries
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(id)
+            .is_some();
+        if removed {
+            self.publish(EventKind::Unregistered { id: id.to_owned() });
+        }
+        removed
     }
 
     /// Say when `id` can run: `check` answers `Err(why)` while it cannot
@@ -1824,6 +1843,27 @@ mod tests {
     fn unit(list: &ActionList, meta: &'static ActionMeta) {
         list.register(meta, Effect::Mutating, |(): ()| Ok(()))
             .expect("registered");
+    }
+
+    /// An action taken off the list is gone — not listed, not run — a
+    /// watcher hears it left, and its id is free to register again.
+    #[test]
+    fn an_unregistered_action_is_gone_and_its_id_free() {
+        let list = ActionList::new();
+        unit(&list, &PLAY);
+        let seen = list.latest();
+        assert!(list.unregister("PLAY"));
+        assert!(!list.unregister("PLAY"), "already gone");
+        assert!(list.info("PLAY").is_none());
+        assert_eq!(list.run("PLAY"), Err(ActionError::Unknown("PLAY".into())));
+        let (events, _) = list.events_since(seen, 10, Duration::ZERO);
+        assert!(
+            events
+                .iter()
+                .any(|e| e.kind == EventKind::Unregistered { id: "PLAY".into() })
+        );
+        unit(&list, &PLAY);
+        list.run("PLAY").expect("registered again");
     }
 
     /// (a) A disabled action says why — in its info and when run — and

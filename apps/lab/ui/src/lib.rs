@@ -120,12 +120,20 @@ pub fn LabApp() -> Element {
     let save = store.clone();
     let settings = architect_settings::use_settings_provider(
         settings::registry,
-        || store.as_ref().map(|s| s.load()).unwrap_or_default(),
-        Some(Callback::new(move |values: architect_settings::Values| {
-            if let Some(s) = save.as_ref() {
-                let _ = s.save(&values);
-            }
-        })),
+        || architect_settings::ScopedValues {
+            device: store.as_ref().map(|s| s.load()).unwrap_or_default(),
+            ..Default::default()
+        },
+        Some(Callback::new(
+            move |change: architect_settings::SettingsChange| {
+                // The lab's sections are all this device's.
+                if change.scope == architect_settings::Scope::Device {
+                    if let Some(s) = save.as_ref() {
+                        let _ = s.save(&change.values);
+                    }
+                }
+            },
+        )),
     );
     let lab = use_context_provider(|| Lab {
         route: Signal::new(Route::Tab("inbox")),

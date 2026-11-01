@@ -1007,6 +1007,7 @@ fn event(e: &ActionEvent) -> Value {
             json!({"seq": e.seq, "changed": topic, "which": detail})
         }
         EventKind::Registered { id } => json!({"seq": e.seq, "registered": id}),
+        EventKind::Unregistered { id } => json!({"seq": e.seq, "unregistered": id}),
     }
 }
 

@@ -25,13 +25,15 @@ mod host;
 mod layout;
 mod model;
 mod ops;
+mod presence;
 mod repair;
 mod screenset;
 
 pub use drop::{Drop, contains, drop_at, float_rect, snap_at};
 #[cfg(feature = "ui")]
 pub use host::{
-    Command, Host, PaneHandle, TitleRow, View, Views, WorkspaceView, use_host, use_pane,
+    Command, Host, PaneHandle, PresenceLayer, PresenceOverlay, TitleRow, View, Views,
+    WorkspaceView, use_host, use_pane, use_presence_overlay,
 };
 pub use layout::{Direction, Placed, area_rects, neighbour};
 pub use model::{
@@ -40,4 +42,5 @@ pub use model::{
     SplitId, ViewKind, Window, WindowId, Workspace,
 };
 pub use ops::{Dest, Target, WorkspaceError};
+pub use presence::{PlayheadMark, PointerMark, PresenceMarks, WashMark, css_color};
 pub use screenset::{FormClass, Layout, Recall, Screenset, Screensets};

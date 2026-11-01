@@ -5,6 +5,12 @@
 //! ("Split item", "Script: Arm selected"), undone as one. Undo is local
 //! — Loro's `UndoManager` only undoes this peer's changes, so undoing my
 //! step never undoes a collaborator's that arrived meanwhile.
+//!
+//! A step can also span calls that each make their own: [`History::begin`]
+//! opens one, every [`History::transact`] until [`History::commit`] folds
+//! into it, and [`History::abort`] takes back what it changed. That is
+//! how a script that runs ten actions, each a transaction of its own, is
+//! still one step: the runner opens it, the actions fold in.
 
 use loro::{LoroDoc, UndoManager};
 
@@ -16,6 +22,16 @@ pub struct History {
     /// The steps undone that can be redone, the next on top.
     undone: Vec<String>,
     keep: usize,
+    /// The step [`History::begin`] opened, while it is open.
+    open: Option<Open>,
+}
+
+/// A step opened by [`History::begin`] and not yet committed.
+#[derive(Debug)]
+struct Open {
+    name: String,
+    /// Loro's undo count when it opened: more at the end is a step.
+    before: usize,
 }
 
 impl std::fmt::Debug for History {
@@ -23,6 +39,7 @@ impl std::fmt::Debug for History {
         f.debug_struct("History")
             .field("done", &self.done)
             .field("undone", &self.undone)
+            .field("open", &self.open)
             .finish_non_exhaustive()
     }
 }
@@ -40,28 +57,75 @@ impl History {
             done: Vec::new(),
             undone: Vec::new(),
             keep,
+            open: None,
         }
     }
 
     /// Runs `change` as one step named `name`. A change that changed
-    /// nothing is no step.
+    /// nothing is no step. Inside a step [`Self::begin`] opened, it is
+    /// part of that step, under that step's name.
     pub fn transact<R>(
         &mut self,
         doc: &LoroDoc,
         name: &str,
         change: impl FnOnce(&LoroDoc) -> R,
     ) -> R {
+        if self.open.is_some() {
+            let out = change(doc);
+            doc.commit();
+            return out;
+        }
+        self.begin(name);
+        let out = change(doc);
+        self.commit(doc);
+        out
+    }
+
+    /// Opens a step named `name`: every change until [`Self::commit`] —
+    /// the [`Self::transact`]s of whatever runs meanwhile included — is
+    /// that one step. False, and nothing opened, when a step is already
+    /// open: what runs now is part of it.
+    pub fn begin(&mut self, name: &str) -> bool {
+        if self.open.is_some() {
+            return false;
+        }
         let before = self.undo.undo_count();
         let _ = self.undo.group_start();
-        let out = change(doc);
+        self.open = Some(Open {
+            name: name.to_owned(),
+            before,
+        });
+        true
+    }
+
+    /// Closes the step [`Self::begin`] opened: its name, when it changed
+    /// something (a step that changed nothing is none). `None` too when
+    /// no step is open.
+    pub fn commit(&mut self, doc: &LoroDoc) -> Option<String> {
+        let open = self.open.take()?;
         doc.commit();
         self.undo.group_end();
-        if self.undo.undo_count() > before {
-            self.done.push(name.to_owned());
-            self.undone.clear();
-            self.trim();
+        if self.undo.undo_count() <= open.before {
+            return None;
         }
-        out
+        self.done.push(open.name.clone());
+        self.undone.clear();
+        self.trim();
+        Some(open.name)
+    }
+
+    /// Closes the step [`Self::begin`] opened and takes back what it
+    /// changed, as Undo would (so Redo brings it back, under its name).
+    /// Its name, when it had changed something.
+    pub fn abort(&mut self, doc: &LoroDoc) -> Option<String> {
+        self.commit(doc)?;
+        self.undo()
+    }
+
+    /// The name of the step [`Self::begin`] opened, while it is open.
+    #[must_use]
+    pub fn open_step(&self) -> Option<&str> {
+        self.open.as_ref().map(|open| open.name.as_str())
     }
 
     /// Undoes the last step; its name.
@@ -110,6 +174,9 @@ impl History {
 
     /// Forgets every step (after loading, or a migration).
     pub fn clear(&mut self) {
+        if self.open.take().is_some() {
+            self.undo.group_end();
+        }
         self.undo.clear();
         self.done.clear();
         self.undone.clear();
