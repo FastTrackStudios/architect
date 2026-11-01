@@ -67,7 +67,16 @@ streams, and `/health`. The identity server has its own recipes
 Read [**Build a feature, end to end**](@/getting-started/walkthrough.md):
 it walks the whole flow (define an entity and a service, write a
 backend, serve it, consume it remote or in-process) against
-`examples/greeter`.
+`examples/greeter`. Then:
+
+- [Script an app, end to end](@/getting-started/scripting.md), against
+  `examples/scripting`: an Action List driven from Luau as one undo
+  step, scripts saved as actions, and an agent over MCP.
+- [Write an extension, end to end](@/getting-started/extension.md),
+  against `examples/extension`: a manifest, a Luau overlay and a
+  process extension with a remote view, loaded from a registry.
+- [The guide](@/guide/_index.md), chapter by chapter, and
+  [the features](@/features/_index.md), one page each.
 
 ## A new feature in one command
 

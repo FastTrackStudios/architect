@@ -22,7 +22,7 @@ Use it for optional and third-party features that should not need a rebuild.
 Built-in features are crates. Design: [Extensions](@/architecture/extensions.md);
 the build-time side is [Extensibility](@/architecture/extensibility.md).
 
-<!-- example: extension -->
+Example: `examples/extension`, a registry with a Luau extension and a process extension loaded by a small host, hot-reloaded on save; walked through in [Write an extension, end to end](@/getting-started/extension.md).
 
 <!-- media: extension-install-reload — installing the metronome from the registry: its section appearing on the settings page and its action in ⌘K; editing its manifest and the section reloading -->
 <!-- media: extension-project-requirements — opening a project that needs an extension: the prompt offering to install it, then the extension loaded -->
