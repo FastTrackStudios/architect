@@ -449,8 +449,8 @@ impl Commands {
         o.set(Some(overlay));
     }
 
-    /// The palette on `group`'s commands only, its field empty with
-    /// `prompt` in it: a command that asks where or which (⇧⌘M's "Move
+    /// The palette on `group`'s commands only (those that can run now),
+    /// its field empty with `prompt` in it: a command that asks where or which (⇧⌘M's "Move
     /// to…" lists the `Move` group), the person narrowing it by typing.
     pub fn show_group(&self, group: &str, prompt: &str) {
         self.show(Overlay::Palette);
@@ -716,13 +716,33 @@ pub fn CommandPalette() -> Element {
     let q = Query::parse(&query.read());
     let only = (commands.only)();
     let mut all = commands.all();
+    // A choice lists only what can be chosen.
     if let Some((group, _)) = &only {
-        all.retain(|c| c.group == *group);
+        all.retain(|c| c.group == *group && c.enabled);
     }
     let (rows, picks): (Vec<Ranked>, Vec<Pick>) = match q.scope {
+        // On one group with nothing typed, the app's own order (a list's,
+        // as its side shows it), not the alphabet.
+        Scope::Commands if only.is_some() && q.text.is_empty() => all
+            .into_iter()
+            .map(|mut command| {
+                command.group.clear();
+                let pick = Pick::Run(command.id.clone());
+                let row = Ranked {
+                    command,
+                    positions: Vec::new(),
+                    score: 0,
+                };
+                (row, pick)
+            })
+            .unzip(),
         Scope::Commands => rank(&all, &q.text, &commands.recents.read())
             .into_iter()
-            .map(|r| {
+            .map(|mut r| {
+                // On one group, its prompt names it: the rows need not.
+                if only.is_some() {
+                    r.command.group.clear();
+                }
                 let pick = Pick::Run(r.command.id.clone());
                 (r, pick)
             })
@@ -770,7 +790,11 @@ pub fn CommandPalette() -> Element {
         Scope::Help => "Nothing is bound to that",
     };
     rsx! {
-        Frame { placeholder: only.map_or_else(|| "Type a command…".to_owned(), |(_, prompt)| prompt), query, on_key,
+        Frame { placeholder: only.clone().map_or_else(|| "Type a command…".to_owned(), |(_, prompt)| prompt), query, on_key,
+            // The prompt stays in sight once the field has text.
+            if let Some((_, prompt)) = only.filter(|_| !q.text.is_empty()) {
+                div { style: "padding: 6px 10px 8px; color: {t.ink_3}; font-size: 12px;", "{prompt}" }
+            }
             if rows.is_empty() {
                 div { style: "padding: 18px 12px; color: {t.ink_3}; font-size: 13px;", "{empty}" }
             }
