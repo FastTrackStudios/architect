@@ -68,8 +68,8 @@ pub fn ArrangeView() -> Element {
     });
     let mut mounted = use_signal(|| None::<std::rc::Rc<MountedData>>);
     let measure = move |m: std::rc::Rc<MountedData>| async move {
-        if let Ok(r) = m.get_client_rect().await {
-            size.set((narrow(r.size.width), narrow(r.size.height)));
+        if let Some(s) = architect_canvas::ui::measure(&m).await {
+            size.set((s.w, s.h));
         }
     };
     let (from, scale) = (start(), zoom());

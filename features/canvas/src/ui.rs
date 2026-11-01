@@ -17,7 +17,7 @@
 //! With `luau` too, [`use_script_canvas`] runs a script's
 //! [`Session`](crate::luau::Session) from Dioxus: a frame each time
 //! something it draws from changes, the pointer's presses and releases
-//! each a frame of their own. Its canvases go in a [`Canvases`] in
+//! each a frame of their own; when it stops, what it drew goes. Its canvases go in a [`Canvases`] in
 //! context, where the views find them: [`CanvasLayers`] draws every
 //! canvas's layers over a view, [`Canvases::publish`] gives them its
 //! coordinate spaces, and [`use_tool_windows`] opens a floating pane for
@@ -26,6 +26,8 @@
 
 // Dioxus is single-threaded: its tasks are not `Send`.
 #![allow(clippy::future_not_send)]
+
+use std::rc::Rc;
 
 use dioxus::html::input_data::MouseButton;
 use dioxus::prelude::*;
@@ -228,6 +230,30 @@ pub enum WindowEvent {
     Size(Size),
 }
 
+/// How many times a measurement is asked for before giving up.
+const MEASURE_TRIES: u8 = 12;
+
+/// `mounted`'s size, in points.
+///
+/// Blitz's document is busy while events stream in (a mount, a drag), and
+/// a measurement then fails; just mounted, it is not laid out yet and
+/// measures nothing: either way it is asked again, a few milliseconds
+/// later, a few times.
+pub async fn measure(mounted: &MountedData) -> Option<Size> {
+    for _ in 0..MEASURE_TRIES {
+        if let Ok(r) = mounted.get_client_rect().await
+            && r.size.width > 0.0
+            && r.size.height > 0.0
+        {
+            // Points on a screen: far inside f32's range.
+            #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
+            return Some(Size::new(r.size.width as f32, r.size.height as f32));
+        }
+        futures_timer::Delay::new(std::time::Duration::from_millis(16)).await;
+    }
+    None
+}
+
 /// One immediate-mode window, filling its (positioned) pane.
 #[component]
 pub fn WindowView(window: WindowFrame, on_event: EventHandler<WindowEvent>) -> Element {
@@ -240,27 +266,25 @@ pub fn WindowView(window: WindowFrame, on_event: EventHandler<WindowEvent>) -> E
             down: e.held_buttons().contains(MouseButton::Primary),
         }
     };
-    let measure = move |mounted: std::rc::Rc<MountedData>| async move {
-        if let Ok(r) = mounted.get_client_rect().await {
-            #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
-            on_event.call(WindowEvent::Size(Size::new(
-                r.size.width as f32,
-                r.size.height as f32,
-            )));
+    let size = move |mounted: Rc<MountedData>| async move {
+        if let Some(size) = measure(&mounted).await {
+            on_event.call(WindowEvent::Size(size));
         }
     };
-    let mut mount = use_signal(|| None::<std::rc::Rc<MountedData>>);
+    let mut mount = use_signal(|| None::<Rc<MountedData>>);
     rsx! {
         div {
             style: "position:absolute; inset:0; overflow:hidden; touch-action:none; user-select:none;",
             onmounted: move |e| {
                 let data = e.data();
                 mount.set(Some(data.clone()));
-                spawn(measure(data));
+                spawn(size(data));
             },
+            // Its pane resized since: measured again when the pointer
+            // comes back.
             onpointerenter: move |_| {
                 if let Some(m) = mount() {
-                    spawn(measure(m));
+                    spawn(size(m));
                 }
             },
             onpointermove: move |e| on_event.call(pointer(&e, true)),
@@ -510,6 +534,9 @@ mod script {
 
     const LOG_KEPT: usize = 100;
 
+    /// A floating pane's title, tab and navigation bars, over its body.
+    const FLOAT_CHROME: f32 = 104.0;
+
     fn note(
         status: &mut Signal<Status>,
         report: &architect_scripting::luau::Report,
@@ -543,6 +570,10 @@ mod script {
             note(&mut status, &report, false);
             return;
         };
+        if !session.running() {
+            note(&mut status, &report, false);
+            return;
+        }
         session.set_style(start.style);
         note(&mut status, &report, session.running());
         output.set(session.output().clone());
@@ -562,7 +593,9 @@ mod script {
             if *output.peek() != *session.output() {
                 output.set(session.output().clone());
             }
+            // Over: what it drew goes with it.
             if !session.running() {
+                output.set(Output::default());
                 return;
             }
         }
@@ -664,7 +697,9 @@ mod script {
                 } else {
                     Size::new(320.0, 160.0)
                 };
-                let rect = PaneRect::new(at.x, at.y, size.w.max(160.0), size.h.max(60.0));
+                // The float's own bars above its body.
+                let h = size.h.max(60.0) + FLOAT_CHROME;
+                let rect = PaneRect::new(at.x, at.y, size.w.max(200.0), h);
                 workspace.write().open(pane, Target::Float(rect)).ok();
             }
         });

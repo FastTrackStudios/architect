@@ -21,6 +21,7 @@ luau = ["dep:architect", "dep:architect-scripting", "architect-scripting/luau", 
 ui = [
     "dep:dioxus",
     "dep:futures",
+    "dep:futures-timer",
     "dep:architect-workspace",
     "architect-workspace/ui",
     "dep:architect-shell",
@@ -33,8 +34,14 @@ architect-scripting = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 dioxus = { workspace = true, optional = true }
 futures = { version = "0.3", optional = true }
+# A measurement while Blitz's document is busy fails: asked again shortly.
+futures-timer = { workspace = true, optional = true }
 architect-workspace = { workspace = true, optional = true }
 architect-shell = { workspace = true, optional = true }
+
+# A timer needs the browser's clock on wasm.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+futures-timer = { workspace = true, optional = true, features = ["wasm-bindgen"] }
 
 [dev-dependencies]
 # Its own runtime, so `cargo test --workspace` builds the tests with it.

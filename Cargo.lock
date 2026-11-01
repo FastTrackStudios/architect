@@ -593,6 +593,7 @@ dependencies = [
  "dioxus",
  "facet",
  "futures",
+ "futures-timer",
  "serde_json",
 ]
 
