@@ -285,6 +285,11 @@ layer = "L1"
 note = "the Luau runtime (mlua, C++ built from source): desk, server, mobile; not wasm yet"
 
 [[row]]
+package = "example-scripting"
+layer = "L3"
+note = "the scripting example: a task board's actions driven by Luau, saved scripts, MCP; native"
+
+[[row]]
 package = "architect-canvas"
 features = ["luau"]
 layer = "L1"

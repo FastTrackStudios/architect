@@ -4249,6 +4249,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-scripting"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-mcp",
+ "architect-permissions",
+ "architect-scripting",
+ "crdt",
+ "facet",
+ "futures",
+ "serde_json",
+]
+
+[[package]]
 name = "exr"
 version = "1.74.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
