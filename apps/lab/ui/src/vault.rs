@@ -261,8 +261,8 @@ pub fn VaultPage() -> Element {
     };
     let mut items = vec![
         StatusItem::new("backlinks", "0 backlinks").left(),
-        StatusItem::new("panes", format!("{open} panes")).left(),
-        StatusItem::new("edits", format!("{edits} edits")).left(),
+        StatusItem::new("panes", crate::count(open, "pane")).left(),
+        StatusItem::new("edits", crate::count(edits, "edit")).left(),
     ];
     // The note on show adds its own; the screenset is the app's.
     items.extend(pane_status());
@@ -380,7 +380,11 @@ fn NoteView() -> Element {
     // The note's own fact on the status line, while it is the one on show.
     let words = title.split_whitespace().count();
     use_pane_status(vec![
-        StatusItem::new("words", format!("{words} words in the title")).left(),
+        StatusItem::new(
+            "words",
+            format!("{} in the title", crate::count(words, "word")),
+        )
+        .left(),
     ]);
     rsx! {
         div { style: "flex: 1; display: flex; flex-direction: column; gap: 12px; padding: 28px 36px; overflow-y: scroll;",
@@ -394,7 +398,11 @@ fn NoteView() -> Element {
                 style: "align-self: flex-start; min-height: 32px; padding: 0 14px; border-radius: 8px; \
                         border: 1px solid {t.rule}; background: {t.pill}; color: {t.ink}; cursor: pointer;",
                 onclick: move |_| pane.set_state((edits + 1).to_string()),
-                if edits == 0 { "Mark as edited" } else { "Edited {edits} times" }
+                match edits {
+                    0 => "Mark as edited".to_owned(),
+                    1 => "Edited once".to_owned(),
+                    n => format!("Edited {n} times"),
+                }
             }
         }
     }

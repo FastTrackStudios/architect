@@ -430,7 +430,10 @@ fn Group(group: ToolGroup, size: ToolSize) -> Element {
 /// One button: inside a pill (`framed: false`) or on its own.
 #[component]
 fn ToolButton(tool: Tool, size: ToolSize, side: f64, framed: bool) -> Element {
-    let t = use_shell().theme;
+    let shell = use_shell();
+    let t = shell.theme;
+    // A long menu scrolls inside the window rather than running past it.
+    let menu_most = (shell.screen.height - shell.screen.insets.bottom - side - 72.0).max(160.0);
     let mut open = use_signal(|| false);
     let frame = if framed {
         format!(
@@ -458,13 +461,17 @@ fn ToolButton(tool: Tool, size: ToolSize, side: f64, framed: bool) -> Element {
             };
             rsx! {
                 button {
-                    class: "lp",
+                    class: "lp tip-host",
                     "aria-label": "{action.label}",
-                    style: "height: {side}px; {pad} {frame} flex-shrink: 0; display: flex; align-items: center; justify-content: center; \
+                    style: "position: relative; height: {side}px; {pad} {frame} flex-shrink: 0; display: flex; align-items: center; justify-content: center; \
                             gap: 6px; color: {t.ink}; font-family: {t.font}; font-size: {size.font}px; font-weight: 650;",
                     onclick: move |_| press.call(()),
                     {(action.icon)(Icon { size: size.icon, color: t.ink })}
-                    if action.show_label { span { "{action.label}" } }
+                    if action.show_label {
+                        span { "{action.label}" }
+                    } else {
+                        span { class: "tip", style: "right: 0; top: {side + 6.0}px;", "{action.label}" }
+                    }
                 }
             }
         }
@@ -483,12 +490,15 @@ fn ToolButton(tool: Tool, size: ToolSize, side: f64, framed: bool) -> Element {
             rsx! {
                 div { style: "position: relative; flex-shrink: 0; display: flex;",
                     button {
-                        class: "lp",
+                        class: "lp tip-host",
                         "aria-label": "{label}",
                         style: "position: relative; height: {side}px; {icon_only} {frame} {fill_style} display: flex; align-items: center; \
                                 justify-content: center;",
                         onclick: move |_| open.toggle(),
                         {icon(Icon { size: size.icon, color: t.ink })}
+                        if !open() {
+                            span { class: "tip", style: "right: 0; top: {side + 6.0}px;", "{label}" }
+                        }
                         if badge > 0 {
                             span {
                                 style: "position: absolute; top: -3px; right: -3px; min-width: 16px; height: 16px; padding: 0 4px; \
@@ -507,6 +517,7 @@ fn ToolButton(tool: Tool, size: ToolSize, side: f64, framed: bool) -> Element {
                         }
                         div {
                             style: "position: absolute; right: -2px; top: {side + 8.0}px; z-index: {super::layer::MENU}; min-width: 248px; \
+                                    max-height: {menu_most}px; overflow-y: scroll; box-sizing: border-box; \
                                     display: flex; flex-direction: column; padding: 6px 0; border-radius: 16px; \
                                     background: {t.pill}; border: 1px solid {t.rule}; box-shadow: {t.shadow_float};",
                             for (i, entry) in menu.entries.iter().cloned().enumerate() {
@@ -734,7 +745,14 @@ fn touch_bar_height(shell: &super::Shell) -> f64 {
 
 #[component]
 pub(super) fn MenuRow(entry: MenuEntry, open: Signal<bool>) -> Element {
-    let t = use_shell().theme;
+    let shell = use_shell();
+    let t = shell.theme;
+    // A finger's row, or a mouse's.
+    let (row_h, font) = if shell.screen.touch {
+        (46, 16)
+    } else {
+        (34, 14)
+    };
     match entry {
         MenuEntry::Divider => {
             rsx! { div { style: "height: 1px; margin: 4px 16px; background: {t.rule};" } }
@@ -748,9 +766,9 @@ pub(super) fn MenuRow(entry: MenuEntry, open: Signal<bool>) -> Element {
             rsx! {
                 button {
                     class: "lp",
-                    style: "height: 46px; display: flex; align-items: center; justify-content: flex-start; gap: 12px; \
-                            padding: 0 16px; border: none; background: transparent; color: {colour}; \
-                            font-family: {t.font}; font-size: 16px; text-align: left;",
+                    style: "height: {row_h}px; flex-shrink: 0; display: flex; align-items: center; justify-content: flex-start; \
+                            gap: 12px; padding: 0 16px; border: none; background: transparent; color: {colour}; \
+                            font-family: {t.font}; font-size: {font}px; text-align: left;",
                     onclick: move |_| {
                         open.set(false);
                         pick.call(());

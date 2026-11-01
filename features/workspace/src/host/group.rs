@@ -382,6 +382,9 @@ fn Tab(
     let pad = if icons { "0 8px" } else { "0 6px 0 12px" };
     let least = if icons { 0.0 } else { TAB_MIN };
     let (grow, most) = if icons { (0, 48.0) } else { (1, TAB_MAX) };
+    // The current tab gives up its room last, so its name reads whole
+    // while the others narrow.
+    let shrink = if on { 0.2 } else { 1.0 };
     let hairline = if rule { t.rule } else { "transparent" };
     let tab_h = s.tabs - 6.0;
     let press = pane.clone();
@@ -399,7 +402,7 @@ fn Tab(
     };
     rsx! {
         div {
-            style: "flex:{grow} 1 {most}px; max-width:{most}px; min-width:{least}px; height:{tab_h}px; \
+            style: "flex:{grow} {shrink} {most}px; max-width:{most}px; min-width:{least}px; height:{tab_h}px; \
                     box-sizing:border-box; display:flex; align-items:center; gap:6px; padding:{pad}; \
                     border-radius:8px 8px 0 0; white-space:nowrap; overflow:hidden; touch-action:none; \
                     user-select:none; color:{ink}; background:{fill}; border-right:1px solid {hairline}; \
@@ -579,8 +582,15 @@ fn Stacked(group: Group, current: PaneId) -> Element {
                             if let Some(icon) = icon {
                                 {icon(architect_shell::Icon { size: 14, color: t.ink_3 })}
                             }
-                            for ch in title.chars().take(14) {
-                                span { style: "font-size:11px; line-height:12px;", "{ch}" }
+                            // The name down the spine, turned to read top to
+                            // bottom as a book's does.
+                            div { style: "position:relative; flex:1 1 0; width:100%; min-height:0; overflow:hidden;",
+                                span {
+                                    style: "position:absolute; top:0; left:{SPINE / 2.0}px; transform-origin:0 0; \
+                                            transform:rotate(90deg) translateY(-7px); white-space:nowrap; \
+                                            font-size:12px; line-height:14px; color:{t.ink_2};",
+                                    "{title}"
+                                }
                             }
                         }
                         div { style: "flex:1 1 0; min-width:0; min-height:0; display:flex; position:relative; overflow:hidden;",

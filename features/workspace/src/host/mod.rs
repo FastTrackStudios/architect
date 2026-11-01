@@ -602,6 +602,18 @@ impl Host {
         let mut a = self.menu_at;
         a.set(Some(at));
         m.set(Some(menu));
+        // The menu is placed within the host, measured now: measured only
+        // when mounted, Blitz may have had no layout yet and given a zero
+        // rect, and every menu went to the host's top left.
+        let host = *self;
+        spawn(async move {
+            if let Some(r) = host.rect(Mount::Host).await
+                && r.w > 0.0
+            {
+                let mut area = host.float_area;
+                area.set(Some(r));
+            }
+        });
     }
 
     /// Shows `menu` in the middle (asked for by a key, not a pointer).

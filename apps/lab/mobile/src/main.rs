@@ -44,6 +44,10 @@ fn main() {
     launch_cfg(
         App,
         vec![],
-        vec![Box::new(Config::new().with_window_attributes(window))],
+        vec![Box::new(
+            Config::new()
+                .with_window_attributes(window)
+                .with_font_ctx(architect_lab_ui::font_context()),
+        )],
     );
 }
