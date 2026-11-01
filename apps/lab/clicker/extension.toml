@@ -1,0 +1,25 @@
+# The lab's process extension: its view is drawn by its own process
+# (src/main.rs) and shown in a pane of the Vault (apps/lab/ui/src/vault.rs).
+# The lab runs it as a development copy when the program is built beside
+# the lab's own (`cargo build --workspace`).
+id = "lab.clicker"
+name = "Clicker"
+version = "0.1.0"
+kind = "process"
+api = "0.1"
+description = "A counter drawn in another process: click it, kill it, start it again."
+authors = ["FastTrackStudio"]
+
+[entry]
+path = "architect-lab-clicker"
+
+[[actions]]
+id = "LAB_CLICKER_CLICKS"
+name = "Clicker: clicks"
+description = "How many times its button was pressed since it started."
+effect = "read_only"
+
+[[views]]
+id = "counter"
+title = "Clicker"
+icon = "mouse-pointer-click"

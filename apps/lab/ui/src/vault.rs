@@ -11,8 +11,8 @@ use architect_workspace::{
 };
 use dioxus::prelude::*;
 use lucide_dioxus::{
-    CalendarCheck, FileText, Files, Layers, Link, ListTree, Network, Search, SquarePen,
-    SquareTerminal, Terminal,
+    CalendarCheck, FileText, Files, Layers, Link, ListTree, MousePointerClick, Network, Search,
+    SquarePen, SquareTerminal, Terminal,
 };
 
 /// The lab's views.
@@ -75,6 +75,21 @@ fn views() -> Views {
                 .icon(icon!(FileText))
                 .many(),
         )
+        // A process extension's view, drawn by another process
+        // (`apps/lab/clicker`).
+        .view(
+            View::new("clicker", "Clicker", |_| {
+                rsx! {
+                    architect_extensions::remote::RemoteView {
+                        processes: crate::extensions::processes(),
+                        extension: crate::extensions::CLICKER,
+                        view: "counter",
+                    }
+                }
+            })
+            .icon(icon!(MousePointerClick))
+            .home(Target::Split(Side::Right)),
+        )
 }
 
 /// The vault's notes (the lab has no files yet).
@@ -116,6 +131,7 @@ fn first_workspace() -> Workspace {
             Pane::new("backlinks", "backlinks", "Backlinks"),
             Target::Dock(Side::Right),
         ),
+        (Pane::new("clicker", "clicker", "Clicker"), Target::Tab),
     ];
     for (pane, target) in opens {
         let _ = w.open(pane, target);
