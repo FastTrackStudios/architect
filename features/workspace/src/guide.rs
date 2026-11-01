@@ -22,7 +22,9 @@ pub const LAYOUT_ACTION: &str = "WORKSPACE_LAYOUT";
 /// - `group` — the tab group holding the pane;
 /// - `tab-bar` — that group's tab bar;
 /// - `split` — the divider right after the pane (the innermost split's,
-///   where splits nest).
+///   where splits nest);
+/// - `card` — the pane's card in a phone's tab switcher;
+/// - `card-close` — that card's ✕.
 #[must_use]
 pub fn target_selector(kind: &str, name: &str) -> Option<String> {
     Some(match kind {
@@ -31,6 +33,8 @@ pub fn target_selector(kind: &str, name: &str) -> Option<String> {
         "group" => format!("[data-group-tabs~=\"{name}\"]"),
         "tab-bar" => format!("[data-tab-bar~=\"{name}\"]"),
         "split" => format!("[data-split-after~=\"{name}\"]"),
+        "card" => format!("[data-card=\"{name}\"]"),
+        "card-close" => format!("[data-card-close=\"{name}\"]"),
         _ => return None,
     })
 }

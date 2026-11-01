@@ -32,6 +32,7 @@ mod presence;
 mod repair;
 mod screenset;
 pub mod store;
+mod switcher;
 
 #[cfg(feature = "ui")]
 pub use bar::{TABS_COMMAND, use_tabs_button};
@@ -55,3 +56,4 @@ pub use ops::{Dest, Target, WorkspaceError};
 pub use presence::{PlayheadMark, PointerMark, PresenceMarks, WashMark, css_color};
 pub use screenset::{FormClass, Layout, Recall, Screenset, Screensets};
 pub use store::{MemoryStore, Store};
+pub use switcher::{Card, CardGrid, Place, reorder_dest};
