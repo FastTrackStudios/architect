@@ -27,13 +27,17 @@ mod model;
 mod ops;
 mod repair;
 mod screenset;
+pub mod store;
 
-pub use drop::{Drop, contains, drop_at, float_rect, snap_at};
+pub use drop::{Bar, Drop, bar_drop, contains, drop_at, drop_in, float_rect, snap_at};
+#[cfg(feature = "native")]
+pub mod native;
 #[cfg(feature = "ui")]
 pub use host::{
-    Command, Host, PaneHandle, TitleRow, View, Views, WorkspaceView, use_host, use_pane,
+    Bridge, Command, Host, PaneHandle, Popout, TitleRow, View, Views, WindowSystem, Windows,
+    WorkspaceStore, WorkspaceView, use_host, use_pane, use_pane_status,
 };
-pub use layout::{Direction, Placed, area_rects, neighbour};
+pub use layout::{Direction, Placed, Slide, area_rects, neighbour, scroll_to, slides};
 pub use model::{
     Above, Area, Axis, Child, Chrome, ClosedPane, Corner, Dock, Docks, Float, Group, GroupId,
     History, LinkId, Location, Node, Pane, PaneId, Pin, Rect, Ribbon, Shown, Side, Snap, Split,
@@ -41,3 +45,4 @@ pub use model::{
 };
 pub use ops::{Dest, Target, WorkspaceError};
 pub use screenset::{FormClass, Layout, Screenset, Screensets};
+pub use store::{MemoryStore, Store};

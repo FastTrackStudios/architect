@@ -206,7 +206,9 @@ impl Workspace {
             }
             Dest::Window(bounds) => {
                 let group = self.fresh_group(vec![pane]);
-                let n = self.windows.len();
+                // Ids are never reused: a window closed and another opened
+                // are two windows to the platform (and to a script).
+                let n = self.alloc();
                 let mut window = Window::new(WindowId(format!("window-{n}")), Node::Group(group));
                 window.bounds = bounds;
                 self.windows.push(window);
@@ -674,6 +676,93 @@ impl Workspace {
         };
         let state = from.pop().ok_or(WorkspaceError::NoHistory)?;
         to.push(std::mem::replace(&mut p.state, state));
+        Ok(())
+    }
+
+    /// Close the pop-out `window`: its tabs come back to the main window,
+    /// into the group with the focus there (closing a window loses no
+    /// work; a tab is closed by its ×). The main window cannot close.
+    pub fn close_window(&mut self, window: &WindowId) -> Result<Vec<PaneId>> {
+        let at = self
+            .windows
+            .iter()
+            .position(|w| &w.id == window)
+            .filter(|&i| i > 0)
+            .ok_or_else(|| WorkspaceError::NoSuchWindow(window.clone()))?;
+        let moved = self.window_panes(at);
+        let into = self.main_group();
+        if at < self.windows.len() {
+            self.windows.remove(at);
+        }
+        if let Some(group) = self.group_mut(into) {
+            group.tabs.extend(moved.iter().cloned());
+        }
+        self.repair();
+        if let Some(first) = moved.first() {
+            self.activate(first)?;
+        }
+        Ok(moved)
+    }
+
+    /// Every pane in the window at `index`, its center's then its floats'.
+    fn window_panes(&self, index: usize) -> Vec<PaneId> {
+        let Some(window) = self.windows.get(index) else {
+            return Vec::new();
+        };
+        let mut groups = Vec::new();
+        if let Some(center) = &window.center {
+            center.groups(&mut groups);
+        }
+        groups.extend(window.floats.iter().map(|f| &f.group));
+        groups.into_iter().flat_map(|g| g.tabs.clone()).collect()
+    }
+
+    /// The main window's group a tab coming back goes to: the one with the
+    /// focus there, else its first (made when there is none).
+    fn main_group(&mut self) -> GroupId {
+        let focused = self
+            .recent
+            .iter()
+            .filter_map(|p| self.locate(p))
+            .find(|l| l.window == 0 && l.area == Area::Center)
+            .map(|l| l.group);
+        let first = self
+            .windows
+            .first()
+            .and_then(|w| w.center.as_ref())
+            .and_then(Node::first_group)
+            .map(|g| g.id);
+        if let Some(group) = focused.or(first) {
+            return group;
+        }
+        let group = self.fresh_group(Vec::new());
+        let id = group.id;
+        if let Some(main) = self.windows.first_mut() {
+            main.center = Some(Node::Group(group));
+        }
+        id
+    }
+
+    /// Move a pane back to the main window, into the group with the focus
+    /// there (a pop-out's "Move to the main window").
+    pub fn to_main_window(&mut self, pane: &PaneId) -> Result<()> {
+        if self.locate(pane).is_some_and(|l| l.window == 0) {
+            return self.activate(pane);
+        }
+        let group = self.main_group();
+        self.move_pane(pane, Dest::Group { group, index: None })
+    }
+
+    /// Where the pop-out `window` is on screen, as the platform last told
+    /// (so the layout puts it back there).
+    pub fn set_window_bounds(&mut self, window: &WindowId, bounds: Rect) -> Result<()> {
+        let w = self
+            .windows
+            .iter_mut()
+            .skip(1)
+            .find(|w| &w.id == window)
+            .ok_or_else(|| WorkspaceError::NoSuchWindow(window.clone()))?;
+        w.bounds = Some(bounds);
         Ok(())
     }
 

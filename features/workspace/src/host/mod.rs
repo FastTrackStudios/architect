@@ -14,6 +14,12 @@
 //!
 //! On a phone (`phone: true`) one pane shows at a time: the active
 //! group's current tab, with a switcher listing every pane.
+//!
+//! A pop-out window is a second document (Blitz draws one per
+//! `VirtualDom`) reading the same `Signal<Workspace>`: where the app runs
+//! on [`Windows`] (feature `native`'s launcher), a tab dragged out of the
+//! window, or "Move to a new window", opens one; elsewhere a pop-out kept
+//! in a layout shows as a chip that brings its tabs back.
 
 // Dioxus is single-threaded: its tasks are not `Send`, and a [`Host`] is a
 // handful of signals copied into each handler. The `for` loops of `rsx!`
@@ -28,22 +34,29 @@ mod commands;
 mod dock;
 mod group;
 mod overlay;
+mod screens;
+mod windows;
 
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use architect_shell::{IconFn, ShellTheme};
+use architect_shell::{IconFn, ShellTheme, StatusItem};
 use dioxus::prelude::*;
 
-use crate::drop::Drop;
+use crate::drop::{Bar, Drop};
 use crate::model::{
-    Area, Axis, GroupId, Node, Pane, PaneId, Rect, Shown, Side, SplitId, ViewKind, Workspace,
+    Area, Axis, GroupId, Node, Pane, PaneId, Rect, Shown, Side, SplitId, ViewKind, WindowId,
+    Workspace,
 };
 use crate::ops::{Dest, Target};
+use crate::screenset::{FormClass, Screensets};
 
 use dock::DockView;
 use group::NodeView;
 use overlay::{DragLayer, FloatView, MenuLayer, PhoneBody, SheetLayer};
+
+pub use screens::WorkspaceStore;
+pub use windows::{Bridge, Popout, WindowSystem, Windows};
 
 /// What a pane can show: registered once, like the shell's tabs.
 #[derive(Clone)]
@@ -150,11 +163,26 @@ impl Command {
 }
 
 /// Something the host measures.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum Mount {
     Host,
     Group(GroupId),
     Split(SplitId),
+    /// A group's tab bar.
+    Bar(GroupId),
+    /// A tab in a bar.
+    Tab(PaneId),
+    /// A stacked group's strip.
+    Strip(GroupId),
+}
+
+/// What a pane drag measured when it began: the host, its groups (the
+/// topmost first) and their tab bars.
+#[derive(Debug, Clone, PartialEq)]
+struct Geometry {
+    host: Rect,
+    groups: Vec<(GroupId, Rect)>,
+    bars: Vec<Bar>,
 }
 
 /// A drag in progress.
@@ -165,7 +193,7 @@ enum Drag {
     /// A tab being dragged; `geometry` is `None` until measured.
     Pane {
         pane: PaneId,
-        geometry: Option<(Rect, Vec<(GroupId, Rect)>)>,
+        geometry: Option<Geometry>,
         at: Option<Drop>,
         x: f32,
         y: f32,
@@ -193,6 +221,15 @@ enum Drag {
     },
     /// A float's resize corner.
     FloatSize { pane: PaneId, host: Rect },
+    /// A stacked strip's scrollbar, grabbed at `x` with the strip at
+    /// `from`; a point of the bar is `per_point` of the strip.
+    Strip {
+        group: GroupId,
+        x: f32,
+        from: f32,
+        per_point: f32,
+        most: f32,
+    },
 }
 
 /// A menu on show.
@@ -236,6 +273,8 @@ const MEASURE_TRIES: u32 = 40;
 const CENTER_MIN: f32 = 240.0;
 /// How far a pressed tab moves before it is dragged, points.
 const DRAG_SLOP: f32 = 6.0;
+/// How long a finger holds a tab for its menu (a right click's), ms.
+const LONG_PRESS_MS: u64 = 500;
 /// A collapsed dock's rail without a ribbon, points.
 const RAIL: f32 = 36.0;
 /// Where a pane floated from a menu goes.
@@ -296,6 +335,21 @@ pub struct Host {
     held: Signal<bool>,
     /// Arrange is turned on (a touch screen has no key to hold).
     latched: Signal<bool>,
+    /// The window this host draws: the main one, or a pop-out.
+    window: CopyValue<WindowId>,
+    /// What each pane has put on the status line, shared by every window:
+    /// by pane, and by who put them there (`0` for [`PaneHandle::set_status`],
+    /// else a [`use_pane_status`]'s own number).
+    status: Signal<Vec<(PaneId, u64, Vec<StatusItem>)>>,
+    /// The last number given a [`use_pane_status`].
+    status_serial: CopyValue<u64>,
+    /// The screensets, and the class of screen they are recalled for.
+    screensets: Signal<Screensets>,
+    form: Signal<FormClass>,
+    /// Each stacked group's scroll along its strip, points.
+    scrolls: Signal<HashMap<GroupId, f32>>,
+    /// The platform's windows, where pop-outs are real OS windows.
+    windows: CopyValue<Option<Windows>>,
 }
 
 /// The [`Host`] a [`WorkspaceView`] above put in context.
@@ -397,9 +451,95 @@ impl PaneHandle {
     pub fn open(&self, kind: &str, target: Target) -> Option<PaneId> {
         self.host.open_at(kind, target)
     }
+
+    /// Puts the pane's own items on the status line, shown while it is the
+    /// current document (a note's word count, a mixer's CPU). Call it on
+    /// every render with what is true now; [`use_pane_status`] also takes
+    /// them away when the pane goes.
+    pub fn set_status(&self, items: Vec<StatusItem>) {
+        self.put_status(0, items);
+    }
+
+    /// The pane's items, put there by `by`.
+    fn put_status(&self, by: u64, items: Vec<StatusItem>) {
+        let mut status = self.host.status;
+        let same = status
+            .peek()
+            .iter()
+            .find(|(p, _, _)| *p == self.id)
+            .is_some_and(|(_, who, now)| *who == by && *now == items);
+        if same {
+            return;
+        }
+        let mut all = status.write();
+        all.retain(|(p, _, _)| *p != self.id);
+        if !items.is_empty() {
+            all.push((self.id.clone(), by, items));
+        }
+    }
+
+    /// Take the pane's items away, if `by` put them there (a slot drawn
+    /// afresh may have put its own since).
+    fn take_status(&self, by: u64) {
+        let mut status = self.host.status;
+        let mine = status
+            .peek()
+            .iter()
+            .any(|(p, who, _)| *p == self.id && *who == by);
+        if mine {
+            status.write().retain(|(p, _, _)| *p != self.id);
+        }
+    }
+}
+
+/// The pane's own status items (see [`PaneHandle::set_status`]), taken
+/// away when the pane is no longer drawn.
+pub fn use_pane_status(items: Vec<StatusItem>) {
+    let pane = use_pane();
+    let by = use_hook(|| {
+        let mut next = pane.host.status_serial;
+        let n = next.peek().saturating_add(1);
+        next.set(n);
+        n
+    });
+    pane.put_status(by, items);
+    use_drop(move || pane.take_status(by));
 }
 
 impl Host {
+    /// The status items of the current document (the pane a command for
+    /// "the document" acts on): what [`use_pane_status`] gave.
+    #[must_use]
+    pub fn status_items(&self) -> Vec<StatusItem> {
+        let current = self.workspace.read().current_document().cloned();
+        current
+            .and_then(|c| {
+                self.status
+                    .read()
+                    .iter()
+                    .find(|(p, _, _)| *p == c)
+                    .map(|(_, _, items)| items.clone())
+            })
+            .unwrap_or_default()
+    }
+
+    /// The window this host draws.
+    #[must_use]
+    pub fn window_id(&self) -> WindowId {
+        self.window.peek().clone()
+    }
+
+    /// The index of this host's window in the workspace.
+    fn window_index(&self, w: &Workspace) -> Option<usize> {
+        let id = self.window.peek();
+        w.windows.iter().position(|win| win.id == *id)
+    }
+
+    /// Whether pop-outs open as OS windows here.
+    fn has_windows(&self) -> bool {
+        self.windows.peek().is_some()
+    }
+
     /// Changes the workspace.
     pub fn edit<R>(&self, f: impl FnOnce(&mut Workspace) -> R) -> R {
         let mut workspace = self.workspace;
@@ -570,6 +710,15 @@ impl Host {
             Op::Show(pane) => {
                 let _ = self.edit(|w| w.activate(&pane));
             }
+            Op::ToMain(pane) => {
+                let _ = self.edit(|w| w.to_main_window(&pane));
+            }
+            Op::CloseWindow(window) => {
+                let _ = self.edit(|w| w.close_window(&window));
+            }
+            Op::Recall(slot) => screens::recall(*self, slot),
+            Op::SaveSet => screens::save(*self),
+            Op::ResetSet => screens::reset(*self),
         }
     }
 }
@@ -588,12 +737,28 @@ enum Op {
     Open(String),
     OpenMenu,
     Show(PaneId),
+    /// Back to the main window, from a pop-out.
+    ToMain(PaneId),
+    /// A pop-out closed: its tabs come back.
+    CloseWindow(WindowId),
+    /// Recall the screenset in slot n (⌘n).
+    Recall(u8),
+    /// Save the arrangement into the active screenset.
+    SaveSet,
+    /// Back to the active screenset's saved layout.
+    ResetSet,
 }
 
 /// A measured length, as the model's points (window sizes fit an `f32`).
 #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
 const fn narrow(v: f64) -> f32 {
     v as f32
+}
+
+/// A count as points (no layout holds more than an `f32` counts).
+#[allow(clippy::cast_precision_loss, clippy::as_conversions)]
+const fn count_f32(n: usize) -> f32 {
+    n as f32
 }
 
 /// Where a click was, in window points.
@@ -644,8 +809,27 @@ pub fn WorkspaceView(
     /// The phone's pane switcher is open: the app's, to open it from its
     /// own bar.
     switcher: Option<Signal<bool>>,
+    /// The screensets (the app's built-in ones to begin with): ⌘1–9
+    /// recall them for this screen's class, and the live layout is kept
+    /// in them per class.
+    screensets: Option<Signal<Screensets>>,
+    /// The class of screen layouts are recalled for; else a desk, or a
+    /// phone's (upright or on its side) when `phone`.
+    form: Option<FormClass>,
+    /// Where the screensets and the live layout are kept: read once when
+    /// the host mounts, written when the workspace settles.
+    store: Option<WorkspaceStore>,
+    /// Kept filled with the current document's own status items
+    /// ([`use_pane_status`]), for the app to put on its status line.
+    status: Option<Signal<Vec<StatusItem>>>,
+    /// Contexts the app's views read, carried into pop-out windows (each a
+    /// document of its own). The shell's and the commands' are carried
+    /// already.
+    #[props(default)]
+    bridge: Bridge,
     #[props(default)] theme: ShellTheme,
 ) -> Element {
+    let os_windows = try_use_context::<Windows>();
     let mut host = use_context_provider(|| Host {
         workspace,
         views: CopyValue::new(views.clone()),
@@ -666,6 +850,13 @@ pub fn WorkspaceView(
         mounts: CopyValue::new(HashMap::new()),
         held: Signal::new(false),
         latched: Signal::new(false),
+        window: CopyValue::new(WindowId::main()),
+        status: Signal::new(Vec::new()),
+        status_serial: CopyValue::new(0),
+        screensets: screensets.unwrap_or_else(|| Signal::new(Screensets::default())),
+        form: Signal::new(FormClass::Desk),
+        scrolls: Signal::new(HashMap::new()),
+        windows: CopyValue::new(os_windows.clone()),
     });
     // Props change under a live host: keep it current.
     host.views.set(views);
@@ -694,6 +885,25 @@ pub fn WorkspaceView(
     architect_shell::use_shell_slots(slot_left, slot_rail);
     if *host.in_shell.peek() != in_shell {
         host.in_shell.set(in_shell);
+    }
+    // A phone's class turns with it: its area, as measured.
+    let area = if phone { *host.float_area.read() } else { None };
+    let class = form.unwrap_or_else(|| match (phone, area) {
+        (true, Some(r)) => FormClass::of(r.w, r.h, true),
+        (true, None) => FormClass::PhonePortrait,
+        (false, _) => FormClass::Desk,
+    });
+    if *host.form.peek() != class {
+        host.form.set(class);
+    }
+    screens::use_kept(host, store);
+    windows::use_release_outside(host);
+    // The current document's own status items, for the app's status line.
+    let items = host.status_items();
+    if let Some(mut out) = status {
+        if *out.peek() != items {
+            out.set(items);
+        }
     }
     let t = theme;
     let body = if phone {
@@ -750,6 +960,9 @@ pub fn WorkspaceView(
             onblur: move |_| host.set_arranging(false),
             {body}
             commands::WorkspaceCommands {}
+            if os_windows.is_some() && !phone {
+                windows::PopoutSync { bridge }
+            }
             DragLayer {}
             MenuLayer {}
             SheetLayer {}
@@ -781,6 +994,24 @@ fn DeskBody() -> Element {
         .filter(|f| f.minimised)
         .filter_map(|f| f.group.current_tab().cloned())
         .collect();
+    // Pop-outs with no OS window to show them in (a browser, an app not
+    // on the native launcher): a chip each, a press brings their tabs back.
+    let popouts: Vec<(WindowId, usize)> = if host.has_windows() {
+        Vec::new()
+    } else {
+        workspace
+            .windows
+            .iter()
+            .skip(1)
+            .map(|w| {
+                let mut groups = Vec::new();
+                if let Some(c) = &w.center {
+                    c.groups(&mut groups);
+                }
+                (w.id.clone(), groups.iter().map(|g| g.tabs.len()).sum())
+            })
+            .collect()
+    };
     drop(workspace);
     let s = (host.sizes)();
     // What reaches the window's left and right edges at the top: an open
@@ -816,11 +1047,14 @@ fn DeskBody() -> Element {
         for (index, pane) in floats {
             FloatView { key: "{pane.0}", index, pane }
         }
-        if !minimised.is_empty() {
+        if !minimised.is_empty() || !popouts.is_empty() {
             div {
                 style: "position:absolute; left:12px; bottom:12px; z-index:{architect_shell::layer::CHIPS}; display:flex; gap:6px;",
                 for pane in minimised {
                     MinimisedChip { key: "{pane.0}", pane }
+                }
+                for (window, count) in popouts {
+                    WindowChip { key: "{window.0}", window, count }
                 }
             }
         }
@@ -854,6 +1088,23 @@ fn MinimisedChip(pane: PaneId) -> Element {
                 let _ = host.edit(|w| w.restore(&pane));
             },
             "{title}"
+        }
+    }
+}
+
+/// A pop-out with nowhere to show it: a press brings its tabs back.
+#[component]
+fn WindowChip(window: WindowId, count: usize) -> Element {
+    let host = use_host();
+    let t = *host.theme.read();
+    let tabs = if count == 1 { "tab" } else { "tabs" };
+    rsx! {
+        button {
+            style: "min-height:32px; padding:0 12px; border-radius:8px; border:1px dashed {t.rule}; \
+                    background:{t.pill}; color:{t.ink}; font-size:12px;",
+            title: "Bring these tabs back",
+            onclick: move |_| host.run(Op::CloseWindow(window.clone())),
+            "Another window: {count} {tabs}"
         }
     }
 }
