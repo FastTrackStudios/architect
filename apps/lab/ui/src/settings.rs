@@ -1,10 +1,9 @@
 //! The lab's settings: what it registers (Appearance, Workspace, Editor,
-//! Keyboard) and a pretend extension that registers its own section while
-//! it is loaded — the way a real one will.
+//! Keyboard). The metronome extension adds its own section while it is
+//! loaded (`extensions.rs`).
 
-use architect_settings::{Choice, Control, Registry, Section, Setting, Value, use_section};
+use architect_settings::{Choice, Control, Registry, Section, Setting, Value};
 use architect_shell::{ShellStyle, StatusStyle};
-use dioxus::prelude::*;
 
 /// Every section the lab itself declares.
 pub fn registry() -> Registry {
@@ -103,7 +102,10 @@ fn workspace() -> Section {
                     Control::Switch,
                     Value::Bool(false),
                 )
-                .describe("A pretend extension: loaded, it adds its own settings to this page."),
+                .describe(
+                    "A real one, from the lab's registry: loaded, its settings are on this page \
+                     and its action in ⌘K; save its files and it reloads.",
+                ),
             ],
         )
 }
@@ -157,51 +159,6 @@ fn keyboard() -> Section {
             .describe("Opens the command palette."),
         ],
     )
-}
-
-/// The pretend extension: while loaded, its section is on the page (it
-/// goes when the extension does).
-#[component]
-pub fn Metronome() -> Element {
-    use_section(|| {
-        Section::new("metronome", "Metronome")
-            .icon("timer")
-            .group("Extensions")
-            .owned_by("fts.metronome")
-            .block(
-                None,
-                vec![
-                    Setting::new(
-                        "fts.metronome.accent",
-                        "Accent the downbeat",
-                        Control::Switch,
-                        Value::Bool(true),
-                    ),
-                    Setting::new(
-                        "fts.metronome.volume",
-                        "Click volume",
-                        Control::Slider {
-                            min: 0.0,
-                            max: 100.0,
-                            step: 1.0,
-                            unit: "%".into(),
-                        },
-                        Value::Float(70.0),
-                    ),
-                    Setting::new(
-                        "fts.metronome.sound",
-                        "Sound",
-                        Control::Select(vec![
-                            Choice::text("wood", "Woodblock"),
-                            Choice::text("beep", "Beep"),
-                            Choice::text("cowbell", "Cowbell"),
-                        ]),
-                        Value::Text("wood".into()),
-                    ),
-                ],
-            )
-    });
-    rsx! {}
 }
 
 /// A shell style's setting id.

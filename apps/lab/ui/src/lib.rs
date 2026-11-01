@@ -9,6 +9,7 @@
 //! left side and the selection's details in the right. Its ⋯ menu switches
 //! the shell's style live.
 
+mod extensions;
 mod pages;
 mod screen;
 mod settings;
@@ -320,9 +321,7 @@ pub fn LabApp() -> Element {
             }
             architect_commands::CommandLayer {}
             architect_settings::SettingsPage {}
-            if metronome {
-                settings::Metronome {}
-            }
+            extensions::LabExtensions { metronome }
             screen::DeviceChrome {}
         }
     }

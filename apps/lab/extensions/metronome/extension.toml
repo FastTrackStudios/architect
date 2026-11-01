@@ -1,0 +1,49 @@
+# The lab's metronome: a Luau extension. Loaded, its section is on the
+# settings page and its action in ⌘K; edit this file while the lab runs
+# and it reloads, settings and all.
+id = "fts.metronome"
+name = "Metronome"
+version = "0.1.0"
+kind = "luau"
+api = "0.1"
+description = "A click: its accent, volume and sound, and an action that counts in."
+authors = ["FastTrackStudio"]
+
+[[actions]]
+id = "FTS_METRONOME_COUNT_IN"
+name = "Metronome: count in"
+description = "The clicks of a count-in, `bars` bars of four (one when none is given), the downbeat accented."
+group = "Metronome"
+params = '{"type":"object","properties":{"bars":{"type":"integer","minimum":1}}}'
+script = "count_in.luau"
+
+[[sections]]
+id = "metronome"
+title = "Metronome"
+icon = "timer"
+
+[[sections.settings]]
+key = "fts.metronome.accent"
+title = "Accent the downbeat"
+control = "switch"
+default = true
+
+[[sections.settings]]
+key = "fts.metronome.volume"
+title = "Click volume"
+control = "slider"
+min = 0
+max = 100
+unit = "%"
+default = 70
+
+[[sections.settings]]
+key = "fts.metronome.sound"
+title = "Sound"
+control = "select"
+default = "wood"
+choices = [
+    { value = "wood", label = "Woodblock" },
+    { value = "beep", label = "Beep" },
+    { value = "cowbell", label = "Cowbell" },
+]
