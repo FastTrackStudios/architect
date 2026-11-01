@@ -8,8 +8,12 @@ weight = 57
 > `features/crdt/crdt/src/kinds.rs` `DocKind` (an id, a name, a file
 > extension, a schema stamp and migrations; `stamp`, `upgrade`),
 > `DocKinds`; `features/crdt/crdt/src/history.rs` `History`
-> (`transact` — one named step — `undo`, `redo`, local only). Next in
-> the order of work: the file format, blobs, the org driver. Proposed
+> (`transact` — one named step — `undo`, `redo`, local only).
+> **Blob transfer landed:** `DocKind::blobs` (which blobs a document
+> points at), `features/crdt/crdt/src/blobs.rs` (`live`, `keep_offline`)
+> and `architect::blob`'s `Fetcher` (on demand by hash over vox, iroh or
+> HTTP, resumable, streamed), pins and collection ([blobs](@/architecture/blob.md)).
+> Next in the order of work: the file format, the org driver. Proposed
 > (2026-10-31): most of
 > the pieces exist ([collaboration](@/architecture/collaboration.md),
 > [peers](@/architecture/peers.md), [blobs](@/architecture/blob.md)); the
@@ -91,7 +95,11 @@ it finishes: there is no "unsaved" state to lose, and "Save" means
 Large media — audio a song records, images a note embeds — are blobs: by
 reference, by content hash, stored beside the document (a folder next to
 the file, or the store's blob table for small ones), fetched on demand
-on another device, pinned to keep offline.
+on another device, pinned to keep offline. The kind says which blobs a
+document points at (`DocKind::blobs`); `architect::blob::Fetcher` reads
+one from the peer the document came from or the org's server when it is
+played, streaming it as it arrives; `crdt::blobs::live` is what keeps a
+blob from collection ([blobs](@/architecture/blob.md)).
 
 ### Undo and transactions
 

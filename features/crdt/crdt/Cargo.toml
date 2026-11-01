@@ -46,6 +46,10 @@ indexeddb = ["dep:idb", "dep:wasm-bindgen", "dep:js-sys"]
 # servers: snapshots + the update log as rows in a local Turso database
 # the caller opens — so one device database can hold a doc store beside
 # whatever else the app keeps there (architect-atom's `turso` rows).
+# The blobs documents point at (`crdt::blobs`): fetched on demand by
+# hash, pinned to keep offline, collected when nothing points at them —
+# over `architect::blob`. Native only; compiles to nothing on wasm.
+blob = ["architect/blob"]
 # Turso's LOCAL engine only; its sync is never used. Native only — on
 # wasm the feature compiles to nothing and `indexeddb` is the backend.
 turso = ["dep:turso"]
@@ -100,11 +104,18 @@ doctest = false
 [dev-dependencies]
 # Self-dep so the test targets always see the sync module (cargo enables
 # the feature for tests without making it a default).
-crdt = { path = ".", features = ["vox", "turso"] }
+crdt = { path = ".", features = ["vox", "turso", "blob"] }
 # The sync convergence test serves DocSyncHost over the in-process vox
 # transport and runs replicas under tokio.
-architect = { workspace = true, features = ["vox", "local"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+# `blob` + `http`/`http-client` + `iroh`: tests/blobs.rs moves blobs over
+# vox (in-process and iroh) and HTTP.
+architect = { workspace = true, features = ["vox", "local", "blob", "http", "http-client", "iroh"] }
+axum.workspace = true
+futures = "0.3"
+iroh.workspace = true
+# tests/blobs.rs cuts an in-process link mid-transfer.
+vox-types.workspace = true
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "net"] }
 tempfile = "3"
 # `crdt::peer`'s convergence property over random edit orders.
 proptest.workspace = true

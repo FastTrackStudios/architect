@@ -35,7 +35,12 @@ pub use loro;
 pub mod history;
 pub mod kinds;
 pub use history::History;
-pub use kinds::{DocKind, DocKinds, Migration};
+pub use kinds::{BlobRefs, DocKind, DocKinds, Migration};
+
+// The blobs documents point at: fetched on demand by hash, kept offline,
+// collected when nothing points at them (`architect::blob`). Native.
+#[cfg(all(feature = "blob", not(target_arch = "wasm32")))]
+pub mod blobs;
 
 #[cfg(feature = "vox")]
 pub mod sync;

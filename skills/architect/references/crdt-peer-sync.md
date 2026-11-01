@@ -1,6 +1,6 @@
 # crdt: documents, text, schema, hub sync, `crdt::peer`, DocRegistry
 
-Crate `crdt` (`features/crdt/crdt`); guides `docs/content/architecture/collaboration.md` and `docs/content/architecture/peers.md`. Feature gates: `vox` (sync, registry, peer), `dioxus` (hooks), `turso`, `indexeddb`.
+Crate `crdt` (`features/crdt/crdt`); guides `docs/content/architecture/collaboration.md` and `docs/content/architecture/peers.md`. Feature gates: `vox` (sync, registry, peer), `dioxus` (hooks), `turso`, `indexeddb`, `blob` (a document's blobs, native).
 
 ## Pieces
 
@@ -18,6 +18,7 @@ Crate `crdt` (`features/crdt/crdt`); guides `docs/content/architecture/collabora
 | `DocRegistry` | many docs on one dispatcher pair; admission, authorizer, eviction | `features/crdt/crdt/src/registry.rs` `DocRegistry`, `with_admission`, `with_authorizer`, `with_idle_eviction` |
 | `crdt::peer` | pairwise exchange, `DocPeer` lane, `SelfLane`, `pull`, lineage check | `features/crdt/crdt/src/peer.rs` `DocPeer`, `DocPeerHost`, `SelfLane`, `exchange`, `pull`, `is_foreign_lineage` |
 | `crdt::docs` | catalog of schema-agnostic app docs (client-chosen id, opaque `kind`, `parent`, tombstones, contiguous `rev`); its host; the device driver | `features/crdt/crdt/src/docs/mod.rs` `Docs`, `DocMeta`, `DocChange`, `DocsStore`, `InMemoryDocsStore`; `features/crdt/crdt/src/docs/host.rs` `DocsHost`; `features/crdt/crdt/src/docs/driver.rs` `DocsDriver`, `DocsIndex`, `DocStorage`, `DocSyncEvent`, `Refusal`; `features/crdt/crdt/src/docs/device_host.rs` `DriverHost`; `features/crdt/crdt/src/docs/turso.rs` `TursoDocsIndex`; `features/crdt/crdt-seaorm/src/docs.rs` `SeaOrmDocsStore` |
+| `crdt::blobs` | the blobs a document points at (its kind's `DocKind::blobs`): live set for collection, keep offline | `features/crdt/crdt/src/blobs.rs` `referenced`, `live`, `missing`, `keep_offline`, `release`; transfer in `architect::blob` (`Fetcher`, `BlobTransferHost`, `VoxRemote`, `HttpRemote`) |
 | Hooks | Dioxus bridge: synced doc, crdt list/entry, presence | `features/crdt/crdt/src/hooks.rs` `use_synced_doc_keyed_with`, `use_crdt_list`, `use_crdt_entry` |
 | iroh seam | peer lookup modes; `Principal::Host` identity | `crates/architect/src/iroh_link.rs` `PeerLookup`; `features/permissions/src/lib.rs` `Principal` |
 
@@ -77,6 +78,17 @@ The host stores and relays Loro bytes and a catalog row (`DocMeta`); it never re
   - A peer's catalog rows merge in: a tombstone wins and the later rename wins. The hub's `rev` is never overwritten; the peer lane's `rev` is the index's `LocalDoc::seq`.
   - A doc learned from a peer stays pending until the hub session registers it. Rename and delete go through the hub.
 - Raw clients: `DocsClient` / `DocsStreamClient` inherent methods return `VoxError<DocsError>`; fold with `architect::vox_into_app`.
+
+## Recipe F: a document's blobs (mirrors `features/crdt/crdt/tests/blobs.rs`)
+
+A document points at its audio and images by sha256; the bytes never go in the Loro doc.
+
+- Kind: `DocKind::new(..).blobs(song_audio)`, where `song_audio(&LoroDoc) -> Vec<String>` returns 64-hex hashes.
+- Recording device: `LocalFs::put_bytes` (or `put`) the take, write its hash into the doc, and serve the store: `.with(blob_transfer_service_descriptor(), BlobTransferDispatcher::new(BlobTransferHost::new(Arc::new(store))))` on the same router as `DocPeer`/`DocSync` (vox over iroh or WebSocket). `.allow(|hash| ..)` narrows what it sends.
+- Other device: `Fetcher::new(LocalFs::new(dir)).with_remote(Arc::new(VoxRemote::new(client)))`, then `.with_remote(Arc::new(HttpRemote::new(".../blobs")))` for the server's copy (served with `blob::serve_http`). `fetcher.open(hash)` / `open_at(hash, offset)` streams while it arrives; `fetch(hash)` waits for it whole. One transfer per hash; a dropped link keeps the `.part`, and the next fetch resumes (`set_remotes` after a reconnect).
+- Offline: `crdt::blobs::keep_offline(kind, doc, &fetcher)` pins and fetches; `release` unpins.
+- Collection: `store.collect(&crdt::blobs::live(&kinds, docs), grace)` with every document on the device; pins are kept, anything else not in the set goes.
+- Streamed bytes are verified only at the end: a corrupt transfer that restarts ends the stream with `InvalidData`.
 
 ## Recipe C: version a document
 
