@@ -15,7 +15,7 @@ description = "Commands: the ⌘K palette, ⌘O open-anything, the action list w
 default = []
 # Keys heard from the window (Blitz delivers a key to the DOM only through
 # what has the focus): `WindowKeys`, for a native app.
-native = ["ui", "dep:dioxus-native"]
+native = ["ui", "dep:dioxus-native", "dep:futures-timer", "dep:muda"]
 ui = [
     "dep:dioxus",
     "dep:architect-shell",
@@ -31,8 +31,13 @@ dioxus = { workspace = true, optional = true }
 architect-shell = { workspace = true, optional = true }
 lucide-dioxus = { workspace = true, optional = true }
 dioxus-native = { workspace = true, optional = true }
+futures-timer = { workspace = true, optional = true }
 # The app's Action List: every action listed in the palette and run by it.
 architect = { workspace = true, optional = true, features = ["action-list"] }
+
+# The native menu bar, drawn by AppKit (src/native_menu.rs).
+[target.'cfg(target_os = "macos")'.dependencies]
+muda = { version = "0.19", optional = true, default-features = false }
 
 [lib]
 doctest = false

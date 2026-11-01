@@ -121,6 +121,45 @@ pub fn LabApp() -> Element {
             .shortcut("⇧⌘N"),
         move || lab.go(Route::Item("inbox", 0)),
     );
+    architect_commands::use_command(
+        architect_commands::Command::new("LAB_SHOW_COMMANDS", "Show every command")
+            .group("Help")
+            .shortcut("⌘K"),
+        move || commands.show(architect_commands::Overlay::Palette),
+    );
+    architect_commands::use_command(
+        architect_commands::Command::new("LAB_OPEN_ANYTHING", "Open…")
+            .group("File")
+            .shortcut("⌘O"),
+        move || commands.show(architect_commands::Overlay::QuickOpen),
+    );
+    // The menu bar: a view of the commands, labels and keys and all.
+    let menus = architect_commands::MenuBar::standard("Architect Lab")
+        .menu("File", |m| {
+            m.commands(["LAB_CAPTURE", "LAB_OPEN_ANYTHING"])
+                .separator()
+                .commands([
+                    "WORKSPACE_CLOSE_TAB",
+                    "WORKSPACE_REOPEN_TAB",
+                    "WORKSPACE_CLOSE_OTHER_TABS",
+                ])
+        })
+        .menu("View", |m| {
+            m.command("LAB_TOGGLE_DETAILS")
+                .separator()
+                .group("Panes")
+                .separator()
+                .group("Docks")
+        })
+        .menu("Go", |m| {
+            m.group("Go").separator().commands([
+                "WORKSPACE_NEXT_TAB",
+                "WORKSPACE_PREVIOUS_TAB",
+                "WORKSPACE_GO_BACK",
+                "WORKSPACE_GO_FORWARD",
+            ])
+        })
+        .menu("Help", |m| m.command("LAB_SHOW_COMMANDS"));
     let route = (lab.route)();
     let tabs = vec![
         shell::Tab::new("inbox", "Inbox", icon!(Inbox)).badge(5),
@@ -160,6 +199,7 @@ pub fn LabApp() -> Element {
             document::Style { {CSS} }
             // The window's chords (⌘K, ⌘W, …), whatever has the focus.
             architect_commands::WindowKeys {}
+            NativeMenus { bar: menus }
             AppShell {
                 screen: screen(),
                 style: (lab.style)(),
@@ -219,5 +259,18 @@ fn Brand() -> Element {
             span { style: "font-size: 21px; font-weight: 750; letter-spacing: -0.03em; color: #e4e4e7;", "Architect" }
             span { style: "font-size: 21px; font-weight: 500; letter-spacing: -0.03em; color: #80808a;", "Lab" }
         }
+    }
+}
+
+/// The menu bar where there is a native one (macOS); elsewhere the same
+/// commands are in the palette.
+#[component]
+fn NativeMenus(bar: architect_commands::MenuBar) -> Element {
+    #[cfg(target_os = "macos")]
+    return rsx! { architect_commands::NativeMenus { bar } };
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = bar;
+        rsx! {}
     }
 }

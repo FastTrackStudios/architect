@@ -11,8 +11,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use architect_commands::{
-    Command, Condition, CustomAction, OpenIn, OpenItem, Opener, Openers, Query, Recents, Runner,
-    Scope, Step, fuzzy, rank,
+    Command, Condition, CustomAction, Item, MenuBar, OpenIn, OpenItem, Opener, Openers, Query,
+    Recents, Runner, Scope, Standard, Step, fuzzy, rank,
 };
 
 #[test]
@@ -173,4 +173,37 @@ fn a_custom_action_stops_at_the_step_that_fails() {
     let err = custom.run(&mut log).unwrap_err();
     assert_eq!(err.step, 1);
     assert_eq!(log.ran, vec!["A"]);
+}
+
+#[test]
+fn a_menu_bar_resolves_against_the_commands_there_are() {
+    let bar = MenuBar::standard("Lab")
+        .menu("File", |m| {
+            m.command("WORKSPACE_CLOSE_TAB")
+                .separator()
+                .command("NOT_THERE")
+        })
+        .menu("View", |m| m.group("Panes").separator())
+        .menu("Go", |m| m.command("NOT_THERE"));
+    let menus = bar.resolve(&commands());
+    let titles: Vec<&str> = menus.iter().map(|m| m.title.as_str()).collect();
+    // The app's menu always; an empty "Go" and an empty Help go.
+    assert_eq!(titles, vec!["Lab", "File", "Edit", "View", "Window"]);
+    let file = &menus[1].items;
+    // The missing command and the separator before it are dropped.
+    assert_eq!(file.len(), 1);
+    assert!(matches!(&file[0], Item::Command(c) if c.shortcut == "⌘W"));
+    let view = &menus[3].items;
+    assert!(matches!(&view[0], Item::Command(c) if c.id == "WORKSPACE_SPLIT_RIGHT"));
+    assert!(menus[2].items.contains(&Item::Standard(Standard::Copy)));
+}
+
+#[test]
+fn a_new_menu_goes_before_window_and_help() {
+    let bar = MenuBar::standard("Lab").menu("Go", |m| m.command("A"));
+    let titles: Vec<&str> = bar.menus.iter().map(|m| m.title.as_str()).collect();
+    assert_eq!(
+        titles,
+        vec!["Lab", "File", "Edit", "View", "Go", "Window", "Help"]
+    );
 }

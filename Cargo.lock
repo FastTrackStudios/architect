@@ -590,7 +590,9 @@ dependencies = [
  "dioxus-native",
  "facet",
  "facet-json",
+ "futures-timer",
  "lucide-dioxus",
+ "muda",
 ]
 
 [[package]]
