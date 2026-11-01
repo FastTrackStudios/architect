@@ -15,9 +15,10 @@ Crate `crdt` (`features/crdt/crdt`); guides `docs/content/architecture/collabora
 | SeaORM tables | crate `crdt-seaorm` owns `crdt_doc` + `crdt_update` and their `Migrator` | `features/crdt/crdt-seaorm/src/migrations.rs` `Migrator`; `features/crdt/crdt-seaorm/src/entities.rs` |
 | Hub sync | `DocSync` call = session; version-vector catch-up; fan-out | `features/crdt/crdt/src/sync.rs` `DocSync`, `DocSyncHost`, `SyncedDoc` (`new`, `durable`, `run`) |
 | Presence | `EphemeralStore` presence; sliding fan-out | `features/crdt/crdt/src/sync.rs` `DocPresence`, `PresenceHost`, `PresencePeer`, `PresenceDriver` |
-| `DocRegistry` | many docs on one dispatcher pair; admission, authorizer, eviction | `features/crdt/crdt/src/registry.rs` `DocRegistry`, `with_admission`, `with_authorizer`, `with_idle_eviction` |
+| `DocRegistry` | many docs on one dispatcher pair; admission, the org's permissions, authorizer, eviction | `features/crdt/crdt/src/registry.rs` `DocRegistry`, `with_admission`, `with_permissions` (`DocPermissions`, `DocAccess`), `with_authorizer`, `with_idle_eviction` |
 | `crdt::peer` | pairwise exchange, `DocPeer` lane, `SelfLane`, `pull`, lineage check | `features/crdt/crdt/src/peer.rs` `DocPeer`, `DocPeerHost`, `SelfLane`, `exchange`, `pull`, `is_foreign_lineage` |
 | `crdt::docs` | catalog of schema-agnostic app docs (client-chosen id, opaque `kind`, `parent`, tombstones, contiguous `rev`); its host; the device driver | `features/crdt/crdt/src/docs/mod.rs` `Docs`, `DocMeta`, `DocChange`, `DocsStore`, `InMemoryDocsStore`; `features/crdt/crdt/src/docs/host.rs` `DocsHost`; `features/crdt/crdt/src/docs/driver.rs` `DocsDriver`, `DocsIndex`, `DocStorage`, `DocSyncEvent`, `Refusal`; `features/crdt/crdt/src/docs/device_host.rs` `DriverHost`; `features/crdt/crdt/src/docs/turso.rs` `TursoDocsIndex`; `features/crdt/crdt-seaorm/src/docs.rs` `SeaOrmDocsStore` |
+| The org driver | one driver per org on a device, kept connected (dial, session until `Caller::closed`, `Backoff`, dial again); docs placed in document files | `features/crdt/crdt/src/docs/org.rs` `OrgDocs` (`stay_connected`, `run_on`, `link`), `OrgSyncs` (`ensure`, `current`, `follow`, `stop`), `Dialed`, `OrgLink`; `features/crdt/crdt/src/docs/placement.rs` `Placement` |
 | Hooks | Dioxus bridge: synced doc, crdt list/entry, presence | `features/crdt/crdt/src/hooks.rs` `use_synced_doc_keyed_with`, `use_crdt_list`, `use_crdt_entry` |
 | iroh seam | peer lookup modes; `Principal::Host` identity | `crates/architect/src/iroh_link.rs` `PeerLookup`; `features/permissions/src/lib.rs` `Principal` |
 
@@ -32,6 +33,7 @@ Crate `crdt` (`features/crdt/crdt`); guides `docs/content/architecture/collabora
 | Devices share docs with no hub | `crdt::peer` over `DocRegistry` plus Host admission |
 | A canonical server exists and clients attach | `DocSyncHost` / `DocRegistry` + `SyncedDoc` (hub) |
 | An app's own data (projects, setlists, rigs) on every device of an owner, made offline, listed without opening | `crdt::docs`: `DocsHost` on the hub, a `DocsDriver` per owner on each device (Recipe D) |
+| The same, per org, signed in, each doc a file the person opens | `OrgSyncs` on the device (one `OrgDocs` per org, `Placement`), `DocsHost::with_permissions` on the org's server (Recipe F) |
 | Server-owned rows the server validates | not CRDT: optimistic `Store` (`references/offline-atom.md`) |
 
 ## Recipe A: pairwise, no hub (mirrors `features/crdt/crdt/tests/peer.rs`)
@@ -57,7 +59,7 @@ Crate `crdt` (`features/crdt/crdt`); guides `docs/content/architecture/collabora
 The host stores and relays Loro bytes and a catalog row (`DocMeta`); it never reads or writes a doc. Content syncs over `DocSync` under the doc's id; the `Docs` lane carries only the catalog.
 
 - Host: `DocsHost::open(store, registry)`; `store` is `InMemoryDocsStore` (tests) or `crdt_seaorm::SeaOrmDocsStore` (its `crdt_doc_meta` table comes with `crdt_seaorm::Migrator`), `registry` a `DocRegistry` over any `Persistence`. Mount it for `Docs`, its stream and `DocSync` (and `DocPresence`): `.with(docs_rpc_service_descriptor(), serve(host.clone())).merge(stream_layer(host.clone())).with(doc_sync_service_descriptor(), DocSyncDispatcher::new(host.clone()))` (all in `crdt::docs`, the sync ones in `crdt::sync`). A host that also serves other docs routes `DocSync` by `host.admits(doc_id)`.
-- Per-caller rules: `.with_authorizer(|who, doc_id, DocAccess::Read | DocAccess::Write| ..)`; default allow, leaving it to the permissions gate. The `changes` hub is not filtered per caller: one host per audience.
+- Per-caller rules: `.with_permissions(DocPermissions::new(org_engine).in_org(&org.id))` asks the org's engine on every call (`read`/`write` on `org/<org>/doc/<id>`); put it on the registry too, so the content lane checks it. `.with_authorizer(|who, doc_id, DocAccess::Read | DocAccess::Write| ..)` is the closure form; default allow, leaving it to the permissions gate. The `changes` hub is not filtered per caller: one host per audience.
 - Device: `DocsDriver::new(index, storage)` per owner (personal space, each org), with `TursoDocsIndex` (or `InMemoryDocsIndex`) and a `DocStorage` resolving each doc's `Arc<dyn Persistence>` from its `DocMeta` (`SharedStorage` for one database). Open docs only through `create` / `open`, so each replica is wired for sync before it is edited. `run(&DocsLane { docs, changes, sync })` is one connected session; loop it with backoff.
 - What `run` does: subscribe, wait for `DocChange::Attached`, register pending creates (`parent_first`), list from the index's cursor (tombstones included), adopt new rows through `DocStorage` (parent first), then sync every live doc with `SyncedDoc::durable` and follow `changes`. A frame whose `rev` skips one triggers a re-list.
 - Lineage (`CreateDoc.lineage`, set by the first registration; a different one later is `DocsError::LineageMismatch`):
@@ -77,6 +79,34 @@ The host stores and relays Loro bytes and a catalog row (`DocMeta`); it never re
   - A peer's catalog rows merge in: a tombstone wins and the later rename wins. The hub's `rev` is never overwritten; the peer lane's `rev` is the index's `LocalDoc::seq`.
   - A doc learned from a peer stays pending until the hub session registers it. Rename and delete go through the hub.
 - Raw clients: `DocsClient` / `DocsStreamClient` inherent methods return `VoxError<DocsError>`; fold with `architect::vox_into_app`.
+
+## Recipe F: one driver per org (mirrors `features/crdt/crdt/tests/org_sync.rs`)
+
+```rust
+let syncs = OrgSyncs::new(
+    move |org: Org| {                       // made once per org
+        let placement = Placement::new(dir.join(&org.slug), kinds.clone());
+        async move { Ok(OrgDocs::new(org, TursoDocsIndex::open_path(&index).await?, placement)) }
+    },
+    move |org: Org| async move {            // every try: the token as it is now
+        match signed_in() {
+            None => Dialed::Stop,
+            Some(token) => match lane(&org_url(&org.slug), &token).await {
+                Ok(lane) => Dialed::Lane(lane),
+                Err(e) => Dialed::Unreachable(e),
+            },
+        }
+    },
+);
+let docs = syncs.current(&orgs).await?;    // the window's org; None in All
+docs.placement().place(id, project_file);  // before the driver opens it
+let doc = docs.driver().create(req).await?;
+```
+
+- `OrgSyncs::ensure` spawns `stay_connected`: dial, `run_on` until a lane connection's `Caller::closed`, sleep `Backoff::next_delay` (reset on connect), dial again. `link()` / `watch_link()` is `Connecting | Live | Offline | Stopped`. `follow(&orgs)` stops orgs the person left; their files stay.
+- An app with a supervised connection (`use_app_supervised`) calls `run_on(&lane)` once per `Connection::generation` instead of `stay_connected`.
+- `Placement`: catalogue `kind` = the `DocKind` id; a doc not placed is `<dir>/<id>.<extension>`; content syncs through `DocFile::persistence(MAIN)`; `placement.file(id)` is the open `DocFile` (name steps through its `Branch`). New files: `DocFile::create_as` for a doc made here, `DocFile::adopt` (empty, unstamped) for one made elsewhere.
+- Server: `DocsHost::open(store, registry.with_permissions(p.clone())).await?.with_permissions(p)`, one host per org, mounted on the org's lane behind the gate.
 
 ## Recipe C: version a document
 
@@ -108,7 +138,7 @@ main.save("Mix sent to Dan").await?;                     // names a checkpoint, 
 - A crash leaves a torn last record; `open` drops it (`recovered()`) and replays the steps since the last snapshot.
 - Branches: `fork`, `open_branch` (side by side), `merge`, `DocFile::delete_branch` (not `main`); versions: `DocFile::versions`, `open_version` (read-only), `restore` (a new branch).
 - In the browser: `DocFile::from_bytes(bytes, &kind)`; the whole folded file to send is `to_bytes()`.
-- To sync a branch with `DocSync`, back the `CrdtDoc` with `file.persistence(MAIN)`.
+- To sync a branch with `DocSync`, back the `CrdtDoc` with `file.persistence(MAIN)`. A file for a catalogue's doc: `DocFile::create_as(storage, &kind, id)` (made here) or `DocFile::adopt(storage, &kind, id)` (made elsewhere, `main` empty).
 
 ## Pitfalls
 
@@ -116,7 +146,8 @@ main.save("Mix sent to Dan").await?;                     // names a checkpoint, 
 - **Loro subscription closures must hold `WeakCrdtDoc`.** A strong `CrdtDoc` dropped inside Loro's unsubscribe path deadlocks.
 - **Imports don't fire local-update subscriptions.** `apply_remote` is not persisted; relaying hosts use `apply_remote_durable`. `SyncedDoc` imports with `apply_remote` by default, so a hub client keeps only its own edits and re-learns the rest by version-vector catch-up (fine for a browser tab). A device replica, which must still show a received edit after an offline restart, uses `SyncedDoc::new(..).durable()`.
 - **Status flashes Live before attach succeeds** in the hook's drive loop; a failed attach then sets `Offline`.
-- **Admission sees only the doc id; the authorizer sees the caller** (`permissions_gate::caller()`). `None` means no identity: refuse. Both refusals answer `SyncError::UnknownDoc`, so a peer cannot tell forbidden from absent (by design). `DocRegistry::doc()` skips the authorizer (server-side reads).
+- **Admission sees only the doc id; the permissions and the authorizer see the caller** (`permissions_gate::caller()`). `None` means no identity: refuse (`DocPermissions` asks about it as `Principal::Anonymous`). Every refusal answers `SyncError::UnknownDoc`, so a peer cannot tell forbidden from absent (by design). `DocRegistry::doc()` skips both (server-side reads).
+- **A file made for a doc from elsewhere must stay empty until it syncs.** `DocFile::create` stamps `main`, which is history of the device's own: a `Strict` host refuses it as `FOREIGN_LINEAGE`. `Placement` uses `DocFile::adopt` for those.
 - **`DocPeerHost` admits only `Principal::Host`.** Users and services are refused on `list` and `sync`.
 - **Foreign lineage is refused, never merged.** `pull` counts it in `foreign`; someone must pick one copy. A timed-out exchange is `failed`, not `foreign`; retry next sweep. Only a non-empty digest equal to ours is skipped.
 - **Permission denials are refusals, not drops** (`InvalidPayload("permission denied: ...")` → `Refused`).
