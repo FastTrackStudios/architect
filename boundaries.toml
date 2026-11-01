@@ -83,6 +83,10 @@ layer = "L0"
 package = "architect-input"
 layer = "L0"
 
+[[row]]
+package = "architect-workspace"
+layer = "L0"
+
 # ── L4 ui ─────────────────────────────────────────────────────────────────
 [[row]]
 package = "crdt"
