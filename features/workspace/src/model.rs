@@ -41,6 +41,20 @@ impl WindowId {
     pub fn main() -> Self {
         Self("main".to_owned())
     }
+
+    /// The window a dock popped out into: `"dock-left"`, `"dock-right"`,
+    /// `"dock-bottom"` (one per side, so a script or a window manager finds
+    /// the sidebar's window by it).
+    #[must_use]
+    pub fn dock(side: Side) -> Self {
+        let name = match side {
+            Side::Left => "left",
+            Side::Right => "right",
+            Side::Top => "top",
+            Side::Bottom => "bottom",
+        };
+        Self(format!("dock-{name}"))
+    }
 }
 
 /// Panes sharing a link follow each other (open a song in one, its mixer
@@ -318,6 +332,12 @@ impl Dock {
             ribbon: None,
         }
     }
+
+    /// Whether it has anything to show: groups, or a ribbon.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.root.is_none() && self.ribbon.is_none()
+    }
 }
 
 /// The main window's docks.
@@ -412,9 +432,11 @@ pub struct Window {
     /// places it).
     pub bounds: Option<Rect>,
     pub maximized: bool,
-    /// The main area.
+    /// The main area; `None` in a dock's own window.
     pub center: Option<Node>,
-    /// The main window's docks; a pop-out's stay empty.
+    /// The main window's docks. A pop-out's stay empty, but for a dock
+    /// popped out into a window of its own ([`Workspace::pop_out_dock`]):
+    /// it is that window's dock on the same side.
     pub docks: Docks,
     /// Floating over it; the last is the front.
     pub floats: Vec<Float>,
@@ -431,6 +453,19 @@ impl Window {
             docks: Docks::default(),
             floats: Vec::new(),
         }
+    }
+
+    /// The first group in the window: its center's, else its docks'.
+    #[must_use]
+    pub fn first_group(&self) -> Option<&Group> {
+        self.center
+            .as_ref()
+            .and_then(Node::first_group)
+            .or_else(|| {
+                Docks::SIDES
+                    .iter()
+                    .find_map(|&s| self.docks.get(s)?.root.as_ref()?.first_group())
+            })
     }
 }
 
@@ -673,5 +708,30 @@ impl Workspace {
     #[must_use]
     pub fn window(&self, id: &WindowId) -> Option<&Window> {
         self.windows.iter().find(|w| &w.id == id)
+    }
+
+    /// The index of the pop-out the dock on `side` is in, if it popped
+    /// out ([`Workspace::pop_out_dock`]).
+    #[must_use]
+    pub fn dock_window(&self, side: Side) -> Option<usize> {
+        self.windows
+            .iter()
+            .enumerate()
+            .skip(1)
+            .find(|(_, w)| w.docks.get(side).is_some_and(|d| !d.is_empty()))
+            .map(|(i, _)| i)
+    }
+
+    /// The dock on `side`, wherever it is: the main window's, or the
+    /// window it popped out into.
+    #[must_use]
+    pub fn dock(&self, side: Side) -> Option<&Dock> {
+        let at = self.dock_window(side).unwrap_or(0);
+        self.windows.get(at)?.docks.get(side)
+    }
+
+    pub fn dock_mut(&mut self, side: Side) -> Option<&mut Dock> {
+        let at = self.dock_window(side).unwrap_or(0);
+        self.windows.get_mut(at)?.docks.get_mut(side)
     }
 }

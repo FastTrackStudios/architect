@@ -7,12 +7,13 @@
 //! - Shares are positive and sum to one.
 //! - A group's `current` is one of its tabs.
 //! - A window with nothing in it closes; the main window keeps one empty
-//!   group ("New tab").
+//!   group ("New tab"). A dock's own window whose last tab went closes
+//!   too, its ribbon and size going back to the main window's side.
 //! - `active` and `recent` name panes that are open.
 
 use std::collections::HashSet;
 
-use crate::model::{Child, Group, GroupId, Node, PaneId, Split, Workspace};
+use crate::model::{Child, Docks, Group, GroupId, Node, PaneId, Split, Workspace};
 
 /// The smallest share a child keeps, so a divider can always be found.
 const MIN_SHARE: f32 = 0.02;
@@ -148,10 +149,37 @@ impl Workspace {
             .filter(|p| !seen.contains(p))
             .collect();
 
+        // A dock's window with no tabs left gives its ribbon (and size)
+        // back to the main window's side, so the sidebar is not lost.
+        let mut returning = Vec::new();
+        for window in self.windows.iter_mut().skip(1) {
+            if window.center.is_some() || !window.floats.is_empty() {
+                continue;
+            }
+            for side in Docks::SIDES {
+                if let Some(dock) = window.docks.get_mut(side) {
+                    if dock.root.is_none() && dock.ribbon.is_some() {
+                        returning.push((side, dock.clone()));
+                        dock.ribbon = None;
+                    }
+                }
+            }
+        }
+        if let Some(main) = self.windows.first_mut() {
+            for (side, dock) in returning {
+                if let Some(home) = main.docks.get_mut(side).filter(|d| d.is_empty()) {
+                    *home = dock;
+                }
+            }
+        }
+
         // Pop-outs with nothing left close; the main window stays.
         let mut first = true;
         self.windows.retain(|w| {
-            let keep = first || w.center.is_some() || !w.floats.is_empty();
+            let docked = Docks::SIDES
+                .iter()
+                .any(|&s| w.docks.get(s).is_some_and(|d| d.root.is_some()));
+            let keep = first || w.center.is_some() || !w.floats.is_empty() || docked;
             first = false;
             keep
         });

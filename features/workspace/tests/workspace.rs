@@ -880,3 +880,146 @@ fn a_store_keeps_the_screensets_and_reads_them_back() {
         1
     );
 }
+
+/// Files and search in the left dock behind a ribbon, a note in the center.
+fn sidebar() -> Workspace {
+    let mut ws = Workspace::new();
+    ws.open(pane("note"), Target::Tab).unwrap();
+    ws.open(pane("files"), Target::Dock(Side::Left)).unwrap();
+    ws.open(pane("search"), Target::Dock(Side::Left)).unwrap();
+    ws.set_dock_size(Side::Left, 300.0).unwrap();
+    ws.windows[0].docks.left.ribbon = Some(architect_workspace::Ribbon {
+        views: vec![architect_workspace::ViewKind::new("files")],
+        commands: vec!["new-note".to_owned()],
+        hidden: Vec::new(),
+    });
+    ws
+}
+
+#[test]
+fn a_dock_pops_out_into_its_own_window_with_its_ribbon_groups_and_size() {
+    let mut ws = sidebar();
+    let before = ws.windows[0].docks.left.clone();
+    let window = ws
+        .pop_out_dock(Side::Left, Some(Rect::new(40.0, 60.0, 340.0, 600.0)))
+        .unwrap();
+    assert_eq!(window, WindowId::dock(Side::Left));
+    assert_eq!(window.0, "dock-left");
+    // The main window's left side is empty: its layout closes the gap.
+    assert!(ws.windows[0].docks.left.is_empty());
+    assert_eq!(ws.windows.len(), 2);
+    let out = &ws.windows[1];
+    assert_eq!(out.id, window);
+    assert!(out.center.is_none());
+    assert_eq!(out.bounds, Some(Rect::new(40.0, 60.0, 340.0, 600.0)));
+    assert_eq!(out.docks.left, before);
+    assert_eq!(ws.dock_window(Side::Left), Some(1));
+    assert_eq!(ws.dock(Side::Left), Some(&before));
+    let loc = ws.locate(&id("files")).unwrap();
+    assert_eq!((loc.window, loc.area), (1, Area::Dock(Side::Left)));
+    // The current document is still the note.
+    assert_eq!(ws.current_document(), Some(&id("note")));
+    // Again: it stays where it is.
+    assert_eq!(ws.pop_out_dock(Side::Left, None).unwrap(), window);
+    assert_eq!(ws.windows.len(), 2);
+    // Nothing to pop out, or no dock there.
+    assert!(ws.pop_out_dock(Side::Right, None).is_err());
+    assert!(ws.pop_out_dock(Side::Top, None).is_err());
+}
+
+#[test]
+fn a_popped_out_dock_docks_back_as_it_was() {
+    let mut ws = sidebar();
+    let before = ws.windows[0].docks.left.clone();
+    ws.pop_out_dock(Side::Left, None).unwrap();
+    ws.dock_back(Side::Left).unwrap();
+    assert_eq!(ws.windows.len(), 1);
+    assert_eq!(ws.windows[0].docks.left, before);
+    assert_eq!(ws.dock_window(Side::Left), None);
+    assert!(ws.dock_back(Side::Left).is_err(), "it is in already");
+}
+
+#[test]
+fn a_popped_out_dock_takes_what_is_moved_to_its_side_and_its_size() {
+    let mut ws = sidebar();
+    ws.pop_out_dock(Side::Left, None).unwrap();
+    ws.move_pane(&id("note"), Dest::Dock(Side::Left)).unwrap();
+    assert_eq!(ws.locate(&id("note")).unwrap().window, 1);
+    assert!(ws.windows[0].docks.left.is_empty());
+    ws.set_dock_size(Side::Left, 360.0).unwrap();
+    ws.dock_back(Side::Left).unwrap();
+    assert_eq!(ws.windows[0].docks.left.size, 360.0);
+    assert_eq!(
+        ws.locate(&id("note")).map(|l| (l.window, l.area)),
+        Some((0, Area::Dock(Side::Left)))
+    );
+}
+
+#[test]
+fn closing_a_docks_window_docks_it_back() {
+    let mut ws = sidebar();
+    let before = ws.windows[0].docks.left.clone();
+    let window = ws.pop_out_dock(Side::Left, None).unwrap();
+    let moved = ws.close_window(&window).unwrap();
+    assert!(moved.is_empty(), "nothing went to the center");
+    assert_eq!(ws.windows.len(), 1);
+    assert_eq!(ws.windows[0].docks.left, before);
+    assert!(ws.locate(&id("files")).is_some());
+}
+
+#[test]
+fn a_docks_window_whose_last_tab_goes_closes_and_its_ribbon_comes_back() {
+    let mut ws = sidebar();
+    ws.pop_out_dock(Side::Left, None).unwrap();
+    ws.close(&id("files")).unwrap();
+    assert_eq!(ws.windows.len(), 2, "search is still there");
+    ws.to_main_window(&id("search")).unwrap();
+    assert_eq!(ws.windows.len(), 1);
+    let left = &ws.windows[0].docks.left;
+    assert!(left.root.is_none());
+    assert_eq!(left.size, 300.0);
+    assert!(left.ribbon.is_some(), "the ribbon is not lost");
+}
+
+#[test]
+fn a_popped_out_dock_is_kept_by_the_store_and_remembered_by_a_screenset() {
+    let mut ws = sidebar();
+    ws.pop_out_dock(Side::Left, Some(Rect::new(10.0, 20.0, 300.0, 500.0)))
+        .unwrap();
+    // Through JSON (the store's), as it was.
+    let back = Workspace::from_json(&ws.to_json().unwrap()).unwrap();
+    assert_eq!(back, ws);
+    assert_eq!(back.dock_window(Side::Left), Some(1));
+
+    // A screenset saved with the dock out recalls it out.
+    let mut sets = Screensets::default();
+    let set = sets.save_as("Focus", Some(3));
+    sets.set_working(FormClass::Desk, ws.clone());
+    assert!(sets.save(FormClass::Desk));
+    let store = MemoryStore::new();
+    architect_workspace::store::save(&store, &sets);
+    let mut kept = architect_workspace::store::load(&store, Vec::new());
+    kept.set_working(FormClass::Desk, sidebar());
+    let recalled = kept.recall(&set, FormClass::Desk).unwrap();
+    assert_eq!(recalled.dock_window(Side::Left), Some(1));
+    assert_eq!(recalled, ws);
+}
+
+#[test]
+fn a_dock_coming_back_to_a_side_that_gained_one_goes_under_it() {
+    let mut ws = sidebar();
+    ws.pop_out_dock(Side::Left, None).unwrap();
+    // A layout edited by hand: the main window has a left dock again.
+    ws.panes.push(pane("tags"));
+    let mut g = Group::new(GroupId(900));
+    g.tabs.push(id("tags"));
+    ws.windows[0].docks.left.root = Some(Node::Group(g));
+    ws.dock_back(Side::Left).unwrap();
+    let Some(Node::Split(split)) = &ws.windows[0].docks.left.root else {
+        panic!("both, split")
+    };
+    assert_eq!(split.axis, Axis::Column);
+    assert_eq!(ws.locate(&id("tags")).unwrap().window, 0);
+    assert_eq!(ws.locate(&id("files")).unwrap().window, 0);
+    assert_eq!(ws.windows.len(), 1);
+}

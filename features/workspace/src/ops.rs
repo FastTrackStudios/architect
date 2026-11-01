@@ -2,8 +2,8 @@
 //! leaves the workspace repaired ([`Workspace::repair`]).
 
 use crate::model::{
-    Area, Child, Chrome, ClosedPane, Float, Group, GroupId, LinkId, Node, Pane, PaneId, Pin, Rect,
-    Shown, Side, Snap, Split, SplitId, Window, WindowId, Workspace,
+    Area, Axis, Child, Chrome, ClosedPane, Dock, Docks, Float, Group, GroupId, LinkId, Node, Pane,
+    PaneId, Pin, Rect, Shown, Side, Snap, Split, SplitId, Window, WindowId, Workspace,
 };
 
 /// Where [`Workspace::open`] puts a pane.
@@ -54,6 +54,10 @@ pub enum WorkspaceError {
     NoSuchWindow(WindowId),
     #[error("there is no dock on that side")]
     NoDock,
+    #[error("the {0:?} dock has nothing in it to pop out")]
+    EmptyDock(Side),
+    #[error("the {0:?} dock is in the main window")]
+    DockNotOut(Side),
     #[error("{0:?} is not floating")]
     NotFloating(PaneId),
     #[error("nothing to go back or forward to")]
@@ -215,11 +219,8 @@ impl Workspace {
             }
             Dest::Dock(side) => {
                 let fresh = self.fresh_group(Vec::new());
-                let main = self
-                    .windows
-                    .first_mut()
-                    .ok_or_else(|| WorkspaceError::NoSuchWindow(WindowId::main()))?;
-                let dock = main.docks.get_mut(side).ok_or(WorkspaceError::NoDock)?;
+                // The dock wherever it is: popped out, a pane joins it there.
+                let dock = self.dock_mut(side).ok_or(WorkspaceError::NoDock)?;
                 dock.shown = Shown::Open;
                 let mut fresh = fresh;
                 match dock.root.as_mut().and_then(|r| match r {
@@ -581,27 +582,127 @@ impl Workspace {
         })
     }
 
-    /// Show, collapse or hide the main window's dock on `side`.
+    /// Show, collapse or hide the dock on `side` (wherever it is).
     pub fn set_dock_shown(&mut self, side: Side, shown: Shown) -> Result<()> {
-        let main = self
-            .windows
-            .first_mut()
-            .ok_or_else(|| WorkspaceError::NoSuchWindow(WindowId::main()))?;
-        main.docks
-            .get_mut(side)
-            .ok_or(WorkspaceError::NoDock)?
-            .shown = shown;
+        self.dock_mut(side).ok_or(WorkspaceError::NoDock)?.shown = shown;
         Ok(())
     }
 
-    /// Resize the main window's dock on `side`.
+    /// Resize the dock on `side` (wherever it is).
     pub fn set_dock_size(&mut self, side: Side, points: f32) -> Result<()> {
+        self.dock_mut(side).ok_or(WorkspaceError::NoDock)?.size = points.max(120.0);
+        Ok(())
+    }
+
+    /// Pop the main window's dock on `side` out into a window of its own
+    /// ([`WindowId::dock`]), with its ribbon, its groups and its size; the
+    /// main window's layout closes the gap. Tabs moved to that dock go to
+    /// its window while it is out. A dock already out stays where it is.
+    pub fn pop_out_dock(&mut self, side: Side, bounds: Option<Rect>) -> Result<WindowId> {
+        if let Some(at) = self.dock_window(side) {
+            return self
+                .windows
+                .get(at)
+                .map(|w| w.id.clone())
+                .ok_or(WorkspaceError::NoDock);
+        }
+        let id = WindowId::dock(side);
+        let has = self
+            .windows
+            .first()
+            .and_then(|w| w.docks.get(side))
+            .ok_or(WorkspaceError::NoDock)?
+            .root
+            .is_some();
+        if !has {
+            return Err(WorkspaceError::EmptyDock(side));
+        }
+        // A window of that id left over (a layout edited by hand) gives
+        // its tabs back first.
+        if self.windows.iter().skip(1).any(|w| w.id == id) {
+            self.close_window(&id)?;
+        }
         let main = self
             .windows
             .first_mut()
             .ok_or_else(|| WorkspaceError::NoSuchWindow(WindowId::main()))?;
-        main.docks.get_mut(side).ok_or(WorkspaceError::NoDock)?.size = points.max(120.0);
+        let dock = main.docks.get_mut(side).ok_or(WorkspaceError::NoDock)?;
+        let points = dock.size;
+        let mut out = std::mem::replace(dock, Dock::new(points));
+        // In a window of its own it is all there is: open.
+        out.shown = Shown::Open;
+        let mut docks = Docks::default();
+        if let Some(d) = docks.get_mut(side) {
+            *d = out;
+        }
+        self.windows.push(Window {
+            id: id.clone(),
+            bounds,
+            maximized: false,
+            center: None,
+            docks,
+            floats: Vec::new(),
+        });
+        Ok(id)
+    }
+
+    /// Put the dock on `side` back in the main window, with its ribbon, its
+    /// groups and its size; its window closes. If the main window has
+    /// gained a dock there meanwhile, the returning groups go under its.
+    pub fn dock_back(&mut self, side: Side) -> Result<()> {
+        let at = self
+            .dock_window(side)
+            .ok_or(WorkspaceError::DockNotOut(side))?;
+        self.return_dock(at, side);
+        self.repair();
         Ok(())
+    }
+
+    /// Move the dock on `side` of the window at `at` into the main
+    /// window's.
+    fn return_dock(&mut self, at: usize, side: Side) {
+        let split = SplitId(self.alloc());
+        let Some(coming) = self
+            .windows
+            .get_mut(at)
+            .and_then(|w| w.docks.get_mut(side))
+            .map(|d| {
+                let points = d.size;
+                std::mem::replace(d, Dock::new(points))
+            })
+        else {
+            return;
+        };
+        let Some(home) = self.windows.first_mut().and_then(|w| w.docks.get_mut(side)) else {
+            return;
+        };
+        let root = match (home.root.take(), coming.root) {
+            (Some(here), Some(back)) => Some(Node::Split(Split {
+                id: split,
+                axis: if side.axis() == Axis::Row {
+                    Axis::Column
+                } else {
+                    Axis::Row
+                },
+                children: vec![
+                    Child {
+                        node: here,
+                        share: 0.5,
+                    },
+                    Child {
+                        node: back,
+                        share: 0.5,
+                    },
+                ],
+            })),
+            (here, back) => back.or(here),
+        };
+        *home = Dock {
+            root,
+            size: coming.size,
+            shown: Shown::Open,
+            ribbon: coming.ribbon.or_else(|| home.ribbon.take()),
+        };
     }
 
     /// The float holding `pane`.
@@ -681,7 +782,8 @@ impl Workspace {
 
     /// Close the pop-out `window`: its tabs come back to the main window,
     /// into the group with the focus there (closing a window loses no
-    /// work; a tab is closed by its ×). The main window cannot close.
+    /// work; a tab is closed by its ×), and a dock popped out into it
+    /// docks back on its side. The main window cannot close.
     pub fn close_window(&mut self, window: &WindowId) -> Result<Vec<PaneId>> {
         let at = self
             .windows
@@ -689,6 +791,18 @@ impl Workspace {
             .position(|w| &w.id == window)
             .filter(|&i| i > 0)
             .ok_or_else(|| WorkspaceError::NoSuchWindow(window.clone()))?;
+        let docked: Vec<Side> = Docks::SIDES
+            .into_iter()
+            .filter(|&s| {
+                self.windows
+                    .get(at)
+                    .and_then(|w| w.docks.get(s))
+                    .is_some_and(|d| !d.is_empty())
+            })
+            .collect();
+        for side in docked {
+            self.return_dock(at, side);
+        }
         let moved = self.window_panes(at);
         let into = self.main_group();
         if at < self.windows.len() {
