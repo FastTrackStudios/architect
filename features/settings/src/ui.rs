@@ -31,6 +31,8 @@ pub struct SettingsHandle {
     pub values: Signal<Values>,
     /// The section on show; `None` when the page is closed.
     pub open: Signal<Option<String>>,
+    /// The setting jumped to (the palette's `#`), lit in its section.
+    pub focus: Signal<Option<String>>,
     on_change: CopyValue<Option<Callback<Values>>>,
 }
 
@@ -44,6 +46,7 @@ pub fn use_settings_provider(
         registry: Signal::new(registry()),
         values: Signal::new(values()),
         open: Signal::new(None),
+        focus: Signal::new(None),
         on_change: CopyValue::new(on_change),
     })
 }
@@ -135,6 +138,20 @@ impl SettingsHandle {
     pub fn close(&self) {
         let mut open = self.open;
         open.set(None);
+        let mut focus = self.focus;
+        focus.set(None);
+    }
+
+    /// Opens the page at setting `key`'s section, the row lit. A key no
+    /// section has opens nothing.
+    pub fn reveal(&self, key: &str) {
+        let section = self.registry.peek().setting(key).map(|(s, _)| s.id.clone());
+        if let Some(section) = section {
+            let mut open = self.open;
+            open.set(Some(section));
+            let mut focus = self.focus;
+            focus.set(Some(key.to_owned()));
+        }
     }
 
     /// Removes every section an extension registered (it unloaded).
@@ -186,6 +203,33 @@ pub fn SettingsPage() -> Element {
             .shortcut("⌘,"),
         move || h.show(None),
     );
+    // The palette's `#`: a setting by name, opened at its row.
+    architect_commands::use_palette_opener(architect_commands::Scope::Settings, move || {
+        architect_commands::Opener::new(
+            "setting",
+            "Settings",
+            move |query| {
+                let registry = h.registry.peek();
+                registry
+                    .search(query)
+                    .into_iter()
+                    .take(20)
+                    .filter_map(|hit| {
+                        let (section, setting) = registry.setting(&hit.key)?;
+                        Some(
+                            architect_commands::OpenItem::new(
+                                "setting",
+                                hit.key.clone(),
+                                setting.title.clone(),
+                            )
+                            .detail(section.title.clone()),
+                        )
+                    })
+                    .collect()
+            },
+            move |item, _| h.reveal(&item.id),
+        )
+    });
     if (h.open)().is_none() {
         return rsx! {};
     }
@@ -455,6 +499,11 @@ fn Row(setting: Setting, first: bool) -> Element {
     };
     let changed = h.values.read().is_changed(&setting.key);
     let rule = if first { "transparent" } else { t.rule };
+    let lit = if (h.focus)().as_deref() == Some(setting.key.as_str()) {
+        t.accent_soft
+    } else {
+        "transparent"
+    };
     let key = setting.key.clone();
     let narrow = phone();
     let dir = if narrow { "column" } else { "row" };
@@ -462,7 +511,7 @@ fn Row(setting: Setting, first: bool) -> Element {
     rsx! {
         div {
             style: "display: flex; flex-direction: {dir}; align-items: {align}; gap: 14px; padding: 14px 16px; \
-                    border-top: 1px solid {rule};",
+                    border-top: 1px solid {rule}; background: {lit};",
             div { style: "flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px;",
                 div { style: "display: flex; align-items: center; gap: 8px;",
                     span { style: "font-size: 13px; font-weight: 550; color: {t.ink};", "{setting.title}" }
