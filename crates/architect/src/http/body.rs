@@ -134,6 +134,13 @@ mod imp {
         pub fn query(&self) -> Option<&str> {
             self.uri.query()
         }
+
+        /// The query parameter `name`, decoded (`+` and `%XX`); the first
+        /// one when it repeats, `None` when it is absent.
+        #[must_use]
+        pub fn query_param(&self, name: &str) -> Option<String> {
+            super::super::query_value(self.query()?, name)
+        }
     }
 
     /// A [`RequestHead`] is also an axum extractor, for a protocol adapter
@@ -382,6 +389,10 @@ mod imp {
         }
         #[must_use]
         pub const fn query(&self) -> Option<&str> {
+            None
+        }
+        #[must_use]
+        pub const fn query_param(&self, _name: &str) -> Option<String> {
             None
         }
     }

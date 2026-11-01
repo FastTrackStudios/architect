@@ -60,6 +60,9 @@ architect.workspace = true
 # to `DocRegistry::with_authorizer` and the `peer` lane's peer check.
 # Already in architect's own tree (wasm-clean).
 architect-permissions.workspace = true
+# `Org`, `OrgId`, `Orgs` — the org a device's `OrgDocs` syncs, and the
+# person's current one (`OrgSyncs::follow`). Pure data, wasm-clean.
+architect-orgs.workspace = true
 vox = { workspace = true, optional = true }
 facet = { workspace = true, optional = true }
 loro.workspace = true
@@ -72,6 +75,10 @@ uuid.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 crdt-derive.workspace = true
+# The document file (`crdt::file`): blobs named by their SHA-256, records
+# checked by CRC-32. Both pure Rust, wasm-clean.
+sha2.workspace = true
+crc32fast = "1"
 
 # Declare tokio independently of the workspace dep so wasm32 builds
 # (which can't pull mio / rt-multi-thread) stay clean. `macros` powers

@@ -235,6 +235,91 @@ fn encode(raw: &str, keep_slash: bool) -> String {
     out
 }
 
+/// The query string a generated client writes for a `get` route.
+///
+/// Its arguments ride the URL (as do those of a method that streams its
+/// body): `name=value` pairs, each value its `Display` form encoded like
+/// [`encode_segment`]. An absent `Option` writes nothing.
+#[derive(Clone, Debug, Default)]
+pub struct QueryString(String);
+
+impl QueryString {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self(String::new())
+    }
+
+    /// Add `name=value`.
+    pub fn push(&mut self, name: &str, value: &dyn Display) {
+        if !self.0.is_empty() {
+            self.0.push('&');
+        }
+        self.0.push_str(&encode(name, false));
+        self.0.push('=');
+        self.0.push_str(&encode_segment(value));
+    }
+
+    /// Add `name=value` when there is a value.
+    pub fn push_opt<T: Display>(&mut self, name: &str, value: Option<&T>) {
+        if let Some(value) = value {
+            self.push(name, value);
+        }
+    }
+
+    /// `path` with the query appended; `path` alone when nothing was added.
+    #[must_use]
+    pub fn after(&self, path: &str) -> String {
+        if self.0.is_empty() {
+            path.to_owned()
+        } else {
+            format!("{path}?{}", self.0)
+        }
+    }
+}
+
+/// The first value of `name` in a raw query string (no leading `?`),
+/// decoded as a form does: `+` is a space and `%XX` a byte. A name given
+/// with no `=` reads as the empty string; `None` when it is absent.
+#[must_use]
+pub fn query_value(query: &str, name: &str) -> Option<String> {
+    query
+        .split('&')
+        .filter(|pair| !pair.is_empty())
+        .map(|pair| pair.split_once('=').unwrap_or((pair, "")))
+        .find(|(key, _)| decode_component(key) == name)
+        .map(|(_, value)| decode_component(value))
+}
+
+/// One form-encoded component: `+` → space, `%XX` → that byte (a `%` not
+/// followed by two hex digits stays as it is), invalid UTF-8 replaced.
+fn decode_component(raw: &str) -> String {
+    let hex = |b: u8| {
+        char::from(b)
+            .to_digit(16)
+            .and_then(|d| u8::try_from(d).ok())
+    };
+    let mut out = Vec::with_capacity(raw.len());
+    let mut rest = raw.as_bytes();
+    while let Some((&byte, tail)) = rest.split_first() {
+        rest = tail;
+        match byte {
+            b'+' => out.push(b' '),
+            b'%' => {
+                if let [hi, lo, after @ ..] = tail
+                    && let (Some(hi), Some(lo)) = (hex(*hi), hex(*lo))
+                {
+                    out.push(hi.wrapping_mul(16) | lo);
+                    rest = after;
+                } else {
+                    out.push(b'%');
+                }
+            }
+            _ => out.push(byte),
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 /// Bind a backend's HTTP face into a route table — the HTTP twin of [`crate::Bind`].
 ///
 /// Emitted for every service token; implemented here for the layer cells
@@ -403,6 +488,43 @@ mod server {
                     &format!("path parameter `{name}`: {err}"),
                 )
             })
+        }
+
+        /// The query parameter `name`, parsed; `400` when it is absent or
+        /// does not parse.
+        pub fn query<T>(&self, name: &str) -> Result<T, Response>
+        where
+            T: core::str::FromStr,
+            T::Err: core::fmt::Display,
+        {
+            self.query_opt(name)?.ok_or_else(|| {
+                plain_error(
+                    StatusCode::BAD_REQUEST,
+                    "invalid_query",
+                    &format!("the query has no `{name}`"),
+                )
+            })
+        }
+
+        /// The query parameter `name`, parsed, or `None` when it is absent;
+        /// `400` when it does not parse.
+        pub fn query_opt<T>(&self, name: &str) -> Result<Option<T>, Response>
+        where
+            T: core::str::FromStr,
+            T::Err: core::fmt::Display,
+        {
+            self.head
+                .query_param(name)
+                .map(|raw| {
+                    raw.parse::<T>().map_err(|err| {
+                        plain_error(
+                            StatusCode::BAD_REQUEST,
+                            "invalid_query",
+                            &format!("query parameter `{name}`: {err}"),
+                        )
+                    })
+                })
+                .transpose()
         }
 
         /// The request's bearer token, if any.
@@ -705,6 +827,12 @@ mod server {
     }
     impl RawCall {
         pub const fn param<T>(&self, _name: &str) -> Result<T, Response> {
+            Err(Response)
+        }
+        pub const fn query<T>(&self, _name: &str) -> Result<T, Response> {
+            Err(Response)
+        }
+        pub const fn query_opt<T>(&self, _name: &str) -> Result<Option<T>, Response> {
             Err(Response)
         }
         #[must_use]
@@ -1196,3 +1324,36 @@ mod client {
 }
 
 pub use client::HttpClient;
+
+#[cfg(test)]
+mod tests {
+    use super::{QueryString, query_value};
+
+    #[test]
+    fn a_query_value_is_decoded_like_a_form() {
+        let q = "date=2026-10-31&pw=a+b%2Fc&flag&minute=5&pw=second&%70w2=x";
+        assert_eq!(query_value(q, "date").as_deref(), Some("2026-10-31"));
+        // `+` is a space, `%XX` a byte, the first repeat wins.
+        assert_eq!(query_value(q, "pw").as_deref(), Some("a b/c"));
+        assert_eq!(query_value(q, "flag").as_deref(), Some(""));
+        assert_eq!(query_value(q, "pw2").as_deref(), Some("x"));
+        assert_eq!(query_value(q, "missing"), None);
+        // A stray `%` stays; multibyte UTF-8 survives.
+        assert_eq!(query_value("a=100%&b=%C3%A9", "a").as_deref(), Some("100%"));
+        assert_eq!(query_value("a=100%&b=%C3%A9", "b").as_deref(), Some("é"));
+    }
+
+    #[test]
+    fn a_query_string_round_trips_through_query_value() {
+        let mut query = QueryString::new();
+        assert_eq!(query.after("/x"), "/x");
+        query.push("text", &"a b&c=d+é");
+        query.push_opt::<u32>("absent", None);
+        query.push_opt("minute", Some(&5_u16));
+        let url = query.after("/x");
+        assert_eq!(url, "/x?text=a%20b%26c%3Dd%2B%C3%A9&minute=5");
+        let raw = url.split_once('?').map(|(_, q)| q).unwrap_or_default();
+        assert_eq!(query_value(raw, "text").as_deref(), Some("a b&c=d+é"));
+        assert_eq!(query_value(raw, "absent"), None);
+    }
+}
