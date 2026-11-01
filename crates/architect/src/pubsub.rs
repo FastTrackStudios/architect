@@ -29,6 +29,20 @@
 //! publisher — is deliberately absent: blocking the writer is exactly
 //! what a host integration can't afford.)
 //!
+//! ## A sink that is full
+//!
+//! The mailbox is the hub's; the sink behind it (a vox `Tx`, a local
+//! channel) has its own room, and `publish` only ever `try_send`s into
+//! it. When the sink is full, the subscriber's **pump** takes over: one
+//! background task ([`crate::platform::spawn`]) that awaits room for the
+//! refused event, then drains the rest of the mailbox, so the backlog
+//! moves on without waiting for the next publish. Publishes made while it
+//! runs queue behind it, which keeps the order. The pump runs on the
+//! publishing thread's tokio runtime, or, from a thread without one,
+//! on the runtime the subscriber attached on. Without the `platform`
+//! feature (which `local` and `server-axum` pull), or for a subscriber
+//! attached outside any runtime, the backlog waits for the next publish.
+//!
 //! ## Snapshot-then-changes (`SubscriptionRef` semantics)
 //!
 //! effect's `SubscriptionRef.changes` atomically reads the current value
@@ -53,6 +67,10 @@
 
 use crate::lock::lock;
 use std::collections::VecDeque;
+#[cfg(feature = "platform")]
+use std::future::Future;
+#[cfg(feature = "platform")]
+use std::sync::Weak;
 use std::sync::{Arc, Mutex};
 
 /// What a bounded mailbox does when it's full.
@@ -145,13 +163,21 @@ impl<T> EventSink<T> {
 }
 
 struct Subscriber<T> {
-    sink: EventSink<T>,
+    /// Shared with the subscriber's pump while one runs.
+    sink: Arc<EventSink<T>>,
     mailbox: VecDeque<T>,
     /// Buffered-attach parking: while `true`, the mailbox collects but
     /// nothing is sent (the snapshot hasn't been prepended yet).
     parked: bool,
+    /// A pump holds the event the sink refused and is waiting for room;
+    /// publishes only queue until it finishes, so nothing overtakes it.
+    pumping: bool,
     /// Set when the sink reports closed; pruned on the next sweep.
     dead: bool,
+    /// The runtime the subscriber attached on, for arming its pump from
+    /// a thread that has none (a host's main-thread poller).
+    #[cfg(all(feature = "platform", not(target_arch = "wasm32")))]
+    runtime: Option<tokio::runtime::Handle>,
     id: u64,
 }
 
@@ -235,7 +261,7 @@ impl<T> PubSub<T> {
     #[must_use]
     pub fn subscribe(&self, capacity: usize) -> async_channel::Receiver<T>
     where
-        T: Clone + facet::Facet<'static>,
+        T: Clone + facet::Facet<'static> + Send + Sync + 'static,
     {
         let (sink, rx) = EventSink::local(capacity);
         self.attach(sink);
@@ -251,7 +277,7 @@ impl<T> PubSub<T> {
 
 impl<T> PubSub<T>
 where
-    T: Clone + facet::Facet<'static>,
+    T: Clone + facet::Facet<'static> + Send + Sync + 'static,
 {
     /// Attach a subscriber: replay window first, then every subsequent
     /// publish. For snapshot-then-changes semantics use
@@ -276,10 +302,13 @@ where
         inner.next_id = inner.next_id.saturating_add(1);
         let mailbox = inner.replay.iter().cloned().collect();
         inner.subscribers.push(Subscriber {
-            sink,
+            sink: Arc::new(sink),
             mailbox,
             parked: true,
+            pumping: false,
             dead: false,
+            #[cfg(all(feature = "platform", not(target_arch = "wasm32")))]
+            runtime: tokio::runtime::Handle::try_current().ok(),
             id,
         });
         PendingAttach(id)
@@ -298,7 +327,7 @@ where
                 sub.mailbox.push_front(intro);
             }
             sub.parked = false;
-            Self::drain_one(sub);
+            self.deliver(sub);
         }
         inner.subscribers.retain(|s| !s.dead);
     }
@@ -314,7 +343,7 @@ where
                 sub.mailbox.push_front(intro);
             }
             sub.parked = false;
-            Self::drain_one(sub);
+            self.deliver(sub);
         }
         inner.subscribers.retain(|s| !s.dead);
     }
@@ -365,30 +394,224 @@ where
                 }
                 Strategy::Unbounded => sub.mailbox.push_back(event.clone()),
             }
-            if !sub.parked {
-                Self::drain_one(sub);
-            }
+            self.deliver(sub);
         }
         inner.subscribers.retain(|s| !s.dead);
         inner.subscribers.len()
     }
 
-    /// Push as much of one subscriber's backlog as the wire will take
-    /// right now. `Full` keeps the rest queued for the next drain; a
-    /// closed sink marks the subscriber dead.
-    fn drain_one(sub: &mut Subscriber<T>) {
-        while let Some(event) = sub.mailbox.pop_front() {
-            match sub.sink.try_send(event) {
-                Ok(()) => {}
-                Err(vox::TrySendError::Full(event)) => {
-                    sub.mailbox.push_front(event);
-                    break;
-                }
-                Err(vox::TrySendError::Closed(_)) => {
-                    sub.dead = true;
-                    break;
-                }
+    /// Hand one open subscriber's backlog to its sink. What the sink
+    /// won't take right now goes to the subscriber's pump. Does nothing
+    /// while the subscriber is parked or a pump already runs.
+    // `self` is only read to arm a pump, which takes `platform`.
+    #[cfg_attr(not(feature = "platform"), allow(clippy::unused_self))]
+    fn deliver(&self, sub: &mut Subscriber<T>) {
+        if sub.parked || sub.pumping || sub.dead {
+            return;
+        }
+        let Some(refused) = drain_ready(sub) else {
+            return;
+        };
+        #[cfg(feature = "platform")]
+        if let Some(runtime) = PumpRuntime::find(sub) {
+            sub.pumping = true;
+            runtime.spawn(Self::pump(
+                Arc::downgrade(&self.inner),
+                sub.id,
+                Arc::clone(&sub.sink),
+                refused,
+            ));
+            return;
+        }
+        // Nothing to run a pump on: the event waits for the next drain.
+        sub.mailbox.push_front(refused);
+    }
+
+    /// A subscriber's pump: wait for room for `event`, then drain the
+    /// mailbox again, until the sink takes everything without waiting,
+    /// the sink closes, or the hub (or the subscriber) is gone.
+    #[cfg(feature = "platform")]
+    async fn pump(hub: Weak<Mutex<Inner<T>>>, id: u64, sink: Arc<EventSink<T>>, event: T) {
+        let mut event = event;
+        loop {
+            let sent = sink.send(event).await;
+            match Self::after_pumped(&hub, id, sent) {
+                Some(refused) => event = refused,
+                None => return,
             }
         }
+    }
+
+    /// The pump's step after a send: the next event the sink refused, or
+    /// `None` when the pump is done (its `pumping` flag cleared).
+    #[cfg(feature = "platform")]
+    fn after_pumped(
+        hub: &Weak<Mutex<Inner<T>>>,
+        id: u64,
+        sent: Result<(), SinkClosed>,
+    ) -> Option<T> {
+        let hub = hub.upgrade()?;
+        let mut inner = lock(&hub);
+        let sub = inner.subscribers.iter_mut().find(|s| s.id == id)?;
+        let refused = if sent.is_ok() {
+            drain_ready(sub)
+        } else {
+            sub.dead = true;
+            None
+        };
+        if refused.is_none() {
+            sub.pumping = false;
+            inner.subscribers.retain(|s| !s.dead);
+        }
+        refused
+    }
+}
+
+/// Push as much of one subscriber's backlog as the sink will take right
+/// now. Returns the event a full sink refused (taken off the mailbox);
+/// a closed sink marks the subscriber dead.
+fn drain_ready<T>(sub: &mut Subscriber<T>) -> Option<T>
+where
+    T: facet::Facet<'static>,
+{
+    while let Some(event) = sub.mailbox.pop_front() {
+        match sub.sink.try_send(event) {
+            Ok(()) => {}
+            Err(vox::TrySendError::Full(event)) => return Some(event),
+            Err(vox::TrySendError::Closed(_)) => {
+                sub.dead = true;
+                return None;
+            }
+        }
+    }
+    None
+}
+
+/// Where a subscriber's pump runs: the publishing thread's tokio runtime,
+/// else the one the subscriber attached on. On wasm, the browser's
+/// executor, which is always there.
+#[cfg(feature = "platform")]
+struct PumpRuntime {
+    #[cfg(not(target_arch = "wasm32"))]
+    handle: tokio::runtime::Handle,
+}
+
+#[cfg(feature = "platform")]
+impl PumpRuntime {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn find<T>(sub: &Subscriber<T>) -> Option<Self> {
+        let handle = tokio::runtime::Handle::try_current()
+            .ok()
+            .or_else(|| sub.runtime.clone())?;
+        Some(Self { handle })
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[allow(clippy::unnecessary_wraps)]
+    const fn find<T>(_sub: &Subscriber<T>) -> Option<Self> {
+        Some(Self {})
+    }
+
+    /// Run `pump` in the background, detached: it ends on its own (the
+    /// sink took everything, the sink closed, or the hub is gone).
+    fn spawn<F>(self, pump: F)
+    where
+        F: Future<Output = ()> + crate::platform::MaybeSend + 'static,
+    {
+        #[cfg(not(target_arch = "wasm32"))]
+        let _entered = self.handle.enter();
+        drop(crate::platform::spawn(pump));
+    }
+}
+
+#[cfg(all(test, feature = "platform"))]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    const PATIENCE: Duration = Duration::from_secs(5);
+
+    async fn next(rx: &async_channel::Receiver<String>) -> String {
+        crate::platform::timeout(PATIENCE, rx.recv())
+            .await
+            .expect("an event in time")
+            .expect("the hub still holds the sink")
+    }
+
+    #[tokio::test]
+    async fn an_event_that_meets_a_full_sink_arrives_without_another_publish() {
+        let hub = PubSub::<String>::unbounded();
+        let rx = hub.subscribe(1);
+        hub.publish("first".into()); // fills the sink
+        hub.publish("second".into()); // meets it full
+
+        assert_eq!(next(&rx).await, "first"); // room again; no publish follows
+        assert_eq!(next(&rx).await, "second");
+    }
+
+    #[tokio::test]
+    async fn publishes_behind_a_pump_keep_their_order() {
+        let hub = PubSub::<String>::unbounded();
+        let rx = hub.subscribe(1);
+        for n in 0..20 {
+            hub.publish(n.to_string());
+        }
+        for n in 0..20 {
+            assert_eq!(next(&rx).await, n.to_string());
+        }
+    }
+
+    #[tokio::test]
+    async fn a_sink_that_closes_under_its_pump_is_pruned() {
+        let hub = PubSub::<String>::unbounded();
+        let rx = hub.subscribe(1);
+        hub.publish("first".into());
+        hub.publish("second".into());
+        drop(rx);
+
+        crate::platform::timeout(PATIENCE, async {
+            while hub.subscriber_count() > 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the pump prunes a closed sink");
+    }
+
+    #[test]
+    fn a_thread_without_a_runtime_publishes_through_the_attached_runtime() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_time()
+            .build()
+            .unwrap();
+        let hub = PubSub::<String>::unbounded();
+        let rx = runtime.block_on(async { hub.subscribe(1) });
+
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                hub.publish("first".into());
+                hub.publish("second".into());
+            });
+        });
+
+        runtime.block_on(async {
+            assert_eq!(next(&rx).await, "first");
+            assert_eq!(next(&rx).await, "second");
+        });
+    }
+
+    #[test]
+    fn without_any_runtime_a_full_sink_waits_for_the_next_publish() {
+        let hub = PubSub::<String>::unbounded();
+        let rx = hub.subscribe(1);
+        hub.publish("first".into());
+        hub.publish("second".into()); // no runtime: stays queued, no panic
+
+        assert_eq!(rx.try_recv().unwrap(), "first");
+        assert!(rx.try_recv().is_err());
+        hub.publish("third".into());
+        assert_eq!(rx.try_recv().unwrap(), "second");
     }
 }
