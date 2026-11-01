@@ -99,6 +99,10 @@ layer = "L0"
 package = "architect-settings"
 layer = "L0"
 
+[[row]]
+package = "architect-orgs"
+layer = "L0"
+
 # ── L4 ui ─────────────────────────────────────────────────────────────────
 [[row]]
 package = "crdt"
@@ -135,6 +139,11 @@ layer = "L4"
 
 [[row]]
 package = "architect-settings"
+features = ["ui"]
+layer = "L4"
+
+[[row]]
+package = "architect-orgs"
 features = ["ui"]
 layer = "L4"
 

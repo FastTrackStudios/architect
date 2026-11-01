@@ -1,0 +1,31 @@
+[package]
+name = "architect-orgs"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "The organization as everything's scope: a person's orgs from the identity server, the current one per window, roles and the app's capabilities, the shell's switcher"
+
+# docs/content/architecture/organizations.md. The default set is the model
+# — the orgs, the selection (one, or All), roles, the app's capabilities by
+# role, a JSON cache for offline — pure data, wasm-clean. `auth` reads the
+# identity server's answer (auth-proto's OrganizationBundle); `ui` is the
+# hook and the shell's switcher.
+
+[features]
+default = []
+auth = ["dep:auth-proto"]
+ui = ["dep:dioxus", "dep:architect-shell", "architect-shell/ui"]
+
+[dependencies]
+facet = { workspace = true }
+facet-json = { version = "0.50.0-rc.5" }
+auth-proto = { workspace = true, optional = true }
+dioxus = { workspace = true, optional = true }
+architect-shell = { workspace = true, optional = true }
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
