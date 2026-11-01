@@ -1,0 +1,27 @@
+[package]
+name = "example-extension-counter"
+description = "The extension example's process extension: a Dioxus view drawn by a process of its own, shown in the host's pane over vox (examples/extension)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+architect-extensions = { workspace = true, features = ["guest"] }
+dioxus = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# tests/survives_kill.rs: the example's host (its library) loading this
+# program, and a headless Blitz document mounting its view as a pane does.
+example-extension-host = { path = "../host" }
+architect = { workspace = true, features = ["action-list"] }
+architect-extensions = { workspace = true, features = ["remote"] }
+blitz-dom = { workspace = true }
+blitz-traits = { workspace = true }
+dioxus-native-dom = { workspace = true }
+futures = "0.3"
+tempfile = "3"
+
+[lints]
+workspace = true

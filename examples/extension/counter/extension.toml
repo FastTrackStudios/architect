@@ -1,0 +1,28 @@
+# A process extension: a program of its own, which the host starts, speaks
+# to over vox on a local socket, and supervises. Its views are Dioxus
+# components rendered in its process and drawn in the host's panes; when
+# it dies the host runs on, the pane says why, and it is started again.
+id = "example.counter"
+name = "Counter"
+version = "0.1.0"
+kind = "process"
+api = "0.1"
+description = "A counter drawn by another process: click it, kill it, watch it come back."
+authors = ["You"]
+
+# The program, in the package's folder (src/main.rs, built by cargo).
+[entry]
+path = "example-extension-counter"
+
+# Each action and view it declares here, it must serve: the host asks it
+# at start (its hello) and refuses one that lacks any.
+[[actions]]
+id = "EXAMPLE_COUNTER_CLICKS"
+name = "Counter: clicks"
+description = "How many times its button was pressed since it started."
+effect = "read_only"
+
+[[views]]
+id = "counter"
+title = "Counter"
+icon = "mouse-pointer-click"
