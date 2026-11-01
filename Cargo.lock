@@ -622,6 +622,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-files"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-files",
+ "architect-orgs",
+ "architect-permissions",
+ "facet",
+ "facet-json",
+ "futures-util",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "uuid",
+ "vox",
+]
+
+[[package]]
 name = "architect-form"
 version = "0.1.0"
 dependencies = [
@@ -725,11 +744,20 @@ dependencies = [
 name = "architect-orgs"
 version = "0.1.0"
 dependencies = [
+ "architect",
+ "architect-atom",
+ "architect-commands",
+ "architect-permissions",
  "architect-shell",
+ "auth-client",
  "auth-proto",
  "dioxus",
  "facet",
  "facet-json",
+ "futures-util",
+ "tokio",
+ "uuid",
+ "vox",
 ]
 
 [[package]]
@@ -1362,8 +1390,10 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "architect-auth",
+ "architect-orgs",
  "architect-telemetry",
  "async-trait",
+ "auth-client",
  "auth-proto",
  "auth-ui",
  "axum",
@@ -2603,19 +2633,24 @@ name = "crdt"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "architect-orgs",
  "architect-permissions",
  "async-trait",
  "auth-proto",
+ "axum",
  "chrono",
+ "crc32fast",
  "crdt",
  "crdt-derive",
  "facet",
+ "futures",
  "idb",
  "iroh",
  "js-sys",
  "loro",
  "loro-internal",
  "proptest",
+ "sha2 0.10.9",
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
@@ -2623,6 +2658,7 @@ dependencies = [
  "turso",
  "uuid",
  "vox",
+ "vox-types",
  "wasm-bindgen",
  "wasm-bindgen-futures",
 ]
