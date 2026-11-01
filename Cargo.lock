@@ -581,6 +581,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-canvas"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-canvas",
+ "architect-extensions",
+ "architect-scripting",
+ "architect-shell",
+ "architect-workspace",
+ "dioxus",
+ "facet",
+ "futures",
+ "serde_json",
+]
+
+[[package]]
 name = "architect-commands"
 version = "0.1.0"
 dependencies = [
@@ -663,9 +679,11 @@ name = "architect-lab-ui"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "architect-canvas",
  "architect-commands",
  "architect-extensions",
  "architect-orgs",
+ "architect-scripting",
  "architect-settings",
  "architect-shell",
  "architect-workspace",
@@ -673,6 +691,7 @@ dependencies = [
  "dioxus-native",
  "futures-timer",
  "lucide-dioxus",
+ "serde_json",
 ]
 
 [[package]]
