@@ -111,6 +111,11 @@ layer = "L0"
 package = "architect-extensions"
 layer = "L0"
 
+[[row]]
+package = "architect-extensions"
+features = ["vox"]
+layer = "L0"
+
 # ── L4 ui ─────────────────────────────────────────────────────────────────
 [[row]]
 package = "crdt"
@@ -158,6 +163,11 @@ layer = "L4"
 [[row]]
 package = "architect-extensions"
 features = ["ui"]
+layer = "L4"
+
+[[row]]
+package = "architect-extensions"
+features = ["remote"]
 layer = "L4"
 
 [[row]]
@@ -251,6 +261,18 @@ package = "architect-extensions"
 features = ["host", "crdt"]
 layer = "L1"
 note = "the extensions host: Luau through architect-scripting, git through the `git` program; not wasm yet"
+
+[[row]]
+package = "architect-extensions"
+features = ["process"]
+layer = "L1"
+note = "process extensions: child processes over vox on a local socket, supervised; desk only"
+
+[[row]]
+package = "architect-extensions"
+features = ["guest"]
+layer = "L1"
+note = "a process extension's own side: its Dioxus views as an edit stream, served over vox; desk only"
 
 [[row]]
 package = "architect-mcp"

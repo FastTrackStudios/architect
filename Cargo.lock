@@ -624,17 +624,26 @@ dependencies = [
  "architect-orgs",
  "architect-scripting",
  "architect-settings",
+ "blitz-dom",
+ "blitz-traits",
  "crdt",
  "dioxus",
+ "dioxus-native-dom",
  "facet",
  "futures",
+ "futures-timer",
  "roxmltree 0.21.1",
  "semver",
  "serde",
  "serde_json",
  "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
  "toml 0.8.2",
  "tracing",
+ "vox",
+ "vox-core",
+ "vox-stream",
 ]
 
 [[package]]
@@ -656,6 +665,15 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.20",
  "tokio",
+]
+
+[[package]]
+name = "architect-lab-clicker"
+version = "0.1.0"
+dependencies = [
+ "architect-extensions",
+ "dioxus",
+ "serde_json",
 ]
 
 [[package]]
@@ -8770,6 +8788,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "passfd"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b332c50e4d07c0011fff51ea305374408319908908bc1dbed7a0ffaaf63a8151"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "password-hash"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13727,6 +13754,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "vox-fdpass"
+version = "0.10.0-rc.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce6eb21badfbbcf44ab74a3b4a2b144e486c018645f1a509546513a17e91dc88"
+dependencies = [
+ "libc",
+ "passfd",
+ "tokio",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "vox-macros-core"
 version = "0.10.0-rc.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13804,6 +13843,21 @@ checksum = "9c3f3346f2d8e55ba959d07aead491df684c371ffbfd6dbdca8deb6c7169226a"
 dependencies = [
  "proc-macro2",
  "vox-macros-core",
+]
+
+[[package]]
+name = "vox-stream"
+version = "0.10.0-rc.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aabbe11ccf9c82034da842d7f8d8a739f603e61218d6108a4cfd37c43e8ee892"
+dependencies = [
+ "libc",
+ "tokio",
+ "tracing",
+ "vox-core",
+ "vox-fdpass",
+ "vox-rt",
+ "vox-types",
 ]
 
 [[package]]
