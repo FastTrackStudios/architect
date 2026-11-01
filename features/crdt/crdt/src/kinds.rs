@@ -26,7 +26,7 @@ impl std::fmt::Debug for Migration {
         f.debug_struct("Migration")
             .field("from", &self.from)
             .field("name", &self.name)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
