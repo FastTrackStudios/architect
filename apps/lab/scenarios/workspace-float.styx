@@ -1,0 +1,92 @@
+// A tab floated over the window, then dragged back into a group by its
+// tab.
+id workspace-float
+title "Float a pane"
+view {width 1440, height 860}
+capture {fps 20, width 960}
+steps (
+    {
+        id vault
+        do @run{id LAB_GO_VAULT}
+        done {on (@changed"lab"), check ({id LAB_STATE, has {tab vault}})}
+        hide true
+    }
+    // The Clicker pane is a process extension's view: headless its
+    // program is not running, so it goes before the take.
+    {
+        id pick-clicker
+        target @tab"clicker"
+        do @click{}
+        done {check ({id WORKSPACE_LAYOUT, has {active clicker}})}
+        hide true
+    }
+    {
+        id close-clicker
+        do @run{id WORKSPACE_CLOSE_TAB}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {windows ({docked ({tabs (files search)} {tabs (outline backlinks)})})}})
+        }
+        hide true
+    }
+    // The arrangement's script floats a tool window whenever it shows;
+    // out of the way here.
+    {
+        id pick-arrange
+        target @tab"arrange"
+        do @click{}
+        hide true
+    }
+    {
+        id close-arrange
+        target @css"[aria-label=\"Close Arrangement\"]"
+        do @click{}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {windows ({groups ({tabs (note-welcome note-shell)} {tabs (graph)})})}})
+        }
+        hide true
+    }
+    {
+        id close-tool-window
+        target @css"[aria-label=\"Close Marker lane\"]"
+        do @click{}
+        done {on (@changed"workspace")}
+        hide true
+    }
+    {
+        id welcome
+        target @tab"note-welcome"
+        do @click{}
+        done {check ({id WORKSPACE_LAYOUT, has {active note-welcome}})}
+        hide true
+    }
+    {
+        id pick
+        target @tab"note-shell"
+        do @click{}
+        done {check ({id WORKSPACE_LAYOUT, has {active note-shell}})}
+        hide true
+    }
+    {
+        id float
+        text "Float a tab (its menu, or Panes › Float tab): it leaves its group and floats over the window."
+        do @run{id WORKSPACE_FLOAT_TAB}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {windows ({groups ({tabs (note-welcome)} {tabs (graph)})})}})
+        }
+        hold 1.0
+    }
+    {
+        id back
+        text "Drag it by its tab into a group: it is one of its tabs again."
+        target @tab"note-shell"
+        do @drag{to @pane"graph", seconds 1.4}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {windows ({groups ({tabs (note-welcome)} {tabs (graph note-shell)})})}})
+        }
+        hold 1.0
+    }
+)

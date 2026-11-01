@@ -1,0 +1,70 @@
+// The left dock and its ribbon (the shell's left column on a desk): a
+// command pinned to the ribbon run, a view shown in the dock, the dock
+// folded and opened again.
+id workspace-docks-ribbon
+title "Docks and the ribbon"
+view {width 1440, height 860}
+capture {fps 20, width 960}
+steps (
+    {
+        id vault
+        do @run{id LAB_GO_VAULT}
+        done {on (@changed"lab"), check ({id LAB_STATE, has {tab vault}})}
+        hide true
+    }
+    // The Clicker pane is a process extension's view: headless its
+    // program is not running, so it goes before the take.
+    {
+        id pick-clicker
+        target @tab"clicker"
+        do @click{}
+        done {check ({id WORKSPACE_LAYOUT, has {active clicker}})}
+        hide true
+    }
+    {
+        id close-clicker
+        do @run{id WORKSPACE_CLOSE_TAB}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {windows ({docked ({tabs (files search)} {tabs (outline backlinks)})})}})
+        }
+        hide true
+    }
+    {
+        id welcome
+        target @tab"note-welcome"
+        do @click{}
+        done {check ({id WORKSPACE_LAYOUT, has {active note-welcome}})}
+        hide true
+    }
+    {
+        id command
+        text "A command pinned to the ribbon runs from it: a new note."
+        target @css"button[aria-label=\"New note\"]"
+        do @click{}
+        done {on (@changed"workspace"), check ({id WORKSPACE_LAYOUT, has {active note-new-1}})}
+        hold 1.0
+    }
+    {
+        id search
+        text "The left dock's views: Search."
+        target @tab"search"
+        do @click{}
+        done {check ({id WORKSPACE_LAYOUT, has {windows ({docked ({current search} {current backlinks})})}})}
+        hold 0.8
+    }
+    {
+        id fold
+        text "Fold the dock away for room."
+        target @css"[aria-label=\"Toggle the sidebar\"]"
+        do @click{}
+        hold 0.8
+    }
+    {
+        id files
+        text "Show it again: as it was."
+        target @css"[aria-label=\"Toggle the sidebar\"]"
+        do @click{}
+        hold 0.8
+    }
+)

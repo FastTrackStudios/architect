@@ -1,0 +1,33 @@
+// A viewer in Harbor & Pine: in ⌘K, Invite people is dimmed, with why.
+id action-disabled-by-role
+title "An action the role does not allow"
+view {width 1280, height 800}
+capture {fps 20, width 960}
+steps (
+    {
+        id open
+        target @css"[aria-label=\"Switch Organization\"]"
+        do @click{}
+        hide true
+    }
+    {
+        id viewer
+        target @text"Harbor & Pine"
+        do @click{}
+        hide true
+    }
+    {
+        id palette
+        text "In an org where you are a viewer, ⌘K still lists Invite people,"
+        do @run{id LAB_SHOW_COMMANDS}
+        done {on (@changed"commands"), check ({id COMMANDS_STATE, has {overlay palette}})}
+        hold 0.4
+    }
+    {
+        id find
+        text "dimmed, saying why it cannot run."
+        do @type{text "invite"}
+        done {check ({id COMMANDS_STATE, has {query invite}})}
+        hold 1.6
+    }
+)

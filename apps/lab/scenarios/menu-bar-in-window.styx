@@ -1,0 +1,68 @@
+// The in-window menu bar (where the platform has no global one): View
+// with its ticked toggle, its sections and their keys; Go with its live
+// section (the tab on show ticked), and an item run from it.
+id menu-bar-in-window
+title "The in-window menu bar"
+view {width 1280, height 800}
+capture {fps 20, width 960}
+steps (
+    {
+        id vault
+        do @run{id LAB_GO_VAULT}
+        done {on (@changed"lab"), check ({id LAB_STATE, has {tab vault}})}
+        hide true
+    }
+    // The Clicker pane is a process extension's view: headless its
+    // program is not running, so it goes before the take.
+    {
+        id pick-clicker
+        target @tab"clicker"
+        do @click{}
+        done {check ({id WORKSPACE_LAYOUT, has {active clicker}})}
+        hide true
+    }
+    {
+        id close-clicker
+        do @run{id WORKSPACE_CLOSE_TAB}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {windows ({docked ({tabs (files search)} {tabs (outline backlinks)})})}})
+        }
+        hide true
+    }
+    {
+        id welcome
+        target @tab"note-welcome"
+        do @click{}
+        done {check ({id WORKSPACE_LAYOUT, has {active note-welcome}})}
+        hide true
+    }
+    {
+        id view
+        text "The app's menu bar, in the window: View, a toggle ticked, each command's keys beside it."
+        target @text"View"
+        do @click{}
+        hold 1.6
+    }
+    {
+        id shut
+        target @text"View"
+        do @click{}
+        hide true
+    }
+    {
+        id go
+        text "Go: a live section, the tab on show ticked."
+        target @text"Go"
+        do @click{}
+        hold 1.2
+    }
+    {
+        id run
+        text "Pick an item: it runs, as its key or ⌘K would."
+        target @text"Go to Schedule"
+        do @click{}
+        done {on (@changed"lab"), check ({id LAB_STATE, has {tab schedule}})}
+        hold 1.0
+    }
+)

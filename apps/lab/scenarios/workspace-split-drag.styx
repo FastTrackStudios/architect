@@ -1,0 +1,83 @@
+// A tab dragged to a group's right edge splits the group; the divider
+// between the two is then pulled.
+id workspace-split-drag
+title "Split by dragging a tab to an edge"
+view {width 1440, height 860}
+capture {fps 20, width 960}
+steps (
+    {
+        id vault
+        do @run{id LAB_GO_VAULT}
+        done {on (@changed"lab"), check ({id LAB_STATE, has {tab vault}})}
+        hide true
+    }
+    // The Clicker pane is a process extension's view: headless its
+    // program is not running, so it goes before the take.
+    {
+        id pick-clicker
+        target @tab"clicker"
+        do @click{}
+        done {check ({id WORKSPACE_LAYOUT, has {active clicker}})}
+        hide true
+    }
+    {
+        id close-clicker
+        do @run{id WORKSPACE_CLOSE_TAB}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {windows ({docked ({tabs (files search)} {tabs (outline backlinks)})})}})
+        }
+        hide true
+    }
+    // The arrangement's script floats a tool window whenever it shows;
+    // out of the way here.
+    {
+        id pick-arrange
+        target @tab"arrange"
+        do @click{}
+        hide true
+    }
+    {
+        id close-arrange
+        target @css"[aria-label=\"Close Arrangement\"]"
+        do @click{}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {windows ({groups ({tabs (note-welcome note-shell)} {tabs (graph)})})}})
+        }
+        hide true
+    }
+    {
+        id close-tool-window
+        target @css"[aria-label=\"Close Marker lane\"]"
+        do @click{}
+        done {on (@changed"workspace")}
+        hide true
+    }
+    {
+        id welcome
+        target @tab"note-welcome"
+        do @click{}
+        done {check ({id WORKSPACE_LAYOUT, has {active note-welcome}})}
+        hide true
+    }
+    {
+        id split
+        text "Drag a tab to a group's right edge: the group splits, the tab beside it."
+        target @tab"note-shell"
+        do @drag{to @group"note-welcome", edge right, seconds 1.2}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {windows ({groups ({tabs (note-welcome)} {tabs (note-shell)} {tabs (graph)})})}})
+        }
+        hold 0.8
+    }
+    {
+        id pull
+        text "Pull the divider to share the room another way."
+        target @split"note-shell"
+        do @drag{dx 160, seconds 1.0}
+        done {on (@changed"workspace")}
+        hold 1.0
+    }
+)

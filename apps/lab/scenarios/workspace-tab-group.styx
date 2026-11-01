@@ -1,0 +1,97 @@
+// A tab group's bar: + opens a tab, a click switches to another, × closes
+// one.
+id workspace-tab-group
+title "A tab group"
+view {width 1440, height 860}
+capture {fps 20, width 960}
+steps (
+    {
+        id vault
+        do @run{id LAB_GO_VAULT}
+        done {on (@changed"lab"), check ({id LAB_STATE, has {tab vault}})}
+        hide true
+    }
+    // The Clicker pane is a process extension's view: headless its
+    // program is not running, so it goes before the take.
+    {
+        id pick-clicker
+        target @tab"clicker"
+        do @click{}
+        done {check ({id WORKSPACE_LAYOUT, has {active clicker}})}
+        hide true
+    }
+    {
+        id close-clicker
+        do @run{id WORKSPACE_CLOSE_TAB}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {windows ({docked ({tabs (files search)} {tabs (outline backlinks)})})}})
+        }
+        hide true
+    }
+    // The arrangement's script floats a tool window whenever it shows;
+    // out of the way here.
+    {
+        id pick-arrange
+        target @tab"arrange"
+        do @click{}
+        hide true
+    }
+    {
+        id close-arrange
+        target @css"[aria-label=\"Close Arrangement\"]"
+        do @click{}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {windows ({groups ({tabs (note-welcome note-shell)} {tabs (graph)})})}})
+        }
+        hide true
+    }
+    {
+        id close-tool-window
+        target @css"[aria-label=\"Close Marker lane\"]"
+        do @click{}
+        done {on (@changed"workspace")}
+        hide true
+    }
+    {
+        id welcome
+        target @tab"note-welcome"
+        do @click{}
+        done {check ({id WORKSPACE_LAYOUT, has {active note-welcome}})}
+        hide true
+    }
+    {
+        id new
+        text "+ opens a new tab in the group."
+        target @css"[data-group-tabs~=\"note-welcome\"] [aria-label=\"New tab\"]"
+        do @click{}
+        hold 0.8
+    }
+    {
+        id pick
+        text "Pick what it shows."
+        target @text"Untitled"
+        do @click{}
+        done {on (@changed"workspace")}
+        hold 0.6
+    }
+    {
+        id switch
+        text "Click a tab to show it."
+        target @tab"note-shell"
+        do @click{}
+        done {check ({id WORKSPACE_LAYOUT, has {active note-shell}})}
+        hold 0.8
+    }
+    {
+        id close
+        text "× closes it; its neighbour shows."
+        target @css"[aria-label=\"Close The app shell\"]"
+        do @click{}
+        done {
+            on (@changed"workspace")
+        }
+        hold 1.0
+    }
+)

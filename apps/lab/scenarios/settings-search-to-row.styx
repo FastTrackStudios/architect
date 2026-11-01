@@ -1,0 +1,39 @@
+// The settings page's search: "dark mode" finds the Theme row by its
+// alias; picked, its section opens and the row pulses.
+id settings-search-to-row
+title "Find a setting"
+view {width 1440, height 860}
+capture {fps 20, width 960}
+steps (
+    {
+        id open
+        do @run{id APP_SETTINGS}
+        hide true
+    }
+    // Away from the row's own section, so the one "Theme" on show is the
+    // search's hit.
+    {
+        id elsewhere
+        target @text"Workspace"
+        do @click{}
+        hide true
+    }
+    {
+        id search
+        text "Search the settings by what you call it."
+        target @css"[aria-label=\"Search settings\"]"
+        do @click{}
+    }
+    {
+        id type
+        do @type{text "dark mode"}
+        hold 1.0
+    }
+    {
+        id pick
+        text "Pick it: its section opens, the row pulses."
+        target @text"Theme"
+        do @click{}
+        hold 1.4
+    }
+)
