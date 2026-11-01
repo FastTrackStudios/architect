@@ -131,7 +131,7 @@ let _ = ext.sync();              // load the copy of each that runs
 // on a timer: ext.reload_changed()  — hot reload; a failed one keeps its last good copy
 ```
 
-- A package is `extension.toml` + files. Kinds `data` (presets only) and `luau` run built in; `wasm` and `process` need a `host::Runner` the app adds (none ship yet: `LoadError::NoRunner`).
+- A package is `extension.toml` + files. Kinds `data` (presets only) and `luau` run built in; `process` needs the runner the app adds: `features/extensions/src/process.rs` `ProcessRunner` (feature `process`, Unix), `host.with_runner(ProcessRunner::new()?.with_processes(processes))` as `examples/extension/host/src/lib.rs` `extensions` does. No `wasm` runner ships yet; a kind with no runner fails to load with `LoadError::NoRunner`.
 - An extension's actions must start with its id's prefix (`fts.metronome` → `FTS_METRONOME_`), its setting keys with `<id>.`; sections are owned by it and leave with it. A Luau extension runs inside its `[capabilities]` (`actions` prefixes, the most `effect`) through `luau::Runtime::with_gate`; a model's call still runs as the model.
 - Extension actions go on the list with `ActionList::register_forwarded_with` (`crates/architect/src/action_list.rs`): a described action whose handler is handed the caller.
 - A reload is a diff: kept actions keep their ids; on any failure nothing is swapped. Values of its settings survive (keys unchanged).

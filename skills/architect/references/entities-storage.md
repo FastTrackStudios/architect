@@ -101,5 +101,6 @@ Error variant (`#[architect::error]`): `http_status = N`; `code = "…"`; `trans
 - **No relations:** the generated `Relation` enum is empty.
 - **Error envelope:** `ClientError` has `App`, `Connect`, `Transport`; `into_app` folds transport failures into `E: From<TransportError>`. `RepoError` is `#[repr(u8)]`: adding a variant is a wire change.
 - **Config types:** `FromEnvValue` exists for scalars, `bool`, `Option<T>`, `Vec<T>`; other types (`PathBuf`) don't compile. A blank variable counts as unset, so `default` applies. `architect::Config` (derive) and `architect::config` (module) both exist.
-- **Stale doc comments:** `crates/architect/src/resource.rs` names `Resource::memoize`, which does not exist (use `SharedResource::from_fn`); `crates/architect/src/handle.rs` says "facet 0.46" while the workspace pins facet 0.50 rc.
+- **Build once:** there is no `Resource::memoize`; share a step with `SharedResource::from_fn(recipe)` and feed chains from its `.resource()`.
+- **Stale doc comment:** `crates/architect/src/handle.rs` says "facet 0.46" while the workspace pins facet 0.50 rc.
 - **Wasm:** storage, migration and store-http are gated off wasm; platform `sleep` is millisecond-grained there.

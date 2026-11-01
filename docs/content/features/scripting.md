@@ -20,7 +20,7 @@ Use it for a person's macros and conditional actions, and for a model's
 one-off scripts over MCP. Design: [Extensions](@/architecture/extensions.md),
 the sections on actions, the model and scripts.
 
-<!-- example: scripting -->
+Example: `examples/scripting`, a task board scripted from Luau, saved scripts as actions and the board over MCP; walked through in [Script an app, end to end](@/getting-started/scripting.md).
 
 <!-- media: script-saved-in-palette — a saved script "Arm selected" found in ⌘K, run, and taken back with one undo -->
 

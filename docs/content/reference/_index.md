@@ -33,7 +33,7 @@ scaffolds one.
 | `architect` | `http` | The HTTP+JSON face over axum. Off, `architect::http` is an inert facade with the same names, so derive-emitted routers still compile (a wasm client, a proto crate on its own). Implied by `server` and `host`. |
 | `architect` | `http-client` | `architect::http::HttpClient` over reqwest (native + wasm). Off, the generated `<Trait>HttpClient`s exist but answer every call with a `Transport` error. |
 | `architect` | `host` | `architect::host::EngineHost` — `/vox` + `/health` + `/version.json` (`build_info!`) + plugins + optional iroh + SPA bundle from one router. |
-| `architect` | `local` | In-process transport — `architect::{LocalServer, serve_local}` (native). |
+| `architect` | `local` | In-process transport — `architect::{LocalServer, serve_local}` (native and wasm). |
 | `architect` | `platform` | Portable clock/sleep/spawn — `architect::platform` (native tokio ↔ wasm browser timers). |
 | `architect` | `schedule` | Retry/repeat policies — `architect::{Schedule, retry, repeat}` (implies `platform`). |
 | `architect` | `fake` | `#[derive(fake::Dummy)]` on emitted structs for seeding. |
@@ -57,9 +57,9 @@ The runtime DI engine (see [idioms §6–7](@/architecture/idioms.md)):
 | Item | Module | Role |
 |------|--------|------|
 | `Layer` / `Services` / `layers!` / `LayerRouter` | `architect::layer` | compose service tokens, bind a backend → router |
-| `Resource<T, E>` / `Scope` / `SharedResource` | `architect::resource` | lazy backend builders — `and_then` / `zip` / `acquire_release` / `memoize`, LIFO teardown |
+| `Resource<T, E>` / `Scope` / `SharedResource` | `architect::resource` | lazy backend builders — `and_then` / `zip` / `acquire_release`, `SharedResource::from_fn` to build once, LIFO teardown |
 | `LayerGraph` / `LayerNode` / `LayerPlan` | `architect::plan` | declared-graph topological planner + diagnostics |
-| `LocalServer` / `serve_local` | `architect::local` (feature `local`, native) | serve a router in-process over a vox in-memory link |
+| `LocalServer` / `serve_local` | `architect::local` (feature `local`, native and wasm) | serve a router in-process over a vox in-memory link |
 | `Schedule` / `retry` / `repeat` | `architect::schedule` (feature `schedule`) | composable retry/repeat policies — backoff, jitter, caps; see [scheduling](@/architecture/scheduling.md) |
 | `Supervisor` / `Restart` / `Supervised` | `architect::supervisor` (feature `schedule`) | keep a service loop alive — restart-under-policy with `Schedule` backoff, cancellable |
 | `Clock` / `SystemClock` / `TestClock` / `timeout` / `spawn` (`JoinHandle`) / `CancellationToken` / `Deferred` / `Semaphore` / `Queue` | `architect::platform` (feature `platform`) | the portable async-runtime seam — clock, tasks, timeouts, cancellation, concurrency primitives (native↔wasm) |

@@ -21,7 +21,7 @@ developed and restarted apart from the app, but needs real UI. Design:
 on views rendered remotely; the manifest side is
 [Extensions](@/features/extensions.md).
 
-<!-- example: extension -->
+Example: `examples/extension`, a registry with a Luau extension and a process extension loaded by a small host, hot-reloaded on save; walked through in [Write an extension, end to end](@/getting-started/extension.md).
 
 <!-- media: remote-view-clicker — the lab's Clicker in a Vault pane: clicking it, then kill -9 on its process, the placeholder with the reason, Start again and the counter back -->
 

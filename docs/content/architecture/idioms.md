@@ -127,8 +127,8 @@ the `Resource` construction layer. Keep the two straight:
   - `Resource::acquire_release(acquire, release)` — register cleanup on a
     `Scope`; finalizers run **LIFO** on `scope.close().await` (graceful
     shutdown — a server closes its db pool this way on Ctrl-C).
-  - `.memoize()` — build once, share across dependents (a pool built once
-    for several repos).
+  - `SharedResource::from_fn(recipe)` + `.resource()` — build once, share
+    across dependents (a pool built once for several repos).
   - `.into_router(&scope)` — build a `Services` backend and mount it.
 
 - **`LayerGraph` (planner).** Declare nodes' `requires`/`provides`, call

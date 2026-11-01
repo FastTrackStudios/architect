@@ -42,14 +42,26 @@ at the larger code that does the same thing for real
 
 ## Part 2: the app half
 
-These chapters are being written. Their pages will be:
-
-- `ui.md`: the UI shell.
-- `ui-primitives.md`: the UI primitives architect ships (components,
-  the shell's and the workspace's pieces, the command overlays, the
-  settings page).
-- `commands.md`: commands, menus and keys.
-- `settings.md`: settings.
-- `documents.md`: documents, sync and files.
-- `identity.md`: sign-in, accounts and organizations.
-- `extending.md`: scripting and extensions.
+8. [The app shell and the workspace](@/guide/ui.md): mount
+   `architect-shell`, give it tabs, sides and a status line, and hand
+   `architect-workspace` your views for tab groups, splits, docks,
+   pop-out windows and screensets.
+9. [The UI primitives](@/guide/ui-primitives.md): `architect-ui`'s
+   components and theme tokens, the shell's page parts, every kind of
+   tab and pane, the command overlays, the settings page, and
+   `architect-story` to browse them.
+10. [Commands, keys and menus](@/guide/commands.md): the Action List,
+    the ⌘K palette, ⌘O, the action list window and its binding editor,
+    keys through `architect-input`, menus, and MCP.
+11. [Settings](@/guide/settings.md): settings declared once as a typed
+    struct, stored by scope under an org's defaults and locks, and the
+    settings page.
+12. [Documents, sync and files](@/guide/documents.md): CRDT documents,
+    kinds and named undo, the document file, org sync, peer to peer,
+    presence and collaborative text, blobs, and Files.
+13. [Sign-in, permissions and organizations](@/guide/identity.md): the
+    identity server, the session and the device, `PermissionsGate`, and
+    the organization as the scope of everything.
+14. [Scripts, extensions and canvases](@/guide/extending.md): Luau over
+    the Action List, extensions with manifests and hot reload, process
+    extensions with remote views, and canvases over a view.

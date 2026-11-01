@@ -11,7 +11,7 @@ depend on the auth crates directly). The split follows the
 
 | Crate | Role |
 | --- | --- |
-| `auth-proto` | wire types (`AuthUser`, `AuthSession`, `AuthSessionBundle`, payloads, `AuthFlowError`) + the `#[architect::service]` traits `AuthService` and `OrganizationService` — vox and HTTP faces, both clients |
+| `auth-proto` | wire types (`AuthUser`, `AuthSession`, `AuthSessionBundle`, payloads, `AuthFlowError`) + the `#[architect::service]` traits `AuthService`, `OrganizationService` and `DeviceService` — vox and HTTP faces, both clients |
 | `auth` | the engine: `ArchitectAuth<S>` over a pluggable `AuthStorage`, ~30 plugins' worth of flows, the vox + axum transports |
 | `auth-db` | SeaORM storage + migrations |
 | `auth-client` | the client session kit — tiny, **wasm-clean**, no engine dependency |
@@ -19,25 +19,50 @@ depend on the auth crates directly). The split follows the
 
 ## The RPC surface
 
-`AuthService` covers the session lifecycle and `OrganizationService`
-the org one — all-async `#[architect::service]` traits, so each mounts
+`AuthService` covers the session lifecycle and the account,
+`OrganizationService` the org, and `DeviceService` the account's
+devices — all-async `#[architect::service]` traits, so each mounts
 like any other architect service and comes with every face: the vox
 client and dispatcher, the axum router (`POST /auth/<method>`,
-`POST /organization/<method>`), and the HTTP client
-(`AuthServiceHttpClient`, `OrganizationServiceHttpClient`). See
-[the HTTP face](@/architecture/http.md).
+`POST /organization/<method>`, `POST /auth/devices/<method>`), and the
+HTTP client (`AuthServiceHttpClient`, `OrganizationServiceHttpClient`,
+`DeviceServiceHttpClient`). See [the HTTP face](@/architecture/http.md).
+
+`AuthService` has 14 methods (`features/auth/auth-proto/src/service.rs`
+`AuthService`; argument types abbreviated here):
 
 ```rust,ignore
 #[architect::service]
 pub trait AuthService {
+    // Ways in: email and password, and a device with no browser (a CLI)
+    // that its person approves from a signed-in browser.
     async fn sign_up_email_password(&self, input: SignUpEmailPassword) -> Result<AuthSessionBundle, AuthFlowError>;
     async fn sign_in_email_password(&self, input: SignInEmailPassword) -> Result<AuthSessionBundle, AuthFlowError>;
+    async fn start_device_sign_in(&self, client_id: String) -> Result<DeviceSignIn, AuthFlowError>;
+    async fn poll_device_sign_in(&self, device_code: String, user_agent: Option<String>) -> Result<AuthSessionBundle, AuthFlowError>;
+    // The session.
     async fn current_session(&self, token: String) -> Result<AuthSessionBundle, AuthFlowError>;
     async fn refresh_session(&self, token: String) -> Result<AuthSessionBundle, AuthFlowError>;
     async fn whoami(&self, token: String) -> Result<AuthUser, AuthFlowError>;
     async fn sign_out(&self, token: String) -> Result<(), AuthFlowError>;
+    // The org's members, and an operator moving someone's email.
+    async fn list_org_members(&self, token: String) -> Result<Vec<OrgMember>, AuthFlowError>;
+    async fn migrate_user_email(&self, input: MigrateUserEmailRequest) -> Result<AuthUser, AuthFlowError>;
+    async fn list_email_history(&self, input: EmailHistoryRequest) -> Result<Vec<AuthEmailChange>, AuthFlowError>;
+    // Self-service: the session names the account.
+    async fn change_password(&self, input: ChangePasswordRequest) -> Result<(), AuthFlowError>;
+    async fn change_email(&self, input: ChangeEmailRequest) -> Result<AuthUser, AuthFlowError>;
+    async fn update_profile(&self, input: UpdateProfileRequest) -> Result<AuthUser, AuthFlowError>;
 }
 ```
+
+`DeviceService` is the account's device address book, each call scoped
+to the account the token names (`features/auth/auth-proto/src/device.rs`
+`DeviceService`): `register_device` (this install, with its iroh
+endpoint id; returns the `DeviceDirectory`), `list_devices` and
+`forget_device`. `auth_proto::ensure_registered` registers a device
+once for every app on it; the tests are
+`features/auth/tests/native/src/devices_tests.rs`.
 
 The `AuthSessionBundle` a sign-up/sign-in/refresh returns carries the
 raw token (only its hash is stored server-side), the `AuthUser`, and

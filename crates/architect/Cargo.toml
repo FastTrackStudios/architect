@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Facet-native, vox-friendly entity framework. One #[derive(Entity)] → wire types + SeaORM Model + auto-generated repo trait, all in one source struct."
+description = "A Rust framework for local-first, multiplayer, collaborative apps: declare each service and document once, and architect gives you every wire, offline and peer-to-peer sync, and one Action List that keys, menus, scripts, extensions and MCP all run."
 repository.workspace = true
 
 # `architect` is the user-facing crate. It re-exports the derive macro

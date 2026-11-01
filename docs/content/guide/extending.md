@@ -95,7 +95,7 @@ a failure's line (`ScriptError { kind, line, message }`) are in
 function (ReaScript's `reaper.defer`), which the host calls one frame at a
 time (`Runtime::start`, `Live::frame`).
 
-<!-- example: scripting -->
+Example: `examples/scripting`, a task board scripted from Luau, saved scripts as actions and the board over MCP; walked through in [Script an app, end to end](@/getting-started/scripting.md).
 
 ## 2. Extensions: `architect-extensions`
 
@@ -189,7 +189,7 @@ the metronome.
 <!-- media: extension-metronome-load — the metronome switched on: its section on the settings page and its action in ⌘K -->
 <!-- media: extension-hot-reload — the metronome's extension.toml edited and saved while the lab runs, its settings section changing without a restart -->
 
-<!-- example: extension -->
+Example: `examples/extension`, a registry with a Luau extension and a process extension loaded by a small host, hot-reloaded on save; walked through in [Write an extension, end to end](@/getting-started/extension.md).
 
 ### Process extensions and remote views
 

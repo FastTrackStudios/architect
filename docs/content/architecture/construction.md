@@ -41,7 +41,7 @@ a server's shutdown path — share the same one.
 | `.and_then(f)` | **dependent** composition — `f: T -> Resource<U>`, the `config → pool → repo` chain; both steps' finalizers stack on the same scope |
 | `.zip(other)` | **independent** pair — build both, return the tuple |
 | `.map(f)` / `.map_err(f)` | transform the value / the error |
-| `.memoize()` | build **once**, share — see below |
+| `SharedResource::from_fn(f)` / `.resource()` | build **once**, share — see below |
 | `.into_router(&scope)` | terminal step on the server: build a `Services` backend and mount its bundle → `LayerRouter` |
 
 ## The real thing: a server
@@ -97,15 +97,20 @@ chain is identical.
 
 ## Memoization: one pool, many repos
 
-Backends often share a resource. `.memoize()` turns a `Resource<T>`
-into a cloneable `SharedResource<T>`: the first `.build()` (on any
-clone) runs the recipe and caches the value; every later build returns
-the same instance. Failed builds are **not** cached — they can be
-retried. `.resource()` views the shared handle as a fresh `Resource`
-so it feeds further `.map`/`.and_then` chains:
+Backends often share a resource. `SharedResource::from_fn(f)` takes a
+recipe (`f: Fn(Arc<Scope>) -> Future<Output = Result<T, E>>`) and gives
+a cloneable handle: the first `.build(&scope)` (on any clone) runs the
+recipe and caches the value; every later build returns the same
+instance. Failed builds are **not** cached — the next build runs the
+recipe again, which is why it is `Fn` and not `FnOnce`. `.resource()`
+views the shared handle as a fresh `Resource` so it feeds further
+`.map`/`.and_then` chains (`crates/architect/src/resource.rs`
+`SharedResource`):
 
 ```rust,ignore
-let pool = pool_resource().memoize();                  // builds at most once
+let pool = SharedResource::from_fn(|scope| async move {
+    pool_resource().build(&scope).await               // builds at most once
+});
 
 let users  = pool.resource().map(UserRepoStorage::new);
 let orders = pool.resource().map(OrderRepoStorage::new);

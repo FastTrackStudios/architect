@@ -11,9 +11,10 @@
 //! [`vox_core::lane_acceptor_fn`] + `establish_connection()`), but over
 //! [`vox_core::memory_link_pair`] instead of a network socket.
 //!
-//! Native only: vox's `MemoryLink` isn't compiled for wasm, so browser
-//! clients stay remote. Desktop, CLI, tests, and servers can run fully
-//! in-process.
+//! Native and wasm: native uses [`vox_core::memory_link_pair`]; vox's
+//! `MemoryLink` isn't compiled for wasm, so there it uses architect's own
+//! in-memory link (`crate::memory_link`). Browser, desktop, CLI, tests and
+//! servers can all run a backend in-process.
 //!
 //! ```ignore
 //! let scope = Scope::new();

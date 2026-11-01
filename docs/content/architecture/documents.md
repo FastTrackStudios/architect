@@ -81,18 +81,31 @@ frame scenes), the engine's bridge, and REAPER and DAWproject interop.
 
 ### A document kind
 
-<!-- doc-check: off (proposed names) -->
-```rust
-Documents::register(
-    DocKind::new("studio.song")
-        .schema::<SongDoc>()                 // its typed shape (the derive emits the Loro codec)
-        .migrations(SONG_MIGRATIONS)         // schema stamp → the next
-        .file("session", "Song")             // its file extension and default name
-        .blobs(|doc| doc.audio_refs())       // which blobs it points at (they travel with it)
-        .undo(Undo::named(200)),             // named steps, kept on disk
+A kind is a value an app registers with its `DocKinds`
+(`features/crdt/crdt/src/kinds.rs` `DocKind`); the extension, the
+schema and the blobs are each optional:
+
+```rust,ignore
+use crdt::{DocKind, DocKinds, Migration};
+
+let mut kinds = DocKinds::new();
+kinds.register(
+    DocKind::new("studio.song", "Song")      // its id and its name
+        .extension("session")               // the file extension, without the dot
+        .schema(3, vec![                     // the stamp this build writes, and how to come up to it
+            Migration { from: 1, name: "add a title", run: add_title },
+            Migration { from: 2, name: "tempo", run: rename_bpm },
+        ])
+        .blobs(song_audio),                  // fn(&LoroDoc) -> Vec<String>: the sha256s it points at
 );
 ```
-<!-- doc-check: on -->
+
+`DocKind::stamp` marks a new document as its kind and stamp;
+`DocKind::upgrade` runs the migrations from the stamp a document is at.
+Named undo is not part of the kind: every change goes through a
+`History` (`features/crdt/crdt/src/history.rs` `History`). The tests
+are `features/crdt/crdt/tests/history.rs` and
+`features/crdt/crdt/tests/blobs.rs`.
 
 ### The file
 
