@@ -25,6 +25,8 @@ members = [
     # ── the reference example ─────────────────────────────────────────
     "examples/greeter",
     "examples/scripting",
+    "examples/extension/host",
+    "examples/extension/counter",
     # ── apps ──────────────────────────────────────────────────────────
     "apps/auth-server",
     "apps/mock-oauth",

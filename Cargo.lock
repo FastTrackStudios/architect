@@ -4231,6 +4231,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-extension-counter"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-extensions",
+ "blitz-dom",
+ "blitz-traits",
+ "dioxus",
+ "dioxus-native-dom",
+ "example-extension-host",
+ "futures",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "example-extension-host"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-canvas",
+ "architect-extensions",
+ "architect-scripting",
+ "architect-settings",
+ "dioxus",
+ "dioxus-native",
+ "futures",
+ "futures-timer",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "example-greeter"
 version = "0.1.0"
 dependencies = [

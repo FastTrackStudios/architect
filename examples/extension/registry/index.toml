@@ -1,0 +1,14 @@
+# The example's registry: a folder with an index. A registry is this,
+# whether it is a folder (FolderRegistry) or a git repository of one
+# (GitRegistry): `name`, and an `[[extensions]]` listing per package,
+# `path` being the package's folder under this one
+# (features/extensions/src/index.rs).
+name = "Example registry"
+
+[[extensions]]
+id = "example.hello"
+name = "Hello"
+version = "0.1.0"
+kind = "luau"
+description = "Greets you, has two settings, and draws a ruler over the timeline with a tool window."
+path = "hello"

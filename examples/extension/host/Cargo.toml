@@ -1,0 +1,33 @@
+[package]
+name = "example-extension-host"
+description = "The extension example's host: a small app that installs extensions from a registry folder, hot-reloads them, draws their overlays and mounts a process extension's view (examples/extension)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+architect = { workspace = true, features = ["action-list"] }
+# `host`: loading, installing, reloading; `process`: process extensions;
+# `remote`: their views in a pane (implies `ui`, settings sections on the
+# settings page).
+architect-extensions = { workspace = true, features = ["host", "process", "remote"] }
+# Overlays: `luau` runs their scripts, `ui` draws them on Blitz.
+architect-canvas = { workspace = true, features = ["luau", "ui"] }
+architect-scripting = { workspace = true, features = ["luau"] }
+architect-settings = { workspace = true, features = ["ui"] }
+dioxus = { workspace = true }
+dioxus-native = { workspace = true }
+futures-timer = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+futures = "0.3"
+tempfile = "3"
+
+[[bin]]
+name = "example-extension-host"
+path = "src/main.rs"
+
+[lints]
+workspace = true

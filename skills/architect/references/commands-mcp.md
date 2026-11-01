@@ -138,6 +138,7 @@ let _ = ext.sync();              // load the copy of each that runs
 - Which copy runs (`catalog::choose`): a dev copy, else an installed one newer than the built-in, else the built-in. `disable(id)` keeps it off whatever copies exist.
 - A project's needs: `Requirements` in its document's `meta` (`doc::requirements`, feature `crdt`); `Extensions::open` makes a `Plan` (install / offer / missing, with an org `Policy`), `accept` installs and loads it.
 - Registry installs are copies; a folder registry's are links (an edit there reloads). `GitRegistry` shells out to `git`; `ReaPackSource` fetches through the app's `Fetch` (`LocalFetch` does `file://` only).
+- Recipe, a whole host to copy: `examples/extension` — a registry folder with a Luau extension (actions, settings, an `[[overlays]]` ruler with an ImGui tool window), a process extension (`examples/extension/counter/src/main.rs`), and the host (`examples/extension/host/src/lib.rs` `extensions`, `overlays`); walked through in `docs/content/getting-started/extension.md`.
 
 ## Pitfalls
 

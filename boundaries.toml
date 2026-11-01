@@ -314,5 +314,15 @@ layer = "L1"
 note = "a process extension's own side: its Dioxus views as an edit stream, served over vox; desk only"
 
 [[row]]
+package = "example-extension-host"
+layer = "L3"
+note = "examples/extension: a host app over architect-extensions (host, process, remote) and architect-canvas; desk only"
+
+[[row]]
+package = "example-extension-counter"
+layer = "L1"
+note = "examples/extension: a process extension's program (architect-extensions guest); desk only"
+
+[[row]]
 package = "architect-mcp"
 layer = "L3"
