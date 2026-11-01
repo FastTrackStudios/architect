@@ -14,6 +14,7 @@ mod screen;
 mod settings;
 mod vault;
 
+use architect_orgs::{Capabilities, Org, Orgs, Role};
 use architect_shell::icon;
 use architect_shell::{self as shell, AppShell, ShellStyle};
 use dioxus::prelude::*;
@@ -225,7 +226,6 @@ pub fn LabApp() -> Element {
     // Which workspace the lab shows; `None` is all of them.
     // The person's organizations (the identity server's, here made up):
     // the switcher, and what each role may do.
-    use architect_orgs::{Capabilities, Org, Orgs, Role};
     let orgs = architect_orgs::use_orgs_provider(
         || {
             Orgs::new(vec![
