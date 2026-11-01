@@ -26,6 +26,11 @@
 //! The macro matches each entry to a fn arg by identifier name and
 //! uses the arg's declared type to pick a `KnobKind`.
 //!
+//! `scenario = "file.styx"` (once per file, relative to the story's
+//! source file) gives the story a guide scenario (`architect-guide`):
+//! included as source into `Story::scenarios`. The story shell tours it;
+//! the guide's runner films and tests it.
+//!
 //! Knob types currently introspected (with editable widgets in the
 //! shell): `bool`, signed/unsigned ints up to 64 bits, `f32`/`f64`,
 //! `&str`, `String`. Anything else renders with the supplied default
@@ -67,6 +72,8 @@ struct StoryArgs {
     name_override: Option<String>,
     /// Map from arg name to user-supplied default expression.
     knob_defaults: Vec<(syn::Ident, Expr)>,
+    /// Guide scenario files, relative to the story's source file.
+    scenarios: Vec<syn::LitStr>,
 }
 
 fn parse_story_args(args: TokenStream2) -> Result<StoryArgs, syn::Error> {
@@ -74,6 +81,7 @@ fn parse_story_args(args: TokenStream2) -> Result<StoryArgs, syn::Error> {
         category: None,
         name_override: None,
         knob_defaults: Vec::new(),
+        scenarios: Vec::new(),
     };
     if args.is_empty() {
         return Ok(out);
@@ -86,6 +94,11 @@ fn parse_story_args(args: TokenStream2) -> Result<StoryArgs, syn::Error> {
         } else if meta.path.is_ident("name") {
             let v: syn::LitStr = meta.value()?.parse()?;
             out.name_override = Some(v.value());
+            Ok(())
+        } else if meta.path.is_ident("scenario") {
+            // `scenario = "file.styx"`, once per file: a guide scenario
+            // over the story (`architect-guide`), included as source.
+            out.scenarios.push(meta.value()?.parse()?);
             Ok(())
         } else if meta.path.is_ident("knobs") {
             // `knobs(arg1 = <expr>, arg2 = <expr>, ...)` — each entry
@@ -102,7 +115,9 @@ fn parse_story_args(args: TokenStream2) -> Result<StoryArgs, syn::Error> {
                 Ok(())
             })
         } else {
-            Err(meta.error("supported keys: `category`, `name`, `knobs(arg = expr, ...)`"))
+            Err(meta.error(
+                "supported keys: `category`, `name`, `knobs(arg = expr, ...)`, `scenario = \"file.styx\"`",
+            ))
         }
     });
     syn::parse::Parser::parse2(parser, args)?;
@@ -254,6 +269,9 @@ fn story_impl(args: TokenStream2, item_fn: ItemFn) -> TokenStream2 {
     let thunk_ident = format_ident!("__{upper}_STORY_THUNK");
     let reg_ident = format_ident!("__{upper}_STORY_REG");
 
+    // `include_str!` resolves against the file the story is written in.
+    let scenario_files = &args.scenarios;
+
     let category_expr = args.category.map_or_else(
         || quote! { ::core::option::Option::None },
         |s| quote! { ::core::option::Option::Some(#s) },
@@ -376,6 +394,7 @@ fn story_impl(args: TokenStream2, item_fn: ItemFn) -> TokenStream2 {
                 source: concat!(file!(), ":", line!()),
                 render: #thunk_ident,
                 knobs: #knobs_static,
+                scenarios: &[ #( ::core::include_str!(#scenario_files) ),* ],
                 ..::architect_story_runtime::StoryDef::DEFAULT
             });
 

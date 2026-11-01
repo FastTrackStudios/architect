@@ -96,7 +96,11 @@ pub fn CollapsibleContent(props: CollapsibleContentProps) -> Element {
 }
 
 /// Default Collapsible story with a trigger button and hidden content.
-#[story(category = "Collapsible", name = "default")]
+#[story(
+    category = "Collapsible",
+    name = "default",
+    scenario = "collapsible.styx"
+)]
 pub fn collapsible_default() -> Element {
     rsx! {
         div { class: "p-6 bg-background text-foreground max-w-md",

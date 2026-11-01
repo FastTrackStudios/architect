@@ -27,6 +27,9 @@
 
 use std::collections::HashMap;
 
+#[cfg(feature = "tours")]
+mod tours;
+
 use architect_story_runtime::{render_fn, KnobKind, KnobSource, KnobValue, Story, STORIES};
 use dioxus::prelude::*;
 use dioxus_router::{
@@ -156,9 +159,38 @@ pub fn Lookbook(props: LookbookProps) -> Element {
         initial_category,
     });
 
+    #[cfg(feature = "tours")]
+    tours::use_story_tours();
+
     rsx! {
-        Router::<Route> {}
+        div { style: "position: relative; min-height: 100vh;",
+            Router::<Route> {}
+            StoryTourLayer {}
+        }
     }
+}
+
+/// The tour over the shell (feature `tours`; else nothing).
+#[component]
+fn StoryTourLayer() -> Element {
+    #[cfg(feature = "tours")]
+    return rsx! { tours::TourLayer {} };
+    #[cfg(not(feature = "tours"))]
+    rsx! {}
+}
+
+/// A story's scenarios, as buttons that tour them (feature `tours`).
+#[cfg(feature = "tours")]
+#[component]
+fn StoryTours(story: &'static Story) -> Element {
+    rsx! { tours::StoryTours { story } }
+}
+
+#[cfg(not(feature = "tours"))]
+#[component]
+fn StoryTours(story: &'static Story) -> Element {
+    let _ = story;
+    rsx! {}
 }
 
 /// Layout component wrapping every route — top bar, sidebar (with
@@ -416,6 +448,7 @@ fn StoryHeader(story: &'static Story) -> Element {
                     "{story.source}"
                 }
             }
+            StoryTours { story }
         }
     }
 }

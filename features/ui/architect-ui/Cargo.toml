@@ -33,6 +33,10 @@ router = ["dioxus/router", "dioxus-primitives/router"]
 # `cargo build` never compiles dev-deps so the lib build stays light.
 architect-story-snapshots = { workspace = true }
 architect-story-parity    = { workspace = true }
+# The stories' guide scenarios, played headlessly (tests/scenarios.rs).
+architect-guide           = { workspace = true, features = ["story"] }
+# The Lookbook's tours (feature `tours`), so the workspace build checks it.
+architect-story-shell     = { workspace = true, features = ["tours"] }
 
 [lints]
 workspace = true

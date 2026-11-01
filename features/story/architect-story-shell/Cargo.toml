@@ -13,6 +13,14 @@ architect-story-runtime = { workspace = true }
 # the shell uses this for URL-based component selection so that
 # refresh / share-link / back-button preserve the selected component.
 dioxus = { workspace = true, features = ["router"] }
+# `tours`: a story's guide scenarios played as in-app tours over the shell
+# (architect-guide's tour; native, Blitz only).
+architect-guide = { workspace = true, optional = true, features = ["ui"] }
+architect = { workspace = true, optional = true, features = ["action-list"] }
+
+[features]
+default = []
+tours = ["dep:architect-guide", "dep:architect"]
 
 [lints]
 workspace = true

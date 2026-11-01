@@ -100,6 +100,8 @@ pub struct StoryDef {
     pub render: RenderFn,
     pub knobs: &'static [KnobSpec],
     pub auto_states: Option<&'static [StateAssignment]>,
+    /// Guide scenarios over the story, as styx source.
+    pub scenarios: &'static [&'static str],
 }
 
 impl StoryDef {
@@ -117,6 +119,7 @@ impl StoryDef {
         render: |_| panic!("StoryDef::DEFAULT render thunk invoked"),
         knobs: &[],
         auto_states: None,
+        scenarios: &[],
     };
 }
 
@@ -137,5 +140,6 @@ pub const fn const_story(def: StoryDef) -> Story {
         knobs: def.knobs,
         render: def.render as *const (),
         auto_states: def.auto_states,
+        scenarios: def.scenarios,
     }
 }
