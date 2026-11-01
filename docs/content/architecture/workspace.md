@@ -14,10 +14,13 @@ weight = 54
 > reorder within a bar, a finger held on a tab opens its menu, stacked
 > tabs slide over each other, ⌘1–9 recall screensets for the screen's
 > class, the layout is kept through the app's `Store`, and a pane puts
-> its own items on the status line (`use_pane_status`). Still to come:
-> dragging a tab onto a group in another window (it joins that window's
-> first group), docks in pop-outs (none, as in Obsidian), the app's
-> chords inside a pop-out. Studio's dock (`studio:features/ui/dock`) was
+> its own items on the status line (`use_pane_status`). A dock (the
+> sidebar, with its ribbon and groups) pops out into a window of its own
+> and docks back (`Workspace::pop_out_dock`, `Workspace::dock_back`; the
+> `WORKSPACE_POP_OUT_*_DOCK` and `WORKSPACE_DOCK_BACK_*_DOCK` actions).
+> Still to come: dragging a tab onto a group in another window (it joins
+> that window's first group), floats in pop-outs, the app's chords inside
+> a pop-out. Studio's dock (`studio:features/ui/dock`) was
 > the starting point; Obsidian's workspace is the bar to clear.
 
 An app hands architect its **views** (what a pane can show) and gets back
@@ -58,7 +61,9 @@ Everything Obsidian's workspace does, and REAPER's screensets on top:
   activity bar, Obsidian's ribbon and sidedock). Both groups are the
   person's to arrange: drag to reorder, hide, drag a view or a command
   (from the palette, a menu, the action list) onto it to pin it. Either
-  side may have a ribbon.
+  side may have a ribbon. At the ribbon's foot, a grip: a press pops the
+  dock out into a window of its own, dragged out of the window it pops
+  out where it is let go (below).
 - **Stacked tabs.** A group's menu turns stacking on (and off): its tab
   bar goes, its tabs become panes side by side, each a fixed width (the
   group's, 700pt by default, narrower where the screen is), in a strip
@@ -74,6 +79,16 @@ Everything Obsidian's workspace does, and REAPER's screensets on top:
   stacks) without docks. Dragging a tab onto another window's group moves
   it there. Closing the main window closes its windows; the layout keeps
   them.
+- **A dock in a window of its own.** A dock (left, right or bottom: its
+  ribbon and its groups) pops out into an OS window (`dock-left`,
+  `dock-right`, `dock-bottom`), by its grip, its tabs' menu or the
+  action; the main window's layout closes the gap, and on a desk whose
+  shell hosts the left dock the shell's sidebar folds. Tabs moved to that
+  dock go to its window while it is out. The grip there (a press, or
+  dragged onto the main window), "Dock the sidebar back", or closing its
+  window puts it back on its side with its size and groups. Its last tab
+  gone, the window closes and the ribbon comes home. A screenset or a
+  kept layout with the dock out brings it back out.
 - **Pin and link.** A pinned tab is never reused: what would open in it
   opens in a new tab. Linked tabs follow each other: open a song in one,
   its mixer in a linked tab follows.
@@ -282,6 +297,7 @@ the same way:
 | `workspace.back` / `.forward` | the active pane's history |
 | `workspace.pin` / `.link { with }` / `.stack { group }` | toggles |
 | `workspace.dock { side, shown }` / `.resize { node, share }` | |
+| `workspace.pop_out_dock { side }` / `.dock_back { side }` | the dock, ribbon and groups, into a window of its own and back (`WORKSPACE_POP_OUT_LEFT_DOCK`, `WORKSPACE_DOCK_BACK_LEFT_DOCK`, and the same for `RIGHT` and `BOTTOM`; which of the pair is enabled says where the dock is) |
 | `workspace.maximize` | the active pane fills the window; again restores |
 | `screenset.recall { id }` / `.save` / `.save_as { name }` / `.reset` / `.delete` | |
 | `workspace.arrange` | arrange mode, latched (for touch) |
@@ -380,6 +396,17 @@ comes back; closing a pop-out brings its tabs back. The layout keeps each
 window's place. Without the launcher (a browser) a pop-out kept in a
 layout shows as a chip that brings its tabs back.
 
+**A dock's window** is a pop-out whose `center` is `None` and whose dock
+on the dock's side holds it (`features/workspace/src/model.rs`
+`Workspace::dock_window`, `Workspace::dock`, `WindowId::dock`); the
+pop-out's view fills its window with it, ribbon and all. Its grip hears
+the pointer itself (in the shell's ribbon it is outside the host's root),
+and a release outside the window comes from the platform, as a tab's does
+(`WindowSystem::on_release_outside`): from the main window the dock pops
+out there, from its own window onto the main one it docks back. A ribbon
+command pressed in it runs in the main window's dom (the app's handler
+lives there).
+
 ## From Studio's dock
 
 | Studio today | Here |
@@ -403,7 +430,8 @@ layer that daw-ui uses retires when daw-ui moves to views.
 1. **Pop-out windows in Blitz:** answered. dioxus-native does not open
    a second window itself; the workspace's launcher does, and both
    documents read one app's signals (see "It renders in Blitz").
-2. **Docks in pop-outs:** Obsidian's windows have none. Keep it so?
+2. **Docks in pop-outs:** answered for a dock popped out whole (its own
+   window, above). A tab's pop-out still has none, as in Obsidian.
 3. **Linking:** by a group id (Obsidian) or by a subject the views agree
    on (a song id)? Studio's `link` is an id; a subject is more useful
    to a DAW.
