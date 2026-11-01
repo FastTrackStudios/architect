@@ -320,10 +320,23 @@ Screensets::default().with_builtins([
 
 ![⌘1 and ⌘2 switching between the Write and Mix screensets](https://raw.githubusercontent.com/FastTrackStudios/architect/media/workspace-screenset-recall.gif)
 
-**On a phone** a workspace is one pane at a time with a switcher listing
-every pane.
+**On a phone** a workspace is one pane at a time, with Obsidian's tab
+switcher: the action bar's tabs button (`use_tabs_button`, counting the
+tabs) zooms the pane out into its card in a grid of every tab, each
+card a live preview of its pane (the view drawn again, scaled down) or
+its view's icon (`View::still`, for a view that registers itself as it
+mounts). A card's ✕ or a swipe across it closes the tab and the others
+slide together; a card held still is lifted and dragged to another
+place; a card pressed zooms back into it. Under the grid, `+` opens a
+new tab, "N tabs ⌄" shows a dock's or a pop-out's tabs instead, recalls
+a screenset, reopens or closes tabs (pinned ones stay), and Done goes
+back. Which tabs, the grid's geometry and where a dragged card lands are
+plain data: `features/workspace/src/switcher.rs` (`Place`,
+`Workspace::cards`, `CardGrid`, `reorder_dest`).
 
-<!-- media: workspace-phone-switcher — on a phone, the pane switcher opened from the page bar and a pane picked -->
+![On a phone, the tab switcher opened from the tabs button and a card chosen](https://raw.githubusercontent.com/FastTrackStudios/architect/media/phone-tab-switcher-open.gif)
+
+![Closing a tab from its card: the others slide together](https://raw.githubusercontent.com/FastTrackStudios/architect/media/phone-tab-switcher-close-card.gif)
 
 `features/workspace/tests/workspace.rs` covers every operation and the
 repair after each.

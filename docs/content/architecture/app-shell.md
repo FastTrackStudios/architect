@@ -105,12 +105,19 @@ counts something (Obsidian's iOS bottom bar). The app gives its own
 (`AppShell`'s `actions`); a page adds its own while it is mounted
 (`use_bar_action`), in place of the app's of the same id, and past six
 the app's give way from the end. The workspace's tabs button is one
-such: `features/workspace/src/bar.rs` `use_tabs_button` counts the open
-panes and runs `WORKSPACE_EVERY_PANE`, the phone's pane switcher. A
+such: `features/workspace/src/bar.rs` `use_tabs_button` counts the
+main window's tabs and runs `WORKSPACE_EVERY_PANE`, the phone's tab
+switcher. A
 press runs the command through the `CommandRunner` in context, which
 `architect-commands`' `use_commands_provider` puts there, so a button
 does what the palette and the keys do and is dimmed when the command
 cannot run.
+
+A page can also take the whole screen, the bars too, while it is
+mounted: `features/shell/src/shell/mod.rs` `use_shell_cover` draws its
+element over everything in the shell's own box. The workspace's tab
+switcher is one (`features/workspace/src/host/switcher.rs`), as
+Obsidian's covers the screen on iOS.
 
 While a field is typed in, the bar rises above the keyboard and becomes
 the editing bar (Task's `KeyboardToolbar`, `task:crates/ui/src/doc_editor.rs`):

@@ -83,6 +83,10 @@ Appearance › Reduce motion is the setting (`apps/lab/ui/src/lib.rs`).
 | A split made by a drop | the new group's share grows 0 → its share on `Spring::PANEL`, the others giving way | clipped: laid out at the size the drop lit, held to the drop's edge | `features/workspace/src/host/group.rs` `SplitView`, `features/workspace/src/host/mod.rs` `Host::move_pane` |
 | A split's last tab closed from its ✕ | its share folds to 0, then the close lands | clipped at the size it had | `Host::close_from_tab` |
 | A divider dragged | 1:1 with the pointer, no motion | | `overlay.rs` `on_move` |
+| A phone's tab switcher opening, and closing into a card | the pane's box to its card and back on `Spring::PANEL` (`Switch::zoom`, 0–1): the card is the pane's own view, laid out at the pane's size and `scale`d; the other cards and the bar fade and slide in | `scale` and `left`/`top` of an absolutely placed card (a `translate` is in device pixels on iOS) | `features/workspace/src/host/switcher.rs` |
+| A switcher card closed (its ✕, or swiped past half its width or flung) | it fades and shrinks, or flies off at its speed; the cards after it slide into its place, each card's place a pair of motions following its slot on `Spring::SNAPPY` | | `switcher.rs` `CardView`, `close_card`, `on_up` |
+| A switcher card lifted (held still) and dragged | it follows the finger (held); the others make room; let go, it springs into its slot | | `switcher.rs` `drop_lifted` |
+| The switcher's grid scrolled | held by the finger, past an end it gives half as far; let go, it coasts and springs back inside | | `switcher.rs` `on_move` |
 | A stacked strip | a trackpad's pixels move it point for point (macOS sends its coasting as more of them); a wheel's notch (40 points; it was 1) eases there from where it was headed; a spine pressed eases to its pane; a scrollbar flicked coasts | panes slide over the ones before them, each to its spine; a pane's shadow deepens as it slides over | `group.rs` `Stacked`, `features/workspace/src/layout.rs` `slides` |
 
 Which close animates: only a tab's ✕ on the last tab of a group in a
@@ -102,8 +106,11 @@ The FTS fork draws a document's own updates at most `FTS_MAX_FPS` times a
 second (30 unless set), so meters and clocks do not each repaint the
 window at every vsync, but draws a running CSS animation at the display's
 rate. `MotionFrames` (`features/shell/src/motion.rs`) bridges the two:
-while any motion runs it draws an invisible 1 px CSS animation, and it
-takes it away when they rest. `AppShell` mounts it, and so do the
+while any motion runs it runs an invisible 1 px CSS animation, and it
+stops it when they rest. The element stays mounted: inserted and removed
+with the motions, it collapsed a phone's pane laid out beside it, and a
+node made just after it went drew under its animation's opacity (blank)
+(`skills/architect/references/blitz-quirks.md`). `AppShell` mounts it, and so do the
 workspace's host (outside a shell) and its pop-outs. Measured in the lab
 on an M4 Mac mini: a sidebar fold went from 32 to 140 frames a second,
 6.8 ms a frame on average, 12.5 ms at worst.
