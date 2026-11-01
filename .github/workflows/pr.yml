@@ -1,0 +1,40 @@
+name: pr
+
+# A PR's checks: the fast ones, about a minute on a hosted runner. The full
+# suite (clippy, tests, wasm, boundaries, docs, tags) runs on main after the
+# merge (checks.yml). Branch protection requires this job's `check` status.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+# A PR's new push supersedes its old run.
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      # The pin in rust-toolchain.toml; rustup reads it.
+      - name: toolchain
+        run: rustup show active-toolchain
+      - name: fmt
+        run: cargo fmt --all -- --check
+      # The committed lockfile is the one cargo resolves: a merge that left
+      # it stale fails here, not on main.
+      - name: lockfile
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          cp Cargo.lock "$RUNNER_TEMP/Cargo.lock.committed"
+          cargo metadata --format-version 1 > /dev/null
+          if ! diff -u "$RUNNER_TEMP/Cargo.lock.committed" Cargo.lock; then
+            echo "::error::Cargo.lock is out of date: run cargo metadata and commit the result"
+            exit 1
+          fi
