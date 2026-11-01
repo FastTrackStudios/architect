@@ -19,6 +19,8 @@
 // compare only redraws.
 #![cfg_attr(feature = "ui", allow(unpredictable_function_pointer_comparisons))]
 
+#[cfg(feature = "ui")]
+mod bar;
 mod drop;
 pub mod guide;
 #[cfg(feature = "ui")]
@@ -31,6 +33,8 @@ mod repair;
 mod screenset;
 pub mod store;
 
+#[cfg(feature = "ui")]
+pub use bar::{TABS_COMMAND, use_tabs_button};
 pub use drop::{Bar, Drop, bar_drop, contains, drop_at, drop_in, float_rect, snap_at};
 #[cfg(feature = "native")]
 pub mod native;
