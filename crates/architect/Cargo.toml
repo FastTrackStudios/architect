@@ -160,6 +160,9 @@ server-axum = [
     "dep:vox-core",
     "dep:vox-types",
     "telemetry",
+    # `PubSub`'s per-subscriber pump (a full sink's backlog keeps moving
+    # without waiting for the next publish) spawns through `platform`.
+    "platform",
 ]
 
 # One `tracing` span per dispatched RPC call, at the LayerRouter choke
