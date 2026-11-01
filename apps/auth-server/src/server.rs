@@ -10,7 +10,7 @@
 //! ```text
 //! services().provide(svc)        →  the vox router     (served at /vox, and over iroh)
 //! services().provide_http(&svc)  →  the HTTP+JSON face (POST /auth/…, /organization/…)
-//! EngineHost::new(vox).plugin(http).plugin(oauth).plugin(pages)…
+//! EngineHost::ungated(vox).plugin(http).plugin(oauth).plugin(pages)…
 //! ```
 //!
 //! What remains hand-written is what is HTTP by nature: the OAuth/OIDC
@@ -393,7 +393,12 @@ where
     let cors = cors_layer(config);
     let svc = AuthVoxService::new(auth.clone());
 
-    EngineHost::new(services().provide(svc.clone()), config.bind_addr.clone())
+    // Ungated on purpose: this server IS the identity provider. Signing
+    // up and signing in are anonymous by nature, and every other method
+    // takes the session token as an argument and checks it itself, on
+    // every face (the HTTP face has no gate either). A gate here would
+    // have no identity to resolve that the services don't already check.
+    EngineHost::ungated(services().provide(svc.clone()), config.bind_addr.clone())
         // The same services, as HTTP+JSON — generated from the traits.
         .plugin(services().provide_http(&svc))
         .plugin(probes())

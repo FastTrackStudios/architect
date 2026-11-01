@@ -8,7 +8,7 @@
 //! ```ignore
 //! use architect_mcp::host::{McpHost, McpTarget};
 //!
-//! EngineHost::new(router, bind)
+//! EngineHost::new(router, gate, bind)
 //!     // Per org, served for the caller the bearer names.
 //!     .mcp_at("/org/{slug}/mcp", move |head: RequestHead| {
 //!         let orgs = orgs.clone();

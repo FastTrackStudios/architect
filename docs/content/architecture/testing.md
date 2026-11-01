@@ -143,7 +143,7 @@ dev-dependency) closes that door:
 let server = architect::testing::sandbox_server(|sb| async move {
     plant_fixtures(&sb.data())?;              // the seed: write the world
     let backend = Backend::open(&sb.data()).await?;
-    Ok(backend.into_router())                 // a LayerRouter, EngineHost or axum Router
+    Ok(backend.into_router())                 // a LayerRouter (served ungated), EngineHost or axum Router
 })
 .await?;
 let client = connect(&server.url()).await?;   // ws://127.0.0.1:<port>/vox

@@ -95,7 +95,7 @@ use inventory_redis::RedisBackend;
 
 let backend = RedisBackend::new(/* … */);
 // mount exactly like the in-tree backends (it lists its `Services` bundle)
-EngineHost::new(backend.into_router(), bind).serve().await?;
+EngineHost::new(backend.into_router(), gate, bind).serve().await?;
 ```
 
 **Use this when**:

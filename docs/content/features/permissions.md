@@ -50,8 +50,13 @@ assert!(gate.coverage(&router).is_complete());
 let gated = router.with_permissions(gate);
 ```
 
-Per connection, with the connection's bearer:
-`PermissionsGate::wrap_shared_with_bearer(Arc::new(gate), router, bearer)`.
+On a server, hand the gate to the host instead:
+`EngineHost::new(router, gate, bind)` puts it in front of `/vox`, the iroh
+lane and every `vox_at` lane ([EngineHost](@/features/engine-host.md)).
+By hand, per connection, with the connection's bearer:
+`PermissionsGate::wrap_shared_with_bearer(Arc::new(gate), router, bearer)`;
+for a peer whose endpoint the transport proved,
+`PermissionsGate::wrap_shared_with_proved_caller(gate, router, Principal::Host { endpoint })`.
 Inside a handler, `architect::permissions_gate::caller()` is the principal
 the gate resolved. For actions: `list.set_authorizer(engine)` and run with
 `run_json_as` or `run_json_async_as`.
@@ -69,7 +74,8 @@ the gate resolved. For actions: `list.set_authorizer(engine)` and run with
 5. `features/auth/auth/src/identity.rs` `SessionIdentityResolver`: a bearer to
    a user or anonymous.
 6. `crates/architect/src/permissions_gate.rs` `PermissionsGate` (`permit`,
-   `unlisted`, `observe_only`, `coverage`, `wrap_shared_with_bearer`),
+   `unlisted`, `observe_only`, `coverage`, `wrap_shared_with_bearer`,
+   `wrap_shared_with_proved_caller`),
    `PermissionedRouter`, `caller`, `GateCoverage`.
 7. `crates/architect/src/action_list.rs` `ActionList::set_authorizer`,
    `run_json_as`, `infos_for`, `ActionCaller`: the same engine for actions.

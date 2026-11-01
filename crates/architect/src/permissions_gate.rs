@@ -262,6 +262,7 @@ impl PermissionsGate {
             inner,
             gate: Arc::new(self),
             connection_bearer: None,
+            proved: None,
         }
     }
 
@@ -272,6 +273,7 @@ impl PermissionsGate {
             inner,
             gate,
             connection_bearer: None,
+            proved: None,
         }
     }
 
@@ -296,6 +298,30 @@ impl PermissionsGate {
             inner,
             gate,
             connection_bearer: bearer.map(Arc::from),
+            proved: None,
+        }
+    }
+
+    /// [`wrap_shared`](Self::wrap_shared) for a connection whose transport
+    /// **proved** who is on the other end: an iroh peer, whose endpoint id
+    /// the QUIC handshake authenticated (`Principal::Host { endpoint }`).
+    ///
+    /// A call with no `authorization` metadata is made as `proved`, without
+    /// consulting the identity resolver: the proof is the credential, and
+    /// there is no token to resolve. A call that does present a bearer is
+    /// resolved from it as on any other lane, so a person signed in on a
+    /// peer device still calls as themselves. `proved` must come from the
+    /// transport, never from anything the caller sent, or it is a claim.
+    pub const fn wrap_shared_with_proved_caller<H>(
+        gate: Arc<Self>,
+        inner: H,
+        proved: Principal,
+    ) -> PermissionedRouter<H> {
+        PermissionedRouter {
+            inner,
+            gate,
+            connection_bearer: None,
+            proved: Some(proved),
         }
     }
 
@@ -322,9 +348,24 @@ impl PermissionsGate {
 
     /// Decide from OWNED request facts (method id + bearer token) — the
     /// `RequestCall` borrow is not `Sync` and must not cross an await.
-    async fn decide(&self, method_id: MethodId, token: Option<String>) -> GateOutcome {
+    /// Who is calling: the bearer's principal when the call presents one,
+    /// else the transport-proved principal, else whatever the resolver
+    /// makes of no token at all.
+    async fn who(&self, token: Option<&str>, proved: Option<&Principal>) -> Principal {
+        match (token, proved) {
+            (None, Some(proved)) => proved.clone(),
+            _ => self.identity.resolve(token).await,
+        }
+    }
+
+    async fn decide(
+        &self,
+        method_id: MethodId,
+        token: Option<String>,
+        proved: Option<&Principal>,
+    ) -> GateOutcome {
         if let Some(rule) = self.rules.get(&method_id) {
-            let who = self.identity.resolve(token.as_deref()).await;
+            let who = self.who(token.as_deref(), proved).await;
             let decision = self.engine.check(&who, &rule.coarse, &rule.action);
             let allowed = decision.allowed();
             if !allowed || rule.audit_allow {
@@ -347,7 +388,7 @@ impl PermissionsGate {
                 )),
             }
         } else if let Some(service) = self.tabled_unlisted.get(&method_id) {
-            let who = self.identity.resolve(token.as_deref()).await.describe();
+            let who = self.who(token.as_deref(), proved).await.describe();
             self.audit.record(AuditEvent {
                 principal: who,
                 resource: format!("service/{service}"),
@@ -367,10 +408,10 @@ impl PermissionsGate {
                 // exist, which is not a distinction a method can reason
                 // about.
                 UnlistedPolicy::Allow => {
-                    GateOutcome::Pass(self.identity.resolve(token.as_deref()).await)
+                    GateOutcome::Pass(self.who(token.as_deref(), proved).await)
                 }
                 UnlistedPolicy::Deny => {
-                    let who = self.identity.resolve(token.as_deref()).await.describe();
+                    let who = self.who(token.as_deref(), proved).await.describe();
                     self.audit.record(AuditEvent {
                         principal: who,
                         resource: format!("method/{method_id:?}"),
@@ -434,6 +475,9 @@ pub struct PermissionedRouter<H = LayerRouter> {
     /// this connection when the call itself carries no `authorization`
     /// metadata. See [`PermissionsGate::wrap_shared_with_bearer`].
     connection_bearer: Option<Arc<str>>,
+    /// The caller the transport proved, for calls that present no bearer.
+    /// See [`PermissionsGate::wrap_shared_with_proved_caller`].
+    proved: Option<Principal>,
 }
 
 impl<H> PermissionedRouter<H> {
@@ -518,7 +562,10 @@ where
         // Kept for the observe-only arm below, which has to resolve the
         // same identity `decide` did.
         let presented = token.clone();
-        let outcome = self.gate.decide(method_id, token).await;
+        let outcome = self
+            .gate
+            .decide(method_id, token, self.proved.as_ref())
+            .await;
         match outcome {
             GateOutcome::Pass(who) => {
                 CALLER
@@ -539,7 +586,10 @@ where
                 // either: a method that reads `caller()` has to behave
                 // the same whether enforcement is on, or turning it on
                 // becomes a behaviour change rather than a refusal.
-                let who = self.gate.identity.resolve(presented.as_deref()).await;
+                let who = self
+                    .gate
+                    .who(presented.as_deref(), self.proved.as_ref())
+                    .await;
                 CALLER
                     .scope(who, self.inner.handle(call, reply, schemas))
                     .await;

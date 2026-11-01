@@ -40,7 +40,7 @@ async fn upgrade(at: std::net::SocketAddr, path: &str, extra: &str) -> String {
 
 #[tokio::test]
 async fn vox_at_resolves_each_upgrade_from_its_params_and_bearer() {
-    let app = EngineHost::new(LayerRouter::new(), "127.0.0.1:0")
+    let app = EngineHost::ungated(LayerRouter::new(), "127.0.0.1:0")
         .vox_at("/org/{slug}/vox", resolve_org)
         .into_app();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -68,7 +68,7 @@ async fn vox_at_resolves_each_upgrade_from_its_params_and_bearer() {
 
 #[tokio::test]
 async fn vox_at_the_root_replaces_the_built_in_vox() {
-    let app = EngineHost::new(LayerRouter::new(), "127.0.0.1:0")
+    let app = EngineHost::ungated(LayerRouter::new(), "127.0.0.1:0")
         .vox_at("/vox", |head: RequestHead| async move {
             match head.bearer() {
                 Some(_) => Ok(LayerRouter::new()),
@@ -127,7 +127,7 @@ async fn send(app: Router, method: &str, path: &str) -> (StatusCode, String) {
 
 #[tokio::test]
 async fn dav_answers_every_verb_outside_the_finish_layers() {
-    let app = EngineHost::new(LayerRouter::new(), "127.0.0.1:0")
+    let app = EngineHost::ungated(LayerRouter::new(), "127.0.0.1:0")
         .dav("/org/{slug}/dav", echo_dav)
         .finish(cors_like)
         .into_app();
@@ -155,7 +155,7 @@ async fn document_answers_get_with_the_head_and_beats_the_spa() {
     let dir = std::env::temp_dir().join(format!("architect-host-mounts-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("index.html"), "spa").unwrap();
-    let app = EngineHost::new(LayerRouter::new(), "127.0.0.1:0")
+    let app = EngineHost::ungated(LayerRouter::new(), "127.0.0.1:0")
         .web(Some(architect::host::WebBundle::Dir(dir.clone())))
         .document("/.well-known/app.json", |head: RequestHead| async move {
             Ok::<_, StatusCode>(format!("{{\"signed_in\":{}}}", head.bearer().is_some()))

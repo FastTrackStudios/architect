@@ -98,8 +98,9 @@ local through an in-memory pipe, so history moves both ways.
 
 Done in architect. Not yet: gossip (fan-out beyond pairs is sweeps);
 read-only links; choosing between two foreign lineages needs a person.
-`EngineHost` serves one router to every iroh caller; per-peer gating means
-calling `serve_peers` as above. The digest is a skip check, not an integrity
+`EngineHost`'s iroh lane puts the host's gate in front of each peer, the
+caller the `Principal::Host` its handshake proved; a router built per peer
+means calling `serve_peers` as above. The digest is a skip check, not an integrity
 check.
 
 - **Task** uses the pairwise lane (`task:apps/server/src/doc_peer.rs`, with

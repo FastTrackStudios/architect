@@ -90,8 +90,7 @@ impl architect::Services for Memory {
 ## 3. Mount on an EngineHost
 
 ```rust
-// examples/greeter/src/main.rs
-EngineHost::new(backend.clone().into_router(), config.bind)
+EngineHost::new(backend.clone().into_router(), gate, config.bind) // gate: PermissionsGate
     .plugin(backend.into_http_router())
     .build_info(architect::build_info!())
     .serve()
@@ -99,16 +98,18 @@ EngineHost::new(backend.clone().into_router(), config.bind)
 ```
 
 - `into_router()` = vox `LayerRouter`; `into_http_router()` = axum router.
+- **Every vox lane is gated** by the `PermissionsGate` given to `new` (`crates/architect/src/host.rs` `EngineHost::new`; it reports the gate's `coverage` of the router): `/vox` wraps each connection with `wrap_shared_with_bearer` (bearer from `Authorization` or the `vox.bearer.` subprotocol), the iroh lane with `wrap_shared_with_proved_caller` (`Principal::Host { endpoint }` from the handshake; a call presenting a bearer resolves from it), each `vox_at` lane like `/vox`. `EngineHost::ungated(router, bind)` is the opt-out: no gate, `caller()` is `None`, a `warn` on every start. Use it only for a router that checks its own tokens (`apps/auth-server/src/server.rs`), a demo with no accounts (`examples/greeter/src/main.rs`) or a loopback test; say why at the call site. `.gate()` hands back the `Arc<PermissionsGate>` (for a `PermissionsService` oracle). The HTTP face is not behind the vox gate. Test: `crates/architect/tests/host_gate.rs`.
 - `/health` and `/vox` (WS, subprotocol `vox.v1`) are always mounted; `/version.json` (`{rev, version, built_at}`, `no-store`) is mounted before the SPA fallback.
 - `plugin` is an alias of `extend`; plugins merge before the SPA fallback. `finish(wrap)` wraps the assembled app after plugins and the SPA fallback. `plugin` is the escape hatch.
 - Protocol mounts (`crates/architect/src/host/mount.rs`), each hook seeing a `RequestHead` (the same `architect::http::RequestHead` a byte method takes: path params, headers, `bearer()` from `Authorization` or the `vox.bearer.` subprotocol):
-  - `.vox_at("/org/{slug}/vox", |head| async { Ok(handler) / Err(impl IntoResponse) })`: vox WS at a parameterised path; the resolver picks the handler (identity) per connection before the upgrade. `vox_at("/vox", …)` replaces the built-in `/vox`.
+  - `.vox_at("/org/{slug}/vox", |head| async { Ok(handler) / Err(impl IntoResponse) })`: vox WS at a parameterised path; the resolver picks the handler per connection before the upgrade, and the host wraps it in its gate with the upgrade's bearer. `vox_at("/vox", …)` replaces the built-in `/vox`.
+  - `.vox_at_permissioned(path, |head| async { Ok(PermissionedRouter) / Err(..) })`: the resolver gates the connection itself (a gate per org, a share link's `StaticPrincipal`); served as is, never double-gated.
   - `.document(path, |head| async { Ok(impl IntoResponse) / Err(impl IntoResponse) })`: a `GET` document (`/.well-known/…`, `/org/{slug}/api`, a per-org probe).
   - `.dav(mount, |dav: DavRequest| async { response })`: WebDAV, every verb at `mount`, `mount/` and below, mounted outside `finish` (outside CORS); `DavRequest { head, mount, rel, request }`.
   - `.otlp_forward("/otlp", upstream, |head| async { Ok(()) / Err(impl IntoResponse) })` (architect feature `otlp-forward`, `crates/architect/src/host/otlp.rs`): `POST /otlp/v1/{traces,logs,metrics}` forwarded with its content type; other signals `404`, collector down `502`.
   - `.mcp(server, token)` / `.mcp_at(path, resolve)`: `architect_mcp::host::McpHost` (feature `host`); see `references/commands-mcp.md`.
   - Tests: `crates/architect/tests/host_mounts.rs`, `examples/greeter/tests/host_mounts.rs`.
-- `serve()` binds TCP and spawns iroh if configured: `.iroh(key_path, id_path)` + optional `.iroh_lookup(PeerLookup::N0AndLan)`. Real use: `apps/auth-server/src/server.rs`. The key file is created 0600 on unix.
+- `serve()` binds TCP and spawns iroh if configured: `.iroh(key_path, id_path)` + optional `.iroh_lookup(PeerLookup::N0AndLan)`, or `.iroh_endpoint(endpoint)` for an endpoint the app bound (a test's loopback endpoint). Real use: `apps/auth-server/src/server.rs`. The key file is created 0600 on unix.
 
 ## 4. Connect
 
