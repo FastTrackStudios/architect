@@ -15,10 +15,12 @@ Crate `crdt` (`features/crdt/crdt`); guides `docs/content/architecture/collabora
 | SeaORM tables | crate `crdt-seaorm` owns `crdt_doc` + `crdt_update` and their `Migrator` | `features/crdt/crdt-seaorm/src/migrations.rs` `Migrator`; `features/crdt/crdt-seaorm/src/entities.rs` |
 | Hub sync | `DocSync` call = session; version-vector catch-up; fan-out | `features/crdt/crdt/src/sync.rs` `DocSync`, `DocSyncHost`, `SyncedDoc` (`new`, `durable`, `run`) |
 | Presence | `EphemeralStore` presence; sliding fan-out | `features/crdt/crdt/src/sync.rs` `DocPresence`, `PresenceHost`, `PresencePeer`, `PresenceDriver` |
+| Presence in views | per person `<id>/state`, `<id>/pointer`, `<id>/play`; a pointer is a `Place` in a view's coordinate space (never pixels); smooth remote pointers | `features/crdt/crdt/src/presence.rs` `Here` (`edit_state`, `pointer`, `no_pointer`, `play`, `flush`, `announce`), `Roster` (`sync`, `here`, `pointers`, `selections_in`, `carets_in`, `moving`), `Place`, `PeerState`, `Selection`, `TextCaret`, `PointerTrail`, `PresenceSink`, `clock_ms` |
+| Collaborative text | a `LoroText` bound to an editor: local edits as ops, others' back echo-guarded and transformed, carets as stable cursors, a hidden prefix, IME | `features/crdt/crdt/src/text.rs` `TextBinding` (`on_local`, `pull`, `sync_into`, `caret`, `resolve`, `remote_carets`, `set_offset`, `set_composing`), `EditorBinding`, `RemoteCaret` |
 | `DocRegistry` | many docs on one dispatcher pair; admission, authorizer, eviction | `features/crdt/crdt/src/registry.rs` `DocRegistry`, `with_admission`, `with_authorizer`, `with_idle_eviction` |
 | `crdt::peer` | pairwise exchange, `DocPeer` lane, `SelfLane`, `pull`, lineage check | `features/crdt/crdt/src/peer.rs` `DocPeer`, `DocPeerHost`, `SelfLane`, `exchange`, `pull`, `is_foreign_lineage` |
 | `crdt::docs` | catalog of schema-agnostic app docs (client-chosen id, opaque `kind`, `parent`, tombstones, contiguous `rev`); its host; the device driver | `features/crdt/crdt/src/docs/mod.rs` `Docs`, `DocMeta`, `DocChange`, `DocsStore`, `InMemoryDocsStore`; `features/crdt/crdt/src/docs/host.rs` `DocsHost`; `features/crdt/crdt/src/docs/driver.rs` `DocsDriver`, `DocsIndex`, `DocStorage`, `DocSyncEvent`, `Refusal`; `features/crdt/crdt/src/docs/device_host.rs` `DriverHost`; `features/crdt/crdt/src/docs/turso.rs` `TursoDocsIndex`; `features/crdt/crdt-seaorm/src/docs.rs` `SeaOrmDocsStore` |
-| Hooks | Dioxus bridge: synced doc, crdt list/entry, presence | `features/crdt/crdt/src/hooks.rs` `use_synced_doc_keyed_with`, `use_crdt_list`, `use_crdt_entry` |
+| Hooks | Dioxus bridge: synced doc, crdt list/entry, presence | `features/crdt/crdt/src/hooks.rs` `use_synced_doc_keyed_with`, `use_crdt_list`, `use_crdt_entry`, `use_roster`, `use_here`, `use_presence_frame` |
 | iroh seam | peer lookup modes; `Principal::Host` identity | `crates/architect/src/iroh_link.rs` `PeerLookup`; `features/permissions/src/lib.rs` `Principal` |
 
 ## Which model for which datum
@@ -28,7 +30,8 @@ Crate `crdt` (`features/crdt/crdt`); guides `docs/content/architecture/collabora
 | Multi-writer doc; concurrent edits must both survive; one doc per collaboration boundary | `CrdtDoc` + `LoroRepo<E>` |
 | Prose or any long text edited concurrently | `#[architect(crdt(text))]` on the `String` field (a `LoroText` child written by minimal diff), or an explicit `LoroText` via `apply_text_ops` |
 | Short scalar fields (title, done, id refs) | plain `#[architect(crdt)]` / `entity_crdt!` fields: whole-value LWW per field |
-| Who is here, cursors, selections | presence (`EphemeralStore`): never in the doc; expires |
+| Who is here, cursors, selections | presence (`EphemeralStore`): never in the doc; expires. Publish with `Here`, read with `Roster`; pointers are `Place`s in a view's space |
+| Text two people type into at once (a note, lyrics, a chart) | a `LoroText` + `TextBinding`; the caret goes in `PeerState::caret` |
 | Devices share docs with no hub | `crdt::peer` over `DocRegistry` plus Host admission |
 | A canonical server exists and clients attach | `DocSyncHost` / `DocRegistry` + `SyncedDoc` (hub) |
 | An app's own data (projects, setlists, rigs) on every device of an owner, made offline, listed without opening | `crdt::docs`: `DocsHost` on the hub, a `DocsDriver` per owner on each device (Recipe D) |
@@ -105,6 +108,8 @@ let report = crdt::schema::migrate(doc.loro(), SCHEMA, MIGRATIONS)?;
 - **Foreign lineage is refused, never merged.** `pull` counts it in `foreign`; someone must pick one copy. A timed-out exchange is `failed`, not `foreign`; retry next sweep. Only a non-empty digest equal to ours is skipped.
 - **Permission denials are refusals, not drops** (`InvalidPayload("permission denied: ...")` → `Refused`).
 - **Eviction breaks held handles:** writes reach persistence but not live replicas. Enable `with_idle_eviction` only if handles are re-fetched per use.
+- **A pointer is a place, not pixels.** Publish `Place::new("session.arrange").with("time", t).with("track", id)`; draw with `Roster::pointers(now, place)` where `place` puts a `Place` in this view's pixels and answers `None` for a space the view does not show. Draw it with `architect_workspace::PresenceLayer` (`use_presence_overlay`, the view's last child).
+- **Text binding:** seed the editor with `TextBinding::shown()`, report its edits with `on_local` (editor coordinates, prefix included), and after every doc revision `sync_into` the editor; its commits carry its own origin and never come back. Ops are Unicode scalars: an editor in bytes or UTF-16 translates at its edge.
 - **Presence:** never call `sweep()` in a render (it fires subscribers → render loop). Presence fan-out is sliding(64) and drops; CRDT updates use unbounded `PubSub`, because a dropped update is a lost edit.
 - **Persistence:** compaction is not atomic by default (snapshot, then prune); `FilePersistence` appends with plain writes, so a crash mid-write can leave a truncated `.loro`; SeaORM compacts in one transaction and sequences by wall-clock nanos; Turso sequences `MAX(seq)+1` under one connection lock.
 - **Text positions are Unicode scalars, not UTF-16:** translate at the DOM boundary. `apply_text_diff` is one prefix/suffix edit. Create the text container once, then sync before forking edits. `read_text_with_migration` uses a mergeable container: prefer `upgrade_to_text` for concurrent upgrades.
