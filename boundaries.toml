@@ -116,6 +116,11 @@ features = ["ui"]
 layer = "L4"
 
 [[row]]
+package = "architect-workspace"
+features = ["ui"]
+layer = "L4"
+
+[[row]]
 package = "architect-ui"
 layer = "L4"
 
