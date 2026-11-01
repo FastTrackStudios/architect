@@ -17,8 +17,12 @@ weight = 57
 > following the person's current org);
 > `features/crdt/crdt/src/docs/placement.rs` `Placement` (each document
 > in its file); `features/crdt/crdt/src/registry.rs` `DocPermissions`
-> (the org's permission on every call). Next in the order of work:
-> blobs. Studio's
+> (the org's permission on every call).
+> **Blob transfer landed:** `DocKind::blobs` (which blobs a document
+> points at), `features/crdt/crdt/src/blobs.rs` (`live`, `keep_offline`)
+> and `architect::blob`'s `Fetcher` (on demand by hash over vox, iroh or
+> HTTP, resumable, streamed), pins and collection ([blobs](@/architecture/blob.md)).
+> Studio's
 > `session-format` moving onto the file is Studio's work. Proposed
 > (2026-10-31): most of
 > the pieces exist ([collaboration](@/architecture/collaboration.md),
@@ -138,7 +142,11 @@ interleave).
 Large media — audio a song records, images a note embeds — are blobs: by
 reference, by content hash, stored beside the document (a folder next to
 the file, or the store's blob table for small ones), fetched on demand
-on another device, pinned to keep offline.
+on another device, pinned to keep offline. The kind says which blobs a
+document points at (`DocKind::blobs`); `architect::blob::Fetcher` reads
+one from the peer the document came from or the org's server when it is
+played, streaming it as it arrives; `crdt::blobs::live` is what keeps a
+blob from collection ([blobs](@/architecture/blob.md)).
 
 ### Undo and transactions
 

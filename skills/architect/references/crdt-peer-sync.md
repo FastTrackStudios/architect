@@ -1,6 +1,6 @@
 # crdt: documents, text, schema, hub sync, `crdt::peer`, DocRegistry
 
-Crate `crdt` (`features/crdt/crdt`); guides `docs/content/architecture/collaboration.md` and `docs/content/architecture/peers.md`. Feature gates: `vox` (sync, registry, peer), `dioxus` (hooks), `turso`, `indexeddb`.
+Crate `crdt` (`features/crdt/crdt`); guides `docs/content/architecture/collaboration.md` and `docs/content/architecture/peers.md`. Feature gates: `vox` (sync, registry, peer), `dioxus` (hooks), `turso`, `indexeddb`, `blob` (a document's blobs, native).
 
 ## Pieces
 
@@ -18,6 +18,7 @@ Crate `crdt` (`features/crdt/crdt`); guides `docs/content/architecture/collabora
 | `DocRegistry` | many docs on one dispatcher pair; admission, the org's permissions, authorizer, eviction | `features/crdt/crdt/src/registry.rs` `DocRegistry`, `with_admission`, `with_permissions` (`DocPermissions`, `DocAccess`), `with_authorizer`, `with_idle_eviction` |
 | `crdt::peer` | pairwise exchange, `DocPeer` lane, `SelfLane`, `pull`, lineage check | `features/crdt/crdt/src/peer.rs` `DocPeer`, `DocPeerHost`, `SelfLane`, `exchange`, `pull`, `is_foreign_lineage` |
 | `crdt::docs` | catalog of schema-agnostic app docs (client-chosen id, opaque `kind`, `parent`, tombstones, contiguous `rev`); its host; the device driver | `features/crdt/crdt/src/docs/mod.rs` `Docs`, `DocMeta`, `DocChange`, `DocsStore`, `InMemoryDocsStore`; `features/crdt/crdt/src/docs/host.rs` `DocsHost`; `features/crdt/crdt/src/docs/driver.rs` `DocsDriver`, `DocsIndex`, `DocStorage`, `DocSyncEvent`, `Refusal`; `features/crdt/crdt/src/docs/device_host.rs` `DriverHost`; `features/crdt/crdt/src/docs/turso.rs` `TursoDocsIndex`; `features/crdt/crdt-seaorm/src/docs.rs` `SeaOrmDocsStore` |
+| `crdt::blobs` | the blobs a document points at (its kind's `DocKind::blobs`): live set for collection, keep offline | `features/crdt/crdt/src/blobs.rs` `referenced`, `live`, `missing`, `keep_offline`, `release`; transfer in `architect::blob` (`Fetcher`, `BlobTransferHost`, `VoxRemote`, `HttpRemote`) |
 | The org driver | one driver per org on a device, kept connected (dial, session until `Caller::closed`, `Backoff`, dial again); docs placed in document files | `features/crdt/crdt/src/docs/org.rs` `OrgDocs` (`stay_connected`, `run_on`, `link`), `OrgSyncs` (`ensure`, `current`, `follow`, `stop`), `Dialed`, `OrgLink`; `features/crdt/crdt/src/docs/placement.rs` `Placement` |
 | Hooks | Dioxus bridge: synced doc, crdt list/entry, presence | `features/crdt/crdt/src/hooks.rs` `use_synced_doc_keyed_with`, `use_crdt_list`, `use_crdt_entry` |
 | iroh seam | peer lookup modes; `Principal::Host` identity | `crates/architect/src/iroh_link.rs` `PeerLookup`; `features/permissions/src/lib.rs` `Principal` |
@@ -80,8 +81,18 @@ The host stores and relays Loro bytes and a catalog row (`DocMeta`); it never re
   - A doc learned from a peer stays pending until the hub session registers it. Rename and delete go through the hub.
 - Raw clients: `DocsClient` / `DocsStreamClient` inherent methods return `VoxError<DocsError>`; fold with `architect::vox_into_app`.
 
-## Recipe F: one driver per org (mirrors `features/crdt/crdt/tests/org_sync.rs`)
+## Recipe G: a document's blobs (mirrors `features/crdt/crdt/tests/blobs.rs`)
 
+A document points at its audio and images by sha256; the bytes never go in the Loro doc.
+
+- Kind: `DocKind::new(..).blobs(song_audio)`, where `song_audio(&LoroDoc) -> Vec<String>` returns 64-hex hashes.
+- Recording device: `LocalFs::put_bytes` (or `put`) the take, write its hash into the doc, and serve the store: `.with(blob_transfer_service_descriptor(), BlobTransferDispatcher::new(BlobTransferHost::new(Arc::new(store))))` on the same router as `DocPeer`/`DocSync` (vox over iroh or WebSocket). `.allow(|hash| ..)` narrows what it sends.
+- Other device: `Fetcher::new(LocalFs::new(dir)).with_remote(Arc::new(VoxRemote::new(client)))`, then `.with_remote(Arc::new(HttpRemote::new(".../blobs")))` for the server's copy (served with `blob::serve_http`). `fetcher.open(hash)` / `open_at(hash, offset)` streams while it arrives; `fetch(hash)` waits for it whole. One transfer per hash; a dropped link keeps the `.part`, and the next fetch resumes (`set_remotes` after a reconnect).
+- Offline: `crdt::blobs::keep_offline(kind, doc, &fetcher)` pins and fetches; `release` unpins.
+- Collection: `store.collect(&crdt::blobs::live(&kinds, docs), grace)` with every document on the device; pins are kept, anything else not in the set goes.
+- Streamed bytes are verified only at the end: a corrupt transfer that restarts ends the stream with `InvalidData`.
+
+## Recipe F: one driver per org (mirrors `features/crdt/crdt/tests/org_sync.rs`)
 ```rust
 let syncs = OrgSyncs::new(
     move |org: Org| {                       // made once per org
@@ -102,12 +113,10 @@ let docs = syncs.current(&orgs).await?;    // the window's org; None in All
 docs.placement().place(id, project_file);  // before the driver opens it
 let doc = docs.driver().create(req).await?;
 ```
-
 - `OrgSyncs::ensure` spawns `stay_connected`: dial, `run_on` until a lane connection's `Caller::closed`, sleep `Backoff::next_delay` (reset on connect), dial again. `link()` / `watch_link()` is `Connecting | Live | Offline | Stopped`. `follow(&orgs)` stops orgs the person left; their files stay.
 - An app with a supervised connection (`use_app_supervised`) calls `run_on(&lane)` once per `Connection::generation` instead of `stay_connected`.
 - `Placement`: catalogue `kind` = the `DocKind` id; a doc not placed is `<dir>/<id>.<extension>`; content syncs through `DocFile::persistence(MAIN)`; `placement.file(id)` is the open `DocFile` (name steps through its `Branch`). New files: `DocFile::create_as` for a doc made here, `DocFile::adopt` (empty, unstamped) for one made elsewhere.
 - Server: `DocsHost::open(store, registry.with_permissions(p.clone())).await?.with_permissions(p)`, one host per org, mounted on the org's lane behind the gate.
-
 ## Recipe C: version a document
 
 ```rust
