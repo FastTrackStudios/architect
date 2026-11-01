@@ -16,7 +16,13 @@ ui = [
     "dep:dioxus",
     "dep:lucide-dioxus",
     "dep:futures-timer",
+    "dep:futures-channel",
+    "dep:futures-util",
+    "dep:objc2",
     "dep:objc2-app-kit",
+    "dep:objc2-ui-kit",
+    "dep:block2",
+    "dep:tracing",
     "dep:objc2-foundation",
     "dep:raw-window-handle",
 ]
@@ -26,6 +32,10 @@ dioxus = { workspace = true, optional = true }
 lucide-dioxus = { workspace = true, optional = true }
 # The drawers ease in a frame at a time (src/shell/motion.rs).
 futures-timer = { workspace = true, optional = true }
+# The keyboard's height and the text focus, reported from any host and
+# heard by the shell (src/shell/keyboard.rs).
+futures-channel = { version = "0.3", optional = true }
+futures-util = { version = "0.3", default-features = false, optional = true }
 
 # A Mac window's own title bar: the traffic lights placed in the shell's
 # title row (src/shell/mac.rs).
@@ -43,6 +53,36 @@ objc2-foundation = { version = "0.3", optional = true, default-features = false,
     "NSGeometry",
 ] }
 raw-window-handle = { version = "0.6", optional = true }
+
+# iOS: the keyboard's frame from UIKit's notifications, and a web view's
+# own accessory bar taken away (src/shell/keyboard/ios.rs).
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2 = { workspace = true, optional = true }
+objc2-foundation = { version = "0.3", optional = true, default-features = false, features = [
+    "std",
+    "block2",
+    "NSDictionary",
+    "NSNotification",
+    "NSOperation",
+    "NSSet",
+    "NSString",
+    "NSValue",
+] }
+objc2-ui-kit = { workspace = true, optional = true, default-features = false, features = [
+    "std",
+    "objc2-core-foundation",
+    "UIApplication",
+    "UIGeometry",
+    "UIResponder",
+    "UIScene",
+    "UIScreen",
+    "UIView",
+    "UIViewController",
+    "UIWindow",
+    "UIWindowScene",
+] }
+block2 = { version = "0.6", optional = true }
+tracing = { workspace = true, optional = true }
 
 # A timer needs the browser's clock on wasm.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
