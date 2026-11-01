@@ -6,8 +6,9 @@
 //! nothing), so nothing jumps.
 //!
 //! The geometry is measured once, when the drag begins ([`Row`]); the
-//! offsets are `transform`s on the tabs, so the bars do not lay out again
-//! while a tab is dragged.
+//! offsets are relative `left`s on the tabs (points: a `translate` is in
+//! device pixels, half as far on a 2x screen), so the bars do not lay out
+//! again while a tab is dragged.
 
 use architect_shell::motion::Motion;
 use dioxus::prelude::*;
