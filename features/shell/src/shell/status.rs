@@ -155,7 +155,7 @@ pub(super) fn StatusBadge(items: Vec<StatusItem>) -> Element {
     }
     rsx! {
         div {
-            style: "position: absolute; right: 0; bottom: 0; z-index: 25; height: {STATUS_BADGE}px; box-sizing: border-box; \
+            style: "position: absolute; right: 0; bottom: 0; z-index: {super::layer::STATUS}; height: {STATUS_BADGE}px; box-sizing: border-box; \
                     display: flex; align-items: center; gap: 12px; padding: 0 10px; background: {t.title_bar}; \
                     border-top: 1px solid {t.rule}; border-left: 1px solid {t.rule}; border-radius: 8px 0 0 0; \
                     color: {t.ink_3}; font-family: {t.font}; font-size: 12px; white-space: nowrap;",

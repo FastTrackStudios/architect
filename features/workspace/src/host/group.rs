@@ -2,7 +2,7 @@
 //! icons, or none), stacked tabs, and the pane on show.
 
 use dioxus::prelude::*;
-use lucide_dioxus::{ArrowLeft, ArrowRight, ChevronDown, Ellipsis, Plus, X};
+use lucide_dioxus::{ArrowLeft, ArrowRight, ChevronDown, Ellipsis, Pin, Plus, X};
 
 use super::{Drag, Menu, Mount, Op, ThisPane, point, use_host};
 use crate::model::{Axis, Chrome, Group, Node, PaneId, Split};
@@ -141,7 +141,7 @@ fn GroupView(group: Group, edges: Edges) -> Element {
                 if group.stacked {
                     Stacked { group: group.clone(), current: current.clone() }
                 } else {
-                    div { style: "flex:1 1 0; min-width:0; min-height:0; display:flex; flex-direction:column;",
+                    div { style: "flex:1 1 0; width:100%; min-width:0; min-height:0; display:flex; flex-direction:column;",
                         if group.chrome == Chrome::Tabs {
                             PaneHeader { key: "h{current.0}", pane: current.clone() }
                         }
@@ -163,7 +163,7 @@ fn GroupView(group: Group, edges: Edges) -> Element {
 /// and a press on its empty part moves the window.
 #[component]
 fn TabBar(group: Group, current: PaneId, edges: Edges) -> Element {
-    let mut host = use_host();
+    let host = use_host();
     let t = *host.theme.read();
     let s = (host.sizes)();
     let icons = group.chrome == Chrome::Icons;
@@ -185,6 +185,9 @@ fn TabBar(group: Group, current: PaneId, edges: Edges) -> Element {
     let bar = if row.is_some() { t.title_bar } else { t.desk };
     let ruled = row.is_some();
     let current_index = group.tabs.iter().position(|p| *p == current);
+    // The group the keyboard acts on: its current tab carries the accent.
+    let focused = host.workspace.read().active_group() == Some(group.id);
+    let many = group.tabs.len() >= 3;
     let workspace = host.workspace.read();
     let tabs: Vec<(PaneId, String, bool, Option<architect_shell::IconFn>)> = group
         .tabs
@@ -216,6 +219,7 @@ fn TabBar(group: Group, current: PaneId, edges: Edges) -> Element {
                     Tab {
                         key: "{pane.0}",
                         on: Some(index) == current_index,
+                        focused,
                         // A hairline after a tab unless it or the next is current.
                         rule: Some(index) != current_index && Some(index.saturating_add(1)) != current_index,
                         pane,
@@ -230,6 +234,7 @@ fn TabBar(group: Group, current: PaneId, edges: Edges) -> Element {
                 button {
                     style: "{button}",
                     title: "New tab",
+                    "aria-label": "New tab",
                     onclick: move |_| host.show_open_menu(),
                     Plus { size: 16, color: t.ink_3 }
                 }
@@ -248,18 +253,20 @@ fn TabBar(group: Group, current: PaneId, edges: Edges) -> Element {
                     }
                 },
             }
-            if !icons {
+            if !icons && many {
                 button {
                     style: "{button}",
                     title: "Every tab",
-                    onclick: move |_| host.menu.set(Some(Menu::Tabs(group.id))),
+                    "aria-label": "Every tab",
+                    onclick: move |e: MouseEvent| host.open_menu(Menu::Tabs(group.id), super::click_point(&e)),
                     ChevronDown { size: 16, color: t.ink_3 }
                 }
             } else {
                 button {
                     style: "{button}",
                     title: "Tab menu",
-                    onclick: move |_| host.menu.set(Some(Menu::Pane(menu_for.clone()))),
+                    "aria-label": "Tab menu",
+                    onclick: move |e: MouseEvent| host.open_menu(Menu::Pane(menu_for.clone()), super::click_point(&e)),
                     Ellipsis { size: 16, color: t.ink_3 }
                 }
             }
@@ -271,7 +278,7 @@ fn TabBar(group: Group, current: PaneId, edges: Edges) -> Element {
 /// title, and its menu (Obsidian's view header).
 #[component]
 fn PaneHeader(pane: PaneId) -> Element {
-    let mut host = use_host();
+    let host = use_host();
     let t = *host.theme.read();
     let s = (host.sizes)();
     let workspace = host.workspace.read();
@@ -298,6 +305,7 @@ fn PaneHeader(pane: PaneId) -> Element {
             button {
                 style: nav(back),
                 title: "Back",
+                "aria-label": "Back",
                 onclick: move |_| {
                     let _ = host.edit(|w| w.go(&go_back, false));
                 },
@@ -306,6 +314,7 @@ fn PaneHeader(pane: PaneId) -> Element {
             button {
                 style: nav(forward),
                 title: "Forward",
+                "aria-label": "Forward",
                 onclick: move |_| {
                     let _ = host.edit(|w| w.go(&go_forward, true));
                 },
@@ -315,7 +324,8 @@ fn PaneHeader(pane: PaneId) -> Element {
             button {
                 style: nav(true),
                 title: "More options",
-                onclick: move |_| host.menu.set(Some(Menu::Pane(menu.clone()))),
+                "aria-label": "More options",
+                onclick: move |e: MouseEvent| host.open_menu(Menu::Pane(menu.clone()), super::click_point(&e)),
                 Ellipsis { size: 16, color: t.ink_2 }
             }
         }
@@ -327,6 +337,7 @@ fn Tab(
     pane: PaneId,
     title: String,
     on: bool,
+    focused: bool,
     rule: bool,
     pinned: bool,
     icon: Option<architect_shell::IconFn>,
@@ -346,14 +357,32 @@ fn Tab(
     let menu = pane.clone();
     let close = pane;
     let icon_size = if s.tabs > 40.0 { 18 } else { 14 };
+    let fade_to = if on { t.sheet } else { bar_colour(&host) };
+    let fade_from = transparent_of(fade_to);
+    let key_open = menu.clone();
+    let label = if pinned {
+        format!("{title}, pinned")
+    } else {
+        title.clone()
+    };
     rsx! {
         div {
             style: "flex:{grow} 1 {most}px; max-width:{most}px; min-width:{least}px; height:{tab_h}px; \
                     box-sizing:border-box; display:flex; align-items:center; gap:6px; padding:{pad}; \
                     border-radius:8px 8px 0 0; white-space:nowrap; overflow:hidden; touch-action:none; \
                     user-select:none; color:{ink}; background:{fill}; border-right:1px solid {hairline}; \
-                    position:relative; z-index:{u8::from(on)};",
+                    position:relative; z-index:{u8::from(on)}; cursor:pointer;",
             title: "{title}",
+            role: "tab",
+            tabindex: "0",
+            "aria-label": "{label}",
+            "aria-selected": "{on}",
+            onkeydown: move |e: KeyboardEvent| {
+                if e.key() == Key::Enter || e.key() == Key::Character(" ".into()) {
+                    e.prevent_default();
+                    let _ = host.edit(|w| w.activate(&key_open));
+                }
+            },
             onpointerdown: move |e| {
                 let (x, y) = point(&e);
                 let _ = host.edit(|w| w.activate(&press));
@@ -362,23 +391,34 @@ fn Tab(
             oncontextmenu: move |e| {
                 e.prevent_default();
                 host.drag.set(None);
-                host.menu.set(Some(Menu::Pane(menu.clone())));
+                host.open_menu(Menu::Pane(menu.clone()), super::click_point(&e));
             },
+            // The focused group's current tab: the accent along its top.
+            if on && focused {
+                div { style: "position:absolute; left:8px; right:8px; top:0; height:2px; border-radius:0 0 2px 2px; \
+                              background:{t.accent};" }
+            }
             if let Some(icon) = icon {
                 {icon(architect_shell::Icon { size: icon_size, color: ink })}
             }
             if !icons || icon.is_none() {
-                span { style: "flex:1 1 0; min-width:0; overflow:hidden;", "{title}" }
+                // A long name fades out at its end (Blitz has no ellipsis).
+                span { style: "position:relative; flex:1 1 0; min-width:0; overflow:hidden;",
+                    "{title}"
+                    span { style: "position:absolute; top:0; right:0; bottom:0; width:16px; \
+                                   background:linear-gradient(to right, {fade_from}, {fade_to});" }
+                }
             }
             if !icons {
                 if pinned {
-                    span { style: "color:{t.ink_3}; font-size:11px;", "📌" }
+                    Pin { size: 12, color: t.ink_3 }
                 } else if on || s.tabs > 40.0 {
                     button {
                         style: "flex:0 0 auto; width:{tab_h - 10.0}px; height:{tab_h - 10.0}px; \
                                 border:none; border-radius:4px; background:transparent; display:flex; \
-                                align-items:center; justify-content:center;",
-                        title: "Close",
+                                align-items:center; justify-content:center; cursor:pointer;",
+                        title: "Close {title}",
+                        "aria-label": "Close {title}",
                         onpointerdown: move |e| e.stop_propagation(),
                         onclick: move |e| {
                             e.stop_propagation();
@@ -419,6 +459,7 @@ fn Stacked(group: Group, current: PaneId) -> Element {
                                 background:{spine_fill(pane == current, t)}; \
                                 border-right:1px solid {t.rule}; color:{t.ink_3};",
                         title: "{title}",
+                        "aria-label": "{title}",
                         onpointerdown: {
                             let pane = pane.clone();
                             move |e: PointerEvent| {
@@ -432,14 +473,14 @@ fn Stacked(group: Group, current: PaneId) -> Element {
                             move |e: MouseEvent| {
                                 e.prevent_default();
                                 host.drag.set(None);
-                                host.menu.set(Some(Menu::Pane(pane.clone())));
+                                host.open_menu(Menu::Pane(pane.clone()), super::click_point(&e));
                             }
                         },
                         if let Some(icon) = icon {
                             {icon(architect_shell::Icon { size: 14, color: t.ink_3 })}
                         }
                         for ch in title.chars().take(14) {
-                            span { style: "font-size:10px; line-height:11px;", "{ch}" }
+                            span { style: "font-size:11px; line-height:12px;", "{ch}" }
                         }
                     }
                     div { style: "flex:1 1 0; min-width:0; min-height:0; display:flex; position:relative; overflow:hidden;",
@@ -492,7 +533,7 @@ fn Grip(group: Group, current: PaneId) -> Element {
             oncontextmenu: move |e| {
                 e.prevent_default();
                 host.drag.set(None);
-                host.menu.set(Some(Menu::Pane(menu.clone())));
+                host.open_menu(Menu::Pane(menu.clone()), super::click_point(&e));
             },
             div {
                 style: "display:flex; flex-wrap:wrap; gap:6px; padding:8px; max-width:90%; \
@@ -552,7 +593,7 @@ pub(super) fn PaneSlot(pane: PaneId) -> Element {
     );
     rsx! {
         div {
-            style: "flex:1 1 0; min-width:0; min-height:0; display:flex; position:relative;",
+            style: "flex:1 1 0; width:100%; min-width:0; min-height:0; display:flex; flex-direction:column; position:relative;",
             onpointerdown: move |_| {
                 let already = host.workspace.peek().active.as_ref() == Some(&focus);
                 if !already {
@@ -588,5 +629,25 @@ pub(super) fn hairline(axis: Axis, grip: f32, rule: &str, cursor: &str) -> (Stri
                 t = 0.5 - half
             ),
         ),
+    }
+}
+
+/// What an inactive tab sits on: the title bar's colour on the title row,
+/// the desk's elsewhere.
+fn bar_colour(host: &super::Host) -> &'static str {
+    let t = *host.theme.peek();
+    if host.title_row.peek().is_some() {
+        t.title_bar
+    } else {
+        t.desk
+    }
+}
+
+/// `#rrggbb` fully transparent (`#rrggbb00`), for a fade into it.
+fn transparent_of(hex: &'static str) -> String {
+    if hex.len() == 7 && hex.starts_with('#') {
+        format!("{hex}00")
+    } else {
+        "transparent".to_owned()
     }
 }

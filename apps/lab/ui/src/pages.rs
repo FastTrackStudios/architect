@@ -3,7 +3,7 @@
 
 use architect_shell::icon;
 use architect_shell::{
-    Action, Crumb, FormFactor, Menu, Page, ShellStyle, StatusStyle, Tool, Toolbar, use_shell,
+    Action, Crumb, Menu, Page, ShellStyle, StatusStyle, Tool, Toolbar, use_shell,
 };
 use dioxus::prelude::*;
 use lucide_dioxus::{
@@ -12,13 +12,6 @@ use lucide_dioxus::{
 
 use crate::screen::{Device, set_device};
 use crate::{Lab, Route};
-
-const INK: &str = "#e4e4e7";
-const INK_2: &str = "#a1a1aa";
-const INK_3: &str = "#80808a";
-const SHEET_2: &str = "#16161a";
-const RULE: &str = "#222228";
-const FONT: &str = "-apple-system, 'SF Pro Text', system-ui, 'Segoe UI', Roboto, sans-serif";
 
 fn title(tab: &str) -> &'static str {
     match tab {
@@ -126,14 +119,8 @@ fn lab_menu(menu: Menu, lab: Lab) -> Menu {
 /// A tab's page: its list.
 #[component]
 pub fn ListPage(tab: &'static str) -> Element {
+    let t = use_shell().theme;
     let lab = use_context::<Lab>();
-    let shell = use_shell();
-    let form = match shell.form() {
-        FormFactor::Phone => "Phone",
-        FormFactor::Tablet => "Tablet",
-        FormFactor::Desk => "Desk",
-    };
-    let screen = shell.screen;
     let menu = Menu::new()
         .item("Sort", icon!(ArrowUpDown), |()| {})
         .note("Newest");
@@ -162,8 +149,8 @@ pub fn ListPage(tab: &'static str) -> Element {
             title: title(tab),
             crumbs: vec![Crumb::new("FastTrackStudio").icon(icon!(Hash))],
             toolbar,
-            span { style: "font-size: 13px; color: {INK_3}; font-family: {FONT}; padding-bottom: 10px;",
-                "{screen.width:.0} × {screen.height:.0} · {form}"
+            span { style: "font-size: 13px; color: {t.ink_3}; font-family: {t.font}; padding-bottom: 10px;",
+                "{items(tab).len()} items"
             }
             div { style: "display: flex; flex-direction: column; gap: 10px;",
                 for (i, (name, detail)) in items(tab).iter().enumerate() {
@@ -176,15 +163,16 @@ pub fn ListPage(tab: &'static str) -> Element {
 
 #[component]
 fn Row(name: &'static str, detail: &'static str, on_press: EventHandler<()>) -> Element {
+    let t = use_shell().theme;
     rsx! {
         button {
             class: "lp",
             style: "display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 14px 16px; \
-                    border-radius: 14px; border: 1px solid {RULE}; background: #0e0e11; color: {INK}; \
-                    font-family: {FONT}; text-align: left;",
+                    border-radius: 14px; border: 1px solid {t.rule}; background: {t.sheet}; color: {t.ink}; \
+                    font-family: {t.font}; text-align: left;",
             onclick: move |_| on_press.call(()),
             span { style: "font-size: 16px; font-weight: 650;", "{name}" }
-            span { style: "font-size: 13px; color: {INK_3};", "{detail}" }
+            span { style: "font-size: 13px; color: {t.ink_3};", "{detail}" }
         }
     }
 }
@@ -192,6 +180,7 @@ fn Row(name: &'static str, detail: &'static str, on_press: EventHandler<()>) -> 
 /// One item: the bar has the way back, the page says what it is.
 #[component]
 pub fn ItemPage(tab: &'static str, index: usize) -> Element {
+    let t = use_shell().theme;
     let lab = use_context::<Lab>();
     let (name, detail) = items(tab)
         .get(index)
@@ -216,10 +205,10 @@ pub fn ItemPage(tab: &'static str, index: usize) -> Element {
                 Tool::action(Action::new("Done", icon!(Check), move |()| lab.go_back())),
                 Tool::more(lab_menu(menu, lab)),
             ]),
-            div { style: "display: flex; flex-direction: column; gap: 14px; font-family: {FONT}; color: {INK};",
-                span { style: "font-size: 14px; color: {INK_3};", "{detail} · in {title(tab)}" }
-                div { style: "height: 1px; background: {RULE};" }
-                span { style: "font-size: 15px; line-height: 1.5; color: #c4c4cc;",
+            div { style: "display: flex; flex-direction: column; gap: 14px; font-family: {t.font}; color: {t.ink};",
+                span { style: "font-size: 14px; color: {t.ink_3};", "{detail} · in {title(tab)}" }
+                div { style: "height: 1px; background: {t.rule};" }
+                span { style: "font-size: 15px; line-height: 1.5; color: {t.ink_2};",
                     "Swipe right for the projects, left for the details. Pull down from the top for the vault. \
                      The ⋯ switches the shell's style, and on a desk the device this window stands in for."
                 }
@@ -232,6 +221,7 @@ pub fn ItemPage(tab: &'static str, index: usize) -> Element {
 /// at its foot).
 #[component]
 pub fn LeftSide() -> Element {
+    let t = use_shell().theme;
     let projects = [
         ("Studio", 12),
         ("Harbor & Pine", 4),
@@ -241,17 +231,17 @@ pub fn LeftSide() -> Element {
     ];
     let mut here = use_signal(|| "Studio");
     rsx! {
-        div { style: "margin: 0 12px 10px; height: 38px; border-radius: 10px; background: {SHEET_2}; border: 1px solid {RULE}; \
-                      display: flex; align-items: center; gap: 8px; padding: 0 12px; font-family: {FONT};",
-            Search { size: 16, color: INK_3 }
-            span { style: "font-size: 14px; color: {INK_3};", "Search" }
+        div { style: "margin: 0 12px 10px; height: 38px; border-radius: 10px; background: {t.pill}; border: 1px solid {t.rule}; \
+                      display: flex; align-items: center; gap: 8px; padding: 0 12px; font-family: {t.font};",
+            Search { size: 16, color: t.ink_3 }
+            span { style: "font-size: 14px; color: {t.ink_3};", "Search" }
         }
-        div { style: "display: flex; flex-direction: column; gap: 2px; padding: 4px 8px; font-family: {FONT};",
-            SideRow { label: "Inbox", count: 5, on: false, icon: rsx! { Inbox { size: 18, color: INK_2 } }, on_press: |()| {} }
-            span { style: "font-size: 12px; font-weight: 650; color: {INK_3}; padding: 14px 12px 6px;", "Projects" }
+        div { style: "display: flex; flex-direction: column; gap: 2px; padding: 4px 8px; font-family: {t.font};",
+            SideRow { label: "Inbox", count: 5, on: false, icon: rsx! { Inbox { size: 18, color: t.ink_2 } }, on_press: |()| {} }
+            span { style: "font-size: 12px; font-weight: 650; color: {t.ink_3}; padding: 14px 12px 6px;", "Projects" }
             for (p, n) in projects {
                 SideRow { key: "{p}", label: p, count: n, on: here() == p,
-                    icon: rsx! { Hash { size: 18, color: if here() == p { INK } else { INK_3 } } },
+                    icon: rsx! { Hash { size: 18, color: if here() == p { t.ink } else { t.ink_3 } } },
                     on_press: move |()| here.set(p) }
             }
         }
@@ -266,21 +256,22 @@ fn SideRow(
     icon: Element,
     on_press: EventHandler<()>,
 ) -> Element {
+    let t = use_shell().theme;
     let (bg, colour, weight) = if on {
-        ("rgba(255,255,255,0.08)", INK, 650)
+        (t.active, t.ink, 650)
     } else {
-        ("transparent", INK_2, 500)
+        ("transparent", t.ink_2, 500)
     };
     rsx! {
         button {
             class: "lp",
             style: "height: 40px; display: flex; align-items: center; justify-content: flex-start; gap: 12px; \
                     padding: 0 12px; border: none; border-radius: 10px; background: {bg}; color: {colour}; \
-                    font-family: {FONT}; font-size: 15px; font-weight: {weight}; text-align: left;",
+                    font-family: {t.font}; font-size: 15px; font-weight: {weight}; text-align: left;",
             onclick: move |_| on_press.call(()),
             {icon}
             span { style: "flex: 1; text-align: left;", "{label}" }
-            span { style: "font-size: 12px; color: {INK_3};", "{count}" }
+            span { style: "font-size: 12px; color: {t.ink_3};", "{count}" }
         }
     }
 }
@@ -288,6 +279,7 @@ fn SideRow(
 /// The right side: the selection's details.
 #[component]
 pub fn RightSide() -> Element {
+    let t = use_shell().theme;
     let lab = use_context::<Lab>();
     let route = (lab.route)();
     let what = match route {
@@ -295,13 +287,13 @@ pub fn RightSide() -> Element {
         Route::Tab(_) => "Nothing selected",
     };
     rsx! {
-        div { style: "display: flex; flex-direction: column; gap: 12px; padding: 12px 20px; font-family: {FONT}; color: {INK};",
-            span { style: "font-size: 12px; font-weight: 650; color: {INK_3};", "Details" }
+        div { style: "display: flex; flex-direction: column; gap: 12px; padding: 12px 20px; font-family: {t.font}; color: {t.ink};",
+            span { style: "font-size: 12px; font-weight: 650; color: {t.ink_3};", "Details" }
             span { style: "font-size: 18px; font-weight: 700;", "{what}" }
             for (k, v) in [("Status", "In progress"), ("Project", "Studio"), ("Due", "Friday"), ("Owner", "Cody")] {
                 div { key: "{k}", style: "display: flex; justify-content: space-between; font-size: 14px; padding: 10px 0; \
-                                          border-bottom: 1px solid {RULE};",
-                    span { style: "color: {INK_3};", "{k}" }
+                                          border-bottom: 1px solid {t.rule};",
+                    span { style: "color: {t.ink_3};", "{k}" }
                     span { "{v}" }
                 }
             }

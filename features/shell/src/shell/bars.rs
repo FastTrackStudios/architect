@@ -45,7 +45,7 @@ pub(super) fn BottomBar(
             div {
                 style: "flex: 1; min-width: 0; height: 54px; box-sizing: border-box; display: flex; align-items: center; gap: 2px; \
                         padding: 4px; border-radius: 27px; background: {t.pill}; border: 1px solid {t.rule}; \
-                        box-shadow: 0 8px 30px rgba(0,0,0,0.35);",
+                        box-shadow: {t.shadow_lift};",
                 for tab in tabs {
                     BarTab { key: "{tab.id}", on: current == Some(tab.id), tab, on_tab, labelled: false }
                 }
@@ -96,7 +96,7 @@ pub(super) fn RoundButton(action: Action) -> Element {
             "aria-label": "{action.label}",
             style: "width: {size}px; height: {size}px; flex-shrink: 0; box-sizing: border-box; border-radius: {size / 2.0}px; \
                     display: flex; align-items: center; justify-content: center; padding: 0; background: {t.pill}; \
-                    border: 1px solid {t.rule}; color: {t.ink}; box-shadow: 0 6px 20px rgba(0,0,0,0.35);",
+                    border: 1px solid {t.rule}; color: {t.ink}; box-shadow: {t.shadow_lift};",
             onclick: move |_| press.call(()),
             {(action.icon)(Icon { size: icon, color: t.ink })}
         }
@@ -197,7 +197,7 @@ fn RailTab(tab: Tab, on: bool, on_tab: EventHandler<&'static str>) -> Element {
 pub(super) fn SideTab(tab: Tab, on: bool, on_tab: EventHandler<&'static str>) -> Element {
     let t = use_shell().theme;
     let (fill, colour, weight) = if on {
-        (t.active, t.ink, 700)
+        (t.accent_soft, t.ink, 700)
     } else {
         ("transparent", t.ink_2, 560)
     };

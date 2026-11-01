@@ -263,10 +263,11 @@ pub fn use_window_chrome() -> Option<WindowChrome> {
     // out again on a resize.
     let _ = use_context::<Signal<Screen>>()();
     let device = use_context::<Signal<Device>>()();
+    // A window standing in for a phone or a tablet has no traffic lights.
     #[cfg(target_os = "macos")]
     architect_shell::fit_traffic_lights(
         window.rwh_06_window_handle(),
-        WindowChrome::MAC_ROW,
+        (device == Device::Native).then_some(WindowChrome::MAC_ROW),
         WindowChrome::MAC_LIGHTS_LEFT,
     );
     (cfg!(target_os = "macos") && window.fullscreen().is_none() && device == Device::Native)

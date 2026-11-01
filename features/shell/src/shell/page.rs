@@ -410,7 +410,7 @@ fn Group(group: ToolGroup, size: ToolSize) -> Element {
             div {
                 style: "height: {size.button}px; box-sizing: border-box; display: flex; align-items: center; padding: 0 1px; \
                         border-radius: {size.radius}px; background: {t.pill}; border: 1px solid {t.rule}; \
-                        box-shadow: 0 8px 24px rgba(0,0,0,0.3);",
+                        box-shadow: {t.shadow_lift};",
                 for (i, tool) in group.tools.into_iter().enumerate() {
                     ToolButton { key: "{i}", tool, size, side: inner, framed: false }
                     if i + 1 < n {
@@ -435,10 +435,11 @@ fn ToolButton(tool: Tool, size: ToolSize, side: f64, framed: bool) -> Element {
     let frame = if framed {
         format!(
             "border-radius: {r}px; background: {bg}; border: 1px solid {rule}; box-sizing: border-box; \
-             box-shadow: 0 8px 24px rgba(0,0,0,0.3);",
+             box-shadow: {shadow};",
             r = size.radius,
             bg = t.pill,
-            rule = t.rule
+            rule = t.rule,
+            shadow = t.shadow_lift
         )
     } else {
         format!(
@@ -505,9 +506,9 @@ fn ToolButton(tool: Tool, size: ToolSize, side: f64, framed: bool) -> Element {
                             onclick: move |_| open.set(false),
                         }
                         div {
-                            style: "position: absolute; right: -2px; top: {side + 8.0}px; z-index: 50; min-width: 248px; \
+                            style: "position: absolute; right: -2px; top: {side + 8.0}px; z-index: {super::layer::MENU}; min-width: 248px; \
                                     display: flex; flex-direction: column; padding: 6px 0; border-radius: 16px; \
-                                    background: {t.pill}; border: 1px solid {t.rule}; box-shadow: 0 20px 50px rgba(0,0,0,0.6);",
+                                    background: {t.pill}; border: 1px solid {t.rule}; box-shadow: {t.shadow_float};",
                             for (i, entry) in menu.entries.iter().cloned().enumerate() {
                                 MenuRow { key: "{i}", entry, open }
                             }

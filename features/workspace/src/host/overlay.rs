@@ -1,7 +1,9 @@
 //! What sits over the workspace: floats, the drag layer and its drop
 //! highlight, the menus, and a phone's one-pane body, switcher and sheet.
 
+use architect_shell::layer;
 use dioxus::prelude::*;
+use lucide_dioxus::{Layers, Minus, PanelRight, X};
 
 use super::group::{NodeView, PaneSlot};
 use super::{DRAG_SLOP, Drag, FLOAT_AT, Host, Menu, Mount, Op, groups_of, point, use_host};
@@ -39,12 +41,14 @@ pub(super) fn FloatView(index: usize, pane: PaneId) -> Element {
     let minimise = pane.clone();
     let node = Node::Group(float.group.clone());
     let radius = if float.snap.is_some() { "0" } else { "8px" };
+    // Floats stack in the order they were made, the last on top.
+    let float_z = layer::FLOAT.saturating_add(u8::try_from(index).unwrap_or(9).min(9));
     rsx! {
         div {
             style: "position:absolute; left:{b.x}px; top:{b.y}px; width:{b.w}px; height:{b.h}px; \
                     display:flex; flex-direction:column; background:{t.sheet}; \
                     border:1px solid {t.rule}; border-radius:{radius}; overflow:hidden; \
-                    box-shadow:0 12px 32px rgba(0,0,0,0.5); z-index:10;",
+                    box-shadow:{t.shadow_float}; z-index:{float_z};",
             div {
                 style: "flex:0 0 28px; display:flex; align-items:center; gap:4px; padding:0 4px 0 10px; \
                         background:{t.pill}; color:{t.ink_2}; cursor:grab; touch-action:none; \
@@ -72,10 +76,10 @@ pub(super) fn FloatView(index: usize, pane: PaneId) -> Element {
                     let _ = host.edit(|w| w.snap(&pane, snap));
                 },
                 div { style: "flex:1; min-width:0; overflow:hidden; white-space:nowrap;", "{title}" }
-                FloatButton { label: "Minimise", glyph: "–", onpress: move |()| {
+                FloatButton { label: "Minimise", icon: FloatIcon::Minimise, onpress: move |()| {
                     let _ = host.edit(|w| w.minimise(&minimise));
                 } }
-                FloatButton { label: "Dock it", glyph: "⇲", onpress: move |()| {
+                FloatButton { label: "Dock it", icon: FloatIcon::Dock, onpress: move |()| {
                     host.run(Op::Move(dock.clone(), Dest::Dock(Side::Right)));
                 } }
             }
@@ -100,19 +104,30 @@ pub(super) fn FloatView(index: usize, pane: PaneId) -> Element {
 }
 
 #[component]
-fn FloatButton(label: &'static str, glyph: &'static str, onpress: EventHandler<()>) -> Element {
+fn FloatButton(label: &'static str, icon: FloatIcon, onpress: EventHandler<()>) -> Element {
     let host = use_host();
     let t = *host.theme.read();
     rsx! {
         button {
-            style: "flex:0 0 auto; min-width:24px; height:22px; border:none; border-radius:4px; \
-                    background:transparent; color:{t.ink_3};",
+            style: "flex:0 0 auto; width:24px; height:24px; border:none; border-radius:5px; \
+                    background:transparent; display:flex; align-items:center; justify-content:center; cursor:pointer;",
             title: label,
+            "aria-label": label,
             onpointerdown: move |e| e.stop_propagation(),
             onclick: move |_| onpress.call(()),
-            "{glyph}"
+            match icon {
+                FloatIcon::Minimise => rsx! { Minus { size: 14, color: t.ink_3 } },
+                FloatIcon::Dock => rsx! { PanelRight { size: 14, color: t.ink_3 } },
+            }
         }
     }
+}
+
+/// A float title bar's buttons.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FloatIcon {
+    Minimise,
+    Dock,
 }
 
 /// While anything drags: a layer over everything that shows where a pane
@@ -176,7 +191,7 @@ pub(super) fn DragLayer() -> Element {
     };
     rsx! {
         div {
-            style: "position:absolute; top:0; left:0; right:0; bottom:0; z-index:40; touch-action:none; cursor:{cursor};",
+            style: "position:absolute; top:0; left:0; right:0; bottom:0; z-index:{layer::DRAG}; touch-action:none; cursor:{cursor};",
             if let Some(h) = highlight {
                 div {
                     style: "position:absolute; left:{h.x}px; top:{h.y}px; width:{h.w}px; height:{h.h}px; \
@@ -422,6 +437,13 @@ pub(super) fn on_up(mut host: Host) {
     }
 }
 
+/// A menu's width, and how tall one may run before it opens upward
+/// (points).
+const MENU_W: f32 = 248.0;
+const MENU_TALL: f32 = 360.0;
+/// The menus' layer, over the floats and the drag layer.
+const Z_MENU: u8 = layer::MENU;
+
 /// The pane menu and the open-a-view menu.
 #[component]
 pub(super) fn MenuLayer() -> Element {
@@ -435,15 +457,39 @@ pub(super) fn MenuLayer() -> Element {
         Menu::Open => open_items(host),
         Menu::Tabs(group) => tab_items(host, group),
     };
+    // On a desk the menu opens where it was asked for (the ⋯, the
+    // pointer), kept inside the window; on a phone, or from a key, in the
+    // middle over a scrim.
+    let area = (host.float_area)().unwrap_or(Rect::new(0.0, 0.0, 1200.0, 800.0));
+    let anchored = (host.menu_at)().filter(|_| !(host.phone)());
+    let (scrim, place) = anchored.map_or_else(
+        || {
+            (
+                t.scrim.to_owned(),
+                "position:relative; margin:auto; max-width:90%; max-height:85%;".to_owned(),
+            )
+        },
+        |(x, y)| {
+            let left = (x - area.x).clamp(8.0, (area.w - MENU_W - 8.0).max(8.0));
+            let top = (y - area.y + 6.0).clamp(8.0, (area.h - MENU_TALL).max(8.0));
+            (
+                "transparent".to_owned(),
+                format!(
+                    "position:absolute; left:{left}px; top:{top}px; max-height:{}px;",
+                    area.h - top - 8.0
+                ),
+            )
+        },
+    );
     rsx! {
         div {
-            style: "position:absolute; top:0; left:0; right:0; bottom:0; z-index:50; background:{t.scrim}; \
-                    display:flex; align-items:center; justify-content:center;",
+            style: "position:absolute; top:0; left:0; right:0; bottom:0; z-index:{Z_MENU}; background:{scrim}; \
+                    display:flex;",
             onclick: move |_| host.menu.set(None),
             div {
-                style: "min-width:260px; max-width:90%; max-height:85%; overflow-y:scroll; \
-                        display:flex; flex-direction:column; padding:6px; border-radius:12px; \
-                        background:{t.pill}; border:1px solid {t.rule};",
+                style: "{place} width:{MENU_W}px; overflow-y:scroll; box-sizing:border-box; \
+                        display:flex; flex-direction:column; padding:5px; border-radius:10px; \
+                        background:{t.pill}; border:1px solid {t.rule}; box-shadow:{t.shadow_float};",
                 onclick: move |e| e.stop_propagation(),
                 for (i, item) in items.into_iter().enumerate() {
                     MenuRow { key: "{i}", item }
@@ -466,16 +512,18 @@ fn MenuRow(item: Item) -> Element {
     let s = (host.sizes)();
     match item {
         Item::Heading(text) => rsx! {
-            div { style: "padding:10px 12px 4px; color:{t.ink_3}; font-size:11px; font-weight:600;", "{text}" }
+            div { style: "padding:8px 10px 3px; color:{t.ink_2}; font-size:11px; font-weight:600;", "{text}" }
         },
         Item::Act(label, op) => {
+            // A mouse's rows (28pt, 13px) or a finger's (44pt, 15px).
+            let row_font = if s.button > 40.0 { 15 } else { 13 };
             let danger = matches!(op, Op::Close(_) | Op::CloseOthers(_));
             let ink = if danger { t.danger } else { t.ink };
             rsx! {
                 button {
                     style: "display:flex; justify-content:flex-start; text-align:left; padding:0 12px; \
-                            min-height:{s.button.max(36.0)}px; border:none; border-radius:8px; \
-                            background:transparent; color:{ink}; font-size:14px;",
+                            min-height:{s.button}px; border:none; border-radius:6px; cursor:pointer; \
+                            background:transparent; color:{ink}; font-size:{row_font}px;",
                     onclick: move |_| {
                         host.menu.set(None);
                         host.switcher.set(false);
@@ -626,19 +674,29 @@ pub(super) fn PhoneBody() -> Element {
         .unwrap_or_default();
     let count = workspace.panes.len();
     drop(workspace);
+    // The app may show the pane's title and the switcher in its own bar
+    // (`phone_header: false`); else this one: the title on the page's
+    // left edge, the switcher a labelled pill.
+    let own_bar = (host.phone_header)();
     rsx! {
         div { style: "flex:1 1 0; min-width:0; min-height:0; display:flex; flex-direction:column;",
-            div {
-                style: "flex:0 0 44px; display:flex; align-items:center; gap:8px; padding:0 8px 0 14px; \
-                        border-bottom:1px solid {t.rule}; background:{t.desk};",
-                div { style: "flex:1; min-width:0; overflow:hidden; white-space:nowrap; font-weight:600;", "{title}" }
-                button {
-                    style: "min-width:44px; height:32px; padding:0 10px; border-radius:8px; \
-                            border:1.5px solid {t.ink_3}; background:transparent; color:{t.ink}; \
-                            font-size:13px; font-weight:700;",
-                    title: "Every pane",
-                    onclick: move |_| host.switcher.set(true),
-                    "{count}"
+            if own_bar {
+                div {
+                    style: "flex:0 0 56px; display:flex; align-items:center; gap:10px; padding:0 12px 0 20px; \
+                            border-bottom:1px solid {t.rule}; background:{t.desk};",
+                    div { style: "flex:1; min-width:0; overflow:hidden; white-space:nowrap; font-size:17px; font-weight:650;",
+                        "{title}"
+                    }
+                    button {
+                        style: "height:44px; display:flex; align-items:center; gap:7px; padding:0 14px; border-radius:22px; \
+                                border:1px solid {t.rule}; background:{t.pill}; color:{t.ink}; font-size:14px; \
+                                font-weight:600; cursor:pointer;",
+                        title: "Every open pane",
+                        "aria-label": "{count} open panes",
+                        onclick: move |_| host.switcher.set(true),
+                        Layers { size: 16, color: t.ink_2 }
+                        "{count} open"
+                    }
                 }
             }
             div { style: "flex:1 1 0; min-width:0; min-height:0; display:flex; position:relative;",
@@ -676,13 +734,14 @@ fn Switcher() -> Element {
         })
         .collect();
     drop(workspace);
+    let sheet_top = layer::SHEET.saturating_add(1);
     rsx! {
         div {
-            style: "position:absolute; top:0; left:0; right:0; bottom:0; z-index:30; background:{t.scrim};",
+            style: "position:absolute; top:0; left:0; right:0; bottom:0; z-index:{layer::SHEET}; background:{t.scrim};",
             onclick: move |_| host.switcher.set(false),
         }
         div {
-            style: "position:absolute; left:0; right:0; bottom:0; max-height:80%; z-index:31; \
+            style: "position:absolute; left:0; right:0; bottom:0; max-height:80%; z-index:{sheet_top}; \
                     display:flex; flex-direction:column; padding:8px; border-radius:16px 16px 0 0; \
                     background:{t.sheet}; overflow-y:scroll;",
             for (pane, title, place) in rows {
@@ -733,23 +792,26 @@ pub(super) fn SheetLayer() -> Element {
     let Some(title) = host.workspace.read().pane(&pane).map(|p| host.title(p)) else {
         return rsx! {};
     };
+    let sheet_top = layer::SHEET.saturating_add(1);
     rsx! {
         div {
-            style: "position:absolute; top:0; left:0; right:0; bottom:0; background:{t.scrim}; z-index:32;",
+            style: "position:absolute; top:0; left:0; right:0; bottom:0; background:{t.scrim}; z-index:{layer::SHEET};",
             onclick: move |_| host.sheet.set(None),
         }
         div {
-            style: "position:absolute; left:0; right:0; bottom:0; height:80%; z-index:33; display:flex; \
+            style: "position:absolute; left:0; right:0; bottom:0; height:80%; z-index:{sheet_top}; display:flex; \
                     flex-direction:column; background:{t.sheet}; border-radius:16px 16px 0 0; overflow:hidden;",
             div {
                 style: "flex:0 0 48px; display:flex; align-items:center; padding:0 6px 0 16px; \
                         border-bottom:1px solid {t.rule};",
                 div { style: "flex:1; font-weight:600;", "{title}" }
                 button {
-                    style: "min-width:44px; min-height:44px; border:none; background:transparent; \
-                            color:{t.ink}; font-size:18px;",
+                    style: "width:44px; height:44px; border:none; background:transparent; display:flex; \
+                            align-items:center; justify-content:center; cursor:pointer;",
+                    title: "Close",
+                    "aria-label": "Close {title}",
                     onclick: move |_| host.sheet.set(None),
-                    "✕"
+                    X { size: 18, color: t.ink_2 }
                 }
             }
             div { style: "flex:1 1 0; min-height:0; display:flex; position:relative;",

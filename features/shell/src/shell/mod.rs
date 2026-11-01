@@ -256,6 +256,13 @@ pub struct ShellTheme {
     pub danger: &'static str,
     /// Over the page while a drawer or a menu is open.
     pub scrim: &'static str,
+    /// The accent, faint: the fill behind something current (the ribbon's
+    /// section, a selected row).
+    pub accent_soft: &'static str,
+    /// A pill or a button over the page.
+    pub shadow_lift: &'static str,
+    /// What floats over everything: a menu, a popover, a floating pane.
+    pub shadow_float: &'static str,
     pub font: &'static str,
 }
 
@@ -271,10 +278,14 @@ impl Default for ShellTheme {
             ink: "#e4e4e7",
             ink_2: "#a1a1aa",
             ink_3: "#80808a",
-            accent: "#2563eb",
-            accent_ink: "#ffffff",
+            // Signal teal: a meter's green, FastTrackStudio's accent.
+            accent: "#2dd4bf",
+            accent_ink: "#04201c",
             danger: "#f87171",
             scrim: "rgba(0,0,0,0.55)",
+            accent_soft: "rgba(45,212,191,0.14)",
+            shadow_lift: "0 6px 20px rgba(0,0,0,0.35)",
+            shadow_float: "0 16px 44px rgba(0,0,0,0.55)",
             font: "-apple-system, 'SF Pro Text', system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif",
         }
     }
@@ -546,6 +557,43 @@ const CONTROL: f64 = 28.0;
 const PARALLAX: f64 = 0.22;
 /// The docked sidebars' widths: the start, and the range a drag keeps to.
 const LEFT_WIDTH: f64 = 264.0;
+/// The shell's stacking order, for the shell and what it hosts (a
+/// workspace's floats and sheets, the command palette): one scale, so two
+/// layers never meet at the same number.
+pub mod layer {
+    /// A resize edge over its side.
+    pub const EDGE: u8 = 5;
+    /// Floating panes (10 and up, the last drawn on top).
+    pub const FLOAT: u8 = 10;
+    /// Minimised floats' chips.
+    pub const CHIPS: u8 = 20;
+    /// The status badge, the "arranging" chip.
+    pub const STATUS: u8 = 25;
+    /// The title row's fixed buttons.
+    pub const CONTROLS: u8 = 30;
+    /// A sheet over the page and its scrim (a phone's pane switcher).
+    pub const SHEET: u8 = 35;
+    /// The layer that follows a drag.
+    pub const DRAG: u8 = 40;
+    /// Menus and their click-away layer.
+    pub const MENU: u8 = 50;
+    /// The workspace switcher's list.
+    pub const POPOVER: u8 = 60;
+    /// The command palette and quick open.
+    pub const PALETTE: u8 = 90;
+}
+
+/// What the shell's inline styles cannot say: a pressable thing shows a
+/// pointer, and what the keyboard is on shows the accent's ring, in every
+/// app on the shell.
+fn shell_css(t: &ShellTheme) -> String {
+    format!(
+        "button, [role=tab], [role=button] {{ cursor: pointer; }} \
+         :focus-visible {{ outline: 2px solid {}; outline-offset: 2px; }}",
+        t.accent
+    )
+}
+
 /// A desk's ribbon, at the window's left edge, points (Obsidian's).
 pub const RIBBON: f64 = 44.0;
 const RIGHT_WIDTH: f64 = 320.0;
@@ -886,6 +934,7 @@ pub fn AppShell(
             onpointermove,
             onpointerup,
             onpointercancel,
+            document::Style { {shell_css(&t)} }
             if frame == Frame::Sidebar && desk {
                 DeskRibbon { tabs: tabs.clone(), current, on_tab: pick }
             }
@@ -1261,13 +1310,13 @@ fn AccountRow(account: Account, bottom: f64) -> Element {
             if let (true, Some(menu)) = (open(), menu) {
                 // Far past every edge: Blitz has no `position: fixed`.
                 div {
-                    style: "position: absolute; top: -4000px; left: -4000px; width: 8000px; height: 8000px; z-index: 40;",
+                    style: "position: absolute; top: -4000px; left: -4000px; width: 8000px; height: 8000px; z-index: {layer::MENU};",
                     onclick: move |_| open.set(false),
                 }
                 div {
-                    style: "position: absolute; left: 8px; right: 8px; bottom: {58.0 + bottom}px; z-index: 50; \
+                    style: "position: absolute; left: 8px; right: 8px; bottom: {58.0 + bottom}px; z-index: {layer::MENU}; \
                             display: flex; flex-direction: column; padding: 6px 0; border-radius: 12px; \
-                            background: {t.pill}; border: 1px solid {t.rule}; box-shadow: 0 20px 50px rgba(0,0,0,0.6);",
+                            background: {t.pill}; border: 1px solid {t.rule}; box-shadow: {t.shadow_float};",
                     div { style: "display: flex; align-items: center; gap: 10px; padding: 6px 12px 10px; \
                                   border-bottom: 1px solid {t.rule}; margin-bottom: 6px; font-family: {t.font};",
                         Avatar { account: account.clone(), size: 32.0 }
@@ -1348,7 +1397,7 @@ fn ResizeEdge(side: Side, on_start: EventHandler<PointerEvent>) -> Element {
     };
     rsx! {
         div {
-            style: "position: absolute; top: 0; {edge} width: 8px; height: 100%; cursor: col-resize; z-index: 5;",
+            style: "position: absolute; top: 0; {edge} width: 8px; height: 100%; cursor: col-resize; z-index: {layer::EDGE};",
             onpointerdown: move |e| on_start.call(e),
         }
     }
@@ -1440,8 +1489,9 @@ fn DeskRibbon(
 #[component]
 fn RibbonTab(tab: Tab, on: bool, on_tab: EventHandler<&'static str>) -> Element {
     let t = use_shell().theme;
+    // The current section: the accent, faint behind it and full in it.
     let (fill, colour) = if on {
-        (t.active, t.ink)
+        (t.accent_soft, t.accent)
     } else {
         ("transparent", t.ink_3)
     };

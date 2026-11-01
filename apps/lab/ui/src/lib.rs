@@ -17,8 +17,8 @@ use architect_shell::icon;
 use architect_shell::{self as shell, AppShell, ShellStyle};
 use dioxus::prelude::*;
 use lucide_dioxus::{
-    CalendarDays, CircleUser, Feather, Inbox, Keyboard, ListTodo, LogOut, NotebookText, Plus,
-    Settings2, Users,
+    CalendarDays, CheckCheck, CircleUser, Feather, Inbox, Keyboard, ListTodo, LogOut, NotebookText,
+    Plus, Settings2, Users,
 };
 
 pub use screen::{Device, use_window_chrome, use_window_screen};
@@ -157,7 +157,8 @@ pub fn LabApp() -> Element {
                 on_pull: move |()| lab.jump(Route::Tab("vault")),
                 window: window_chrome,
                 status: vec![
-                    shell::StatusItem::new("sync", "Synced").dot("#22c55e").hint("Every change is saved and synced"),
+                    shell::StatusItem::new("sync", "Synced")
+                        .icon(icon!(CheckCheck)).hint("Every change is saved and synced"),
                     shell::StatusItem::new("people", "3 online").icon(icon!(Users)),
                 ],
                 status_style: (lab.status)(),

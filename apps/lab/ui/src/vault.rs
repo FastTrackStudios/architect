@@ -4,17 +4,15 @@
 //! at the bottom from "Open a view"). Drag a tab anywhere, hold W to grab a pane without
 //! tabs, right-click (or ⋯) a tab for the rest.
 
-use architect_shell::{FormFactor, PageBar, Screen, StatusItem, icon, use_shell};
+use architect_shell::{Action, FormFactor, PageBar, Screen, StatusItem, Toolbar, icon, use_shell};
 use architect_workspace::{
     Command, Pane, Ribbon, Side, Target, TitleRow, View, ViewKind, Views, Workspace, WorkspaceView,
     use_pane,
 };
 use dioxus::prelude::*;
 use lucide_dioxus::{
-    CalendarDays, FileText, Files, Link, ListTree, Network, Search, SquarePen, Terminal,
+    CalendarCheck, FileText, Files, Layers, Link, ListTree, Network, Search, SquarePen, Terminal,
 };
-
-const INK_3: &str = "#80808a";
 
 /// The lab's views.
 fn views() -> Views {
@@ -28,7 +26,7 @@ fn views() -> Views {
             View::new(
                 "search",
                 "Search",
-                |_| rsx! { Stand { what: "Search the vault" } },
+                |_| rsx! { Stand { what: "Search the vault", next: "Type to find a note by its words." } },
             )
             .icon(icon!(Search))
             .home(Target::Dock(Side::Left)),
@@ -37,7 +35,7 @@ fn views() -> Views {
             View::new(
                 "outline",
                 "Outline",
-                |_| rsx! { Stand { what: "The note's headings" } },
+                |_| rsx! { Stand { what: "No headings yet", next: "Start a line with # in the note to give it one." } },
             )
             .icon(icon!(ListTree))
             .home(Target::Dock(Side::Right)),
@@ -46,13 +44,13 @@ fn views() -> Views {
             View::new(
                 "backlinks",
                 "Backlinks",
-                |_| rsx! { Stand { what: "Notes that link here" } },
+                |_| rsx! { Stand { what: "No links here yet", next: "Link to this note from another with [[its name]]." } },
             )
             .icon(icon!(Link))
             .home(Target::Dock(Side::Right)),
         )
         .view(
-            View::new("console", "Console", |_| rsx! { Stand { what: "Logs" } })
+            View::new("console", "Console", |_| rsx! { Stand { what: "Nothing logged", next: "What the vault does shows here." } })
                 .icon(icon!(Terminal))
                 .home(Target::Dock(Side::Bottom)),
         )
@@ -60,7 +58,7 @@ fn views() -> Views {
             View::new(
                 "graph",
                 "Graph",
-                |_| rsx! { Stand { what: "Every note and its links" } },
+                |_| rsx! { Stand { what: "Every note and its links", next: "Link notes together and the graph fills in." } },
             )
             .icon(icon!(Network))
             .home(Target::Split(Side::Right)),
@@ -127,7 +125,7 @@ pub fn VaultPage() -> Element {
     let mut made = use_signal(|| 0_u32);
     let commands = vec![
         Command::new("new-note", "New note", icon!(SquarePen)),
-        Command::new("daily", "Today's note", icon!(CalendarDays)),
+        Command::new("daily", "Today's note", icon!(CalendarCheck)),
     ];
     let on_command = move |id: String| {
         let (pane_id, title) = if id == "daily" {
@@ -166,8 +164,27 @@ pub fn VaultPage() -> Element {
             on_zoom: shell.window_chrome().map(|w| w.on_zoom),
         }
     });
+    // On a phone the page's own bar says what is open and opens the
+    // switcher (one title, on the page's edge); the pane bar goes.
+    let phone = screen.form() == FormFactor::Phone;
+    let mut switcher = use_signal(|| false);
+    let pane_title = {
+        let w = workspace.read();
+        w.active
+            .as_ref()
+            .and_then(|id| w.pane(id))
+            .map_or_else(|| "Vault".to_owned(), |p| p.title.clone())
+    };
+    let panes = Toolbar::new().separate(
+        Action::new(format!("{open} open"), icon!(Layers), move |()| {
+            switcher.set(true);
+        })
+        .with_label(),
+    );
     rsx! {
-        if title_row.is_none() {
+        if phone {
+            PageBar { title: pane_title, toolbar: panes }
+        } else if title_row.is_none() {
             PageBar { title: "Vault" }
         }
         div { style: "flex: 1 1 0; min-height: 0; display: flex; position: relative;",
@@ -181,6 +198,8 @@ pub fn VaultPage() -> Element {
                 title_row,
                 // One left side: the shell's ribbon and sidebar are the dock's.
                 in_shell: shell.desk(),
+                phone_header: !phone,
+                switcher,
             }
         }
     }
@@ -189,6 +208,7 @@ pub fn VaultPage() -> Element {
 #[component]
 fn FilesView() -> Element {
     let pane = use_pane();
+    let t = use_shell().theme;
     let files = [
         ("note-welcome", "Welcome"),
         ("note-shell", "The app shell"),
@@ -196,14 +216,22 @@ fn FilesView() -> Element {
         ("note-actions", "Actions everywhere"),
         ("note-extensions", "Extensions"),
     ];
+    // The note on show is lit, as Obsidian lights the open file.
+    let open_now = pane
+        .workspace()
+        .read()
+        .current_document()
+        .map(|p| p.0.clone());
     rsx! {
         div { style: "flex: 1; display: flex; flex-direction: column; padding: 8px; gap: 2px; overflow-y: scroll;",
             for (id, title) in files {
                 button {
                     key: "{id}",
                     class: "lp",
+                    "aria-current": if open_now.as_deref() == Some(id) { "page" } else { "false" },
                     style: "display: flex; align-items: center; justify-content: flex-start; min-height: 30px; padding: 0 10px; border: none; \
-                            border-radius: 6px; background: transparent; color: #e4e4e7; font-size: 13px; text-align: left;",
+                            border-radius: 6px; background: {lit(open_now.as_deref() == Some(id), &t)}; color: {t.ink}; \
+                            font-size: 13px; text-align: left; cursor: pointer;",
                     onclick: {
                         let pane = pane.clone();
                         // The id is the file: a note open already comes
@@ -222,31 +250,41 @@ fn FilesView() -> Element {
 #[component]
 fn NoteView() -> Element {
     let pane = use_pane();
+    let t = use_shell().theme;
     let edits: u32 = pane.state().parse().unwrap_or(0);
     let title = pane.title();
     rsx! {
         div { style: "flex: 1; display: flex; flex-direction: column; gap: 12px; padding: 28px 36px; overflow-y: scroll;",
-            div { style: "font-size: 26px; font-weight: 750; color: #e4e4e7;", "{title}" }
-            div { style: "font-size: 14px; line-height: 1.6; color: #a1a1aa;",
-                "Pane “{pane.id.0}”. Its state lives in the workspace, so it comes back with a screenset."
+            div { style: "font-size: 26px; font-weight: 750; color: {t.ink};", "{title}" }
+            div { style: "max-width: 560px; font-size: 14px; line-height: 1.6; color: {t.ink_2};",
+                "Notes open as tabs. Drag a tab to a pane's edge to split it, or to the window's edge to dock it; \
+                 right-click a tab for the rest. What you arrange comes back the next time you open the vault."
             }
             button {
                 class: "lp",
                 style: "align-self: flex-start; min-height: 32px; padding: 0 14px; border-radius: 8px; \
-                        border: 1px solid #2b2b31; background: #1a1a1f; color: #e4e4e7;",
+                        border: 1px solid {t.rule}; background: {t.pill}; color: {t.ink}; cursor: pointer;",
                 onclick: move |_| pane.set_state((edits + 1).to_string()),
-                "Edited {edits} times"
+                if edits == 0 { "Mark as edited" } else { "Edited {edits} times" }
             }
         }
     }
 }
 
 #[component]
-fn Stand(what: &'static str) -> Element {
+fn Stand(what: &'static str, next: &'static str) -> Element {
+    let t = use_shell().theme;
+    // Centred in the pane itself, so empty panes line up across groups.
     rsx! {
-        div { style: "flex: 1; display: flex; align-items: center; justify-content: center; padding: 16px; \
-                      text-align: center; color: {INK_3}; font-size: 13px;",
-            "{what}"
+        // Laid against the pane's own edges: in a dock, a flex child's
+        // wrapping text measured narrower than the pane.
+        div { style: "position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; \
+                      justify-content: center; padding: 16px 24px;",
+            p { style: "margin: 0; text-align: center; color: {t.ink_3}; font-size: 12px; line-height: 1.6;",
+                span { style: "color: {t.ink_2}; font-size: 13px; font-weight: 600;", "{what}" }
+                br {}
+                "{next}"
+            }
         }
     }
 }
@@ -255,4 +293,9 @@ fn Stand(what: &'static str) -> Element {
 #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
 const fn narrow(v: f64) -> f32 {
     v as f32
+}
+
+/// A file row's fill: the accent, faint, behind the note on show.
+const fn lit(on: bool, t: &architect_shell::ShellTheme) -> &'static str {
+    if on { t.accent_soft } else { "transparent" }
 }

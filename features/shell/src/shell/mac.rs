@@ -9,9 +9,11 @@ use objc2_foundation::NSPoint;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
 /// Centres the window's buttons in a title row `row` points tall, the
-/// first `left` points in. Does nothing off `AppKit` or before the window
-/// has its buttons.
-pub fn fit_traffic_lights(window: &dyn HasWindowHandle, row: f64, left: f64) {
+/// first `left` points in.
+///
+/// A `row` of `None` hides them: a window standing in for a phone has
+/// none. Does nothing off `AppKit` or before the window has its buttons.
+pub fn fit_traffic_lights(window: &dyn HasWindowHandle, row: Option<f64>, left: f64) {
     let Ok(handle) = window.window_handle() else {
         return;
     };
@@ -32,6 +34,12 @@ pub fn fit_traffic_lights(window: &dyn HasWindowHandle, row: f64, left: f64) {
     ]
     .map(|b| ns_window.standardWindowButton(b));
     let [Some(close), Some(mini), Some(zoom)] = buttons else {
+        return;
+    };
+    for button in [&close, &mini, &zoom] {
+        button.setHidden(row.is_none());
+    }
+    let Some(row) = row else {
         return;
     };
     // The buttons' superview is the title bar view, its superview the

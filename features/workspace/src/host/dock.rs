@@ -87,6 +87,10 @@ fn Ribbon(
     /// The shell's sidebar is folded (so the dock is not on show).
     #[props(default)]
     folded: bool,
+    /// Only the pinned commands: the dock's views are its own tabs (in the
+    /// title row), so a ribbon that also listed them would say it twice.
+    #[props(default)]
+    commands_only: bool,
 ) -> Element {
     let host = use_host();
     let t = *host.theme.read();
@@ -97,6 +101,7 @@ fn Ribbon(
     let views: Vec<(String, String, Option<IconFn>)> = ribbon
         .views
         .iter()
+        .filter(|_| !commands_only)
         .filter(|k| !ribbon.hidden.contains(k))
         .filter_map(|k| {
             host.views
@@ -105,6 +110,7 @@ fn Ribbon(
                 .map(|v| (k.0.clone(), v.title.clone(), v.icon))
         })
         .collect();
+    let has_views = !views.is_empty();
     let commands: Vec<(String, String, IconFn)> = ribbon
         .commands
         .iter()
@@ -169,7 +175,7 @@ fn Ribbon(
                     onpress: move |()| press_view(&host, side, &kind, on_side, folded),
                 }
             }
-            if !commands.is_empty() {
+            if has_views && !commands.is_empty() {
                 div { style: "flex:0 0 1px; width:60%; height:1px; background:{t.rule}; margin:4px 0;" }
             }
             for (id, label, icon) in commands {
@@ -268,8 +274,9 @@ fn RibbonButton(
         button {
             style: "flex:0 0 auto; width:{s.button}px; height:{s.button}px; border:none; border-radius:8px; \
                     display:flex; align-items:center; justify-content:center; background:{fill}; color:{ink}; \
-                    font-size:10px; font-weight:700;",
+                    font-size:11px; font-weight:700;",
             title: "{label}",
+            "aria-label": "{label}",
             onclick: move |_| onpress.call(()),
             {icon.map_or_else(|| rsx! { "{short}" }, |icon| icon(Icon { size: 18, color: ink }))}
         }
@@ -404,5 +411,5 @@ pub(super) fn ShellRibbon() -> Element {
             shell.toggle(architect_shell::Side::Left);
         }
     });
-    rsx! { Ribbon { side: Side::Left, dock, bare: true, on_side, folded } }
+    rsx! { Ribbon { side: Side::Left, dock, bare: true, on_side, folded, commands_only: true } }
 }

@@ -278,6 +278,8 @@ pub struct Host {
     phone: Signal<bool>,
     title_row: Signal<Option<TitleRow>>,
     in_shell: Signal<bool>,
+    /// A phone shows its own bar over the pane (the title, the switcher).
+    phone_header: Signal<bool>,
     drag: Signal<Option<Drag>>,
     menu: Signal<Option<Menu>>,
     /// A phone's pane opened over the one on show (a docked one).
@@ -285,6 +287,9 @@ pub struct Host {
     switcher: Signal<bool>,
     /// The host's rectangle, as last measured (a snapped float's area).
     float_area: Signal<Option<Rect>>,
+    /// Where the menu on show was asked for (window points); `None` puts it
+    /// in the middle.
+    menu_at: Signal<Option<(f32, f32)>>,
     mounts: CopyValue<HashMap<Mount, Rc<MountedData>>>,
     /// The arrange key is held: every pane can be grabbed.
     held: Signal<bool>,
@@ -445,8 +450,19 @@ impl Host {
         latched.set(on);
     }
 
+    /// Shows `menu` beside the point it was asked for at (window
+    /// points); a phone shows it in the middle.
+    fn open_menu(&self, menu: Menu, at: (f32, f32)) {
+        let mut m = self.menu;
+        let mut a = self.menu_at;
+        a.set(Some(at));
+        m.set(Some(menu));
+    }
+
     /// Shows the menu of views to open.
     pub fn show_open_menu(&self) {
+        let mut a = self.menu_at;
+        a.set(None);
         let mut menu = self.menu;
         menu.set(Some(Menu::Open));
     }
@@ -569,6 +585,12 @@ const fn narrow(v: f64) -> f32 {
     v as f32
 }
 
+/// Where a click was, in window points.
+fn click_point(e: &MouseEvent) -> (f32, f32) {
+    let p = e.client_coordinates();
+    (narrow(p.x), narrow(p.y))
+}
+
 fn point(e: &PointerEvent) -> (f32, f32) {
     let p = e.data().client_coordinates();
     (narrow(p.x), narrow(p.y))
@@ -603,6 +625,14 @@ pub fn WorkspaceView(
     /// mount.
     #[props(default)]
     in_shell: bool,
+    /// On a phone, the bar over the pane (its title, the switcher). An app
+    /// that shows them in its own bar turns it off and opens the switcher
+    /// through `switcher`.
+    #[props(default = true)]
+    phone_header: bool,
+    /// The phone's pane switcher is open: the app's, to open it from its
+    /// own bar.
+    switcher: Option<Signal<bool>>,
     #[props(default)] theme: ShellTheme,
 ) -> Element {
     let mut host = use_context_provider(|| Host {
@@ -615,11 +645,13 @@ pub fn WorkspaceView(
         phone: Signal::new(phone),
         title_row: Signal::new(None),
         in_shell: Signal::new(false),
+        phone_header: Signal::new(phone_header),
         drag: Signal::new(None),
         menu: Signal::new(None),
         sheet: Signal::new(None),
-        switcher: Signal::new(false),
+        switcher: switcher.unwrap_or_else(|| Signal::new(false)),
         float_area: Signal::new(None),
+        menu_at: Signal::new(None),
         mounts: CopyValue::new(HashMap::new()),
         held: Signal::new(false),
         latched: Signal::new(false),
@@ -673,7 +705,8 @@ pub fn WorkspaceView(
             },
             onresize: move |e| {
                 if let Ok(size) = e.get_content_box_size() {
-                    let r = Rect::new(0.0, 0.0, narrow(size.width), narrow(size.height));
+                    let (x, y) = host.float_area.peek().map_or((0.0, 0.0), |r| (r.x, r.y));
+                    let r = Rect::new(x, y, narrow(size.width), narrow(size.height));
                     host.float_area.set(Some(r));
                 }
             },
@@ -773,7 +806,7 @@ fn DeskBody() -> Element {
         }
         if !minimised.is_empty() {
             div {
-                style: "position:absolute; left:12px; bottom:12px; z-index:20; display:flex; gap:6px;",
+                style: "position:absolute; left:12px; bottom:12px; z-index:{architect_shell::layer::CHIPS}; display:flex; gap:6px;",
                 for pane in minimised {
                     MinimisedChip { key: "{pane.0}", pane }
                 }
@@ -781,7 +814,7 @@ fn DeskBody() -> Element {
         }
         if host.arranging() {
             div {
-                style: "position:absolute; right:12px; top:12px; z-index:25; padding:4px 10px; \
+                style: "position:absolute; right:12px; top:12px; z-index:{architect_shell::layer::STATUS}; padding:4px 10px; \
                         border-radius:999px; background:{t.accent}; color:{t.accent_ink}; \
                         font-size:11px; font-weight:700; pointer-events:none;",
                 "Arranging"

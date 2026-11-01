@@ -247,9 +247,9 @@ pub(super) fn Switcher(workspaces: Workspaces, place: Place) -> Element {
                     onclick: move |_| open.set(false),
                 }
                 div {
-                    style: "position: absolute; {list_at} z-index: 70; width: 280px; display: flex; flex-direction: column; \
+                    style: "position: absolute; {list_at} z-index: {super::layer::POPOVER}; width: 280px; display: flex; flex-direction: column; \
                             padding: 6px 0; border-radius: 16px; background: {t.pill}; border: 1px solid {t.rule}; \
-                            box-shadow: 0 20px 50px rgba(0,0,0,0.6); font-family: {t.font};",
+                            box-shadow: {t.shadow_float}; font-family: {t.font};",
                     div { style: "padding: 8px 14px 6px; font-size: 12px; font-weight: 650; color: {t.ink_3};",
                         "{workspaces.kind}"
                     }
