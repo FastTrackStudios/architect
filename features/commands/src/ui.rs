@@ -97,12 +97,14 @@ pub struct Commands {
     pub(crate) cache: CopyValue<Option<(u64, Rc<crate::keys_ui::Effective>)>>,
 }
 
-/// Puts a [`Commands`] in context for everything below.
+/// Puts a [`Commands`] in context for everything below, and the
+/// [`CommandRunner`](architect_shell::CommandRunner) a phone's bar runs
+/// its buttons through.
 #[must_use = "the commands, to run one or open the palette"]
 pub fn use_commands_provider() -> Commands {
     // Not vim: `q` and `@` are keys like any other.
     let keys = use_input_processor(|| InputProcessor::new().with_macro_keys(MacroKeys::Off));
-    use_context_provider(|| Commands {
+    let commands = use_context_provider(|| Commands {
         scoped: CopyValue::new(Rc::new(RefCell::new(Vec::new()))),
         lists: CopyValue::new(Vec::new()),
         openers: CopyValue::new(Rc::new(RefCell::new(Openers::new()))),
@@ -124,7 +126,19 @@ pub fn use_commands_provider() -> Commands {
         targets: CopyValue::new(Rc::new(RefCell::new(Openers::new()))),
         settings: CopyValue::new(Rc::new(RefCell::new(Openers::new()))),
         cache: CopyValue::new(None),
-    })
+    });
+    // A phone's bar buttons run what the palette and the keys run.
+    use_context_provider(|| architect_shell::CommandRunner {
+        run: Callback::new(move |id: String| commands.run(&id)),
+        enabled: Callback::new(move |id: String| {
+            commands
+                .declared()
+                .into_iter()
+                .find(|c| c.id == id)
+                .map(|c| c.enabled)
+        }),
+    });
+    commands
 }
 
 /// The [`Commands`] above, if any.

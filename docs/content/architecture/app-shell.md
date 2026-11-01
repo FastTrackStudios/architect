@@ -97,6 +97,43 @@ button with the separate action. The page pads its foot by the bar's
 height so the last row is never under it. A page's own sticky actions
 (Task's `MobileActionBar`) sit just above the pill.
 
+### The action bar and the keyboard bar
+
+Over the tabs on a phone sits the action bar: up to six (`BAR_MAX`)
+icon buttons, each an Action List command by id with a badge if it
+counts something (Obsidian's iOS bottom bar). The app gives its own
+(`AppShell`'s `actions`); a page adds its own while it is mounted
+(`use_bar_action`), in place of the app's of the same id, and past six
+the app's give way from the end. The workspace's tabs button is one
+such: `features/workspace/src/bar.rs` `use_tabs_button` counts the open
+panes and runs `WORKSPACE_EVERY_PANE`, the phone's pane switcher. A
+press runs the command through the `CommandRunner` in context, which
+`architect-commands`' `use_commands_provider` puts there, so a button
+does what the palette and the keys do and is dimmed when the command
+cannot run.
+
+While a field is typed in, the bar rises above the keyboard and becomes
+the editing bar (Task's `KeyboardToolbar`, `task:crates/ui/src/doc_editor.rs`):
+the editing actions the focused editor registers
+(`use_editing_actions`, with a context such as `markdown`) in a pill that
+scrolls sideways when they do not fit, and apart at the right a round
+button that puts the keyboard away. When the field lets go, the bar
+settles back into the action bar and the tabs. The app writes none of
+it: `features/shell/src/shell/bar.rs` `PhoneFoot` lays it out.
+
+The keyboard is one process-wide feed (`features/shell/src/shell/keyboard.rs`):
+its height comes from UIKit's keyboard notifications on iOS
+(`install_keyboard`, before launch) and from `visualViewport` in a
+browser or a web view; whether a field has the focus comes from
+`focusin` / `focusout` there, and in Blitz from the document's text
+focus, which the host forwards
+(`dioxus_native::on_text_focus_change(architect_shell::set_typing)`).
+The bar eases after the keyboard on the shell's `Motion`. On iOS the
+same call takes a web view's own ⌃ ⌄ ✓ accessory bar away (moved here
+from `task:apps/mobile/src/keyboard_bar.rs`) and makes a field focused
+from code raise the keyboard, in a web view and in Blitz (whose
+`autofocus` never asks for it).
+
 The person orders the tabs (Task's Customize: drag to move, hide, bring
 back), per device. The first four are the bar; the rest are in the left
 sidebar's list and the command palette. A section added later (a plugin

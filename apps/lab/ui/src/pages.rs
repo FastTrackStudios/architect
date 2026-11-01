@@ -3,12 +3,14 @@
 
 use architect_shell::icon;
 use architect_shell::{
-    Action, Crumb, Menu, Page, ShellStyle, StatusStyle, Tool, Toolbar, use_shell,
+    Action, BarAction, Crumb, Menu, Page, ShellStyle, StatusStyle, Tool, Toolbar,
+    use_editing_actions, use_shell,
 };
 use dioxus::prelude::*;
 use lucide_dioxus::{
-    Building2, Check, CheckCheck, Circle, CircleCheck, Feather, FlaskConical, FolderInput, Hash,
-    Inbox, Plus, Search, Trash2, Undo2,
+    AtSign, Bold, Brackets, Building2, CalendarDays, Check, CheckCheck, Circle, CircleCheck,
+    CornerDownLeft, Eraser, Feather, Flag, FlaskConical, FolderInput, Hash, Inbox, ListTodo, Plus,
+    Search, Trash2, Undo2,
 };
 
 use crate::items::{Item, PROJECTS};
@@ -528,6 +530,37 @@ pub fn CapturePage(tab: &'static str) -> Element {
         lab.add(tab, &name);
     };
     let empty = text.read().trim().is_empty();
+    // The editing bar over the keyboard, while the field is typed in:
+    // each a command, sideways when they don't fit.
+    for (id, label, change) in CAPTURE_EDITS {
+        architect_commands::use_command(
+            architect_commands::Command::new(id, label).group("Capture"),
+            move || {
+                let now = change(&text.peek());
+                let (mut typing, mut text) = (lab.typing, text);
+                typing.set(!now.trim().is_empty());
+                text.set(now);
+            },
+        );
+    }
+    architect_commands::use_command(
+        architect_commands::Command::new("LAB_CAPTURE_ADD", "Add it").group("Capture"),
+        move || save(),
+    );
+    let editing = use_editing_actions(
+        "capture",
+        &[
+            BarAction::new("LAB_CAPTURE_ADD", "Add it", icon!(CornerDownLeft)),
+            BarAction::new("LAB_CAPTURE_TASK", "Checklist", icon!(ListTodo)),
+            BarAction::new("LAB_CAPTURE_BOLD", "Bold", icon!(Bold)),
+            BarAction::new("LAB_CAPTURE_LINK", "Link to a note", icon!(Brackets)),
+            BarAction::new("LAB_CAPTURE_TAG", "Tag", icon!(Hash)),
+            BarAction::new("LAB_CAPTURE_MENTION", "Mention", icon!(AtSign)),
+            BarAction::new("LAB_CAPTURE_TODAY", "Today", icon!(CalendarDays)),
+            BarAction::new("LAB_CAPTURE_PRIORITY", "Priority", icon!(Flag)),
+            BarAction::new("LAB_CAPTURE_CLEAR", "Clear", icon!(Eraser)),
+        ],
+    );
     let on_back = if lab.can_go_back() {
         Some(EventHandler::new(move |()| lab.go_back()))
     } else {
@@ -550,6 +583,8 @@ pub fn CapturePage(tab: &'static str) -> Element {
                     style: "height: 44px; box-sizing: border-box; padding: 0 14px; border-radius: 10px; \
                             border: 1px solid {t.rule}; background: {t.pill}; color: {t.ink}; \
                             font-family: {t.font}; font-size: 16px;",
+                    onfocus: move |_| editing.focus(),
+                    onblur: move |_| editing.blur(),
                     oninput: move |e: FormEvent| {
                         let mut typing = lab.typing;
                         typing.set(!e.value().trim().is_empty());
@@ -580,6 +615,34 @@ pub fn CapturePage(tab: &'static str) -> Element {
                 }
             }
         }
+    }
+}
+
+/// What the capture's editing bar does to the line: each a command (its
+/// id, its label) and the line it makes of the one typed.
+const CAPTURE_EDITS: [(&str, &str, fn(&str) -> String); 8] = [
+    ("LAB_CAPTURE_TASK", "Checklist", |s| {
+        format!("- [ ] {}", s.trim_start_matches("- [ ] "))
+    }),
+    ("LAB_CAPTURE_BOLD", "Bold", |s| {
+        format!("**{}**", s.trim_matches('*'))
+    }),
+    ("LAB_CAPTURE_LINK", "Link to a note", |s| {
+        spaced(s, "[[Note]]")
+    }),
+    ("LAB_CAPTURE_TAG", "Tag", |s| spaced(s, "#")),
+    ("LAB_CAPTURE_MENTION", "Mention", |s| spaced(s, "@")),
+    ("LAB_CAPTURE_TODAY", "Today", |s| spaced(s, "today")),
+    ("LAB_CAPTURE_PRIORITY", "Priority", |s| spaced(s, "!1")),
+    ("LAB_CAPTURE_CLEAR", "Clear", |_| String::new()),
+];
+
+/// `s` with `word` after it, a space between.
+fn spaced(s: &str, word: &str) -> String {
+    if s.is_empty() || s.ends_with(' ') {
+        format!("{s}{word}")
+    } else {
+        format!("{s} {word}")
     }
 }
 

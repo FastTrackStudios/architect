@@ -17,6 +17,9 @@ pub struct LabState {
     pub tab: String,
     /// `list`, `item`, `capture` or `help`.
     pub page: String,
+    /// A phone's bar at the foot: `actions`, or `editing` while a field
+    /// is typed in. Read when asked.
+    pub bar: String,
 }
 
 impl LabState {
@@ -30,6 +33,7 @@ impl LabState {
         Self {
             tab: route.tab().to_owned(),
             page: page.to_owned(),
+            bar: String::new(),
         }
     }
 }
@@ -39,7 +43,7 @@ static STATE: ActionMeta = ActionMeta {
     trait_name: "",
     method_name: "",
     display_name: "Where the lab is",
-    description: "The tab on show and whether it is the list, an item or a capture.",
+    description: "The tab on show, whether it is the list, an item or a capture, and whether a phone's bar is the action bar or the editing bar.",
     category: "Lab",
     group: "Go",
     shortcut: "",
@@ -56,7 +60,14 @@ pub fn use_lab_actions(list: &Arc<ActionList>, lab: &Lab) {
         let kept = kept.clone();
         move || {
             let _ = list.register(&STATE, Effect::ReadOnly, move |(): ()| {
-                Ok(kept.lock().unwrap_or_else(PoisonError::into_inner).clone())
+                let mut now = kept.lock().unwrap_or_else(PoisonError::into_inner).clone();
+                let bar = if architect_shell::keyboard().editing() {
+                    "editing"
+                } else {
+                    "actions"
+                };
+                bar.clone_into(&mut now.bar);
+                Ok(now)
             });
         }
     });
