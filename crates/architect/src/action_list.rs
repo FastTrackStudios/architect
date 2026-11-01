@@ -45,7 +45,9 @@
 //!   tool is built on.
 //! - **Guarding**: an action can be *disabled* with a reason
 //!   ([`ActionList::set_enabled`]; it shows in [`ActionInfo`] and refuses
-//!   to run with [`ActionError::Disabled`]); a list can carry a
+//!   to run with [`ActionError::Disabled`]); a toggle says whether it is
+//!   *on* ([`ActionList::set_checked`]; [`ActionInfo::checked`], the tick
+//!   a menu shows); a list can carry a
 //!   [`PermissionEngine`] ([`ActionList::set_authorizer`]) whose
 //!   [`PermissionEngine::authorize`] decides who may see
 //!   ([`ActionList::infos_for`]) and run ([`ActionList::run_json_as`])
@@ -119,6 +121,9 @@ pub struct ActionInfo {
     pub enabled: bool,
     /// Why not, when it cannot (`"no project is open"`).
     pub disabled_reason: Option<String>,
+    /// Whether a toggle is on now, the tick a menu shows
+    /// ([`ActionList::set_checked`]); `None` for an action that is not one.
+    pub checked: Option<bool>,
 }
 
 /// Why an action did not run, or failed.
@@ -400,6 +405,9 @@ impl ActionOutput for RawJson {
 /// Whether an action can run right now: `Err` says why not.
 pub type EnabledCheck = Arc<dyn Fn() -> Result<(), String> + Send + Sync>;
 
+/// Whether a toggle is on right now.
+pub type CheckedCheck = Arc<dyn Fn() -> bool + Send + Sync>;
+
 /// The engine a list asks who may see and run what.
 pub type Authorizer = Arc<dyn PermissionEngine + Send + Sync>;
 
@@ -438,6 +446,7 @@ struct Entry {
     forwarded: Option<ForwardedSchemas>,
     run: Run,
     enabled: Option<EnabledCheck>,
+    checked: Option<CheckedCheck>,
 }
 
 /// A forwarded action's schemas, as its own list described them.
@@ -615,6 +624,7 @@ impl ActionList {
             forwarded: None,
             run: Run::Sync(handler),
             enabled: None,
+            checked: None,
         })
     }
 
@@ -656,6 +666,7 @@ impl ActionList {
             forwarded: None,
             run: Run::Async(handler),
             enabled: None,
+            checked: None,
         })
     }
 
@@ -682,6 +693,7 @@ impl ActionList {
             forwarded: None,
             run: Run::Sync(Arc::new(move |_: &ActionCaller, args: &[u8]| handler(args))),
             enabled: None,
+            checked: None,
         })
     }
 
@@ -707,6 +719,7 @@ impl ActionList {
             forwarded: None,
             run: Run::Async(Arc::new(move |_: &ActionCaller, args: &[u8]| handler(args))),
             enabled: None,
+            checked: None,
         })
     }
 
@@ -755,6 +768,7 @@ impl ActionList {
             }),
             run: Run::Async(Arc::new(move |_: &ActionCaller, args: &[u8]| handler(args))),
             enabled: None,
+            checked: None,
         })
     }
 
@@ -805,6 +819,32 @@ impl ActionList {
             .get_mut(id)
             .ok_or_else(|| ActionError::Unknown(id.to_owned()))?;
         entry.enabled = Some(Arc::new(check));
+        drop(entries);
+        Ok(())
+    }
+
+    /// Make `id` a toggle: `check` says whether it is on now, the tick a
+    /// menu shows beside it ([`ActionInfo::checked`]). Asked whenever the
+    /// action is described; a check that panics counts as off. Running it
+    /// is still its handler's business: a toggle's handler flips what
+    /// `check` reads.
+    ///
+    /// # Errors
+    ///
+    /// [`ActionError::Unknown`] when there is no such action.
+    pub fn set_checked<F>(&self, id: &str, check: F) -> Result<(), ActionError>
+    where
+        F: Fn() -> bool + Send + Sync + 'static,
+    {
+        let mut entries = self
+            .inner
+            .entries
+            .write()
+            .unwrap_or_else(PoisonError::into_inner);
+        let entry = entries
+            .get_mut(id)
+            .ok_or_else(|| ActionError::Unknown(id.to_owned()))?;
+        entry.checked = Some(Arc::new(check));
         drop(entries);
         Ok(())
     }
@@ -1284,6 +1324,7 @@ impl ActionBackend for ActionList {
             forwarded: None,
             run: Run::Sync(erased),
             enabled: None,
+            checked: None,
         });
         // The trait cannot say no; `validate` will.
         if let Err(error) = added {
@@ -1307,6 +1348,10 @@ fn info(entry: &Entry) -> ActionInfo {
         result_schema: entry.result_schema(),
         enabled: disabled_reason.is_none(),
         disabled_reason,
+        checked: entry
+            .checked
+            .as_ref()
+            .map(|check| catch_unwind(AssertUnwindSafe(|| check())).unwrap_or(false)),
     }
 }
 
@@ -1827,6 +1872,39 @@ mod tests {
         );
     }
 
+    /// A toggle shows whether it is on, follows what its check reads,
+    /// counts a check that panics as off; an action that is not one says
+    /// `None`; there is no check to set on an unknown id.
+    #[test]
+    fn a_toggle_says_whether_it_is_on() {
+        let list = ActionList::new();
+        unit(&list, &SAVE);
+        assert_eq!(list.info("PROJECT_SAVE").and_then(|i| i.checked), None);
+        let on = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&on);
+        list.set_checked("PROJECT_SAVE", move || flag.load(Ordering::SeqCst))
+            .expect("set");
+        assert_eq!(
+            list.info("PROJECT_SAVE").and_then(|i| i.checked),
+            Some(false)
+        );
+        on.store(true, Ordering::SeqCst);
+        assert_eq!(
+            list.info("PROJECT_SAVE").and_then(|i| i.checked),
+            Some(true)
+        );
+        list.set_checked("PROJECT_SAVE", || panic!("check blew up"))
+            .expect("set");
+        assert_eq!(
+            list.info("PROJECT_SAVE").and_then(|i| i.checked),
+            Some(false)
+        );
+        assert_eq!(
+            list.set_checked("NOPE", || true),
+            Err(ActionError::Unknown("NOPE".into()))
+        );
+    }
+
     /// The test engine: users may run read-only drum actions only; a
     /// service may run anything.
     struct DrumsOnly;
@@ -2294,6 +2372,7 @@ mod tests {
             result_schema: Some(r#"{"type":"number"}"#.to_owned()),
             enabled: true,
             disabled_reason: None,
+            checked: None,
         };
         let forwarded: super::AsyncHandler = Arc::new(|args: &[u8]| {
             let echoed = [b"{\"got\":".as_slice(), args, b"}"].concat();
