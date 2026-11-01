@@ -187,8 +187,8 @@ impl<T> Sandboxed<T> {
 }
 
 /// What a sandbox can serve: an axum app, a vox router (mounted on an
-/// [`EngineHost`] at `/vox`, with `/health` and `/version.json`), or a
-/// configured [`EngineHost`].
+/// ungated [`EngineHost`] at `/vox`, with `/health` and `/version.json`),
+/// or a configured [`EngineHost`].
 pub trait IntoSandboxApp {
     /// The axum app to bind.
     fn into_sandbox_app(self) -> Router;
@@ -206,9 +206,12 @@ impl IntoSandboxApp for EngineHost {
     }
 }
 
+/// A bare router is served [`EngineHost::ungated`]: a loopback test of
+/// what the services do. To test the gate, hand the sandbox an
+/// [`EngineHost`] built with one.
 impl IntoSandboxApp for LayerRouter {
     fn into_sandbox_app(self) -> Router {
-        EngineHost::new(self, "127.0.0.1:0").into_app()
+        EngineHost::ungated(self, "127.0.0.1:0").into_app()
     }
 }
 

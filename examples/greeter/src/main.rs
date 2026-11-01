@@ -23,7 +23,9 @@ async fn main() -> eyre::Result<()> {
     architect::host::boot("info");
     let config = Config::from_env()?;
     let backend = Memory::default();
-    EngineHost::new(backend.clone().into_router(), config.bind)
+    // A demo with no accounts: every wire is public, the HTTP face too.
+    // A real server passes its `PermissionsGate` to `EngineHost::new`.
+    EngineHost::ungated(backend.clone().into_router(), config.bind)
         .plugin(backend.into_http_router())
         .build_info(architect::build_info!())
         .serve()

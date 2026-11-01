@@ -51,7 +51,7 @@ async fn get(app: Router, path: &str) -> (StatusCode, Option<String>, Option<Str
 async fn version_json_wins_over_the_spa_and_unknown_paths_still_fall_back() {
     let dir = spa_dir("spa");
     let app = || {
-        EngineHost::new(LayerRouter::new(), "127.0.0.1:0")
+        EngineHost::ungated(LayerRouter::new(), "127.0.0.1:0")
             .web(Some(WebBundle::Dir(dir.clone())))
             .build_info(BuildInfo::new(
                 Some("1.2.3"),
@@ -82,7 +82,7 @@ async fn version_json_wins_over_the_spa_and_unknown_paths_still_fall_back() {
 
 #[tokio::test]
 async fn unset_fields_are_null_and_empty_env_counts_as_unset() {
-    let app = EngineHost::new(LayerRouter::new(), "127.0.0.1:0")
+    let app = EngineHost::ungated(LayerRouter::new(), "127.0.0.1:0")
         .build_info(BuildInfo::new(Some("0.1.0"), Some(""), None))
         .into_app();
     let (status, _, _, body) = get(app, "/version.json").await;
@@ -91,7 +91,7 @@ async fn unset_fields_are_null_and_empty_env_counts_as_unset() {
 
     // No `build_info` at all: the route still answers, every field null,
     // and a headless host (no bundle) has no fallback to answer for it.
-    let app = EngineHost::new(LayerRouter::new(), "127.0.0.1:0").into_app();
+    let app = EngineHost::ungated(LayerRouter::new(), "127.0.0.1:0").into_app();
     let (status, _, _, body) = get(app.clone(), "/version.json").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body, r#"{"rev":null,"version":null,"built_at":null}"#);

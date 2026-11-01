@@ -5,7 +5,17 @@
 //! with `/health` + `/vox` (the router), optionally the same router over iroh
 //! p2p, and optionally a static SPA bundle as the HTTP fallback. This module
 //! owns all of it; a binary supplies only its router (business logic) and
-//! calls [`EngineHost::serve`].
+//! its [`PermissionsGate`], and calls [`EngineHost::serve`].
+//!
+//! ## Every vox lane is gated
+//!
+//! [`EngineHost::new`] takes the gate with the router, and puts it in
+//! front of every vox lane the host owns: the built-in `/vox` (the caller
+//! is the upgrade's bearer), the iroh lane (the caller is the endpoint id
+//! the QUIC handshake proved, `Principal::Host`) and every
+//! [`vox_at`](EngineHost::vox_at) lane. A host that serves its router to
+//! everyone unchecked says so at the call site,
+//! [`EngineHost::ungated`], and logs it on every start.
 //!
 //! Every host also answers `GET /version.json` with the binary's
 //! [`BuildInfo`] (`{"rev", "version", "built_at"}`), mounted before the SPA
@@ -14,15 +24,19 @@
 //!
 //! Native only (the `host` feature); the wasm client build never sees it.
 
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use axum::Router;
 use axum::extract::WebSocketUpgrade;
+use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 
 use crate::LayerRouter;
+use crate::permissions_gate::PermissionsGate;
 
 mod mount;
 pub use mount::{BEARER_SUBPROTOCOL_PREFIX, DavRequest, RequestHead};
@@ -156,7 +170,7 @@ impl BuildInfo {
 /// crate that expands the macro.
 ///
 /// ```ignore
-/// EngineHost::new(router, bind).build_info(architect::build_info!())
+/// EngineHost::new(router, gate, bind).build_info(architect::build_info!())
 /// ```
 #[macro_export]
 macro_rules! build_info {
@@ -178,13 +192,25 @@ pub enum WebBundle {
     Embedded(&'static include_dir::Dir<'static>),
 }
 
+/// Who checks the calls on the vox lanes an [`EngineHost`] owns.
+#[derive(Clone)]
+enum LaneGate {
+    /// Every lane behind this gate.
+    Gated(Arc<PermissionsGate>),
+    /// Nothing checks anything: [`EngineHost::ungated`].
+    Ungated,
+}
+
 /// A headless engine host.
 ///
 /// Serves a vox [`LayerRouter`] over axum with a `/vox` WebSocket +
 /// `/health` + `/version.json` routes, optionally over iroh p2p, and
-/// optionally with a static SPA bundle as the HTTP fallback.
+/// optionally with a static SPA bundle as the HTTP fallback. Every vox
+/// lane sits behind the host's [`PermissionsGate`] unless the host was
+/// built [`ungated`](Self::ungated).
 pub struct EngineHost {
     router: LayerRouter,
+    gate: LaneGate,
     addr: String,
     web: Option<WebBundle>,
     build: BuildInfo,
@@ -202,18 +228,60 @@ pub struct EngineHost {
 }
 
 #[cfg(feature = "iroh")]
-struct IrohConfig {
-    key_path: PathBuf,
-    id_path: Option<PathBuf>,
-    lookup: crate::iroh_link::PeerLookup,
+enum IrohConfig {
+    /// Bind an endpoint from a persisted key: [`EngineHost::iroh`].
+    Key {
+        key_path: PathBuf,
+        id_path: Option<PathBuf>,
+        lookup: crate::iroh_link::PeerLookup,
+    },
+    /// Serve on an endpoint the app bound: [`EngineHost::iroh_endpoint`].
+    Bound(crate::iroh_link::iroh::Endpoint),
 }
 
 impl EngineHost {
-    /// A host serving `router` on `addr` (e.g. `"0.0.0.0:4040"`).
-    pub fn new(router: LayerRouter, addr: impl Into<String>) -> Self {
+    /// A host serving `router` on `addr` (e.g. `"0.0.0.0:4040"`), with
+    /// `gate` in front of every vox lane it owns.
+    ///
+    /// - The built-in `/vox`: each connection is wrapped with
+    ///   [`PermissionsGate::wrap_shared_with_bearer`], the bearer taken
+    ///   from the upgrade (`Authorization: Bearer`, or the
+    ///   `vox.bearer.<token>` subprotocol a browser offers).
+    /// - The iroh lane ([`iroh`](Self::iroh)): each peer connection is
+    ///   wrapped with [`PermissionsGate::wrap_shared_with_proved_caller`],
+    ///   the caller `Principal::Host` of the endpoint id the handshake
+    ///   proved.
+    /// - Every [`vox_at`](Self::vox_at) lane: the resolver's handler is
+    ///   wrapped like `/vox`.
+    ///
+    /// The gate's [`coverage`](PermissionsGate::coverage) of `router` is
+    /// reported through `tracing` here, as [`PermissionsGate::wrap`] does.
+    pub fn new(router: LayerRouter, gate: PermissionsGate, addr: impl Into<String>) -> Self {
+        gate.coverage(&router).report();
+        Self::with_gate(router, LaneGate::Gated(Arc::new(gate)), addr.into())
+    }
+
+    /// A host that serves `router` to **every caller, unchecked**, on the
+    /// built-in `/vox`, the iroh lane and every [`vox_at`](Self::vox_at)
+    /// lane: no gate, no caller identity
+    /// ([`caller()`](crate::permissions_gate::caller) is `None` in every
+    /// handler).
+    ///
+    /// Only for a router that authenticates each call itself (an auth
+    /// server's sign-in services take the session token as an argument),
+    /// a demo with no accounts, a loopback test, or a host whose every
+    /// lane is a [`vox_at_permissioned`](Self::vox_at_permissioned) lane
+    /// gated per connection. Say which at the call site. Every start
+    /// logs a `warn` naming the host ungated.
+    pub fn ungated(router: LayerRouter, addr: impl Into<String>) -> Self {
+        Self::with_gate(router, LaneGate::Ungated, addr.into())
+    }
+
+    fn with_gate(router: LayerRouter, gate: LaneGate, addr: String) -> Self {
         Self {
             router,
-            addr: addr.into(),
+            gate,
+            addr,
             cross_origin_isolated: false,
             web: None,
             build: BuildInfo::default(),
@@ -275,19 +343,46 @@ impl EngineHost {
         self
     }
 
-    /// Also serve the router over an iroh endpoint. The secret key persists at
+    /// The gate in front of every vox lane, or `None` for an
+    /// [`ungated`](Self::ungated) host. For a
+    /// [`vox_at_permissioned`](Self::vox_at_permissioned) resolver that
+    /// wraps with the host's gate plus something of its own, or for a
+    /// `PermissionsService` oracle that must agree with enforcement.
+    #[must_use]
+    pub fn gate(&self) -> Option<Arc<PermissionsGate>> {
+        match &self.gate {
+            LaneGate::Gated(gate) => Some(Arc::clone(gate)),
+            LaneGate::Ungated => None,
+        }
+    }
+
+    /// Also serve the router over an iroh endpoint, behind the host's
+    /// gate (each peer calls as the `Principal::Host` its handshake
+    /// proved; see [`new`](Self::new)). The secret key persists at
     /// `key_path` (stable id across restarts); the endpoint id is written to
     /// `id_path` when given, for other devices/agents to read.
     #[cfg(feature = "iroh")]
     #[must_use]
     pub fn iroh(mut self, key_path: PathBuf, id_path: Option<PathBuf>) -> Self {
-        self.iroh = Some(IrohConfig {
+        self.iroh = Some(IrohConfig::Key {
             key_path,
             id_path,
             // Replaced by `iroh_lookup` in `assemble`, so call order
             // between the two builder methods doesn't matter.
             lookup: crate::iroh_link::PeerLookup::default(),
         });
+        self
+    }
+
+    /// [`iroh`](Self::iroh) on an endpoint the app already bound (its own
+    /// address lookup or bind address, an in-process test's loopback
+    /// endpoint). It must speak [`VOX_ALPN`](crate::iroh_link::VOX_ALPN);
+    /// [`iroh_lookup`](Self::iroh_lookup) does not apply to it. The same
+    /// gate, and the same proved caller, as `iroh`.
+    #[cfg(feature = "iroh")]
+    #[must_use]
+    pub fn iroh_endpoint(mut self, endpoint: crate::iroh_link::iroh::Endpoint) -> Self {
+        self.iroh = Some(IrohConfig::Bound(endpoint));
         self
     }
 
@@ -345,14 +440,29 @@ impl EngineHost {
     }
 
     #[cfg(feature = "iroh")]
-    fn assemble(self) -> (Router, Option<(LayerRouter, IrohConfig)>) {
+    fn assemble(self) -> (Router, Option<(VoxLane, IrohConfig)>) {
+        self.warn_if_ungated();
         let lookup = self.iroh_lookup;
-        let iroh = self
-            .iroh
-            .map(|cfg| (self.router.clone(), IrohConfig { lookup, ..cfg }));
+        let lane = VoxLane {
+            router: self.router,
+            gate: self.gate,
+        };
+        let iroh = self.iroh.map(|cfg| {
+            let cfg = match cfg {
+                IrohConfig::Key {
+                    key_path, id_path, ..
+                } => IrohConfig::Key {
+                    key_path,
+                    id_path,
+                    lookup,
+                },
+                bound @ IrohConfig::Bound(_) => bound,
+            };
+            (lane.clone(), cfg)
+        });
         (
             assemble_app(
-                (!self.root_vox_resolved).then_some(self.router),
+                (!self.root_vox_resolved).then_some(lane),
                 self.web,
                 self.build,
                 self.extra,
@@ -366,9 +476,14 @@ impl EngineHost {
 
     #[cfg(not(feature = "iroh"))]
     fn assemble(self) -> (Router, Option<()>) {
+        self.warn_if_ungated();
+        let lane = VoxLane {
+            router: self.router,
+            gate: self.gate,
+        };
         (
             assemble_app(
-                (!self.root_vox_resolved).then_some(self.router),
+                (!self.root_vox_resolved).then_some(lane),
                 self.web,
                 self.build,
                 self.extra,
@@ -380,14 +495,25 @@ impl EngineHost {
         )
     }
 
+    /// Say so, loudly, on every start of a host nothing gates.
+    fn warn_if_ungated(&self) {
+        if matches!(self.gate, LaneGate::Ungated) {
+            tracing::warn!(
+                addr = %self.addr,
+                "EngineHost is UNGATED: /vox, the iroh lane and every vox_at lane \
+                 serve their router to every caller unchecked"
+            );
+        }
+    }
+
     /// Bind and serve until the server dies. Never returns on success.
     pub async fn serve(self) -> std::io::Result<()> {
         let addr = self.addr.clone();
         let (app, iroh) = self.assemble();
 
         #[cfg(feature = "iroh")]
-        if let Some((router, cfg)) = iroh {
-            tokio::spawn(serve_iroh(router, cfg));
+        if let Some((lane, cfg)) = iroh {
+            tokio::spawn(serve_iroh(lane, cfg));
         }
         #[cfg(not(feature = "iroh"))]
         let _ = iroh;
@@ -402,8 +528,34 @@ impl EngineHost {
     }
 }
 
+/// The host's router and the gate in front of it: what the built-in
+/// `/vox` and the iroh lane serve.
+#[derive(Clone)]
+struct VoxLane {
+    router: LayerRouter,
+    gate: LaneGate,
+}
+
+impl VoxLane {
+    /// Serve one WebSocket upgrade, gated by the bearer it presented.
+    fn upgrade(self, headers: HeaderMap, ws: WebSocketUpgrade) -> Response {
+        match self.gate {
+            LaneGate::Gated(gate) => {
+                let bearer = mount::RequestHead::new(BTreeMap::new(), headers, "/vox")
+                    .bearer()
+                    .map(str::to_owned);
+                mount::upgrade_to(
+                    ws,
+                    PermissionsGate::wrap_shared_with_bearer(gate, self.router, bearer),
+                )
+            }
+            LaneGate::Ungated => mount::upgrade_to(ws, self.router),
+        }
+    }
+}
+
 fn assemble_app(
-    router: Option<LayerRouter>,
+    lane: Option<VoxLane>,
     web: Option<WebBundle>,
     build: BuildInfo,
     extra: Option<Router>,
@@ -419,16 +571,11 @@ fn assemble_app(
             get(move || std::future::ready(version_json(&build))),
         );
     // `None` when `vox_at("/vox", …)` resolves `/vox` per connection instead.
-    if let Some(vox_router) = router {
+    if let Some(lane) = lane {
         app = app.route(
             "/vox",
-            get(move |ws: WebSocketUpgrade| {
-                let router = vox_router.clone();
-                async move {
-                    ws.protocols([VOX_SUBPROTOCOL])
-                        .on_upgrade(move |socket| crate::axum_ws::serve_router(socket, router))
-                        .into_response()
-                }
+            get(move |headers: HeaderMap, ws: WebSocketUpgrade| {
+                std::future::ready(lane.clone().upgrade(headers, ws))
             }),
         );
     }
@@ -515,29 +662,74 @@ fn version_json(build: &BuildInfo) -> Response {
 }
 
 #[cfg(feature = "iroh")]
-async fn serve_iroh(router: LayerRouter, cfg: IrohConfig) {
+async fn serve_iroh(lane: VoxLane, cfg: IrohConfig) {
+    let endpoint = match cfg {
+        IrohConfig::Bound(endpoint) => endpoint,
+        IrohConfig::Key {
+            key_path,
+            id_path,
+            lookup,
+        } => match bind_iroh(&key_path, id_path.as_deref(), lookup).await {
+            Some(endpoint) => endpoint,
+            None => return,
+        },
+    };
+    serve_iroh_lane(&endpoint, lane).await;
+}
+
+/// Serve the host's router on `endpoint`: each peer connection behind
+/// the gate, calling as the `Principal::Host` its handshake proved.
+#[cfg(feature = "iroh")]
+async fn serve_iroh_lane(endpoint: &crate::iroh_link::iroh::Endpoint, lane: VoxLane) {
     use crate::iroh_link;
-    let secret_key = match iroh_link::load_or_create_secret_key(&cfg.key_path) {
+    match lane.gate {
+        LaneGate::Gated(gate) => {
+            let router = lane.router;
+            iroh_link::serve_peers(endpoint, move |remote| {
+                PermissionsGate::wrap_shared_with_proved_caller(
+                    Arc::clone(&gate),
+                    router.clone(),
+                    architect_permissions::Principal::Host {
+                        endpoint: remote.to_string(),
+                    },
+                )
+            })
+            .await;
+        }
+        LaneGate::Ungated => iroh_link::serve_router(endpoint, lane.router).await,
+    }
+}
+
+/// Bind the host's iroh endpoint from its persisted key, and publish its
+/// id. `None` (logged) when either fails: the host keeps serving HTTP.
+#[cfg(feature = "iroh")]
+async fn bind_iroh(
+    key_path: &std::path::Path,
+    id_path: Option<&std::path::Path>,
+    lookup: crate::iroh_link::PeerLookup,
+) -> Option<crate::iroh_link::iroh::Endpoint> {
+    use crate::iroh_link;
+    let secret_key = match iroh_link::load_or_create_secret_key(key_path) {
         Ok(k) => k,
         Err(e) => {
             tracing::error!(error = %e, "iroh secret key unavailable; p2p transport disabled");
-            return;
+            return None;
         }
     };
-    let endpoint = match iroh_link::bind_endpoint_with(secret_key, cfg.lookup).await {
+    let endpoint = match iroh_link::bind_endpoint_with(secret_key, lookup).await {
         Ok(ep) => ep,
         Err(e) => {
             tracing::error!(error = %e, "iroh endpoint bind failed; p2p transport disabled");
-            return;
+            return None;
         }
     };
     tracing::info!("iroh endpoint id: {}", endpoint.id());
-    if let Some(id_path) = &cfg.id_path
+    if let Some(id_path) = id_path
         && let Err(e) = std::fs::write(id_path, format!("{}\n", endpoint.id()))
     {
         tracing::warn!(error = %e, "could not write iroh endpoint-id file");
     }
-    iroh_link::serve_router(&endpoint, router).await;
+    Some(endpoint)
 }
 
 /// Serve an embedded SPA bundle from memory: an exact file match, else

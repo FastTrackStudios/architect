@@ -6,8 +6,10 @@
 //! one a typed hook rather than a hand-written axum route:
 //!
 //! - [`EngineHost::vox_at`]: a vox WebSocket at a parameterised path
-//!   (`/org/{slug}/vox`), with a resolver that picks the handler, and so
-//!   the identity, per connection.
+//!   (`/org/{slug}/vox`), with a resolver that picks the handler per
+//!   connection, served behind the host's gate.
+//! - [`EngineHost::vox_at_permissioned`]: the same, for a resolver that
+//!   gates each connection itself (a gate per org).
 //! - [`EngineHost::dav`]: a `WebDAV` bridge, every verb, outside the
 //!   [`finish`](EngineHost::finish) layers (so outside CORS).
 //! - [`EngineHost::document`]: a `GET` document at a path, such as a
@@ -24,7 +26,8 @@ use axum::http::{HeaderMap, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get};
 
-use super::{EngineHost, VOX_SUBPROTOCOL};
+use super::{EngineHost, LaneGate, VOX_SUBPROTOCOL};
+use crate::permissions_gate::{PermissionedRouter, PermissionsGate};
 
 pub use crate::http::{BEARER_SUBPROTOCOL_PREFIX, RequestHead};
 
@@ -50,14 +53,22 @@ pub struct DavRequest {
 
 impl EngineHost {
     /// Serve vox over a WebSocket at `path`, which may have params
-    /// (`/org/{slug}/vox`, `/org/{slug}/share/{token}/vox`).
+    /// (`/org/{slug}/vox`, `/org/{slug}/share/{token}/vox`), behind the
+    /// host's gate.
     ///
     /// Each upgrade calls `resolve` with the request's [`RequestHead`]
     /// first. It answers with the handler to serve the connection with (a
-    /// [`LayerRouter`](crate::LayerRouter), or a gated wrapper of one
-    /// built for the caller's identity), or with anything
-    /// [`IntoResponse`] that refuses it (`404` for an org this host doesn't serve, `401` for a bad
-    /// token). The `vox.v1` subprotocol is echoed as on `/vox`.
+    /// [`LayerRouter`](crate::LayerRouter), say the org's), or with
+    /// anything [`IntoResponse`] that refuses it (`404` for an org this
+    /// host doesn't serve). The host wraps the handler with its gate and
+    /// the upgrade's bearer
+    /// ([`PermissionsGate::wrap_shared_with_bearer`]), exactly as on
+    /// `/vox`; on an [`ungated`](EngineHost::ungated) host it serves the
+    /// handler as is. The `vox.v1` subprotocol is echoed as on `/vox`.
+    ///
+    /// A lane that needs a gate of its own per connection (each org its
+    /// own engine, a share link's fixed guest) is
+    /// [`vox_at_permissioned`](Self::vox_at_permissioned), not this.
     ///
     /// `vox_at("/vox", …)` replaces the built-in `/vox`, for a host whose
     /// root lane is picked per connection too (the first hosted org, a
@@ -65,39 +76,88 @@ impl EngineHost {
     /// only iroh peers.
     ///
     /// ```ignore
-    /// EngineHost::new(router, bind).vox_at("/org/{slug}/vox", move |head| {
+    /// EngineHost::new(router, gate, bind).vox_at("/org/{slug}/vox", move |head| {
     ///     let orgs = orgs.clone();
     ///     async move {
-    ///         let org = orgs.get(head.param("slug").unwrap_or_default())
-    ///             .ok_or(StatusCode::NOT_FOUND)?;
-    ///         Ok(org.router_for(head.bearer()))
+    ///         orgs.get(head.param("slug").unwrap_or_default())
+    ///             .map(|org| org.router())
+    ///             .ok_or(StatusCode::NOT_FOUND)
     ///     }
     /// })
     /// ```
     #[must_use]
-    pub fn vox_at<H, E, F, Fut>(mut self, path: &str, resolve: F) -> Self
+    pub fn vox_at<H, E, F, Fut>(self, path: &str, resolve: F) -> Self
     where
         F: Fn(RequestHead) -> Fut + Clone + Send + Sync + 'static,
         Fut: Future<Output = Result<H, E>> + Send + 'static,
         E: IntoResponse,
         H: vox::Handler<vox::DriverReplySink> + Clone + Send + Sync + 'static,
     {
+        let gate = self.gate.clone();
         let upgrade =
             move |params: RawPathParams, uri: Uri, headers: HeaderMap, ws: WebSocketUpgrade| {
                 let head = RequestHead::from_raw(&params, headers, &uri);
+                let bearer = head.bearer().map(str::to_owned);
                 let resolved = resolve(head);
+                let gate = gate.clone();
+                async move {
+                    match (resolved.await, gate) {
+                        (Ok(handler), LaneGate::Gated(gate)) => upgrade_to(
+                            ws,
+                            PermissionsGate::wrap_shared_with_bearer(gate, handler, bearer),
+                        ),
+                        (Ok(handler), LaneGate::Ungated) => upgrade_to(ws, handler),
+                        (Err(refused), _) => refused.into_response(),
+                    }
+                }
+            };
+        self.mount_vox(path, any(upgrade))
+    }
+
+    /// [`vox_at`](Self::vox_at) for a resolver that gates each connection
+    /// itself: it answers with a [`PermissionedRouter`] (a gate per org, a
+    /// share link's [`StaticPrincipal`](crate::permissions_gate::StaticPrincipal)
+    /// lane), which is served as is, not wrapped in the host's gate a
+    /// second time. The type is the guarantee: an ungated handler does not
+    /// fit.
+    ///
+    /// ```ignore
+    /// EngineHost::new(router, gate, bind).vox_at_permissioned("/org/{slug}/vox", move |head| {
+    ///     let orgs = orgs.clone();
+    ///     async move {
+    ///         let org = orgs.get(head.param("slug").unwrap_or_default())
+    ///             .ok_or(StatusCode::NOT_FOUND)?;
+    ///         Ok(PermissionsGate::wrap_shared_with_bearer(
+    ///             org.gate(), org.router(), head.bearer().map(str::to_owned),
+    ///         ))
+    ///     }
+    /// })
+    /// ```
+    #[must_use]
+    pub fn vox_at_permissioned<H, E, F, Fut>(self, path: &str, resolve: F) -> Self
+    where
+        F: Fn(RequestHead) -> Fut + Clone + Send + Sync + 'static,
+        Fut: Future<Output = Result<PermissionedRouter<H>, E>> + Send + 'static,
+        E: IntoResponse,
+        H: vox::Handler<vox::DriverReplySink> + Clone + Send + Sync + 'static,
+    {
+        let upgrade =
+            move |params: RawPathParams, uri: Uri, headers: HeaderMap, ws: WebSocketUpgrade| {
+                let resolved = resolve(RequestHead::from_raw(&params, headers, &uri));
                 async move {
                     match resolved.await {
-                        Ok(handler) => ws
-                            .protocols([VOX_SUBPROTOCOL])
-                            .on_upgrade(move |socket| crate::axum_ws::serve_router(socket, handler))
-                            .into_response(),
+                        Ok(handler) => upgrade_to(ws, handler),
                         Err(refused) => refused.into_response(),
                     }
                 }
             };
+        self.mount_vox(path, any(upgrade))
+    }
+
+    /// Mount a vox upgrade route; at `/vox` it replaces the built-in one.
+    fn mount_vox(mut self, path: &str, route: axum::routing::MethodRouter) -> Self {
         self.root_vox_resolved |= path == "/vox";
-        self.extend(Router::new().route(path, any(upgrade)))
+        self.extend(Router::new().route(path, route))
     }
 
     /// Serve a `WebDAV` bridge at `mount` (`/org/{slug}/dav`): every verb,
@@ -181,6 +241,17 @@ impl EngineHost {
         };
         self.extend(Router::new().route(path, get(answer)))
     }
+}
+
+/// Accept a vox WebSocket upgrade (`vox.v1` echoed) and serve `handler`
+/// on it.
+pub(super) fn upgrade_to<H>(ws: WebSocketUpgrade, handler: H) -> Response
+where
+    H: vox::Handler<vox::DriverReplySink> + Clone + Send + Sync + 'static,
+{
+    ws.protocols([VOX_SUBPROTOCOL])
+        .on_upgrade(move |socket| crate::axum_ws::serve_router(socket, handler))
+        .into_response()
 }
 
 /// The first `depth` segments of `path`: the mount as the client

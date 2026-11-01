@@ -69,7 +69,7 @@ fn server() -> Arc<Server> {
 #[tokio::test]
 async fn mcp_mounts_per_path_with_a_resolver_and_on_loopback() {
     let org_server = server();
-    let app = EngineHost::new(LayerRouter::new(), "127.0.0.1:0")
+    let app = EngineHost::ungated(LayerRouter::new(), "127.0.0.1:0")
         .mcp_at("/org/{slug}/mcp", move |head: RequestHead| {
             let org_server = Arc::clone(&org_server);
             async move {
@@ -151,7 +151,7 @@ async fn ingest_only(head: RequestHead) -> Result<(), StatusCode> {
 #[tokio::test]
 async fn otlp_forward_passes_the_three_signals_through_once_authorized() {
     let (upstream, seen) = collector().await;
-    let app = EngineHost::new(LayerRouter::new(), "127.0.0.1:0")
+    let app = EngineHost::ungated(LayerRouter::new(), "127.0.0.1:0")
         .otlp_forward("/otlp", &format!("http://{upstream}/"), ingest_only)
         .into_app();
     let at = serve(app).await;
@@ -194,7 +194,7 @@ async fn otlp_forward_passes_the_three_signals_through_once_authorized() {
     let gone = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let dead = gone.local_addr().unwrap();
     drop(gone);
-    let app = EngineHost::new(LayerRouter::new(), "127.0.0.1:0")
+    let app = EngineHost::ungated(LayerRouter::new(), "127.0.0.1:0")
         .otlp_forward("/otlp", &format!("http://{dead}"), ingest_only)
         .into_app();
     let at = serve(app).await;
