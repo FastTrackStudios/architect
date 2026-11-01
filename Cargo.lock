@@ -735,6 +735,9 @@ dependencies = [
  "dioxus",
  "futures-timer",
  "lucide-dioxus",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "raw-window-handle 0.6.2",
 ]
 
 [[package]]

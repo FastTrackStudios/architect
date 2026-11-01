@@ -74,7 +74,20 @@ pub(super) fn DockView(side: Side, dock: Dock) -> Element {
 /// The two-stage sidebar's first stage: the dock's views, then its pinned
 /// commands.
 #[component]
-fn Ribbon(side: Side, dock: Dock) -> Element {
+fn Ribbon(
+    side: Side,
+    dock: Dock,
+    /// Only the buttons, for a ribbon the app's shell draws (its own column
+    /// and edge are the shell's).
+    #[props(default)]
+    bare: bool,
+    /// Who shows or folds the dock when its ribbon is the shell's: `true`
+    /// to show it.
+    on_side: Option<Callback<bool>>,
+    /// The shell's sidebar is folded (so the dock is not on show).
+    #[props(default)]
+    folded: bool,
+) -> Element {
     let host = use_host();
     let t = *host.theme.read();
     let s = (host.sizes)();
@@ -113,7 +126,7 @@ fn Ribbon(side: Side, dock: Dock) -> Element {
         .and_then(|p| workspace.pane(p))
         .map(|p| p.view.0.clone());
     drop(workspace);
-    let open = dock.shown == Shown::Open;
+    let open = dock.shown == Shown::Open && !folded;
     let (dir, rule) = if side.axis() == Axis::Row {
         (
             "column",
@@ -135,17 +148,25 @@ fn Ribbon(side: Side, dock: Dock) -> Element {
     let top = (host.title_row)()
         .filter(|_| side != Side::Bottom)
         .map_or(6.0, |r| r.height.max(s.tabs) + 6.0);
+    let column = if bare {
+        "display:flex; flex-direction:column; align-items:center; gap:4px;".to_owned()
+    } else {
+        format!(
+            "flex:0 0 auto; {across} display:flex; flex-direction:{dir}; align-items:center; \
+             gap:4px; padding:{top}px 0 6px; background:{}; {rule}:1px solid {};",
+            t.desk, t.rule
+        )
+    };
     rsx! {
         div {
-            style: "flex:0 0 auto; {across} display:flex; flex-direction:{dir}; align-items:center; \
-                    gap:4px; padding:{top}px 0 6px; background:{t.desk}; {rule}:1px solid {t.rule};",
+            style: "{column}",
             for (kind, title, icon) in views {
                 RibbonButton {
                     key: "{kind}",
                     label: title,
                     icon,
                     on: open && showing.as_deref() == Some(kind.as_str()),
-                    onpress: move |()| press_view(&host, side, &kind),
+                    onpress: move |()| press_view(&host, side, &kind, on_side, folded),
                 }
             }
             if !commands.is_empty() {
@@ -184,17 +205,24 @@ fn showing_kind(host: &Host, side: Side) -> Option<String> {
 
 /// A ribbon's view pressed: the one on show folds the dock; another is
 /// brought into the dock (or opened there) and the dock opens.
-fn press_view(host: &Host, side: Side, kind: &str) {
+fn press_view(host: &Host, side: Side, kind: &str, on_side: Option<Callback<bool>>, folded: bool) {
     let open = host
         .workspace
         .peek()
         .windows
         .first()
         .and_then(|w| w.docks.get(side))
-        .is_some_and(|d| d.shown == Shown::Open);
+        .is_some_and(|d| d.shown == Shown::Open)
+        && !folded;
     if open && showing_kind(host, side).as_deref() == Some(kind) {
-        host.run(Op::Dock(side, Shown::Collapsed));
+        match on_side {
+            Some(fold) => fold.call(false),
+            None => host.run(Op::Dock(side, Shown::Collapsed)),
+        }
         return;
+    }
+    if let Some(show) = on_side {
+        show.call(true);
     }
     let existing: Option<PaneId> = host
         .workspace
@@ -323,4 +351,63 @@ fn DockDivider(side: Side) -> Element {
             ondoubleclick: move |_| host.run(Op::Dock(side, Shown::Collapsed)),
         }
     }
+}
+
+/// The left dock in the shell's sidebar: its groups, their top tab bars in
+/// the title row clear of the window's buttons and the sidebar's.
+#[component]
+pub(super) fn ShellLeftDock() -> Element {
+    let host = use_host();
+    let workspace = host.workspace.read();
+    let root = workspace
+        .windows
+        .first()
+        .and_then(|w| w.docks.left.root.clone());
+    drop(workspace);
+    let covered = (host.title_row)().map_or(0.0, |r| r.left - r.sidebar_left);
+    let edges = super::group::Edges {
+        top: true,
+        left: true,
+        right: false,
+        covered,
+    };
+    root.map_or_else(
+        || rsx! {},
+        |root| {
+            rsx! {
+                div { style: "flex:1 1 0; min-height:0; display:flex; position:relative; overflow:hidden;",
+                    super::NodeView { node: root, edges }
+                }
+            }
+        },
+    )
+}
+
+/// The left dock's ribbon buttons in the shell's ribbon: a view pressed
+/// shows it in the shell's sidebar (unfolding it), the one on show folds
+/// the sidebar.
+#[component]
+pub(super) fn ShellRibbon() -> Element {
+    let host = use_host();
+    let Some(shell) = architect_shell::try_use_shell() else {
+        return rsx! {};
+    };
+    let folded = shell.folded();
+    let dock = host
+        .workspace
+        .read()
+        .windows
+        .first()
+        .map(|w| w.docks.left.clone());
+    let Some(dock) = dock else {
+        return rsx! {};
+    };
+    let on_side = Callback::new(move |show: bool| {
+        if show {
+            shell.unfold();
+        } else if !shell.folded() {
+            shell.toggle(architect_shell::Side::Left);
+        }
+    });
+    rsx! { Ribbon { side: Side::Left, dock, bare: true, on_side, folded } }
 }

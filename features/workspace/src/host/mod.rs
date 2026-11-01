@@ -257,6 +257,9 @@ pub struct TitleRow {
     pub left: f32,
     /// Kept clear at the right end (the app's buttons), points.
     pub right: f32,
+    /// Kept clear at the left end of the shell's sidebar (the window's
+    /// buttons and the sidebar's), for a left dock the shell hosts.
+    pub sidebar_left: f32,
     /// Start moving the window (called from the press itself).
     pub on_drag: Option<Callback<()>>,
     /// Zoom the window (a double click on the row).
@@ -274,6 +277,7 @@ pub struct Host {
     sizes: Signal<Sizes>,
     phone: Signal<bool>,
     title_row: Signal<Option<TitleRow>>,
+    in_shell: Signal<bool>,
     drag: Signal<Option<Drag>>,
     menu: Signal<Option<Menu>>,
     /// A phone's pane opened over the one on show (a docked one).
@@ -594,6 +598,11 @@ pub fn WorkspaceView(
     arrange_key: Option<Code>,
     /// The window's title row, when the workspace reaches the window's top.
     title_row: Option<TitleRow>,
+    /// The app's shell hosts the left dock: its groups in the shell's
+    /// sidebar, its ribbon in the shell's ribbon (one left side). Read on
+    /// mount.
+    #[props(default)]
+    in_shell: bool,
     #[props(default)] theme: ShellTheme,
 ) -> Element {
     let mut host = use_context_provider(|| Host {
@@ -605,6 +614,7 @@ pub fn WorkspaceView(
         sizes: Signal::new(Sizes::FINE),
         phone: Signal::new(phone),
         title_row: Signal::new(None),
+        in_shell: Signal::new(false),
         drag: Signal::new(None),
         menu: Signal::new(None),
         sheet: Signal::new(None),
@@ -629,6 +639,18 @@ pub fn WorkspaceView(
     let title_row = title_row.filter(|_| !phone);
     if *host.title_row.peek() != title_row {
         host.title_row.set(title_row);
+    }
+    // One left side: the shell draws the dock and its ribbon, from here.
+    let slots = (in_shell && !phone).then(|| {
+        (
+            rsx! { HostScope { host, dock::ShellLeftDock {} } },
+            rsx! { HostScope { host, dock::ShellRibbon {} } },
+        )
+    });
+    let (slot_left, slot_rail) = slots.unzip();
+    architect_shell::use_shell_slots(slot_left, slot_rail);
+    if *host.in_shell.peek() != in_shell {
+        host.in_shell.set(in_shell);
     }
     let t = theme;
     let body = if phone {
@@ -726,15 +748,18 @@ fn DeskBody() -> Element {
         (true, true) => s.ribbon,
         (true, false) => RAIL,
     };
+    let in_shell = (host.in_shell)();
     let center_edges = group::Edges {
         top: true,
-        left: !open_tree(&docks.left),
+        left: in_shell || !open_tree(&docks.left),
         right: !open_tree(&docks.right),
-        covered: strip(&docks.left),
+        covered: if in_shell { 0.0 } else { strip(&docks.left) },
     };
     rsx! {
         div { style: "flex:1 1 0; min-width:0; min-height:0; display:flex; flex-direction:row;",
-            DockView { side: Side::Left, dock: docks.left }
+            if !in_shell {
+                DockView { side: Side::Left, dock: docks.left }
+            }
             div { style: "flex:1 1 0; min-width:{CENTER_MIN}px; min-height:0; display:flex; flex-direction:column;",
                 div { style: "flex:1 1 0; min-width:0; min-height:0; display:flex; position:relative;",
                     {center.map_or_else(|| rsx! { EmptyCenter {} }, |node| rsx! { NodeView { node, edges: center_edges } })}
@@ -813,4 +838,18 @@ fn groups_of(node: &Node, out: &mut Vec<GroupId>) {
     let mut found = Vec::new();
     node.groups(&mut found);
     out.extend(found.into_iter().map(|g| g.id));
+}
+
+impl PartialEq for Host {
+    fn eq(&self, other: &Self) -> bool {
+        self.workspace == other.workspace
+    }
+}
+
+/// Puts `host` back in context for what is drawn elsewhere (the shell's
+/// sidebar and ribbon, which are not under the [`WorkspaceView`]).
+#[component]
+fn HostScope(host: Host, children: Element) -> Element {
+    use_context_provider(|| host);
+    children
 }

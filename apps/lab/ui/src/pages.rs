@@ -3,7 +3,7 @@
 
 use architect_shell::icon;
 use architect_shell::{
-    Action, Crumb, FormFactor, Menu, Page, ShellStyle, Tool, Toolbar, use_shell,
+    Action, Crumb, FormFactor, Menu, Page, ShellStyle, StatusStyle, Tool, Toolbar, use_shell,
 };
 use dioxus::prelude::*;
 use lucide_dioxus::{
@@ -92,7 +92,24 @@ fn lab_menu(menu: Menu, lab: Lab) -> Menu {
         .check("Right side", (lab.right)(), move |()| {
             let mut right = lab.right;
             right.toggle();
-        });
+        })
+        .heading("Status")
+        .check(
+            "Bar along the foot",
+            (lab.status)() == StatusStyle::Bar,
+            move |()| {
+                let mut s = lab.status;
+                s.set(StatusStyle::Bar);
+            },
+        )
+        .check(
+            "Badge in the corner",
+            (lab.status)() == StatusStyle::Badge,
+            move |()| {
+                let mut s = lab.status;
+                s.set(StatusStyle::Badge);
+            },
+        );
     if !cfg!(any(target_os = "ios", target_os = "android")) {
         let device = consume_context::<Signal<Device>>()();
         menu = menu.divider().heading("Device");

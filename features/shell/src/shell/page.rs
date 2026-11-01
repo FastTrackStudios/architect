@@ -4,7 +4,7 @@
 use dioxus::prelude::*;
 use lucide_dioxus::{Check, ChevronLeft, Ellipsis, PanelRight};
 
-use super::{Action, FormFactor, Icon, IconFn, ShellStyle, Side, use_shell};
+use super::{Action, DragStrip, FormFactor, Icon, IconFn, ShellStyle, Side, use_shell};
 
 // ── The ⋯ menu ──────────────────────────────────────────────────────────────
 
@@ -774,10 +774,11 @@ fn MenuRow(entry: MenuEntry, open: Signal<bool>) -> Element {
     }
 }
 
-/// A desk's page bar (T3 Code's): the title row itself, the page's colour,
-/// the breadcrumb on the left, the page's toolbar small on the right;
-/// clear at each end of the sides' fixed buttons where they sit over it.
-/// Its empty space moves the window.
+/// A desk's page bar, Obsidian's way: the title row holds the page as a
+/// tab (rounded at the top, the page's colour, running on into it), the
+/// rest of the row moving the window; under it the page's header — the way
+/// back, the breadcrumb, the page's toolbar. Clear at each end of the
+/// sides' fixed buttons where they sit over the title row.
 #[component]
 fn DeskBar(
     title: String,
@@ -791,19 +792,33 @@ fn DeskBar(
     let t = shell.theme;
     let ins = shell.screen.insets;
     let row = shell.title_row();
-    // Beside a showing sidebar, the page's own margin; else clear of the
-    // window's buttons and the sidebar's (and the right side's button).
     let (left, right) = shell.title_clearance();
-    let pad_left = if left > 0.0 { left } else { 20.0 };
-    let pad_right = if shell.right_button_over_page() {
-        right
-    } else {
-        20.0 + ins.right
-    };
+    let pad_left = left.max(4.0);
+    let tab_h = (row - 6.0).max(24.0);
+    let chrome = shell.window_chrome().cloned();
     rsx! {
         div {
             style: "position: relative; flex-shrink: 0; box-sizing: border-box; height: {row + ins.top}px; \
-                    padding: {ins.top}px {pad_right}px 0 {pad_left}px; display: flex; align-items: center; gap: 10px;",
+                    padding: {ins.top}px {right}px 0 {pad_left}px; display: flex; align-items: flex-end; \
+                    background: {t.title_bar};",
+            // The bar's rule, under everything but the tab (drawn over it).
+            div { style: "position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: {t.rule};" }
+            div {
+                style: "position: relative; z-index: 1; flex: 0 1 200px; max-width: 200px; min-width: 72px; \
+                        height: {tab_h}px; box-sizing: border-box; display: flex; align-items: center; \
+                        padding: 0 12px; border-radius: 8px 8px 0 0; background: {t.desk}; color: {t.ink}; \
+                        font-family: {t.font}; font-size: 13px; white-space: nowrap; overflow: hidden;",
+                "{title}"
+            }
+            if let Some(c) = chrome {
+                DragStrip { chrome: c, width: None }
+            } else {
+                span { style: "flex: 1;" }
+            }
+        }
+        div {
+            style: "position: relative; flex-shrink: 0; box-sizing: border-box; height: 44px; \
+                    padding: 0 {20.0 + ins.right}px 0 20px; display: flex; align-items: center; gap: 10px;",
             if let Some(back) = on_back {
                 button {
                     class: "lp",

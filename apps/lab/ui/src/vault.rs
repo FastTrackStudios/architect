@@ -4,7 +4,7 @@
 //! at the bottom. Drag a tab anywhere, hold W to grab a pane without
 //! tabs, right-click (or ⋯) a tab for the rest.
 
-use architect_shell::{FormFactor, PageBar, Screen, icon, use_shell};
+use architect_shell::{FormFactor, PageBar, Screen, StatusItem, icon, use_shell};
 use architect_workspace::{
     Command, Pane, Ribbon, Shown, Side, Target, TitleRow, View, ViewKind, Views, Workspace,
     WorkspaceView, use_pane,
@@ -144,6 +144,19 @@ pub fn VaultPage() -> Element {
         let mut workspace = workspace;
         let _ = workspace.write().open(note(&pane_id, &title), Target::Tab);
     };
+    // What is open, on the status line (Obsidian's counts).
+    let open = workspace.read().panes.len();
+    let edits: u32 = workspace
+        .read()
+        .panes
+        .iter()
+        .filter_map(|p| p.state.parse::<u32>().ok())
+        .sum();
+    architect_shell::use_status(vec![
+        StatusItem::new("backlinks", "0 backlinks").left(),
+        StatusItem::new("panes", format!("{open} panes")).left(),
+        StatusItem::new("edits", format!("{edits} edits")).left(),
+    ]);
     // On a desk the workspace's tabs are the title row (Obsidian's): no page
     // bar, the top tab bars as tall, clear of the window's buttons.
     let shell = use_shell();
@@ -153,6 +166,7 @@ pub fn VaultPage() -> Element {
             height: narrow(shell.title_row()),
             left: narrow(left),
             right: narrow(right),
+            sidebar_left: narrow(shell.sidebar_title_left()),
             on_drag: shell.window_chrome().map(|w| w.on_drag),
             on_zoom: shell.window_chrome().map(|w| w.on_zoom),
         }
@@ -170,6 +184,8 @@ pub fn VaultPage() -> Element {
                 phone: screen.form() == FormFactor::Phone,
                 coarse: screen.touch,
                 title_row,
+                // One left side: the shell's ribbon and sidebar are the dock's.
+                in_shell: shell.desk(),
             }
         }
     }

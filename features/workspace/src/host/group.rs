@@ -189,6 +189,10 @@ fn TabBar(group: Group, current: PaneId, edges: Edges) -> Element {
     let on_drag = row.as_ref().and_then(|r| r.on_drag);
     let on_zoom = row.as_ref().and_then(|r| r.on_zoom);
     let lift = (height - s.tabs + 6.0).max(6.0);
+    // On the title row the bar is the window's title bar, its rule under
+    // every tab but the current one (which runs on into its pane).
+    let bar = if row.is_some() { t.title_bar } else { t.desk };
+    let ruled = row.is_some();
     let current_index = group.tabs.iter().position(|p| *p == current);
     let workspace = host.workspace.read();
     let tabs: Vec<(PaneId, String, bool, Option<architect_shell::IconFn>)> = group
@@ -210,7 +214,11 @@ fn TabBar(group: Group, current: PaneId, edges: Edges) -> Element {
         div {
             style: "flex:0 0 {height}px; height:{height}px; box-sizing:border-box; display:flex; \
                     align-items:stretch; padding:0 {pad_right}px 0 {pad_left}px; overflow:hidden; \
-                    min-width:0; background:{t.desk};",
+                    min-width:0; background:{bar}; position:relative;",
+            // The bar's rule, under every tab but the current one (drawn over it).
+            if ruled {
+                div { style: "position:absolute; left:0; right:0; bottom:0; height:1px; background:{t.rule};" }
+            }
             div { style: "flex:0 1 auto; min-width:0; display:flex; align-items:flex-end; overflow:hidden; \
                           padding-top:{lift}px; gap:1px;",
                 for (index, (pane, title, pinned, icon)) in tabs.into_iter().enumerate() {
@@ -352,7 +360,8 @@ fn Tab(
             style: "flex:{grow} 1 {most}px; max-width:{most}px; min-width:{least}px; height:{tab_h}px; \
                     box-sizing:border-box; display:flex; align-items:center; gap:6px; padding:{pad}; \
                     border-radius:8px 8px 0 0; white-space:nowrap; overflow:hidden; touch-action:none; \
-                    user-select:none; color:{ink}; background:{fill}; border-right:1px solid {hairline};",
+                    user-select:none; color:{ink}; background:{fill}; border-right:1px solid {hairline}; \
+                    position:relative; z-index:{u8::from(on)};",
             title: "{title}",
             onpointerdown: move |e| {
                 let (x, y) = point(&e);

@@ -185,6 +185,34 @@ their bars (`features/shell/src/shell/page.rs` `Page`, `Toolbar`,
 and the workspace switcher (`features/shell/src/shell/workspaces.rs`).
 The names above are the sketch; the code is what landed.
 
+## On a desk: Obsidian's frame
+
+A desk window is laid out the way Obsidian lays out a vault, and every
+app on the shell gets it:
+
+- **The title bar** runs the whole width, 40pt
+  (`WindowChrome::MAC_ROW`), in its own colour (`ShellTheme::title_bar`)
+  over one rule. The traffic lights are placed in it
+  (`fit_traffic_lights`, after each resize), then the sidebar's button.
+  What fills the rest is **tabs**: a page's own tab, or a workspace's tab
+  bars (`architect-workspace`'s `TitleRow`). The tab on show is the
+  page's colour and runs on into it. The breadcrumb and the page's
+  toolbar sit in the page's header under it, where Obsidian shows a
+  note's path. A press on the bar's empty part moves the window.
+- **The ribbon** (`RIBBON`, 44pt) is the window's left edge under the
+  bar, the full height: the app's sections as icons, then what the page
+  adds (a workspace's views and pinned commands). Folding the sidebar
+  leaves the ribbon.
+- **One sidebar** beside it: the app's `left`, or what the page claims
+  with `use_shell_slots` (a workspace's left dock, its tabs in the title
+  row). Then the workspace switcher sits at its foot, over the account.
+- **The status line**: `StatusItem`s (a fact or a switch: text, icon, a
+  dot, a chip, a press), the app's on `AppShell` and the page's from
+  `use_status`. It is drawn as a `StatusStyle::Bar` along the foot,
+  right of the ribbon (Task's: the page's items on the left, the app's
+  on the right), or as a `StatusStyle::Badge` in the bottom right corner
+  (Obsidian's).
+
 ## It renders in Blitz
 
 Studio's windows, its plugins and its iPhone app paint through Blitz
