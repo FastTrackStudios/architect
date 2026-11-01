@@ -13,6 +13,10 @@
 //! (`use_window_event` is the main window's), so the app's chords
 //! (`architect_commands::WindowKeys`) are heard in the main window only;
 //! keys in a pop-out reach what has the focus there.
+//!
+//! The main window is in context as a [`MainWindow`]: an app that keeps
+//! running with no window (`architect-presence`'s background mode) says
+//! what closing it does, and quits the loop itself.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -70,6 +74,7 @@ pub fn launch_with_fonts(
         main: RefCell::new(None),
         open: RefCell::new(Vec::new()),
         releases: RefCell::new(Vec::new()),
+        on_close: RefCell::new(None),
     });
 
     #[cfg(all(feature = "hot-reload", debug_assertions))]
@@ -164,6 +169,8 @@ struct Desk {
     open: RefCell<Vec<(WindowId, Arc<dyn OsWindow>)>>,
     /// Each window's host, told where a drag let go outside it.
     releases: RefCell<Vec<(WindowId, Rc<dyn Fn(f32, f32)>)>>,
+    /// Asked when the person closes the main window ([`MainWindow::on_close`]).
+    on_close: RefCell<Option<Rc<dyn Fn() -> bool>>>,
 }
 
 impl Desk {
@@ -221,6 +228,47 @@ impl Desk {
 enum Ask {
     Open(Box<Popout>),
     Close(WindowId),
+    /// End the event loop: the app quits.
+    Quit,
+}
+
+/// The desk's main window, in context for everything in it: the OS
+/// window, what closing it does, and quitting.
+///
+/// Closing the last window quits, as dioxus-native has it, unless the app
+/// says otherwise ([`Self::on_close`]): a menu-bar app hides the window
+/// and keeps running, and quits with [`Self::quit`].
+#[derive(Clone)]
+pub struct MainWindow(Rc<Desk>);
+
+impl MainWindow {
+    /// The OS window, once it is open.
+    #[must_use]
+    pub fn window(&self) -> Option<Arc<dyn OsWindow>> {
+        self.0.main.borrow().clone()
+    }
+
+    /// Asks `close` each time the person closes the main window (its
+    /// close button, Window › Close): `true` keeps the window (the app hid
+    /// it), `false` lets it close, which quits when it is the last. `None`
+    /// puts the default back. Called on the event loop's thread, outside
+    /// any dom: change no signal from it.
+    pub fn on_close(&self, close: Option<Rc<dyn Fn() -> bool>>) {
+        *self.0.on_close.borrow_mut() = close;
+    }
+
+    /// Ends the event loop on its next turn: the app quits, its windows
+    /// with it, hidden or not.
+    pub fn quit(&self) {
+        self.0.requests.borrow_mut().push(Ask::Quit);
+        self.0.wake.wake_up();
+    }
+}
+
+impl PartialEq for MainWindow {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
 }
 
 /// Where `window`'s content is on screen, logical points.
@@ -310,11 +358,12 @@ struct RootProps {
     desk: DeskHandle,
 }
 
-/// The main window's root: the [`Windows`] in context, the window itself
-/// known to the desk, then the app.
+/// The main window's root: the [`Windows`] and the [`MainWindow`] in
+/// context, the window itself known to the desk, then the app.
 #[allow(non_snake_case, clippy::needless_pass_by_value)]
 fn Root(props: RootProps) -> Element {
     use_context_provider(|| props.windows.clone());
+    use_context_provider(|| MainWindow(props.desk.0.clone()));
     let window = dioxus_native::use_window();
     let desk = props.desk.clone();
     use_hook(move || {
@@ -347,6 +396,7 @@ impl App {
         for ask in asks {
             match ask {
                 Ask::Open(popout) => self.open(event_loop, *popout),
+                Ask::Quit => event_loop.exit(),
                 Ask::Close(id) => {
                     let os = self
                         .popouts
@@ -403,6 +453,13 @@ impl App {
             .borrow_mut()
             .push((popout.id().clone(), Arc::clone(&window)));
         self.popouts.insert(view.window_id(), Open { popout, view });
+    }
+
+    /// The person closed the main window: whether the app kept it
+    /// ([`MainWindow::on_close`]).
+    fn kept_main(&self) -> bool {
+        let close = self.desk.on_close.borrow().clone();
+        close.is_some_and(|close| close())
     }
 
     /// Drop the pop-out's window (its document goes with it).
@@ -537,6 +594,9 @@ impl ApplicationHandler for App {
         }
         if self.popouts.contains_key(&window) {
             self.popout_event(window, event);
+            self.asks(event_loop);
+        } else if matches!(event, WindowEvent::CloseRequested) && self.kept_main() {
+            // The app hid the window instead: the loop runs on.
             self.asks(event_loop);
         } else {
             self.inner.window_event(event_loop, window, event);
