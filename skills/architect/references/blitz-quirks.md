@@ -16,6 +16,7 @@ They belong in that skill too; until Studio takes them, they are kept here.
 | The `ch` unit is not supported. | Size in `px` or `em`. | |
 | `placeholder` on an input draws nothing. | Put the question in a `label` above the field. | `apps/lab/ui/src/pages.rs` `CapturePage` |
 | An element measured in `onmounted` can report a zero rect: it is not laid out yet, and nothing measures it again. | Measure again when the number is needed (a menu opening, a drag starting), and ignore a zero size. | `features/workspace/src/host/mod.rs` `Host::open_menu` |
+| A `title` attribute draws no tooltip. | Draw the tip: a child `span.tip` in a `position: relative` host, shown by `.tip-host:hover > .tip` (Blitz marks the hovered node's ancestors hovered, as a browser does) after a transition delay. | `features/shell/src/shell/mod.rs` `shell_css`, `RibbonTab` |
 | Vertical text (`writing-mode`) is not supported. | An absolutely placed `white-space: nowrap` span with `transform-origin: 0 0; transform: rotate(90deg) translateY(-half its line)`; 2D transforms work. | `features/workspace/src/host/group.rs` `Stacked` (the stacked tabs' spines) |
 
 ## Fonts
@@ -30,7 +31,7 @@ To check a face really loaded, put a different generic last in the stack for one
 
 | What happens | Write instead | Where architect does |
 |---|---|---|
-| Keys reach the DOM only through what has the focus: with nothing focused (after a click on empty space), a page's `onkeydown` hears nothing. | Hear the window's keys: mount `architect_commands::WindowKeys` once, and give chords to commands. | `features/commands/src/native.rs` `WindowKeys` |
+| Keys reach the DOM only through what has the focus: with nothing focused (after a click on empty space), a page's `onkeydown` hears nothing. Tab moves focus only on from an element that already has it, and a focus change does not reliably reach `onfocus`. | Hear the window's keys: mount `architect_commands::WindowKeys` once, and give chords to commands (⌘ or ⌃). Keep a list's selection in a signal and move it with commands (⌃N, ⌃P), not with focus. | `features/commands/src/native.rs` `WindowKeys`; `apps/lab/ui/src/lib.rs` `Lab::step` |
 
 ## The window (macOS)
 
