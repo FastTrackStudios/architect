@@ -32,6 +32,11 @@ pub use loro;
 // Real-time, offline-first sync over vox (`DocSync` + `DocSyncHost` +
 // `SyncedDoc`, plus the presence channel). Gated: the core stays
 // transport-free.
+pub mod history;
+pub mod kinds;
+pub use history::History;
+pub use kinds::{DocKind, DocKinds, Migration};
+
 #[cfg(feature = "vox")]
 pub mod sync;
 

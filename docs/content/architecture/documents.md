@@ -4,7 +4,13 @@ description = "What an app's work is saved as, how it is undone, versioned, sync
 weight = 57
 +++
 
-> **Status: proposed (2026-10-31).** For review before any code. Most of
+> **Status: kinds and named undo landed (2026-11-01)** in `crdt`:
+> `features/crdt/crdt/src/kinds.rs` `DocKind` (an id, a name, a file
+> extension, a schema stamp and migrations; `stamp`, `upgrade`),
+> `DocKinds`; `features/crdt/crdt/src/history.rs` `History`
+> (`transact` — one named step — `undo`, `redo`, local only). Next in
+> the order of work: the file format, blobs, the org driver. Proposed
+> (2026-10-31): most of
 > the pieces exist ([collaboration](@/architecture/collaboration.md),
 > [peers](@/architecture/peers.md), [blobs](@/architecture/blob.md)); the
 > rest are in Studio and move here. Studio's `studio:docs/design/sync.md` is the
