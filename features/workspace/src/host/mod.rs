@@ -34,9 +34,9 @@ mod commands;
 mod dock;
 mod group;
 mod overlay;
+mod presence;
 mod screens;
 mod windows;
-mod presence;
 
 use std::collections::HashMap;
 use std::rc::Rc;
