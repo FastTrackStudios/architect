@@ -72,18 +72,7 @@ fn SplitView(split: Split, edges: Edges) -> Element {
     } else {
         "ns-resize"
     };
-    let bar = if axis == Axis::Row {
-        format!("width:{}px;", s.divider)
-    } else {
-        format!("height:{}px;", s.divider)
-    };
-    // A hairline down the middle of the handle (Obsidian's), the handle wide
-    // enough to grab.
-    let line = if axis == Axis::Row {
-        "border-left"
-    } else {
-        "border-top"
-    };
+    let (hair_line, hair_grip) = hairline(axis, s.divider, t.rule, cursor);
     let shares: Vec<f32> = split.children.iter().map(|c| c.share).collect();
     let count = split.children.len();
     let last = count.saturating_sub(1);
@@ -101,8 +90,9 @@ fn SplitView(split: Split, edges: Edges) -> Element {
                 if index < last {
                     div {
                         key: "d{index}",
-                        style: "flex:0 0 auto; {bar} background:{t.desk}; {line}:1px solid {t.rule}; \
-                                box-sizing:border-box; cursor:{cursor}; touch-action:none;",
+                        style: "{hair_line}",
+                        div {
+                        style: "{hair_grip}",
                         onpointerdown: {
                             let shares = shares.clone();
                             move |_| {
@@ -121,6 +111,7 @@ fn SplitView(split: Split, edges: Edges) -> Element {
                         ondoubleclick: move |_| {
                             let _ = host.edit(|w| w.even(id));
                         },
+                        }
                     }
                 }
             }
@@ -575,4 +566,27 @@ pub(super) fn PaneSlot(pane: PaneId) -> Element {
 
 const fn spine_fill(on: bool, t: architect_shell::ShellTheme) -> &'static str {
     if on { t.sheet } else { t.desk }
+}
+
+/// A divider, Obsidian's: a one-point line in the layout, and over it an
+/// invisible handle `grip` points across to grab (the panes either side
+/// keep their colour right up to the line).
+pub(super) fn hairline(axis: Axis, grip: f32, rule: &str, cursor: &str) -> (String, String) {
+    let half = grip / 2.0;
+    match axis {
+        Axis::Row => (
+            format!("flex:0 0 1px; width:1px; position:relative; z-index:6; background:{rule};"),
+            format!(
+                "position:absolute; top:0; bottom:0; left:{l}px; width:{grip}px; cursor:{cursor}; touch-action:none;",
+                l = 0.5 - half
+            ),
+        ),
+        Axis::Column => (
+            format!("flex:0 0 1px; height:1px; position:relative; z-index:6; background:{rule};"),
+            format!(
+                "position:absolute; left:0; right:0; top:{t}px; height:{grip}px; cursor:{cursor}; touch-action:none;",
+                t = 0.5 - half
+            ),
+        ),
+    }
 }

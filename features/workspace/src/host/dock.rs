@@ -325,22 +325,16 @@ fn DockDivider(side: Side) -> Element {
     let mut host = use_host();
     let t = *host.theme.read();
     let s = (host.sizes)();
-    // A hairline on the dock's own edge, the handle wide enough to grab.
-    let line = match side {
-        Side::Left => "border-left",
-        Side::Right => "border-right",
-        Side::Top => "border-bottom",
-        Side::Bottom => "border-top",
-    };
-    let (cursor, shape) = if side.axis() == Axis::Row {
-        ("ew-resize", format!("width:{}px;", s.divider))
+    let cursor = if side.axis() == Axis::Row {
+        "ew-resize"
     } else {
-        ("ns-resize", format!("height:{}px;", s.divider))
+        "ns-resize"
     };
+    let (line, grip) = super::group::hairline(side.axis(), s.divider, t.rule, cursor);
     rsx! {
+        div { style: "{line}",
         div {
-            style: "flex:0 0 auto; {shape} box-sizing:border-box; background:{t.desk}; {line}:1px solid {t.rule}; \
-                    cursor:{cursor}; touch-action:none;",
+            style: "{grip}",
             onpointerdown: move |_| {
                 spawn(async move {
                     if let Some(rect) = host.rect(Mount::Host).await {
@@ -349,6 +343,7 @@ fn DockDivider(side: Side) -> Element {
                 });
             },
             ondoubleclick: move |_| host.run(Op::Dock(side, Shown::Collapsed)),
+        }
         }
     }
 }

@@ -1,13 +1,13 @@
 //! The Vault tab: the workspace host, Obsidian's shape — files and search
 //! in the left dock behind a ribbon, notes in the center (more than one
-//! may be open), the outline and backlinks on the right, a console folded
-//! at the bottom. Drag a tab anywhere, hold W to grab a pane without
+//! may be open), the outline and backlinks on the right (a console opens
+//! at the bottom from "Open a view"). Drag a tab anywhere, hold W to grab a pane without
 //! tabs, right-click (or ⋯) a tab for the rest.
 
 use architect_shell::{FormFactor, PageBar, Screen, StatusItem, icon, use_shell};
 use architect_workspace::{
-    Command, Pane, Ribbon, Shown, Side, Target, TitleRow, View, ViewKind, Views, Workspace,
-    WorkspaceView, use_pane,
+    Command, Pane, Ribbon, Side, Target, TitleRow, View, ViewKind, Views, Workspace, WorkspaceView,
+    use_pane,
 };
 use dioxus::prelude::*;
 use lucide_dioxus::{
@@ -102,17 +102,12 @@ fn first_workspace() -> Workspace {
             Pane::new("backlinks", "backlinks", "Backlinks"),
             Target::Dock(Side::Right),
         ),
-        (
-            Pane::new("console", "console", "Console"),
-            Target::Dock(Side::Bottom),
-        ),
     ];
     for (pane, target) in opens {
         let _ = w.open(pane, target);
     }
     let _ = w.activate(&architect_workspace::PaneId::new("files"));
     let _ = w.activate(&architect_workspace::PaneId::new("note-welcome"));
-    let _ = w.set_dock_shown(Side::Bottom, Shown::Collapsed);
     if let Some(main) = w.windows.first_mut() {
         main.docks.left.ribbon = Some(Ribbon {
             views: vec![ViewKind::new("files"), ViewKind::new("search")],
