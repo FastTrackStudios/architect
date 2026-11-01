@@ -4,12 +4,15 @@ description = "What an app's work is saved as, how it is undone, versioned, sync
 weight = 57
 +++
 
-> **Status: kinds and named undo landed (2026-11-01)** in `crdt`:
-> `features/crdt/crdt/src/kinds.rs` `DocKind` (an id, a name, a file
-> extension, a schema stamp and migrations; `stamp`, `upgrade`),
+> **Status: kinds, named undo and the file landed (2026-11-01)** in
+> `crdt`: `features/crdt/crdt/src/kinds.rs` `DocKind` (an id, a name, a
+> file extension, a schema stamp and migrations; `stamp`, `upgrade`),
 > `DocKinds`; `features/crdt/crdt/src/history.rs` `History`
-> (`transact` — one named step — `undo`, `redo`, local only). Next in
-> the order of work: the file format, blobs, the org driver. Proposed
+> (`transact` — one named step — `undo`, `redo`, local only);
+> `features/crdt/crdt/src/file/mod.rs` `DocFile` and
+> `features/crdt/crdt/src/file/branch.rs` `Branch` (the file, below).
+> Next in the order of work: blobs, the org driver. Studio's
+> `session-format` moving onto the file is Studio's work. Proposed
 > (2026-10-31): most of
 > the pieces exist ([collaboration](@/architecture/collaboration.md),
 > [peers](@/architecture/peers.md), [blobs](@/architecture/blob.md)); the
@@ -87,6 +90,41 @@ it, folds it on save, and recovers it after a crash from the updates
 since the last snapshot. Every finished undo step is on disk the moment
 it finishes: there is no "unsaved" state to lose, and "Save" means
 "name this version".
+
+Built (`features/crdt/crdt/src/file/mod.rs`): Studio's five tables are
+records in one append-only file rather than tables in a database
+(`features/crdt/crdt/src/file/format.rs`): a 12-byte header, then each
+record framed by its length and a CRC-32. Nothing in it is native, so a
+browser reads a file it was handed (`DocFile::from_bytes`) as a desktop
+reads one from disk (`DiskStorage`); where the bytes live is a `Storage`
+(`MemoryStorage` and `DiskStorage` today).
+
+```rust,ignore
+let file = DocFile::create(DiskStorage::open(path)?, &kind).await?; // meta + `main`, stamped
+let mut main = file.open_branch(MAIN).await?;
+main.transact("Split item", |doc| { /* edit */ }).await?;   // on disk when it returns
+main.save("Mix sent to Dan").await?;                       // a checkpoint, and a fold
+let mut alt = main.fork("acoustic").await?;                // open side by side
+main.merge(&alt).await?;                                   // a step, "Merge acoustic"
+let v = &file.versions(MAIN).await?[3];
+let old = file.open_version(v).await?;                     // read-only
+let back = file.restore(v, "from v3").await?;              // a new branch
+```
+
+| | How |
+|---|---|
+| A step | `Branch::transact`, `undo`, `redo` append the step's Loro update (its name, time and frontiers) and sync it before returning |
+| Crash | the write it cut short is a torn last record; opening drops it (`DocFile::recovered`) and replays the steps after the last snapshot. `features/crdt/crdt/tests/file.rs` `kill_9_mid_edit_reopens_with_every_finished_step` kills a writer mid-edit |
+| Save | `Branch::save` names a checkpoint and folds the branch into a snapshot built from the file (another handle's steps are kept); the file is rewritten beside itself and renamed over. Folded steps keep their names and places, so every one still opens |
+| Branches | forked at a point (`parent`, `base` frontiers), sharing the history before it; deleting one folds its children first so they stand alone; `main` cannot be deleted |
+| Kind | `meta` holds `kind`, `schema` and `id`; opening refuses another kind or a newer schema, and `open_branch` runs migrations as a step |
+| Blobs | `DocFile::put_blob` keeps bytes once by SHA-256 (the name `architect::blob` uses) |
+| Sync | `DocFile::persistence` is a branch as a `Persistence`, so a `CrdtDoc` (and `DocSync` on it) keeps its replica in the file |
+
+Not yet: blobs beside the file and their reachability, an IndexedDB
+`Storage`, undo that survives reopening (Loro's `UndoManager` cannot be
+seeded), and one writer per file (two processes appending would
+interleave).
 
 Large media — audio a song records, images a note embeds — are blobs: by
 reference, by content hash, stored beside the document (a folder next to

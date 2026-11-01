@@ -68,6 +68,10 @@ uuid.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 crdt-derive.workspace = true
+# The document file (`crdt::file`): blobs named by their SHA-256, records
+# checked by CRC-32. Both pure Rust, wasm-clean.
+sha2.workspace = true
+crc32fast = "1"
 
 # Declare tokio independently of the workspace dep so wasm32 builds
 # (which can't pull mio / rt-multi-thread) stay clean. `macros` powers
