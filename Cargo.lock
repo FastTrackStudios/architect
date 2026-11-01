@@ -585,6 +585,7 @@ name = "architect-commands"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "architect-input",
  "architect-shell",
  "dioxus",
  "dioxus-native",
@@ -593,6 +594,8 @@ dependencies = [
  "futures-timer",
  "lucide-dioxus",
  "muda",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

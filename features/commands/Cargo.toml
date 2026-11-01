@@ -18,6 +18,7 @@ default = []
 native = ["ui", "dep:dioxus-native", "dep:futures-timer", "dep:muda"]
 ui = [
     "dep:dioxus",
+    "architect-input/dioxus",
     "dep:architect-shell",
     "architect-shell/ui",
     "dep:lucide-dioxus",
@@ -27,6 +28,11 @@ ui = [
 [dependencies]
 facet = { workspace = true }
 facet-json = { version = "0.50.0-rc.5" }
+# The keymap engine: a command's keys, sequences, contexts and held tools.
+architect-input = { workspace = true }
+# An action's params schema, read to ask for its arguments (src/params.rs).
+serde = { workspace = true }
+serde_json = { workspace = true }
 dioxus = { workspace = true, optional = true }
 architect-shell = { workspace = true, optional = true }
 lucide-dioxus = { workspace = true, optional = true }
