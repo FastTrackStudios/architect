@@ -1,0 +1,31 @@
+// Closing a tab from its card in a phone's tab switcher: the card fades,
+// and the cards after it slide together.
+id phone-tab-switcher-close-card
+title "Close a tab from the switcher"
+view {width 402, height 874}
+capture {fps 20, width 402, outputs (gif png)}
+steps (
+    {
+        id vault
+        do @run{id LAB_GO_VAULT}
+        done {on (@changed"lab"), check ({id LAB_STATE, has {tab vault, bar actions}})}
+        hide true
+    }
+    {
+        id open
+        target @css"[data-bar-item=\"WORKSPACE_EVERY_PANE\"]"
+        do @click{}
+        hold 0.6
+    }
+    {
+        id close
+        text "Each card's ✕ closes its tab; the others slide together."
+        target @app{kind card-close, name note-shell}
+        do @click{}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {windows ({groups ({tabs (note-welcome arrange)} {tabs (graph)})})}})
+        }
+        hold 0.8
+    }
+)

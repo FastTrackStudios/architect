@@ -1,0 +1,30 @@
+// A phone's tab switcher: the tabs button zooms the pane on show out
+// into its card, among a grid of every tab (each a live preview, or its
+// view's icon), and a card pressed zooms back into it.
+id phone-tab-switcher-open
+title "The tab switcher on a phone"
+view {width 402, height 874}
+capture {fps 20, width 402, outputs (gif png)}
+steps (
+    {
+        id vault
+        do @run{id LAB_GO_VAULT}
+        done {on (@changed"lab"), check ({id LAB_STATE, has {tab vault, bar actions}})}
+        hide true
+    }
+    {
+        id open
+        text "The tabs button zooms out of the tab into a grid of every tab."
+        target @css"[data-bar-item=\"WORKSPACE_EVERY_PANE\"]"
+        do @click{}
+        hold 0.8
+    }
+    {
+        id choose
+        text "Press a card to zoom into its tab."
+        target @app{kind card, name note-shell}
+        do @click{}
+        done {on (@changed"workspace"), check ({id WORKSPACE_LAYOUT, has {active note-shell}})}
+        hold 0.8
+    }
+)
