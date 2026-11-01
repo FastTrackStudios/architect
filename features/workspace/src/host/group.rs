@@ -573,7 +573,11 @@ fn Grip(group: Group, current: PaneId) -> Element {
 pub(super) fn PaneSlot(pane: PaneId) -> Element {
     let host = use_host();
     let t = *host.theme.read();
-    use_context_provider(|| ThisPane(pane.clone()));
+    let this = use_context_provider(|| ThisPane(Signal::new(pane.clone())));
+    if *this.0.peek() != pane {
+        let mut current = this.0;
+        current.set(pane.clone());
+    }
     let kind = host.workspace.read().pane(&pane).map(|p| p.view.0.clone());
     let render = kind
         .as_ref()

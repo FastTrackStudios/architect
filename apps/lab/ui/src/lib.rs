@@ -17,8 +17,8 @@ use architect_shell::icon;
 use architect_shell::{self as shell, AppShell, ShellStyle};
 use dioxus::prelude::*;
 use lucide_dioxus::{
-    CalendarDays, CheckCheck, CircleUser, Feather, Inbox, Keyboard, ListTodo, LogOut, NotebookText,
-    Plus, Settings2, Users,
+    CalendarDays, CheckCheck, CircleUser, Command, Feather, Inbox, Keyboard, ListTodo, LogOut,
+    NotebookText, Plus, Settings2, Users,
 };
 
 pub use screen::{Device, use_window_chrome, use_window_screen};
@@ -94,6 +94,72 @@ pub fn LabApp() -> Element {
         right: Signal::new(true),
         status: Signal::new(shell::StatusStyle::Bar),
     });
+    // Commands: the palette (⌘K), quick open (⌘O), and every command's key.
+    let commands = architect_commands::use_commands_provider();
+    for (id, label, to) in [
+        ("LAB_GO_INBOX", "Go to Inbox", "inbox"),
+        ("LAB_GO_TASKS", "Go to Tasks", "tasks"),
+        ("LAB_GO_SCHEDULE", "Go to Schedule", "schedule"),
+        ("LAB_GO_VAULT", "Go to Vault", "vault"),
+    ] {
+        architect_commands::use_command(
+            architect_commands::Command::new(id, label).group("Go"),
+            move || lab.jump(Route::Tab(to)),
+        );
+    }
+    architect_commands::use_command(
+        architect_commands::Command::new("LAB_TOGGLE_DETAILS", "Show or hide the details")
+            .group("View"),
+        move || {
+            let mut right = lab.right;
+            right.toggle();
+        },
+    );
+    architect_commands::use_command(
+        architect_commands::Command::new("LAB_CAPTURE", "Capture")
+            .group("Inbox")
+            .shortcut("⇧⌘N"),
+        move || lab.go(Route::Item("inbox", 0)),
+    );
+    architect_commands::use_command(
+        architect_commands::Command::new("LAB_SHOW_COMMANDS", "Show every command")
+            .group("Help")
+            .shortcut("⌘K"),
+        move || commands.show(architect_commands::Overlay::Palette),
+    );
+    architect_commands::use_command(
+        architect_commands::Command::new("LAB_OPEN_ANYTHING", "Open…")
+            .group("File")
+            .shortcut("⌘O"),
+        move || commands.show(architect_commands::Overlay::QuickOpen),
+    );
+    // The menu bar: a view of the commands, labels and keys and all.
+    let menus = architect_commands::MenuBar::standard("Architect Lab")
+        .menu("File", |m| {
+            m.commands(["LAB_CAPTURE", "LAB_OPEN_ANYTHING"])
+                .separator()
+                .commands([
+                    "WORKSPACE_CLOSE_TAB",
+                    "WORKSPACE_REOPEN_TAB",
+                    "WORKSPACE_CLOSE_OTHER_TABS",
+                ])
+        })
+        .menu("View", |m| {
+            m.command("LAB_TOGGLE_DETAILS")
+                .separator()
+                .group("Panes")
+                .separator()
+                .group("Docks")
+        })
+        .menu("Go", |m| {
+            m.group("Go").separator().commands([
+                "WORKSPACE_NEXT_TAB",
+                "WORKSPACE_PREVIOUS_TAB",
+                "WORKSPACE_GO_BACK",
+                "WORKSPACE_GO_FORWARD",
+            ])
+        })
+        .menu("Help", |m| m.command("LAB_SHOW_COMMANDS"));
     let route = (lab.route)();
     let tabs = vec![
         shell::Tab::new("inbox", "Inbox", icon!(Inbox)).badge(5),
@@ -131,6 +197,9 @@ pub fn LabApp() -> Element {
         div {
             style: "position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; overflow: hidden;",
             document::Style { {CSS} }
+            // The window's chords (⌘K, ⌘W, …), whatever has the focus.
+            architect_commands::WindowKeys {}
+            NativeMenus { bar: menus }
             AppShell {
                 screen: screen(),
                 style: (lab.style)(),
@@ -157,6 +226,10 @@ pub fn LabApp() -> Element {
                 on_pull: move |()| lab.jump(Route::Tab("vault")),
                 window: window_chrome,
                 status: vec![
+                    shell::StatusItem::new("commands", "⌘K")
+                        .icon(icon!(Command))
+                        .hint("Every command")
+                        .on_press(move |()| commands.show(architect_commands::Overlay::Palette)),
                     shell::StatusItem::new("sync", "Synced")
                         .icon(icon!(CheckCheck)).hint("Every change is saved and synced"),
                     shell::StatusItem::new("people", "3 online").icon(icon!(Users)),
@@ -168,6 +241,7 @@ pub fn LabApp() -> Element {
                     Route::Item(tab, index) => rsx! { pages::ItemPage { tab, index } },
                 }
             }
+            architect_commands::CommandLayer {}
             screen::DeviceChrome {}
         }
     }
@@ -185,5 +259,18 @@ fn Brand() -> Element {
             span { style: "font-size: 21px; font-weight: 750; letter-spacing: -0.03em; color: #e4e4e7;", "Architect" }
             span { style: "font-size: 21px; font-weight: 500; letter-spacing: -0.03em; color: #80808a;", "Lab" }
         }
+    }
+}
+
+/// The menu bar where there is a native one (macOS); elsewhere the same
+/// commands are in the palette.
+#[component]
+fn NativeMenus(bar: architect_commands::MenuBar) -> Element {
+    #[cfg(target_os = "macos")]
+    return rsx! { architect_commands::NativeMenus { bar } };
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = bar;
+        rsx! {}
     }
 }

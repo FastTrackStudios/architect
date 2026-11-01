@@ -24,6 +24,7 @@
     clippy::needless_collect
 )]
 
+mod commands;
 mod dock;
 mod group;
 mod overlay;
@@ -303,14 +304,16 @@ pub fn use_host() -> Host {
     use_context()
 }
 
-#[derive(Clone, PartialEq, Eq)]
-struct ThisPane(PaneId);
+/// The pane a slot draws, kept current: Dioxus may hand a slot another
+/// pane (a tab closed beside it) without making it afresh.
+#[derive(Clone, Copy)]
+struct ThisPane(Signal<PaneId>);
 
 /// The pane this component draws, inside a [`View`]'s render.
 #[must_use]
 pub fn use_pane() -> PaneHandle {
     PaneHandle {
-        id: use_context::<ThisPane>().0,
+        id: use_context::<ThisPane>().0(),
         host: use_host(),
     }
 }
@@ -456,6 +459,14 @@ impl Host {
         let mut m = self.menu;
         let mut a = self.menu_at;
         a.set(Some(at));
+        m.set(Some(menu));
+    }
+
+    /// Shows `menu` in the middle (asked for by a key, not a pointer).
+    fn show_menu(&self, menu: Menu) {
+        let mut a = self.menu_at;
+        a.set(None);
+        let mut m = self.menu;
         m.set(Some(menu));
     }
 
@@ -738,6 +749,7 @@ pub fn WorkspaceView(
             },
             onblur: move |_| host.set_arranging(false),
             {body}
+            commands::WorkspaceCommands {}
             DragLayer {}
             MenuLayer {}
             SheetLayer {}

@@ -4,7 +4,13 @@ description = "The menu bar (File, Edit, View, …) built from the Action List: 
 weight = 55
 +++
 
-> **Status: proposed (2026-10-31).** For review before any code.
+> **Status: macOS landed (2026-11-01)** in `architect-commands`: the
+> model (`features/commands/src/menu.rs` `MenuBar`, `Menu`, `Standard`,
+> `MenuBar::resolve`) and the native bar (`features/commands/src/native_menu.rs`
+> `NativeMenus`, AppKit through `muda`), built from the commands — the
+> same labels, keys and enabled states as the palette. Still to come:
+> ticked items, live sections, the Linux dbusmenu and in-window bars, the
+> iPad menu bar.
 
 Today every app builds its menus by hand, differently: Studio's macOS
 menu is AppKit code with one selector per item and no enabled or ticked
