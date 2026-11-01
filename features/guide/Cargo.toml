@@ -1,0 +1,72 @@
+[package]
+name = "architect-guide"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Guide media: one scenario file run as a headless film (GIF, WebM, MP4, poster), as a test, and as an in-app tour"
+
+# docs/content/architecture/guide-media.md. The default set is the model:
+# the scenario's facet types, read from styx, and the predicates'
+# matching — no Dioxus, wasm-clean, so a browser tour reads the same file.
+# `run` is the headless runner on Blitz (native only): a document of the
+# app's root, a virtual clock, tweened pointer events, the app's Action
+# List. `capture` films it: frames, a drawn pointer, ffmpeg and gifski.
+
+[features]
+default = []
+run = [
+    "dep:architect",
+    "dep:dioxus",
+    "dep:dioxus-native-dom",
+    "dep:blitz-dom",
+    "dep:blitz-traits",
+    "dep:architect-workspace",
+    "dep:architect-commands",
+]
+capture = [
+    "run",
+    "dep:blitz-paint",
+    "dep:anyrender",
+    "dep:anyrender_vello_cpu",
+    "dep:peniko",
+    "dep:kurbo",
+    "dep:image",
+    "dep:clap",
+]
+
+[dependencies]
+facet = { workspace = true }
+facet-styx = { workspace = true }
+# A step's arguments and a check's expected result: any styx value.
+facet-value = { version = "0.50.0-rc.7" }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+# The runner: the app's Action List, its root in a headless document.
+architect = { workspace = true, optional = true, features = ["action-list"] }
+dioxus = { workspace = true, optional = true }
+dioxus-native-dom = { workspace = true, optional = true }
+blitz-dom = { workspace = true, optional = true }
+blitz-traits = { workspace = true, optional = true }
+# The workspace's windows (a pop-out is a second document on the
+# desktop) and the resolvers for its tabs, panes and dividers; the
+# commands' resolver for palette rows and their bridge onto the list.
+architect-workspace = { workspace = true, optional = true, features = ["ui"] }
+architect-commands = { workspace = true, optional = true, features = ["ui"] }
+
+# The film: Blitz's painter on the CPU rasteriser (no GPU), as
+# architect-story-snapshots and ui-snapshot render.
+blitz-paint = { workspace = true, optional = true }
+anyrender = { version = "0.11", optional = true }
+anyrender_vello_cpu = { workspace = true, optional = true }
+peniko = { workspace = true, optional = true }
+kurbo = { workspace = true, optional = true }
+image = { workspace = true, optional = true }
+clap = { workspace = true, optional = true }
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
