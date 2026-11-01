@@ -360,6 +360,17 @@ impl Toolbar {
         }
         Self::new().joined(tools)
     }
+
+    /// The same buttons, every action as its icon alone: an upright
+    /// phone's bar has room for the title and icons, not for labels too.
+    fn icons_only(mut self) -> Self {
+        for tool in self.groups.iter_mut().flat_map(|g| g.tools.iter_mut()) {
+            if let Tool::Action(action) = tool {
+                action.show_label = false;
+            }
+        }
+        self
+    }
 }
 
 /// How big the toolbar's buttons are: a finger's, or a desk's.
@@ -691,6 +702,14 @@ fn TouchBar(
     let weight = if on_back.is_some() { 650 } else { 750 };
     let right_button = !phone && shell.has_side(Side::Right);
     let brand = if branded { shell.brand.clone() } else { None };
+    // The title keeps clear of the buttons: on an upright phone they say
+    // their icons alone (the label is still their name and their tip), and
+    // a title too long for what is left is cut at the buttons.
+    let toolbar = if upright_phone {
+        toolbar.icons_only()
+    } else {
+        toolbar
+    };
     rsx! {
         div {
             style: "position: relative; flex-shrink: 0; box-sizing: border-box; height: {height + top}px; \
@@ -706,9 +725,9 @@ fn TouchBar(
                 }
             }
             if let Some(brand) = brand {
-                div { style: "flex: 1; min-width: 0; display: flex; align-items: center;", "aria-label": "{title}", {brand} }
+                div { style: "flex: 1; min-width: 0; overflow: hidden; display: flex; align-items: center;", "aria-label": "{title}", {brand} }
             } else if let Some(lead) = lead {
-                div { style: "flex: 1; min-width: 0;", "aria-label": "{title}", {lead} }
+                div { style: "flex: 1; min-width: 0; overflow: hidden;", "aria-label": "{title}", {lead} }
             } else {
                 h1 {
                     style: "flex: 1; min-width: 0; margin: 0; white-space: nowrap; overflow: hidden; \
@@ -856,5 +875,46 @@ fn DeskBar(
             if let Some(trailing) = trailing { {trailing} }
             ToolbarView { toolbar, size: ToolSize::DESK }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[allow(clippy::unnecessary_wraps)]
+    fn glyph(_: Icon) -> Element {
+        rsx! {}
+    }
+
+    #[test]
+    fn an_upright_phone_bar_says_icons_alone() {
+        // An action's press is a callback, which needs a runtime.
+        let dom = VirtualDom::new(|| rsx! {});
+        dom.in_scope(ScopeId::ROOT, icons_alone);
+    }
+
+    fn icons_alone() {
+        let toolbar = Toolbar::new()
+            .separate(Action::new("Capture", glyph, |()| {}).with_label())
+            .joined([
+                Tool::action(Action::new("Back", glyph, |()| {}).with_label()),
+                Tool::more(Menu::default()),
+            ]);
+        let labelled = |toolbar: &Toolbar| {
+            toolbar
+                .groups
+                .iter()
+                .flat_map(|g| &g.tools)
+                .filter(|tool| matches!(tool, Tool::Action(a) if a.show_label))
+                .count()
+        };
+        assert_eq!(labelled(&toolbar), 2);
+        let compact = toolbar.icons_only();
+        assert_eq!(labelled(&compact), 0);
+        // The same buttons, in the same groups.
+        assert_eq!(compact.groups.len(), 2);
+        assert_eq!(compact.groups[1].tools.len(), 2);
+        assert!(compact.groups[1].joined);
     }
 }
