@@ -487,6 +487,13 @@ impl Shell {
         self.form() == FormFactor::Desk
     }
 
+    /// Whether to show keys beside what they do (`⌘O`, "↵ open"): not on
+    /// a touch screen, where there may be no keyboard to press them on.
+    #[must_use]
+    pub const fn shows_keys(&self) -> bool {
+        !self.screen.touch
+    }
+
     /// The title row's height: the window's buttons' row, or 52.
     #[must_use]
     pub fn title_row(&self) -> f64 {
@@ -1102,10 +1109,11 @@ pub fn AppShell(
                 },
                 Frame::Bottom => rsx! {},
             }
-            // The page.
+            // The page. It gives way by `left`, not `translateX`, which
+            // Blitz moves by device pixels (a third as far on a 3x phone).
             div {
-                style: "position: relative; flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; \
-                        transform: translateX({page_shift}px);",
+                style: "position: relative; left: {page_shift}px; flex: 1; min-width: 0; min-height: 0; \
+                        display: flex; flex-direction: column;",
                 {children}
                 if float_separate {
                     if let Some(sep) = separate.clone() {
