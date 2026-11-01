@@ -190,6 +190,6 @@ Cannot:
 - **Reconnect is lazy.** The pool drops a dead root on the next `caller()`; a held dead `Caller` fails. The supervised hook needs `atom` + `platform`; `use_app_pooled` evicts before redial. dioxus `use_resource` tracks signal reads inside the future: drive loops read `generation_now()`.
 - **Backoff:** full jitter, floor 250 ms, cap 10 s, reset on success; one `warn` per outage, `debug` after.
 - **Features.** Greeter needs `host`, `http-client`, `local`. `host` → `server-axum` → `telemetry` → `vox`. LAN needs `iroh-lan`. The `rpc` span needs `telemetry` (inert without a subscriber).
-- **PubSub never blocks the publisher.** Overflow drops (sliding/dropping); no back-pressure. Never publish from an audio thread.
+- **PubSub never blocks the publisher.** Overflow drops (sliding/dropping); no back-pressure. A full sink hands its backlog to a per-subscriber pump task (`platform` feature, pulled by `local` and `server-axum`), so nothing waits for the next publish; events must be `Send + Sync + 'static`. Never publish from an audio thread.
 - **`BlockingCaller` deadlocks** if used inside an async context.
 - `examples/greeter` is the only example; any doc that names another example directory is stale.

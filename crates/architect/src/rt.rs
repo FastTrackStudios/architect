@@ -131,7 +131,7 @@ impl<T> RtConsumer<T> {
     #[cfg(feature = "vox")]
     pub fn drain_into(&mut self, hub: &crate::PubSub<T>) -> usize
     where
-        T: Clone + facet::Facet<'static>,
+        T: Clone + facet::Facet<'static> + Send + Sync + 'static,
     {
         self.drain(|event| {
             hub.publish(event);
