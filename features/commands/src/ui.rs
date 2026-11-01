@@ -85,6 +85,9 @@ pub struct Commands {
     pub(crate) query: Signal<String>,
     /// An action's arguments being asked for in the palette.
     pub(crate) asking: Signal<Option<Asking>>,
+    /// The one group the palette lists, and its field's prompt
+    /// ([`Commands::show_group`]).
+    pub(crate) only: Signal<Option<(String, String)>>,
     /// A binding being recorded in the action list window.
     pub(crate) recording: Signal<Option<Recording>>,
     /// The `@` (this page's targets) and `#` (settings) finders.
@@ -116,6 +119,7 @@ pub fn use_commands_provider() -> Commands {
         held: Signal::new(None),
         query: Signal::new(String::new()),
         asking: Signal::new(None),
+        only: Signal::new(None),
         recording: Signal::new(None),
         targets: CopyValue::new(Rc::new(RefCell::new(Openers::new()))),
         settings: CopyValue::new(Rc::new(RefCell::new(Openers::new()))),
@@ -439,8 +443,19 @@ impl Commands {
             query.set(String::new());
             let mut asking = self.asking;
             asking.set(None);
+            let mut only = self.only;
+            only.set(None);
         }
         o.set(Some(overlay));
+    }
+
+    /// The palette on `group`'s commands only (those that can run now),
+    /// its field empty with `prompt` in it: a command that asks where or which (⇧⌘M's "Move
+    /// to…" lists the `Move` group), the person narrowing it by typing.
+    pub fn show_group(&self, group: &str, prompt: &str) {
+        self.show(Overlay::Palette);
+        let mut only = self.only;
+        only.set(Some((group.to_owned(), prompt.to_owned())));
     }
 
     pub fn close(&self) {
@@ -448,6 +463,8 @@ impl Commands {
         o.set(None);
         let mut asking = self.asking;
         asking.set(None);
+        let mut only = self.only;
+        only.set(None);
     }
 
     /// A key at the app's root: ⌘K (or ⌘⇧P) the palette, ⌘O quick open,
@@ -542,6 +559,12 @@ pub(crate) const fn fill(on: bool, t: &ShellTheme) -> &'static str {
     if on { t.active } else { "transparent" }
 }
 
+/// A row's quiet ink: a step up on the picked row, where `ink_3` falls
+/// under 4.5:1 on `fill`.
+pub(crate) const fn quiet(on: bool, t: &ShellTheme) -> &'static str {
+    if on { t.ink_2 } else { t.ink_3 }
+}
+
 pub(crate) fn theme() -> ShellTheme {
     try_use_shell().map(|s| s.theme).unwrap_or_default()
 }
@@ -568,7 +591,7 @@ pub fn CommandLayer() -> Element {
 /// The overlay's frame: a scrim, and a panel near the top with a field.
 #[component]
 pub(crate) fn Frame(
-    placeholder: &'static str,
+    placeholder: String,
     query: Signal<String>,
     on_key: EventHandler<KeyboardEvent>,
     children: Element,
@@ -622,12 +645,15 @@ pub(crate) fn Frame(
     }
 }
 
+/// A key, as a chip; `on` on a picked row (the quiet ink a step up, for
+/// 4.5:1 on its fill).
 #[component]
-pub(crate) fn Kbd(text: String) -> Element {
+pub(crate) fn Kbd(text: String, #[props(default)] on: bool) -> Element {
     let t = theme();
+    let ink = if on { t.ink_2 } else { t.ink_3 };
     rsx! {
         span { style: "flex-shrink: 0; padding: 1px 6px; border-radius: 4px; border: 1px solid {t.rule}; \
-                       color: {t.ink_3}; font-size: 11px; font-family: {t.font};",
+                       color: {ink}; font-size: 11px; font-family: {t.font};",
             "{text}"
         }
     }
@@ -697,10 +723,35 @@ pub fn CommandPalette() -> Element {
     let query = commands.query;
     let mut selected = use_signal(|| 0usize);
     let q = Query::parse(&query.read());
+    let only = (commands.only)();
+    let mut all = commands.all();
+    // A choice lists only what can be chosen.
+    if let Some((group, _)) = &only {
+        all.retain(|c| c.group == *group && c.enabled);
+    }
     let (rows, picks): (Vec<Ranked>, Vec<Pick>) = match q.scope {
-        Scope::Commands => rank(&commands.all(), &q.text, &commands.recents.read())
+        // On one group with nothing typed, the app's own order (a list's,
+        // as its side shows it), not the alphabet.
+        Scope::Commands if only.is_some() && q.text.is_empty() => all
             .into_iter()
-            .map(|r| {
+            .map(|mut command| {
+                command.group.clear();
+                let pick = Pick::Run(command.id.clone());
+                let row = Ranked {
+                    command,
+                    positions: Vec::new(),
+                    score: 0,
+                };
+                (row, pick)
+            })
+            .unzip(),
+        Scope::Commands => rank(&all, &q.text, &commands.recents.read())
+            .into_iter()
+            .map(|mut r| {
+                // On one group, its prompt names it: the rows need not.
+                if only.is_some() {
+                    r.command.group.clear();
+                }
                 let pick = Pick::Run(r.command.id.clone());
                 (r, pick)
             })
@@ -748,7 +799,11 @@ pub fn CommandPalette() -> Element {
         Scope::Help => "Nothing is bound to that",
     };
     rsx! {
-        Frame { placeholder: "Type a command…", query, on_key,
+        Frame { placeholder: only.clone().map_or_else(|| "Type a command…".to_owned(), |(_, prompt)| prompt), query, on_key,
+            // The prompt stays in sight once the field has text.
+            if let Some((_, prompt)) = only.filter(|_| !q.text.is_empty()) {
+                div { style: "padding: 6px 10px 8px; color: {t.ink_3}; font-size: 12px;", "{prompt}" }
+            }
             if rows.is_empty() {
                 div { style: "padding: 18px 12px; color: {t.ink_3}; font-size: 13px;", "{empty}" }
             }
@@ -772,7 +827,8 @@ pub(crate) fn CommandRow(row: Ranked, on: bool, onpress: EventHandler<()>) -> El
     let t = theme();
     let c = row.command;
     let fill = if on { t.active } else { "transparent" };
-    let ink = if c.enabled { t.ink } else { t.ink_3 };
+    let quiet = quiet(on, &t);
+    let ink = if c.enabled { t.ink } else { quiet };
     rsx! {
         div {
             class: "lp",
@@ -781,15 +837,15 @@ pub(crate) fn CommandRow(row: Ranked, on: bool, onpress: EventHandler<()>) -> El
             onclick: move |_| onpress.call(()),
             span { style: "flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; overflow: hidden;",
                 if !c.group.is_empty() {
-                    span { style: "flex-shrink: 0; color: {t.ink_3};", "{c.group}:" }
+                    span { style: "flex-shrink: 0; color: {quiet};", "{c.group}:" }
                 }
                 Lit { text: c.label.clone(), positions: row.positions, ink, lit: t.ink }
                 if let Some(why) = c.disabled_reason.clone() {
-                    span { style: "color: {t.ink_3}; font-size: 12px; white-space: nowrap;", "— {why}" }
+                    span { style: "color: {quiet}; font-size: 12px; white-space: nowrap;", "— {why}" }
                 }
             }
             if !c.shortcut.is_empty() {
-                Kbd { text: c.shortcut }
+                Kbd { text: c.shortcut, on }
             }
         }
     }
@@ -879,10 +935,10 @@ pub fn QuickOpen() -> Element {
                     span { style: "flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden;",
                         Lit { text: f.item.title.clone(), positions: f.positions.clone(), ink: t.ink_2, lit: t.ink }
                         if !f.item.detail.is_empty() {
-                            span { style: "color: {t.ink_3}; font-size: 11px; white-space: nowrap; overflow: hidden;", "{f.item.detail}" }
+                            span { style: "color: {quiet(i == pick, &t)}; font-size: 11px; white-space: nowrap; overflow: hidden;", "{f.item.detail}" }
                         }
                     }
-                    span { style: "flex-shrink: 0; color: {t.ink_3}; font-size: 11px;",
+                    span { style: "flex-shrink: 0; color: {quiet(i == pick, &t)}; font-size: 11px;",
                         "{titles.get(i).cloned().unwrap_or_default()}"
                     }
                 }

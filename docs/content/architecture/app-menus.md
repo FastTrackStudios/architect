@@ -69,6 +69,9 @@ rsx! {
   platform's, wired to the focused view (a text field gets its own
   Copy). Where the app draws or exports the bar there are none to wire
   them to, so they are left out (`without_platform`).
+  An app that keeps its own history puts its Undo command in Undo's
+  place (`Menu::instead(Standard::Undo, "APP_UNDO")`), so ⌘Z reaches it
+  outside a text field too.
 
 ## Where it shows
 

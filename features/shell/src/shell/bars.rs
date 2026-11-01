@@ -233,7 +233,7 @@ fn Badge(text: String) -> Element {
         span {
             style: "position: absolute; top: 4px; right: 22%; min-width: 16px; height: 16px; padding: 0 4px; \
                     box-sizing: border-box; border-radius: 8px; display: flex; align-items: center; justify-content: center; \
-                    background: {t.accent}; color: {t.accent_ink}; font-size: 10px; font-weight: 700;",
+                    background: {t.accent}; color: {t.accent_ink}; font-size: 11px; font-weight: 700;",
             "{text}"
         }
     }

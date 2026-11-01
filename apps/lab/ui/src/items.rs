@@ -22,6 +22,8 @@ pub struct Item {
     /// When, or where it came from: "due Friday", "Captured 1h ago".
     pub detail: String,
     pub project: Option<&'static str>,
+    /// Its notes, oldest first.
+    pub notes: Vec<String>,
 }
 
 impl Item {
@@ -115,6 +117,7 @@ impl Lists {
             name: name.to_owned(),
             detail: detail.to_owned(),
             project,
+            notes: Vec::new(),
         });
         self.next = self.next.saturating_add(1);
     }
@@ -191,6 +194,7 @@ impl Lists {
                 name: name.to_owned(),
                 detail: detail.to_owned(),
                 project,
+                notes: Vec::new(),
             },
         );
         self.next = self.next.saturating_add(1);
@@ -217,6 +221,37 @@ impl Lists {
         true
     }
 
+    /// Adds `note` to `id`'s notes; whether it did (not for a blank one,
+    /// or an item that is not there).
+    pub fn note(&mut self, id: usize, note: &str) -> bool {
+        let note = note.trim();
+        match self.items.iter_mut().find(|i| i.id == id) {
+            Some(item) if !note.is_empty() => {
+                item.notes.push(note.to_owned());
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Takes `id`'s note `at` away; whether there was one.
+    pub fn unnote(&mut self, id: usize, at: usize) -> bool {
+        match self.items.iter_mut().find(|i| i.id == id) {
+            Some(item) if at < item.notes.len() => {
+                item.notes.remove(at);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// `id`'s notes as they were (Undo) or will be (Redo).
+    pub fn set_notes(&mut self, id: usize, notes: Vec<String>) {
+        if let Some(item) = self.items.iter_mut().find(|i| i.id == id) {
+            item.notes = notes;
+        }
+    }
+
     /// Takes `id` out; where it was and what it was, for [`Lists::restore`].
     pub fn remove(&mut self, id: usize) -> Option<(usize, Item)> {
         let at = self.items.iter().position(|i| i.id == id)?;
@@ -228,6 +263,16 @@ impl Lists {
         let at = at.min(self.items.len());
         self.items.insert(at, item);
     }
+}
+
+/// The row to pick once `id` leaves `list` (done, deleted, filed): the
+/// one after it, else the one before; `None` when it was the last.
+#[must_use]
+pub fn next_after(list: &[usize], id: usize) -> Option<usize> {
+    let at = list.iter().position(|i| *i == id)?;
+    list.get(at.saturating_add(1))
+        .or_else(|| at.checked_sub(1).and_then(|b| list.get(b)))
+        .copied()
 }
 
 #[cfg(test)]
@@ -315,5 +360,49 @@ mod tests {
         assert_eq!(task.meta(), "Studio · due Friday");
         let capture = lists.of("inbox", None, false)[0];
         assert_eq!(capture.meta(), "Captured 10 min ago");
+    }
+
+    #[test]
+    fn the_next_row_is_picked_after_one_leaves() {
+        let list = [4, 7, 9];
+        assert_eq!(next_after(&list, 4), Some(7));
+        assert_eq!(next_after(&list, 9), Some(7));
+        assert_eq!(next_after(&[4], 4), None);
+        assert_eq!(next_after(&list, 5), None);
+    }
+
+    #[test]
+    fn undo_steps_back_through_several_removals() {
+        let mut lists = Lists::sample();
+        let before = lists.clone();
+        let inbox: Vec<usize> = lists
+            .of("inbox", None, false)
+            .iter()
+            .map(|i| i.id)
+            .collect();
+        let first = lists.remove(inbox[1]).unwrap();
+        let second = lists.remove(inbox[3]).unwrap();
+        // Last taken, first put back.
+        lists.restore(second.0, second.1);
+        lists.restore(first.0, first.1);
+        assert_eq!(lists, before);
+    }
+
+    #[test]
+    fn a_note_is_kept_with_its_item() {
+        let mut lists = Lists::sample();
+        let id = lists.of("inbox", None, false)[0].id;
+        assert!(lists.note(id, " Ask for the load-in time "));
+        assert!(!lists.note(id, "   "));
+        assert!(!lists.note(9999, "lost"));
+        assert_eq!(
+            lists.get(id).map(|i| i.notes.clone()),
+            Some(vec!["Ask for the load-in time".to_owned()])
+        );
+        assert!(lists.unnote(id, 0));
+        assert!(!lists.unnote(id, 0));
+        assert_eq!(lists.get(id).map(|i| i.notes.len()), Some(0));
+        lists.set_notes(id, vec!["Back again".to_owned()]);
+        assert_eq!(lists.get(id).map(|i| i.notes.len()), Some(1));
     }
 }

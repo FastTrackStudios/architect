@@ -187,6 +187,20 @@ impl Menu {
         self
     }
 
+    /// The command `id` where the platform's `item` was: an app that keeps
+    /// its own history puts its Undo in Edit › Undo, so ⌘Z reaches it
+    /// outside a text field too.
+    #[must_use]
+    pub fn instead(mut self, item: Standard, id: impl Into<String>) -> Self {
+        let id = id.into();
+        for entry in &mut self.entries {
+            if *entry == Entry::Standard(item) {
+                *entry = Entry::Command(id.clone());
+            }
+        }
+        self
+    }
+
     #[must_use]
     pub fn submenu(mut self, menu: Self) -> Self {
         self.entries.push(Entry::Submenu(menu));

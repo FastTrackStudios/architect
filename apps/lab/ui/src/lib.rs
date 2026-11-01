@@ -28,19 +28,20 @@ use lucide_dioxus::{
 
 pub use screen::{Device, use_window_chrome, use_window_screen};
 
-/// Where the lab is: a tab's list, one item of it (by its id), or a new
-/// one being written for it.
+/// Where the lab is: a tab's list, one item of it (by its id), a new one
+/// being written for it, or the help (over the tab it was asked from).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Route {
     Tab(&'static str),
     Item(&'static str, usize),
     Capture(&'static str),
+    Help(&'static str),
 }
 
 impl Route {
     const fn tab(self) -> &'static str {
         match self {
-            Self::Tab(t) | Self::Item(t, _) | Self::Capture(t) => t,
+            Self::Tab(t) | Self::Item(t, _) | Self::Capture(t) | Self::Help(t) => t,
         }
     }
 }
@@ -53,18 +54,32 @@ const TABS: [(&str, &str, &str); 4] = [
     ("LAB_GO_VAULT", "Go to Vault", "vault"),
 ];
 
-/// What the last Done, Delete or Move changed, for Undo.
+/// What a Done, Delete or Move changed, for Undo.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Undone {
     /// "Completed", "Deleted", "Moved": the status line's word.
     pub verb: &'static str,
+    /// What Edit › Undo calls it: "Done", "Delete", "Move".
+    pub action: &'static str,
     /// The whole of it: "Moved “Bass DI is buzzing” to Tasks in Signal".
     pub said: String,
     at: usize,
     /// The item as it was, where it was.
     item: items::Item,
-    /// Whether the item is still in a list (moved), to take out first.
-    moved: bool,
+    change: Change,
+}
+
+/// What a change did to the item, for Undo and Redo to do back and again.
+#[derive(Clone, PartialEq, Eq, Debug)]
+enum Change {
+    /// Done or Delete took it out.
+    Removed,
+    /// Move filed it here (a tab, a project).
+    Moved(&'static str, Option<&'static str>),
+    /// Capture wrote it.
+    Added,
+    /// Its notes changed to these (the item kept is as it was before).
+    Noted(Vec<String>),
 }
 
 /// `n` of `noun`, with its plural: "1 item", "5 items".
@@ -97,10 +112,23 @@ pub struct Lab {
     pub oldest: Signal<bool>,
     /// The row just added, marked in its list until the lab moves on.
     pub fresh: Signal<Option<usize>>,
-    /// What Undo would put back.
-    pub undone: Signal<Option<Undone>>,
+    /// What Undo puts back, the last at the end (⌘Z steps back through
+    /// it).
+    pub undone: Signal<Vec<Undone>>,
+    /// What the last Undo put back, said until the next change or move.
+    pub undid: Signal<Option<String>>,
+    /// What Undo put back, for Redo (⇧⌘Z); a new change lets it go.
+    pub redone: Signal<Vec<Undone>>,
+    /// Whether the last change is still said over its list (until the
+    /// lab moves to another list).
+    pub notice: Signal<bool>,
+    /// Whether a field on the page has text in it: ⌘Z is the field's then.
+    pub typing: Signal<bool>,
+    /// The rows being completed: checked and fading, then gone.
+    pub completing: Signal<Vec<usize>>,
     /// The row the keys act on in a list (the one focused).
     pub selected: Signal<Option<usize>>,
+
     settings: Option<architect_settings::SettingsHandle>,
 }
 
@@ -120,25 +148,97 @@ impl Lab {
 
     pub fn go(mut self, to: Route) {
         let here = *self.route.peek();
+        // A row pressed and its Return heard at once go once.
+        if here == to {
+            return;
+        }
+        self.typing.set(false);
         self.back.write().push(here);
         self.fresh.set(None);
         self.route.set(to);
     }
 
     /// To a tab's list or an item afresh: no way back, no project picked,
-    /// and the last Undo let go (it belonged to where the lab was).
+    /// and the last change no longer said over the list (⌘Z still undoes
+    /// it).
     pub fn jump(mut self, to: Route) {
         self.back.write().clear();
         self.project.set(None);
         self.fresh.set(None);
-        self.undone.set(None);
+        self.notice.set(false);
+        self.typing.set(false);
+        self.undid.set(None);
         self.route.set(to);
+        self.select_first();
+    }
+
+    /// A list just shown: its first row selected, so the keys and the
+    /// details have something from the start.
+    fn select_first(mut self) {
+        let first = self.shown_ids().first().copied();
+        let on_list = matches!(*self.route.peek(), Route::Tab(t) if t != "vault");
+        self.selected.set(first.filter(|_| on_list));
+    }
+
+    /// Keeps `u` for Undo and says it over the list.
+    fn did(mut self, u: Undone) {
+        let mut undone = self.undone.write();
+        undone.push(u);
+        let over = undone.len().saturating_sub(UNDO_STEPS);
+        undone.drain(..over);
+        drop(undone);
+        self.redone.write().clear();
+        self.undid.set(None);
+        self.notice.set(true);
+    }
+
+    /// The ids of the list on show (on an item's page, its list's).
+    fn shown_ids(self) -> Vec<usize> {
+        let tab = self.route.peek().tab();
+        let project = if tab == "tasks" {
+            *self.project.peek()
+        } else {
+            None
+        };
+        self.lists
+            .read()
+            .of(tab, project, *self.oldest.peek())
+            .iter()
+            .map(|i| i.id)
+            .collect()
+    }
+
+    /// Done on `id`: in a list its circle fills and the row fades before
+    /// it goes (the selection already on the next row, so ⌘↵ again
+    /// completes that one too); on its own page, at once.
+    pub fn complete(mut self, id: usize) {
+        if !matches!(*self.route.peek(), Route::Tab(_)) {
+            self.remove(id, "Completed");
+            return;
+        }
+        let mut completing = self.completing;
+        if completing.peek().contains(&id) {
+            return;
+        }
+        let shown: Vec<usize> = self
+            .shown_ids()
+            .into_iter()
+            .filter(|i| !completing.peek().contains(i))
+            .collect();
+        completing.write().push(id);
+        self.selected.set(items::next_after(&shown, id));
+        spawn(async move {
+            futures_timer::Delay::new(COMPLETING).await;
+            completing.write().retain(|i| *i != id);
+            self.remove(id, "Completed");
+        });
     }
 
     /// The Tasks of `project`.
     pub fn show_project(mut self, project: &'static str) {
         self.jump(Route::Tab("tasks"));
         self.project.set(Some(project));
+        self.select_first();
     }
 
     /// Write a new item for `tab` (Capture, for the Inbox).
@@ -157,33 +257,93 @@ impl Lab {
         let Some(id) = self.lists.write().add(tab, name, project) else {
             return;
         };
-        // Back to the list it was written from, the new row marked.
+        let at = self.lists.peek().position(id).unwrap_or_default();
+        let item = self.lists.peek().get(id).cloned();
+        if let Some(item) = item {
+            let (verb, action) = if tab == "inbox" {
+                ("Captured", "Capture")
+            } else {
+                ("Added", "Add")
+            };
+            self.did(Undone {
+                verb,
+                action,
+                said: format!("{verb} “{}”", item.name),
+                at,
+                item,
+                change: Change::Added,
+            });
+        }
+        // Back to the list it was written from, the new row marked and
+        // selected: the next key acts on what was just written.
+        self.back_to(tab);
+        self.fresh.set(Some(id));
+        self.selected.set(Some(id));
+    }
+
+    /// Esc on a capture with text: dropped, but kept for Undo to bring
+    /// back into the list (nothing typed is lost to a stray Esc).
+    pub fn drop_capture(mut self, tab: &'static str, name: &str) {
+        let project = if tab == "inbox" {
+            None
+        } else {
+            *self.project.peek()
+        };
+        let id = self.lists.write().add(tab, name, project);
+        let removed = id.and_then(|id| self.lists.write().remove(id));
+        self.back_to(tab);
+        if let Some((at, item)) = removed {
+            self.did(Undone {
+                verb: "Dropped",
+                action: "Drop",
+                said: format!("Dropped “{}”", item.name),
+                at,
+                item,
+                change: Change::Removed,
+            });
+        }
+    }
+
+    /// To `tab`'s list, from a page written for it.
+    fn back_to(mut self, tab: &'static str) {
+        self.typing.set(false);
         let mut back = self.back;
         let from = back.write().pop();
         if from != Some(Route::Tab(tab)) {
             back.write().clear();
         }
         self.route.set(Route::Tab(tab));
-        self.fresh.set(Some(id));
     }
 
     /// Takes the item away (`verb`: "Completed", "Deleted"), for Undo to
     /// put back; from the item's own page, back to its list.
     pub fn remove(mut self, id: usize, verb: &'static str) {
+        // The next row, unless the selection has moved on already (a
+        // completion fading out).
+        let next = if *self.selected.peek() == Some(id) || self.selected.peek().is_none() {
+            items::next_after(&self.shown_ids(), id)
+        } else {
+            *self.selected.peek()
+        };
         let removed = self.lists.write().remove(id);
         if let Some((at, item)) = removed {
             let tab = item.tab;
             let said = format!("{verb} “{}”", item.name);
-            self.undone.set(Some(Undone {
+            let action = match verb {
+                "Deleted" => "Delete",
+                "Dropped" => "Drop",
+                _ => "Done",
+            };
+            self.did(Undone {
                 verb,
+                action,
                 said,
                 at,
                 item,
-                moved: false,
-            }));
-            if *self.selected.peek() == Some(id) {
-                self.selected.set(None);
-            }
+                change: Change::Removed,
+            });
+            // The next row at hand, for the next Done.
+            self.selected.set(next);
             if matches!(*self.route.peek(), Route::Item(_, on) if on == id) {
                 if self.can_go_back() {
                     self.go_back();
@@ -203,28 +363,23 @@ impl Lab {
         let (Some(item), Some(at)) = (before, at) else {
             return;
         };
+        let next = items::next_after(&self.shown_ids(), id);
         if !self.lists.write().move_to(id, tab, project) {
             return;
         }
         let from = item.tab;
-        let to = project.map_or_else(
-            || {
-                if tab == "inbox" {
-                    "the Inbox".to_owned()
-                } else {
-                    "the Schedule".to_owned()
-                }
-            },
-            |p| format!("Tasks in {p}"),
-        );
-        self.undone.set(Some(Undone {
+        // Said as the Move to list says it.
+        let to = move_label(tab, project);
+        self.did(Undone {
             verb: "Moved",
+            action: "Move",
             said: format!("Moved “{}” to {to}", item.name),
             at,
             item,
-            moved: true,
-        }));
-        self.selected.set(None);
+            change: Change::Moved(tab, project),
+        });
+        // Triage: the next capture selected, for ⇧⌘M to file.
+        self.selected.set(next);
         if matches!(*self.route.peek(), Route::Item(_, on) if on == id) {
             if self.can_go_back() {
                 self.go_back();
@@ -280,23 +435,119 @@ impl Lab {
         match *self.route.peek() {
             Route::Item(_, id) => Some(id),
             Route::Tab(_) => *self.selected.peek(),
-            Route::Capture(_) => None,
+            Route::Capture(_) | Route::Help(_) => None,
         }
     }
 
-    /// Puts back what the last Done or Delete took.
+    /// Puts back what the last Done, Delete or Move changed; again, the
+    /// one before.
     pub fn undo(mut self) {
-        let undone = self.undone.write().take();
+        let undone = self.undone.write().pop();
         if let Some(u) = undone {
             let id = u.item.id;
             let mut lists = self.lists.write();
-            if u.moved {
-                let _ = lists.remove(id);
+            match &u.change {
+                Change::Removed => lists.restore(u.at, u.item.clone()),
+                Change::Noted(_) => lists.set_notes(id, u.item.notes.clone()),
+                Change::Moved(..) => {
+                    let _ = lists.remove(id);
+                    lists.restore(u.at, u.item.clone());
+                }
+                Change::Added => {
+                    let _ = lists.remove(id);
+                }
             }
-            lists.restore(u.at, u.item);
             drop(lists);
-            self.fresh.set(Some(id));
+            let back = matches!(u.change, Change::Removed | Change::Moved(..));
+            let added = u.change == Change::Added;
+            self.undid
+                .set(Some(format!("Undid {} on “{}”", u.action, u.item.name)));
+            self.redone.write().push(u);
+            if back || added {
+                self.fresh.set(back.then_some(id));
+                self.selected.set(back.then_some(id));
+            }
+            // The notice now says what Undo did, with the way to do it again.
+            self.notice.set(false);
         }
+    }
+
+    /// Does again what Undo put back.
+    pub fn redo(mut self) {
+        let redone = self.redone.write().pop();
+        let Some(u) = redone else {
+            return;
+        };
+        // Doing it again is a change like any other, but keeps the rest
+        // of what Redo has.
+        let rest = std::mem::take(&mut *self.redone.write());
+        match u.change.clone() {
+            Change::Noted(notes) => {
+                self.lists.write().set_notes(u.item.id, notes);
+                self.did(u);
+            }
+            Change::Moved(tab, project) => self.move_item(u.item.id, tab, project),
+            Change::Removed => self.remove(u.item.id, u.verb),
+            Change::Added => {
+                self.lists.write().restore(u.at, u.item.clone());
+                self.fresh.set(Some(u.item.id));
+                self.did(u);
+            }
+        }
+        self.redone.set(rest);
+    }
+
+    /// Adds `text` to `id`'s notes, for Undo to take back; whether it
+    /// did (not for a blank one).
+    #[must_use = "false when nothing was added"]
+    pub fn note(self, id: usize, text: &str) -> bool {
+        self.change_notes(id, "Added a note", "Note", |lists| lists.note(id, text))
+    }
+
+    /// Takes `id`'s note `at` away, for Undo to put back.
+    pub fn unnote(self, id: usize, at: usize) {
+        let _ = self.change_notes(id, "Removed a note", "Note Removal", |lists| {
+            lists.unnote(id, at)
+        });
+    }
+
+    fn change_notes(
+        mut self,
+        id: usize,
+        verb: &'static str,
+        action: &'static str,
+        change: impl FnOnce(&mut items::Lists) -> bool,
+    ) -> bool {
+        let before = self.lists.peek().get(id).cloned();
+        let at = self.lists.peek().position(id).unwrap_or_default();
+        let Some(before) = before else {
+            return false;
+        };
+        if !change(&mut self.lists.write()) {
+            return false;
+        }
+        let after = self
+            .lists
+            .peek()
+            .get(id)
+            .map(|i| i.notes.clone())
+            .unwrap_or_default();
+        self.did(Undone {
+            verb,
+            action,
+            said: format!("{verb} to “{}”", before.name),
+            at,
+            item: before,
+            change: Change::Noted(after),
+        });
+        true
+    }
+
+    /// The help, over the tab it is asked from.
+    pub fn help(self) {
+        // Let go of the route before `go` writes it.
+        let tab = self.route.peek().tab();
+        self.go(Route::Help(tab));
     }
 
     #[must_use]
@@ -305,11 +556,68 @@ impl Lab {
     }
 
     pub fn go_back(mut self) {
+        self.typing.set(false);
         let prev = self.back.write().pop();
         if let Some(prev) = prev {
             self.route.set(prev);
         }
     }
+}
+
+/// How many changes Undo keeps.
+const UNDO_STEPS: usize = 20;
+
+/// How long a completed row shows its check before it goes.
+const COMPLETING: std::time::Duration = std::time::Duration::from_millis(420);
+
+/// The destinations ⇧⌘M offers, in the left side's order, each a
+/// command: its id, where it files the item (the tab, the project). Not
+/// the Schedule: an event needs a time, which a move cannot ask.
+const MOVES: [(&str, &str, Option<&str>); 6] = [
+    ("LAB_MOVE_STUDIO", "tasks", Some("Studio")),
+    ("LAB_MOVE_HARBOR", "tasks", Some("Harbor & Pine")),
+    ("LAB_MOVE_ALBUM", "tasks", Some("Album release")),
+    ("LAB_MOVE_SIGNAL", "tasks", Some("Signal")),
+    ("LAB_MOVE_ADMIN", "tasks", Some("Admin")),
+    ("LAB_MOVE_INBOX", "inbox", None),
+];
+
+/// A destination, as the Move to list and the notice say it: "Signal",
+/// "Inbox".
+const fn move_label(tab: &str, project: Option<&'static str>) -> &'static str {
+    match (tab.as_bytes(), project) {
+        (_, Some(p)) => p,
+        (b"inbox", None) => "Inbox",
+        _ => "Schedule",
+    }
+}
+
+/// Edit › Undo or Redo: "Undo Move", what it changes in its detail; off
+/// with nothing to do, or while a field is typed in (its own then).
+fn edit_command(
+    id: &str,
+    verb: &str,
+    change: Option<&Undone>,
+    typing: bool,
+    detail: &str,
+    none: &str,
+    here: &str,
+) -> architect_commands::Command {
+    let c = match change {
+        Some(u) if !typing => {
+            // A change made in another tab says where: "Undo Done in Inbox".
+            let place = if u.item.tab == here {
+                String::new()
+            } else {
+                format!(" in {}", pages::title(u.item.tab))
+            };
+            architect_commands::Command::new(id, format!("{verb} {}{place}", u.action))
+                .detail(format!("{detail} “{}”", u.item.name))
+        }
+        Some(_) => architect_commands::Command::new(id, verb).disabled("this page's field has it"),
+        None => architect_commands::Command::new(id, verb).disabled(none),
+    };
+    c.group("Edit")
 }
 
 /// The stylesheet: the page's ground, and hover and press feedback
@@ -368,19 +676,29 @@ pub fn LabApp() -> Element {
             },
         )),
     );
-    let lab = use_context_provider(|| Lab {
-        route: Signal::new(Route::Tab("inbox")),
-        back: Signal::new(Vec::new()),
-        style: Signal::new(ShellStyle::FloatingPill),
-        right: Signal::new(true),
-        status: Signal::new(shell::StatusStyle::Bar),
-        lists: Signal::new(items::Lists::sample()),
-        project: Signal::new(None),
-        oldest: Signal::new(false),
-        fresh: Signal::new(None),
-        undone: Signal::new(None),
-        selected: Signal::new(None),
-        settings: Some(settings),
+    let lab = use_context_provider(|| {
+        let lists = items::Lists::sample();
+        // The Inbox's first row, selected from the start.
+        let first = lists.of("inbox", None, false).first().map(|i| i.id);
+        Lab {
+            route: Signal::new(Route::Tab("inbox")),
+            back: Signal::new(Vec::new()),
+            style: Signal::new(ShellStyle::FloatingPill),
+            right: Signal::new(true),
+            status: Signal::new(shell::StatusStyle::Bar),
+            lists: Signal::new(lists),
+            project: Signal::new(None),
+            oldest: Signal::new(false),
+            fresh: Signal::new(None),
+            undone: Signal::new(Vec::new()),
+            redone: Signal::new(Vec::new()),
+            notice: Signal::new(false),
+            completing: Signal::new(Vec::new()),
+            typing: Signal::new(false),
+            undid: Signal::new(None),
+            selected: Signal::new(first),
+            settings: Some(settings),
+        }
     });
     // The lab's signals follow the settings.
     {
@@ -410,9 +728,12 @@ pub fn LabApp() -> Element {
         .unwrap_or(false);
     // Commands: the palette (⌘K), quick open (⌘O), and every command's key.
     let commands = architect_commands::use_commands_provider();
-    for (id, label, to) in TABS {
+    for (n, (id, label, to)) in TABS.into_iter().enumerate() {
+        // ⌃⌘1–4: ⌘1–9 are the Vault's screensets, and ⌥ changes the digit.
         architect_commands::use_command(
-            architect_commands::Command::new(id, label).group("Go"),
+            architect_commands::Command::new(id, label)
+                .group("Go")
+                .shortcut(format!("⌃⌘{}", n.saturating_add(1))),
             move || lab.jump(Route::Tab(to)),
         );
     }
@@ -446,25 +767,114 @@ pub fn LabApp() -> Element {
         move || lab.open_selected(),
     );
     architect_commands::use_command(
+        {
+            let c = architect_commands::Command::new("LAB_DELETE", "Delete")
+                .group("Edit")
+                .shortcut("⌘⌫");
+            // A field with text has ⌘⌫ (delete to the line's start).
+            if lab.target().is_some() && !(lab.typing)() {
+                c
+            } else {
+                c.disabled("select an item first")
+            }
+        },
+        move || {
+            if let Some(id) = lab.target() {
+                lab.remove(id, "Deleted");
+            }
+        },
+    );
+    architect_commands::use_command(
         architect_commands::Command::new("LAB_DONE", "Mark done")
             .group("Edit")
             .shortcut("⌘↵"),
         move || {
             if let Some(id) = lab.target() {
-                lab.remove(id, "Completed");
+                lab.complete(id);
             }
         },
     );
-    let undone = (lab.undone)();
-    let undo =
-        architect_commands::Command::new("LAB_UNDO", "Undo the last Done or Delete").group("Edit");
+    // Edit › Undo and Redo are the lab's (⌘Z, ⇧⌘Z), named for what they
+    // change; on a page with a field to type in (Capture, an item's
+    // notes), they stand aside for it.
+    let typing = (lab.typing)();
+    let here_tab = (lab.route)().tab();
+    let last = (lab.undone)().last().cloned();
+    let again = (lab.redone)().last().cloned();
     architect_commands::use_command(
-        if undone.is_some() {
-            undo
-        } else {
-            undo.disabled("nothing has been completed or deleted")
-        },
+        edit_command(
+            "LAB_UNDO",
+            "Undo",
+            last.as_ref(),
+            typing,
+            "Put back",
+            "nothing to undo yet",
+            here_tab,
+        )
+        .shortcut("⌘Z"),
         move || lab.undo(),
+    );
+    architect_commands::use_command(
+        edit_command(
+            "LAB_REDO",
+            "Redo",
+            again.as_ref(),
+            typing,
+            "Again:",
+            "nothing undone to redo",
+            here_tab,
+        )
+        .shortcut("⇧⌘Z"),
+        move || lab.redo(),
+    );
+    // Triage from the keys: ⇧⌘M asks where, typing narrows it, Return
+    // files the item and selects the next.
+    let _ = (lab.selected)();
+    let target = lab
+        .target()
+        .and_then(|id| lab.lists.read().get(id).cloned());
+    architect_commands::use_command(
+        {
+            let c = architect_commands::Command::new("LAB_MOVE", "Move to…")
+                .group("Edit")
+                .shortcut("⇧⌘M");
+            if target.is_some() {
+                c
+            } else {
+                c.disabled("select an item first")
+            }
+        },
+        move || {
+            let name = lab
+                .target()
+                .and_then(|id| lab.lists.peek().get(id).map(|i| i.name.clone()))
+                .unwrap_or_default();
+            commands.show_group("Move to", &format!("Move “{name}” to…"));
+        },
+    );
+    for (id, tab, project) in MOVES {
+        let here = target
+            .as_ref()
+            .is_some_and(|i| i.tab == tab && (tab != "tasks" || i.project == project));
+        let c = architect_commands::Command::new(id, move_label(tab, project)).group("Move to");
+        architect_commands::use_command(
+            match &target {
+                None => c.disabled("select an item first"),
+                Some(_) if here => c.disabled("it is already there"),
+                Some(_) => c,
+            },
+            move || {
+                if let Some(at) = lab.target() {
+                    lab.move_item(at, tab, project);
+                }
+            },
+        );
+    }
+    architect_commands::use_command(
+        architect_commands::Command::new("LAB_HELP", "Keys and how the lab works")
+            .group("Help")
+            .shortcut("⌘/"),
+        move || lab.help(),
     );
     architect_commands::use_command(
         architect_commands::Command::new("LAB_SHOW_COMMANDS", "Show every command")
@@ -488,6 +898,12 @@ pub fn LabApp() -> Element {
                     "WORKSPACE_REOPEN_TAB",
                     "WORKSPACE_CLOSE_OTHER_TABS",
                 ])
+        })
+        .menu("Edit", |m| {
+            m.instead(architect_commands::Standard::Undo, "LAB_UNDO")
+                .instead(architect_commands::Standard::Redo, "LAB_REDO")
+                .separator()
+                .commands(["LAB_DONE", "LAB_MOVE", "LAB_DELETE"])
         })
         .menu("View", |m| {
             m.command("LAB_TOGGLE_DETAILS")
@@ -515,11 +931,19 @@ pub fn LabApp() -> Element {
                 "WORKSPACE_GO_FORWARD",
             ])
         })
-        .menu("Help", |m| m.command("LAB_SHOW_COMMANDS"));
+        .menu("Help", |m| m.commands(["LAB_HELP", "LAB_SHOW_COMMANDS"]));
     let route = (lab.route)();
     let inbox_count = lab.lists.read().count("inbox");
     let tabs = vec![
-        shell::Tab::new("inbox", "Inbox", icon!(Inbox)).badge(inbox_count),
+        {
+            let inbox = shell::Tab::new("inbox", "Inbox", icon!(Inbox));
+            // A clear Inbox shows no count.
+            if inbox_count > 0 {
+                inbox.badge(inbox_count)
+            } else {
+                inbox
+            }
+        },
         shell::Tab::new("tasks", "Tasks", icon!(ListTodo)),
         shell::Tab::new("schedule", "Schedule", icon!(CalendarDays)),
         shell::Tab::new("vault", "Vault", icon!(NotebookText)),
@@ -580,14 +1004,45 @@ pub fn LabApp() -> Element {
             .hint("Every change is saved and synced"),
         shell::StatusItem::new("people", "3 online").icon(icon!(Users)),
     ];
-    // Done and Delete keep their way back on the status line.
-    if let Some(u) = &undone {
+    // Done, Delete and Move keep their way back on the status line,
+    // where the notice over their list is not on show.
+    let said_here = (lab.notice)()
+        && last
+            .as_ref()
+            .is_some_and(|u| route == Route::Tab(u.item.tab));
+    if let Some(u) = last.as_ref().filter(|_| !said_here) {
         status.insert(
             0,
-            shell::StatusItem::new("undo", format!("{} · Undo", u.verb))
+            shell::StatusItem::new(
+                "undo",
+                format!(
+                    "{} {} {} · {}",
+                    u.verb,
+                    if matches!(u.change, Change::Moved(..)) {
+                        "from"
+                    } else {
+                        "in"
+                    },
+                    pages::title(u.item.tab),
+                    // Where a field has ⌘Z, the item says only Undo.
+                    if typing { "Undo" } else { "Undo ⌘Z" }
+                ),
+            )
+            .icon(icon!(Undo2))
+            .hint(format!("Put back “{}”", u.item.name))
+            .on_press(move |()| lab.undo()),
+        );
+    }
+    // What the last Undo did, with the way to do it again, where no
+    // notice over a list says it.
+    let undid = (lab.undid)();
+    if let Some(said) = undid.filter(|_| !matches!(route, Route::Tab(_))) {
+        status.retain(|s| s.id != "undo");
+        status.insert(
+            0,
+            shell::StatusItem::new("undo", format!("{said} · Redo ⇧⌘Z"))
                 .icon(icon!(Undo2))
-                .hint(format!("Put back “{}”", u.item.name))
-                .on_press(move |()| lab.undo()),
+                .on_press(move |()| lab.redo()),
         );
     }
     rsx! {
@@ -596,13 +1051,15 @@ pub fn LabApp() -> Element {
             document::Style { {CSS} }
             // The window's chords (⌘K, ⌘W, …), whatever has the focus.
             architect_commands::WindowKeys {}
+            ListKeys {}
             NativeMenus { bar: menus }
             AppShell {
                 screen: screen(),
                 style: (lab.style)(),
                 title: "Architect Lab",
                 tabs,
-                current: Some(route.tab()),
+                // The help is over a tab, not one of them.
+                current: (!matches!(route, Route::Help(_))).then(|| route.tab()),
                 on_tab: move |id| lab.jump(Route::Tab(id)),
                 separate: capture,
                 brand: rsx! { Brand {} },
@@ -613,13 +1070,15 @@ pub fn LabApp() -> Element {
                         // The lab has no account to leave: only what works.
                         shell::Menu::new()
                             .item("Settings", icon!(Settings2), move |()| settings.show(None))
-                            .item("Keyboard shortcuts", icon!(Keyboard), move |()| {
-                                commands.show(architect_commands::Overlay::Palette);
+                            .item("Keys and help", icon!(Keyboard), move |()| {
+                                lab.help();
                             }),
                     ),
                 workspaces,
                 left: rsx! { pages::LeftSide {} },
-                right: if (lab.right)() { Some(rsx! { pages::RightSide {} }) } else { None },
+                // The details are the lists': the Vault's panes are its own,
+                // an item's page is its details, the help is the help.
+                right: if (lab.right)() && matches!(route, Route::Tab(t) if t != "vault") { Some(rsx! { pages::RightSide {} }) } else { None },
                 on_pull: move |()| lab.jump(Route::Tab("vault")),
                 window: window_chrome,
                 status,
@@ -629,6 +1088,7 @@ pub fn LabApp() -> Element {
                     Route::Tab(tab) => rsx! { pages::ListPage { key: "{tab}", tab } },
                     Route::Item(tab, id) => rsx! { pages::ItemPage { tab, id } },
                     Route::Capture(tab) => rsx! { pages::CapturePage { key: "{tab}", tab } },
+                    Route::Help(_) => rsx! { pages::HelpPage {} },
                 }
             }
             architect_commands::CommandLayer {}
@@ -650,9 +1110,42 @@ fn Brand() -> Element {
                 "A"
             }
             span { style: "font-size: 19px; font-weight: 750; letter-spacing: -0.03em; color: #e4e4e7;", "Architect" }
-            span { style: "font-size: 19px; font-weight: 500; letter-spacing: -0.03em; color: #80808a;", "Lab" }
+            span { style: "font-size: 19px; font-weight: 500; letter-spacing: -0.03em; color: #8f8f99;", "Lab" }
         }
     }
+}
+
+/// A list's plain keys: ↑ and ↓ select a row, Return opens it. Heard from
+/// the window (Blitz moves no focus for the page to hear them), and only
+/// over a list with nothing over it, so the palette's field and the
+/// capture field keep theirs.
+#[component]
+fn ListKeys() -> Element {
+    use dioxus_native::winit::event::{ElementState, WindowEvent};
+    use dioxus_native::winit::keyboard::{Key, ModifiersState, NamedKey};
+
+    let lab = use_context::<Lab>();
+    let commands = use_context::<architect_commands::Commands>();
+    let mut held = use_signal(ModifiersState::default);
+    dioxus_native::use_window_event(move |event, _| match event {
+        WindowEvent::ModifiersChanged(m) => held.set(m.state()),
+        WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
+            let on_list = matches!(*lab.route.peek(), Route::Tab(t) if t != "vault");
+            let over = commands.overlay.peek().is_some()
+                || lab.settings.is_some_and(|s| s.open.peek().is_some());
+            if !on_list || over || !held.peek().is_empty() {
+                return;
+            }
+            match &event.logical_key {
+                Key::Named(NamedKey::ArrowDown) => lab.step(1),
+                Key::Named(NamedKey::ArrowUp) => lab.step(-1),
+                Key::Named(NamedKey::Enter) => lab.open_selected(),
+                _ => {}
+            }
+        }
+        _ => {}
+    });
+    rsx! {}
 }
 
 /// The menu bar: the platform's where there is one (macOS, a Linux shell

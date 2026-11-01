@@ -17,11 +17,15 @@ the window's title row; drag a tab to a group's middle or edge or the
 window's edge, hold W to grab a pane without tabs, right-click a tab (or
 ⋯) for the rest.
 
-The lab's lists are live: Capture (⇧⌘N, or the feather) and a list's +
-write a new row; a row's circle, Done or ⌘↵ completes one and Delete
-deletes it, with Undo beside the list; Move to files a capture in a
-project; ⌃N and ⌃P pick a row, ⌘↓ opens it; a project on the left shows
-its tasks. Its face, Inter, is
+The lab's lists are live. A click selects a row (the details follow,
+with what it can do and the keys for it), a double click or Return
+opens it; ↑ and ↓ (or ⌃N and ⌃P) select. Capture (⇧⌘N, or the feather)
+and a list's + write a new row (Return or Esc keeps it). A row's circle,
+Done or ⌘↵ completes one: its circle fills, it fades, and the next row
+is selected. Move to, or ⇧⌘M and a few letters of the project, files a
+capture and selects the next one. Edit › Undo and Redo (⌘Z, ⇧⌘Z) step
+through the last twenty changes. An item's page keeps notes. ⌘/ shows
+every key and where things are. The lab's face, Inter, is
 bundled (`ui/assets/fonts`, OFL) and handed to Blitz at launch
 (`FONTS`): Blitz does not load an `@font-face` from a `data:` URI. What
 else Blitz does differently is in the skill's

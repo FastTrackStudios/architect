@@ -205,7 +205,8 @@ app on the shell gets it:
   leaves the ribbon.
 - **One sidebar** beside it: the app's `left`, or what the page claims
   with `use_shell_slots` (a workspace's left dock, its tabs in the title
-  row). Then the workspace switcher sits at its foot, over the account.
+  row). The workspace switcher sits at its foot, over the account, with
+  either, so it does not move when a page claims the sidebar.
 - **The status line**: `StatusItem`s (a fact or a switch: text, icon, a
   dot, a chip, a press), the app's on `AppShell` and the page's from
   `use_status`. It is drawn as a `StatusStyle::Bar` along the foot,

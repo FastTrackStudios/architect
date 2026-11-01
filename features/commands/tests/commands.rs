@@ -199,6 +199,19 @@ fn a_menu_bar_resolves_against_the_commands_there_are() {
     assert!(menus[2].items.contains(&Item::Standard(Standard::Copy)));
 }
 
+/// An app's own Undo takes the platform's place in Edit, key and all.
+#[test]
+fn an_apps_undo_stands_in_for_the_platforms() {
+    let bar = MenuBar::standard("Lab").menu("Edit", |m| m.instead(Standard::Undo, "APP_UNDO"));
+    let undo = [Command::new("APP_UNDO", "Undo Done").shortcut("⌘Z")];
+    let menus = bar.resolve(&undo);
+    let edit = menus.iter().find(|m| m.title == "Edit").unwrap();
+    assert!(matches!(&edit.items[0], Item::Command(c) if c.id == "APP_UNDO" && c.shortcut == "⌘Z"));
+    assert!(!edit.items.contains(&Item::Standard(Standard::Undo)));
+    // Redo and the rest stay the platform's.
+    assert_eq!(edit.items[1], Item::Standard(Standard::Redo));
+}
+
 #[test]
 fn a_new_menu_goes_before_window_and_help() {
     let bar = MenuBar::standard("Lab").menu("Go", |m| m.command("A"));
