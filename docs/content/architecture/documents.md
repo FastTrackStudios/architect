@@ -9,8 +9,7 @@ weight = 57
 > file extension, a schema stamp and migrations; `stamp`, `upgrade`),
 > `DocKinds`; `features/crdt/crdt/src/history.rs` `History`
 > (`transact` — one named step — `begin`/`commit`/`abort` for a step
-> that spans many transactions, `undo`, `redo`, local only). Next in
-> (`transact` — one named step — `undo`, `redo`, local only);
+> that spans many transactions, `undo`, `redo`, local only);
 > `features/crdt/crdt/src/file/mod.rs` `DocFile` and
 > `features/crdt/crdt/src/file/branch.rs` `Branch` (the file, below).
 > The org driver landed (2026-11-01):
