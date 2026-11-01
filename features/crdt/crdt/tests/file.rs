@@ -433,7 +433,7 @@ async fn blobs_are_kept_once_by_hash_and_survive_a_fold() {
 
     let mut main = file.open_branch(MAIN).await.unwrap();
     main.transact("Add FX", |d| {
-        d.get_map("fx").insert("chain", hash.as_str()).unwrap()
+        d.get_map("fx").insert("chain", hash.as_str()).unwrap();
     })
     .await
     .unwrap();
