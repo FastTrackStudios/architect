@@ -16,6 +16,7 @@ The full guide is `docs/content/architecture/commands.md`; this page is what an 
 | MCP HTTP | `POST /mcp`, origin guard, optional bearer, loopback serve | `features/mcp/src/http.rs` `router`, `serve`, `serve_loopback_or` |
 | MCP on `EngineHost` | feature `host`: `.mcp(server, token)` (loopback guard) and `.mcp_at("/org/{slug}/mcp", \|head\| async { Ok(McpTarget::new(server, caller)) / Err(impl IntoResponse) })` (no origin check; the resolver authenticates) | `features/mcp/src/host.rs` `McpHost`, `McpTarget`; `examples/greeter/tests/host_mounts.rs` |
 | MCP discovery | `<config>/fts/<name>-mcp.json` and a project's `.mcp.json` | `features/mcp/src/discovery.rs` `publish`, `read`, `unpublish`, `project_mcp_json` |
+| Extensions | Run-time actions and settings from packages: `EXT_LIST` / `EXT_SEARCH` / `EXT_INSTALL` / `EXT_UNINSTALL` / `EXT_RELOAD`; an extension's actions under its id's prefix | `features/extensions/src/actions.rs`; `features/extensions/src/host.rs` `Host`; `features/extensions/tests/metronome.rs` |
 | Scripts | Luau over the list: `SCRIPT_RUN` / `SCRIPT_SAVE` / `SCRIPT_DESCRIBE` (and `SCRIPT_LIST`, `SCRIPT_DELETE`, `_ORG` forms); each saved script an action `SCRIPT_MY_<NAME>` / `SCRIPT_ORG_<NAME>`; a run is one undo step | `features/scripting/src/actions.rs` `Scripting`; `features/scripting/src/luau.rs` `Runtime`, `Report`; `features/scripting/tests/scripts.rs` |
 | Keys | keymap bindings name action ids | `features/input/src/processor.rs` `InputProcessor` (see `docs/content/architecture/input.md`) |
 | Telemetry | one `action` span per run, stage timings | `features/telemetry/src/timing.rs` `Stages`, `DIRECTIVES` |
@@ -96,6 +97,26 @@ scripting.install()?;  // SCRIPT_* actions + every saved script
 - Saved scripts are read when they run; `save` checks the source first. `SCRIPT_SAVE_ORG` / `SCRIPT_DELETE_ORG` are separate ids so a permission engine can keep the organization's scripts to some people.
 - Limits: `Limits { memory, steps }` per run, `MAX_RUNNING` runs at once (a script that runs itself stops there).
 - A single-person list: on a multi-tenant server every person's saved scripts would share one list; give each its own list there.
+
+## Extensions (`architect-extensions`)
+
+```rust
+let host = Host::new(list.clone(), SharedSections::new(registry)); // `ui`: use_extension_sections()
+let ext = Extensions::new(host, Installs::new(data_dir.join("extensions")))
+    .with_source(GitRegistry::new(url, cache_dir))   // or FolderRegistry, ReaPackSource
+    .with_builtin(Package::embedded(include_str!(".../extension.toml"), &[("x.luau", include_str!(".../x.luau"))])?);
+ext.install_actions()?;          // EXT_LIST / EXT_SEARCH / EXT_INSTALL / EXT_UNINSTALL / EXT_RELOAD
+let _ = ext.sync();              // load the copy of each that runs
+// on a timer: ext.reload_changed()  — hot reload; a failed one keeps its last good copy
+```
+
+- A package is `extension.toml` + files. Kinds `data` (presets only) and `luau` run built in; `wasm` and `process` need a `host::Runner` the app adds (none ship yet: `LoadError::NoRunner`).
+- An extension's actions must start with its id's prefix (`fts.metronome` → `FTS_METRONOME_`), its setting keys with `<id>.`; sections are owned by it and leave with it. A Luau extension runs inside its `[capabilities]` (`actions` prefixes, the most `effect`) through `luau::Runtime::with_gate`; a model's call still runs as the model.
+- Extension actions go on the list with `ActionList::register_forwarded_with` (`crates/architect/src/action_list.rs`): a described action whose handler is handed the caller.
+- A reload is a diff: kept actions keep their ids; on any failure nothing is swapped. Values of its settings survive (keys unchanged).
+- Which copy runs (`catalog::choose`): a dev copy, else an installed one newer than the built-in, else the built-in. `disable(id)` keeps it off whatever copies exist.
+- A project's needs: `Requirements` in its document's `meta` (`doc::requirements`, feature `crdt`); `Extensions::open` makes a `Plan` (install / offer / missing, with an org `Policy`), `accept` installs and loads it.
+- Registry installs are copies; a folder registry's are links (an edit there reloads). `GitRegistry` shells out to `git`; `ReaPackSource` fetches through the app's `Fetch` (`LocalFetch` does `file://` only).
 
 ## Pitfalls
 

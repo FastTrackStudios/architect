@@ -12,8 +12,22 @@ weight = 67
 > (`features/scripting/src/actions.rs` `Scripting`), and the `SCRIPT_RUN`,
 > `SCRIPT_SAVE` and `SCRIPT_DESCRIBE` actions a model reaches over MCP.
 > Not yet: dry runs, the typed model services in the Luau library,
-> streams, the ImGui API, Luau on the web. The rest of this page is
-> proposed (2026-10-31). Decided: one crate, `architect-extensions`, with four kinds — data,
+> streams, the ImGui API, Luau on the web.
+>
+> **The runtime landed (2026-11-01)** in `architect-extensions`
+> (`features/extensions`): the manifest (`features/extensions/src/manifest.rs`
+> `Manifest`), the host that loads and reloads extensions as a diff onto
+> the Action List and the settings page (`features/extensions/src/host.rs`
+> `Host`, with data and Luau runners and `Runner` for the rest), git and
+> folder registries and ReaPack indexes (`features/extensions/src/install.rs`),
+> built-ins overridden by newer installs and development copies
+> (`features/extensions/src/catalog.rs` `choose`), hot reload by polling
+> (`features/extensions/src/watch.rs` `Watch`), a project's requirements
+> and an organization's approved list (`features/extensions/src/project.rs`
+> `plan`), and the `EXT_*` actions. The lab's metronome is one
+> (`apps/lab/extensions`). Not yet: WASM and process runners, remote
+> views, overlays, signed archives, `architect ext dev` as a command.
+> The rest of this page is proposed (2026-10-31). Decided: one crate, `architect-extensions`, with four kinds — data,
 > WebAssembly components, Luau scripts, and processes over vox — and a
 > git-based registry. Proposed for UI: Dioxus views rendered remotely (the
 > extension's `VirtualDom`, the host's Blitz), frame documents for faces.
