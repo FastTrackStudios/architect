@@ -1,4 +1,5 @@
-//! The palette's matching and order, openers, and custom actions.
+//! The palette's matching and order, openers, custom actions, and the
+//! menu bar's model.
 
 #![allow(
     clippy::unwrap_used,
@@ -11,8 +12,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use architect_commands::{
-    Command, Condition, CustomAction, Item, MenuBar, OpenIn, OpenItem, Opener, Openers, Query,
-    Recents, Runner, Scope, Standard, Step, fuzzy, rank,
+    Command, Condition, CustomAction, Item, Kind, Live, MenuBar, OpenIn, OpenItem, Opener, Openers,
+    Pick, Query, Recents, Runner, Scope, Standard, Step, Tree, fuzzy, rank, without_platform,
 };
 
 #[test]
@@ -206,4 +207,249 @@ fn a_new_menu_goes_before_window_and_help() {
         titles,
         vec!["Lab", "File", "Edit", "View", "Go", "Window", "Help"]
     );
+}
+
+// ── The keymap a person edits ──────────────────────────────────────────
+
+use architect_commands::{Clash, EVERYWHERE, Keymap, Layer};
+use architect_input::KeymapConfig;
+
+fn studio_keys() -> Keymap {
+    let app = KeymapConfig::from_json_str(
+        r#"{ "keymap": { "normal": { "Meta+d": "EDIT_DUPLICATE", "g g": "VIEW_TOP" } },
+             "contexts": { "session.arrange": { "keys": { "Meta+d": "ARRANGE_DUPLICATE" } } } }"#,
+    )
+    .unwrap();
+    let mut keymap = Keymap::new(app);
+    keymap.set_shortcuts([("WORKSPACE_CLOSE_TAB", "⌘W")]);
+    keymap
+}
+
+#[test]
+fn a_new_binding_shows_what_it_collides_with() {
+    let keymap = studio_keys();
+    let clashes = |context: &str, keys: &str| -> Vec<(String, Clash)> {
+        keymap
+            .conflicts("NEW", context, keys)
+            .into_iter()
+            .map(|c| (c.binding.action, c.clash))
+            .collect()
+    };
+    assert_eq!(
+        clashes(EVERYWHERE, "⌘W"),
+        [("WORKSPACE_CLOSE_TAB".into(), Clash::Same)]
+    );
+    assert_eq!(
+        clashes(EVERYWHERE, "g"),
+        [("VIEW_TOP".into(), Clash::Prefix)]
+    );
+    let mut d = clashes("session.arrange.item", "⌘D");
+    d.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        d,
+        [
+            ("ARRANGE_DUPLICATE".into(), Clash::Outer),
+            ("EDIT_DUPLICATE".into(), Clash::Outer)
+        ]
+    );
+    assert_eq!(
+        clashes(EVERYWHERE, "⌘D").len(),
+        2,
+        "same everywhere, inner in arrange"
+    );
+    assert!(clashes(EVERYWHERE, "⌘J").is_empty());
+}
+
+#[test]
+fn what_a_key_does_is_answered_per_context() {
+    let keymap = studio_keys();
+    let does: Vec<(String, String)> = keymap
+        .what_does("⌘D")
+        .into_iter()
+        .map(|b| (b.context, b.action))
+        .collect();
+    assert_eq!(
+        does,
+        [
+            (String::new(), "EDIT_DUPLICATE".to_owned()),
+            ("session.arrange".to_owned(), "ARRANGE_DUPLICATE".to_owned())
+        ]
+    );
+}
+
+#[test]
+fn the_persons_changes_are_marked_and_reset() {
+    let mut keymap = studio_keys();
+    keymap.unbind(EVERYWHERE, "⌘W").unwrap();
+    keymap
+        .bind("WORKSPACE_CLOSE_TAB", "session.arrange", "⌘E")
+        .unwrap();
+    assert!(keymap.is_changed("WORKSPACE_CLOSE_TAB"));
+    let bindings = keymap.bindings_of("WORKSPACE_CLOSE_TAB");
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(bindings[0].layer, Layer::Person);
+    assert_eq!(
+        keymap.shortcut("WORKSPACE_CLOSE_TAB").as_deref(),
+        Some("⌘E")
+    );
+    keymap.reset("WORKSPACE_CLOSE_TAB");
+    assert!(!keymap.is_changed("WORKSPACE_CLOSE_TAB"));
+    assert_eq!(
+        keymap.shortcut("WORKSPACE_CLOSE_TAB").as_deref(),
+        Some("⌘W")
+    );
+    assert!(keymap.person().rebinds.is_empty());
+}
+
+#[test]
+fn a_toggle_resolves_with_its_tick() {
+    let bar = MenuBar::standard("Lab").menu("View", |m| m.command("VIEW_GRID"));
+    let on = [Command::new("VIEW_GRID", "Grid").checked(true)];
+    let menus = bar.resolve(&on);
+    let view = menus.iter().find(|m| m.title == "View").unwrap();
+    assert!(matches!(&view.items[0], Item::Command(c) if c.checked == Some(true)));
+    let plain = [Command::new("VIEW_GRID", "Grid")];
+    let menus = bar.resolve(&plain);
+    let view = menus.iter().find(|m| m.title == "View").unwrap();
+    assert!(matches!(&view.items[0], Item::Command(c) if c.checked.is_none()));
+}
+
+/// A live section is listed each time the bar is resolved; a row whose
+/// command is not there goes, one whose command cannot run is disabled
+/// with its reason.
+#[test]
+fn a_live_section_is_listed_when_the_bar_is_resolved() {
+    let recent = Rc::new(RefCell::new(vec!["a.rpp".to_owned()]));
+    let read = Rc::clone(&recent);
+    let bar = MenuBar::standard("Lab").menu("File", |m| {
+        m.command("PROJECT_SAVE")
+            .separator()
+            .section("Recent projects", move || {
+                read.borrow()
+                    .iter()
+                    .map(|p| {
+                        Live::new(p.clone(), "PROJECT_OPEN").args(format!("{{\"path\":\"{p}\"}}"))
+                    })
+                    .chain(std::iter::once(Live::new("Gone", "NOT_THERE")))
+                    .collect()
+            })
+    });
+    let commands = vec![
+        Command::new("PROJECT_SAVE", "Save"),
+        Command::new("PROJECT_OPEN", "Open"),
+    ];
+    let rows = |commands: &[Command]| -> Vec<Live> {
+        bar.resolve(commands)
+            .into_iter()
+            .find(|m| m.title == "File")
+            .map(|m| m.items)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|i| match i {
+                Item::Live(row) => Some(row),
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(
+        rows(&commands),
+        vec![Live::new("a.rpp", "PROJECT_OPEN").args(r#"{"path":"a.rpp"}"#)]
+    );
+    recent.borrow_mut().push("b.rpp".into());
+    assert_eq!(rows(&commands).len(), 2);
+
+    let closed = vec![
+        Command::new("PROJECT_SAVE", "Save"),
+        Command::new("PROJECT_OPEN", "Open").disabled("a render is running"),
+    ];
+    let rows = rows(&closed);
+    assert!(rows.iter().all(|r| !r.enabled));
+    assert_eq!(
+        rows[0].disabled_reason.as_deref(),
+        Some("a render is running")
+    );
+    // A section that lists nothing leaves no separator trailing.
+    let empty = MenuBar::standard("Lab").menu("File", |m| {
+        m.command("PROJECT_SAVE")
+            .separator()
+            .section("None", Vec::new)
+    });
+    let file = empty
+        .resolve(&commands)
+        .into_iter()
+        .find(|m| m.title == "File")
+        .unwrap();
+    assert_eq!(file.items.len(), 1);
+}
+
+/// A bar with the same section (a clone) is equal to itself across
+/// renders; another function is another section.
+#[test]
+fn a_section_is_the_function_it_holds() {
+    let bar = MenuBar::standard("Lab").menu("View", |m| m.section("Sets", Vec::new));
+    assert_eq!(bar.clone(), bar);
+    let other = MenuBar::standard("Lab").menu("View", |m| m.section("Sets", Vec::new));
+    assert_ne!(other, bar);
+}
+
+/// Where the platform draws nothing, its items go, and so do the menus
+/// left empty by that, and the separators left over.
+#[test]
+fn without_the_platform_its_items_go() {
+    let bar = MenuBar::standard("Lab").menu("File", |m| m.command("WORKSPACE_CLOSE_TAB"));
+    let menus = without_platform(&bar.resolve(&commands()));
+    let titles: Vec<&str> = menus.iter().map(|m| m.title.as_str()).collect();
+    // The app menu (About … Quit, no settings command here), Edit and
+    // Window were all the platform's.
+    assert_eq!(titles, vec!["File"]);
+    assert!(
+        menus
+            .iter()
+            .flat_map(|m| &m.items)
+            .all(|i| !matches!(i, Item::Standard(_) | Item::Separator))
+    );
+}
+
+/// A numbered tree: the root is 0, the rest in order depth first; a
+/// row's pick runs its command (with a live row's arguments), and a
+/// disabled row picks nothing.
+#[test]
+fn a_tree_numbers_the_bar_and_says_what_a_pick_runs() {
+    let bar = MenuBar::default()
+        .menu("File", |m| {
+            m.command("A")
+                .separator()
+                .section("Recent", || vec![Live::new("x.rpp", "OPEN").args("{}")])
+        })
+        .menu("View", |m| m.command("B"));
+    let commands = vec![
+        Command::new("A", "A").shortcut("⌘A"),
+        Command::new("B", "B").disabled("not now").checked(false),
+        Command::new("OPEN", "Open"),
+    ];
+    let tree = Tree::new(&bar.resolve(&commands));
+    let ids: Vec<i32> = tree.walk().map(|n| n.id).collect();
+    assert_eq!(ids, vec![0, 1, 2, 3, 4, 5, 6]);
+    assert!(matches!(&tree.find(1).unwrap().kind, Kind::Menu { title } if title == "File"));
+    assert!(matches!(tree.find(3).unwrap().kind, Kind::Separator));
+    assert_eq!(
+        tree.pick(2),
+        Some(&Pick {
+            command: "A".into(),
+            args: None
+        })
+    );
+    assert_eq!(
+        tree.pick(4),
+        Some(&Pick {
+            command: "OPEN".into(),
+            args: Some("{}".into())
+        })
+    );
+    assert!(
+        matches!(&tree.find(6).unwrap().kind, Kind::Row(r) if r.checked == Some(false) && !r.enabled)
+    );
+    assert_eq!(tree.pick(6), None);
+    assert_eq!(tree.pick(1), None);
+    assert_eq!(tree.pick(99), None);
 }

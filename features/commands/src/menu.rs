@@ -3,6 +3,14 @@
 //! go in which menu, in what order, grouped how; the labels, the keys and
 //! whether each can run come from the commands themselves. A backend draws
 //! the resolved bar (the native one on macOS: feature `native`).
+//!
+//! A toggle is ticked when on ([`Command::checked`]). A [`Section`] is
+//! live: a function that lists its rows (the recent projects, the
+//! screensets, the open windows) each time the bar is resolved, which a
+//! backend does when a menu opens or the commands change. [`Tree`] numbers
+//! a resolved bar for a backend that names items by number (dbusmenu).
+
+use std::rc::Rc;
 
 use crate::palette::Command;
 
@@ -40,6 +48,96 @@ pub enum Entry {
     Standard(Standard),
     /// A menu inside the menu.
     Submenu(Menu),
+    /// Rows listed when the bar is resolved.
+    Section(Section),
+}
+
+/// One row of a live section: a command, run with its own arguments.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Live {
+    pub label: String,
+    /// The command it runs (`WORKSPACE_RECALL_SCREENSET`).
+    pub command: String,
+    /// What it runs it with, as JSON (`{"id":"mixing"}`); `None` for nothing.
+    pub args: Option<String>,
+    /// Ticked when on (the current screenset); `None` when it is not a toggle.
+    pub checked: Option<bool>,
+    pub enabled: bool,
+    /// Why not, when it cannot run now.
+    pub disabled_reason: Option<String>,
+}
+
+impl Live {
+    pub fn new(label: impl Into<String>, command: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            command: command.into(),
+            args: None,
+            checked: None,
+            enabled: true,
+            disabled_reason: None,
+        }
+    }
+
+    /// The command's arguments, as JSON.
+    #[must_use]
+    pub fn args(mut self, json: impl Into<String>) -> Self {
+        self.args = Some(json.into());
+        self
+    }
+
+    #[must_use]
+    pub const fn checked(mut self, on: bool) -> Self {
+        self.checked = Some(on);
+        self
+    }
+
+    #[must_use]
+    pub fn disabled(mut self, reason: impl Into<String>) -> Self {
+        self.enabled = false;
+        self.disabled_reason = Some(reason.into());
+        self
+    }
+}
+
+/// A live section: a function that lists its rows, called each time the
+/// bar is resolved. Two sections are the same when they are one function
+/// (a clone), so a bar stays equal to itself across renders.
+#[derive(Clone)]
+pub struct Section {
+    pub name: String,
+    rows: Rc<dyn Fn() -> Vec<Live>>,
+}
+
+impl Section {
+    pub fn new(name: impl Into<String>, rows: impl Fn() -> Vec<Live> + 'static) -> Self {
+        Self {
+            name: name.into(),
+            rows: Rc::new(rows),
+        }
+    }
+
+    /// Its rows now.
+    #[must_use]
+    pub fn rows(&self) -> Vec<Live> {
+        (self.rows)()
+    }
+}
+
+impl PartialEq for Section {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && Rc::ptr_eq(&self.rows, &other.rows)
+    }
+}
+
+impl Eq for Section {}
+
+impl std::fmt::Debug for Section {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Section")
+            .field("name", &self.name)
+            .finish_non_exhaustive()
+    }
 }
 
 /// A menu: its title and its entries.
@@ -92,6 +190,17 @@ impl Menu {
     #[must_use]
     pub fn submenu(mut self, menu: Self) -> Self {
         self.entries.push(Entry::Submenu(menu));
+        self
+    }
+
+    /// A live section: `rows` lists them each time the bar is resolved.
+    #[must_use]
+    pub fn section(
+        mut self,
+        name: impl Into<String>,
+        rows: impl Fn() -> Vec<Live> + 'static,
+    ) -> Self {
+        self.entries.push(Entry::Section(Section::new(name, rows)));
         self
     }
 }
@@ -166,9 +275,11 @@ impl MenuBar {
     }
 
     /// Resolved against the commands there are now: each command entry
-    /// becomes its label, key and state; a group, its commands; a command
-    /// that is not there is left out, and so is a menu left empty (the
-    /// app's own menu always stays). Separators never lead, trail or
+    /// becomes its label, key and state; a group, its commands; a live
+    /// section, its rows now (a row whose command is not there is left
+    /// out, one whose command cannot run is disabled with its reason); a
+    /// command that is not there is left out, and so is a menu left empty
+    /// (the app's own menu always stays). Separators never lead, trail or
     /// double.
     #[must_use]
     pub fn resolve(&self, commands: &[Command]) -> Vec<Resolved> {
@@ -200,6 +311,55 @@ pub enum Item {
     Separator,
     Standard(Standard),
     Submenu(Resolved),
+    /// A live section's row.
+    Live(Live),
+}
+
+/// `menus` without the platform's own items, for a bar the app draws.
+///
+/// Where the app draws or exports the bar (dbusmenu, the in-window bar)
+/// there is no Undo, Copy or Quit of the platform's to wire them to. Menus
+/// left empty go, the app's own too; separators are tidied again.
+#[must_use]
+pub fn without_platform(menus: &[Resolved]) -> Vec<Resolved> {
+    menus
+        .iter()
+        .filter_map(|m| {
+            let items = own_items(&m.items);
+            (!items.is_empty()).then(|| Resolved {
+                title: m.title.clone(),
+                items,
+            })
+        })
+        .collect()
+}
+
+fn own_items(items: &[Item]) -> Vec<Item> {
+    let mut out: Vec<Item> = Vec::new();
+    for item in items {
+        match item {
+            Item::Standard(_) => {}
+            Item::Separator => {
+                if out.last().is_some_and(|i| *i != Item::Separator) {
+                    out.push(Item::Separator);
+                }
+            }
+            Item::Submenu(sub) => {
+                let inner = own_items(&sub.items);
+                if !inner.is_empty() {
+                    out.push(Item::Submenu(Resolved {
+                        title: sub.title.clone(),
+                        items: inner,
+                    }));
+                }
+            }
+            other => out.push(other.clone()),
+        }
+    }
+    while out.last() == Some(&Item::Separator) {
+        out.pop();
+    }
+    out
 }
 
 fn resolve_entries(entries: &[Entry], commands: &[Command]) -> Vec<Item> {
@@ -223,6 +383,17 @@ fn resolve_entries(entries: &[Entry], commands: &[Command]) -> Vec<Item> {
                 }
             }
             Entry::Standard(s) => items.push(Item::Standard(*s)),
+            Entry::Section(section) => {
+                items.extend(section.rows().into_iter().filter_map(|row| {
+                    let c = commands.iter().find(|c| c.id == row.command)?;
+                    Some(Item::Live(if c.enabled {
+                        row
+                    } else {
+                        let reason = c.disabled_reason.clone().unwrap_or_default();
+                        row.disabled(reason)
+                    }))
+                }));
+            }
             Entry::Submenu(menu) => {
                 let inner = resolve_entries(&menu.entries, commands);
                 if !inner.is_empty() {
@@ -238,4 +409,147 @@ fn resolve_entries(entries: &[Entry], commands: &[Command]) -> Vec<Item> {
         items.pop();
     }
     items
+}
+
+/// What picking an item does: run `command`, with `args` (JSON) when it
+/// has them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pick {
+    pub command: String,
+    pub args: Option<String>,
+}
+
+/// A clickable row, as a backend draws it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Row {
+    pub label: String,
+    /// `⌘W`, as commands show theirs; empty for none.
+    pub shortcut: String,
+    pub enabled: bool,
+    /// `Some` for a toggle: ticked when on.
+    pub checked: Option<bool>,
+    pub pick: Pick,
+}
+
+/// What a numbered node is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Kind {
+    /// The bar itself (node 0).
+    Root,
+    Menu {
+        title: String,
+    },
+    Row(Row),
+    Separator,
+    Standard(Standard),
+}
+
+/// A resolved bar numbered, for a backend that names items by number.
+///
+/// (dbusmenu.) The root is 0, the rest are numbered in order, depth first.
+/// A rebuilt tree numbers again from scratch: a backend tells its host the
+/// layout changed when the tree is not the one it had.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tree {
+    pub id: i32,
+    pub kind: Kind,
+    pub children: Vec<Self>,
+}
+
+impl Tree {
+    /// `menus` numbered.
+    #[must_use]
+    pub fn new(menus: &[Resolved]) -> Self {
+        let mut next: i32 = 0;
+        let mut number = || {
+            next = next.saturating_add(1);
+            next
+        };
+        let children = menus.iter().map(|m| menu_node(m, &mut number)).collect();
+        Self {
+            id: 0,
+            kind: Kind::Root,
+            children,
+        }
+    }
+
+    /// The node numbered `id`.
+    #[must_use]
+    pub fn find(&self, id: i32) -> Option<&Self> {
+        if self.id == id {
+            return Some(self);
+        }
+        self.children.iter().find_map(|c| c.find(id))
+    }
+
+    /// What picking node `id` does; `None` when it is not a row, or
+    /// cannot run now.
+    #[must_use]
+    pub fn pick(&self, id: i32) -> Option<&Pick> {
+        match &self.find(id)?.kind {
+            Kind::Row(row) if row.enabled => Some(&row.pick),
+            _ => None,
+        }
+    }
+
+    /// Every node, this one first, depth first.
+    pub fn walk(&self) -> Box<dyn Iterator<Item = &Self> + '_> {
+        Box::new(std::iter::once(self).chain(self.children.iter().flat_map(Self::walk)))
+    }
+}
+
+fn menu_node(menu: &Resolved, number: &mut impl FnMut() -> i32) -> Tree {
+    let id = number();
+    let children = menu
+        .items
+        .iter()
+        .map(|item| match item {
+            Item::Submenu(inner) => menu_node(inner, number),
+            Item::Command(c) => Tree {
+                id: number(),
+                kind: Kind::Row(Row {
+                    label: c.label.clone(),
+                    shortcut: c.shortcut.clone(),
+                    enabled: c.enabled,
+                    checked: c.checked,
+                    pick: Pick {
+                        command: c.id.clone(),
+                        args: None,
+                    },
+                }),
+                children: Vec::new(),
+            },
+            Item::Live(row) => Tree {
+                id: number(),
+                kind: Kind::Row(Row {
+                    label: row.label.clone(),
+                    shortcut: String::new(),
+                    enabled: row.enabled,
+                    checked: row.checked,
+                    pick: Pick {
+                        command: row.command.clone(),
+                        args: row.args.clone(),
+                    },
+                }),
+                children: Vec::new(),
+            },
+            Item::Separator => Tree {
+                id: number(),
+                kind: Kind::Separator,
+                children: Vec::new(),
+            },
+            Item::Standard(s) => Tree {
+                id: number(),
+                kind: Kind::Standard(*s),
+                children: Vec::new(),
+            },
+        })
+        .collect();
+    Tree {
+        id,
+        kind: Kind::Menu {
+            title: menu.title.clone(),
+        },
+        children,
+    }
 }

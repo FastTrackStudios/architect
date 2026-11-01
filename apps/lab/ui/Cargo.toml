@@ -15,6 +15,7 @@ architect-orgs = { workspace = true, features = ["ui"] }
 architect-extensions = { workspace = true, features = ["ui"] }
 architect = { workspace = true, features = ["action-list", "settings"] }
 dioxus = { workspace = true }
+facet = { workspace = true }
 dioxus-native = { workspace = true }
 lucide-dioxus = { workspace = true }
 futures-timer = { workspace = true }

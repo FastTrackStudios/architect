@@ -1,9 +1,11 @@
 //! Scroll gesture patterns and per-mode (or per-surface) binding tables.
 
 use crate::config::{ConfigError, KeymapConfig, parse_scroll_pattern};
+use std::fmt;
+
 use crate::context::{InputContext, WhenExpr};
 use crate::event::ScrollEvent;
-use crate::key::Modifiers;
+use crate::key::{KeyCode, Modifiers};
 
 /// Which way a scroll pattern listens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -13,24 +15,45 @@ pub enum ScrollAxis {
     Vertical,
 }
 
-/// A scroll gesture a binding matches: an axis and the held modifiers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A scroll gesture a binding matches: an axis, the held modifiers, and
+/// a key held as a modifier (`Z+Scroll`).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScrollPattern {
     pub axis: ScrollAxis,
     pub modifiers: Modifiers,
+    /// A key held as a modifier for it: the gesture matches only while
+    /// that key is held.
+    pub held: Option<KeyCode>,
 }
 
 impl ScrollPattern {
     #[must_use]
     pub const fn new(axis: ScrollAxis, modifiers: Modifiers) -> Self {
-        Self { axis, modifiers }
+        Self {
+            axis,
+            modifiers,
+            held: None,
+        }
     }
 
-    /// Whether `event` is this gesture. A gesture's axis is the larger of
-    /// its two deltas (a tie reads as vertical).
+    /// This gesture while `key` is held.
+    #[must_use]
+    pub fn held(mut self, key: KeyCode) -> Self {
+        self.held = Some(key);
+        self
+    }
+
+    /// Whether `event` is this gesture, with no key held. A gesture's axis
+    /// is the larger of its two deltas (a tie reads as vertical).
     #[must_use]
     pub fn matches(&self, event: &ScrollEvent) -> bool {
-        if self.modifiers != event.modifiers {
+        self.matches_held(event, None)
+    }
+
+    /// Whether `event` is this gesture while `held` is the key held.
+    #[must_use]
+    pub fn matches_held(&self, event: &ScrollEvent, held: Option<&KeyCode>) -> bool {
+        if self.modifiers != event.modifiers || self.held.as_ref() != held {
             return false;
         }
         match self.axis {
@@ -38,6 +61,25 @@ impl ScrollPattern {
             ScrollAxis::Horizontal => event.delta_x.abs() > event.delta_y.abs(),
             ScrollAxis::Vertical => event.delta_y.abs() >= event.delta_x.abs(),
         }
+    }
+}
+
+/// `Z+Shift+ScrollX`: what [`parse_scroll_pattern`] reads.
+impl fmt::Display for ScrollPattern {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(key) = &self.held {
+            write!(f, "{}+", crate::key::KeyChord::plain(key.clone()))?;
+        }
+        for (held, name) in self.modifiers.named() {
+            if held {
+                write!(f, "{name}+")?;
+            }
+        }
+        f.write_str(match self.axis {
+            ScrollAxis::Any => "Scroll",
+            ScrollAxis::Horizontal => "ScrollX",
+            ScrollAxis::Vertical => "ScrollY",
+        })
     }
 }
 
@@ -99,9 +141,20 @@ impl<A: Clone> ScrollBindingTable<A> {
     /// The action of the first entry matching `event` whose clause holds.
     #[must_use]
     pub fn match_event(&self, event: &ScrollEvent, ctx: &InputContext) -> Option<A> {
+        self.match_held(event, None, ctx)
+    }
+
+    /// [`match_event`](Self::match_event) while `held` is the key held.
+    #[must_use]
+    pub fn match_held(
+        &self,
+        event: &ScrollEvent,
+        held: Option<&KeyCode>,
+        ctx: &InputContext,
+    ) -> Option<A> {
         self.bindings
             .iter()
-            .find(|(pattern, when, _)| pattern.matches(event) && when.evaluate(ctx))
+            .find(|(pattern, when, _)| pattern.matches_held(event, held) && when.evaluate(ctx))
             .map(|(_, _, action)| action.clone())
     }
 }

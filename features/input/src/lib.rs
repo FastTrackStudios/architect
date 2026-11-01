@@ -2,8 +2,10 @@
 //!
 //! Key chords, a key trie, a modal input processor (mode stack, multi-key
 //! sequences, counts, operator + motion, macros, held which-key
-//! prefixes), mouse and scroll binding tables, a JSON keymap config with a
-//! base + user merge, vim key notation, and the which-key popup model.
+//! prefixes, held-letter tools), nested contexts (app › view › target
+//! under the pointer), mouse and scroll binding tables, MIDI and OSC
+//! bindings, a JSON keymap config with a base + user merge, vim key
+//! notation, and the which-key popup model.
 //!
 //! It binds keys to **action ids**: by default `String`s naming actions in
 //! the app's Action List, so a key runs the same action a menu, the
@@ -20,6 +22,7 @@
 pub mod command;
 pub mod config;
 pub mod context;
+pub mod control;
 pub mod event;
 pub mod key;
 pub mod macros;
@@ -37,17 +40,21 @@ pub mod dioxus;
 
 pub use command::{ActionKey, InputArgs, InputCommand};
 pub use config::{
-    ConfigError, ContextLayerConfig, KeymapConfig, ModeConfig, parse_key_chord, parse_key_sequence,
-    parse_leaf_action,
+    ConfigError, ContextConfig, ContextLayerConfig, KeymapConfig, ModeConfig, parse_key_chord,
+    parse_key_sequence, parse_leaf_action, parse_mouse_pattern, parse_scroll_pattern,
 };
 pub use context::{InputContext, WhenExpr};
-pub use event::{InputEvent, KeyEvent, MouseAction, MouseButton, MouseEvent, ScrollEvent};
+pub use control::{ControlBindings, MidiKind, MidiPattern, parse_midi_pattern};
+pub use event::{
+    InputEvent, KeyEvent, MidiEvent, MidiMessage, MouseAction, MouseButton, MouseEvent, OscEvent,
+    ScrollEvent,
+};
 pub use key::{KeyChord, KeyCode, Modifiers};
 pub use macros::MacroRecorder;
 pub use mode::{ModeDefinition, ModeId, ModeStack};
 pub use mouse::{MouseBindingTable, MousePattern};
 pub use notation::{KeyPlatform, translate_modifiers, translate_sequence};
-pub use processor::{InputProcessor, MacroKeys, SequenceTimeout};
+pub use processor::{HeldTool, InputProcessor, MacroKeys, Released, SequenceTimeout};
 pub use scroll::{ScrollAxis, ScrollBindingTable, ScrollPattern, table_for_surface};
 pub use sequence::{SequenceResult, SequenceState};
 pub use trie::{KeyTrie, LeafAction, TrieLookup, TrieNode};

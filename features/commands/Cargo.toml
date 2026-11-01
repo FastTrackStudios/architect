@@ -15,9 +15,22 @@ description = "Commands: the ⌘K palette, ⌘O open-anything, the action list w
 default = []
 # Keys heard from the window (Blitz delivers a key to the DOM only through
 # what has the focus): `WindowKeys`, for a native app.
-native = ["ui", "dep:dioxus-native", "dep:futures-timer", "dep:muda"]
+native = [
+    "ui",
+    "dep:dioxus-native",
+    "dep:futures-timer",
+    "dep:muda",
+    "dep:zbus",
+    "dep:tokio",
+    "dep:tracing",
+    "dep:objc2",
+    "dep:objc2-foundation",
+    "dep:objc2-ui-kit",
+    "dep:block2",
+]
 ui = [
     "dep:dioxus",
+    "architect-input/dioxus",
     "dep:architect-shell",
     "architect-shell/ui",
     "dep:lucide-dioxus",
@@ -27,6 +40,11 @@ ui = [
 [dependencies]
 facet = { workspace = true }
 facet-json = { version = "0.50.0-rc.5" }
+# The keymap engine: a command's keys, sequences, contexts and held tools.
+architect-input = { workspace = true }
+# An action's params schema, read to ask for its arguments (src/params.rs).
+serde = { workspace = true }
+serde_json = { workspace = true }
 dioxus = { workspace = true, optional = true }
 architect-shell = { workspace = true, optional = true }
 lucide-dioxus = { workspace = true, optional = true }
@@ -38,6 +56,31 @@ architect = { workspace = true, optional = true, features = ["action-list"] }
 # The native menu bar, drawn by AppKit (src/native_menu.rs).
 [target.'cfg(target_os = "macos")'.dependencies]
 muda = { version = "0.19", optional = true, default-features = false }
+
+# The iPadOS menu bar, built with UIMenuBuilder (src/ios_menu.rs).
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2 = { workspace = true, optional = true }
+objc2-foundation = { version = "0.3", optional = true, default-features = false, features = ["std", "NSArray", "NSString"] }
+objc2-ui-kit = { workspace = true, optional = true, default-features = false, features = [
+    "std",
+    "block2",
+    "UIAction",
+    "UIApplication",
+    "UIImage",
+    "UIMenu",
+    "UIMenuBuilder",
+    "UIMenuElement",
+    "UIMenuSystem",
+    "UIResponder",
+] }
+block2 = { version = "0.6", optional = true }
+tracing = { workspace = true, optional = true }
+
+# The Linux menu bar, exported over dbusmenu (src/linux_menu.rs).
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = { version = "5.19", optional = true, default-features = false, features = ["tokio"] }
+tokio = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
 
 [lib]
 doctest = false
