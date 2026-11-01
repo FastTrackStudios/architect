@@ -20,11 +20,13 @@ pub fn from_bundles(bundles: &[OrganizationBundle], personal: Option<&str>) -> V
         .iter()
         .map(|b| {
             let id = b.organization.id.to_string();
-            let mark = id.bytes().fold(0usize, |a, c| {
-                a.wrapping_mul(31).wrapping_add(usize::from(c))
-            })
-            .checked_rem(MARKS.len())
-            .unwrap_or(0);
+            let mark = id
+                .bytes()
+                .fold(0usize, |a, c| {
+                    a.wrapping_mul(31).wrapping_add(usize::from(c))
+                })
+                .checked_rem(MARKS.len())
+                .unwrap_or(0);
             Org {
                 id: OrgId::new(id.clone()),
                 name: b.organization.name.clone(),
