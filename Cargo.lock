@@ -625,6 +625,7 @@ name = "architect-lab-ui"
 version = "0.1.0"
 dependencies = [
  "architect-shell",
+ "architect-workspace",
  "dioxus",
  "dioxus-native",
  "futures-timer",
@@ -870,8 +871,12 @@ dependencies = [
 name = "architect-workspace"
 version = "0.1.0"
 dependencies = [
+ "architect-shell",
+ "dioxus",
  "facet",
  "facet-json",
+ "futures-timer",
+ "lucide-dioxus",
  "thiserror 2.0.20",
 ]
 

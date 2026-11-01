@@ -357,6 +357,35 @@ impl Shell {
         self.controls_left() + CONTROL + 10.0
     }
 
+    /// The window's own title bar, when the app draws it.
+    #[must_use]
+    pub const fn window_chrome(&self) -> Option<&WindowChrome> {
+        self.window.as_ref()
+    }
+
+    /// What a desk page that draws its own title row keeps clear, in
+    /// points from the left and the right edge: the window's buttons and
+    /// the sidebar's (unless a sidebar is docked beside the page), and the
+    /// right side's button when it is over the page.
+    #[must_use]
+    pub fn title_clearance(&self) -> (f64, f64) {
+        let left = if self.has_side(Side::Left) && self.docked(Side::Left) {
+            0.0
+        } else if self.has_side(Side::Left) {
+            self.content_left()
+        } else if self.window.is_some() {
+            self.controls_left()
+        } else {
+            0.0
+        };
+        let right = if self.right_button_over_page() {
+            12.0 + CONTROL + 14.0
+        } else {
+            0.0
+        };
+        (left, right + self.screen.insets.right)
+    }
+
     /// Whether the desk's right side's button is over the page's title row
     /// (the side is not docked and showing), so the page keeps clear of it.
     #[must_use]

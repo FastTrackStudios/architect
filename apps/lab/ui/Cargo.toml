@@ -8,6 +8,7 @@ publish = false
 
 [dependencies]
 architect-shell = { workspace = true, features = ["ui"] }
+architect-workspace = { workspace = true, features = ["ui"] }
 dioxus = { workspace = true }
 dioxus-native = { workspace = true }
 lucide-dioxus = { workspace = true }

@@ -791,19 +791,12 @@ fn DeskBar(
     let t = shell.theme;
     let ins = shell.screen.insets;
     let row = shell.title_row();
-    // The left end: beside a showing sidebar, the page's own margin; else
-    // clear of the window's buttons and the sidebar's.
-    let pad_left = if shell.has_side(Side::Left) && shell.docked(Side::Left) {
-        20.0
-    } else if shell.has_side(Side::Left) {
-        shell.content_left()
-    } else if shell.window.is_some() {
-        shell.controls_left()
-    } else {
-        20.0
-    };
+    // Beside a showing sidebar, the page's own margin; else clear of the
+    // window's buttons and the sidebar's (and the right side's button).
+    let (left, right) = shell.title_clearance();
+    let pad_left = if left > 0.0 { left } else { 20.0 };
     let pad_right = if shell.right_button_over_page() {
-        12.0 + 28.0 + 14.0 + ins.right
+        right
     } else {
         20.0 + ins.right
     };

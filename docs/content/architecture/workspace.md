@@ -4,9 +4,16 @@ description = "One layout system for every app: tab groups in splits, docks on e
 weight = 54
 +++
 
-> **Status: proposed (2026-10-31).** For review before any code. Studio's
-> dock (`studio:features/ui/dock`, `Dockspace` and screensets) is the
-> starting point; Obsidian's workspace is the bar to clear.
+> **Status: model and desk host landed (2026-10-31).** The model is
+> `architect-workspace` (`features/workspace/src/model.rs`, `ops.rs`,
+> `screenset.rs`); the host is its `ui` feature
+> (`features/workspace/src/host/mod.rs` `WorkspaceView`, `View`, `Views`,
+> `TitleRow`), developed in the lab's Vault tab
+> (`apps/lab/ui/src/vault.rs`). Still to come: pop-out OS windows,
+> long-press menus, stacked tabs that overlap as they scroll, the
+> per-form-class screenset switch in the host. Studio's dock
+> (`studio:features/ui/dock`) was the starting point; Obsidian's
+> workspace is the bar to clear.
 
 An app hands architect its **views** (what a pane can show) and gets back
 a workspace a person arranges as they like: any number of tab groups,

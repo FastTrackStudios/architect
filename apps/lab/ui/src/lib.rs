@@ -11,6 +11,7 @@
 
 mod pages;
 mod screen;
+mod vault;
 
 use architect_shell::icon;
 use architect_shell::{self as shell, AppShell, ShellStyle};
@@ -140,6 +141,7 @@ pub fn LabApp() -> Element {
                 on_pull: move |()| lab.jump(Route::Tab("vault")),
                 window: window_chrome,
                 match route {
+                    Route::Tab("vault") => rsx! { vault::VaultPage {} },
                     Route::Tab(tab) => rsx! { pages::ListPage { key: "{tab}", tab } },
                     Route::Item(tab, index) => rsx! { pages::ItemPage { tab, index } },
                 }
