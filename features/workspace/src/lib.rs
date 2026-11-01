@@ -20,6 +20,7 @@
 #![cfg_attr(feature = "ui", allow(unpredictable_function_pointer_comparisons))]
 
 mod drop;
+pub mod guide;
 #[cfg(feature = "ui")]
 mod host;
 mod layout;
@@ -33,11 +34,12 @@ pub mod store;
 pub use drop::{Bar, Drop, bar_drop, contains, drop_at, drop_in, float_rect, snap_at};
 #[cfg(feature = "native")]
 pub mod native;
+pub use guide::{ArrangedGroup, ArrangedSplit, ArrangedWindow, Arrangement, target_selector};
 #[cfg(feature = "ui")]
 pub use host::{
     Bridge, Command, Host, PaneHandle, Popout, PresenceLayer, PresenceOverlay, TitleRow, View,
     Views, WindowSystem, Windows, WorkspaceStore, WorkspaceView, use_host, use_pane,
-    use_pane_status, use_presence_overlay,
+    use_pane_status, use_presence_overlay, use_workspace_actions,
 };
 pub use layout::{Direction, Placed, Slide, area_rects, neighbour, scroll_to, slides};
 pub use model::{

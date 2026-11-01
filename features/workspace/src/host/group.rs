@@ -104,6 +104,9 @@ fn SplitView(split: Split, edges: Edges) -> Element {
     };
     let (hair_line, hair_grip) = hairline(axis, s.divider, t.rule, cursor);
     let shares: Vec<f32> = split.children.iter().map(|c| c.share).collect();
+    // Each divider names the panes before it, for a guide scenario's
+    // `@split"<pane>"` (`crate::target_selector`).
+    let befores: Vec<String> = split.children.iter().map(|c| pane_names(&c.node)).collect();
     let count = split.children.len();
     let last = count.saturating_sub(1);
     rsx! {
@@ -123,6 +126,7 @@ fn SplitView(split: Split, edges: Edges) -> Element {
                         style: "{hair_line}",
                         div {
                         style: "{hair_grip}",
+                        "data-split-after": befores.get(index).cloned().unwrap_or_default(),
                         onpointerdown: {
                             let shares = shares.clone();
                             move |_| {
@@ -159,10 +163,13 @@ fn GroupView(group: Group, edges: Edges) -> Element {
         return rsx! {};
     };
     let id = group.id;
+    let names = tab_names(&group);
     rsx! {
         div {
             style: "flex:1 1 0; min-width:0; min-height:0; display:flex; flex-direction:column; \
                     background:{t.sheet};",
+            "data-group": "{id.0}",
+            "data-group-tabs": "{names}",
             onmounted: move |e| host.mount(Mount::Group(id), e.data()),
             if group.chrome != Chrome::Bare && !group.stacked {
                 TabBar { group: group.clone(), current: current.clone(), edges }
@@ -227,6 +234,7 @@ fn TabBar(group: Group, current: PaneId, edges: Edges) -> Element {
         .collect();
     drop(workspace);
     let menu_for = current;
+    let names = tab_names(&group);
     let button = format!(
         "flex:0 0 auto; width:{w}px; height:{w}px; align-self:center; border:none; border-radius:6px; \
          background:transparent; color:{ink}; font-size:16px; display:flex; align-items:center; \
@@ -245,6 +253,7 @@ fn TabBar(group: Group, current: PaneId, edges: Edges) -> Element {
             }
             div { style: "flex:0 1 auto; min-width:0; display:flex; align-items:flex-end; overflow:hidden; \
                           padding-top:{lift}px; gap:1px;",
+                "data-tab-bar": "{names}",
                 onmounted: move |e| host.mount(Mount::Bar(group.id), e.data()),
                 for (index, (pane, title, pinned, icon)) in tabs.into_iter().enumerate() {
                     Tab {
@@ -374,6 +383,7 @@ fn Tab(
     icon: Option<architect_shell::IconFn>,
     icons: bool,
 ) -> Element {
+    let tab_id = pane.0.clone();
     let mut host = use_host();
     let t = *host.theme.read();
     let s = (host.sizes)();
@@ -409,6 +419,7 @@ fn Tab(
                     position:relative; z-index:{u8::from(on)}; cursor:pointer;",
             title: "{title}",
             role: "tab",
+            "data-tab": "{tab_id}",
             tabindex: "0",
             "aria-label": "{label}",
             "aria-selected": "{on}",
@@ -562,6 +573,7 @@ fn Stacked(group: Group, current: PaneId) -> Element {
                                     border-right:1px solid {t.rule}; color:{t.ink_3};",
                             title: "{title}",
                             "aria-label": "{title}",
+                            "data-tab": "{pane.0}",
                             onpointerdown: {
                                 let pane = pane.clone();
                                 move |e: PointerEvent| {
@@ -709,6 +721,7 @@ fn Grip(group: Group, current: PaneId) -> Element {
 /// One pane, drawn by its view; a press in it makes it the active pane.
 #[component]
 pub(super) fn PaneSlot(pane: PaneId) -> Element {
+    let named = pane.0.clone();
     let host = use_host();
     let t = *host.theme.read();
     let this = use_context_provider(|| ThisPane(Signal::new(pane.clone())));
@@ -736,6 +749,7 @@ pub(super) fn PaneSlot(pane: PaneId) -> Element {
     rsx! {
         div {
             style: "flex:1 1 0; width:100%; min-width:0; min-height:0; display:flex; flex-direction:column; position:relative;",
+            "data-pane": "{named}",
             onpointerdown: move |_| {
                 let already = host.workspace.peek().active.as_ref() == Some(&focus);
                 if !already {
@@ -745,6 +759,28 @@ pub(super) fn PaneSlot(pane: PaneId) -> Element {
             {body}
         }
     }
+}
+
+/// A group's panes, space-separated: what its element says it holds, for
+/// a guide scenario's `@group"<pane>"` and `@tab-bar"<pane>"`.
+fn tab_names(group: &Group) -> String {
+    group
+        .tabs
+        .iter()
+        .map(|p| p.0.as_str())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Every pane under `node`, space-separated.
+fn pane_names(node: &Node) -> String {
+    let mut groups = Vec::new();
+    node.groups(&mut groups);
+    groups
+        .iter()
+        .map(|g| tab_names(g))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 const fn spine_fill(on: bool, t: architect_shell::ShellTheme) -> &'static str {

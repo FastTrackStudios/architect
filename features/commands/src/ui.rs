@@ -832,6 +832,7 @@ pub(crate) fn CommandRow(row: Ranked, on: bool, onpress: EventHandler<()>) -> El
     rsx! {
         div {
             class: "lp",
+            "data-command": "{c.id}",
             style: "height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 10px; border-radius: 8px; \
                     background: {fill}; font-size: 13px; cursor: pointer;",
             onclick: move |_| onpress.call(()),
