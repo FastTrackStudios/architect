@@ -45,6 +45,10 @@ members = [
     "features/workspace",
     "features/ui/showcase",
     "features/ui/ui-snapshot",
+    "features/shell",
+    "apps/lab/ui",
+    "apps/lab/desktop",
+    "apps/lab/mobile",
     # ── story (component workbench) ───────────────────────────────────
     "features/story/architect-story-core",
     "features/story/architect-story-macros",
@@ -195,6 +199,12 @@ tw_merge = "0.1.21"
 nucleo-matcher = "0.3"
 palette = "0.7.6"
 linkme = "0.3"
+architect-shell = { path = "features/shell", default-features = false }
+architect-lab-ui = { path = "apps/lab/ui" }
+# iOS: the UIScene lifecycle the lab app adopts (apps/lab/mobile).
+objc2 = "0.6"
+objc2-ui-kit = "0.3"
+futures-timer = "3"
 
 # ── Plugin framework (features/ui) ────────────────────────────────────
 # The ONE sanctioned non-path exception in the monorepo; carried verbatim.
@@ -280,15 +290,27 @@ proptest = "1"
 
 # ── Patches ───────────────────────────────────────────────────────────
 [patch.crates-io]
-# Blitz from the FTS fork (0.3.0-beta.1 line, upstream 02523b83 +
-# fts-focus: focus-follows-pointerdown for all focusable content).
-# dioxus git pins `=0.3.0-beta.1`. One rev across all blitz crates.
-blitz-dom = { git = "https://github.com/FastTrackStudios/blitz", rev = "c82dd238000515c44c758845b9a17e9b48eb0087" }
-blitz-traits = { git = "https://github.com/FastTrackStudios/blitz", rev = "c82dd238000515c44c758845b9a17e9b48eb0087" }
-blitz-paint = { git = "https://github.com/FastTrackStudios/blitz", rev = "c82dd238000515c44c758845b9a17e9b48eb0087" }
-blitz-shell = { git = "https://github.com/FastTrackStudios/blitz", rev = "c82dd238000515c44c758845b9a17e9b48eb0087" }
-blitz-net = { git = "https://github.com/FastTrackStudios/blitz", rev = "c82dd238000515c44c758845b9a17e9b48eb0087" }
-blitz-html = { git = "https://github.com/FastTrackStudios/blitz", rev = "c82dd238000515c44c758845b9a17e9b48eb0087" }
+# Blitz from the FTS fork: the 0.3.0-beta.1 line with fts-focus (focus
+# follows pointerdown), fts-pointer (touch as pointer events) and the iOS
+# safe-area work (BLITZ_SAFE_AREA=0: the page is the whole window; the
+# safe area re-read every frame; a finger's tap slop). dioxus git pins
+# `=0.3.0-beta.1`. One tag across all blitz crates.
+blitz-dom = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-safe-area-2026-10" }
+blitz-traits = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-safe-area-2026-10" }
+blitz-paint = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-safe-area-2026-10" }
+blitz-shell = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-safe-area-2026-10" }
+blitz-net = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-safe-area-2026-10" }
+blitz-html = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-safe-area-2026-10" }
+anyrender = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-safe-area-2026-10" }
+# The renderer and windowing forks a Blitz app needs on iOS (each one's
+# reason is in vendor's README): Vello's surface on Metal, winit's UIKit
+# backend, wgpu's Metal layer. Only the lab apps (apps/lab)
+# reach them.
+anyrender_vello = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.6.1" }
+anyrender_vello_hybrid = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.6.1" }
+winit-uikit = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.6.1" }
+wgpu-hal = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.6.1" }
+raw-window-metal = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.6.1" }
 # Vendored one-line fix: quote scalars containing `<`/`>` — upstream
 # styx-format emits them bare but styx-parse rejects them.
 styx-format = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.1.0" }
@@ -311,6 +333,14 @@ facet-core = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.4.0
 # vox-phon rc.7 without the bogus post-decode length check: upstream fails
 # every real schema exchange with "schema decode consumed N of M bytes".
 vox-phon = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.3.0" }
+
+# dioxus-native from the FTS vendor fork, at the tag studio ships: the
+# window's events to the app (`use_window_event`), touch handed to Dioxus
+# handlers, and the fixes iOS needs.
+[patch."https://github.com/DioxusLabs/dioxus"]
+dioxus-native = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.6.1" }
+dioxus-native-dom = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.6.1" }
+dioxus-core = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.6.1" }
 
 # ── Lints ─────────────────────────────────────────────────────────────
 [workspace.lints.rust]

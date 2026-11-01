@@ -1,0 +1,31 @@
+[package]
+name = "architect-shell"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "The app shell: a page's title and actions at the top, tabs and a separate button at the bottom, a sidebar on each side, laid out per form factor"
+
+# docs/content/architecture/app-shell.md. The default set is the contract
+# (the screen, its form factor and insets, the style): pure data,
+# wasm-clean. `ui` adds the Dioxus components.
+
+[features]
+default = []
+ui = ["dep:dioxus", "dep:lucide-dioxus", "dep:futures-timer"]
+
+[dependencies]
+dioxus = { workspace = true, optional = true }
+lucide-dioxus = { workspace = true, optional = true }
+# The drawers ease in a frame at a time (src/shell/motion.rs).
+futures-timer = { workspace = true, optional = true }
+
+# A timer needs the browser's clock on wasm.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+futures-timer = { workspace = true, optional = true, features = ["wasm-bindgen"] }
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true

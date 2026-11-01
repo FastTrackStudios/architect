@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# `dx serve --ios` installs and launches with `xcrun simctl … booted`, in
+# the default device set. Put this folder first on PATH to send it to a
+# simulator of your choosing instead (README.md):
+#
+#   SIM_UDID   the simulator (required when more than one is booted)
+#   SIM_SET    its device set, when not the default one
+#
+# Every other xcrun call passes through untouched.
+set -euo pipefail
+
+if [[ "${1:-}" == "simctl" ]]; then
+    shift
+    args=()
+    for a in "$@"; do
+        if [[ "$a" == "booted" && -n "${SIM_UDID:-}" ]]; then
+            a="$SIM_UDID"
+        fi
+        args+=("$a")
+    done
+    if [[ -n "${SIM_SET:-}" ]]; then
+        exec /usr/bin/xcrun simctl --set "$SIM_SET" "${args[@]}"
+    fi
+    exec /usr/bin/xcrun simctl "${args[@]}"
+fi
+exec /usr/bin/xcrun "$@"

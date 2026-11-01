@@ -4,8 +4,10 @@ description = "One shell for every FastTrackStudio app: a title and its actions 
 weight = 53
 +++
 
-> **Status: proposed (2026-10-30).** For review before any code. Task's
-> shell is the reference; Studio is the second app on it.
+> **Status: first cut landed (2026-10-31)** in `architect-shell`
+> (`features/shell`), with a lab to develop it in (`apps/lab`: the
+> desktop and iOS apps run under `dx serve`). Task's shell is the
+> reference; Studio is the second app on it.
 
 Task has a shell people like: on a phone, the screen's name large at the
 top left and its main action at the top right, four tabs in a floating
@@ -174,10 +176,14 @@ let screen: Screen = use_screen(); // size, form factor, touch, safe-area insets
 ```
 <!-- doc-check: on -->
 
-It lives in architect-ui behind a `shell` cargo feature
-([one crate per feature](@/architecture/layout.md)): the layout, the
-top bar, the bottom bar, the drawers and gestures, the tab order and its
-editor, and `Screen` with the form-factor rule.
+It is `architect-shell` (`features/shell`,
+[one crate per feature](@/architecture/layout.md)): `Screen` and the
+form-factor rule in the default (wasm-clean) build, and behind `ui` the
+rest — `AppShell` (`features/shell/src/shell/mod.rs`), the pages and
+their bars (`features/shell/src/shell/page.rs` `Page`, `Toolbar`,
+`Breadcrumb`, `Menu`), the bottom bars, the drawers and their gestures,
+and the workspace switcher (`features/shell/src/shell/workspaces.rs`).
+The names above are the sketch; the code is what landed.
 
 ## It renders in Blitz
 

@@ -1,0 +1,20 @@
+[package]
+name = "architect-mobile"
+description = "The app shell's lab on an iPhone or iPad (Blitz on UIKit). `dx serve --ios` it for hot reload on the simulator."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+architect-lab-ui = { workspace = true }
+dioxus = { workspace = true }
+dioxus-native = { workspace = true, features = ["vello", "hot-reload"] }
+tracing = { workspace = true }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2 = { workspace = true }
+objc2-ui-kit = { workspace = true }
+
+[lints]
+workspace = true

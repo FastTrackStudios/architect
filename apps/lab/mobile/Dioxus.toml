@@ -1,0 +1,9 @@
+# dx config: `dx serve --ios` from this folder (see README.md).
+[application]
+# The whole Info.plist, as dx takes it verbatim: iOS 27 stops an app that
+# does not adopt the UIScene lifecycle, which dx's own plist does not.
+ios_info_plist = "ios/Info.plist"
+
+[bundle]
+identifier = "app.fasttrackstudio.architect-mobile"
+publisher = "FastTrackStudio"
