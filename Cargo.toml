@@ -43,6 +43,7 @@ members = [
     # ── ui ────────────────────────────────────────────────────────────
     "features/ui/architect-ui",
     "features/workspace",
+    "features/commands",
     "features/ui/showcase",
     "features/ui/ui-snapshot",
     "features/shell",
@@ -201,6 +202,7 @@ palette = "0.7.6"
 linkme = "0.3"
 architect-shell = { path = "features/shell", default-features = false }
 architect-workspace = { path = "features/workspace" }
+architect-commands = { path = "features/commands" }
 architect-lab-ui = { path = "apps/lab/ui" }
 # iOS: the UIScene lifecycle the lab app adopts (apps/lab/mobile).
 objc2 = "0.6"

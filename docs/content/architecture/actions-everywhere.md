@@ -4,9 +4,18 @@ description = "REAPER's Action List, taken further: everything any UI does is an
 weight = 66
 +++
 
-> **Status: proposed (2026-10-31).** For review before any code. Builds on
-> the [Action List](@/architecture/commands.md) and
-> [architect-input](@/architecture/input.md), which exist.
+> **Status: palette, quick open and the action list window landed
+> (2026-11-01)** in `architect-commands` (`features/commands`): the model
+> (`features/commands/src/fuzzy.rs`, `palette.rs` `rank`, `opener.rs`
+> `Openers`, `custom.rs` `CustomAction`) wasm-clean; behind `ui` the
+> palette, quick open and `ActionListView` over an app's Action Lists and
+> the commands a view registers (`use_command`, `use_opener`); behind
+> `native` the window's chords (`WindowKeys`). The workspace's own
+> commands are in `features/workspace/src/host/commands.rs`. Still to
+> come: bindings through architect-input (contexts, sequences, held-key
+> tools, MIDI), the binding editor, `@`/`#`/`?` scopes, arguments asked
+> step by step. Builds on the [Action List](@/architecture/commands.md)
+> and [architect-input](@/architecture/input.md).
 
 REAPER's Action List is the model: every single thing the program can do
 is an action with an id, listed in one window, searchable, and bindable —

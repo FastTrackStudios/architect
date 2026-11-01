@@ -11,7 +11,8 @@ use architect_workspace::{
 };
 use dioxus::prelude::*;
 use lucide_dioxus::{
-    CalendarCheck, FileText, Files, Layers, Link, ListTree, Network, Search, SquarePen, Terminal,
+    CalendarCheck, FileText, Files, Layers, Link, ListTree, Network, Search, SquarePen,
+    SquareTerminal, Terminal,
 };
 
 /// The lab's views.
@@ -64,11 +65,26 @@ fn views() -> Views {
             .home(Target::Split(Side::Right)),
         )
         .view(
+            View::new("actions", "Action list", |_| {
+                rsx! { architect_commands::ActionListView {} }
+            })
+            .icon(icon!(SquareTerminal)),
+        )
+        .view(
             View::new("note", "Untitled", |_| rsx! { NoteView {} })
                 .icon(icon!(FileText))
                 .many(),
         )
 }
+
+/// The vault's notes (the lab has no files yet).
+const NOTES: [(&str, &str); 5] = [
+    ("note-welcome", "Welcome"),
+    ("note-shell", "The app shell"),
+    ("note-workspace", "The workspace"),
+    ("note-actions", "Actions everywhere"),
+    ("note-extensions", "Extensions"),
+];
 
 fn note(id: &str, title: &str) -> Pane {
     Pane::new(id, "note", title)
@@ -137,6 +153,30 @@ pub fn VaultPage() -> Element {
         let mut workspace = workspace;
         let _ = workspace.write().open(note(&pane_id, &title), Target::Tab);
     };
+    // ⌘O finds the vault's notes (and the workspace's views and tabs).
+    architect_commands::use_opener(move || {
+        architect_commands::Opener::new(
+            "note",
+            "Notes",
+            |_| {
+                NOTES
+                    .iter()
+                    .map(|(id, title)| {
+                        architect_commands::OpenItem::new("note", *id, *title).detail("Vault")
+                    })
+                    .collect()
+            },
+            move |item, open_in| {
+                let target = match open_in {
+                    architect_commands::OpenIn::Here => Target::Here,
+                    architect_commands::OpenIn::Tab => Target::Tab,
+                    architect_commands::OpenIn::Split => Target::Split(Side::Right),
+                };
+                let mut w = workspace;
+                let _ = w.write().open(note(&item.id, &item.title), target);
+            },
+        )
+    });
     // What is open, on the status line (Obsidian's counts).
     let open = workspace.read().panes.len();
     let edits: u32 = workspace
@@ -209,13 +249,7 @@ pub fn VaultPage() -> Element {
 fn FilesView() -> Element {
     let pane = use_pane();
     let t = use_shell().theme;
-    let files = [
-        ("note-welcome", "Welcome"),
-        ("note-shell", "The app shell"),
-        ("note-workspace", "The workspace"),
-        ("note-actions", "Actions everywhere"),
-        ("note-extensions", "Extensions"),
-    ];
+    let files = NOTES;
     // The note on show is lit, as Obsidian lights the open file.
     let open_now = pane
         .workspace()

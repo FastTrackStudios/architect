@@ -17,8 +17,8 @@ use architect_shell::icon;
 use architect_shell::{self as shell, AppShell, ShellStyle};
 use dioxus::prelude::*;
 use lucide_dioxus::{
-    CalendarDays, CheckCheck, CircleUser, Feather, Inbox, Keyboard, ListTodo, LogOut, NotebookText,
-    Plus, Settings2, Users,
+    CalendarDays, CheckCheck, CircleUser, Command, Feather, Inbox, Keyboard, ListTodo, LogOut,
+    NotebookText, Plus, Settings2, Users,
 };
 
 pub use screen::{Device, use_window_chrome, use_window_screen};
@@ -94,6 +94,33 @@ pub fn LabApp() -> Element {
         right: Signal::new(true),
         status: Signal::new(shell::StatusStyle::Bar),
     });
+    // Commands: the palette (⌘K), quick open (⌘O), and every command's key.
+    let commands = architect_commands::use_commands_provider();
+    for (id, label, to) in [
+        ("LAB_GO_INBOX", "Go to Inbox", "inbox"),
+        ("LAB_GO_TASKS", "Go to Tasks", "tasks"),
+        ("LAB_GO_SCHEDULE", "Go to Schedule", "schedule"),
+        ("LAB_GO_VAULT", "Go to Vault", "vault"),
+    ] {
+        architect_commands::use_command(
+            architect_commands::Command::new(id, label).group("Go"),
+            move || lab.jump(Route::Tab(to)),
+        );
+    }
+    architect_commands::use_command(
+        architect_commands::Command::new("LAB_TOGGLE_DETAILS", "Show or hide the details")
+            .group("View"),
+        move || {
+            let mut right = lab.right;
+            right.toggle();
+        },
+    );
+    architect_commands::use_command(
+        architect_commands::Command::new("LAB_CAPTURE", "Capture")
+            .group("Inbox")
+            .shortcut("⇧⌘N"),
+        move || lab.go(Route::Item("inbox", 0)),
+    );
     let route = (lab.route)();
     let tabs = vec![
         shell::Tab::new("inbox", "Inbox", icon!(Inbox)).badge(5),
@@ -131,6 +158,8 @@ pub fn LabApp() -> Element {
         div {
             style: "position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; overflow: hidden;",
             document::Style { {CSS} }
+            // The window's chords (⌘K, ⌘W, …), whatever has the focus.
+            architect_commands::WindowKeys {}
             AppShell {
                 screen: screen(),
                 style: (lab.style)(),
@@ -157,6 +186,10 @@ pub fn LabApp() -> Element {
                 on_pull: move |()| lab.jump(Route::Tab("vault")),
                 window: window_chrome,
                 status: vec![
+                    shell::StatusItem::new("commands", "⌘K")
+                        .icon(icon!(Command))
+                        .hint("Every command")
+                        .on_press(move |()| commands.show(architect_commands::Overlay::Palette)),
                     shell::StatusItem::new("sync", "Synced")
                         .icon(icon!(CheckCheck)).hint("Every change is saved and synced"),
                     shell::StatusItem::new("people", "3 online").icon(icon!(Users)),
@@ -168,6 +201,7 @@ pub fn LabApp() -> Element {
                     Route::Item(tab, index) => rsx! { pages::ItemPage { tab, index } },
                 }
             }
+            architect_commands::CommandLayer {}
             screen::DeviceChrome {}
         }
     }
