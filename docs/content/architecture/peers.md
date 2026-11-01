@@ -84,6 +84,48 @@ let ours = digests(&registry).await;            // doc id -> vv_digest, from Ope
 let report = crdt::peer::pull(&local, &peer_client, &ours, Duration::from_secs(10)).await?;
 ```
 
+## Serving a node: devices and links
+
+`crdt::p2p` (`features/crdt/crdt/src/p2p.rs`) is the wiring above, done
+once: who a node serves, and the router each connection gets.
+
+| Item | What it is |
+| --- | --- |
+| `Devices` | The owner's other devices, by endpoint id. Kept current from the device registry: `devices.replace(directory.peer_endpoints(this_device))` with auth's `DeviceDirectory`. Read on every call, so a device taken off the account is refused on its next call. |
+| `Shares` | The live links the node has handed out. `share(endpoint, doc_id)` mints a key and returns a `DocLink`; `revoke` and `revoke_doc` close them. |
+| `NodeAccess` | Both, answering the three questions: who the caller is (`caller`: the link's `Principal::Guest` when the call presents a live key, otherwise `Principal::Host` of the proved endpoint), whether they may call at all (it is the gate's `PermissionEngine`: registered devices and live guests only), and which documents they may open (`admits`, for `DocRegistry::with_authorizer`: a device any, a guest the link's). |
+| `node_router(registry, catalog, access, remote)` | `DocSync` and `DocPeer` over the registry, behind that gate, for the connection from `remote`. |
+
+`architect::iroh_link::serve_peers` builds one per connection from the
+endpoint id the QUIC handshake proved, which is what makes the id an
+identity rather than a claim (`serve_router`, one router for every
+caller, cannot):
+
+```rust,ignore
+let access = NodeAccess::new(Devices::new(), Shares::new());
+let registry = DocRegistry::new(open_or_create)
+    .with_authorizer({ let access = access.clone(); move |who, id| access.admits(who, id) });
+iroh_link::serve_peers(&endpoint, move |remote| {
+    node_router(registry.clone(), OpenDocs(registry.clone()), access.clone(), &remote.to_string())
+})
+.await;
+```
+
+**A link** (`crdt::link`, `features/crdt/crdt/src/link.rs`) is
+`fts-doc:<endpoint id>/<doc id>?key=<key>`: the node to dial, the
+document, and the credential. The joiner parses it (`DocLink`, wasm-clean),
+dials the endpoint, and runs an ordinary `SyncedDoc` over a
+`DocSyncClient` carrying `LinkKey::new(&link)`, which presents
+`Bearer link:<key>` on each call. The guest edits that one document live,
+until the node revokes the link; it never reaches `DocPeer`.
+
+**Devices nearby.** Endpoints bound with `PeerLookup::Lan` or
+`N0AndLan` advertise as FTS nodes, `<endpoint id>._fts._udp.local.`
+(`iroh_link::LAN_SERVICE`; iroh's QUIC is UDP, hence `_udp`), with the
+name `iroh_link::advertise_name` gives them. `iroh_link::LanBrowser`
+lists them (`LanEvent::Found { endpoint, name }`, `Lost`); a found id is
+dialled bare and its address comes from the network.
+
 Peers find each other through iroh: n0 relays and DNS by default, or
 `PeerLookup::N0AndLan` / `PeerLookup::Lan` (feature `iroh-lan`) to dial
 by bare endpoint id on a LAN with the internet down
@@ -103,6 +145,17 @@ each behind its own gate, dialled over `vox::memory_link_pair`):
 | `the_registry_authorizer_sees_the_gates_caller` | per-document access sees the real caller, not `None` |
 | `a_foreign_lineage_is_refused` | two unrelated documents with one id are not merged |
 | `any_edit_order_converges` | proptest: random edit orders across replicas converge |
+
+`features/crdt/crdt/tests/p2p.rs` runs the same over real iroh endpoints,
+each node served by `serve_peers` + `node_router`, with no server:
+
+| Test | Proves |
+| --- | --- |
+| `a_link_joins_a_live_document_and_edits_flow_both_ways` | a guest holding only the link's text joins, and edits flow both ways live |
+| `a_link_opens_its_document_only_and_not_once_revoked` | a link opens nothing else, not `DocPeer`, and nothing once revoked |
+| `registered_devices_edit_live_with_no_server` | two devices from one `DeviceDirectory` edit live, and a sweep brings a document not open |
+| `an_unregistered_device_is_refused` | an endpoint off the account gets nothing; a device removed from it is refused on its next call |
+| `devices_on_one_network_find_each_other` | the LAN browser finds the other device by name, and a bare-id dial syncs (needs multicast) |
 
 ## Limits
 

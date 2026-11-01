@@ -1,17 +1,19 @@
 name: checks
 
+# The full suite runs after a PR merges, on every push to main (studio's
+# shape). A PR runs only the fast checks in pr.yml; whoever merges watches
+# main and reverts or fixes forward when it goes red.
 on:
   push:
     branches: [main]
-  pull_request:
   workflow_dispatch:
 
-# A PR's new push supersedes its old run. A push to main never cancels a
-# running check: it waits as the one pending run, so every run that starts
-# on main finishes and says whether that commit is green.
+# A push to main never cancels a running check: it waits as the one pending
+# run, so every run that starts on main finishes and says whether that
+# commit is green.
 concurrency:
   group: checks-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -98,6 +100,9 @@ jobs:
           # fetch backend) are what a browser app signs in through, so
           # their wasm build is load-bearing.
           cargo check --target wasm32-unknown-unknown -p auth-proto
+          # Files' contract and its client run in browser apps.
+          cargo check --target wasm32-unknown-unknown -p architect-files
+          cargo check --target wasm32-unknown-unknown -p architect-files --features vox
           # The keymap engine's Dioxus hook runs in browser shells.
           cargo check --target wasm32-unknown-unknown \
             -p architect-input --features dioxus

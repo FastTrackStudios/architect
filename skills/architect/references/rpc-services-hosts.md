@@ -20,7 +20,7 @@ Entity/derive, storage, the permissions gate, crdt/atom and the Action List have
 | `connect::pool` | shared, single-flight, liveness-checked connections keyed by (target, bearer) | `crates/architect/src/connect/mod.rs` `pool`, `caller_with`, `evict_all` |
 | `connect::ws` | WebSocket dial; native header / browser subprotocol bearer | `crates/architect/src/connect/ws.rs` |
 | `axum_ws` | server half of vox over an axum WebSocket | `crates/architect/src/axum_ws.rs` |
-| `iroh_link` | vox over QUIC, bare `EndpointId` dial (bounded, one retry after a peer restart), ALPN `architect/vox/1`, LAN lookup | `crates/architect/src/iroh_link.rs` `connect`, `connect_with`, `DialError`, `PeerLookup`, `bind_endpoint_with` |
+| `iroh_link` | vox over QUIC, bare `EndpointId` dial (bounded, one retry after a peer restart), ALPN `architect/vox/1`, LAN lookup and browsing, a handler per connection from the proved peer id | `crates/architect/src/iroh_link.rs` `connect`, `connect_with`, `DialError`, `PeerLookup`, `bind_endpoint_with`, `serve_peers`; `crates/architect/src/iroh_link/lan.rs` `LanBrowser` |
 | HTTP face (server/client) | `POST /<prefix>/<method>` JSON, SSE; `<Trait>HttpClient` (reqwest, wasm fetch) | `crates/architect/src/http.rs` `HttpError`, `respond`, `sse`, `HttpClient` |
 | Error envelope | `TransportError`, `ClientError<E>`, `vox_into_app` | `crates/architect/src/lib.rs` `TransportError`, `ClientError`, `vox_into_app` |
 | `PubSub` / `EventSink` | server fan-out with overflow strategies, replay, buffered attach | `crates/architect/src/pubsub.rs` `PubSub` |
@@ -145,14 +145,15 @@ EngineHost::new(backend.clone().into_router(), config.bind)
 Can:
 - Route `POST /<prefix>/<method-kebab>` by default; prefix = trait minus `Service`, kebab-cased; `path = "org/{slug}"` overrides it (may nest, may hold `{param}`s); `#[http(path = "sign-in/email")]` sets the method tail.
 - `#[http(get | put | post | delete | any, path = "notes/{id}", limit = "1GiB")]`: verb, path, body cap (axum `DefaultBodyLimit`; default 2 MiB). `{name}` / `{*name}` (last segment) bind the same-named argument via `FromStr`, `400 invalid_path` if it does not parse; a service-prefix `{param}` must be an argument of every method. Several verbs may share a path. The typed client percent-encodes params (`architect::http::encode_segment`, `encode_rest`) and sends the verb. Test: `crates/architect/tests/http_routes.rs`.
-- Body: one JSON key per non-path argument (`http::<Method>Args`); empty body = `{}`; content type not checked. A `get` route has no body: every argument comes from the path (or `token` from the bearer), else a compile error.
-- Bytes: a `BodyStream` argument (streamed upload, capped at `limit`; `413` on a declared length over it, `io::ErrorKind::FileTooLarge` mid-stream), a `RequestHead` argument (`bearer()`, `header()`, `query()`), a `ByteBody` result (`ByteBody::new(total, mime, |offset, len| …)`, `from_bytes`, `file`; served via `ranged::serve_body`, so `206`/`416` for free). Any of these makes the trait an **HTTP-only service**: no vox client/dispatcher/descriptor, no typed client method for byte methods, all `async fn`, no `context`/`ops`/`sync_client`/`actions`/`scopes`. Its `Service` token still mounts with `provide_http`. Test: `crates/architect/tests/http_bytes.rs`.
+- Body: one JSON key per non-path argument (`http::<Method>Args`); empty body = `{}`; content type not checked.
+- Query: a route with no JSON body (a `get`, or a method taking a `BodyStream`) reads its non-path arguments from the query string, `FromStr` per argument (`Option<T>` absent = `None`; missing or unparseable = `400 invalid_query`; first repeat wins; unknown names ignored). `token` there: query wins, else the bearer. The typed client writes them with `Display`, percent-encoded (`architect::http::QueryString`), and leaves out `None` and an empty `token`. Tests: `crates/architect/tests/http_routes.rs` (one scenario in process, over HTTP and over vox), `crates/architect/tests/http_bytes.rs`.
+- Bytes: a `BodyStream` argument (streamed upload, capped at `limit`; `413` on a declared length over it, `io::ErrorKind::FileTooLarge` mid-stream), a `RequestHead` argument (`bearer()`, `header()`, `query()`, `query_param(name)`), a `ByteBody` result (`ByteBody::new(total, mime, |offset, len| …)`, `from_bytes`, `file`; served via `ranged::serve_body`, so `206`/`416` for free). Any of these makes the trait an **HTTP-only service**: no vox client/dispatcher/descriptor, no typed client method for byte methods, all `async fn`, no `context`/`ops`/`sync_client`/`actions`/`scopes`. Its `Service` token still mounts with `provide_http`. Test: `crates/architect/tests/http_bytes.rs`.
 - `200` + JSON on success; errors via `HttpError::status()` (default 400, clamped ≥ 400), body `{code, message, error}`; the client decodes `ClientError::App(E)`.
 - An argument named `token` may come from `Authorization: Bearer`.
 - `#[subscribe]` → SSE `text/event-stream`, POST and GET. An argless subscription delivers its `{name}_intro` frame first over SSE (fixed in v0.9.24), as the vox stream host does.
 
 Cannot:
-- Query strings as arguments (read them via `RequestHead`); multipart; custom success status (always 200). `#[subscribe]` under a service `path` with params. A byte method on vox (split vox methods into their own trait).
+- Query arguments on a route with a JSON body (`post` / `put` with JSON); multipart; custom success status (always 200). `#[subscribe]` under a service `path` with params. A byte method on vox (split vox methods into their own trait).
 - Auth beyond `Bearer` / `token`: no cookie, no per-route guard. Use `plugin` / `finish` tower layers.
 - `context = T` traits: the HTTP face (and the action projection) is skipped.
 - Generic methods, `&mut self`, borrowed or `Self` returns: compile errors.
@@ -190,6 +191,6 @@ Cannot:
 - **Reconnect is lazy.** The pool drops a dead root on the next `caller()`; a held dead `Caller` fails. The supervised hook needs `atom` + `platform`; `use_app_pooled` evicts before redial. dioxus `use_resource` tracks signal reads inside the future: drive loops read `generation_now()`.
 - **Backoff:** full jitter, floor 250 ms, cap 10 s, reset on success; one `warn` per outage, `debug` after.
 - **Features.** Greeter needs `host`, `http-client`, `local`. `host` → `server-axum` → `telemetry` → `vox`. LAN needs `iroh-lan`. The `rpc` span needs `telemetry` (inert without a subscriber).
-- **PubSub never blocks the publisher.** Overflow drops (sliding/dropping); no back-pressure. Never publish from an audio thread.
+- **PubSub never blocks the publisher.** Overflow drops (sliding/dropping); no back-pressure. A full sink hands its backlog to a per-subscriber pump task (`platform` feature, pulled by `local` and `server-axum`), so nothing waits for the next publish; events must be `Send + Sync + 'static`. Never publish from an audio thread.
 - **`BlockingCaller` deadlocks** if used inside an async context.
 - `examples/greeter` is the only example; any doc that names another example directory is stale.

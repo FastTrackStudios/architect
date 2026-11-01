@@ -1,8 +1,10 @@
 //! The identity server's answer (feature `auth`): auth-proto's
 //! `OrganizationBundle`s — one per org the session belongs to, with its
-//! membership — as [`Org`]s.
+//! membership — as [`Org`]s, and [`fetch`], which asks for them with the
+//! session auth-client keeps.
 
-use auth_proto::OrganizationBundle;
+use auth_client::StoredSession;
+use auth_proto::{AuthFlowError, OrganizationBundle, OrganizationService};
 
 use crate::model::{Org, OrgId, Role};
 
@@ -38,4 +40,23 @@ pub fn from_bundles(bundles: &[OrganizationBundle], personal: Option<&str>) -> V
             }
         })
         .collect()
+}
+
+/// The signed-in person's orgs, live from the identity server.
+///
+/// `OrganizationService::list_organizations` over any of its clients (vox
+/// or HTTP), with the session auth-client stored. The person's own org is
+/// the one whose slug is their user id.
+///
+/// # Errors
+///
+/// The identity server's: `SessionExpired` when the session is no longer
+/// valid (sign in again), anything else when it could not answer (keep
+/// the cached list).
+pub async fn fetch<C: OrganizationService>(
+    client: &C,
+    session: &StoredSession,
+) -> Result<Vec<Org>, AuthFlowError> {
+    let bundles = client.list_organizations(session.token.clone()).await?;
+    Ok(from_bundles(&bundles, session.user_id.as_deref()))
 }

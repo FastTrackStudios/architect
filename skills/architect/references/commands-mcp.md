@@ -16,7 +16,9 @@ The full guide is `docs/content/architecture/commands.md`; this page is what an 
 | MCP HTTP | `POST /mcp`, origin guard, optional bearer, loopback serve | `features/mcp/src/http.rs` `router`, `serve`, `serve_loopback_or` |
 | MCP on `EngineHost` | feature `host`: `.mcp(server, token)` (loopback guard) and `.mcp_at("/org/{slug}/mcp", \|head\| async { Ok(McpTarget::new(server, caller)) / Err(impl IntoResponse) })` (no origin check; the resolver authenticates) | `features/mcp/src/host.rs` `McpHost`, `McpTarget`; `examples/greeter/tests/host_mounts.rs` |
 | MCP discovery | `<config>/fts/<name>-mcp.json` and a project's `.mcp.json` | `features/mcp/src/discovery.rs` `publish`, `read`, `unpublish`, `project_mcp_json` |
-| Keys | keymap bindings name action ids | `features/input/src/processor.rs` `InputProcessor` (see `docs/content/architecture/input.md`) |
+| Extensions | Run-time actions and settings from packages: `EXT_LIST` / `EXT_SEARCH` / `EXT_INSTALL` / `EXT_UNINSTALL` / `EXT_RELOAD`; an extension's actions under its id's prefix | `features/extensions/src/actions.rs`; `features/extensions/src/host.rs` `Host`; `features/extensions/tests/metronome.rs` |
+| Keys | keymap bindings name action ids; an app's `Commands` runs them in the live contexts, the person's layer over the app's | `features/input/src/processor.rs` `InputProcessor`, `features/commands/src/keymap.rs` `Keymap` (see `docs/content/architecture/input.md`) |
+| Scripts | Luau over the list: `SCRIPT_RUN` / `SCRIPT_SAVE` / `SCRIPT_DESCRIBE` (and `SCRIPT_LIST`, `SCRIPT_DELETE`, `_ORG` forms); each saved script an action `SCRIPT_MY_<NAME>` / `SCRIPT_ORG_<NAME>`; a run is one undo step | `features/scripting/src/actions.rs` `Scripting`; `features/scripting/src/luau.rs` `Runtime`, `Report`; `features/scripting/tests/scripts.rs` |
 | Telemetry | one `action` span per run, stage timings | `features/telemetry/src/timing.rs` `Stages`, `DIRECTIVES` |
 
 ## Registering
@@ -38,7 +40,8 @@ list.register_with(&TASKS_LIST, Effect::ReadOnly, |cx: &ActionCaller, a: ListArg
 
 - Handlers return `Result<R, String>`; `R` is a facet type, `()` for none, or `RawJson` (JSON another serializer wrote; checked to be one value, no result schema). Arguments are always facet types.
 - `register_dynamic` / `register_dynamic_async` take handlers already erased to JSON.
-- `set_enabled(id, || Result<(), String>)` disables with a reason (`ActionInfo::enabled` / `disabled_reason`, `ActionError::Disabled`). Register first: an unknown id is `Unknown`.
+- `set_enabled(id, || Result<(), String>)` disables with a reason (`ActionInfo::enabled` / `disabled_reason`, `ActionError::Disabled`). `set_checked(id, || bool)` makes it a toggle (`ActionInfo::checked`, `None` when it is not one; the menus tick it). Register first: an unknown id is `Unknown`.
+- `unregister(id)` takes an action off the list (an `Unregistered` event; the id is free again): for actions that come and go, such as saved scripts.
 - **Ids:** `AREA_VERB`, SCREAMING_SNAKE, starting with a letter. The id is the contract (keymaps, menus, REAPER named commands store it): never rename one. `shortcut` in `ActionMeta` is display-only.
 - **Derive path:** `#[architect::actions(namespace = "SESSION")]` on a trait; methods are `&self` only, returning nothing or `Result<(), E: Display>`. They land as `Effect::Mutating` with no args or schema, and a duplicate arriving this way is logged and kept out (only `validate()` reports it). For typed or read-only actions call `register` by hand.
 - **A service as actions:** `#[architect::service(actions)]` (or `actions = "NS"`), then `<snake>_actions::register(backend, &list)`. One async action per method, id `<NS>_<METHOD>`, doc comment as description, `http::<Method>Args` as params. Per method `#[action(effect = read_only | mutating | destructive, id, name, category, skip)]`; the effect defaults to `mutating`, so mark readers `read_only`. Needs architect's `action-list` and the HTTP face, so not for `context = T` traits.
@@ -79,14 +82,70 @@ if let Some(serving) = server.serve_loopback_or(47_811, "FTS_MCP_PORT", "FTS_MCP
 - **stdio:** `serve_stdio(&server)`. **HTTP:** `http::serve(listener, server, token)` or `serve_loopback(_or)`; the app picks the token variable. `project_mcp_json(dir, name, url)` writes the URL (never the token) into a committed `.mcp.json`.
 - **Schemas a model reads** are flat (v0.9.24): a documented field is `{"type", "description"}`, an `Option<T>` field is `T` and not required, `#[facet(deny_unknown_fields)]` adds `"additionalProperties": false`.
 
+## Scripts (`architect-scripting`)
+
+```rust
+let scripting = Scripting::new(list.clone(), Library::new(person_store).with_org(org_store))
+    .with_transactions(HistoryTransactions::new(doc.clone(), history.clone())); // feature `crdt`
+scripting.install()?;  // SCRIPT_* actions + every saved script
+```
+
+- Features: default is the model (`Script`, `Scope`, `action_id`, `ScriptError`, `Transactions`, `ScriptStore`, `MemoryStore`, `Library`; wasm-clean); `luau` the runtime and actions (mlua's Luau, built from C++ source: not on wasm); `crdt` `HistoryTransactions`; `settings` `SettingsStore` (a settings file).
+- A script's globals: `actions.list/describe/run/enabled`, `state.query` (read-only actions only), `print`/`log`, `args`; it returns its result. Each action it runs goes through `run_json_async_with` as the run's caller, so a model's script can do exactly what the model may.
+- A run opens one step (`Transactions::begin`), commits it at the end, aborts it on failure. With `crdt::History`, every `transact` an action makes while a step is open folds into it (`History::begin` / `commit` / `abort`), so the actions must share the app's one `Arc<Mutex<History>>`.
+- Failures carry their line (`ScriptError { kind, line, message }`); as an action the failure is `Failed` with `line N: …`, what ran and the log.
+- Saved scripts are read when they run; `save` checks the source first. `SCRIPT_SAVE_ORG` / `SCRIPT_DELETE_ORG` are separate ids so a permission engine can keep the organization's scripts to some people.
+- Limits: `Limits { memory, steps }` per run, `MAX_RUNNING` runs at once (a script that runs itself stops there).
+- A single-person list: on a multi-tenant server every person's saved scripts would share one list; give each its own list there.
+- Live scripts: `Runtime::start(caller, source, args, step)` runs the first part and gives a `Live`; each `Live::frame()` runs what the script handed `defer(fn)` (ReaScript's `reaper.defer`), one step each, the step limit reset. A frame that fails stops it. One-off runs have no `defer`.
+- Modules: `Runtime::with_module(Arc<dyn Module>)` adds a global and a `require` path (`require` finds nothing else). A module keeps its state in an `Arc` shared with its host, never as a Luau value (that would keep the state alive); `raise(lua, msg)` fails the script at its line. `mlua` is re-exported from `architect_scripting::luau`.
+
+## Canvases (`architect-canvas`)
+
+```rust
+let (report, session) = Session::start(&runtime, &caller, source, args, "Marker lane").await;
+let mut s = session.expect("started");          // None: the first run failed (report says why)
+s.publish("session.arrange", Some(spaces));     // the view's time axis and lanes, scrolled
+s.pointer("session.arrange", ViewPointer { at, down, context });
+s.frame(imgui::Input { pointer, down, sizes, closed }).await;  // one frame: a press, a release, a resize
+for layer in s.output().layers_on("session.arrange", Plane::Over) { /* draw */ }
+```
+
+- Scripts see `ImGui` (ReaImGui's names: `require 'imgui' '0.10'`, `CreateContext`, `Begin(ctx, name, p_open?, flags?)` → `visible, open`, `Text`, `Button`, `Checkbox`, `SliderDouble`/`SliderInt` → `changed, v`, `SameLine`, `Separator`, `PushID`, `WindowFlags_*`, `Cond_*`) and `Canvas` (`Layer(view, plane?, id?)`, `Spaces`, `TimeToX`, `Lane`, `Line`, `Rect`, `Circle`, `Text`, `Region` → `hovered, clicked, held, context`). Colours are `0xRRGGBBAA`.
+- A window is a workspace pane: the UI never moves or titles it; it is laid out at its pane's size (`Input::sizes`), its id is `<context>/<name id>`, closing its pane gives `open == false` once (`Input::closed`).
+- A layer drawn into in a frame is redrawn from scratch; untouched it keeps its last drawing. Regions answer from the last frame's hit-test (the last claimed is on top); everywhere else the pointer passes to the view.
+- Frames come on change, not a timer: a press and a release must each be its own frame (`use_script_canvas` does this).
+- On Blitz: `use_canvases()` at the app, `use_script_canvas(…)` per script, `use_tool_windows(workspace)`, `window_view()` in the `Views`, and `CanvasLayers { view, plane }` as a child of the (positioned) view, which publishes its spaces with `Canvases::publish`. Shapes are boxes (no egui, no `<canvas>` yet).
+- An extension declares `[[overlays]] id, view, plane, script` (Luau kind only); the app starts it as a `Session` on a runtime gated by `host::gate(&manifest)`.
+
+## Extensions (`architect-extensions`)
+
+```rust
+let host = Host::new(list.clone(), SharedSections::new(registry)); // `ui`: use_extension_sections()
+let ext = Extensions::new(host, Installs::new(data_dir.join("extensions")))
+    .with_source(GitRegistry::new(url, cache_dir))   // or FolderRegistry, ReaPackSource
+    .with_builtin(Package::embedded(include_str!(".../extension.toml"), &[("x.luau", include_str!(".../x.luau"))])?);
+ext.install_actions()?;          // EXT_LIST / EXT_SEARCH / EXT_INSTALL / EXT_UNINSTALL / EXT_RELOAD
+let _ = ext.sync();              // load the copy of each that runs
+// on a timer: ext.reload_changed()  — hot reload; a failed one keeps its last good copy
+```
+
+- A package is `extension.toml` + files. Kinds `data` (presets only) and `luau` run built in; `wasm` and `process` need a `host::Runner` the app adds (none ship yet: `LoadError::NoRunner`).
+- An extension's actions must start with its id's prefix (`fts.metronome` → `FTS_METRONOME_`), its setting keys with `<id>.`; sections are owned by it and leave with it. A Luau extension runs inside its `[capabilities]` (`actions` prefixes, the most `effect`) through `luau::Runtime::with_gate`; a model's call still runs as the model.
+- Extension actions go on the list with `ActionList::register_forwarded_with` (`crates/architect/src/action_list.rs`): a described action whose handler is handed the caller.
+- A reload is a diff: kept actions keep their ids; on any failure nothing is swapped. Values of its settings survive (keys unchanged).
+- Which copy runs (`catalog::choose`): a dev copy, else an installed one newer than the built-in, else the built-in. `disable(id)` keeps it off whatever copies exist.
+- A project's needs: `Requirements` in its document's `meta` (`doc::requirements`, feature `crdt`); `Extensions::open` makes a `Plan` (install / offer / missing, with an org `Policy`), `accept` installs and loads it.
+- Registry installs are copies; a folder registry's are links (an edit there reloads). `GitRegistry` shells out to `git`; `ReaPackSource` fetches through the app's `Fetch` (`LocalFetch` does `file://` only).
+
 ## Pitfalls
 
-1. `run_json` refuses async actions; a key or menu handler spawns `run_json_async` on the app's runtime.
+1. `run_json` refuses async actions; a key or menu handler spawns `run_json_async` on the app's runtime (architect-commands' `Commands::run` does, so ⌘K runs saved scripts and service actions).
 2. The app doors skip the authorizer by design. Don't assume a key or menu run is authorized, and give the list the same engine as the router's `PermissionsGate` (`set_authorizer`): otherwise there are two planes.
 3. The MCP HTTP transport calls `handle`, so every request runs as the server's one principal. The bearer token is a gate, not an identity; per-request principals need your own transport around `handle_as` / `handle_with`.
 4. The origin guard checks an `Origin` header only when present, and does not check `Host`. Bind loopback, make serving opt-in (`FTS_MCP=0` turns `serve_loopback` off), and set a token for any app with destructive actions.
 5. `batch` with missing or non-array `steps` runs zero steps without an error.
 6. `#[architect::service(actions)]` handlers do not see the caller; a per-org service registers by hand with `register_async_with`. A projected failure is the error's `Display`, not the HTTP face's `{code, message}`.
 7. `validate()` checks schemas are JSON objects only; it does not prove the decoder and schema agree beyond that.
-8. Menu and palette adapters from `ActionInfo` are not in architect (I13). architect-ui `Command*` / `Menubar*` take their own items; Session builds its menu from `infos()` (`studio:apps/session/daw/src/app_menu.rs`). The launcher (`features/launcher/architect-launcher-core`) is a separate catalogue with no architect dependency and no bridge to the list.
+8. The palette and the menu bar over the Action List are `architect-commands` (`features/commands/src/ui.rs` `use_action_list`; `features/commands/src/menu.rs` `MenuBar`). architect-ui `Command*` / `Menubar*` still take their own items. A menu re-reads enabled and ticked states when the list's events move on: after changing what a check reads outside an action, call `list.changed(topic, detail)`. The launcher (`features/launcher/architect-launcher-core`) is a separate catalogue with no architect dependency and no bridge to the list.
 9. The queued-window pattern for UI-only effects is Session's (`studio:apps/session/daw/src/actions.rs` `WINDOW`, `take_window`): a programmatic run never opens a dialog.

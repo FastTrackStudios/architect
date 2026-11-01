@@ -1,0 +1,15 @@
+[package]
+name = "architect-lab-clicker"
+description = "The lab's process extension: a Dioxus view in a process of its own, shown in a workspace pane over vox (apps/lab/clicker/extension.toml). Kill it and the lab runs on."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+architect-extensions = { workspace = true, features = ["guest"] }
+dioxus = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

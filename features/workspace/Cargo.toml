@@ -16,7 +16,7 @@ description = "The workspace: tab groups in splits, docks with ribbons, stacked 
 
 [features]
 default = []
-ui = ["dep:dioxus", "dep:architect-shell", "architect-shell/ui", "dep:futures-timer", "dep:futures-util", "dep:lucide-dioxus", "dep:architect-commands", "architect-commands/ui"]
+ui = ["dep:dioxus", "dep:architect-shell", "architect-shell/ui", "dep:futures-timer", "dep:futures-util", "dep:lucide-dioxus", "architect-commands/ui"]
 native = ["ui", "dep:dioxus-native", "dep:blitz-shell", "dep:blitz-traits", "dep:dioxus-asset-resolver"]
 hot-reload = ["native", "dioxus-native/hot-reload", "dep:dioxus-devtools"]
 
@@ -27,8 +27,6 @@ thiserror = { workspace = true }
 dioxus = { workspace = true, optional = true }
 architect-shell = { workspace = true, optional = true }
 lucide-dioxus = { workspace = true, optional = true }
-# The workspace's commands, in the app's palette.
-architect-commands = { workspace = true, optional = true }
 dioxus-native = { workspace = true, optional = true, features = ["vello"] }
 blitz-shell = { workspace = true, optional = true }
 blitz-traits = { workspace = true, optional = true }
@@ -37,6 +35,9 @@ dioxus-devtools = { workspace = true, optional = true }
 # What the platform says about a pointer let go outside a window, heard in
 # the host's dom.
 futures-util = { version = "0.3", default-features = false, optional = true }
+# The workspace's commands, in the app's palette; by default the model
+# (the screensets as a menu's live rows), wasm-clean.
+architect-commands = { workspace = true }
 # A measurement mid-drag finds the document busy and asks again shortly.
 futures-timer = { workspace = true, optional = true }
 

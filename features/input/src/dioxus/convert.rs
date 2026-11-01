@@ -90,6 +90,7 @@ pub fn convert_mouse_event(e: &MouseEvent, action: MouseAction) -> InputEvent {
         x: coords.x,
         y: coords.y,
         modifiers: convert_modifiers(&e.modifiers()),
+        from: None,
     })
 }
 

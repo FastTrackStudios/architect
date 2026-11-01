@@ -1,0 +1,574 @@
+//! Registries and what is installed from them (feature `host`).
+//!
+//! A [`Source`] is where packages come from: a registry's git repository
+//! ([`GitRegistry`], cloned and pulled with the `git` program), a folder
+//! with an `index.toml` ([`FolderRegistry`]: a registry being written, or
+//! one on a shared drive), or a `ReaPack` repository ([`ReaPackSource`],
+//! its `index.xml` and files fetched through a [`Fetch`] the app gives —
+//! [`LocalFetch`] for `file://`, the app's HTTP client for the rest).
+//!
+//! [`Installs`] keeps what is installed, one folder an id under its root:
+//! the package copied in, or — from a folder registry — a link to the
+//! package where it is, so an author's edit there is what loads.
+
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::{Arc, Mutex, PoisonError};
+
+use semver::Version;
+use serde::{Deserialize, Serialize};
+
+use crate::index::{Index, Listing, Location};
+use crate::manifest::{MANIFEST, Manifest};
+
+/// Why a source or an install failed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum InstallError {
+    /// The registry could not be reached or read.
+    Source(String),
+    /// `git` failed (its message), or is not there.
+    Git(String),
+    /// A file could not be read or written.
+    Io(String),
+    /// What came is not what was listed: another id or version, or no
+    /// manifest.
+    Mismatch(String),
+    /// No source has it, at a version that fits.
+    NotFound(String),
+    /// The organization does not allow it.
+    NotAllowed(String),
+}
+
+impl std::fmt::Display for InstallError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Source(e) => write!(f, "the registry: {e}"),
+            Self::Git(e) => write!(f, "git: {e}"),
+            Self::Io(e) | Self::NotAllowed(e) => f.write_str(e),
+            Self::Mismatch(e) => write!(f, "not what the registry listed: {e}"),
+            Self::NotFound(e) => write!(f, "no registry has {e}"),
+        }
+    }
+}
+
+impl std::error::Error for InstallError {}
+
+fn io(what: &Path) -> impl Fn(std::io::Error) -> InstallError + '_ {
+    move |e| InstallError::Io(format!("{}: {e}", what.display()))
+}
+
+/// How a source handed over a package.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Fetched {
+    /// Its files are now in the folder it was given.
+    Copied,
+    /// It is used where it is (a folder registry's package).
+    Linked(PathBuf),
+}
+
+/// Where packages come from.
+pub trait Source: Send + Sync {
+    /// What the person calls it (its index's name, or its URL).
+    fn name(&self) -> String;
+
+    /// Brings it up to date: pulls the repository, fetches the index.
+    ///
+    /// # Errors
+    ///
+    /// It cannot be reached.
+    fn refresh(&self) -> Result<(), InstallError>;
+
+    /// What it offers, as of the last refresh.
+    ///
+    /// # Errors
+    ///
+    /// The index cannot be read.
+    fn index(&self) -> Result<Index, InstallError>;
+
+    /// Puts `listing`'s files in `into` (an empty folder), or says where
+    /// they are.
+    ///
+    /// # Errors
+    ///
+    /// They cannot be fetched.
+    fn fetch(&self, listing: &Listing, into: &Path) -> Result<Fetched, InstallError>;
+}
+
+/// Fetches a URL's bytes: what a `ReaPack` source downloads with.
+pub trait Fetch: Send + Sync {
+    /// # Errors
+    ///
+    /// It cannot be fetched.
+    fn get(&self, url: &str) -> Result<Vec<u8>, String>;
+}
+
+/// `file://` URLs and plain paths.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LocalFetch;
+
+impl Fetch for LocalFetch {
+    fn get(&self, url: &str) -> Result<Vec<u8>, String> {
+        let path = url.strip_prefix("file://").unwrap_or(url);
+        if path.contains("://") {
+            return Err(format!(
+                "{url}: only local files here; give the app's HTTP fetch"
+            ));
+        }
+        std::fs::read(path).map_err(|e| format!("{url}: {e}"))
+    }
+}
+
+/// A registry in a folder: `index.toml` and the packages it lists by path.
+/// Packages are linked, not copied: what is in the folder is what loads.
+#[derive(Clone, Debug)]
+pub struct FolderRegistry {
+    root: PathBuf,
+}
+
+impl FolderRegistry {
+    pub fn new(root: impl Into<PathBuf>) -> Self {
+        Self { root: root.into() }
+    }
+
+    #[must_use]
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    fn read_index(&self) -> Result<Index, InstallError> {
+        let path = self.root.join("index.toml");
+        let text = std::fs::read_to_string(&path).map_err(io(&path))?;
+        Index::parse(&text).map_err(|e| InstallError::Source(e.to_string()))
+    }
+
+    /// Where a listed path is in the folder, refusing one that leaves it.
+    fn package_dir(&self, path: &str) -> Result<PathBuf, InstallError> {
+        let rel = Path::new(path);
+        if !rel
+            .components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)))
+        {
+            return Err(InstallError::Mismatch(format!(
+                "{path} is outside the registry"
+            )));
+        }
+        Ok(self.root.join(rel))
+    }
+}
+
+impl Source for FolderRegistry {
+    fn name(&self) -> String {
+        self.read_index()
+            .ok()
+            .map(|i| i.name)
+            .filter(|n| !n.is_empty())
+            .unwrap_or_else(|| self.root.display().to_string())
+    }
+
+    fn refresh(&self) -> Result<(), InstallError> {
+        self.read_index().map(drop)
+    }
+
+    fn index(&self) -> Result<Index, InstallError> {
+        self.read_index()
+    }
+
+    fn fetch(&self, listing: &Listing, into: &Path) -> Result<Fetched, InstallError> {
+        match &listing.location {
+            Location::Path(path) => Ok(Fetched::Linked(self.package_dir(path)?)),
+            Location::Git { url, rev } => clone_at(url, rev, into).map(|()| Fetched::Copied),
+            Location::Files(files) => fetch_files(&LocalFetch, files, into),
+        }
+    }
+}
+
+/// A registry's git repository, cloned into a folder of the app's and
+/// pulled on [`Source::refresh`]: what most registries are.
+#[derive(Clone, Debug)]
+pub struct GitRegistry {
+    url: String,
+    checkout: FolderRegistry,
+}
+
+impl GitRegistry {
+    /// The registry at `url`, checked out in `checkout`.
+    pub fn new(url: impl Into<String>, checkout: impl Into<PathBuf>) -> Self {
+        Self {
+            url: url.into(),
+            checkout: FolderRegistry::new(checkout),
+        }
+    }
+}
+
+impl Source for GitRegistry {
+    fn name(&self) -> String {
+        self.checkout
+            .read_index()
+            .ok()
+            .map(|i| i.name)
+            .filter(|n| !n.is_empty())
+            .unwrap_or_else(|| self.url.clone())
+    }
+
+    fn refresh(&self) -> Result<(), InstallError> {
+        let dir = self.checkout.root();
+        if dir.join(".git").exists() {
+            git(Some(dir), &["fetch", "--depth", "1", "origin"])?;
+            git(Some(dir), &["reset", "--hard", "FETCH_HEAD"])
+        } else {
+            if let Some(parent) = dir.parent() {
+                std::fs::create_dir_all(parent).map_err(io(parent))?;
+            }
+            let target = dir.display().to_string();
+            git(None, &["clone", "--depth", "1", &self.url, &target])
+        }
+    }
+
+    fn index(&self) -> Result<Index, InstallError> {
+        self.checkout.read_index()
+    }
+
+    fn fetch(&self, listing: &Listing, into: &Path) -> Result<Fetched, InstallError> {
+        match &listing.location {
+            Location::Path(path) => {
+                copy_dir(&self.checkout.package_dir(path)?, into)?;
+                Ok(Fetched::Copied)
+            }
+            Location::Git { url, rev } => clone_at(url, rev, into).map(|()| Fetched::Copied),
+            Location::Files(files) => fetch_files(&LocalFetch, files, into),
+        }
+    }
+}
+
+/// A `ReaPack` repository: its `index.xml` at a URL, its files fetched.
+pub struct ReaPackSource {
+    url: String,
+    fetch: Arc<dyn Fetch>,
+    index: Mutex<Option<Index>>,
+}
+
+impl std::fmt::Debug for ReaPackSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReaPackSource")
+            .field("url", &self.url)
+            .finish_non_exhaustive()
+    }
+}
+
+impl ReaPackSource {
+    /// The repository whose index is at `url`, fetched with `fetch`.
+    pub fn new(url: impl Into<String>, fetch: impl Fetch + 'static) -> Self {
+        Self {
+            url: url.into(),
+            fetch: Arc::new(fetch),
+            index: Mutex::new(None),
+        }
+    }
+}
+
+impl Source for ReaPackSource {
+    fn name(&self) -> String {
+        self.index
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .map(|i| i.name.clone())
+            .filter(|n| !n.is_empty())
+            .unwrap_or_else(|| self.url.clone())
+    }
+
+    fn refresh(&self) -> Result<(), InstallError> {
+        let bytes = self.fetch.get(&self.url).map_err(InstallError::Source)?;
+        let text = String::from_utf8(bytes).map_err(|e| InstallError::Source(e.to_string()))?;
+        let index =
+            crate::reapack::parse(&text).map_err(|e| InstallError::Source(e.to_string()))?;
+        *self.index.lock().unwrap_or_else(PoisonError::into_inner) = Some(index);
+        Ok(())
+    }
+
+    fn index(&self) -> Result<Index, InstallError> {
+        if self
+            .index
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_none()
+        {
+            self.refresh()?;
+        }
+        Ok(self
+            .index
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+            .unwrap_or_default())
+    }
+
+    fn fetch(&self, listing: &Listing, into: &Path) -> Result<Fetched, InstallError> {
+        match &listing.location {
+            Location::Files(files) => fetch_files(self.fetch.as_ref(), files, into),
+            other => Err(InstallError::Mismatch(format!(
+                "a ReaPack package lists files, not {other:?}"
+            ))),
+        }
+    }
+}
+
+fn fetch_files(
+    fetch: &dyn Fetch,
+    files: &[(String, String)],
+    into: &Path,
+) -> Result<Fetched, InstallError> {
+    for (url, file) in files {
+        let rel = Path::new(file);
+        if !rel
+            .components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)))
+        {
+            return Err(InstallError::Mismatch(format!(
+                "{file} is outside the package"
+            )));
+        }
+        let bytes = fetch.get(url).map_err(InstallError::Source)?;
+        let path = into.join(rel);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(io(parent))?;
+        }
+        std::fs::write(&path, bytes).map_err(io(&path))?;
+    }
+    Ok(Fetched::Copied)
+}
+
+/// Runs `git` (in `dir`), never asking for a password.
+fn git(dir: Option<&Path>, args: &[&str]) -> Result<(), InstallError> {
+    let mut cmd = Command::new("git");
+    if let Some(dir) = dir {
+        cmd.arg("-C").arg(dir);
+    }
+    let out = cmd
+        .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .map_err(|e| InstallError::Git(format!("cannot run git: {e}")))?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(InstallError::Git(
+            String::from_utf8_lossy(&out.stderr).trim().to_owned(),
+        ))
+    }
+}
+
+/// Clones `url` into `into` at `rev` (a tag, a branch or a commit), and
+/// drops its `.git`.
+fn clone_at(url: &str, rev: &str, into: &Path) -> Result<(), InstallError> {
+    let target = into.display().to_string();
+    git(None, &["clone", "--quiet", url, &target])?;
+    git(Some(into), &["checkout", "--quiet", rev])?;
+    let dot_git = into.join(".git");
+    std::fs::remove_dir_all(&dot_git).map_err(io(&dot_git))
+}
+
+/// Copies the folder `from` into `to`, leaving out `.git`.
+fn copy_dir(from: &Path, to: &Path) -> Result<(), InstallError> {
+    std::fs::create_dir_all(to).map_err(io(to))?;
+    for entry in std::fs::read_dir(from).map_err(io(from))? {
+        let entry = entry.map_err(io(from))?;
+        let path = entry.path();
+        if entry.file_name() == ".git" {
+            continue;
+        }
+        let dest = to.join(entry.file_name());
+        if entry.file_type().map_err(io(&path))?.is_dir() {
+            copy_dir(&path, &dest)?;
+        } else {
+            std::fs::copy(&path, &dest).map_err(io(&path))?;
+        }
+    }
+    Ok(())
+}
+
+/// What `installed.toml` records of an install.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+struct Record {
+    id: String,
+    version: String,
+    kind: String,
+    /// Where it came from (the source's name).
+    source: String,
+    /// The package's folder, when it is linked rather than copied.
+    #[serde(default)]
+    link: Option<PathBuf>,
+}
+
+const RECORD: &str = "installed.toml";
+
+/// One installed package.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Install {
+    pub id: String,
+    pub version: Version,
+    pub kind: String,
+    pub source: String,
+    /// Where its files are: its own folder, or the folder it links to.
+    pub dir: PathBuf,
+    pub linked: bool,
+}
+
+impl Install {
+    /// Whether it is an extension the host loads (not a `ReaPack` package
+    /// of the app's own kinds).
+    #[must_use]
+    pub fn is_extension(&self) -> bool {
+        matches!(self.kind.as_str(), "data" | "luau" | "wasm" | "process")
+    }
+}
+
+/// What is installed, one folder an id under `root`.
+#[derive(Clone, Debug)]
+pub struct Installs {
+    root: PathBuf,
+}
+
+impl Installs {
+    pub fn new(root: impl Into<PathBuf>) -> Self {
+        Self { root: root.into() }
+    }
+
+    #[must_use]
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// The folder of `id`'s install.
+    fn slot(&self, id: &str) -> PathBuf {
+        let slug: String = id
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || ".-_".contains(c) {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        self.root.join(slug)
+    }
+
+    /// Everything installed, by id.
+    #[must_use]
+    pub fn list(&self) -> Vec<Install> {
+        let Ok(entries) = std::fs::read_dir(&self.root) else {
+            return Vec::new();
+        };
+        let mut out: Vec<Install> = entries
+            .filter_map(Result::ok)
+            .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
+            .filter_map(|e| read_record(&e.path()))
+            .collect();
+        out.sort_by(|a, b| a.id.cmp(&b.id));
+        out
+    }
+
+    /// `id`'s install.
+    #[must_use]
+    pub fn get(&self, id: &str) -> Option<Install> {
+        read_record(&self.slot(id))
+    }
+
+    /// Installs `listing` from `source`, in place of the version there
+    /// was. An extension's manifest must say the id and version listed.
+    ///
+    /// # Errors
+    ///
+    /// It cannot be fetched or written, or is not what was listed.
+    pub fn install(&self, source: &dyn Source, listing: &Listing) -> Result<Install, InstallError> {
+        std::fs::create_dir_all(&self.root).map_err(io(&self.root))?;
+        let slot = self.slot(&listing.id);
+        let incoming = self.root.join(format!(
+            ".incoming-{}",
+            slot.file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        ));
+        if incoming.exists() {
+            std::fs::remove_dir_all(&incoming).map_err(io(&incoming))?;
+        }
+        let result = Self::receive(source, listing, &incoming, &slot);
+        if incoming.exists() {
+            let _ = std::fs::remove_dir_all(&incoming);
+        }
+        result
+    }
+
+    fn receive(
+        source: &dyn Source,
+        listing: &Listing,
+        incoming: &Path,
+        slot: &Path,
+    ) -> Result<Install, InstallError> {
+        let fetched = source.fetch(listing, incoming)?;
+        let link = match fetched {
+            Fetched::Copied => None,
+            Fetched::Linked(dir) => Some(dir),
+        };
+        let files = link.clone().unwrap_or_else(|| incoming.to_path_buf());
+        let is_extension = matches!(listing.kind.as_str(), "data" | "luau" | "wasm" | "process");
+        if is_extension {
+            let path = files.join(MANIFEST);
+            let text = std::fs::read_to_string(&path).map_err(io(&path))?;
+            let manifest =
+                Manifest::parse(&text).map_err(|e| InstallError::Mismatch(e.to_string()))?;
+            if manifest.id != listing.id || manifest.version != listing.version {
+                return Err(InstallError::Mismatch(format!(
+                    "listed {} {}, its manifest says {} {}",
+                    listing.id, listing.version, manifest.id, manifest.version
+                )));
+            }
+        }
+        std::fs::create_dir_all(incoming).map_err(io(incoming))?;
+        let record = Record {
+            id: listing.id.clone(),
+            version: listing.version.to_string(),
+            kind: listing.kind.clone(),
+            source: source.name(),
+            link,
+        };
+        let text = toml::to_string(&record).map_err(|e| InstallError::Io(e.to_string()))?;
+        let at = incoming.join(RECORD);
+        std::fs::write(&at, text).map_err(io(&at))?;
+        if slot.exists() {
+            std::fs::remove_dir_all(slot).map_err(io(slot))?;
+        }
+        std::fs::rename(incoming, slot).map_err(io(slot))?;
+        read_record(slot)
+            .ok_or_else(|| InstallError::Io(format!("{} was not kept", slot.display())))
+    }
+
+    /// Removes `id`'s install: false when there was none. A linked one's
+    /// folder is left where it is.
+    ///
+    /// # Errors
+    ///
+    /// It cannot be removed.
+    pub fn uninstall(&self, id: &str) -> Result<bool, InstallError> {
+        let slot = self.slot(id);
+        if !slot.exists() {
+            return Ok(false);
+        }
+        std::fs::remove_dir_all(&slot).map_err(io(&slot))?;
+        Ok(true)
+    }
+}
+
+fn read_record(slot: &Path) -> Option<Install> {
+    let text = std::fs::read_to_string(slot.join(RECORD)).ok()?;
+    let record: Record = toml::from_str(&text).ok()?;
+    Some(Install {
+        version: Version::parse(&record.version).ok()?,
+        linked: record.link.is_some(),
+        dir: record.link.unwrap_or_else(|| slot.to_path_buf()),
+        id: record.id,
+        kind: record.kind,
+        source: record.source,
+    })
+}

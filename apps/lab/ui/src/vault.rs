@@ -5,6 +5,8 @@
 //! window for a window of its own, on a desk — hold W to grab a pane
 //! without tabs, right-click (or ⋯, or hold a finger on) a tab for the
 //! rest. ⌘1 recalls the "Write" screenset, ⌘2 "Mix" (the notes stacked).
+//! The arrangement tab has a script's marker lane over it, and the
+//! script's tool window floats.
 
 use architect_shell::{Action, FormFactor, PageBar, Screen, StatusItem, Toolbar, icon, use_shell};
 use architect_workspace::{
@@ -13,8 +15,8 @@ use architect_workspace::{
 };
 use dioxus::prelude::*;
 use lucide_dioxus::{
-    CalendarCheck, FileText, Files, Layers, Link, ListTree, Network, Search, SquarePen,
-    SquareTerminal, Terminal,
+    AudioLines, CalendarCheck, FileText, Files, Layers, Link, ListTree, MousePointerClick, Network,
+    Search, SlidersHorizontal, SquarePen, SquareTerminal, Terminal,
 };
 
 /// The lab's views.
@@ -73,9 +75,29 @@ fn views() -> Views {
             .icon(icon!(SquareTerminal)),
         )
         .view(
+            View::new("arrange", "Arrangement", |_| rsx! { crate::arrange::ArrangeView {} })
+                .icon(icon!(AudioLines)),
+        )
+        .view(architect_canvas::ui::window_view().icon(icon!(SlidersHorizontal)))
+        .view(
             View::new("note", "Untitled", |_| rsx! { NoteView {} })
                 .icon(icon!(FileText))
                 .many(),
+        )
+        // A process extension's view, drawn by another process
+        // (`apps/lab/clicker`).
+        .view(
+            View::new("clicker", "Clicker", |_| {
+                rsx! {
+                    architect_extensions::remote::RemoteView {
+                        processes: crate::extensions::processes(),
+                        extension: crate::extensions::CLICKER,
+                        view: "counter",
+                    }
+                }
+            })
+            .icon(icon!(MousePointerClick))
+            .home(Target::Split(Side::Right)),
         )
 }
 
@@ -98,6 +120,7 @@ fn first_workspace() -> Workspace {
     let opens = [
         (note("note-welcome", "Welcome"), Target::Tab),
         (note("note-shell", "The app shell"), Target::Tab),
+        (Pane::new("arrange", "arrange", "Arrangement"), Target::Tab),
         (
             Pane::new("graph", "graph", "Graph"),
             Target::Split(Side::Right),
@@ -118,6 +141,7 @@ fn first_workspace() -> Workspace {
             Pane::new("backlinks", "backlinks", "Backlinks"),
             Target::Dock(Side::Right),
         ),
+        (Pane::new("clicker", "clicker", "Clicker"), Target::Tab),
     ];
     for (pane, target) in opens {
         let _ = w.open(pane, target);
@@ -176,6 +200,11 @@ pub fn VaultPage() -> Element {
     let store = use_root_context(|| VaultStore(WorkspaceStore::new(MemoryStore::new()))).0;
     let pane_status = use_signal(Vec::new);
     let views = use_hook(views);
+    // The marker lane draws over the arrangement; its tool window floats
+    // as a pane, to dock or tab like any other.
+    let _canvases = architect_canvas::ui::use_canvases();
+    crate::arrange::use_marker_lane();
+    architect_canvas::ui::use_tool_windows(workspace);
     let mut made = use_signal(|| 0_u32);
     let commands = vec![
         Command::new("new-note", "New note", icon!(SquarePen)),

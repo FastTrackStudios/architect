@@ -81,8 +81,21 @@ Tests to copy: `features/auth/tests/native/src/permissions_gate_tests.rs` (`esta
 - Share lane: `StaticPrincipal(Principal::Guest { link_id, display })` with `ScopeEngine::new(vec![Rule::new("probe/", &["read"])])`; a scope denies everything outside its rules.
 - Identity chains (Task): host bearer → central accounts → home-org fallback → own store, wrapped in an audited resolver so "no token" and "token rejected" are distinguishable (`task:apps/server/src/permits.rs`, `task:apps/server/src/lib.rs`). Central identity alone never admits: the membership table is the fence.
 
+## E. Confine every service to the caller's org
+
+`architect-orgs` feature `server` (native; `docs/content/architecture/organizations.md`). Test to copy: `features/orgs/tests/server.rs`.
+
+1. Members: `Members::new()`, shared by the two pieces below.
+2. Identity: `MembersResolver::new(sessions, IdentityServer(orgs_client), members.clone())` wraps the resolver you already have; on each resolve it asks the identity server (`OrganizationService::list_organizations`, through any of its clients) which orgs the session is in, at most once per `MEMBERS_TTL` (`with_ttl`). An unanswered session is in no org.
+3. Engine: `ConfinedEngine::new(members).role(&Role::Member, vec![Rule::new("**", &["read", "write"])])`, rules written org-relative (`vault/**`); `.over(engine)` adds your existing engine after it. A non-member is refused; so is a resource in another org (`org/<other>/…`); an in-process `Principal::Service` is in every org.
+4. Per connection on an org's lane (`/org/{slug}/vox`): `confine(org_id, PermissionsGate::wrap_shared_with_bearer(gate, router, bearer))`. Handlers read `current_org()` and key data by `OrgId::path`. Spawned work runs `in_org(org, fut)`.
+5. A lane in no org is the All-organizations one: resources there name their org (`OrgId::path`), and a service reads across `Members::scope_of(&principal)`.
+
+Entry points: `features/orgs/src/server.rs` `confine`, `current_org`, `Members`, `MembersResolver`, `IdentityServer`, `ConfinedEngine`, `Directory`.
+
 ## Pitfalls
 
+- **Org confinement is the engine's:** `confine` only says which org a call is in. Without `ConfinedEngine` as (or inside) the gate's engine, nothing refuses a non-member. Membership lags removal by up to `MEMBERS_TTL`.
 - **Fail-closed by default; Task opts out.** Task sets `UnlistedPolicy::Allow`, so its untabled services are served unchecked, and enforces only when `TASK_ENFORCE_PERMISSIONS` is exactly `1` (`task:apps/server/src/config.rs`).
 - **Observe-only lets every deny through**, including fail-closed and unlisted denials; it audits `principal: "observe-only", action: "would-deny"`, and resolves identity twice on a deny.
 - **The gate checks the coarse resource only** (`vault/{path}` means `vault/**`); per-path decisions belong in the handler via `PermissionEngine::check`.
