@@ -4,7 +4,15 @@ description = "The organization (workspace) is architect's, not an app's: files,
 weight = 52
 +++
 
-> **Status: proposed (2026-10-31).** For review before any code. The
+> **Status: the client's org layer landed (2026-11-01)** in
+> `architect-orgs` (`features/orgs`): `features/orgs/src/model.rs` `Orgs`
+> (the person's orgs, the window's `Selection`, the device's cache),
+> `Role`, `Capabilities` (the app's, by role, with per-org grants);
+> `features/orgs/src/auth.rs` `from_bundles` (fts-auth's
+> `list_organizations` answer); `features/orgs/src/ui.rs` `use_org`,
+> `OrgHandle::switcher` (the shell's switcher). Still to come: features
+> scoped by the current org (files, documents, settings' org levels), the
+> server side's confinement. Proposed (2026-10-31): the
 > model exists ([auth](@/architecture/auth.md): organizations, members,
 > roles, teams, invitations, invite links, devices, linked agents, served
 > over vox and HTTP from one declaration); this page makes it the scope

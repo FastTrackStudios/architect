@@ -14,6 +14,7 @@ mod screen;
 mod settings;
 mod vault;
 
+use architect_orgs::{Capabilities, Org, Orgs, Role};
 use architect_shell::icon;
 use architect_shell::{self as shell, AppShell, ShellStyle};
 use dioxus::prelude::*;
@@ -223,27 +224,48 @@ pub fn LabApp() -> Element {
         shell::Tab::new("vault", "Vault", icon!(NotebookText)),
     ];
     // Which workspace the lab shows; `None` is all of them.
-    let mut workspace = use_signal(|| Some("fts".to_owned()));
-    let workspaces = shell::Workspaces::new("Organization", move |id| workspace.set(id))
-        .all("All organizations")
-        .with(
-            shell::Workspace::new("fts", "FastTrackStudio")
-                .detail("12 members")
-                .color("#1d4ed8"),
-        )
-        .with(
-            shell::Workspace::new("hp", "Harbor & Pine")
-                .detail("Band · 4 members")
-                .color("#b45309"),
-        )
-        .with(
-            shell::Workspace::new("me", "Personal")
-                .detail("Just you")
-                .color("#047857"),
-        )
-        .current(workspace())
+    // The person's organizations (the identity server's, here made up):
+    // the switcher, and what each role may do.
+    let orgs = architect_orgs::use_orgs_provider(
+        || {
+            Orgs::new(vec![
+                Org::new("me", "Personal", Role::Owner)
+                    .personal()
+                    .color("#047857"),
+                Org::new("fts", "FastTrackStudio", Role::Admin)
+                    .members(12)
+                    .color("#1d4ed8"),
+                Org::new("hp", "Harbor & Pine", Role::Viewer)
+                    .members(4)
+                    .color("#b45309"),
+            ])
+        },
+        Capabilities::new()
+            .allow(&Role::Viewer, ["notes.read"])
+            .allow(&Role::Member, ["notes.write"])
+            .allow(&Role::Admin, ["members.invite"])
+            .allow(&Role::Owner, ["org.delete"])
+            .inherit(),
+        None,
+    );
+    let workspaces = orgs
+        .switcher(Some("All organizations"))
         .action("New organization", icon!(Plus), |()| {})
         .action("Manage organizations", icon!(Settings2), |()| {});
+    // A command that is the role's to allow: off with the reason elsewhere.
+    let here = orgs
+        .current()
+        .map_or_else(|| "every organization".to_owned(), |o| o.name);
+    let invite =
+        architect_commands::Command::new("ORG_INVITE", "Invite people").group("Organization");
+    architect_commands::use_command(
+        if orgs.can("members.invite") {
+            invite
+        } else {
+            invite.disabled(format!("only an admin can invite to {here}"))
+        },
+        || {},
+    );
     let window_chrome = screen::use_window_chrome();
     let capture = shell::Action::new("Capture", icon!(Feather), move |()| {
         lab.go(Route::Item("inbox", 0));
