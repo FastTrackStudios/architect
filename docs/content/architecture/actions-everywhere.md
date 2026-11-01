@@ -11,11 +11,23 @@ weight = 66
 > palette, quick open and `ActionListView` over an app's Action Lists and
 > the commands a view registers (`use_command`, `use_opener`); behind
 > `native` the window's chords (`WindowKeys`). The workspace's own
-> commands are in `features/workspace/src/host/commands.rs`. Still to
-> come: bindings through architect-input (contexts, sequences, held-key
-> tools, MIDI), the binding editor, `@`/`#`/`?` scopes, arguments asked
-> step by step. Builds on the [Action List](@/architecture/commands.md)
-> and [architect-input](@/architecture/input.md).
+> commands are in `features/workspace/src/host/commands.rs`.
+> **Bindings landed (#102):** keys run through architect-input
+> (`features/commands/src/keys_ui.rs` `Commands::handle_chord`), with
+> nested contexts, sequences and which-key (`WhichKeyPanel`), held-letter
+> tools and per-target mouse gestures, MIDI/OSC bindings
+> (`features/input/src/control.rs`); the person's layer over the app's
+> keymap (`features/commands/src/keymap.rs` `Keymap`, `PersonKeymap`,
+> kept by the app through `use_keymap`); the binding editor
+> (`BindingEditor`: record a chord, conflicts shown, reset) and custom
+> actions with conditions (`KeymapTools`) in `ActionListView`; the
+> palette's `@`/`#`/`?` scopes (`use_palette_opener`; settings register
+> `#`) and arguments asked step by step (`features/commands/src/params.rs`).
+> Still to come: the `checked` test of a custom action step (with the
+> Action List's `checked`), which-key's pause, keymap import/export UI and
+> REAPER's `reaper-kb.ini`, scripts. Builds on the
+> [Action List](@/architecture/commands.md) and
+> [architect-input](@/architecture/input.md).
 
 REAPER's Action List is the model: every single thing the program can do
 is an action with an id, listed in one window, searchable, and bindable —
