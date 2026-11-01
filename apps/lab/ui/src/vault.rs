@@ -2,7 +2,8 @@
 //! in the left dock behind a ribbon, notes in the center (more than one
 //! may be open), the outline and backlinks on the right (a console opens
 //! at the bottom from "Open a view"). Drag a tab anywhere, hold W to grab a pane without
-//! tabs, right-click (or ⋯) a tab for the rest.
+//! tabs, right-click (or ⋯) a tab for the rest. The arrangement tab has a
+//! script's marker lane over it, and the script's tool window floats.
 
 use architect_shell::{Action, FormFactor, PageBar, Screen, StatusItem, Toolbar, icon, use_shell};
 use architect_workspace::{
@@ -11,8 +12,8 @@ use architect_workspace::{
 };
 use dioxus::prelude::*;
 use lucide_dioxus::{
-    CalendarCheck, FileText, Files, Layers, Link, ListTree, MousePointerClick, Network, Search,
-    SquarePen, SquareTerminal, Terminal,
+    AudioLines, CalendarCheck, FileText, Files, Layers, Link, ListTree, MousePointerClick, Network,
+    Search, SlidersHorizontal, SquarePen, SquareTerminal, Terminal,
 };
 
 /// The lab's views.
@@ -71,6 +72,11 @@ fn views() -> Views {
             .icon(icon!(SquareTerminal)),
         )
         .view(
+            View::new("arrange", "Arrangement", |_| rsx! { crate::arrange::ArrangeView {} })
+                .icon(icon!(AudioLines)),
+        )
+        .view(architect_canvas::ui::window_view().icon(icon!(SlidersHorizontal)))
+        .view(
             View::new("note", "Untitled", |_| rsx! { NoteView {} })
                 .icon(icon!(FileText))
                 .many(),
@@ -111,6 +117,7 @@ fn first_workspace() -> Workspace {
     let opens = [
         (note("note-welcome", "Welcome"), Target::Tab),
         (note("note-shell", "The app shell"), Target::Tab),
+        (Pane::new("arrange", "arrange", "Arrangement"), Target::Tab),
         (
             Pane::new("graph", "graph", "Graph"),
             Target::Split(Side::Right),
@@ -154,6 +161,11 @@ pub fn VaultPage() -> Element {
     let screen = screen();
     let workspace = use_signal(first_workspace);
     let views = use_hook(views);
+    // The marker lane draws over the arrangement; its tool window floats
+    // as a pane, to dock or tab like any other.
+    let _canvases = architect_canvas::ui::use_canvases();
+    crate::arrange::use_marker_lane();
+    architect_canvas::ui::use_tool_windows(workspace);
     let mut made = use_signal(|| 0_u32);
     let commands = vec![
         Command::new("new-note", "New note", icon!(SquarePen)),

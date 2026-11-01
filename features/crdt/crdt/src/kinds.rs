@@ -2,8 +2,8 @@
 //! document kind").
 //!
 //! What an app declares — an id, a name, its file's extension, its
-//! schema's stamp and the migrations up to it — and architect reads,
-//! writes and upgrades.
+//! schema's stamp and the migrations up to it, the blobs a document
+//! points at — and architect reads, writes, upgrades and fetches.
 
 use loro::LoroDoc;
 
@@ -30,6 +30,9 @@ impl std::fmt::Debug for Migration {
     }
 }
 
+/// Which blobs a document points at: their sha256s, as 64 hex digits.
+pub type BlobRefs = fn(&LoroDoc) -> Vec<String>;
+
 /// A kind of document an app keeps.
 #[derive(Debug, Clone)]
 pub struct DocKind {
@@ -42,6 +45,8 @@ pub struct DocKind {
     /// The schema this build writes.
     pub stamp: u32,
     pub migrations: Vec<Migration>,
+    /// The blobs a document of this kind points at ([`Self::blobs`]).
+    pub blob_refs: Option<BlobRefs>,
 }
 
 impl DocKind {
@@ -52,6 +57,7 @@ impl DocKind {
             extension: String::new(),
             stamp: 1,
             migrations: Vec::new(),
+            blob_refs: None,
         }
     }
 
@@ -67,6 +73,22 @@ impl DocKind {
         self.stamp = stamp;
         self.migrations = migrations;
         self
+    }
+
+    /// Which blobs a document of this kind points at (a song's audio, a
+    /// note's images): they travel with it, fetched on demand by hash,
+    /// and are what keeps them from collection (`crate::blobs`).
+    #[must_use]
+    pub fn blobs(mut self, refs: BlobRefs) -> Self {
+        self.blob_refs = Some(refs);
+        self
+    }
+
+    /// The blobs `doc` points at, as 64 hex digits (none for a kind
+    /// that declares no [`Self::blobs`]).
+    #[must_use]
+    pub fn blobs_of(&self, doc: &LoroDoc) -> Vec<String> {
+        self.blob_refs.map(|refs| refs(doc)).unwrap_or_default()
     }
 
     /// Marks a new document as this kind, at this build's schema.

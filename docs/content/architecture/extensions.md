@@ -12,7 +12,30 @@ weight = 67
 > (`features/scripting/src/actions.rs` `Scripting`), and the `SCRIPT_RUN`,
 > `SCRIPT_SAVE` and `SCRIPT_DESCRIBE` actions a model reaches over MCP.
 > Not yet: dry runs, the typed model services in the Luau library,
-> streams, the ImGui API, Luau on the web.
+> streams, Luau on the web.
+>
+> **Canvases landed (2026-11-01)** in `architect-canvas`
+> (`features/canvas`): a view's coordinate spaces
+> (`features/canvas/src/space.rs` `Spaces`: time across, lanes down),
+> layers drawn over a view by kind on a plane, passing the pointer
+> through except over the regions they claim
+> (`features/canvas/src/layer.rs` `Layer`, `Overlays`), an
+> immediate-mode UI in ReaImGui's shape (`features/canvas/src/imgui.rs`
+> `Ui`: windows, text, buttons, checkboxes, sliders, progress bars,
+> `SameLine`, ids), and both in front of Luau as `ImGui` and `Canvas`
+> on a live script, a frame at a time
+> (`features/canvas/src/luau.rs` `Session`; scripts gained `defer` and
+> modules, `features/scripting/src/luau.rs` `Runtime::start`, `Live`,
+> `Module`). On Blitz, a layer mounts in its view and a window is a
+> workspace pane (`features/canvas/src/ui.rs` `CanvasLayers`,
+> `window_view`, `use_tool_windows`); an extension declares an overlay
+> in its manifest (`[[overlays]]`, `features/extensions/src/manifest.rs`
+> `OverlayDecl`). The lab's arrangement has a marker lane over it
+> (`apps/lab/ui/src/marker_lane.luau`). Drawn as boxes, not through
+> egui: Blitz has no texture widget yet. Not yet: egui (or Dear ImGui)
+> behind the same API, `gfx` images and fonts, the WIT interface,
+> layers from Dioxus views or frame documents, the extension host
+> starting overlays itself, Studio's arrangement publishing its spaces.
 >
 > **The runtime landed (2026-11-01)** in `architect-extensions`
 > (`features/extensions`): the manifest (`features/extensions/src/manifest.rs`

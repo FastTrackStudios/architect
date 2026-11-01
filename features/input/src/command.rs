@@ -5,6 +5,7 @@
 //! from the id strings in a keymap works.
 
 use crate::event::InputEvent;
+use crate::key::KeyChord;
 use crate::mode::ModeId;
 
 /// A command produced by [`crate::InputProcessor`] for one input event.
@@ -15,6 +16,16 @@ pub enum InputCommand<A = String> {
     /// Run an action with composed arguments (a count, an operator and
     /// its motion or text object).
     ActionWithArgs { action: A, args: InputArgs },
+    /// Run an action with the input that triggered it as its data: a
+    /// pointer gesture (where, and a drag's start and delta), a wheel's
+    /// deltas, a MIDI message's value, an OSC message's arguments.
+    Gesture { action: A, event: InputEvent },
+    /// A held-letter key went down and is waiting to see what comes next
+    /// (a tool while it is held, a tap if it goes up alone): show its tool
+    /// ([`crate::InputProcessor::held_tool`]).
+    Hold(KeyChord),
+    /// The held key went up: the tool goes.
+    Unhold(KeyChord),
     /// The base mode changed.
     SwitchMode(ModeId),
     /// A sub-mode was pushed.
@@ -34,7 +45,9 @@ impl<A> InputCommand<A> {
     #[must_use]
     pub const fn action(&self) -> Option<&A> {
         match self {
-            Self::Action(action) | Self::ActionWithArgs { action, .. } => Some(action),
+            Self::Action(action)
+            | Self::ActionWithArgs { action, .. }
+            | Self::Gesture { action, .. } => Some(action),
             _ => None,
         }
     }

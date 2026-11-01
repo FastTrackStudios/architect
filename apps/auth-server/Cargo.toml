@@ -66,6 +66,9 @@ mock-oauth = { path = "../mock-oauth" }
 iroh.workspace = true
 vox-core.workspace = true
 futures = "0.3"
+# The orgs every app reads from one sign-in (tests/surfaces.rs).
+architect-orgs = { workspace = true, features = ["auth", "server"] }
+auth-client.workspace = true
 
 [lints]
 workspace = true
