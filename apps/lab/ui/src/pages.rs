@@ -139,7 +139,8 @@ fn move_menu(lab: Lab, item: &Item) -> Menu {
 /// pick the next and previous row, ⌘↓ opens it and ⌘↵ marks it done.
 #[component]
 pub fn ListPage(tab: &'static str) -> Element {
-    let t = use_shell().theme;
+    let shell = use_shell();
+    let (t, keys) = (shell.theme, shell.shows_keys());
     let lab = use_context::<Lab>();
     let project = if tab == "tasks" {
         (lab.project)()
@@ -196,7 +197,7 @@ pub fn ListPage(tab: &'static str) -> Element {
                         {crate::count(rows.len().saturating_sub(completing.len()), "item")}
                     }
                 }
-                if !rows.is_empty() {
+                if !rows.is_empty() && keys {
                     span { style: "white-space: nowrap;", "{keys_hint(can_finish)}" }
                 }
             }
@@ -248,7 +249,9 @@ pub fn ListPage(tab: &'static str) -> Element {
                         onclick: move |_| lab.undo(),
                         Undo2 { size: 14, color: t.ink }
                         "Undo"
-                        span { style: "font-size: 12px; font-weight: 500; color: {t.ink_3};", "⌘Z" }
+                        if keys {
+                            span { style: "font-size: 12px; font-weight: 500; color: {t.ink_3};", "⌘Z" }
+                        }
                     }
                 }
             }
@@ -266,7 +269,9 @@ pub fn ListPage(tab: &'static str) -> Element {
                                 font-family: {t.font}; font-size: 13px; font-weight: 600;",
                         onclick: move |_| lab.redo(),
                         "Redo"
-                        span { style: "font-size: 12px; font-weight: 500; color: {t.ink_3};", "⇧⌘Z" }
+                        if keys {
+                            span { style: "font-size: 12px; font-weight: 500; color: {t.ink_3};", "⇧⌘Z" }
+                        }
                     }
                 }
             }
@@ -286,7 +291,8 @@ const fn keys_hint(can_finish: bool) -> &'static str {
 /// An empty list: what goes in it, and the button that adds one.
 #[component]
 fn Empty(tab: &'static str, project: Option<&'static str>) -> Element {
-    let t = use_shell().theme;
+    let shell = use_shell();
+    let (t, keys) = (shell.theme, shell.shows_keys());
     let lab = use_context::<Lab>();
     let (new_label, _) = new_one(tab);
     let what = project.map_or_else(
@@ -319,7 +325,7 @@ fn Empty(tab: &'static str, project: Option<&'static str>) -> Element {
                         background: {t.pill}; color: {t.ink}; font-family: {t.font}; font-size: 14px;",
                 onclick: move |_| lab.capture(tab),
                 "{new_label}"
-                if tab == "inbox" {
+                if tab == "inbox" && keys {
                     span { style: "margin-left: 8px; font-size: 12px; color: {t.ink_3};", "⇧⌘N" }
                 }
             }
@@ -515,7 +521,8 @@ pub fn ItemPage(tab: &'static str, id: usize) -> Element {
 /// A new item for `tab`: one line, Return keeps it, Esc lets it go.
 #[component]
 pub fn CapturePage(tab: &'static str) -> Element {
-    let t = use_shell().theme;
+    let shell = use_shell();
+    let (t, keys) = (shell.theme, shell.shows_keys());
     let lab = use_context::<Lab>();
     let mut text = use_signal(String::new);
     let mut nudge = use_signal(|| false);
@@ -611,7 +618,7 @@ pub fn CapturePage(tab: &'static str) -> Element {
                     },
                 }
                 span { style: "font-size: 13px; color: {t.ink_3};",
-                    if nudge() { "Type a line first: an empty capture adds nothing." } else if empty { "Return adds it to {into}; Esc goes back." } else { "Return adds it to {into}; Esc drops it (⌘Z brings it back)." }
+                    if nudge() { "Type a line first: an empty capture adds nothing." } else if !keys { "Return adds it to {into}." } else if empty { "Return adds it to {into}; Esc goes back." } else { "Return adds it to {into}; Esc drops it (⌘Z brings it back)." }
                 }
             }
         }
@@ -650,7 +657,8 @@ fn spaced(s: &str, word: &str) -> String {
 /// the account at its foot). What is on show is marked.
 #[component]
 pub fn LeftSide() -> Element {
-    let t = use_shell().theme;
+    let shell = use_shell();
+    let (t, keys) = (shell.theme, shell.shows_keys());
     let lab = use_context::<Lab>();
     let commands = use_context::<architect_commands::Commands>();
     let route = (lab.route)();
@@ -673,7 +681,9 @@ pub fn LeftSide() -> Element {
             onclick: move |_| commands.show(architect_commands::Overlay::QuickOpen),
             Search { size: 16, color: t.ink_3 }
             span { style: "flex: 1; font-size: 14px; color: {t.ink_3};", "Search" }
-            span { style: "font-size: 12px; color: {t.ink_3};", "⌘O" }
+            if keys {
+                span { style: "font-size: 12px; color: {t.ink_3};", "⌘O" }
+            }
         }
         div { style: "display: flex; flex-direction: column; gap: 2px; padding: 4px 8px; font-family: {t.font};",
             SideRow { label: "Inbox", count: inbox, on: in_inbox,
@@ -724,7 +734,8 @@ fn SideRow(
 /// (each a command, its key beside it).
 #[component]
 pub fn RightSide() -> Element {
-    let t = use_shell().theme;
+    let shell = use_shell();
+    let (t, keys) = (shell.theme, shell.shows_keys());
     let lab = use_context::<Lab>();
     let commands = use_context::<architect_commands::Commands>();
     let on_list = matches!((lab.route)(), Route::Tab(_));
@@ -742,8 +753,10 @@ pub fn RightSide() -> Element {
                 span { style: "font-size: 13px; line-height: 1.5; color: {t.ink_3};",
                     "Click a row, or press ↓, to see where it is and when, and what it can do."
                 }
-                span { style: "font-size: 13px; line-height: 1.5; color: {t.ink_3};",
-                    "Every key: ⌘/ (Help)"
+                if keys {
+                    span { style: "font-size: 13px; line-height: 1.5; color: {t.ink_3};",
+                        "Every key: ⌘/ (Help)"
+                    }
                 }
             }
         };
@@ -787,7 +800,9 @@ pub fn RightSide() -> Element {
                             let _ = commands.run(id);
                         },
                         span { style: "flex: 1; text-align: left;", "{label}" }
-                        span { style: "font-size: 12px; color: {t.ink_3};", "{key}" }
+                        if keys {
+                            span { style: "font-size: 12px; color: {t.ink_3};", "{key}" }
+                        }
                     }
                 }
             }
