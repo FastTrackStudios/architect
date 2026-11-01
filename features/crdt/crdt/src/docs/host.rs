@@ -12,7 +12,7 @@ use super::{
     CreateDoc, DocChange, DocMeta, DocPage, DocQuery, Docs, DocsError, DocsStore, DocsStreamSource,
     Lineage, check_create, check_name, now_us,
 };
-use crate::registry::DocRegistry;
+use crate::registry::{DocAccess, DocPermissions, DocRegistry};
 use crate::sync::{DocPresence, DocSync, SyncDown, SyncError};
 
 /// What the content lane keeps of a catalogued id.
@@ -31,15 +31,6 @@ impl Held {
             lineage: m.lineage,
         }
     }
-}
-
-/// What a caller asks to do to a doc, for [`DocsHost::with_authorizer`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DocAccess {
-    /// See it in the catalog, watch its presence.
-    Read,
-    /// Register, rename, delete, sync its content.
-    Write,
 }
 
 type Authorizer = dyn Fn(Option<&Principal>, Uuid, DocAccess) -> bool + Send + Sync;
@@ -121,6 +112,20 @@ impl DocsHost {
     {
         self.authorize = Arc::new(authorize);
         self
+    }
+
+    /// Check every call against the org's permissions
+    /// ([`DocPermissions`]): `read` on a doc to see it in the catalog
+    /// (each row of a `list`) or watch its presence, `write` to register,
+    /// rename, delete or sync it. The same check the registry makes
+    /// ([`DocRegistry::with_permissions`]), for the catalog too: what a
+    /// person may not open, they do not see listed either. Replaces
+    /// [`Self::with_authorizer`].
+    #[must_use]
+    pub fn with_permissions(self, permissions: DocPermissions) -> Self {
+        self.with_authorizer(move |who, doc_id, access| {
+            permissions.check(who, doc_id, access).is_ok()
+        })
     }
 
     /// The registry the content lane serves from.

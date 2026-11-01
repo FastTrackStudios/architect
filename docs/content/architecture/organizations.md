@@ -10,9 +10,18 @@ weight = 52
 > `Role`, `Capabilities` (the app's, by role, with per-org grants);
 > `features/orgs/src/auth.rs` `from_bundles` (fts-auth's
 > `list_organizations` answer); `features/orgs/src/ui.rs` `use_org`,
-> `OrgHandle::switcher` (the shell's switcher). Still to come: features
-> scoped by the current org (files, documents, settings' org levels), the
-> server side's confinement. Proposed (2026-10-31): the
+> `OrgHandle::switcher` (the shell's switcher). **Scoping and confinement
+> landed (2026-11-01):** the live fetch (`features/orgs/src/auth.rs`
+> `fetch` with auth-client's session, `features/orgs/src/ui.rs`
+> `use_orgs_live` on every reconnect, `features/orgs/src/refresh.rs`
+> `Refresh`); the scope every layer keys by (`features/orgs/src/scope.rs`
+> `Scope`, `OrgId::path`, `OrgId::doc_id`) and the All read (`read_all`,
+> `features/orgs/src/opener.rs` `scoped_opener` for ⌘O); the server's
+> confinement (`features/orgs/src/server.rs` `confine`, `current_org`,
+> `ConfinedEngine`, `MembersResolver`). Still to come: files, documents,
+> settings' org levels and presence adopting the scope (each keys its
+> data by `OrgId::path` as it lands), and Task and Studio moving onto it.
+> Proposed (2026-10-31): the
 > model exists ([auth](@/architecture/auth.md): organizations, members,
 > roles, teams, invitations, invite links, devices, linked agents, served
 > over vox and HTTP from one declaration); this page makes it the scope
@@ -83,6 +92,48 @@ server mounting architect's features gets tenancy with them: every
 service is confined to the caller's org, every row and blob is the
 org's, and what crosses orgs (a shared link, a moved document, a
 federated server) is explicit.
+
+## The scope, as built
+
+One convention for every layer, so files, documents, settings and
+presence agree without knowing each other:
+
+| Layer | Keyed by |
+|---|---|
+| Files | an org's roots under `OrgId::path("files/…")` |
+| Documents | the catalogue `OrgId::doc_id("catalogue")`; a document's blob under `OrgId::path("docs/<id>")` |
+| Settings | the org's own under `OrgId::path("settings")`, a person's within it under `OrgId::path("settings/<user>")`; a person's everywhere stays unscoped |
+| Presence | the org's roster is the presence channel of `OrgId::doc_id("presence")`; a document's stays the document's |
+| Permissions | resources `org/<id>/…` (what `OrgId::path` returns) on a lane in no org |
+
+**Client.** The window's `Scope` (`OrgHandle::scope`) is its org, or in
+All every org; a read asks `read_all(&scope, |org| …)` and gets every
+org's items tagged with their org (`Scoped`), the orgs that did not
+answer listed apart (`Aggregate::failed`), so an offline org hides none
+of the others. A write goes to `Scope::writes_to`, which is `None` in
+All: the person picks an org first. ⌘O registers `scoped_opener`, which
+asks the window's org (or all of them, naming each item's org) and opens
+an item in the org it came from.
+
+**The list.** `use_orgs_live` fetches the person's orgs
+(`architect_orgs::fetch`: `OrganizationService::list_organizations`
+with auth-client's stored session, over vox or HTTP) when the
+connection comes up and again on every reconnect
+(`Connection::generation`); a failed fetch keeps the device's cached
+list and says why (`OrgHandle::stale`). Every app asks the same identity
+server with the same session, so every app shows the same orgs.
+
+**Server.** A per-org lane (`/org/{slug}/vox`) wraps its gated handler
+in `confine(org, …)`: every call on it runs in that org
+(`current_org()`), and services key their data by it. The gate's
+identity is wrapped in `MembersResolver`, which learns each session's
+orgs from the identity server (`IdentityServer` over an
+`OrganizationService` client, at most once a minute per session); its
+engine is `ConfinedEngine`, which refuses a caller who is not a member
+of the call's org, any resource in another org, and whatever the
+caller's role there does not allow. A lane in no org serves the
+All-organizations reads: its resources name their org, and a service
+reads across `Members::scope_of` the caller.
 
 ## Personal, team, and all
 

@@ -28,6 +28,7 @@ use architect::dioxus::prelude::*;
 use architect::{AtomResult, Duration, RepoError, use_connection};
 use uuid::Uuid;
 
+use crate::presence::{Here, PeerState, Roster, clock_ms};
 use crate::sync::{DocPresenceClient, DocSyncClient, PresenceDriver, PresencePeer, SyncedDoc};
 use crate::{CrdtDoc, EntityCrdt, LoroRepo, PersistError};
 
@@ -576,4 +577,89 @@ pub fn use_presence_channel_into(presence: Presence, doc_id: Uuid, timeout_ms: i
 #[must_use]
 pub fn use_presence() -> Presence {
     use_context::<Presence>()
+}
+
+// ── Presence in views ───────────────────────────────────────────────────
+
+impl Presence {
+    /// Whether the channel is wired (a peer exists to write to). Reactive.
+    #[must_use]
+    pub fn joined(&self) -> bool {
+        self.peer.read().is_some()
+    }
+}
+
+impl crate::presence::PresenceSink for Presence {
+    fn set(&self, key: &str, value: loro::LoroValue) {
+        Self::set(self, key, value);
+    }
+    fn delete(&self, key: &str) {
+        Self::delete(self, key);
+    }
+}
+
+/// Everyone else on `presence`, as a [`Roster`]: folded from the channel's
+/// picture on every change. `me` (this person's presence id) is captured
+/// on first render.
+#[must_use]
+pub fn use_roster(presence: Presence, me: &str) -> Signal<Roster> {
+    let me = use_hook(|| me.to_owned());
+    let mut roster = use_signal(Roster::default);
+    use_effect(move || {
+        let states = presence.states();
+        roster.write().sync(&me, &states, clock_ms());
+    });
+    roster
+}
+
+/// This person on `presence`: a [`Here`] that publishes `state()` as soon
+/// as the channel joins (and again on every rejoin), and sends what its
+/// throttles hold on a timer. `me` and `state` are taken on first render;
+/// change the state with [`Here::edit_state`]. A view calls
+/// [`Here::pointer`] as the pointer moves over it and
+/// [`Here::no_pointer`] when it leaves.
+#[must_use]
+pub fn use_here(presence: Presence, me: &str, state: impl FnOnce() -> PeerState) -> Here<Presence> {
+    let here = use_hook(|| Here::new(presence, me, state()));
+    let announcer = here.clone();
+    use_effect(move || {
+        if presence.joined() {
+            announcer.announce();
+        }
+    });
+    let flusher = here.clone();
+    use_future(move || {
+        let flusher = flusher.clone();
+        async move {
+            loop {
+                architect::sleep(Duration::from_millis(33)).await;
+                flusher.flush(clock_ms());
+            }
+        }
+    });
+    here
+}
+
+/// The local clock to draw `roster`'s pointers at
+/// ([`Roster::pointers`]): re-renders the caller about sixty times a
+/// second while a pointer moves, and not while none does.
+#[must_use]
+pub fn use_presence_frame(roster: Signal<Roster>) -> f64 {
+    let mut frame = use_signal(clock_ms);
+    use_future(move || async move {
+        loop {
+            let t = clock_ms();
+            // `peek`: this loop writes `frame`, never reads it reactively.
+            let moving = roster.peek().moving(t);
+            if moving {
+                frame.set(t);
+            }
+            architect::sleep(Duration::from_millis(if moving { 16 } else { 50 })).await;
+        }
+    });
+    // A new sample re-renders through the roster; a moving one through the
+    // frame.
+    let _ = roster.read();
+    let _ = frame();
+    clock_ms()
 }

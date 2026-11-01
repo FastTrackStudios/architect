@@ -1,7 +1,8 @@
 //! HTTP-only service methods: a ranged byte download (`ByteBody`) with a
 //! path parameter, a `{*path}` wildcard reading the request head, and a
 //! streamed upload (`BodyStream`) past axum's 2 MiB default under
-//! `limit = "1GiB"`, all under a `{slug}` service prefix, mounted through
+//! `limit = "1GiB"`, and query-string arguments on both a download and an
+//! upload, all under a `{slug}` service prefix, mounted through
 //! `provide_http` and driven over a real socket.
 
 #![allow(
@@ -57,6 +58,23 @@ mod media {
         /// JSON still works on an HTTP-only service.
         #[http(get, path = "blobs")]
         async fn list(&self, slug: String) -> Result<Vec<String>, MediaError>;
+        /// An upload named by its query: `PUT …/files?name=…&part=…`.
+        #[http(put, path = "files", limit = "1GiB")]
+        async fn put_file(
+            &self,
+            slug: String,
+            name: String,
+            part: u32,
+            body: BodyStream,
+        ) -> Result<String, MediaError>;
+        /// A stored blob behind a share password: `GET …/share/{hash}?pw=…`.
+        #[http(get, path = "share/{hash}")]
+        async fn shared(
+            &self,
+            slug: String,
+            hash: String,
+            pw: Option<String>,
+        ) -> Result<ByteBody, MediaError>;
     }
 
     #[derive(Clone, Default)]
@@ -123,6 +141,34 @@ mod media {
 
         async fn note_upload(&self, _slug: String, body: BodyStream) -> Result<u64, MediaError> {
             Ok(drain(body).await?.len() as u64)
+        }
+
+        async fn put_file(
+            &self,
+            slug: String,
+            name: String,
+            part: u32,
+            body: BodyStream,
+        ) -> Result<String, MediaError> {
+            let bytes = drain(body).await?;
+            let id = format!("{name}#{part}");
+            self.blobs
+                .lock()
+                .unwrap()
+                .insert((slug, id.clone()), Bytes::from(bytes));
+            Ok(id)
+        }
+
+        async fn shared(
+            &self,
+            slug: String,
+            hash: String,
+            pw: Option<String>,
+        ) -> Result<ByteBody, MediaError> {
+            if pw.as_deref() != Some("open sesame") {
+                return Err(MediaError::Unauthenticated);
+            }
+            self.blob(slug, hash).await
         }
 
         async fn list(&self, slug: String) -> Result<Vec<String>, MediaError> {
@@ -278,4 +324,53 @@ async fn a_wildcard_route_reads_the_request_head() {
 
     let response = http.get(&url).bearer_auth("t-cody").send().await.unwrap();
     assert_eq!(response.text().await.unwrap(), "acme:docs/a b/readme.md");
+}
+
+#[tokio::test]
+async fn query_arguments_ride_an_upload_and_a_ranged_download() {
+    let backend = media::Backend::default();
+    let base = serve(architect::layers![media::Service].provide_http(&backend)).await;
+    let http = reqwest::Client::new();
+    let data = payload();
+
+    // A streamed upload whose other arguments are the query: 3 MiB under
+    // the route's 1 GiB cap, the name decoded (`%20`), the part parsed.
+    let response = http
+        .put(format!("{base}/org/acme/files?name=a%20b.txt&part=2"))
+        .body(data.clone())
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.text().await.unwrap(), r#""a b.txt#2""#);
+
+    // A query argument that is missing or does not parse is a 400 with
+    // the usual envelope, before the method runs.
+    for query in ["name=x", "name=x&part=two"] {
+        let response = http
+            .put(format!("{base}/org/acme/files?{query}"))
+            .body(vec![1_u8; 10])
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 400, "{query}");
+        assert!(
+            response.text().await.unwrap().contains("invalid_query"),
+            "{query}"
+        );
+    }
+
+    // An `Option` argument: absent reads as `None`, so the share refuses.
+    let url = format!("{base}/org/acme/share/{}", "a%20b.txt%232");
+    let response = http.get(&url).send().await.unwrap();
+    assert_eq!(response.status(), 401);
+    // With it (`+` is a space), the download still answers `Range`.
+    let response = http
+        .get(format!("{url}?pw=open+sesame"))
+        .header("range", "bytes=10-19")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 206);
+    assert_eq!(response.bytes().await.unwrap().as_ref(), &data[10..20]);
 }

@@ -13,6 +13,7 @@ architect-commands = { workspace = true, features = ["native"] }
 architect-settings = { workspace = true, features = ["ui", "store"] }
 architect-orgs = { workspace = true, features = ["ui"] }
 dioxus = { workspace = true }
+facet = { workspace = true }
 dioxus-native = { workspace = true }
 lucide-dioxus = { workspace = true }
 futures-timer = { workspace = true }

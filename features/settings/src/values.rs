@@ -1,11 +1,11 @@
 //! The values set: anything not set reads as its default; a value is
 //! checked against its setting before it is kept.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use facet::Facet;
 
-use crate::model::{Control, Setting, Value};
+use crate::model::{Control, Scope, Setting, Value};
 use crate::registry::Registry;
 
 /// Why a value was refused.
@@ -17,6 +17,8 @@ pub enum ValueError {
         key: String,
         why: String,
     },
+    /// The person's organization has set it for everyone.
+    Locked(String),
 }
 
 /// The values set, by key: what is kept (per scope, by the app).
@@ -123,6 +125,206 @@ impl Values {
     /// The decoder's message.
     pub fn from_json(json: &str) -> Result<Self, String> {
         facet_json::from_str(json).map_err(|e| e.to_string())
+    }
+}
+
+/// An organization's settings (`architect-orgs`): what an admin sets as
+/// everyone's default, and which of those no member may change. Which
+/// org's applies is the app's to say (the window's current org).
+#[derive(Debug, Clone, Default, PartialEq, Facet)]
+pub struct OrgSettings {
+    /// A default in place of the one declared, by key.
+    pub defaults: BTreeMap<String, Value>,
+    /// Keys a member cannot change: they read the org's default (or the
+    /// declared one).
+    pub locked: BTreeSet<String>,
+}
+
+impl OrgSettings {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// `key` defaults to `value` in this org.
+    #[must_use]
+    pub fn default_to(mut self, key: impl Into<String>, value: Value) -> Self {
+        self.defaults.insert(key.into(), value);
+        self
+    }
+
+    /// No member may change `key`.
+    #[must_use]
+    pub fn lock(mut self, key: impl Into<String>) -> Self {
+        self.locked.insert(key.into());
+        self
+    }
+
+    #[must_use]
+    pub fn is_locked(&self, key: &str) -> bool {
+        self.locked.contains(key)
+    }
+}
+
+/// Everything set, by where it lives.
+///
+/// This device's values, the person's (on every device), the open
+/// project's, and the org's defaults and locks under them. A setting's [`Scope`] says which of the
+/// three holds it; a value reads, in order, the org's lock, its own
+/// scope's value, the org's default, the declared default.
+#[derive(Debug, Clone, Default, PartialEq, Facet)]
+pub struct ScopedValues {
+    pub device: Values,
+    pub synced: Values,
+    pub project: Values,
+    pub org: OrgSettings,
+}
+
+impl ScopedValues {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The values of `scope`.
+    #[must_use]
+    pub const fn of(&self, scope: Scope) -> &Values {
+        match scope {
+            Scope::Device => &self.device,
+            Scope::Synced => &self.synced,
+            Scope::Project => &self.project,
+        }
+    }
+
+    const fn of_mut(&mut self, scope: Scope) -> &mut Values {
+        match scope {
+            Scope::Device => &mut self.device,
+            Scope::Synced => &mut self.synced,
+            Scope::Project => &mut self.project,
+        }
+    }
+
+    /// Puts `values` in as `scope`'s (they came from its store: loaded,
+    /// or changed on another device).
+    pub fn replace(&mut self, scope: Scope, values: Values) {
+        *self.of_mut(scope) = values;
+    }
+
+    /// `key`'s default: the org's, when it set one `key` takes, else the
+    /// declared one.
+    #[must_use]
+    pub fn default_of(&self, registry: &Registry, key: &str) -> Option<Value> {
+        let (_, setting) = registry.setting(key)?;
+        Some(
+            self.org
+                .defaults
+                .get(key)
+                .and_then(|v| check(setting, v).ok())
+                .unwrap_or_else(|| setting.default.clone()),
+        )
+    }
+
+    /// `key`'s value: the org's when it is locked; else what its scope
+    /// holds (if still valid); else its default.
+    #[must_use]
+    pub fn get(&self, registry: &Registry, key: &str) -> Option<Value> {
+        let (_, setting) = registry.setting(key)?;
+        if self.org.is_locked(key) {
+            return self.default_of(registry, key);
+        }
+        self.of(setting.scope)
+            .set
+            .get(key)
+            .filter(|v| check(setting, v).is_ok())
+            .cloned()
+            .or_else(|| self.default_of(registry, key))
+    }
+
+    /// Sets `key` in its scope, numbers kept inside their range; setting
+    /// its default clears it. The scope it went to.
+    ///
+    /// # Errors
+    ///
+    /// [`ValueError`]: no such setting, a value it does not take, or the
+    /// org has locked it.
+    // By value, as `Values::set`.
+    #[allow(clippy::needless_pass_by_value)]
+    pub fn set(
+        &mut self,
+        registry: &Registry,
+        key: &str,
+        value: Value,
+    ) -> Result<Scope, ValueError> {
+        let (_, setting) = registry
+            .setting(key)
+            .ok_or_else(|| ValueError::UnknownKey(key.to_owned()))?;
+        if self.org.is_locked(key) {
+            return Err(ValueError::Locked(key.to_owned()));
+        }
+        let value = check(setting, &value)?;
+        let scope = setting.scope;
+        if Some(&value) == self.default_of(registry, key).as_ref() {
+            self.of_mut(scope).set.remove(key);
+        } else {
+            self.of_mut(scope).set.insert(key.to_owned(), value);
+        }
+        Ok(scope)
+    }
+
+    /// Puts `key` back to its default; the scope it was in.
+    pub fn reset(&mut self, registry: &Registry, key: &str) -> Option<Scope> {
+        let (_, setting) = registry.setting(key)?;
+        self.of_mut(setting.scope)
+            .set
+            .remove(key)
+            .map(|_| setting.scope)
+    }
+
+    /// Whether `key` differs from its default (a locked one never does:
+    /// the member did not choose it).
+    #[must_use]
+    pub fn is_changed(&self, registry: &Registry, key: &str) -> bool {
+        !self.org.is_locked(key)
+            && registry
+                .setting(key)
+                .is_some_and(|(_, s)| self.of(s.scope).set.contains_key(key))
+    }
+
+    #[must_use]
+    pub fn is_locked(&self, key: &str) -> bool {
+        self.org.is_locked(key)
+    }
+
+    /// The settings of section `id` that differ from their defaults.
+    #[must_use]
+    pub fn changed_in<'r>(&self, registry: &'r Registry, id: &str) -> Vec<&'r Setting> {
+        registry
+            .section(id)
+            .map(|s| {
+                s.settings()
+                    .filter(|t| self.is_changed(registry, &t.key))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Every setting of section `id` back to its default (Restore
+    /// defaults): the scopes that changed, each once.
+    pub fn restore_section(&mut self, registry: &Registry, id: &str) -> Vec<Scope> {
+        let keys: Vec<String> = self
+            .changed_in(registry, id)
+            .into_iter()
+            .map(|t| t.key.clone())
+            .collect();
+        let mut scopes = Vec::new();
+        for k in &keys {
+            if let Some(scope) = self.reset(registry, k) {
+                if !scopes.contains(&scope) {
+                    scopes.push(scope);
+                }
+            }
+        }
+        scopes
     }
 }
 

@@ -1,8 +1,12 @@
 //! Routes beyond `POST /<prefix>/<method>`: `{param}` and `{*rest}` path
 //! segments (in the method's path and the service prefix), the `get` /
-//! `put` / `delete` / `any` verbs, and `limit = …` body caps — served by
-//! the generated router over a real socket and called through the typed
-//! client.
+//! `put` / `delete` / `any` verbs, query-string arguments on a `get`, and
+//! `limit = …` body caps — served by the generated router over a real
+//! socket and called through the typed client.
+//!
+//! These methods keep their vox face, so one scenario runs on every face
+//! at once (`apps/auth-server/tests/surfaces.rs` style): the backend in
+//! process, the HTTP client, and the vox client over a `LocalServer`.
 
 #![allow(
     clippy::unwrap_used,
@@ -45,6 +49,19 @@ mod notes {
         /// A JSON body past axum's 2 MiB default.
         #[http(post, path = "bulk", limit = "4MiB")]
         async fn bulk(&self, slug: String, text: String) -> Result<u64, NoteError>;
+        /// The ids of the notes whose text contains `q`, in order, past
+        /// `after`: a `get` has no body, so these ride the query string.
+        #[http(get, path = "search")]
+        async fn search(
+            &self,
+            slug: String,
+            q: String,
+            limit: u32,
+            after: Option<u32>,
+        ) -> Result<Vec<u32>, NoteError>;
+        /// Who is asking: `?token=`, else the bearer header.
+        #[http(get, path = "whoami")]
+        async fn whoami(&self, slug: String, token: String) -> Result<String, NoteError>;
     }
 
     #[derive(Clone, Default)]
@@ -78,6 +95,28 @@ mod notes {
         }
         async fn bulk(&self, _slug: String, text: String) -> Result<u64, NoteError> {
             Ok(text.len() as u64)
+        }
+        async fn search(
+            &self,
+            slug: String,
+            q: String,
+            limit: u32,
+            after: Option<u32>,
+        ) -> Result<Vec<u32>, NoteError> {
+            Ok(self
+                .notes
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|((s, id), text)| {
+                    *s == slug && after.is_none_or(|a| *id > a) && text.contains(&q)
+                })
+                .map(|((_, id), _)| *id)
+                .take(limit as usize)
+                .collect())
+        }
+        async fn whoami(&self, slug: String, token: String) -> Result<String, NoteError> {
+            Ok(format!("{slug}:{token}"))
         }
     }
 }
@@ -118,6 +157,8 @@ fn the_paths_table_keeps_the_templates() {
             ("drop_note", "/org/{slug}/notes/{id}"),
             ("file", "/org/{slug}/files/{*path}"),
             ("bulk", "/org/{slug}/bulk"),
+            ("search", "/org/{slug}/search"),
+            ("whoami", "/org/{slug}/whoami"),
         ]
     );
     assert_eq!(architect::http::encode_segment(&"a b/c"), "a%20b%2Fc");
@@ -204,4 +245,119 @@ async fn a_route_answers_its_verb_parses_its_params_and_caps_its_body() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+}
+
+/// One scenario, written once against the trait: whatever face `notes`
+/// is, verbs, path params and query arguments must behave the same.
+async fn scenario(face: &str, notes: &impl notes::Notes) {
+    use notes::NoteError;
+
+    let slug = || String::from("a b/c");
+    for (id, text) in [
+        (1, "apple pie"),
+        (2, "pear"),
+        (3, "apple & pear"),
+        (4, "apples"),
+    ] {
+        notes.set_note(slug(), id, text.into()).await.unwrap();
+    }
+    assert_eq!(notes.note(slug(), 2).await.unwrap(), "pear", "{face}");
+    assert_eq!(
+        notes
+            .search(slug(), "apple".into(), 10, None)
+            .await
+            .unwrap(),
+        [1, 3, 4],
+        "{face}"
+    );
+    // A query that needs encoding (`&`, a space), a limit, an `after`.
+    assert_eq!(
+        notes
+            .search(slug(), "apple & ".into(), 10, None)
+            .await
+            .unwrap(),
+        [3],
+        "{face}"
+    );
+    assert_eq!(
+        notes
+            .search(slug(), "apple".into(), 1, Some(1))
+            .await
+            .unwrap(),
+        [3],
+        "{face}"
+    );
+    assert_eq!(
+        notes
+            .search("other".into(), "apple".into(), 10, None)
+            .await
+            .unwrap(),
+        Vec::<u32>::new(),
+        "{face}"
+    );
+    assert_eq!(
+        notes.whoami(slug(), "t-1".into()).await.unwrap(),
+        "a b/c:t-1",
+        "{face}"
+    );
+    notes.drop_note(slug(), 2).await.unwrap();
+    assert_eq!(
+        notes.note(slug(), 2).await.unwrap_err(),
+        NoteError::NotFound,
+        "{face}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn every_face_runs_the_same_scenario() {
+    use architect::local::LocalServer;
+    use architect::resource::Scope;
+
+    scenario("in process", &notes::Backend::default()).await;
+
+    let app = architect::layers![notes::Service].provide_http(&notes::Backend::default());
+    scenario("http", &notes::NotesHttpClient::at(serve(app).await)).await;
+
+    let router = architect::layers![notes::Service].provide(notes::Backend::default());
+    let server = LocalServer::serve(router, Scope::new());
+    let vox: notes::NotesClient = server.establish().await.unwrap();
+    scenario("vox", &vox).await;
+}
+
+#[tokio::test]
+async fn a_get_reads_its_arguments_from_the_query() {
+    let app = notes::http::router(notes::Backend::default());
+    let get = |uri: &str| {
+        let app = app.clone();
+        let request = Request::get(uri).body(Body::empty()).unwrap();
+        async move { text(app.oneshot(request).await.unwrap()).await }
+    };
+
+    // A missing argument, or one that does not parse: 400 `invalid_query`.
+    for uri in ["/org/acme/search?q=x", "/org/acme/search?q=x&limit=ten"] {
+        let (status, body) = get(uri).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{uri}: {body}");
+        assert!(body.contains(r#""code":"invalid_query""#), "{uri}: {body}");
+    }
+    // An `Option` may be absent; unknown parameters are ignored.
+    let (status, body) = get("/org/acme/search?q=x&limit=1&utm=y").await;
+    assert_eq!((status, body.as_str()), (StatusCode::OK, "[]"));
+
+    // `token`: the query wins when it says something, the bearer fills in.
+    let (_, body) = get("/org/acme/whoami?token=t-query").await;
+    assert_eq!(body, r#""acme:t-query""#);
+    let request = Request::get("/org/acme/whoami")
+        .header(header::AUTHORIZATION, "Bearer t-header")
+        .body(Body::empty())
+        .unwrap();
+    let (_, body) = text(app.clone().oneshot(request).await.unwrap()).await;
+    assert_eq!(body, r#""acme:t-header""#);
+
+    // The typed client sends an empty `token` as no `token`, so its bearer
+    // reaches the method.
+    let client = notes::NotesHttpClient::at(serve(app.clone()).await).with_bearer("t-client");
+    assert_eq!(
+        client.whoami("acme".into(), String::new()).await.unwrap(),
+        "acme:t-client"
+    );
 }

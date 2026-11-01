@@ -646,6 +646,7 @@ dependencies = [
  "architect-workspace",
  "dioxus",
  "dioxus-native",
+ "facet",
  "futures-timer",
  "lucide-dioxus",
 ]
@@ -779,11 +780,25 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "architect-commands",
+ "architect-settings",
+ "architect-settings-derive",
  "architect-shell",
  "dioxus",
  "facet",
  "facet-json",
+ "facet-value",
+ "loro",
  "lucide-dioxus",
+ "uuid",
+]
+
+[[package]]
+name = "architect-settings-derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -2560,11 +2575,13 @@ dependencies = [
  "architect",
  "architect-permissions",
  "async-trait",
+ "auth-proto",
  "chrono",
  "crdt",
  "crdt-derive",
  "facet",
  "idb",
+ "iroh",
  "js-sys",
  "loro",
  "loro-internal",
