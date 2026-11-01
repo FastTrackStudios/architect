@@ -12,8 +12,12 @@
 //!   (feature `capture`, [`capture`]);
 //! - **a test**: the same run with no frames, every `done` asserted
 //!   (feature `run`, [`run::run`]);
-//! - **a tour**: `architect-shell`'s tour overlay rings each target, shows
-//!   the step's text and moves on when its `done` holds.
+//! - **a tour**: played live in the running app (feature `ui`, [`tour`]):
+//!   the window dimmed around the step's target, its text in a popover,
+//!   moving on when its `done` holds on the app's Action List.
+//!
+//! A story (`architect-story`) carries scenarios too: the runner films and
+//! tests them (feature `story`, [`story`]), the story shell tours them.
 //!
 //! The default build is the model and its loader ([`load`]): facet types
 //! read from styx, and [`contains`], the predicates' matching — no Dioxus,
@@ -23,9 +27,17 @@
 pub mod capture;
 #[cfg(feature = "capture")]
 pub mod cli;
+#[cfg(feature = "ui")]
+pub mod locate;
 mod model;
+#[cfg(feature = "ui")]
+mod predicate;
 #[cfg(feature = "run")]
 pub mod run;
+#[cfg(feature = "story")]
+pub mod story;
+#[cfg(feature = "ui")]
+pub mod tour;
 
 pub use model::{
     Capture, Check, DesktopSize, Do, Done, Edge, Modifier, Output, Scenario, Step, Target,

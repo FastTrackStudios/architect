@@ -8,7 +8,9 @@
 //! ```
 //!
 //! `lab-media` (`apps/lab/media`) is one: `cargo run -p
-//! architect-lab-media -- showcase-layout --out target/media`.
+//! architect-lab-media -- showcase-layout --out target/media`. With
+//! feature `story`, [`main_stories`] is the same command over the
+//! scenarios of the stories linked in.
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -16,6 +18,7 @@ use std::process::ExitCode;
 
 use clap::Parser;
 
+use crate::Scenario;
 use crate::capture::{Recorder, encode};
 use crate::run::{App, run};
 
@@ -38,13 +41,87 @@ struct Args {
     list: bool,
 }
 
+/// A scenario to play, where it came from, and its app.
+struct Job<'a> {
+    path: PathBuf,
+    scenario: Scenario,
+    make: &'a dyn Fn() -> App,
+}
+
+impl Clone for Job<'_> {
+    fn clone(&self) -> Self {
+        Self {
+            path: self.path.clone(),
+            scenario: self.scenario.clone(),
+            make: self.make,
+        }
+    }
+}
+
 /// Runs the command over the scenarios in `dir`, a fresh app from `make`
 /// for each.
 #[must_use]
 pub fn main(make: impl Fn() -> App, dir: &Path) -> ExitCode {
     let args = Args::parse();
-    let mut out = std::io::stdout().lock();
-    match go(&args, &make, dir, &mut out) {
+    let found = crate::load_dir(dir).map(|all| {
+        all.into_iter()
+            .map(|(path, scenario)| Job {
+                path,
+                scenario,
+                make: &make,
+            })
+            .collect::<Vec<_>>()
+    });
+    finish(found.map_err(|e| e.to_string()).and_then(|all| {
+        let from = dir.display().to_string();
+        go(
+            &args,
+            all,
+            Some(&make),
+            &from,
+            &mut std::io::stdout().lock(),
+        )
+    }))
+}
+
+/// Runs the command over the scenarios of every story linked in that has
+/// any (`#[story(scenario = "…")]`), each over its story alone
+/// ([`crate::story::app`]).
+#[cfg(feature = "story")]
+#[must_use]
+pub fn main_stories() -> ExitCode {
+    let args = Args::parse();
+    let stories: Vec<_> = crate::story::with_scenarios().collect();
+    let makers: Vec<Box<dyn Fn() -> App>> = stories
+        .iter()
+        .map(|story| {
+            let story = *story;
+            let make: Box<dyn Fn() -> App> = Box::new(move || crate::story::app(story));
+            make
+        })
+        .collect();
+    let mut all = Vec::new();
+    for (story, make) in stories.iter().zip(&makers) {
+        match crate::story::scenarios(story) {
+            Ok(list) => all.extend(list.into_iter().map(|scenario| Job {
+                path: PathBuf::from(story.source),
+                scenario,
+                make: make.as_ref(),
+            })),
+            Err(e) => return finish(Err(e.to_string())),
+        }
+    }
+    finish(go(
+        &args,
+        all,
+        None,
+        "the stories",
+        &mut std::io::stdout().lock(),
+    ))
+}
+
+fn finish(done: Result<(), String>) -> ExitCode {
+    match done {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             let _ = writeln!(std::io::stderr(), "error: {e}");
@@ -55,25 +132,28 @@ pub fn main(make: impl Fn() -> App, dir: &Path) -> ExitCode {
 
 fn go(
     args: &Args,
-    make: &impl Fn() -> App,
-    dir: &Path,
+    all: Vec<Job<'_>>,
+    for_files: Option<&dyn Fn() -> App>,
+    from: &str,
     out: &mut impl std::io::Write,
 ) -> Result<(), String> {
-    let all = crate::load_dir(dir).map_err(|e| e.to_string())?;
     let mut picked = Vec::new();
     for want in &args.scenarios {
-        if Path::new(want).extension().is_some_and(|x| x == "styx") {
+        if let Some(make) =
+            for_files.filter(|_| Path::new(want).extension().is_some_and(|x| x == "styx"))
+        {
             let source = std::fs::read_to_string(want).map_err(|e| format!("{want}: {e}"))?;
-            picked.push((
-                PathBuf::from(want),
-                crate::load(&source).map_err(|e| e.to_string())?,
-            ));
+            picked.push(Job {
+                path: PathBuf::from(want),
+                scenario: crate::load(&source).map_err(|e| e.to_string())?,
+                make,
+            });
             continue;
         }
         let found = all
             .iter()
-            .find(|(_, s)| s.id == *want)
-            .ok_or_else(|| format!("no scenario {want:?} in {}", dir.display()))?;
+            .find(|j| j.scenario.id == *want)
+            .ok_or_else(|| format!("no scenario {want:?} in {from}"))?;
         picked.push(found.clone());
     }
     if args.scenarios.is_empty() {
@@ -83,13 +163,15 @@ fn go(
         let _ = writeln!(out, "{line}");
     };
     if args.list {
-        for (path, s) in &picked {
-            say(out, format!("{}\t{}\t{}", s.id, s.title, path.display()));
+        for j in &picked {
+            let s = &j.scenario;
+            say(out, format!("{}\t{}\t{}", s.id, s.title, j.path.display()));
         }
         return Ok(());
     }
-    for (_, scenario) in &picked {
-        let app = make();
+    for job in &picked {
+        let scenario = &job.scenario;
+        let app = (job.make)();
         if args.test {
             let report = run(&app, scenario, None).map_err(|e| format!("{}: {e}", scenario.id))?;
             say(

@@ -216,9 +216,21 @@ note = "sibling of launcher; fold in as a ui flag"
 
 [[row]]
 package = "architect-guide"
+features = ["ui"]
+layer = "L4"
+note = "the in-app tour and the live target path"
+
+[[row]]
+package = "architect-guide"
 features = ["capture"]
 layer = "L4"
 note = "the headless runner and film: native only"
+
+[[row]]
+package = "architect-guide"
+features = ["story"]
+layer = "L4"
+note = "a story's scenarios through the runner"
 
 [[row]]
 package = "architect-story-core"
@@ -230,6 +242,11 @@ layer = "L4"
 
 [[row]]
 package = "architect-story-shell"
+layer = "L4"
+
+[[row]]
+package = "architect-story-shell"
+features = ["tours"]
 layer = "L4"
 
 [[row]]
