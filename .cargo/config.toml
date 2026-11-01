@@ -1,0 +1,4 @@
+# `cargo xtask <command>` runs the repo tooling (`xtask/`). An alias only:
+# no [build] or rustflags here, so cache keys stay the same as plain cargo.
+[alias]
+xtask = "run -q -p xtask --"
