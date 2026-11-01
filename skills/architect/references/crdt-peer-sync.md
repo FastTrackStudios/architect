@@ -1,4 +1,4 @@
-# crdt: documents, text, schema, hub sync, `crdt::peer`, DocRegistry
+# crdt: documents, text, schema, hub sync, `crdt::peer`, `crdt::p2p`, DocRegistry
 
 Crate `crdt` (`features/crdt/crdt`); guides `docs/content/architecture/collaboration.md` and `docs/content/architecture/peers.md`. Feature gates: `vox` (sync, registry, peer), `dioxus` (hooks), `turso`, `indexeddb`, `blob` (a document's blobs, native).
 
@@ -17,11 +17,13 @@ Crate `crdt` (`features/crdt/crdt`); guides `docs/content/architecture/collabora
 | Presence | `EphemeralStore` presence; sliding fan-out | `features/crdt/crdt/src/sync.rs` `DocPresence`, `PresenceHost`, `PresencePeer`, `PresenceDriver` |
 | `DocRegistry` | many docs on one dispatcher pair; admission, the org's permissions, authorizer, eviction | `features/crdt/crdt/src/registry.rs` `DocRegistry`, `with_admission`, `with_permissions` (`DocPermissions`, `DocAccess`), `with_authorizer`, `with_idle_eviction` |
 | `crdt::peer` | pairwise exchange, `DocPeer` lane, `SelfLane`, `pull`, lineage check | `features/crdt/crdt/src/peer.rs` `DocPeer`, `DocPeerHost`, `SelfLane`, `exchange`, `pull`, `is_foreign_lineage` |
+| `crdt::link` | a link to a live document, `fts-doc:<endpoint>/<doc>?key=<key>` (wasm-clean); `LinkKey` presents its key on a `DocSyncClient` | `features/crdt/crdt/src/link.rs` `DocLink`, `LinkKey`, `LinkError` |
+| `crdt::p2p` | who a node serves, peer to peer: the owner's devices (from auth's device directory) and live links; the router one connection gets | `features/crdt/crdt/src/p2p.rs` `Devices`, `Shares`, `NodeAccess`, `node_router` |
 | `crdt::docs` | catalog of schema-agnostic app docs (client-chosen id, opaque `kind`, `parent`, tombstones, contiguous `rev`); its host; the device driver | `features/crdt/crdt/src/docs/mod.rs` `Docs`, `DocMeta`, `DocChange`, `DocsStore`, `InMemoryDocsStore`; `features/crdt/crdt/src/docs/host.rs` `DocsHost`; `features/crdt/crdt/src/docs/driver.rs` `DocsDriver`, `DocsIndex`, `DocStorage`, `DocSyncEvent`, `Refusal`; `features/crdt/crdt/src/docs/device_host.rs` `DriverHost`; `features/crdt/crdt/src/docs/turso.rs` `TursoDocsIndex`; `features/crdt/crdt-seaorm/src/docs.rs` `SeaOrmDocsStore` |
 | `crdt::blobs` | the blobs a document points at (its kind's `DocKind::blobs`): live set for collection, keep offline | `features/crdt/crdt/src/blobs.rs` `referenced`, `live`, `missing`, `keep_offline`, `release`; transfer in `architect::blob` (`Fetcher`, `BlobTransferHost`, `VoxRemote`, `HttpRemote`) |
 | The org driver | one driver per org on a device, kept connected (dial, session until `Caller::closed`, `Backoff`, dial again); docs placed in document files | `features/crdt/crdt/src/docs/org.rs` `OrgDocs` (`stay_connected`, `run_on`, `link`), `OrgSyncs` (`ensure`, `current`, `follow`, `stop`), `Dialed`, `OrgLink`; `features/crdt/crdt/src/docs/placement.rs` `Placement` |
 | Hooks | Dioxus bridge: synced doc, crdt list/entry, presence | `features/crdt/crdt/src/hooks.rs` `use_synced_doc_keyed_with`, `use_crdt_list`, `use_crdt_entry` |
-| iroh seam | peer lookup modes; `Principal::Host` identity | `crates/architect/src/iroh_link.rs` `PeerLookup`; `features/permissions/src/lib.rs` `Principal` |
+| iroh seam | peer lookup modes; a handler per connection from the proved endpoint id; LAN browsing | `crates/architect/src/iroh_link.rs` `PeerLookup`, `serve_peers`; `crates/architect/src/iroh_link/lan.rs` `LanBrowser`, `advertise_name`, `LAN_SERVICE`; `features/permissions/src/lib.rs` `Principal` |
 
 ## Which model for which datum
 
@@ -31,7 +33,8 @@ Crate `crdt` (`features/crdt/crdt`); guides `docs/content/architecture/collabora
 | Prose or any long text edited concurrently | `#[architect(crdt(text))]` on the `String` field (a `LoroText` child written by minimal diff), or an explicit `LoroText` via `apply_text_ops` |
 | Short scalar fields (title, done, id refs) | plain `#[architect(crdt)]` / `entity_crdt!` fields: whole-value LWW per field |
 | Who is here, cursors, selections | presence (`EphemeralStore`): never in the doc; expires |
-| Devices share docs with no hub | `crdt::peer` over `DocRegistry` plus Host admission |
+| Devices share docs with no hub | `crdt::peer` over `DocRegistry` plus Host admission; served with `crdt::p2p::node_router` (Recipe E) |
+| Someone across the room joins one document live | a `crdt::link::DocLink` from `crdt::p2p::Shares::share` (Recipe E) |
 | A canonical server exists and clients attach | `DocSyncHost` / `DocRegistry` + `SyncedDoc` (hub) |
 | An app's own data (projects, setlists, rigs) on every device of an owner, made offline, listed without opening | `crdt::docs`: `DocsHost` on the hub, a `DocsDriver` per owner on each device (Recipe D) |
 | The same, per org, signed in, each doc a file the person opens | `OrgSyncs` on the device (one `OrgDocs` per org, `Placement`), `DocsHost::with_permissions` on the org's server (Recipe F) |
@@ -41,7 +44,7 @@ Crate `crdt` (`features/crdt/crdt`); guides `docs/content/architecture/collabora
 
 1. Node registry: `DocRegistry::new(factory).with_authorizer(|who, doc_id| ..)`. The factory is `FilePersistence` (or `CrdtDoc::ephemeral()` in tests).
 2. Serve: `DocPeerHost::new(reg.clone(), OpenDocs(reg.clone()), |endpoint| admitted.contains(endpoint))`; mount `LayerRouter::new().with(doc_peer_service_descriptor(), DocPeerDispatcher::new(host))`, wrapped by `PermissionsGate::new(..).permit(doc_peer_service_descriptor(), &PEER_PERMITS).wrap(router)`. `PEER_PERMITS` (the test's table): `list` read, `sync` write, both on `docs/**`.
-3. Identity: the gate's resolver must yield `Principal::Host { endpoint }` from the proved iroh connection (`IrohLink::remote_id()`); the host app maps it.
+3. Identity: the gate's resolver must yield `Principal::Host { endpoint }` from the proved iroh connection, never from metadata. `iroh_link::serve_peers(&endpoint, |remote| router_for(remote))` hands each connection's proved id to the function that builds its gated router; `crdt::p2p::node_router` is that router, ready-made (Recipe E).
 4. Create the document once on one node, then carry it to the others. Separately created docs with one id are refused as foreign lineage.
 5. Pull per node, on a timer: `SelfLane::open(reg.clone(), Principal::Service { name })`, a `DocPeerClient` over the link, `OpenDocs(reg).held()` digests, then `pull(&local, &peer, &ours, per_doc)` → `PullReport`. Single document: `exchange(doc_id, &local, &PeerLane { client, name })`.
 6. Convergence is by repeated sweeps, not one call; each pull moves both directions. Proof: proptest `any_edit_order_converges`.
@@ -81,17 +84,24 @@ The host stores and relays Loro bytes and a catalog row (`DocMeta`); it never re
   - A doc learned from a peer stays pending until the hub session registers it. Rename and delete go through the hub.
 - Raw clients: `DocsClient` / `DocsStreamClient` inherent methods return `VoxError<DocsError>`; fold with `architect::vox_into_app`.
 
+## Recipe H: live peer to peer, links and devices (mirrors `features/crdt/crdt/tests/p2p.rs`)
+
+1. One `NodeAccess::new(Devices::new(), Shares::new())` per node. Keep `Devices` current from auth: `devices.replace(directory.peer_endpoints(this_device))` on every `list_devices` / `register_device` answer (`features/auth/auth-proto/src/device.rs` `DeviceDirectory::peer_endpoints`). It is read per call, so a device taken off the account is refused on its next call, over a connection it already has.
+2. Registry: `.with_authorizer(move |who, id| access.admits(who, id) || mine(who, id))`. `admits`: a registered device (`Principal::Host`) any document, a link's guest (`Principal::Guest`) only the link's document, anyone else nothing.
+3. Serve: `iroh_link::serve_peers(&endpoint, move |remote| node_router(reg.clone(), OpenDocs(reg.clone()), access.clone(), &remote.to_string()))`. Each connection gets `DocSync` + `DocPeer` behind a gate whose engine is the `NodeAccess` (an unregistered endpoint is refused before any service runs) and whose resolver is the proved id, or the link's guest when the call presents a live key.
+4. Share: `shares.share(&endpoint.id().to_string(), doc_id)` returns a `DocLink`; hand over `link.to_string()`. `shares.revoke(&link)` / `revoke_doc(doc_id)` refuse it from the next call.
+5. Join: `let link: DocLink = text.parse()?`; dial `link.endpoint.parse::<iroh::EndpointId>()?` with `iroh_link::connect`, establish a `DocSyncClient`, `.with_middleware(LinkKey::new(&link))`, then `SyncedDoc::new(link.doc_id, doc).run(&client)`.
+6. Devices live: the same `SyncedDoc` over a `DocSyncClient` to the other device, with no `LinkKey` (the device is its endpoint). Documents not open: Recipe A's `pull` over a `DocPeerClient` on the same connection kind.
+7. Find devices nearby (`iroh-lan`, native): bind with `PeerLookup::Lan` / `N0AndLan`, `advertise_name(&endpoint, "Cody's laptop")`; `LanBrowser::new(endpoint.id())?.events().await` yields `LanEvent::Found { endpoint, name }` / `Lost`. Dial a found id bare: its address comes from the LAN.
+
 ## Recipe G: a document's blobs (mirrors `features/crdt/crdt/tests/blobs.rs`)
-
 A document points at its audio and images by sha256; the bytes never go in the Loro doc.
-
 - Kind: `DocKind::new(..).blobs(song_audio)`, where `song_audio(&LoroDoc) -> Vec<String>` returns 64-hex hashes.
 - Recording device: `LocalFs::put_bytes` (or `put`) the take, write its hash into the doc, and serve the store: `.with(blob_transfer_service_descriptor(), BlobTransferDispatcher::new(BlobTransferHost::new(Arc::new(store))))` on the same router as `DocPeer`/`DocSync` (vox over iroh or WebSocket). `.allow(|hash| ..)` narrows what it sends.
 - Other device: `Fetcher::new(LocalFs::new(dir)).with_remote(Arc::new(VoxRemote::new(client)))`, then `.with_remote(Arc::new(HttpRemote::new(".../blobs")))` for the server's copy (served with `blob::serve_http`). `fetcher.open(hash)` / `open_at(hash, offset)` streams while it arrives; `fetch(hash)` waits for it whole. One transfer per hash; a dropped link keeps the `.part`, and the next fetch resumes (`set_remotes` after a reconnect).
 - Offline: `crdt::blobs::keep_offline(kind, doc, &fetcher)` pins and fetches; `release` unpins.
 - Collection: `store.collect(&crdt::blobs::live(&kinds, docs), grace)` with every document on the device; pins are kept, anything else not in the set goes.
 - Streamed bytes are verified only at the end: a corrupt transfer that restarts ends the stream with `InvalidData`.
-
 ## Recipe F: one driver per org (mirrors `features/crdt/crdt/tests/org_sync.rs`)
 ```rust
 let syncs = OrgSyncs::new(
@@ -165,11 +175,13 @@ main.save("Mix sent to Dan").await?;                     // names a checkpoint, 
 - **Persistence:** compaction is not atomic by default (snapshot, then prune); `FilePersistence` appends with plain writes, so a crash mid-write can leave a truncated `.loro`; SeaORM compacts in one transaction and sequences by wall-clock nanos; Turso sequences `MAX(seq)+1` under one connection lock.
 - **Text positions are Unicode scalars, not UTF-16:** translate at the DOM boundary. `apply_text_diff` is one prefix/suffix edit. Create the text container once, then sync before forking edits. `read_text_with_migration` uses a mergeable container: prefer `upgrade_to_text` for concurrent upgrades.
 - **`#[architect(crdt)]` needs `repo` and a `Uuid` pk.** Without `crdt(text)` a `String` is whole-string LWW.
-- **wasm:** registry, peer and the sync host are native only; client `SyncedDoc` and hooks compile on wasm; IndexedDB is wasm + `indexeddb`; Turso is native + `turso`; `Persistence` is `?Send` on wasm.
+- **A link is a credential.** Whoever holds the text edits the document until it is revoked; there are no read-only links yet. A link's guest never reaches `DocPeer` (`DocPeerHost` serves devices only).
+- **wasm:** registry, peer, `p2p` and the sync host are native only; `crdt::link` parses everywhere; client `SyncedDoc` and hooks compile on wasm; IndexedDB is wasm + `indexeddb`; Turso is native + `turso`; `Persistence` is `?Send` on wasm.
 - **Hub and pairwise are different topologies.** A node that is both uses one registry for both. There is no gossip: pairwise sweeps only.
 
 ## iroh seam
 
-- `PeerLookup`: `N0` (default), `N0AndLan`, `Lan`; the last two need `iroh-lan` (native only). `Lan` turns relays off and publishes nothing: a LAN-only node cannot reach internet peers.
+- `PeerLookup`: `N0` (default), `N0AndLan`, `Lan`; the last two need `iroh-lan` (native only). `Lan` turns relays off and publishes nothing: a LAN-only node cannot reach internet peers. Both LAN modes advertise under `LAN_SERVICE` (`fts`, records `<id>._fts._udp.local.`): an iOS app lists `_fts._udp` in `NSBonjourServices`.
+- `serve_router` serves one handler to every caller: only for routers that treat callers alike. Anything gated per peer goes through `serve_peers`, which builds the handler from the endpoint id the handshake proved.
 - `bind_endpoint` is `N0`; `bind_endpoint_with` takes a lookup; `EngineHost::iroh_lookup` sets it. Dial by bare id with `iroh_link::connect(endpoint, remote)`. It redials a restarted peer once and reports `DialErrorKind::PeerUnreachable` when that fails too (`crates/architect/src/iroh_link.rs` `connect_with`).
-- Test: `crates/architect/tests/iroh_lan.rs` (needs a multicast interface); manual two-machine check `crates/architect/examples/iroh_lan.rs`.
+- Test: `crates/architect/tests/iroh_lan.rs` and `devices_on_one_network_find_each_other` in `features/crdt/crdt/tests/p2p.rs` (both need a multicast interface); manual two-machine check `crates/architect/examples/iroh_lan.rs`.

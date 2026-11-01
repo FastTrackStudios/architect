@@ -67,6 +67,17 @@ pub mod docs;
 #[cfg(all(feature = "vox", not(target_arch = "wasm32")))]
 pub mod peer;
 
+// A link to a live document (`fts-doc:<endpoint>/<doc>?key=…`): parsed
+// everywhere, a browser included.
+pub mod link;
+pub use link::DocLink;
+
+// Who a node serves its documents to, peer to peer: the owner's devices
+// (from the device registry) and live links, and the router one caller
+// gets. Native only, like the peer lane.
+#[cfg(all(feature = "vox", not(target_arch = "wasm32")))]
+pub mod p2p;
+
 // Dioxus hooks (`use_synced_doc`, `use_crdt_list`, `use_crdt_entry`,
 // `use_presence_channel`) — the client-side bridge from a syncing
 // replica to `AtomResult` phase rendering. Pulls Dioxus via

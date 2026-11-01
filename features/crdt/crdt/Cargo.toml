@@ -113,13 +113,16 @@ doctest = false
 # the feature for tests without making it a default).
 crdt = { path = ".", features = ["vox", "turso", "blob"] }
 # The sync convergence test serves DocSyncHost over the in-process vox
-# transport and runs replicas under tokio.
+# transport and runs replicas under tokio. `tests/p2p.rs` serves nodes
+# over real iroh endpoints and browses the LAN (`iroh-lan`).
 # `blob` + `http`/`http-client` + `iroh`: tests/blobs.rs moves blobs over
 # vox (in-process and iroh) and HTTP.
-architect = { workspace = true, features = ["vox", "local", "blob", "http", "http-client", "iroh"] }
+architect = { workspace = true, features = ["vox", "local", "iroh-lan", "blob", "http", "http-client", "iroh"] }
 axum.workspace = true
 futures = "0.3"
 iroh.workspace = true
+# `tests/p2p.rs` admits devices from auth's device directory.
+auth-proto.workspace = true
 # tests/blobs.rs cuts an in-process link mid-transfer.
 vox-types.workspace = true
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "net"] }

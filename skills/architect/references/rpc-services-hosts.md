@@ -20,7 +20,7 @@ Entity/derive, storage, the permissions gate, crdt/atom and the Action List have
 | `connect::pool` | shared, single-flight, liveness-checked connections keyed by (target, bearer) | `crates/architect/src/connect/mod.rs` `pool`, `caller_with`, `evict_all` |
 | `connect::ws` | WebSocket dial; native header / browser subprotocol bearer | `crates/architect/src/connect/ws.rs` |
 | `axum_ws` | server half of vox over an axum WebSocket | `crates/architect/src/axum_ws.rs` |
-| `iroh_link` | vox over QUIC, bare `EndpointId` dial (bounded, one retry after a peer restart), ALPN `architect/vox/1`, LAN lookup | `crates/architect/src/iroh_link.rs` `connect`, `connect_with`, `DialError`, `PeerLookup`, `bind_endpoint_with` |
+| `iroh_link` | vox over QUIC, bare `EndpointId` dial (bounded, one retry after a peer restart), ALPN `architect/vox/1`, LAN lookup and browsing, a handler per connection from the proved peer id | `crates/architect/src/iroh_link.rs` `connect`, `connect_with`, `DialError`, `PeerLookup`, `bind_endpoint_with`, `serve_peers`; `crates/architect/src/iroh_link/lan.rs` `LanBrowser` |
 | HTTP face (server/client) | `POST /<prefix>/<method>` JSON, SSE; `<Trait>HttpClient` (reqwest, wasm fetch) | `crates/architect/src/http.rs` `HttpError`, `respond`, `sse`, `HttpClient` |
 | Error envelope | `TransportError`, `ClientError<E>`, `vox_into_app` | `crates/architect/src/lib.rs` `TransportError`, `ClientError`, `vox_into_app` |
 | `PubSub` / `EventSink` | server fan-out with overflow strategies, replay, buffered attach | `crates/architect/src/pubsub.rs` `PubSub` |

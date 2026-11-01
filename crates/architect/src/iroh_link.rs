@@ -38,6 +38,18 @@
 //! dial by bare id with the internet down), `Lan` uses only the local
 //! network. `EngineHost::iroh_lookup` picks it for a host.
 //!
+//! Both advertise the endpoint as an FTS node ([`LAN_SERVICE`]), and a
+//! [`LanBrowser`] lists the nodes it can see there — what a "devices
+//! nearby" list is made from; [`advertise_name`] puts a name beside the
+//! id.
+//!
+//! ## Who is calling
+//!
+//! An iroh connection proves the peer's endpoint id during the handshake.
+//! [`serve_peers`] hands that id to a function that makes the
+//! connection's handler, so a gate can resolve the caller from the proof
+//! rather than from anything the caller sent.
+//!
 //! ## Dialling a restarted peer
 //!
 //! [`connect`] is bounded ([`DIAL_TIMEOUT`]) and survives the peer
@@ -143,6 +155,11 @@ pub fn secret_key_to_hex(key: &iroh::SecretKey) -> String {
 #[cfg(all(feature = "iroh-lan", not(target_arch = "wasm32")))]
 pub use iroh_mdns_address_lookup;
 
+#[cfg(all(feature = "iroh-lan", not(target_arch = "wasm32")))]
+mod lan;
+#[cfg(all(feature = "iroh-lan", not(target_arch = "wasm32")))]
+pub use lan::{LAN_SERVICE, LanBrowser, LanEvent, LanEvents, advertise_name};
+
 /// How an endpoint turns a bare [`iroh::EndpointId`] into addresses it
 /// can dial, and where it publishes its own.
 ///
@@ -176,12 +193,13 @@ pub fn endpoint_builder(lookup: PeerLookup) -> iroh::endpoint::Builder {
     let builder = match lookup {
         PeerLookup::N0 => iroh::Endpoint::builder(iroh::endpoint::presets::N0),
         #[cfg(all(feature = "iroh-lan", not(target_arch = "wasm32")))]
-        PeerLookup::N0AndLan => iroh::Endpoint::builder(iroh::endpoint::presets::N0)
-            .address_lookup(iroh_mdns_address_lookup::MdnsAddressLookup::builder()),
+        PeerLookup::N0AndLan => {
+            iroh::Endpoint::builder(iroh::endpoint::presets::N0).address_lookup(lan::advertiser())
+        }
         #[cfg(all(feature = "iroh-lan", not(target_arch = "wasm32")))]
         PeerLookup::Lan => iroh::Endpoint::builder(iroh::endpoint::presets::Minimal)
             .relay_mode(iroh::RelayMode::Disabled)
-            .address_lookup(iroh_mdns_address_lookup::MdnsAddressLookup::builder()),
+            .address_lookup(lan::advertiser()),
     };
     builder.alpns(vec![VOX_ALPN.to_vec()])
 }
@@ -217,9 +235,45 @@ where
     A: vox_core::LaneAcceptor,
 {
     let acceptor = SharedAcceptor(std::sync::Arc::new(acceptor));
+    accept_each(endpoint, move |_| acceptor.clone()).await;
+}
+
+/// Serve every connection a handler of its own, made from the peer's
+/// endpoint id.
+///
+/// The id is the one the QUIC handshake proved (the peer holds its
+/// secret key), not one the peer presented, so `make` can turn it into
+/// the caller's identity: a [`PermissionsGate`](crate::permissions_gate::PermissionsGate)
+/// with a `StaticPrincipal(Principal::Host { endpoint })` resolver, say.
+/// [`serve_router`] serves one handler to every caller, which is right
+/// only for a router that treats all callers alike.
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn serve_peers<H, F>(endpoint: &iroh::Endpoint, make: F)
+where
+    F: Fn(iroh::EndpointId) -> H + Send + Sync + 'static,
+    H: vox::Handler<vox::DriverReplySink> + Clone + Send + Sync + 'static,
+{
+    accept_each(endpoint, move |remote| {
+        SharedAcceptor(std::sync::Arc::new(crate::layer::handler_acceptor(make(
+            remote,
+        ))))
+    })
+    .await;
+}
+
+/// The accept loop behind [`serve_endpoint`] and [`serve_peers`]: one
+/// task per QUIC connection, one vox connection per bi-stream, each
+/// served through the acceptor `per_connection` made for the peer.
+#[cfg(not(target_arch = "wasm32"))]
+async fn accept_each<A, F>(endpoint: &iroh::Endpoint, per_connection: F)
+where
+    A: vox_core::LaneAcceptor + Clone,
+    F: Fn(iroh::EndpointId) -> A + Send + Sync + 'static,
+{
+    let per_connection = std::sync::Arc::new(per_connection);
     let local = endpoint.id();
     while let Some(incoming) = endpoint.accept().await {
-        let acceptor = acceptor.clone();
+        let per_connection = std::sync::Arc::clone(&per_connection);
         tokio::task::spawn(async move {
             let connection = match incoming.await {
                 Ok(c) => c,
@@ -231,12 +285,12 @@ where
             // An inbound connection pins iroh's path to the peer just
             // like an outbound one; a redial may need to drop it.
             tracked::insert(local, &connection);
+            let acceptor = per_connection(connection.remote_id());
             loop {
                 match connection.accept_bi().await {
                     Ok((send, recv)) => {
                         let link = IrohLink::new(connection.clone(), send, recv);
-                        let acceptor = acceptor.clone();
-                        tokio::task::spawn(serve_link(link, acceptor));
+                        tokio::task::spawn(serve_link(link, acceptor.clone()));
                     }
                     Err(e) => {
                         debug!(error = %e, "iroh connection closed");

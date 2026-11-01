@@ -2565,6 +2565,7 @@ dependencies = [
  "architect-orgs",
  "architect-permissions",
  "async-trait",
+ "auth-proto",
  "axum",
  "chrono",
  "crc32fast",
