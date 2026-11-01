@@ -15,7 +15,7 @@ use architect::snapshot::{WriteGate, quiesce, wal_checkpoint};
 
 let gate = WriteGate::new(); // holds last at most DEFAULT_MAX_HOLD (30 s)
 let router = backend.into_router().gated(&gate); // every vox call parks at the gate
-EngineHost::new(router, bind).serve().await?;
+EngineHost::new(router, permissions, bind).serve().await?; // `permissions`: the PermissionsGate
 
 // A snapshot cycle:
 let commit = quiesce(

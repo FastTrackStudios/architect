@@ -239,7 +239,7 @@ token is still a `Layer`, so it mounts like any other:
 
 ```rust,ignore
 let http = layers![MediaService, NotesService].provide_http(&backend);
-EngineHost::new(vox, bind).plugin(http).serve().await?;
+EngineHost::new(vox, gate, bind).plugin(http).serve().await?;
 ```
 
 On vox the token binds nothing (an empty descriptor, which
@@ -310,7 +310,9 @@ let svc = AuthVoxService::new(auth);
 let vox  = layers![AuthServiceService, OrganizationServiceService].provide(svc.clone());
 let http = layers![AuthServiceService, OrganizationServiceService].provide_http(&svc);
 
-EngineHost::new(vox, "0.0.0.0:8080")
+// The auth server is the identity provider: sign-in is anonymous and
+// every other method checks the token it takes, so it is ungated.
+EngineHost::ungated(vox, "0.0.0.0:8080")
     .plugin(http)                  // the generated face
     .plugin(oauth::router(state))  // the escape hatch: a hand-built router
     .plugin(auth_ui::router(ui))   // hosted pages
@@ -324,6 +326,15 @@ EngineHost::new(vox, "0.0.0.0:8080")
 `.iroh(key, id)` — the same vox router peer to peer. `into_app()` hands
 back the axum `Router` for in-process tests.
 
+Every vox lane the host owns sits behind the `PermissionsGate` given to
+`EngineHost::new(router, gate, bind)`: `/vox` resolves the caller from the
+upgrade's bearer, the iroh lane uses the endpoint id the handshake proved
+(`Principal::Host`), and each `vox_at` lane is wrapped like `/vox`.
+`EngineHost::ungated(router, bind)` is the explicit opt-out, for a server
+like this one whose services check their own tokens; it logs a `warn` on
+every start. The HTTP face is not behind the vox gate: a generated route
+reads its bearer through `RequestHead`.
+
 ### Protocol mounts
 
 Some endpoints are adapters, not capabilities: a vox WebSocket per org,
@@ -332,15 +343,15 @@ a WebDAV bridge, a discovery document. They belong to the host the way
 route (`crates/architect/src/host/mount.rs`):
 
 ```rust,ignore
-EngineHost::new(vox, bind)
+EngineHost::new(vox, gate, bind)
     // A vox WebSocket at a parameterised path. The resolver picks the
-    // handler (and so the identity) per connection, or refuses it.
+    // handler per connection, or refuses it; the host's gate wraps it.
     .vox_at("/org/{slug}/vox", move |head: RequestHead| {
         let orgs = orgs.clone();
         async move {
-            let org = orgs.get(head.param("slug").unwrap_or_default())
-                .ok_or(StatusCode::NOT_FOUND)?;
-            Ok(org.router_for(head.bearer()))
+            orgs.get(head.param("slug").unwrap_or_default())
+                .map(|org| org.router())
+                .ok_or(StatusCode::NOT_FOUND)
         }
     })
     // A GET document: discovery, a per-org API description, a probe.
@@ -352,7 +363,8 @@ EngineHost::new(vox, bind)
 
 | Method | Serves | The hook gets | The hook answers |
 |---|---|---|---|
-| `vox_at(path, resolve)` | a vox WebSocket at `path` (`any` verb; `vox.v1` echoed) | `RequestHead` | `Ok(handler)` (a `LayerRouter` or a gated wrapper), or `Err(impl IntoResponse)` to refuse the upgrade |
+| `vox_at(path, resolve)` | a vox WebSocket at `path` (`any` verb; `vox.v1` echoed), behind the host's gate and the upgrade's bearer | `RequestHead` | `Ok(handler)` (a `LayerRouter`, say), or `Err(impl IntoResponse)` to refuse the upgrade |
+| `vox_at_permissioned(path, resolve)` | the same, served as the resolver gated it, not wrapped again | `RequestHead` | `Ok(PermissionedRouter)` (a gate per org, a share link's `StaticPrincipal` lane), or `Err(impl IntoResponse)` |
 | `document(path, describe)` | `GET path`, before the SPA fallback | `RequestHead` | `Ok(impl IntoResponse)` or `Err(impl IntoResponse)` |
 | `dav(mount, handle)` | every verb at `mount`, `mount/` and below it, **outside** `finish` | `DavRequest`: `head`, `mount` as addressed (`/org/acme/dav`), `rel` (decoded, no leading `/`), the whole `request` | a `Response` |
 
@@ -409,7 +421,7 @@ env through `architect::build_info!()`, expanded in the **binary** crate:
 | `built_at` | `ARCHITECT_BUILT_AT`, RFC 3339 UTC, e.g. `date -u +%Y-%m-%dT%H:%M:%SZ` |
 
 ```rust,ignore
-EngineHost::new(vox, bind)
+EngineHost::new(vox, gate, bind)
     .build_info(architect::build_info!())
     .serve()
     .await?;

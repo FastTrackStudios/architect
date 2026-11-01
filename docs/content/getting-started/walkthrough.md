@@ -120,7 +120,7 @@ struct Config {
 }
 
 let backend = Memory::default();
-EngineHost::new(backend.clone().into_router(), config.bind)
+EngineHost::ungated(backend.clone().into_router(), config.bind)
     .plugin(backend.into_http_router())
     .serve()
     .await?;
@@ -128,7 +128,10 @@ EngineHost::new(backend.clone().into_router(), config.bind)
 
 `EngineHost` serves vox over WebSocket at `/vox`, the HTTP+JSON routes and
 SSE streams from the plugin, `/health`, and with `.iroh(key, id)` the same
-router peer to peer ([HTTP and iroh](@/architecture/http.md)). Try it:
+router peer to peer ([HTTP and iroh](@/architecture/http.md)). The greeter has
+no accounts, so it says `ungated`; a real server passes its `PermissionsGate`
+to `EngineHost::new(router, gate, bind)`, which checks every vox lane
+([EngineHost](@/features/engine-host.md)). Try it:
 
 ```sh
 GREETER_BIND=127.0.0.1:4040 cargo run -p example-greeter

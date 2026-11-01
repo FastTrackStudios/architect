@@ -194,6 +194,18 @@ vox (served at `/vox` and, with `AUTH_IROH_KEY_FILE`, over iroh),
 `services().provide_http(&svc)` for HTTP, and the OAuth/OIDC flows and
 the hosted pages as plugins on an `architect::host::EngineHost`. Nothing
 in the server hand-writes a route that mirrors a trait method.
+
+The host is built `EngineHost::ungated`, on purpose: this server is the
+identity provider. Signing up and signing in are anonymous by nature, and
+every other method takes the session token as an argument and checks it
+itself, on every face. An app's server is the other way round: it passes
+its `PermissionsGate` to `EngineHost::new(router, gate, bind)`, and the
+host puts it in front of every vox lane it owns, `/vox` (the caller from
+the upgrade's bearer), the iroh lane (the endpoint id the QUIC handshake
+proved, `Principal::Host`) and every `vox_at` lane
+(`crates/architect/src/host.rs` `EngineHost`,
+`crates/architect/tests/host_gate.rs`). See
+[EngineHost](@/features/engine-host.md).
 `apps/auth-server/tests/surfaces.rs` runs one suite over every
 transport.
 

@@ -27,7 +27,9 @@ async fn main() -> eyre::Result<()> {
     architect::host::boot("info");
     let config = Config::from_env()?;
     let backend = Memory::default();
-    EngineHost::new(backend.clone().into_router(), config.bind)
+    // A demo with no accounts: every wire is public, the HTTP face too.
+    // A real server passes its `PermissionsGate` to `EngineHost::new`.
+    EngineHost::ungated(backend.clone().into_router(), config.bind)
         .plugin(backend.into_http_router())
         .build_info(architect::build_info!())
         .serve()
@@ -44,7 +46,13 @@ async fn main() -> eyre::Result<()> {
   `architect_telemetry::otel::init` when OTLP is configured. Install
   one subscriber, once. (`task:apps/server/src/main.rs` is the
   reference; `features/telemetry/src/lib.rs` has the functions.)
-- `EngineHost::new(router, bind)` takes the vox `LayerRouter`.
+- `EngineHost::new(router, gate, bind)` takes the vox `LayerRouter` and
+  the `PermissionsGate` that checks every vox lane the host owns: `/vox`
+  (the caller from the upgrade's bearer), the iroh lane (the caller is the
+  peer's proved endpoint id, `Principal::Host`) and every `vox_at` lane.
+  `EngineHost::ungated(router, bind)` serves the router to everyone
+  unchecked and logs a `warn` on every start; the greeter uses it because
+  it has no accounts.
 - `.plugin(router)` merges an axum router: here the generated HTTP
   face. A host may take several.
 - `.build_info(architect::build_info!())` fills `/version.json`
@@ -228,13 +236,14 @@ builder methods on the host, not hand-written routes
 (`crates/architect/src/host/mount.rs`):
 
 ```rust
-EngineHost::new(vox, bind)
+EngineHost::new(vox, gate, bind)
+    // The host's gate wraps the router the resolver picks.
     .vox_at("/org/{slug}/vox", move |head: RequestHead| {
         let orgs = orgs.clone();
         async move {
-            let org = orgs.get(head.param("slug").unwrap_or_default())
-                .ok_or(StatusCode::NOT_FOUND)?;
-            Ok(org.router_for(head.bearer()))
+            orgs.get(head.param("slug").unwrap_or_default())
+                .map(|org| org.router())
+                .ok_or(StatusCode::NOT_FOUND)
         }
     })
     .document("/.well-known/app.json", move |head| discovery(head.bearer()))
@@ -244,7 +253,8 @@ EngineHost::new(vox, bind)
 
 | Mount | Serves | Feature |
 |---|---|---|
-| `.vox_at(path, resolve)` | a vox WebSocket at a parameterised path; the resolver refuses with a status before the upgrade | `host` |
+| `.vox_at(path, resolve)` | a vox WebSocket at a parameterised path behind the host's gate; the resolver refuses with a status before the upgrade | `host` |
+| `.vox_at_permissioned(path, resolve)` | the same, for a resolver that returns a `PermissionedRouter` it gated itself (a gate per org, a share link's guest) | `host` |
 | `.document(path, describe)` | a `GET` document ahead of the SPA fallback | `host` |
 | `.dav(mount, handle)` | every WebDAV verb at and below `mount`, outside the `finish` layers so CORS does not answer `OPTIONS` | `host` |
 | `.otlp_forward(at, upstream, authorize)` | `POST {at}/v1/{traces,logs,metrics}` forwarded to a collector once `authorize(head)` is `Ok`; other signals `404`, a dead collector `502` | `otlp-forward` |
@@ -254,7 +264,7 @@ EngineHost::new(vox, bind)
 loopback, and forwards OTLP to a fake collector:
 
 ```rust
-let app = EngineHost::new(LayerRouter::new(), "127.0.0.1:0")
+let app = EngineHost::ungated(LayerRouter::new(), "127.0.0.1:0")
     .otlp_forward("/otlp", &format!("http://{upstream}/"), ingest_only)
     .into_app();
 ```

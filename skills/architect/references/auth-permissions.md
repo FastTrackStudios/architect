@@ -55,7 +55,7 @@ In short: (1) the gate is fail-closed by default, and observe-only is the migrat
 1. Engine and identity: e.g. `RoleEngine::new().with_default_user_role("member")` inside a `CompositeEngine` with a `ScopeEngine` granting `public/**` (Task's org lane). Identity: `SessionIdentityResolver::new(auth.clone())` (30 s cache; `with_ttl(Duration::ZERO)` disables it).
 2. Table: `const X: ServicePermits = ServicePermits { service: "...", methods: &[MethodPermit::new("method", Action::READ, "vault/{path}")] };` plus `.audited()` where wanted.
 3. Gate: `PermissionsGate::new(engine, Arc::new(identity)).unlisted(UnlistedPolicy::Deny).observe_only(!enforce).permit(<svc>_service_descriptor(), &TABLE)`, one `permit` per service; the descriptor comes from the service macro.
-4. Install: `router.with_permissions(gate)`, or per connection `PermissionsGate::wrap_shared_with_bearer(Arc::new(gate), router, bearer)`.
+4. Install: on a host, `EngineHost::new(router, gate, bind)` gates `/vox`, the iroh lane and every `vox_at` lane (`EngineHost::ungated` is the explicit opt-out; `crates/architect/tests/host_gate.rs`). By hand: `router.with_permissions(gate)`, or per connection `PermissionsGate::wrap_shared_with_bearer(Arc::new(gate), router, bearer)`; for a transport-proved peer, `PermissionsGate::wrap_shared_with_proved_caller(gate, router, Principal::Host { endpoint })`.
 5. Check: `coverage(&router).is_complete()` in a test.
 6. Serve the oracle from the same pair: `Permissions::new(gate.engine(), gate.identity_resolver())` + `PermissionsServiceDispatcher`, so it cannot disagree with enforcement.
 7. Handlers see the caller with `architect::permissions_gate::caller()` (`Option<Principal>`); test `a_handler_sees_the_caller_the_gate_resolved`. Action List handlers get it as `ActionCaller` instead.
@@ -72,7 +72,7 @@ In short: (1) the gate is fail-closed by default, and observe-only is the migrat
 | `Anonymous` | no or invalid token | none; denied unless a scope/public rule matches |
 | `Guest { link_id, display }` | share lane `StaticPrincipal` | none (the share engine supplies rules) |
 | `Service { name }` | in-process caller | `RoleEngine` allows all |
-| `Host { endpoint }` | transport-proven peer endpoint | none on its own |
+| `Host { endpoint }` | transport-proven peer endpoint (`EngineHost`'s iroh lane, `wrap_shared_with_proved_caller`, used when the call presents no bearer) | none on its own |
 
 Tests to copy: `features/auth/tests/native/src/permissions_gate_tests.rs` (`establish_gated`, observe-only, untabled denied, `coverage_names_every_gap`); `apps/auth-server/tests/surfaces.rs` (one suite across HTTP, pooled WebSocket and iroh; org isolation, invitations).
 
@@ -108,6 +108,7 @@ Entry points: `features/orgs/src/server.rs` `confine`, `current_org`, `Members`,
 - **A malformed token comes back as `Anonymous`** with no distinct error.
 - **Phantom permits:** a table naming a method the descriptor lacks is `phantom`; the real method is denied.
 - **`caller()` is task-local:** work spawned onto another task sees `None` and must refuse.
+- **An ungated host serves every vox lane unchecked.** `EngineHost::ungated` exists for routers that check their own tokens; on any other app it is the hole the gate closes, so grep for it in review.
 - **Gate state is shared** (`wrap_shared` takes an `Arc`); per-connection state is only the connection bearer. Spans exist only with feature `telemetry`.
 - **wasm:** the gate and `caller()` are excluded on wasm32; the engine crate switches its `Send` bounds; `auth-client` is wasm-clean.
 - **Two authorization planes:** the router gate does not cover in-process `ActionList` runs. Give the list the gate's engine with `set_authorizer`.
