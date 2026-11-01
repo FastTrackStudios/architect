@@ -1,0 +1,40 @@
+// A phone's bar while a field is typed in: the capture field's editing
+// actions in a pill, the button that puts the keyboard away apart at the
+// right. Headless there is no keyboard, so the bar stays at the foot
+// (with one, it rides it).
+id shell-phone-editing-bar
+title "The editing bar on a phone"
+view {width 402, height 874}
+capture {fps 20, width 402, outputs (png)}
+steps (
+    {
+        id capture
+        text "A field takes the focus: the action bar becomes the editing bar."
+        do @run{id LAB_CAPTURE}
+        done {check ({id LAB_STATE, has {page capture, bar editing}})}
+    }
+    {
+        id tag
+        text "Its actions are the field's own, by command id."
+        target @css"[data-bar-item=\"LAB_CAPTURE_TAG\"]"
+        do @click{}
+        done {check ({id LAB_STATE, has {page capture, bar editing}})}
+        hold 0.6
+    }
+    {
+        id hide
+        text "The button at the right lets the field go; the action bar comes back."
+        target @css"[data-bar-item=\"hide-keyboard\"]"
+        do @click{}
+        done {check ({id LAB_STATE, has {page capture, bar actions}})}
+        hold 0.4
+    }
+    {
+        id again
+        text "A tap on the field brings the editing bar back."
+        target @css"#lab-capture"
+        do @click{}
+        done {check ({id LAB_STATE, has {page capture, bar editing}})}
+        hold 0.6
+    }
+)

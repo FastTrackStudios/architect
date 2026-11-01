@@ -839,6 +839,7 @@ name = "architect-mobile"
 version = "0.1.0"
 dependencies = [
  "architect-lab-ui",
+ "architect-shell",
  "dioxus",
  "dioxus-native",
  "objc2 0.6.4",
@@ -946,12 +947,18 @@ dependencies = [
 name = "architect-shell"
 version = "0.1.0"
 dependencies = [
+ "block2 0.6.2",
  "dioxus",
+ "futures-channel",
  "futures-timer",
+ "futures-util",
  "lucide-dioxus",
+ "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
+ "objc2-ui-kit",
  "raw-window-handle 0.6.2",
+ "tracing",
  "web-time",
 ]
 

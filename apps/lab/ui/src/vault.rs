@@ -206,6 +206,8 @@ pub fn VaultPage() -> Element {
         use_context::<std::sync::Arc<architect::action::ActionList>>(),
         workspace,
     );
+    // A phone's action bar: the workspace's tabs button, counted.
+    architect_workspace::use_tabs_button(workspace);
     // The marker lane draws over the arrangement; its tool window floats
     // as a pane, to dock or tab like any other.
     let _canvases = architect_canvas::ui::use_canvases();

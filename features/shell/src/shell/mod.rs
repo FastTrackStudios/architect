@@ -1,7 +1,9 @@
 //! The shell's Dioxus half (feature `ui`): [`AppShell`] and everything it
 //! draws.
 
+mod bar;
 mod bars;
+mod keyboard;
 #[cfg(target_os = "macos")]
 mod mac;
 mod page;
@@ -16,7 +18,12 @@ use dioxus::prelude::*;
 use lucide_dioxus::{ChevronsUpDown, PanelLeft, PanelLeftClose, PanelRight};
 
 pub use crate::screen::{FormFactor, Insets, Screen, ShellStyle};
-use bars::{BottomBar, Rail, RoundButton, SideTab};
+pub use bar::{
+    BAR_MAX, BarAction, CommandRunner, EditingFocus, use_bar_action, use_editing_actions,
+};
+use bar::{BarModel, PhoneFoot};
+use bars::{Rail, RoundButton, SideTab};
+pub use keyboard::{Keyboard, install_keyboard, keyboard, set_keyboard_height, set_typing};
 #[cfg(target_os = "macos")]
 pub use mac::fit_traffic_lights;
 pub use page::{
@@ -341,6 +348,11 @@ pub struct Shell {
     /// The page's status items: [`use_status`].
     page_status: Signal<Vec<StatusItem>>,
     pub status_style: StatusStyle,
+    /// The app's buttons on a phone's action bar.
+    bar_actions: Vec<BarAction>,
+    /// What the pages and editors put on the bar: [`use_bar_action`],
+    /// [`use_editing_actions`].
+    bars: Signal<BarModel>,
 }
 
 /// Puts the page's own content in the shell's left side while the page is
@@ -683,6 +695,10 @@ pub fn AppShell(
     /// How a desk shows them: a bar along the foot, or a corner badge.
     #[props(default)]
     status_style: StatusStyle,
+    /// The app's buttons on a phone's action bar, by command id (a page
+    /// adds its own: [`use_bar_action`]); at most [`BAR_MAX`] show.
+    #[props(default)]
+    actions: Vec<BarAction>,
     children: Element,
 ) -> Element {
     let mut drawer = use_signal(|| None::<Side>);
@@ -695,6 +711,7 @@ pub fn AppShell(
     // The page's items first (its own, at a bar's left), then the app's.
     let all_status: Vec<StatusItem> = page_status().into_iter().chain(status).collect();
     let rail_extra = use_signal(|| None::<Element>);
+    let bars = use_signal(BarModel::default);
     // A page that claims the sidebar draws it from the top (its tabs in the
     // title row). On a desk the switcher sits at the sidebar's foot either
     // way, so it stays put when such a page comes and goes.
@@ -721,6 +738,8 @@ pub fn AppShell(
         rail_extra,
         page_status,
         status_style,
+        bar_actions: actions,
+        bars,
     };
     let mut ctx = use_context_provider(|| Signal::new(shell.clone()));
     if *ctx.peek() != shell {
@@ -1090,7 +1109,7 @@ pub fn AppShell(
                 }
             }
             if in_bar {
-                BottomBar { tabs: tabs, current, on_tab: pick, separate: separate, screen }
+                PhoneFoot { tabs: tabs, current, on_tab: pick, separate: separate, screen }
             }
             }
             if desk && status_style == StatusStyle::Bar && !all_status.is_empty() {
