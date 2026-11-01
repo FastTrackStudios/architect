@@ -1,0 +1,25 @@
+[package]
+name = "example-scripting"
+version.workspace = true
+edition.workspace = true
+publish = false
+description = "Architect's scripting API in one small crate: a task board's actions, Luau scripts that drive them as one undo step, a saved script as its own action, and an agent doing the same over MCP."
+
+[dependencies]
+architect = { workspace = true, features = ["action-list"] }
+# `luau` is the runtime and the SCRIPT_* actions; `crdt` makes a run one
+# step of the board's `crdt::History`.
+architect-scripting = { workspace = true, features = ["luau", "crdt"] }
+architect-mcp = { path = "../../features/mcp" }
+architect-permissions.workspace = true
+crdt.workspace = true
+facet.workspace = true
+futures = "0.3"
+serde_json.workspace = true
+
+[[bin]]
+name = "scripting"
+path = "src/main.rs"
+
+[lints]
+workspace = true
