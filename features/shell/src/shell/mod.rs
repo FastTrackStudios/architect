@@ -263,6 +263,9 @@ pub struct ShellTheme {
     pub shadow_lift: &'static str,
     /// What floats over everything: a menu, a popover, a floating pane.
     pub shadow_float: &'static str,
+    /// The face, a CSS stack. Its first, Inter, is the app's to bundle
+    /// (`architect_workspace::native::launch_with_fonts`, as the lab does);
+    /// without it the system's sans is used.
     pub font: &'static str,
 }
 
@@ -286,7 +289,9 @@ impl Default for ShellTheme {
             accent_soft: "rgba(45,212,191,0.14)",
             shadow_lift: "0 6px 20px rgba(0,0,0,0.35)",
             shadow_float: "0 16px 44px rgba(0,0,0,0.55)",
-            font: "-apple-system, 'SF Pro Text', system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif",
+            // FastTrackStudio's face where the app bundles it (the lab
+            // does) or the system has it; the system's sans elsewhere.
+            font: "Inter, -apple-system, 'SF Pro Text', system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif",
         }
     }
 }

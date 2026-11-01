@@ -37,5 +37,5 @@ fn main() {
             .with_fullsize_content_view(true)
             .with_title_hidden(true),
     ));
-    architect_workspace::native::launch(App, window);
+    architect_workspace::native::launch_with_fonts(App, window, architect_lab_ui::FONTS);
 }

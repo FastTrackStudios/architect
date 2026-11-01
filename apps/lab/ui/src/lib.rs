@@ -98,6 +98,23 @@ button { cursor: pointer; }\
 .lp:active { background-color: rgba(255,255,255,0.07); }\
 ";
 
+/// The lab's face, bundled so it is the same on every desk and phone:
+/// Inter (variable, OFL; `assets/fonts/OFL.txt`), FastTrackStudio's, the
+/// first of the shell's stack (`ShellTheme::font`). The apps hand it to
+/// Blitz when they launch (an `@font-face` from a `data:` URI does not
+/// load).
+pub const FONTS: &[&[u8]] = &[include_bytes!("../assets/fonts/Inter-Variable.ttf")];
+
+/// The system's faces and [`FONTS`], for `dioxus_native::Config::with_font_ctx`.
+#[must_use]
+pub fn font_context() -> dioxus_native::FontContext {
+    let mut ctx = dioxus_native::FontContext::default();
+    for font in FONTS {
+        ctx.collection.register_fonts(font.to_vec().into(), None);
+    }
+    ctx
+}
+
 /// The lab's root. The host publishes the window as a
 /// `Signal<shell::Screen>` ([`use_window_screen`]) above it.
 #[component]
@@ -331,8 +348,9 @@ pub fn LabApp() -> Element {
 /// The lab's brand, T3 Code's way: a mark and a two-tone wordmark.
 #[component]
 fn Brand() -> Element {
+    let font = shell::use_shell().theme.font;
     rsx! {
-        div { style: "display: flex; align-items: center; gap: 8px; font-family: -apple-system, system-ui, sans-serif;",
+        div { style: "display: flex; align-items: center; gap: 8px; font-family: {font};",
             span { style: "width: 26px; height: 26px; border-radius: 7px; background: #e4e4e7; display: flex; \
                            align-items: center; justify-content: center; color: #09090b; font-size: 14px; font-weight: 800;",
                 "A"

@@ -44,6 +44,20 @@ use crate::model::{Rect, WindowId};
 /// What `dioxus_native::launch_cfg` does for one window, with a
 /// [`Windows`] in context for every workspace host.
 pub fn launch(app: fn() -> Element, window: WindowAttributes) {
+    launch_with_fonts(app, window, &[]);
+}
+
+/// [`launch`], every window's text able to use the faces in `fonts`
+/// (font files, each family by the name in it) beside the system's.
+///
+/// An app's own face goes here: Blitz does not load an `@font-face`
+/// whose source is a `data:` URI, and has no file to read beside a
+/// bundled app.
+pub fn launch_with_fonts(
+    app: fn() -> Element,
+    window: WindowAttributes,
+    fonts: &'static [&'static [u8]],
+) {
     let event_loop = blitz_shell::create_default_event_loop();
     let winit_proxy = event_loop.create_proxy();
     // The main window's events go to dioxus-native's queue; the pop-outs'
@@ -75,7 +89,7 @@ pub fn launch(app: fn() -> Element, window: WindowAttributes) {
             desk: DeskHandle(desk.clone()),
         },
     );
-    let doc = document(vdom, &proxy);
+    let doc = document(vdom, &proxy, fonts);
     let config =
         WindowConfig::with_attributes(Box::new(doc), DioxusNativeWindowRenderer::new(), window);
     let app = App {
@@ -84,14 +98,20 @@ pub fn launch(app: fn() -> Element, window: WindowAttributes) {
         popouts: HashMap::new(),
         own,
         own_queue,
+        fonts,
     };
     // An event loop that cannot run has no window to say so in; the
     // process ends either way.
     let _ = event_loop.run_app(app);
 }
 
-/// A document for `vdom`: the bundle's assets and `data:` URIs load.
-fn document(vdom: VirtualDom, proxy: &BlitzShellProxy) -> DioxusDocument {
+/// A document for `vdom`: the bundle's assets and `data:` URIs load, and
+/// the app's `fonts` join the system's.
+fn document(
+    vdom: VirtualDom,
+    proxy: &BlitzShellProxy,
+    fonts: &'static [&'static [u8]],
+) -> DioxusDocument {
     let waker: Arc<dyn blitz_traits::net::NetWaker> = Arc::new(proxy.clone());
     let net: Arc<dyn NetProvider> = Arc::new(Assets {
         data: blitz_shell::DataUriNetProvider::shared(Some(waker)),
@@ -101,9 +121,19 @@ fn document(vdom: VirtualDom, proxy: &BlitzShellProxy) -> DioxusDocument {
         vdom,
         DocumentConfig {
             net_provider: Some(net),
+            font_ctx: (!fonts.is_empty()).then(|| font_context(fonts)),
             ..Default::default()
         },
     )
+}
+
+/// The system's faces and `fonts`.
+fn font_context(fonts: &[&[u8]]) -> dioxus_native::FontContext {
+    let mut ctx = dioxus_native::FontContext::default();
+    for font in fonts {
+        ctx.collection.register_fonts(font.to_vec().into(), None);
+    }
+    ctx
 }
 
 /// Fetches `dioxus:` assets from the bundle, the rest as `data:` URIs.
@@ -303,6 +333,8 @@ struct App {
     popouts: HashMap<OsId, Open>,
     own: BlitzShellProxy,
     own_queue: Receiver<BlitzShellEvent>,
+    /// The app's faces, for each pop-out's document.
+    fonts: &'static [&'static [u8]],
 }
 
 impl App {
@@ -338,7 +370,7 @@ impl App {
             attributes =
                 attributes.with_position(LogicalPosition::new(f64::from(b.x), f64::from(b.y)));
         }
-        let doc = document(popout.dom(), &self.own);
+        let doc = document(popout.dom(), &self.own, self.fonts);
         let config = WindowConfig::with_attributes(
             Box::new(doc),
             DioxusNativeWindowRenderer::new(),
