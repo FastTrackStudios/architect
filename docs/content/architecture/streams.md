@@ -59,6 +59,22 @@ Changes that landed during the read are delivered *after* the snapshot
 — possibly already contained in it. That's why event payloads should
 carry **full state** (idempotent re-application), never diffs.
 
+A sink has room of its own behind the mailbox (a vox `Tx`'s credit, a
+local channel's capacity), and `publish` only `try_send`s into it. When
+the sink is full, the subscriber's **pump** takes over: one background
+task (`architect::platform::spawn`) awaits room for the refused event,
+then drains the rest of the mailbox, so a hub that publishes rarely
+never strands an event until its next publish. Later publishes queue
+behind the pump, so the order holds. The pump runs on the publishing
+thread's tokio runtime or, from a thread without one (a host's
+main-thread poller), on the runtime the subscriber attached on
+(`crates/architect/src/pubsub.rs`
+`an_event_that_meets_a_full_sink_arrives_without_another_publish`).
+Event types are `Send + Sync + 'static` for that reason. The pump needs
+the `platform` feature (`local` and `server-axum` pull it); without it,
+or for a subscriber attached outside any runtime, a full sink's backlog
+waits for the next publish.
+
 ## 2a. Entity events — the `events` derive flag
 
 For CRUD entities, don't write any of the above. Add `events` to the

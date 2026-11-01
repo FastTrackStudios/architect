@@ -1,0 +1,63 @@
+[package]
+name = "architect-files"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Files: an org's roots of files and folders, versions and their labels, resumable uploads and ranged reads over vox, quotas, and members' access by role and per-folder grants"
+
+# docs/content/architecture/documents.md, "Files". The default set is the
+# contract — ids, paths, the model, the fault, capabilities by role and
+# the access resolution — pure data, wasm-clean. `vox` is the service
+# trait (bytes ride its channels), its client stubs and `FilesClient`,
+# the store an app talks to (still wasm-clean). `server` (native) is the
+# feature a server mounts: every org's files kept under `OrgId::path`,
+# bytes in the content-addressed blob store documents share, access by
+# the caller's role in the org and the grants on its folders.
+
+[features]
+default = []
+vox = ["dep:vox", "architect/vox", "dep:architect-permissions", "dep:futures-util", "dep:sha2"]
+server = [
+    "vox",
+    "architect/blob",
+    "architect-orgs/server",
+    "dep:facet-json",
+    "dep:tokio",
+    "uuid/v4",
+]
+
+[dependencies]
+architect = { workspace = true }
+architect-orgs = { workspace = true }
+facet = { workspace = true }
+thiserror = { workspace = true }
+uuid = { version = "1", default-features = false }
+vox = { workspace = true, optional = true }
+# `vox`: the gate's permit tables for the service.
+architect-permissions = { workspace = true, optional = true }
+# `FilesClient`: an upload's sender and the call that takes its frames
+# run side by side, on any executor (no runtime's `spawn`, so wasm too).
+futures-util = { version = "0.3", default-features = false, features = ["alloc"], optional = true }
+# `FilesClient` names what it saves by its sha256, as the server's blob
+# store does, so content the org already holds is not sent again.
+sha2 = { workspace = true, optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+facet-json = { version = "0.50.0-rc.5", optional = true }
+tokio = { version = "1", default-features = false, features = ["fs", "io-util", "rt", "sync"], optional = true }
+
+[dev-dependencies]
+# The tests drive the server and the client: build them with both.
+architect-files = { path = ".", features = ["server"] }
+architect = { workspace = true, features = ["vox", "local"] }
+architect-permissions = { workspace = true }
+tempfile = "3"
+tokio = { workspace = true }
+vox = { workspace = true }
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
