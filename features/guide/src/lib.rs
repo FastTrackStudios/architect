@@ -306,6 +306,16 @@ steps (
     }
 
     #[test]
+    fn a_target_by_its_text_reads_from_styx() {
+        let s = load("id x\nsteps ({id a, target @text\"View\", do @click{}})").unwrap();
+        assert_eq!(s.steps[0].target, Some(Target::Text("View".into())));
+        assert_eq!(
+            s.steps[0].target.as_ref().and_then(Target::kind_and_name),
+            Some(("text", "View"))
+        );
+    }
+
+    #[test]
     fn a_gesture_without_a_target_is_refused() {
         let err = load("id x\nsteps ({id a, do @click{}})").unwrap_err();
         assert!(err.to_string().contains("needs a target"), "{err}");

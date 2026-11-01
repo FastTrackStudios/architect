@@ -363,17 +363,18 @@ impl Desktop {
             return Some(Rect::new(*x, *y, 0.0, 0.0));
         }
         let (kind, name) = target.kind_and_name()?;
-        let selector = if kind == "id" {
+        let selector = if matches!(kind, "id" | "text") {
             None
         } else {
             Some(resolvers.iter().find_map(|r| r(kind, name))?)
         };
         self.windows.iter().rev().find_map(|w| {
             let doc = w.doc.inner.borrow();
-            let node = selector.as_ref().map_or_else(
-                || doc.get_element_by_id(name),
-                |s| doc.query_selector(s).ok().flatten(),
-            )?;
+            let node = match &selector {
+                Some(s) => doc.query_selector(s).ok().flatten(),
+                None if kind == "text" => by_text(&doc, name),
+                None => doc.get_element_by_id(name),
+            }?;
             let r = doc.get_client_bounding_rect(node)?;
             (r.width > 0.0 && r.height > 0.0).then(|| {
                 Rect::new(
@@ -385,6 +386,24 @@ impl Desktop {
             })
         })
     }
+}
+
+/// The element whose whole text, trimmed, is `text` and that has a size:
+/// the last in the page, which is the innermost of a chain of them nested
+/// (a button, its label) and, of the rest, the one drawn over the others
+/// (a menu or a popover comes after the page it opens over).
+fn by_text(doc: &blitz_dom::BaseDocument, text: &str) -> Option<usize> {
+    doc.query_selector_all("*")
+        .ok()?
+        .into_iter()
+        .rev()
+        .find(|id| {
+            doc.get_node(*id)
+                .is_some_and(|n| n.text_content().trim() == text)
+                && doc
+                    .get_client_bounding_rect(*id)
+                    .is_some_and(|r| r.width > 0.0 && r.height > 0.0)
+        })
 }
 
 /// How many times a frame polls the documents for work before it lays
