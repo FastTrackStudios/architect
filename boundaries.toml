@@ -103,6 +103,10 @@ layer = "L0"
 package = "architect-orgs"
 layer = "L0"
 
+[[row]]
+package = "architect-scripting"
+layer = "L0"
+
 # ── L4 ui ─────────────────────────────────────────────────────────────────
 [[row]]
 package = "crdt"
@@ -226,6 +230,12 @@ note = "sibling of launcher; fold in"
 [[row]]
 package = "architect-telemetry"
 layer = "L1"
+
+[[row]]
+package = "architect-scripting"
+features = ["luau", "crdt", "settings"]
+layer = "L1"
+note = "the Luau runtime (mlua, C++ built from source): desk, server, mobile; not wasm yet"
 
 [[row]]
 package = "architect-mcp"
