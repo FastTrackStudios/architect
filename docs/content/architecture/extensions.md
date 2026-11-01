@@ -4,8 +4,16 @@ description = "Adding to an app at runtime, without rebuilding it: data-only ext
 weight = 67
 +++
 
-> **Status: proposed (2026-10-31).** For review before any code.
-> Decided: one crate, `architect-extensions`, with four kinds — data,
+> **Status: scripts landed (2026-11-01)** in `architect-scripting`
+> (`features/scripting`): the Luau runtime over the Action List
+> (`features/scripting/src/luau.rs` `Runtime`), a run as one undo step
+> (`Transactions`; over `crdt::History` with `HistoryTransactions`),
+> saved scripts per person and per organization as actions
+> (`features/scripting/src/actions.rs` `Scripting`), and the `SCRIPT_RUN`,
+> `SCRIPT_SAVE` and `SCRIPT_DESCRIBE` actions a model reaches over MCP.
+> Not yet: dry runs, the typed model services in the Luau library,
+> streams, the ImGui API, Luau on the web. The rest of this page is
+> proposed (2026-10-31). Decided: one crate, `architect-extensions`, with four kinds — data,
 > WebAssembly components, Luau scripts, and processes over vox — and a
 > git-based registry. Proposed for UI: Dioxus views rendered remotely (the
 > extension's `VirtualDom`, the host's Blitz), frame documents for faces.
@@ -111,14 +119,21 @@ actions, the streams — through three tools:
 
 | Tool | What it does |
 |---|---|
-| `script.run { source, args?, dry_run? }` | runs a one-off Luau script; returns its result, its log and the changes it made (a dry run makes them in a scratch transaction and returns the diff instead) |
-| `script.save { name, source, description }` | saves it as a script action: in the action list, ⌘K, bindable, pinnable |
-| `script.describe` | the API it can call: every model service and action, with schemas — generated, so always current |
+| `script_run { source, args?, name? }` | runs a one-off Luau script; returns its result, its log, the actions it ran and the undo step it made (proposed: `dry_run`, making the changes in a scratch transaction and returning the diff instead) |
+| `script_save { name, source, description? }` | saves it as a script action: in the action list, ⌘K, bindable, pinnable (`script_save_org` for the organization) |
+| `script_describe` | the API it can call: every action it may run, with schemas — generated, so always current (proposed: the model services too) |
+
+They are actions (`SCRIPT_RUN`, `SCRIPT_SAVE`, `SCRIPT_DESCRIBE`, with
+`SCRIPT_LIST` and `SCRIPT_DELETE`), so a model reaches them as tools of
+their own under `Tools::Named` or through the generic `run`, and a
+person's keys and ⌘K reach them too.
 
 The agent's script runs with the capabilities the person granted that
 agent (read-only, or allowed to change things, or destructive too), as
 one transaction, so "undo" undoes all of what it did, and the person can
-see the script before saving it.
+see the script before saving it. Every action a script runs is
+authorized for whoever ran the script, one by one; a script that fails
+says the line it stopped on, and what it changed is taken back.
 
 ## Scripts and conditional actions
 

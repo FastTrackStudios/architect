@@ -8,7 +8,8 @@ weight = 57
 > `crdt`: `features/crdt/crdt/src/kinds.rs` `DocKind` (an id, a name, a
 > file extension, a schema stamp and migrations; `stamp`, `upgrade`),
 > `DocKinds`; `features/crdt/crdt/src/history.rs` `History`
-> (`transact` — one named step — `undo`, `redo`, local only);
+> (`transact` — one named step — `begin`/`commit`/`abort` for a step
+> that spans many transactions, `undo`, `redo`, local only);
 > `features/crdt/crdt/src/file/mod.rs` `DocFile` and
 > `features/crdt/crdt/src/file/branch.rs` `Branch` (the file, below).
 > The org driver landed (2026-11-01):
@@ -153,7 +154,11 @@ blob from collection ([blobs](@/architecture/blob.md)).
 Every change goes through a transaction: a person's edit, a script, an
 extension, a collaborator's update arriving. A transaction is one undo
 step with a name ("Split item", "Script: Arm selected"), undone as one,
-and undo is local — undoing my step never undoes yours. Scripts and
+and undo is local — undoing my step never undoes yours. A step can span
+many transactions: a script opens one (`History::begin`), the actions it
+runs make their own as always and they fold into it, and it is committed
+when the script ends or aborted — taken back — when it fails
+(`features/scripting/src/history.rs` `HistoryTransactions`). Scripts and
 extensions get transactions ([extensions](@/architecture/extensions.md));
 an engine with its own undo (Studio's) feeds its finished steps in as
 transactions.

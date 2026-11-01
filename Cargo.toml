@@ -47,6 +47,7 @@ members = [
     "features/settings",
     "features/settings/derive",
     "features/orgs",
+    "features/scripting",
     "features/files",
     "features/ui/showcase",
     "features/ui/ui-snapshot",
@@ -210,6 +211,7 @@ architect-commands = { path = "features/commands" }
 architect-settings = { path = "features/settings" }
 architect-settings-derive = { path = "features/settings/derive" }
 architect-orgs = { path = "features/orgs" }
+architect-scripting = { path = "features/scripting" }
 architect-files = { path = "features/files" }
 architect-lab-ui = { path = "apps/lab/ui" }
 # iOS: the UIScene lifecycle the lab app adopts (apps/lab/mobile).
