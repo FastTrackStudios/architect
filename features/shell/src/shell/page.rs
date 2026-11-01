@@ -4,7 +4,7 @@
 use dioxus::prelude::*;
 use lucide_dioxus::{Check, ChevronLeft, Ellipsis, PanelRight};
 
-use super::{Action, FormFactor, Icon, IconFn, ShellStyle, Side, use_shell};
+use super::{Action, DragStrip, FormFactor, Icon, IconFn, ShellStyle, Side, use_shell};
 
 // ── The ⋯ menu ──────────────────────────────────────────────────────────────
 
@@ -410,7 +410,7 @@ fn Group(group: ToolGroup, size: ToolSize) -> Element {
             div {
                 style: "height: {size.button}px; box-sizing: border-box; display: flex; align-items: center; padding: 0 1px; \
                         border-radius: {size.radius}px; background: {t.pill}; border: 1px solid {t.rule}; \
-                        box-shadow: 0 8px 24px rgba(0,0,0,0.3);",
+                        box-shadow: {t.shadow_lift};",
                 for (i, tool) in group.tools.into_iter().enumerate() {
                     ToolButton { key: "{i}", tool, size, side: inner, framed: false }
                     if i + 1 < n {
@@ -435,10 +435,11 @@ fn ToolButton(tool: Tool, size: ToolSize, side: f64, framed: bool) -> Element {
     let frame = if framed {
         format!(
             "border-radius: {r}px; background: {bg}; border: 1px solid {rule}; box-sizing: border-box; \
-             box-shadow: 0 8px 24px rgba(0,0,0,0.3);",
+             box-shadow: {shadow};",
             r = size.radius,
             bg = t.pill,
-            rule = t.rule
+            rule = t.rule,
+            shadow = t.shadow_lift
         )
     } else {
         format!(
@@ -505,9 +506,9 @@ fn ToolButton(tool: Tool, size: ToolSize, side: f64, framed: bool) -> Element {
                             onclick: move |_| open.set(false),
                         }
                         div {
-                            style: "position: absolute; right: -2px; top: {side + 8.0}px; z-index: 50; min-width: 248px; \
+                            style: "position: absolute; right: -2px; top: {side + 8.0}px; z-index: {super::layer::MENU}; min-width: 248px; \
                                     display: flex; flex-direction: column; padding: 6px 0; border-radius: 16px; \
-                                    background: {t.pill}; border: 1px solid {t.rule}; box-shadow: 0 20px 50px rgba(0,0,0,0.6);",
+                                    background: {t.pill}; border: 1px solid {t.rule}; box-shadow: {t.shadow_float};",
                             for (i, entry) in menu.entries.iter().cloned().enumerate() {
                                 MenuRow { key: "{i}", entry, open }
                             }
@@ -732,7 +733,7 @@ fn touch_bar_height(shell: &super::Shell) -> f64 {
 }
 
 #[component]
-fn MenuRow(entry: MenuEntry, open: Signal<bool>) -> Element {
+pub(super) fn MenuRow(entry: MenuEntry, open: Signal<bool>) -> Element {
     let t = use_shell().theme;
     match entry {
         MenuEntry::Divider => {
@@ -774,10 +775,11 @@ fn MenuRow(entry: MenuEntry, open: Signal<bool>) -> Element {
     }
 }
 
-/// A desk's page bar (T3 Code's): the title row itself, the page's colour,
-/// the breadcrumb on the left, the page's toolbar small on the right;
-/// clear at each end of the sides' fixed buttons where they sit over it.
-/// Its empty space moves the window.
+/// A desk's page bar, Obsidian's way: the title row holds the page as a
+/// tab (rounded at the top, the page's colour, running on into it), the
+/// rest of the row moving the window; under it the page's header — the way
+/// back, the breadcrumb, the page's toolbar. Clear at each end of the
+/// sides' fixed buttons where they sit over the title row.
 #[component]
 fn DeskBar(
     title: String,
@@ -791,26 +793,33 @@ fn DeskBar(
     let t = shell.theme;
     let ins = shell.screen.insets;
     let row = shell.title_row();
-    // The left end: beside a showing sidebar, the page's own margin; else
-    // clear of the window's buttons and the sidebar's.
-    let pad_left = if shell.has_side(Side::Left) && shell.docked(Side::Left) {
-        20.0
-    } else if shell.has_side(Side::Left) {
-        shell.content_left()
-    } else if shell.window.is_some() {
-        shell.controls_left()
-    } else {
-        20.0
-    };
-    let pad_right = if shell.right_button_over_page() {
-        12.0 + 28.0 + 14.0 + ins.right
-    } else {
-        20.0 + ins.right
-    };
+    let (left, right) = shell.title_clearance();
+    let pad_left = left.max(4.0);
+    let tab_h = (row - 6.0).max(24.0);
+    let chrome = shell.window_chrome().cloned();
     rsx! {
         div {
             style: "position: relative; flex-shrink: 0; box-sizing: border-box; height: {row + ins.top}px; \
-                    padding: {ins.top}px {pad_right}px 0 {pad_left}px; display: flex; align-items: center; gap: 10px;",
+                    padding: {ins.top}px {right}px 0 {pad_left}px; display: flex; align-items: flex-end; \
+                    background: {t.title_bar};",
+            // The bar's rule, under everything but the tab (drawn over it).
+            div { style: "position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: {t.rule};" }
+            div {
+                style: "position: relative; z-index: 1; flex: 0 1 200px; max-width: 200px; min-width: 72px; \
+                        height: {tab_h}px; box-sizing: border-box; display: flex; align-items: center; \
+                        padding: 0 12px; border-radius: 8px 8px 0 0; background: {t.desk}; color: {t.ink}; \
+                        font-family: {t.font}; font-size: 13px; white-space: nowrap; overflow: hidden;",
+                "{title}"
+            }
+            if let Some(c) = chrome {
+                DragStrip { chrome: c, width: None }
+            } else {
+                span { style: "flex: 1;" }
+            }
+        }
+        div {
+            style: "position: relative; flex-shrink: 0; box-sizing: border-box; height: 44px; \
+                    padding: 0 {20.0 + ins.right}px 0 20px; display: flex; align-items: center; gap: 10px;",
             if let Some(back) = on_back {
                 button {
                     class: "lp",

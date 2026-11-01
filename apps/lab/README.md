@@ -10,7 +10,11 @@ running app without a rebuild (a change to Rust logic rebuilds).
 The lab is Task's shape: Inbox, Tasks, Schedule and Vault as the tabs,
 Capture as the separate button, projects on the left, details on the
 right. Its ⋯ menu switches the shell's style (Floating pill, Tab bar, Rail
-only) and the right side live.
+only) and the right side live. The Vault tab is the workspace host
+(`architect-workspace`'s `ui`), Obsidian's shape: on a desk its tabs are
+the window's title row; drag a tab to a group's middle or edge or the
+window's edge, hold W to grab a pane without tabs, right-click a tab (or
+⋯) for the rest.
 
 ## On a desk
 

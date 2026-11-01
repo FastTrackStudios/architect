@@ -12,15 +12,27 @@
 //!
 //! The design is `docs/content/architecture/workspace.md`. This module is
 //! the model only: no Dioxus, no I/O, no clock. The host that draws it and
-//! turns pointer drags into operations is the crate's `ui` feature (to
-//! come).
+//! turns pointer drags into operations is the crate's `ui` feature:
+//! [`WorkspaceView`], given the app's [`Views`].
 
+// A view's icon is a fn pointer compared by Dioxus's props: a stale
+// compare only redraws.
+#![cfg_attr(feature = "ui", allow(unpredictable_function_pointer_comparisons))]
+
+mod drop;
+#[cfg(feature = "ui")]
+mod host;
 mod layout;
 mod model;
 mod ops;
 mod repair;
 mod screenset;
 
+pub use drop::{Drop, contains, drop_at, float_rect, snap_at};
+#[cfg(feature = "ui")]
+pub use host::{
+    Command, Host, PaneHandle, TitleRow, View, Views, WorkspaceView, use_host, use_pane,
+};
 pub use layout::{Direction, Placed, area_rects, neighbour};
 pub use model::{
     Above, Area, Axis, Child, Chrome, ClosedPane, Corner, Dock, Docks, Float, Group, GroupId,

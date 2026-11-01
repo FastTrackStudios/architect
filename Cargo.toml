@@ -200,6 +200,7 @@ nucleo-matcher = "0.3"
 palette = "0.7.6"
 linkme = "0.3"
 architect-shell = { path = "features/shell", default-features = false }
+architect-workspace = { path = "features/workspace" }
 architect-lab-ui = { path = "apps/lab/ui" }
 # iOS: the UIScene lifecycle the lab app adopts (apps/lab/mobile).
 objc2 = "0.6"

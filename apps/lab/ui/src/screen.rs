@@ -258,9 +258,18 @@ pub fn use_window_chrome() -> Option<WindowChrome> {
             move |()| zoom.set_maximized(!zoom.is_maximized()),
         )
     });
-    // Read again whenever the screen changes (entering full screen resizes).
+    // Read again whenever the screen changes (entering full screen resizes),
+    // and put the traffic lights back in the row: AppKit lays its title bar
+    // out again on a resize.
     let _ = use_context::<Signal<Screen>>()();
     let device = use_context::<Signal<Device>>()();
+    // A window standing in for a phone or a tablet has no traffic lights.
+    #[cfg(target_os = "macos")]
+    architect_shell::fit_traffic_lights(
+        window.rwh_06_window_handle(),
+        (device == Device::Native).then_some(WindowChrome::MAC_ROW),
+        WindowChrome::MAC_LIGHTS_LEFT,
+    );
     (cfg!(target_os = "macos") && window.fullscreen().is_none() && device == Device::Native)
         .then_some(chrome)
 }

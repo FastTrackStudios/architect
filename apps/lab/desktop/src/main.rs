@@ -26,15 +26,14 @@ fn main() {
         .with_title("Architect — app shell lab")
         .with_surface_size(LogicalSize::new(w, h));
     // The shell draws the title bar: the content runs under a transparent
-    // one, the traffic lights centred in a toolbar-height row
+    // one, the traffic lights placed in the shell's 40pt row
     // (`use_window_chrome`).
     #[cfg(target_os = "macos")]
     let window = window.with_platform_attributes(Box::new(
         dioxus_native::winit::platform::macos::WindowAttributesMacOS::default()
             .with_titlebar_transparent(true)
             .with_fullsize_content_view(true)
-            .with_title_hidden(true)
-            .with_unified_titlebar(true),
+            .with_title_hidden(true),
     ));
     launch_cfg(
         App,

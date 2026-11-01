@@ -8,8 +8,9 @@
 )]
 
 use architect_workspace::{
-    Area, Axis, Chrome, Dest, Direction, FormClass, GroupId, LinkId, Node, Pane, PaneId, Rect,
-    Screensets, Shown, Side, Snap, Target, Workspace, area_rects, neighbour,
+    Above, Area, Axis, Chrome, Corner, Dest, Direction, Float, FormClass, Group, GroupId, LinkId,
+    Node, Pane, PaneId, Pin, Rect, Screensets, Shown, Side, Snap, Target, Workspace, area_rects,
+    drop_at, float_rect, neighbour, snap_at,
 };
 
 fn pane(id: &str) -> Pane {
@@ -463,4 +464,102 @@ fn screensets_recall_save_reset_and_keep_their_builtins() {
 
     let json = sets.to_json().unwrap();
     assert_eq!(Screensets::from_json(&json).unwrap(), sets);
+}
+
+// ---- Where a drag lands, where a float shows ----
+
+#[test]
+fn a_drop_near_the_window_edge_docks_there_but_not_at_the_top() {
+    let host = Rect::new(0.0, 0.0, 1000.0, 600.0);
+    let groups = [(GroupId(1), Rect::new(0.0, 0.0, 1000.0, 600.0))];
+    let left = drop_at(4.0, 300.0, host, &groups).expect("a drop");
+    assert_eq!(left.dest, Dest::Dock(Side::Left));
+    let bottom = drop_at(500.0, 596.0, host, &groups).expect("a drop");
+    assert_eq!(bottom.dest, Dest::Dock(Side::Bottom));
+    // The top edge is the title bar's: it splits the group instead.
+    let top = drop_at(500.0, 4.0, host, &groups).expect("a drop");
+    assert_eq!(
+        top.dest,
+        Dest::Edge {
+            group: GroupId(1),
+            side: Side::Top
+        }
+    );
+}
+
+#[test]
+fn a_drop_on_a_group_splits_at_its_bands_and_tabs_in_its_middle() {
+    let host = Rect::new(0.0, 0.0, 1000.0, 600.0);
+    let a = Rect::new(100.0, 50.0, 400.0, 500.0);
+    let b = Rect::new(500.0, 50.0, 400.0, 500.0);
+    let groups = [(GroupId(1), a), (GroupId(2), b)];
+    let middle = drop_at(300.0, 300.0, host, &groups).expect("a drop");
+    assert_eq!(
+        middle.dest,
+        Dest::Group {
+            group: GroupId(1),
+            index: None
+        }
+    );
+    assert_eq!(middle.highlight, a);
+    let right = drop_at(890.0, 300.0, host, &groups).expect("a drop");
+    assert_eq!(
+        right.dest,
+        Dest::Edge {
+            group: GroupId(2),
+            side: Side::Right
+        }
+    );
+    // The band lit is the half the new group would take.
+    assert_eq!(right.highlight, Rect::new(700.0, 50.0, 200.0, 500.0));
+    assert_eq!(drop_at(1200.0, 300.0, host, &groups), None);
+}
+
+#[test]
+fn the_first_group_listed_wins_so_floats_go_first() {
+    let host = Rect::new(0.0, 0.0, 1000.0, 600.0);
+    let float = (GroupId(9), Rect::new(300.0, 200.0, 300.0, 200.0));
+    let center = (GroupId(1), Rect::new(0.0, 0.0, 1000.0, 600.0));
+    let d = drop_at(450.0, 300.0, host, &[float, center]).expect("a drop");
+    assert_eq!(
+        d.dest,
+        Dest::Group {
+            group: GroupId(9),
+            index: None
+        }
+    );
+}
+
+#[test]
+fn a_float_shows_snapped_pinned_or_where_it_was_put() {
+    let area = Rect::new(0.0, 0.0, 1000.0, 600.0);
+    let mut float = Float {
+        group: Group::new(GroupId(3)),
+        rect: Rect::new(100.0, 100.0, 300.0, 200.0),
+        snap: None,
+        pin: None,
+        minimised: false,
+    };
+    assert_eq!(float_rect(&float, area), float.rect);
+    float.pin = Some(Pin {
+        corner: Corner::TopRight,
+        above: Above::Window,
+    });
+    assert_eq!(
+        float_rect(&float, area),
+        Rect::new(688.0, 12.0, 300.0, 200.0)
+    );
+    float.snap = Some(Snap::Half(Side::Left));
+    assert_eq!(float_rect(&float, area), Rect::new(0.0, 0.0, 500.0, 600.0));
+    float.snap = Some(Snap::Maximised);
+    assert_eq!(float_rect(&float, area), area);
+}
+
+#[test]
+fn a_float_let_go_at_the_top_fills_the_window_and_at_a_side_halves_it() {
+    let host = Rect::new(0.0, 0.0, 1000.0, 600.0);
+    assert_eq!(snap_at(500.0, 2.0, host), Some(Snap::Maximised));
+    assert_eq!(snap_at(2.0, 300.0, host), Some(Snap::Half(Side::Left)));
+    assert_eq!(snap_at(998.0, 300.0, host), Some(Snap::Half(Side::Right)));
+    assert_eq!(snap_at(500.0, 300.0, host), None);
 }

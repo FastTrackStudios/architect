@@ -2,21 +2,28 @@
 //! draws.
 
 mod bars;
+#[cfg(target_os = "macos")]
+mod mac;
 mod motion;
 mod page;
+mod status;
 mod workspaces;
 
 use std::cell::Cell;
 use std::rc::Rc;
 
 use dioxus::prelude::*;
-use lucide_dioxus::{PanelLeft, PanelLeftClose, PanelRight};
+use lucide_dioxus::{ChevronsUpDown, PanelLeft, PanelLeftClose, PanelRight};
 
 pub use crate::screen::{FormFactor, Insets, Screen, ShellStyle};
 use bars::{BottomBar, Rail, RoundButton, SideTab};
+#[cfg(target_os = "macos")]
+pub use mac::fit_traffic_lights;
 pub use page::{
     Breadcrumb, Crumb, Menu, MenuEntry, MenuItem, Page, PageBar, Tool, ToolGroup, Toolbar,
 };
+pub use status::{STATUS_BADGE, STATUS_BAR, StatusItem, StatusSide, StatusStyle, use_status};
+use status::{StatusBadge, StatusBar};
 use workspaces::{Place, Switcher};
 pub use workspaces::{Workspace, WorkspaceAction, Workspaces};
 
@@ -115,8 +122,14 @@ pub struct Account {
     pub initials: String,
     /// The avatar's fill.
     pub color: &'static str,
-    /// What a press on it does (the account menu, settings).
+    /// What a press on it does, when it has no [`menu`](Self::menu).
     pub on_press: Option<Callback<()>>,
+    /// A picture, in place of the initials.
+    pub image: Option<String>,
+    /// A presence dot on the avatar, in this colour (online, away, busy).
+    pub presence: Option<&'static str>,
+    /// What a press opens, above the row: headed by who this is.
+    pub menu: Option<Menu>,
 }
 
 impl Account {
@@ -135,6 +148,9 @@ impl Account {
             initials,
             color: "#1e3a8a",
             on_press: None,
+            image: None,
+            presence: None,
+            menu: None,
         }
     }
 
@@ -153,6 +169,25 @@ impl Account {
     #[must_use]
     pub fn on_press(mut self, on_press: impl FnMut(()) + 'static) -> Self {
         self.on_press = Some(Callback::new(on_press));
+        self
+    }
+
+    #[must_use]
+    pub fn image(mut self, url: impl Into<String>) -> Self {
+        self.image = Some(url.into());
+        self
+    }
+
+    #[must_use]
+    pub const fn presence(mut self, colour: &'static str) -> Self {
+        self.presence = Some(colour);
+        self
+    }
+
+    /// The account menu (profile, settings, sign out), opened above it.
+    #[must_use]
+    pub fn menu(mut self, menu: Menu) -> Self {
+        self.menu = Some(menu);
         self
     }
 }
@@ -177,12 +212,18 @@ pub struct WindowChrome {
 }
 
 impl WindowChrome {
-    /// macOS with a unified (toolbar-height) title bar: the traffic lights
-    /// centred in a 52pt row, reaching 78pt in.
+    /// A Mac title row's height, points.
+    pub const MAC_ROW: f64 = 40.0;
+    /// How far in a Mac window's first button sits, points.
+    pub const MAC_LIGHTS_LEFT: f64 = 14.0;
+
+    /// macOS, Obsidian's way: a 40pt title row, the traffic lights centred
+    /// in it 14pt in (placed there by [`fit_traffic_lights`]), reaching
+    /// 74pt in.
     pub fn mac(on_drag: impl FnMut(()) + 'static, on_zoom: impl FnMut(()) + 'static) -> Self {
         Self {
-            height: 52.0,
-            buttons: 78.0,
+            height: Self::MAC_ROW,
+            buttons: 74.0,
             on_drag: Callback::new(on_drag),
             on_zoom: Callback::new(on_zoom),
         }
@@ -196,6 +237,9 @@ pub struct ShellTheme {
     pub desk: &'static str,
     /// The sidebars, the drawers, the menus.
     pub sheet: &'static str,
+    /// A desk's title bar, across the whole window over the sidebars: the
+    /// window's buttons, the sidebar's head, the page's bar or its tabs.
+    pub title_bar: &'static str,
     /// The pills.
     pub pill: &'static str,
     /// A pill's edge, a sidebar's edge.
@@ -212,6 +256,13 @@ pub struct ShellTheme {
     pub danger: &'static str,
     /// Over the page while a drawer or a menu is open.
     pub scrim: &'static str,
+    /// The accent, faint: the fill behind something current (the ribbon's
+    /// section, a selected row).
+    pub accent_soft: &'static str,
+    /// A pill or a button over the page.
+    pub shadow_lift: &'static str,
+    /// What floats over everything: a menu, a popover, a floating pane.
+    pub shadow_float: &'static str,
     pub font: &'static str,
 }
 
@@ -220,16 +271,21 @@ impl Default for ShellTheme {
         Self {
             desk: "#09090b",
             sheet: "#0e0e11",
+            title_bar: "#17171b",
             pill: "#1a1a1f",
             rule: "#2b2b31",
             active: "rgba(255,255,255,0.10)",
             ink: "#e4e4e7",
             ink_2: "#a1a1aa",
             ink_3: "#80808a",
-            accent: "#2563eb",
-            accent_ink: "#ffffff",
+            // Signal teal: a meter's green, FastTrackStudio's accent.
+            accent: "#2dd4bf",
+            accent_ink: "#04201c",
             danger: "#f87171",
             scrim: "rgba(0,0,0,0.55)",
+            accent_soft: "rgba(45,212,191,0.14)",
+            shadow_lift: "0 6px 20px rgba(0,0,0,0.35)",
+            shadow_float: "0 16px 44px rgba(0,0,0,0.55)",
             font: "-apple-system, 'SF Pro Text', system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif",
         }
     }
@@ -270,6 +326,45 @@ pub struct Shell {
     /// Whether the separate button floats at the page's bottom right (a
     /// tablet) rather than sitting in a bar or a rail.
     floats_separate: bool,
+    /// What the page puts in the left sidebar instead of the app's `left`
+    /// (a workspace's left dock): [`use_shell_slots`].
+    page_left: Signal<Option<Element>>,
+    /// What the page adds to a desk's ribbon, under the app's sections.
+    rail_extra: Signal<Option<Element>>,
+    /// The page's status items: [`use_status`].
+    page_status: Signal<Vec<StatusItem>>,
+    pub status_style: StatusStyle,
+}
+
+/// Puts the page's own content in the shell's left side while the page is
+/// mounted.
+///
+/// `left` goes in place of the app's sidebar content, `rail` in a desk's
+/// ribbon under the app's sections. Give elements that read their
+/// state themselves (they are set once, on mount); `None` leaves the
+/// app's.
+pub fn use_shell_slots(left: Option<Element>, rail: Option<Element>) {
+    let shell = try_use_context::<Signal<Shell>>();
+    use_hook(move || {
+        if let Some(shell) = shell {
+            let (mut l, mut r) = {
+                let s = shell.peek();
+                (s.page_left, s.rail_extra)
+            };
+            l.set(left);
+            r.set(rail);
+        }
+    });
+    use_drop(move || {
+        if let Some(shell) = shell {
+            let (mut l, mut r) = {
+                let s = shell.peek();
+                (s.page_left, s.rail_extra)
+            };
+            l.set(None);
+            r.set(None);
+        }
+    });
 }
 
 impl Shell {
@@ -357,6 +452,46 @@ impl Shell {
         self.controls_left() + CONTROL + 10.0
     }
 
+    /// The window's own title bar, when the app draws it.
+    #[must_use]
+    pub const fn window_chrome(&self) -> Option<&WindowChrome> {
+        self.window.as_ref()
+    }
+
+    /// What a desk page that draws its own title row keeps clear, in
+    /// points from the left and the right edge: the window's buttons and
+    /// the sidebar's (unless a sidebar is docked beside the page), and the
+    /// right side's button when it is over the page.
+    #[must_use]
+    pub fn title_clearance(&self) -> (f64, f64) {
+        // A desk's page starts past the ribbon.
+        let ribbon = if self.desk() { RIBBON } else { 0.0 };
+        let left = if self.has_side(Side::Left) && self.docked(Side::Left) {
+            0.0
+        } else if self.has_side(Side::Left) {
+            self.content_left() - ribbon
+        } else if self.window.is_some() {
+            self.controls_left() - ribbon
+        } else {
+            0.0
+        };
+        let left = left.max(0.0);
+        let right = if self.right_button_over_page() {
+            12.0 + CONTROL + 14.0
+        } else {
+            0.0
+        };
+        (left, right + self.screen.insets.right)
+    }
+
+    /// What the head of a desk's sidebar keeps clear in the title row, from
+    /// the sidebar's left edge (past the ribbon): the window's buttons and
+    /// the sidebar's.
+    #[must_use]
+    pub fn sidebar_title_left(&self) -> f64 {
+        (self.content_left() - if self.desk() { RIBBON } else { 0.0 }).max(0.0)
+    }
+
     /// Whether the desk's right side's button is over the page's title row
     /// (the side is not docked and showing), so the page keeps clear of it.
     #[must_use]
@@ -375,6 +510,12 @@ impl Shell {
 #[must_use]
 pub fn use_shell() -> Shell {
     use_context::<Signal<Shell>>()()
+}
+
+/// The shell around this page, if there is one.
+#[must_use]
+pub fn try_use_shell() -> Option<Shell> {
+    try_use_context::<Signal<Shell>>().map(|s| s())
 }
 
 /// How the bars and the rail are laid out for this screen and style.
@@ -416,6 +557,45 @@ const CONTROL: f64 = 28.0;
 const PARALLAX: f64 = 0.22;
 /// The docked sidebars' widths: the start, and the range a drag keeps to.
 const LEFT_WIDTH: f64 = 264.0;
+/// The shell's stacking order, for the shell and what it hosts (a
+/// workspace's floats and sheets, the command palette): one scale, so two
+/// layers never meet at the same number.
+pub mod layer {
+    /// A resize edge over its side.
+    pub const EDGE: u8 = 5;
+    /// Floating panes (10 and up, the last drawn on top).
+    pub const FLOAT: u8 = 10;
+    /// Minimised floats' chips.
+    pub const CHIPS: u8 = 20;
+    /// The status badge, the "arranging" chip.
+    pub const STATUS: u8 = 25;
+    /// The title row's fixed buttons.
+    pub const CONTROLS: u8 = 30;
+    /// A sheet over the page and its scrim (a phone's pane switcher).
+    pub const SHEET: u8 = 35;
+    /// The layer that follows a drag.
+    pub const DRAG: u8 = 40;
+    /// Menus and their click-away layer.
+    pub const MENU: u8 = 50;
+    /// The workspace switcher's list.
+    pub const POPOVER: u8 = 60;
+    /// The command palette and quick open.
+    pub const PALETTE: u8 = 90;
+}
+
+/// What the shell's inline styles cannot say: a pressable thing shows a
+/// pointer, and what the keyboard is on shows the accent's ring, in every
+/// app on the shell.
+fn shell_css(t: &ShellTheme) -> String {
+    format!(
+        "button, [role=tab], [role=button] {{ cursor: pointer; }} \
+         :focus-visible {{ outline: 2px solid {}; outline-offset: 2px; }}",
+        t.accent
+    )
+}
+
+/// A desk's ribbon, at the window's left edge, points (Obsidian's).
+pub const RIBBON: f64 = 44.0;
 const RIGHT_WIDTH: f64 = 320.0;
 const MIN_WIDTH: f64 = 200.0;
 const MAX_WIDTH: f64 = 440.0;
@@ -478,6 +658,12 @@ pub fn AppShell(
     /// The app's brand (its mark and name): at the top left of a phone's
     /// root pages, in place of the page's title (T3 Code's).
     brand: Option<Element>,
+    /// The app's status items (a page adds its own: [`use_status`]).
+    #[props(default)]
+    status: Vec<StatusItem>,
+    /// How a desk shows them: a bar along the foot, or a corner badge.
+    #[props(default)]
+    status_style: StatusStyle,
     children: Element,
 ) -> Element {
     let mut drawer = use_signal(|| None::<Side>);
@@ -485,6 +671,15 @@ pub fn AppShell(
     let right_away = use_signal(|| false);
     let left_w = use_signal(|| LEFT_WIDTH);
     let right_w = use_signal(|| RIGHT_WIDTH);
+    let page_left = use_signal(|| None::<Element>);
+    let page_status = use_signal(Vec::<StatusItem>::new);
+    // The page's items first (its own, at a bar's left), then the app's.
+    let all_status: Vec<StatusItem> = page_status().into_iter().chain(status).collect();
+    let rail_extra = use_signal(|| None::<Element>);
+    // A page that claims the sidebar draws it from the top (its tabs in the
+    // title row); the switcher then sits at the sidebar's foot.
+    let page_side = page_left.read().is_some();
+    let left = page_left().or(left);
     let has_left = left.is_some();
     let has_right = right.is_some();
     let shell = Shell {
@@ -502,6 +697,10 @@ pub fn AppShell(
         window: window.clone(),
         brand,
         floats_separate: frame(screen, style) == Frame::Sidebar,
+        page_left,
+        rail_extra,
+        page_status,
+        status_style,
     };
     let mut ctx = use_context_provider(|| Signal::new(shell.clone()));
     if *ctx.peek() != shell {
@@ -700,45 +899,94 @@ pub fn AppShell(
     let lw = left_w();
     let rw = right_w();
     let resizable = form == FormFactor::Desk;
+    // On a desk the title bar runs across the top of the sides too: their
+    // edges start under it, and their heads draw their part of it.
+    let desk = form == FormFactor::Desk;
+    // A corner badge sits under the floating button: lift it clear.
+    let badge_room = if desk && status_style == StatusStyle::Badge && !all_status.is_empty() {
+        STATUS_BADGE
+    } else {
+        0.0
+    };
+    let bar_h = shell.title_row() + screen.insets.top;
+    let (left_edge, left_pad_top) = if desk {
+        (String::new(), 0.0)
+    } else {
+        (
+            format!("border-right: 1px solid {};", t.rule),
+            screen.insets.top,
+        )
+    };
+    let (right_edge, right_pad_top) = if desk {
+        (String::new(), 0.0)
+    } else {
+        (
+            format!("border-left: 1px solid {};", t.rule),
+            screen.insets.top,
+        )
+    };
 
     rsx! {
         div {
             style: "position: relative; width: 100%; height: 100%; overflow: hidden; display: flex; \
-                    flex-direction: {direction}; background: {t.desk}; color: {t.ink}; font-family: {t.font};",
+                    flex-direction: row; background: {t.desk}; color: {t.ink}; font-family: {t.font};",
             onpointerdown,
             onpointermove,
             onpointerup,
             onpointercancel,
+            document::Style { {shell_css(&t)} }
+            if frame == Frame::Sidebar && desk {
+                DeskRibbon { tabs: tabs.clone(), current, on_tab: pick }
+            }
+            // Everything right of the ribbon, over a desk's status bar.
+            div { style: "flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column;",
+            div { style: "flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: {direction};",
             match frame {
                 Frame::Rail => rsx! {
                     Rail { tabs: tabs.clone(), current, on_tab: pick, screen: side_screen }
                 },
-                Frame::Sidebar if !docked_left && form == FormFactor::Desk => rsx! {},
+                Frame::Sidebar if !docked_left && desk => rsx! {},
                 Frame::Sidebar if !docked_left => rsx! {
                     Rail { tabs: tabs.clone(), current, on_tab: pick, screen: side_screen }
                 },
                 Frame::Sidebar => rsx! {
                     div {
                         style: "position: relative; width: {lw}px; flex-shrink: 0; display: flex; flex-direction: column; \
-                                background: {t.sheet}; border-right: 1px solid {t.rule}; \
-                                padding-top: {screen.insets.top}px; padding-left: {screen.insets.left}px;",
-                        if form == FormFactor::Desk {
+                                background: {t.sheet}; {left_edge} \
+                                padding-top: {left_pad_top}px; padding-left: {screen.insets.left}px;",
+                        if desk && page_side {
+                            div { style: "position: absolute; top: {bar_h}px; bottom: 0; right: 0; width: 1px; background: {t.rule};" }
+                        } else if desk {
                             DeskSidebarHead { title: title }
+                            // The sidebar's edge, under the title bar (which runs over it).
+                            div { style: "position: absolute; top: {bar_h}px; bottom: 0; right: 0; width: 1px; background: {t.rule};" }
                         } else {
                             SidebarHead { title: title }
                         }
-                        div { style: "display: flex; flex-direction: column; gap: 2px; padding: 4px 10px 6px;",
-                            for tab in tabs.iter().cloned() {
-                                SideTab { key: "{tab.id}", on: current == Some(tab.id), tab, on_tab: pick }
+                        // On a desk the sections are the ribbon's; a tablet lists them here.
+                        if !desk {
+                            div { style: "display: flex; flex-direction: column; gap: 2px; padding: 4px 10px 6px;",
+                                for tab in tabs.iter().cloned() {
+                                    SideTab { key: "{tab.id}", on: current == Some(tab.id), tab, on_tab: pick }
+                                }
                             }
                         }
                         if let Some(left) = left.clone() {
-                            div { style: "height: 1px; background: {t.rule}; margin: 8px 18px;" }
+                            if !desk {
+                                div { style: "height: 1px; background: {t.rule}; margin: 8px 18px;" }
+                            }
                             div { style: "flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: scroll;",
                                 {left}
                             }
                         } else {
                             span { style: "flex: 1;" }
+                        }
+                        if desk && page_side {
+                            if let Some(workspaces) = workspaces.clone() {
+                                div { style: "display: flex; align-items: center; padding: 6px 10px; border-top: 1px solid {t.rule};",
+                                    Switcher { workspaces, place: Place::Head }
+                                }
+                            }
                         }
                         if let Some(account) = account.clone() {
                             AccountRow { account, bottom: screen.insets.bottom }
@@ -759,7 +1007,7 @@ pub fn AppShell(
                     if let Some(sep) = separate.clone() {
                         div {
                             style: "position: absolute; right: {20.0 + screen.insets.right}px; \
-                                    bottom: {20.0 + screen.insets.bottom}px;",
+                                    bottom: {20.0 + screen.insets.bottom + badge_room}px;",
                             RoundButton { action: sep }
                         }
                     }
@@ -769,15 +1017,19 @@ pub fn AppShell(
                 if let Some(right) = right.clone() {
                     div {
                         style: "position: relative; width: {rw}px; flex-shrink: 0; display: flex; flex-direction: column; \
-                                overflow-y: scroll; background: {t.sheet}; border-left: 1px solid {t.rule}; \
-                                padding-top: {screen.insets.top}px; padding-right: {screen.insets.right}px;",
-                        // A desk's title row, under the side's fixed button.
+                                overflow-y: scroll; background: {t.sheet}; {right_edge} \
+                                padding-top: {right_pad_top}px; padding-right: {screen.insets.right}px;",
+                        // A desk's title row, under the side's fixed button:
+                        // the title bar, running on over the side.
                         if form == FormFactor::Desk {
-                            div { style: "height: {shell.title_row()}px; flex-shrink: 0; display: flex;",
+                            div { style: "height: {bar_h}px; flex-shrink: 0; display: flex; box-sizing: border-box; \
+                                          padding-top: {screen.insets.top}px; background: {t.title_bar}; \
+                                          border-bottom: 1px solid {t.rule};",
                                 if let Some(w) = window {
                                     DragStrip { chrome: w, width: None }
                                 }
                             }
+                            div { style: "position: absolute; top: {bar_h}px; bottom: 0; left: 0; width: 1px; background: {t.rule};" }
                         }
                         {right}
                         if resizable {
@@ -788,6 +1040,14 @@ pub fn AppShell(
             }
             if in_bar {
                 BottomBar { tabs: tabs, current, on_tab: pick, separate: separate, screen }
+            }
+            }
+            if desk && status_style == StatusStyle::Bar && !all_status.is_empty() {
+                StatusBar { items: all_status.clone() }
+            }
+            }
+            if desk && status_style == StatusStyle::Badge {
+                StatusBadge { items: all_status }
             }
             // A desk's sides' buttons, fixed in the title row whether the
             // side is showing or not (T3 Code's): the left one just past the
@@ -912,10 +1172,12 @@ fn DeskSidebarHead(title: Option<String>) -> Element {
     let shell = use_shell();
     let t = shell.theme;
     let row = shell.title_row();
-    let start = shell.content_left();
+    let top = shell.screen.insets.top;
+    let start = shell.sidebar_title_left();
     let chrome = shell.window.clone();
     rsx! {
-        div { style: "height: {row}px; flex-shrink: 0; display: flex; align-items: center; padding-left: {start}px; padding-right: 10px;",
+        div { style: "height: {row + top}px; flex-shrink: 0; box-sizing: border-box; display: flex; align-items: center; \
+                      padding: {top}px 10px 0 {start}px; background: {t.title_bar}; border-bottom: 1px solid {t.rule};",
             if let Some(title) = title {
                 span { style: "flex-shrink: 0; white-space: nowrap; font-size: 15px; font-weight: 700; \
                                letter-spacing: -0.01em; color: {t.ink};",
@@ -927,7 +1189,7 @@ fn DeskSidebarHead(title: Option<String>) -> Element {
             }
         }
         if let Some(workspaces) = shell.workspaces {
-            div { style: "display: flex; align-items: center; padding: 2px 10px 4px;",
+            div { style: "display: flex; align-items: center; padding: 8px 10px 4px;",
                 Switcher { workspaces, place: Place::Head }
             }
         }
@@ -1006,24 +1268,70 @@ fn RailSideButton() -> Element {
     }
 }
 
-/// The account as a row: avatar, name, detail.
+/// The account at the foot of a sidebar (shadcn's `NavUser`, Linear's):
+/// an inset row — a rounded avatar with its presence, the name over the
+/// email, ⇅ — that opens the account menu above it, headed by who this is.
 #[component]
 fn AccountRow(account: Account, bottom: f64) -> Element {
     let t = use_shell().theme;
+    let mut open = use_signal(|| false);
     let press = account.on_press;
+    let menu = account.menu.clone();
+    let has_menu = menu.is_some();
+    let fill = if open() { t.active } else { "transparent" };
     rsx! {
-        button {
-            class: "lp",
-            "aria-label": "Account",
-            style: "flex-shrink: 0; display: flex; align-items: center; justify-content: flex-start; gap: 12px;                     padding: 12px 16px {12.0 + bottom}px; border: none; border-top: 1px solid {t.rule};                     background: transparent; font-family: {t.font}; text-align: left;",
-            onclick: move |_| if let Some(p) = press { p.call(()) },
-            Avatar { initials: account.initials.clone(), color: account.color, size: 34.0 }
-            div { style: "flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;",
-                span { style: "font-size: 15px; font-weight: 650; color: {t.ink}; white-space: nowrap; overflow: hidden;",
-                    "{account.name}"
+        div { style: "position: relative; flex-shrink: 0; padding: 6px 8px {6.0 + bottom}px; border-top: 1px solid {t.rule};",
+            button {
+                class: "lp",
+                "aria-label": "Account",
+                style: "width: 100%; height: 48px; box-sizing: border-box; display: flex; align-items: center; gap: 10px; \
+                        padding: 0 8px; border: none; border-radius: 8px; background: {fill}; font-family: {t.font}; \
+                        text-align: left;",
+                onclick: move |_| {
+                    if has_menu {
+                        open.toggle();
+                    } else if let Some(p) = press {
+                        p.call(());
+                    }
+                },
+                Avatar { account: account.clone(), size: 32.0 }
+                div { style: "flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px;",
+                    span { style: "font-size: 13px; font-weight: 600; color: {t.ink}; white-space: nowrap; overflow: hidden;",
+                        "{account.name}"
+                    }
+                    if let Some(d) = account.detail.clone() {
+                        span { style: "font-size: 12px; color: {t.ink_3}; white-space: nowrap; overflow: hidden;", "{d}" }
+                    }
                 }
-                if let Some(d) = account.detail {
-                    span { style: "font-size: 12px; color: {t.ink_3}; white-space: nowrap; overflow: hidden;", "{d}" }
+                if has_menu {
+                    ChevronsUpDown { size: 15, color: t.ink_3 }
+                }
+            }
+            if let (true, Some(menu)) = (open(), menu) {
+                // Far past every edge: Blitz has no `position: fixed`.
+                div {
+                    style: "position: absolute; top: -4000px; left: -4000px; width: 8000px; height: 8000px; z-index: {layer::MENU};",
+                    onclick: move |_| open.set(false),
+                }
+                div {
+                    style: "position: absolute; left: 8px; right: 8px; bottom: {58.0 + bottom}px; z-index: {layer::MENU}; \
+                            display: flex; flex-direction: column; padding: 6px 0; border-radius: 12px; \
+                            background: {t.pill}; border: 1px solid {t.rule}; box-shadow: {t.shadow_float};",
+                    div { style: "display: flex; align-items: center; gap: 10px; padding: 6px 12px 10px; \
+                                  border-bottom: 1px solid {t.rule}; margin-bottom: 6px; font-family: {t.font};",
+                        Avatar { account: account.clone(), size: 32.0 }
+                        div { style: "flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px;",
+                            span { style: "font-size: 13px; font-weight: 600; color: {t.ink}; white-space: nowrap; overflow: hidden;",
+                                "{account.name}"
+                            }
+                            if let Some(d) = account.detail {
+                                span { style: "font-size: 12px; color: {t.ink_3}; white-space: nowrap; overflow: hidden;", "{d}" }
+                            }
+                        }
+                    }
+                    for (i, entry) in menu.entries.iter().cloned().enumerate() {
+                        page::MenuRow { key: "{i}", entry, open }
+                    }
                 }
             }
         }
@@ -1038,21 +1346,44 @@ fn AccountChip(account: Account) -> Element {
         button {
             class: "lp",
             "aria-label": "Account",
-            style: "height: 52px; border: none; border-radius: 12px; background: transparent;                     display: flex; align-items: center; justify-content: center;",
+            style: "height: 52px; border: none; border-radius: 12px; background: transparent; \
+                    display: flex; align-items: center; justify-content: center;",
             onclick: move |_| if let Some(p) = press { p.call(()) },
-            Avatar { initials: account.initials.clone(), color: account.color, size: 36.0 }
+            Avatar { account, size: 36.0 }
         }
     }
 }
 
+/// A rounded square (a person's picture or initials on their colour,
+/// lit from the top left), its presence a dot at the corner ringed in the
+/// sidebar's colour.
 #[component]
-fn Avatar(initials: String, color: &'static str, size: f64) -> Element {
+fn Avatar(account: Account, size: f64) -> Element {
     let t = use_shell().theme;
-    let font = (size * 0.42).round();
+    let font = (size * 0.4).round();
+    let radius = (size * 0.25).round();
+    let dot = (size * 0.3).round();
+    let fill = format!(
+        "linear-gradient(135deg, {c} 0%, {c}b3 100%)",
+        c = account.color
+    );
     rsx! {
-        span {
-            style: "width: {size}px; height: {size}px; flex-shrink: 0; border-radius: {size / 2.0}px; background: {color};                     display: flex; align-items: center; justify-content: center; color: {t.ink};                     font-size: {font}px; font-weight: 700;",
-            "{initials}"
+        span { style: "position: relative; width: {size}px; height: {size}px; flex-shrink: 0; display: flex;",
+            if let Some(src) = account.image.clone() {
+                img { src: "{src}", style: "width: {size}px; height: {size}px; border-radius: {radius}px; object-fit: cover;" }
+            } else {
+                span {
+                    style: "width: {size}px; height: {size}px; border-radius: {radius}px; background: {fill}; \
+                            display: flex; align-items: center; justify-content: center; color: #ffffff; \
+                            font-family: {t.font}; font-size: {font}px; font-weight: 650; letter-spacing: 0.02em;",
+                    "{account.initials}"
+                }
+            }
+            if let Some(colour) = account.presence {
+                span { style: "position: absolute; right: -2px; bottom: -2px; width: {dot}px; height: {dot}px; \
+                               box-sizing: border-box; border-radius: {dot / 2.0}px; background: {colour}; \
+                               border: 2px solid {t.sheet};" }
+            }
         }
     }
 }
@@ -1066,7 +1397,7 @@ fn ResizeEdge(side: Side, on_start: EventHandler<PointerEvent>) -> Element {
     };
     rsx! {
         div {
-            style: "position: absolute; top: 0; {edge} width: 8px; height: 100%; cursor: col-resize; z-index: 5;",
+            style: "position: absolute; top: 0; {edge} width: 8px; height: 100%; cursor: col-resize; z-index: {layer::EDGE};",
             onpointerdown: move |e| on_start.call(e),
         }
     }
@@ -1112,5 +1443,72 @@ mod tests {
             frame(s(1440.0, 900.0, false), ShellStyle::TabBar),
             Frame::Sidebar
         );
+    }
+}
+
+/// A desk's ribbon: the window's left edge under the title bar, the app's
+/// sections as icons, then what the page adds (a workspace's views and
+/// pinned commands). Its head is its part of the title bar.
+#[component]
+fn DeskRibbon(
+    tabs: Vec<Tab>,
+    current: Option<&'static str>,
+    on_tab: EventHandler<&'static str>,
+) -> Element {
+    let shell = use_shell();
+    let t = shell.theme;
+    let bar_h = shell.title_row() + shell.screen.insets.top;
+    let extra = (shell.rail_extra)();
+    let chrome = shell.window;
+    rsx! {
+        div {
+            style: "width: {RIBBON}px; flex-shrink: 0; display: flex; flex-direction: column; background: {t.desk};",
+            div {
+                style: "height: {bar_h}px; flex-shrink: 0; box-sizing: border-box; display: flex; \
+                        background: {t.title_bar}; border-bottom: 1px solid {t.rule};",
+                if let Some(c) = chrome {
+                    DragStrip { chrome: c, width: None }
+                }
+            }
+            div {
+                style: "flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; \
+                        gap: 4px; padding: 8px 0; border-right: 1px solid {t.rule};",
+                for tab in tabs {
+                    RibbonTab { key: "{tab.id}", on: current == Some(tab.id), tab, on_tab }
+                }
+                if let Some(extra) = extra {
+                    div { style: "width: 60%; height: 1px; background: {t.rule}; margin: 4px 0;" }
+                    {extra}
+                }
+            }
+        }
+    }
+}
+
+/// An app section in a desk's ribbon: its icon, its name on hover.
+#[component]
+fn RibbonTab(tab: Tab, on: bool, on_tab: EventHandler<&'static str>) -> Element {
+    let t = use_shell().theme;
+    // The current section: the accent, faint behind it and full in it.
+    let (fill, colour) = if on {
+        (t.accent_soft, t.accent)
+    } else {
+        ("transparent", t.ink_3)
+    };
+    let id = tab.id;
+    rsx! {
+        button {
+            class: "lp",
+            "aria-label": tab.label,
+            title: tab.label,
+            style: "position: relative; width: 32px; height: 32px; flex-shrink: 0; border: none; border-radius: 7px; \
+                    background: {fill}; display: flex; align-items: center; justify-content: center;",
+            onclick: move |_| on_tab.call(id),
+            {(tab.icon)(Icon { size: 18, color: colour })}
+            if tab.badge.is_some() {
+                span { style: "position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 3px; \
+                               background: {t.accent};" }
+            }
+        }
     }
 }

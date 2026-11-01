@@ -11,11 +11,15 @@
 
 mod pages;
 mod screen;
+mod vault;
 
 use architect_shell::icon;
 use architect_shell::{self as shell, AppShell, ShellStyle};
 use dioxus::prelude::*;
-use lucide_dioxus::{CalendarDays, Feather, Inbox, ListTodo, NotebookText, Plus, Settings2};
+use lucide_dioxus::{
+    CalendarDays, CheckCheck, CircleUser, Feather, Inbox, Keyboard, ListTodo, LogOut, NotebookText,
+    Plus, Settings2, Users,
+};
 
 pub use screen::{Device, use_window_chrome, use_window_screen};
 
@@ -42,6 +46,8 @@ pub struct Lab {
     pub style: Signal<ShellStyle>,
     /// Whether the app fills the right side.
     pub right: Signal<bool>,
+    /// How a desk shows the status items.
+    pub status: Signal<shell::StatusStyle>,
 }
 
 impl Lab {
@@ -86,6 +92,7 @@ pub fn LabApp() -> Element {
         back: Signal::new(Vec::new()),
         style: Signal::new(ShellStyle::FloatingPill),
         right: Signal::new(true),
+        status: Signal::new(shell::StatusStyle::Bar),
     });
     let route = (lab.route)();
     let tabs = vec![
@@ -133,13 +140,30 @@ pub fn LabApp() -> Element {
                 on_tab: move |id| lab.jump(Route::Tab(id)),
                 separate: capture,
                 brand: rsx! { Brand {} },
-                account: shell::Account::new("Cody Wright").detail("cody@fasttrackstudio.app"),
+                account: shell::Account::new("Cody Wright")
+                    .detail("cody@fasttrackstudio.app")
+                    .presence("#22c55e")
+                    .menu(
+                        shell::Menu::new()
+                            .item("Profile", icon!(CircleUser), |()| {})
+                            .item("Settings", icon!(Settings2), |()| {})
+                            .item("Keyboard shortcuts", icon!(Keyboard), |()| {})
+                            .divider()
+                            .item("Sign out", icon!(LogOut), |()| {}),
+                    ),
                 workspaces,
                 left: rsx! { pages::LeftSide {} },
                 right: if (lab.right)() { Some(rsx! { pages::RightSide {} }) } else { None },
                 on_pull: move |()| lab.jump(Route::Tab("vault")),
                 window: window_chrome,
+                status: vec![
+                    shell::StatusItem::new("sync", "Synced")
+                        .icon(icon!(CheckCheck)).hint("Every change is saved and synced"),
+                    shell::StatusItem::new("people", "3 online").icon(icon!(Users)),
+                ],
+                status_style: (lab.status)(),
                 match route {
+                    Route::Tab("vault") => rsx! { vault::VaultPage {} },
                     Route::Tab(tab) => rsx! { pages::ListPage { key: "{tab}", tab } },
                     Route::Item(tab, index) => rsx! { pages::ItemPage { tab, index } },
                 }
