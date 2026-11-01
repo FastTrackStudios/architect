@@ -258,18 +258,40 @@ pub fn use_window_chrome() -> Option<WindowChrome> {
             move |()| zoom.set_maximized(!zoom.is_maximized()),
         )
     });
-    // Read again whenever the screen changes (entering full screen resizes),
-    // and put the traffic lights back in the row: AppKit lays its title bar
-    // out again on a resize.
+    // Whether the window is in full screen, followed through the window's
+    // events: read only while drawing, it was still full screen at the
+    // resize that leaves it, and the row stayed without its lights.
+    let mut full = use_signal(|| window.fullscreen().is_some());
+    let watched = window.clone();
+    dioxus_native::use_window_event(move |event, _| {
+        if matches!(
+            event,
+            WindowEvent::SurfaceResized(_)
+                | WindowEvent::Moved(_)
+                | WindowEvent::Focused(_)
+                | WindowEvent::Occluded(_)
+                | WindowEvent::RedrawRequested
+        ) {
+            let now = watched.fullscreen().is_some();
+            if *full.peek() != now {
+                full.set(now);
+            }
+        }
+    });
+    let full = full();
+    // Read again whenever the screen changes, and put the traffic lights
+    // back in the row: AppKit lays its title bar out again on a resize. In
+    // full screen AppKit's own (the bar that slides down) is left alone.
     let _ = use_context::<Signal<Screen>>()();
     let device = use_context::<Signal<Device>>()();
     // A window standing in for a phone or a tablet has no traffic lights.
     #[cfg(target_os = "macos")]
-    architect_shell::fit_traffic_lights(
-        window.rwh_06_window_handle(),
-        (device == Device::Native).then_some(WindowChrome::MAC_ROW),
-        WindowChrome::MAC_LIGHTS_LEFT,
-    );
-    (cfg!(target_os = "macos") && window.fullscreen().is_none() && device == Device::Native)
-        .then_some(chrome)
+    if !full {
+        architect_shell::fit_traffic_lights(
+            window.rwh_06_window_handle(),
+            (device == Device::Native).then_some(WindowChrome::MAC_ROW),
+            WindowChrome::MAC_LIGHTS_LEFT,
+        );
+    }
+    (cfg!(target_os = "macos") && !full && device == Device::Native).then_some(chrome)
 }

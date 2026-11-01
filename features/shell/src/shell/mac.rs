@@ -49,6 +49,11 @@ pub fn fit_traffic_lights(window: &dyn HasWindowHandle, row: Option<f64>, left: 
     else {
         return;
     };
+    // AppKit moves the window for a drag that starts anywhere in its title
+    // bar, over the page or not (a tab dragged in the row moved the window,
+    // and its release never reached the page). The row's empty space moves
+    // the window itself (`WindowChrome::on_drag`, `performWindowDrag`).
+    ns_window.setMovable(false);
     let mut rect = container.frame();
     rect.size.height = row;
     rect.origin.y = ns_window.frame().size.height - row;
