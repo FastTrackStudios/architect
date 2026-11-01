@@ -175,6 +175,57 @@ PartialEq + Debug + From<String>`). An app with an enum of actions
 implements `From<String>`, mapping ids it does not know to an "unbound"
 variant so they can be logged instead of dropped.
 
+## Contexts
+
+A binding can belong to a **context**: where it applies. The app says
+which are live, outermost first — `ctx.set_context("session.arrange.item")`
+makes `session`, `session.arrange` and `session.arrange.item` live (or
+`set_contexts([...])` for names that do not nest by dots). Each context's
+bindings sit in `contexts` and beat the mode's own keymap, the innermost
+first; a context that binds nothing falls back outward. They are not
+live in a passthrough-text mode.
+
+```json
+{
+  "keymap": { "normal": { "Ctrl+d": "EDIT_DUPLICATE", "z": "VIEW_ZOOM_FIT" } },
+  "contexts": {
+    "session.arrange": {
+      "keys": { "Ctrl+d": "ARRANGE_DUPLICATE" },
+      "mouse": { "Z+Left.Drag": "VIEW_ZOOM_BOX", "Z+Alt+Left.Click": "VIEW_ZOOM_OUT" },
+      "scroll": { "Z+Scroll": "VIEW_ZOOM" }
+    },
+    "session.arrange.item": { "mouse": { "Alt+Left.Drag": "ITEM_COPY" } }
+  },
+  "midi": { "CC64 ch1": "TRANSPORT_PLAY", "Note60": "MARKER_ADD" },
+  "osc": { "/transport/play": "TRANSPORT_PLAY" }
+}
+```
+
+## Held-letter tools and gestures
+
+A key a pointer or wheel pattern names as held (`Z+Left.Drag`) is a
+modifier while it is down. Its press comes back as `InputCommand::Hold`
+(show the tool: `processor.held_tool(&ctx)` lists its gestures) and runs
+nothing; gestures that follow match the patterns that hold it. The
+release, `processor.release(&chord, &ctx)` (the hook's `release` /
+`handle_key_up`), tells a tap from a hold by what came in between, not
+by a timer: another input made it a modifier (`Unhold`); nothing did,
+and it was a tap — `Unhold`, then whatever the key is bound to.
+
+Mouse gestures are `Press`, `Release`, `Click`, `DoubleClick`, `Drag`
+(`MouseEvent::drag(button, from, to, mods)`) and `LongPress`. A pointer,
+wheel, MIDI or OSC match comes back as `InputCommand::Gesture { action,
+event }`: the input itself, so a drag's start and delta
+(`MouseEvent::delta`), a wheel's deltas or a fader's value reach the
+action.
+
+## MIDI and OSC
+
+The binding kinds are here (`features/input/src/control.rs`): `midi`
+maps `Note60`, `CC64 ch1`, `PC5` (any number or channel when left out)
+and `osc` maps an address, in every mode. The sources are the app's: it
+hands each message in as `InputEvent::Midi` / `InputEvent::Osc`.
+
 ## User keymaps
 
 `KeymapConfig::merge(base, user)` lays a user's file over the shipped

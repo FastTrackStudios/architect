@@ -209,6 +209,98 @@ fn a_new_menu_goes_before_window_and_help() {
     );
 }
 
+// ── The keymap a person edits ──────────────────────────────────────────
+
+use architect_commands::{Clash, EVERYWHERE, Keymap, Layer};
+use architect_input::KeymapConfig;
+
+fn studio_keys() -> Keymap {
+    let app = KeymapConfig::from_json_str(
+        r#"{ "keymap": { "normal": { "Meta+d": "EDIT_DUPLICATE", "g g": "VIEW_TOP" } },
+             "contexts": { "session.arrange": { "keys": { "Meta+d": "ARRANGE_DUPLICATE" } } } }"#,
+    )
+    .unwrap();
+    let mut keymap = Keymap::new(app);
+    keymap.set_shortcuts([("WORKSPACE_CLOSE_TAB", "⌘W")]);
+    keymap
+}
+
+#[test]
+fn a_new_binding_shows_what_it_collides_with() {
+    let keymap = studio_keys();
+    let clashes = |context: &str, keys: &str| -> Vec<(String, Clash)> {
+        keymap
+            .conflicts("NEW", context, keys)
+            .into_iter()
+            .map(|c| (c.binding.action, c.clash))
+            .collect()
+    };
+    assert_eq!(
+        clashes(EVERYWHERE, "⌘W"),
+        [("WORKSPACE_CLOSE_TAB".into(), Clash::Same)]
+    );
+    assert_eq!(
+        clashes(EVERYWHERE, "g"),
+        [("VIEW_TOP".into(), Clash::Prefix)]
+    );
+    let mut d = clashes("session.arrange.item", "⌘D");
+    d.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        d,
+        [
+            ("ARRANGE_DUPLICATE".into(), Clash::Outer),
+            ("EDIT_DUPLICATE".into(), Clash::Outer)
+        ]
+    );
+    assert_eq!(
+        clashes(EVERYWHERE, "⌘D").len(),
+        2,
+        "same everywhere, inner in arrange"
+    );
+    assert!(clashes(EVERYWHERE, "⌘J").is_empty());
+}
+
+#[test]
+fn what_a_key_does_is_answered_per_context() {
+    let keymap = studio_keys();
+    let does: Vec<(String, String)> = keymap
+        .what_does("⌘D")
+        .into_iter()
+        .map(|b| (b.context, b.action))
+        .collect();
+    assert_eq!(
+        does,
+        [
+            (String::new(), "EDIT_DUPLICATE".to_owned()),
+            ("session.arrange".to_owned(), "ARRANGE_DUPLICATE".to_owned())
+        ]
+    );
+}
+
+#[test]
+fn the_persons_changes_are_marked_and_reset() {
+    let mut keymap = studio_keys();
+    keymap.unbind(EVERYWHERE, "⌘W").unwrap();
+    keymap
+        .bind("WORKSPACE_CLOSE_TAB", "session.arrange", "⌘E")
+        .unwrap();
+    assert!(keymap.is_changed("WORKSPACE_CLOSE_TAB"));
+    let bindings = keymap.bindings_of("WORKSPACE_CLOSE_TAB");
+    assert_eq!(bindings.len(), 1);
+    assert_eq!(bindings[0].layer, Layer::Person);
+    assert_eq!(
+        keymap.shortcut("WORKSPACE_CLOSE_TAB").as_deref(),
+        Some("⌘E")
+    );
+    keymap.reset("WORKSPACE_CLOSE_TAB");
+    assert!(!keymap.is_changed("WORKSPACE_CLOSE_TAB"));
+    assert_eq!(
+        keymap.shortcut("WORKSPACE_CLOSE_TAB").as_deref(),
+        Some("⌘W")
+    );
+    assert!(keymap.person().rebinds.is_empty());
+}
+
 #[test]
 fn a_toggle_resolves_with_its_tick() {
     let bar = MenuBar::standard("Lab").menu("View", |m| m.command("VIEW_GRID"));

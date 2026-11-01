@@ -337,6 +337,33 @@ pub fn SettingsPage() -> Element {
             .shortcut("⌘,"),
         move || h.show(None),
     );
+    // The palette's `#`: a setting by name, opened at its row.
+    architect_commands::use_palette_opener(architect_commands::Scope::Settings, move || {
+        architect_commands::Opener::new(
+            "setting",
+            "Settings",
+            move |query| {
+                let registry = h.registry.peek();
+                registry
+                    .search(query)
+                    .into_iter()
+                    .take(20)
+                    .filter_map(|hit| {
+                        let (section, setting) = registry.setting(&hit.key)?;
+                        Some(
+                            architect_commands::OpenItem::new(
+                                "setting",
+                                hit.key.clone(),
+                                setting.title.clone(),
+                            )
+                            .detail(section.title.clone()),
+                        )
+                    })
+                    .collect()
+            },
+            move |item, _| h.show_setting(&item.id),
+        )
+    });
     if (h.open)().is_none() {
         return rsx! {};
     }

@@ -585,6 +585,7 @@ name = "architect-commands"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "architect-input",
  "architect-shell",
  "block2 0.6.2",
  "dioxus",
@@ -597,6 +598,8 @@ dependencies = [
  "objc2 0.6.4",
  "objc2-foundation 0.3.2",
  "objc2-ui-kit",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
  "zbus",
