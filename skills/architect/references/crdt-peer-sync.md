@@ -84,7 +84,7 @@ The host stores and relays Loro bytes and a catalog row (`DocMeta`); it never re
   - A doc learned from a peer stays pending until the hub session registers it. Rename and delete go through the hub.
 - Raw clients: `DocsClient` / `DocsStreamClient` inherent methods return `VoxError<DocsError>`; fold with `architect::vox_into_app`.
 
-## Recipe E: live peer to peer, links and devices (mirrors `features/crdt/crdt/tests/p2p.rs`)
+## Recipe H: live peer to peer, links and devices (mirrors `features/crdt/crdt/tests/p2p.rs`)
 
 1. One `NodeAccess::new(Devices::new(), Shares::new())` per node. Keep `Devices` current from auth: `devices.replace(directory.peer_endpoints(this_device))` on every `list_devices` / `register_device` answer (`features/auth/auth-proto/src/device.rs` `DeviceDirectory::peer_endpoints`). It is read per call, so a device taken off the account is refused on its next call, over a connection it already has.
 2. Registry: `.with_authorizer(move |who, id| access.admits(who, id) || mine(who, id))`. `admits`: a registered device (`Principal::Host`) any document, a link's guest (`Principal::Guest`) only the link's document, anyone else nothing.
