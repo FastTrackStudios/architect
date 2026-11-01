@@ -23,8 +23,8 @@ use architect_shell::icon;
 use architect_shell::{self as shell, AppShell, ShellStyle};
 use dioxus::prelude::*;
 use lucide_dioxus::{
-    CalendarDays, CheckCheck, Feather, Inbox, Keyboard, ListTodo, NotebookText, Plus, Settings2,
-    Undo2, Users,
+    ArrowLeft, CalendarDays, CheckCheck, CircleQuestionMark, Command as CommandIcon, Feather,
+    Inbox, Keyboard, ListTodo, NotebookText, Plus, Search, Settings2, Undo2, Users,
 };
 
 pub use screen::{Device, use_window_chrome, use_window_screen};
@@ -663,6 +663,9 @@ pub fn LabApp() -> Element {
     let windowed = use_hook(|| {
         try_consume_context::<std::sync::Arc<dyn dioxus_native::winit::window::Window>>().is_some()
     });
+    // A phone's bar becomes the editing bar while a field has the focus:
+    // the document's text focus, told to the shell.
+    use_hook(|| dioxus_native::on_text_focus_change(shell::set_typing));
     let list = use_hook(|| {
         try_consume_context::<std::sync::Arc<architect::action::ActionList>>()
             .unwrap_or_else(|| std::sync::Arc::new(architect::action::ActionList::new()))
@@ -783,6 +786,19 @@ pub fn LabApp() -> Element {
             move || lab.step(by),
         );
     }
+    architect_commands::use_command(
+        {
+            let c = architect_commands::Command::new("LAB_GO_BACK", "Go back")
+                .group("Go")
+                .shortcut("⌘[");
+            if lab.can_go_back() {
+                c
+            } else {
+                c.disabled("nowhere to go back to")
+            }
+        },
+        move || lab.go_back(),
+    );
     architect_commands::use_command(
         architect_commands::Command::new("LAB_OPEN_SELECTED", "Open the selected item")
             .group("Go")
@@ -1116,6 +1132,16 @@ pub fn LabApp() -> Element {
                         window: window_chrome,
                         status,
                         status_style: (lab.status)(),
+                        // A phone's action bar (a page adds its own: the
+                        // Vault, its tabs).
+                        actions: vec![
+                            shell::BarAction::new("LAB_GO_BACK", "Go back", icon!(ArrowLeft)),
+                            shell::BarAction::new("LAB_OPEN_ANYTHING", "Open…", icon!(Search)),
+                            shell::BarAction::new("LAB_UNDO", "Undo", icon!(Undo2)),
+                            shell::BarAction::new("LAB_SHOW_COMMANDS", "Commands", icon!(CommandIcon)),
+                            shell::BarAction::new("APP_SETTINGS", "Settings", icon!(Settings2)),
+                            shell::BarAction::new("LAB_HELP", "Help", icon!(CircleQuestionMark)),
+                        ],
                         match route {
                             Route::Tab("vault") => rsx! { vault::VaultPage {} },
                             Route::Tab(tab) => rsx! { pages::ListPage { key: "{tab}", tab } },

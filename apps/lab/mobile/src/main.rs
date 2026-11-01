@@ -40,6 +40,8 @@ fn main() {
     unsafe { std::env::set_var("BLITZ_SAFE_AREA", "0") };
     #[cfg(target_os = "ios")]
     scene::register();
+    // The keyboard's height from UIKit, for the bar that rides it.
+    architect_shell::install_keyboard();
     let window = WindowAttributes::default().with_title("Architect");
     launch_cfg(
         App,
