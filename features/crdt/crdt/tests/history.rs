@@ -55,6 +55,58 @@ fn a_new_step_drops_what_could_be_redone_and_nothing_is_no_step() {
 }
 
 #[test]
+fn an_open_step_takes_in_every_transaction_until_it_commits() {
+    let doc = LoroDoc::new();
+    let mut h = History::new(&doc, 100);
+    h.transact(&doc, "Before", |d| {
+        d.get_text("body").insert(0, "x").unwrap();
+    });
+    assert!(h.begin("Script: Arm selected"));
+    assert!(!h.begin("A second"), "one step is open at a time");
+    assert_eq!(h.open_step(), Some("Script: Arm selected"));
+    for (i, word) in ["a", "b", "c"].iter().enumerate() {
+        h.transact(&doc, "Arm track", |d| {
+            d.get_text("body").insert(i + 1, word).unwrap();
+        });
+    }
+    assert_eq!(h.commit(&doc).as_deref(), Some("Script: Arm selected"));
+    assert_eq!(h.open_step(), None);
+    assert_eq!(text(&doc), "xabc");
+    assert_eq!(h.steps(), ["Before", "Script: Arm selected"]);
+    assert_eq!(h.undo().as_deref(), Some("Script: Arm selected"));
+    assert_eq!(text(&doc), "x");
+    assert_eq!(h.redo().as_deref(), Some("Script: Arm selected"));
+    assert_eq!(text(&doc), "xabc");
+}
+
+#[test]
+fn an_open_step_that_changed_nothing_is_no_step() {
+    let doc = LoroDoc::new();
+    let mut h = History::new(&doc, 100);
+    assert!(h.begin("Script: Look"));
+    assert_eq!(h.commit(&doc), None);
+    assert!(h.steps().is_empty());
+    assert_eq!(h.commit(&doc), None, "nothing is open");
+}
+
+#[test]
+fn an_aborted_step_takes_back_what_it_changed() {
+    let doc = LoroDoc::new();
+    let mut h = History::new(&doc, 100);
+    h.transact(&doc, "Keep", |d| {
+        d.get_text("body").insert(0, "keep").unwrap();
+    });
+    h.begin("Script: Fails half way");
+    h.transact(&doc, "Arm track", |d| {
+        d.get_text("body").insert(4, "!").unwrap();
+    });
+    assert_eq!(h.abort(&doc).as_deref(), Some("Script: Fails half way"));
+    assert_eq!(text(&doc), "keep");
+    assert_eq!(h.steps(), ["Keep"]);
+    assert_eq!(h.next_undo(), Some("Keep"));
+}
+
+#[test]
 fn undo_is_local_a_collaborators_change_stays() {
     let mine = LoroDoc::new();
     mine.set_peer_id(1).unwrap();
