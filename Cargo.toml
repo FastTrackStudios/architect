@@ -57,10 +57,12 @@ members = [
     "features/ui/showcase",
     "features/ui/ui-snapshot",
     "features/shell",
+    "features/guide",
     "apps/lab/ui",
     "apps/lab/desktop",
     "apps/lab/mobile",
     "apps/lab/clicker",
+    "apps/lab/media",
     # ── story (component workbench) ───────────────────────────────────
     "features/story/architect-story-core",
     "features/story/architect-story-macros",
@@ -118,6 +120,8 @@ architect-ui = { path = "features/ui/architect-ui" }
 architect-telemetry = { path = "features/telemetry" }
 architect-ui-showcase = { path = "features/ui/showcase" }
 ui-snapshot = { path = "features/ui/ui-snapshot" }
+# guide media: scenarios as films, tests and tours.
+architect-guide = { path = "features/guide" }
 # story — the component workbench (stories, snapshots, parity, fuzz).
 architect-story-core = { path = "features/story/architect-story-core" }
 architect-story-macros = { path = "features/story/architect-story-macros" }

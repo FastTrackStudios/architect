@@ -57,6 +57,54 @@ lint:
 tags:
     cargo run -p xtask -- tags --verbose
 
+# Film the lab's guide scenarios (apps/lab/scenarios; all of them, or
+# one by id) into target/media: <id>.gif and <id>.png, and .webm/.mp4
+# where a scenario asks. Needs ffmpeg and gifski (the dev shell has them).
+media *IDS:
+    cargo run -q -p architect-lab-media -- {{IDS}} --out target/media
+
+# Play the lab's guide scenarios as tests, no frames.
+media-test *IDS:
+    cargo run -q -p architect-lab-media -- {{IDS}} --test
+
+# Regenerate every scenario's media and commit them to the orphan `media`
+# branch (only the generated files; README and docs embed them from
+# raw.githubusercontent.com/FastTrackStudios/architect/media/<id>.gif).
+# Works in a temporary worktree: this checkout and its branch are never
+# touched. PUSH=1 pushes the branch too.
+media-publish PUSH="0":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root=$(git rev-parse --show-toplevel)
+    out=$(mktemp -d)
+    tree=$(mktemp -d)
+    trap 'git -C "$root" worktree remove --force "$tree" 2>/dev/null || true; rm -rf "$out" "$tree"' EXIT
+    cargo run -q -p architect-lab-media -- --out "$out"
+    git -C "$root" fetch -q origin media 2>/dev/null || true
+    if git -C "$root" rev-parse -q --verify origin/media >/dev/null; then
+        git -C "$root" worktree add -q --detach "$tree" origin/media
+        git -C "$tree" checkout -q -B media
+    else
+        git -C "$root" worktree add -q --detach "$tree"
+        git -C "$tree" checkout -q --orphan media
+        git -C "$tree" rm -rq --cached . >/dev/null
+        git -C "$tree" clean -fdxq
+    fi
+    find "$tree" -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+    find "$out" -maxdepth 1 -type f \( -name '*.gif' -o -name '*.webm' -o -name '*.mp4' -o -name '*.png' \) -exec cp {} "$tree"/ \;
+    git -C "$tree" add -A
+    if git -C "$tree" diff --cached --quiet; then
+        echo "media: nothing changed"
+    else
+        rev=$(git -C "$root" rev-parse --short HEAD)
+        git -C "$tree" commit -qm "media: regenerated from $rev"
+        echo "media: committed $(git -C "$tree" rev-parse --short HEAD) to media"
+    fi
+    if [ "{{PUSH}}" = "1" ]; then
+        git -C "$tree" push -q origin media
+        echo "media: pushed"
+    fi
+
 # Every path and command the docs and skills name must exist (CI runs this).
 docs-check:
     cargo run -q -p xtask -- docs
