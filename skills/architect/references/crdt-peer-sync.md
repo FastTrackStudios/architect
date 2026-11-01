@@ -81,7 +81,7 @@ The host stores and relays Loro bytes and a catalog row (`DocMeta`); it never re
   - A doc learned from a peer stays pending until the hub session registers it. Rename and delete go through the hub.
 - Raw clients: `DocsClient` / `DocsStreamClient` inherent methods return `VoxError<DocsError>`; fold with `architect::vox_into_app`.
 
-## Recipe F: a document's blobs (mirrors `features/crdt/crdt/tests/blobs.rs`)
+## Recipe G: a document's blobs (mirrors `features/crdt/crdt/tests/blobs.rs`)
 
 A document points at its audio and images by sha256; the bytes never go in the Loro doc.
 
