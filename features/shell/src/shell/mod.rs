@@ -872,7 +872,7 @@ pub fn AppShell(
     let shown_side = shown();
     let over = shown_side.is_some() && amount > 0.001;
     let left_x = -drawer_w * (1.0 - amount);
-    let right_x = screen.width - drawer_w * amount;
+    let right_x = drawer_w.mul_add(-amount, screen.width);
     // On a phone the page gives way a little to the drawer coming in.
     let page_shift = match shown_side {
         Some(Side::Left) if phone => drawer_w * PARALLAX * amount,
