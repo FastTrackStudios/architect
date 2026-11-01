@@ -189,28 +189,61 @@ impl DocFile {
     /// Makes a new document of `kind` in `storage` (whatever was there is
     /// replaced): its `meta`, and `main` stamped with the kind's schema.
     pub async fn create(storage: impl Storage, kind: &DocKind) -> Result<Self, FileError> {
-        let records = vec![
-            meta("kind", &kind.id),
-            meta("schema", &kind.stamp.to_string()),
-            meta("id", &Uuid::new_v4().to_string()),
+        Self::create_as(storage, kind, Uuid::new_v4()).await
+    }
+
+    /// [`Self::create`], for the document `id` (the id a catalogue knows
+    /// it by: a document made on this device and registered later).
+    pub async fn create_as(
+        storage: impl Storage,
+        kind: &DocKind,
+        id: Uuid,
+    ) -> Result<Self, FileError> {
+        let file = Self::empty(storage, kind, id, Some(kind.stamp)).await?;
+        // Stamped at this build's schema, not upgraded to it: a new
+        // document has nothing to migrate.
+        let mut main = Branch::new(file.clone(), MAIN.to_owned(), LoroDoc::new());
+        main.stamp(kind).await?;
+        Ok(file)
+    }
+
+    /// A file of `kind` for the document `id` made somewhere else, its
+    /// `main` empty (whatever was in `storage` is replaced). Nothing is
+    /// written into it, not even the kind's stamp: its history, stamp
+    /// included, arrives from the device that made it, and an edit of
+    /// this file's own before that would be a history the document's
+    /// host refuses as another lineage.
+    pub async fn adopt(storage: impl Storage, kind: &DocKind, id: Uuid) -> Result<Self, FileError> {
+        Self::empty(storage, kind, id, None).await
+    }
+
+    /// A file holding only its `meta` and an empty `main`.
+    async fn empty(
+        storage: impl Storage,
+        kind: &DocKind,
+        id: Uuid,
+        stamp: Option<u32>,
+    ) -> Result<Self, FileError> {
+        let mut records = vec![meta("kind", &kind.id)];
+        if let Some(stamp) = stamp {
+            records.push(meta("schema", &stamp.to_string()));
+        }
+        records.extend([
+            meta("id", &id.to_string()),
             Record::Branch {
                 name: MAIN.to_owned(),
                 parent: None,
                 base: None,
                 at: now(),
             },
-        ];
-        let mut bytes = format::header();
-        for r in &records {
-            bytes.extend(format::frame(r)?);
-        }
-        storage.replace(&bytes).await?;
-        let file = Self::from_parts(Box::new(storage), Index::from_records(records), kind, None);
-        // Stamped at this build's schema, not upgraded to it: a new
-        // document has nothing to migrate.
-        let mut main = Branch::new(file.clone(), MAIN.to_owned(), LoroDoc::new());
-        main.stamp(kind).await?;
-        Ok(file)
+        ]);
+        storage.replace(&image(&records)?).await?;
+        Ok(Self::from_parts(
+            Box::new(storage),
+            Index::from_records(records),
+            kind,
+            None,
+        ))
     }
 
     /// Opens the document of `kind` in `storage`, dropping a torn tail a

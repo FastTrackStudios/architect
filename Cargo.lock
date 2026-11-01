@@ -2562,6 +2562,7 @@ name = "crdt"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "architect-orgs",
  "architect-permissions",
  "async-trait",
  "chrono",

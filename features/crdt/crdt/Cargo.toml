@@ -56,6 +56,9 @@ architect.workspace = true
 # to `DocRegistry::with_authorizer` and the `peer` lane's peer check.
 # Already in architect's own tree (wasm-clean).
 architect-permissions.workspace = true
+# `Org`, `OrgId`, `Orgs` — the org a device's `OrgDocs` syncs, and the
+# person's current one (`OrgSyncs::follow`). Pure data, wasm-clean.
+architect-orgs.workspace = true
 vox = { workspace = true, optional = true }
 facet = { workspace = true, optional = true }
 loro.workspace = true

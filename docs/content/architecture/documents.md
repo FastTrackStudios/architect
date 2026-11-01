@@ -11,7 +11,14 @@ weight = 57
 > (`transact` — one named step — `undo`, `redo`, local only);
 > `features/crdt/crdt/src/file/mod.rs` `DocFile` and
 > `features/crdt/crdt/src/file/branch.rs` `Branch` (the file, below).
-> Next in the order of work: blobs, the org driver. Studio's
+> The org driver landed (2026-11-01):
+> `features/crdt/crdt/src/docs/org.rs` `OrgDocs` (one org's driver,
+> kept connected under a `Backoff`) and `OrgSyncs` (one per org,
+> following the person's current org);
+> `features/crdt/crdt/src/docs/placement.rs` `Placement` (each document
+> in its file); `features/crdt/crdt/src/registry.rs` `DocPermissions`
+> (the org's permission on every call). Next in the order of work:
+> blobs. Studio's
 > `session-format` moving onto the file is Studio's work. Proposed
 > (2026-10-31): most of
 > the pieces exist ([collaboration](@/architecture/collaboration.md),
@@ -53,7 +60,9 @@ In Studio, generic and moving here:
   (`signal/proto/src/doc/codec.rs`), better than the hand-written one
   here.
 - **The org driver:** one sync driver per org, reconnecting, placing
-  each document by policy (`studio:features/account/src/sync.rs`).
+  each document by policy (`studio:features/account/src/sync.rs`) —
+  now architect's (below, "The org driver"); Studio moving onto it is
+  Studio's work.
 - **Live sessions:** a host serves its documents over iroh; a link
   (`fts-session:<endpoint>/<set>`) joins it; presence (pointers, who is
   here) rides beside the document.
@@ -163,7 +172,31 @@ Three ways a document reaches other devices, all `DocSync` underneath:
 Presence — who is here, where their pointer is, what they have selected
 — rides beside each document on every one of them. Who may read, edit,
 or administer a document is the org's permission, checked on every
-call (caller identity in the registry: the gap collaboration.md names).
+call: `DocPermissions` (`features/crdt/crdt/src/registry.rs`) asks the
+org's permission engine about the caller the gate resolved, `read` or
+`write` on `org/<org>/doc/<id>`, in `DocRegistry` and `DocsHost` alike
+([collaboration](@/architecture/collaboration.md), "Who may").
+
+### The org driver
+
+A device keeps one driver per org that owns something on it
+(`features/crdt/crdt/src/docs/org.rs`):
+
+| Piece | What it does |
+|---|---|
+| `OrgDocs` | one org's `DocsDriver` (the device's index of the org's documents and their sync) and its `Placement`. `stay_connected(dial)` is the loop: dial the org's lane, run a session until a connection closes (`Caller::closed`), wait under architect's `Backoff` (full jitter, 250 ms to 10 s, reset by every connection), dial again; `Dialed::Stop` (signed out) ends it. `run_on(&lane)` is one session, for an app whose connection is already supervised (`use_app_supervised`: run it once per `Connection::generation`). `link()` is `Connecting`, `Live`, `Offline` or `Stopped` |
+| `OrgSyncs` | one `OrgDocs` per org, made on first ask by the app's `open` and kept connected through its `dial`; `current(&Orgs)` is the window's org (`architect-orgs`), `follow(&Orgs)` stops the orgs the person left |
+| `Placement` | each document in a document file: where the app placed it (`place(id, path)`), else `<dir>/<id>.<extension>` by its kind; synced through the file's `main` (`DocFile::persistence`), so every step that arrives is durable in the file the person opens. A new file is stamped for a document made here and left empty for one made elsewhere (`DocFile::adopt`), so it is never another lineage |
+
+Offline, every document edits locally; the next session is a delta
+both ways. Proven by `features/crdt/crdt/tests/org_sync.rs`
+(`a_members_doc_syncs_through_a_dropped_connection_and_merges_offline_edits`).
+
+Confining every service to the caller's org, with membership learnt
+from the identity server, is `architect-orgs`' server side (in review,
+PR #111): `DocPermissions::in_org` names a document by the same
+`org/<id>/…` resource that layer keys an org's data by, so its engine
+is the one to hand `DocPermissions`.
 
 ### The catalogue
 
