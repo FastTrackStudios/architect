@@ -393,6 +393,11 @@ nursery = { level = "deny", priority = -1 }
 # and after this cleanup there are few enough of those to keep honest.
 missing_errors_doc = "allow"
 
+# New in clippy 1.99 (pedantic). It wants `assert!(v.is_empty())` written
+# as `assert_eq!(v, [])`, which for a `Vec<T>` needs `[] as [T; 0]` and
+# then trips `as_conversions`. `assert!(v.is_empty())` reads fine.
+assert_is_empty = "allow"
+
 # The `async` on these is not the impl's to choose. Every site is either
 # a trait method whose signature the trait owns (`Link::close`,
 # `PermissionCheck::can`), or a repo-shaped inherent API whose callers
