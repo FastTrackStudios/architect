@@ -376,3 +376,122 @@ fn a_panes_status_items_show_while_it_is_the_document_and_survive_a_redraw() {
     settle(&mut main);
     assert_eq!(shown(&main), ["a"]);
 }
+
+// A dock popped out into a window of its own: through its actions, the
+// platform opens a window for it whose dom draws the dock, and closing
+// that window docks it back.
+
+fn dock_app() -> Element {
+    let fake = FAKE.with(|f| f.borrow().clone().expect("a fake platform"));
+    use_context_provider(|| Windows::new(Platform(fake)));
+    let commands = architect_commands::use_commands_provider();
+    COMMANDS.with(|c| *c.borrow_mut() = Some(commands));
+    let workspace = use_signal(|| {
+        let mut w = Workspace::new();
+        w.open(note("doc"), Target::Tab).unwrap();
+        w.open(note("files"), Target::Dock(architect_workspace::Side::Left))
+            .unwrap();
+        w.open(
+            note("search"),
+            Target::Dock(architect_workspace::Side::Left),
+        )
+        .unwrap();
+        w.activate(&PaneId::new("files")).unwrap();
+        w.windows[0].docks.left.ribbon = Some(architect_workspace::Ribbon::default());
+        w
+    });
+    WORKSPACE.with(|s| *s.borrow_mut() = Some(workspace));
+    let views = use_hook(views);
+    rsx! { WorkspaceView { workspace, views } }
+}
+
+/// Whether the command `id` is enabled now.
+fn enabled(main: &VirtualDom, id: &str) -> bool {
+    let commands = COMMANDS.with(|c| c.borrow().unwrap());
+    main.in_runtime(|| commands.all())
+        .into_iter()
+        .find(|c| c.id == id)
+        .unwrap_or_else(|| panic!("no command {id}"))
+        .enabled
+}
+
+#[test]
+fn the_sidebar_pops_out_into_a_window_that_draws_it_and_docks_back() {
+    use architect_workspace::Side;
+    FAKE.with(|f| *f.borrow_mut() = Some(Rc::new(Fake::default())));
+    let fake = FAKE.with(|f| f.borrow().clone().unwrap());
+    let mut main = VirtualDom::new(dock_app);
+    main.rebuild_in_place();
+    main.render_immediate(&mut NoOpMutations);
+    let workspace = WORKSPACE.with(|s| s.borrow().unwrap());
+    let commands = COMMANDS.with(|c| c.borrow().unwrap());
+    assert!(enabled(&main, "WORKSPACE_POP_OUT_LEFT_DOCK"));
+    assert!(!enabled(&main, "WORKSPACE_DOCK_BACK_LEFT_DOCK"));
+    assert!(
+        !enabled(&main, "WORKSPACE_POP_OUT_RIGHT_DOCK"),
+        "the right dock is empty"
+    );
+
+    // The action: the dock is in a window of its own.
+    assert!(main.in_runtime(|| commands.run("WORKSPACE_POP_OUT_LEFT_DOCK")));
+    main.render_immediate(&mut NoOpMutations);
+    let out = main.in_runtime(|| workspace.peek().dock_window(Side::Left));
+    assert_eq!(out, Some(1));
+    let popout = {
+        let opened = fake.opened.borrow();
+        assert_eq!(opened.len(), 1);
+        opened[0].clone()
+    };
+    assert_eq!(*popout.id(), WindowId::dock(Side::Left));
+    assert_eq!(popout.title(), "Sidebar");
+    assert!(enabled(&main, "WORKSPACE_DOCK_BACK_LEFT_DOCK"));
+    assert!(!enabled(&main, "WORKSPACE_POP_OUT_LEFT_DOCK"));
+
+    // Its own dom draws the dock's tab on show (and the main one doesn't).
+    DRAWN.with(|d| d.borrow_mut().clear());
+    let mut window = popout.dom();
+    window.rebuild_in_place();
+    assert_eq!(DRAWN.with(|d| d.borrow().clone()), ["files"]);
+    DRAWN.with(|d| d.borrow_mut().clear());
+    main.render_immediate(&mut NoOpMutations);
+    assert!(
+        !DRAWN.with(|d| d.borrow().contains(&"files".to_owned())),
+        "the main window no longer draws the dock"
+    );
+    drop(window);
+
+    // "Dock the sidebar back": its window closes.
+    assert!(main.in_runtime(|| commands.run("WORKSPACE_DOCK_BACK_LEFT_DOCK")));
+    main.render_immediate(&mut NoOpMutations);
+    assert_eq!(*fake.closed.borrow(), [WindowId::dock(Side::Left)]);
+    let back = main.in_runtime(|| {
+        let w = workspace.peek();
+        (
+            w.windows.len(),
+            w.locate(&PaneId::new("files")).map(|l| (l.window, l.area)),
+            w.windows[0].docks.left.ribbon.is_some(),
+        )
+    });
+    assert_eq!(
+        back,
+        (
+            1,
+            Some((0, architect_workspace::Area::Dock(Side::Left))),
+            true
+        )
+    );
+
+    // Out again, and the person closes its window: it docks back too.
+    assert!(main.in_runtime(|| commands.run("WORKSPACE_POP_OUT_LEFT_DOCK")));
+    main.render_immediate(&mut NoOpMutations);
+    let popout = fake.opened.borrow().last().cloned().unwrap();
+    let window = popout.dom();
+    window.in_runtime(|| popout.closed());
+    drop(window);
+    main.render_immediate(&mut NoOpMutations);
+    let back = main.in_runtime(|| {
+        let w = workspace.peek();
+        (w.windows.len(), w.dock_window(Side::Left))
+    });
+    assert_eq!(back, (1, None));
+}

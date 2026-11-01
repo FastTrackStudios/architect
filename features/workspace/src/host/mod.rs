@@ -223,6 +223,15 @@ enum Drag {
     },
     /// A float's resize corner.
     FloatSize { pane: PaneId, host: Rect },
+    /// A dock's grip, pressed at `x, y`, the pointer last at `last`;
+    /// `moved` once past the slop (a drag, not a press).
+    DockGrip {
+        side: Side,
+        x: f32,
+        y: f32,
+        last: (f32, f32),
+        moved: bool,
+    },
     /// A stacked strip's scrollbar, grabbed at `x` with the strip at
     /// `from`; a point of the bar is `per_point` of the strip.
     Strip {
@@ -352,6 +361,14 @@ pub struct Host {
     scrolls: Signal<HashMap<GroupId, f32>>,
     /// The platform's windows, where pop-outs are real OS windows.
     windows: CopyValue<Option<Windows>>,
+    /// A ribbon's pinned command pressed in a pop-out, for the main
+    /// window's host to hand to the app's `on_command` (a handler runs in
+    /// the dom that made it).
+    pressed: Signal<Option<String>>,
+    /// Where the platform last said the pointer let go outside this
+    /// window, set as it says so (before the document hears the release),
+    /// for a grip's drag to end there.
+    released: CopyValue<Rc<std::cell::Cell<Option<(f32, f32)>>>>,
 }
 
 /// The [`Host`] a [`WorkspaceView`] above put in context.
@@ -677,6 +694,61 @@ impl Host {
         None
     }
 
+    /// A ribbon's pinned command pressed: the app's `on_command` hears it,
+    /// from the main window's dom.
+    fn press_command(&self, id: String) {
+        if let Some(on) = *self.on_command.peek() {
+            on.call(id);
+        } else {
+            let mut pressed = self.pressed;
+            pressed.set(Some(id));
+        }
+    }
+
+    /// Where the dock on `side` goes when it pops out without a place
+    /// given: over where it was in the main window, a little in, as tall as
+    /// the main window (the host's own area, where the platform does not
+    /// say).
+    fn dock_bounds(&self, side: Side) -> Option<Rect> {
+        let windows = self.windows.peek().clone()?;
+        let main = WindowId::main();
+        let (ox, oy, area) = if let Some(r) = windows.0.content(&main) {
+            (r.x, r.y, Rect::new(0.0, 0.0, r.w, r.h))
+        } else {
+            let (ox, oy) = windows.0.origin(&main)?;
+            let area = (*self.float_area.peek()).filter(|a| a.w > 0.0 && a.h > 0.0)?;
+            (ox, oy, area)
+        };
+        let w = self.workspace.peek();
+        let dock = w.dock(side)?;
+        let ribbon = if dock.ribbon.is_some() {
+            self.sizes.peek().ribbon
+        } else {
+            0.0
+        };
+        let across = (dock.size + ribbon).max(240.0);
+        Some(match side {
+            Side::Right => Rect::new(
+                ox + area.right() - across - 24.0,
+                oy + area.y + 24.0,
+                across,
+                (area.h - 48.0).max(320.0),
+            ),
+            Side::Bottom | Side::Top => Rect::new(
+                ox + area.x + 24.0,
+                oy + area.bottom() - across - 24.0,
+                (area.w - 48.0).max(480.0),
+                across,
+            ),
+            Side::Left => Rect::new(
+                ox + area.x + 24.0,
+                oy + area.y + 24.0,
+                across,
+                (area.h - 48.0).max(320.0),
+            ),
+        })
+    }
+
     /// Runs a menu row or a gesture's end.
     fn run(&self, op: Op) {
         let mut sheet = self.sheet;
@@ -730,6 +802,15 @@ impl Host {
             Op::CloseWindow(window) => {
                 let _ = self.edit(|w| w.close_window(&window));
             }
+            Op::PopOutDock(side, bounds) => {
+                if self.has_windows() {
+                    let bounds = bounds.or_else(|| self.dock_bounds(side));
+                    let _ = self.edit(|w| w.pop_out_dock(side, bounds));
+                }
+            }
+            Op::DockBack(side) => {
+                let _ = self.edit(|w| w.dock_back(side));
+            }
             Op::Recall(slot) => screens::recall(*self, slot),
             Op::SaveSet => screens::save(*self),
             Op::ResetSet => screens::reset(*self),
@@ -755,6 +836,11 @@ enum Op {
     ToMain(PaneId),
     /// A pop-out closed: its tabs come back.
     CloseWindow(WindowId),
+    /// The dock on this side into a window of its own (there, on screen,
+    /// or where it was).
+    PopOutDock(Side, Option<Rect>),
+    /// A popped-out dock back to its side.
+    DockBack(Side),
     /// Recall the screenset in slot n (⌘n).
     Recall(u8),
     /// Save the arrangement into the active screenset.
@@ -871,6 +957,8 @@ pub fn WorkspaceView(
         form: Signal::new(FormClass::Desk),
         scrolls: Signal::new(HashMap::new()),
         windows: CopyValue::new(os_windows.clone()),
+        pressed: Signal::new(None),
+        released: CopyValue::new(Rc::default()),
     });
     // Props change under a live host: keep it current.
     host.views.set(views);
@@ -912,6 +1000,8 @@ pub fn WorkspaceView(
     }
     screens::use_kept(host, store);
     windows::use_release_outside(host);
+    use_pressed_in_popouts(host);
+    use_sidebar_follows_left_dock(host, in_shell && !phone);
     // The current document's own status items, for the app's status line.
     let items = host.status_items();
     if let Some(mut out) = status {
@@ -984,6 +1074,44 @@ pub fn WorkspaceView(
     }
 }
 
+/// A ribbon's command pressed in a pop-out reaches the app's `on_command`
+/// here, in the main window's dom.
+fn use_pressed_in_popouts(host: Host) {
+    use_effect(move || {
+        let mut pressed = host.pressed;
+        let Some(id) = pressed() else {
+            return;
+        };
+        pressed.set(None);
+        if let Some(on) = *host.on_command.peek() {
+            on.call(id);
+        }
+    });
+}
+
+/// Where the shell hosts the left dock: its sidebar folds while the dock
+/// is in a window of its own, and unfolds when it docks back.
+fn use_sidebar_follows_left_dock(host: Host, in_shell: bool) {
+    let shell = try_use_context::<Signal<architect_shell::Shell>>();
+    let mut was_out = use_hook(|| CopyValue::new(false));
+    use_effect(move || {
+        let out = host.workspace.read().dock_window(Side::Left).is_some();
+        if out == *was_out.peek() {
+            return;
+        }
+        was_out.set(out);
+        let Some(shell) = shell.filter(|_| in_shell) else {
+            return;
+        };
+        let shell = shell.peek().clone();
+        if out && !shell.folded() {
+            shell.toggle(architect_shell::Side::Left);
+        } else if !out && shell.folded() {
+            shell.unfold();
+        }
+    });
+}
+
 /// The docks around the center, the floats over them.
 #[component]
 fn DeskBody() -> Element {
@@ -1021,6 +1149,11 @@ fn DeskBody() -> Element {
                 let mut groups = Vec::new();
                 if let Some(c) = &w.center {
                     c.groups(&mut groups);
+                }
+                for side in crate::Docks::SIDES {
+                    if let Some(root) = w.docks.get(side).and_then(|d| d.root.as_ref()) {
+                        root.groups(&mut groups);
+                    }
                 }
                 (w.id.clone(), groups.iter().map(|g| g.tabs.len()).sum())
             })
