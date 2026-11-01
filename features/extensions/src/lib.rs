@@ -46,14 +46,24 @@ pub mod actions;
 pub mod doc;
 #[cfg(feature = "host")]
 pub mod extensions;
+#[cfg(all(feature = "guest", unix))]
+pub mod guest;
 #[cfg(feature = "host")]
 pub mod host;
 #[cfg(feature = "host")]
 pub mod install;
+#[cfg(all(feature = "process", unix))]
+pub mod process;
+#[cfg(feature = "vox")]
+pub mod proto;
+#[cfg(all(feature = "remote", unix))]
+pub mod remote;
 #[cfg(feature = "ui")]
 pub mod ui;
 #[cfg(feature = "host")]
 pub mod watch;
+#[cfg(feature = "vox")]
+pub mod wire;
 
 pub use catalog::{Candidate, Chosen, Origin, choose};
 pub use index::{Hit, Index, Listing, Location};

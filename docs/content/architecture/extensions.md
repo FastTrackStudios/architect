@@ -48,8 +48,28 @@ weight = 67
 > (`features/extensions/src/watch.rs` `Watch`), a project's requirements
 > and an organization's approved list (`features/extensions/src/project.rs`
 > `plan`), and the `EXT_*` actions. The lab's metronome is one
-> (`apps/lab/extensions`). Not yet: WASM and process runners, remote
-> views, overlays, signed archives, `architect ext dev` as a command.
+> (`apps/lab/extensions`). Not yet: WASM runners, overlays, signed
+> archives, `architect ext dev` as a command.
+>
+> **Processes and remote views landed (2026-11-01)** in the same crate:
+> `process` runs process extensions (`features/extensions/src/process.rs`
+> `ProcessRunner`: started with a local socket in their environment,
+> spoken to over vox through one `#[architect::rpc]` trait,
+> `features/extensions/src/proto.rs` `ProcessExtension`; a hello that
+> must cover the manifest; supervised, restarted with backoff, saying why
+> it died); `guest` is a process extension's `main`
+> (`features/extensions/src/guest.rs` `Guest`: each view a `VirtualDom` on
+> its own thread, its mutations written as the wire's edits by
+> `WireWriter`); `remote` mounts a view in a pane
+> (`features/extensions/src/remote.rs` `RemoteView`, a Blitz sub-document
+> filled by `RemoteDocument`, which checks every edit, and a placeholder
+> when the process is gone). The wire is architect's own, versioned
+> (`features/extensions/src/wire.rs` `WIRE`). The lab's clicker is one
+> (`apps/lab/clicker`); `features/extensions/tests/remote_view.rs` clicks
+> through a real child process and kills it. Not yet: stdio, lazy start
+> and idle stop, state handed over on a reload, the host service an
+> extension calls back into, pointer, wheel and IME events, the
+> allowlist, Windows.
 > The rest of this page is proposed (2026-10-31). Decided: one crate, `architect-extensions`, with four kinds — data,
 > WebAssembly components, Luau scripts, and processes over vox — and a
 > git-based registry. Proposed for UI: Dioxus views rendered remotely (the

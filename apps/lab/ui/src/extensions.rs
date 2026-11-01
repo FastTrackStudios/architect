@@ -6,20 +6,57 @@
 //! settings page and its action in ⌘K; a save to its files reloads it.
 //! With no registry to be found (a phone), the copy linked into the build
 //! runs.
+//!
+//! The clicker (`apps/lab/clicker`) is a process extension: when its
+//! program was built beside the lab's, it runs as a development copy and
+//! its view is the Vault's Clicker pane ([`processes`]).
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use architect::action::ActionList;
 use architect_extensions::extensions::Extensions;
 use architect_extensions::host::Host;
 use architect_extensions::install::{FolderRegistry, Installs};
+use architect_extensions::process::{ProcessRunner, Processes};
 use architect_extensions::ui::use_extension_sections;
 use architect_extensions::{Package, VersionReq};
 use dioxus::prelude::*;
 
 const METRONOME: &str = "fts.metronome";
+
+/// The clicker's id, as the Vault's pane names it.
+pub const CLICKER: &str = "lab.clicker";
+
+static PROCESSES: LazyLock<Processes> = LazyLock::new(Processes::default);
+
+/// The process extensions running, for the panes that show their views.
+pub fn processes() -> Processes {
+    PROCESSES.clone()
+}
+
+/// The clicker as a development copy: its manifest and a link to its
+/// program, when the program sits beside the lab's.
+fn clicker(root: &std::path::Path) -> Option<PathBuf> {
+    let program = std::env::current_exe()
+        .ok()?
+        .with_file_name("architect-lab-clicker");
+    if !program.is_file() {
+        return None;
+    }
+    let dir = root.join("dev").join(CLICKER);
+    std::fs::create_dir_all(&dir).ok()?;
+    std::fs::write(
+        dir.join("extension.toml"),
+        include_str!("../../clicker/extension.toml"),
+    )
+    .ok()?;
+    let link = dir.join("architect-lab-clicker");
+    let _ = std::fs::remove_file(&link);
+    std::os::unix::fs::symlink(&program, &link).ok()?;
+    Some(dir)
+}
 
 /// How often a loaded extension's files are checked for a save.
 const POLL: Duration = Duration::from_millis(500);
@@ -55,9 +92,13 @@ pub fn LabExtensions(metronome: bool) -> Element {
     let list = use_hook(|| Arc::new(ActionList::new()));
     architect_commands::use_action_list(Arc::clone(&list));
     let (extensions, from_registry) = use_hook(|| {
-        let host = Host::new((*list).clone(), sections.clone());
+        let mut host = Host::new((*list).clone(), sections.clone());
+        if let Ok(runner) = ProcessRunner::new() {
+            host = host.with_runner(runner.with_processes(processes()));
+        }
         let root = architect::settings::app_dir("architect-lab")
             .unwrap_or_else(|_| std::env::temp_dir().join("architect-lab"));
+        let clicker = clicker(&root);
         let mut extensions = Extensions::new(host, Installs::new(root.join("extensions")));
         let found = registry();
         match &found {
@@ -71,6 +112,9 @@ pub fn LabExtensions(metronome: bool) -> Element {
         let _ = extensions.install_actions();
         // Off until the switch says otherwise.
         let _ = extensions.disable(METRONOME);
+        if let Some(dir) = clicker {
+            let _ = extensions.dev(dir);
+        }
         (extensions, found.is_some())
     });
     let follow = extensions.clone();

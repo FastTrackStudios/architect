@@ -12,7 +12,7 @@ architect-workspace = { workspace = true, features = ["ui"] }
 architect-commands = { workspace = true, features = ["native"] }
 architect-settings = { workspace = true, features = ["ui", "store"] }
 architect-orgs = { workspace = true, features = ["ui"] }
-architect-extensions = { workspace = true, features = ["ui"] }
+architect-extensions = { workspace = true, features = ["ui", "remote"] }
 architect-canvas = { workspace = true, features = ["ui", "luau"] }
 architect-scripting = { workspace = true, features = ["luau"] }
 serde_json = { workspace = true }

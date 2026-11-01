@@ -31,6 +31,13 @@ camera housing and home indicator drawn over the page. The ⋯ menu changes
 it live. A mouse drag stands in for a swipe (the shell hears pointer
 events).
 
+The Vault's Clicker tab is a process extension's view (`apps/lab/clicker`):
+a counter whose `VirtualDom` runs in a process of its own, its edits
+applied in the pane over vox. It runs when its program is built beside
+the lab's (`cargo build --workspace`, then `target/debug/architect-desktop`).
+Kill that process and the pane says why, with a button to start it again;
+the lab runs on.
+
 ## On the iOS simulator
 
 ```bash
