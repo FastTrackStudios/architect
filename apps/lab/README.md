@@ -16,6 +16,14 @@ the window's title row; drag a tab to a group's middle or edge or the
 window's edge, hold W to grab a pane without tabs, right-click a tab (or
 ⋯) for the rest.
 
+The lab's lists are live: Capture (⇧⌘N, or the feather) and a list's +
+write a new row, Done and Delete take one away with Undo on the status
+line, and a project on the left shows its tasks. Its face, Inter, is
+bundled (`ui/assets/fonts`, OFL) and handed to Blitz at launch
+(`FONTS`): Blitz does not load an `@font-face` from a `data:` URI. What
+else Blitz does differently is in the skill's
+`skills/architect/references/blitz-quirks.md`.
+
 ## On a desk
 
 ```bash

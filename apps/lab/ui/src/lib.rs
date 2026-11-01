@@ -9,6 +9,7 @@
 //! left side and the selection's details in the right. Its ⋯ menu switches
 //! the shell's style live.
 
+mod items;
 mod pages;
 mod screen;
 mod settings;
@@ -19,24 +20,47 @@ use architect_shell::icon;
 use architect_shell::{self as shell, AppShell, ShellStyle};
 use dioxus::prelude::*;
 use lucide_dioxus::{
-    CalendarDays, CheckCheck, CircleUser, Command, Feather, Inbox, Keyboard, ListTodo, LogOut,
-    NotebookText, Plus, Settings2, Users,
+    CalendarDays, CheckCheck, CircleUser, Feather, Inbox, Keyboard, ListTodo, LogOut, NotebookText,
+    Plus, Settings2, Undo2, Users,
 };
 
 pub use screen::{Device, use_window_chrome, use_window_screen};
 
-/// Where the lab is: a tab's list, or one item of it.
+/// Where the lab is: a tab's list, one item of it (by its id), or a new
+/// one being written for it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Route {
     Tab(&'static str),
     Item(&'static str, usize),
+    Capture(&'static str),
 }
 
 impl Route {
     const fn tab(self) -> &'static str {
         match self {
-            Self::Tab(t) | Self::Item(t, _) => t,
+            Self::Tab(t) | Self::Item(t, _) | Self::Capture(t) => t,
         }
+    }
+}
+
+/// What the last Done or Delete took away, for Undo.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Undone {
+    /// "Completed", "Deleted".
+    pub verb: &'static str,
+    at: usize,
+    item: items::Item,
+}
+
+/// `n` of `noun`, with its plural: "1 item", "5 items".
+pub(crate) fn count<N: std::fmt::Display + PartialEq + From<u8> + Copy>(
+    n: N,
+    noun: &str,
+) -> String {
+    if n == N::from(1) {
+        format!("{n} {noun}")
+    } else {
+        format!("{n} {noun}s")
     }
 }
 
@@ -50,6 +74,16 @@ pub struct Lab {
     pub right: Signal<bool>,
     /// How a desk shows the status items.
     pub status: Signal<shell::StatusStyle>,
+    /// Every list.
+    pub lists: Signal<items::Lists>,
+    /// The project picked on the left: the Tasks list shows only its.
+    pub project: Signal<Option<&'static str>>,
+    /// The lists oldest first.
+    pub oldest: Signal<bool>,
+    /// The row just added, marked in its list until the lab moves on.
+    pub fresh: Signal<Option<usize>>,
+    /// What Undo would put back.
+    pub undone: Signal<Option<Undone>>,
     settings: Option<architect_settings::SettingsHandle>,
 }
 
@@ -70,12 +104,73 @@ impl Lab {
     pub fn go(mut self, to: Route) {
         let here = *self.route.peek();
         self.back.write().push(here);
+        self.fresh.set(None);
         self.route.set(to);
     }
 
+    /// To a tab's list or an item afresh: no way back, no project picked.
     pub fn jump(mut self, to: Route) {
         self.back.write().clear();
+        self.project.set(None);
+        self.fresh.set(None);
         self.route.set(to);
+    }
+
+    /// The Tasks of `project`.
+    pub fn show_project(mut self, project: &'static str) {
+        self.jump(Route::Tab("tasks"));
+        self.project.set(Some(project));
+    }
+
+    /// Write a new item for `tab` (Capture, for the Inbox).
+    pub fn capture(self, tab: &'static str) {
+        self.go(Route::Capture(tab));
+    }
+
+    /// Adds `name` to `tab` (in the picked project) and shows it there;
+    /// a blank name adds nothing.
+    pub fn add(mut self, tab: &'static str, name: &str) {
+        let project = if tab == "inbox" {
+            None
+        } else {
+            *self.project.peek()
+        };
+        let Some(id) = self.lists.write().add(tab, name, project) else {
+            return;
+        };
+        // Back to the list it was written from, the new row marked.
+        let mut back = self.back;
+        let from = back.write().pop();
+        if from != Some(Route::Tab(tab)) {
+            back.write().clear();
+        }
+        self.route.set(Route::Tab(tab));
+        self.fresh.set(Some(id));
+    }
+
+    /// Takes the item away (`verb`: "Completed", "Deleted"), for Undo to
+    /// put back, and goes back to its list.
+    pub fn remove(mut self, id: usize, verb: &'static str) {
+        let removed = self.lists.write().remove(id);
+        if let Some((at, item)) = removed {
+            let tab = item.tab;
+            self.undone.set(Some(Undone { verb, at, item }));
+            if self.can_go_back() {
+                self.go_back();
+            } else {
+                self.route.set(Route::Tab(tab));
+            }
+        }
+    }
+
+    /// Puts back what the last Done or Delete took.
+    pub fn undo(mut self) {
+        let undone = self.undone.write().take();
+        if let Some(u) = undone {
+            let id = u.item.id;
+            self.lists.write().restore(u.at, u.item);
+            self.fresh.set(Some(id));
+        }
     }
 
     #[must_use]
@@ -98,8 +193,9 @@ button { cursor: pointer; }\
 .lp:active { background-color: rgba(255,255,255,0.07); }\
 ";
 
-/// The lab's face, bundled so it is the same on every desk and phone:
-/// Inter (variable, OFL; `assets/fonts/OFL.txt`), FastTrackStudio's, the
+/// The lab's face, the same on every desk and phone.
+///
+/// Inter (variable, OFL: `assets/fonts/OFL.txt`), `FastTrackStudio`'s, the
 /// first of the shell's stack (`ShellTheme::font`). The apps hand it to
 /// Blitz when they launch (an `@font-face` from a `data:` URI does not
 /// load).
@@ -142,6 +238,11 @@ pub fn LabApp() -> Element {
         style: Signal::new(ShellStyle::FloatingPill),
         right: Signal::new(true),
         status: Signal::new(shell::StatusStyle::Bar),
+        lists: Signal::new(items::Lists::sample()),
+        project: Signal::new(None),
+        oldest: Signal::new(false),
+        fresh: Signal::new(None),
+        undone: Signal::new(None),
         settings: Some(settings),
     });
     // The lab's signals follow the settings.
@@ -192,7 +293,18 @@ pub fn LabApp() -> Element {
         architect_commands::Command::new("LAB_CAPTURE", "Capture")
             .group("Inbox")
             .shortcut("⇧⌘N"),
-        move || lab.go(Route::Item("inbox", 0)),
+        move || lab.capture("inbox"),
+    );
+    let undone = (lab.undone)();
+    let undo =
+        architect_commands::Command::new("LAB_UNDO", "Undo the last Done or Delete").group("Edit");
+    architect_commands::use_command(
+        if undone.is_some() {
+            undo
+        } else {
+            undo.disabled("nothing has been completed or deleted")
+        },
+        move || lab.undo(),
     );
     architect_commands::use_command(
         architect_commands::Command::new("LAB_SHOW_COMMANDS", "Show every command")
@@ -234,8 +346,9 @@ pub fn LabApp() -> Element {
         })
         .menu("Help", |m| m.command("LAB_SHOW_COMMANDS"));
     let route = (lab.route)();
+    let inbox_count = lab.lists.read().count("inbox");
     let tabs = vec![
-        shell::Tab::new("inbox", "Inbox", icon!(Inbox)).badge(5),
+        shell::Tab::new("inbox", "Inbox", icon!(Inbox)).badge(inbox_count),
         shell::Tab::new("tasks", "Tasks", icon!(ListTodo)),
         shell::Tab::new("schedule", "Schedule", icon!(CalendarDays)),
         shell::Tab::new("vault", "Vault", icon!(NotebookText)),
@@ -285,8 +398,27 @@ pub fn LabApp() -> Element {
     );
     let window_chrome = screen::use_window_chrome();
     let capture = shell::Action::new("Capture", icon!(Feather), move |()| {
-        lab.go(Route::Item("inbox", 0));
+        lab.capture("inbox");
     });
+    let mut status = vec![
+        shell::StatusItem::new("commands", "⌘K Commands")
+            .hint("Every command")
+            .on_press(move |()| commands.show(architect_commands::Overlay::Palette)),
+        shell::StatusItem::new("sync", "Synced")
+            .icon(icon!(CheckCheck))
+            .hint("Every change is saved and synced"),
+        shell::StatusItem::new("people", "3 online").icon(icon!(Users)),
+    ];
+    // Done and Delete keep their way back on the status line.
+    if let Some(u) = &undone {
+        status.insert(
+            0,
+            shell::StatusItem::new("undo", format!("{} · Undo", u.verb))
+                .icon(icon!(Undo2))
+                .hint(format!("Put back “{}”", u.item.name))
+                .on_press(move |()| lab.undo()),
+        );
+    }
     rsx! {
         div {
             style: "position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; overflow: hidden;",
@@ -297,7 +429,7 @@ pub fn LabApp() -> Element {
             AppShell {
                 screen: screen(),
                 style: (lab.style)(),
-                title: "Lab",
+                title: "Architect Lab",
                 tabs,
                 current: Some(route.tab()),
                 on_tab: move |id| lab.jump(Route::Tab(id)),
@@ -310,7 +442,9 @@ pub fn LabApp() -> Element {
                         shell::Menu::new()
                             .item("Profile", icon!(CircleUser), |()| {})
                             .item("Settings", icon!(Settings2), move |()| settings.show(None))
-                            .item("Keyboard shortcuts", icon!(Keyboard), |()| {})
+                            .item("Keyboard shortcuts", icon!(Keyboard), move |()| {
+                                commands.show(architect_commands::Overlay::Palette);
+                            })
                             .divider()
                             .item("Sign out", icon!(LogOut), |()| {}),
                     ),
@@ -319,20 +453,13 @@ pub fn LabApp() -> Element {
                 right: if (lab.right)() { Some(rsx! { pages::RightSide {} }) } else { None },
                 on_pull: move |()| lab.jump(Route::Tab("vault")),
                 window: window_chrome,
-                status: vec![
-                    shell::StatusItem::new("commands", "⌘K")
-                        .icon(icon!(Command))
-                        .hint("Every command")
-                        .on_press(move |()| commands.show(architect_commands::Overlay::Palette)),
-                    shell::StatusItem::new("sync", "Synced")
-                        .icon(icon!(CheckCheck)).hint("Every change is saved and synced"),
-                    shell::StatusItem::new("people", "3 online").icon(icon!(Users)),
-                ],
+                status,
                 status_style: (lab.status)(),
                 match route {
                     Route::Tab("vault") => rsx! { vault::VaultPage {} },
                     Route::Tab(tab) => rsx! { pages::ListPage { key: "{tab}", tab } },
-                    Route::Item(tab, index) => rsx! { pages::ItemPage { tab, index } },
+                    Route::Item(tab, id) => rsx! { pages::ItemPage { tab, id } },
+                    Route::Capture(tab) => rsx! { pages::CapturePage { key: "{tab}", tab } },
                 }
             }
             architect_commands::CommandLayer {}
@@ -355,8 +482,8 @@ fn Brand() -> Element {
                            align-items: center; justify-content: center; color: #09090b; font-size: 14px; font-weight: 800;",
                 "A"
             }
-            span { style: "font-size: 21px; font-weight: 750; letter-spacing: -0.03em; color: #e4e4e7;", "Architect" }
-            span { style: "font-size: 21px; font-weight: 500; letter-spacing: -0.03em; color: #80808a;", "Lab" }
+            span { style: "font-size: 19px; font-weight: 750; letter-spacing: -0.03em; color: #e4e4e7;", "Architect" }
+            span { style: "font-size: 19px; font-weight: 500; letter-spacing: -0.03em; color: #80808a;", "Lab" }
         }
     }
 }
