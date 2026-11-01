@@ -287,8 +287,8 @@ impl Drop for Running {
 ///
 /// Blitz (the FTS fork) draws a document's own updates at most 30 times a
 /// second (`FTS_MAX_FPS`) but a running CSS animation at the display's
-/// rate: while any [`Motion`] moves this draws an invisible one, and takes
-/// it away when they rest. Mount it once in each window's root (the
+/// rate: while any [`Motion`] moves this runs an invisible one, and stops
+/// it when they rest (the element stays). Mount it once in each window's root (the
 /// shell's [`AppShell`](crate::AppShell) and the workspace's pop-outs do).
 #[component]
 pub fn MotionFrames() -> Element {
@@ -310,14 +310,23 @@ pub fn MotionFrames() -> Element {
             }
         });
     });
-    if !on() || is_virtual() {
+    if is_virtual() {
         return rsx! {};
     }
+    // Always there, its animation turned on and off: inserted beside a
+    // pane as a motion began, Blitz laid the pane's box out again at
+    // nothing; removed as they rested, the next element made took its
+    // node and drew under the running animation's opacity (blank).
+    let animation = if on() {
+        "architect-motion-frames 1s linear infinite"
+    } else {
+        "none"
+    };
     rsx! {
         document::Style { "@keyframes architect-motion-frames {{ from {{ opacity: 0; }} to {{ opacity: 0.01; }} }}" }
         div {
             style: "position:absolute; left:0; top:0; width:1px; height:1px; opacity:0; pointer-events:none; \
-                    animation: architect-motion-frames 1s linear infinite;",
+                    animation: {animation};",
         }
     }
 }
