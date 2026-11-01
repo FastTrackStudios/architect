@@ -27,12 +27,42 @@ pub struct Drop {
     pub highlight: Rect,
 }
 
+/// How wide the line showing where a tab goes in a tab bar is, points.
+pub const INSERT_W: f32 = 2.0;
+
+/// A group's tab bar, measured: where a dragged tab is put among its tabs.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Bar {
+    pub group: GroupId,
+    /// The bar itself.
+    pub rect: Rect,
+    /// Its tabs, in order.
+    pub tabs: Vec<Rect>,
+}
+
 /// The drop at `(x, y)` in a window at `host` holding `groups` (the
 /// topmost first: floats before the docks and the center), if any.
 #[must_use]
 pub fn drop_at(x: f32, y: f32, host: Rect, groups: &[(GroupId, Rect)]) -> Option<Drop> {
+    drop_in(x, y, host, &[], groups)
+}
+
+/// [`drop_at`], with the groups' tab bars: over a bar the tab goes in
+/// among its tabs, before the one whose middle is past the pointer (the
+/// highlight a line in the gap).
+#[must_use]
+pub fn drop_in(
+    x: f32,
+    y: f32,
+    host: Rect,
+    bars: &[Bar],
+    groups: &[(GroupId, Rect)],
+) -> Option<Drop> {
     if !contains(host, x, y) {
         return None;
+    }
+    if let Some(bar) = bars.iter().find(|b| contains(b.rect, x, y)) {
+        return Some(bar_drop(bar, x));
     }
     edge_drop(x, y, host).or_else(|| {
         groups
@@ -40,6 +70,31 @@ pub fn drop_at(x: f32, y: f32, host: Rect, groups: &[(GroupId, Rect)]) -> Option
             .find(|(_, r)| contains(*r, x, y))
             .map(|(id, r)| group_drop(*id, *r, x, y))
     })
+}
+
+/// Where along `bar` a tab let go at `x` goes, and the line to show.
+#[must_use]
+pub fn bar_drop(bar: &Bar, x: f32) -> Drop {
+    let index = bar
+        .tabs
+        .iter()
+        .position(|t| x < t.x + t.w / 2.0)
+        .unwrap_or(bar.tabs.len());
+    let at = match (
+        index.checked_sub(1).and_then(|i| bar.tabs.get(i)),
+        bar.tabs.get(index),
+    ) {
+        (_, Some(next)) => next.x,
+        (Some(last), None) => last.right(),
+        (None, None) => bar.rect.x,
+    };
+    Drop {
+        dest: Dest::Group {
+            group: bar.group,
+            index: Some(index),
+        },
+        highlight: Rect::new(at - INSERT_W / 2.0, bar.rect.y, INSERT_W, bar.rect.h),
+    }
 }
 
 fn edge_drop(x: f32, y: f32, host: Rect) -> Option<Drop> {

@@ -201,6 +201,11 @@ dioxus-ssr = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a5
 blitz-dom = "=0.3.0-beta.1"
 blitz-paint = "=0.3.0-beta.1"
 blitz-traits = "=0.3.0-beta.1"
+# The workspace's pop-out windows drive Blitz's window views themselves
+# (architect-workspace `native`), and serve the bundle's assets to them.
+blitz-shell = "=0.3.0-beta.1"
+dioxus-asset-resolver = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a522d078b70bb4b4d62a5f9a99ddfc" }
+dioxus-devtools = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a522d078b70bb4b4d62a5f9a99ddfc" }
 dioxus-primitives = { git = "https://github.com/FastTrackStudios/dioxus-components", package = "dioxus-primitives", branch = "main", default-features = false }
 lucide-dioxus = { git = "https://github.com/FastTrackStudios/lucide", branch = "main", features = ["all-icons"] }
 clsx = "0.1.1"

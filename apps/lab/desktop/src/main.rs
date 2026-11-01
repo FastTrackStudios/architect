@@ -3,12 +3,14 @@
 //! standing in for that device (its size, touch and insets, with its
 //! status bar and housing drawn over the page); the ⋯ menu changes it
 //! live. Served with `dx serve`, an `rsx!` edit in the lab or in
-//! `architect-shell` shows at once.
+//! `architect-shell` shows at once. Launched by the workspace's
+//! launcher, so a Vault tab dragged out of the window opens a window of
+//! its own.
 
 use architect_lab_ui::{Device, LabApp, use_window_screen};
 use dioxus::prelude::*;
+use dioxus_native::WindowAttributes;
 use dioxus_native::winit::dpi::LogicalSize;
-use dioxus_native::{Config, WindowAttributes, launch_cfg};
 
 fn first_device() -> Device {
     Device::named(&std::env::var("ARCHITECT_DEVICE").unwrap_or_default())
@@ -35,9 +37,5 @@ fn main() {
             .with_fullsize_content_view(true)
             .with_title_hidden(true),
     ));
-    launch_cfg(
-        App,
-        vec![],
-        vec![Box::new(Config::new().with_window_attributes(window))],
-    );
+    architect_workspace::native::launch(App, window);
 }

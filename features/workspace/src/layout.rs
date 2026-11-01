@@ -91,3 +91,60 @@ pub fn neighbour(placed: &[Placed], from: GroupId, direction: Direction) -> Opti
         .min_by(|a, b| a.0.total_cmp(&b.0).then(b.1.total_cmp(&a.1)))
         .map(|(_, _, g)| g)
 }
+
+/// One pane of a stacked group, placed in its strip.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Slide {
+    /// Its left edge in the strip's viewport, points.
+    pub x: f32,
+    /// It lies over the pane before it (a shadow on its left edge).
+    pub over: bool,
+    /// The pane after it covers it up to its spine.
+    pub covered: bool,
+}
+
+/// Obsidian's stacked tabs, placed.
+///
+/// `count` panes each `width` wide in a strip `view` wide scrolled
+/// `scroll` along. Each pane sits where the scroll
+/// puts it, but never further left than the spines of the panes before
+/// it (piled at the left edge, `spine` apart) nor further right than the
+/// spines of those after it leave (piled at the right edge). So a pane
+/// slides over the ones before it as the strip scrolls.
+#[must_use]
+pub fn slides(count: usize, width: f32, spine: f32, view: f32, scroll: f32) -> Vec<Slide> {
+    let mut out: Vec<Slide> = Vec::with_capacity(count);
+    for i in 0..count {
+        let at = count_f32(i);
+        let before = spine * at;
+        let after = spine * (count_f32(count) - at);
+        let natural = width.mul_add(at, -scroll);
+        let x = natural.min(view - after).max(before);
+        let over = out.last().is_some_and(|prev| x < prev.x + width - 0.5);
+        if over {
+            if let Some(prev) = out.last_mut() {
+                prev.covered = true;
+            }
+        }
+        out.push(Slide {
+            x,
+            over,
+            covered: false,
+        });
+    }
+    out
+}
+
+/// The scroll that brings pane `index` of a strip fully into view, left
+/// aligned after the spines before it.
+#[must_use]
+pub fn scroll_to(index: usize, width: f32, spine: f32) -> f32 {
+    let at = count_f32(index);
+    width.mul_add(at, -spine * at).max(0.0)
+}
+
+/// A pane count as points (a strip never holds more than an `f32` counts).
+#[allow(clippy::cast_precision_loss, clippy::as_conversions)]
+const fn count_f32(n: usize) -> f32 {
+    n as f32
+}

@@ -1,14 +1,17 @@
 //! The Vault tab: the workspace host, Obsidian's shape — files and search
 //! in the left dock behind a ribbon, notes in the center (more than one
 //! may be open), the outline and backlinks on the right (a console opens
-//! at the bottom from "Open a view"). Drag a tab anywhere, hold W to grab a pane without
-//! tabs, right-click (or ⋯) a tab for the rest. The arrangement tab has a
-//! script's marker lane over it, and the script's tool window floats.
+//! at the bottom from "Open a view"). Drag a tab anywhere — out of the
+//! window for a window of its own, on a desk — hold W to grab a pane
+//! without tabs, right-click (or ⋯, or hold a finger on) a tab for the
+//! rest. ⌘1 recalls the "Write" screenset, ⌘2 "Mix" (the notes stacked).
+//! The arrangement tab has a script's marker lane over it, and the
+//! script's tool window floats.
 
 use architect_shell::{Action, FormFactor, PageBar, Screen, StatusItem, Toolbar, icon, use_shell};
 use architect_workspace::{
-    Command, Pane, Ribbon, Side, Target, TitleRow, View, ViewKind, Views, Workspace, WorkspaceView,
-    use_pane,
+    Command, FormClass, MemoryStore, Pane, Ribbon, Screenset, Screensets, Side, Target, TitleRow,
+    View, ViewKind, Views, Workspace, WorkspaceStore, WorkspaceView, use_pane, use_pane_status,
 };
 use dioxus::prelude::*;
 use lucide_dioxus::{
@@ -155,11 +158,47 @@ fn first_workspace() -> Workspace {
     w
 }
 
+/// "Mix": every note stacked in one strip, the graph beside it.
+fn mix_workspace() -> Workspace {
+    let mut w = Workspace::new();
+    for (id, title) in NOTES {
+        let _ = w.open(note(id, title), Target::Tab);
+    }
+    if let Some(g) = w.active_group() {
+        let _ = w.set_stacked(g, true);
+    }
+    let _ = w.open(
+        Pane::new("graph", "graph", "Graph"),
+        Target::Split(Side::Right),
+    );
+    w
+}
+
+/// The vault's screensets: "Write" (where it starts) and "Mix".
+fn screensets() -> Screensets {
+    Screensets::default().with_builtins([
+        Screenset::new("Write")
+            .slot(1)
+            .layout(FormClass::Desk, first_workspace()),
+        Screenset::new("Mix")
+            .slot(2)
+            .layout(FormClass::Desk, mix_workspace()),
+    ])
+}
+
+/// Where the lab keeps its workspace: in memory, for the run (a page
+/// switch and back finds it as it was left).
+#[derive(Clone)]
+struct VaultStore(WorkspaceStore);
+
 #[component]
 pub fn VaultPage() -> Element {
     let screen = use_context::<Signal<Screen>>();
     let screen = screen();
     let workspace = use_signal(first_workspace);
+    let sets = use_signal(screensets);
+    let store = use_root_context(|| VaultStore(WorkspaceStore::new(MemoryStore::new()))).0;
+    let pane_status = use_signal(Vec::new);
     let views = use_hook(views);
     // The marker lane draws over the arrangement; its tool window floats
     // as a pane, to dock or tab like any other.
@@ -213,11 +252,24 @@ pub fn VaultPage() -> Element {
         .iter()
         .filter_map(|p| p.state.parse::<u32>().ok())
         .sum();
-    architect_shell::use_status(vec![
+    let set = {
+        let s = sets.read();
+        s.active
+            .as_deref()
+            .and_then(|id| s.get(id))
+            .map(|set| set.name.clone())
+    };
+    let mut items = vec![
         StatusItem::new("backlinks", "0 backlinks").left(),
         StatusItem::new("panes", format!("{open} panes")).left(),
         StatusItem::new("edits", format!("{edits} edits")).left(),
-    ]);
+    ];
+    // The note on show adds its own; the screenset is the app's.
+    items.extend(pane_status());
+    if let Some(set) = set {
+        items.push(StatusItem::new("screenset", set).hint("⌘1 Write, ⌘2 Mix"));
+    }
+    architect_shell::use_status(items);
     // On a desk the workspace's tabs are the title row (Obsidian's): no page
     // bar, the top tab bars as tall, clear of the window's buttons.
     let shell = use_shell();
@@ -268,6 +320,10 @@ pub fn VaultPage() -> Element {
                 in_shell: shell.desk(),
                 phone_header: !phone,
                 switcher,
+                screensets: sets,
+                store,
+                status: pane_status,
+                form: screen_class(&screen),
             }
         }
     }
@@ -309,12 +365,23 @@ fn FilesView() -> Element {
     }
 }
 
+/// The class of screen the lab stands in for.
+fn screen_class(screen: &Screen) -> FormClass {
+    let (w, h) = (narrow(screen.width), narrow(screen.height));
+    FormClass::of(w, h, screen.form() != FormFactor::Desk)
+}
+
 #[component]
 fn NoteView() -> Element {
     let pane = use_pane();
     let t = use_shell().theme;
     let edits: u32 = pane.state().parse().unwrap_or(0);
     let title = pane.title();
+    // The note's own fact on the status line, while it is the one on show.
+    let words = title.split_whitespace().count();
+    use_pane_status(vec![
+        StatusItem::new("words", format!("{words} words in the title")).left(),
+    ]);
     rsx! {
         div { style: "flex: 1; display: flex; flex-direction: column; gap: 12px; padding: 28px 36px; overflow-y: scroll;",
             div { style: "font-size: 26px; font-weight: 750; color: {t.ink};", "{title}" }

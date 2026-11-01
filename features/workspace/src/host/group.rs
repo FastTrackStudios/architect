@@ -4,17 +4,47 @@
 use dioxus::prelude::*;
 use lucide_dioxus::{ArrowLeft, ArrowRight, ChevronDown, Ellipsis, Pin, Plus, X};
 
-use super::{Drag, Menu, Mount, Op, ThisPane, point, use_host};
+use super::{Drag, Host, LONG_PRESS_MS, Menu, Mount, Op, ThisPane, point, use_host};
+use crate::layout::{scroll_to, slides};
 use crate::model::{Axis, Chrome, Group, Node, PaneId, Split};
 
 /// How far a named tab gives way before the bar clips, points.
 const TAB_MIN: f32 = 72.0;
 /// How wide a named tab grows, points (Obsidian's).
 const TAB_MAX: f32 = 200.0;
-/// How wide a stacked pane is, points.
+/// How wide a stacked pane is, points (narrower where the strip is).
 const STACKED_W: f32 = 420.0;
+/// The narrowest a stacked pane gets, points.
+const STACKED_MIN: f32 = 240.0;
 /// A stacked pane's spine, points.
 const SPINE: f32 = 32.0;
+/// A stacked strip's scrollbar, points.
+const STRIP_BAR: f32 = 8.0;
+
+/// A tab (or a spine) pressed: it may become a drag; under a finger or a
+/// pen, held still long enough, it opens the tab's menu (a right click's).
+fn press(mut host: Host, pane: &PaneId, e: &PointerEvent) {
+    let (x, y) = point(e);
+    let pressed = Drag::Pressed {
+        pane: pane.clone(),
+        x,
+        y,
+    };
+    host.drag.set(Some(pressed.clone()));
+    let touch = e.data().pointer_type() != "mouse" || host.sizes.peek().tabs > 40.0;
+    if !touch {
+        return;
+    }
+    let pane = pane.clone();
+    spawn(async move {
+        futures_timer::Delay::new(std::time::Duration::from_millis(LONG_PRESS_MS)).await;
+        // Still held where it was pressed: not a drag, not let go.
+        if host.drag.peek().as_ref() == Some(&pressed) {
+            host.drag.set(None);
+            host.open_menu(Menu::Pane(pane), (x, y));
+        }
+    });
+}
 
 /// Which of the window's edges a tree touches: a group on the top edge
 /// draws its tab bar as the title row (Obsidian's), kept clear of the
@@ -215,6 +245,7 @@ fn TabBar(group: Group, current: PaneId, edges: Edges) -> Element {
             }
             div { style: "flex:0 1 auto; min-width:0; display:flex; align-items:flex-end; overflow:hidden; \
                           padding-top:{lift}px; gap:1px;",
+                onmounted: move |e| host.mount(Mount::Bar(group.id), e.data()),
                 for (index, (pane, title, pinned, icon)) in tabs.into_iter().enumerate() {
                     Tab {
                         key: "{pane.0}",
@@ -360,6 +391,7 @@ fn Tab(
     let fade_to = if on { t.sheet } else { bar_colour(&host) };
     let fade_from = transparent_of(fade_to);
     let key_open = menu.clone();
+    let mounted = menu.clone();
     let label = if pinned {
         format!("{title}, pinned")
     } else {
@@ -383,10 +415,10 @@ fn Tab(
                     let _ = host.edit(|w| w.activate(&key_open));
                 }
             },
+            onmounted: move |e| host.mount(Mount::Tab(mounted.clone()), e.data()),
             onpointerdown: move |e| {
-                let (x, y) = point(&e);
                 let _ = host.edit(|w| w.activate(&press));
-                host.drag.set(Some(Drag::Pressed { pane: press.clone(), x, y }));
+                self::press(host, &press, &e);
             },
             oncontextmenu: move |e| {
                 e.prevent_default();
@@ -432,8 +464,13 @@ fn Tab(
     }
 }
 
-/// A stacked group: every pane side by side, each behind a spine with its
-/// name, the strip scrolled sideways (Obsidian's stacked tabs).
+/// A stacked group (Obsidian's stacked tabs): its panes side by side in
+/// a strip, each behind a spine with its name. As the strip scrolls a
+/// pane slides over the ones before it, which leave their spines piled at
+/// the left; the panes still to come pile theirs at the right. Blitz has
+/// no horizontal `position: sticky` and cannot scroll a box from code, so
+/// the strip keeps its own scroll ([`slides`] places each pane from it):
+/// a sideways wheel or trackpad, its scrollbar, or a press on a spine.
 #[component]
 fn Stacked(group: Group, current: PaneId) -> Element {
     let mut host = use_host();
@@ -446,49 +483,140 @@ fn Stacked(group: Group, current: PaneId) -> Element {
         .map(|p| (p.id.clone(), host.title(p), host.icon(p)))
         .collect();
     drop(workspace);
+    let id = group.id;
+    let mut view = use_signal(|| 0.0_f32);
+    let shown = view();
+    let count = panes.len();
+    let width = STACKED_W.min(shown).max(STACKED_MIN);
+    let total = width * super::count_f32(count);
+    let most = (total - shown).max(0.0);
+    let scroll = host
+        .scrolls
+        .read()
+        .get(&id)
+        .copied()
+        .unwrap_or(0.0)
+        .clamp(0.0, most);
+    let placed = slides(count, width, SPINE, shown, scroll);
+    let set_scroll = move |to: f32| {
+        let to = to.clamp(0.0, most);
+        let mut scrolls = host.scrolls;
+        if scrolls.peek().get(&id) != Some(&to) {
+            scrolls.write().insert(id, to);
+        }
+    };
+    let thumb_w = if total > 0.0 {
+        shown * shown / total
+    } else {
+        0.0
+    };
+    let thumb_x = if total > 0.0 {
+        scroll * shown / total
+    } else {
+        0.0
+    };
     rsx! {
-        div { style: "flex:1 1 0; min-width:0; min-height:0; display:flex; flex-direction:row; overflow-x:scroll; overflow-y:hidden;",
-            for (pane, title, icon) in panes {
-                div {
-                    key: "{pane.0}",
-                    style: "flex:0 0 {STACKED_W}px; width:{STACKED_W}px; min-height:0; display:flex; \
-                            flex-direction:row; border-right:1px solid {t.rule};",
-                    div {
-                        style: "flex:0 0 {SPINE}px; display:flex; flex-direction:column; align-items:center; \
-                                gap:8px; padding-top:8px; touch-action:none; user-select:none; \
-                                background:{spine_fill(pane == current, t)}; \
-                                border-right:1px solid {t.rule}; color:{t.ink_3};",
-                        title: "{title}",
-                        "aria-label": "{title}",
-                        onpointerdown: {
-                            let pane = pane.clone();
-                            move |e: PointerEvent| {
-                                let (x, y) = point(&e);
-                                let _ = host.edit(|w| w.activate(&pane));
-                                host.drag.set(Some(Drag::Pressed { pane: pane.clone(), x, y }));
+        div { style: "flex:1 1 0; min-width:0; min-height:0; display:flex; flex-direction:column;",
+            div {
+                style: "flex:1 1 0; min-width:0; min-height:0; position:relative; overflow:hidden;",
+                // Measured when drawn (Blitz may not report a first size),
+                // and again as it resizes.
+                onmounted: move |e| {
+                    host.mount(Mount::Strip(id), e.data());
+                    spawn(async move {
+                        if let Some(r) = host.rect(Mount::Strip(id)).await {
+                            if (*view.peek() - r.w).abs() > 0.5 {
+                                view.set(r.w);
                             }
-                        },
-                        oncontextmenu: {
-                            let pane = pane;
-                            move |e: MouseEvent| {
-                                e.prevent_default();
-                                host.drag.set(None);
-                                host.open_menu(Menu::Pane(pane.clone()), super::click_point(&e));
-                            }
-                        },
-                        if let Some(icon) = icon {
-                            {icon(architect_shell::Icon { size: 14, color: t.ink_3 })}
                         }
-                        for ch in title.chars().take(14) {
-                            span { style: "font-size:11px; line-height:12px;", "{ch}" }
+                    });
+                },
+                onresize: move |e| {
+                    if let Ok(size) = e.get_content_box_size() {
+                        let w = super::narrow(size.width);
+                        if (*view.peek() - w).abs() > 0.5 {
+                            view.set(w);
                         }
                     }
-                    div { style: "flex:1 1 0; min-width:0; min-height:0; display:flex; position:relative; overflow:hidden;",
-                        PaneSlot { pane: pane.clone() }
+                },
+                onwheel: move |e| {
+                    let d = e.data().delta().strip_units();
+                    let dx = super::narrow(d.x);
+                    if dx != 0.0 {
+                        set_scroll(scroll + dx);
+                    }
+                },
+                for (i, ((pane, title, icon), slide)) in panes.into_iter().zip(placed).enumerate() {
+                    div {
+                        key: "{pane.0}",
+                        style: "position:absolute; top:0; bottom:0; left:{slide.x}px; width:{width}px; \
+                                z-index:{i}; display:flex; flex-direction:row; background:{t.sheet}; \
+                                border-right:1px solid {t.rule}; box-shadow:{slide_shadow(slide.over)};",
+                        div {
+                            style: "flex:0 0 {SPINE}px; display:flex; flex-direction:column; align-items:center; \
+                                    gap:8px; padding-top:8px; touch-action:none; user-select:none; cursor:pointer; \
+                                    background:{spine_fill(pane == current, t)}; \
+                                    border-right:1px solid {t.rule}; color:{t.ink_3};",
+                            title: "{title}",
+                            "aria-label": "{title}",
+                            onpointerdown: {
+                                let pane = pane.clone();
+                                move |e: PointerEvent| {
+                                    let _ = host.edit(|w| w.activate(&pane));
+                                    press(host, &pane, &e);
+                                }
+                            },
+                            // A press on a spine brings its pane into view.
+                            onclick: move |_| set_scroll(scroll_to(i, width, SPINE)),
+                            oncontextmenu: {
+                                let pane = pane;
+                                move |e: MouseEvent| {
+                                    e.prevent_default();
+                                    host.drag.set(None);
+                                    host.open_menu(Menu::Pane(pane.clone()), super::click_point(&e));
+                                }
+                            },
+                            if let Some(icon) = icon {
+                                {icon(architect_shell::Icon { size: 14, color: t.ink_3 })}
+                            }
+                            for ch in title.chars().take(14) {
+                                span { style: "font-size:11px; line-height:12px;", "{ch}" }
+                            }
+                        }
+                        div { style: "flex:1 1 0; min-width:0; min-height:0; display:flex; position:relative; overflow:hidden;",
+                            PaneSlot { pane: pane.clone() }
+                        }
+                    }
+                }
+            }
+            if most > 0.0 {
+                div { style: "flex:0 0 {STRIP_BAR}px; position:relative; background:{t.desk};",
+                    div {
+                        style: "position:absolute; top:1px; bottom:1px; left:{thumb_x}px; width:{thumb_w}px; \
+                                border-radius:4px; background:{t.rule}; touch-action:none;",
+                        onpointerdown: move |e| {
+                            let (x, _) = point(&e);
+                            host.drag.set(Some(Drag::Strip {
+                                group: id,
+                                x,
+                                from: scroll,
+                                per_point: total / shown.max(1.0),
+                                most,
+                            }));
+                        },
                     }
                 }
             }
         }
+    }
+}
+
+/// A stacked pane lying over the one before it casts a shadow on it.
+const fn slide_shadow(over: bool) -> &'static str {
+    if over {
+        "-6px 0 12px rgba(0,0,0,0.18)"
+    } else {
+        "none"
     }
 }
 

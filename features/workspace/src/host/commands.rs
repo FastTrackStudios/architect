@@ -23,6 +23,8 @@ pub(super) fn WorkspaceCommands() -> Element {
     let stacked = group.as_ref().is_some_and(|g| g.stacked);
     let closed = !w.closed.is_empty();
     let docked = loc.is_some_and(|l| matches!(l.area, Area::Dock(_)));
+    let popped = loc.is_some_and(|l| l.window > 0);
+    let has_sets = !host.screensets.read().sets.is_empty();
     let can_back = active
         .as_ref()
         .and_then(|p| w.pane(p))
@@ -181,6 +183,32 @@ pub(super) fn WorkspaceCommands() -> Element {
             let active = host.workspace.peek().active.clone();
             if let Some(p) = active {
                 host.run(Op::Move(p, Dest::Float(super::FLOAT_AT)));
+            }
+        },
+    );
+    use_command(
+        tab(
+            Command::new("WORKSPACE_MOVE_TO_NEW_WINDOW", "Move tab to a new window").group("Panes"),
+        )
+        .enabled_if(host.has_windows(), "this app opens no other windows"),
+        move || {
+            let active = host.workspace.peek().active.clone();
+            if let Some(p) = active {
+                host.run(Op::Move(p, Dest::Window(None)));
+            }
+        },
+    );
+    use_command(
+        tab(Command::new(
+            "WORKSPACE_MOVE_TO_MAIN_WINDOW",
+            "Move tab to the main window",
+        )
+        .group("Panes"))
+        .enabled_if(popped, "it is in the main window"),
+        move || {
+            let active = host.workspace.peek().active.clone();
+            if let Some(p) = active {
+                host.run(Op::ToMain(p));
             }
         },
     );
@@ -381,7 +409,11 @@ pub(super) fn WorkspaceCommands() -> Element {
             },
         )
     });
-    rsx! {}
+    rsx! {
+        if has_sets {
+            super::screens::ScreensetCommands {}
+        }
+    }
 }
 
 /// Moves the active pane beside its group, on `side`.

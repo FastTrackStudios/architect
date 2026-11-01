@@ -6,8 +6,10 @@ use dioxus::prelude::*;
 use lucide_dioxus::{Layers, Minus, PanelRight, X};
 
 use super::group::{NodeView, PaneSlot};
-use super::{DRAG_SLOP, Drag, FLOAT_AT, Host, Menu, Mount, Op, groups_of, point, use_host};
-use crate::drop::{drop_at, float_rect, snap_at};
+use super::{
+    DRAG_SLOP, Drag, FLOAT_AT, Geometry, Host, Menu, Mount, Op, groups_of, point, use_host,
+};
+use crate::drop::{Bar, contains, drop_in, float_rect, snap_at};
 use crate::model::{Area, Axis, Chrome, Node, PaneId, Rect, Side};
 use crate::ops::Dest;
 
@@ -143,7 +145,7 @@ pub(super) fn DragLayer() -> Element {
     let highlight = match &drag {
         Drag::Pane {
             at: Some(d),
-            geometry: Some((r, _)),
+            geometry: Some(Geometry { host: r, .. }),
             ..
         } => Some(Rect::new(
             d.highlight.x - r.x,
@@ -168,7 +170,7 @@ pub(super) fn DragLayer() -> Element {
             pane,
             x,
             y,
-            geometry: Some((r, _)),
+            geometry: Some(Geometry { host: r, .. }),
             ..
         } => host
             .workspace
@@ -230,13 +232,13 @@ pub(super) fn on_move(mut host: Host, (x, y): (f32, f32)) {
         }
         Drag::Pane {
             pane,
-            geometry: Some((r, groups)),
+            geometry: Some(g),
             ..
         } => {
-            let at = drop_at(x, y, r, &groups);
+            let at = drop_in(x, y, g.host, &g.bars, &g.groups);
             host.drag.set(Some(Drag::Pane {
                 pane,
-                geometry: Some((r, groups)),
+                geometry: Some(g),
                 at,
                 x,
                 y,
@@ -296,6 +298,16 @@ pub(super) fn on_move(mut host: Host, (x, y): (f32, f32)) {
                 y,
             }));
         }
+        Drag::Strip {
+            group,
+            x: x0,
+            from,
+            per_point,
+            most,
+        } => {
+            let to = (x - x0).mul_add(per_point, from).clamp(0.0, most);
+            host.scrolls.write().insert(group, to);
+        }
         Drag::FloatSize { pane, host: r } => {
             host.edit(|w| {
                 let rect = w
@@ -354,9 +366,12 @@ async fn measure_for_drop(mut host: Host, pane: PaneId) {
     let measured = host.rect(Mount::Host).await;
     // Floats sit over the docks and the center: the last drawn first.
     let mut ids = Vec::new();
+    // Each group's tabs, for its bar.
+    let mut tabs: Vec<(crate::GroupId, Vec<PaneId>)> = Vec::new();
     {
         let workspace = host.workspace.peek();
-        if let Some(main) = workspace.windows.first() {
+        let here = host.window_index(&workspace);
+        if let Some(main) = here.and_then(|i| workspace.windows.get(i)) {
             for float in main.floats.iter().rev().filter(|f| !f.minimised) {
                 ids.push(float.group.id);
             }
@@ -371,12 +386,37 @@ async fn measure_for_drop(mut host: Host, pane: PaneId) {
                 groups_of(center, &mut ids);
             }
         }
+        for id in &ids {
+            let named = workspace
+                .group(*id)
+                .filter(|g| g.chrome != crate::Chrome::Bare && !g.stacked);
+            if let Some(g) = named {
+                tabs.push((*id, g.tabs.clone()));
+            }
+        }
     }
     let mut groups = Vec::with_capacity(ids.len());
     for id in ids {
         if let Some(g) = host.rect(Mount::Group(id)).await {
             groups.push((id, g));
         }
+    }
+    let mut bars = Vec::with_capacity(tabs.len());
+    for (group, panes) in tabs {
+        let Some(rect) = host.rect(Mount::Bar(group)).await else {
+            continue;
+        };
+        let mut rects = Vec::with_capacity(panes.len());
+        for p in panes {
+            if let Some(r) = host.rect(Mount::Tab(p)).await {
+                rects.push(r);
+            }
+        }
+        bars.push(Bar {
+            group,
+            rect,
+            tabs: rects,
+        });
     }
     // The host's own rectangle, else what its groups cover.
     let Some(r) = measured.or_else(|| cover(&groups)) else {
@@ -391,7 +431,11 @@ async fn measure_for_drop(mut host: Host, pane: PaneId) {
         };
         host.drag.set(Some(Drag::Pane {
             pane,
-            geometry: Some((r, groups)),
+            geometry: Some(Geometry {
+                host: r,
+                groups,
+                bars,
+            }),
             at: None,
             x,
             y,
@@ -415,6 +459,22 @@ fn cover(groups: &[(crate::GroupId, Rect)]) -> Option<Rect> {
     }))
 }
 
+/// The platform saw the pointer let go at `(x, y)`, outside the window: a
+/// tab being dragged ends there (in another window, or a new one).
+pub(super) fn release_outside(mut host: Host, (x, y): (f32, f32)) {
+    let Some(Drag::Pane { pane, geometry, .. }) = host.drag.peek().clone() else {
+        return;
+    };
+    host.drag.set(Some(Drag::Pane {
+        pane,
+        geometry,
+        at: None,
+        x,
+        y,
+    }));
+    on_up(host);
+}
+
 pub(super) fn on_up(mut host: Host) {
     let drag = host.drag.peek().clone();
     host.drag.set(None);
@@ -422,6 +482,24 @@ pub(super) fn on_up(mut host: Host) {
         Some(Drag::Pane {
             pane, at: Some(d), ..
         }) => host.run(Op::Move(pane, d.dest)),
+        // Let go outside the window: the window under it, or a new one.
+        Some(Drag::Pane {
+            pane,
+            at: None,
+            geometry: Some(g),
+            x,
+            y,
+        }) if !contains(g.host, x, y) => {
+            let from = host
+                .workspace
+                .peek()
+                .locate(&pane)
+                .and_then(|l| g.groups.iter().find(|(id, _)| *id == l.group).copied());
+            let to = super::windows::drop_outside(host, &pane, (x, y), from);
+            if let Some(op) = to {
+                host.run(op);
+            }
+        }
         Some(Drag::Float {
             pane,
             host: r,
@@ -573,7 +651,16 @@ fn pane_items(host: Host, pane: &PaneId) -> Vec<Item> {
             items.push(act(label, Op::Move(pane.clone(), Dest::Dock(side))));
         }
     }
-    if loc.area == Area::Center {
+    let popped = loc.window > 0;
+    if host.has_windows() && !*host.phone.peek() && (!popped || tabs > 1) {
+        items.push(act(
+            "Move to a new window",
+            Op::Move(pane.clone(), Dest::Window(None)),
+        ));
+    }
+    if popped {
+        items.push(act("Move to the main window", Op::ToMain(pane.clone())));
+    } else if loc.area == Area::Center {
         if !*host.phone.peek() {
             items.push(act("Float", Op::Move(pane.clone(), Dest::Float(FLOAT_AT))));
         }

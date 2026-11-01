@@ -7,10 +7,12 @@
     clippy::indexing_slicing
 )]
 
+use architect_workspace::Store as _;
 use architect_workspace::{
-    Above, Area, Axis, Chrome, Corner, Dest, Direction, Float, FormClass, Group, GroupId, LinkId,
-    Node, Pane, PaneId, Pin, Rect, Screensets, Shown, Side, Snap, Target, Workspace, area_rects,
-    drop_at, float_rect, neighbour, snap_at,
+    Above, Area, Axis, Bar, Chrome, Corner, Dest, Direction, Float, FormClass, Group, GroupId,
+    LinkId, MemoryStore, Node, Pane, PaneId, Pin, Rect, Screenset, Screensets, Shown, Side, Snap,
+    Target, WindowId, Workspace, area_rects, bar_drop, drop_at, drop_in, float_rect, neighbour,
+    scroll_to, slides, snap_at,
 };
 
 fn pane(id: &str) -> Pane {
@@ -615,4 +617,266 @@ fn a_float_let_go_at_the_top_fills_the_window_and_at_a_side_halves_it() {
     assert_eq!(snap_at(2.0, 300.0, host), Some(Snap::Half(Side::Left)));
     assert_eq!(snap_at(998.0, 300.0, host), Some(Snap::Half(Side::Right)));
     assert_eq!(snap_at(500.0, 300.0, host), None);
+}
+
+#[test]
+fn a_tab_moved_to_a_window_comes_back_when_the_window_closes() {
+    let mut ws = Workspace::new();
+    ws.open(pane("a"), Target::Tab).unwrap();
+    ws.open(pane("b"), Target::Tab).unwrap();
+    ws.open(pane("c"), Target::Tab).unwrap();
+    let main_group = group_of(&ws, "a");
+    ws.move_pane(&id("b"), Dest::Window(None)).unwrap();
+    ws.move_pane(&id("c"), Dest::Window(None)).unwrap();
+    assert_eq!(ws.windows.len(), 3);
+    // Every window has its own id, never reused.
+    let ids: Vec<_> = ws.windows.iter().map(|w| w.id.0.clone()).collect();
+    assert_eq!(ids.len(), 3);
+    assert_ne!(ids[1], ids[2]);
+    let second = ws.windows[1].id.clone();
+    // Its OS window moved: the layout keeps where.
+    let at = Rect::new(40.0, 50.0, 700.0, 500.0);
+    ws.set_window_bounds(&second, at).unwrap();
+    assert_eq!(ws.windows[1].bounds, Some(at));
+    assert!(ws.set_window_bounds(&WindowId::main(), at).is_err());
+
+    let back = ws.close_window(&second).unwrap();
+    assert_eq!(back, vec![id("b")]);
+    assert_eq!(ws.windows.len(), 2);
+    assert_eq!(ws.locate(&id("b")).unwrap().window, 0);
+    assert_eq!(group_of(&ws, "b"), main_group);
+    assert_eq!(ws.active, Some(id("b")));
+    // A new window after a close is another id.
+    ws.move_pane(&id("a"), Dest::Window(None)).unwrap();
+    assert!(!ws.windows.iter().any(|w| w.id == second));
+    // The main window does not close.
+    assert!(ws.close_window(&WindowId::main()).is_err());
+}
+
+#[test]
+fn a_tab_in_a_window_goes_back_to_the_main_window() {
+    let mut ws = Workspace::new();
+    ws.open(pane("a"), Target::Tab).unwrap();
+    ws.open(pane("b"), Target::Window(None)).unwrap();
+    assert_eq!(ws.windows.len(), 2);
+    ws.to_main_window(&id("b")).unwrap();
+    // Its window, empty, closed.
+    assert_eq!(ws.windows.len(), 1);
+    assert_eq!(group_of(&ws, "b"), group_of(&ws, "a"));
+    assert_eq!(ws.active, Some(id("b")));
+    // Already there: it just comes forward.
+    ws.activate(&id("a")).unwrap();
+    ws.to_main_window(&id("b")).unwrap();
+    assert_eq!(ws.active, Some(id("b")));
+}
+
+#[test]
+fn closing_a_window_whose_main_window_is_empty_makes_it_a_group() {
+    let mut ws = Workspace::new();
+    ws.open(pane("a"), Target::Tab).unwrap();
+    ws.move_pane(&id("a"), Dest::Window(None)).unwrap();
+    let window = ws.windows[1].id.clone();
+    ws.close_window(&window).unwrap();
+    assert_eq!(ws.windows.len(), 1);
+    assert_eq!(ws.locate(&id("a")).unwrap().area, Area::Center);
+}
+
+#[test]
+fn a_tab_let_go_on_a_tab_bar_goes_between_the_tabs_there() {
+    let g = GroupId(7);
+    let bar = Bar {
+        group: g,
+        rect: Rect::new(0.0, 0.0, 400.0, 36.0),
+        tabs: vec![
+            Rect::new(0.0, 6.0, 100.0, 30.0),
+            Rect::new(100.0, 6.0, 100.0, 30.0),
+            Rect::new(200.0, 6.0, 100.0, 30.0),
+        ],
+    };
+    let index = |x: f32| match bar_drop(&bar, x).dest {
+        Dest::Group { index, .. } => index,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(index(10.0), Some(0));
+    assert_eq!(index(60.0), Some(1));
+    assert_eq!(index(149.0), Some(1));
+    assert_eq!(index(260.0), Some(3));
+    assert_eq!(index(390.0), Some(3));
+    // The line sits in the gap.
+    assert_eq!(bar_drop(&bar, 60.0).highlight.x, 99.0);
+    assert_eq!(bar_drop(&bar, 390.0).highlight.x, 299.0);
+
+    // The bar wins over its group's edges; elsewhere the group's rules hold.
+    let host = Rect::new(0.0, 0.0, 1000.0, 800.0);
+    let groups = [(g, Rect::new(0.0, 0.0, 400.0, 800.0))];
+    let on_bar = drop_in(150.0, 20.0, host, std::slice::from_ref(&bar), &groups).unwrap();
+    assert!(matches!(on_bar.dest, Dest::Group { index: Some(2), .. }));
+    let below = drop_in(200.0, 400.0, host, std::slice::from_ref(&bar), &groups).unwrap();
+    assert!(matches!(below.dest, Dest::Group { index: None, .. }));
+    // Outside the window: nothing here (the host makes it a window).
+    assert!(drop_in(1200.0, 20.0, host, std::slice::from_ref(&bar), &groups).is_none());
+}
+
+#[test]
+fn reordering_a_tab_within_its_own_bar_lands_where_it_was_let_go() {
+    let mut ws = Workspace::new();
+    for p in ["a", "b", "c", "d"] {
+        ws.open(pane(p), Target::Tab).unwrap();
+    }
+    let g = group_of(&ws, "a");
+    // "a" let go before "d" (index 3, counted before it leaves).
+    ws.move_pane(
+        &id("a"),
+        Dest::Group {
+            group: g,
+            index: Some(3),
+        },
+    )
+    .unwrap();
+    assert_eq!(tabs(&ws, g), ["b", "c", "a", "d"]);
+    ws.move_pane(
+        &id("d"),
+        Dest::Group {
+            group: g,
+            index: Some(0),
+        },
+    )
+    .unwrap();
+    assert_eq!(tabs(&ws, g), ["d", "b", "c", "a"]);
+}
+
+#[test]
+fn stacked_panes_slide_over_the_ones_before_them() {
+    let (w, spine, view) = (400.0, 32.0, 900.0);
+    // Unscrolled: side by side until the strip's end, where the rest pile
+    // their spines at the right.
+    let s = slides(4, w, spine, view, 0.0);
+    assert_eq!(s[0].x, 0.0);
+    assert_eq!(s[1].x, 400.0);
+    assert_eq!(s[2].x, 800.0);
+    // The fourth would start past the end: its spine is kept at the right,
+    // over the third.
+    assert_eq!(s[3].x, view - spine);
+    assert!(s[3].over && s[2].covered);
+    assert!(!s[2].over && !s[1].covered);
+
+    // Scrolled far: the first panes leave their spines at the left.
+    let far = slides(4, w, spine, view, 1000.0);
+    assert_eq!(far[0].x, 0.0);
+    assert_eq!(far[1].x, spine);
+    assert_eq!(far[2].x, 2.0 * spine);
+    assert!(far[1].over && far[0].covered);
+    assert_eq!(far[3].x, 3.0f32.mul_add(w, -1000.0).max(3.0 * spine));
+
+    // A spine pressed scrolls its pane just past the spines before it.
+    let to = scroll_to(2, w, spine);
+    let shown = slides(4, w, spine, view, to);
+    assert_eq!(shown[2].x, 2.0 * spine);
+    assert_eq!(scroll_to(0, w, spine), 0.0);
+}
+
+#[test]
+fn a_screen_has_a_form_class() {
+    assert_eq!(FormClass::of(1440.0, 900.0, false), FormClass::Desk);
+    // A touchscreen PC is a desk.
+    assert_eq!(FormClass::of(1080.0, 1920.0, false), FormClass::Desk);
+    assert_eq!(
+        FormClass::of(1180.0, 820.0, true),
+        FormClass::TabletLandscape
+    );
+    assert_eq!(
+        FormClass::of(820.0, 1180.0, true),
+        FormClass::TabletPortrait
+    );
+    assert_eq!(FormClass::of(393.0, 852.0, true), FormClass::PhonePortrait);
+    assert_eq!(FormClass::of(852.0, 393.0, true), FormClass::PhoneLandscape);
+}
+
+/// A workspace with these tabs in its center.
+fn with_tabs(names: &[&str]) -> Workspace {
+    let mut ws = Workspace::new();
+    for n in names {
+        ws.open(pane(n), Target::Tab).unwrap();
+    }
+    ws
+}
+
+#[test]
+fn a_slot_recalls_its_set_for_the_class_of_screen() {
+    let sets = Screensets::default().with_builtins([
+        Screenset::new("Edit")
+            .slot(1)
+            .layout(FormClass::Desk, with_tabs(&["song"])),
+        Screenset::new("Mix")
+            .slot(2)
+            .layout(FormClass::Desk, with_tabs(&["mixer", "meters"]))
+            .layout(FormClass::TabletPortrait, with_tabs(&["mixer"])),
+    ]);
+    assert_eq!(sets.get("mix").unwrap().name, "Mix");
+    let mut sets = sets;
+    let desk = sets.recall_slot(2, FormClass::Desk).unwrap();
+    assert_eq!(desk.panes.len(), 2);
+    assert_eq!(sets.active.as_deref(), Some("mix"));
+    assert_eq!(sets.working(FormClass::Desk), Some(&desk));
+    let upright = sets.recall_slot(2, FormClass::TabletPortrait).unwrap();
+    assert_eq!(upright.panes.len(), 1);
+    // A class it has no layout for takes the nearest.
+    let side = sets.recall_slot(2, FormClass::TabletLandscape).unwrap();
+    assert_eq!(side, desk);
+    assert!(sets.recall_slot(5, FormClass::Desk).is_none());
+}
+
+#[test]
+fn the_apps_sets_join_the_ones_kept_without_losing_changes() {
+    let mut kept = Screensets::default().with_builtins([Screenset::new("Mix")
+        .slot(2)
+        .layout(FormClass::Desk, with_tabs(&["mixer"]))]);
+    kept.recall("mix", FormClass::Desk);
+    kept.set_working(FormClass::Desk, with_tabs(&["mixer", "fx"]));
+    assert!(kept.save(FormClass::Desk));
+    kept.save_as("Mine", Some(3));
+
+    // The app ships Mix again (renamed, a new slot, a tablet layout).
+    let joined = kept.clone().with_builtins([Screenset::new("Mix")
+        .slot(4)
+        .layout(FormClass::Desk, with_tabs(&["mixer"]))
+        .layout(FormClass::TabletPortrait, with_tabs(&["mixer"]))]);
+    let mix = joined.get("mix").unwrap();
+    assert_eq!(mix.slot, Some(4));
+    // The person's desk layout stays; the new class is added.
+    assert_eq!(mix.layout_for(FormClass::Desk).unwrap().panes.len(), 2);
+    assert!(
+        mix.layouts
+            .iter()
+            .any(|l| l.class == FormClass::TabletPortrait)
+    );
+    assert!(joined.get("mine").is_some());
+}
+
+#[test]
+fn a_store_keeps_the_screensets_and_reads_them_back() {
+    let store = MemoryStore::new();
+    let builtins = || {
+        vec![
+            Screenset::new("Mix")
+                .slot(2)
+                .layout(FormClass::Desk, with_tabs(&["mixer"])),
+        ]
+    };
+    // Nothing kept: the app's sets.
+    let mut sets = architect_workspace::store::load(&store, builtins());
+    assert_eq!(sets.sets.len(), 1);
+    sets.set_working(FormClass::Desk, with_tabs(&["a", "b"]));
+    assert!(architect_workspace::store::save(&store, &sets));
+    let back = architect_workspace::store::load(&store, builtins());
+    assert_eq!(back.working(FormClass::Desk).unwrap().panes.len(), 2);
+    assert_eq!(back, sets);
+    // Something unreadable kept: the app's sets, nothing lost to a panic.
+    store.save("{ not json");
+    assert_eq!(
+        architect_workspace::store::load(&store, builtins())
+            .sets
+            .len(),
+        1
+    );
 }

@@ -20,6 +20,30 @@ pub enum FormClass {
 }
 
 impl FormClass {
+    /// The class of a screen `width` by `height` points: a phone or a
+    /// tablet (`handheld`) by its shorter side, upright or on its side by
+    /// its longer; anything else a desk (a touchscreen PC included).
+    #[must_use]
+    pub fn of(width: f32, height: f32, handheld: bool) -> Self {
+        let upright = height > width;
+        if !handheld {
+            Self::Desk
+        } else if width.min(height) < Self::PHONE_MAX {
+            if upright {
+                Self::PhonePortrait
+            } else {
+                Self::PhoneLandscape
+            }
+        } else if upright {
+            Self::TabletPortrait
+        } else {
+            Self::TabletLandscape
+        }
+    }
+
+    /// A handheld screen's shorter side below this is a phone's, points.
+    pub const PHONE_MAX: f32 = 600.0;
+
     /// The classes to try for this one, nearest first.
     #[must_use]
     pub const fn fallbacks(self) -> [Self; 5] {
@@ -84,6 +108,33 @@ pub struct Screenset {
 }
 
 impl Screenset {
+    /// A set the app ships (built in: it can be changed and reset, not
+    /// deleted), its id from its name ("Mix" is `mix`).
+    pub fn new(name: impl Into<String>) -> Self {
+        let name = name.into();
+        Self {
+            id: slug(&name),
+            name,
+            slot: None,
+            builtin: true,
+            layouts: Vec::new(),
+        }
+    }
+
+    /// Recalled by ⌘`n` (1–9).
+    #[must_use]
+    pub const fn slot(mut self, n: u8) -> Self {
+        self.slot = Some(n);
+        self
+    }
+
+    /// Its layout for `class`.
+    #[must_use]
+    pub fn layout(mut self, class: FormClass, workspace: Workspace) -> Self {
+        self.set_layout(class, workspace);
+        self
+    }
+
     /// Its layout for `class`, or the nearest it has.
     #[must_use]
     pub fn layout_for(&self, class: FormClass) -> Option<&Workspace> {
@@ -129,6 +180,34 @@ impl Screensets {
     #[must_use]
     pub fn in_slot(&self, n: u8) -> Option<&Screenset> {
         self.sets.iter().find(|s| s.slot == Some(n))
+    }
+
+    /// Every set the app ships joins these: one the person has (by id)
+    /// keeps its changes and the app's name and slot; a new one is added.
+    #[must_use]
+    pub fn with_builtins(mut self, builtins: impl IntoIterator<Item = Screenset>) -> Self {
+        for set in builtins {
+            match self.sets.iter_mut().find(|s| s.id == set.id) {
+                Some(kept) => {
+                    kept.builtin = true;
+                    kept.name = set.name;
+                    kept.slot = set.slot;
+                    for layout in set.layouts {
+                        if !kept.layouts.iter().any(|l| l.class == layout.class) {
+                            kept.layouts.push(layout);
+                        }
+                    }
+                }
+                None => self.sets.push(set),
+            }
+        }
+        self
+    }
+
+    /// Recall the set in slot `n` (⌘n) for `class`: its layout, to show.
+    pub fn recall_slot(&mut self, n: u8, class: FormClass) -> Option<Workspace> {
+        let id = self.in_slot(n)?.id.clone();
+        self.recall(&id, class)
     }
 
     /// The live layout for `class`, if one has been arranged.
@@ -192,11 +271,7 @@ impl Screensets {
     /// Save every live layout as a new set, which becomes active.
     pub fn save_as(&mut self, name: impl Into<String>, slot: Option<u8>) -> String {
         let name = name.into();
-        let base: String = name
-            .to_lowercase()
-            .chars()
-            .map(|c| if c.is_alphanumeric() { c } else { '-' })
-            .collect();
+        let base = slug(&name);
         let mut id = base.clone();
         let mut n = 2u32;
         while self.get(&id).is_some() {
@@ -257,6 +332,14 @@ impl Screensets {
         }
         Ok(sets)
     }
+}
+
+/// A set's id from its name: lower case, a dash for anything else.
+fn slug(name: &str) -> String {
+    name.to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect()
 }
 
 /// The View menu's live list of screensets.

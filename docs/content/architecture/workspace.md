@@ -4,16 +4,21 @@ description = "One layout system for every app: tab groups in splits, docks on e
 weight = 54
 +++
 
-> **Status: model and desk host landed (2026-10-31).** The model is
-> `architect-workspace` (`features/workspace/src/model.rs`, `ops.rs`,
-> `screenset.rs`); the host is its `ui` feature
+> **Status: model, desk host and pop-out windows landed (2026-10-31).**
+> The model is `architect-workspace` (`features/workspace/src/model.rs`,
+> `ops.rs`, `screenset.rs`, `store.rs`); the host is its `ui` feature
 > (`features/workspace/src/host/mod.rs` `WorkspaceView`, `View`, `Views`,
 > `TitleRow`), developed in the lab's Vault tab
-> (`apps/lab/ui/src/vault.rs`). Still to come: pop-out OS windows,
-> long-press menus, stacked tabs that overlap as they scroll, the
-> per-form-class screenset switch in the host. Studio's dock
-> (`studio:features/ui/dock`) was the starting point; Obsidian's
-> workspace is the bar to clear.
+> (`apps/lab/ui/src/vault.rs`). Pop-out OS windows are the `native`
+> feature's launcher (`features/workspace/src/native.rs` `launch`); tabs
+> reorder within a bar, a finger held on a tab opens its menu, stacked
+> tabs slide over each other, ⌘1–9 recall screensets for the screen's
+> class, the layout is kept through the app's `Store`, and a pane puts
+> its own items on the status line (`use_pane_status`). Still to come:
+> dragging a tab onto a group in another window (it joins that window's
+> first group), docks in pop-outs (none, as in Obsidian), the app's
+> chords inside a pop-out. Studio's dock (`studio:features/ui/dock`) was
+> the starting point; Obsidian's workspace is the bar to clear.
 
 An app hands architect its **views** (what a pane can show) and gets back
 a workspace a person arranges as they like: any number of tab groups,
@@ -353,10 +358,27 @@ Two things decide how the workspace looks, separately:
 The host is Studio's, generalised: pointer events and `get_client_rect`
 for every drag (Blitz has no drag-and-drop events), overlays absolute
 against the workspace's root (no `position: fixed`), inline styles from
-the shell's theme. Stacked tabs place their panes from the strip's scroll
-offset (Blitz has no horizontal `position: sticky`). Pop-out windows need
-dioxus-native to open a second window with its own document, sharing the
-app's state — the one part not yet proven.
+the shell's theme. Stacked tabs place their panes from the strip's own
+scroll offset (`features/workspace/src/layout.rs` `slides`): Blitz has no
+horizontal `position: sticky` and cannot scroll a box from code, so the
+strip keeps the offset itself, moved by a sideways wheel, its scrollbar or
+a press on a spine.
+
+**Pop-out windows.** dioxus-native opens one window, at start. The
+workspace's launcher (`features/workspace/src/native.rs` `launch`) runs
+dioxus-native's application inside its own, which opens more while the
+app runs: each pop-out is a Blitz view with its own document and
+`VirtualDom`, its root the host's pop-out view
+(`features/workspace/src/host/windows.rs` `Popout`), reading the main
+window's `Signal<Workspace>`. A signal owned by one dom redraws what reads
+it in another, both ways (`features/workspace/tests/windows.rs`). The
+contexts a view reads (the shell's, the commands', the app's own through
+`Bridge`) are carried into each pop-out's root. A tab dragged out of a
+window, or "Move to a new window", opens one where it was let go; dragged
+out of a pop-out onto the main window, or "Move to the main window", it
+comes back; closing a pop-out brings its tabs back. The layout keeps each
+window's place. Without the launcher (a browser) a pop-out kept in a
+layout shows as a chip that brings its tabs back.
 
 ## From Studio's dock
 
@@ -378,9 +400,9 @@ layer that daw-ui uses retires when daw-ui moves to views.
 ## Open questions
 
 
-1. **Pop-out windows in Blitz:** does dioxus-native open a second window
-   with its own document today, and can both read one app's signals?
-   (A spike first; in-window floats until then.)
+1. **Pop-out windows in Blitz:** answered. dioxus-native does not open
+   a second window itself; the workspace's launcher does, and both
+   documents read one app's signals (see "It renders in Blitz").
 2. **Docks in pop-outs:** Obsidian's windows have none. Keep it so?
 3. **Linking:** by a group id (Obsidian) or by a subject the views agree
    on (a song id)? Studio's `link` is an id; a subject is more useful

@@ -9,12 +9,16 @@ description = "The workspace: tab groups in splits, docks with ribbons, stacked 
 # The default set is the model (docs/content/architecture/workspace.md):
 # pure data and the operations on it — no Dioxus, no I/O, wasm-clean.
 # `ui` is the host on Blitz: tab bars, drag and drop, splits, docks and
-# ribbons, stacked tabs, floats, a phone's switcher. `native` (pop-out
-# windows, plugin views) comes later, as a flag of this one crate.
+# ribbons, stacked tabs, floats, a phone's switcher, screensets on ⌘1–9.
+# `native` is a desk app's launcher: dioxus-native's, plus pop-out OS
+# windows that share the app's state (`hot-reload` keeps `dx serve`'s
+# reload for the main window). Plugin views come later, on `native`.
 
 [features]
 default = []
-ui = ["dep:dioxus", "dep:architect-shell", "architect-shell/ui", "dep:futures-timer", "dep:lucide-dioxus", "architect-commands/ui"]
+ui = ["dep:dioxus", "dep:architect-shell", "architect-shell/ui", "dep:futures-timer", "dep:futures-util", "dep:lucide-dioxus", "architect-commands/ui"]
+native = ["ui", "dep:dioxus-native", "dep:blitz-shell", "dep:blitz-traits", "dep:dioxus-asset-resolver"]
+hot-reload = ["native", "dioxus-native/hot-reload", "dep:dioxus-devtools"]
 
 [dependencies]
 facet = { workspace = true }
@@ -23,6 +27,14 @@ thiserror = { workspace = true }
 dioxus = { workspace = true, optional = true }
 architect-shell = { workspace = true, optional = true }
 lucide-dioxus = { workspace = true, optional = true }
+dioxus-native = { workspace = true, optional = true, features = ["vello"] }
+blitz-shell = { workspace = true, optional = true }
+blitz-traits = { workspace = true, optional = true }
+dioxus-asset-resolver = { workspace = true, optional = true }
+dioxus-devtools = { workspace = true, optional = true }
+# What the platform says about a pointer let go outside a window, heard in
+# the host's dom.
+futures-util = { version = "0.3", default-features = false, optional = true }
 # The workspace's commands, in the app's palette; by default the model
 # (the screensets as a menu's live rows), wasm-clean.
 architect-commands = { workspace = true }
@@ -35,6 +47,10 @@ futures-timer = { workspace = true, optional = true, features = ["wasm-bindgen"]
 
 [lib]
 doctest = false
+
+[[test]]
+name = "windows"
+required-features = ["ui"]
 
 [lints]
 workspace = true

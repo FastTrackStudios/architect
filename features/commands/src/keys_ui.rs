@@ -300,9 +300,10 @@ impl Commands {
         let mut held = self.held;
         for command in commands {
             match command {
+                // A key bound to a command that cannot run now (disabled,
+                // gone) is not used: it goes on to the page.
                 InputCommand::Action(id) | InputCommand::ActionWithArgs { action: id, .. } => {
-                    let _ = self.run(&id);
-                    used = true;
+                    used |= self.run(&id);
                 }
                 InputCommand::Hold(chord) => {
                     held.set(Some(display_chord(&chord)));

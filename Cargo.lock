@@ -637,6 +637,7 @@ name = "architect-desktop"
 version = "0.1.0"
 dependencies = [
  "architect-lab-ui",
+ "architect-workspace",
  "dioxus",
  "dioxus-native",
 ]
@@ -1050,10 +1051,16 @@ version = "0.1.0"
 dependencies = [
  "architect-commands",
  "architect-shell",
+ "blitz-shell",
+ "blitz-traits",
  "dioxus",
+ "dioxus-asset-resolver",
+ "dioxus-devtools",
+ "dioxus-native",
  "facet",
  "facet-json",
  "futures-timer",
+ "futures-util",
  "lucide-dioxus",
  "thiserror 2.0.20",
 ]
