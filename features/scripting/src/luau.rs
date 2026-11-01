@@ -1,0 +1,554 @@
+//! The Luau runtime: one script, run against an Action List as a caller,
+//! inside one transaction.
+//!
+//! What a script sees (its globals, read-only — Luau's sandbox):
+//!
+//! | global | what it does |
+//! |---|---|
+//! | `actions.list(filter?)` | the actions the caller may run: `{id, name, description, category, group, effect, enabled, disabled_reason}`, filtered by text |
+//! | `actions.describe(id)` | one, with `params` and `result` (JSON Schema as tables); `nil` when there is none |
+//! | `actions.run(id, args?)` | runs it with `args` (a table), answering with its result |
+//! | `actions.enabled(id)` | whether it can run now, and why not |
+//! | `state.query(id, args?)` | runs a read-only action; refuses one that changes the app |
+//! | `print(...)`, `log(...)` | a line in the run's log |
+//! | `args` | what the run was given (`nil` for nothing) |
+//!
+//! What the script returns is the run's result. An action that fails
+//! raises an error a script can catch with `pcall`; one it does not catch
+//! stops it, with the line it was on ([`ScriptError`]).
+//!
+//! Every run is a fresh Luau state: nothing one run sets is seen by the
+//! next. Each action runs as the run's [`ActionCaller`], so a model's
+//! script can do exactly what the model may, action by action.
+
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
+
+use architect::action::{ActionCaller, ActionInfo, ActionList, Effect};
+use mlua::{Lua, LuaSerdeExt, MultiValue, Value as LuaValue};
+use serde_json::{Value, json};
+
+use crate::{ErrorKind, ScriptError, Transactions};
+
+/// The chunk name a script's errors are reported under (`script:3: …`).
+const CHUNK: &str = "script";
+
+/// How far a run may go.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Limits {
+    /// The most memory its Luau state may hold, in bytes.
+    pub memory: usize,
+    /// The most steps it may take: Luau counts one at every call and every
+    /// turn of a loop. What stops `while true do end`.
+    pub steps: u64,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            memory: 64 * 1024 * 1024,
+            steps: 10_000_000,
+        }
+    }
+}
+
+/// What a run did.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Report {
+    /// What the script returned (`null` for nothing), or why it stopped.
+    pub result: Result<Value, ScriptError>,
+    /// What it printed, a line a call.
+    pub log: Vec<String>,
+    /// The actions it ran and queried, in order — those that failed too.
+    pub ran: Vec<String>,
+    /// The undo step it made, when it changed something and finished. A
+    /// run that fails is taken back, and makes none.
+    pub undo: Option<String>,
+}
+
+impl Report {
+    /// The report as JSON: `{result, log, ran, undo}`, or `{error: {kind,
+    /// line, message}, log, ran}` when it failed.
+    #[must_use]
+    pub fn to_json(&self) -> Value {
+        match &self.result {
+            Ok(result) => json!({
+                "result": result,
+                "log": self.log,
+                "ran": self.ran,
+                "undo": self.undo,
+            }),
+            Err(error) => json!({
+                "error": {
+                    "kind": kind_name(error.kind),
+                    "line": error.line,
+                    "message": error.message,
+                },
+                "log": self.log,
+                "ran": self.ran,
+            }),
+        }
+    }
+}
+
+const fn kind_name(kind: ErrorKind) -> &'static str {
+    match kind {
+        ErrorKind::Syntax => "syntax",
+        ErrorKind::Runtime => "runtime",
+        ErrorKind::Action => "action",
+        ErrorKind::Limit => "limit",
+    }
+}
+
+const fn effect_name(effect: Effect) -> &'static str {
+    match effect {
+        Effect::ReadOnly => "read_only",
+        Effect::Mutating => "mutating",
+        Effect::Destructive => "destructive",
+    }
+}
+
+/// Runs scripts against one Action List.
+#[derive(Clone)]
+pub struct Runtime {
+    list: ActionList,
+    transactions: Option<Arc<dyn Transactions>>,
+    limits: Limits,
+}
+
+impl std::fmt::Debug for Runtime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Runtime")
+            .field("list", &self.list)
+            .field("transactions", &self.transactions.is_some())
+            .field("limits", &self.limits)
+            .finish()
+    }
+}
+
+impl Runtime {
+    /// Scripts over `list`, with no transactions: what they change stays
+    /// as each action left it.
+    #[must_use]
+    pub fn new(list: ActionList) -> Self {
+        Self {
+            list,
+            transactions: None,
+            limits: Limits::default(),
+        }
+    }
+
+    /// Each run one step of `transactions`, taken back when it fails.
+    #[must_use]
+    pub fn with_transactions(mut self, transactions: Arc<dyn Transactions>) -> Self {
+        self.transactions = Some(transactions);
+        self
+    }
+
+    #[must_use]
+    pub const fn with_limits(mut self, limits: Limits) -> Self {
+        self.limits = limits;
+        self
+    }
+
+    /// Whether its runs are transactions.
+    #[must_use]
+    pub const fn has_transactions(&self) -> bool {
+        self.transactions.is_some()
+    }
+
+    /// The list it runs against.
+    #[must_use]
+    pub const fn list(&self) -> &ActionList {
+        &self.list
+    }
+
+    /// Whether `source` is Luau, without running it.
+    ///
+    /// # Errors
+    ///
+    /// Where it is not ([`ErrorKind::Syntax`]).
+    pub fn check(source: &str) -> Result<(), ScriptError> {
+        let lua = Lua::new();
+        lua.load(source)
+            .set_name(format!("={CHUNK}"))
+            .into_function()
+            .map(drop)
+            .map_err(|e| script_error(&e))
+    }
+
+    /// Runs `source` as `caller` with `args`, as one undo step named
+    /// `step` ("Script: Arm selected tracks").
+    pub async fn run(
+        &self,
+        caller: &ActionCaller,
+        source: &str,
+        args: Value,
+        step: &str,
+    ) -> Report {
+        let trace = Arc::new(Mutex::new(Trace::default()));
+        let opened = self.transactions.as_ref().is_some_and(|t| t.begin(step));
+        let result = self.execute(caller, source, args, &trace).await;
+        let undo = match (&self.transactions, opened, result.is_ok()) {
+            (Some(t), true, true) => t.commit(),
+            (Some(t), true, false) => {
+                t.abort();
+                None
+            }
+            _ => None,
+        };
+        let trace = std::mem::take(&mut *trace.lock().unwrap_or_else(PoisonError::into_inner));
+        Report {
+            result,
+            log: trace.log,
+            ran: trace.ran,
+            undo,
+        }
+    }
+
+    async fn execute(
+        &self,
+        caller: &ActionCaller,
+        source: &str,
+        args: Value,
+        trace: &Arc<Mutex<Trace>>,
+    ) -> Result<Value, ScriptError> {
+        let lua = self
+            .state(caller, &args, trace)
+            .map_err(|e| script_error(&e))?;
+        let main = lua
+            .load(source)
+            .set_name(format!("={CHUNK}"))
+            .into_function()
+            .map_err(|e| script_error(&e))?;
+        let out: MultiValue = main.call_async(()).await.map_err(|e| script_error(&e))?;
+        let first = out.into_iter().next().unwrap_or(LuaValue::Nil);
+        from_lua(&lua, first).map_err(|message| ScriptError::new(ErrorKind::Runtime, None, message))
+    }
+
+    /// A fresh, sandboxed Luau state with the script's globals.
+    fn state(
+        &self,
+        caller: &ActionCaller,
+        args: &Value,
+        trace: &Arc<Mutex<Trace>>,
+    ) -> mlua::Result<Lua> {
+        let lua = Lua::new();
+        lua.set_memory_limit(self.limits.memory)?;
+        let globals = lua.globals();
+        globals.set("actions", self.actions_table(&lua, caller, trace)?)?;
+        globals.set("state", self.state_table(&lua, caller, trace)?)?;
+        let print = log_function(&lua, trace)?;
+        globals.set("print", print.clone())?;
+        globals.set("log", print)?;
+        globals.set("args", to_lua(&lua, args)?)?;
+        // From here the globals above are read-only, and what a script
+        // sets lives in its own table.
+        lua.sandbox(true)?;
+        let steps = AtomicU64::new(0);
+        let limit = self.limits.steps;
+        lua.set_interrupt(move |lua| {
+            if steps.fetch_add(1, Ordering::Relaxed) >= limit {
+                return Err(fault(
+                    lua,
+                    ErrorKind::Limit,
+                    format!("ran past its limit of {limit} steps (a loop that never ends?)"),
+                ));
+            }
+            Ok(mlua::VmState::Continue)
+        });
+        Ok(lua)
+    }
+
+    fn actions_table(
+        &self,
+        lua: &Lua,
+        caller: &ActionCaller,
+        trace: &Arc<Mutex<Trace>>,
+    ) -> mlua::Result<mlua::Table> {
+        let table = lua.create_table()?;
+        let (list, who) = (self.list.clone(), caller.clone());
+        table.set(
+            "list",
+            lua.create_function(move |lua, filter: Option<String>| {
+                let filter = filter.map(|f| f.to_lowercase());
+                let found: Vec<Value> = visible(&list, &who)
+                    .iter()
+                    .filter(|i| filter.as_deref().is_none_or(|f| matches(i, f)))
+                    .map(summary)
+                    .collect();
+                to_lua(lua, &Value::Array(found))
+            })?,
+        )?;
+        let (list, who) = (self.list.clone(), caller.clone());
+        table.set(
+            "describe",
+            lua.create_function(move |lua, id: String| {
+                let found = visible(&list, &who).into_iter().find(|i| i.id == id);
+                found.map_or(Ok(LuaValue::Nil), |info| to_lua(lua, &detail(&info)))
+            })?,
+        )?;
+        let (list, who) = (self.list.clone(), caller.clone());
+        table.set(
+            "enabled",
+            lua.create_function(move |_, id: String| {
+                let found = visible(&list, &who).into_iter().find(|i| i.id == id);
+                Ok(found.map_or_else(
+                    || (false, Some(format!("no action {id}"))),
+                    |i| (i.enabled, i.disabled_reason),
+                ))
+            })?,
+        )?;
+        table.set("run", self.run_function(lua, caller, trace, false)?)?;
+        Ok(table)
+    }
+
+    fn state_table(
+        &self,
+        lua: &Lua,
+        caller: &ActionCaller,
+        trace: &Arc<Mutex<Trace>>,
+    ) -> mlua::Result<mlua::Table> {
+        let table = lua.create_table()?;
+        table.set("query", self.run_function(lua, caller, trace, true)?)?;
+        Ok(table)
+    }
+
+    /// `actions.run`, or — `read_only` — `state.query`.
+    fn run_function(
+        &self,
+        lua: &Lua,
+        caller: &ActionCaller,
+        trace: &Arc<Mutex<Trace>>,
+        read_only: bool,
+    ) -> mlua::Result<mlua::Function> {
+        let (list, who, trace) = (self.list.clone(), caller.clone(), Arc::clone(trace));
+        lua.create_async_function(move |lua, (id, args): (String, Option<LuaValue>)| {
+            // Where the script is, taken now: once the future runs, the
+            // script is no longer on that line's frame.
+            let line = line_of(&lua);
+            let refused = refusal(&list, &id, read_only);
+            let args = args.map(|a| lua.from_value::<Value>(a));
+            let (list, who, trace) = (list.clone(), who.clone(), Arc::clone(&trace));
+            async move {
+                if let Some(message) = refused {
+                    return Err(fault_at(line, ErrorKind::Action, message));
+                }
+                let args = match args.transpose() {
+                    Ok(args) => args,
+                    Err(e) => {
+                        let message = format!("{id}: its arguments are not JSON: {e}");
+                        return Err(fault_at(line, ErrorKind::Action, message));
+                    }
+                };
+                trace
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .ran
+                    .push(id.clone());
+                let bytes = args.map(|a| a.to_string().into_bytes()).unwrap_or_default();
+                let out = list
+                    .run_json_async_with(&who, &id, &bytes)
+                    .await
+                    .map_err(|e| fault_at(line, ErrorKind::Action, e.to_string()))?;
+                let value: Value = serde_json::from_slice(&out).unwrap_or(Value::Null);
+                to_lua(&lua, &value)
+            }
+        })
+    }
+}
+
+/// What a run printed and ran, gathered as it goes.
+#[derive(Debug, Default)]
+struct Trace {
+    log: Vec<String>,
+    ran: Vec<String>,
+}
+
+fn log_function(lua: &Lua, trace: &Arc<Mutex<Trace>>) -> mlua::Result<mlua::Function> {
+    let trace = Arc::clone(trace);
+    lua.create_function(move |_, values: MultiValue| {
+        let line: Vec<String> = values
+            .iter()
+            .map(|v| v.to_string().unwrap_or_else(|_| v.type_name().to_owned()))
+            .collect();
+        trace
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .log
+            .push(line.join("\t"));
+        Ok(())
+    })
+}
+
+/// Why `state.query` will not run `id`: it changes the app.
+fn refusal(list: &ActionList, id: &str, read_only: bool) -> Option<String> {
+    if !read_only {
+        return None;
+    }
+    let info = list.info(id)?;
+    (info.effect != Effect::ReadOnly).then(|| {
+        format!(
+            "{id} changes the app ({}): run it with actions.run",
+            effect_name(info.effect)
+        )
+    })
+}
+
+/// The actions `who` may run.
+fn visible(list: &ActionList, who: &ActionCaller) -> Vec<ActionInfo> {
+    who.principal()
+        .map_or_else(|| list.infos(), |p| list.infos_for(p))
+}
+
+fn matches(info: &ActionInfo, filter: &str) -> bool {
+    [
+        &info.id,
+        &info.display_name,
+        &info.description,
+        &info.category,
+        &info.group,
+    ]
+    .iter()
+    .any(|field| field.to_lowercase().contains(filter))
+}
+
+/// One action, as `actions.list` gives it.
+pub(crate) fn summary(info: &ActionInfo) -> Value {
+    json!({
+        "id": info.id,
+        "name": info.display_name,
+        "description": info.description,
+        "category": info.category,
+        "group": info.group,
+        "effect": effect_name(info.effect),
+        "enabled": info.enabled,
+        "disabled_reason": info.disabled_reason,
+    })
+}
+
+/// One action with what it takes and gives, as `actions.describe` gives it.
+pub(crate) fn detail(info: &ActionInfo) -> Value {
+    let schema = |s: &Option<String>| {
+        s.as_deref()
+            .and_then(|s| serde_json::from_str::<Value>(s).ok())
+    };
+    let mut out = summary(info);
+    if let Value::Object(map) = &mut out {
+        map.insert("params".into(), schema(&info.params_schema).into());
+        map.insert("result".into(), schema(&info.result_schema).into());
+    }
+    out
+}
+
+/// JSON into Luau: `null` is `nil`, an array a sequence.
+fn to_lua(lua: &Lua, value: &Value) -> mlua::Result<LuaValue> {
+    let options = mlua::serde::SerializeOptions::new()
+        .serialize_none_to_null(false)
+        .serialize_unit_to_null(false);
+    lua.to_value_with(value, options)
+}
+
+fn from_lua(lua: &Lua, value: LuaValue) -> Result<Value, String> {
+    lua.from_value::<Value>(value)
+        .map_err(|e| format!("what it returned is not JSON: {e}"))
+}
+
+/// A failure a script's globals raise, with where the script was.
+#[derive(Debug)]
+struct Fault(ScriptError);
+
+impl std::fmt::Display for Fault {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl std::error::Error for Fault {}
+
+fn fault_at(line: Option<u32>, kind: ErrorKind, message: String) -> mlua::Error {
+    mlua::Error::external(Fault(ScriptError::new(kind, line, message)))
+}
+
+fn fault(lua: &Lua, kind: ErrorKind, message: String) -> mlua::Error {
+    fault_at(line_of(lua), kind, message)
+}
+
+/// The script's line now: the innermost frame that is the script's (a
+/// global's own frame is not).
+fn line_of(lua: &Lua) -> Option<u32> {
+    (0..8).find_map(|level| {
+        lua.inspect_stack(level, |debug| {
+            let ours = debug.source().short_src.as_deref() == Some(CHUNK);
+            ours.then(|| debug.current_line()).flatten()
+        })
+        .flatten()
+        .and_then(|line| u32::try_from(line).ok())
+    })
+}
+
+/// What stopped a script, with its line, from what Luau raised.
+fn script_error(error: &mlua::Error) -> ScriptError {
+    if let Some(Fault(found)) = fault_in(error) {
+        return found.clone();
+    }
+    match error {
+        mlua::Error::SyntaxError { message, .. } => located(ErrorKind::Syntax, message),
+        mlua::Error::RuntimeError(message) => located(ErrorKind::Runtime, message),
+        mlua::Error::MemoryError(_) => {
+            ScriptError::new(ErrorKind::Limit, None, "ran out of memory")
+        }
+        mlua::Error::CallbackError { cause, .. } | mlua::Error::WithContext { cause, .. } => {
+            script_error(cause)
+        }
+        other => located(ErrorKind::Runtime, &other.to_string()),
+    }
+}
+
+fn fault_in(error: &mlua::Error) -> Option<&Fault> {
+    match error {
+        mlua::Error::ExternalError(inner) => inner.downcast_ref::<Fault>(),
+        mlua::Error::CallbackError { cause, .. } | mlua::Error::WithContext { cause, .. } => {
+            fault_in(cause)
+        }
+        _ => None,
+    }
+}
+
+/// `script:3: attempt to …` as line 3 and its message; the traceback
+/// mlua adds after the first line is left out.
+fn located(kind: ErrorKind, message: &str) -> ScriptError {
+    let first = message.lines().next().unwrap_or_default();
+    let mut rest = first;
+    // A nested error repeats the prefix (`script:3: script:5: …`): the
+    // innermost line is where it happened.
+    let mut line = None;
+    while let Some((at, tail)) = rest
+        .strip_prefix(CHUNK)
+        .and_then(|r| r.strip_prefix(':'))
+        .and_then(|r| r.split_once(':'))
+        .and_then(|(n, tail)| n.parse::<u32>().ok().map(|n| (n, tail)))
+    {
+        line = Some(at);
+        rest = tail.trim_start();
+    }
+    ScriptError::new(kind, line, rest)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::located;
+    use crate::ErrorKind;
+
+    #[test]
+    fn a_message_gives_up_its_line() {
+        let e = located(
+            ErrorKind::Runtime,
+            "script:3: attempt to add\nstack traceback:\n…",
+        );
+        assert_eq!(e.line, Some(3));
+        assert_eq!(e.message, "attempt to add");
+        let e = located(ErrorKind::Runtime, "boom");
+        assert_eq!((e.line, e.message.as_str()), (None, "boom"));
+    }
+}

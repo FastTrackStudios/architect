@@ -20,6 +20,8 @@ pub struct Command {
     pub enabled: bool,
     /// Why not, when it cannot run now.
     pub disabled_reason: Option<String>,
+    /// A toggle's state, the tick a menu shows; `None` when it is not one.
+    pub checked: Option<bool>,
 }
 
 impl Command {
@@ -32,6 +34,7 @@ impl Command {
             shortcut: String::new(),
             enabled: true,
             disabled_reason: None,
+            checked: None,
         }
     }
 
@@ -50,6 +53,13 @@ impl Command {
     #[must_use]
     pub fn shortcut(mut self, shortcut: impl Into<String>) -> Self {
         self.shortcut = shortcut.into();
+        self
+    }
+
+    /// A toggle, on or off: a menu ticks it when on.
+    #[must_use]
+    pub const fn checked(mut self, on: bool) -> Self {
+        self.checked = Some(on);
         self
     }
 

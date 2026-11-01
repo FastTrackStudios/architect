@@ -39,6 +39,17 @@
 //! length; `has` asks without reading. [`LocalFs`] keeps blobs at
 //! `<root>/<hex[0..2]>/<hex>`.
 //!
+//! # Blobs by hash, on demand
+//!
+//! [`Fetcher`] is a [`LocalFs`] that fills itself: a blob it lacks is
+//! fetched by hash from its [`Remote`]s (a peer over vox or iroh with
+//! [`VoxRemote`] against a [`BlobTransferHost`], a server's HTTP route
+//! with [`HttpRemote`] against [`serve_http`]), resumable, and streamed
+//! so a reader starts before the end arrives. [`LocalFs::pin`] keeps a
+//! blob offline; [`LocalFs::collect`] removes the blobs no document
+//! points at and no pin keeps. Which blobs a document points at is its
+//! kind's (`crdt::DocKind::blobs`, `crdt::blobs`).
+//!
 //! Native only for now. The wasm side (an OPFS file plus an `IndexedDB`
 //! ledger, as Signal's web packs do) is a follow-up.
 //!
@@ -56,7 +67,30 @@ use std::sync::{Mutex, OnceLock, PoisonError};
 
 use futures::future::BoxFuture;
 use sha2::Digest as _;
-use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWriteExt as _};
+use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncSeekExt as _, AsyncWriteExt as _};
+
+mod fetch;
+#[cfg(feature = "http-client")]
+mod http_remote;
+#[cfg(feature = "http")]
+mod http_serve;
+mod keep;
+mod stream_reader;
+#[cfg(feature = "vox")]
+mod wire;
+
+pub use fetch::{Fetcher, HashSource, Progress, Remote};
+#[cfg(feature = "http-client")]
+pub use http_remote::HttpRemote;
+#[cfg(feature = "http")]
+pub use http_serve::serve_http;
+pub use keep::Collected;
+pub use stream_reader::StreamReader;
+#[cfg(feature = "vox")]
+pub use wire::{
+    BlobTransfer, BlobTransferClient, BlobTransferDispatcher, BlobTransferHost, TransferError,
+    VoxRemote, blob_transfer_service_descriptor,
+};
 
 /// A boxed byte stream: what a [`Source`] serves and a [`BlobStore`]
 /// takes and returns.
@@ -183,6 +217,10 @@ pub enum BlobError {
     /// Not 64 hex digits.
     #[error("not a sha256 hex digest: {0:?}")]
     BadHash(String),
+    /// Every remote that has the blob failed to send it whole (a dropped
+    /// link, a refusal). What arrived is kept; fetching again resumes.
+    #[error("blob {hash} is unavailable: {reason}")]
+    Unavailable { hash: Sha256, reason: String },
     /// A host-supplied relative path that would leave its root.
     #[error("refusing the path {0:?}: not a plain relative path")]
     BadPath(String),
@@ -591,6 +629,29 @@ pub trait BlobStore: Send + Sync {
 
     /// Whether the store holds the blob.
     fn has(&self, hash: Sha256) -> BoxFuture<'_, Result<bool, BlobError>>;
+
+    /// The blob's bytes from `offset` (clamped to its end); `len` is the
+    /// bytes from there. Backends that can seek override the default,
+    /// which reads past the first `offset` bytes.
+    fn get_from(&self, hash: Sha256, offset: u64) -> BoxFuture<'_, Result<Blob, BlobError>> {
+        Box::pin(async move {
+            let blob = self.get(hash).await?;
+            let skip = offset.min(blob.len);
+            let mut reader = blob.reader;
+            let skipped = tokio::io::copy(&mut (&mut reader).take(skip), &mut tokio::io::sink())
+                .await
+                .map_err(BlobError::Source)?;
+            if skipped < skip {
+                return Err(BlobError::Source(io::Error::from(
+                    io::ErrorKind::UnexpectedEof,
+                )));
+            }
+            Ok(Blob {
+                len: blob.len.saturating_sub(skip),
+                reader,
+            })
+        })
+    }
 }
 
 /// [`BlobStore`] on the local filesystem: `<root>/<hex[0..2]>/<hex>`,
@@ -696,15 +757,26 @@ impl LocalFs {
     }
 
     async fn get_blob(&self, hash: Sha256) -> Result<Blob, BlobError> {
+        self.get_blob_from(hash, 0).await
+    }
+
+    /// The blob from `offset` (clamped to its end), by seeking.
+    async fn get_blob_from(&self, hash: Sha256, offset: u64) -> Result<Blob, BlobError> {
         let path = self.path_for(&hash);
-        let file = match tokio::fs::File::open(&path).await {
+        let mut file = match tokio::fs::File::open(&path).await {
             Ok(file) => file,
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Err(BlobError::NotFound(hash)),
             Err(e) => return Err(io_at(&path)(e)),
         };
         let len = file.metadata().await.map_err(io_at(&path))?.len();
+        let skip = offset.min(len);
+        if skip > 0 {
+            file.seek(io::SeekFrom::Start(skip))
+                .await
+                .map_err(io_at(&path))?;
+        }
         Ok(Blob {
-            len,
+            len: len.saturating_sub(skip),
             reader: Box::pin(file),
         })
     }
@@ -730,5 +802,9 @@ impl BlobStore for LocalFs {
 
     fn has(&self, hash: Sha256) -> BoxFuture<'_, Result<bool, BlobError>> {
         Box::pin(self.has_blob(hash))
+    }
+
+    fn get_from(&self, hash: Sha256, offset: u64) -> BoxFuture<'_, Result<Blob, BlobError>> {
+        Box::pin(self.get_blob_from(hash, offset))
     }
 }

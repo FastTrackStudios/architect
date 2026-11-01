@@ -466,6 +466,59 @@ fn screensets_recall_save_reset_and_keep_their_builtins() {
     assert_eq!(Screensets::from_json(&json).unwrap(), sets);
 }
 
+/// The View menu lists the screensets live, the current one ticked: the
+/// section is read again each time the bar is resolved.
+#[test]
+fn the_view_menu_lists_the_screensets_with_the_current_one_ticked() {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use architect_commands::{Command, Item, MenuBar};
+    use architect_workspace::Recall;
+
+    let sets = Rc::new(RefCell::new(Screensets::default()));
+    sets.borrow_mut()
+        .set_working(FormClass::Desk, Workspace::new());
+    let mix = sets.borrow_mut().save_as("Mix", Some(1));
+    let edit = sets.borrow_mut().save_as("Edit", Some(2));
+    let read = Rc::clone(&sets);
+    let bar = MenuBar::standard("Studio").menu("View", |m| {
+        m.section("Screensets", move || {
+            read.borrow().menu_rows("VIEW_RECALL_SCREENSET")
+        })
+    });
+    let commands = [Command::new("VIEW_RECALL_SCREENSET", "Recall screenset")];
+    let ticked = |bar: &MenuBar| -> Vec<(String, Option<bool>, Option<String>)> {
+        let menus = bar.resolve(&commands);
+        let view = menus.iter().find(|m| m.title == "View").unwrap();
+        view.items
+            .iter()
+            .filter_map(|i| match i {
+                Item::Live(row) => Some((row.label.clone(), row.checked, row.args.clone())),
+                _ => None,
+            })
+            .collect()
+    };
+    let args = |id: &str| Some(facet_json::to_string(&Recall { id: id.to_owned() }).unwrap());
+    assert_eq!(
+        ticked(&bar),
+        vec![
+            ("Mix".into(), Some(false), args(&mix)),
+            ("Edit".into(), Some(true), args(&edit)),
+        ]
+    );
+
+    // Recalled and added since: the same bar shows it, no rebuild.
+    sets.borrow_mut().recall(&mix, FormClass::Desk);
+    sets.borrow_mut().save_as("Record", None);
+    sets.borrow_mut().recall(&mix, FormClass::Desk);
+    let rows = ticked(&bar);
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0].1, Some(true));
+    assert_eq!(rows[2].0, "Record");
+    assert_eq!(rows[2].1, Some(false));
+}
+
 // ---- Where a drag lands, where a float shows ----
 
 #[test]

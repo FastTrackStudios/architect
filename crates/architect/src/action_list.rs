@@ -45,7 +45,9 @@
 //!   tool is built on.
 //! - **Guarding**: an action can be *disabled* with a reason
 //!   ([`ActionList::set_enabled`]; it shows in [`ActionInfo`] and refuses
-//!   to run with [`ActionError::Disabled`]); a list can carry a
+//!   to run with [`ActionError::Disabled`]); a toggle says whether it is
+//!   *on* ([`ActionList::set_checked`]; [`ActionInfo::checked`], the tick
+//!   a menu shows); a list can carry a
 //!   [`PermissionEngine`] ([`ActionList::set_authorizer`]) whose
 //!   [`PermissionEngine::authorize`] decides who may see
 //!   ([`ActionList::infos_for`]) and run ([`ActionList::run_json_as`])
@@ -119,6 +121,9 @@ pub struct ActionInfo {
     pub enabled: bool,
     /// Why not, when it cannot (`"no project is open"`).
     pub disabled_reason: Option<String>,
+    /// Whether a toggle is on now, the tick a menu shows
+    /// ([`ActionList::set_checked`]); `None` for an action that is not one.
+    pub checked: Option<bool>,
 }
 
 /// Why an action did not run, or failed.
@@ -207,6 +212,8 @@ pub enum EventKind {
     Changed { topic: String, detail: String },
     /// An action joined the list.
     Registered { id: String },
+    /// An action left the list ([`ActionList::unregister`]).
+    Unregistered { id: String },
 }
 
 /// How many events the list keeps for a watcher that falls behind.
@@ -400,6 +407,9 @@ impl ActionOutput for RawJson {
 /// Whether an action can run right now: `Err` says why not.
 pub type EnabledCheck = Arc<dyn Fn() -> Result<(), String> + Send + Sync>;
 
+/// Whether a toggle is on right now.
+pub type CheckedCheck = Arc<dyn Fn() -> bool + Send + Sync>;
+
 /// The engine a list asks who may see and run what.
 pub type Authorizer = Arc<dyn PermissionEngine + Send + Sync>;
 
@@ -438,6 +448,7 @@ struct Entry {
     forwarded: Option<ForwardedSchemas>,
     run: Run,
     enabled: Option<EnabledCheck>,
+    checked: Option<CheckedCheck>,
 }
 
 /// A forwarded action's schemas, as its own list described them.
@@ -615,6 +626,7 @@ impl ActionList {
             forwarded: None,
             run: Run::Sync(handler),
             enabled: None,
+            checked: None,
         })
     }
 
@@ -656,6 +668,7 @@ impl ActionList {
             forwarded: None,
             run: Run::Async(handler),
             enabled: None,
+            checked: None,
         })
     }
 
@@ -682,6 +695,7 @@ impl ActionList {
             forwarded: None,
             run: Run::Sync(Arc::new(move |_: &ActionCaller, args: &[u8]| handler(args))),
             enabled: None,
+            checked: None,
         })
     }
 
@@ -707,6 +721,7 @@ impl ActionList {
             forwarded: None,
             run: Run::Async(Arc::new(move |_: &ActionCaller, args: &[u8]| handler(args))),
             enabled: None,
+            checked: None,
         })
     }
 
@@ -755,6 +770,7 @@ impl ActionList {
             }),
             run: Run::Async(Arc::new(move |_: &ActionCaller, args: &[u8]| handler(args))),
             enabled: None,
+            checked: None,
         })
     }
 
@@ -785,6 +801,23 @@ impl ActionList {
         Ok(())
     }
 
+    /// Take `id` off the list — an action that was only ever there for a
+    /// while (a saved script deleted, an extension unloaded). False when
+    /// there was no such action. A call already running finishes.
+    pub fn unregister(&self, id: &str) -> bool {
+        let removed = self
+            .inner
+            .entries
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(id)
+            .is_some();
+        if removed {
+            self.publish(EventKind::Unregistered { id: id.to_owned() });
+        }
+        removed
+    }
+
     /// Say when `id` can run: `check` answers `Err(why)` while it cannot
     /// (`"no project is open"`). Asked before every run and whenever the
     /// action is described; a check that panics counts as disabled.
@@ -805,6 +838,32 @@ impl ActionList {
             .get_mut(id)
             .ok_or_else(|| ActionError::Unknown(id.to_owned()))?;
         entry.enabled = Some(Arc::new(check));
+        drop(entries);
+        Ok(())
+    }
+
+    /// Make `id` a toggle: `check` says whether it is on now, the tick a
+    /// menu shows beside it ([`ActionInfo::checked`]). Asked whenever the
+    /// action is described; a check that panics counts as off. Running it
+    /// is still its handler's business: a toggle's handler flips what
+    /// `check` reads.
+    ///
+    /// # Errors
+    ///
+    /// [`ActionError::Unknown`] when there is no such action.
+    pub fn set_checked<F>(&self, id: &str, check: F) -> Result<(), ActionError>
+    where
+        F: Fn() -> bool + Send + Sync + 'static,
+    {
+        let mut entries = self
+            .inner
+            .entries
+            .write()
+            .unwrap_or_else(PoisonError::into_inner);
+        let entry = entries
+            .get_mut(id)
+            .ok_or_else(|| ActionError::Unknown(id.to_owned()))?;
+        entry.checked = Some(Arc::new(check));
         drop(entries);
         Ok(())
     }
@@ -1284,6 +1343,7 @@ impl ActionBackend for ActionList {
             forwarded: None,
             run: Run::Sync(erased),
             enabled: None,
+            checked: None,
         });
         // The trait cannot say no; `validate` will.
         if let Err(error) = added {
@@ -1307,6 +1367,10 @@ fn info(entry: &Entry) -> ActionInfo {
         result_schema: entry.result_schema(),
         enabled: disabled_reason.is_none(),
         disabled_reason,
+        checked: entry
+            .checked
+            .as_ref()
+            .map(|check| catch_unwind(AssertUnwindSafe(|| check())).unwrap_or(false)),
     }
 }
 
@@ -1781,6 +1845,27 @@ mod tests {
             .expect("registered");
     }
 
+    /// An action taken off the list is gone — not listed, not run — a
+    /// watcher hears it left, and its id is free to register again.
+    #[test]
+    fn an_unregistered_action_is_gone_and_its_id_free() {
+        let list = ActionList::new();
+        unit(&list, &PLAY);
+        let seen = list.latest();
+        assert!(list.unregister("PLAY"));
+        assert!(!list.unregister("PLAY"), "already gone");
+        assert!(list.info("PLAY").is_none());
+        assert_eq!(list.run("PLAY"), Err(ActionError::Unknown("PLAY".into())));
+        let (events, _) = list.events_since(seen, 10, Duration::ZERO);
+        assert!(
+            events
+                .iter()
+                .any(|e| e.kind == EventKind::Unregistered { id: "PLAY".into() })
+        );
+        unit(&list, &PLAY);
+        list.run("PLAY").expect("registered again");
+    }
+
     /// (a) A disabled action says why — in its info and when run — and
     /// runs again once its check says yes; a check that panics counts as
     /// disabled; there is no check to set on an unknown id.
@@ -1823,6 +1908,39 @@ mod tests {
         );
         assert_eq!(
             list.set_enabled("NOPE", || Ok(())),
+            Err(ActionError::Unknown("NOPE".into()))
+        );
+    }
+
+    /// A toggle shows whether it is on, follows what its check reads,
+    /// counts a check that panics as off; an action that is not one says
+    /// `None`; there is no check to set on an unknown id.
+    #[test]
+    fn a_toggle_says_whether_it_is_on() {
+        let list = ActionList::new();
+        unit(&list, &SAVE);
+        assert_eq!(list.info("PROJECT_SAVE").and_then(|i| i.checked), None);
+        let on = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&on);
+        list.set_checked("PROJECT_SAVE", move || flag.load(Ordering::SeqCst))
+            .expect("set");
+        assert_eq!(
+            list.info("PROJECT_SAVE").and_then(|i| i.checked),
+            Some(false)
+        );
+        on.store(true, Ordering::SeqCst);
+        assert_eq!(
+            list.info("PROJECT_SAVE").and_then(|i| i.checked),
+            Some(true)
+        );
+        list.set_checked("PROJECT_SAVE", || panic!("check blew up"))
+            .expect("set");
+        assert_eq!(
+            list.info("PROJECT_SAVE").and_then(|i| i.checked),
+            Some(false)
+        );
+        assert_eq!(
+            list.set_checked("NOPE", || true),
             Err(ActionError::Unknown("NOPE".into()))
         );
     }
@@ -2294,6 +2412,7 @@ mod tests {
             result_schema: Some(r#"{"type":"number"}"#.to_owned()),
             enabled: true,
             disabled_reason: None,
+            checked: None,
         };
         let forwarded: super::AsyncHandler = Arc::new(|args: &[u8]| {
             let echoed = [b"{\"got\":".as_slice(), args, b"}"].concat();

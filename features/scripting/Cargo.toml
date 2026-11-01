@@ -1,0 +1,48 @@
+[package]
+name = "architect-scripting"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Scripts: Luau programs over the Action List, each saved one an action, run by a person or by a model over MCP, one undo step"
+
+# docs/content/architecture/extensions.md ("Scripts and conditional
+# actions", "An agent writes scripts") and actions-everywhere.md §5. The
+# default set is the model — a script, whose it is (the person's or the
+# organization's), where saved ones are kept, the transaction a run makes,
+# what a failure says (with its line) — pure data, wasm-clean. `luau` is
+# the runtime (mlua's Luau) and the SCRIPT_* actions; `crdt` runs a
+# script's changes as one step of a document's `crdt::History`;
+# `settings` keeps saved scripts in a settings file.
+
+[features]
+default = []
+luau = ["dep:mlua", "dep:architect", "dep:serde_json", "dep:tracing"]
+crdt = ["dep:crdt"]
+settings = ["dep:architect", "architect/settings"]
+
+[dependencies]
+facet = { workspace = true }
+architect = { workspace = true, optional = true, features = ["action-list"] }
+crdt = { workspace = true, optional = true }
+# Luau (Roblox's sandboxed Lua), built from source; `async` so a script
+# awaits an async action, `send` so a run is a `Send` future like every
+# other action's, `serde` for JSON in and out.
+mlua = { version = "0.12", optional = true, features = ["luau", "async", "send", "serde"] }
+serde_json = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+
+[dev-dependencies]
+# Its own runtime, so `cargo test --workspace` builds the tests with it.
+architect-scripting = { path = ".", features = ["luau", "crdt", "settings"] }
+architect-mcp = { path = "../mcp" }
+architect-permissions.workspace = true
+futures = "0.3"
+serde_json.workspace = true
+crdt = { workspace = true }
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true

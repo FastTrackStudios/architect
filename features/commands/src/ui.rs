@@ -34,6 +34,7 @@ use lucide_dioxus::{Command as CommandIcon, Search};
 use crate::fuzzy::fuzzy;
 use crate::keymap::{Keymap, PersonKeymap};
 use crate::keys_ui::{Asking, Pick, Recording};
+use crate::menu::Pick as MenuPick;
 use crate::opener::{Found, OpenIn, Opener, Openers};
 use crate::palette::{Command, Query, Ranked, Scope, rank};
 use crate::recent::Recents;
@@ -64,6 +65,9 @@ pub struct Commands {
     pub overlay: Signal<Option<Overlay>>,
     /// Bumped when the scoped commands change, so the palette redraws.
     pub(crate) version: Signal<u64>,
+    /// Whether the platform shows the menu bar ([`NativeMenus`](crate::NativeMenus)
+    /// took it), so the in-window one stands aside.
+    global_menu: Signal<bool>,
     serial: CopyValue<u64>,
     /// The app's keymap with the person's layer over it.
     pub(crate) keymap: Signal<Keymap>,
@@ -102,6 +106,7 @@ pub fn use_commands_provider() -> Commands {
         recents: Signal::new(Recents::default()),
         overlay: Signal::new(None),
         version: Signal::new(0),
+        global_menu: Signal::new(false),
         serial: CopyValue::new(0),
         keymap: Signal::new(Keymap::default()),
         on_keymap: CopyValue::new(None),
@@ -204,6 +209,9 @@ fn from_info(info: &architect::action::ActionInfo) -> Command {
         .group(group)
         .detail(info.description.clone())
         .shortcut(info.shortcut.clone());
+    if let Some(on) = info.checked {
+        c = c.checked(on);
+    }
     if !info.enabled {
         c = c.disabled(
             info.disabled_reason
@@ -291,7 +299,9 @@ impl Commands {
         all
     }
 
-    /// Runs command `id`. False when there is none, or it is disabled.
+    /// Runs command `id`. False when there is none, or it is disabled. An
+    /// async action from a list (a saved script) is spawned, and counts as
+    /// run once started.
     #[must_use = "false when there is no such command, or it cannot run"]
     pub fn run(&self, id: &str) -> bool {
         let found = {
@@ -317,13 +327,23 @@ impl Commands {
             .cloned();
         if let Some(list) = list {
             recents.write().touch(id);
-            return list.run(id).is_ok();
+            if !list.is_async(id) {
+                return list.run(id).is_ok();
+            }
+            // An async action (a saved script, a service call) is awaited
+            // off the key's turn; started is all a key can know.
+            let id = id.to_owned();
+            spawn(async move {
+                let _ = list.run_json_async(&id, b"").await;
+            });
+            return true;
         }
         self.run_custom(id)
     }
 
     /// Runs action `id` with `args` (JSON). False when there is no such
-    /// action in the app's lists, it is disabled, or it said no.
+    /// action in the app's lists, it is disabled, or it said no. An async
+    /// action is spawned, and counts as run once started.
     #[must_use = "false when it did not run"]
     pub fn run_with(&self, id: &str, args: &str) -> bool {
         let list = self
@@ -335,7 +355,15 @@ impl Commands {
         list.is_some_and(|list| {
             let mut recents = self.recents;
             recents.write().touch(id);
-            list.run_json(id, args.as_bytes()).is_ok()
+            if !list.is_async(id) {
+                return list.run_json(id, args.as_bytes()).is_ok();
+            }
+            let id = id.to_owned();
+            let args = args.as_bytes().to_vec();
+            spawn(async move {
+                let _ = list.run_json_async(&id, &args).await;
+            });
+            true
         })
     }
 
@@ -346,6 +374,62 @@ impl Commands {
             .iter()
             .find_map(|l| l.info(id))
             .and_then(|i| i.params_schema)
+    }
+
+    /// Does what picking a menu row does: runs its command, with the row's
+    /// arguments when it has them (a live section's row: those go to the
+    /// Action List, which is where an action that takes any lives). False
+    /// when there is no such command, it is disabled or it failed.
+    #[must_use = "false when there is no such command, or it cannot run"]
+    pub fn run_pick(&self, pick: &MenuPick) -> bool {
+        let Some(args) = &pick.args else {
+            return self.run(&pick.command);
+        };
+        let list = self
+            .lists
+            .read()
+            .iter()
+            .find(|l| l.info(&pick.command).is_some_and(|i| i.enabled))
+            .cloned();
+        list.is_some_and(|list| {
+            let mut recents = self.recents;
+            recents.write().touch(&pick.command);
+            list.run_json(&pick.command, args.as_bytes()).is_ok()
+        })
+    }
+
+    /// Where the Action Lists' events have got to: it moves on with each
+    /// run, each [`ActionList::changed`] the app reports, each action
+    /// registered. A menu bar asks again (`refresh`) when it moved,
+    /// so enabled and ticked states follow the events, not a clock.
+    #[must_use]
+    pub fn heard(&self) -> u64 {
+        self.lists
+            .peek()
+            .iter()
+            .fold(0_u64, |sum, l| sum.wrapping_add(l.latest()))
+    }
+
+    /// Whether the platform shows the app's menu bar (the macOS one, or a
+    /// Linux shell that took the exported one): the in-window bar
+    /// ([`InWindowMenus`](crate::InWindowMenus)) draws nothing then.
+    #[must_use]
+    pub fn has_global_menu(&self) -> bool {
+        (self.global_menu)()
+    }
+
+    /// Says whether the platform shows the menu bar: what a backend does
+    /// once it knows.
+    pub fn set_global_menu(&self, shown: bool) {
+        let mut g = self.global_menu;
+        if *g.peek() != shown {
+            g.set(shown);
+        }
+    }
+
+    /// Everything that reads the commands reads them again.
+    pub fn refresh(&self) {
+        self.bump();
     }
 
     pub fn show(&self, overlay: Overlay) {
