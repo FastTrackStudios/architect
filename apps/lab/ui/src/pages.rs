@@ -136,7 +136,7 @@ pub fn ListPage(tab: &'static str) -> Element {
         .separate(Action::new("Search", icon!(Search), |()| {}))
         .joined([
             Tool::action(Action::new("New", icon!(Plus), move |()| {
-                lab.go(Route::Item(tab, 0))
+                lab.go(Route::Item(tab, 0));
             })),
             Tool::more(lab_menu(menu, lab)),
         ]);

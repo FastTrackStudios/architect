@@ -118,7 +118,7 @@ pub fn LabApp() -> Element {
         .action("Manage organizations", icon!(Settings2), |()| {});
     let window_chrome = screen::use_window_chrome();
     let capture = shell::Action::new("Capture", icon!(Feather), move |()| {
-        lab.go(Route::Item("inbox", 0))
+        lab.go(Route::Item("inbox", 0));
     });
     rsx! {
         div {
