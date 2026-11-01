@@ -12,9 +12,8 @@ permissions:
 
 jobs:
   release:
-    # Only git and the node-based release action are needed: a hosted
-    # runner does it without waiting on THEBATTLESHIP.
-    runs-on: ubuntu-latest
+    # Reserved capacity: normal CI cannot occupy the release slots.
+    runs-on: [self-hosted, thebattleship-release]
     steps:
       - uses: actions/checkout@v4
         with:

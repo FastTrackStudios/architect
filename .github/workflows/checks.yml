@@ -26,22 +26,18 @@ env:
   CARGO_PROFILE_TEST_DEBUG: "0"
   CARGO_INCREMENTAL: "0"
 
-# Every job runs on GitHub-hosted ubuntu-latest: the repo is public, so
-# the runners cost nothing, and three jobs run side by side instead of one
-# serial job queued behind the other repos on THEBATTLESHIP.
-#
-# CACHE BUDGET: the repo has 10 GB of Actions cache, evicted LRU across
-# branches. rust-cache SAVES only on main; PRs restore main's entry. Each
-# job has its own shared-key, so check-mode (lint), test and wasm32
-# artifacts never overwrite each other.
+# Build jobs use the shared THEBATTLESHIP pool. The job gate provides
+# repo-scoped CI_CACHE_DIR/CARGO_HOME; targets are isolated by kind and
+# slot, while kache restores reusable artifacts across slots and repos.
+# The status-only aggregator and public PR fast checks remain hosted.
 jobs:
   lint:
     name: Lint (fmt + clippy + boundaries + docs)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, thebattleship]
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/hosted-rust
+      - uses: ./.github/actions/shared-rust
         with:
           kind: lint
 
@@ -67,11 +63,11 @@ jobs:
 
   test:
     name: Tests
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, thebattleship]
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/hosted-rust
+      - uses: ./.github/actions/shared-rust
         with:
           kind: test
 
@@ -82,11 +78,11 @@ jobs:
   # native rendering (blitz/vello) and are checked natively only.
   wasm:
     name: wasm check
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, thebattleship]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/hosted-rust
+      - uses: ./.github/actions/shared-rust
         with:
           kind: wasm
 
@@ -137,18 +133,14 @@ jobs:
   # what the graph says. `v0.0.2` already names a commit sitting between
   # v0.5.0 and v0.6.0; this stops the next one.
   tags:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, thebattleship]
     steps:
       - uses: actions/checkout@v4
         with:
           # The check walks every tag, so it needs the whole history.
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@master
+      - uses: ./.github/actions/shared-rust
         with:
-          toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: checks-tags
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          kind: tags
       - name: tag ordering
         run: cargo run -p xtask -- tags --verbose
