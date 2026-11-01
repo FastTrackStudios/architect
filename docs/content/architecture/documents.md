@@ -213,6 +213,18 @@ synced with it.
 
 ## Files
 
+> **Status: the core landed (2026-11-01)** in `architect-files`
+> (`features/files`): the store (`features/files/src/server/mod.rs`
+> `FilesServer`: every org's roots, trees, versions, labels, grants,
+> uploads and quota under `OrgId::path`, bytes in the `architect::blob`
+> store), the wire (`features/files/src/service.rs` `FilesService`, bytes
+> over vox channels, its events per subscriber), access by the caller's
+> role in the org and per-folder grants (`features/files/src/access.rs`
+> `resolve`), version labels, and the client
+> (`features/files/src/client.rs` `FilesClient`). Next: client sync,
+> the browser and desktop integrations, adopting on-disk folders, the
+> HTTP byte face; then Task and Studio move over.
+
 Task's Files platform (`task:features/files`, about 38,600 lines) is the
 file layer every app needs: roots of files and folders, versions,
 chunked and resumable uploads that only send what is new, bytes over vox
@@ -247,9 +259,10 @@ Task and Studio are both its clients, as any architect app is.
 | ffmpeg proxies (`files-transcode`) | a feature of the server, behind a cargo feature |
 
 **One store with documents:** a document's blobs (above) and files are
-the same store — BLAKE3 both — so a song's audio is a file in its root
-and a blob its document points at, fetched, pinned and kept offline the
-same way.
+the same store — `architect::blob`, addressed by sha256 (Task's Files
+used BLAKE3; a file's `ContentId` is now the blob's sha256) — so a song's
+audio is a file in its root and a blob its document points at, fetched,
+pinned and kept offline the same way.
 
 ## Collaborative text
 
