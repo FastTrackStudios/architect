@@ -43,8 +43,10 @@ The springs used, timed to Obsidian's (measured below), none
 overshooting: `Spring::PANEL` (0.12 s: a sidebar, a dock, a split),
 `Spring::SNAPPY` (0.22 s: tabs, a stacked strip's wheel notch and
 spine), `Spring::TRACK` (0.11 s: the drop highlight following the
-pointer). `Spring::SHEET` (0.32 s) is a phone's drawer, its tab switcher
-and the keyboard's lift, which the study (on a desk) did not measure.
+pointer). `Spring::SHEET` (0.32 s) is a phone's drawer, its tab switcher,
+the keyboard's lift and a tour's spotlight
+(`features/guide/src/tour.rs` `TourLayer`), which the study (on a desk)
+did not measure.
 
 ## One clock
 
