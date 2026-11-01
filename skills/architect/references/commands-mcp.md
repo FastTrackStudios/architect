@@ -97,6 +97,26 @@ scripting.install()?;  // SCRIPT_* actions + every saved script
 - Saved scripts are read when they run; `save` checks the source first. `SCRIPT_SAVE_ORG` / `SCRIPT_DELETE_ORG` are separate ids so a permission engine can keep the organization's scripts to some people.
 - Limits: `Limits { memory, steps }` per run, `MAX_RUNNING` runs at once (a script that runs itself stops there).
 - A single-person list: on a multi-tenant server every person's saved scripts would share one list; give each its own list there.
+- Live scripts: `Runtime::start(caller, source, args, step)` runs the first part and gives a `Live`; each `Live::frame()` runs what the script handed `defer(fn)` (ReaScript's `reaper.defer`), one step each, the step limit reset. A frame that fails stops it. One-off runs have no `defer`.
+- Modules: `Runtime::with_module(Arc<dyn Module>)` adds a global and a `require` path (`require` finds nothing else). A module keeps its state in an `Arc` shared with its host, never as a Luau value (that would keep the state alive); `raise(lua, msg)` fails the script at its line. `mlua` is re-exported from `architect_scripting::luau`.
+
+## Canvases (`architect-canvas`)
+
+```rust
+let (report, session) = Session::start(&runtime, &caller, source, args, "Marker lane").await;
+let mut s = session.expect("started");          // None: the first run failed (report says why)
+s.publish("session.arrange", Some(spaces));     // the view's time axis and lanes, scrolled
+s.pointer("session.arrange", ViewPointer { at, down, context });
+s.frame(imgui::Input { pointer, down, sizes, closed }).await;  // one frame: a press, a release, a resize
+for layer in s.output().layers_on("session.arrange", Plane::Over) { /* draw */ }
+```
+
+- Scripts see `ImGui` (ReaImGui's names: `require 'imgui' '0.10'`, `CreateContext`, `Begin(ctx, name, p_open?, flags?)` → `visible, open`, `Text`, `Button`, `Checkbox`, `SliderDouble`/`SliderInt` → `changed, v`, `SameLine`, `Separator`, `PushID`, `WindowFlags_*`, `Cond_*`) and `Canvas` (`Layer(view, plane?, id?)`, `Spaces`, `TimeToX`, `Lane`, `Line`, `Rect`, `Circle`, `Text`, `Region` → `hovered, clicked, held, context`). Colours are `0xRRGGBBAA`.
+- A window is a workspace pane: the UI never moves or titles it; it is laid out at its pane's size (`Input::sizes`), its id is `<context>/<name id>`, closing its pane gives `open == false` once (`Input::closed`).
+- A layer drawn into in a frame is redrawn from scratch; untouched it keeps its last drawing. Regions answer from the last frame's hit-test (the last claimed is on top); everywhere else the pointer passes to the view.
+- Frames come on change, not a timer: a press and a release must each be its own frame (`use_script_canvas` does this).
+- On Blitz: `use_canvases()` at the app, `use_script_canvas(…)` per script, `use_tool_windows(workspace)`, `window_view()` in the `Views`, and `CanvasLayers { view, plane }` as a child of the (positioned) view, which publishes its spaces with `Canvases::publish`. Shapes are boxes (no egui, no `<canvas>` yet).
+- An extension declares `[[overlays]] id, view, plane, script` (Luau kind only); the app starts it as a `Session` on a runtime gated by `host::gate(&manifest)`.
 
 ## Extensions (`architect-extensions`)
 
