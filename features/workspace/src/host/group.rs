@@ -597,7 +597,7 @@ fn Stacked(group: Group, current: PaneId) -> Element {
     // notch and a spine's press eased there, a flicked scrollbar coasting.
     let strip = use_hook(|| {
         let from = host.scrolls.peek().get(&id).copied().unwrap_or(0.0);
-        let m = Motion::new(f64::from(from), Spring::PANEL, 0.25);
+        let m = Motion::new(f64::from(from), Spring::SNAPPY, 0.25);
         let mut strips = host.strips;
         strips.write().insert(id, m);
         m
