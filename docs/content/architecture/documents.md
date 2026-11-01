@@ -274,6 +274,16 @@ pinned and kept offline the same way.
 
 ## Collaborative text
 
+> **Status: the binding landed (2026-11-01)** in `crdt`:
+> `features/crdt/crdt/src/text.rs` `TextBinding` (`on_local`, `pull`,
+> `sync_into`, `caret`, `resolve`, `remote_carets`, `set_offset`,
+> `set_composing`) and `EditorBinding`. Remote edits still queued when
+> the person types are transformed against what they typed; the binding
+> checks the editor would match the document after every hand-over and
+> sends one replacement when it would not. Not yet: `editor-crdt`
+> implementing `EditorBinding`, Task's notes and Studio's chart editor
+> on it.
+
 Every app has text — a note, lyrics, a chart, a comment — and every one
 needs the same: a Loro text container, an editor bound to it, and the
 others' carets and selections in it. Task and Studio each built it, the
@@ -299,6 +309,17 @@ properties, a chart's sections), and what the app does when typing
 pauses.
 
 ## Presence and cursors
+
+> **Status: places, rosters and the overlay landed (2026-11-01)**:
+> `features/crdt/crdt/src/presence.rs` `Place` (a space and named
+> coordinates), `Here` (state, pointer at 30 a second, playhead),
+> `Roster` (`sync`, `here`, `pointers`, `selections_in`, `carets_in`),
+> `PointerTrail`; the hooks `use_roster`, `use_here`,
+> `use_presence_frame` (`features/crdt/crdt/src/hooks.rs`); the layer a
+> pane draws them in, `features/workspace/src/host/presence.rs`
+> `PresenceLayer` and `use_presence_overlay`. Not yet: the shared clock,
+> follow, the org-wide roster, rosters keyed by an org's documents, and
+> Studio's arrangement on it.
 
 Who is here, where their pointer is, what they have selected, where
 their playhead is — drawn live, in the app's own coordinates, so a

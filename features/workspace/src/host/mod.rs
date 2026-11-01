@@ -28,6 +28,7 @@ mod commands;
 mod dock;
 mod group;
 mod overlay;
+mod presence;
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -44,6 +45,7 @@ use crate::ops::{Dest, Target};
 use dock::DockView;
 use group::NodeView;
 use overlay::{DragLayer, FloatView, MenuLayer, PhoneBody, SheetLayer};
+pub use presence::{PresenceLayer, PresenceOverlay, use_presence_overlay};
 
 /// What a pane can show: registered once, like the shell's tabs.
 #[derive(Clone)]
