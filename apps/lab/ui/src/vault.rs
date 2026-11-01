@@ -244,14 +244,6 @@ pub fn VaultPage() -> Element {
             },
         )
     });
-    // What is open, on the status line (Obsidian's counts).
-    let open = workspace.read().panes.len();
-    let edits: u32 = workspace
-        .read()
-        .panes
-        .iter()
-        .filter_map(|p| p.state.parse::<u32>().ok())
-        .sum();
     let set = {
         let s = sets.read();
         s.active
@@ -259,13 +251,9 @@ pub fn VaultPage() -> Element {
             .and_then(|id| s.get(id))
             .map(|set| set.name.clone())
     };
-    let mut items = vec![
-        StatusItem::new("backlinks", "0 backlinks").left(),
-        StatusItem::new("panes", crate::count(open, "pane")).left(),
-        StatusItem::new("edits", crate::count(edits, "edit")).left(),
-    ];
-    // The note on show adds its own; the screenset is the app's.
-    items.extend(pane_status());
+    // The note on show says its own (its words, Obsidian's way); the
+    // screenset is the vault's.
+    let mut items = pane_status();
     if let Some(set) = set {
         items.push(StatusItem::new("screenset", set).hint("⌘1 Write, ⌘2 Mix"));
     }
@@ -295,6 +283,8 @@ pub fn VaultPage() -> Element {
             .and_then(|id| w.pane(id))
             .map_or_else(|| "Vault".to_owned(), |p| p.title.clone())
     };
+    // A phone's pane switcher: how many there are to switch between.
+    let open = workspace.read().panes.len();
     let panes = Toolbar::new().separate(
         Action::new(format!("{open} open"), icon!(Layers), move |()| {
             switcher.set(true);
@@ -371,6 +361,10 @@ fn screen_class(screen: &Screen) -> FormClass {
     FormClass::of(w, h, screen.form() != FormFactor::Desk)
 }
 
+/// A note's body (the lab's notes are all this one).
+const WELCOME: &str = "Notes open as tabs. Drag a tab to a pane's edge to split it, or to the window's edge to dock it; \
+                       right-click a tab for the rest. What you arrange comes back the next time you open the vault.";
+
 #[component]
 fn NoteView() -> Element {
     let pane = use_pane();
@@ -378,21 +372,14 @@ fn NoteView() -> Element {
     let edits: u32 = pane.state().parse().unwrap_or(0);
     let title = pane.title();
     // The note's own fact on the status line, while it is the one on show.
-    let words = title.split_whitespace().count();
+    let words = WELCOME.split_whitespace().count();
     use_pane_status(vec![
-        StatusItem::new(
-            "words",
-            format!("{} in the title", crate::count(words, "word")),
-        )
-        .left(),
+        StatusItem::new("words", crate::count(words, "word")).left(),
     ]);
     rsx! {
         div { style: "flex: 1; display: flex; flex-direction: column; gap: 12px; padding: 28px 36px; overflow-y: scroll;",
             div { style: "font-size: 26px; font-weight: 750; color: {t.ink};", "{title}" }
-            div { style: "max-width: 560px; font-size: 14px; line-height: 1.6; color: {t.ink_2};",
-                "Notes open as tabs. Drag a tab to a pane's edge to split it, or to the window's edge to dock it; \
-                 right-click a tab for the rest. What you arrange comes back the next time you open the vault."
-            }
+            div { style: "max-width: 560px; font-size: 14px; line-height: 1.6; color: {t.ink_2};", "{WELCOME}" }
             button {
                 class: "lp",
                 style: "align-self: flex-start; min-height: 32px; padding: 0 14px; border-radius: 8px; \

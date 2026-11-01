@@ -234,6 +234,24 @@ impl Lists {
         }
     }
 
+    /// Takes `id`'s note `at` away; whether there was one.
+    pub fn unnote(&mut self, id: usize, at: usize) -> bool {
+        match self.items.iter_mut().find(|i| i.id == id) {
+            Some(item) if at < item.notes.len() => {
+                item.notes.remove(at);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// `id`'s notes as they were (Undo) or will be (Redo).
+    pub fn set_notes(&mut self, id: usize, notes: Vec<String>) {
+        if let Some(item) = self.items.iter_mut().find(|i| i.id == id) {
+            item.notes = notes;
+        }
+    }
+
     /// Takes `id` out; where it was and what it was, for [`Lists::restore`].
     pub fn remove(&mut self, id: usize) -> Option<(usize, Item)> {
         let at = self.items.iter().position(|i| i.id == id)?;
@@ -381,5 +399,10 @@ mod tests {
             lists.get(id).map(|i| i.notes.clone()),
             Some(vec!["Ask for the load-in time".to_owned()])
         );
+        assert!(lists.unnote(id, 0));
+        assert!(!lists.unnote(id, 0));
+        assert_eq!(lists.get(id).map(|i| i.notes.len()), Some(0));
+        lists.set_notes(id, vec!["Back again".to_owned()]);
+        assert_eq!(lists.get(id).map(|i| i.notes.len()), Some(1));
     }
 }

@@ -196,25 +196,6 @@ pub fn ListPage(tab: &'static str) -> Element {
                     span { style: "white-space: nowrap;", "{keys_hint(can_finish)}" }
                 }
             }
-            // Done and Delete answer where they were asked, with the way back.
-            if let Some(u) = undone {
-                div { style: "display: flex; align-items: center; gap: 10px; margin-bottom: 10px; padding: 8px 8px 8px 14px; \
-                              border-radius: 10px; background: {t.accent_soft}; font-family: {t.font}; font-size: 14px; color: {t.ink};",
-                    span { style: "flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;",
-                        "{u.said}"
-                    }
-                    button {
-                        class: "lp",
-                        style: "flex-shrink: 0; height: 30px; display: flex; align-items: center; gap: 6px; padding: 0 12px; \
-                                border: none; border-radius: 8px; background: {t.pill}; color: {t.ink}; \
-                                font-family: {t.font}; font-size: 13px; font-weight: 600;",
-                        onclick: move |_| lab.undo(),
-                        Undo2 { size: 14, color: t.ink }
-                        "Undo"
-                        span { style: "font-size: 12px; font-weight: 500; color: {t.ink_3};", "⌘Z" }
-                    }
-                }
-            }
             if rows.is_empty() {
                 Empty { tab, project }
             }
@@ -246,6 +227,26 @@ pub fn ListPage(tab: &'static str) -> Element {
                     }
                 }
             }
+            }
+            // What the last change was, under the list (so no row moves under
+            // the pointer), with the way back.
+            if let Some(u) = undone {
+                div { style: "display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 8px 8px 8px 14px; \
+                              border-radius: 10px; background: {t.accent_soft}; font-family: {t.font}; font-size: 14px; color: {t.ink};",
+                    span { style: "flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;",
+                        "{u.said}"
+                    }
+                    button {
+                        class: "lp",
+                        style: "flex-shrink: 0; height: 30px; display: flex; align-items: center; gap: 6px; padding: 0 12px; \
+                                border: none; border-radius: 8px; background: {t.pill}; color: {t.ink}; \
+                                font-family: {t.font}; font-size: 13px; font-weight: 600;",
+                        onclick: move |_| lab.undo(),
+                        Undo2 { size: 14, color: t.ink }
+                        "Undo"
+                        span { style: "font-size: 12px; font-weight: 500; color: {t.ink_3};", "⌘Z" }
+                    }
+                }
             }
         }
     }
@@ -296,6 +297,9 @@ fn Empty(tab: &'static str, project: Option<&'static str>) -> Element {
                         background: {t.pill}; color: {t.ink}; font-family: {t.font}; font-size: 14px;",
                 onclick: move |_| lab.capture(tab),
                 "{new_label}"
+                if tab == "inbox" {
+                    span { style: "margin-left: 8px; font-size: 12px; color: {t.ink_3};", "⇧⌘N" }
+                }
             }
         }
     }
@@ -376,6 +380,8 @@ pub fn ItemPage(tab: &'static str, id: usize) -> Element {
     // The note being written: empty each time (Blitz leaves a filled
     // field's caret at its start).
     let mut note = use_signal(String::new);
+    // A Return on an empty field: said why nothing was added.
+    let mut nudge = use_signal(|| false);
     let item = lab.lists.read().get(id).cloned();
     let crumbs = vec![
         org_crumb(),
@@ -433,7 +439,18 @@ pub fn ItemPage(tab: &'static str, id: usize) -> Element {
                     }
                 }
                 for (n, line) in item.notes.iter().enumerate() {
-                    span { key: "{n}", style: "font-size: 15px; line-height: 1.5;", "{line}" }
+                    div { key: "{n}", style: "display: flex; align-items: flex-start; gap: 10px;",
+                        span { style: "flex: 1; font-size: 15px; line-height: 1.5;", "{line}" }
+                        // A note can go again (⌘Z puts it back).
+                        button {
+                            class: "lp",
+                            "aria-label": "Remove the note “{line}”",
+                            style: "flex-shrink: 0; height: 26px; padding: 0 10px; border: 1px solid {t.rule}; border-radius: 7px; \
+                                    background: transparent; color: {t.ink_2}; font-family: {t.font}; font-size: 12px;",
+                            onclick: move |_| lab.unnote(id, n),
+                            "Remove"
+                        }
+                    }
                 }
                 // Blitz draws no `placeholder`: the field says what it is by
                 // its label.
@@ -445,17 +462,28 @@ pub fn ItemPage(tab: &'static str, id: usize) -> Element {
                     style: "height: 40px; box-sizing: border-box; padding: 0 12px; border-radius: 10px; \
                             border: 1px solid {t.rule}; background: {t.pill}; color: {t.ink}; \
                             font-family: {t.font}; font-size: 15px;",
-                    oninput: move |e: FormEvent| note.set(e.value()),
+                    oninput: move |e: FormEvent| {
+                        let mut typing = lab.typing;
+                        typing.set(!e.value().trim().is_empty());
+                        nudge.set(false);
+                        note.set(e.value());
+                    },
                     onkeydown: move |e: KeyboardEvent| {
                         if e.key() == Key::Enter {
                             e.prevent_default();
                             let text = note.peek().clone();
-                            let mut lists = lab.lists;
-                            if lists.write().note(id, &text) {
+                            if lab.note(id, &text) {
                                 note.set(String::new());
+                                let mut typing = lab.typing;
+                                typing.set(false);
+                            } else {
+                                nudge.set(true);
                             }
                         }
                     },
+                }
+                if nudge() {
+                    span { style: "font-size: 13px; color: {t.ink_2};", "Type the note first: an empty one is not kept." }
                 }
             }
         }
@@ -468,6 +496,7 @@ pub fn CapturePage(tab: &'static str) -> Element {
     let t = use_shell().theme;
     let lab = use_context::<Lab>();
     let mut text = use_signal(String::new);
+    let mut nudge = use_signal(|| false);
     let (heading, ask) = new_one(tab);
     let into = if tab == "inbox" {
         "the Inbox".to_owned()
@@ -501,10 +530,18 @@ pub fn CapturePage(tab: &'static str) -> Element {
                     style: "height: 44px; box-sizing: border-box; padding: 0 14px; border-radius: 10px; \
                             border: 1px solid {t.rule}; background: {t.pill}; color: {t.ink}; \
                             font-family: {t.font}; font-size: 16px;",
-                    oninput: move |e: FormEvent| text.set(e.value()),
+                    oninput: move |e: FormEvent| {
+                        let mut typing = lab.typing;
+                        typing.set(!e.value().trim().is_empty());
+                        nudge.set(false);
+                        text.set(e.value());
+                    },
                     onkeydown: move |e: KeyboardEvent| {
                         if e.key() == Key::Enter {
                             e.prevent_default();
+                            if text.peek().trim().is_empty() {
+                                nudge.set(true);
+                            }
                             save();
                         } else if e.key() == Key::Escape {
                             // Esc lets it go, as everywhere on a Mac; Undo
@@ -519,7 +556,7 @@ pub fn CapturePage(tab: &'static str) -> Element {
                     },
                 }
                 span { style: "font-size: 13px; color: {t.ink_3};",
-                    if empty { "Return adds it to {into}; Esc goes back." } else { "Return adds it to {into}; Esc drops it (⌘Z brings it back)." }
+                    if nudge() { "Type a line first: an empty capture adds nothing." } else if empty { "Return adds it to {into}; Esc goes back." } else { "Return adds it to {into}; Esc drops it (⌘Z brings it back)." }
                 }
             }
         }
@@ -617,7 +654,7 @@ pub fn RightSide() -> Element {
                 span { style: "font-size: 12px; font-weight: 650; color: {t.ink_3};", "Details" }
                 span { style: "font-size: 15px; font-weight: 650; color: {t.ink_2};", "Nothing selected" }
                 span { style: "font-size: 13px; line-height: 1.5; color: {t.ink_3};",
-                    "Click a row, or press ↓, to see where it is, when, and whose it is."
+                    "Click a row, or press ↓, to see where it is and when, and what it can do."
                 }
                 span { style: "font-size: 13px; line-height: 1.5; color: {t.ink_3};",
                     "Every key: ⌘/ (Help)"
@@ -640,11 +677,7 @@ pub fn RightSide() -> Element {
         || title(item.tab).to_owned(),
         |p| format!("{} · {p}", title(item.tab)),
     );
-    let rows = [
-        ("In", place),
-        ("When", item.detail.clone()),
-        ("Owner", "You".to_owned()),
-    ];
+    let rows = [("In", place), ("When", item.detail.clone())];
     rsx! {
         div { style: "display: flex; flex-direction: column; gap: 12px; padding: 12px 20px; font-family: {t.font}; color: {t.ink};",
             span { style: "font-size: 12px; font-weight: 650; color: {t.ink_3};", "Details" }
@@ -691,7 +724,10 @@ const KEYS: [(&str, &[(&str, &str)]); 3] = [
         "Anywhere",
         &[
             ("⇧⌘N", "Capture into the Inbox"),
-            ("⌘Z", "Undo the last Done, Move, Delete or Capture"),
+            (
+                "⌘Z",
+                "Undo the last change: Done, Move, Delete, Capture, Drop, a note",
+            ),
             ("⇧⌘Z", "Redo it"),
             ("⌘K", "Every command, by name"),
             ("⌘O", "Open anything"),
@@ -746,7 +782,8 @@ pub fn HelpPage() -> Element {
         None
     };
     rsx! {
-        Page { title: "Keys and help", crumbs: vec![org_crumb()], on_back,
+        // The help is the app's, not an organization's: no crumb.
+        Page { title: "Keys and help", crumbs: Vec::new(), on_back,
             // Clear of the floating Capture button at the foot.
             div { style: "display: flex; flex-direction: column; gap: 24px; max-width: 640px; padding-bottom: 88px; \
                           font-family: {t.font}; color: {t.ink};",
@@ -756,7 +793,7 @@ pub fn HelpPage() -> Element {
                         for (key, what) in keys.iter().copied() {
                             div { key: "{key}{what}",
                                 style: "display: flex; align-items: flex-start; gap: 16px; padding: 8px 0; border-top: 1px solid {t.rule}; font-size: 14px;",
-                                span { style: "flex-shrink: 0; width: 64px; font-weight: 650;", "{key}" }
+                                span { style: "flex-shrink: 0; width: 104px; font-weight: 650;", "{key}" }
                                 span { style: "color: {t.ink_2};", "{what}" }
                             }
                         }

@@ -70,7 +70,7 @@ pub struct Undone {
 }
 
 /// What a change did to the item, for Undo and Redo to do back and again.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 enum Change {
     /// Done or Delete took it out.
     Removed,
@@ -78,6 +78,8 @@ enum Change {
     Moved(&'static str, Option<&'static str>),
     /// Capture wrote it.
     Added,
+    /// Its notes changed to these (the item kept is as it was before).
+    Noted(Vec<String>),
 }
 
 /// `n` of `noun`, with its plural: "1 item", "5 items".
@@ -118,6 +120,8 @@ pub struct Lab {
     /// Whether the last change is still said over its list (until the
     /// lab moves to another list).
     pub notice: Signal<bool>,
+    /// Whether a field on the page has text in it: ⌘Z is the field's then.
+    pub typing: Signal<bool>,
     /// The rows being completed: checked and fading, then gone.
     pub completing: Signal<Vec<usize>>,
     /// The row the keys act on in a list (the one focused).
@@ -146,6 +150,7 @@ impl Lab {
         if here == to {
             return;
         }
+        self.typing.set(false);
         self.back.write().push(here);
         self.fresh.set(None);
         self.route.set(to);
@@ -159,8 +164,17 @@ impl Lab {
         self.project.set(None);
         self.fresh.set(None);
         self.notice.set(false);
-        self.selected.set(None);
+        self.typing.set(false);
         self.route.set(to);
+        self.select_first();
+    }
+
+    /// A list just shown: its first row selected, so the keys and the
+    /// details have something from the start.
+    fn select_first(mut self) {
+        let first = self.shown_ids().first().copied();
+        let on_list = matches!(*self.route.peek(), Route::Tab(t) if t != "vault");
+        self.selected.set(first.filter(|_| on_list));
     }
 
     /// Keeps `u` for Undo and says it over the list.
@@ -220,6 +234,7 @@ impl Lab {
     pub fn show_project(mut self, project: &'static str) {
         self.jump(Route::Tab("tasks"));
         self.project.set(Some(project));
+        self.select_first();
     }
 
     /// Write a new item for `tab` (Capture, for the Inbox).
@@ -287,6 +302,7 @@ impl Lab {
 
     /// To `tab`'s list, from a page written for it.
     fn back_to(mut self, tab: &'static str) {
+        self.typing.set(false);
         let mut back = self.back;
         let from = back.write().pop();
         if from != Some(Route::Tab(tab)) {
@@ -426,8 +442,9 @@ impl Lab {
         if let Some(u) = undone {
             let id = u.item.id;
             let mut lists = self.lists.write();
-            match u.change {
+            match &u.change {
                 Change::Removed => lists.restore(u.at, u.item.clone()),
+                Change::Noted(_) => lists.set_notes(id, u.item.notes.clone()),
                 Change::Moved(..) => {
                     let _ = lists.remove(id);
                     lists.restore(u.at, u.item.clone());
@@ -437,10 +454,13 @@ impl Lab {
                 }
             }
             drop(lists);
-            let back = u.change != Change::Added;
+            let back = matches!(u.change, Change::Removed | Change::Moved(..));
+            let added = u.change == Change::Added;
             self.redone.write().push(u);
-            self.fresh.set(back.then_some(id));
-            self.selected.set(back.then_some(id));
+            if back || added {
+                self.fresh.set(back.then_some(id));
+                self.selected.set(back.then_some(id));
+            }
             // The notice said what is now undone: the row's mark says it.
             self.notice.set(false);
         }
@@ -455,7 +475,11 @@ impl Lab {
         // Doing it again is a change like any other, but keeps the rest
         // of what Redo has.
         let rest = std::mem::take(&mut *self.redone.write());
-        match u.change {
+        match u.change.clone() {
+            Change::Noted(notes) => {
+                self.lists.write().set_notes(u.item.id, notes);
+                self.did(u);
+            }
             Change::Moved(tab, project) => self.move_item(u.item.id, tab, project),
             Change::Removed => self.remove(u.item.id, u.verb),
             Change::Added => {
@@ -465,6 +489,52 @@ impl Lab {
             }
         }
         self.redone.set(rest);
+    }
+
+    /// Adds `text` to `id`'s notes, for Undo to take back; whether it
+    /// did (not for a blank one).
+    #[must_use = "false when nothing was added"]
+    pub fn note(self, id: usize, text: &str) -> bool {
+        self.change_notes(id, "Noted", "Note", |lists| lists.note(id, text))
+    }
+
+    /// Takes `id`'s note `at` away, for Undo to put back.
+    pub fn unnote(self, id: usize, at: usize) {
+        let _ = self.change_notes(id, "Removed a note", "Note Removal", |lists| {
+            lists.unnote(id, at)
+        });
+    }
+
+    fn change_notes(
+        mut self,
+        id: usize,
+        verb: &'static str,
+        action: &'static str,
+        change: impl FnOnce(&mut items::Lists) -> bool,
+    ) -> bool {
+        let before = self.lists.peek().get(id).cloned();
+        let at = self.lists.peek().position(id).unwrap_or_default();
+        let Some(before) = before else {
+            return false;
+        };
+        if !change(&mut self.lists.write()) {
+            return false;
+        }
+        let after = self
+            .lists
+            .peek()
+            .get(id)
+            .map(|i| i.notes.clone())
+            .unwrap_or_default();
+        self.did(Undone {
+            verb,
+            action,
+            said: format!("{verb} on “{}”", before.name),
+            at,
+            item: before,
+            change: Change::Noted(after),
+        });
+        true
     }
 
     /// The help, over the tab it is asked from.
@@ -480,6 +550,7 @@ impl Lab {
     }
 
     pub fn go_back(mut self) {
+        self.typing.set(false);
         let prev = self.back.write().pop();
         if let Some(prev) = prev {
             self.route.set(prev);
@@ -590,22 +661,28 @@ pub fn LabApp() -> Element {
             },
         )),
     );
-    let lab = use_context_provider(|| Lab {
-        route: Signal::new(Route::Tab("inbox")),
-        back: Signal::new(Vec::new()),
-        style: Signal::new(ShellStyle::FloatingPill),
-        right: Signal::new(true),
-        status: Signal::new(shell::StatusStyle::Bar),
-        lists: Signal::new(items::Lists::sample()),
-        project: Signal::new(None),
-        oldest: Signal::new(false),
-        fresh: Signal::new(None),
-        undone: Signal::new(Vec::new()),
-        redone: Signal::new(Vec::new()),
-        notice: Signal::new(false),
-        completing: Signal::new(Vec::new()),
-        selected: Signal::new(None),
-        settings: Some(settings),
+    let lab = use_context_provider(|| {
+        let lists = items::Lists::sample();
+        // The Inbox's first row, selected from the start.
+        let first = lists.of("inbox", None, false).first().map(|i| i.id);
+        Lab {
+            route: Signal::new(Route::Tab("inbox")),
+            back: Signal::new(Vec::new()),
+            style: Signal::new(ShellStyle::FloatingPill),
+            right: Signal::new(true),
+            status: Signal::new(shell::StatusStyle::Bar),
+            lists: Signal::new(lists),
+            project: Signal::new(None),
+            oldest: Signal::new(false),
+            fresh: Signal::new(None),
+            undone: Signal::new(Vec::new()),
+            redone: Signal::new(Vec::new()),
+            notice: Signal::new(false),
+            completing: Signal::new(Vec::new()),
+            typing: Signal::new(false),
+            selected: Signal::new(first),
+            settings: Some(settings),
+        }
     });
     // The lab's signals follow the settings.
     {
@@ -686,7 +763,7 @@ pub fn LabApp() -> Element {
     // Edit › Undo and Redo are the lab's (⌘Z, ⇧⌘Z), named for what they
     // change; on a page with a field to type in (Capture, an item's
     // notes), they stand aside for it.
-    let typing = matches!((lab.route)(), Route::Capture(_) | Route::Item(..));
+    let typing = (lab.typing)();
     let last = (lab.undone)().last().cloned();
     let again = (lab.redone)().last().cloned();
     architect_commands::use_command(
@@ -821,7 +898,15 @@ pub fn LabApp() -> Element {
     let route = (lab.route)();
     let inbox_count = lab.lists.read().count("inbox");
     let tabs = vec![
-        shell::Tab::new("inbox", "Inbox", icon!(Inbox)).badge(inbox_count),
+        {
+            let inbox = shell::Tab::new("inbox", "Inbox", icon!(Inbox));
+            // A clear Inbox shows no count.
+            if inbox_count > 0 {
+                inbox.badge(inbox_count)
+            } else {
+                inbox
+            }
+        },
         shell::Tab::new("tasks", "Tasks", icon!(ListTodo)),
         shell::Tab::new("schedule", "Schedule", icon!(CalendarDays)),
         shell::Tab::new("vault", "Vault", icon!(NotebookText)),
@@ -894,14 +979,16 @@ pub fn LabApp() -> Element {
             shell::StatusItem::new(
                 "undo",
                 format!(
-                    "{} {} {} · Undo ⌘Z",
+                    "{} {} {} · {}",
                     u.verb,
                     if matches!(u.change, Change::Moved(..)) {
                         "from"
                     } else {
                         "in"
                     },
-                    pages::title(u.item.tab)
+                    pages::title(u.item.tab),
+                    // Where a field has ⌘Z, the item says only Undo.
+                    if typing { "Undo" } else { "Undo ⌘Z" }
                 ),
             )
             .icon(icon!(Undo2))
@@ -922,7 +1009,8 @@ pub fn LabApp() -> Element {
                 style: (lab.style)(),
                 title: "Architect Lab",
                 tabs,
-                current: Some(route.tab()),
+                // The help is over a tab, not one of them.
+                current: (!matches!(route, Route::Help(_))).then(|| route.tab()),
                 on_tab: move |id| lab.jump(Route::Tab(id)),
                 separate: capture,
                 brand: rsx! { Brand {} },
@@ -939,9 +1027,9 @@ pub fn LabApp() -> Element {
                     ),
                 workspaces,
                 left: rsx! { pages::LeftSide {} },
-                // The Vault's panes are its own, the help is the help; the
-                // details are the lists'.
-                right: if (lab.right)() && route != Route::Tab("vault") && !matches!(route, Route::Help(_)) { Some(rsx! { pages::RightSide {} }) } else { None },
+                // The details are the lists': the Vault's panes are its own,
+                // an item's page is its details, the help is the help.
+                right: if (lab.right)() && matches!(route, Route::Tab(t) if t != "vault") { Some(rsx! { pages::RightSide {} }) } else { None },
                 on_pull: move |()| lab.jump(Route::Tab("vault")),
                 window: window_chrome,
                 status,
