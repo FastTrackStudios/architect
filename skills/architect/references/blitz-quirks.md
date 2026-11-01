@@ -13,6 +13,7 @@ They belong in that skill too; until Studio takes them, they are kept here.
 |---|---|---|
 | In a dock, a flex child's wrapping text measures at its narrowest (min-content), so a centred empty state wraps a word per line. | Lay the block against the pane's own edges: `position: absolute; top: 0; left: 0; right: 0; bottom: 0`, then flex inside it. | `apps/lab/ui/src/vault.rs` `Stand` |
 | A space where two spans meet is dropped, even a non-breaking one (`&nbsp;`, `\u{a0}`): "a **b** c" reads "a**b**c". | Trim each run and turn its edge spaces into margin on `display: inline-block` runs, about 0.27em a space. | `features/commands/src/ui.rs` `Lit` |
+| `align-items: baseline` in a flex row lines an item up with a wrapping neighbour's last line, not its first (a browser uses the first): a label beside two lines of text sits low. | `align-items: flex-start` when a neighbour can wrap, and the same font size or a `padding-top` to line the first lines up. | `apps/lab/ui/src/pages.rs` `HelpPage` |
 | The `ch` unit is not supported. | Size in `px` or `em`. | |
 | `placeholder` on an input draws nothing. | Put the question in a `label` above the field. | `apps/lab/ui/src/pages.rs` `CapturePage` |
 | An element measured in `onmounted` can report a zero rect: it is not laid out yet, and nothing measures it again. | Measure again when the number is needed (a menu opening, a drag starting), and ignore a zero size. | `features/workspace/src/host/mod.rs` `Host::open_menu` |
@@ -32,6 +33,8 @@ To check a face really loaded, put a different generic last in the stack for one
 | What happens | Write instead | Where architect does |
 |---|---|---|
 | Keys reach the DOM only through what has the focus: with nothing focused (after a click on empty space), a page's `onkeydown` hears nothing. Tab moves focus only on from an element that already has it, and a focus change does not reliably reach `onfocus`. | Hear the window's keys: mount `architect_commands::WindowKeys` once, and give chords to commands (⌘ or ⌃). Keep a list's selection in a signal and move it with commands (⌃N, ⌃P), not with focus. | `features/commands/src/native.rs` `WindowKeys`; `apps/lab/ui/src/lib.rs` `Lab::step` |
+| Plain keys (↑, ↓, Return) for a list have the same problem, and `WindowKeys` leaves unchorded keys to the page on purpose (the palette's field, typing). | Hear them from the window in a component of the page's own (`dioxus_native::use_window_event`), only while the list is on show and nothing is over it (the palette, settings). | `apps/lab/ui/src/lib.rs` `ListKeys` |
+| A field given a value from code (`value: "{query}"` set before it is focused) keeps its caret at the start, and nothing moves it: what the person types goes in front of the text. | Do not pre-type a field. Narrow what it lists instead and say so in its prompt. | `features/commands/src/ui.rs` `Commands::show_group` |
 
 ## The window (macOS)
 
@@ -41,8 +44,21 @@ To check a face really loaded, put a different generic last in the stack for one
 | `window.fullscreen()` still reports full screen during the resize that leaves it, so a title row read while drawing stays without its traffic lights. | Follow full screen through the window's events (`use_window_event`), into a signal. | `apps/lab/ui/src/screen.rs` `use_window_chrome` |
 | AppKit lays its title bar out again on every resize and on entering or leaving full screen. | Place the traffic lights again after each, and leave AppKit's own bar alone in full screen. | `features/shell/src/shell/mac.rs` `fit_traffic_lights` |
 
+## Accessibility
+
+AccessKit is compiled in: `dioxus-native`'s default features (which `architect-commands` takes) include `accessibility`, and so do `blitz-shell`'s. The adapter starts when an assistive tool first asks, and Blitz then builds a tree of every DOM node (`blitz-dom`'s `build_accessibility_node`). But the tree it builds says almost nothing, so VoiceOver and a GUI-testing tool see the window's own buttons and the menu bar, and under them nodes they cannot list:
+
+| What Blitz's tree lacks | So | What the fix in Blitz is |
+|---|---|---|
+| Bounds: no node gets `set_bounds` from its layout. | Nothing can be found by position, and macOS drops frameless nodes. | Set each node's bounds from its final layout box. |
+| Names: text becomes a `TextRun` child that labels its parent, and the macOS adapter hides text runs; `aria-label` is not read. | Every button is unnamed, the row's "Mark “…” done" too. | Name a node from `aria-label`, else from its text; give text the `Label` role. |
+| Roles past a handful: `button`, `div`, `header`, `h1`–`h6`, `p`, `section`, `input`. A `span`, `label`, `nav` or `[role]` is `Unknown`. | Tabs, menus, lists and links read as nothing. | Read the `role` attribute and map more elements. |
+| Actions: `ActionRequested` is a `TODO` in `blitz-shell`'s `application.rs`. | VoiceOver's press does nothing, and a background click from a testing tool lands on the window, not the page. | Turn a `Click` action into a click on the node. |
+
+None of this can be fixed from architect: the tree is built from the DOM inside Blitz, and nothing an app writes reaches it except elements and their text. Architect writes `aria-label` on its icon-only controls (the shell's, the lab's row circles) so they are named once Blitz reads it. The fix belongs in the FastTrackStudio Blitz fork (`blitz-dom`'s `accessibility.rs`, `blitz-shell`'s `application.rs`).
+
 ## Testing and review tools
 
-- The page has no accessibility tree (the `dioxus-native` features architect enables leave out `accessibility`). VoiceOver sees an empty window, and a GUI-testing tool's background click, which goes through the accessibility tree, lands on the window instead of the page. With cua-driver, click and drag with `delivery_mode: "foreground"` (real HID events), at pixel positions read from a screenshot.
+- Because the accessibility tree has no names, bounds or actions (above), a GUI-testing tool's background click, which goes through the accessibility tree, lands on the window instead of the page. With cua-driver, click and drag with `delivery_mode: "foreground"` (real HID events), at pixel positions read from a screenshot. Its first read of the window can list no page nodes at all: that read is what starts the adapter.
 - A window capture of a full-screen Blitz window can show a blank band along the top and right that is not on the screen. Check with a capture of the whole display.
 - The impeccable detector (`impeccable detect`) reads only web files (html, jsx, tsx, vue, svelte, astro, css, scss, js, ts). It skips `.rs` silently and exits 0, which looks like a clean scan. To get any deterministic signal from `rsx!`, extract the `style:` literals into an HTML file and scan that, then discount the contrast findings the flattening causes (the parents' colours are lost).
