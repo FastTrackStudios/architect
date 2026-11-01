@@ -87,6 +87,10 @@ layer = "L0"
 package = "architect-workspace"
 layer = "L0"
 
+[[row]]
+package = "architect-shell"
+layer = "L0"
+
 # ── L4 ui ─────────────────────────────────────────────────────────────────
 [[row]]
 package = "crdt"
@@ -104,6 +108,11 @@ layer = "L4"
 [[row]]
 package = "architect-input"
 features = ["dioxus"]
+layer = "L4"
+
+[[row]]
+package = "architect-shell"
+features = ["ui"]
 layer = "L4"
 
 [[row]]
