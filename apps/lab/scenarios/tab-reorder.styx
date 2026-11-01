@@ -1,0 +1,29 @@
+// Drag a tab along its bar to put it somewhere else in the group.
+id tab-reorder
+title "Reorder tabs by dragging"
+view {width 1600, height 900}
+capture {fps 20, crop @tabs"note-welcome", pad 40, width 960}
+steps (
+    {
+        id vault
+        do @run{id LAB_GO_VAULT}
+        done {on (@changed"lab"), check ({id LAB_STATE, has {tab vault}})}
+        hide true
+    }
+    {
+        id room
+        do @run{id LAB_TOGGLE_DETAILS}
+        hide true
+    }
+    {
+        id drag
+        text "Drag a tab along the bar: the others make room, and it lands where you let go."
+        target @tab"note-welcome"
+        do @drag{to @tab"arrange", edge right, seconds 1.0}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {windows ({groups ({tabs (note-shell arrange note-welcome)} {tabs (graph)})})}})
+        }
+        hold 1.0
+    }
+)

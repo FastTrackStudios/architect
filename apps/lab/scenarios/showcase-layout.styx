@@ -1,0 +1,117 @@
+// Every way the workspace lays panes out, in one take: tabs opened, a
+// split by dragging a tab to a group's side, a vertical split by dragging
+// one down, two dividers pulled, a group stacked and filled, and the
+// sidebar dragged out of the window into one of its own. The README's "Showcase
+// Layout".
+//
+// The last step drags the left sidebar out by its grip (the dock's own
+// window, architect#138).
+id showcase-layout
+title "Showcase layout"
+view {width 1440, height 860, x 40, y 68}
+capture {fps 20, width 1280, desktop {width 1920, height 968}}
+steps (
+    {
+        id vault
+        do @run{id LAB_GO_VAULT}
+        done {on (@changed"lab"), check ({id LAB_STATE, has {tab vault}})}
+        hide true
+    }
+    {
+        id room
+        do @run{id LAB_TOGGLE_DETAILS}
+        hide true
+    }
+    {
+        id open-one
+        text "Open a note: it is a tab in the group you are in."
+        do @run{id LAB_NEW_NOTE}
+        done {on (@changed"workspace"), check ({id WORKSPACE_LAYOUT, has {active note-new-1}})}
+        hold 0.5
+    }
+    {
+        id open-two
+        do @run{id LAB_NEW_NOTE}
+        done {on (@changed"workspace"), check ({id WORKSPACE_LAYOUT, has {active note-new-2}})}
+        hold 0.5
+    }
+    {
+        id split-right
+        text "Drag a tab to a group's side: it splits, the new pane beside the old."
+        target @tab"note-new-2"
+        do @drag{to @group"note-welcome", edge right, seconds 1.2}
+        done {on (@changed"workspace"), check ({id WORKSPACE_LAYOUT, has {active note-new-2}})}
+        hold 0.8
+    }
+    {
+        id split-down
+        text "Drag one to its bottom: a split the other way."
+        target @tab"note-new-1"
+        do @drag{to @group"note-welcome", edge bottom, seconds 1.2}
+        done {on (@changed"workspace"), check ({id WORKSPACE_LAYOUT, has {active note-new-1}})}
+        hold 0.8
+    }
+    {
+        id resize-row
+        text "Pull a divider to share the room another way."
+        target @split"note-new-2"
+        do @drag{dx 180, seconds 0.9}
+        done {on (@changed"workspace")}
+        hold 0.4
+    }
+    {
+        id resize-column
+        target @split"note-welcome"
+        do @drag{dy 120, seconds 0.9}
+        done {on (@changed"workspace")}
+        hold 0.6
+    }
+    {
+        id pick
+        target @tab"note-new-2"
+        do @click{}
+        done {check ({id WORKSPACE_LAYOUT, has {active note-new-2}})}
+    }
+    {
+        id stack
+        text "Stack a group: its tabs side by side in a strip that slides."
+        do @run{id WORKSPACE_STACK_TABS}
+        done {on (@changed"workspace")}
+        hold 0.5
+    }
+    {
+        id fill-1
+        do @run{id LAB_NEW_NOTE}
+        done {on (@changed"workspace"), check ({id WORKSPACE_LAYOUT, has {active note-new-3}})}
+        hold 0.3
+    }
+    {
+        id fill-2
+        do @run{id LAB_NEW_NOTE}
+        done {on (@changed"workspace"), check ({id WORKSPACE_LAYOUT, has {active note-new-4}})}
+        hold 0.3
+    }
+    {
+        id fill-3
+        do @run{id LAB_NEW_NOTE}
+        done {on (@changed"workspace"), check ({id WORKSPACE_LAYOUT, has {active note-new-5}})}
+        hold 0.5
+    }
+    {
+        id slide
+        target @group"note-new-2"
+        do @scroll{dx -600, seconds 1.0}
+        hold 0.6
+    }
+    {
+        id detach
+        text "Drag the sidebar's grip out of the window: the sidebar becomes a window of its own."
+        target @testid"dock-grip-left"
+        do @drag{to @at{x 1540, y 110}, seconds 1.4}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {windows ({id main} {id dock-left})}})
+        }
+        hold 1.5
+    }
+)

@@ -1,0 +1,21 @@
+[package]
+name = "architect-lab-media"
+description = "The lab's guide scenarios (apps/lab/scenarios), filmed headlessly into GIF / WebM / MP4 and a poster (`lab-media`), and played as tests."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "lab-media"
+path = "src/main.rs"
+
+[dependencies]
+architect-guide = { workspace = true, features = ["capture"] }
+architect-lab-ui = { workspace = true }
+architect-shell = { workspace = true }
+architect = { workspace = true, features = ["action-list"] }
+dioxus = { workspace = true }
+
+[lints]
+workspace = true
