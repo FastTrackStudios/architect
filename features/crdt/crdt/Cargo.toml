@@ -102,8 +102,12 @@ doctest = false
 # the feature for tests without making it a default).
 crdt = { path = ".", features = ["vox", "turso"] }
 # The sync convergence test serves DocSyncHost over the in-process vox
-# transport and runs replicas under tokio.
-architect = { workspace = true, features = ["vox", "local"] }
+# transport and runs replicas under tokio. `tests/p2p.rs` serves nodes
+# over real iroh endpoints and browses the LAN (`iroh-lan`).
+architect = { workspace = true, features = ["vox", "local", "iroh-lan"] }
+iroh.workspace = true
+# `tests/p2p.rs` admits devices from auth's device directory.
+auth-proto.workspace = true
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 tempfile = "3"
 # `crdt::peer`'s convergence property over random edit orders.
