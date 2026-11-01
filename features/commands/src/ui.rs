@@ -559,6 +559,12 @@ pub(crate) const fn fill(on: bool, t: &ShellTheme) -> &'static str {
     if on { t.active } else { "transparent" }
 }
 
+/// A row's quiet ink: a step up on the picked row, where `ink_3` falls
+/// under 4.5:1 on `fill`.
+pub(crate) const fn quiet(on: bool, t: &ShellTheme) -> &'static str {
+    if on { t.ink_2 } else { t.ink_3 }
+}
+
 pub(crate) fn theme() -> ShellTheme {
     try_use_shell().map(|s| s.theme).unwrap_or_default()
 }
@@ -639,12 +645,15 @@ pub(crate) fn Frame(
     }
 }
 
+/// A key, as a chip; `on` on a picked row (the quiet ink a step up, for
+/// 4.5:1 on its fill).
 #[component]
-pub(crate) fn Kbd(text: String) -> Element {
+pub(crate) fn Kbd(text: String, #[props(default)] on: bool) -> Element {
     let t = theme();
+    let ink = if on { t.ink_2 } else { t.ink_3 };
     rsx! {
         span { style: "flex-shrink: 0; padding: 1px 6px; border-radius: 4px; border: 1px solid {t.rule}; \
-                       color: {t.ink_3}; font-size: 11px; font-family: {t.font};",
+                       color: {ink}; font-size: 11px; font-family: {t.font};",
             "{text}"
         }
     }
@@ -818,7 +827,8 @@ pub(crate) fn CommandRow(row: Ranked, on: bool, onpress: EventHandler<()>) -> El
     let t = theme();
     let c = row.command;
     let fill = if on { t.active } else { "transparent" };
-    let ink = if c.enabled { t.ink } else { t.ink_3 };
+    let quiet = quiet(on, &t);
+    let ink = if c.enabled { t.ink } else { quiet };
     rsx! {
         div {
             class: "lp",
@@ -827,15 +837,15 @@ pub(crate) fn CommandRow(row: Ranked, on: bool, onpress: EventHandler<()>) -> El
             onclick: move |_| onpress.call(()),
             span { style: "flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; overflow: hidden;",
                 if !c.group.is_empty() {
-                    span { style: "flex-shrink: 0; color: {t.ink_3};", "{c.group}:" }
+                    span { style: "flex-shrink: 0; color: {quiet};", "{c.group}:" }
                 }
                 Lit { text: c.label.clone(), positions: row.positions, ink, lit: t.ink }
                 if let Some(why) = c.disabled_reason.clone() {
-                    span { style: "color: {t.ink_3}; font-size: 12px; white-space: nowrap;", "— {why}" }
+                    span { style: "color: {quiet}; font-size: 12px; white-space: nowrap;", "— {why}" }
                 }
             }
             if !c.shortcut.is_empty() {
-                Kbd { text: c.shortcut }
+                Kbd { text: c.shortcut, on }
             }
         }
     }
@@ -925,10 +935,10 @@ pub fn QuickOpen() -> Element {
                     span { style: "flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden;",
                         Lit { text: f.item.title.clone(), positions: f.positions.clone(), ink: t.ink_2, lit: t.ink }
                         if !f.item.detail.is_empty() {
-                            span { style: "color: {t.ink_3}; font-size: 11px; white-space: nowrap; overflow: hidden;", "{f.item.detail}" }
+                            span { style: "color: {quiet(i == pick, &t)}; font-size: 11px; white-space: nowrap; overflow: hidden;", "{f.item.detail}" }
                         }
                     }
-                    span { style: "flex-shrink: 0; color: {t.ink_3}; font-size: 11px;",
+                    span { style: "flex-shrink: 0; color: {quiet(i == pick, &t)}; font-size: 11px;",
                         "{titles.get(i).cloned().unwrap_or_default()}"
                     }
                 }
