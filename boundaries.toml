@@ -103,6 +103,32 @@ layer = "L0"
 package = "architect-orgs"
 layer = "L0"
 
+[[row]]
+package = "architect-scripting"
+layer = "L0"
+
+[[row]]
+package = "architect-extensions"
+layer = "L0"
+
+[[row]]
+package = "architect-extensions"
+features = ["vox"]
+layer = "L0"
+
+[[row]]
+package = "architect-canvas"
+layer = "L0"
+
+[[row]]
+package = "architect-files"
+layer = "L0"
+
+[[row]]
+package = "architect-files"
+features = ["vox"]
+layer = "L0"
+
 # ── L4 ui ─────────────────────────────────────────────────────────────────
 [[row]]
 package = "crdt"
@@ -144,6 +170,21 @@ layer = "L4"
 
 [[row]]
 package = "architect-orgs"
+features = ["ui"]
+layer = "L4"
+
+[[row]]
+package = "architect-extensions"
+features = ["ui"]
+layer = "L4"
+
+[[row]]
+package = "architect-extensions"
+features = ["remote"]
+layer = "L4"
+
+[[row]]
+package = "architect-canvas"
 features = ["ui"]
 layer = "L4"
 
@@ -204,6 +245,16 @@ layer = "L1"
 note = "sibling of auth; fold in"
 
 [[row]]
+package = "architect-orgs"
+features = ["server"]
+layer = "L1"
+
+[[row]]
+package = "architect-files"
+features = ["server"]
+layer = "L1"
+
+[[row]]
 package = "auth-db"
 layer = "L2"
 note = "sibling of auth; fold in as a db flag"
@@ -226,6 +277,36 @@ note = "sibling of launcher; fold in"
 [[row]]
 package = "architect-telemetry"
 layer = "L1"
+
+[[row]]
+package = "architect-scripting"
+features = ["luau", "crdt", "settings"]
+layer = "L1"
+note = "the Luau runtime (mlua, C++ built from source): desk, server, mobile; not wasm yet"
+
+[[row]]
+package = "architect-canvas"
+features = ["luau"]
+layer = "L1"
+note = "ImGui and Canvas for Luau scripts, on architect-scripting's runtime: not wasm yet"
+
+[[row]]
+package = "architect-extensions"
+features = ["host", "crdt"]
+layer = "L1"
+note = "the extensions host: Luau through architect-scripting, git through the `git` program; not wasm yet"
+
+[[row]]
+package = "architect-extensions"
+features = ["process"]
+layer = "L1"
+note = "process extensions: child processes over vox on a local socket, supervised; desk only"
+
+[[row]]
+package = "architect-extensions"
+features = ["guest"]
+layer = "L1"
+note = "a process extension's own side: its Dioxus views as an edit stream, served over vox; desk only"
 
 [[row]]
 package = "architect-mcp"

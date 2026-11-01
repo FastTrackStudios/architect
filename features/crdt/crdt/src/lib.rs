@@ -32,10 +32,26 @@ pub use loro;
 // Real-time, offline-first sync over vox (`DocSync` + `DocSyncHost` +
 // `SyncedDoc`, plus the presence channel). Gated: the core stays
 // transport-free.
+pub mod file;
 pub mod history;
 pub mod kinds;
+pub use file::{Branch, DocFile};
 pub use history::History;
-pub use kinds::{DocKind, DocKinds, Migration};
+pub use kinds::{BlobRefs, DocKind, DocKinds, Migration};
+
+// The blobs documents point at: fetched on demand by hash, kept offline,
+// collected when nothing points at them (`architect::blob`). Native.
+#[cfg(all(feature = "blob", not(target_arch = "wasm32")))]
+pub mod blobs;
+
+// Who is here and where (pointers as places in a view's coordinate
+// space, selections, carets, playheads) and the text binding that puts
+// others' edits and carets in an editor. Plain data over Loro: they ride
+// the presence channel and the doc, and compile everywhere.
+pub mod presence;
+pub mod text;
+pub use presence::{Here, PeerState, Place, PresenceSink, Roster};
+pub use text::{EditorBinding, RemoteCaret, TextBinding};
 
 #[cfg(feature = "vox")]
 pub mod sync;
@@ -60,6 +76,17 @@ pub mod docs;
 #[cfg(all(feature = "vox", not(target_arch = "wasm32")))]
 pub mod peer;
 
+// A link to a live document (`fts-doc:<endpoint>/<doc>?key=…`): parsed
+// everywhere, a browser included.
+pub mod link;
+pub use link::DocLink;
+
+// Who a node serves its documents to, peer to peer: the owner's devices
+// (from the device registry) and live links, and the router one caller
+// gets. Native only, like the peer lane.
+#[cfg(all(feature = "vox", not(target_arch = "wasm32")))]
+pub mod p2p;
+
 // Dioxus hooks (`use_synced_doc`, `use_crdt_list`, `use_crdt_entry`,
 // `use_presence_channel`) — the client-side bridge from a syncing
 // replica to `AtomResult` phase rendering. Pulls Dioxus via
@@ -69,9 +96,10 @@ pub mod hooks;
 #[cfg(feature = "dioxus")]
 pub use hooks::{
     DocHandle, Presence, SyncStatus, use_crdt_entry, use_crdt_list, use_doc_handle, use_doc_slot,
-    use_presence, use_presence_channel, use_presence_channel_into, use_presence_channel_keyed,
-    use_presence_slot, use_synced_doc, use_synced_doc_into, use_synced_doc_into_with,
-    use_synced_doc_keyed, use_synced_doc_keyed_with, use_synced_doc_with,
+    use_here, use_presence, use_presence_channel, use_presence_channel_into,
+    use_presence_channel_keyed, use_presence_frame, use_presence_slot, use_roster, use_synced_doc,
+    use_synced_doc_into, use_synced_doc_into_with, use_synced_doc_keyed, use_synced_doc_keyed_with,
+    use_synced_doc_with,
 };
 
 // File-backed persistence — the desktop client's (and a small server's)

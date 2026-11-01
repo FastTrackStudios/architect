@@ -1,0 +1,58 @@
+[package]
+name = "architect-canvas"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Canvases: layers an extension or a script draws over a view in the view's own coordinates, with hit-testing, and an immediate-mode UI shaped like ReaImGui's, docked as workspace panes"
+
+# docs/content/architecture/extensions.md ("Immediate-mode UI for scripts"
+# and "Overlays: drawing over another view"). The default set is the model,
+# pure data and wasm-clean: shapes, a view's coordinate spaces, layers and
+# their claimed regions, and the immediate-mode UI that lays out windows
+# and widgets into shapes. `luau` gives scripts `ImGui` and `Canvas` on
+# `architect-scripting`'s runtime and runs one as a live session; `ui`
+# draws layers and windows on Blitz, a window as a workspace pane (with
+# `luau`, a script's session driven from Dioxus).
+
+[features]
+default = []
+luau = ["dep:architect", "dep:architect-scripting", "architect-scripting/luau", "dep:serde_json"]
+ui = [
+    "dep:dioxus",
+    "dep:futures",
+    "dep:futures-timer",
+    "dep:architect-workspace",
+    "architect-workspace/ui",
+    "dep:architect-shell",
+    "architect-shell/ui",
+]
+
+[dependencies]
+architect = { workspace = true, optional = true, features = ["action-list"] }
+architect-scripting = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+dioxus = { workspace = true, optional = true }
+futures = { version = "0.3", optional = true }
+# A measurement while Blitz's document is busy fails: asked again shortly.
+futures-timer = { workspace = true, optional = true }
+architect-workspace = { workspace = true, optional = true }
+architect-shell = { workspace = true, optional = true }
+
+# A timer needs the browser's clock on wasm.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+futures-timer = { workspace = true, optional = true, features = ["wasm-bindgen"] }
+
+[dev-dependencies]
+# Its own runtime, so `cargo test --workspace` builds the tests with it.
+architect-canvas = { path = ".", features = ["luau"] }
+architect-extensions = { workspace = true, features = ["host"] }
+futures = "0.3"
+serde_json.workspace = true
+facet.workspace = true
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true

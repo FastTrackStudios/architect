@@ -599,3 +599,236 @@ fn releasing_the_modifier_first_still_releases_the_chord() {
     let _ = proc.notify_key_release(&chord('g'));
     assert_eq!(ids(&proc.process(press(), &ctx)), vec!["DOUBLE"]);
 }
+
+// ── Contexts, held-letter tools, MIDI and OSC ──────────────────────────
+
+use architect_input::{
+    MidiEvent, MidiMessage, MouseAction, MouseButton, MouseEvent, OscEvent, ScrollEvent,
+};
+
+/// Studio's arrange, sketched: `z` taps to zoom-to-fit, held it is the
+/// zoom tool; an item under the pointer takes Ctrl+d before the view.
+const ARRANGE: &str = r#"{
+    "keymap": { "normal": { "Ctrl+d": "app.duplicate", "z": "view.zoom_fit", "x": "edit.cut" } },
+    "contexts": {
+        "session.arrange": {
+            "keys": { "Ctrl+d": "arrange.duplicate" },
+            "mouse": {
+                "Z+Left.Drag": "view.zoom_box",
+                "Z+Left.Click": "view.zoom_in",
+                "Z+Alt+Left.Click": "view.zoom_out"
+            },
+            "scroll": { "Z+Scroll": "view.zoom" }
+        },
+        "session.arrange.item": {
+            "keys": { "Ctrl+d": "item.duplicate" },
+            "mouse": { "Alt+Left.Drag": "item.copy" }
+        }
+    },
+    "midi": { "CC64 ch1": "transport.play", "Note60": "marker.add" },
+    "osc": { "/transport/play": "transport.play" }
+}"#;
+
+#[allow(clippy::unwrap_used)]
+fn arrange() -> Proc {
+    InputProcessor::from_config(KeymapConfig::from_json_str(ARRANGE).unwrap())
+        .unwrap()
+        .with_macro_keys(MacroKeys::Off)
+}
+
+fn at(context: &str) -> InputContext {
+    let mut ctx = InputContext::new();
+    ctx.set_context(context);
+    ctx
+}
+
+fn ctrl(ch: char) -> InputEvent {
+    InputEvent::Key(KeyEvent {
+        key: KeyCode::char(ch),
+        modifiers: Modifiers::CTRL,
+    })
+}
+
+const fn click(action: MouseAction, modifiers: Modifiers) -> InputEvent {
+    InputEvent::Mouse(MouseEvent::new(
+        MouseButton::Left,
+        action,
+        (40.0, 10.0),
+        modifiers,
+    ))
+}
+
+#[test]
+fn the_most_specific_context_that_binds_a_key_wins() {
+    let mut keys = arrange();
+    assert_eq!(
+        ids(&keys.process(ctrl('d'), &at("session.arrange.item"))),
+        ["item.duplicate"]
+    );
+    assert_eq!(
+        ids(&keys.process(ctrl('d'), &at("session.arrange"))),
+        ["arrange.duplicate"]
+    );
+    assert_eq!(
+        ids(&keys.process(ctrl('d'), &at("session.mixer"))),
+        ["app.duplicate"],
+        "a context that binds nothing falls back to the app's"
+    );
+}
+
+#[test]
+fn a_target_gesture_is_live_only_over_its_target() {
+    let mut keys = arrange();
+    let drag = InputEvent::Mouse(MouseEvent::drag(
+        MouseButton::Left,
+        (10.0, 10.0),
+        (60.0, 30.0),
+        Modifiers::ALT,
+    ));
+    let over_item = keys.process(drag.clone(), &at("session.arrange.item"));
+    let Some(InputCommand::Gesture { action, event }) = over_item.first() else {
+        panic!("a gesture: {over_item:?}");
+    };
+    assert_eq!(action, "item.copy");
+    let InputEvent::Mouse(mouse) = event else {
+        panic!("the drag itself");
+    };
+    assert_eq!(
+        mouse.delta(),
+        (50.0, 20.0),
+        "the drag's data reaches the action"
+    );
+    assert!(matches!(
+        keys.process(drag, &at("session.arrange")).first(),
+        Some(InputCommand::Unhandled(_))
+    ));
+}
+
+#[test]
+fn holding_z_is_the_zoom_tool_until_it_goes_up() {
+    let mut keys = arrange();
+    let ctx = at("session.arrange");
+    assert_eq!(
+        keys.process(char_event('z'), &ctx),
+        [InputCommand::Hold(chord('z'))],
+        "the press waits to see what comes"
+    );
+    assert!(
+        keys.process(char_event('z'), &ctx).is_empty(),
+        "auto-repeat"
+    );
+    let tool = keys.held_tool(&ctx).unwrap();
+    let gestures: Vec<&str> = tool.gestures.iter().map(|(p, _)| p.as_str()).collect();
+    assert!(gestures.contains(&"z+Left.Drag") && gestures.contains(&"z+Scroll"));
+
+    assert_eq!(
+        ids(&keys.process(click(MouseAction::Click, Modifiers::NONE), &ctx)),
+        ["view.zoom_in"]
+    );
+    assert_eq!(
+        ids(&keys.process(click(MouseAction::Click, Modifiers::ALT), &ctx)),
+        ["view.zoom_out"]
+    );
+    let wheel = InputEvent::Scroll(ScrollEvent {
+        delta_x: 0.0,
+        delta_y: -4.0,
+        modifiers: Modifiers::NONE,
+    });
+    assert_eq!(ids(&keys.process(wheel, &ctx)), ["view.zoom"]);
+
+    let up = keys.release(&chord('z'), &ctx);
+    assert_eq!(
+        up.commands,
+        [InputCommand::Unhold(chord('z'))],
+        "it was a modifier: no tap"
+    );
+    assert!(keys.holding().is_none());
+    assert!(
+        matches!(
+            keys.process(click(MouseAction::Click, Modifiers::NONE), &ctx)
+                .first(),
+            Some(InputCommand::Unhandled(_))
+        ),
+        "without z a click is not the zoom tool's"
+    );
+}
+
+#[test]
+fn a_held_key_that_goes_up_alone_was_a_tap() {
+    let mut keys = arrange();
+    let ctx = at("session.arrange");
+    let _ = keys.process(char_event('z'), &ctx);
+    let up = keys.release(&chord('z'), &ctx);
+    assert_eq!(up.commands.first(), Some(&InputCommand::Unhold(chord('z'))));
+    assert_eq!(ids(&up.commands), ["view.zoom_fit"]);
+    // And again: a tap leaves nothing held.
+    let _ = keys.process(char_event('z'), &ctx);
+    assert_eq!(
+        ids(&keys.release(&chord('z'), &ctx).commands),
+        ["view.zoom_fit"]
+    );
+}
+
+#[test]
+fn another_key_while_held_makes_it_a_modifier() {
+    let mut keys = arrange();
+    let ctx = at("session.arrange");
+    let _ = keys.process(char_event('z'), &ctx);
+    assert_eq!(ids(&keys.process(char_event('x'), &ctx)), ["edit.cut"]);
+    assert_eq!(
+        keys.release(&chord('z'), &ctx).commands,
+        [InputCommand::Unhold(chord('z'))]
+    );
+}
+
+#[test]
+fn a_key_no_live_pattern_holds_is_an_ordinary_key() {
+    let mut keys = arrange();
+    // Outside the arrange no pattern holds z: it runs on the press.
+    assert_eq!(
+        ids(&keys.process(char_event('z'), &at("session.mixer"))),
+        ["view.zoom_fit"]
+    );
+}
+
+#[test]
+fn midi_and_osc_run_their_actions_with_the_message() {
+    let mut keys = arrange();
+    let ctx = InputContext::new();
+    let cc = InputEvent::Midi(MidiEvent {
+        channel: 1,
+        message: MidiMessage::ControlChange {
+            control: 64,
+            value: 127,
+        },
+    });
+    let commands = keys.process(cc.clone(), &ctx);
+    assert_eq!(
+        commands,
+        [InputCommand::Gesture {
+            action: "transport.play".into(),
+            event: cc
+        }]
+    );
+    let note = InputEvent::Midi(MidiEvent {
+        channel: 10,
+        message: MidiMessage::NoteOn {
+            note: 60,
+            velocity: 90,
+        },
+    });
+    assert_eq!(ids(&keys.process(note, &ctx)), ["marker.add"]);
+    let osc = InputEvent::Osc(OscEvent {
+        address: "/transport/play".into(),
+        args: vec![1.0],
+    });
+    assert_eq!(ids(&keys.process(osc, &ctx)), ["transport.play"]);
+    let other = InputEvent::Osc(OscEvent {
+        address: "/transport/stop".into(),
+        args: Vec::new(),
+    });
+    assert!(matches!(
+        keys.process(other, &ctx).first(),
+        Some(InputCommand::Unhandled(_))
+    ));
+}

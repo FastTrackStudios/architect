@@ -1,0 +1,806 @@
+//! An extension's manifest, `extension.toml`: who it is, what kind it is,
+//! what it may reach, and what it adds — read before anything of it runs.
+//!
+//! ```toml
+//! id = "fts.metronome"
+//! name = "Metronome"
+//! version = "0.2.0"
+//! kind = "luau"
+//! api = "0.1"
+//! description = "A click, and the actions to count in."
+//!
+//! [capabilities]
+//! actions = ["TRANSPORT_"]   # namespaces it may run, past its own
+//! effect = "read_only"       # the most it may change
+//!
+//! [[actions]]
+//! id = "FTS_METRONOME_COUNT_IN"
+//! name = "Count in"
+//! script = "count_in.luau"
+//!
+//! [[sections]]
+//! id = "metronome"
+//! title = "Metronome"
+//! icon = "timer"
+//!
+//! [[sections.settings]]
+//! key = "fts.metronome.accent"
+//! title = "Accent the downbeat"
+//! control = "switch"
+//! default = true
+//! ```
+
+use architect_settings::{Block, Choice, Control, Section, Setting, Value};
+use semver::Version;
+use serde::Deserialize;
+
+/// The extension API this build speaks: a manifest naming a newer one
+/// (`api = "0.2"` here) is refused, an older one in the same `0.x` taken.
+pub const API: &str = "0.1";
+
+/// The manifest's file name in a package.
+pub const MANIFEST: &str = "extension.toml";
+
+/// How an extension runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Kind {
+    /// A manifest and files, no code: settings, presets, keys, views.
+    /// Everywhere, iOS included.
+    Data,
+    /// Luau scripts over the Action List (`architect-scripting`'s runtime).
+    Luau,
+    /// A WebAssembly component against the `architect:extension` world.
+    Wasm,
+    /// A program speaking vox, as a remote client does. Desk only.
+    Process,
+}
+
+impl Kind {
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Data => "data",
+            Self::Luau => "luau",
+            Self::Wasm => "wasm",
+            Self::Process => "process",
+        }
+    }
+
+    /// Whether it carries code: what a project can need and a phone may
+    /// not run (a process).
+    #[must_use]
+    pub const fn runs_code(self) -> bool {
+        !matches!(self, Self::Data)
+    }
+}
+
+/// What an action does to the app, as a manifest says it: the same three
+/// steps as the Action List's `Effect`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Reach {
+    #[default]
+    ReadOnly,
+    Mutating,
+    Destructive,
+}
+
+impl Reach {
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::ReadOnly => "read_only",
+            Self::Mutating => "mutating",
+            Self::Destructive => "destructive",
+        }
+    }
+}
+
+/// What it asks to reach, granted when it is installed.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct Capabilities {
+    /// The action id prefixes it may run, past its own namespace
+    /// (`TRANSPORT_`); `*` for every action.
+    pub actions: Vec<String>,
+    /// The most an action it runs may change.
+    pub effect: Reach,
+    /// The network hosts it may reach (WASM and processes).
+    pub hosts: Vec<String>,
+    /// The folders it may read and write, past its own.
+    pub folders: Vec<String>,
+}
+
+/// One action it adds.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct ActionDecl {
+    /// In the extension's namespace ([`Manifest::action_prefix`]).
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub group: String,
+    /// A key that runs it (`⇧⌘M`), for display and the keymap.
+    #[serde(default)]
+    pub shortcut: String,
+    #[serde(default)]
+    pub effect: Reach,
+    /// What it takes, as JSON Schema text.
+    #[serde(default)]
+    pub params: Option<String>,
+    /// A Luau file in the package that runs it (a `luau` extension).
+    #[serde(default)]
+    pub script: Option<String>,
+    /// Another action it runs with fixed arguments: a preset, for any
+    /// kind (a data extension's only code-free action).
+    #[serde(default)]
+    pub preset: Option<Preset>,
+}
+
+/// An action run with fixed arguments.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct Preset {
+    pub action: String,
+    /// Its arguments, as JSON text.
+    #[serde(default)]
+    pub args: Option<String>,
+}
+
+/// A view it adds to the workspace: listed by the host, mounted by the
+/// app (remote Dioxus views and frame documents are later work).
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct ViewDecl {
+    pub id: String,
+    pub title: String,
+    #[serde(default)]
+    pub icon: String,
+    /// A frame document in the package that draws it, for a data view.
+    #[serde(default)]
+    pub document: Option<String>,
+}
+
+/// A layer it draws over a kind of view (`session.arrange`).
+///
+/// A live Luau script with `Canvas` and `ImGui` (`architect-canvas`),
+/// started while the extension is loaded, drawing in the view's
+/// coordinates on one of its planes. The app's canvas host runs it; the
+/// script may open tool windows too.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct OverlayDecl {
+    /// Unique among its contributions.
+    pub id: String,
+    /// The kind of view it draws over.
+    pub view: String,
+    /// `under` the view's items, `over` them (the default), or `top`.
+    #[serde(default = "over")]
+    pub plane: String,
+    /// The script that draws it, in the package.
+    pub script: String,
+}
+
+fn over() -> String {
+    "over".to_owned()
+}
+
+/// An opener for ⌘O: items of `kind`, found by the action `action`
+/// (`{query}` in, a list of `{id, title}` out).
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct OpenerDecl {
+    pub kind: String,
+    pub title: String,
+    /// What a query starts with to ask only this opener (`click:`).
+    #[serde(default)]
+    pub prefix: String,
+    pub action: String,
+}
+
+/// Where in a project an extension keeps its own data.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DataScope {
+    /// One container for the project.
+    #[default]
+    Project,
+    /// One per object it annotates (a track, an item, a section).
+    Object,
+}
+
+/// Document data it keeps, namespaced by its id.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct DataDecl {
+    pub name: String,
+    #[serde(default)]
+    pub scope: DataScope,
+}
+
+/// A key it binds to an action.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct KeyDecl {
+    pub chord: String,
+    pub action: String,
+}
+
+/// A settings section it adds, there while it is loaded.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct SectionDecl {
+    /// Unique on the settings page.
+    pub id: String,
+    pub title: String,
+    #[serde(default)]
+    pub icon: String,
+    /// The heading it sits under (`Extensions` when none is given).
+    #[serde(default)]
+    pub group: Option<String>,
+    #[serde(default)]
+    pub settings: Vec<SettingDecl>,
+}
+
+/// One setting, as an author writes it.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct SettingDecl {
+    /// `<extension id>.<name>` (`fts.metronome.accent`).
+    pub key: String,
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+    /// The titled block it sits in; untitled when none.
+    #[serde(default)]
+    pub block: Option<String>,
+    /// `switch`, `select`, `segmented`, `cards`, `slider`, `stepper`,
+    /// `text` or `shortcut`.
+    pub control: String,
+    pub default: toml::Value,
+    #[serde(default)]
+    pub min: Option<f64>,
+    #[serde(default)]
+    pub max: Option<f64>,
+    #[serde(default)]
+    pub step: Option<f64>,
+    #[serde(default)]
+    pub unit: String,
+    #[serde(default)]
+    pub placeholder: String,
+    #[serde(default)]
+    pub choices: Vec<ChoiceDecl>,
+    #[serde(default)]
+    pub aliases: Vec<String>,
+}
+
+/// One choice of a select, segmented control or cards.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct ChoiceDecl {
+    pub value: String,
+    pub label: String,
+    #[serde(default)]
+    pub detail: String,
+}
+
+/// What a WASM or process extension runs: its entry point.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct Entry {
+    /// The component (`extension.wasm`) or the program (`bin/tool`), in
+    /// the package.
+    pub path: String,
+    /// A process's arguments.
+    pub args: Vec<String>,
+}
+
+/// `extension.toml`, read.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct Manifest {
+    /// Reverse-DNS-ish, lower case (`fts.metronome`): unique in every
+    /// registry, the owner of everything it adds.
+    pub id: String,
+    pub name: String,
+    #[serde(deserialize_with = "version")]
+    pub version: Version,
+    pub kind: Kind,
+    /// The extension API it was written against ([`API`]).
+    #[serde(default = "api")]
+    pub api: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub authors: Vec<String>,
+    #[serde(default)]
+    pub capabilities: Capabilities,
+    #[serde(default)]
+    pub entry: Entry,
+    #[serde(default)]
+    pub actions: Vec<ActionDecl>,
+    #[serde(default)]
+    pub sections: Vec<SectionDecl>,
+    #[serde(default)]
+    pub views: Vec<ViewDecl>,
+    #[serde(default)]
+    pub overlays: Vec<OverlayDecl>,
+    #[serde(default)]
+    pub openers: Vec<OpenerDecl>,
+    #[serde(default)]
+    pub data: Vec<DataDecl>,
+    #[serde(default)]
+    pub keys: Vec<KeyDecl>,
+}
+
+fn api() -> String {
+    API.to_owned()
+}
+
+fn version<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Version, D::Error> {
+    let text = String::deserialize(d)?;
+    Version::parse(&text).map_err(serde::de::Error::custom)
+}
+
+/// Why a manifest was refused.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ManifestError {
+    /// It is not TOML, or not a manifest.
+    Parse(String),
+    /// Its id is empty, or has characters other than `a-z 0-9 . - _`.
+    BadId(String),
+    /// It needs a newer extension API than this build's.
+    Api { wants: String, have: &'static str },
+    /// An action outside its namespace (`expected` is the prefix).
+    ActionNamespace { action: String, expected: String },
+    /// A setting key outside its namespace (`<id>.`).
+    SettingNamespace(String),
+    /// An action with no way to run: no script, no preset, and a kind
+    /// that has no code of its own.
+    NoRun(String),
+    /// A script in a kind that does not run Luau.
+    ScriptKind(String),
+    /// A file outside its package (`..`, an absolute path).
+    BadPath(String),
+    /// A setting that cannot be drawn: an unknown control, or a default
+    /// of the wrong type.
+    BadSetting { key: String, why: String },
+    /// Two of its contributions share an id.
+    Duplicate(String),
+    /// An overlay on a plane that is not `under`, `over` or `top`.
+    BadPlane { overlay: String, plane: String },
+}
+
+impl std::fmt::Display for ManifestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Parse(e) => write!(f, "{MANIFEST} is not a manifest: {e}"),
+            Self::BadId(id) => write!(f, "“{id}” is not an extension id (a-z, 0-9, . - _)"),
+            Self::Api { wants, have } => {
+                write!(f, "it needs extension API {wants}; this app has {have}")
+            }
+            Self::ActionNamespace { action, expected } => {
+                write!(f, "action {action} is not in its namespace ({expected}…)")
+            }
+            Self::SettingNamespace(key) => write!(f, "setting {key} is not in its namespace"),
+            Self::NoRun(id) => write!(f, "action {id} has no script and no preset"),
+            Self::ScriptKind(id) => write!(f, "{id} has a script, but this is not Luau"),
+            Self::BadPath(p) => write!(f, "{p} is outside the package"),
+            Self::BadSetting { key, why } => write!(f, "setting {key}: {why}"),
+            Self::Duplicate(id) => write!(f, "{id} is declared twice"),
+            Self::BadPlane { overlay, plane } => {
+                write!(
+                    f,
+                    "overlay {overlay}: {plane:?} is not a plane (under, over, top)"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for ManifestError {}
+
+impl Manifest {
+    /// Reads and checks `extension.toml`'s text.
+    ///
+    /// # Errors
+    ///
+    /// It is not a manifest, or breaks a rule [`Self::check`] keeps.
+    pub fn parse(text: &str) -> Result<Self, ManifestError> {
+        let manifest: Self =
+            toml::from_str(text).map_err(|e| ManifestError::Parse(e.to_string()))?;
+        manifest.check()?;
+        Ok(manifest)
+    }
+
+    /// The prefix every action it adds starts with: its id upper-cased,
+    /// each run of other characters one `_` (`fts.metronome` →
+    /// `FTS_METRONOME_`).
+    #[must_use]
+    pub fn action_prefix(&self) -> String {
+        action_prefix(&self.id)
+    }
+
+    /// Checks what can be checked without its files: its id, its API,
+    /// its namespaces, that each action can run, that each setting can be
+    /// drawn.
+    ///
+    /// # Errors
+    ///
+    /// The first rule it breaks.
+    pub fn check(&self) -> Result<(), ManifestError> {
+        if self.id.is_empty()
+            || !self
+                .id
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || ".-_".contains(c))
+        {
+            return Err(ManifestError::BadId(self.id.clone()));
+        }
+        if !api_ok(&self.api) {
+            return Err(ManifestError::Api {
+                wants: self.api.clone(),
+                have: API,
+            });
+        }
+        let prefix = self.action_prefix();
+        let mut seen = std::collections::BTreeSet::new();
+        for a in &self.actions {
+            if !a.id.starts_with(&prefix) {
+                return Err(ManifestError::ActionNamespace {
+                    action: a.id.clone(),
+                    expected: prefix,
+                });
+            }
+            if !seen.insert(a.id.as_str()) {
+                return Err(ManifestError::Duplicate(a.id.clone()));
+            }
+            match (&a.script, &a.preset) {
+                (Some(_), _) if self.kind != Kind::Luau => {
+                    return Err(ManifestError::ScriptKind(a.id.clone()));
+                }
+                (Some(path), _) => inside(path)?,
+                (None, None) if matches!(self.kind, Kind::Data | Kind::Luau) => {
+                    return Err(ManifestError::NoRun(a.id.clone()));
+                }
+                _ => {}
+            }
+        }
+        if !self.entry.path.is_empty() {
+            inside(&self.entry.path)?;
+        }
+        for view in &self.views {
+            if let Some(doc) = &view.document {
+                inside(doc)?;
+            }
+        }
+        for overlay in &self.overlays {
+            if self.kind != Kind::Luau {
+                return Err(ManifestError::ScriptKind(overlay.id.clone()));
+            }
+            if !seen.insert(overlay.id.as_str()) {
+                return Err(ManifestError::Duplicate(overlay.id.clone()));
+            }
+            if !matches!(overlay.plane.as_str(), "under" | "over" | "top") {
+                return Err(ManifestError::BadPlane {
+                    overlay: overlay.id.clone(),
+                    plane: overlay.plane.clone(),
+                });
+            }
+            inside(&overlay.script)?;
+        }
+        let keys = format!("{}.", self.id);
+        for section in &self.sections {
+            if !seen.insert(section.id.as_str()) {
+                return Err(ManifestError::Duplicate(section.id.clone()));
+            }
+            for s in &section.settings {
+                if !s.key.starts_with(&keys) {
+                    return Err(ManifestError::SettingNamespace(s.key.clone()));
+                }
+                setting(s)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Its settings sections as the settings page takes them, each owned
+    /// by this extension (removed with it).
+    #[must_use]
+    pub fn sections(&self) -> Vec<Section> {
+        self.sections
+            .iter()
+            .map(|decl| {
+                let mut section = Section::new(&decl.id, &decl.title)
+                    .group(decl.group.as_deref().unwrap_or("Extensions"))
+                    .owned_by(&self.id);
+                if !decl.icon.is_empty() {
+                    section = section.icon(&decl.icon);
+                }
+                for s in &decl.settings {
+                    let Ok(made) = setting(s) else { continue };
+                    let title = s.block.clone();
+                    match section.blocks.iter_mut().find(|b| b.title == title) {
+                        Some(block) => block.settings.push(made),
+                        None => section.blocks.push(Block {
+                            title,
+                            settings: vec![made],
+                        }),
+                    }
+                }
+                section
+            })
+            .collect()
+    }
+}
+
+/// The action namespace of extension `id` ([`Manifest::action_prefix`]).
+#[must_use]
+pub fn action_prefix(id: &str) -> String {
+    let mut out = String::with_capacity(id.len().saturating_add(1));
+    for c in id.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_uppercase());
+        } else if !out.ends_with('_') {
+            out.push('_');
+        }
+    }
+    if !out.ends_with('_') {
+        out.push('_');
+    }
+    out
+}
+
+/// Whether a manifest's `api` is one this build runs: the same major,
+/// and — while it is `0.x` — the same minor, no newer than ours.
+fn api_ok(wants: &str) -> bool {
+    let parse = |v: &str| -> Option<(u64, u64)> {
+        let mut parts = v.trim().split('.');
+        let major = parts.next()?.parse().ok()?;
+        let minor = parts.next().unwrap_or("0").parse().ok()?;
+        Some((major, minor))
+    };
+    match (parse(wants), parse(API)) {
+        (Some((0, w)), Some((0, h))) => w == h,
+        (Some((wm, wn)), Some((hm, hn))) => wm == hm && wn <= hn,
+        _ => false,
+    }
+}
+
+/// A relative path that stays in its package.
+fn inside(path: &str) -> Result<(), ManifestError> {
+    let p = std::path::Path::new(path);
+    let ok = !path.is_empty()
+        && p.components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)));
+    if ok {
+        Ok(())
+    } else {
+        Err(ManifestError::BadPath(path.to_owned()))
+    }
+}
+
+/// A declared setting as the settings page takes it.
+fn setting(s: &SettingDecl) -> Result<Setting, ManifestError> {
+    let bad = |why: &str| ManifestError::BadSetting {
+        key: s.key.clone(),
+        why: why.to_owned(),
+    };
+    let choices = || -> Vec<Choice> {
+        s.choices
+            .iter()
+            .map(|c| Choice::text(&c.value, &c.label).detail(&c.detail))
+            .collect()
+    };
+    let (control, default) = match s.control.as_str() {
+        "switch" => (
+            Control::Switch,
+            Value::Bool(
+                s.default
+                    .as_bool()
+                    .ok_or_else(|| bad("its default is not true or false"))?,
+            ),
+        ),
+        "select" | "segmented" | "cards" => {
+            let control = match s.control.as_str() {
+                "select" => Control::Select(choices()),
+                "segmented" => Control::Segmented(choices()),
+                _ => Control::Cards(choices()),
+            };
+            let default = s
+                .default
+                .as_str()
+                .ok_or_else(|| bad("its default is not text"))?;
+            if !s.choices.iter().any(|c| c.value == default) {
+                return Err(bad("its default is not one of its choices"));
+            }
+            (control, Value::Text(default.to_owned()))
+        }
+        "slider" => (
+            Control::Slider {
+                min: s.min.unwrap_or(0.0),
+                max: s.max.unwrap_or(100.0),
+                step: s.step.unwrap_or(1.0),
+                unit: s.unit.clone(),
+            },
+            Value::Float(number(&s.default).ok_or_else(|| bad("its default is not a number"))?),
+        ),
+        "stepper" => (
+            Control::Stepper {
+                min: whole(s.min.unwrap_or(0.0)),
+                max: whole(s.max.unwrap_or(100.0)),
+                step: whole(s.step.unwrap_or(1.0)),
+                unit: s.unit.clone(),
+            },
+            Value::Int(
+                s.default
+                    .as_integer()
+                    .ok_or_else(|| bad("its default is not a whole number"))?,
+            ),
+        ),
+        "text" => (
+            Control::Text {
+                placeholder: s.placeholder.clone(),
+            },
+            Value::Text(
+                s.default
+                    .as_str()
+                    .ok_or_else(|| bad("its default is not text"))?
+                    .to_owned(),
+            ),
+        ),
+        "shortcut" => (
+            Control::Shortcut,
+            Value::Text(
+                s.default
+                    .as_str()
+                    .ok_or_else(|| bad("its default is not a chord"))?
+                    .to_owned(),
+            ),
+        ),
+        other => return Err(bad(&format!("no control called “{other}”"))),
+    };
+    Ok(Setting::new(&s.key, &s.title, control, default)
+        .describe(&s.description)
+        .aliases(s.aliases.iter().cloned()))
+}
+
+fn number(v: &toml::Value) -> Option<f64> {
+    v.as_float().or_else(|| {
+        v.as_integer()
+            .and_then(|i| i32::try_from(i).ok())
+            .map(f64::from)
+    })
+}
+
+/// A whole number from a manifest's `min`/`max`/`step`.
+#[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
+const fn whole(f: f64) -> i64 {
+    // Saturating: `as` clamps a float into i64 and maps NaN to 0.
+    f.round() as i64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Kind, Manifest, ManifestError, action_prefix};
+    use architect_settings::{Control, Owner, Value};
+
+    const METRONOME: &str = r#"
+id = "fts.metronome"
+name = "Metronome"
+version = "0.1.0"
+kind = "luau"
+
+[[actions]]
+id = "FTS_METRONOME_COUNT_IN"
+name = "Count in"
+script = "count_in.luau"
+
+[[sections]]
+id = "metronome"
+title = "Metronome"
+icon = "timer"
+
+[[sections.settings]]
+key = "fts.metronome.accent"
+title = "Accent the downbeat"
+control = "switch"
+default = true
+
+[[sections.settings]]
+key = "fts.metronome.volume"
+title = "Click volume"
+control = "slider"
+max = 100
+unit = "%"
+default = 70
+
+[[sections.settings]]
+key = "fts.metronome.sound"
+title = "Sound"
+block = "Sound"
+control = "select"
+default = "wood"
+choices = [{ value = "wood", label = "Woodblock" }, { value = "beep", label = "Beep" }]
+"#;
+
+    #[test]
+    fn a_manifest_reads_into_settings_sections_it_owns() {
+        let m = Manifest::parse(METRONOME).unwrap();
+        assert_eq!(m.kind, Kind::Luau);
+        assert_eq!(m.version.to_string(), "0.1.0");
+        let sections = m.sections();
+        assert_eq!(sections.len(), 1);
+        let s = &sections[0];
+        assert_eq!(s.owner, Owner::Extension("fts.metronome".into()));
+        assert_eq!(s.group.as_deref(), Some("Extensions"));
+        assert_eq!(s.blocks.len(), 2, "untitled, then Sound");
+        let volume = s
+            .settings()
+            .find(|t| t.key == "fts.metronome.volume")
+            .unwrap();
+        assert_eq!(volume.default, Value::Float(70.0));
+        assert!(
+            matches!(volume.control, Control::Slider { max, .. } if (max - 100.0).abs() < f64::EPSILON)
+        );
+    }
+
+    #[test]
+    fn a_manifest_keeps_to_its_namespaces_and_its_api() {
+        let bad = |from: &str, to: &str| Manifest::parse(&METRONOME.replacen(from, to, 1));
+        assert!(matches!(
+            bad("FTS_METRONOME_COUNT_IN", "TRANSPORT_PLAY"),
+            Err(ManifestError::ActionNamespace { .. })
+        ));
+        assert!(matches!(
+            bad(
+                "key = \"fts.metronome.accent\"",
+                "key = \"appearance.theme\""
+            ),
+            Err(ManifestError::SettingNamespace(_))
+        ));
+        assert!(matches!(
+            bad("kind = \"luau\"", "kind = \"data\""),
+            Err(ManifestError::ScriptKind(_))
+        ));
+        assert!(matches!(
+            bad("count_in.luau", "../outside.luau"),
+            Err(ManifestError::BadPath(_))
+        ));
+        assert!(matches!(
+            bad("kind = \"luau\"", "kind = \"luau\"\napi = \"0.9\""),
+            Err(ManifestError::Api { .. })
+        ));
+        assert!(matches!(
+            bad("default = \"wood\"", "default = \"cowbell\""),
+            Err(ManifestError::BadSetting { .. })
+        ));
+        assert!(matches!(
+            bad("id = \"fts.metronome\"", "id = \"FTS\""),
+            Err(ManifestError::BadId(_))
+        ));
+    }
+
+    #[test]
+    fn an_overlay_is_a_script_on_a_plane_of_a_view() {
+        let with =
+            |overlay: &str| Manifest::parse(&format!("{METRONOME}\n[[overlays]]\n{overlay}"));
+        let m =
+            with("id = \"clicks\"\nview = \"session.arrange\"\nscript = \"clicks.luau\"").unwrap();
+        let o = &m.overlays[0];
+        assert_eq!(
+            (o.view.as_str(), o.plane.as_str()),
+            ("session.arrange", "over")
+        );
+        assert!(matches!(
+            with("id = \"c\"\nview = \"v\"\nplane = \"side\"\nscript = \"c.luau\""),
+            Err(ManifestError::BadPlane { .. })
+        ));
+        assert!(matches!(
+            with("id = \"c\"\nview = \"v\"\nscript = \"/etc/c.luau\""),
+            Err(ManifestError::BadPath(_))
+        ));
+        assert!(matches!(
+            with("id = \"metronome\"\nview = \"v\"\nscript = \"c.luau\""),
+            Err(ManifestError::Duplicate(_))
+        ));
+    }
+
+    #[test]
+    fn an_id_makes_an_action_namespace() {
+        assert_eq!(action_prefix("fts.metronome"), "FTS_METRONOME_");
+        assert_eq!(action_prefix("a--b"), "A_B_");
+    }
+}

@@ -36,6 +36,7 @@ mod group;
 mod overlay;
 mod screens;
 mod windows;
+mod presence;
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -54,6 +55,7 @@ use crate::screenset::{FormClass, Screensets};
 use dock::DockView;
 use group::NodeView;
 use overlay::{DragLayer, FloatView, MenuLayer, PhoneBody, SheetLayer};
+pub use presence::{PresenceLayer, PresenceOverlay, use_presence_overlay};
 
 pub use screens::WorkspaceStore;
 pub use windows::{Bridge, Popout, WindowSystem, Windows};

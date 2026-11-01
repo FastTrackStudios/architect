@@ -60,23 +60,27 @@ fn write_png(path: &Path, buffer: &[u8], width: u32, height: u32) {
     w.finish().expect("png finish");
 }
 
+/// `features/ui/ui-snapshot`, found at run time: `cargo run` sets
+/// `CARGO_MANIFEST_DIR` for the process. `env!` would bake the checkout's
+/// absolute path into the binary, and kache would key it per checkout.
+fn crate_dir() -> PathBuf {
+    std::env::var_os("CARGO_MANIFEST_DIR")
+        .map(PathBuf::from)
+        .expect("run through `cargo run -p ui-snapshot`, which sets CARGO_MANIFEST_DIR")
+}
+
 fn reference_path(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    crate_dir()
         .join("tests/reference")
         .join(format!("{name}.png"))
 }
 
 fn output_path(name: &str) -> PathBuf {
-    // CARGO_MANIFEST_DIR is features/ui/ui-snapshot — three levels below
-    // the workspace root.
-    let ws = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap();
-    ws.join("target/ui-snapshots").join(format!("{name}.png"))
+    // The crate is features/ui/ui-snapshot, three levels below the
+    // workspace root.
+    crate_dir()
+        .join("../../../target/ui-snapshots")
+        .join(format!("{name}.png"))
 }
 
 fn update() -> std::process::ExitCode {

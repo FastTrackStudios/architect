@@ -8,25 +8,33 @@
 //! handler that holds the view's signals, which the Action List (shared
 //! across threads) cannot.
 //!
-//! Keys: until the keymap engine drives them, a key runs the command whose
-//! shortcut it is ([`Commands::handle_key`]), so a shortcut shown in the
-//! palette is also the one that works.
+//! Keys run through `architect-input` ([`Commands::handle_chord`]): the
+//! app's keymap, each command's declared shortcut, and the person's
+//! layer over both ([`crate::use_keymap`]), in the live contexts
+//! ([`Commands::set_context`]). A shortcut shown in the palette is the
+//! binding that runs it, and changes when the person rebinds it.
 
 // The `rsx!` loops iterate rows collected so a signal's read is let go
-// before drawing.
-#![allow(clippy::needless_collect)]
+// before drawing. Items shared with `keys_ui` are `pub(crate)`, out of
+// the crate's `pub use ui::*`.
+#![allow(clippy::needless_collect, clippy::redundant_pub_crate)]
 
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use architect::action::ActionList;
+use architect_input::dioxus::{InputHandle, use_input_processor};
+use architect_input::{InputContext, InputProcessor, KeymapConfig, MacroKeys};
 
 use architect_shell::{ShellTheme, try_use_shell};
 use dioxus::prelude::*;
 use lucide_dioxus::{Command as CommandIcon, Search};
 
 use crate::fuzzy::fuzzy;
+use crate::keymap::{Keymap, PersonKeymap};
+use crate::keys_ui::{Asking, Pick, Recording};
+use crate::menu::Pick as MenuPick;
 use crate::opener::{Found, OpenIn, Opener, Openers};
 use crate::palette::{Command, Query, Ranked, Scope, rank};
 use crate::recent::Recents;
@@ -56,13 +64,41 @@ pub struct Commands {
     pub recents: Signal<Recents>,
     pub overlay: Signal<Option<Overlay>>,
     /// Bumped when the scoped commands change, so the palette redraws.
-    version: Signal<u64>,
+    pub(crate) version: Signal<u64>,
+    /// Whether the platform shows the menu bar ([`NativeMenus`](crate::NativeMenus)
+    /// took it), so the in-window one stands aside.
+    global_menu: Signal<bool>,
     serial: CopyValue<u64>,
+    /// The app's keymap with the person's layer over it.
+    pub(crate) keymap: Signal<Keymap>,
+    /// Told when the person's layer changes, to keep and sync it.
+    pub(crate) on_keymap: CopyValue<Option<Callback<PersonKeymap>>>,
+    /// The keymap engine the keys run through.
+    pub(crate) keys: CopyValue<InputHandle>,
+    /// The config the engine was last built from.
+    pub(crate) built: CopyValue<Option<KeymapConfig>>,
+    /// Where keys are going: the live contexts.
+    pub(crate) context: CopyValue<InputContext>,
+    /// The held-letter key down now, for its tool's hint.
+    pub(crate) held: Signal<Option<String>>,
+    /// The palette's field.
+    pub(crate) query: Signal<String>,
+    /// An action's arguments being asked for in the palette.
+    pub(crate) asking: Signal<Option<Asking>>,
+    /// A binding being recorded in the action list window.
+    pub(crate) recording: Signal<Option<Recording>>,
+    /// The `@` (this page's targets) and `#` (settings) finders.
+    pub(crate) targets: CopyValue<Rc<RefCell<Openers>>>,
+    pub(crate) settings: CopyValue<Rc<RefCell<Openers>>>,
+    /// The keymap in force, at the `version` it was computed for.
+    pub(crate) cache: CopyValue<Option<(u64, Rc<crate::keys_ui::Effective>)>>,
 }
 
 /// Puts a [`Commands`] in context for everything below.
 #[must_use = "the commands, to run one or open the palette"]
 pub fn use_commands_provider() -> Commands {
+    // Not vim: `q` and `@` are keys like any other.
+    let keys = use_input_processor(|| InputProcessor::new().with_macro_keys(MacroKeys::Off));
     use_context_provider(|| Commands {
         scoped: CopyValue::new(Rc::new(RefCell::new(Vec::new()))),
         lists: CopyValue::new(Vec::new()),
@@ -70,7 +106,20 @@ pub fn use_commands_provider() -> Commands {
         recents: Signal::new(Recents::default()),
         overlay: Signal::new(None),
         version: Signal::new(0),
+        global_menu: Signal::new(false),
         serial: CopyValue::new(0),
+        keymap: Signal::new(Keymap::default()),
+        on_keymap: CopyValue::new(None),
+        keys: CopyValue::new(keys),
+        built: CopyValue::new(None),
+        context: CopyValue::new(InputContext::new()),
+        held: Signal::new(None),
+        query: Signal::new(String::new()),
+        asking: Signal::new(None),
+        recording: Signal::new(None),
+        targets: CopyValue::new(Rc::new(RefCell::new(Openers::new()))),
+        settings: CopyValue::new(Rc::new(RefCell::new(Openers::new()))),
+        cache: CopyValue::new(None),
     })
 }
 
@@ -160,6 +209,9 @@ fn from_info(info: &architect::action::ActionInfo) -> Command {
         .group(group)
         .detail(info.description.clone())
         .shortcut(info.shortcut.clone());
+    if let Some(on) = info.checked {
+        c = c.checked(on);
+    }
     if !info.enabled {
         c = c.disabled(
             info.disabled_reason
@@ -188,15 +240,41 @@ pub fn use_opener(make: impl FnOnce() -> Opener) {
 }
 
 impl Commands {
-    fn bump(self) {
+    pub(crate) fn bump(self) {
         let mut v = self.version;
         let next = v.peek().saturating_add(1);
         v.set(next);
     }
 
-    /// Every command there is now.
+    /// Every command there is now, each shown with the binding that runs
+    /// it (the person's, else the app's).
     #[must_use]
     pub fn all(&self) -> Vec<Command> {
+        let effective = self.effective();
+        self.declared()
+            .into_iter()
+            .map(|mut c| {
+                c.shortcut = effective.shortcuts.get(&c.id).cloned().unwrap_or_default();
+                c
+            })
+            .collect()
+    }
+
+    /// The keymap with `commands`' declared shortcuts in it.
+    pub(crate) fn keymap_for(&self, commands: &[Command]) -> Keymap {
+        let mut keymap = self.keymap.read().clone();
+        keymap.set_shortcuts(
+            commands
+                .iter()
+                .filter(|c| !c.shortcut.is_empty())
+                .map(|c| (c.id.clone(), c.shortcut.clone())),
+        );
+        keymap
+    }
+
+    /// Every command, with the shortcut it declares, and the person's
+    /// custom actions.
+    pub(crate) fn declared(&self) -> Vec<Command> {
         let _ = (self.version)();
         let mut all: Vec<Command> = self
             .scoped
@@ -213,10 +291,17 @@ impl Commands {
                 }
             }
         }
+        for custom in self.keymap.read().custom() {
+            if !all.iter().any(|c| c.id == custom.id) {
+                all.push(crate::keys_ui::custom_command(custom));
+            }
+        }
         all
     }
 
-    /// Runs command `id`. False when there is none, or it is disabled.
+    /// Runs command `id`. False when there is none, or it is disabled. An
+    /// async action from a list (a saved script) is spawned, and counts as
+    /// run once started.
     #[must_use = "false when there is no such command, or it cannot run"]
     pub fn run(&self, id: &str) -> bool {
         let found = {
@@ -240,20 +325,129 @@ impl Commands {
             .iter()
             .find(|l| l.info(id).is_some_and(|i| i.enabled))
             .cloned();
-        list.is_some_and(|list| {
+        if let Some(list) = list {
             recents.write().touch(id);
-            list.run(id).is_ok()
+            if !list.is_async(id) {
+                return list.run(id).is_ok();
+            }
+            // An async action (a saved script, a service call) is awaited
+            // off the key's turn; started is all a key can know.
+            let id = id.to_owned();
+            spawn(async move {
+                let _ = list.run_json_async(&id, b"").await;
+            });
+            return true;
+        }
+        self.run_custom(id)
+    }
+
+    /// Runs action `id` with `args` (JSON). False when there is no such
+    /// action in the app's lists, it is disabled, or it said no. An async
+    /// action is spawned, and counts as run once started.
+    #[must_use = "false when it did not run"]
+    pub fn run_with(&self, id: &str, args: &str) -> bool {
+        let list = self
+            .lists
+            .read()
+            .iter()
+            .find(|l| l.info(id).is_some_and(|i| i.enabled))
+            .cloned();
+        list.is_some_and(|list| {
+            let mut recents = self.recents;
+            recents.write().touch(id);
+            if !list.is_async(id) {
+                return list.run_json(id, args.as_bytes()).is_ok();
+            }
+            let id = id.to_owned();
+            let args = args.as_bytes().to_vec();
+            spawn(async move {
+                let _ = list.run_json_async(&id, &args).await;
+            });
+            true
         })
+    }
+
+    /// Action `id`'s params schema, when an app list has it.
+    pub(crate) fn params_schema(&self, id: &str) -> Option<String> {
+        self.lists
+            .read()
+            .iter()
+            .find_map(|l| l.info(id))
+            .and_then(|i| i.params_schema)
+    }
+
+    /// Does what picking a menu row does: runs its command, with the row's
+    /// arguments when it has them (a live section's row: those go to the
+    /// Action List, which is where an action that takes any lives). False
+    /// when there is no such command, it is disabled or it failed.
+    #[must_use = "false when there is no such command, or it cannot run"]
+    pub fn run_pick(&self, pick: &MenuPick) -> bool {
+        let Some(args) = &pick.args else {
+            return self.run(&pick.command);
+        };
+        let list = self
+            .lists
+            .read()
+            .iter()
+            .find(|l| l.info(&pick.command).is_some_and(|i| i.enabled))
+            .cloned();
+        list.is_some_and(|list| {
+            let mut recents = self.recents;
+            recents.write().touch(&pick.command);
+            list.run_json(&pick.command, args.as_bytes()).is_ok()
+        })
+    }
+
+    /// Where the Action Lists' events have got to: it moves on with each
+    /// run, each [`ActionList::changed`] the app reports, each action
+    /// registered. A menu bar asks again (`refresh`) when it moved,
+    /// so enabled and ticked states follow the events, not a clock.
+    #[must_use]
+    pub fn heard(&self) -> u64 {
+        self.lists
+            .peek()
+            .iter()
+            .fold(0_u64, |sum, l| sum.wrapping_add(l.latest()))
+    }
+
+    /// Whether the platform shows the app's menu bar (the macOS one, or a
+    /// Linux shell that took the exported one): the in-window bar
+    /// ([`InWindowMenus`](crate::InWindowMenus)) draws nothing then.
+    #[must_use]
+    pub fn has_global_menu(&self) -> bool {
+        (self.global_menu)()
+    }
+
+    /// Says whether the platform shows the menu bar: what a backend does
+    /// once it knows.
+    pub fn set_global_menu(&self, shown: bool) {
+        let mut g = self.global_menu;
+        if *g.peek() != shown {
+            g.set(shown);
+        }
+    }
+
+    /// Everything that reads the commands reads them again.
+    pub fn refresh(&self) {
+        self.bump();
     }
 
     pub fn show(&self, overlay: Overlay) {
         let mut o = self.overlay;
+        if overlay == Overlay::Palette {
+            let mut query = self.query;
+            query.set(String::new());
+            let mut asking = self.asking;
+            asking.set(None);
+        }
         o.set(Some(overlay));
     }
 
     pub fn close(&self) {
         let mut o = self.overlay;
         o.set(None);
+        let mut asking = self.asking;
+        asking.set(None);
     }
 
     /// A key at the app's root: ⌘K (or ⌘⇧P) the palette, ⌘O quick open,
@@ -267,8 +461,25 @@ impl Commands {
     /// A chord as commands show theirs (`⌘K`, `⌃⇧Tab`): what
     /// [`Self::handle_key`] does with a DOM key, for a key heard elsewhere
     /// (the window, [`WindowKeys`]).
+    ///
+    /// Any other chord goes to the keymap: a binding runs its command, a
+    /// sequence's first key waits for the next ([`crate::WhichKeyPanel`]
+    /// shows what can follow). While the action list window records a
+    /// binding, the chord is recorded instead; while the palette asks `?`,
+    /// it is the key asked about.
     #[must_use = "true when the chord was used"]
     pub fn handle_chord(&self, chord: &str) -> bool {
+        if self.recording.peek().is_some() {
+            return self.record_chord(chord);
+        }
+        if self.overlay.peek().is_some()
+            && chord != "Esc"
+            && self.query.peek().trim_start().starts_with('?')
+        {
+            let mut query = self.query;
+            query.set(format!("?{chord}"));
+            return true;
+        }
         match chord {
             "⌘K" | "⌃K" | "⇧⌘P" | "⌃⇧P" => {
                 self.show(Overlay::Palette);
@@ -284,18 +495,13 @@ impl Commands {
             }
             _ => {}
         }
-        let id = self
-            .all()
-            .into_iter()
-            .find(|c| c.enabled && c.shortcut == *chord)
-            .map(|c| c.id);
-        id.is_some_and(|id| self.run(&id))
+        self.key_chord(chord)
     }
 }
 
 /// A key event as a shortcut's text (`⌘W`, `⌃⇧Tab`), the way commands
 /// show theirs: modifiers in the Mac order, then the key.
-fn chord(e: &KeyboardEvent) -> Option<String> {
+pub(crate) fn chord(e: &KeyboardEvent) -> Option<String> {
     let m = e.modifiers();
     let key = match e.key() {
         Key::Character(c) if c == " " => "Space".to_owned(),
@@ -332,11 +538,11 @@ fn chord(e: &KeyboardEvent) -> Option<String> {
 }
 
 /// A row's fill: lit when picked.
-const fn fill(on: bool, t: &ShellTheme) -> &'static str {
+pub(crate) const fn fill(on: bool, t: &ShellTheme) -> &'static str {
     if on { t.active } else { "transparent" }
 }
 
-fn theme() -> ShellTheme {
+pub(crate) fn theme() -> ShellTheme {
     try_use_shell().map(|s| s.theme).unwrap_or_default()
 }
 
@@ -348,16 +554,20 @@ pub fn CommandLayer() -> Element {
     let Some(commands) = commands else {
         return rsx! {};
     };
-    match (commands.overlay)() {
+    let overlay = match (commands.overlay)() {
         Some(Overlay::Palette) => rsx! { CommandPalette {} },
         Some(Overlay::QuickOpen) => rsx! { QuickOpen {} },
         None => rsx! {},
+    };
+    rsx! {
+        {overlay}
+        crate::WhichKeyPanel {}
     }
 }
 
 /// The overlay's frame: a scrim, and a panel near the top with a field.
 #[component]
-fn Frame(
+pub(crate) fn Frame(
     placeholder: &'static str,
     query: Signal<String>,
     on_key: EventHandler<KeyboardEvent>,
@@ -413,7 +623,7 @@ fn Frame(
 }
 
 #[component]
-fn Kbd(text: String) -> Element {
+pub(crate) fn Kbd(text: String) -> Element {
     let t = theme();
     rsx! {
         span { style: "flex-shrink: 0; padding: 1px 6px; border-radius: 4px; border: 1px solid {t.rule}; \
@@ -484,12 +694,20 @@ pub fn CommandPalette() -> Element {
         return rsx! {};
     };
     let t = theme();
-    let query = use_signal(String::new);
+    let query = commands.query;
     let mut selected = use_signal(|| 0usize);
     let q = Query::parse(&query.read());
-    let rows: Vec<Ranked> = match q.scope {
-        Scope::Commands => rank(&commands.all(), &q.text, &commands.recents.read()),
-        _ => Vec::new(),
+    let (rows, picks): (Vec<Ranked>, Vec<Pick>) = match q.scope {
+        Scope::Commands => rank(&commands.all(), &q.text, &commands.recents.read())
+            .into_iter()
+            .map(|r| {
+                let pick = Pick::Run(r.command.id.clone());
+                (r, pick)
+            })
+            .unzip(),
+        _ => crate::keys_ui::scope_rows(&commands, &q)
+            .into_iter()
+            .unzip(),
     };
     let count = rows.len();
     // A new query starts at the top.
@@ -497,15 +715,14 @@ pub fn CommandPalette() -> Element {
         let _ = query();
         selected.set(0);
     });
-    let ids: Vec<(String, bool)> = rows
-        .iter()
-        .map(|r| (r.command.id.clone(), r.command.enabled))
-        .collect();
+    if commands.asking.read().is_some() {
+        return rsx! { crate::keys_ui::AskPalette {} };
+    }
+    let enabled: Vec<bool> = rows.iter().map(|r| r.command.enabled).collect();
     let pick = selected().min(count.saturating_sub(1));
     let run_at = move |i: usize| {
-        if let Some((id, true)) = ids.get(i) {
-            commands.close();
-            let _ = commands.run(id);
+        if let (Some(p), Some(true)) = (picks.get(i), enabled.get(i)) {
+            commands.pick(p);
         }
     };
     let run_key = run_at.clone();
@@ -525,9 +742,10 @@ pub fn CommandPalette() -> Element {
     let empty = match q.scope {
         Scope::Commands if q.text.is_empty() => "No commands yet",
         Scope::Commands => "No command matches",
-        Scope::Targets => "Nothing on this page to jump to yet",
-        Scope::Settings => "Settings come with the settings page",
-        Scope::Help => "Type a key to see what it does",
+        Scope::Targets => "Nothing on this page matches",
+        Scope::Settings => "No setting matches",
+        Scope::Help if q.text.is_empty() => "Press a key to see what it does",
+        Scope::Help => "Nothing is bound to that",
     };
     rsx! {
         Frame { placeholder: "Type a command…", query, on_key,
@@ -550,7 +768,7 @@ pub fn CommandPalette() -> Element {
 }
 
 #[component]
-fn CommandRow(row: Ranked, on: bool, onpress: EventHandler<()>) -> Element {
+pub(crate) fn CommandRow(row: Ranked, on: bool, onpress: EventHandler<()>) -> Element {
     let t = theme();
     let c = row.command;
     let fill = if on { t.active } else { "transparent" };
@@ -725,12 +943,13 @@ pub fn ActionListView() -> Element {
                     "Unbound only"
                 }
                 span { style: "color: {t.ink_3}; font-size: 12px;", "{count} actions" }
+                crate::KeymapTools {}
             }
             div { style: "flex-shrink: 0; display: flex; gap: 10px; padding: 6px 14px; color: {t.ink_3}; font-size: 11px; \
                           font-weight: 600; border-bottom: 1px solid {t.rule};",
                 span { style: "flex: 3; min-width: 0;", "Action" }
                 span { style: "flex: 2; min-width: 0;", "Group" }
-                span { style: "flex: 1; min-width: 0;", "Shortcut" }
+                span { style: "flex: 2; min-width: 0;", "Bindings" }
                 span { style: "flex: 3; min-width: 0;", "Id" }
                 span { style: "width: 52px;", "" }
             }
@@ -761,10 +980,8 @@ fn ActionRow(command: Command) -> Element {
                 }
             }
             span { style: "flex: 2; min-width: 0; color: {t.ink_2}; white-space: nowrap; overflow: hidden;", "{command.group}" }
-            span { style: "flex: 1; min-width: 0;",
-                if !command.shortcut.is_empty() {
-                    Kbd { text: command.shortcut.clone() }
-                }
+            span { style: "flex: 2; min-width: 0;",
+                crate::BindingEditor { action: command.id.clone() }
             }
             span { style: "flex: 3; min-width: 0; color: {t.ink_3}; font-family: ui-monospace, Menlo, monospace; \
                            font-size: 11px; white-space: nowrap; overflow: hidden;",

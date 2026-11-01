@@ -3357,9 +3357,9 @@ fn check_http_only(trait_item: &ItemTrait, args: &RpcArgs, methods: &[Method]) -
     Ok(())
 }
 
-/// Every route's parameters must name one of its method's arguments, and
-/// a `get` route (no body) must take all of its arguments from the path
-/// or the bearer header; so must one that streams its body.
+/// Every route's parameters must name one of its method's arguments. (A
+/// route with no JSON body, a `get` or one that streams its body, takes
+/// its other arguments from the query string.)
 fn check_http_routes(prefix: &str, methods: &[Method], subs: &[Subscription]) -> syn::Result<()> {
     let prefix_params = path_params(prefix).unwrap_or_default();
     if let (Some(p), Some(sub)) = (prefix_params.first(), subs.first()) {
@@ -3392,31 +3392,32 @@ fn check_http_routes(prefix: &str, methods: &[Method], subs: &[Subscription]) ->
                 ));
             }
         }
-        // The arguments a JSON body would have to carry.
-        let body_arg = typed_args(m).find(|(id, ty)| {
-            *id != "token"
-                && raw_arg(ty).is_none()
-                && !params.iter().any(|p| *id == p.name.as_str())
-        });
-        let streams = typed_args(m).any(|(_, ty)| raw_arg(ty) == Some(RawArg::Body));
-        if let Some((id, _)) = body_arg
-            && (m.http.verb == Verb::Get || streams)
-        {
-            let why = if streams {
-                "a method that streams its body (`BodyStream`) has no JSON body"
-            } else {
-                "a `get` route has no body"
-            };
-            return Err(syn::Error::new_spanned(
-                id,
-                format!(
-                    "{why}: `{id}` must come from the path (`{{{id}}}`), or the \
-                     method must use `post` / `put` with a JSON body"
-                ),
-            ));
-        }
     }
     Ok(())
+}
+
+/// A route with no JSON body to carry its arguments: a `get` (a browser's
+/// `fetch` sends none), or a method whose body is a `BodyStream`. The
+/// arguments the path does not bind ride the query string instead.
+fn takes_query(m: &Method) -> bool {
+    m.http.verb == Verb::Get || typed_args(m).any(|(_, ty)| raw_arg(ty) == Some(RawArg::Body))
+}
+
+/// `T` of an `Option<T>` argument, by its last path segment: an absent
+/// query parameter reads as `None`.
+fn option_inner(ty: &Type) -> Option<&Type> {
+    let Type::Path(p) = ty else { return None };
+    let last = p.path.segments.last()?;
+    if last.ident != "Option" {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &last.arguments else {
+        return None;
+    };
+    match args.args.first()? {
+        syn::GenericArgument::Type(inner) => Some(inner),
+        _ => None,
+    }
 }
 
 /// Emit the HTTP face:
@@ -3557,9 +3558,12 @@ fn emit_http_block(
         let mut token_fixups = Vec::new();
         // The extended handler: one binding per argument, from the path,
         // the bearer header or the JSON body.
-        let has_body = verb != Verb::Get
-            && typed_args(m).any(|(id, ty)| !is_param(id) && raw_arg(ty).is_none());
+        let has_body =
+            !takes_query(m) && typed_args(m).any(|(id, ty)| !is_param(id) && raw_arg(ty).is_none());
+        let query_route = takes_query(m);
         let mut binds = Vec::new();
+        // What the client writes into the query string, in order.
+        let mut query_pushes = Vec::new();
         // What the handler passes the method, in order. The backend is
         // called directly in an HTTP-only service, so a borrowed argument
         // is passed borrowed.
@@ -3613,6 +3617,26 @@ fn emit_http_block(
             let ident_str = ident.to_string();
             binds.push(if is_param(ident) {
                 quote! { let #ident = raw.param::<#ty>(#ident_str)?; }
+            } else if query_route && is_token {
+                // The query fills in for the body: it wins when it says
+                // something, the bearer header when it does not.
+                query_pushes.push(quote! {
+                    __query.push_opt(#ident_str, (!#ident.is_empty()).then_some(&#ident));
+                });
+                quote! {
+                    let #ident = ::architect::http::token_or_bearer(
+                        raw.query_opt::<::std::string::String>(#ident_str)?.unwrap_or_default(),
+                        raw.bearer(),
+                    );
+                }
+            } else if query_route {
+                if let Some(inner) = option_inner(ty) {
+                    query_pushes.push(quote! { __query.push_opt(#ident_str, #ident.as_ref()); });
+                    quote! { let #ident = raw.query_opt::<#inner>(#ident_str)?; }
+                } else {
+                    query_pushes.push(quote! { __query.push(#ident_str, &#ident); });
+                    quote! { let #ident = raw.query::<#ty>(#ident_str)?; }
+                }
             } else if is_token {
                 let from_body = if has_body {
                     quote! { __args.#ident }
@@ -3715,18 +3739,7 @@ fn emit_http_block(
         path_pairs.push(quote! { (#name_str, #path) });
 
         let make_args = quote! { let args = http::#args_name { #(#field_names),* }; };
-        let client_body = if !extended {
-            quote! {
-                #make_args
-                self.inner.call(#path, &args).await
-            }
-        } else if params.is_empty() {
-            let client_verb = verb.client();
-            quote! {
-                #make_args
-                self.inner.call_to(#client_verb, #path, &args).await
-            }
-        } else {
+        let client_body = if extended {
             let client_verb = verb.client();
             // The path with each parameter percent-encoded in place,
             // written before the arguments move into `args`.
@@ -3743,10 +3756,30 @@ fn emit_http_block(
                     quote! { ::architect::http::encode_segment(&#id) }
                 }
             });
+            let base = if params.is_empty() {
+                quote! { ::std::string::String::from(#path) }
+            } else {
+                quote! { ::std::format!(#fmt, #(#encoded),*) }
+            };
+            // The query, like the path, is written before the arguments
+            // move into `args`.
+            let query = (!query_pushes.is_empty()).then(|| {
+                quote! {
+                    let mut __query = ::architect::http::QueryString::new();
+                    #(#query_pushes)*
+                    let __path = __query.after(&__path);
+                }
+            });
             quote! {
-                let __path = ::std::format!(#fmt, #(#encoded),*);
+                let __path = #base;
+                #query
                 #make_args
                 self.inner.call_to(#client_verb, &__path, &args).await
+            }
+        } else {
+            quote! {
+                #make_args
+                self.inner.call(#path, &args).await
             }
         };
         // A byte method has no typed client: any HTTP client calls it.

@@ -25,6 +25,7 @@ mod host;
 mod layout;
 mod model;
 mod ops;
+mod presence;
 mod repair;
 mod screenset;
 pub mod store;
@@ -34,8 +35,9 @@ pub use drop::{Bar, Drop, bar_drop, contains, drop_at, drop_in, float_rect, snap
 pub mod native;
 #[cfg(feature = "ui")]
 pub use host::{
-    Bridge, Command, Host, PaneHandle, Popout, TitleRow, View, Views, WindowSystem, Windows,
-    WorkspaceStore, WorkspaceView, use_host, use_pane, use_pane_status,
+    Bridge, Command, Host, PaneHandle, Popout, PresenceLayer, PresenceOverlay, TitleRow, View,
+    Views, WindowSystem, Windows, WorkspaceStore, WorkspaceView, use_host, use_pane,
+    use_pane_status, use_presence_overlay,
 };
 pub use layout::{Direction, Placed, Slide, area_rects, neighbour, scroll_to, slides};
 pub use model::{
@@ -44,5 +46,6 @@ pub use model::{
     SplitId, ViewKind, Window, WindowId, Workspace,
 };
 pub use ops::{Dest, Target, WorkspaceError};
-pub use screenset::{FormClass, Layout, Screenset, Screensets};
+pub use presence::{PlayheadMark, PointerMark, PresenceMarks, WashMark, css_color};
+pub use screenset::{FormClass, Layout, Recall, Screenset, Screensets};
 pub use store::{MemoryStore, Store};

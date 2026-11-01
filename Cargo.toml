@@ -45,13 +45,19 @@ members = [
     "features/workspace",
     "features/commands",
     "features/settings",
+    "features/settings/derive",
     "features/orgs",
+    "features/scripting",
+    "features/extensions",
+    "features/canvas",
+    "features/files",
     "features/ui/showcase",
     "features/ui/ui-snapshot",
     "features/shell",
     "apps/lab/ui",
     "apps/lab/desktop",
     "apps/lab/mobile",
+    "apps/lab/clicker",
     # ── story (component workbench) ───────────────────────────────────
     "features/story/architect-story-core",
     "features/story/architect-story-macros",
@@ -211,7 +217,12 @@ architect-shell = { path = "features/shell", default-features = false }
 architect-workspace = { path = "features/workspace" }
 architect-commands = { path = "features/commands" }
 architect-settings = { path = "features/settings" }
+architect-settings-derive = { path = "features/settings/derive" }
 architect-orgs = { path = "features/orgs" }
+architect-scripting = { path = "features/scripting" }
+architect-extensions = { path = "features/extensions" }
+architect-canvas = { path = "features/canvas" }
+architect-files = { path = "features/files" }
 architect-lab-ui = { path = "apps/lab/ui" }
 # iOS: the UIScene lifecycle the lab app adopts (apps/lab/mobile).
 objc2 = "0.6"

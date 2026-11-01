@@ -2,7 +2,9 @@
 //! and the base + user merge.
 //!
 //! Bindings are strings both ways: a key sequence (`g g`, `Ctrl+s`,
-//! `Shift+Tab`) to an action string. An action string is an action id
+//! `Shift+Tab`), a mouse or scroll pattern (`Z+Left.Drag`,
+//! `Ctrl+Scroll`), a MIDI pattern (`CC64 ch1`) or an OSC address
+//! (`/transport/play`) to an action string. An action string is an action id
 //! (`file.save`, an Action List id), or one of `mode:<id>`,
 //! `operator:<op>`, `motion:<m>`, `textobj:<o>`, `unbind`.
 //!
@@ -34,6 +36,8 @@ pub enum ConfigError {
     InvalidMousePattern(String),
     #[error("invalid scroll pattern: {0}")]
     InvalidScrollPattern(String),
+    #[error("invalid MIDI pattern: {0}")]
+    InvalidMidiPattern(String),
 }
 
 /// A whole keymap, as written in a config file. Every map is keyed by mode
@@ -56,6 +60,32 @@ pub struct KeymapConfig {
     /// Scroll pattern (`Shift+Scroll`) to action id, per mode or surface.
     #[serde(default)]
     pub scroll: HashMap<String, HashMap<String, String>>,
+    /// Bindings by context (`session.arrange`, `session.arrange.item`):
+    /// live while the context is ([`crate::InputContext::set_context`]),
+    /// the innermost first, before the mode's own keymap. They apply in
+    /// every mode but a passthrough-text one (typing).
+    #[serde(default)]
+    pub contexts: HashMap<String, ContextConfig>,
+    /// MIDI pattern (`CC64 ch1`, `Note60`) to action id, in every mode.
+    #[serde(default)]
+    pub midi: HashMap<String, String>,
+    /// OSC address (`/transport/play`) to action id, in every mode.
+    #[serde(default)]
+    pub osc: HashMap<String, String>,
+}
+
+/// One context's bindings, of every kind.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContextConfig {
+    /// Key sequence to action string.
+    #[serde(default)]
+    pub keys: HashMap<String, String>,
+    /// Mouse pattern (`Z+Left.Drag`, `Alt+Left.Drag`) to action id.
+    #[serde(default)]
+    pub mouse: HashMap<String, String>,
+    /// Scroll pattern (`Z+Scroll`) to action id.
+    #[serde(default)]
+    pub scroll: HashMap<String, String>,
 }
 
 /// A mode as written in a config file.
@@ -95,7 +125,10 @@ impl KeymapConfig {
     ///   base's other `o *` entries;
     /// - a user value of `unbind` removes that sequence;
     /// - user context layers replace the base's, per mode;
-    /// - mouse and scroll bindings merge per pattern, the user's winning.
+    /// - mouse and scroll bindings merge per pattern, the user's winning;
+    /// - a context's keys overlay the base's as a mode's do, its mouse and
+    ///   scroll per pattern; MIDI and OSC per pattern. `unbind` removes
+    ///   any of them.
     #[must_use]
     pub fn merge(base: Self, user: Self) -> Self {
         let mut merged = base;
@@ -107,7 +140,27 @@ impl KeymapConfig {
         merged.keymap_context.extend(user.keymap_context);
         merge_tables(&mut merged.mouse, user.mouse);
         merge_tables(&mut merged.scroll, user.scroll);
+        for (name, user_context) in user.contexts {
+            let context = merged.contexts.entry(name).or_default();
+            overlay_bindings(&mut context.keys, user_context.keys);
+            merge_patterns(&mut context.mouse, user_context.mouse);
+            merge_patterns(&mut context.scroll, user_context.scroll);
+        }
+        merge_patterns(&mut merged.midi, user.midi);
+        merge_patterns(&mut merged.osc, user.osc);
         merged
+    }
+}
+
+/// Merge one pattern table, the user's entries winning and `unbind`
+/// removing.
+fn merge_patterns(base: &mut HashMap<String, String>, user: HashMap<String, String>) {
+    for (pattern, action) in user {
+        if is_unbind(&action) {
+            base.remove(&pattern);
+        } else {
+            base.insert(pattern, action);
+        }
     }
 }
 
@@ -140,7 +193,7 @@ fn merge_tables(
     user: HashMap<String, HashMap<String, String>>,
 ) {
     for (mode, bindings) in user {
-        base.entry(mode).or_default().extend(bindings);
+        merge_patterns(base.entry(mode).or_default(), bindings);
     }
 }
 
@@ -270,29 +323,58 @@ pub fn parse_when_expr(input: &str) -> WhenExpr {
     WhenExpr::parse(input)
 }
 
-/// Parse a mouse pattern: `[Mods+]Button.Action`, e.g.
-/// `Ctrl+Left.DoubleClick`.
-pub fn parse_mouse_pattern(input: &str) -> Result<MousePattern, ConfigError> {
-    let invalid = || ConfigError::InvalidMousePattern(input.to_owned());
-    let (lhs, rhs) = input.split_once('.').ok_or_else(invalid)?;
-    let (modifiers, button) = split_modifiers(lhs).ok_or_else(invalid)?;
-    let button = parse_mouse_button(button).ok_or_else(invalid)?;
-    let action = parse_mouse_action(rhs.trim()).ok_or_else(invalid)?;
-    Ok(MousePattern::new(button, action, modifiers))
+/// Split a pointer pattern's `Z+Alt+…` into its modifiers, the one key
+/// held as a modifier (any token that is not a modifier name: `Z`,
+/// `Space`), and the last token. `None` when a token is neither, or two
+/// keys are held.
+fn split_held(input: &str) -> Option<(Modifiers, Option<KeyCode>, &str)> {
+    let mut parts: Vec<&str> = input.split('+').collect();
+    let last = parts.pop()?.trim();
+    let mut modifiers = Modifiers::NONE;
+    let mut held = None;
+    for part in parts {
+        if let Some(with) = with_modifier(modifiers, part) {
+            modifiers = with;
+        } else if held.is_none() {
+            held = Some(parse_key_code(part).ok()?);
+        } else {
+            return None;
+        }
+    }
+    Some((modifiers, held, last))
 }
 
-/// Parse a scroll pattern: `[Mods+]Axis`, the axis one of `Scroll`
+/// Parse a mouse pattern: `[Held+][Mods+]Button.Action`, e.g.
+/// `Ctrl+Left.DoubleClick`, `Z+Left.Drag`, `Alt+Left.LongPress`.
+pub fn parse_mouse_pattern(input: &str) -> Result<MousePattern, ConfigError> {
+    let invalid = || ConfigError::InvalidMousePattern(input.to_owned());
+    let (lhs, rhs) = input.rsplit_once('.').ok_or_else(invalid)?;
+    let (modifiers, held, button) = split_held(lhs).ok_or_else(invalid)?;
+    let button = parse_mouse_button(button).ok_or_else(invalid)?;
+    let action = parse_mouse_action(rhs.trim()).ok_or_else(invalid)?;
+    let pattern = MousePattern::new(button, action, modifiers);
+    Ok(match held {
+        Some(key) => pattern.held(key),
+        None => pattern,
+    })
+}
+
+/// Parse a scroll pattern: `[Held+][Mods+]Axis`, the axis one of `Scroll`
 /// (any), `ScrollX`, `ScrollY` (and their aliases).
 pub fn parse_scroll_pattern(input: &str) -> Result<ScrollPattern, ConfigError> {
     let invalid = || ConfigError::InvalidScrollPattern(input.to_owned());
-    let (modifiers, axis) = split_modifiers(input).ok_or_else(invalid)?;
+    let (modifiers, held, axis) = split_held(input).ok_or_else(invalid)?;
     let axis = match axis.to_ascii_lowercase().as_str() {
         "scroll" | "wheel" => ScrollAxis::Any,
         "scrollx" | "wheelx" | "hscroll" | "horizontal" => ScrollAxis::Horizontal,
         "scrolly" | "wheely" | "vscroll" | "vertical" => ScrollAxis::Vertical,
         _ => return Err(invalid()),
     };
-    Ok(ScrollPattern::new(axis, modifiers))
+    let pattern = ScrollPattern::new(axis, modifiers);
+    Ok(match held {
+        Some(key) => pattern.held(key),
+        None => pattern,
+    })
 }
 
 fn parse_mouse_button(token: &str) -> Option<MouseButton> {
@@ -310,6 +392,8 @@ fn parse_mouse_action(token: &str) -> Option<MouseAction> {
         "release" | "up" => Some(MouseAction::Release),
         "click" => Some(MouseAction::Click),
         "doubleclick" | "double_click" | "double-click" => Some(MouseAction::DoubleClick),
+        "drag" => Some(MouseAction::Drag),
+        "longpress" | "long_press" | "long-press" | "hold" => Some(MouseAction::LongPress),
         _ => None,
     }
 }
@@ -420,6 +504,47 @@ mod tests {
     }
 
     #[test]
+    fn a_pointer_pattern_names_a_key_held_as_a_modifier() {
+        let pat = parse_mouse_pattern("Z+Alt+Left.Drag").unwrap();
+        assert_eq!(pat.held, Some(KeyCode::char('z')));
+        assert!(pat.modifiers.alt);
+        assert_eq!(pat.action, MouseAction::Drag);
+        assert_eq!(pat.to_string(), "z+Alt+Left.Drag");
+        assert_eq!(parse_mouse_pattern(&pat.to_string()).unwrap(), pat);
+        let scroll = parse_scroll_pattern("Z+Scroll").unwrap();
+        assert_eq!(scroll.held, Some(KeyCode::char('z')));
+        assert!(
+            parse_mouse_pattern("Z+X+Left.Click").is_err(),
+            "one held key"
+        );
+    }
+
+    #[test]
+    fn a_user_context_overlays_the_base_context() {
+        let base = KeymapConfig::from_json_str(
+            r#"{ "contexts": { "arrange": {
+                "keys": { "Ctrl+d": "item.duplicate", "g g": "top" },
+                "mouse": { "Alt+Left.Drag": "item.copy" } } },
+               "midi": { "CC64": "transport.play" } }"#,
+        )
+        .unwrap();
+        let user = KeymapConfig::from_json_str(
+            r#"{ "contexts": { "arrange": {
+                "keys": { "Ctrl+d": "unbind", "Ctrl+e": "item.duplicate" },
+                "mouse": { "Alt+Left.Drag": "unbind" } } },
+               "midi": { "CC64": "transport.stop" } }"#,
+        )
+        .unwrap();
+        let merged = KeymapConfig::merge(base, user);
+        let arrange = &merged.contexts["arrange"];
+        assert!(!arrange.keys.contains_key("Ctrl+d"));
+        assert_eq!(arrange.keys["Ctrl+e"], "item.duplicate");
+        assert_eq!(arrange.keys["g g"], "top");
+        assert!(arrange.mouse.is_empty());
+        assert_eq!(merged.midi["CC64"], "transport.stop");
+    }
+
+    #[test]
     fn test_parse_scroll_pattern_with_modifiers() {
         let pat = parse_scroll_pattern("Ctrl+ScrollX").unwrap();
         assert_eq!(pat.axis, ScrollAxis::Horizontal);
@@ -456,6 +581,7 @@ mod tests {
                 x: 10.0,
                 y: 20.0,
                 modifiers: Modifiers::NONE,
+                from: None,
             }),
             &ctx,
         );

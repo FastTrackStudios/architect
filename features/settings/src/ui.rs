@@ -6,7 +6,9 @@
 //! and a reset arrow when it is not the default.
 //!
 //! "Settings…" (⌘,) is a command, so the palette, the menu bar and a
-//! model open it too.
+//! model open it too. A search hit opens its section, scrolls to its row
+//! and pulses it. `use_settings::<T>()` is a derived section's typed
+//! value.
 
 // The `rsx!` loops iterate rows collected so a signal's read is let go
 // before drawing.
@@ -19,33 +21,99 @@ use lucide_dioxus::{
     PanelBottom, Plus, Puzzle, RotateCcw, Search, Settings2, Shield, Timer, Type, User, X,
 };
 
-use crate::model::{Choice, Control, Owner, Section, Setting, Value};
+use crate::derive::Settings;
+use crate::model::{Choice, Control, Owner, Scope, Section, Setting, Value};
 use crate::registry::Registry;
-use crate::values::Values;
+use crate::values::{OrgSettings, ScopedValues, Values};
 
 /// The settings, in context: the registry (the app's sections and every
-/// loaded extension's), the values, and the page.
+/// loaded extension's), the values by scope, and the page.
 #[derive(Clone, Copy)]
 pub struct SettingsHandle {
     pub registry: Signal<Registry>,
-    pub values: Signal<Values>,
+    pub values: Signal<ScopedValues>,
     /// The section on show; `None` when the page is closed.
     pub open: Signal<Option<String>>,
-    on_change: CopyValue<Option<Callback<Values>>>,
+    /// The setting a search hit went to, and how many times one has (so
+    /// the same one pulses again).
+    pub focus: Signal<Option<(String, u32)>>,
+    on_change: CopyValue<Option<Callback<SettingsChange>>>,
 }
 
-/// Puts the settings in context. `on_change` keeps the values (a store).
+/// What changed, for the store of its scope to keep.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SettingsChange {
+    pub scope: Scope,
+    /// Everything that scope now holds.
+    pub values: Values,
+    /// The keys that changed (a synced store writes only these).
+    pub keys: Vec<String>,
+}
+
+/// Puts the settings in context. `on_change` keeps the values: each
+/// change goes to the store of its scope.
 pub fn use_settings_provider(
     registry: impl FnOnce() -> Registry,
-    values: impl FnOnce() -> Values,
-    on_change: Option<Callback<Values>>,
+    values: impl FnOnce() -> ScopedValues,
+    on_change: Option<Callback<SettingsChange>>,
 ) -> SettingsHandle {
-    use_context_provider(|| SettingsHandle {
-        registry: Signal::new(registry()),
-        values: Signal::new(values()),
-        open: Signal::new(None),
-        on_change: CopyValue::new(on_change),
-    })
+    use_context_provider(|| SettingsHandle::new(registry(), values(), on_change))
+}
+
+/// A derived section's typed value: `value` redraws what reads it;
+/// `update` changes it, storing each field that changed in its scope.
+pub struct UseSettings<T: 'static> {
+    pub handle: SettingsHandle,
+    pub value: Memo<T>,
+}
+
+impl<T> Clone for UseSettings<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T> Copy for UseSettings<T> {}
+
+impl<T: Settings + PartialEq> UseSettings<T> {
+    /// The value now (and redraws when it changes).
+    #[must_use]
+    pub fn read(&self) -> T {
+        self.value.read().clone()
+    }
+
+    /// Changes the value: `update(|a| a.buffer = 256)`. A field the
+    /// org has locked, or a value its setting refuses, is let go.
+    pub fn update(&self, f: impl FnOnce(&mut T)) {
+        let before = self.value.peek().clone();
+        let mut after = before.clone();
+        f(&mut after);
+        let old = before.entries();
+        for (key, v) in after.entries() {
+            if !old.iter().any(|(k, o)| *k == key && *o == v) {
+                self.handle.set(&key, v);
+            }
+        }
+    }
+}
+
+/// Section `T`'s value, typed: `use_settings::<Audio>()`. Registers the
+/// section when it is not yet. Under no settings provider the value is
+/// this component's own (defaults, kept nowhere).
+#[must_use]
+pub fn use_settings<T: Settings + PartialEq>() -> UseSettings<T> {
+    let outer = try_use_settings();
+    let handle = use_hook(move || {
+        let h = outer
+            .unwrap_or_else(|| SettingsHandle::new(Registry::new(), ScopedValues::new(), None));
+        if h.registry.peek().section(T::id()).is_none() {
+            let mut registry = h.registry;
+            let _ = registry.write().register(T::section());
+        }
+        h
+    });
+    let value = use_memo(move || T::read(&handle.registry.read(), &handle.values.read()));
+    UseSettings { handle, value }
 }
 
 /// The settings above, if any.
@@ -61,6 +129,12 @@ pub fn use_setting(key: &str) -> Option<Value> {
     let s = try_use_settings()?;
     let registry = s.registry.read();
     s.values.read().get(&registry, key)
+}
+
+/// The setting a search hit is on: the hit's key and how many hits
+/// there have been.
+fn focused(h: SettingsHandle) -> Option<(String, u32)> {
+    (h.focus)()
 }
 
 /// Registers `section` while the calling component is mounted (an
@@ -84,40 +158,115 @@ pub fn use_section(make: impl FnOnce() -> Section) {
 }
 
 impl SettingsHandle {
-    /// Sets `key`; a value it does not take is let go.
+    /// A handle of its own (not in context): `use_settings_provider`
+    /// is the usual way.
+    #[must_use]
+    pub fn new(
+        registry: Registry,
+        values: ScopedValues,
+        on_change: Option<Callback<SettingsChange>>,
+    ) -> Self {
+        Self {
+            registry: Signal::new(registry),
+            values: Signal::new(values),
+            open: Signal::new(None),
+            focus: Signal::new(None),
+            on_change: CopyValue::new(on_change),
+        }
+    }
+
+    /// Sets `key`; a value it does not take, or a locked setting, is let
+    /// go.
     pub fn set(&self, key: &str, value: Value) {
         let mut values = self.values;
-        let ok = {
+        let scope = {
             let registry = self.registry.peek();
-            values.write().set(&registry, key, value).is_ok()
+            values.write().set(&registry, key, value).ok()
         };
-        if ok {
-            self.changed();
+        if let Some(scope) = scope {
+            self.changed(scope, vec![key.to_owned()]);
         }
     }
 
     pub fn reset(&self, key: &str) {
         let mut values = self.values;
-        values.write().reset(key);
-        self.changed();
+        let scope = {
+            let registry = self.registry.peek();
+            values.write().reset(&registry, key)
+        };
+        if let Some(scope) = scope {
+            self.changed(scope, vec![key.to_owned()]);
+        }
     }
 
     /// Puts every setting of section `id` back; how many.
     #[must_use = "how many settings were put back"]
     pub fn restore(&self, id: &str) -> usize {
         let mut values = self.values;
-        let n = {
+        let changed: Vec<(Scope, String)> = {
             let registry = self.registry.peek();
-            values.write().restore_section(&registry, id)
+            let scoped = values.peek();
+            scoped
+                .changed_in(&registry, id)
+                .into_iter()
+                .map(|s| (s.scope, s.key.clone()))
+                .collect()
         };
-        self.changed();
-        n
+        {
+            let registry = self.registry.peek();
+            let _ = values.write().restore_section(&registry, id);
+        }
+        for scope in [Scope::Device, Scope::Synced, Scope::Project] {
+            let keys: Vec<String> = changed
+                .iter()
+                .filter(|(s, _)| *s == scope)
+                .map(|(_, k)| k.clone())
+                .collect();
+            if !keys.is_empty() {
+                self.changed(scope, keys);
+            }
+        }
+        changed.len()
     }
 
-    fn changed(&self) {
+    fn changed(&self, scope: Scope, keys: Vec<String>) {
         if let Some(cb) = *self.on_change.peek() {
-            cb.call(self.values.peek().clone());
+            cb.call(SettingsChange {
+                scope,
+                values: self.values.peek().of(scope).clone(),
+                keys,
+            });
         }
+    }
+
+    /// Puts in `scope`'s values as its store has them now (another device
+    /// changed them). Not a change to keep: `on_change` is not called.
+    pub fn replace(&self, scope: Scope, values: Values) {
+        let mut v = self.values;
+        v.write().replace(scope, values);
+    }
+
+    /// The current org's defaults and locks (the org switched, or an
+    /// admin changed them).
+    pub fn set_org(&self, org: OrgSettings) {
+        let mut v = self.values;
+        v.write().org = org;
+    }
+
+    /// Opens the page at setting `key`'s section, scrolled to its row,
+    /// which pulses.
+    pub fn show_setting(&self, key: &str) {
+        let section = self.registry.peek().setting(key).map(|(s, _)| s.id.clone());
+        let Some(section) = section else { return };
+        let n = self
+            .focus
+            .peek()
+            .as_ref()
+            .map_or(0, |(_, n)| n.wrapping_add(1));
+        let mut focus = self.focus;
+        focus.set(Some((key.to_owned(), n)));
+        let mut open = self.open;
+        open.set(Some(section));
     }
 
     /// Opens the page at section `id` (the first when `None`).
@@ -135,6 +284,8 @@ impl SettingsHandle {
     pub fn close(&self) {
         let mut open = self.open;
         open.set(None);
+        let mut focus = self.focus;
+        focus.set(None);
     }
 
     /// Removes every section an extension registered (it unloaded).
@@ -186,6 +337,33 @@ pub fn SettingsPage() -> Element {
             .shortcut("⌘,"),
         move || h.show(None),
     );
+    // The palette's `#`: a setting by name, opened at its row.
+    architect_commands::use_palette_opener(architect_commands::Scope::Settings, move || {
+        architect_commands::Opener::new(
+            "setting",
+            "Settings",
+            move |query| {
+                let registry = h.registry.peek();
+                registry
+                    .search(query)
+                    .into_iter()
+                    .take(20)
+                    .filter_map(|hit| {
+                        let (section, setting) = registry.setting(&hit.key)?;
+                        Some(
+                            architect_commands::OpenItem::new(
+                                "setting",
+                                hit.key.clone(),
+                                setting.title.clone(),
+                            )
+                            .detail(section.title.clone()),
+                        )
+                    })
+                    .collect()
+            },
+            move |item, _| h.show_setting(&item.id),
+        )
+    });
     if (h.open)().is_none() {
         return rsx! {};
     }
@@ -331,7 +509,7 @@ fn SearchResults(hits: Vec<crate::registry::Hit>) -> Element {
         .filter_map(|hit| {
             registry
                 .setting(&hit.key)
-                .map(|(s, set)| (s.id.clone(), set.title.clone(), s.title.clone()))
+                .map(|(s, set)| (set.key.clone(), set.title.clone(), s.title.clone()))
         })
         .collect();
     drop(registry);
@@ -339,12 +517,12 @@ fn SearchResults(hits: Vec<crate::registry::Hit>) -> Element {
         if rows.is_empty() {
             div { style: "padding: 10px; color: {t.ink_3}; font-size: 12px;", "No setting matches" }
         }
-        for (i, (id, title, section)) in rows.into_iter().enumerate() {
+        for (i, (key, title, section)) in rows.into_iter().enumerate() {
             button {
                 key: "{i}",
                 style: "display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 1px; \
                         padding: 6px 10px; border: none; border-radius: 7px; background: transparent; text-align: left; cursor: pointer;",
-                onclick: move |_| h.show(Some(&id)),
+                onclick: move |_| h.show_setting(&key),
                 span { style: "color: {t.ink}; font-size: 13px;", "{title}" }
                 span { style: "color: {t.ink_3}; font-size: 11px;", "{section}" }
             }
@@ -439,31 +617,64 @@ fn SectionBody(section: Section) -> Element {
 }
 
 /// One setting: its words, then its control; a dot and a reset arrow
-/// when it is not the default.
+/// when it is not the default; dimmed, saying why, when the org has
+/// locked it. A search hit on it scrolls to it and pulses it.
 #[component]
 fn Row(setting: Setting, first: bool) -> Element {
     let Some(h) = try_use_settings() else {
         return rsx! {};
     };
     let t = theme();
-    let value = {
+    let mut mounted = use_signal(|| None::<std::rc::Rc<MountedData>>);
+    let this = setting.key.clone();
+    let pulse = focused(h).filter(|(k, _)| *k == this).map(|(_, n)| n);
+    use_effect(move || {
+        let on = focused(h).is_some_and(|(k, _)| k == this);
+        if let (true, Some(m)) = (on, mounted()) {
+            spawn(async move {
+                let _ = m.scroll_to(ScrollBehavior::Smooth).await;
+            });
+        }
+    });
+    let (value, changed, locked) = {
         let registry = h.registry.read();
-        h.values.read().get(&registry, &setting.key)
+        let values = h.values.read();
+        (
+            values.get(&registry, &setting.key),
+            values.is_changed(&registry, &setting.key),
+            values.is_locked(&setting.key),
+        )
     };
     let Some(value) = value else {
         return rsx! {};
     };
-    let changed = h.values.read().is_changed(&setting.key);
     let rule = if first { "transparent" } else { t.rule };
     let key = setting.key.clone();
     let narrow = phone();
     let dir = if narrow { "column" } else { "row" };
     let align = if narrow { "stretch" } else { "center" };
+    let (fade, reach) = if locked {
+        ("0.5", "none")
+    } else {
+        ("1", "auto")
+    };
+    let row_id = format!("setting-{}", setting.key);
     rsx! {
         div {
-            style: "display: flex; flex-direction: {dir}; align-items: {align}; gap: 14px; padding: 14px 16px; \
+            id: "{row_id}",
+            style: "position: relative; display: flex; flex-direction: {dir}; align-items: {align}; gap: 14px; padding: 14px 16px; \
                     border-top: 1px solid {rule};",
-            div { style: "flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px;",
+            onmounted: move |e| mounted.set(Some(e.data())),
+            if let Some(n) = pulse {
+                // Keyed by the hit's count, so another hit on it pulses again.
+                div {
+                    key: "{n}",
+                    style: "position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; \
+                            background: {t.accent_soft}; animation: architect-settings-pulse 900ms ease-out 2 forwards;",
+                }
+                style { "@keyframes architect-settings-pulse {{ 0% {{ opacity: 1; }} 100% {{ opacity: 0; }} }}" }
+            }
+            div { style: "position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px;",
                 div { style: "display: flex; align-items: center; gap: 8px;",
                     span { style: "font-size: 13px; font-weight: 550; color: {t.ink};", "{setting.title}" }
                     if changed {
@@ -481,8 +692,13 @@ fn Row(setting: Setting, first: bool) -> Element {
                 if !setting.description.is_empty() {
                     span { style: "font-size: 12px; line-height: 1.5; color: {t.ink_3};", "{setting.description}" }
                 }
+                if locked {
+                    span { style: "font-size: 12px; color: {t.ink_3};", "Set by your organization" }
+                }
             }
-            ControlView { setting_key: setting.key, control: setting.control, value }
+            div { style: "position: relative; opacity: {fade}; pointer-events: {reach};",
+                ControlView { setting_key: setting.key, control: setting.control, value }
+            }
         }
     }
 }
@@ -819,7 +1035,8 @@ fn PhoneSettings() -> Element {
         return rsx! {};
     };
     let t = theme();
-    let mut in_section = use_signal(|| false);
+    // A search hit opens straight into its section.
+    let mut in_section = use_signal(|| h.focus.peek().is_some());
     let current = (h.open)().unwrap_or_default();
     let registry = h.registry.read();
     let groups: Vec<(Option<String>, Vec<(String, String, String)>)> = registry
