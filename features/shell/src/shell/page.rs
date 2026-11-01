@@ -461,13 +461,17 @@ fn ToolButton(tool: Tool, size: ToolSize, side: f64, framed: bool) -> Element {
             };
             rsx! {
                 button {
-                    class: "lp",
+                    class: "lp tip-host",
                     "aria-label": "{action.label}",
-                    style: "height: {side}px; {pad} {frame} flex-shrink: 0; display: flex; align-items: center; justify-content: center; \
+                    style: "position: relative; height: {side}px; {pad} {frame} flex-shrink: 0; display: flex; align-items: center; justify-content: center; \
                             gap: 6px; color: {t.ink}; font-family: {t.font}; font-size: {size.font}px; font-weight: 650;",
                     onclick: move |_| press.call(()),
                     {(action.icon)(Icon { size: size.icon, color: t.ink })}
-                    if action.show_label { span { "{action.label}" } }
+                    if action.show_label {
+                        span { "{action.label}" }
+                    } else {
+                        span { class: "tip", style: "right: 0; top: {side + 6.0}px;", "{action.label}" }
+                    }
                 }
             }
         }
@@ -486,12 +490,15 @@ fn ToolButton(tool: Tool, size: ToolSize, side: f64, framed: bool) -> Element {
             rsx! {
                 div { style: "position: relative; flex-shrink: 0; display: flex;",
                     button {
-                        class: "lp",
+                        class: "lp tip-host",
                         "aria-label": "{label}",
                         style: "position: relative; height: {side}px; {icon_only} {frame} {fill_style} display: flex; align-items: center; \
                                 justify-content: center;",
                         onclick: move |_| open.toggle(),
                         {icon(Icon { size: size.icon, color: t.ink })}
+                        if !open() {
+                            span { class: "tip", style: "right: 0; top: {side + 6.0}px;", "{label}" }
+                        }
                         if badge > 0 {
                             span {
                                 style: "position: absolute; top: -3px; right: -3px; min-width: 16px; height: 16px; padding: 0 4px; \

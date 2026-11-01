@@ -43,13 +43,18 @@ impl Route {
     }
 }
 
-/// What the last Done or Delete took away, for Undo.
+/// What the last Done, Delete or Move changed, for Undo.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Undone {
-    /// "Completed", "Deleted".
+    /// "Completed", "Deleted", "Moved": the status line's word.
     pub verb: &'static str,
+    /// The whole of it: "Moved “Bass DI is buzzing” to Tasks in Signal".
+    pub said: String,
     at: usize,
+    /// The item as it was, where it was.
     item: items::Item,
+    /// Whether the item is still in a list (moved), to take out first.
+    moved: bool,
 }
 
 /// `n` of `noun`, with its plural: "1 item", "5 items".
@@ -110,11 +115,13 @@ impl Lab {
         self.route.set(to);
     }
 
-    /// To a tab's list or an item afresh: no way back, no project picked.
+    /// To a tab's list or an item afresh: no way back, no project picked,
+    /// and the last Undo let go (it belonged to where the lab was).
     pub fn jump(mut self, to: Route) {
         self.back.write().clear();
         self.project.set(None);
         self.fresh.set(None);
+        self.undone.set(None);
         self.route.set(to);
     }
 
@@ -156,7 +163,14 @@ impl Lab {
         let removed = self.lists.write().remove(id);
         if let Some((at, item)) = removed {
             let tab = item.tab;
-            self.undone.set(Some(Undone { verb, at, item }));
+            let said = format!("{verb} “{}”", item.name);
+            self.undone.set(Some(Undone {
+                verb,
+                said,
+                at,
+                item,
+                moved: false,
+            }));
             if *self.selected.peek() == Some(id) {
                 self.selected.set(None);
             }
@@ -170,13 +184,43 @@ impl Lab {
         }
     }
 
-    /// Files the item in `tab`'s list, in `project` (triage), and shows it
-    /// there, marked.
+    /// Files the item in `tab`'s list, in `project` (triage), and goes
+    /// back to the list it came from, the next one to file at hand, with
+    /// Undo.
     pub fn move_item(mut self, id: usize, tab: &'static str, project: Option<&'static str>) {
-        if self.lists.write().move_to(id, tab, project) {
-            self.jump(Route::Tab(tab));
-            self.project.set(project);
-            self.fresh.set(Some(id));
+        let before = self.lists.read().get(id).cloned();
+        let at = self.lists.read().position(id);
+        let (Some(item), Some(at)) = (before, at) else {
+            return;
+        };
+        if !self.lists.write().move_to(id, tab, project) {
+            return;
+        }
+        let from = item.tab;
+        let to = project.map_or_else(
+            || {
+                if tab == "inbox" {
+                    "the Inbox".to_owned()
+                } else {
+                    "the Schedule".to_owned()
+                }
+            },
+            |p| format!("Tasks in {p}"),
+        );
+        self.undone.set(Some(Undone {
+            verb: "Moved",
+            said: format!("Moved “{}” to {to}", item.name),
+            at,
+            item,
+            moved: true,
+        }));
+        self.selected.set(None);
+        if matches!(*self.route.peek(), Route::Item(_, on) if on == id) {
+            if self.can_go_back() {
+                self.go_back();
+            } else {
+                self.route.set(Route::Tab(from));
+            }
         }
     }
 
@@ -235,7 +279,12 @@ impl Lab {
         let undone = self.undone.write().take();
         if let Some(u) = undone {
             let id = u.item.id;
-            self.lists.write().restore(u.at, u.item);
+            let mut lists = self.lists.write();
+            if u.moved {
+                let _ = lists.remove(id);
+            }
+            lists.restore(u.at, u.item);
+            drop(lists);
             self.fresh.set(Some(id));
         }
     }

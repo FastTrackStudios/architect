@@ -93,12 +93,16 @@ pub(super) fn RoundButton(action: Action) -> Element {
     let press = action.on_press;
     rsx! {
         button {
+            class: "tip-host",
             "aria-label": "{action.label}",
-            style: "width: {size}px; height: {size}px; flex-shrink: 0; box-sizing: border-box; border-radius: {size / 2.0}px; \
+            style: "position: relative; width: {size}px; height: {size}px; flex-shrink: 0; box-sizing: border-box; border-radius: {size / 2.0}px; \
                     display: flex; align-items: center; justify-content: center; padding: 0; background: {t.pill}; \
                     border: 1px solid {t.rule}; color: {t.ink}; box-shadow: {t.shadow_lift};",
             onclick: move |_| press.call(()),
             {(action.icon)(Icon { size: icon, color: t.ink })}
+            if shell.desk() {
+                span { class: "tip", style: "right: 0; bottom: {size + 8.0}px;", "{action.label}" }
+            }
         }
     }
 }

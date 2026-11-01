@@ -116,18 +116,19 @@ fn sort_menu(lab: Lab) -> Menu {
 #[allow(clippy::large_types_passed_by_value)]
 fn move_menu(lab: Lab, item: &Item) -> Menu {
     let id = item.id;
-    let mut menu = Menu::new().heading("Move to");
+    let mut menu = Menu::new().heading("Tasks in");
+    for p in PROJECTS {
+        if !(item.tab == "tasks" && item.project == Some(p)) {
+            menu = menu.item(p, icon!(Hash), move |()| {
+                lab.move_item(id, "tasks", Some(p));
+            });
+        }
+    }
+    menu = menu.divider();
     if item.tab != "inbox" {
         menu = menu.item("Inbox", icon!(Inbox), move |()| {
             lab.move_item(id, "inbox", None);
         });
-    }
-    for p in PROJECTS {
-        if !(item.tab == "tasks" && item.project == Some(p)) {
-            menu = menu.item(format!("Tasks in {p}"), icon!(Hash), move |()| {
-                lab.move_item(id, "tasks", Some(p));
-            });
-        }
     }
     if item.tab != "schedule" {
         menu = menu.item("Schedule", icon!(FolderInput), move |()| {
@@ -152,11 +153,16 @@ pub fn ListPage(tab: &'static str) -> Element {
     let (new_label, _) = new_one(tab);
     // The search on its own, the page's action named, its order in ⋯,
     // the lab's switches apart.
-    let toolbar = Toolbar::new()
-        .separate(Action::new("Search", icon!(Search), move |()| {
-            commands.show(architect_commands::Overlay::QuickOpen);
-        }))
-        .separate(Action::new(new_label, icon!(Plus), move |()| lab.capture(tab)).with_label())
+    let mut toolbar = Toolbar::new().separate(Action::new("Search", icon!(Search), move |()| {
+        commands.show(architect_commands::Overlay::QuickOpen);
+    }));
+    // The Inbox's add is the shell's own Capture button; another would be
+    // a second way to say the same.
+    if tab != "inbox" {
+        toolbar = toolbar
+            .separate(Action::new(new_label, icon!(Plus), move |()| lab.capture(tab)).with_label());
+    }
+    let toolbar = toolbar
         .joined([Tool::more(sort_menu(lab))])
         .separate(lab_tool(lab));
     let lists = lab.lists.read();
@@ -187,7 +193,7 @@ pub fn ListPage(tab: &'static str) -> Element {
                 div { style: "display: flex; align-items: center; gap: 10px; margin-bottom: 10px; padding: 8px 8px 8px 14px; \
                               border-radius: 10px; background: {t.accent_soft}; font-family: {t.font}; font-size: 14px; color: {t.ink};",
                     span { style: "flex: 1; min-width: 0; white-space: nowrap; overflow: hidden;",
-                        "{u.verb} “{u.item.name}”"
+                        "{u.said}"
                     }
                     button {
                         class: "lp",
@@ -268,7 +274,7 @@ fn Row(
     let fill = if fresh {
         t.accent_soft
     } else if selected {
-        t.active
+        t.pill
     } else {
         t.sheet
     };
@@ -508,7 +514,7 @@ pub fn RightSide() -> Element {
                 span { style: "font-size: 12px; font-weight: 650; color: {t.ink_3};", "Details" }
                 span { style: "font-size: 15px; font-weight: 650; color: {t.ink_2};", "Nothing selected" }
                 span { style: "font-size: 13px; line-height: 1.5; color: {t.ink_3};",
-                    "Pick an item (⌃N, ⌃P) to see its project, its date and who has it."
+                    "Select an item to see its project, its date and who has it."
                 }
             }
         };

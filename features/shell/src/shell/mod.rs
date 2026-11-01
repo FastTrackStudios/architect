@@ -592,10 +592,22 @@ pub mod layer {
 /// pointer, and what the keyboard is on shows the accent's ring, in every
 /// app on the shell.
 fn shell_css(t: &ShellTheme) -> String {
+    // A tip: an icon-only control's name, drawn by the shell on hover
+    // after a beat (Blitz draws no `title`). Its host is
+    // `position: relative` and places it.
     format!(
         "button, [role=tab], [role=button] {{ cursor: pointer; }} \
-         :focus-visible {{ outline: 2px solid {}; outline-offset: 2px; }}",
-        t.accent
+         :focus-visible {{ outline: 2px solid {accent}; outline-offset: 2px; }} \
+         .tip {{ position: absolute; z-index: {z}; white-space: nowrap; padding: 4px 8px; border-radius: 6px; \
+                 background: {pill}; border: 1px solid {rule}; color: {ink}; font-family: {font}; font-size: 12px; \
+                 font-weight: 500; pointer-events: none; opacity: 0; transition: opacity 100ms ease-out; }} \
+         .tip-host:hover > .tip {{ opacity: 1; transition: opacity 120ms ease-out 450ms; }}",
+        accent = t.accent,
+        z = layer::POPOVER,
+        pill = t.pill,
+        rule = t.rule,
+        ink = t.ink,
+        font = t.font,
     )
 }
 
@@ -1503,13 +1515,13 @@ fn RibbonTab(tab: Tab, on: bool, on_tab: EventHandler<&'static str>) -> Element 
     let id = tab.id;
     rsx! {
         button {
-            class: "lp",
+            class: "lp tip-host",
             "aria-label": tab.label,
-            title: tab.label,
             style: "position: relative; width: 32px; height: 32px; flex-shrink: 0; border: none; border-radius: 7px; \
                     background: {fill}; display: flex; align-items: center; justify-content: center;",
             onclick: move |_| on_tab.call(id),
             {(tab.icon)(Icon { size: 18, color: colour })}
+            span { class: "tip", style: "left: 40px; top: 5px;", "{tab.label}" }
             if tab.badge.is_some() {
                 span { style: "position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 3px; \
                                background: {t.accent};" }

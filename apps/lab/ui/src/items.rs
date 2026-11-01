@@ -134,6 +134,12 @@ impl Lists {
         list
     }
 
+    /// Where `id` is among every list's items (for [`Lists::restore`]).
+    #[must_use]
+    pub fn position(&self, id: usize) -> Option<usize> {
+        self.items.iter().position(|i| i.id == id)
+    }
+
     #[must_use]
     pub fn get(&self, id: usize) -> Option<&Item> {
         self.items.iter().find(|i| i.id == id)
