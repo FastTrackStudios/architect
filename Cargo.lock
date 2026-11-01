@@ -640,6 +640,7 @@ name = "architect-lab-ui"
 version = "0.1.0"
 dependencies = [
  "architect-commands",
+ "architect-settings",
  "architect-shell",
  "architect-workspace",
  "dioxus",
@@ -742,6 +743,19 @@ dependencies = [
  "quote",
  "syn 2.0.119",
  "vox",
+]
+
+[[package]]
+name = "architect-settings"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-commands",
+ "architect-shell",
+ "dioxus",
+ "facet",
+ "facet-json",
+ "lucide-dioxus",
 ]
 
 [[package]]

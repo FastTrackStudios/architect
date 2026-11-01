@@ -11,6 +11,7 @@
 
 mod pages;
 mod screen;
+mod settings;
 mod vault;
 
 use architect_shell::icon;
@@ -48,9 +49,23 @@ pub struct Lab {
     pub right: Signal<bool>,
     /// How a desk shows the status items.
     pub status: Signal<shell::StatusStyle>,
+    settings: Option<architect_settings::SettingsHandle>,
 }
 
 impl Lab {
+    /// Sets a text setting (the lab's signals follow the settings).
+    pub fn put(self, key: &str, id: &str) {
+        if let Some(s) = self.settings {
+            s.set(key, architect_settings::Value::Text(id.to_owned()));
+        }
+    }
+
+    pub fn put_bool(self, key: &str, on: bool) {
+        if let Some(s) = self.settings {
+            s.set(key, architect_settings::Value::Bool(on));
+        }
+    }
+
     pub fn go(mut self, to: Route) {
         let here = *self.route.peek();
         self.back.write().push(here);
@@ -87,13 +102,56 @@ button { cursor: pointer; }\
 #[component]
 pub fn LabApp() -> Element {
     let screen = use_context::<Signal<shell::Screen>>();
+    // Settings: the lab's sections, kept on this device.
+    let store = use_hook(|| {
+        architect_settings::DeviceValues::open("architect-lab")
+            .ok()
+            .map(std::rc::Rc::new)
+    });
+    let save = store.clone();
+    let settings = architect_settings::use_settings_provider(
+        settings::registry,
+        || store.as_ref().map(|s| s.load()).unwrap_or_default(),
+        Some(Callback::new(move |values: architect_settings::Values| {
+            if let Some(s) = save.as_ref() {
+                let _ = s.save(&values);
+            }
+        })),
+    );
     let lab = use_context_provider(|| Lab {
         route: Signal::new(Route::Tab("inbox")),
         back: Signal::new(Vec::new()),
         style: Signal::new(ShellStyle::FloatingPill),
         right: Signal::new(true),
         status: Signal::new(shell::StatusStyle::Bar),
+        settings: Some(settings),
     });
+    // The lab's signals follow the settings.
+    {
+        let text = |key: &str| {
+            architect_settings::use_setting(key)
+                .and_then(|v| v.as_text().map(str::to_owned))
+                .unwrap_or_default()
+        };
+        let style = settings::shell_style(&text("workspace.shell"));
+        let status = settings::status_style(&text("workspace.status"));
+        let right = architect_settings::use_setting("workspace.details")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        let (mut a, mut b, mut c) = (lab.style, lab.status, lab.right);
+        if *a.peek() != style {
+            a.set(style);
+        }
+        if *b.peek() != status {
+            b.set(status);
+        }
+        if *c.peek() != right {
+            c.set(right);
+        }
+    }
+    let metronome = architect_settings::use_setting("workspace.metronome")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     // Commands: the palette (⌘K), quick open (⌘O), and every command's key.
     let commands = architect_commands::use_commands_provider();
     for (id, label, to) in [
@@ -110,10 +168,7 @@ pub fn LabApp() -> Element {
     architect_commands::use_command(
         architect_commands::Command::new("LAB_TOGGLE_DETAILS", "Show or hide the details")
             .group("View"),
-        move || {
-            let mut right = lab.right;
-            right.toggle();
-        },
+        move || lab.put_bool("workspace.details", !(lab.right)()),
     );
     architect_commands::use_command(
         architect_commands::Command::new("LAB_CAPTURE", "Capture")
@@ -215,7 +270,7 @@ pub fn LabApp() -> Element {
                     .menu(
                         shell::Menu::new()
                             .item("Profile", icon!(CircleUser), |()| {})
-                            .item("Settings", icon!(Settings2), |()| {})
+                            .item("Settings", icon!(Settings2), move |()| settings.show(None))
                             .item("Keyboard shortcuts", icon!(Keyboard), |()| {})
                             .divider()
                             .item("Sign out", icon!(LogOut), |()| {}),
@@ -242,6 +297,10 @@ pub fn LabApp() -> Element {
                 }
             }
             architect_commands::CommandLayer {}
+            architect_settings::SettingsPage {}
+            if metronome {
+                settings::Metronome {}
+            }
             screen::DeviceChrome {}
         }
     }
