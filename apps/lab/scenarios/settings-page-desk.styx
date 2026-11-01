@@ -1,0 +1,28 @@
+// The settings page on a desk: its sections on the left, a section's
+// rows; a row changed shows a dot and an arrow to put it back.
+id settings-page-desk
+title "The settings page"
+view {width 1440, height 860}
+capture {fps 20, width 960}
+steps (
+    {
+        id open
+        text "Settings (⌘,): its sections on the left, a section's rows on the right."
+        do @run{id APP_SETTINGS}
+        hold 1.0
+    }
+    {
+        id workspace
+        text "Pick a section."
+        target @text"Workspace"
+        do @click{}
+        hold 0.8
+    }
+    {
+        id change
+        text "Change a row: a dot says it is changed, the arrow puts it back."
+        target @text"Badge"
+        do @click{}
+        hold 1.6
+    }
+)

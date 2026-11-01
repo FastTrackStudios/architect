@@ -189,6 +189,9 @@ fn Mark(name: String, color: &'static str, all: bool, size: f64) -> Element {
 pub(super) enum Place {
     /// The head of a docked sidebar or a drawer: mark, name, ⌃⌄.
     Head,
+    /// The foot of a desk's sidebar, above the account: as the head, its
+    /// list opening upward (below it is the window's edge).
+    Foot,
     /// The head of a rail: the mark alone; the list opens to its right.
     Rail,
 }
@@ -203,7 +206,7 @@ pub(super) fn Switcher(workspaces: Workspaces, place: Place) -> Element {
     let label = workspaces.label();
     let color = chosen.as_ref().map_or("#3f3f46", |w| w.color);
     let (trigger, list_at) = match place {
-        Place::Head => (
+        Place::Head | Place::Foot => (
             rsx! {
                 button {
                     class: "lp",
@@ -220,7 +223,11 @@ pub(super) fn Switcher(workspaces: Workspaces, place: Place) -> Element {
                     ChevronsUpDown { size: 15, color: t.ink_3 }
                 }
             },
-            "top: 48px; left: 8px;",
+            if place == Place::Foot {
+                "bottom: 48px; left: 8px;"
+            } else {
+                "top: 48px; left: 8px;"
+            },
         ),
         Place::Rail => (
             rsx! {

@@ -19,7 +19,7 @@ Use it for the org switcher, capability checks, All-organizations views and
 server tenancy. Keep the org out of method arguments: it comes from the lane,
 never from the caller. Design: [Organizations](@/architecture/organizations.md).
 
-<!-- media: org-switcher — the shell's organization switcher: picking another org, then All organizations, and the page's list changing with it -->
+![the shell's organization switcher: picking another org, then All organizations, and the page's list changing with it](https://raw.githubusercontent.com/FastTrackStudios/architect/media/org-switcher.gif)
 
 ## A minimal example
 

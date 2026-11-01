@@ -1,0 +1,35 @@
+// The organization switcher: another org picked, then All organizations;
+// the page's breadcrumb follows.
+id org-switcher
+title "Switch organizations"
+view {width 1440, height 860}
+capture {fps 20, width 960}
+steps (
+    {
+        id open
+        text "The switcher lists your organizations."
+        target @css"[aria-label=\"Switch Organization\"]"
+        do @click{}
+        hold 0.8
+    }
+    {
+        id fts
+        text "Pick one: the app shows its things."
+        target @text"FastTrackStudio"
+        do @click{}
+        hold 1.0
+    }
+    {
+        id reopen
+        target @css"[aria-label=\"Switch Organization\"]"
+        do @click{}
+        hold 0.6
+    }
+    {
+        id all
+        text "All organizations: everything, from every one."
+        target @text"All organizations"
+        do @click{}
+        hold 1.2
+    }
+)

@@ -1,0 +1,12 @@
+// The lab on a desk: the sidebar with its tabs and projects, the page, the
+// details on the right, the status line along the foot.
+id shell-app-shell-desk
+title "The app shell on a desk"
+view {width 1440, height 860}
+capture {fps 20, width 1280, outputs (png)}
+steps (
+    {
+        id look
+        do @pause{seconds 0.5}
+    }
+)

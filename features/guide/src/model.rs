@@ -322,6 +322,11 @@ pub enum Target {
     /// A row of the ⌘K palette, by its command's id
     /// (`architect-commands`).
     PaletteRow(String),
+    /// The element whose whole text is this (trimmed), the last in the
+    /// page (the innermost of those nested; a popover over the page): a
+    /// menu's title or row, a settings section, a switcher's org.
+    /// `@text"View"`.
+    Text(String),
     /// A kind of target an app resolves itself: `@app{kind lane, name
     /// Drums}`.
     App { kind: String, name: String },
@@ -344,6 +349,7 @@ impl Target {
             Self::Tabs(n) => ("tab-bar", n),
             Self::Split(n) => ("split", n),
             Self::PaletteRow(n) => ("palette-row", n),
+            Self::Text(n) => ("text", n),
             Self::App { kind, name } => (kind, name),
             Self::At { .. } => return None,
         })

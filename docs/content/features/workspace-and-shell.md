@@ -23,12 +23,12 @@ status line. Develop both in `apps/lab` (`dx serve`). Design:
 [Workspace](@/architecture/workspace.md), [App shell](@/architecture/app-shell.md)
 and [Composing the UI](@/architecture/composing-the-ui.md).
 
-<!-- media: workspace-split-groups — two tab groups side by side; dragging a tab from one into the other, and onto an edge to make a new split -->
-<!-- media: workspace-stacked-tabs — a stacked group: tabs sliding over each other as the group scrolls -->
-<!-- media: workspace-docks-ribbon — the left dock with its ribbon: collapsing and reopening it, a dock tab moved to the right dock -->
-<!-- media: workspace-float — a tab dragged out into a floating pane and back into a group -->
-<!-- media: workspace-popout-window — a tab dragged out of the window opening as its own OS window, then closed and its tab coming back -->
-<!-- media: screensets-recall — ⌘1 and ⌘2 switching between the Write and Mix screensets; the status line naming the current one -->
+![two tab groups side by side; dragging a tab from one into the other, and onto an edge to make a new split](https://raw.githubusercontent.com/FastTrackStudios/architect/media/workspace-split-groups.gif)
+![a stacked group: tabs sliding over each other as the group scrolls](https://raw.githubusercontent.com/FastTrackStudios/architect/media/stacked-tabs.gif)
+![the left dock with its ribbon: collapsing and reopening it, a dock tab moved to the right dock](https://raw.githubusercontent.com/FastTrackStudios/architect/media/workspace-docks-ribbon.gif)
+![a tab dragged out into a floating pane and back into a group](https://raw.githubusercontent.com/FastTrackStudios/architect/media/workspace-float.gif)
+![a tab dragged out of the window opening as its own OS window, then closed and its tab coming back](https://raw.githubusercontent.com/FastTrackStudios/architect/media/workspace-pop-out-window.gif)
+![⌘1 and ⌘2 switching between the Write and Mix screensets; the status line naming the current one](https://raw.githubusercontent.com/FastTrackStudios/architect/media/workspace-screenset-recall.gif)
 <!-- media: shell-form-factors — the same app as a desk window (title-row tabs, ribbon, sidebar, status bar), on a tablet, and on a phone (floating tab pill, drawer) -->
 
 ## A minimal example

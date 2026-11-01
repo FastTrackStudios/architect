@@ -62,8 +62,10 @@ A step (`features/guide/src/model.rs` `Step`) is:
   `@css"…"`; the workspace's `@tab"<pane>"`, `@pane"<pane>"`,
   `@group"<pane>"` (the group holding it), `@tabs"<pane>"` (its tab bar),
   `@split"<pane>"` (the divider after it); the palette's
-  `@palette-row"<command>"`; an app's own `@app{kind …, name …}`; a point
-  `@at{x, y}`.
+  `@palette-row"<command>"`; an element by its whole text, `@text"…"`
+  (the last in the page, so a menu or popover over it wins: a menu's
+  title or row, a settings section, an org in the switcher); an app's own
+  `@app{kind …, name …}`; a point `@at{x, y}`.
 - **`done`** (`Done`): Action List events to wake on (`@ran"ID"`,
   `@changed"topic"`) and **checks**: a read-only action and the subset of
   its JSON result it must contain (`features/guide/src/lib.rs` `contains`:
@@ -173,12 +175,18 @@ it too.
 | `apps/lab/scenarios/stacked-tabs.styx` | a group stacked, its strip scrolled |
 | `apps/lab/scenarios/showcase-layout.styx` | the README's showcase: notes opened, a split by dragging a tab to a group's side, a vertical one, two dividers pulled, a group stacked and filled, the sidebar dragged out by its grip into a window of its own |
 
+The rest are the guide's pictures, one per thing a page shows, each named
+for the picture it makes (`workspace-split-groups`, `menu-bar-in-window`,
+`settings-search-to-row`, …): the docs embed them by that id. A Vault
+scenario closes the Clicker pane first, in hidden steps: it is a process
+extension's view, and headless its program is not running.
+
 ## Status
 
 Built: the model and its loader (wasm-clean), the runner with multiple
 windows, the film and its encoders, the CLI and recipes, the test mode,
-the workspace's and the commands' resolvers and actions, the lab's four
-scenarios.
+the workspace's and the commands' resolvers and actions, the text target,
+the lab's scenarios.
 
 Next:
 

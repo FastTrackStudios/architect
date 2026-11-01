@@ -1,0 +1,65 @@
+// ⌘O: find a note by a few letters of its name and open it in a split
+// (⌘⌥↵), beside the one on show.
+id quick-open-note
+title "Open a note from ⌘O"
+view {width 1440, height 860}
+capture {fps 20, width 960}
+steps (
+    {
+        id vault
+        do @run{id LAB_GO_VAULT}
+        done {on (@changed"lab"), check ({id LAB_STATE, has {tab vault}})}
+        hide true
+    }
+    // The Clicker pane is a process extension's view: headless its
+    // program is not running, so it goes before the take.
+    {
+        id pick-clicker
+        target @tab"clicker"
+        do @click{}
+        done {check ({id WORKSPACE_LAYOUT, has {active clicker}})}
+        hide true
+    }
+    {
+        id close-clicker
+        do @run{id WORKSPACE_CLOSE_TAB}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {windows ({docked ({tabs (files search)} {tabs (outline backlinks)})})}})
+        }
+        hide true
+    }
+    {
+        id welcome
+        target @tab"note-welcome"
+        do @click{}
+        done {check ({id WORKSPACE_LAYOUT, has {active note-welcome}})}
+        hide true
+    }
+    {
+        id open
+        text "⌘O opens anything: notes, files, views, by a few of their letters."
+        do @run{id LAB_OPEN_ANYTHING}
+        done {
+            on (@changed"commands")
+            check ({id COMMANDS_STATE, has {overlay quick-open}})
+        }
+        hold 0.6
+    }
+    {
+        id find
+        text "Type a few letters of its name."
+        do @type{text "workspace"}
+        hold 0.8
+    }
+    {
+        id split
+        text "⌘⌥↵ opens it in a split, beside the note on show."
+        do @key{key Enter, mods (meta alt)}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {active note-workspace}} {id COMMANDS_STATE, has {overlay ""}})
+        }
+        hold 1.2
+    }
+)

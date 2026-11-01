@@ -1,0 +1,50 @@
+// The metronome extension switched on from the settings page: its own
+// section appears there, and its action in ⌘K.
+id extension-metronome-load
+title "Load an extension"
+view {width 1440, height 860}
+capture {fps 20, width 960}
+steps (
+    {
+        id open
+        do @run{id APP_SETTINGS}
+        hide true
+    }
+    {
+        id workspace
+        target @text"Workspace"
+        do @click{}
+        hide true
+    }
+    {
+        id load
+        text "Switch the metronome on: a real extension, from the lab's registry."
+        target @css"[id=\"setting-workspace.metronome\"] [role=\"switch\"]"
+        do @click{}
+        hold 1.0
+    }
+    {
+        id section
+        text "Its settings are a section of the page."
+        target @text"Metronome"
+        do @click{}
+        hold 1.2
+    }
+    {
+        id close
+        target @css"[aria-label=\"Close settings\"]"
+        do @click{}
+        hide true
+    }
+    {
+        id palette
+        text "Its action is in ⌘K."
+        do @run{id LAB_SHOW_COMMANDS}
+        done {on (@changed"commands"), check ({id COMMANDS_STATE, has {overlay palette}})}
+    }
+    {
+        id find
+        do @type{text "count in"}
+        hold 1.4
+    }
+)

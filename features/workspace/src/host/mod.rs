@@ -501,14 +501,17 @@ impl PaneHandle {
 
     /// Take the pane's items away, if `by` put them there (a slot drawn
     /// afresh may have put its own since).
+    /// A pane in a pop-out goes with its window, whose host (and its
+    /// status) may be dropped first: then there is nothing to take.
     fn take_status(&self, by: u64) {
         let mut status = self.host.status;
         let mine = status
-            .peek()
-            .iter()
-            .any(|(p, who, _)| *p == self.id && *who == by);
+            .try_peek()
+            .is_ok_and(|all| all.iter().any(|(p, who, _)| *p == self.id && *who == by));
         if mine {
-            status.write().retain(|(p, _, _)| *p != self.id);
+            if let Ok(mut all) = status.try_write() {
+                all.retain(|(p, _, _)| *p != self.id);
+            }
         }
     }
 }

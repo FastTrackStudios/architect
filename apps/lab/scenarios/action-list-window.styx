@@ -1,0 +1,85 @@
+// The action list as a pane: every action, searched, and one run from
+// it.
+id action-list-window
+title "The action list"
+view {width 1440, height 860}
+capture {fps 20, width 960}
+steps (
+    {
+        id vault
+        do @run{id LAB_GO_VAULT}
+        done {on (@changed"lab"), check ({id LAB_STATE, has {tab vault}})}
+        hide true
+    }
+    // The Clicker pane is a process extension's view: headless its
+    // program is not running, so it goes before the take.
+    {
+        id pick-clicker
+        target @tab"clicker"
+        do @click{}
+        done {check ({id WORKSPACE_LAYOUT, has {active clicker}})}
+        hide true
+    }
+    {
+        id close-clicker
+        do @run{id WORKSPACE_CLOSE_TAB}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {windows ({docked ({tabs (files search)} {tabs (outline backlinks)})})}})
+        }
+        hide true
+    }
+    {
+        id welcome
+        target @tab"note-welcome"
+        do @click{}
+        done {check ({id WORKSPACE_LAYOUT, has {active note-welcome}})}
+        hide true
+    }
+    {
+        id graph
+        target @tab"graph"
+        do @click{}
+        done {check ({id WORKSPACE_LAYOUT, has {active graph}})}
+        hide true
+    }
+    {
+        id no-graph
+        do @run{id WORKSPACE_CLOSE_TAB}
+        done {on (@changed"workspace")}
+        hide true
+    }
+    {
+        id new
+        target @css"[data-group-tabs~=\"note-welcome\"] [aria-label=\"New tab\"]"
+        do @click{}
+        hide true
+    }
+    {
+        id open
+        text "The action list: every action the app has, in a pane of its own."
+        target @text"Action list"
+        do @click{}
+        done {on (@changed"workspace")}
+        hold 1.0
+    }
+    {
+        id search
+        text "Search it."
+        target @css"[aria-label=\"Filter actions\"]"
+        do @click{}
+    }
+    {
+        id type
+        do @type{text "open graph"}
+        hold 1.0
+    }
+    {
+        id run
+        text "Run one from its row: the graph opens beside it."
+        target @text"Run"
+        do @click{}
+        done {on (@changed"workspace"), check ({id WORKSPACE_LAYOUT, has {active graph}})}
+        hold 1.0
+    }
+)

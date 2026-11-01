@@ -119,7 +119,7 @@ an app can switch style without touching a page (the lab does it from a
 setting). Routing stays yours: the shell is told the current tab and calls
 `on_tab`.
 
-<!-- media: shell-app-shell-desk — the lab on a desk: title row, ribbon, sidebar with tabs and projects, page, right side, status bar -->
+![the lab on a desk: title row, ribbon, sidebar with tabs and projects, page, right side, status bar](https://raw.githubusercontent.com/FastTrackStudios/architect/media/shell-app-shell-desk.png)
 
 A `Tab` is an id, a label and an icon: `Tab::new("inbox", "Inbox",
 icon!(Inbox)).badge(5)`. An `Action` is a label, an icon and a press:
@@ -303,7 +303,7 @@ from it without the app writing any of it:
   which a menu or a key can name;
 - on a phone, one pane at a time with a switcher.
 
-<!-- media: workspace-vault-tour — the lab's Vault: tabs in the title row, files in the left dock, a split, a tab dragged to a new group -->
+![the lab's Vault: tabs in the title row, files in the left dock, a split, a tab dragged to a new group](https://raw.githubusercontent.com/FastTrackStudios/architect/media/workspace-vault-tour.gif)
 
 ### Persistence through a store
 
@@ -375,7 +375,7 @@ and `VirtualDom`, its root the host's `Popout`, reading the main window's
 `Signal<Workspace>`; the shell's and the commands' contexts are carried
 into it, and an app's own go through `WorkspaceView { bridge }` (`Bridge`).
 
-<!-- media: workspace-pop-out-window — a tab dragged out of the main window becomes its own window, then dragged back -->
+![a tab dragged out of the main window becomes its own window, then dragged back](https://raw.githubusercontent.com/FastTrackStudios/architect/media/workspace-pop-out-window.gif)
 
 Limits today, from the code: chords (`WindowKeys`) are heard in the main
 window only; pop-outs have no docks; a tab dragged onto a group in another

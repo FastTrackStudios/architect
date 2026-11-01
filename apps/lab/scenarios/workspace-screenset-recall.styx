@@ -1,0 +1,59 @@
+// Screensets: ⌘2 recalls "Mix" (every note stacked, the graph beside),
+// ⌘1 "Write"; the status line names the one on show.
+id workspace-screenset-recall
+title "Recall a screenset"
+view {width 1440, height 860}
+capture {fps 20, width 960}
+steps (
+    {
+        id vault
+        do @run{id LAB_GO_VAULT}
+        done {on (@changed"lab"), check ({id LAB_STATE, has {tab vault}})}
+        hide true
+    }
+    // Write made the active screenset, so it can be saved below.
+    {
+        id write
+        do @run{id SCREENSET_RECALL_1}
+        hide true
+    }
+    {
+        id close-clicker
+        target @tab"clicker"
+        do @click{}
+        done {check ({id WORKSPACE_LAYOUT, has {active clicker}})}
+        hide true
+    }
+    {
+        id closed
+        do @run{id WORKSPACE_CLOSE_TAB}
+        done {on (@changed"workspace")}
+        hide true
+    }
+    // Write kept without it, so recalling Write does not bring it back.
+    {
+        id keep
+        do @run{id SCREENSET_SAVE}
+        hide true
+    }
+    {
+        id mix
+        text "⌘2 recalls Mix: every note stacked, the graph beside them."
+        do @run{id SCREENSET_RECALL_2}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {windows ({groups ({stacked true} {tabs (graph)})})}})
+        }
+        hold 1.4
+    }
+    {
+        id write-again
+        text "⌘1 brings Write back as it was left; the status line names the one on show."
+        do @run{id SCREENSET_RECALL_1}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {windows ({groups ({tabs (note-welcome note-shell arrange)} {tabs (graph)})})}})
+        }
+        hold 1.4
+    }
+)

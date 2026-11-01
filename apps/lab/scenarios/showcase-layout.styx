@@ -5,7 +5,8 @@
 // Layout".
 //
 // The last step drags the left sidebar out by its grip (the dock's own
-// window, architect#138).
+// window, architect#138). The Clicker pane (a process extension, not
+// running headless) is closed before the take.
 id showcase-layout
 title "Showcase layout"
 view {width 1440, height 860, x 40, y 68}
@@ -15,6 +16,31 @@ steps (
         id vault
         do @run{id LAB_GO_VAULT}
         done {on (@changed"lab"), check ({id LAB_STATE, has {tab vault}})}
+        hide true
+    }
+    // The Clicker pane is a process extension's view: headless its
+    // program is not running, so it goes before the take.
+    {
+        id pick-clicker
+        target @tab"clicker"
+        do @click{}
+        done {check ({id WORKSPACE_LAYOUT, has {active clicker}})}
+        hide true
+    }
+    {
+        id close-clicker
+        do @run{id WORKSPACE_CLOSE_TAB}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {windows ({docked ({tabs (files search)} {tabs (outline backlinks)})})}})
+        }
+        hide true
+    }
+    {
+        id welcome
+        target @tab"note-welcome"
+        do @click{}
+        done {check ({id WORKSPACE_LAYOUT, has {active note-welcome}})}
         hide true
     }
     {

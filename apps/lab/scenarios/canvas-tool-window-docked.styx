@@ -1,0 +1,58 @@
+// The marker lane's tool window (a script's ImGui window) floating over
+// the arrangement, then docked as a pane.
+id canvas-tool-window-docked
+title "A script's tool window"
+view {width 1440, height 860}
+capture {fps 20, width 960}
+steps (
+    {
+        id vault
+        do @run{id LAB_GO_VAULT}
+        done {on (@changed"lab"), check ({id LAB_STATE, has {tab vault}})}
+        hide true
+    }
+    // The Clicker pane is a process extension's view: headless its
+    // program is not running, so it goes before the take.
+    {
+        id pick-clicker
+        target @tab"clicker"
+        do @click{}
+        done {check ({id WORKSPACE_LAYOUT, has {active clicker}})}
+        hide true
+    }
+    {
+        id close-clicker
+        do @run{id WORKSPACE_CLOSE_TAB}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {windows ({docked ({tabs (files search)} {tabs (outline backlinks)})})}})
+        }
+        hide true
+    }
+    {
+        id welcome
+        target @tab"note-welcome"
+        do @click{}
+        done {check ({id WORKSPACE_LAYOUT, has {active note-welcome}})}
+        hide true
+    }
+    {
+        id arrange
+        text "The arrangement: a script's marker lane over it, its tool window floating."
+        target @tab"arrange"
+        do @click{}
+        done {on (@changed"workspace"), check ({id WORKSPACE_LAYOUT, has {active "canvas.window:Markers/Marker lane"}})}
+        hold 1.4
+    }
+    {
+        id dock
+        text "Drag it by its tab into a group: docked, a pane like any other."
+        target @tab"canvas.window:Markers/Marker lane"
+        do @drag{to @pane"graph", seconds 1.4}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {windows ({groups ({tabs (note-welcome note-shell arrange)} {tabs (graph "canvas.window:Markers/Marker lane")})})}})
+        }
+        hold 1.4
+    }
+)

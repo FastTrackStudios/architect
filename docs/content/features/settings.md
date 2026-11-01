@@ -20,7 +20,7 @@ itself (a token, window state), `architect::settings::Store<T>` writes one
 typed file. Design: [The settings page](@/architecture/settings-page.md) and
 [Settings files](@/architecture/settings.md).
 
-<!-- media: settings-search-to-row — the settings page: typing "dark mode" in search, the Theme row opening, scrolling into view and pulsing -->
+![the settings page: typing "dark mode" in search, the Theme row opening, scrolling into view and pulsing](https://raw.githubusercontent.com/FastTrackStudios/architect/media/settings-search-to-row.gif)
 <!-- media: settings-page-sections — the settings page with its section list, a slider, a choice of cards and a locked org setting -->
 
 ## A minimal example

@@ -1,0 +1,63 @@
+// The lab's Vault: tabs in the title row, files in the left dock, a note
+// opened from them, and a tab dragged to a group's side for a new split.
+id workspace-vault-tour
+title "The Vault"
+view {width 1440, height 860}
+capture {fps 20, width 960}
+steps (
+    {
+        id vault
+        do @run{id LAB_GO_VAULT}
+        done {on (@changed"lab"), check ({id LAB_STATE, has {tab vault}})}
+        hide true
+    }
+    // The Clicker pane is a process extension's view: headless its
+    // program is not running, so it goes before the take.
+    {
+        id pick-clicker
+        target @tab"clicker"
+        do @click{}
+        done {check ({id WORKSPACE_LAYOUT, has {active clicker}})}
+        hide true
+    }
+    {
+        id close-clicker
+        do @run{id WORKSPACE_CLOSE_TAB}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {windows ({docked ({tabs (files search)} {tabs (outline backlinks)})})}})
+        }
+        hide true
+    }
+    {
+        id welcome
+        target @tab"note-welcome"
+        do @click{}
+        done {check ({id WORKSPACE_LAYOUT, has {active note-welcome}})}
+        hide true
+    }
+    {
+        id look
+        text "The Vault: its tabs are the window's title row, its files in the left dock."
+        do @pause{seconds 1.0}
+    }
+    {
+        id file
+        text "A file opens as a tab in the group you are in."
+        target @text"The workspace"
+        do @click{}
+        done {on (@changed"workspace"), check ({id WORKSPACE_LAYOUT, has {active note-workspace}})}
+        hold 0.8
+    }
+    {
+        id split
+        text "Drag a tab to a group's side: a new group beside it."
+        target @tab"note-workspace"
+        do @drag{to @group"note-welcome", edge right, seconds 1.2}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {windows ({groups ({tabs (note-welcome note-shell arrange)} {tabs (note-workspace)} {tabs (graph)})})}})
+        }
+        hold 1.2
+    }
+)

@@ -1004,7 +1004,7 @@ pub fn AppShell(
                         if desk {
                             if let Some(workspaces) = workspaces.clone() {
                                 div { style: "display: flex; align-items: center; padding: 6px 10px; border-top: 1px solid {t.rule};",
-                                    Switcher { workspaces, place: Place::Head }
+                                    Switcher { workspaces, place: Place::Foot }
                                 }
                             }
                         }

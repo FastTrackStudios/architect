@@ -1081,43 +1081,49 @@ pub fn LabApp() -> Element {
                 architect_commands::WindowKeys {}
                 ListKeys {}
             }
-            NativeMenus { bar: menus, windowed }
-            AppShell {
-                screen: screen(),
-                style: (lab.style)(),
-                title: "Architect Lab",
-                tabs,
-                // The help is over a tab, not one of them.
-                current: (!matches!(route, Route::Help(_))).then(|| route.tab()),
-                on_tab: move |id| lab.jump(Route::Tab(id)),
-                separate: capture,
-                brand: rsx! { Brand {} },
-                account: shell::Account::new("Cody Wright")
-                    .detail("cody@fasttrackstudio.app")
-                    .presence("#22c55e")
-                    .menu(
-                        // The lab has no account to leave: only what works.
-                        shell::Menu::new()
-                            .item("Settings", icon!(Settings2), move |()| settings.show(None))
-                            .item("Keys and help", icon!(Keyboard), move |()| {
-                                lab.help();
-                            }),
-                    ),
-                workspaces,
-                left: rsx! { pages::LeftSide {} },
-                // The details are the lists': the Vault's panes are its own,
-                // an item's page is its details, the help is the help.
-                right: if (lab.right)() && matches!(route, Route::Tab(t) if t != "vault") { Some(rsx! { pages::RightSide {} }) } else { None },
-                on_pull: move |()| lab.jump(Route::Tab("vault")),
-                window: window_chrome,
-                status,
-                status_style: (lab.status)(),
-                match route {
-                    Route::Tab("vault") => rsx! { vault::VaultPage {} },
-                    Route::Tab(tab) => rsx! { pages::ListPage { key: "{tab}", tab } },
-                    Route::Item(tab, id) => rsx! { pages::ItemPage { tab, id } },
-                    Route::Capture(tab) => rsx! { pages::CapturePage { key: "{tab}", tab } },
-                    Route::Help(_) => rsx! { pages::HelpPage {} },
+            // A column: the in-window menu bar (where there is one) takes
+            // its height off the top, the shell the rest.
+            div { style: "position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column;",
+                NativeMenus { bar: menus, windowed }
+                div { style: "position: relative; flex: 1 1 0; min-height: 0;",
+                    AppShell {
+                        screen: screen(),
+                        style: (lab.style)(),
+                        title: "Architect Lab",
+                        tabs,
+                        // The help is over a tab, not one of them.
+                        current: (!matches!(route, Route::Help(_))).then(|| route.tab()),
+                        on_tab: move |id| lab.jump(Route::Tab(id)),
+                        separate: capture,
+                        brand: rsx! { Brand {} },
+                        account: shell::Account::new("Cody Wright")
+                            .detail("cody@fasttrackstudio.app")
+                            .presence("#22c55e")
+                            .menu(
+                                // The lab has no account to leave: only what works.
+                                shell::Menu::new()
+                                    .item("Settings", icon!(Settings2), move |()| settings.show(None))
+                                    .item("Keys and help", icon!(Keyboard), move |()| {
+                                        lab.help();
+                                    }),
+                            ),
+                        workspaces,
+                        left: rsx! { pages::LeftSide {} },
+                        // The details are the lists': the Vault's panes are its own,
+                        // an item's page is its details, the help is the help.
+                        right: if (lab.right)() && matches!(route, Route::Tab(t) if t != "vault") { Some(rsx! { pages::RightSide {} }) } else { None },
+                        on_pull: move |()| lab.jump(Route::Tab("vault")),
+                        window: window_chrome,
+                        status,
+                        status_style: (lab.status)(),
+                        match route {
+                            Route::Tab("vault") => rsx! { vault::VaultPage {} },
+                            Route::Tab(tab) => rsx! { pages::ListPage { key: "{tab}", tab } },
+                            Route::Item(tab, id) => rsx! { pages::ItemPage { tab, id } },
+                            Route::Capture(tab) => rsx! { pages::CapturePage { key: "{tab}", tab } },
+                            Route::Help(_) => rsx! { pages::HelpPage {} },
+                        }
+                    }
                 }
             }
             architect_commands::CommandLayer {}

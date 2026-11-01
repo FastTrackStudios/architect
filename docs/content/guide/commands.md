@@ -114,7 +114,7 @@ What you get:
   `@` this page's targets, `#` settings, `?` help for a key. Open it with
   `commands.show(Overlay::Palette)`.
 
-<!-- media: palette-run-action — ⌘K opened, "done" typed, Mark done run from the palette -->
+![⌘K opened, "done" typed, Mark done run from the palette](https://raw.githubusercontent.com/FastTrackStudios/architect/media/palette-run.gif)
 
 - **⌘O, quick open** (`QuickOpen`): every opener at once. A feature
   registers one with `use_opener`; the lab's Vault registers its notes and
@@ -141,7 +141,7 @@ What you get:
   `use_palette_opener(Scope::Targets, …)` fills the palette's `@` the same
   way; the settings page registers `#` itself.
 
-<!-- media: quick-open-note — ⌘O finding a note and opening it in a split -->
+![⌘O finding a note and opening it in a split](https://raw.githubusercontent.com/FastTrackStudios/architect/media/quick-open-note.gif)
 
 - **The action list window** (`ActionListView`): REAPER's. Every action,
   searchable by name, id, group and binding; for each its bindings by
@@ -290,7 +290,7 @@ rsx! {
 The Linux and iPad bars are checked to build, not yet run on a device.
 
 <!-- media: menu-bar-native-macos — the macOS menu bar built from the lab's MenuBar: a ticked Details toggle and the live Tabs section -->
-<!-- media: menu-bar-in-window — the in-window menu bar on Linux without a global menu, a menu opened with its shortcuts -->
+![the in-window menu bar on Linux without a global menu, a menu opened with its shortcuts](https://raw.githubusercontent.com/FastTrackStudios/architect/media/menu-bar-in-window.gif)
 
 ## 5. MCP
 
