@@ -1,0 +1,39 @@
+[package]
+name = "architect-settings"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Settings declared once — by the app or by an extension at run time — stored, validated, searched, and drawn as T3 Code's settings page"
+
+# docs/content/architecture/settings-page.md. The default set is the model:
+# the registry (sections an app or an extension registers and removes at
+# run time), the values (validated, reset, restored, JSON), search — pure
+# data, wasm-clean. `store` keeps the device's values on disk
+# (architect::settings::Store); `ui` draws the page.
+
+[features]
+default = []
+store = ["dep:architect", "architect/settings"]
+ui = [
+    "dep:dioxus",
+    "dep:architect-shell",
+    "architect-shell/ui",
+    "dep:lucide-dioxus",
+    "architect-commands/ui",
+]
+
+[dependencies]
+architect-commands = { workspace = true }
+facet = { workspace = true }
+facet-json = { version = "0.50.0-rc.5" }
+architect = { workspace = true, optional = true }
+dioxus = { workspace = true, optional = true }
+architect-shell = { workspace = true, optional = true }
+lucide-dioxus = { workspace = true, optional = true }
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true

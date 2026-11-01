@@ -56,14 +56,13 @@ fn items(tab: &str) -> &'static [(&'static str, &'static str)] {
 
 /// What every lab page adds to its ⋯: the shell's style, the right side,
 /// and (off a real device) which device the window stands in for.
+// `Lab` is a handful of signals, copied into every closure below.
+#[allow(clippy::large_types_passed_by_value)]
 fn lab_menu(menu: Menu, lab: Lab) -> Menu {
     let style = (lab.style)();
-    let pick = move |s: ShellStyle| {
-        move |()| {
-            let mut style = lab.style;
-            style.set(s);
-        }
-    };
+    // The settings are the truth; the lab's signals follow them.
+    let pick =
+        move |s: ShellStyle| move |()| lab.put("workspace.shell", crate::settings::shell_id(s));
     let mut menu = menu
         .divider()
         .heading("Shell")
@@ -83,25 +82,18 @@ fn lab_menu(menu: Menu, lab: Lab) -> Menu {
             pick(ShellStyle::RailOnly),
         )
         .check("Right side", (lab.right)(), move |()| {
-            let mut right = lab.right;
-            right.toggle();
+            lab.put_bool("workspace.details", !(lab.right)());
         })
         .heading("Status")
         .check(
             "Bar along the foot",
             (lab.status)() == StatusStyle::Bar,
-            move |()| {
-                let mut s = lab.status;
-                s.set(StatusStyle::Bar);
-            },
+            move |()| lab.put("workspace.status", "bar"),
         )
         .check(
             "Badge in the corner",
             (lab.status)() == StatusStyle::Badge,
-            move |()| {
-                let mut s = lab.status;
-                s.set(StatusStyle::Badge);
-            },
+            move |()| lab.put("workspace.status", "badge"),
         );
     if !cfg!(any(target_os = "ios", target_os = "android")) {
         let device = consume_context::<Signal<Device>>()();

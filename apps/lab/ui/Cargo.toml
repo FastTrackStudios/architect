@@ -10,6 +10,7 @@ publish = false
 architect-shell = { workspace = true, features = ["ui"] }
 architect-workspace = { workspace = true, features = ["ui"] }
 architect-commands = { workspace = true, features = ["native"] }
+architect-settings = { workspace = true, features = ["ui", "store"] }
 dioxus = { workspace = true }
 dioxus-native = { workspace = true }
 lucide-dioxus = { workspace = true }

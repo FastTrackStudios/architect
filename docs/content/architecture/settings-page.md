@@ -4,7 +4,17 @@ description = "An app declares its settings as typed structs; architect stores t
 weight = 56
 +++
 
-> **Status: proposed (2026-10-31).** For review before any code. T3 Code's
+> **Status: the registry and the page landed (2026-11-01)** in
+> `architect-settings` (`features/settings`). Settings are data
+> (`features/settings/src/model.rs` `Section`, `Setting`, `Control`,
+> `Value`), so an extension registers its own at run time
+> (`features/settings/src/registry.rs` `Registry::register`,
+> `Registry::remove_owner`; `features/settings/src/ui.rs` `use_section`) as the app does at
+> launch; `Values` checks, resets and restores them; `DeviceValues`
+> (feature `store`) keeps the device's; `SettingsPage` (feature `ui`) is
+> T3 Code's page, opened by the `APP_SETTINGS` command (⌘,). Still to
+> come: the derive (a struct as a section), the `Synced` and `Project`
+> scopes' stores, a search hit scrolling to its row. T3 Code's
 > settings are the design to match; [app settings](@/architecture/settings.md)
 > (`Store<T>`, per device) is the storage that exists.
 
