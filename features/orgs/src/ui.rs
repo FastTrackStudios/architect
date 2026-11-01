@@ -1,10 +1,17 @@
 //! The current org in a window (feature `ui`): [`use_org`] for any
-//! component, and the shell's switcher built from the person's orgs.
+//! component, the shell's switcher built from the person's orgs, and
+//! [`use_orgs_live`], which fetches them again on every (re)connect.
 
+use std::future::Future;
+use std::rc::Rc;
+
+use architect_atom::Connection;
 use architect_shell::{Workspace, Workspaces};
 use dioxus::prelude::*;
 
 use crate::model::{Capabilities, Org, OrgId, Orgs, Selection};
+use crate::refresh::Refresh;
+use crate::scope::Scope;
 
 /// The window's orgs, in context.
 #[derive(Clone, Copy)]
@@ -12,6 +19,7 @@ pub struct OrgHandle {
     pub orgs: Signal<Orgs>,
     caps: CopyValue<Capabilities>,
     on_change: CopyValue<Option<Callback<Orgs>>>,
+    fetched: Signal<Refresh>,
 }
 
 /// Puts the person's orgs (and the app's capabilities by role) in context.
@@ -25,7 +33,45 @@ pub fn use_orgs_provider(
         orgs: Signal::new(orgs()),
         caps: CopyValue::new(caps),
         on_change: CopyValue::new(on_change),
+        fetched: Signal::new(Refresh::default()),
     })
+}
+
+/// Keeps the window's orgs live, fetched again on every (re)connect.
+///
+/// `fetch` (`architect_orgs::fetch` over the app's identity-server client)
+/// runs when `conn` connects and again on every reconnect
+/// ([`Connection::generation`]), refreshing `org`. A fetch that fails
+/// leaves the cached list ([`OrgHandle::stale`] says why).
+pub fn use_orgs_live<C, F, Fut>(org: OrgHandle, conn: Connection<C>, fetch: F)
+where
+    C: Clone + 'static,
+    F: Fn(C) -> Fut + 'static,
+    Fut: Future<Output = Result<Vec<Org>, String>> + 'static,
+{
+    let fetch = use_hook(|| Rc::new(fetch));
+    let _live = use_resource(move || {
+        // Reactive on purpose: the resource re-runs on every (re)connect.
+        let generation = conn.generation();
+        let ready = conn.ready();
+        let fetch = Rc::clone(&fetch);
+        async move {
+            let Some(client) = ready else {
+                return;
+            };
+            // `peek`: a read here would subscribe the resource to its own
+            // writes below and restart it.
+            if !org.fetched.peek().due(generation) {
+                return;
+            }
+            let answer = fetch(client).await;
+            let mut fetched = org.fetched;
+            let fresh = fetched.write().finish(generation, answer);
+            if let Some(list) = fresh {
+                org.refresh(list);
+            }
+        }
+    });
 }
 
 /// The orgs above.
@@ -39,6 +85,19 @@ impl OrgHandle {
     #[must_use]
     pub fn current(&self) -> Option<Org> {
         self.orgs.read().current().cloned()
+    }
+
+    /// What the window's reads cover: its org, or every org in All.
+    #[must_use]
+    pub fn scope(&self) -> Scope {
+        self.orgs.read().scope()
+    }
+
+    /// Why the orgs shown are the device's cached list: the last fetch's
+    /// failure, if it failed.
+    #[must_use]
+    pub fn stale(&self) -> Option<String> {
+        self.fetched.read().error().map(str::to_owned)
     }
 
     /// Whether the person may do `cap` here.
