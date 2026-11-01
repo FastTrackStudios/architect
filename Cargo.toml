@@ -42,6 +42,7 @@ members = [
     "features/crdt/tests/derive",
     # ── ui ────────────────────────────────────────────────────────────
     "features/ui/architect-ui",
+    "features/workspace",
     "features/ui/showcase",
     "features/ui/ui-snapshot",
     # ── story (component workbench) ───────────────────────────────────

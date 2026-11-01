@@ -810,6 +810,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-workspace"
+version = "0.1.0"
+dependencies = [
+ "facet",
+ "facet-json",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "arg_enum_proc_macro"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
