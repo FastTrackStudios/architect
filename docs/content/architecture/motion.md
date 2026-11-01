@@ -107,9 +107,8 @@ second (30 unless set), so meters and clocks do not each repaint the
 window at every vsync, but draws a running CSS animation at the display's
 rate. `MotionFrames` (`features/shell/src/motion.rs`) bridges the two:
 while any motion runs it runs an invisible 1 px CSS animation, and it
-stops it when they rest. The element stays mounted: inserted and removed
-with the motions, it collapsed a phone's pane laid out beside it, and a
-node made just after it went drew under its animation's opacity (blank)
+stops it when they rest. The element stays mounted: a node made just
+after it went drew under its animation's opacity (blank)
 (`skills/architect/references/blitz-quirks.md`). `AppShell` mounts it, and so do the
 workspace's host (outside a shell) and its pop-outs. Measured in the lab
 on an M4 Mac mini: a sidebar fold went from 32 to 140 frames a second,

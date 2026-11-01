@@ -323,15 +323,16 @@ proptest = "1"
 # Blitz from the FTS fork: the 0.3.0-beta.1 line with fts-focus (focus
 # follows pointerdown), fts-pointer (touch as pointer events) and the iOS
 # safe-area work (BLITZ_SAFE_AREA=0: the page is the whole window; the
-# safe area re-read every frame; a finger's tap slop). dioxus git pins
+# safe area re-read every frame; a finger's tap slop), and fts-measure (a
+# measure leaves an inline layout's lines as laid out). dioxus git pins
 # `=0.3.0-beta.1`. One tag across all blitz crates.
-blitz-dom = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-safe-area-2026-10" }
-blitz-traits = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-safe-area-2026-10" }
-blitz-paint = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-safe-area-2026-10" }
-blitz-shell = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-safe-area-2026-10" }
-blitz-net = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-safe-area-2026-10" }
-blitz-html = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-safe-area-2026-10" }
-anyrender = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-safe-area-2026-10" }
+blitz-dom = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-measure-2026-11" }
+blitz-traits = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-measure-2026-11" }
+blitz-paint = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-measure-2026-11" }
+blitz-shell = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-measure-2026-11" }
+blitz-net = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-measure-2026-11" }
+blitz-html = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-measure-2026-11" }
+anyrender = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-measure-2026-11" }
 # The renderer and windowing forks a Blitz app needs on iOS (each one's
 # reason is in vendor's README): Vello's surface on Metal, winit's UIKit
 # backend, wgpu's Metal layer. Only the lab apps (apps/lab)

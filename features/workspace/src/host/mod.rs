@@ -1232,15 +1232,20 @@ pub fn WorkspaceView(
                 }
             },
             onpointermove: move |e| {
-                if host.drag.peek().is_some() {
+                if switcher::pulling(host) {
+                    switcher::pull_move(host, point(&e).1);
+                } else if host.drag.peek().is_some() {
                     overlay::on_move(host, point(&e));
                 }
             },
             onpointerup: move |_| {
-                if host.drag.peek().is_some() {
+                if switcher::pulling(host) {
+                    switcher::pull_end(host, true);
+                } else if host.drag.peek().is_some() {
                     overlay::on_up(host);
                 }
             },
+            onpointercancel: move |_| switcher::pull_end(host, false),
             onkeydown: move |e| {
                 let m = e.modifiers();
                 let plain = !(m.meta() || m.ctrl() || m.alt());
