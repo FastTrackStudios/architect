@@ -12,13 +12,24 @@
 //! | `state.query(id, args?)` | runs a read-only action; refuses one that changes the app |
 //! | `print(...)`, `log(...)` | a line in the run's log |
 //! | `args` | what the run was given (`nil` for nothing) |
+//! | `require(name)` | a [`Module`] the app added (`require 'imgui'`); nothing else |
+//! | `defer(fn)` | a live script only ([`Runtime::start`]): calls `fn` on the next [`Live::frame`] |
+//!
+//! An app adds globals of its own with [`Module`]s ([`Runtime::with_module`]):
+//! `architect-canvas`'s `ImGui` and `Canvas`, for one.
+//!
+//! A script either runs once ([`Runtime::run`]) or lives
+//! ([`Runtime::start`]): its first run sets up, and each function it hands
+//! `defer` runs on the next frame its host asks for — `ReaScript`'s
+//! `reaper.defer`, the loop of an immediate-mode window. Each frame is a
+//! step of its own ([`Live::frame`]); one that fails stops the script.
 //!
 //! What the script returns is the run's result. An action that fails
 //! raises an error a script can catch with `pcall`; one it does not catch
 //! stops it, with the line it was on ([`ScriptError`]).
 //!
 //! Every run is a fresh Luau state: nothing one run sets is seen by the
-//! next. Each action runs as the run's [`ActionCaller`], so a model's
+//! next (a live script's frames share its one state). Each action runs as the run's [`ActionCaller`], so a model's
 //! script can do exactly what the model may, action by action.
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -29,6 +40,10 @@ use mlua::{Lua, LuaSerdeExt, MultiValue, Value as LuaValue};
 use serde_json::{Value, json};
 
 use crate::{ErrorKind, ScriptError, Transactions};
+
+/// The Luau binding a [`Module`] is written against: this one, so its
+/// version is the runtime's.
+pub use mlua;
 
 /// The chunk name a script's errors are reported under (`script:3: …`).
 const CHUNK: &str = "script";
@@ -113,6 +128,40 @@ const fn effect_name(effect: Effect) -> &'static str {
 /// namespaces it named, the most it may change) are one.
 pub type Gate = Arc<dyn Fn(&ActionInfo) -> Result<(), String> + Send + Sync>;
 
+/// What a script reaches as a global, and by `require`, past the
+/// runtime's own: `ImGui`, `Canvas`.
+///
+/// Installed into each fresh state before it is sandboxed, so what it
+/// gives is read-only to the script. What it keeps across frames it keeps
+/// outside Luau (an `Arc` it shares with its host), never a Luau value:
+/// that would keep the state alive past its script.
+pub trait Module: Send + Sync {
+    /// Its global (`ImGui`).
+    fn global(&self) -> &str;
+
+    /// What `require` knows it by (`imgui`).
+    fn path(&self) -> &str;
+
+    /// Makes its value in `lua`.
+    ///
+    /// # Errors
+    ///
+    /// When Luau does (out of memory).
+    fn install(&self, lua: &Lua) -> mlua::Result<LuaValue>;
+}
+
+/// An error a [`Module`]'s function raises: the script stops (or its
+/// `pcall` catches it) with `message`, at the line it called from.
+#[must_use]
+pub fn raise(lua: &Lua, message: impl Into<String>) -> mlua::Error {
+    fault(lua, ErrorKind::Runtime, message.into())
+}
+
+/// The registry key of a live script's deferred functions.
+const DEFERRED: &str = "architect.deferred";
+/// The registry key of the modules `require` finds.
+const MODULES: &str = "architect.modules";
+
 /// Runs scripts against one Action List.
 #[derive(Clone)]
 pub struct Runtime {
@@ -120,6 +169,7 @@ pub struct Runtime {
     transactions: Option<Arc<dyn Transactions>>,
     limits: Limits,
     gate: Option<Gate>,
+    modules: Vec<Arc<dyn Module>>,
 }
 
 impl std::fmt::Debug for Runtime {
@@ -129,6 +179,10 @@ impl std::fmt::Debug for Runtime {
             .field("transactions", &self.transactions.is_some())
             .field("limits", &self.limits)
             .field("gate", &self.gate.is_some())
+            .field(
+                "modules",
+                &self.modules.iter().map(|m| m.path()).collect::<Vec<_>>(),
+            )
             .finish()
     }
 }
@@ -143,7 +197,15 @@ impl Runtime {
             transactions: None,
             limits: Limits::default(),
             gate: None,
+            modules: Vec::new(),
         }
+    }
+
+    /// Its scripts reach `module` too.
+    #[must_use]
+    pub fn with_module(mut self, module: Arc<dyn Module>) -> Self {
+        self.modules.push(module);
+        self
     }
 
     /// Its runs see and run only the actions `gate` lets through, on top
@@ -185,12 +247,7 @@ impl Runtime {
     ///
     /// Where it is not ([`ErrorKind::Syntax`]).
     pub fn check(source: &str) -> Result<(), ScriptError> {
-        let lua = Lua::new();
-        lua.load(source)
-            .set_name(format!("={CHUNK}"))
-            .into_function()
-            .map(drop)
-            .map_err(|e| script_error(&e))
+        load(&Lua::new(), source).map(drop)
     }
 
     /// Runs `source` as `caller` with `args`, as one undo step named
@@ -203,8 +260,56 @@ impl Runtime {
         step: &str,
     ) -> Report {
         let trace = Arc::new(Mutex::new(Trace::default()));
+        let steps = Arc::new(AtomicU64::new(0));
+        let result = match self.state(caller, &args, &trace, &steps, false) {
+            Ok(lua) => {
+                let main = load(&lua, source);
+                self.step(step, async { execute(&lua, main?).await }).await
+            }
+            Err(e) => (Err(script_error(&e)), None),
+        };
+        report(result, &trace)
+    }
+
+    /// Starts `source` as a live script, as `caller` with `args`: its
+    /// first run is one step named `step`, and what it hands `defer` runs
+    /// on each [`Live::frame`] after. `None` when the first run failed.
+    pub async fn start(
+        &self,
+        caller: &ActionCaller,
+        source: &str,
+        args: Value,
+        step: &str,
+    ) -> (Report, Option<Live>) {
+        let trace = Arc::new(Mutex::new(Trace::default()));
+        let steps = Arc::new(AtomicU64::new(0));
+        let lua = match self.state(caller, &args, &trace, &steps, true) {
+            Ok(lua) => lua,
+            Err(e) => return (report((Err(script_error(&e)), None), &trace), None),
+        };
+        let main = load(&lua, source);
+        let result = self.step(step, async { execute(&lua, main?).await }).await;
+        let started = result.0.is_ok();
+        let report = report(result, &trace);
+        let live = started.then(|| Live {
+            lua,
+            trace,
+            steps,
+            runtime: self.clone(),
+            step: step.to_owned(),
+        });
+        (report, live)
+    }
+
+    /// `body`, inside one step named `step` when there are transactions:
+    /// committed when it succeeds, taken back when it fails.
+    async fn step<T>(
+        &self,
+        step: &str,
+        body: impl Future<Output = Result<T, ScriptError>>,
+    ) -> (Result<T, ScriptError>, Option<String>) {
         let opened = self.transactions.as_ref().is_some_and(|t| t.begin(step));
-        let result = self.execute(caller, source, args, &trace).await;
+        let result = body.await;
         let undo = match (&self.transactions, opened, result.is_ok()) {
             (Some(t), true, true) => t.commit(),
             (Some(t), true, false) => {
@@ -213,41 +318,18 @@ impl Runtime {
             }
             _ => None,
         };
-        let trace = std::mem::take(&mut *trace.lock().unwrap_or_else(PoisonError::into_inner));
-        Report {
-            result,
-            log: trace.log,
-            ran: trace.ran,
-            undo,
-        }
+        (result, undo)
     }
 
-    async fn execute(
-        &self,
-        caller: &ActionCaller,
-        source: &str,
-        args: Value,
-        trace: &Arc<Mutex<Trace>>,
-    ) -> Result<Value, ScriptError> {
-        let lua = self
-            .state(caller, &args, trace)
-            .map_err(|e| script_error(&e))?;
-        let main = lua
-            .load(source)
-            .set_name(format!("={CHUNK}"))
-            .into_function()
-            .map_err(|e| script_error(&e))?;
-        let out: MultiValue = main.call_async(()).await.map_err(|e| script_error(&e))?;
-        let first = out.into_iter().next().unwrap_or(LuaValue::Nil);
-        from_lua(&lua, first).map_err(|message| ScriptError::new(ErrorKind::Runtime, None, message))
-    }
-
-    /// A fresh, sandboxed Luau state with the script's globals.
+    /// A fresh, sandboxed Luau state with the script's globals — `defer`
+    /// too when it is `live`.
     fn state(
         &self,
         caller: &ActionCaller,
         args: &Value,
         trace: &Arc<Mutex<Trace>>,
+        steps: &Arc<AtomicU64>,
+        live: bool,
     ) -> mlua::Result<Lua> {
         let lua = Lua::new();
         lua.set_memory_limit(self.limits.memory)?;
@@ -258,10 +340,43 @@ impl Runtime {
         globals.set("print", print.clone())?;
         globals.set("log", print)?;
         globals.set("args", to_lua(&lua, args)?)?;
+        let modules = lua.create_table()?;
+        for module in &self.modules {
+            let value = module.install(&lua)?;
+            globals.set(module.global(), value.clone())?;
+            modules.set(module.path(), value)?;
+        }
+        // Kept in the registry, not captured: a Luau value a Rust closure
+        // holds keeps its state alive for ever.
+        lua.set_named_registry_value(MODULES, modules)?;
+        globals.set(
+            "require",
+            lua.create_function(|lua, path: String| {
+                let modules: mlua::Table = lua.named_registry_value(MODULES)?;
+                match modules.get(path.as_str())? {
+                    LuaValue::Nil => Err(fault(
+                        lua,
+                        ErrorKind::Runtime,
+                        format!("there is no module {path:?} here"),
+                    )),
+                    found => Ok(found),
+                }
+            })?,
+        )?;
+        if live {
+            lua.set_named_registry_value(DEFERRED, lua.create_table()?)?;
+            globals.set(
+                "defer",
+                lua.create_function(|lua, f: mlua::Function| {
+                    let deferred: mlua::Table = lua.named_registry_value(DEFERRED)?;
+                    deferred.push(f)
+                })?,
+            )?;
+        }
         // From here the globals above are read-only, and what a script
         // sets lives in its own table.
         lua.sandbox(true)?;
-        let steps = AtomicU64::new(0);
+        let steps = Arc::clone(steps);
         let limit = self.limits.steps;
         lua.set_interrupt(move |lua| {
             if steps.fetch_add(1, Ordering::Relaxed) >= limit {
@@ -376,6 +491,99 @@ impl Runtime {
                 to_lua(&lua, &value)
             }
         })
+    }
+}
+
+/// A live script ([`Runtime::start`]): one Luau state its frames share.
+pub struct Live {
+    lua: Lua,
+    trace: Arc<Mutex<Trace>>,
+    steps: Arc<AtomicU64>,
+    runtime: Runtime,
+    step: String,
+}
+
+impl std::fmt::Debug for Live {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Live")
+            .field("step", &self.step)
+            .field("running", &self.running())
+            .finish_non_exhaustive()
+    }
+}
+
+impl Live {
+    /// Whether it has something to run on the next frame: false once it
+    /// stops deferring, or fails, or is stopped.
+    #[must_use]
+    pub fn running(&self) -> bool {
+        self.lua
+            .named_registry_value::<mlua::Table>(DEFERRED)
+            .is_ok_and(|t| t.raw_len() > 0)
+    }
+
+    /// Runs what it deferred, in order, as one step (named as its first
+    /// run was): each `defer` they call runs on the frame after. Its
+    /// limits start again each frame. One that fails stops the script.
+    pub async fn frame(&self) -> Report {
+        self.steps.store(0, Ordering::Relaxed);
+        let result = self
+            .runtime
+            .step(&self.step, async {
+                let due = self.take().map_err(|e| script_error(&e))?;
+                for f in due {
+                    f.call_async::<()>(()).await.map_err(|e| script_error(&e))?;
+                }
+                Ok(Value::Null)
+            })
+            .await;
+        if result.0.is_err() {
+            self.stop();
+        }
+        report(result, &self.trace)
+    }
+
+    /// Stops it: what it deferred never runs.
+    pub fn stop(&self) {
+        if let Ok(fresh) = self.lua.create_table() {
+            self.lua.set_named_registry_value(DEFERRED, fresh).ok();
+        }
+    }
+
+    /// What is due this frame, leaving an empty list for the next.
+    fn take(&self) -> mlua::Result<Vec<mlua::Function>> {
+        let due: mlua::Table = self.lua.named_registry_value(DEFERRED)?;
+        self.lua
+            .set_named_registry_value(DEFERRED, self.lua.create_table()?)?;
+        due.sequence_values().collect()
+    }
+}
+
+fn load(lua: &Lua, source: &str) -> Result<mlua::Function, ScriptError> {
+    lua.load(source)
+        .set_name(format!("={CHUNK}"))
+        .into_function()
+        .map_err(|e| script_error(&e))
+}
+
+async fn execute(lua: &Lua, main: mlua::Function) -> Result<Value, ScriptError> {
+    let out: MultiValue = main.call_async(()).await.map_err(|e| script_error(&e))?;
+    let first = out.into_iter().next().unwrap_or(LuaValue::Nil);
+    from_lua(lua, first).map_err(|message| ScriptError::new(ErrorKind::Runtime, None, message))
+}
+
+/// A run's report: its result and undo step, and what it logged and ran
+/// since the last.
+fn report(
+    (result, undo): (Result<Value, ScriptError>, Option<String>),
+    trace: &Arc<Mutex<Trace>>,
+) -> Report {
+    let trace = std::mem::take(&mut *trace.lock().unwrap_or_else(PoisonError::into_inner));
+    Report {
+        result,
+        log: trace.log,
+        ran: trace.ran,
+        undo,
     }
 }
 
