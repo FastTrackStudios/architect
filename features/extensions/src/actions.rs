@@ -1,0 +1,207 @@
+//! Extensions on the Action List (feature `host`): find, install and
+//! remove them from ⌘K, a key, or a model over MCP — on every platform,
+//! with no page of their own needed.
+//!
+//! | action | what it does |
+//! |---|---|
+//! | `EXT_LIST` | the extensions there are: each one's id, name, version, kind, which copy runs and what it adds |
+//! | `EXT_SEARCH` | searches every registry: `{query}` → the newest of each that matches |
+//! | `EXT_INSTALL` | installs one: `{id, version?}` (a semver range), loaded at once |
+//! | `EXT_UNINSTALL` | removes one: `{id}`; a built-in comes back |
+//! | `EXT_RELOAD` | reloads every extension whose files changed |
+
+use architect::action::{ActionCaller, ActionError, ActionMeta, Effect, RawJson};
+use facet::Facet;
+use semver::VersionReq;
+use serde_json::{Value, json};
+
+use crate::extensions::Extensions;
+use crate::host::Event;
+
+const fn meta(id: &'static str, name: &'static str, description: &'static str) -> ActionMeta {
+    ActionMeta {
+        id,
+        trait_name: "Extensions",
+        method_name: id,
+        display_name: name,
+        description,
+        category: "Extensions",
+        group: "Extensions",
+        shortcut: "",
+        toggleable: false,
+        undo: false,
+    }
+}
+
+static LIST: ActionMeta = meta(
+    "EXT_LIST",
+    "List extensions",
+    "Every extension there is — built in, installed, in development — with its version, its \
+     kind, which copy runs, and the actions it adds.",
+);
+static SEARCH: ActionMeta = meta(
+    "EXT_SEARCH",
+    "Search for extensions",
+    "Searches every registry (and ReaPack repository) for `query`: the newest of each that \
+     matches, with where it is listed.",
+);
+static INSTALL: ActionMeta = meta(
+    "EXT_INSTALL",
+    "Install an extension",
+    "Installs extension `id` — the newest version, or the newest `version` (a semver range like \
+     ^1.2) takes — and loads it at once, without a restart.",
+);
+static UNINSTALL: ActionMeta = meta(
+    "EXT_UNINSTALL",
+    "Remove an extension",
+    "Removes installed extension `id`: its actions and settings go with it; a built-in copy \
+     comes back.",
+);
+static RELOAD: ActionMeta = meta(
+    "EXT_RELOAD",
+    "Reload changed extensions",
+    "Reloads every loaded extension whose files changed; one that fails keeps its last good copy.",
+);
+
+/// `EXT_SEARCH`'s arguments.
+#[derive(Debug, Facet)]
+pub struct SearchArgs {
+    pub query: String,
+}
+
+/// `EXT_INSTALL`'s arguments.
+#[derive(Debug, Facet)]
+pub struct InstallArgs {
+    pub id: String,
+    /// A semver range (`^1.2`); the newest when none.
+    pub version: Option<String>,
+}
+
+/// `EXT_UNINSTALL`'s arguments.
+#[derive(Debug, Facet)]
+pub struct UninstallArgs {
+    pub id: String,
+}
+
+/// An event as JSON: `{loaded|unloaded|failed: id, …}`.
+#[must_use]
+pub fn event_json(event: &Event) -> Value {
+    match event {
+        Event::Loaded(c) => json!({
+            "loaded": c.id,
+            "version": c.version.to_string(),
+            "reloaded": c.reloaded,
+            "added": c.added,
+            "removed": c.removed,
+            "took_ms": u64::try_from(c.took.as_millis()).unwrap_or(u64::MAX),
+        }),
+        Event::Unloaded { id } => json!({ "unloaded": id }),
+        Event::Failed { id, error } => json!({ "failed": id, "error": error.to_string() }),
+    }
+}
+
+impl Extensions {
+    /// Puts the `EXT_*` actions on the host's list.
+    ///
+    /// # Errors
+    ///
+    /// An id is taken.
+    pub fn install_actions(&self) -> Result<(), ActionError> {
+        let list = self.host().list().clone();
+        let me = self.clone();
+        list.register_with(&LIST, Effect::ReadOnly, move |_: &ActionCaller, (): ()| {
+            Ok::<_, String>(RawJson::from(me.listing().to_string()))
+        })?;
+        let me = self.clone();
+        list.register_with(
+            &SEARCH,
+            Effect::ReadOnly,
+            move |_: &ActionCaller, a: SearchArgs| {
+                let hits: Vec<Value> = me
+                    .search(&a.query)
+                    .into_iter()
+                    .map(|f| {
+                        let l = f.hit.listing;
+                        json!({
+                            "id": l.id,
+                            "name": l.name,
+                            "version": l.version.to_string(),
+                            "kind": l.kind,
+                            "description": l.description,
+                            "registry": f.source,
+                        })
+                    })
+                    .collect();
+                Ok::<_, String>(RawJson::from(json!({ "found": hits }).to_string()))
+            },
+        )?;
+        let me = self.clone();
+        list.register_with(
+            &INSTALL,
+            Effect::Mutating,
+            move |_: &ActionCaller, a: InstallArgs| {
+                let req = match a.version.as_deref() {
+                    None | Some("") => VersionReq::STAR,
+                    Some(r) => VersionReq::parse(r).map_err(|e| format!("version {r}: {e}"))?,
+                };
+                let install = me.install(&a.id, &req).map_err(|e| e.to_string())?;
+                let loaded = me.host().get(&install.id).is_some();
+                Ok::<_, String>(RawJson::from(
+                    json!({
+                        "id": install.id,
+                        "version": install.version.to_string(),
+                        "loaded": loaded,
+                    })
+                    .to_string(),
+                ))
+            },
+        )?;
+        let me = self.clone();
+        list.register_with(
+            &UNINSTALL,
+            Effect::Destructive,
+            move |_: &ActionCaller, a: UninstallArgs| {
+                let removed = me.uninstall(&a.id).map_err(|e| e.to_string())?;
+                Ok::<_, String>(RawJson::from(json!({ "removed": removed }).to_string()))
+            },
+        )?;
+        let me = self.clone();
+        list.register_with(
+            &RELOAD,
+            Effect::Mutating,
+            move |_: &ActionCaller, (): ()| {
+                let events: Vec<Value> = me.reload_changed().iter().map(event_json).collect();
+                Ok::<_, String>(RawJson::from(json!({ "events": events }).to_string()))
+            },
+        )?;
+        Ok(())
+    }
+
+    fn listing(&self) -> Value {
+        let loaded = self.host().loaded();
+        let extensions: Vec<Value> = self
+            .chosen()
+            .into_iter()
+            .map(|c| {
+                let m = &c.runs.package.manifest;
+                let actions = loaded
+                    .iter()
+                    .find(|l| l.manifest.id == m.id)
+                    .map(|l| l.actions.clone())
+                    .unwrap_or_default();
+                json!({
+                    "id": m.id,
+                    "name": m.name,
+                    "version": m.version.to_string(),
+                    "kind": m.kind.name(),
+                    "runs": c.describe(),
+                    "loaded": !actions.is_empty() || loaded.iter().any(|l| l.manifest.id == m.id),
+                    "actions": actions,
+                    "settings": m.sections.iter().map(|s| s.id.clone()).collect::<Vec<_>>(),
+                    "views": m.views.iter().map(|v| v.id.clone()).collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+        json!({ "extensions": extensions })
+    }
+}

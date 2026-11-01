@@ -1,0 +1,58 @@
+[package]
+name = "architect-extensions"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Extensions: adding to an app at run time — data, Luau, WASM and processes — from git registries and ReaPack, hot-reloaded, installed when a project needs them"
+
+# docs/content/architecture/extensions.md. The default set is the model —
+# a manifest (`extension.toml`) and what it adds, a registry's index and
+# search, ReaPack's `index.xml`, which copy wins (built in, installed, in
+# development), what a project needs and an organization approves — pure
+# data, wasm-clean. `host` loads extensions onto an Action List and a
+# settings registry, installs them from git registries, folders and
+# ReaPack, and reloads them when their files change; `crdt` keeps a
+# project's requirements and an extension's data in its document; `ui`
+# brings loaded extensions' settings sections onto the settings page.
+
+[features]
+default = []
+host = [
+    "dep:architect",
+    "dep:architect-scripting",
+    "architect-scripting/luau",
+    "dep:tracing",
+]
+crdt = ["dep:crdt"]
+ui = ["host", "dep:dioxus", "dep:futures", "architect-settings/ui"]
+
+[dependencies]
+architect-settings = { workspace = true }
+architect-orgs = { workspace = true }
+architect-commands = { workspace = true }
+facet = { workspace = true }
+serde = { workspace = true }
+toml = { workspace = true }
+semver = "1"
+roxmltree = "0.21"
+architect = { workspace = true, optional = true, features = ["action-list"] }
+architect-scripting = { workspace = true, optional = true }
+serde_json = { workspace = true }
+tracing = { workspace = true, optional = true }
+crdt = { workspace = true, optional = true }
+dioxus = { workspace = true, optional = true }
+futures = { version = "0.3", optional = true }
+
+[dev-dependencies]
+# Its own host, so `cargo test --workspace` builds the tests with it.
+architect-extensions = { path = ".", features = ["host", "crdt"] }
+futures = "0.3"
+tempfile = "3"
+crdt = { workspace = true }
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true

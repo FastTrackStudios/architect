@@ -12,6 +12,8 @@ architect-workspace = { workspace = true, features = ["ui"] }
 architect-commands = { workspace = true, features = ["native"] }
 architect-settings = { workspace = true, features = ["ui", "store"] }
 architect-orgs = { workspace = true, features = ["ui"] }
+architect-extensions = { workspace = true, features = ["ui"] }
+architect = { workspace = true, features = ["action-list", "settings"] }
 dioxus = { workspace = true }
 facet = { workspace = true }
 dioxus-native = { workspace = true }

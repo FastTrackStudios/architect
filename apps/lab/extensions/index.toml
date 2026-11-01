@@ -1,0 +1,12 @@
+# The lab's registry: a folder with an index, as a registry's git
+# repository is (features/extensions/src/index.rs). The lab installs from
+# it and reloads what it installed when a file here changes.
+name = "Architect Lab"
+
+[[extensions]]
+id = "fts.metronome"
+name = "Metronome"
+version = "0.1.0"
+kind = "luau"
+description = "A click: its accent, volume and sound on the settings page, and an action that counts in."
+path = "metronome"

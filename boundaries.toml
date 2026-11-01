@@ -108,6 +108,10 @@ package = "architect-scripting"
 layer = "L0"
 
 [[row]]
+package = "architect-extensions"
+layer = "L0"
+
+[[row]]
 package = "architect-files"
 layer = "L0"
 
@@ -157,6 +161,11 @@ layer = "L4"
 
 [[row]]
 package = "architect-orgs"
+features = ["ui"]
+layer = "L4"
+
+[[row]]
+package = "architect-extensions"
 features = ["ui"]
 layer = "L4"
 
@@ -255,6 +264,12 @@ package = "architect-scripting"
 features = ["luau", "crdt", "settings"]
 layer = "L1"
 note = "the Luau runtime (mlua, C++ built from source): desk, server, mobile; not wasm yet"
+
+[[row]]
+package = "architect-extensions"
+features = ["host", "crdt"]
+layer = "L1"
+note = "the extensions host: Luau through architect-scripting, git through the `git` program; not wasm yet"
 
 [[row]]
 package = "architect-mcp"

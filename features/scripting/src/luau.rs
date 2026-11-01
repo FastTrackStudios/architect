@@ -108,12 +108,18 @@ const fn effect_name(effect: Effect) -> &'static str {
     }
 }
 
+/// What a run may reach, past what its caller may: `Err(why)` for an
+/// action it may not see or run. An extension's capabilities (the action
+/// namespaces it named, the most it may change) are one.
+pub type Gate = Arc<dyn Fn(&ActionInfo) -> Result<(), String> + Send + Sync>;
+
 /// Runs scripts against one Action List.
 #[derive(Clone)]
 pub struct Runtime {
     list: ActionList,
     transactions: Option<Arc<dyn Transactions>>,
     limits: Limits,
+    gate: Option<Gate>,
 }
 
 impl std::fmt::Debug for Runtime {
@@ -122,6 +128,7 @@ impl std::fmt::Debug for Runtime {
             .field("list", &self.list)
             .field("transactions", &self.transactions.is_some())
             .field("limits", &self.limits)
+            .field("gate", &self.gate.is_some())
             .finish()
     }
 }
@@ -135,7 +142,16 @@ impl Runtime {
             list,
             transactions: None,
             limits: Limits::default(),
+            gate: None,
         }
+    }
+
+    /// Its runs see and run only the actions `gate` lets through, on top
+    /// of what the caller may.
+    #[must_use]
+    pub fn with_gate(mut self, gate: Gate) -> Self {
+        self.gate = Some(gate);
+        self
     }
 
     /// Each run one step of `transactions`, taken back when it fails.
@@ -267,12 +283,12 @@ impl Runtime {
         trace: &Arc<Mutex<Trace>>,
     ) -> mlua::Result<mlua::Table> {
         let table = lua.create_table()?;
-        let (list, who) = (self.list.clone(), caller.clone());
+        let (list, who, gate) = (self.list.clone(), caller.clone(), self.gate.clone());
         table.set(
             "list",
             lua.create_function(move |lua, filter: Option<String>| {
                 let filter = filter.map(|f| f.to_lowercase());
-                let found: Vec<Value> = visible(&list, &who)
+                let found: Vec<Value> = visible(&list, &who, gate.as_ref())
                     .iter()
                     .filter(|i| filter.as_deref().is_none_or(|f| matches(i, f)))
                     .map(summary)
@@ -280,19 +296,23 @@ impl Runtime {
                 to_lua(lua, &Value::Array(found))
             })?,
         )?;
-        let (list, who) = (self.list.clone(), caller.clone());
+        let (list, who, gate) = (self.list.clone(), caller.clone(), self.gate.clone());
         table.set(
             "describe",
             lua.create_function(move |lua, id: String| {
-                let found = visible(&list, &who).into_iter().find(|i| i.id == id);
+                let found = visible(&list, &who, gate.as_ref())
+                    .into_iter()
+                    .find(|i| i.id == id);
                 found.map_or(Ok(LuaValue::Nil), |info| to_lua(lua, &detail(&info)))
             })?,
         )?;
-        let (list, who) = (self.list.clone(), caller.clone());
+        let (list, who, gate) = (self.list.clone(), caller.clone(), self.gate.clone());
         table.set(
             "enabled",
             lua.create_function(move |_, id: String| {
-                let found = visible(&list, &who).into_iter().find(|i| i.id == id);
+                let found = visible(&list, &who, gate.as_ref())
+                    .into_iter()
+                    .find(|i| i.id == id);
                 Ok(found.map_or_else(
                     || (false, Some(format!("no action {id}"))),
                     |i| (i.enabled, i.disabled_reason),
@@ -323,11 +343,12 @@ impl Runtime {
         read_only: bool,
     ) -> mlua::Result<mlua::Function> {
         let (list, who, trace) = (self.list.clone(), caller.clone(), Arc::clone(trace));
+        let gate = self.gate.clone();
         lua.create_async_function(move |lua, (id, args): (String, Option<LuaValue>)| {
             // Where the script is, taken now: once the future runs, the
             // script is no longer on that line's frame.
             let line = line_of(&lua);
-            let refused = refusal(&list, &id, read_only);
+            let refused = refusal(&list, &id, read_only, gate.as_ref());
             let args = args.map(|a| lua.from_value::<Value>(a));
             let (list, who, trace) = (list.clone(), who.clone(), Arc::clone(&trace));
             async move {
@@ -381,12 +402,16 @@ fn log_function(lua: &Lua, trace: &Arc<Mutex<Trace>>) -> mlua::Result<mlua::Func
     })
 }
 
-/// Why `state.query` will not run `id`: it changes the app.
-fn refusal(list: &ActionList, id: &str, read_only: bool) -> Option<String> {
+/// Why a run will not run `id`: its gate keeps it out, or — for
+/// `state.query` — it changes the app.
+fn refusal(list: &ActionList, id: &str, read_only: bool, gate: Option<&Gate>) -> Option<String> {
+    let info = list.info(id)?;
+    if let Some(Err(why)) = gate.map(|g| g(&info)) {
+        return Some(format!("{id}: {why}"));
+    }
     if !read_only {
         return None;
     }
-    let info = list.info(id)?;
     (info.effect != Effect::ReadOnly).then(|| {
         format!(
             "{id} changes the app ({}): run it with actions.run",
@@ -395,10 +420,15 @@ fn refusal(list: &ActionList, id: &str, read_only: bool) -> Option<String> {
     })
 }
 
-/// The actions `who` may run.
-fn visible(list: &ActionList, who: &ActionCaller) -> Vec<ActionInfo> {
-    who.principal()
-        .map_or_else(|| list.infos(), |p| list.infos_for(p))
+/// The actions `who` may run, and the gate lets through.
+fn visible(list: &ActionList, who: &ActionCaller, gate: Option<&Gate>) -> Vec<ActionInfo> {
+    let mut infos = who
+        .principal()
+        .map_or_else(|| list.infos(), |p| list.infos_for(p));
+    if let Some(gate) = gate {
+        infos.retain(|i| gate(i).is_ok());
+    }
+    infos
 }
 
 fn matches(info: &ActionInfo, filter: &str) -> bool {

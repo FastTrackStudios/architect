@@ -242,8 +242,9 @@ type CallerHandler =
     Arc<dyn Fn(&ActionCaller, &[u8]) -> Result<Vec<u8>, ActionError> + Send + Sync>;
 
 /// An async handler that is handed who is calling, once its types are
-/// erased: what [`ActionList::register_async_with`] stores.
-type CallerAsyncHandler =
+/// erased: what [`ActionList::register_async_with`] stores, and what
+/// [`ActionList::register_forwarded_with`] takes.
+pub type CallerAsyncHandler =
     Arc<dyn Fn(&ActionCaller, &[u8]) -> Result<ActionFuture, ActionError> + Send + Sync>;
 
 /// Who runs an action, and what it runs in: what a handler registered
@@ -742,6 +743,23 @@ impl ActionList {
         info: &ActionInfo,
         handler: AsyncHandler,
     ) -> Result<(), ActionError> {
+        self.register_forwarded_with(
+            info,
+            Arc::new(move |_: &ActionCaller, args: &[u8]| handler(args)),
+        )
+    }
+
+    /// [`Self::register_forwarded`] for a handler that is handed who is
+    /// calling: an extension's action, run as whoever ran it.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::register`].
+    pub fn register_forwarded_with(
+        &self,
+        info: &ActionInfo,
+        handler: CallerAsyncHandler,
+    ) -> Result<(), ActionError> {
         if self.info(&info.id).is_some() {
             return Err(ActionError::Duplicate(info.id.clone()));
         }
@@ -768,7 +786,7 @@ impl ActionList {
                 params: info.params_schema.clone(),
                 result: info.result_schema.clone(),
             }),
-            run: Run::Async(Arc::new(move |_: &ActionCaller, args: &[u8]| handler(args))),
+            run: Run::Async(handler),
             enabled: None,
             checked: None,
         })
