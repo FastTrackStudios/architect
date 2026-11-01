@@ -1,6 +1,9 @@
 //! The native menu bar (feature `native`, macOS): a [`MenuBar`] drawn by
-//! `AppKit` through `muda`, rebuilt when the commands change (a label, a
-//! key, whether one can run), each pick running its command.
+//! `AppKit` through `muda`, rebuilt when what it shows changes (a label, a
+//! key, whether one can run or is ticked, a live section's rows), each
+//! pick running its command. It is resolved again when the Action Lists'
+//! events move on ([`Commands::heard`](crate::Commands::heard)) and when
+//! anything a section reads (a signal) changes.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -8,41 +11,72 @@ use std::time::Duration;
 
 use dioxus::prelude::*;
 use muda::accelerator::{Accelerator, Code, Modifiers};
-use muda::{IsMenuItem, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
+use muda::{CheckMenuItem, IsMenuItem, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 
-use crate::menu::{Item, MenuBar, Resolved, Standard};
+use crate::menu::{Kind, MenuBar, Resolved, Standard, Tree};
 use crate::ui::try_use_commands;
 
-/// How often a pick is looked for (the menu's events come on a channel).
+/// How often a pick, or an Action List event, is looked for (the menu's
+/// events come on a channel; the list's are counted).
 const POLL: Duration = Duration::from_millis(30);
+
+/// The bar `AppKit` shows: what it was built from, the numbered tree its
+/// item ids name, and the menu, which must outlive each build.
+type Held = Rc<RefCell<Option<(Vec<Resolved>, Tree, muda::Menu)>>>;
 
 /// Draws `bar` as the app's menu bar while mounted (once, at the root).
 #[component]
 pub fn NativeMenus(bar: MenuBar) -> Element {
     let commands = try_use_commands();
-    // The menu AppKit shows must outlive each build; the last one built.
-    let held = use_hook(|| Rc::new(RefCell::new(None::<(Vec<Resolved>, muda::Menu)>)));
+    let held: Held = use_hook(|| Rc::new(RefCell::new(None)));
+    use_hook(move || {
+        if let Some(c) = commands {
+            c.set_global_menu(true);
+        }
+    });
+    use_drop(move || {
+        if let Some(c) = commands {
+            c.set_global_menu(false);
+        }
+    });
     if let Some(c) = commands {
         let resolved = bar.resolve(&c.all());
         let stale = held
             .borrow()
             .as_ref()
-            .is_none_or(|(last, _)| *last != resolved);
+            .is_none_or(|(last, _, _)| *last != resolved);
         if stale {
-            let menu = build(&resolved);
-            #[cfg(target_os = "macos")]
+            let tree = Tree::new(&resolved);
+            let menu = build(&tree);
             menu.init_for_nsapp();
-            *held.borrow_mut() = Some((resolved, menu));
+            *held.borrow_mut() = Some((resolved, tree, menu));
         }
     }
     // Picks: the channel is read on the UI's own loop, so a command's
     // handler runs where its signals live.
-    use_future(move || async move {
-        loop {
-            futures_timer::Delay::new(POLL).await;
-            while let Ok(event) = MenuEvent::receiver().try_recv() {
-                if let Some(c) = commands {
-                    let _ = c.run(&event.id().0);
+    use_future(move || {
+        let held = held.clone();
+        async move {
+            let mut heard = commands.map_or(0, |c| c.heard());
+            loop {
+                futures_timer::Delay::new(POLL).await;
+                let Some(c) = commands else {
+                    continue;
+                };
+                while let Ok(event) = MenuEvent::receiver().try_recv() {
+                    let pick = event.id().0.parse::<i32>().ok().and_then(|id| {
+                        held.borrow()
+                            .as_ref()
+                            .and_then(|(_, tree, _)| tree.pick(id).cloned())
+                    });
+                    if let Some(pick) = pick {
+                        let _ = c.run_pick(&pick);
+                    }
+                }
+                let now = c.heard();
+                if now != heard {
+                    heard = now;
+                    c.refresh();
                 }
             }
         }
@@ -50,27 +84,38 @@ pub fn NativeMenus(bar: MenuBar) -> Element {
     rsx! {}
 }
 
-fn build(resolved: &[Resolved]) -> muda::Menu {
+fn build(tree: &Tree) -> muda::Menu {
     let menu = muda::Menu::new();
-    for r in resolved {
-        let sub = submenu(r);
-        let _ = menu.append(&sub);
+    for node in &tree.children {
+        if let Kind::Menu { title } = &node.kind {
+            let _ = menu.append(&submenu(title, node));
+        }
     }
     menu
 }
 
-fn submenu(r: &Resolved) -> Submenu {
-    let sub = Submenu::new(&r.title, true);
-    for item in &r.items {
-        let _ = match item {
-            Item::Command(c) => {
-                let entry =
-                    MenuItem::with_id(c.id.clone(), &c.label, c.enabled, accelerator(&c.shortcut));
-                sub.append(&entry)
+fn submenu(title: &str, node: &Tree) -> Submenu {
+    let sub = Submenu::new(title, true);
+    for child in &node.children {
+        let id = child.id.to_string();
+        let _ = match &child.kind {
+            Kind::Row(row) => {
+                let key = accelerator(&row.shortcut);
+                match row.checked {
+                    Some(on) => sub.append(&CheckMenuItem::with_id(
+                        id,
+                        &row.label,
+                        row.enabled,
+                        on,
+                        key,
+                    )),
+                    None => sub.append(&MenuItem::with_id(id, &row.label, row.enabled, key)),
+                }
             }
-            Item::Separator => sub.append(&PredefinedMenuItem::separator()),
-            Item::Standard(s) => sub.append(standard(*s).as_ref()),
-            Item::Submenu(inner) => sub.append(&submenu(inner)),
+            Kind::Separator => sub.append(&PredefinedMenuItem::separator()),
+            Kind::Standard(s) => sub.append(standard(*s).as_ref()),
+            Kind::Menu { title } => sub.append(&submenu(title, child)),
+            Kind::Root => Ok(()),
         };
     }
     sub

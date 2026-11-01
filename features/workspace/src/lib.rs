@@ -43,4 +43,4 @@ pub use model::{
 };
 pub use ops::{Dest, Target, WorkspaceError};
 pub use presence::{PlayheadMark, PointerMark, PresenceMarks, WashMark, css_color};
-pub use screenset::{FormClass, Layout, Screenset, Screensets};
+pub use screenset::{FormClass, Layout, Recall, Screenset, Screensets};

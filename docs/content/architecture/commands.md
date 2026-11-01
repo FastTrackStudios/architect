@@ -88,6 +88,10 @@ pub fn register(list: &ActionList) -> Result<(), ActionError> {
 - `set_enabled(id, || Result<(), String>)` says when an action can run.
   `Err(why)` disables it: `ActionInfo` shows `enabled: false` and
   `disabled_reason`, and a run answers `ActionError::Disabled`.
+- `set_checked(id, || bool)` makes an action a toggle: `ActionInfo`
+  shows `checked: Some(on)` (`None` for an action that is not one), the
+  tick a menu draws beside it. The handler still does the flipping; the
+  check only reads the state.
 - Keep one `register(list)` function per area module and call them all
   from one place at startup. The registry test builds the list and runs
   the list's own checks:

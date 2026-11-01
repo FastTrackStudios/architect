@@ -974,6 +974,7 @@ fn summary(info: &ActionInfo) -> Value {
         "shortcut": (!info.shortcut.is_empty()).then_some(&info.shortcut),
         "enabled": info.enabled,
         "disabled_reason": info.disabled_reason,
+        "checked": info.checked,
     })
 }
 
@@ -995,6 +996,7 @@ fn detail(info: &ActionInfo) -> Value {
         "gives": schema(&info.result_schema),
         "enabled": info.enabled,
         "disabled_reason": info.disabled_reason,
+        "checked": info.checked,
     })
 }
 

@@ -27,6 +27,7 @@ use dioxus::prelude::*;
 use lucide_dioxus::{Command as CommandIcon, Search};
 
 use crate::fuzzy::fuzzy;
+use crate::menu::Pick;
 use crate::opener::{Found, OpenIn, Opener, Openers};
 use crate::palette::{Command, Query, Ranked, Scope, rank};
 use crate::recent::Recents;
@@ -57,6 +58,9 @@ pub struct Commands {
     pub overlay: Signal<Option<Overlay>>,
     /// Bumped when the scoped commands change, so the palette redraws.
     version: Signal<u64>,
+    /// Whether the platform shows the menu bar ([`NativeMenus`](crate::NativeMenus)
+    /// took it), so the in-window one stands aside.
+    global_menu: Signal<bool>,
     serial: CopyValue<u64>,
 }
 
@@ -70,6 +74,7 @@ pub fn use_commands_provider() -> Commands {
         recents: Signal::new(Recents::default()),
         overlay: Signal::new(None),
         version: Signal::new(0),
+        global_menu: Signal::new(false),
         serial: CopyValue::new(0),
     })
 }
@@ -160,6 +165,9 @@ fn from_info(info: &architect::action::ActionInfo) -> Command {
         .group(group)
         .detail(info.description.clone())
         .shortcut(info.shortcut.clone());
+    if let Some(on) = info.checked {
+        c = c.checked(on);
+    }
     if !info.enabled {
         c = c.disabled(
             info.disabled_reason
@@ -255,6 +263,62 @@ impl Commands {
             });
             true
         })
+    }
+
+    /// Does what picking a menu row does: runs its command, with the row's
+    /// arguments when it has them (a live section's row: those go to the
+    /// Action List, which is where an action that takes any lives). False
+    /// when there is no such command, it is disabled or it failed.
+    #[must_use = "false when there is no such command, or it cannot run"]
+    pub fn run_pick(&self, pick: &Pick) -> bool {
+        let Some(args) = &pick.args else {
+            return self.run(&pick.command);
+        };
+        let list = self
+            .lists
+            .read()
+            .iter()
+            .find(|l| l.info(&pick.command).is_some_and(|i| i.enabled))
+            .cloned();
+        list.is_some_and(|list| {
+            let mut recents = self.recents;
+            recents.write().touch(&pick.command);
+            list.run_json(&pick.command, args.as_bytes()).is_ok()
+        })
+    }
+
+    /// Where the Action Lists' events have got to: it moves on with each
+    /// run, each [`ActionList::changed`] the app reports, each action
+    /// registered. A menu bar asks again (`refresh`) when it moved,
+    /// so enabled and ticked states follow the events, not a clock.
+    #[must_use]
+    pub fn heard(&self) -> u64 {
+        self.lists
+            .peek()
+            .iter()
+            .fold(0_u64, |sum, l| sum.wrapping_add(l.latest()))
+    }
+
+    /// Whether the platform shows the app's menu bar (the macOS one, or a
+    /// Linux shell that took the exported one): the in-window bar
+    /// ([`InWindowMenus`](crate::InWindowMenus)) draws nothing then.
+    #[must_use]
+    pub fn has_global_menu(&self) -> bool {
+        (self.global_menu)()
+    }
+
+    /// Says whether the platform shows the menu bar: what a backend does
+    /// once it knows.
+    pub fn set_global_menu(&self, shown: bool) {
+        let mut g = self.global_menu;
+        if *g.peek() != shown {
+            g.set(shown);
+        }
+    }
+
+    /// Everything that reads the commands reads them again.
+    pub fn refresh(&self) {
+        self.bump();
     }
 
     pub fn show(&self, overlay: Overlay) {
