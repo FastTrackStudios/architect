@@ -37,9 +37,10 @@ In the architect repo `cargo xtask` is `cargo run -p xtask --`. Consumers build 
 - Edits a line only if its key is `architect`, `auth`, `crdt`, `ui-snapshot` or `<prefix>-*` and the line contains `FastTrackStudios/architect`; replaces the first `tag`/`rev`/`branch` value with `tag = "<TAG>"`. An owned line with none of those is a hard error for that file.
 - It does not touch `Cargo.lock`, does not check the tag exists or is ordered, skips owned deps split over several lines, and aborts on the first failing manifest with earlier ones already rewritten.
 
-## CI (`.github/workflows/checks.yml`)
+## CI (`.github/workflows/pr.yml`, `.github/workflows/checks.yml`)
 
-- `RUSTFLAGS: -D warnings`. Jobs run on GitHub-hosted `ubuntu-latest` (setup in `.github/actions/hosted-rust`: apt native libs, rust 1.99.1 (the `rust-toolchain.toml` pin) via `RUSTUP_TOOLCHAIN`, rust-cache saved only on main), in parallel: `lint` (fmt, `clippy --workspace --all-targets` with no `--all-features`, `boundaries`, `docs`), `test` (`test --workspace`, includes xtask tests) and `wasm`, the wasm checks of the framework crates (architect, atom, form, permissions, auth-proto, auth-client, crdt, architect-input, plus architect-input with `dioxus`).
+- A PR runs `pr.yml` only: one job, `check` (the status branch protection requires), with `cargo fmt --all -- --check` and a stale-`Cargo.lock` check, about a minute. The full suite below runs after the merge, on every push to main; when main goes red, revert or fix forward.
+- `checks.yml`, on main: `RUSTFLAGS: -D warnings`. Jobs run on GitHub-hosted `ubuntu-latest` (setup in `.github/actions/hosted-rust`: apt native libs, rust 1.99.1 (the `rust-toolchain.toml` pin) via `RUSTUP_TOOLCHAIN`, rust-cache saved only on main), in parallel: `lint` (fmt, `clippy --workspace --all-targets` with no `--all-features`, `boundaries`, `docs`), `test` (`test --workspace`, includes xtask tests) and `wasm`, the wasm checks of the framework crates (architect, atom, form, permissions, auth-proto, auth-client, crdt, architect-input, plus architect-input with `dioxus`).
 - Job `tags` (ubuntu, full history) runs `cargo run -p xtask -- tags --verbose`.
 - Not in CI: clippy `--all-features` (`just lint` runs it), `just ui-css-check`, `just auth-ui-css-check`, `just auth-e2e`, ui-snapshot and parity tests.
 
