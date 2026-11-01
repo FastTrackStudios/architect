@@ -200,6 +200,12 @@ pub fn VaultPage() -> Element {
     let store = use_root_context(|| VaultStore(WorkspaceStore::new(MemoryStore::new()))).0;
     let pane_status = use_signal(Vec::new);
     let views = use_hook(views);
+    // The arrangement on the lab's Action List: a scenario's checks read
+    // it, each change is heard.
+    architect_workspace::use_workspace_actions(
+        use_context::<std::sync::Arc<architect::action::ActionList>>(),
+        workspace,
+    );
     // The marker lane draws over the arrangement; its tool window floats
     // as a pane, to dock or tab like any other.
     let _canvases = architect_canvas::ui::use_canvases();
@@ -220,6 +226,15 @@ pub fn VaultPage() -> Element {
         let mut workspace = workspace;
         let _ = workspace.write().open(note(&pane_id, &title), Target::Tab);
     };
+    let new_note = on_command.clone();
+    architect_commands::use_command(
+        architect_commands::Command::new("LAB_NEW_NOTE", "New note").group("Vault"),
+        move || {
+            // A copy of the handler (its signals are shared): `Fn`.
+            let mut open = new_note;
+            open("new-note".to_owned());
+        },
+    );
     // ⌘O finds the vault's notes (and the workspace's views and tabs).
     architect_commands::use_opener(move || {
         architect_commands::Opener::new(

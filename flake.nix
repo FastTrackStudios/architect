@@ -38,6 +38,10 @@
             openssl
             zlib
             sqlite
+            # Guide media (`just media`, features/guide): frames to WebM and
+            # MP4, and to GIF. Run as programs, never linked.
+            ffmpeg
+            gifski
           ];
           shell = extra: pkgs.mkShell {
             packages = common ++ linux ++ extra;

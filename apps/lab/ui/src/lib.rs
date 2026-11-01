@@ -11,6 +11,7 @@
 
 mod arrange;
 mod extensions;
+mod guide;
 mod items;
 mod pages;
 mod screen;
@@ -649,13 +650,31 @@ pub fn font_context() -> dioxus_native::FontContext {
 
 /// The lab's root. The host publishes the window as a
 /// `Signal<shell::Screen>` ([`use_window_screen`]) above it.
+///
+/// Headless (`apps/lab/media`, the guide scenarios' runner) it has no
+/// window: what needs one (the window's keys, its title bar, the
+/// platform's menu bar) is left out, and the host's Action List, given in
+/// context, is the lab's.
 #[component]
 pub fn LabApp() -> Element {
     let screen = use_context::<Signal<shell::Screen>>();
-    // Settings: the lab's sections, kept on this device.
+    // Fixed for the component's life, so the hooks below it are called the
+    // same way every render.
+    let windowed = use_hook(|| {
+        try_consume_context::<std::sync::Arc<dyn dioxus_native::winit::window::Window>>().is_some()
+    });
+    let list = use_hook(|| {
+        try_consume_context::<std::sync::Arc<architect::action::ActionList>>()
+            .unwrap_or_else(|| std::sync::Arc::new(architect::action::ActionList::new()))
+    });
+    use_context_provider(|| list.clone());
+    // Settings: the lab's sections, kept on this device — in a window.
+    // Headless, the defaults, kept nowhere: a scenario neither reads nor
+    // changes the person's own.
     let store = use_hook(|| {
-        architect_settings::DeviceValues::open("architect-lab")
-            .ok()
+        windowed
+            .then(|| architect_settings::DeviceValues::open("architect-lab").ok())
+            .flatten()
             .map(std::rc::Rc::new)
     });
     let save = store.clone();
@@ -728,6 +747,10 @@ pub fn LabApp() -> Element {
         .unwrap_or(false);
     // Commands: the palette (⌘K), quick open (⌘O), and every command's key.
     let commands = architect_commands::use_commands_provider();
+    // Every command (a view's own too) and the palette's state, on the
+    // lab's list; the lab's own state beside them.
+    architect_commands::use_command_actions(list.clone());
+    guide::use_lab_actions(&list, &lab);
     for (n, (id, label, to)) in TABS.into_iter().enumerate() {
         // ⌃⌘1–4: ⌘1–9 are the Vault's screensets, and ⌥ changes the digit.
         architect_commands::use_command(
@@ -991,7 +1014,11 @@ pub fn LabApp() -> Element {
         },
         || {},
     );
-    let window_chrome = screen::use_window_chrome();
+    let window_chrome = if windowed {
+        screen::use_window_chrome()
+    } else {
+        None
+    };
     let capture = shell::Action::new("Capture", icon!(Feather), move |()| {
         lab.capture("inbox");
     });
@@ -1050,9 +1077,11 @@ pub fn LabApp() -> Element {
             style: "position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; overflow: hidden;",
             document::Style { {CSS} }
             // The window's chords (⌘K, ⌘W, …), whatever has the focus.
-            architect_commands::WindowKeys {}
-            ListKeys {}
-            NativeMenus { bar: menus }
+            if windowed {
+                architect_commands::WindowKeys {}
+                ListKeys {}
+            }
+            NativeMenus { bar: menus, windowed }
             AppShell {
                 screen: screen(),
                 style: (lab.style)(),
@@ -1151,7 +1180,10 @@ fn ListKeys() -> Element {
 /// The menu bar: the platform's where there is one (macOS, a Linux shell
 /// that takes dbusmenu, iPadOS), else the app's own in the window.
 #[component]
-fn NativeMenus(bar: architect_commands::MenuBar) -> Element {
+fn NativeMenus(bar: architect_commands::MenuBar, windowed: bool) -> Element {
+    if !windowed {
+        return rsx! { architect_commands::InWindowMenus { bar } };
+    }
     #[cfg(any(target_os = "macos", target_os = "linux", target_os = "ios"))]
     return rsx! {
         architect_commands::NativeMenus { bar: bar.clone() }

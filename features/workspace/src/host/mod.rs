@@ -30,6 +30,7 @@
     clippy::needless_collect
 )]
 
+mod actions;
 mod commands;
 mod dock;
 mod group;
@@ -57,6 +58,7 @@ use group::NodeView;
 use overlay::{DragLayer, FloatView, MenuLayer, PhoneBody, SheetLayer};
 pub use presence::{PresenceLayer, PresenceOverlay, use_presence_overlay};
 
+pub use actions::use_workspace_actions;
 pub use screens::WorkspaceStore;
 pub use windows::{Bridge, Popout, WindowSystem, Windows};
 

@@ -35,6 +35,8 @@ ui = [
     "architect-shell/ui",
     "dep:lucide-dioxus",
     "dep:architect",
+    "dep:futures-channel",
+    "dep:futures-util",
 ]
 
 [dependencies]
@@ -50,6 +52,10 @@ architect-shell = { workspace = true, optional = true }
 lucide-dioxus = { workspace = true, optional = true }
 dioxus-native = { workspace = true, optional = true }
 futures-timer = { workspace = true, optional = true }
+# The commands on an Action List (src/bridge.rs): a run asked from any
+# thread, answered from the window's.
+futures-channel = { version = "0.3", optional = true }
+futures-util = { version = "0.3", default-features = false, optional = true }
 # The app's Action List: every action listed in the palette and run by it.
 architect = { workspace = true, optional = true, features = ["action-list"] }
 

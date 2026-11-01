@@ -11,6 +11,8 @@
 //! binding editor), with scoped actions a view registers while it is
 //! mounted ([`use_command`]), keys run through `architect-input`.
 
+#[cfg(feature = "ui")]
+mod bridge;
 mod custom;
 #[cfg(any(test, all(feature = "native", target_os = "linux")))]
 mod dbusmenu;
@@ -36,6 +38,8 @@ mod recent;
 #[cfg(feature = "ui")]
 mod ui;
 
+#[cfg(feature = "ui")]
+pub use bridge::{CommandsState, Ran, RunCommand, use_command_actions};
 pub use custom::{Condition, CustomAction, Runner, Step, StepFailed};
 pub use fuzzy::{Match, fuzzy};
 #[cfg(all(feature = "native", target_os = "ios"))]
@@ -63,3 +67,22 @@ pub use palette::{Command, Query, Ranked, Scope, rank};
 pub use recent::Recents;
 #[cfg(feature = "ui")]
 pub use ui::*;
+
+/// The Action List action that runs any command by id, a view's own too
+/// ([`use_command_actions`] registers it; feature `ui`).
+pub const RUN_ACTION: &str = "COMMANDS_RUN";
+
+/// The read-only Action List action that says which overlay is open and
+/// what the palette's field says ([`use_command_actions`]; feature `ui`).
+pub const STATE_ACTION: &str = "COMMANDS_STATE";
+
+/// A guide scenario's target in the commands' UI, as a CSS selector:
+/// `palette-row` and a command's id is that command's row in the ⌘K
+/// palette (`architect-guide`'s resolvers). `None` for any other kind.
+#[must_use]
+pub fn target_selector(kind: &str, name: &str) -> Option<String> {
+    match kind {
+        "palette-row" => Some(format!("[data-command=\"{name}\"]")),
+        _ => None,
+    }
+}

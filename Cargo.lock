@@ -609,7 +609,9 @@ dependencies = [
  "dioxus-native",
  "facet",
  "facet-json",
+ "futures-channel",
  "futures-timer",
+ "futures-util",
  "lucide-dioxus",
  "muda",
  "objc2 0.6.4",
@@ -702,6 +704,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-guide"
+version = "0.1.0"
+dependencies = [
+ "anyrender",
+ "anyrender_vello_cpu",
+ "architect",
+ "architect-commands",
+ "architect-workspace",
+ "blitz-dom",
+ "blitz-paint",
+ "blitz-traits",
+ "clap",
+ "dioxus",
+ "dioxus-native-dom",
+ "facet",
+ "facet-styx",
+ "facet-value",
+ "image",
+ "kurbo",
+ "peniko",
+ "serde_json",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "architect-input"
 version = "0.1.0"
 dependencies = [
@@ -721,6 +748,17 @@ dependencies = [
  "architect-extensions",
  "dioxus",
  "serde_json",
+]
+
+[[package]]
+name = "architect-lab-media"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-guide",
+ "architect-lab-ui",
+ "architect-shell",
+ "dioxus",
 ]
 
 [[package]]
@@ -1049,6 +1087,7 @@ dependencies = [
 name = "architect-workspace"
 version = "0.1.0"
 dependencies = [
+ "architect",
  "architect-commands",
  "architect-shell",
  "blitz-shell",

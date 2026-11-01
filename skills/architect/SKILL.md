@@ -47,6 +47,7 @@ Paperclip projects: **Architect** and **fts-auth**. Wiki: `architect` (Task org 
 | Sentry, tracing init, `wide::set`, stage timings, OTLP | `references/telemetry.md` | `features/telemetry/src/lib.rs` `init_tracing_full` |
 | Dioxus component kit, theme tokens, snapshots, stories | `references/architect-ui.md` | `features/ui/architect-ui/src/prelude.rs`, `ThemeProvider` |
 | What Blitz does differently, found building the shell and the lab (layout, fonts, keys, the macOS title bar, testing tools) | `references/blitz-quirks.md` | `features/workspace/src/native.rs` `launch_with_fonts`; `features/shell/src/shell/mac.rs` `fit_traffic_lights`; `features/commands/src/native.rs` `WindowKeys` |
+| Guide media: a scenario (styx) filmed headlessly into GIF/WebM/MP4 + poster, played as a test; targets, `done` checks, multi-window desktop, the `media` branch | `references/guide-media.md` | `features/guide/src/model.rs` `Scenario`; `features/guide/src/run.rs` `run`, `App`; `features/guide/src/capture.rs` `Recorder` |
 | `cargo xtask`, `boundaries.toml`, fleet-bump, CI, docs check | `references/xtask-tooling.md` | `xtask/src/main.rs` `Command` |
 
 ### App plumbing modules

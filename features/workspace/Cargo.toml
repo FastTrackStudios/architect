@@ -16,7 +16,7 @@ description = "The workspace: tab groups in splits, docks with ribbons, stacked 
 
 [features]
 default = []
-ui = ["dep:dioxus", "dep:architect-shell", "architect-shell/ui", "dep:futures-timer", "dep:futures-util", "dep:lucide-dioxus", "architect-commands/ui"]
+ui = ["dep:dioxus", "dep:architect-shell", "architect-shell/ui", "dep:futures-timer", "dep:futures-util", "dep:lucide-dioxus", "architect-commands/ui", "dep:architect"]
 native = ["ui", "dep:dioxus-native", "dep:blitz-shell", "dep:blitz-traits", "dep:dioxus-asset-resolver"]
 hot-reload = ["native", "dioxus-native/hot-reload", "dep:dioxus-devtools"]
 
@@ -38,6 +38,8 @@ futures-util = { version = "0.3", default-features = false, optional = true }
 # The workspace's commands, in the app's palette; by default the model
 # (the screensets as a menu's live rows), wasm-clean.
 architect-commands = { workspace = true }
+# The workspace's layout on the app's Action List (src/host/actions.rs).
+architect = { workspace = true, optional = true, features = ["action-list"] }
 # A measurement mid-drag finds the document busy and asks again shortly.
 futures-timer = { workspace = true, optional = true }
 

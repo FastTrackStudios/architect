@@ -125,6 +125,10 @@ package = "architect-files"
 layer = "L0"
 
 [[row]]
+package = "architect-guide"
+layer = "L0"
+
+[[row]]
 package = "architect-files"
 features = ["vox"]
 layer = "L0"
@@ -209,6 +213,12 @@ note = "sibling of auth; fold in as a ui flag"
 package = "architect-launcher-ui"
 layer = "L4"
 note = "sibling of launcher; fold in as a ui flag"
+
+[[row]]
+package = "architect-guide"
+features = ["capture"]
+layer = "L4"
+note = "the headless runner and film: native only"
 
 [[row]]
 package = "architect-story-core"
