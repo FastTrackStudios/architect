@@ -94,6 +94,22 @@ let report = crdt::schema::migrate(doc.loro(), SCHEMA, MIGRATIONS)?;
 - Steps must be idempotent (two offline peers both migrate; both ops merge). Seed legacy strings with `codec::upgrade_to_text` (a plain container, LWW on creation), never by inserting into a mergeable container, or the seed appears twice.
 - Run it after the initial load/sync: migrating an empty joiner stamps it.
 
+## Recipe E: a document's file (mirrors `features/crdt/crdt/tests/file.rs`)
+
+```rust
+let kind = DocKind::new("studio.song", "Song").extension("session").schema(2, MIGRATIONS);
+let file = DocFile::create(DiskStorage::open(&path)?, &kind).await?; // or DocFile::open
+let mut main = file.open_branch(MAIN).await?;           // migrated to the kind's schema
+main.transact("Split item", |doc| { /* edit */ }).await?; // durable when it returns
+main.save("Mix sent to Dan").await?;                     // names a checkpoint, folds
+```
+
+- No "unsaved" state: `transact`, `undo` and `redo` return after the step is synced. Edits made straight on `branch.loro()` are written only by the next step or `flush(label)`.
+- A crash leaves a torn last record; `open` drops it (`recovered()`) and replays the steps since the last snapshot.
+- Branches: `fork`, `open_branch` (side by side), `merge`, `DocFile::delete_branch` (not `main`); versions: `DocFile::versions`, `open_version` (read-only), `restore` (a new branch).
+- In the browser: `DocFile::from_bytes(bytes, &kind)`; the whole folded file to send is `to_bytes()`.
+- To sync a branch with `DocSync`, back the `CrdtDoc` with `file.persistence(MAIN)`.
+
 ## Pitfalls
 
 - **A `crdt::docs` host must never write into a `Strict` doc.** A doc made offline meets an empty one on the host; anything the host wrote would make it a different lineage, refused as `FOREIGN_LINEAGE`. Create a `Strict` doc on one device and let others adopt it: two devices each creating "the same" `Strict` doc offline are two docs, and the second is refused until `reset`. A doc every device makes under one derived id must be `Lineage::Merge`.
