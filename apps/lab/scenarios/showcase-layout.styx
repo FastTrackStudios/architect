@@ -126,7 +126,7 @@ steps (
     {
         id slide
         target @group"note-new-2"
-        do @scroll{dx -600, seconds 1.0}
+        do @scroll{dx 600, seconds 1.0}
         hold 0.6
     }
     {

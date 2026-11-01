@@ -25,7 +25,7 @@ use dioxus::prelude::*;
 use futures_channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use futures_util::StreamExt as _;
 
-use super::motion::{self, Motion};
+use crate::motion::{Motion, Spring, use_motion};
 
 /// The keyboard, now.
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
@@ -144,8 +144,7 @@ await new Promise(() => {});
 #[derive(Clone, Copy)]
 pub(super) struct KeyboardLift {
     pub(super) now: Signal<Keyboard>,
-    // TODO(#145): ride the workspace's motion clock once it lands, so the
-    // bar keeps time with the keyboard's own curve.
+    // On the motion clock (#145): a film or test drives it like the rest.
     lift: Motion,
 }
 
@@ -168,7 +167,7 @@ impl KeyboardLift {
 /// Hears the feed (and, in a browser or a web view, the page's keyboard)
 /// while the calling component is mounted.
 pub(super) fn use_keyboard_lift() -> KeyboardLift {
-    let lift = motion::use_motion();
+    let lift = use_motion(0.0, Spring::PANEL, 0.5);
     let mut now = use_signal(keyboard);
     use_hook(move || {
         let (first, mut heard) = subscribe();
@@ -191,7 +190,7 @@ pub(super) fn use_keyboard_lift() -> KeyboardLift {
         });
     });
     let height = now().height;
-    use_effect(use_reactive!(|height| lift.to(height, || {})));
+    use_effect(use_reactive!(|height| lift.to(height)));
     KeyboardLift { now, lift }
 }
 

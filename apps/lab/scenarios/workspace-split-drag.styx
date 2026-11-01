@@ -1,5 +1,6 @@
-// A tab dragged to a group's right edge splits the group; the divider
-// between the two is then pulled.
+// A tab dragged to a group's right edge splits the group, growing in from
+// that edge; the divider between the two is then pulled, and the new
+// group closed, folding its room back.
 id workspace-split-drag
 title "Split by dragging a tab to an edge"
 view {width 1440, height 860}
@@ -78,6 +79,17 @@ steps (
         target @split"note-shell"
         do @drag{dx 160, seconds 1.0}
         done {on (@changed"workspace")}
+        hold 1.0
+    }
+    {
+        id close
+        text "Close the split's tab: its room folds back into the group beside it."
+        target @css"[aria-label=\"Close The app shell\"]"
+        do @click{}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {windows ({groups ({tabs (note-welcome)} {tabs (graph)})})}})
+        }
         hold 1.0
     }
 )

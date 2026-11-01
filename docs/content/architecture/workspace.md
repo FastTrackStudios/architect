@@ -398,6 +398,12 @@ horizontal `position: sticky` and cannot scroll a box from code, so the
 strip keeps the offset itself, moved by a sideways wheel, its scrollbar or
 a press on a spine.
 
+**Motion.** Docks open and fold, tabs make room for a dragged one and
+settle where it lands, stacked strips scroll continuously, splits grow in
+from the drop's edge and fold back when closed, and the drop highlight
+follows the pointer, on one clock a film can drive:
+[Motion](@/architecture/motion.md).
+
 **Pop-out windows.** dioxus-native opens one window, at start. The
 workspace's launcher (`features/workspace/src/native.rs` `launch`) runs
 dioxus-native's application inside its own, which opens more while the

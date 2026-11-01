@@ -23,6 +23,7 @@ run = [
     "dep:blitz-traits",
     "dep:architect-workspace",
     "dep:architect-commands",
+    "dep:architect-shell",
 ]
 capture = [
     "run",
@@ -54,6 +55,8 @@ blitz-traits = { workspace = true, optional = true }
 # commands' resolver for palette rows and their bridge onto the list.
 architect-workspace = { workspace = true, optional = true, features = ["ui"] }
 architect-commands = { workspace = true, optional = true, features = ["ui"] }
+# The motion clock: a run drives it, so the app's motions are filmed frame by frame.
+architect-shell = { workspace = true, optional = true, features = ["ui"] }
 
 # The film: Blitz's painter on the CPU rasteriser (no GPU), as
 # architect-story-snapshots and ui-snapshot render.

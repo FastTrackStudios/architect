@@ -2,16 +2,19 @@
 //! highlight, the menus, and a phone's one-pane body, switcher and sheet.
 
 use architect_shell::layer;
+use architect_shell::motion::{Spring, use_motion};
 use dioxus::prelude::*;
 use lucide_dioxus::{Layers, Minus, PanelRight, X};
 
 use super::group::{NodeView, PaneSlot};
 use super::{
-    DRAG_SLOP, Drag, FLOAT_AT, Geometry, Host, Menu, Mount, Op, groups_of, point, use_host,
+    DRAG_SLOP, Drag, FLOAT_AT, Geometry, Host, Menu, Mount, Op, groups_of, narrow, point, use_host,
 };
 use crate::drop::{Bar, contains, drop_in, float_rect, snap_at};
 use crate::model::{Area, Axis, Chrome, Node, PaneId, Rect, Side};
 use crate::ops::Dest;
+
+use super::slide::Landing;
 
 /// A float in the main window: a title bar to drag (to an edge to snap
 /// it), its group, a resize corner.
@@ -146,29 +149,8 @@ pub(super) fn DragLayer() -> Element {
     if matches!(drag, Drag::DockGrip { moved: false, .. }) {
         return rsx! {};
     }
-    let highlight = match &drag {
-        Drag::Pane {
-            at: Some(d),
-            geometry: Some(Geometry { host: r, .. }),
-            ..
-        } => Some(Rect::new(
-            d.highlight.x - r.x,
-            d.highlight.y - r.y,
-            d.highlight.w,
-            d.highlight.h,
-        )),
-        Drag::Float { host: r, x, y, .. } => snap_at(*x, *y, *r).map(|snap| {
-            let ghost = crate::Float {
-                group: crate::Group::new(crate::GroupId(0)),
-                rect: Rect::new(0.0, 0.0, 0.0, 0.0),
-                snap: Some(snap),
-                pin: None,
-                minimised: false,
-            };
-            float_rect(&ghost, Rect::new(0.0, 0.0, r.w, r.h))
-        }),
-        _ => None,
-    };
+    // Along its own bar the tab itself follows the pointer: no label.
+    let on_own = (host.lifted)().is_some_and(|(_, own)| own);
     let label = match &drag {
         Drag::Pane {
             pane,
@@ -176,7 +158,7 @@ pub(super) fn DragLayer() -> Element {
             y,
             geometry: Some(Geometry { host: r, .. }),
             ..
-        } => host
+        } if !on_own => host
             .workspace
             .read()
             .pane(pane)
@@ -198,13 +180,6 @@ pub(super) fn DragLayer() -> Element {
     rsx! {
         div {
             style: "position:absolute; top:0; left:0; right:0; bottom:0; z-index:{layer::DRAG}; touch-action:none; cursor:{cursor};",
-            if let Some(h) = highlight {
-                div {
-                    style: "position:absolute; left:{h.x}px; top:{h.y}px; width:{h.w}px; height:{h.h}px; \
-                            background:rgba(191,219,254,0.12); border:2px solid {t.ink_2}; \
-                            border-radius:4px; pointer-events:none;",
-                }
-            }
             if let Some((title, x, y)) = label {
                 div {
                     style: "position:absolute; left:{x}px; top:{y}px; padding:4px 10px; border-radius:6px; \
@@ -213,6 +188,77 @@ pub(super) fn DragLayer() -> Element {
                     "{title}"
                 }
             }
+        }
+    }
+}
+
+/// Where a drag would land, lit: a split's half, a group, a dock's band,
+/// a float's snap. (A place in a tab bar shows as the gap the tabs make.)
+fn highlight_of(drag: Option<&Drag>) -> Option<Rect> {
+    match drag? {
+        Drag::Pane {
+            at: Some(d),
+            geometry: Some(Geometry { host: r, .. }),
+            ..
+        } if !matches!(d.dest, Dest::Group { index: Some(_), .. }) => Some(Rect::new(
+            d.highlight.x - r.x,
+            d.highlight.y - r.y,
+            d.highlight.w,
+            d.highlight.h,
+        )),
+        Drag::Float { host: r, x, y, .. } => snap_at(*x, *y, *r).map(|snap| {
+            let ghost = crate::Float {
+                group: crate::Group::new(crate::GroupId(0)),
+                rect: Rect::new(0.0, 0.0, 0.0, 0.0),
+                snap: Some(snap),
+                pin: None,
+                minimised: false,
+            };
+            float_rect(&ghost, Rect::new(0.0, 0.0, r.w, r.h))
+        }),
+        _ => None,
+    }
+}
+
+/// The drop's highlight: it fades in where a drag would land, follows the
+/// pointer from place to place on a spring, and fades out when the drag
+/// ends (over the split that grows in under it).
+#[component]
+pub(super) fn DropHighlight() -> Element {
+    let host = use_host();
+    let t = *host.theme.read();
+    let x = use_motion(0.0, Spring::TRACK, 0.25);
+    let y = use_motion(0.0, Spring::TRACK, 0.25);
+    let w = use_motion(0.0, Spring::TRACK, 0.25);
+    let h = use_motion(0.0, Spring::TRACK, 0.25);
+    let shown = use_motion(0.0, Spring::TRACK, 0.005);
+    let target = highlight_of((host.drag)().as_ref());
+    use_effect(use_reactive!(|target| {
+        let Some(r) = target else {
+            shown.to(0.0);
+            return;
+        };
+        // Coming in from nothing it starts where it is, else it travels.
+        let fresh = shown.peek() < 0.05 && shown.target() < 0.5;
+        for (m, v) in [(x, r.x), (y, r.y), (w, r.w), (h, r.h)] {
+            if fresh {
+                m.jump(f64::from(v));
+            } else {
+                m.to(f64::from(v));
+            }
+        }
+        shown.to(1.0);
+    }));
+    let alpha = shown.value();
+    if alpha < 0.01 {
+        return rsx! {};
+    }
+    rsx! {
+        div {
+            style: "position:absolute; left:{x.value()}px; top:{y.value()}px; width:{w.value()}px; \
+                    height:{h.value()}px; box-sizing:border-box; background:rgba(191,219,254,0.12); \
+                    border:2px solid {t.ink_2}; border-radius:4px; pointer-events:none; \
+                    opacity:{alpha}; z-index:{layer::DRAG};",
         }
     }
 }
@@ -228,6 +274,7 @@ pub(super) fn on_move(mut host: Host, (x, y): (f32, f32)) {
                     pane: pane.clone(),
                     geometry: None,
                     at: None,
+                    x0,
                     x,
                     y,
                 }));
@@ -237,13 +284,16 @@ pub(super) fn on_move(mut host: Host, (x, y): (f32, f32)) {
         Drag::Pane {
             pane,
             geometry: Some(g),
+            x0,
             ..
         } => {
             let at = drop_in(x, y, g.host, &g.bars, &g.groups);
+            super::slide::during(host, &pane, &g.rows, at.map(|d| d.dest), x - x0);
             host.drag.set(Some(Drag::Pane {
                 pane,
                 geometry: Some(g),
                 at,
+                x0,
                 x,
                 y,
             }));
@@ -314,6 +364,9 @@ pub(super) fn on_move(mut host: Host, (x, y): (f32, f32)) {
         } => {
             let to = (x - x0).mul_add(per_point, from).clamp(0.0, most);
             host.scrolls.write().insert(group, to);
+            if let Some(m) = host.strips.peek().get(&group) {
+                m.hold(f64::from(to));
+            }
         }
         Drag::FloatSize { pane, host: r } => {
             host.edit(|w| {
@@ -409,20 +462,32 @@ async fn measure_for_drop(mut host: Host, pane: PaneId) {
         }
     }
     let mut bars = Vec::with_capacity(tabs.len());
+    let mut rows = Vec::with_capacity(tabs.len());
     for (group, panes) in tabs {
         let Some(rect) = host.rect(Mount::Bar(group)).await else {
             continue;
         };
-        let mut rects = Vec::with_capacity(panes.len());
+        let mut named = Vec::with_capacity(panes.len());
         for p in panes {
-            if let Some(r) = host.rect(Mount::Tab(p)).await {
-                rects.push(r);
+            if let Some(r) = host.rect(Mount::Tab(p.clone())).await {
+                // Where it stands in the layout, not where a shift draws it.
+                let shift = host
+                    .tab_shift
+                    .peek()
+                    .get(&p)
+                    .map_or(0.0, |m| narrow(m.peek()));
+                named.push((p, Rect::new(r.x - shift, r.y, r.w, r.h)));
             }
         }
         bars.push(Bar {
             group,
             rect,
-            tabs: rects,
+            tabs: named.iter().map(|(_, r)| *r).collect(),
+        });
+        rows.push(super::slide::Row {
+            group,
+            bar: rect,
+            tabs: named,
         });
     }
     // The host's own rectangle, else what its groups cover.
@@ -432,9 +497,9 @@ async fn measure_for_drop(mut host: Host, pane: PaneId) {
     };
     let still = matches!(host.drag.peek().as_ref(), Some(Drag::Pane { pane: p, .. }) if *p == pane);
     if still {
-        let (x, y) = match host.drag.peek().as_ref() {
-            Some(Drag::Pane { x, y, .. }) => (*x, *y),
-            _ => (0.0, 0.0),
+        let (x0, x, y) = match host.drag.peek().as_ref() {
+            Some(Drag::Pane { x0, x, y, .. }) => (*x0, *x, *y),
+            _ => (0.0, 0.0, 0.0),
         };
         host.drag.set(Some(Drag::Pane {
             pane,
@@ -442,8 +507,10 @@ async fn measure_for_drop(mut host: Host, pane: PaneId) {
                 host: r,
                 groups,
                 bars,
+                rows,
             }),
             at: None,
+            x0,
             x,
             y,
         }));
@@ -478,13 +545,17 @@ pub(super) fn release_outside(mut host: Host, (x, y): (f32, f32)) {
         }
         return;
     }
-    let Some(Drag::Pane { pane, geometry, .. }) = drag else {
+    let Some(Drag::Pane {
+        pane, geometry, x0, ..
+    }) = drag
+    else {
         return;
     };
     host.drag.set(Some(Drag::Pane {
         pane,
         geometry,
         at: None,
+        x0,
         x,
         y,
     }));
@@ -498,15 +569,37 @@ pub(super) fn on_up(mut host: Host) {
         return;
     }
     host.drag.set(None);
+    // The tabs that made room settle into their places (`super::slide`).
+    let land = |pane: &PaneId, g: &Geometry, x0: f32, x: f32, landing| {
+        let left = g
+            .rows
+            .iter()
+            .flat_map(|r| r.tabs.iter())
+            .find(|(p, _)| p == pane)
+            .map_or(x, |(_, r)| r.x);
+        super::slide::landed(host, pane, &g.rows, landing, x - x0 + left);
+    };
     match drag {
         Some(Drag::Pane {
-            pane, at: Some(d), ..
-        }) => host.run(Op::Move(pane, d.dest)),
+            pane,
+            at: Some(d),
+            geometry,
+            x0,
+            x,
+            ..
+        }) => {
+            if let Some(g) = &geometry {
+                land(&pane, g, x0, x, Landing::To(Some(d.dest)));
+            }
+            // Where it lit is the size a split it makes grows in at.
+            host.move_pane(&pane, d.dest, Some(d.highlight));
+        }
         // Let go outside the window: the window under it, or a new one.
         Some(Drag::Pane {
             pane,
             at: None,
             geometry: Some(g),
+            x0,
             x,
             y,
         }) if !contains(g.host, x, y) => {
@@ -516,8 +609,26 @@ pub(super) fn on_up(mut host: Host) {
                 .locate(&pane)
                 .and_then(|l| g.groups.iter().find(|(id, _)| *id == l.group).copied());
             let to = super::windows::drop_outside(host, &pane, (x, y), from);
+            land(
+                &pane,
+                &g,
+                x0,
+                x,
+                if to.is_some() {
+                    Landing::To(None)
+                } else {
+                    Landing::Back
+                },
+            );
             if let Some(op) = to {
                 host.run(op);
+            }
+        }
+        Some(Drag::Pane { .. }) => super::slide::cancel(host),
+        // A scrollbar let go moving: the strip coasts on.
+        Some(Drag::Strip { group, most, .. }) => {
+            if let Some(m) = host.strips.peek().get(&group) {
+                m.coast(0.0, f64::from(most));
             }
         }
         Some(Drag::Float {

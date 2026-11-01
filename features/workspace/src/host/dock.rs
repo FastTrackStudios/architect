@@ -5,6 +5,7 @@
 //! grip at its ribbon's foot pops it out and docks it back, pressed or
 //! dragged out of the window.
 
+use architect_shell::motion::{Spring, use_motion};
 use architect_shell::{Icon, IconFn};
 use dioxus::prelude::*;
 use lucide_dioxus::{ExternalLink, PanelLeftOpen};
@@ -26,9 +27,15 @@ pub(super) fn DockView(
 ) -> Element {
     let host = use_host();
     let shown = if fill { Shown::Open } else { dock.shown };
+    // How open it is, 0 (its ribbon or rail) to 1: it opens and folds on a
+    // spring, its tree drawn whole and clipped on the way.
+    let opened = f64::from(u8::from(shown == Shown::Open));
+    let open = use_motion(opened, Spring::PANEL, 0.001);
+    use_effect(use_reactive!(|opened| open.to(opened)));
     if shown == Shown::Hidden || dock.is_empty() {
         return rsx! {};
     }
+    let amount = narrow_amount(open.value());
     let across = side.axis() == Axis::Row;
     let ribbon = dock
         .ribbon
@@ -48,17 +55,37 @@ pub(super) fn DockView(
                 }
             }
         }
-        (Shown::Open, Some(root)) => {
-            let size = if across {
-                format!(
-                    "flex:0 1 {}px; width:{}px; min-width:{DOCK_MIN}px;",
-                    dock.size, dock.size
-                )
+        (_, Some(root)) if shown == Shown::Open || amount > 0.001 => {
+            // Folded, it leaves its rail (no ribbon) or nothing.
+            let rest = if dock.ribbon.is_none() {
+                super::RAIL
             } else {
-                format!(
-                    "flex:0 1 {}px; height:{}px; min-height:{DOCK_MIN}px;",
-                    dock.size, dock.size
-                )
+                0.0
+            };
+            let settled = amount >= 0.999;
+            let size = (dock.size - rest).mul_add(amount, rest);
+            let (length, least) = if across {
+                ("width", "min-width")
+            } else {
+                ("height", "min-height")
+            };
+            let least_px = if settled { DOCK_MIN } else { 0.0 };
+            let style = format!(
+                "flex:0 {} {size}px; {length}:{size}px; {least}:{least_px}px;",
+                u8::from(settled)
+            );
+            // The tree keeps its full size while the box around it moves,
+            // fixed to the window's edge.
+            let anchor = match side {
+                Side::Left => "left:0; top:0; bottom:0;",
+                Side::Right => "right:0; top:0; bottom:0;",
+                Side::Top => "top:0; left:0; right:0;",
+                Side::Bottom => "bottom:0; left:0; right:0;",
+            };
+            let inner = if settled {
+                format!("{anchor} {length}:100%;")
+            } else {
+                format!("{anchor} {length}:{}px;", dock.size)
             };
             let divider = rsx! { DockDivider { side } };
             // A side dock reaches the window's top; the bottom one does not.
@@ -74,8 +101,10 @@ pub(super) fn DockView(
                 covered: ribbon_w,
             };
             let tree = rsx! {
-                div { style: "{size} display:flex; position:relative; overflow:hidden;",
-                    super::NodeView { node: root, edges }
+                div { style: "{style} display:flex; position:relative; overflow:hidden;",
+                    div { style: "position:absolute; {inner} display:flex;",
+                        super::NodeView { node: root, edges }
+                    }
                 }
             };
             if side.leads() {
@@ -92,6 +121,12 @@ pub(super) fn DockView(
         Side::Left => rsx! { {ribbon} {body} },
         _ => rsx! { {body} {ribbon} },
     }
+}
+
+/// A motion's amount as the layout's points.
+#[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
+const fn narrow_amount(v: f64) -> f32 {
+    v as f32
 }
 
 /// The two-stage sidebar's first stage: the dock's views, then its pinned

@@ -731,6 +731,11 @@ pub fn LabApp() -> Element {
         };
         let style = settings::shell_style(&text("workspace.shell"));
         let status = settings::status_style(&text("workspace.status"));
+        // On, motion is reduced; off, the OS's preference holds.
+        let reduce = architect_settings::use_setting("appearance.reduce_motion")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        shell::motion::set_reduced_motion(reduce.then_some(true));
         let right = architect_settings::use_setting("workspace.details")
             .and_then(|v| v.as_bool())
             .unwrap_or(true);

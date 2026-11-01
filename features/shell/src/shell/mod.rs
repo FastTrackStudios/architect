@@ -6,7 +6,6 @@ mod bars;
 mod keyboard;
 #[cfg(target_os = "macos")]
 mod mac;
-mod motion;
 mod page;
 mod status;
 mod workspaces;
@@ -14,6 +13,7 @@ mod workspaces;
 use std::cell::Cell;
 use std::rc::Rc;
 
+use crate::motion::{Spring, use_motion};
 use dioxus::prelude::*;
 use lucide_dioxus::{ChevronsUpDown, PanelLeft, PanelLeftClose, PanelRight};
 
@@ -753,7 +753,7 @@ pub fn AppShell(
 
     // The drawer's travel, 0 (away) to 1 (open), and which side it is:
     // driven by the finger while a swipe lasts, animated otherwise.
-    let motion = motion::use_motion();
+    let motion = use_motion(0.0, Spring::PANEL, 0.001);
     let mut shown = use_signal(|| None::<Side>);
     use_effect(move || {
         let target = drawer();
@@ -761,11 +761,23 @@ pub fn AppShell(
             if *shown.peek() != Some(side) {
                 shown.set(Some(side));
             }
-            motion.to(1.0, move || {});
+            motion.to(1.0);
         } else {
-            motion.to(0.0, move || shown.set(None));
+            motion.to_then(0.0, move || shown.set(None));
         }
     });
+    // The docked sides open and fold on a spring: 0 folded away, 1 open.
+    let docked_now = (
+        frame == Frame::Sidebar && !shell.folded(),
+        has_right && shell.docked(Side::Right) && !right_away(),
+    );
+    let left_open = use_motion(f64::from(u8::from(docked_now.0)), Spring::PANEL, 0.001);
+    let right_open = use_motion(f64::from(u8::from(docked_now.1)), Spring::PANEL, 0.001);
+    use_effect(use_reactive!(|docked_now| {
+        let (left, right) = docked_now;
+        left_open.to(f64::from(u8::from(left)));
+        right_open.to(f64::from(u8::from(right)));
+    }));
 
     // A press on a tab also closes a drawer.
     let pick = move |id: &'static str| {
@@ -861,7 +873,7 @@ pub fn AppShell(
                 if *drawer.peek() == target {
                     // Not far enough: back to where it was.
                     let to = if target.is_some() { 1.0 } else { 0.0 };
-                    motion.to(to, move || {
+                    motion.to_then(to, move || {
                         if target.is_none() {
                             shown.set(None);
                         }
@@ -886,7 +898,7 @@ pub fn AppShell(
             .is_some_and(|s| s.stroke == Stroke::Sideways)
         {
             let open = *drawer.peek();
-            motion.to(if open.is_some() { 1.0 } else { 0.0 }, move || {
+            motion.to_then(if open.is_some() { 1.0 } else { 0.0 }, move || {
                 if open.is_none() {
                     shown.set(None);
                 }
@@ -919,8 +931,11 @@ pub fn AppShell(
         _ => 0.0,
     };
 
-    let docked_left = frame == Frame::Sidebar && !shell.folded();
-    let docked_right = has_right && shell.docked(Side::Right) && !right_away();
+    // A side on its way open or folded is drawn whole and clipped to its
+    // share of its width: its content does not reflow on the way.
+    let (left_amount, right_amount) = (left_open.value(), right_open.value());
+    let docked_left = frame == Frame::Sidebar && (docked_now.0 || left_amount > 0.001);
+    let docked_right = has_right && (docked_now.1 || right_amount > 0.001);
     let float_separate = shell.floats_separate;
     let in_bar = frame == Frame::Bottom;
     let direction = if in_bar { "column" } else { "row" };
@@ -937,6 +952,15 @@ pub fn AppShell(
     };
     let lw = left_w();
     let rw = right_w();
+    // A tablet folds its sidebar to its rail, a desk all the way.
+    let rail_w = if form == FormFactor::Desk {
+        0.0
+    } else {
+        76.0 + screen.insets.left
+    };
+    // Their padding (the safe area) is outside their widths.
+    let left_clip = (lw + screen.insets.left - rail_w).mul_add(left_amount, rail_w);
+    let right_clip = (rw + screen.insets.right) * right_amount;
     let resizable = form == FormFactor::Desk;
     // On a desk the title bar runs across the top of the sides too: their
     // edges start under it, and their heads draw their part of it.
@@ -974,6 +998,7 @@ pub fn AppShell(
             onpointerup,
             onpointercancel,
             document::Style { {shell_css(&t)} }
+            crate::motion::MotionFrames {}
             if frame == Frame::Sidebar && desk {
                 DeskRibbon { tabs: tabs.clone(), current, on_tab: pick }
             }
@@ -989,8 +1014,10 @@ pub fn AppShell(
                     Rail { tabs: tabs.clone(), current, on_tab: pick, screen: side_screen }
                 },
                 Frame::Sidebar => rsx! {
+                    div { style: "position: relative; width: {left_clip}px; flex-shrink: 0; overflow: hidden;",
                     div {
-                        style: "position: relative; width: {lw}px; flex-shrink: 0; display: flex; flex-direction: column; \
+                        style: "position: absolute; top: 0; bottom: 0; left: 0; width: {lw}px; \
+                                display: flex; flex-direction: column; \
                                 background: {t.sheet}; {left_edge} \
                                 padding-top: {left_pad_top}px; padding-left: {screen.insets.left}px;",
                         if desk && page_side {
@@ -1034,6 +1061,7 @@ pub fn AppShell(
                             ResizeEdge { side: Side::Left, on_start: move |e| start_left(Side::Left, e) }
                         }
                     }
+                    }
                 },
                 Frame::Bottom => rsx! {},
             }
@@ -1054,8 +1082,10 @@ pub fn AppShell(
             }
             if docked_right {
                 if let Some(right) = right.clone() {
+                    div { style: "position: relative; width: {right_clip}px; flex-shrink: 0; overflow: hidden;",
                     div {
-                        style: "position: relative; width: {rw}px; flex-shrink: 0; display: flex; flex-direction: column; \
+                        style: "position: absolute; top: 0; bottom: 0; right: 0; width: {rw}px; \
+                                display: flex; flex-direction: column; \
                                 overflow-y: scroll; background: {t.sheet}; {right_edge} \
                                 padding-top: {right_pad_top}px; padding-right: {screen.insets.right}px;",
                         // A desk's title row, under the side's fixed button:
@@ -1074,6 +1104,7 @@ pub fn AppShell(
                         if resizable {
                             ResizeEdge { side: Side::Right, on_start: move |e| start_right(Side::Right, e) }
                         }
+                    }
                     }
                 }
             }

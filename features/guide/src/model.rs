@@ -227,7 +227,9 @@ pub enum Do {
         seconds: f32,
     },
     /// Turns the wheel over the step's target by `dx`/`dy` points, over
-    /// `seconds`: `@scroll{dx 240}`.
+    /// `seconds`, as a trackpad's flick does (quick, then coasting to a
+    /// stop): `@scroll{dx -240}`. Signed as the platform sends it and Blitz
+    /// scrolls: a negative `dx` brings what is to the right into view.
     Scroll {
         #[facet(default)]
         dx: f32,

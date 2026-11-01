@@ -43,6 +43,8 @@ mod screen;
 pub use screen::{FormFactor, Insets, Screen, ShellStyle};
 
 #[cfg(feature = "ui")]
+pub mod motion;
+#[cfg(feature = "ui")]
 mod shell;
 #[cfg(feature = "ui")]
 pub use shell::*;
