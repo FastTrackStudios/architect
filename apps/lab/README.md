@@ -1,0 +1,49 @@
+# The lab: `architect-desktop` and `architect-mobile`
+
+Two thin apps that mount one made-up app on `architect_shell`
+(`apps/lab/ui`), for designing the shell on a phone, a tablet
+and a desk. Both paint through Blitz, as the FastTrackStudio apps do, and
+both are meant to be run with `dx serve`: an `rsx!` edit in
+`apps/lab/ui` or in `features/shell` shows in the
+running app without a rebuild (a change to Rust logic rebuilds).
+
+The lab is Task's shape: Inbox, Tasks, Schedule and Vault as the tabs,
+Capture as the separate button, projects on the left, details on the
+right. Its ⋯ menu switches the shell's style (Floating pill, Tab bar, Rail
+only) and the right side live.
+
+## On a desk
+
+```bash
+cd apps/lab/desktop
+dx serve --platform desktop --renderer native
+# or open it standing in for a device:
+ARCHITECT_DEVICE=iphone dx serve --platform desktop --renderer native
+```
+
+`ARCHITECT_DEVICE` is `iphone`, `iphone-side`, `ipad` or `ipad-side`: the
+window takes that device's size, touch and safe area, with its status bar,
+camera housing and home indicator drawn over the page. The ⋯ menu changes
+it live. A mouse drag stands in for a swipe (the shell hears pointer
+events).
+
+## On the iOS simulator
+
+```bash
+cd apps/lab/mobile
+env -u DEVELOPER_DIR -u SDKROOT \
+  PATH="$PWD/ios:$PATH" SIM_UDID=<udid> SIM_SET=<device set, if not the default> \
+  dx serve --ios
+```
+
+- `ios/Info.plist` is the app's whole plist (dx takes it verbatim): iOS
+  27 stops an app that has not adopted the UIScene lifecycle, and
+  `src/scene.rs` is the delegate it names.
+- `ios/xcrun` sends dx's `xcrun simctl … booted` to `SIM_UDID` in
+  `SIM_SET`: dx assumes one booted simulator in the default device set.
+- The iOS targets must be installed for the toolchain cargo uses
+  (`rustup target add aarch64-apple-ios-sim`).
+
+With no Simulator.app at hand (a headless Mac), watch and drive the
+simulator with `xcrun simctl io <udid> screenshot --mask=black` and `idb ui
+tap` / `idb ui swipe`.

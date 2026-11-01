@@ -1,0 +1,6 @@
+# dx config: `dx serve` from this folder (see README.md).
+[application]
+
+[bundle]
+identifier = "app.fasttrackstudio.architect-desktop"
+publisher = "FastTrackStudio"

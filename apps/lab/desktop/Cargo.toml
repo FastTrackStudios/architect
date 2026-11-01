@@ -1,0 +1,15 @@
+[package]
+name = "architect-desktop"
+description = "The app shell's lab in a desk window (Blitz): resize it, or stand it in for an iPhone or an iPad from the ⋯ menu. `dx serve` it for hot reload."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+architect-lab-ui = { workspace = true }
+dioxus = { workspace = true }
+dioxus-native = { workspace = true, features = ["vello", "hot-reload"] }
+
+[lints]
+workspace = true

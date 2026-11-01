@@ -1,0 +1,17 @@
+[package]
+name = "architect-lab-ui"
+description = "The app shell's lab: a made-up app on architect_shell, mounted by the lab apps (apps/lab/desktop, apps/lab/mobile), for designing the shell on every form factor with hot reload."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+architect-shell = { workspace = true, features = ["ui"] }
+dioxus = { workspace = true }
+dioxus-native = { workspace = true }
+lucide-dioxus = { workspace = true }
+futures-timer = { workspace = true }
+
+[lints]
+workspace = true
