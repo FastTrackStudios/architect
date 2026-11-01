@@ -1,0 +1,116 @@
+[package]
+name = "architect-presence"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "App presence: the Dock icon (badge, menu, progress, attention), a menu-bar or tray item, background mode, reopen, launch at login and one instance, every part of it on the Action List"
+
+# docs/content/architecture/app-presence.md. The default set is the model:
+# what an app declares (its Dock menu and tray item as Action List menus,
+# the badge), the window's life (shown, in the background) as a state
+# machine, the login item's files and the hand-off a second launch sends —
+# pure data, wasm-clean. `ui` adds the component that binds it to the
+# commands, the settings and the Action List; `native` the platforms'
+# side: AppKit on macOS, StatusNotifierItem and XDG autostart on Linux,
+# the Run key on Windows.
+
+[features]
+default = []
+ui = [
+    "dep:dioxus",
+    "dep:architect",
+    "architect-commands/ui",
+    "dep:architect-settings",
+    "architect-settings/ui",
+    "dep:futures-channel",
+    "dep:futures-util",
+    "dep:futures-timer",
+]
+native = [
+    "ui",
+    "architect-commands/native",
+    "dep:architect-workspace",
+    "architect-workspace/native",
+    "dep:dioxus-native",
+    "dep:tracing",
+    "dep:objc2",
+    "dep:objc2-app-kit",
+    "dep:objc2-foundation",
+    "dep:zbus",
+    "dep:tokio",
+]
+
+[dependencies]
+# The menus: a Dock or tray menu is an Action List menu (`Menu`), resolved
+# and numbered as the menu bar is.
+architect-commands = { workspace = true }
+# A second launch's hand-off, one JSON line on the instance socket.
+serde = { workspace = true }
+serde_json = { workspace = true }
+# What `PRESENCE_STATE` answers.
+facet = { workspace = true }
+dioxus = { workspace = true, optional = true }
+architect = { workspace = true, optional = true, features = ["action-list"] }
+architect-settings = { workspace = true, optional = true }
+# What the platform says (a pick, a Dock click, a hand-off) comes to the
+# window's thread on a channel that wakes it.
+futures-channel = { version = "0.3", optional = true }
+futures-util = { version = "0.3", default-features = false, optional = true }
+futures-timer = { workspace = true, optional = true }
+architect-workspace = { workspace = true, optional = true }
+# The main window (winit's), shown, hidden and focused.
+dioxus-native = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+
+# The Dock tile, the status item and the app's delegate (src/mac.rs).
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { workspace = true, optional = true }
+objc2-foundation = { version = "0.3", optional = true, default-features = false, features = [
+    "std",
+    "NSArray",
+    "NSData",
+    "NSGeometry",
+    "NSObject",
+    "NSString",
+    "NSURL",
+] }
+objc2-app-kit = { version = "0.3", optional = true, default-features = false, features = [
+    "std",
+    "NSApplication",
+    "NSButton",
+    "NSCell",
+    "NSControl",
+    "NSDockTile",
+    "NSEvent",
+    "NSImage",
+    "NSImageView",
+    "NSMenu",
+    "NSMenuItem",
+    "NSProgressIndicator",
+    "NSResponder",
+    "NSRunningApplication",
+    "NSStatusBar",
+    "NSStatusBarButton",
+    "NSStatusItem",
+    "NSView",
+] }
+
+# The tray as a StatusNotifierItem, its menu over dbusmenu (src/linux.rs).
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = { version = "5.19", optional = true, default-features = false, features = ["tokio"] }
+tokio = { workspace = true, optional = true }
+
+[dev-dependencies]
+architect-commands = { workspace = true }
+
+[lib]
+doctest = false
+
+[[test]]
+name = "presence_ui"
+path = "tests/presence_ui.rs"
+required-features = ["ui"]
+
+[lints]
+workspace = true

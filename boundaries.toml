@@ -100,6 +100,10 @@ package = "architect-settings"
 layer = "L0"
 
 [[row]]
+package = "architect-presence"
+layer = "L0"
+
+[[row]]
 package = "architect-orgs"
 layer = "L0"
 
@@ -169,6 +173,11 @@ layer = "L4"
 
 [[row]]
 package = "architect-settings"
+features = ["ui"]
+layer = "L4"
+
+[[row]]
+package = "architect-presence"
 features = ["ui"]
 layer = "L4"
 

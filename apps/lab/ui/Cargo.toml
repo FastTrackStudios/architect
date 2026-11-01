@@ -22,8 +22,15 @@ architect = { workspace = true, features = ["action-list", "settings"] }
 dioxus = { workspace = true }
 facet = { workspace = true }
 dioxus-native = { workspace = true }
+# The Dock icon and its badge, the menu-bar item, background mode, opening
+# at login (src/presence.rs): the model everywhere, the platforms' side on
+# a desk.
+architect-presence = { workspace = true }
 lucide-dioxus = { workspace = true }
 futures-timer = { workspace = true }
+
+[target.'cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))'.dependencies]
+architect-presence = { workspace = true, features = ["native"] }
 
 [lints]
 workspace = true

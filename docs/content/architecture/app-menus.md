@@ -88,6 +88,9 @@ standard item; the root is 0) and each backend draws that; a pick is a
 `Pick` (the command and its arguments), run on the UI's thread by
 `Commands::run_pick`.
 
+The Dock menu and a menu-bar or tray item are the same `Menu`s, resolved
+and numbered the same way ([App presence](@/architecture/app-presence.md)).
+
 ## From what exists
 
 - Session's dbusmenu server (`studio:apps/session/daw/src/app_menu/bus.rs`)
