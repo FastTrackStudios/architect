@@ -732,7 +732,7 @@ fn touch_bar_height(shell: &super::Shell) -> f64 {
 }
 
 #[component]
-fn MenuRow(entry: MenuEntry, open: Signal<bool>) -> Element {
+pub(super) fn MenuRow(entry: MenuEntry, open: Signal<bool>) -> Element {
     let t = use_shell().theme;
     match entry {
         MenuEntry::Divider => {

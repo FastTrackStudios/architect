@@ -86,16 +86,19 @@ fn BarTab(tab: Tab, on: bool, on_tab: EventHandler<&'static str>, labelled: bool
 /// The round separate button: Task's capture, Studio's search.
 #[component]
 pub(super) fn RoundButton(action: Action) -> Element {
-    let t = use_shell().theme;
+    let shell = use_shell();
+    let t = shell.theme;
+    // A finger's size on a touch screen, a mouse's on a desk.
+    let (size, icon) = if shell.desk() { (44.0, 18) } else { (54.0, 22) };
     let press = action.on_press;
     rsx! {
         button {
             "aria-label": "{action.label}",
-            style: "width: 54px; height: 54px; flex-shrink: 0; border-radius: 27px; display: flex; align-items: center; \
-                    justify-content: center; background: {t.pill}; border: 1px solid {t.rule}; color: {t.ink}; \
-                    box-shadow: 0 8px 30px rgba(0,0,0,0.35);",
+            style: "width: {size}px; height: {size}px; flex-shrink: 0; box-sizing: border-box; border-radius: {size / 2.0}px; \
+                    display: flex; align-items: center; justify-content: center; padding: 0; background: {t.pill}; \
+                    border: 1px solid {t.rule}; color: {t.ink}; box-shadow: 0 6px 20px rgba(0,0,0,0.35);",
             onclick: move |_| press.call(()),
-            {(action.icon)(Icon { size: 22, color: t.ink })}
+            {(action.icon)(Icon { size: icon, color: t.ink })}
         }
     }
 }

@@ -13,7 +13,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use dioxus::prelude::*;
-use lucide_dioxus::{PanelLeft, PanelLeftClose, PanelRight};
+use lucide_dioxus::{ChevronsUpDown, PanelLeft, PanelLeftClose, PanelRight};
 
 pub use crate::screen::{FormFactor, Insets, Screen, ShellStyle};
 use bars::{BottomBar, Rail, RoundButton, SideTab};
@@ -122,8 +122,14 @@ pub struct Account {
     pub initials: String,
     /// The avatar's fill.
     pub color: &'static str,
-    /// What a press on it does (the account menu, settings).
+    /// What a press on it does, when it has no [`menu`](Self::menu).
     pub on_press: Option<Callback<()>>,
+    /// A picture, in place of the initials.
+    pub image: Option<String>,
+    /// A presence dot on the avatar, in this colour (online, away, busy).
+    pub presence: Option<&'static str>,
+    /// What a press opens, above the row: headed by who this is.
+    pub menu: Option<Menu>,
 }
 
 impl Account {
@@ -142,6 +148,9 @@ impl Account {
             initials,
             color: "#1e3a8a",
             on_press: None,
+            image: None,
+            presence: None,
+            menu: None,
         }
     }
 
@@ -160,6 +169,25 @@ impl Account {
     #[must_use]
     pub fn on_press(mut self, on_press: impl FnMut(()) + 'static) -> Self {
         self.on_press = Some(Callback::new(on_press));
+        self
+    }
+
+    #[must_use]
+    pub fn image(mut self, url: impl Into<String>) -> Self {
+        self.image = Some(url.into());
+        self
+    }
+
+    #[must_use]
+    pub const fn presence(mut self, colour: &'static str) -> Self {
+        self.presence = Some(colour);
+        self
+    }
+
+    /// The account menu (profile, settings, sign out), opened above it.
+    #[must_use]
+    pub fn menu(mut self, menu: Menu) -> Self {
+        self.menu = Some(menu);
         self
     }
 }
@@ -1191,24 +1219,70 @@ fn RailSideButton() -> Element {
     }
 }
 
-/// The account as a row: avatar, name, detail.
+/// The account at the foot of a sidebar (shadcn's `NavUser`, Linear's):
+/// an inset row — a rounded avatar with its presence, the name over the
+/// email, ⇅ — that opens the account menu above it, headed by who this is.
 #[component]
 fn AccountRow(account: Account, bottom: f64) -> Element {
     let t = use_shell().theme;
+    let mut open = use_signal(|| false);
     let press = account.on_press;
+    let menu = account.menu.clone();
+    let has_menu = menu.is_some();
+    let fill = if open() { t.active } else { "transparent" };
     rsx! {
-        button {
-            class: "lp",
-            "aria-label": "Account",
-            style: "flex-shrink: 0; display: flex; align-items: center; justify-content: flex-start; gap: 12px;                     padding: 12px 16px {12.0 + bottom}px; border: none; border-top: 1px solid {t.rule};                     background: transparent; font-family: {t.font}; text-align: left;",
-            onclick: move |_| if let Some(p) = press { p.call(()) },
-            Avatar { initials: account.initials.clone(), color: account.color, size: 34.0 }
-            div { style: "flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;",
-                span { style: "font-size: 15px; font-weight: 650; color: {t.ink}; white-space: nowrap; overflow: hidden;",
-                    "{account.name}"
+        div { style: "position: relative; flex-shrink: 0; padding: 6px 8px {6.0 + bottom}px; border-top: 1px solid {t.rule};",
+            button {
+                class: "lp",
+                "aria-label": "Account",
+                style: "width: 100%; height: 48px; box-sizing: border-box; display: flex; align-items: center; gap: 10px; \
+                        padding: 0 8px; border: none; border-radius: 8px; background: {fill}; font-family: {t.font}; \
+                        text-align: left;",
+                onclick: move |_| {
+                    if has_menu {
+                        open.toggle();
+                    } else if let Some(p) = press {
+                        p.call(());
+                    }
+                },
+                Avatar { account: account.clone(), size: 32.0 }
+                div { style: "flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px;",
+                    span { style: "font-size: 13px; font-weight: 600; color: {t.ink}; white-space: nowrap; overflow: hidden;",
+                        "{account.name}"
+                    }
+                    if let Some(d) = account.detail.clone() {
+                        span { style: "font-size: 12px; color: {t.ink_3}; white-space: nowrap; overflow: hidden;", "{d}" }
+                    }
                 }
-                if let Some(d) = account.detail {
-                    span { style: "font-size: 12px; color: {t.ink_3}; white-space: nowrap; overflow: hidden;", "{d}" }
+                if has_menu {
+                    ChevronsUpDown { size: 15, color: t.ink_3 }
+                }
+            }
+            if let (true, Some(menu)) = (open(), menu) {
+                // Far past every edge: Blitz has no `position: fixed`.
+                div {
+                    style: "position: absolute; top: -4000px; left: -4000px; width: 8000px; height: 8000px; z-index: 40;",
+                    onclick: move |_| open.set(false),
+                }
+                div {
+                    style: "position: absolute; left: 8px; right: 8px; bottom: {58.0 + bottom}px; z-index: 50; \
+                            display: flex; flex-direction: column; padding: 6px 0; border-radius: 12px; \
+                            background: {t.pill}; border: 1px solid {t.rule}; box-shadow: 0 20px 50px rgba(0,0,0,0.6);",
+                    div { style: "display: flex; align-items: center; gap: 10px; padding: 6px 12px 10px; \
+                                  border-bottom: 1px solid {t.rule}; margin-bottom: 6px; font-family: {t.font};",
+                        Avatar { account: account.clone(), size: 32.0 }
+                        div { style: "flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px;",
+                            span { style: "font-size: 13px; font-weight: 600; color: {t.ink}; white-space: nowrap; overflow: hidden;",
+                                "{account.name}"
+                            }
+                            if let Some(d) = account.detail {
+                                span { style: "font-size: 12px; color: {t.ink_3}; white-space: nowrap; overflow: hidden;", "{d}" }
+                            }
+                        }
+                    }
+                    for (i, entry) in menu.entries.iter().cloned().enumerate() {
+                        page::MenuRow { key: "{i}", entry, open }
+                    }
                 }
             }
         }
@@ -1223,21 +1297,44 @@ fn AccountChip(account: Account) -> Element {
         button {
             class: "lp",
             "aria-label": "Account",
-            style: "height: 52px; border: none; border-radius: 12px; background: transparent;                     display: flex; align-items: center; justify-content: center;",
+            style: "height: 52px; border: none; border-radius: 12px; background: transparent; \
+                    display: flex; align-items: center; justify-content: center;",
             onclick: move |_| if let Some(p) = press { p.call(()) },
-            Avatar { initials: account.initials.clone(), color: account.color, size: 36.0 }
+            Avatar { account, size: 36.0 }
         }
     }
 }
 
+/// A rounded square (a person's picture or initials on their colour,
+/// lit from the top left), its presence a dot at the corner ringed in the
+/// sidebar's colour.
 #[component]
-fn Avatar(initials: String, color: &'static str, size: f64) -> Element {
+fn Avatar(account: Account, size: f64) -> Element {
     let t = use_shell().theme;
-    let font = (size * 0.42).round();
+    let font = (size * 0.4).round();
+    let radius = (size * 0.25).round();
+    let dot = (size * 0.3).round();
+    let fill = format!(
+        "linear-gradient(135deg, {c} 0%, {c}b3 100%)",
+        c = account.color
+    );
     rsx! {
-        span {
-            style: "width: {size}px; height: {size}px; flex-shrink: 0; border-radius: {size / 2.0}px; background: {color};                     display: flex; align-items: center; justify-content: center; color: {t.ink};                     font-size: {font}px; font-weight: 700;",
-            "{initials}"
+        span { style: "position: relative; width: {size}px; height: {size}px; flex-shrink: 0; display: flex;",
+            if let Some(src) = account.image.clone() {
+                img { src: "{src}", style: "width: {size}px; height: {size}px; border-radius: {radius}px; object-fit: cover;" }
+            } else {
+                span {
+                    style: "width: {size}px; height: {size}px; border-radius: {radius}px; background: {fill}; \
+                            display: flex; align-items: center; justify-content: center; color: #ffffff; \
+                            font-family: {t.font}; font-size: {font}px; font-weight: 650; letter-spacing: 0.02em;",
+                    "{account.initials}"
+                }
+            }
+            if let Some(colour) = account.presence {
+                span { style: "position: absolute; right: -2px; bottom: -2px; width: {dot}px; height: {dot}px; \
+                               box-sizing: border-box; border-radius: {dot / 2.0}px; background: {colour}; \
+                               border: 2px solid {t.sheet};" }
+            }
         }
     }
 }

@@ -16,7 +16,10 @@ mod vault;
 use architect_shell::icon;
 use architect_shell::{self as shell, AppShell, ShellStyle};
 use dioxus::prelude::*;
-use lucide_dioxus::{CalendarDays, Feather, Inbox, ListTodo, NotebookText, Plus, Settings2, Users};
+use lucide_dioxus::{
+    CalendarDays, CircleUser, Feather, Inbox, Keyboard, ListTodo, LogOut, NotebookText, Plus,
+    Settings2, Users,
+};
 
 pub use screen::{Device, use_window_chrome, use_window_screen};
 
@@ -137,7 +140,17 @@ pub fn LabApp() -> Element {
                 on_tab: move |id| lab.jump(Route::Tab(id)),
                 separate: capture,
                 brand: rsx! { Brand {} },
-                account: shell::Account::new("Cody Wright").detail("cody@fasttrackstudio.app"),
+                account: shell::Account::new("Cody Wright")
+                    .detail("cody@fasttrackstudio.app")
+                    .presence("#22c55e")
+                    .menu(
+                        shell::Menu::new()
+                            .item("Profile", icon!(CircleUser), |()| {})
+                            .item("Settings", icon!(Settings2), |()| {})
+                            .item("Keyboard shortcuts", icon!(Keyboard), |()| {})
+                            .divider()
+                            .item("Sign out", icon!(LogOut), |()| {}),
+                    ),
                 workspaces,
                 left: rsx! { pages::LeftSide {} },
                 right: if (lab.right)() { Some(rsx! { pages::RightSide {} }) } else { None },
