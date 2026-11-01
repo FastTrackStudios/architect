@@ -106,15 +106,34 @@ odysseus's model, AGPL there, so its behaviour, not its code):
 **As its own OS window** (desk): a float can pop out into a real window
 — another screen, kept above the main window or not — and back in.
 
-**Plugin editors:** a CLAP or VST3 editor is a native view the plugin
-draws itself (an `NSView`, an `HWND`, an X11 window), which nothing
-painted can host inside: on a desk it opens as its own OS window, a child
-of the app's (above it, closed with it, remembered where it was), with
-the app's title strip (bypass, presets, the parameter panel) beside it.
-A plugin with no editor, or a JSFX, or a web build, shows the generated
-parameter panel or its canvas as an in-window float. Opening a track's
-plugin from the FX row opens its window; the same plugin again brings it
-to the front.
+**Plugin editors (CLAP, VST3) on a desk:** an editor is a native view
+the plugin draws itself (an `NSView`, an `HWND`, an X11 window), not
+something Blitz can paint. Two ways to show one, the person's choice per
+plugin:
+
+- **Embedded in a pane** (REAPER's and Bitwig's): the host places the
+  plugin's native view as a child of the app's window, over the pane's
+  rectangle, and keeps it there — moved and resized with the pane,
+  hidden when its tab is not showing, the pane is collapsed or scrolled
+  away, or the window is minimised. So a plugin docks, tabs, stacks and
+  goes into screensets like any view. One rule follows from a native
+  view sitting above the painted window: nothing the app paints can be
+  drawn over it, so while a menu, a drag ghost, a tooltip or another
+  float would overlap it, the host hides the plugin's view (or shows a
+  still of it) until the overlap ends.
+- **Its own window:** a child OS window of the app's (above it, closed
+  with it, remembered where it was) — for a plugin that will not
+  resize, one that misbehaves when re-parented, or a second screen.
+
+Either way the app's strip (bypass, presets, A/B, the parameter panel)
+sits beside it, and opening a plugin from the FX row opens it where it
+last was, or brings it forward.
+
+**In a browser** there are no third-party plugin GUIs: no plugin runs
+there. The web shows what can draw in a page — the app's own effects
+(their UI is the app's), JSFX with their `@gfx` on a canvas, and the
+generated parameter panel for anything else. A browser driving a desk's
+engine remotely shows that engine's plugins by their parameter panels.
 
 ### Window ids: anything can find a window
 
