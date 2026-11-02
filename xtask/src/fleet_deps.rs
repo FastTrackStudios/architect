@@ -19,9 +19,9 @@
 //! their graph too and its features unify into theirs: their own extra
 //! features become a no-op, and a crate builds the same in every repo.
 //!
-//! A build here is `cargo build --workspace --all-targets` (default
-//! features, dev-dependencies), resolved per platform with guppy, the
-//! resolver hakari uses. The hack crate is left out of each repo's own
+//! A build here is `cargo build --workspace --all-targets` (dev-dependencies),
+//! with default features and with all features, as hakari resolves, per
+//! platform with guppy, the resolver hakari uses. The hack crate is left out of each repo's own
 //! resolution, so the union is of what the repos need, not of an older
 //! union. wasm is measured but not written: the hack line is off on wasm
 //! (`GATE`), because a whole-workspace union there would put the native
@@ -192,30 +192,35 @@ pub fn resolve(graph: &PackageGraph, hack: Hack) -> Result<Resolution, String> {
         .map(|p| p.id())
         .collect();
     let mut out = Resolution::new();
-    for build in BUILDS {
-        let platform = |triple: &'static str| {
-            Platform::new(triple, TargetFeatures::Unknown).map_err(|e| format!("{triple}: {e}"))
-        };
-        let mut opts = CargoOptions::new();
-        opts.set_resolver(CargoResolverVersion::V2)
-            .set_include_dev(true)
-            .set_target_platform(platform(build.target)?)
-            .set_host_platform(platform(build.host)?);
-        if hack == Hack::Omit {
-            opts.add_omitted_packages(hack_ids.iter().copied());
-        }
-        let initials = graph
-            .resolve_workspace()
-            .filter(DependencyDirection::Forward, |p| !is_hack(p.name()))
-            .to_feature_set(StandardFeatures::Default);
-        let set = initials
-            .into_cargo_set(&opts)
-            .map_err(|e| format!("resolving for {}: {e}", build.target))?;
-        collect(&set, Section::Target(build.target), hack, &mut out, false);
-        // A wasm build's host side is the Linux host's, already measured
-        // by the native build; the hack is off for wasm builds anyway.
-        if cfg_of(build.target).is_some() {
-            collect(&set, Section::Host(build.host), hack, &mut out, true);
+    // Default features and all features, as hakari resolves each repo: its
+    // section holds what any member's features turn on (Task's `wasm-split`
+    // reaches dioxus-core), so the fleet's union has to as well.
+    for features in [StandardFeatures::Default, StandardFeatures::All] {
+        for build in BUILDS {
+            let platform = |triple: &'static str| {
+                Platform::new(triple, TargetFeatures::Unknown).map_err(|e| format!("{triple}: {e}"))
+            };
+            let mut opts = CargoOptions::new();
+            opts.set_resolver(CargoResolverVersion::V2)
+                .set_include_dev(true)
+                .set_target_platform(platform(build.target)?)
+                .set_host_platform(platform(build.host)?);
+            if hack == Hack::Omit {
+                opts.add_omitted_packages(hack_ids.iter().copied());
+            }
+            let initials = graph
+                .resolve_workspace()
+                .filter(DependencyDirection::Forward, |p| !is_hack(p.name()))
+                .to_feature_set(features);
+            let set = initials
+                .into_cargo_set(&opts)
+                .map_err(|e| format!("resolving for {}: {e}", build.target))?;
+            collect(&set, Section::Target(build.target), hack, &mut out, false);
+            // A wasm build's host side is the Linux host's, already measured
+            // by the native build; the hack is off for wasm builds anyway.
+            if cfg_of(build.target).is_some() {
+                collect(&set, Section::Host(build.host), hack, &mut out, true);
+            }
         }
     }
     Ok(out)
@@ -741,17 +746,11 @@ pub fn run(root: &Path, repos: &[PathBuf], check: bool, print_report: bool) -> R
     }
 
     let sources: Vec<String> = repos.iter().map(|r| describe(r)).collect();
-    if !repos.is_empty() {
-        // Start from an empty section: an old one can name a crate the
-        // lockfile no longer has, and then `cargo metadata` fails before
-        // anything runs.
-        let manifest = read(&manifest_path)?;
-        let empty = splice(
-            &manifest,
-            &render(&Resolution::new(), &sources, &BTreeMap::new()),
-        )?;
-        std::fs::write(&manifest_path, empty).map_err(|e| format!("{HACK_MANIFEST}: {e}"))?;
-    }
+    // The old section stays until the first round replaces it: emptying it
+    // would let cargo drop its crates and add them back at their newest
+    // versions, past what the fleet locks. Every round re-renders the whole
+    // section from the repos' own resolutions, so a stale entry never
+    // survives. (A section cargo cannot resolve at all: delete it by hand.)
     for m in gate(root)? {
         println!(
             "fleet-deps: gated the workspace-hack line in {}",

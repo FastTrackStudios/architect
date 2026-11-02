@@ -467,9 +467,21 @@ rustc-hash = { version = "1.1.0" }
 ahash = { version = "0.8.12", features = ["getrandom", "runtime-rng", "serde", "std"] }
 aho-corasick = { version = "1.1.5", features = ["perf-literal", "std"] }
 alloc-stdlib = { version = "0.2.4", default-features = false }
+anyrender_vello_hybrid = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1", default-features = false, features = ["webgl"] }
 approx = { version = "0.5.1", features = ["std"] }
-axum = { version = "0.8.9", features = ["form", "http1", "json", "macros", "matched-path", "multipart", "original-uri", "query", "tokio", "tower-log", "tracing", "ws"] }
+async-compression = { version = "0.4.43", default-features = false, features = ["gzip", "tokio"] }
+async-lock = { version = "3.4.2", features = ["std"] }
+async-once-cell = { version = "0.5.4", default-features = false, features = ["std"] }
+aws-lc-rs = { version = "1.18.0", default-features = false, features = ["aws-lc-sys", "prebuilt-nasm"] }
+aws-lc-sys = { version = "0.44.0", default-features = false, features = ["prebuilt-nasm"] }
+axum = { version = "0.8.9", features = ["form", "http1", "http2", "json", "macros", "matched-path", "multipart", "original-uri", "query", "tokio", "tower-log", "tracing", "ws"] }
+axum-extra = { version = "0.12.6", features = ["tracing", "typed-header"] }
 base16ct = { version = "1.0.0", default-features = false, features = ["alloc"] }
+bit-set = { version = "0.8.0", features = ["std"] }
+bit-vec = { version = "0.8.0", features = ["std"] }
+blitz-dom = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11", features = ["accessibility", "accesskit", "autofocus", "custom-widget", "file-input", "svg", "system-fonts", "text-transform-icu", "woff"] }
+blitz-paint = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11", features = ["apple-font-embolden", "custom-widget", "svg"] }
+blitz-shell = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11", features = ["accessibility", "custom-widget", "data-uri", "file-dialog"] }
 block-buffer = { version = "0.12.1", default-features = false, features = ["zeroize"] }
 block-padding = { version = "0.3.3", default-features = false }
 block2-0_5 = { package = "block2", version = "0.5.1", features = ["alloc", "std"] }
@@ -489,6 +501,8 @@ cipher = { version = "0.4.4", default-features = false, features = ["block-paddi
 clap = { version = "4.6.7", features = ["color", "derive", "env", "error-context", "help", "std", "suggestions", "usage"] }
 clap_builder = { version = "4.6.7", default-features = false, features = ["color", "env", "error-context", "help", "std", "suggestions", "usage"] }
 color = { version = "0.3.3", features = ["bytemuck", "std"] }
+compression-codecs = { version = "0.4.38", default-features = false, features = ["flate2", "gzip", "memchr"] }
+compression-core = { version = "0.4.32", default-features = false }
 concurrent-queue = { version = "2.5.0", features = ["std"] }
 const-str = { version = "0.7.1" }
 constant_time_eq = { version = "0.4.2", features = ["std"] }
@@ -500,20 +514,29 @@ crossterm = { version = "0.29.0", features = ["bracketed-paste", "derive-more", 
 crypto-common-c65f7effa3be6d31 = { package = "crypto-common", version = "0.1.7", default-features = false, features = ["getrandom", "rand_core", "std"] }
 crypto-common-6f8ce4dd05d13bba = { package = "crypto-common", version = "0.2.2", default-features = false, features = ["getrandom", "rand_core"] }
 ctutils = { version = "0.4.2", default-features = false, features = ["subtle"] }
+dashmap = { version = "6.2.1", default-features = false }
+debug_timer = { version = "0.1.3", default-features = false, features = ["enable"] }
 derive_more = { version = "2.1.1", features = ["add", "add_assign", "debug", "deref", "deref_mut", "display", "from", "from_str", "into", "into_iterator", "is_variant", "std", "try_from", "try_into"] }
 digest-93f6ce9d446188ac = { package = "digest", version = "0.10.7", features = ["alloc", "block-buffer", "core-api", "mac", "std", "subtle"] }
 digest-a6292c17cd707f01 = { package = "digest", version = "0.11.3", features = ["alloc", "block-api", "mac", "oid", "rand_core", "zeroize"] }
-dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["asset", "cli-config", "desktop", "devtools", "document", "fullstack", "hooks", "html", "launch", "lib", "logger", "macro", "mobile", "mounted", "router", "signals", "warnings", "web"] }
+dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["asset", "cli-config", "desktop", "devtools", "document", "fullstack", "hooks", "html", "launch", "lib", "logger", "macro", "mobile", "mounted", "router", "server", "signals", "ssr", "warnings", "wasm-split", "web"] }
 dioxus-asset-resolver = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["native", "web"] }
 dioxus-cli-config = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["web"] }
-dioxus-fullstack = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["web", "ws"] }
-dioxus-fullstack-core = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["web"] }
+dioxus-config-macros = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["wasm-split"] }
+dioxus-core = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["document", "hooks", "html", "macro", "signals", "ssr", "stores", "wasm-split"] }
+dioxus-devtools = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["serve"] }
+dioxus-fullstack = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["server", "web", "ws"] }
+dioxus-fullstack-core = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["server", "web"] }
 dioxus-html = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["serialize"] }
 dioxus-interpreter-js = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["binary-protocol", "minimal_bindings", "serialize", "sledgehammer", "webonly"] }
 dioxus-primitives = { git = "https://github.com/FastTrackStudios/dioxus-components", tag = "fts-upstream-2026-11", features = ["router"] }
+dioxus-router = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["html", "wasm-split"] }
+dioxus-server = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["document", "router"] }
 dioxus-web = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["devtools", "document", "hydrate", "mounted"] }
 dispatch = { version = "0.2.0", default-features = false }
 either = { version = "1.18.0", features = ["serde", "std", "use_std"] }
+env_filter = { version = "2.0.0", default-features = false, features = ["regex", "std"] }
+env_logger = { version = "0.11.11", features = ["auto-color", "color", "humantime", "regex"] }
 euclid = { version = "0.22.14", features = ["serde", "std"] }
 event-listener = { version = "5.4.2", features = ["parking", "std"] }
 event-listener-strategy = { version = "0.5.4", features = ["std"] }
@@ -523,9 +546,8 @@ facet-pretty = { version = "0.50.0-rc.7", features = ["detect-terminal-theme"] }
 facet-styx = { version = "5.0.0-rc.7", default-features = false, features = ["figue"] }
 figue = { version = "5.0.0-rc.6", features = ["rich-diagnostics"] }
 figue-attrs = { version = "5.0.0-rc.6", default-features = false }
-flate2 = { version = "1.1.10", features = ["any_impl", "any_zlib", "miniz_oxide", "runtime_detection", "rust_backend", "zlib-rs"] }
+flate2 = { version = "1.1.10", features = ["any_c_zlib", "any_impl", "any_zlib", "libz-sys", "miniz_oxide", "runtime_detection", "rust_backend", "zlib", "zlib-rs"] }
 foldhash = { version = "0.2.0", features = ["std"] }
-form_urlencoded = { version = "1.2.2", features = ["alloc", "std"] }
 futures = { version = "0.3.34", features = ["alloc", "async-await", "executor", "futures-executor", "std", "thread-pool"] }
 futures-executor = { version = "0.3.34", features = ["std", "thread-pool"] }
 futures-io = { version = "0.3.34", features = ["std"] }
@@ -537,9 +559,10 @@ gloo-net = { version = "0.7.0", features = ["eventsource", "futures-channel", "f
 gloo-timers = { version = "0.4.0", features = ["futures", "futures-channel", "futures-core"] }
 gloo-utils = { version = "0.3.0", default-features = false, features = ["serde"] }
 h2 = { version = "0.4.19", default-features = false, features = ["stream"] }
-half = { version = "2.7.1", features = ["alloc", "num-traits", "std"] }
+half = { version = "2.7.1", features = ["alloc", "bytemuck", "num-traits", "rand_distr", "std", "use-intrinsics"] }
 hashbrown = { version = "0.14.5", features = ["ahash", "allocator-api2", "inline-more", "raw"] }
-hashbrown-986da7b5efc2b80e = { package = "hashbrown", version = "0.16.1", features = ["allocator-api2", "default-hasher", "equivalent", "inline-more", "raw-entry"] }
+hashbrown-986da7b5efc2b80e = { package = "hashbrown", version = "0.16.1", features = ["allocator-api2", "default-hasher", "equivalent", "inline-more", "raw-entry", "serde"] }
+headers = { version = "0.4.1", default-features = false }
 headers-core = { version = "0.3.0", default-features = false }
 heapless = { version = "0.8.0", default-features = false, features = ["serde"] }
 hmac-0_13 = { package = "hmac", version = "0.13.0", default-features = false, features = ["zeroize"] }
@@ -547,37 +570,40 @@ hybrid-array = { version = "0.4.14", default-features = false, features = ["allo
 hyper = { version = "1.11.1", features = ["client", "full", "http1", "http2", "server"] }
 hyper-rustls = { version = "0.27.9", default-features = false, features = ["aws-lc-rs", "http1", "http2", "log", "logging", "native-tokio", "ring", "rustls-native-certs", "tls12", "webpki-roots", "webpki-tokio"] }
 hyper-tls = { version = "0.6.0", default-features = false, features = ["alpn"] }
-hyper-util = { version = "0.1.20", features = ["client", "client-legacy", "client-proxy", "client-proxy-system", "http1", "http2", "server", "server-auto", "service", "tokio"] }
-icu_collections = { version = "2.4.0", default-features = false, features = ["alloc"] }
-icu_locale_core = { version = "2.4.0", default-features = false, features = ["alloc", "zerovec"] }
+hyper-util = { version = "0.1.20", features = ["client", "client-legacy", "client-pool", "client-proxy", "client-proxy-system", "full", "http1", "http2", "server", "server-auto", "server-graceful", "service", "tokio", "tracing"] }
 icu_normalizer = { version = "2.4.0", default-features = false, features = ["compiled_data", "utf16_iter", "utf8_iter"] }
-icu_provider = { version = "2.4.0", default-features = false, features = ["alloc", "baked"] }
 icu_segmenter = { version = "2.4.0", default-features = false, features = ["auto", "compiled_data", "lstm"] }
 idna = { version = "1.1.0", features = ["alloc", "compiled_data", "std"] }
 image = { version = "0.25.6", features = ["avif", "bmp", "dds", "default-formats", "exr", "ff", "gif", "hdr", "ico", "jpeg", "png", "pnm", "qoi", "rayon", "tga", "tiff", "webp"] }
 inout = { version = "0.1.4", default-features = false, features = ["block-padding"] }
+inventory = { version = "0.3.24", default-features = false }
+ipnet = { version = "2.12.2", features = ["serde", "std"] }
 iroh-metrics = { version = "1.0.1", features = ["metrics"] }
+jiff = { version = "0.2.37", features = ["alloc", "perf-inline", "std", "tz-fat", "tz-system", "tzdb-bundle-platform", "tzdb-concatenated", "tzdb-zoneinfo"] }
+jiff-core = { version = "0.1.1", default-features = false, features = ["alloc", "std", "tz-fat"] }
 js-sys = { version = "0.3.104", features = ["std", "unsafe-eval"] }
 libc = { version = "0.2.189", features = ["extra_traits", "std"] }
 libsqlite3-sys = { version = "0.30.1", features = ["bundled", "bundled_bindings", "cc", "min_sqlite_version_3_14_0", "pkg-config", "unlock_notify", "vcpkg"] }
+libz-sys = { version = "1.1.29", default-features = false }
 linebender_resource_handle = { version = "0.1.1", features = ["std"] }
 litemap = { version = "0.8.3", default-features = false, features = ["alloc"] }
 lock_api = { version = "0.4.14", features = ["arc_lock", "atomic_usize"] }
 log = { version = "0.4.34", default-features = false, features = ["alloc", "kv", "kv_unstable", "std", "value-bag"] }
 md-5 = { version = "0.10.6", features = ["std"] }
 memchr = { version = "2.8.3", features = ["alloc", "std", "use_std"] }
+memmap2 = { version = "0.9.11", default-features = false, features = ["stable_deref_trait"] }
 mime_guess = { version = "2.0.5", features = ["rev-mappings"] }
 mio = { version = "1.2.3", features = ["log", "net", "os-ext", "os-poll"] }
+moka = { version = "0.12.16", features = ["future", "sync"] }
 multer = { version = "3.1.0" }
+naga = { version = "30.0.1", features = ["glsl-out", "msl-out", "wgsl-in", "wgsl-out"] }
 native-tls = { version = "0.2.18", features = ["alpn"] }
 nix = { version = "0.31.3", features = ["poll"] }
 num-bigint = { version = "0.4.8", features = ["std"] }
 num-complex = { version = "0.4.6", features = ["bytemuck", "std"] }
 num-integer = { version = "0.1.47", features = ["i128", "std"] }
 num-rational = { version = "0.4.2", features = ["num-bigint", "num-bigint-std", "std"] }
-num-traits = { version = "0.2.19", features = ["i128", "libm", "std"] }
 objc2-0_5 = { package = "objc2", version = "0.5.2", features = ["alloc", "relax-sign-encoding", "std"] }
-objc2 = { version = "0.6.5", features = ["alloc", "disable-encoding-assertions", "exception", "relax-sign-encoding", "std"] }
 objc2-app-kit-0_2 = { package = "objc2-app-kit", version = "0.2.2", features = ["NSAccessibility", "NSAccessibilityConstants", "NSAccessibilityElement", "NSAccessibilityProtocols", "NSAppearance", "NSApplication", "NSBitmapImageRep", "NSButton", "NSColor", "NSControl", "NSCursor", "NSDragging", "NSEvent", "NSGraphics", "NSGraphicsContext", "NSImage", "NSImageRep", "NSMenu", "NSMenuItem", "NSOpenGLView", "NSPasteboard", "NSResponder", "NSRunningApplication", "NSScreen", "NSText", "NSTextInputClient", "NSTextInputContext", "NSView", "NSWindow", "NSWindowScripting", "NSWindowTabGroup", "alloc", "bitflags", "std"] }
 objc2-app-kit = { version = "0.3.2", features = ["AppKitDefines", "AppKitErrors", "NSATSTypesetter", "NSAccessibility", "NSAccessibilityColor", "NSAccessibilityConstants", "NSAccessibilityCustomAction", "NSAccessibilityCustomRotor", "NSAccessibilityElement", "NSAccessibilityProtocols", "NSActionCell", "NSAdaptiveImageGlyph", "NSAffineTransform", "NSAlert", "NSAlignmentFeedbackFilter", "NSAnimation", "NSAnimationContext", "NSAppearance", "NSAppleScriptExtensions", "NSApplication", "NSApplicationScripting", "NSArrayController", "NSAttributedString", "NSBackgroundExtensionView", "NSBezierPath", "NSBitmapImageRep", "NSBox", "NSBrowser", "NSBrowserCell", "NSButton", "NSButtonCell", "NSButtonTouchBarItem", "NSCIImageRep", "NSCachedImageRep", "NSCandidateListTouchBarItem", "NSCell", "NSClickGestureRecognizer", "NSClipView", "NSCollectionView", "NSCollectionViewCompositionalLayout", "NSCollectionViewFlowLayout", "NSCollectionViewGridLayout", "NSCollectionViewLayout", "NSCollectionViewTransitionLayout", "NSColor", "NSColorList", "NSColorPanel", "NSColorPicker", "NSColorPickerTouchBarItem", "NSColorPicking", "NSColorSampler", "NSColorSpace", "NSColorWell", "NSComboBox", "NSComboBoxCell", "NSComboButton", "NSControl", "NSController", "NSCursor", "NSCustomImageRep", "NSCustomTouchBarItem", "NSDataAsset", "NSDatePicker", "NSDatePickerCell", "NSDictionaryController", "NSDiffableDataSource", "NSDirection", "NSDockTile", "NSDocument", "NSDocumentController", "NSDocumentScripting", "NSDragging", "NSDraggingItem", "NSDraggingSession", "NSDrawer", "NSEPSImageRep", "NSErrors", "NSEvent", "NSFilePromiseProvider", "NSFilePromiseReceiver", "NSFileWrapperExtensions", "NSFont", "NSFontAssetRequest", "NSFontCollection", "NSFontDescriptor", "NSFontManager", "NSFontPanel", "NSForm", "NSFormCell", "NSGestureRecognizer", "NSGlassEffectView", "NSGlyphGenerator", "NSGlyphInfo", "NSGradient", "NSGraphics", "NSGraphicsContext", "NSGridView", "NSGroupTouchBarItem", "NSHapticFeedback", "NSHelpManager", "NSImage", "NSImageCell", "NSImageRep", "NSImageView", "NSInputManager", "NSInputServer", "NSInterfaceStyle", "NSItemBadge", "NSItemProvider", "NSKeyValueBinding", "NSLayoutAnchor", "NSLayoutConstraint", "NSLayoutGuide", "NSLayoutManager", "NSLevelIndicator", "NSLevelIndicatorCell", "NSMagnificationGestureRecognizer", "NSMatrix", "NSMediaLibraryBrowserController", "NSMenu", "NSMenuItem", "NSMenuItemBadge", "NSMenuItemCell", "NSMenuToolbarItem", "NSMovie", "NSNib", "NSNibConnector", "NSNibControlConnector", "NSNibDeclarations", "NSNibLoading", "NSNibOutletConnector", "NSObjectController", "NSOpenGL", "NSOpenGLLayer", "NSOpenGLView", "NSOpenPanel", "NSOutlineView", "NSPDFImageRep", "NSPDFInfo", "NSPDFPanel", "NSPICTImageRep", "NSPageController", "NSPageLayout", "NSPanGestureRecognizer", "NSPanel", "NSParagraphStyle", "NSPasteboard", "NSPasteboardItem", "NSPathCell", "NSPathComponentCell", "NSPathControl", "NSPathControlItem", "NSPersistentDocument", "NSPickerTouchBarItem", "NSPopUpButton", "NSPopUpButtonCell", "NSPopover", "NSPopoverTouchBarItem", "NSPredicateEditor", "NSPredicateEditorRowTemplate", "NSPressGestureRecognizer", "NSPressureConfiguration", "NSPreviewRepresentingActivityItem", "NSPrintInfo", "NSPrintOperation", "NSPrintPanel", "NSPrinter", "NSProgressIndicator", "NSResponder", "NSRotationGestureRecognizer", "NSRuleEditor", "NSRulerMarker", "NSRulerView", "NSRunningApplication", "NSSavePanel", "NSScreen", "NSScrollView", "NSScroller", "NSScrubber", "NSScrubberItemView", "NSScrubberLayout", "NSSearchField", "NSSearchFieldCell", "NSSearchToolbarItem", "NSSecureTextField", "NSSegmentedCell", "NSSegmentedControl", "NSShadow", "NSSharingCollaborationModeRestriction", "NSSharingService", "NSSharingServicePickerToolbarItem", "NSSharingServicePickerTouchBarItem", "NSSlider", "NSSliderAccessory", "NSSliderCell", "NSSliderTouchBarItem", "NSSound", "NSSpeechRecognizer", "NSSpeechSynthesizer", "NSSpellChecker", "NSSpellProtocol", "NSSplitView", "NSSplitViewController", "NSSplitViewItem", "NSSplitViewItemAccessoryViewController", "NSStackView", "NSStatusBar", "NSStatusBarButton", "NSStatusItem", "NSStepper", "NSStepperCell", "NSStepperTouchBarItem", "NSStoryboard", "NSStoryboardSegue", "NSStringDrawing", "NSSwitch", "NSTabView", "NSTabViewController", "NSTabViewItem", "NSTableCellView", "NSTableColumn", "NSTableHeaderCell", "NSTableHeaderView", "NSTableRowView", "NSTableView", "NSTableViewDiffableDataSource", "NSTableViewRowAction", "NSText", "NSTextAlternatives", "NSTextAttachment", "NSTextAttachmentCell", "NSTextCheckingClient", "NSTextCheckingController", "NSTextContainer", "NSTextContent", "NSTextContentManager", "NSTextElement", "NSTextField", "NSTextFieldCell", "NSTextFinder", "NSTextInputClient", "NSTextInputContext", "NSTextInsertionIndicator", "NSTextLayoutFragment", "NSTextLayoutManager", "NSTextLineFragment", "NSTextList", "NSTextListElement", "NSTextRange", "NSTextSelection", "NSTextSelectionNavigation", "NSTextStorage", "NSTextStorageScripting", "NSTextTable", "NSTextView", "NSTextViewportLayoutController", "NSTintConfiguration", "NSTintProminence", "NSTitlebarAccessoryViewController", "NSTokenField", "NSTokenFieldCell", "NSToolbar", "NSToolbarItem", "NSToolbarItemGroup", "NSTouch", "NSTouchBar", "NSTouchBarItem", "NSTrackingArea", "NSTrackingSeparatorToolbarItem", "NSTreeController", "NSTreeNode", "NSTypesetter", "NSUserActivity", "NSUserDefaultsController", "NSUserInterfaceCompression", "NSUserInterfaceItemIdentification", "NSUserInterfaceItemSearching", "NSUserInterfaceLayout", "NSUserInterfaceValidation", "NSView", "NSViewController", "NSViewLayoutRegion", "NSVisualEffectView", "NSWindow", "NSWindowController", "NSWindowRestoration", "NSWindowScripting", "NSWindowTab", "NSWindowTabGroup", "NSWorkspace", "NSWritingToolsCoordinator", "NSWritingToolsCoordinatorAnimationParameters", "NSWritingToolsCoordinatorContext", "alloc", "bitflags", "block2", "libc", "objc2-cloud-kit", "objc2-core-data", "objc2-core-foundation", "objc2-core-graphics", "objc2-core-image", "objc2-core-text", "objc2-core-video", "objc2-quartz-core", "std"] }
 objc2-cloud-kit = { version = "0.3.2", default-features = false, features = ["CKContainer", "CKRecord", "CKShare", "CKShareMetadata", "bitflags"] }
@@ -602,6 +628,7 @@ parking_lot = { version = "0.12.5", features = ["arc_lock", "send_guard"] }
 parley = { version = "0.12.0", features = ["bytemuck", "std", "system"] }
 pathdiff = { version = "0.2.3", default-features = false, features = ["camino"] }
 peniko = { version = "0.6.1", features = ["bytemuck", "std"] }
+petgraph = { version = "0.8.3", features = ["graphmap", "matrix_graph", "stable_graph", "std"] }
 phf = { version = "0.13.1", features = ["macros", "phf_macros", "std"] }
 phf_shared = { version = "0.13.1", features = ["std"] }
 pkcs8 = { version = "0.11.0", default-features = false, features = ["alloc", "pem", "std"] }
@@ -610,13 +637,15 @@ potential_utf = { version = "0.1.6", default-features = false, features = ["allo
 profiling = { version = "1.0.18", features = ["procmacros", "profiling-procmacros"] }
 psl-types = { version = "2.0.11", default-features = false }
 publicsuffix = { version = "2.3.0", features = ["idna", "punycode"] }
+pulp = { version = "0.22.3", features = ["relaxed-simd", "std", "x86-v3"] }
+pulp-wasm-simd-flag = { version = "0.1.1", default-features = false, features = ["relaxed-simd"] }
 quick-xml = { version = "0.41.0", features = ["serde", "serialize"] }
 rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.8", features = ["alloc", "getrandom", "libc", "rand_chacha", "small_rng", "std", "std_rng"] }
 rand_chacha-0_3 = { package = "rand_chacha", version = "0.3.1", features = ["std"] }
 rand_chacha = { version = "0.9.0", features = ["std"] }
-read-fonts = { version = "0.41.0", default-features = false, features = ["experimental_font_api", "std"] }
+rand_distr = { version = "0.5.1", features = ["alloc", "std"] }
 regex-automata = { version = "0.4.18", default-features = false, features = ["alloc", "dfa", "dfa-build", "dfa-onepass", "dfa-search", "hybrid", "meta", "nfa", "nfa-backtrack", "nfa-pikevm", "nfa-thompson", "perf", "perf-inline", "perf-literal", "perf-literal-multisubstring", "perf-literal-substring", "std", "syntax", "unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment", "unicode-word-boundary"] }
-reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", features = ["__rustls", "__rustls-ring", "__tls", "blocking", "charset", "default-tls", "h2", "http2", "json", "macos-system-configuration", "multipart", "rustls-tls", "rustls-tls-webpki-roots", "rustls-tls-webpki-roots-no-provider", "stream", "system-proxy"] }
+reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", features = ["__rustls", "__rustls-ring", "__tls", "blocking", "charset", "default-tls", "gzip", "h2", "http2", "json", "macos-system-configuration", "multipart", "rustls-tls", "rustls-tls-native-roots", "rustls-tls-native-roots-no-provider", "rustls-tls-webpki-roots", "rustls-tls-webpki-roots-no-provider", "stream", "system-proxy"] }
 reqwest-594e8ee84c453af0 = { package = "reqwest", version = "0.13.5", default-features = false, features = ["__native-tls", "__native-tls-alpn", "__rustls", "__rustls-aws-lc-rs", "__tls", "charset", "cookies", "form", "http2", "json", "multipart", "native-tls", "rustls", "rustls-no-provider", "stream"] }
 rfd = { version = "0.17.2", features = ["pollster", "wayland", "wayland-backend", "wayland-client", "wayland-protocols", "xdg-portal"] }
 ring = { version = "0.17.14", features = ["alloc", "dev_urandom_fallback", "std"] }
@@ -625,11 +654,13 @@ rustix = { version = "1.1.5", features = ["alloc", "event", "fs", "io_uring", "n
 rustls = { version = "0.23.46", features = ["aws-lc-rs", "aws_lc_rs", "log", "logging", "prefer-post-quantum", "ring", "std", "tls12"] }
 rustls-native-certs = { version = "0.8.4", default-features = false }
 rustls-pemfile = { version = "2.2.0", features = ["std"] }
+same-file = { version = "1.0.6", default-features = false }
 scopeguard = { version = "1.2.0", features = ["use_std"] }
 sea-orm = { version = "1.1.20", features = ["bigdecimal", "chrono", "macros", "postgres-array", "runtime-tokio", "runtime-tokio-rustls", "rust_decimal", "sea-query-binder", "serde_json", "sqlx", "sqlx-dep", "sqlx-postgres", "sqlx-sqlite", "time", "uuid", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
 sea-query = { version = "0.32.7", default-features = false, features = ["backend-mysql", "backend-postgres", "backend-sqlite", "bigdecimal", "chrono", "derive", "hashable-value", "ordered-float", "postgres-array", "rust_decimal", "sea-query-derive", "serde_json", "thread-safe", "time", "uuid", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
 sea-query-binder = { version = "0.7.0", default-features = false, features = ["bigdecimal", "chrono", "postgres-array", "runtime-tokio-rustls", "rust_decimal", "serde_json", "sqlx", "sqlx-postgres", "sqlx-sqlite", "time", "uuid", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
 seize = { version = "0.5.1", features = ["fast-barrier", "libc", "windows-sys"] }
+semver = { version = "1.0.28", features = ["serde", "std"] }
 send_wrapper = { version = "0.6.0", default-features = false, features = ["futures", "futures-core"] }
 serde = { version = "1.0.229", features = ["alloc", "derive", "rc", "serde_derive", "std"] }
 serde-wasm-bindgen = { version = "0.6.5", default-features = false }
@@ -644,13 +675,14 @@ skrifa = { version = "0.44.0", features = ["autohint_shaping", "std"] }
 sledgehammer_bindgen = { version = "0.6.0", default-features = false, features = ["wasm-bindgen", "web"] }
 slotmap = { version = "1.1.1", features = ["serde", "std"] }
 smallvec = { version = "1.16.4", default-features = false, features = ["const_generics", "const_new", "serde", "union", "write"] }
-spin = { version = "0.9.9", features = ["barrier", "lazy", "lock_api", "lock_api_crate", "mutex", "once", "rwlock", "spin_mutex", "std"] }
+spin = { version = "0.10.1", features = ["barrier", "lazy", "lock_api", "mutex", "once", "rwlock", "spin_mutex"] }
+spin-0_9 = { package = "spin", version = "0.9.9", features = ["barrier", "lazy", "lock_api", "lock_api_crate", "mutex", "once", "rwlock", "spin_mutex", "std"] }
 spki = { version = "0.8.0", default-features = false, features = ["alloc", "pem", "std"] }
 sqlx = { version = "0.8.6", default-features = false, features = ["_rt-tokio", "_sqlite", "bigdecimal", "chrono", "json", "postgres", "runtime-tokio", "runtime-tokio-rustls", "rust_decimal", "sqlite", "sqlx-postgres", "sqlx-sqlite", "time", "tls-rustls-ring", "tls-rustls-ring-webpki", "uuid"] }
 stable_deref_trait = { version = "1.2.1", features = ["alloc", "std"] }
 strip-ansi-escapes = { version = "0.2.1", default-features = false }
+strum-1f5adca70f036a62 = { package = "strum", version = "0.28.0", features = ["derive", "std", "strum_macros"] }
 terminal-light = { version = "1.9.1", default-features = false }
-thin-vec = { version = "0.2.21", features = ["serde", "std"] }
 time = { version = "0.3.55", features = ["alloc", "formatting", "local-offset", "macros", "parsing", "serde", "serde-human-readable", "serde-well-known", "std"] }
 tinystr = { version = "0.8.5", features = ["alloc", "zerovec"] }
 tinyvec = { version = "1.13.3", features = ["alloc", "rustc_1_57", "std"] }
@@ -661,9 +693,10 @@ tokio-tungstenite = { version = "0.29.0", features = ["__rustls-tls", "connect",
 tokio-util = { version = "0.7.19", features = ["codec", "compat", "futures-io", "futures-util", "io", "io-util", "libc", "rt"] }
 toml = { version = "0.8.2", features = ["display", "indexmap", "parse", "preserve_order"] }
 tower = { version = "0.5.3", default-features = false, features = ["balance", "buffer", "discover", "futures-core", "futures-util", "indexmap", "limit", "load", "load-shed", "log", "make", "pin-project-lite", "ready-cache", "retry", "slab", "sync_wrapper", "timeout", "tokio", "tokio-util", "tracing", "util"] }
-tower-http = { version = "0.6.11", features = ["cors", "follow-redirect", "fs", "futures-core", "futures-util", "httpdate", "map-response-body", "mime", "mime_guess", "percent-encoding", "set-header", "set-status", "tokio-util", "tower", "trace", "tracing"] }
+tower-http = { version = "0.6.11", features = ["cors", "decompression-gzip", "follow-redirect", "fs", "futures-core", "futures-util", "httpdate", "limit", "map-response-body", "mime", "mime_guess", "percent-encoding", "set-header", "set-status", "tokio-util", "tower", "trace", "tracing"] }
 tracing = { version = "0.1.44", features = ["attributes", "log", "std", "tracing-attributes"] }
 tracing-core = { version = "0.1.36", features = ["once_cell", "std"] }
+tracing-futures = { version = "0.2.5", features = ["pin-project", "std", "std-future"] }
 tracing-subscriber = { version = "0.3.23", features = ["alloc", "ansi", "env-filter", "fmt", "matchers", "nu-ansi-term", "once_cell", "registry", "sharded-slab", "smallvec", "std", "thread_local", "tracing", "tracing-log"] }
 tungstenite = { version = "0.29.0", features = ["__rustls-tls", "data-encoding", "handshake", "http", "httparse", "native-tls", "native-tls-crate", "rustls", "rustls-pki-types", "sha1"] }
 twox-hash = { version = "2.1.4", features = ["alloc", "random", "std", "xxhash32", "xxhash3_128", "xxhash3_64", "xxhash64"] }
@@ -674,30 +707,45 @@ url = { version = "2.5.8", features = ["serde", "std"] }
 usvg = { version = "0.48.1", features = ["base64", "flate2", "fontdb", "harfrust", "memmap-fonts", "skrifa", "svgz", "system-fonts", "text", "unicode-bidi", "unicode-script", "unicode-vo", "writer", "xmlwriter"] }
 uuid = { version = "1.26.1", features = ["atomic", "js", "md5", "rng", "serde", "sha1", "std", "v1", "v3", "v4", "v5", "v6", "v7", "v8"] }
 value-bag = { version = "1.14.1", default-features = false, features = ["inline-i128"] }
+vello_gpu = { version = "0.3.0", features = ["text", "webgl", "wgpu", "wgpu_default"] }
+vello_gpu_shaders = { version = "0.3.0", default-features = false, features = ["glsl"] }
 vox = { version = "0.10.0-rc.7", default-features = false, features = ["runtime", "transport-local", "transport-websocket", "transport-websocket-tls"] }
 vte = { version = "0.14.1", default-features = false }
+walkdir = { version = "2.5.0", default-features = false }
 wasm-bindgen = { version = "0.2.127", features = ["std"] }
 wasm-bindgen-futures = { version = "0.4.77", features = ["std"] }
 wasm-bindgen-shared = { version = "0.2.127", default-features = false }
+wasm-splitter = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false }
 wasm-streams = { version = "0.5.0", default-features = false }
-web-sys = { version = "0.3.104", features = ["AbortController", "AbortSignal", "AddEventListenerOptions", "AnalyserNode", "AnimationEvent", "AudioContext", "AudioDestinationNode", "AudioNode", "BaseAudioContext", "BinaryType", "Blob", "CharacterData", "Clipboard", "ClipboardEvent", "CloseEvent", "CloseEventInit", "Comment", "CompositionEvent", "Crypto", "CssStyleDeclaration", "CustomEvent", "DataTransfer", "DataTransferItem", "DataTransferItemList", "Document", "DomRect", "DomRectReadOnly", "DomTokenList", "DragEvent", "Element", "ErrorEvent", "Event", "EventSource", "EventSourceInit", "EventTarget", "File", "FileList", "FileReader", "FocusEvent", "FormData", "Headers", "History", "HtmlAudioElement", "HtmlElement", "HtmlFormElement", "HtmlHeadElement", "HtmlInputElement", "HtmlMediaElement", "HtmlSelectElement", "HtmlTextAreaElement", "InputEvent", "IntersectionObserverEntry", "KeyboardEvent", "Location", "MediaElementAudioSourceNode", "MediaQueryList", "MessageEvent", "MouseEvent", "Navigator", "Node", "NodeList", "ObserverCallback", "Performance", "PointerEvent", "ProgressEvent", "QueuingStrategy", "ReadableByteStreamController", "ReadableStream", "ReadableStreamByobReader", "ReadableStreamByobRequest", "ReadableStreamDefaultController", "ReadableStreamDefaultReader", "ReadableStreamGetReaderOptions", "ReadableStreamReadResult", "ReadableStreamReaderMode", "ReadableStreamType", "ReadableWritablePair", "ReferrerPolicy", "Request", "RequestCache", "RequestCredentials", "RequestInit", "RequestMode", "RequestRedirect", "ResizeObserverEntry", "ResizeObserverSize", "Response", "ResponseInit", "ResponseType", "ScrollBehavior", "ScrollIntoViewOptions", "ScrollLogicalPosition", "ScrollRestoration", "ScrollToOptions", "Selection", "Storage", "StreamPipeOptions", "Text", "Touch", "TouchEvent", "TouchList", "TransformStream", "TransformStreamDefaultController", "Transformer", "TransitionEvent", "UiEvent", "UnderlyingSink", "UnderlyingSource", "Url", "UrlSearchParams", "WebSocket", "WheelEvent", "Window", "WritableStream", "WritableStreamDefaultController", "WritableStreamDefaultWriter", "console", "std"] }
+web-sys = { version = "0.3.104", features = ["AbortController", "AbortSignal", "AddEventListenerOptions", "AnalyserNode", "AnimationEvent", "AudioContext", "AudioContextOptions", "AudioContextState", "AudioDestinationNode", "AudioNode", "AudioWorklet", "AudioWorkletNode", "AudioWorkletNodeOptions", "BaseAudioContext", "BinaryType", "Blob", "BlobPropertyBag", "Cache", "CacheStorage", "CharacterData", "Clipboard", "ClipboardEvent", "CloseEvent", "CloseEventInit", "Comment", "CompositionEvent", "Crypto", "CssStyleDeclaration", "CustomEvent", "DataTransfer", "DataTransferItem", "DataTransferItemList", "Document", "DomRect", "DomRectReadOnly", "DomTokenList", "DragEvent", "Element", "ErrorEvent", "Event", "EventSource", "EventSourceInit", "EventTarget", "File", "FileList", "FileReader", "FocusEvent", "FormData", "Headers", "History", "HtmlAudioElement", "HtmlCanvasElement", "HtmlElement", "HtmlFormElement", "HtmlHeadElement", "HtmlInputElement", "HtmlMediaElement", "HtmlSelectElement", "HtmlTextAreaElement", "InputEvent", "IntersectionObserverEntry", "KeyboardEvent", "Location", "MediaElementAudioSourceNode", "MediaQueryList", "MessageEvent", "MessagePort", "MouseEvent", "Navigator", "Node", "NodeList", "ObserverCallback", "Performance", "PointerEvent", "ProgressEvent", "QueuingStrategy", "ReadableByteStreamController", "ReadableStream", "ReadableStreamByobReader", "ReadableStreamByobRequest", "ReadableStreamDefaultController", "ReadableStreamDefaultReader", "ReadableStreamGetReaderOptions", "ReadableStreamReadResult", "ReadableStreamReaderMode", "ReadableStreamType", "ReadableWritablePair", "ReferrerPolicy", "Request", "RequestCache", "RequestCredentials", "RequestInit", "RequestMode", "RequestRedirect", "ResizeObserverEntry", "ResizeObserverSize", "Response", "ResponseInit", "ResponseType", "ScrollBehavior", "ScrollIntoViewOptions", "ScrollLogicalPosition", "ScrollRestoration", "ScrollToOptions", "Selection", "Storage", "StreamPipeOptions", "Text", "Touch", "TouchEvent", "TouchList", "TransformStream", "TransformStreamDefaultController", "Transformer", "TransitionEvent", "UiEvent", "UnderlyingSink", "UnderlyingSource", "Url", "UrlSearchParams", "WebGl2RenderingContext", "WebGlBuffer", "WebGlContextAttributes", "WebGlFramebuffer", "WebGlProgram", "WebGlRenderbuffer", "WebGlShader", "WebGlSync", "WebGlTexture", "WebGlUniformLocation", "WebGlVertexArrayObject", "WebSocket", "WheelEvent", "Window", "Worklet", "WorkletOptions", "WritableStream", "WritableStreamDefaultController", "WritableStreamDefaultWriter", "console", "std"] }
 web-time = { version = "1.1.0", default-features = false, features = ["serde"] }
 writeable = { version = "0.6.4", default-features = false, features = ["alloc"] }
 xterm-query = { version = "0.6.1", default-features = false }
-xxhash-rust = { version = "0.8.18", default-features = false, features = ["const_xxh64", "xxh32"] }
-yoke = { version = "0.8.4", default-features = false, features = ["alloc", "derive", "zerofrom"] }
+xxhash-rust = { version = "0.8.18", default-features = false, features = ["const_xxh64", "xxh3", "xxh32"] }
+yoke = { version = "0.8.4", features = ["alloc", "derive", "zerofrom"] }
 zerofrom = { version = "0.1.8", default-features = false, features = ["alloc", "derive"] }
 zeroize = { version = "1.9.0", features = ["alloc", "derive", "zeroize_derive"] }
 zerotrie = { version = "0.2.5", default-features = false, features = ["alloc", "yoke", "zerofrom"] }
-zerovec = { version = "0.11.9", default-features = false, features = ["alloc", "derive", "yoke"] }
 
 [target.'cfg(all(target_arch = "aarch64", target_os = "ios"))'.dependencies]
 ahash = { version = "0.8.12", features = ["getrandom", "runtime-rng", "serde", "std"] }
 aho-corasick = { version = "1.1.5", features = ["perf-literal", "std"] }
 alloc-stdlib = { version = "0.2.4", default-features = false }
+anyrender_vello_hybrid = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1", default-features = false, features = ["webgl"] }
 approx = { version = "0.5.1", features = ["std"] }
-axum = { version = "0.8.9", features = ["form", "http1", "json", "macros", "matched-path", "multipart", "original-uri", "query", "tokio", "tower-log", "tracing", "ws"] }
+async-compression = { version = "0.4.43", default-features = false, features = ["gzip", "tokio"] }
+async-lock = { version = "3.4.2", features = ["std"] }
+async-once-cell = { version = "0.5.4", default-features = false, features = ["std"] }
+aws-lc-rs = { version = "1.18.0", default-features = false, features = ["aws-lc-sys", "prebuilt-nasm"] }
+aws-lc-sys = { version = "0.44.0", default-features = false, features = ["prebuilt-nasm"] }
+axum = { version = "0.8.9", features = ["form", "http1", "http2", "json", "macros", "matched-path", "multipart", "original-uri", "query", "tokio", "tower-log", "tracing", "ws"] }
+axum-extra = { version = "0.12.6", features = ["tracing", "typed-header"] }
 base16ct = { version = "1.0.0", default-features = false, features = ["alloc"] }
+bit-set = { version = "0.8.0", features = ["std"] }
+bit-vec = { version = "0.8.0", features = ["std"] }
+blitz-dom = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11", features = ["accessibility", "accesskit", "autofocus", "custom-widget", "file-input", "svg", "system-fonts", "text-transform-icu", "woff"] }
+blitz-paint = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11", features = ["apple-font-embolden", "custom-widget", "svg"] }
+blitz-shell = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11", features = ["accessibility", "custom-widget", "data-uri", "file-dialog"] }
 block-buffer = { version = "0.12.1", default-features = false, features = ["zeroize"] }
 block-padding = { version = "0.3.3", default-features = false }
 brotli-decompressor = { version = "5.0.3", features = ["alloc-stdlib", "std"] }
@@ -716,6 +764,8 @@ cipher = { version = "0.4.4", default-features = false, features = ["block-paddi
 clap = { version = "4.6.7", features = ["color", "derive", "env", "error-context", "help", "std", "suggestions", "usage"] }
 clap_builder = { version = "4.6.7", default-features = false, features = ["color", "env", "error-context", "help", "std", "suggestions", "usage"] }
 color = { version = "0.3.3", features = ["bytemuck", "std"] }
+compression-codecs = { version = "0.4.38", default-features = false, features = ["flate2", "gzip", "memchr"] }
+compression-core = { version = "0.4.32", default-features = false }
 concurrent-queue = { version = "2.5.0", features = ["std"] }
 const-str = { version = "0.7.1" }
 constant_time_eq = { version = "0.4.2", features = ["std"] }
@@ -727,19 +777,29 @@ crossterm = { version = "0.29.0", features = ["bracketed-paste", "derive-more", 
 crypto-common-c65f7effa3be6d31 = { package = "crypto-common", version = "0.1.7", default-features = false, features = ["getrandom", "rand_core", "std"] }
 crypto-common-6f8ce4dd05d13bba = { package = "crypto-common", version = "0.2.2", default-features = false, features = ["getrandom", "rand_core"] }
 ctutils = { version = "0.4.2", default-features = false, features = ["subtle"] }
+dashmap = { version = "6.2.1", default-features = false }
+debug_timer = { version = "0.1.3", default-features = false, features = ["enable"] }
 derive_more = { version = "2.1.1", features = ["add", "add_assign", "debug", "deref", "deref_mut", "display", "from", "from_str", "into", "into_iterator", "is_variant", "std", "try_from", "try_into"] }
 digest-93f6ce9d446188ac = { package = "digest", version = "0.10.7", features = ["alloc", "block-buffer", "core-api", "mac", "std", "subtle"] }
 digest-a6292c17cd707f01 = { package = "digest", version = "0.11.3", features = ["alloc", "block-api", "mac", "oid", "rand_core", "zeroize"] }
-dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["asset", "cli-config", "desktop", "devtools", "document", "fullstack", "hooks", "html", "launch", "lib", "logger", "macro", "mobile", "mounted", "router", "signals", "warnings", "web"] }
+dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["asset", "cli-config", "desktop", "devtools", "document", "fullstack", "hooks", "html", "launch", "lib", "logger", "macro", "mobile", "mounted", "router", "server", "signals", "ssr", "warnings", "wasm-split", "web"] }
 dioxus-asset-resolver = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["native", "web"] }
 dioxus-cli-config = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["web"] }
-dioxus-fullstack = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["web", "ws"] }
-dioxus-fullstack-core = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["web"] }
+dioxus-config-macros = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["wasm-split"] }
+dioxus-core = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["document", "hooks", "html", "macro", "signals", "ssr", "stores", "wasm-split"] }
+dioxus-devtools = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["serve"] }
+dioxus-fullstack = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["server", "web", "ws"] }
+dioxus-fullstack-core = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["server", "web"] }
 dioxus-html = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["serialize"] }
 dioxus-interpreter-js = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["binary-protocol", "minimal_bindings", "serialize", "sledgehammer", "webonly"] }
 dioxus-primitives = { git = "https://github.com/FastTrackStudios/dioxus-components", tag = "fts-upstream-2026-11", features = ["router"] }
+dioxus-router = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["html", "wasm-split"] }
+dioxus-server = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["document", "router"] }
 dioxus-web = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["devtools", "document", "hydrate", "mounted"] }
+dispatch2 = { version = "0.3.1", features = ["alloc", "block2", "libc", "objc2", "std"] }
 either = { version = "1.18.0", features = ["serde", "std", "use_std"] }
+env_filter = { version = "2.0.0", default-features = false, features = ["regex", "std"] }
+env_logger = { version = "0.11.11", features = ["auto-color", "color", "humantime", "regex"] }
 euclid = { version = "0.22.14", features = ["serde", "std"] }
 event-listener = { version = "5.4.2", features = ["parking", "std"] }
 event-listener-strategy = { version = "0.5.4", features = ["std"] }
@@ -749,9 +809,8 @@ facet-pretty = { version = "0.50.0-rc.7", features = ["detect-terminal-theme"] }
 facet-styx = { version = "5.0.0-rc.7", default-features = false, features = ["figue"] }
 figue = { version = "5.0.0-rc.6", features = ["rich-diagnostics"] }
 figue-attrs = { version = "5.0.0-rc.6", default-features = false }
-flate2 = { version = "1.1.10", features = ["any_impl", "any_zlib", "miniz_oxide", "runtime_detection", "rust_backend", "zlib-rs"] }
+flate2 = { version = "1.1.10", features = ["any_c_zlib", "any_impl", "any_zlib", "libz-sys", "miniz_oxide", "runtime_detection", "rust_backend", "zlib", "zlib-rs"] }
 foldhash = { version = "0.2.0", features = ["std"] }
-form_urlencoded = { version = "1.2.2", features = ["alloc", "std"] }
 futures = { version = "0.3.34", features = ["alloc", "async-await", "executor", "futures-executor", "std", "thread-pool"] }
 futures-executor = { version = "0.3.34", features = ["std", "thread-pool"] }
 futures-io = { version = "0.3.34", features = ["std"] }
@@ -763,9 +822,10 @@ gloo-net = { version = "0.7.0", features = ["eventsource", "futures-channel", "f
 gloo-timers = { version = "0.4.0", features = ["futures", "futures-channel", "futures-core"] }
 gloo-utils = { version = "0.3.0", default-features = false, features = ["serde"] }
 h2 = { version = "0.4.19", default-features = false, features = ["stream"] }
-half = { version = "2.7.1", features = ["alloc", "num-traits", "std"] }
+half = { version = "2.7.1", features = ["alloc", "bytemuck", "num-traits", "rand_distr", "std", "use-intrinsics"] }
 hashbrown = { version = "0.14.5", features = ["ahash", "allocator-api2", "inline-more", "raw"] }
-hashbrown-986da7b5efc2b80e = { package = "hashbrown", version = "0.16.1", features = ["allocator-api2", "default-hasher", "equivalent", "inline-more", "raw-entry"] }
+hashbrown-986da7b5efc2b80e = { package = "hashbrown", version = "0.16.1", features = ["allocator-api2", "default-hasher", "equivalent", "inline-more", "raw-entry", "serde"] }
+headers = { version = "0.4.1", default-features = false }
 headers-core = { version = "0.3.0", default-features = false }
 heapless = { version = "0.8.0", default-features = false, features = ["serde"] }
 hmac-0_13 = { package = "hmac", version = "0.13.0", default-features = false, features = ["zeroize"] }
@@ -773,40 +833,41 @@ hybrid-array = { version = "0.4.14", default-features = false, features = ["allo
 hyper = { version = "1.11.1", features = ["client", "full", "http1", "http2", "server"] }
 hyper-rustls = { version = "0.27.9", default-features = false, features = ["aws-lc-rs", "http1", "http2", "log", "logging", "native-tokio", "ring", "rustls-native-certs", "tls12", "webpki-roots", "webpki-tokio"] }
 hyper-tls = { version = "0.6.0", default-features = false, features = ["alpn"] }
-hyper-util = { version = "0.1.20", features = ["client", "client-legacy", "client-proxy", "client-proxy-system", "http1", "http2", "server", "server-auto", "service", "tokio"] }
-icu_collections = { version = "2.4.0", default-features = false, features = ["alloc"] }
-icu_locale_core = { version = "2.4.0", default-features = false, features = ["alloc", "zerovec"] }
+hyper-util = { version = "0.1.20", features = ["client", "client-legacy", "client-pool", "client-proxy", "client-proxy-system", "full", "http1", "http2", "server", "server-auto", "server-graceful", "service", "tokio", "tracing"] }
 icu_normalizer = { version = "2.4.0", default-features = false, features = ["compiled_data", "utf16_iter", "utf8_iter"] }
-icu_provider = { version = "2.4.0", default-features = false, features = ["alloc", "baked"] }
 icu_segmenter = { version = "2.4.0", default-features = false, features = ["auto", "compiled_data", "lstm"] }
 idna = { version = "1.1.0", features = ["alloc", "compiled_data", "std"] }
 image = { version = "0.25.6", features = ["avif", "bmp", "dds", "default-formats", "exr", "ff", "gif", "hdr", "ico", "jpeg", "png", "pnm", "qoi", "rayon", "tga", "tiff", "webp"] }
 inout = { version = "0.1.4", default-features = false, features = ["block-padding"] }
+inventory = { version = "0.3.24", default-features = false }
+ipnet = { version = "2.12.2", features = ["serde", "std"] }
 iroh-metrics = { version = "1.0.1", features = ["metrics"] }
+jiff = { version = "0.2.37", features = ["alloc", "perf-inline", "std", "tz-fat", "tz-system", "tzdb-bundle-platform", "tzdb-concatenated", "tzdb-zoneinfo"] }
+jiff-core = { version = "0.1.1", default-features = false, features = ["alloc", "std", "tz-fat"] }
 js-sys = { version = "0.3.104", features = ["std", "unsafe-eval"] }
-keyboard-types = { version = "0.8.3", features = ["serde", "std"] }
 libc = { version = "0.2.189", features = ["extra_traits", "std"] }
 libsqlite3-sys = { version = "0.30.1", features = ["bundled", "bundled_bindings", "cc", "min_sqlite_version_3_14_0", "pkg-config", "unlock_notify", "vcpkg"] }
+libz-sys = { version = "1.1.29", default-features = false }
 linebender_resource_handle = { version = "0.1.1", features = ["std"] }
 litemap = { version = "0.8.3", default-features = false, features = ["alloc"] }
 lock_api = { version = "0.4.14", features = ["arc_lock", "atomic_usize"] }
 log = { version = "0.4.34", default-features = false, features = ["alloc", "kv", "kv_unstable", "std", "value-bag"] }
 md-5 = { version = "0.10.6", features = ["std"] }
 memchr = { version = "2.8.3", features = ["alloc", "std", "use_std"] }
+memmap2 = { version = "0.9.11", default-features = false, features = ["stable_deref_trait"] }
 mime_guess = { version = "2.0.5", features = ["rev-mappings"] }
 mio = { version = "1.2.3", features = ["log", "net", "os-ext", "os-poll"] }
+moka = { version = "0.12.16", features = ["future", "sync"] }
 multer = { version = "3.1.0" }
+naga = { version = "30.0.1", features = ["glsl-out", "msl-out", "wgsl-in", "wgsl-out"] }
 native-tls = { version = "0.2.18", features = ["alpn"] }
 nix = { version = "0.31.3", features = ["poll"] }
 num-bigint = { version = "0.4.8", features = ["std"] }
 num-complex = { version = "0.4.6", features = ["bytemuck", "std"] }
 num-integer = { version = "0.1.47", features = ["i128", "std"] }
 num-rational = { version = "0.4.2", features = ["num-bigint", "num-bigint-std", "std"] }
-num-traits = { version = "0.2.19", features = ["i128", "libm", "std"] }
-objc2 = { version = "0.6.5", features = ["alloc", "disable-encoding-assertions", "exception", "relax-sign-encoding", "std"] }
 objc2-core-foundation = { version = "0.3.2", features = ["CFArray", "CFAttributedString", "CFAvailability", "CFBag", "CFBase", "CFBinaryHeap", "CFBitVector", "CFBundle", "CFByteOrder", "CFCGTypes", "CFCalendar", "CFCharacterSet", "CFData", "CFDate", "CFDateFormatter", "CFDictionary", "CFError", "CFFileDescriptor", "CFFileSecurity", "CFLocale", "CFMachPort", "CFMessagePort", "CFNotificationCenter", "CFNumber", "CFNumberFormatter", "CFPlugIn", "CFPlugInCOM", "CFPreferences", "CFPropertyList", "CFRunLoop", "CFSet", "CFSocket", "CFStream", "CFString", "CFStringEncodingExt", "CFStringTokenizer", "CFTimeZone", "CFTree", "CFURL", "CFURLAccess", "CFURLEnumerator", "CFUUID", "CFUserNotification", "CFUtilities", "CFXMLNode", "CFXMLParser", "alloc", "bitflags", "block2", "dispatch2", "libc", "objc2", "std"] }
 objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["CGColor", "CGColorSpace", "CGContext", "CGFont", "CGImage", "CGPath", "alloc", "bitflags", "objc2", "std"] }
-objc2-core-text = { version = "0.3.2", default-features = false, features = ["CTFont", "CTFontCollection", "CTFontDescriptor", "bitflags", "objc2"] }
 objc2-foundation = { version = "0.3.2", features = ["FoundationErrors", "FoundationLegacySwiftCompatibility", "NSAffineTransform", "NSAppleEventDescriptor", "NSAppleEventManager", "NSAppleScript", "NSArchiver", "NSArray", "NSAttributedString", "NSAutoreleasePool", "NSBackgroundActivityScheduler", "NSBundle", "NSByteCountFormatter", "NSByteOrder", "NSCache", "NSCalendar", "NSCalendarDate", "NSCharacterSet", "NSClassDescription", "NSCoder", "NSComparisonPredicate", "NSCompoundPredicate", "NSConnection", "NSData", "NSDate", "NSDateComponentsFormatter", "NSDateFormatter", "NSDateInterval", "NSDateIntervalFormatter", "NSDebug", "NSDecimal", "NSDecimalNumber", "NSDictionary", "NSDistantObject", "NSDistributedLock", "NSDistributedNotificationCenter", "NSEnergyFormatter", "NSEnumerator", "NSError", "NSException", "NSExpression", "NSExtensionContext", "NSExtensionItem", "NSExtensionRequestHandling", "NSFileCoordinator", "NSFileHandle", "NSFileManager", "NSFilePresenter", "NSFileVersion", "NSFileWrapper", "NSFormatter", "NSGarbageCollector", "NSGeometry", "NSHFSFileTypes", "NSHTTPCookie", "NSHTTPCookieStorage", "NSHashTable", "NSHost", "NSISO8601DateFormatter", "NSIndexPath", "NSIndexSet", "NSInflectionRule", "NSInvocation", "NSItemProvider", "NSJSONSerialization", "NSKeyValueCoding", "NSKeyValueObserving", "NSKeyValueSharedObservers", "NSKeyedArchiver", "NSLengthFormatter", "NSLinguisticTagger", "NSListFormatter", "NSLocale", "NSLocalizedNumberFormatRule", "NSLock", "NSMapTable", "NSMassFormatter", "NSMeasurement", "NSMeasurementFormatter", "NSMetadata", "NSMetadataAttributes", "NSMethodSignature", "NSMorphology", "NSNetServices", "NSNotification", "NSNotificationQueue", "NSNull", "NSNumberFormatter", "NSObjCRuntime", "NSObject", "NSObjectScripting", "NSOperation", "NSOrderedCollectionChange", "NSOrderedCollectionDifference", "NSOrderedSet", "NSOrthography", "NSPathUtilities", "NSPersonNameComponents", "NSPersonNameComponentsFormatter", "NSPointerArray", "NSPointerFunctions", "NSPort", "NSPortCoder", "NSPortMessage", "NSPortNameServer", "NSPredicate", "NSProcessInfo", "NSProgress", "NSPropertyList", "NSProtocolChecker", "NSProxy", "NSRange", "NSRegularExpression", "NSRelativeDateTimeFormatter", "NSRunLoop", "NSScanner", "NSScriptClassDescription", "NSScriptCoercionHandler", "NSScriptCommand", "NSScriptCommandDescription", "NSScriptExecutionContext", "NSScriptKeyValueCoding", "NSScriptObjectSpecifiers", "NSScriptStandardSuiteCommands", "NSScriptSuiteRegistry", "NSScriptWhoseTests", "NSSet", "NSSortDescriptor", "NSSpellServer", "NSStream", "NSString", "NSTask", "NSTermOfAddress", "NSTextCheckingResult", "NSThread", "NSTimeZone", "NSTimer", "NSURL", "NSURLAuthenticationChallenge", "NSURLCache", "NSURLConnection", "NSURLCredential", "NSURLCredentialStorage", "NSURLDownload", "NSURLError", "NSURLHandle", "NSURLProtectionSpace", "NSURLProtocol", "NSURLRequest", "NSURLResponse", "NSURLSession", "NSUUID", "NSUbiquitousKeyValueStore", "NSUndoManager", "NSUnit", "NSUserActivity", "NSUserDefaults", "NSUserNotification", "NSUserScriptTask", "NSValue", "NSValueTransformer", "NSXMLDTD", "NSXMLDTDNode", "NSXMLDocument", "NSXMLElement", "NSXMLNode", "NSXMLNodeOptions", "NSXMLParser", "NSXPCConnection", "NSZone", "alloc", "bitflags", "block2", "libc", "objc2-core-foundation", "std"] }
 objc2-quartz-core = { version = "0.3.2", default-features = false, features = ["CADisplayLink", "CAFrameRateRange", "CALayer", "CAMediaTiming", "CAMetalLayer", "CATransform3D", "alloc", "bitflags", "objc2-core-foundation", "objc2-core-graphics", "objc2-metal", "std"] }
 objc2-security = { version = "0.3.2", default-features = false, features = ["Authorization", "SecBase", "bitflags", "objc2"] }
@@ -822,6 +883,7 @@ parking_lot = { version = "0.12.5", features = ["arc_lock", "send_guard"] }
 parley = { version = "0.12.0", features = ["bytemuck", "std", "system"] }
 pathdiff = { version = "0.2.3", default-features = false, features = ["camino"] }
 peniko = { version = "0.6.1", features = ["bytemuck", "std"] }
+petgraph = { version = "0.8.3", features = ["graphmap", "matrix_graph", "stable_graph", "std"] }
 phf = { version = "0.13.1", features = ["macros", "phf_macros", "std"] }
 phf_shared = { version = "0.13.1", features = ["std"] }
 pkcs8 = { version = "0.11.0", default-features = false, features = ["alloc", "pem", "std"] }
@@ -830,25 +892,29 @@ potential_utf = { version = "0.1.6", default-features = false, features = ["allo
 profiling = { version = "1.0.18", features = ["procmacros", "profiling-procmacros"] }
 psl-types = { version = "2.0.11", default-features = false }
 publicsuffix = { version = "2.3.0", features = ["idna", "punycode"] }
+pulp = { version = "0.22.3", features = ["relaxed-simd", "std", "x86-v3"] }
+pulp-wasm-simd-flag = { version = "0.1.1", default-features = false, features = ["relaxed-simd"] }
 quick-xml = { version = "0.41.0", features = ["serde", "serialize"] }
 rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.8", features = ["alloc", "getrandom", "libc", "rand_chacha", "small_rng", "std", "std_rng"] }
 rand_chacha-0_3 = { package = "rand_chacha", version = "0.3.1", features = ["std"] }
 rand_chacha = { version = "0.9.0", features = ["std"] }
-read-fonts = { version = "0.41.0", default-features = false, features = ["experimental_font_api", "std"] }
+rand_distr = { version = "0.5.1", features = ["alloc", "std"] }
 regex-automata = { version = "0.4.18", default-features = false, features = ["alloc", "dfa", "dfa-build", "dfa-onepass", "dfa-search", "hybrid", "meta", "nfa", "nfa-backtrack", "nfa-pikevm", "nfa-thompson", "perf", "perf-inline", "perf-literal", "perf-literal-multisubstring", "perf-literal-substring", "std", "syntax", "unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment", "unicode-word-boundary"] }
-reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", features = ["__rustls", "__rustls-ring", "__tls", "blocking", "charset", "default-tls", "h2", "http2", "json", "macos-system-configuration", "multipart", "rustls-tls", "rustls-tls-webpki-roots", "rustls-tls-webpki-roots-no-provider", "stream", "system-proxy"] }
+reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", features = ["__rustls", "__rustls-ring", "__tls", "blocking", "charset", "default-tls", "gzip", "h2", "http2", "json", "macos-system-configuration", "multipart", "rustls-tls", "rustls-tls-native-roots", "rustls-tls-native-roots-no-provider", "rustls-tls-webpki-roots", "rustls-tls-webpki-roots-no-provider", "stream", "system-proxy"] }
 reqwest-594e8ee84c453af0 = { package = "reqwest", version = "0.13.5", default-features = false, features = ["__native-tls", "__native-tls-alpn", "__rustls", "__rustls-aws-lc-rs", "__tls", "charset", "cookies", "form", "http2", "json", "multipart", "native-tls", "rustls", "rustls-no-provider", "stream"] }
 ring = { version = "0.17.14", features = ["alloc", "dev_urandom_fallback", "std"] }
 rust_decimal = { version = "1.43.0", features = ["maths", "serde", "std"] }
 rustls = { version = "0.23.46", features = ["aws-lc-rs", "aws_lc_rs", "log", "logging", "prefer-post-quantum", "ring", "std", "tls12"] }
 rustls-native-certs = { version = "0.8.4", default-features = false }
 rustls-pemfile = { version = "2.2.0", features = ["std"] }
+same-file = { version = "1.0.6", default-features = false }
 scopeguard = { version = "1.2.0", features = ["use_std"] }
 sea-orm = { version = "1.1.20", features = ["bigdecimal", "chrono", "macros", "postgres-array", "runtime-tokio", "runtime-tokio-rustls", "rust_decimal", "sea-query-binder", "serde_json", "sqlx", "sqlx-dep", "sqlx-postgres", "sqlx-sqlite", "time", "uuid", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
 sea-query = { version = "0.32.7", default-features = false, features = ["backend-mysql", "backend-postgres", "backend-sqlite", "bigdecimal", "chrono", "derive", "hashable-value", "ordered-float", "postgres-array", "rust_decimal", "sea-query-derive", "serde_json", "thread-safe", "time", "uuid", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
 sea-query-binder = { version = "0.7.0", default-features = false, features = ["bigdecimal", "chrono", "postgres-array", "runtime-tokio-rustls", "rust_decimal", "serde_json", "sqlx", "sqlx-postgres", "sqlx-sqlite", "time", "uuid", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
 security-framework-sys = { version = "2.17.0", features = ["OSX_10_10", "OSX_10_11", "OSX_10_12", "OSX_10_13", "OSX_10_9"] }
 seize = { version = "0.5.1", features = ["fast-barrier", "libc", "windows-sys"] }
+semver = { version = "1.0.28", features = ["serde", "std"] }
 send_wrapper = { version = "0.6.0", default-features = false, features = ["futures", "futures-core"] }
 serde = { version = "1.0.229", features = ["alloc", "derive", "rc", "serde_derive", "std"] }
 serde-wasm-bindgen = { version = "0.6.5", default-features = false }
@@ -863,13 +929,14 @@ skrifa = { version = "0.44.0", features = ["autohint_shaping", "std"] }
 sledgehammer_bindgen = { version = "0.6.0", default-features = false, features = ["wasm-bindgen", "web"] }
 slotmap = { version = "1.1.1", features = ["serde", "std"] }
 smallvec = { version = "1.16.4", default-features = false, features = ["const_generics", "const_new", "serde", "union", "write"] }
-spin = { version = "0.9.9", features = ["barrier", "lazy", "lock_api", "lock_api_crate", "mutex", "once", "rwlock", "spin_mutex", "std"] }
+spin = { version = "0.10.1", features = ["barrier", "lazy", "lock_api", "mutex", "once", "rwlock", "spin_mutex"] }
+spin-0_9 = { package = "spin", version = "0.9.9", features = ["barrier", "lazy", "lock_api", "lock_api_crate", "mutex", "once", "rwlock", "spin_mutex", "std"] }
 spki = { version = "0.8.0", default-features = false, features = ["alloc", "pem", "std"] }
 sqlx = { version = "0.8.6", default-features = false, features = ["_rt-tokio", "_sqlite", "bigdecimal", "chrono", "json", "postgres", "runtime-tokio", "runtime-tokio-rustls", "rust_decimal", "sqlite", "sqlx-postgres", "sqlx-sqlite", "time", "tls-rustls-ring", "tls-rustls-ring-webpki", "uuid"] }
 stable_deref_trait = { version = "1.2.1", features = ["alloc", "std"] }
 strip-ansi-escapes = { version = "0.2.1", default-features = false }
+strum-1f5adca70f036a62 = { package = "strum", version = "0.28.0", features = ["derive", "std", "strum_macros"] }
 terminal-light = { version = "1.9.1", default-features = false }
-thin-vec = { version = "0.2.21", features = ["serde", "std"] }
 time = { version = "0.3.55", features = ["alloc", "formatting", "local-offset", "macros", "parsing", "serde", "serde-human-readable", "serde-well-known", "std"] }
 tinystr = { version = "0.8.5", features = ["alloc", "zerovec"] }
 tinyvec = { version = "1.13.3", features = ["alloc", "rustc_1_57", "std"] }
@@ -880,9 +947,10 @@ tokio-tungstenite = { version = "0.29.0", features = ["__rustls-tls", "connect",
 tokio-util = { version = "0.7.19", features = ["codec", "compat", "futures-io", "futures-util", "io", "io-util", "libc", "rt"] }
 toml = { version = "0.8.2", features = ["display", "indexmap", "parse", "preserve_order"] }
 tower = { version = "0.5.3", default-features = false, features = ["balance", "buffer", "discover", "futures-core", "futures-util", "indexmap", "limit", "load", "load-shed", "log", "make", "pin-project-lite", "ready-cache", "retry", "slab", "sync_wrapper", "timeout", "tokio", "tokio-util", "tracing", "util"] }
-tower-http = { version = "0.6.11", features = ["cors", "follow-redirect", "fs", "futures-core", "futures-util", "httpdate", "map-response-body", "mime", "mime_guess", "percent-encoding", "set-header", "set-status", "tokio-util", "tower", "trace", "tracing"] }
+tower-http = { version = "0.6.11", features = ["cors", "decompression-gzip", "follow-redirect", "fs", "futures-core", "futures-util", "httpdate", "limit", "map-response-body", "mime", "mime_guess", "percent-encoding", "set-header", "set-status", "tokio-util", "tower", "trace", "tracing"] }
 tracing = { version = "0.1.44", features = ["attributes", "log", "std", "tracing-attributes"] }
 tracing-core = { version = "0.1.36", features = ["once_cell", "std"] }
+tracing-futures = { version = "0.2.5", features = ["pin-project", "std", "std-future"] }
 tracing-subscriber = { version = "0.3.23", features = ["alloc", "ansi", "env-filter", "fmt", "matchers", "nu-ansi-term", "once_cell", "registry", "sharded-slab", "smallvec", "std", "thread_local", "tracing", "tracing-log"] }
 tungstenite = { version = "0.29.0", features = ["__rustls-tls", "data-encoding", "handshake", "http", "httparse", "native-tls", "native-tls-crate", "rustls", "rustls-pki-types", "sha1"] }
 twox-hash = { version = "2.1.4", features = ["alloc", "random", "std", "xxhash32", "xxhash3_128", "xxhash3_64", "xxhash64"] }
@@ -893,30 +961,45 @@ url = { version = "2.5.8", features = ["serde", "std"] }
 usvg = { version = "0.48.1", features = ["base64", "flate2", "fontdb", "harfrust", "memmap-fonts", "skrifa", "svgz", "system-fonts", "text", "unicode-bidi", "unicode-script", "unicode-vo", "writer", "xmlwriter"] }
 uuid = { version = "1.26.1", features = ["atomic", "js", "md5", "rng", "serde", "sha1", "std", "v1", "v3", "v4", "v5", "v6", "v7", "v8"] }
 value-bag = { version = "1.14.1", default-features = false, features = ["inline-i128"] }
+vello_gpu = { version = "0.3.0", features = ["text", "webgl", "wgpu", "wgpu_default"] }
+vello_gpu_shaders = { version = "0.3.0", default-features = false, features = ["glsl"] }
 vox = { version = "0.10.0-rc.7", default-features = false, features = ["runtime", "transport-local", "transport-websocket", "transport-websocket-tls"] }
 vte = { version = "0.14.1", default-features = false }
+walkdir = { version = "2.5.0", default-features = false }
 wasm-bindgen = { version = "0.2.127", features = ["std"] }
 wasm-bindgen-futures = { version = "0.4.77", features = ["std"] }
 wasm-bindgen-shared = { version = "0.2.127", default-features = false }
+wasm-splitter = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false }
 wasm-streams = { version = "0.5.0", default-features = false }
-web-sys = { version = "0.3.104", features = ["AbortController", "AbortSignal", "AddEventListenerOptions", "AnalyserNode", "AnimationEvent", "AudioContext", "AudioDestinationNode", "AudioNode", "BaseAudioContext", "BinaryType", "Blob", "CharacterData", "Clipboard", "ClipboardEvent", "CloseEvent", "CloseEventInit", "Comment", "CompositionEvent", "Crypto", "CssStyleDeclaration", "CustomEvent", "DataTransfer", "DataTransferItem", "DataTransferItemList", "Document", "DomRect", "DomRectReadOnly", "DomTokenList", "DragEvent", "Element", "ErrorEvent", "Event", "EventSource", "EventSourceInit", "EventTarget", "File", "FileList", "FileReader", "FocusEvent", "FormData", "Headers", "History", "HtmlAudioElement", "HtmlElement", "HtmlFormElement", "HtmlHeadElement", "HtmlInputElement", "HtmlMediaElement", "HtmlSelectElement", "HtmlTextAreaElement", "InputEvent", "IntersectionObserverEntry", "KeyboardEvent", "Location", "MediaElementAudioSourceNode", "MediaQueryList", "MessageEvent", "MouseEvent", "Navigator", "Node", "NodeList", "ObserverCallback", "Performance", "PointerEvent", "ProgressEvent", "QueuingStrategy", "ReadableByteStreamController", "ReadableStream", "ReadableStreamByobReader", "ReadableStreamByobRequest", "ReadableStreamDefaultController", "ReadableStreamDefaultReader", "ReadableStreamGetReaderOptions", "ReadableStreamReadResult", "ReadableStreamReaderMode", "ReadableStreamType", "ReadableWritablePair", "ReferrerPolicy", "Request", "RequestCache", "RequestCredentials", "RequestInit", "RequestMode", "RequestRedirect", "ResizeObserverEntry", "ResizeObserverSize", "Response", "ResponseInit", "ResponseType", "ScrollBehavior", "ScrollIntoViewOptions", "ScrollLogicalPosition", "ScrollRestoration", "ScrollToOptions", "Selection", "Storage", "StreamPipeOptions", "Text", "Touch", "TouchEvent", "TouchList", "TransformStream", "TransformStreamDefaultController", "Transformer", "TransitionEvent", "UiEvent", "UnderlyingSink", "UnderlyingSource", "Url", "UrlSearchParams", "WebSocket", "WheelEvent", "Window", "WritableStream", "WritableStreamDefaultController", "WritableStreamDefaultWriter", "console", "std"] }
+web-sys = { version = "0.3.104", features = ["AbortController", "AbortSignal", "AddEventListenerOptions", "AnalyserNode", "AnimationEvent", "AudioContext", "AudioContextOptions", "AudioContextState", "AudioDestinationNode", "AudioNode", "AudioWorklet", "AudioWorkletNode", "AudioWorkletNodeOptions", "BaseAudioContext", "BinaryType", "Blob", "BlobPropertyBag", "Cache", "CacheStorage", "CharacterData", "Clipboard", "ClipboardEvent", "CloseEvent", "CloseEventInit", "Comment", "CompositionEvent", "Crypto", "CssStyleDeclaration", "CustomEvent", "DataTransfer", "DataTransferItem", "DataTransferItemList", "Document", "DomRect", "DomRectReadOnly", "DomTokenList", "DragEvent", "Element", "ErrorEvent", "Event", "EventSource", "EventSourceInit", "EventTarget", "File", "FileList", "FileReader", "FocusEvent", "FormData", "Headers", "History", "HtmlAudioElement", "HtmlCanvasElement", "HtmlElement", "HtmlFormElement", "HtmlHeadElement", "HtmlInputElement", "HtmlMediaElement", "HtmlSelectElement", "HtmlTextAreaElement", "InputEvent", "IntersectionObserverEntry", "KeyboardEvent", "Location", "MediaElementAudioSourceNode", "MediaQueryList", "MessageEvent", "MessagePort", "MouseEvent", "Navigator", "Node", "NodeList", "ObserverCallback", "Performance", "PointerEvent", "ProgressEvent", "QueuingStrategy", "ReadableByteStreamController", "ReadableStream", "ReadableStreamByobReader", "ReadableStreamByobRequest", "ReadableStreamDefaultController", "ReadableStreamDefaultReader", "ReadableStreamGetReaderOptions", "ReadableStreamReadResult", "ReadableStreamReaderMode", "ReadableStreamType", "ReadableWritablePair", "ReferrerPolicy", "Request", "RequestCache", "RequestCredentials", "RequestInit", "RequestMode", "RequestRedirect", "ResizeObserverEntry", "ResizeObserverSize", "Response", "ResponseInit", "ResponseType", "ScrollBehavior", "ScrollIntoViewOptions", "ScrollLogicalPosition", "ScrollRestoration", "ScrollToOptions", "Selection", "Storage", "StreamPipeOptions", "Text", "Touch", "TouchEvent", "TouchList", "TransformStream", "TransformStreamDefaultController", "Transformer", "TransitionEvent", "UiEvent", "UnderlyingSink", "UnderlyingSource", "Url", "UrlSearchParams", "WebGl2RenderingContext", "WebGlBuffer", "WebGlContextAttributes", "WebGlFramebuffer", "WebGlProgram", "WebGlRenderbuffer", "WebGlShader", "WebGlSync", "WebGlTexture", "WebGlUniformLocation", "WebGlVertexArrayObject", "WebSocket", "WheelEvent", "Window", "Worklet", "WorkletOptions", "WritableStream", "WritableStreamDefaultController", "WritableStreamDefaultWriter", "console", "std"] }
 web-time = { version = "1.1.0", default-features = false, features = ["serde"] }
 writeable = { version = "0.6.4", default-features = false, features = ["alloc"] }
 xterm-query = { version = "0.6.1", default-features = false }
-xxhash-rust = { version = "0.8.18", default-features = false, features = ["const_xxh64", "xxh32"] }
-yoke = { version = "0.8.4", default-features = false, features = ["alloc", "derive", "zerofrom"] }
+xxhash-rust = { version = "0.8.18", default-features = false, features = ["const_xxh64", "xxh3", "xxh32"] }
+yoke = { version = "0.8.4", features = ["alloc", "derive", "zerofrom"] }
 zerofrom = { version = "0.1.8", default-features = false, features = ["alloc", "derive"] }
 zeroize = { version = "1.9.0", features = ["alloc", "derive", "zeroize_derive"] }
 zerotrie = { version = "0.2.5", default-features = false, features = ["alloc", "yoke", "zerofrom"] }
-zerovec = { version = "0.11.9", default-features = false, features = ["alloc", "derive", "yoke"] }
 
 [target.'cfg(all(target_arch = "x86_64", target_os = "macos"))'.dependencies]
 ahash = { version = "0.8.12", features = ["getrandom", "runtime-rng", "serde", "std"] }
 aho-corasick = { version = "1.1.5", features = ["perf-literal", "std"] }
 alloc-stdlib = { version = "0.2.4", default-features = false }
+anyrender_vello_hybrid = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1", default-features = false, features = ["webgl"] }
 approx = { version = "0.5.1", features = ["std"] }
-axum = { version = "0.8.9", features = ["form", "http1", "json", "macros", "matched-path", "multipart", "original-uri", "query", "tokio", "tower-log", "tracing", "ws"] }
+async-compression = { version = "0.4.43", default-features = false, features = ["gzip", "tokio"] }
+async-lock = { version = "3.4.2", features = ["std"] }
+async-once-cell = { version = "0.5.4", default-features = false, features = ["std"] }
+aws-lc-rs = { version = "1.18.0", default-features = false, features = ["aws-lc-sys", "prebuilt-nasm"] }
+aws-lc-sys = { version = "0.44.0", default-features = false, features = ["prebuilt-nasm"] }
+axum = { version = "0.8.9", features = ["form", "http1", "http2", "json", "macros", "matched-path", "multipart", "original-uri", "query", "tokio", "tower-log", "tracing", "ws"] }
+axum-extra = { version = "0.12.6", features = ["tracing", "typed-header"] }
 base16ct = { version = "1.0.0", default-features = false, features = ["alloc"] }
+bit-set = { version = "0.8.0", features = ["std"] }
+bit-vec = { version = "0.8.0", features = ["std"] }
+blitz-dom = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11", features = ["accessibility", "accesskit", "autofocus", "custom-widget", "file-input", "svg", "system-fonts", "text-transform-icu", "woff"] }
+blitz-paint = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11", features = ["apple-font-embolden", "custom-widget", "svg"] }
+blitz-shell = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11", features = ["accessibility", "custom-widget", "data-uri", "file-dialog"] }
 block-buffer = { version = "0.12.1", default-features = false, features = ["zeroize"] }
 block-padding = { version = "0.3.3", default-features = false }
 block2-0_5 = { package = "block2", version = "0.5.1", features = ["alloc", "std"] }
@@ -936,6 +1019,8 @@ cipher = { version = "0.4.4", default-features = false, features = ["block-paddi
 clap = { version = "4.6.7", features = ["color", "derive", "env", "error-context", "help", "std", "suggestions", "usage"] }
 clap_builder = { version = "4.6.7", default-features = false, features = ["color", "env", "error-context", "help", "std", "suggestions", "usage"] }
 color = { version = "0.3.3", features = ["bytemuck", "std"] }
+compression-codecs = { version = "0.4.38", default-features = false, features = ["flate2", "gzip", "memchr"] }
+compression-core = { version = "0.4.32", default-features = false }
 concurrent-queue = { version = "2.5.0", features = ["std"] }
 const-str = { version = "0.7.1" }
 constant_time_eq = { version = "0.4.2", features = ["std"] }
@@ -947,20 +1032,29 @@ crossterm = { version = "0.29.0", features = ["bracketed-paste", "derive-more", 
 crypto-common-c65f7effa3be6d31 = { package = "crypto-common", version = "0.1.7", default-features = false, features = ["getrandom", "rand_core", "std"] }
 crypto-common-6f8ce4dd05d13bba = { package = "crypto-common", version = "0.2.2", default-features = false, features = ["getrandom", "rand_core"] }
 ctutils = { version = "0.4.2", default-features = false, features = ["subtle"] }
+dashmap = { version = "6.2.1", default-features = false }
+debug_timer = { version = "0.1.3", default-features = false, features = ["enable"] }
 derive_more = { version = "2.1.1", features = ["add", "add_assign", "debug", "deref", "deref_mut", "display", "from", "from_str", "into", "into_iterator", "is_variant", "std", "try_from", "try_into"] }
 digest-93f6ce9d446188ac = { package = "digest", version = "0.10.7", features = ["alloc", "block-buffer", "core-api", "mac", "std", "subtle"] }
 digest-a6292c17cd707f01 = { package = "digest", version = "0.11.3", features = ["alloc", "block-api", "mac", "oid", "rand_core", "zeroize"] }
-dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["asset", "cli-config", "desktop", "devtools", "document", "fullstack", "hooks", "html", "launch", "lib", "logger", "macro", "mobile", "mounted", "router", "signals", "warnings", "web"] }
+dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["asset", "cli-config", "desktop", "devtools", "document", "fullstack", "hooks", "html", "launch", "lib", "logger", "macro", "mobile", "mounted", "router", "server", "signals", "ssr", "warnings", "wasm-split", "web"] }
 dioxus-asset-resolver = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["native", "web"] }
 dioxus-cli-config = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["web"] }
-dioxus-fullstack = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["web", "ws"] }
-dioxus-fullstack-core = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["web"] }
+dioxus-config-macros = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["wasm-split"] }
+dioxus-core = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["document", "hooks", "html", "macro", "signals", "ssr", "stores", "wasm-split"] }
+dioxus-devtools = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["serve"] }
+dioxus-fullstack = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["server", "web", "ws"] }
+dioxus-fullstack-core = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["server", "web"] }
 dioxus-html = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["serialize"] }
 dioxus-interpreter-js = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["binary-protocol", "minimal_bindings", "serialize", "sledgehammer", "webonly"] }
 dioxus-primitives = { git = "https://github.com/FastTrackStudios/dioxus-components", tag = "fts-upstream-2026-11", features = ["router"] }
+dioxus-router = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["html", "wasm-split"] }
+dioxus-server = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["document", "router"] }
 dioxus-web = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["devtools", "document", "hydrate", "mounted"] }
 dispatch = { version = "0.2.0", default-features = false }
 either = { version = "1.18.0", features = ["serde", "std", "use_std"] }
+env_filter = { version = "2.0.0", default-features = false, features = ["regex", "std"] }
+env_logger = { version = "0.11.11", features = ["auto-color", "color", "humantime", "regex"] }
 euclid = { version = "0.22.14", features = ["serde", "std"] }
 event-listener = { version = "5.4.2", features = ["parking", "std"] }
 event-listener-strategy = { version = "0.5.4", features = ["std"] }
@@ -970,9 +1064,8 @@ facet-pretty = { version = "0.50.0-rc.7", features = ["detect-terminal-theme"] }
 facet-styx = { version = "5.0.0-rc.7", default-features = false, features = ["figue"] }
 figue = { version = "5.0.0-rc.6", features = ["rich-diagnostics"] }
 figue-attrs = { version = "5.0.0-rc.6", default-features = false }
-flate2 = { version = "1.1.10", features = ["any_impl", "any_zlib", "miniz_oxide", "runtime_detection", "rust_backend", "zlib-rs"] }
+flate2 = { version = "1.1.10", features = ["any_c_zlib", "any_impl", "any_zlib", "libz-sys", "miniz_oxide", "runtime_detection", "rust_backend", "zlib", "zlib-rs"] }
 foldhash = { version = "0.2.0", features = ["std"] }
-form_urlencoded = { version = "1.2.2", features = ["alloc", "std"] }
 futures = { version = "0.3.34", features = ["alloc", "async-await", "executor", "futures-executor", "std", "thread-pool"] }
 futures-executor = { version = "0.3.34", features = ["std", "thread-pool"] }
 futures-io = { version = "0.3.34", features = ["std"] }
@@ -984,9 +1077,10 @@ gloo-net = { version = "0.7.0", features = ["eventsource", "futures-channel", "f
 gloo-timers = { version = "0.4.0", features = ["futures", "futures-channel", "futures-core"] }
 gloo-utils = { version = "0.3.0", default-features = false, features = ["serde"] }
 h2 = { version = "0.4.19", default-features = false, features = ["stream"] }
-half = { version = "2.7.1", features = ["alloc", "num-traits", "std"] }
+half = { version = "2.7.1", features = ["alloc", "bytemuck", "num-traits", "rand_distr", "std", "use-intrinsics"] }
 hashbrown = { version = "0.14.5", features = ["ahash", "allocator-api2", "inline-more", "raw"] }
-hashbrown-986da7b5efc2b80e = { package = "hashbrown", version = "0.16.1", features = ["allocator-api2", "default-hasher", "equivalent", "inline-more", "raw-entry"] }
+hashbrown-986da7b5efc2b80e = { package = "hashbrown", version = "0.16.1", features = ["allocator-api2", "default-hasher", "equivalent", "inline-more", "raw-entry", "serde"] }
+headers = { version = "0.4.1", default-features = false }
 headers-core = { version = "0.3.0", default-features = false }
 heapless = { version = "0.8.0", default-features = false, features = ["serde"] }
 hmac-0_13 = { package = "hmac", version = "0.13.0", default-features = false, features = ["zeroize"] }
@@ -994,37 +1088,40 @@ hybrid-array = { version = "0.4.14", default-features = false, features = ["allo
 hyper = { version = "1.11.1", features = ["client", "full", "http1", "http2", "server"] }
 hyper-rustls = { version = "0.27.9", default-features = false, features = ["aws-lc-rs", "http1", "http2", "log", "logging", "native-tokio", "ring", "rustls-native-certs", "tls12", "webpki-roots", "webpki-tokio"] }
 hyper-tls = { version = "0.6.0", default-features = false, features = ["alpn"] }
-hyper-util = { version = "0.1.20", features = ["client", "client-legacy", "client-proxy", "client-proxy-system", "http1", "http2", "server", "server-auto", "service", "tokio"] }
-icu_collections = { version = "2.4.0", default-features = false, features = ["alloc"] }
-icu_locale_core = { version = "2.4.0", default-features = false, features = ["alloc", "zerovec"] }
+hyper-util = { version = "0.1.20", features = ["client", "client-legacy", "client-pool", "client-proxy", "client-proxy-system", "full", "http1", "http2", "server", "server-auto", "server-graceful", "service", "tokio", "tracing"] }
 icu_normalizer = { version = "2.4.0", default-features = false, features = ["compiled_data", "utf16_iter", "utf8_iter"] }
-icu_provider = { version = "2.4.0", default-features = false, features = ["alloc", "baked"] }
 icu_segmenter = { version = "2.4.0", default-features = false, features = ["auto", "compiled_data", "lstm"] }
 idna = { version = "1.1.0", features = ["alloc", "compiled_data", "std"] }
 image = { version = "0.25.6", features = ["avif", "bmp", "dds", "default-formats", "exr", "ff", "gif", "hdr", "ico", "jpeg", "png", "pnm", "qoi", "rayon", "tga", "tiff", "webp"] }
 inout = { version = "0.1.4", default-features = false, features = ["block-padding"] }
+inventory = { version = "0.3.24", default-features = false }
+ipnet = { version = "2.12.2", features = ["serde", "std"] }
 iroh-metrics = { version = "1.0.1", features = ["metrics"] }
+jiff = { version = "0.2.37", features = ["alloc", "perf-inline", "std", "tz-fat", "tz-system", "tzdb-bundle-platform", "tzdb-concatenated", "tzdb-zoneinfo"] }
+jiff-core = { version = "0.1.1", default-features = false, features = ["alloc", "std", "tz-fat"] }
 js-sys = { version = "0.3.104", features = ["std", "unsafe-eval"] }
 libc = { version = "0.2.189", features = ["extra_traits", "std"] }
 libsqlite3-sys = { version = "0.30.1", features = ["bundled", "bundled_bindings", "cc", "min_sqlite_version_3_14_0", "pkg-config", "unlock_notify", "vcpkg"] }
+libz-sys = { version = "1.1.29", default-features = false }
 linebender_resource_handle = { version = "0.1.1", features = ["std"] }
 litemap = { version = "0.8.3", default-features = false, features = ["alloc"] }
 lock_api = { version = "0.4.14", features = ["arc_lock", "atomic_usize"] }
 log = { version = "0.4.34", default-features = false, features = ["alloc", "kv", "kv_unstable", "std", "value-bag"] }
 md-5 = { version = "0.10.6", features = ["std"] }
 memchr = { version = "2.8.3", features = ["alloc", "std", "use_std"] }
+memmap2 = { version = "0.9.11", default-features = false, features = ["stable_deref_trait"] }
 mime_guess = { version = "2.0.5", features = ["rev-mappings"] }
 mio = { version = "1.2.3", features = ["log", "net", "os-ext", "os-poll"] }
+moka = { version = "0.12.16", features = ["future", "sync"] }
 multer = { version = "3.1.0" }
+naga = { version = "30.0.1", features = ["glsl-out", "msl-out", "wgsl-in", "wgsl-out"] }
 native-tls = { version = "0.2.18", features = ["alpn"] }
 nix = { version = "0.31.3", features = ["poll"] }
 num-bigint = { version = "0.4.8", features = ["std"] }
 num-complex = { version = "0.4.6", features = ["bytemuck", "std"] }
 num-integer = { version = "0.1.47", features = ["i128", "std"] }
 num-rational = { version = "0.4.2", features = ["num-bigint", "num-bigint-std", "std"] }
-num-traits = { version = "0.2.19", features = ["i128", "libm", "std"] }
 objc2-0_5 = { package = "objc2", version = "0.5.2", features = ["alloc", "relax-sign-encoding", "std"] }
-objc2 = { version = "0.6.5", features = ["alloc", "disable-encoding-assertions", "exception", "relax-sign-encoding", "std"] }
 objc2-app-kit-0_2 = { package = "objc2-app-kit", version = "0.2.2", features = ["NSAccessibility", "NSAccessibilityConstants", "NSAccessibilityElement", "NSAccessibilityProtocols", "NSAppearance", "NSApplication", "NSBitmapImageRep", "NSButton", "NSColor", "NSControl", "NSCursor", "NSDragging", "NSEvent", "NSGraphics", "NSGraphicsContext", "NSImage", "NSImageRep", "NSMenu", "NSMenuItem", "NSOpenGLView", "NSPasteboard", "NSResponder", "NSRunningApplication", "NSScreen", "NSText", "NSTextInputClient", "NSTextInputContext", "NSView", "NSWindow", "NSWindowScripting", "NSWindowTabGroup", "alloc", "bitflags", "std"] }
 objc2-app-kit = { version = "0.3.2", features = ["AppKitDefines", "AppKitErrors", "NSATSTypesetter", "NSAccessibility", "NSAccessibilityColor", "NSAccessibilityConstants", "NSAccessibilityCustomAction", "NSAccessibilityCustomRotor", "NSAccessibilityElement", "NSAccessibilityProtocols", "NSActionCell", "NSAdaptiveImageGlyph", "NSAffineTransform", "NSAlert", "NSAlignmentFeedbackFilter", "NSAnimation", "NSAnimationContext", "NSAppearance", "NSAppleScriptExtensions", "NSApplication", "NSApplicationScripting", "NSArrayController", "NSAttributedString", "NSBackgroundExtensionView", "NSBezierPath", "NSBitmapImageRep", "NSBox", "NSBrowser", "NSBrowserCell", "NSButton", "NSButtonCell", "NSButtonTouchBarItem", "NSCIImageRep", "NSCachedImageRep", "NSCandidateListTouchBarItem", "NSCell", "NSClickGestureRecognizer", "NSClipView", "NSCollectionView", "NSCollectionViewCompositionalLayout", "NSCollectionViewFlowLayout", "NSCollectionViewGridLayout", "NSCollectionViewLayout", "NSCollectionViewTransitionLayout", "NSColor", "NSColorList", "NSColorPanel", "NSColorPicker", "NSColorPickerTouchBarItem", "NSColorPicking", "NSColorSampler", "NSColorSpace", "NSColorWell", "NSComboBox", "NSComboBoxCell", "NSComboButton", "NSControl", "NSController", "NSCursor", "NSCustomImageRep", "NSCustomTouchBarItem", "NSDataAsset", "NSDatePicker", "NSDatePickerCell", "NSDictionaryController", "NSDiffableDataSource", "NSDirection", "NSDockTile", "NSDocument", "NSDocumentController", "NSDocumentScripting", "NSDragging", "NSDraggingItem", "NSDraggingSession", "NSDrawer", "NSEPSImageRep", "NSErrors", "NSEvent", "NSFilePromiseProvider", "NSFilePromiseReceiver", "NSFileWrapperExtensions", "NSFont", "NSFontAssetRequest", "NSFontCollection", "NSFontDescriptor", "NSFontManager", "NSFontPanel", "NSForm", "NSFormCell", "NSGestureRecognizer", "NSGlassEffectView", "NSGlyphGenerator", "NSGlyphInfo", "NSGradient", "NSGraphics", "NSGraphicsContext", "NSGridView", "NSGroupTouchBarItem", "NSHapticFeedback", "NSHelpManager", "NSImage", "NSImageCell", "NSImageRep", "NSImageView", "NSInputManager", "NSInputServer", "NSInterfaceStyle", "NSItemBadge", "NSItemProvider", "NSKeyValueBinding", "NSLayoutAnchor", "NSLayoutConstraint", "NSLayoutGuide", "NSLayoutManager", "NSLevelIndicator", "NSLevelIndicatorCell", "NSMagnificationGestureRecognizer", "NSMatrix", "NSMediaLibraryBrowserController", "NSMenu", "NSMenuItem", "NSMenuItemBadge", "NSMenuItemCell", "NSMenuToolbarItem", "NSMovie", "NSNib", "NSNibConnector", "NSNibControlConnector", "NSNibDeclarations", "NSNibLoading", "NSNibOutletConnector", "NSObjectController", "NSOpenGL", "NSOpenGLLayer", "NSOpenGLView", "NSOpenPanel", "NSOutlineView", "NSPDFImageRep", "NSPDFInfo", "NSPDFPanel", "NSPICTImageRep", "NSPageController", "NSPageLayout", "NSPanGestureRecognizer", "NSPanel", "NSParagraphStyle", "NSPasteboard", "NSPasteboardItem", "NSPathCell", "NSPathComponentCell", "NSPathControl", "NSPathControlItem", "NSPersistentDocument", "NSPickerTouchBarItem", "NSPopUpButton", "NSPopUpButtonCell", "NSPopover", "NSPopoverTouchBarItem", "NSPredicateEditor", "NSPredicateEditorRowTemplate", "NSPressGestureRecognizer", "NSPressureConfiguration", "NSPreviewRepresentingActivityItem", "NSPrintInfo", "NSPrintOperation", "NSPrintPanel", "NSPrinter", "NSProgressIndicator", "NSResponder", "NSRotationGestureRecognizer", "NSRuleEditor", "NSRulerMarker", "NSRulerView", "NSRunningApplication", "NSSavePanel", "NSScreen", "NSScrollView", "NSScroller", "NSScrubber", "NSScrubberItemView", "NSScrubberLayout", "NSSearchField", "NSSearchFieldCell", "NSSearchToolbarItem", "NSSecureTextField", "NSSegmentedCell", "NSSegmentedControl", "NSShadow", "NSSharingCollaborationModeRestriction", "NSSharingService", "NSSharingServicePickerToolbarItem", "NSSharingServicePickerTouchBarItem", "NSSlider", "NSSliderAccessory", "NSSliderCell", "NSSliderTouchBarItem", "NSSound", "NSSpeechRecognizer", "NSSpeechSynthesizer", "NSSpellChecker", "NSSpellProtocol", "NSSplitView", "NSSplitViewController", "NSSplitViewItem", "NSSplitViewItemAccessoryViewController", "NSStackView", "NSStatusBar", "NSStatusBarButton", "NSStatusItem", "NSStepper", "NSStepperCell", "NSStepperTouchBarItem", "NSStoryboard", "NSStoryboardSegue", "NSStringDrawing", "NSSwitch", "NSTabView", "NSTabViewController", "NSTabViewItem", "NSTableCellView", "NSTableColumn", "NSTableHeaderCell", "NSTableHeaderView", "NSTableRowView", "NSTableView", "NSTableViewDiffableDataSource", "NSTableViewRowAction", "NSText", "NSTextAlternatives", "NSTextAttachment", "NSTextAttachmentCell", "NSTextCheckingClient", "NSTextCheckingController", "NSTextContainer", "NSTextContent", "NSTextContentManager", "NSTextElement", "NSTextField", "NSTextFieldCell", "NSTextFinder", "NSTextInputClient", "NSTextInputContext", "NSTextInsertionIndicator", "NSTextLayoutFragment", "NSTextLayoutManager", "NSTextLineFragment", "NSTextList", "NSTextListElement", "NSTextRange", "NSTextSelection", "NSTextSelectionNavigation", "NSTextStorage", "NSTextStorageScripting", "NSTextTable", "NSTextView", "NSTextViewportLayoutController", "NSTintConfiguration", "NSTintProminence", "NSTitlebarAccessoryViewController", "NSTokenField", "NSTokenFieldCell", "NSToolbar", "NSToolbarItem", "NSToolbarItemGroup", "NSTouch", "NSTouchBar", "NSTouchBarItem", "NSTrackingArea", "NSTrackingSeparatorToolbarItem", "NSTreeController", "NSTreeNode", "NSTypesetter", "NSUserActivity", "NSUserDefaultsController", "NSUserInterfaceCompression", "NSUserInterfaceItemIdentification", "NSUserInterfaceItemSearching", "NSUserInterfaceLayout", "NSUserInterfaceValidation", "NSView", "NSViewController", "NSViewLayoutRegion", "NSVisualEffectView", "NSWindow", "NSWindowController", "NSWindowRestoration", "NSWindowScripting", "NSWindowTab", "NSWindowTabGroup", "NSWorkspace", "NSWritingToolsCoordinator", "NSWritingToolsCoordinatorAnimationParameters", "NSWritingToolsCoordinatorContext", "alloc", "bitflags", "block2", "libc", "objc2-cloud-kit", "objc2-core-data", "objc2-core-foundation", "objc2-core-graphics", "objc2-core-image", "objc2-core-text", "objc2-core-video", "objc2-quartz-core", "std"] }
 objc2-cloud-kit = { version = "0.3.2", default-features = false, features = ["CKContainer", "CKRecord", "CKShare", "CKShareMetadata", "bitflags"] }
@@ -1049,6 +1146,7 @@ parking_lot = { version = "0.12.5", features = ["arc_lock", "send_guard"] }
 parley = { version = "0.12.0", features = ["bytemuck", "std", "system"] }
 pathdiff = { version = "0.2.3", default-features = false, features = ["camino"] }
 peniko = { version = "0.6.1", features = ["bytemuck", "std"] }
+petgraph = { version = "0.8.3", features = ["graphmap", "matrix_graph", "stable_graph", "std"] }
 phf = { version = "0.13.1", features = ["macros", "phf_macros", "std"] }
 phf_shared = { version = "0.13.1", features = ["std"] }
 pkcs8 = { version = "0.11.0", default-features = false, features = ["alloc", "pem", "std"] }
@@ -1057,13 +1155,15 @@ potential_utf = { version = "0.1.6", default-features = false, features = ["allo
 profiling = { version = "1.0.18", features = ["procmacros", "profiling-procmacros"] }
 psl-types = { version = "2.0.11", default-features = false }
 publicsuffix = { version = "2.3.0", features = ["idna", "punycode"] }
+pulp = { version = "0.22.3", features = ["relaxed-simd", "std", "x86-v3"] }
+pulp-wasm-simd-flag = { version = "0.1.1", default-features = false, features = ["relaxed-simd"] }
 quick-xml = { version = "0.41.0", features = ["serde", "serialize"] }
 rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.8", features = ["alloc", "getrandom", "libc", "rand_chacha", "small_rng", "std", "std_rng"] }
 rand_chacha-0_3 = { package = "rand_chacha", version = "0.3.1", features = ["std"] }
 rand_chacha = { version = "0.9.0", features = ["std"] }
-read-fonts = { version = "0.41.0", default-features = false, features = ["experimental_font_api", "std"] }
+rand_distr = { version = "0.5.1", features = ["alloc", "std"] }
 regex-automata = { version = "0.4.18", default-features = false, features = ["alloc", "dfa", "dfa-build", "dfa-onepass", "dfa-search", "hybrid", "meta", "nfa", "nfa-backtrack", "nfa-pikevm", "nfa-thompson", "perf", "perf-inline", "perf-literal", "perf-literal-multisubstring", "perf-literal-substring", "std", "syntax", "unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment", "unicode-word-boundary"] }
-reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", features = ["__rustls", "__rustls-ring", "__tls", "blocking", "charset", "default-tls", "h2", "http2", "json", "macos-system-configuration", "multipart", "rustls-tls", "rustls-tls-webpki-roots", "rustls-tls-webpki-roots-no-provider", "stream", "system-proxy"] }
+reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", features = ["__rustls", "__rustls-ring", "__tls", "blocking", "charset", "default-tls", "gzip", "h2", "http2", "json", "macos-system-configuration", "multipart", "rustls-tls", "rustls-tls-native-roots", "rustls-tls-native-roots-no-provider", "rustls-tls-webpki-roots", "rustls-tls-webpki-roots-no-provider", "stream", "system-proxy"] }
 reqwest-594e8ee84c453af0 = { package = "reqwest", version = "0.13.5", default-features = false, features = ["__native-tls", "__native-tls-alpn", "__rustls", "__rustls-aws-lc-rs", "__tls", "charset", "cookies", "form", "http2", "json", "multipart", "native-tls", "rustls", "rustls-no-provider", "stream"] }
 rfd = { version = "0.17.2", features = ["pollster", "wayland", "wayland-backend", "wayland-client", "wayland-protocols", "xdg-portal"] }
 ring = { version = "0.17.14", features = ["alloc", "dev_urandom_fallback", "std"] }
@@ -1072,11 +1172,13 @@ rustix = { version = "1.1.5", features = ["alloc", "event", "fs", "io_uring", "n
 rustls = { version = "0.23.46", features = ["aws-lc-rs", "aws_lc_rs", "log", "logging", "prefer-post-quantum", "ring", "std", "tls12"] }
 rustls-native-certs = { version = "0.8.4", default-features = false }
 rustls-pemfile = { version = "2.2.0", features = ["std"] }
+same-file = { version = "1.0.6", default-features = false }
 scopeguard = { version = "1.2.0", features = ["use_std"] }
 sea-orm = { version = "1.1.20", features = ["bigdecimal", "chrono", "macros", "postgres-array", "runtime-tokio", "runtime-tokio-rustls", "rust_decimal", "sea-query-binder", "serde_json", "sqlx", "sqlx-dep", "sqlx-postgres", "sqlx-sqlite", "time", "uuid", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
 sea-query = { version = "0.32.7", default-features = false, features = ["backend-mysql", "backend-postgres", "backend-sqlite", "bigdecimal", "chrono", "derive", "hashable-value", "ordered-float", "postgres-array", "rust_decimal", "sea-query-derive", "serde_json", "thread-safe", "time", "uuid", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
 sea-query-binder = { version = "0.7.0", default-features = false, features = ["bigdecimal", "chrono", "postgres-array", "runtime-tokio-rustls", "rust_decimal", "serde_json", "sqlx", "sqlx-postgres", "sqlx-sqlite", "time", "uuid", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
 seize = { version = "0.5.1", features = ["fast-barrier", "libc", "windows-sys"] }
+semver = { version = "1.0.28", features = ["serde", "std"] }
 send_wrapper = { version = "0.6.0", default-features = false, features = ["futures", "futures-core"] }
 serde = { version = "1.0.229", features = ["alloc", "derive", "rc", "serde_derive", "std"] }
 serde-wasm-bindgen = { version = "0.6.5", default-features = false }
@@ -1091,13 +1193,14 @@ skrifa = { version = "0.44.0", features = ["autohint_shaping", "std"] }
 sledgehammer_bindgen = { version = "0.6.0", default-features = false, features = ["wasm-bindgen", "web"] }
 slotmap = { version = "1.1.1", features = ["serde", "std"] }
 smallvec = { version = "1.16.4", default-features = false, features = ["const_generics", "const_new", "serde", "union", "write"] }
-spin = { version = "0.9.9", features = ["barrier", "lazy", "lock_api", "lock_api_crate", "mutex", "once", "rwlock", "spin_mutex", "std"] }
+spin = { version = "0.10.1", features = ["barrier", "lazy", "lock_api", "mutex", "once", "rwlock", "spin_mutex"] }
+spin-0_9 = { package = "spin", version = "0.9.9", features = ["barrier", "lazy", "lock_api", "lock_api_crate", "mutex", "once", "rwlock", "spin_mutex", "std"] }
 spki = { version = "0.8.0", default-features = false, features = ["alloc", "pem", "std"] }
 sqlx = { version = "0.8.6", default-features = false, features = ["_rt-tokio", "_sqlite", "bigdecimal", "chrono", "json", "postgres", "runtime-tokio", "runtime-tokio-rustls", "rust_decimal", "sqlite", "sqlx-postgres", "sqlx-sqlite", "time", "tls-rustls-ring", "tls-rustls-ring-webpki", "uuid"] }
 stable_deref_trait = { version = "1.2.1", features = ["alloc", "std"] }
 strip-ansi-escapes = { version = "0.2.1", default-features = false }
+strum-1f5adca70f036a62 = { package = "strum", version = "0.28.0", features = ["derive", "std", "strum_macros"] }
 terminal-light = { version = "1.9.1", default-features = false }
-thin-vec = { version = "0.2.21", features = ["serde", "std"] }
 time = { version = "0.3.55", features = ["alloc", "formatting", "local-offset", "macros", "parsing", "serde", "serde-human-readable", "serde-well-known", "std"] }
 tinystr = { version = "0.8.5", features = ["alloc", "zerovec"] }
 tinyvec = { version = "1.13.3", features = ["alloc", "rustc_1_57", "std"] }
@@ -1108,9 +1211,10 @@ tokio-tungstenite = { version = "0.29.0", features = ["__rustls-tls", "connect",
 tokio-util = { version = "0.7.19", features = ["codec", "compat", "futures-io", "futures-util", "io", "io-util", "libc", "rt"] }
 toml = { version = "0.8.2", features = ["display", "indexmap", "parse", "preserve_order"] }
 tower = { version = "0.5.3", default-features = false, features = ["balance", "buffer", "discover", "futures-core", "futures-util", "indexmap", "limit", "load", "load-shed", "log", "make", "pin-project-lite", "ready-cache", "retry", "slab", "sync_wrapper", "timeout", "tokio", "tokio-util", "tracing", "util"] }
-tower-http = { version = "0.6.11", features = ["cors", "follow-redirect", "fs", "futures-core", "futures-util", "httpdate", "map-response-body", "mime", "mime_guess", "percent-encoding", "set-header", "set-status", "tokio-util", "tower", "trace", "tracing"] }
+tower-http = { version = "0.6.11", features = ["cors", "decompression-gzip", "follow-redirect", "fs", "futures-core", "futures-util", "httpdate", "limit", "map-response-body", "mime", "mime_guess", "percent-encoding", "set-header", "set-status", "tokio-util", "tower", "trace", "tracing"] }
 tracing = { version = "0.1.44", features = ["attributes", "log", "std", "tracing-attributes"] }
 tracing-core = { version = "0.1.36", features = ["once_cell", "std"] }
+tracing-futures = { version = "0.2.5", features = ["pin-project", "std", "std-future"] }
 tracing-subscriber = { version = "0.3.23", features = ["alloc", "ansi", "env-filter", "fmt", "matchers", "nu-ansi-term", "once_cell", "registry", "sharded-slab", "smallvec", "std", "thread_local", "tracing", "tracing-log"] }
 tungstenite = { version = "0.29.0", features = ["__rustls-tls", "data-encoding", "handshake", "http", "httparse", "native-tls", "native-tls-crate", "rustls", "rustls-pki-types", "sha1"] }
 twox-hash = { version = "2.1.4", features = ["alloc", "random", "std", "xxhash32", "xxhash3_128", "xxhash3_64", "xxhash64"] }
@@ -1121,30 +1225,45 @@ url = { version = "2.5.8", features = ["serde", "std"] }
 usvg = { version = "0.48.1", features = ["base64", "flate2", "fontdb", "harfrust", "memmap-fonts", "skrifa", "svgz", "system-fonts", "text", "unicode-bidi", "unicode-script", "unicode-vo", "writer", "xmlwriter"] }
 uuid = { version = "1.26.1", features = ["atomic", "js", "md5", "rng", "serde", "sha1", "std", "v1", "v3", "v4", "v5", "v6", "v7", "v8"] }
 value-bag = { version = "1.14.1", default-features = false, features = ["inline-i128"] }
+vello_gpu = { version = "0.3.0", features = ["text", "webgl", "wgpu", "wgpu_default"] }
+vello_gpu_shaders = { version = "0.3.0", default-features = false, features = ["glsl"] }
 vox = { version = "0.10.0-rc.7", default-features = false, features = ["runtime", "transport-local", "transport-websocket", "transport-websocket-tls"] }
 vte = { version = "0.14.1", default-features = false }
+walkdir = { version = "2.5.0", default-features = false }
 wasm-bindgen = { version = "0.2.127", features = ["std"] }
 wasm-bindgen-futures = { version = "0.4.77", features = ["std"] }
 wasm-bindgen-shared = { version = "0.2.127", default-features = false }
+wasm-splitter = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false }
 wasm-streams = { version = "0.5.0", default-features = false }
-web-sys = { version = "0.3.104", features = ["AbortController", "AbortSignal", "AddEventListenerOptions", "AnalyserNode", "AnimationEvent", "AudioContext", "AudioDestinationNode", "AudioNode", "BaseAudioContext", "BinaryType", "Blob", "CharacterData", "Clipboard", "ClipboardEvent", "CloseEvent", "CloseEventInit", "Comment", "CompositionEvent", "Crypto", "CssStyleDeclaration", "CustomEvent", "DataTransfer", "DataTransferItem", "DataTransferItemList", "Document", "DomRect", "DomRectReadOnly", "DomTokenList", "DragEvent", "Element", "ErrorEvent", "Event", "EventSource", "EventSourceInit", "EventTarget", "File", "FileList", "FileReader", "FocusEvent", "FormData", "Headers", "History", "HtmlAudioElement", "HtmlElement", "HtmlFormElement", "HtmlHeadElement", "HtmlInputElement", "HtmlMediaElement", "HtmlSelectElement", "HtmlTextAreaElement", "InputEvent", "IntersectionObserverEntry", "KeyboardEvent", "Location", "MediaElementAudioSourceNode", "MediaQueryList", "MessageEvent", "MouseEvent", "Navigator", "Node", "NodeList", "ObserverCallback", "Performance", "PointerEvent", "ProgressEvent", "QueuingStrategy", "ReadableByteStreamController", "ReadableStream", "ReadableStreamByobReader", "ReadableStreamByobRequest", "ReadableStreamDefaultController", "ReadableStreamDefaultReader", "ReadableStreamGetReaderOptions", "ReadableStreamReadResult", "ReadableStreamReaderMode", "ReadableStreamType", "ReadableWritablePair", "ReferrerPolicy", "Request", "RequestCache", "RequestCredentials", "RequestInit", "RequestMode", "RequestRedirect", "ResizeObserverEntry", "ResizeObserverSize", "Response", "ResponseInit", "ResponseType", "ScrollBehavior", "ScrollIntoViewOptions", "ScrollLogicalPosition", "ScrollRestoration", "ScrollToOptions", "Selection", "Storage", "StreamPipeOptions", "Text", "Touch", "TouchEvent", "TouchList", "TransformStream", "TransformStreamDefaultController", "Transformer", "TransitionEvent", "UiEvent", "UnderlyingSink", "UnderlyingSource", "Url", "UrlSearchParams", "WebSocket", "WheelEvent", "Window", "WritableStream", "WritableStreamDefaultController", "WritableStreamDefaultWriter", "console", "std"] }
+web-sys = { version = "0.3.104", features = ["AbortController", "AbortSignal", "AddEventListenerOptions", "AnalyserNode", "AnimationEvent", "AudioContext", "AudioContextOptions", "AudioContextState", "AudioDestinationNode", "AudioNode", "AudioWorklet", "AudioWorkletNode", "AudioWorkletNodeOptions", "BaseAudioContext", "BinaryType", "Blob", "BlobPropertyBag", "Cache", "CacheStorage", "CharacterData", "Clipboard", "ClipboardEvent", "CloseEvent", "CloseEventInit", "Comment", "CompositionEvent", "Crypto", "CssStyleDeclaration", "CustomEvent", "DataTransfer", "DataTransferItem", "DataTransferItemList", "Document", "DomRect", "DomRectReadOnly", "DomTokenList", "DragEvent", "Element", "ErrorEvent", "Event", "EventSource", "EventSourceInit", "EventTarget", "File", "FileList", "FileReader", "FocusEvent", "FormData", "Headers", "History", "HtmlAudioElement", "HtmlCanvasElement", "HtmlElement", "HtmlFormElement", "HtmlHeadElement", "HtmlInputElement", "HtmlMediaElement", "HtmlSelectElement", "HtmlTextAreaElement", "InputEvent", "IntersectionObserverEntry", "KeyboardEvent", "Location", "MediaElementAudioSourceNode", "MediaQueryList", "MessageEvent", "MessagePort", "MouseEvent", "Navigator", "Node", "NodeList", "ObserverCallback", "Performance", "PointerEvent", "ProgressEvent", "QueuingStrategy", "ReadableByteStreamController", "ReadableStream", "ReadableStreamByobReader", "ReadableStreamByobRequest", "ReadableStreamDefaultController", "ReadableStreamDefaultReader", "ReadableStreamGetReaderOptions", "ReadableStreamReadResult", "ReadableStreamReaderMode", "ReadableStreamType", "ReadableWritablePair", "ReferrerPolicy", "Request", "RequestCache", "RequestCredentials", "RequestInit", "RequestMode", "RequestRedirect", "ResizeObserverEntry", "ResizeObserverSize", "Response", "ResponseInit", "ResponseType", "ScrollBehavior", "ScrollIntoViewOptions", "ScrollLogicalPosition", "ScrollRestoration", "ScrollToOptions", "Selection", "Storage", "StreamPipeOptions", "Text", "Touch", "TouchEvent", "TouchList", "TransformStream", "TransformStreamDefaultController", "Transformer", "TransitionEvent", "UiEvent", "UnderlyingSink", "UnderlyingSource", "Url", "UrlSearchParams", "WebGl2RenderingContext", "WebGlBuffer", "WebGlContextAttributes", "WebGlFramebuffer", "WebGlProgram", "WebGlRenderbuffer", "WebGlShader", "WebGlSync", "WebGlTexture", "WebGlUniformLocation", "WebGlVertexArrayObject", "WebSocket", "WheelEvent", "Window", "Worklet", "WorkletOptions", "WritableStream", "WritableStreamDefaultController", "WritableStreamDefaultWriter", "console", "std"] }
 web-time = { version = "1.1.0", default-features = false, features = ["serde"] }
 writeable = { version = "0.6.4", default-features = false, features = ["alloc"] }
 xterm-query = { version = "0.6.1", default-features = false }
-xxhash-rust = { version = "0.8.18", default-features = false, features = ["const_xxh64", "xxh32"] }
-yoke = { version = "0.8.4", default-features = false, features = ["alloc", "derive", "zerofrom"] }
+xxhash-rust = { version = "0.8.18", default-features = false, features = ["const_xxh64", "xxh3", "xxh32"] }
+yoke = { version = "0.8.4", features = ["alloc", "derive", "zerofrom"] }
 zerofrom = { version = "0.1.8", default-features = false, features = ["alloc", "derive"] }
 zeroize = { version = "1.9.0", features = ["alloc", "derive", "zeroize_derive"] }
 zerotrie = { version = "0.2.5", default-features = false, features = ["alloc", "yoke", "zerofrom"] }
-zerovec = { version = "0.11.9", default-features = false, features = ["alloc", "derive", "yoke"] }
 
 [target.'cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"))'.dependencies]
 ahash = { version = "0.8.12", features = ["getrandom", "no-rng", "runtime-rng", "serde", "std"] }
 aho-corasick = { version = "1.1.5", features = ["perf-literal", "std"] }
 alloc-stdlib = { version = "0.2.4", default-features = false }
+anyrender_vello_hybrid = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1", default-features = false, features = ["webgl"] }
 approx = { version = "0.5.1", features = ["std"] }
-axum = { version = "0.8.9", features = ["form", "http1", "json", "macros", "matched-path", "multipart", "original-uri", "query", "tokio", "tower-log", "tracing", "ws"] }
+async-compression = { version = "0.4.43", default-features = false, features = ["gzip", "tokio"] }
+async-lock = { version = "3.4.2", features = ["std"] }
+async-once-cell = { version = "0.5.4", default-features = false, features = ["std"] }
+aws-lc-rs = { version = "1.18.0", default-features = false, features = ["aws-lc-sys", "prebuilt-nasm"] }
+aws-lc-sys = { version = "0.44.0", default-features = false, features = ["prebuilt-nasm"] }
+axum = { version = "0.8.9", features = ["form", "http1", "http2", "json", "macros", "matched-path", "multipart", "original-uri", "query", "tokio", "tower-log", "tracing", "ws"] }
+axum-extra = { version = "0.12.6", features = ["tracing", "typed-header"] }
 base16ct = { version = "1.0.0", default-features = false, features = ["alloc"] }
+bit-set = { version = "0.8.0", features = ["std"] }
+bit-vec = { version = "0.8.0", features = ["std"] }
+blitz-dom = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11", features = ["accessibility", "accesskit", "autofocus", "custom-widget", "file-input", "svg", "system-fonts", "text-transform-icu", "woff"] }
+blitz-paint = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11", features = ["apple-font-embolden", "custom-widget", "svg"] }
+blitz-shell = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11", features = ["accessibility", "custom-widget", "data-uri", "file-dialog"] }
 block-buffer = { version = "0.12.1", default-features = false, features = ["zeroize"] }
 block-padding = { version = "0.3.3", default-features = false }
 brotli-decompressor = { version = "5.0.3", features = ["alloc-stdlib", "std"] }
@@ -1163,6 +1282,8 @@ cipher = { version = "0.4.4", default-features = false, features = ["block-paddi
 clap = { version = "4.6.7", features = ["color", "derive", "env", "error-context", "help", "std", "suggestions", "usage"] }
 clap_builder = { version = "4.6.7", default-features = false, features = ["color", "env", "error-context", "help", "std", "suggestions", "usage"] }
 color = { version = "0.3.3", features = ["bytemuck", "std"] }
+compression-codecs = { version = "0.4.38", default-features = false, features = ["flate2", "gzip", "memchr"] }
+compression-core = { version = "0.4.32", default-features = false }
 concurrent-queue = { version = "2.5.0", features = ["std"] }
 const-str = { version = "0.7.1" }
 constant_time_eq = { version = "0.4.2", features = ["std"] }
@@ -1174,20 +1295,29 @@ crossterm = { version = "0.29.0", features = ["bracketed-paste", "derive-more", 
 crypto-common-c65f7effa3be6d31 = { package = "crypto-common", version = "0.1.7", default-features = false, features = ["getrandom", "rand_core", "std"] }
 crypto-common-6f8ce4dd05d13bba = { package = "crypto-common", version = "0.2.2", default-features = false, features = ["getrandom", "rand_core"] }
 ctutils = { version = "0.4.2", default-features = false, features = ["subtle"] }
+dashmap = { version = "6.2.1", default-features = false }
+debug_timer = { version = "0.1.3", default-features = false, features = ["enable"] }
 derive_more = { version = "2.1.1", features = ["add", "add_assign", "debug", "deref", "deref_mut", "display", "from", "from_str", "into", "into_iterator", "is_variant", "std", "try_from", "try_into"] }
 digest-93f6ce9d446188ac = { package = "digest", version = "0.10.7", features = ["alloc", "block-buffer", "core-api", "mac", "std", "subtle"] }
 digest-a6292c17cd707f01 = { package = "digest", version = "0.11.3", features = ["alloc", "block-api", "mac", "oid", "rand_core", "zeroize"] }
-dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["asset", "cli-config", "desktop", "devtools", "document", "fullstack", "hooks", "html", "launch", "lib", "logger", "macro", "mobile", "mounted", "router", "signals", "warnings", "web"] }
+dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["asset", "cli-config", "desktop", "devtools", "document", "fullstack", "hooks", "html", "launch", "lib", "logger", "macro", "mobile", "mounted", "router", "server", "signals", "ssr", "warnings", "wasm-split", "web"] }
 dioxus-asset-resolver = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["native", "web"] }
 dioxus-cli-config = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["web"] }
-dioxus-fullstack = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["web", "ws"] }
-dioxus-fullstack-core = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["web"] }
+dioxus-config-macros = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["wasm-split"] }
+dioxus-core = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["document", "hooks", "html", "macro", "signals", "ssr", "stores", "wasm-split"] }
+dioxus-devtools = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["serve"] }
+dioxus-fullstack = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["server", "web", "ws"] }
+dioxus-fullstack-core = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["server", "web"] }
 dioxus-html = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["serialize"] }
 dioxus-interpreter-js = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["binary-protocol", "minimal_bindings", "serialize", "sledgehammer", "webonly"] }
 dioxus-primitives = { git = "https://github.com/FastTrackStudios/dioxus-components", tag = "fts-upstream-2026-11", features = ["router"] }
+dioxus-router = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["html", "wasm-split"] }
+dioxus-server = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["document", "router"] }
 dioxus-web = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["devtools", "document", "hydrate", "mounted"] }
 downcast-rs = { version = "1.2.1", features = ["std"] }
 either = { version = "1.18.0", features = ["serde", "std", "use_std"] }
+env_filter = { version = "2.0.0", default-features = false, features = ["regex", "std"] }
+env_logger = { version = "0.11.11", features = ["auto-color", "color", "humantime", "regex"] }
 euclid = { version = "0.22.14", features = ["serde", "std"] }
 event-listener = { version = "5.4.2", features = ["parking", "std"] }
 event-listener-strategy = { version = "0.5.4", features = ["std"] }
@@ -1197,9 +1327,8 @@ facet-pretty = { version = "0.50.0-rc.7", features = ["detect-terminal-theme"] }
 facet-styx = { version = "5.0.0-rc.7", default-features = false, features = ["figue"] }
 figue = { version = "5.0.0-rc.6", features = ["rich-diagnostics"] }
 figue-attrs = { version = "5.0.0-rc.6", default-features = false }
-flate2 = { version = "1.1.10", features = ["any_impl", "any_zlib", "miniz_oxide", "runtime_detection", "rust_backend", "zlib-rs"] }
+flate2 = { version = "1.1.10", features = ["any_c_zlib", "any_impl", "any_zlib", "libz-sys", "miniz_oxide", "runtime_detection", "rust_backend", "zlib", "zlib-rs"] }
 foldhash = { version = "0.2.0", features = ["std"] }
-form_urlencoded = { version = "1.2.2", features = ["alloc", "std"] }
 futures = { version = "0.3.34", features = ["alloc", "async-await", "executor", "futures-executor", "std", "thread-pool"] }
 futures-executor = { version = "0.3.34", features = ["std", "thread-pool"] }
 futures-io = { version = "0.3.34", features = ["std"] }
@@ -1211,8 +1340,10 @@ gloo-net = { version = "0.7.0", features = ["eventsource", "futures-channel", "f
 gloo-timers = { version = "0.4.0", features = ["futures", "futures-channel", "futures-core"] }
 gloo-utils = { version = "0.3.0", default-features = false, features = ["serde"] }
 h2 = { version = "0.4.19", default-features = false, features = ["stream"] }
-half = { version = "2.7.1", features = ["alloc", "num-traits", "std"] }
+half = { version = "2.7.1", features = ["alloc", "bytemuck", "num-traits", "rand_distr", "std", "use-intrinsics"] }
 hashbrown = { version = "0.14.5", features = ["ahash", "allocator-api2", "inline-more", "raw"] }
+hashbrown-986da7b5efc2b80e = { package = "hashbrown", version = "0.16.1", features = ["allocator-api2", "default-hasher", "equivalent", "inline-more", "raw-entry", "serde"] }
+headers = { version = "0.4.1", default-features = false }
 headers-core = { version = "0.3.0", default-features = false }
 heapless = { version = "0.8.0", default-features = false, features = ["serde"] }
 hmac-0_13 = { package = "hmac", version = "0.13.0", default-features = false, features = ["zeroize"] }
@@ -1220,19 +1351,21 @@ hybrid-array = { version = "0.4.14", default-features = false, features = ["allo
 hyper = { version = "1.11.1", features = ["client", "full", "http1", "http2", "server"] }
 hyper-rustls = { version = "0.27.9", default-features = false, features = ["aws-lc-rs", "http1", "http2", "log", "logging", "native-tokio", "ring", "rustls-native-certs", "tls12", "webpki-roots", "webpki-tokio"] }
 hyper-tls = { version = "0.6.0", default-features = false, features = ["alpn"] }
-hyper-util = { version = "0.1.20", features = ["client", "client-legacy", "client-proxy", "client-proxy-system", "http1", "http2", "server", "server-auto", "service", "tokio"] }
-icu_collections = { version = "2.4.0", default-features = false, features = ["alloc"] }
-icu_locale_core = { version = "2.4.0", default-features = false, features = ["alloc", "zerovec"] }
+hyper-util = { version = "0.1.20", features = ["client", "client-legacy", "client-pool", "client-proxy", "client-proxy-system", "full", "http1", "http2", "server", "server-auto", "server-graceful", "service", "tokio", "tracing"] }
 icu_normalizer = { version = "2.4.0", default-features = false, features = ["compiled_data", "utf16_iter", "utf8_iter"] }
-icu_provider = { version = "2.4.0", default-features = false, features = ["alloc", "baked"] }
 icu_segmenter = { version = "2.4.0", default-features = false, features = ["auto", "compiled_data", "lstm"] }
 idna = { version = "1.1.0", features = ["alloc", "compiled_data", "std"] }
 image = { version = "0.25.6", features = ["avif", "bmp", "dds", "default-formats", "exr", "ff", "gif", "hdr", "ico", "jpeg", "png", "pnm", "qoi", "rayon", "tga", "tiff", "webp"] }
 inout = { version = "0.1.4", default-features = false, features = ["block-padding"] }
+inventory = { version = "0.3.24", default-features = false }
+ipnet = { version = "2.12.2", features = ["serde", "std"] }
 iroh-metrics = { version = "1.0.1", features = ["metrics"] }
+jiff = { version = "0.2.37", features = ["alloc", "perf-inline", "std", "tz-fat", "tz-system", "tzdb-bundle-platform", "tzdb-concatenated", "tzdb-zoneinfo"] }
+jiff-core = { version = "0.1.1", default-features = false, features = ["alloc", "std", "tz-fat"] }
 js-sys = { version = "0.3.104", features = ["std", "unsafe-eval"] }
 libc = { version = "0.2.189", features = ["extra_traits", "std"] }
 libsqlite3-sys = { version = "0.30.1", features = ["bundled", "bundled_bindings", "cc", "min_sqlite_version_3_14_0", "pkg-config", "unlock_notify", "vcpkg"] }
+libz-sys = { version = "1.1.29", default-features = false }
 linebender_resource_handle = { version = "0.1.1", features = ["std"] }
 linux-raw-sys = { version = "0.12.1", default-features = false, features = ["auxvec", "elf", "errno", "general", "if_ether", "io_uring", "ioctl", "net", "netlink", "no_std", "prctl", "system", "xdp"] }
 litemap = { version = "0.8.3", default-features = false, features = ["alloc"] }
@@ -1240,16 +1373,18 @@ lock_api = { version = "0.4.14", features = ["arc_lock", "atomic_usize"] }
 log = { version = "0.4.34", default-features = false, features = ["alloc", "kv", "kv_unstable", "std", "value-bag"] }
 md-5 = { version = "0.10.6", features = ["std"] }
 memchr = { version = "2.8.3", features = ["alloc", "std", "use_std"] }
+memmap2 = { version = "0.9.11", default-features = false, features = ["stable_deref_trait"] }
 mime_guess = { version = "2.0.5", features = ["rev-mappings"] }
 mio = { version = "1.2.3", features = ["log", "net", "os-ext", "os-poll"] }
+moka = { version = "0.12.16", features = ["future", "sync"] }
 multer = { version = "3.1.0" }
+naga = { version = "30.0.1", features = ["glsl-out", "hlsl-out", "spv-out", "wgsl-in", "wgsl-out"] }
 native-tls = { version = "0.2.18", features = ["alpn"] }
 nix = { version = "0.31.3", features = ["feature", "fs", "ioctl", "memoffset", "mount", "poll", "process", "socket", "uio", "user"] }
 num-bigint = { version = "0.4.8", features = ["std"] }
 num-complex = { version = "0.4.6", features = ["bytemuck", "std"] }
 num-integer = { version = "0.1.47", features = ["i128", "std"] }
 num-rational = { version = "0.4.2", features = ["num-bigint", "num-bigint-std", "std"] }
-num-traits = { version = "0.2.19", features = ["i128", "libm", "std"] }
 once_cell = { version = "1.21.4", features = ["alloc", "critical-section", "portable-atomic", "race", "std"] }
 opentelemetry = { version = "0.30.0", features = ["futures", "futures-core", "futures-sink", "internal-logs", "logs", "metrics", "pin-project-lite", "testing", "thiserror", "trace", "tracing"] }
 opentelemetry_sdk = { version = "0.30.0", features = ["experimental_async_runtime", "internal-logs", "logs", "metrics", "percent-encoding", "rand", "rt-tokio", "rt-tokio-current-thread", "serde_json", "testing", "tokio", "tokio-stream", "trace"] }
@@ -1259,6 +1394,7 @@ parking_lot = { version = "0.12.5", features = ["arc_lock", "send_guard"] }
 parley = { version = "0.12.0", features = ["bytemuck", "std", "system"] }
 pathdiff = { version = "0.2.3", default-features = false, features = ["camino"] }
 peniko = { version = "0.6.1", features = ["bytemuck", "std"] }
+petgraph = { version = "0.8.3", features = ["graphmap", "matrix_graph", "stable_graph", "std"] }
 phf = { version = "0.13.1", features = ["macros", "phf_macros", "std"] }
 phf_shared = { version = "0.13.1", features = ["std"] }
 pkcs8 = { version = "0.11.0", default-features = false, features = ["alloc", "pem", "std"] }
@@ -1267,12 +1403,14 @@ potential_utf = { version = "0.1.6", default-features = false, features = ["allo
 profiling = { version = "1.0.18", features = ["procmacros", "profiling-procmacros"] }
 psl-types = { version = "2.0.11", default-features = false }
 publicsuffix = { version = "2.3.0", features = ["idna", "punycode"] }
+pulp = { version = "0.22.3", features = ["relaxed-simd", "std", "x86-v3"] }
+pulp-wasm-simd-flag = { version = "0.1.1", default-features = false, features = ["relaxed-simd"] }
 rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.8", features = ["alloc", "getrandom", "libc", "rand_chacha", "small_rng", "std", "std_rng"] }
 rand_chacha-0_3 = { package = "rand_chacha", version = "0.3.1", features = ["std"] }
 rand_chacha = { version = "0.9.0", features = ["std"] }
-read-fonts = { version = "0.41.0", default-features = false, features = ["experimental_font_api", "std"] }
+rand_distr = { version = "0.5.1", features = ["alloc", "std"] }
 regex-automata = { version = "0.4.18", default-features = false, features = ["alloc", "dfa", "dfa-build", "dfa-onepass", "dfa-search", "hybrid", "meta", "nfa", "nfa-backtrack", "nfa-pikevm", "nfa-thompson", "perf", "perf-inline", "perf-literal", "perf-literal-multisubstring", "perf-literal-substring", "std", "syntax", "unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment", "unicode-word-boundary"] }
-reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", features = ["__rustls", "__rustls-ring", "__tls", "blocking", "charset", "default-tls", "h2", "http2", "json", "macos-system-configuration", "multipart", "rustls-tls", "rustls-tls-webpki-roots", "rustls-tls-webpki-roots-no-provider", "stream", "system-proxy"] }
+reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", features = ["__rustls", "__rustls-ring", "__tls", "blocking", "charset", "default-tls", "gzip", "h2", "http2", "json", "macos-system-configuration", "multipart", "rustls-tls", "rustls-tls-native-roots", "rustls-tls-native-roots-no-provider", "rustls-tls-webpki-roots", "rustls-tls-webpki-roots-no-provider", "stream", "system-proxy"] }
 reqwest-594e8ee84c453af0 = { package = "reqwest", version = "0.13.5", default-features = false, features = ["__native-tls", "__native-tls-alpn", "__rustls", "__rustls-aws-lc-rs", "__tls", "charset", "cookies", "form", "http2", "json", "multipart", "native-tls", "rustls", "rustls-no-provider", "stream"] }
 rfd = { version = "0.17.2", features = ["pollster", "wayland", "wayland-backend", "wayland-client", "wayland-protocols", "xdg-portal"] }
 ring = { version = "0.17.14", features = ["alloc", "dev_urandom_fallback", "std"] }
@@ -1280,11 +1418,13 @@ rust_decimal = { version = "1.43.0", features = ["maths", "serde", "std"] }
 rustix = { version = "1.1.5", features = ["alloc", "event", "fs", "io_uring", "net", "pipe", "process", "shm", "std", "system", "thread", "time"] }
 rustls = { version = "0.23.46", features = ["aws-lc-rs", "aws_lc_rs", "log", "logging", "prefer-post-quantum", "ring", "std", "tls12"] }
 rustls-pemfile = { version = "2.2.0", features = ["std"] }
+same-file = { version = "1.0.6", default-features = false }
 scopeguard = { version = "1.2.0", features = ["use_std"] }
 sea-orm = { version = "1.1.20", features = ["bigdecimal", "chrono", "macros", "postgres-array", "runtime-tokio", "runtime-tokio-rustls", "rust_decimal", "sea-query-binder", "serde_json", "sqlx", "sqlx-dep", "sqlx-postgres", "sqlx-sqlite", "time", "uuid", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
 sea-query = { version = "0.32.7", default-features = false, features = ["backend-mysql", "backend-postgres", "backend-sqlite", "bigdecimal", "chrono", "derive", "hashable-value", "ordered-float", "postgres-array", "rust_decimal", "sea-query-derive", "serde_json", "thread-safe", "time", "uuid", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
 sea-query-binder = { version = "0.7.0", default-features = false, features = ["bigdecimal", "chrono", "postgres-array", "runtime-tokio-rustls", "rust_decimal", "serde_json", "sqlx", "sqlx-postgres", "sqlx-sqlite", "time", "uuid", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
 seize = { version = "0.5.1", features = ["fast-barrier", "libc", "windows-sys"] }
+semver = { version = "1.0.28", features = ["serde", "std"] }
 send_wrapper = { version = "0.6.0", default-features = false, features = ["futures", "futures-core"] }
 serde = { version = "1.0.229", features = ["alloc", "derive", "rc", "serde_derive", "std"] }
 serde-wasm-bindgen = { version = "0.6.5", default-features = false }
@@ -1299,14 +1439,14 @@ skrifa = { version = "0.44.0", features = ["autohint_shaping", "std"] }
 sledgehammer_bindgen = { version = "0.6.0", default-features = false, features = ["wasm-bindgen", "web"] }
 slotmap = { version = "1.1.1", features = ["serde", "std"] }
 smallvec = { version = "1.16.4", default-features = false, features = ["const_generics", "const_new", "serde", "union", "write"] }
-spin-0_10 = { package = "spin", version = "0.10.1", features = ["barrier", "lazy", "lock_api", "mutex", "once", "rwlock", "spin_mutex"] }
-spin = { version = "0.9.9", features = ["barrier", "lazy", "lock_api", "lock_api_crate", "mutex", "once", "rwlock", "spin_mutex", "std"] }
+spin = { version = "0.10.1", features = ["barrier", "lazy", "lock_api", "mutex", "once", "rwlock", "spin_mutex"] }
+spin-0_9 = { package = "spin", version = "0.9.9", features = ["barrier", "lazy", "lock_api", "lock_api_crate", "mutex", "once", "rwlock", "spin_mutex", "std"] }
 spki = { version = "0.8.0", default-features = false, features = ["alloc", "pem", "std"] }
 sqlx = { version = "0.8.6", default-features = false, features = ["_rt-tokio", "_sqlite", "bigdecimal", "chrono", "json", "postgres", "runtime-tokio", "runtime-tokio-rustls", "rust_decimal", "sqlite", "sqlx-postgres", "sqlx-sqlite", "time", "tls-rustls-ring", "tls-rustls-ring-webpki", "uuid"] }
 stable_deref_trait = { version = "1.2.1", features = ["alloc", "std"] }
 strip-ansi-escapes = { version = "0.2.1", default-features = false }
+strum-1f5adca70f036a62 = { package = "strum", version = "0.28.0", features = ["derive", "std", "strum_macros"] }
 terminal-light = { version = "1.9.1", default-features = false }
-thin-vec = { version = "0.2.21", features = ["serde", "std"] }
 time = { version = "0.3.55", features = ["alloc", "formatting", "local-offset", "macros", "parsing", "serde", "serde-human-readable", "serde-well-known", "std"] }
 tinystr = { version = "0.8.5", features = ["alloc", "zerovec"] }
 tinyvec = { version = "1.13.3", features = ["alloc", "rustc_1_57", "std"] }
@@ -1317,9 +1457,10 @@ tokio-tungstenite = { version = "0.29.0", features = ["__rustls-tls", "connect",
 tokio-util = { version = "0.7.19", features = ["codec", "compat", "futures-io", "futures-util", "io", "io-util", "libc", "rt"] }
 toml = { version = "0.8.2", features = ["display", "indexmap", "parse", "preserve_order"] }
 tower = { version = "0.5.3", default-features = false, features = ["balance", "buffer", "discover", "futures-core", "futures-util", "indexmap", "limit", "load", "load-shed", "log", "make", "pin-project-lite", "ready-cache", "retry", "slab", "sync_wrapper", "timeout", "tokio", "tokio-util", "tracing", "util"] }
-tower-http = { version = "0.6.11", features = ["cors", "follow-redirect", "fs", "futures-core", "futures-util", "httpdate", "map-response-body", "mime", "mime_guess", "percent-encoding", "set-header", "set-status", "tokio-util", "tower", "trace", "tracing"] }
+tower-http = { version = "0.6.11", features = ["cors", "decompression-gzip", "follow-redirect", "fs", "futures-core", "futures-util", "httpdate", "limit", "map-response-body", "mime", "mime_guess", "percent-encoding", "set-header", "set-status", "tokio-util", "tower", "trace", "tracing"] }
 tracing = { version = "0.1.44", features = ["attributes", "log", "std", "tracing-attributes"] }
 tracing-core = { version = "0.1.36", features = ["once_cell", "std"] }
+tracing-futures = { version = "0.2.5", features = ["pin-project", "std", "std-future"] }
 tracing-subscriber = { version = "0.3.23", features = ["alloc", "ansi", "env-filter", "fmt", "matchers", "nu-ansi-term", "once_cell", "registry", "sharded-slab", "smallvec", "std", "thread_local", "tracing", "tracing-log"] }
 ttf-parser = { version = "0.25.1", features = ["apple-layout", "core_maths", "glyph-names", "gvar-alloc", "no-std-float", "opentype-layout", "std", "variable-fonts"] }
 tungstenite = { version = "0.29.0", features = ["__rustls-tls", "data-encoding", "handshake", "http", "httparse", "native-tls", "native-tls-crate", "rustls", "rustls-pki-types", "sha1"] }
@@ -1331,51 +1472,63 @@ url = { version = "2.5.8", features = ["serde", "std"] }
 usvg = { version = "0.48.1", features = ["base64", "flate2", "fontdb", "harfrust", "memmap-fonts", "skrifa", "svgz", "system-fonts", "text", "unicode-bidi", "unicode-script", "unicode-vo", "writer", "xmlwriter"] }
 uuid = { version = "1.26.1", features = ["atomic", "js", "md5", "rng", "serde", "sha1", "std", "v1", "v3", "v4", "v5", "v6", "v7", "v8"] }
 value-bag = { version = "1.14.1", default-features = false, features = ["inline-i128"] }
+vello_gpu = { version = "0.3.0", features = ["text", "webgl", "wgpu", "wgpu_default"] }
+vello_gpu_shaders = { version = "0.3.0", default-features = false, features = ["glsl"] }
 vox = { version = "0.10.0-rc.7", default-features = false, features = ["runtime", "transport-local", "transport-websocket", "transport-websocket-tls"] }
 vte = { version = "0.14.1", default-features = false }
+walkdir = { version = "2.5.0", default-features = false }
 wasm-bindgen = { version = "0.2.127", features = ["std"] }
 wasm-bindgen-futures = { version = "0.4.77", features = ["std"] }
 wasm-bindgen-shared = { version = "0.2.127", default-features = false }
+wasm-splitter = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false }
 wasm-streams = { version = "0.5.0", default-features = false }
-web-sys = { version = "0.3.104", features = ["AbortController", "AbortSignal", "AddEventListenerOptions", "AnalyserNode", "AnimationEvent", "AudioContext", "AudioDestinationNode", "AudioNode", "BaseAudioContext", "BinaryType", "Blob", "CharacterData", "Clipboard", "ClipboardEvent", "CloseEvent", "CloseEventInit", "Comment", "CompositionEvent", "Crypto", "CssStyleDeclaration", "CustomEvent", "DataTransfer", "DataTransferItem", "DataTransferItemList", "Document", "DomRect", "DomRectReadOnly", "DomTokenList", "DragEvent", "Element", "ErrorEvent", "Event", "EventSource", "EventSourceInit", "EventTarget", "File", "FileList", "FileReader", "FocusEvent", "FormData", "Headers", "History", "HtmlAudioElement", "HtmlElement", "HtmlFormElement", "HtmlHeadElement", "HtmlInputElement", "HtmlMediaElement", "HtmlSelectElement", "HtmlTextAreaElement", "InputEvent", "IntersectionObserverEntry", "KeyboardEvent", "Location", "MediaElementAudioSourceNode", "MediaQueryList", "MessageEvent", "MouseEvent", "Navigator", "Node", "NodeList", "ObserverCallback", "Performance", "PointerEvent", "ProgressEvent", "QueuingStrategy", "ReadableByteStreamController", "ReadableStream", "ReadableStreamByobReader", "ReadableStreamByobRequest", "ReadableStreamDefaultController", "ReadableStreamDefaultReader", "ReadableStreamGetReaderOptions", "ReadableStreamReadResult", "ReadableStreamReaderMode", "ReadableStreamType", "ReadableWritablePair", "ReferrerPolicy", "Request", "RequestCache", "RequestCredentials", "RequestInit", "RequestMode", "RequestRedirect", "ResizeObserverEntry", "ResizeObserverSize", "Response", "ResponseInit", "ResponseType", "ScrollBehavior", "ScrollIntoViewOptions", "ScrollLogicalPosition", "ScrollRestoration", "ScrollToOptions", "Selection", "Storage", "StreamPipeOptions", "Text", "Touch", "TouchEvent", "TouchList", "TransformStream", "TransformStreamDefaultController", "Transformer", "TransitionEvent", "UiEvent", "UnderlyingSink", "UnderlyingSource", "Url", "UrlSearchParams", "WebSocket", "WheelEvent", "Window", "WritableStream", "WritableStreamDefaultController", "WritableStreamDefaultWriter", "console", "std"] }
+web-sys = { version = "0.3.104", features = ["AbortController", "AbortSignal", "AddEventListenerOptions", "AnalyserNode", "AnimationEvent", "AudioContext", "AudioContextOptions", "AudioContextState", "AudioDestinationNode", "AudioNode", "AudioWorklet", "AudioWorkletNode", "AudioWorkletNodeOptions", "BaseAudioContext", "BinaryType", "Blob", "BlobPropertyBag", "Cache", "CacheStorage", "CharacterData", "Clipboard", "ClipboardEvent", "CloseEvent", "CloseEventInit", "Comment", "CompositionEvent", "Crypto", "CssStyleDeclaration", "CustomEvent", "DataTransfer", "DataTransferItem", "DataTransferItemList", "Document", "DomRect", "DomRectReadOnly", "DomTokenList", "DragEvent", "Element", "ErrorEvent", "Event", "EventSource", "EventSourceInit", "EventTarget", "File", "FileList", "FileReader", "FocusEvent", "FormData", "Headers", "History", "HtmlAudioElement", "HtmlCanvasElement", "HtmlElement", "HtmlFormElement", "HtmlHeadElement", "HtmlInputElement", "HtmlMediaElement", "HtmlSelectElement", "HtmlTextAreaElement", "InputEvent", "IntersectionObserverEntry", "KeyboardEvent", "Location", "MediaElementAudioSourceNode", "MediaQueryList", "MessageEvent", "MessagePort", "MouseEvent", "Navigator", "Node", "NodeList", "ObserverCallback", "Performance", "PointerEvent", "ProgressEvent", "QueuingStrategy", "ReadableByteStreamController", "ReadableStream", "ReadableStreamByobReader", "ReadableStreamByobRequest", "ReadableStreamDefaultController", "ReadableStreamDefaultReader", "ReadableStreamGetReaderOptions", "ReadableStreamReadResult", "ReadableStreamReaderMode", "ReadableStreamType", "ReadableWritablePair", "ReferrerPolicy", "Request", "RequestCache", "RequestCredentials", "RequestInit", "RequestMode", "RequestRedirect", "ResizeObserverEntry", "ResizeObserverSize", "Response", "ResponseInit", "ResponseType", "ScrollBehavior", "ScrollIntoViewOptions", "ScrollLogicalPosition", "ScrollRestoration", "ScrollToOptions", "Selection", "Storage", "StreamPipeOptions", "Text", "Touch", "TouchEvent", "TouchList", "TransformStream", "TransformStreamDefaultController", "Transformer", "TransitionEvent", "UiEvent", "UnderlyingSink", "UnderlyingSource", "Url", "UrlSearchParams", "WebGl2RenderingContext", "WebGlBuffer", "WebGlContextAttributes", "WebGlFramebuffer", "WebGlProgram", "WebGlRenderbuffer", "WebGlShader", "WebGlSync", "WebGlTexture", "WebGlUniformLocation", "WebGlVertexArrayObject", "WebSocket", "WheelEvent", "Window", "Worklet", "WorkletOptions", "WritableStream", "WritableStreamDefaultController", "WritableStreamDefaultWriter", "console", "std"] }
 web-time = { version = "1.1.0", default-features = false, features = ["serde"] }
 writeable = { version = "0.6.4", default-features = false, features = ["alloc"] }
 x11rb = { version = "0.13.2", default-features = false, features = ["allow-unsafe-code", "as-raw-xcb-connection", "cursor", "dl-libxcb", "libc", "libloading", "once_cell", "randr", "render", "resource_manager", "shape", "xcursor", "xfixes", "xinput", "xkb"] }
 x11rb-protocol = { version = "0.13.2", default-features = false, features = ["randr", "render", "resource_manager", "shape", "std", "xfixes", "xinput", "xkb"] }
 xterm-query = { version = "0.6.1", default-features = false }
-xxhash-rust = { version = "0.8.18", default-features = false, features = ["const_xxh64", "xxh32"] }
-yoke = { version = "0.8.4", default-features = false, features = ["alloc", "derive", "zerofrom"] }
+xxhash-rust = { version = "0.8.18", default-features = false, features = ["const_xxh64", "xxh3", "xxh32"] }
+yoke = { version = "0.8.4", features = ["alloc", "derive", "zerofrom"] }
 zbus = { version = "5.19.0", default-features = false, features = ["p2p", "tokio"] }
 zerofrom = { version = "0.1.8", default-features = false, features = ["alloc", "derive"] }
 zeroize = { version = "1.9.0", features = ["alloc", "derive", "zeroize_derive"] }
 zerotrie = { version = "0.2.5", default-features = false, features = ["alloc", "yoke", "zerofrom"] }
-zerovec = { version = "0.11.9", default-features = false, features = ["alloc", "derive", "yoke"] }
 
 [target.'cfg(all(target_arch = "aarch64", target_os = "macos"))'.build-dependencies]
 anstyle = { version = "1.0.14", features = ["std"] }
 axum-macros = { version = "0.5.1" }
 base64-0_23 = { package = "base64", version = "0.23.1", default-features = false, features = ["alloc", "std"] }
 base64ct = { version = "1.8.3", default-features = false, features = ["alloc"] }
+bitflags-1 = { package = "bitflags", version = "1.3.2" }
 bumpalo = { version = "3.20.3" }
 byteorder = { version = "1.5.0", features = ["std"] }
+bytes = { version = "1.12.1", features = ["std"] }
 cc = { version = "1.8.0", default-features = false, features = ["parallel"] }
 clang-sys = { version = "1.9.1", default-features = false, features = ["clang_10_0", "clang_11_0", "clang_3_5", "clang_3_6", "clang_3_7", "clang_3_8", "clang_3_9", "clang_4_0", "clang_5_0", "clang_6_0", "clang_7_0", "clang_8_0", "clang_9_0", "libloading", "runtime"] }
 cmake = { version = "0.1.58", default-features = false }
 const_format = { version = "0.2.36" }
 core-foundation = { version = "0.10.1", features = ["link"] }
+crossbeam-deque = { version = "0.8.8", features = ["std"] }
+crossbeam-epoch = { version = "0.9.21", default-features = false, features = ["alloc", "std"] }
+crossbeam-utils = { version = "0.8.23", features = ["std"] }
 darling-0_21 = { package = "darling", version = "0.21.3", features = ["suggestions"] }
 darling_core-0_21 = { package = "darling_core", version = "0.21.3", default-features = false, features = ["strsim", "suggestions"] }
 data-encoding = { version = "2.11.1", features = ["alloc", "std"] }
+der = { version = "0.8.2", default-features = false, features = ["alloc", "pem", "std", "zeroize"] }
+deranged = { version = "0.5.8" }
 derive_more-impl = { version = "2.1.1", features = ["add", "add_assign", "as_ref", "constructor", "debug", "deref", "deref_mut", "display", "from", "from_str", "into", "into_iterator", "is_variant", "try_from", "try_into", "try_unwrap", "unwrap"] }
 digest-93f6ce9d446188ac = { package = "digest", version = "0.10.7", features = ["alloc", "block-buffer", "core-api", "mac", "std", "subtle"] }
-dioxus-config-macro = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["desktop", "fullstack", "mobile", "web"] }
+dioxus-config-macro = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["desktop", "fullstack", "mobile", "ssr", "web"] }
 dioxus-fullstack-macro = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false }
 displaydoc = { version = "0.2.7", features = ["std"] }
-fastrand = { version = "2.5.0", features = ["alloc", "std"] }
+either = { version = "1.18.0", features = ["std", "use_std"] }
+foldhash-0_1 = { package = "foldhash", version = "0.1.5", default-features = false }
 fs_extra = { version = "1.3.0", default-features = false }
 genawaiter-proc-macro = { version = "0.99.1", default-features = false }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.17", default-features = false, features = ["std"] }
 half = { version = "2.7.1", features = ["alloc", "num-traits", "std"] }
+hashbrown-0_15 = { package = "hashbrown", version = "0.15.5", default-features = false, features = ["default-hasher", "inline-more"] }
 hashbrown-9067fe90e8c1f593 = { package = "hashbrown", version = "0.17.1", features = ["allocator-api2", "default-hasher", "equivalent", "inline-more", "raw-entry"] }
 http = { version = "1.5.0", default-features = false, features = ["std"] }
 httparse = { version = "1.10.1", default-features = false }
@@ -1389,6 +1542,7 @@ miniz_oxide = { version = "0.8.9", default-features = false, features = ["simd",
 naga = { version = "30.0.1", default-features = false, features = ["glsl-out", "wgsl-in", "wgsl-out"] }
 native-tls = { version = "0.2.18", default-features = false }
 num-traits = { version = "0.2.19", features = ["libm", "std"] }
+num_cpus = { version = "1.17.0", default-features = false }
 objc2 = { version = "0.6.5", features = ["alloc", "exception", "std"] }
 once_cell = { version = "1.21.4", features = ["alloc", "race", "std"] }
 openssl-src = { version = "300.6.1", features = ["legacy"] }
@@ -1397,6 +1551,7 @@ percent-encoding = { version = "2.3.2", features = ["alloc", "std"] }
 phf_generator = { version = "0.13.1", default-features = false }
 phf_macros = { version = "0.13.1", default-features = false }
 phf_shared = { version = "0.13.1", features = ["std"] }
+powerfmt = { version = "0.2.0", default-features = false }
 ppv-lite86 = { version = "0.2.21", default-features = false, features = ["simd", "std"] }
 proc-macro-error = { version = "0.4.12", default-features = false }
 proc-macro-error-attr = { version = "0.4.12", default-features = false }
@@ -1405,9 +1560,12 @@ proc-macro2-diagnostics = { version = "0.10.1", features = ["colors", "yansi"] }
 rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.8", default-features = false, features = ["small_rng"] }
 rand_chacha-0_3 = { package = "rand_chacha", version = "0.3.1", default-features = false, features = ["std"] }
 rand_core = { version = "0.6.4", default-features = false, features = ["alloc", "getrandom", "std"] }
+rayon = { version = "1.12.0", default-features = false }
+rayon-core = { version = "1.13.0", default-features = false }
 regex = { version = "1.13.1", features = ["perf", "perf-backtrack", "perf-cache", "perf-dfa", "perf-inline", "perf-literal", "perf-onepass", "std", "unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }
 regex-automata = { version = "0.4.18", features = ["alloc", "dfa", "dfa-build", "dfa-onepass", "dfa-search", "hybrid", "meta", "nfa", "nfa-backtrack", "nfa-pikevm", "nfa-thompson", "perf", "perf-inline", "perf-literal", "perf-literal-multisubstring", "perf-literal-substring", "std", "syntax", "unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment", "unicode-word-boundary"] }
 rustc-hash = { version = "1.1.0", features = ["std"] }
+rustix = { version = "1.1.5", features = ["alloc", "fs", "std"] }
 rustls-pki-types = { version = "1.15.1", default-features = false, features = ["alloc", "std"] }
 sea-orm-macros = { version = "1.1.20", default-features = false, features = ["bae", "derive", "postgres-array", "strum"] }
 security-framework = { version = "3.7.0", features = ["OSX_10_14", "alpn", "session-tickets"] }
@@ -1417,25 +1575,29 @@ serde_core = { version = "1.0.229", features = ["alloc", "result", "std"] }
 serde_spanned = { version = "0.6.9", default-features = false, features = ["serde"] }
 sledgehammer_bindgen_macro = { version = "0.6.5", features = ["web"] }
 smallvec = { version = "1.16.4", default-features = false, features = ["const_generics", "const_new"] }
+static_assertions = { version = "1.1.0", default-features = false }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109", features = ["clone-impls", "derive", "extra-traits", "fold", "full", "parsing", "printing", "proc-macro", "quote", "visit", "visit-mut"] }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.119", features = ["clone-impls", "derive", "extra-traits", "fold", "full", "parsing", "printing", "proc-macro", "visit", "visit-mut"] }
 syn-mid = { version = "0.5.4", default-features = false }
 tempfile = { version = "3.27.0", features = ["getrandom"] }
 thiserror = { version = "2.0.20", features = ["std"] }
+time = { version = "0.3.55", features = ["alloc", "formatting", "macros", "parsing", "std"] }
 toml_datetime-3b31131e45eafb45 = { package = "toml_datetime", version = "0.6.3", default-features = false, features = ["serde"] }
-toml_datetime-dff4ba8e3ae991db = { package = "toml_datetime", version = "1.1.1", features = ["alloc", "serde", "std"] }
 toml_edit = { version = "0.20.2", features = ["serde"] }
 typenum = { version = "1.20.1", default-features = false, features = ["const-generics"] }
+unicode-normalization = { version = "0.1.25", features = ["std"] }
 wasm-bindgen-macro = { version = "0.2.127", default-features = false }
 wasm-bindgen-macro-support = { version = "0.2.127", default-features = false }
 wasm-bindgen-shared = { version = "0.2.127", default-features = false }
+wasm-split-macro = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false }
 zeroize = { version = "1.9.0", features = ["alloc"] }
 
 [target.'cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"))'.build-dependencies]
+anstyle = { version = "1.0.14", features = ["std"] }
 axum-macros = { version = "0.5.1" }
 base64-0_23 = { package = "base64", version = "0.23.1", default-features = false, features = ["alloc", "std"] }
 base64ct = { version = "1.8.3", default-features = false, features = ["alloc"] }
-bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
+bitflags-1 = { package = "bitflags", version = "1.3.2" }
 bumpalo = { version = "3.20.3" }
 byteorder = { version = "1.5.0", features = ["std"] }
 bytes = { version = "1.12.1", features = ["std"] }
@@ -1443,21 +1605,29 @@ cc = { version = "1.8.0", default-features = false, features = ["parallel"] }
 clang-sys = { version = "1.9.1", default-features = false, features = ["clang_10_0", "clang_11_0", "clang_3_5", "clang_3_6", "clang_3_7", "clang_3_8", "clang_3_9", "clang_4_0", "clang_5_0", "clang_6_0", "clang_7_0", "clang_8_0", "clang_9_0", "libloading", "runtime"] }
 cmake = { version = "0.1.58", default-features = false }
 const_format = { version = "0.2.36" }
+crossbeam-deque = { version = "0.8.8", features = ["std"] }
+crossbeam-epoch = { version = "0.9.21", default-features = false, features = ["alloc", "std"] }
+crossbeam-utils = { version = "0.8.23", features = ["std"] }
 darling-0_21 = { package = "darling", version = "0.21.3", features = ["suggestions"] }
 darling_core-0_21 = { package = "darling_core", version = "0.21.3", default-features = false, features = ["strsim", "suggestions"] }
 data-encoding = { version = "2.11.1", features = ["alloc", "std"] }
+der = { version = "0.8.2", default-features = false, features = ["alloc", "pem", "std", "zeroize"] }
+deranged = { version = "0.5.8" }
 derive_more-impl = { version = "2.1.1", features = ["add", "add_assign", "as_ref", "constructor", "debug", "deref", "deref_mut", "display", "from", "from_str", "into", "into_iterator", "is_variant", "try_from", "try_into", "try_unwrap", "unwrap"] }
 digest-93f6ce9d446188ac = { package = "digest", version = "0.10.7", features = ["alloc", "block-buffer", "core-api", "mac", "std", "subtle"] }
-dioxus-config-macro = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["desktop", "fullstack", "mobile", "web"] }
+dioxus-config-macro = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["desktop", "fullstack", "mobile", "ssr", "web"] }
 dioxus-fullstack-macro = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false }
 displaydoc = { version = "0.2.7", features = ["std"] }
+either = { version = "1.18.0", features = ["std", "use_std"] }
 fastrand = { version = "2.5.0", features = ["alloc", "std"] }
+foldhash-0_1 = { package = "foldhash", version = "0.1.5", default-features = false }
 foreign-types = { version = "0.3.2", default-features = false }
 foreign-types-shared = { version = "0.1.1", default-features = false }
 fs_extra = { version = "1.3.0", default-features = false }
 genawaiter-proc-macro = { version = "0.99.1", default-features = false }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.17", default-features = false, features = ["std"] }
 half = { version = "2.7.1", features = ["alloc", "num-traits", "std"] }
+hashbrown-0_15 = { package = "hashbrown", version = "0.15.5", default-features = false, features = ["default-hasher", "inline-more"] }
 hashbrown-9067fe90e8c1f593 = { package = "hashbrown", version = "0.17.1", features = ["allocator-api2", "default-hasher", "equivalent", "inline-more", "raw-entry"] }
 http = { version = "1.5.0", default-features = false, features = ["std"] }
 httparse = { version = "1.10.1", default-features = false }
@@ -1467,11 +1637,11 @@ konst_macro_rules = { version = "0.2.19", default-features = false, features = [
 linux-raw-sys = { version = "0.12.1", default-features = false, features = ["auxvec", "elf", "errno", "general", "ioctl", "no_std"] }
 log = { version = "0.4.34", default-features = false, features = ["alloc", "std"] }
 manganis-core = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["dioxus"] }
-memchr = { version = "2.8.3", features = ["alloc", "std"] }
 miniz_oxide = { version = "0.8.9", default-features = false, features = ["simd", "simd-adler32", "with-alloc"] }
 naga = { version = "30.0.1", default-features = false, features = ["glsl-out", "wgsl-in", "wgsl-out"] }
 native-tls = { version = "0.2.18", default-features = false }
 num-traits = { version = "0.2.19", features = ["libm", "std"] }
+num_cpus = { version = "1.17.0", default-features = false }
 openssl = { version = "0.10.81" }
 openssl-probe = { version = "0.2.1", default-features = false }
 openssl-sys = { version = "0.9.117", default-features = false }
@@ -1480,6 +1650,7 @@ percent-encoding = { version = "2.3.2", features = ["alloc", "std"] }
 phf_generator = { version = "0.13.1", default-features = false }
 phf_macros = { version = "0.13.1", default-features = false }
 phf_shared = { version = "0.13.1", features = ["std"] }
+powerfmt = { version = "0.2.0", default-features = false }
 ppv-lite86 = { version = "0.2.21", default-features = false, features = ["simd", "std"] }
 proc-macro-error = { version = "0.4.12", default-features = false }
 proc-macro-error-attr = { version = "0.4.12", default-features = false }
@@ -1488,24 +1659,30 @@ proc-macro2-diagnostics = { version = "0.10.1", features = ["colors", "yansi"] }
 rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.8", default-features = false, features = ["small_rng"] }
 rand_chacha-0_3 = { package = "rand_chacha", version = "0.3.1", default-features = false, features = ["std"] }
 rand_core = { version = "0.6.4", default-features = false, features = ["alloc", "getrandom", "std"] }
+rayon = { version = "1.12.0", default-features = false }
+rayon-core = { version = "1.13.0", default-features = false }
 regex = { version = "1.13.1", features = ["perf", "perf-backtrack", "perf-cache", "perf-dfa", "perf-inline", "perf-literal", "perf-onepass", "std", "unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }
 regex-automata = { version = "0.4.18", features = ["alloc", "dfa", "dfa-build", "dfa-onepass", "dfa-search", "hybrid", "meta", "nfa", "nfa-backtrack", "nfa-pikevm", "nfa-thompson", "perf", "perf-inline", "perf-literal", "perf-literal-multisubstring", "perf-literal-substring", "std", "syntax", "unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment", "unicode-word-boundary"] }
 rustc-hash = { version = "1.1.0", features = ["std"] }
+rustix = { version = "1.1.5", default-features = false, features = ["alloc", "fs", "std"] }
 rustls-pki-types = { version = "1.15.1", default-features = false, features = ["alloc", "std"] }
 sea-orm-macros = { version = "1.1.20", default-features = false, features = ["bae", "derive", "postgres-array", "strum"] }
 serde = { version = "1.0.229", features = ["alloc", "derive", "serde_derive", "std"] }
 serde_core = { version = "1.0.229", features = ["alloc", "result", "std"] }
 sledgehammer_bindgen_macro = { version = "0.6.5", features = ["web"] }
 smallvec = { version = "1.16.4", default-features = false, features = ["const_generics", "const_new"] }
+static_assertions = { version = "1.1.0", default-features = false }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109", features = ["clone-impls", "derive", "extra-traits", "fold", "full", "parsing", "printing", "proc-macro", "quote", "visit", "visit-mut"] }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.119", features = ["clone-impls", "derive", "extra-traits", "fold", "full", "parsing", "printing", "proc-macro", "visit", "visit-mut"] }
 syn-mid = { version = "0.5.4", default-features = false }
 thiserror = { version = "2.0.20", features = ["std"] }
+time = { version = "0.3.55", features = ["alloc", "formatting", "macros", "parsing", "std"] }
 toml = { version = "0.8.2", features = ["display", "parse"] }
-toml_datetime-dff4ba8e3ae991db = { package = "toml_datetime", version = "1.1.1", features = ["alloc", "serde", "std"] }
 typenum = { version = "1.20.1", default-features = false, features = ["const-generics"] }
+unicode-normalization = { version = "0.1.25", features = ["std"] }
 wasm-bindgen-macro = { version = "0.2.127", default-features = false }
 wasm-bindgen-macro-support = { version = "0.2.127", default-features = false }
 wasm-bindgen-shared = { version = "0.2.127", default-features = false }
+wasm-split-macro = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false }
 zeroize = { version = "1.9.0", features = ["alloc"] }
 ### END FLEET SECTION
