@@ -1,5 +1,5 @@
 name: Shared THEBATTLESHIP Rust
-description: Enter the native-library shell, install the pinned toolchain and use a slot-local target backed by host kache.
+description: Put the pinned devenv on PATH, evaluate the repo's devenv shell and use a slot-local target backed by host kache.
 inputs:
   kind:
     description: Build kind (lint, test, wasm, tags).
@@ -17,19 +17,22 @@ runs:
         mkdir -p "$dir"
         echo "CARGO_TARGET_DIR=$dir" >> "$GITHUB_ENV"
         test -n "${RUSTC_WRAPPER:?host kache wrapper is required}"
-    - uses: nicknovitski/nix-develop@v1
-      with:
-        # The pinned rust 1.99.1, the native libraries and mold; rustup
-        # below installs the same release with the wasm target.
-        arguments: --accept-flake-config
-    - name: Let rustup install under the runner's work-dir HOME
+    # devenv 2.4.0 from the nixpkgs revision devenv-fleet's pins.json names
+    # (`devenv.nixpkgs`), until the runner units carry devenv themselves. A
+    # store path the host already has, so this is an evaluation, not a build.
+    - name: devenv
       shell: bash
-      # Each runner sets HOME to its own work dir, not the service user's
-      # passwd home, and rustup-init refuses that ("$HOME differs from
-      # euid-obtained home directory") on a runner with no rustup yet.
-      run: echo RUSTUP_INIT_SKIP_SUDO_CHECK=yes >> "$GITHUB_ENV"
-    - uses: dtolnay/rust-toolchain@master
-      with:
-        toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
-        components: rustfmt, clippy
-        targets: wasm32-unknown-unknown
+      run: |
+        set -euo pipefail
+        out=$(nix build --no-link --print-out-paths \
+          github:NixOS/nixpkgs/e62746b0b472753ef019baceab6f1e2e52014980#devenv)
+        echo "$out/bin" >> "$GITHUB_PATH"
+        "$out/bin/devenv" version
+    # The dev shell every checkout gets (devenv.nix, devenv-fleet's `rust`):
+    # rust 1.99.1, the native libraries and mold. The job's steps run inside
+    # it (`shell: devenv shell -- bash -e {0}`); this step evaluates it once
+    # and asserts the rustc is devenv-fleet's pinned store path, the same
+    # one a local shell gets, so kache's CI and local entries are shared.
+    - name: dev shell
+      shell: devenv shell -- bash -e {0}
+      run: fleet-doctor

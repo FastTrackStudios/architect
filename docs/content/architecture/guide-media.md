@@ -139,7 +139,7 @@ window edge to edge), with the pointer and a press's ripple drawn over it
 (the film's own layer: the app never sees it), cropped and scaled, and
 written as a PNG. `encode` makes the media: gifski for the GIF, ffmpeg
 for WebM (VP9) and MP4 (H.264), the last frame as the poster. Both are
-run as programs; the dev shell has them (`flake.nix`). A still is a
+run as programs; the dev shell has them (`devenv.nix`). A still is a
 scenario of one step.
 
 An app's media binary is three lines over `features/guide/src/cli.rs`

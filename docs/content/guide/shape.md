@@ -139,21 +139,22 @@ call ([idioms §5](@/architecture/idioms.md)).
 
 ## 4. The dev shell and the toolchain
 
-`flake.nix` carries the native libraries the workspace links against.
+`devenv.nix` carries the native libraries the workspace links against.
 The Dioxus desktop crates need the GTK/WebKit stack even in unit tests,
 so without the shell `cargo test --workspace` fails at link time.
 
 ```sh
-nix develop          # the pinned rust (1.99.1), the libraries and mold
+devenv shell         # the pinned rust (1.99.1), the libraries and mold
 ```
 
-`rust-toolchain.toml` pins the toolchain (rust 1.99.1, with `rustfmt`,
-`clippy`, `rust-src` and the `wasm32-unknown-unknown` target); rustup
-reads it, and `flake.nix`'s shell pins the same release (shadowing any
-other rust on the machine's PATH). The
-consumers (Task, studio, keyflow, frame) pin the same version, and the
-pins move together. CI reads the same pin through `RUSTUP_TOOLCHAIN` in
-`.github/workflows/checks.yml`. `.cargo/config.toml` carries the
+direnv enters the same shell on `cd` (`.envrc`). The toolchain comes from
+the fleet's shared module, devenv-fleet's `rust`, imported in
+`devenv.yaml`: rust 1.99.1 with `rustfmt`, `clippy`, `rust-src`,
+`rust-analyzer` and the `wasm32-unknown-unknown` target, the release
+`rust-toolchain.toml` pins, as one nix store path that shadows any other
+rust on the machine's PATH. The consumers (Task, studio, keyflow, frame)
+import the same module, so they compile with the same rustc, and CI runs
+its steps in this shell too (`.github/actions/shared-rust/action.yml`). `.cargo/config.toml` carries the
 fleet's rustflags (frame pointers everywhere; mold and `x86-64-v3` on
 x86-64 Linux; `x86-64-v3` on Intel macOS), the same in every fleet repo,
 so the shell includes mold.

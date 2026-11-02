@@ -113,8 +113,12 @@ fn surface() -> Surface {
     })
 }
 
+/// In a directory of this process's own: the server lets in only the
+/// user who owns the socket's directory, and a shared `/tmp` is root's.
 fn socket(tag: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("architect-mcp-{tag}-{}.sock", std::process::id()))
+    std::env::temp_dir()
+        .join(format!("architect-mcp-{}", std::process::id()))
+        .join(format!("{tag}.sock"))
 }
 
 fn serve(tag: &str, surface: Surface) -> Serving {
