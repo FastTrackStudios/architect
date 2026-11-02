@@ -49,3 +49,6 @@ clap.workspace = true
 architect-permissions.workspace = true
 facet.workspace = true
 tokio.workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
