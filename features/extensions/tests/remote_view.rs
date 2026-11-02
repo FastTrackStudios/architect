@@ -358,10 +358,9 @@ fn a_program_that_never_says_hello_does_not_load() {
     let dir = tempfile::tempdir().unwrap();
     let (host, _) = host(dir.path());
     let mut package = package(dir.path(), &[]);
-    // `true` exits at once, saying nothing.
-    std::fs::remove_file(dir.path().join("guest")).unwrap();
-    std::os::unix::fs::symlink("/usr/bin/true", dir.path().join("guest")).unwrap();
-    package.manifest.entry.args.clear();
+    // This binary again, asked for a test it does not have: the harness
+    // runs nothing and exits at once, saying nothing.
+    package.manifest.entry.args = vec!["--exact".to_owned(), "no_such_test".to_owned()];
     let error = host.load(&package, Origin::Installed).unwrap_err();
     assert_eq!(error, LoadError::Start("exited with code 0".to_owned()));
 }
