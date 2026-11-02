@@ -216,6 +216,23 @@ async fn a_resource_names_its_org_and_another_orgs_is_refused() {
             .check(&alice, &Resource::new("public/x"), &write)
             .allowed()
     );
+    // Unless the engine requires an org: then it is refused, except for an
+    // in-process service.
+    let strict = ConfinedEngine::new(members.clone()).require_org();
+    assert!(
+        !strict
+            .check(&alice, &Resource::new("public/x"), &read)
+            .allowed()
+    );
+    assert!(strict.check(&alice, &hp_note, &read).allowed());
+    let indexer = Principal::Service {
+        name: "indexer".into(),
+    };
+    assert!(
+        strict
+            .check(&indexer, &Resource::new("public/x"), &read)
+            .allowed()
+    );
 
     // On FastTrackStudio's lane, Harbor & Pine's notes are out of reach,
     // whatever her role there.
