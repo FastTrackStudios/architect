@@ -24,13 +24,13 @@
         "narHash": "sha256-U606lXI/i+ibOjKgGQJbh5ggrrtiHgYGvjtmB2Qnp6E=",
         "owner": "FastTrackStudios",
         "repo": "devenv-fleet",
-        "rev": "ab6cb110c1a17c94048e8bafe3e44e7ac9260677",
+        "rev": "57ae7717fb54a0c7331f7acb1eeec33529b1d4ce",
         "type": "github"
       },
       "original": {
         "owner": "FastTrackStudios",
+        "ref": "v0.1.0",
         "repo": "devenv-fleet",
-        "rev": "ab6cb110c1a17c94048e8bafe3e44e7ac9260677",
         "type": "github"
       }
     },

@@ -15,7 +15,7 @@ inputs:
     overlays:
       - default
   devenv-fleet:
-    url: github:FastTrackStudios/devenv-fleet/ab6cb110c1a17c94048e8bafe3e44e7ac9260677
+    url: github:FastTrackStudios/devenv-fleet/v0.1.0
     flake: false
 imports:
   - devenv-fleet/rust
