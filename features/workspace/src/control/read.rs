@@ -122,8 +122,12 @@ pub struct ScreensetsAnswer {
 /// # Errors
 ///
 /// Never.
-pub fn layout(st: &State, _env: &Env, (): ()) -> Result<Arrangement, String> {
-    Ok(Arrangement::of(&st.workspace))
+pub fn layout(st: &State, env: &Env, (): ()) -> Result<Arrangement, String> {
+    Ok(Arrangement::measured(
+        &st.workspace,
+        st.revision,
+        &env.measured,
+    ))
 }
 
 /// `WORKSPACE_PANE_GET`.

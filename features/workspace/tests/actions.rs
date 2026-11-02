@@ -753,3 +753,164 @@ fn each_change_is_heard_and_a_no_op_is_not() {
             .any(|e| matches!(&e.kind, architect::action::EventKind::Changed { .. }))
     );
 }
+
+/// A model built with the main window's area measured, as a host does.
+fn measured_model() -> Model {
+    let list = ActionList::new();
+    let mut env = env();
+    env.measured.areas.insert(
+        "main".to_owned(),
+        architect_workspace::Rect::new(0.0, 0.0, 1200.0, 800.0),
+    );
+    let host = HeadlessWorkspace::new(State::new(workspace()).with_screensets(screensets()), env);
+    host.install(&list).expect("installed");
+    let server = Server::new("workspace", "0", list.clone());
+    Model { server, list, host }
+}
+
+#[test]
+fn the_layout_is_a_tree_with_ids_paths_and_rectangles() {
+    let m = measured_model();
+    m.run(ids::SPLIT, json!({"pane": "note-b", "side": "right"}));
+    let layout = m.layout();
+    let main = &layout["windows"][0];
+    assert_eq!(main["area"]["w"], 1200.0);
+    let center = &main["center"]["split"];
+    assert_eq!(center["path"], "center");
+    assert_eq!(center["axis"], "row");
+    let left = &center["children"][0]["group"];
+    let right = &center["children"][1]["group"];
+    assert_eq!(left["path"], "center/0");
+    assert_eq!(left["tabs"][0]["pane"], "note-a");
+    assert_eq!(left["tabs"][0]["view"], "note");
+    assert_eq!(right["tabs"][0]["pane"], "note-b");
+    assert_eq!(left["measured"], false, "laid out from the shares");
+    // The left dock (files, search) is open: the center starts after it.
+    let dock = main["docks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["side"] == "left")
+        .unwrap()
+        .clone();
+    let width = dock["size"].as_f64().unwrap();
+    assert_eq!(dock["rect"]["w"].as_f64(), Some(width));
+    assert_eq!(left["rect"]["x"].as_f64(), Some(width));
+    let half = (1200.0 - width) / 2.0;
+    assert!((right["rect"]["x"].as_f64().unwrap() - (width + half)).abs() < 0.01);
+    assert_eq!(dock["root"]["group"]["tabs"][1]["pane"], "search");
+    assert_eq!(layout["current_document"], "note-a");
+
+    // A split by its path.
+    m.run(ids::RESIZE, json!({"path": "center", "shares": [1.0, 3.0]}));
+    assert_eq!(
+        m.layout()["windows"][0]["center"]["split"]["shares"],
+        json!([0.25, 0.75])
+    );
+    assert!(
+        m.fails(ids::RESIZE, json!({"path": "center/0", "even": true}))
+            .contains("center/0")
+    );
+
+    // A zoomed group fills the center.
+    m.run(ids::ZOOM, json!({"pane": "note-b", "mode": "on"}));
+    let zoomed = m.layout()["windows"][0]["center"]["split"]["children"][1]["group"].clone();
+    assert_eq!(zoomed["zoomed"], true);
+    assert_eq!(zoomed["rect"]["x"].as_f64(), Some(width));
+
+    // Floats carry their rect, snap and pin.
+    m.run(
+        ids::FLOAT,
+        json!({"pane": "note-a", "rect": {"x": 1.0, "y": 2.0, "w": 300.0, "h": 200.0},
+        "snap": "left_half", "pin": "bottom_left"}),
+    );
+    let float = m.layout()["windows"][0]["floats"][0].clone();
+    assert_eq!(
+        (float["snap"].clone(), float["pin"].clone()),
+        (json!("left_half"), json!("bottom_left"))
+    );
+    assert_eq!(float["group"]["tabs"][0]["pane"], "note-a");
+}
+
+#[test]
+fn every_change_moves_the_revision_on_and_a_stale_write_is_refused() {
+    let m = model();
+    let r0 = m.layout()["revision"].as_u64().unwrap();
+    let split = m.run(
+        ids::SPLIT,
+        json!({"pane": "note-b", "side": "right", "if_revision": r0}),
+    );
+    assert_eq!(split["changed"], true);
+    let r1 = split["revision"].as_u64().unwrap();
+    assert_eq!(r1, r0 + 1);
+    assert_eq!(split["layout"]["revision"].as_u64(), Some(r1));
+
+    // Planned on the old layout: refused, with the layout as it is now.
+    let stale = m.run(
+        ids::MOVE,
+        json!({"pane": "files", "to": {"dock": {"side": "right"}}, "if_revision": r0}),
+    );
+    assert_eq!(
+        (stale["changed"].clone(), stale["reason"].clone()),
+        (json!(false), json!("stale"))
+    );
+    assert_eq!(stale["revision"].as_u64(), Some(r1));
+    assert_eq!(m.pane("files")["place"], "left_dock", "nothing moved");
+    let fresh = m.run(
+        ids::MOVE,
+        json!({"pane": "files", "to": {"dock": {"side": "right"}}, "if_revision": r1}),
+    );
+    assert_eq!(fresh["changed"], true);
+
+    // A no-op and a view's own state leave the revision where it is.
+    let r2 = fresh["revision"].as_u64().unwrap();
+    let same = m.run(ids::SPLIT, json!({"pane": "note-b", "side": "right"}));
+    assert_eq!(same["revision"].as_u64(), Some(r2));
+    m.run(ids::NAVIGATE, json!({"pane": "note-a", "state": "page-2"}));
+    assert_eq!(
+        m.layout()["revision"].as_u64(),
+        Some(r2 + 1),
+        "history shows in the tree"
+    );
+    let saved = m.run(ids::SCREENSET_SAVE, json!({"if_revision": 0}));
+    assert_eq!(saved["reason"], "stale");
+}
+
+#[test]
+fn a_change_event_says_its_revision_actor_kinds_and_panes() {
+    let m = model();
+    let since = m.list.latest();
+    m.run(
+        ids::OPEN,
+        json!({"view": "note", "id": "note-c", "at": {"beside": {"pane": "note-a"}}}),
+    );
+    m.run(
+        ids::MOVE,
+        json!({"pane": "note-c", "to": {"dock": {"side": "right"}}, "focus": true}),
+    );
+    let (events, _) = m.list.events_since(since, 64, std::time::Duration::ZERO);
+    let changes: Vec<Value> = events
+        .iter()
+        .filter_map(|e| match &e.kind {
+            architect::action::EventKind::Changed { topic, detail } if topic == "workspace" => {
+                serde_json::from_str(detail).ok()
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(changes.len(), 2);
+    let (a, b) = (&changes[0], &changes[1]);
+    assert_eq!(
+        b["revision"].as_u64(),
+        a["revision"].as_u64().map(|r| r + 1),
+        "no gap"
+    );
+    assert_eq!(a["actor"], "anonymous", "the MCP server's principal");
+    assert!(a["kinds"].as_array().unwrap().contains(&json!("opened")));
+    assert_eq!(a["panes"], json!(["note-c"]));
+    let kinds = b["kinds"].as_array().unwrap();
+    assert!(
+        kinds.contains(&json!("moved")) && kinds.contains(&json!("focus")),
+        "{kinds:?}"
+    );
+}

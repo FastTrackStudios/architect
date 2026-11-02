@@ -338,8 +338,53 @@ The rules every write keeps (herdr's agent API, which these follow):
   `Workspace::resolve_window`): an id read before finds them.
 - **Modes, not toggles**, where a toggle would make a retry undo itself:
   `WORKSPACE_ZOOM {mode: on | off | toggle}`.
-- Each change of the arrangement is a `Changed { topic: "workspace" }`
-  event.
+- **Revisions.** The arrangement has a revision that goes up by one
+  with every change of it, whoever made it: a person's drag, a key, a
+  command, an agent. A view's own state (a scroll, a cursor) does not
+  count. Every write takes `if_revision`: planned on an older layout, it
+  changes nothing and answers `stale` with the layout as it is now, so an
+  agent that read, thought and wrote never undoes what the person did
+  meanwhile.
+- **Change events.** Each new revision is a
+  `Changed { topic: "workspace" }` event whose detail is a JSON
+  `control::Change`:
+  - `revision`;
+  - `actor`: `app` for the app itself, else the caller's principal, such
+    as `service:claude`;
+  - `kinds`: some of `opened`, `closed`, `moved`, `focus`, `shown`,
+    `resized`, `groups`, `tabs`, `docks`, `floats`, `windows`, `zoom`;
+  - `panes`: the panes opened, closed or moved.
+
+  A watcher treats it as invalidation: a revision that skips one means
+  events were lost, so read `WORKSPACE_LAYOUT` again.
+
+### The layout an agent reads
+
+`WORKSPACE_LAYOUT` (`features/workspace/src/guide.rs` `Arrangement`)
+keeps the flat lists a guide check compares: each window's `groups`,
+`splits` and `docked`. Beside them it gives `revision`, `active`,
+`current_document`, and each window as a tree
+(`features/workspace/src/tree.rs`):
+
+- each window's `bounds`, `maximized` and measured `area`;
+- `center`: nested `split {id, path, axis, shares, rect, children}` and
+  `group {id, path, rect, measured, tabs, current, stacked, chrome,
+  zoomed}`. Each tab has its pane, view, title, pin, link and whether it
+  can go back or forward;
+- `docks`: side, shown, size, popped out, rect and tree;
+- `floats`: group, rect, snap, pin, minimised.
+
+A **path** names a place in one tree: `center`, `center/0/1`, `left/0`,
+`float/2`. Ids address things; a path finds an anonymous split
+(`WORKSPACE_RESIZE {path, shares}`) and holds for one revision only, as a
+split's id may after a repair.
+
+**Rectangles** are window points. The Blitz host measures its area and
+each group after the frame that drew them (`Measured`), and such a group
+says `measured: true`. Any other group is laid out from the window's
+measured area by the shares and the docks' sizes. A zoomed group fills
+the center. A headless workspace has no rectangles unless its `Env` is
+given an area.
 
 | Action | Effect | Takes |
 |---|---|---|

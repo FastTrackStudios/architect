@@ -33,6 +33,7 @@ mod read;
 mod write;
 
 pub use args::*;
+
 #[cfg(feature = "actions")]
 pub use list::{Exec, HeadlessWorkspace, Job, ids, register};
 pub use portable::{
@@ -52,7 +53,7 @@ use facet::Facet;
 use crate::guide::Arrangement;
 use crate::layout::{Direction, area_rects, neighbour};
 use crate::model::{
-    Docks, GroupAlias, GroupId, Node, PaneId, Rect, Side, WindowAlias, WindowId, Workspace,
+    Docks, GroupAlias, GroupId, Node, PaneId, Rect, Shown, Side, WindowAlias, WindowId, Workspace,
 };
 use crate::screenset::{FormClass, Screensets};
 
@@ -63,6 +64,13 @@ pub struct State {
     pub workspace: Workspace,
     pub screensets: Screensets,
     pub form: FormClass,
+    /// The arrangement's revision: up by one with each change of it
+    /// ([`crate::Arrangement::revision`]).
+    pub revision: u64,
+    /// Who the write under way is for: `app` (a key, a gesture, a
+    /// command) or a caller's principal (`service:claude`). What a change
+    /// event names as its actor.
+    pub actor: String,
 }
 
 impl State {
@@ -72,6 +80,8 @@ impl State {
             workspace,
             screensets: Screensets::default(),
             form: FormClass::Desk,
+            revision: 0,
+            actor: APP.to_owned(),
         }
     }
 
@@ -121,6 +131,8 @@ impl ViewSpec {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Env {
     pub views: Vec<ViewSpec>,
+    /// What the host measured: windows' areas, groups' rectangles.
+    pub measured: crate::tree::Measured,
     /// Pop-outs open as OS windows (`WORKSPACE_DOCK_POP_OUT` needs them).
     pub windows: bool,
     pub dock_bounds: BTreeMap<u8, Rect>,
@@ -131,6 +143,10 @@ impl Env {
     pub const fn new(views: Vec<ViewSpec>) -> Self {
         Self {
             views,
+            measured: crate::tree::Measured {
+                areas: BTreeMap::new(),
+                groups: BTreeMap::new(),
+            },
             windows: false,
             dock_bounds: BTreeMap::new(),
         }
@@ -167,6 +183,10 @@ const fn side_key(side: Side) -> u8 {
         Side::Bottom => 3,
     }
 }
+
+/// The actor of a change the app made itself (a key, a gesture, a
+/// command).
+pub const APP: &str = "app";
 
 /// Where a pane floated without a rectangle goes, window points.
 pub const FLOAT_AT: Rect = Rect {
@@ -219,6 +239,7 @@ impl Acted {
 /// the answer — `same` the reason when nothing changed.
 pub(crate) fn finish(
     st: &mut State,
+    env: &Env,
     before: &State,
     focus: Focus,
     acted: Acted,
@@ -235,11 +256,27 @@ pub(crate) fn finish(
     }
     note_aliases(&before.workspace, &mut st.workspace);
     let changed = st != before;
-    answer(st, changed, (!changed).then_some(same), acted)
+    if rearranged(&before.workspace, &st.workspace) {
+        st.revision = before.revision.saturating_add(1);
+    }
+    answer(st, env, changed, (!changed).then_some(same), acted)
+}
+
+/// Whether the arrangement (what [`crate::Arrangement`] shows, not a
+/// view's own state) differs: what moves the revision on.
+#[must_use]
+pub fn rearranged(before: &Workspace, after: &Workspace) -> bool {
+    Arrangement::of(before) != Arrangement::of(after)
 }
 
 /// An answer for `st` as it is.
-pub(crate) fn answer(st: &State, changed: bool, reason: Option<Reason>, acted: Acted) -> Answer {
+pub(crate) fn answer(
+    st: &State,
+    env: &Env,
+    changed: bool,
+    reason: Option<Reason>,
+    acted: Acted,
+) -> Answer {
     let w = &st.workspace;
     let at = acted.pane.as_ref().and_then(|p| w.locate(p));
     Answer {
@@ -252,7 +289,8 @@ pub(crate) fn answer(st: &State, changed: bool, reason: Option<Reason>, acted: A
             .or_else(|| at.and_then(|l| w.windows.get(l.window).map(|win| win.id.clone())))
             .map(|win| win.0),
         screenset: acted.screenset,
-        layout: Arrangement::of(w),
+        revision: st.revision,
+        layout: Arrangement::measured(w, st.revision, &env.measured),
     }
 }
 
@@ -340,6 +378,15 @@ pub(crate) fn groups_of(w: &Workspace) -> Vec<(GroupId, Vec<PaneId>)> {
         .collect()
 }
 
+/// The ids of every group in the window at `index`.
+#[must_use]
+pub fn groups_in(w: &Workspace, index: usize) -> Vec<u64> {
+    groups_in_window(w, index)
+        .into_iter()
+        .map(|(g, _)| g.0)
+        .collect()
+}
+
 /// Every group in the window at `index`, with its tabs.
 fn groups_in_window(w: &Workspace, index: usize) -> Vec<(GroupId, Vec<PaneId>)> {
     let Some(window) = w.windows.get(index) else {
@@ -414,4 +461,205 @@ pub(crate) fn neighbour_group(
     };
     let placed = area_rects(root, Rect::new(0.0, 0.0, 1000.0, 1000.0));
     Ok(neighbour(&placed, l.group, direction))
+}
+
+/// What a `Changed { topic: "workspace" }` event's detail says.
+///
+/// As JSON: which revision the layout is at now, who changed it, what kinds of
+/// change, and which panes. A watcher treats it as invalidation: a
+/// revision that skips one (events dropped while it was away) means read
+/// `WORKSPACE_LAYOUT` again.
+#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+pub struct Change {
+    pub revision: u64,
+    /// `app`, or the caller's principal (`service:claude`).
+    pub actor: String,
+    /// Some of `opened`, `closed`, `moved`, `focus`, `shown`, `resized`,
+    /// `groups`, `tabs`, `docks`, `floats`, `windows`, `zoom`.
+    pub kinds: Vec<String>,
+    /// The panes opened, closed or moved.
+    pub panes: Vec<String>,
+}
+
+impl Change {
+    /// What changed from `before` to `st`'s workspace.
+    #[must_use]
+    pub fn between(before: &Workspace, st: &State) -> Self {
+        let after = &st.workspace;
+        let mut kinds: Vec<&str> = Vec::new();
+        let mut panes: Vec<String> = Vec::new();
+        let note = |p: &PaneId, panes: &mut Vec<String>| {
+            if !panes.contains(&p.0) {
+                panes.push(p.0.clone());
+            }
+        };
+        let opened: Vec<&PaneId> = after
+            .panes
+            .iter()
+            .map(|p| &p.id)
+            .filter(|id| before.pane(id).is_none())
+            .collect();
+        let closed: Vec<&PaneId> = before
+            .panes
+            .iter()
+            .map(|p| &p.id)
+            .filter(|id| after.pane(id).is_none())
+            .collect();
+        let place = |w: &Workspace, p: &PaneId| {
+            w.locate(p)
+                .map(|l| (l.window, format!("{:?}", l.area), l.group))
+        };
+        // Its order among the tabs its group had before and has still: a
+        // tab opened or closed beside it does not move it.
+        let order = |w: &Workspace, other: &Workspace, p: &PaneId| {
+            let group = w.locate(p).and_then(|l| w.group(l.group))?;
+            group
+                .tabs
+                .iter()
+                .filter(|t| other.locate(t).map(|l| l.group) == Some(group.id) || *t == p)
+                .position(|t| t == p)
+        };
+        let moved: Vec<&PaneId> = after
+            .panes
+            .iter()
+            .map(|p| &p.id)
+            .filter(|id| {
+                let was = order(before, after, id);
+                let is = order(after, before, id);
+                before.pane(id).is_some() && (place(before, id) != place(after, id) || was != is)
+            })
+            .collect();
+        for (kind, list) in [("opened", &opened), ("closed", &closed), ("moved", &moved)] {
+            if !list.is_empty() {
+                kinds.push(kind);
+                for p in list.as_slice() {
+                    note(p, &mut panes);
+                }
+            }
+        }
+        if before.active != after.active {
+            kinds.push("focus");
+        }
+        let a = Arrangement::of(before);
+        let b = Arrangement::of(after);
+        let current = |x: &Arrangement| -> Vec<(u64, String)> {
+            x.windows
+                .iter()
+                .flat_map(|w| w.groups.iter().chain(&w.docked))
+                .map(|g| (g.id, g.current.clone()))
+                .collect()
+        };
+        if current(&a) != current(&b) {
+            kinds.push("shown");
+        }
+        let shares = |x: &Arrangement| -> Vec<Vec<f32>> {
+            x.windows
+                .iter()
+                .flat_map(|w| w.splits.iter().map(|s| s.shares.clone()))
+                .collect()
+        };
+        let sizes = |w: &Workspace| -> Vec<f32> {
+            w.windows
+                .iter()
+                .flat_map(|win| {
+                    Docks::SIDES
+                        .iter()
+                        .filter_map(|&s| win.docks.get(s))
+                        .map(|d| d.size)
+                        .collect::<Vec<_>>()
+                })
+                .collect()
+        };
+        if shares(&a) != shares(&b) || sizes(before) != sizes(after) {
+            kinds.push("resized");
+        }
+        let groups = |x: &Arrangement| -> Vec<(u64, bool)> {
+            x.windows
+                .iter()
+                .flat_map(|w| w.groups.iter().chain(&w.docked))
+                .map(|g| (g.id, g.stacked))
+                .collect()
+        };
+        let chrome = |w: &Workspace| -> Vec<String> {
+            groups_of(w)
+                .iter()
+                .filter_map(|(g, _)| w.group(*g).map(|g| format!("{:?}", g.chrome)))
+                .collect()
+        };
+        if groups(&a) != groups(&b) || chrome(before) != chrome(after) {
+            kinds.push("groups");
+        }
+        let tabs = |w: &Workspace| -> Vec<(String, String, bool, Option<String>)> {
+            w.panes
+                .iter()
+                .map(|p| {
+                    (
+                        p.id.0.clone(),
+                        p.title.clone(),
+                        p.pinned,
+                        p.link.as_ref().map(|l| l.0.clone()),
+                    )
+                })
+                .collect()
+        };
+        if tabs(before) != tabs(after) {
+            kinds.push("tabs");
+        }
+        let docks = |w: &Workspace| -> Vec<(Shown, Option<usize>)> {
+            Docks::SIDES
+                .iter()
+                .map(|&s| {
+                    (
+                        w.dock(s).map_or(Shown::Hidden, |d| d.shown),
+                        w.dock_window(s),
+                    )
+                })
+                .collect()
+        };
+        if docks(before) != docks(after) {
+            kinds.push("docks");
+        }
+        let floats = |w: &Workspace| -> Vec<String> {
+            w.windows
+                .iter()
+                .flat_map(|win| &win.floats)
+                .map(|f| {
+                    format!(
+                        "{:?}{:?}{:?}{:?}{}",
+                        f.group.id, f.rect, f.snap, f.pin, f.minimised
+                    )
+                })
+                .collect()
+        };
+        if floats(before) != floats(after) {
+            kinds.push("floats");
+        }
+        let windows = |w: &Workspace| -> Vec<(WindowId, Option<Rect>, bool)> {
+            w.windows
+                .iter()
+                .map(|win| (win.id.clone(), win.bounds, win.maximized))
+                .collect()
+        };
+        if windows(before) != windows(after) {
+            kinds.push("windows");
+        }
+        let zoom = |w: &Workspace| -> Vec<Option<GroupId>> {
+            w.windows.iter().map(|win| win.zoomed).collect()
+        };
+        if zoom(before) != zoom(after) {
+            kinds.push("zoom");
+        }
+        Self {
+            revision: st.revision,
+            actor: st.actor.clone(),
+            kinds: kinds.into_iter().map(str::to_owned).collect(),
+            panes,
+        }
+    }
+
+    /// As JSON, an event's detail.
+    #[must_use]
+    pub fn to_json(&self) -> String {
+        facet_json::to_string(self).unwrap_or_default()
+    }
 }

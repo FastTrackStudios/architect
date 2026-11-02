@@ -6,14 +6,14 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
-use architect::action::{ActionError, ActionList, ActionMeta, Effect};
+use architect::action::{ActionCaller, ActionError, ActionList, ActionMeta, Effect};
 use facet::Facet;
 
 use super::{
     ApplyArgs, CloseArgs, DeleteArgs, DockBackArgs, DockPopOutArgs, DockSetArgs, Env, FloatArgs,
     FocusArgs, GroupSetArgs, MoveArgs, NavigateArgs, NeighborArgs, OpenArgs, PaneArgs, RecallArgs,
-    ReopenArgs, ResizeArgs, RestoreArgs, SaveAsArgs, SplitArgs, State, TabSetArgs, WindowArgs,
-    WindowSetArgs, Write, ZoomArgs, transact,
+    ReopenArgs, ResizeArgs, RestoreArgs, RevisionArgs, SaveAsArgs, SplitArgs, State, TabSetArgs,
+    WindowArgs, WindowSetArgs, Write, ZoomArgs, transact,
 };
 
 /// The actions' ids. Each is a contract (keymaps, scripts and models
@@ -166,12 +166,17 @@ fn write<A>(
     f: Write<A>,
 ) -> Result<(), ActionError>
 where
-    A: Facet<'static> + Send + 'static,
+    A: Facet<'static> + super::Guarded + Send + 'static,
 {
     let exec = exec.clone();
-    list.register_async(meta, effect, move |args: A| {
+    list.register_async_with(meta, effect, move |caller: &ActionCaller, args: A| {
+        let actor = caller.principal().map_or_else(
+            || super::APP.to_owned(),
+            architect::action::Principal::describe,
+        );
         let (tx, rx) = futures_channel::oneshot::channel();
         let sent = exec.exec(Box::new(move |st, env| {
+            st.actor = actor;
             let _ = tx.send(transact(st, env, f, args));
         }));
         async move {
@@ -246,9 +251,9 @@ pub fn register(list: &ActionList, exec: &Arc<dyn Exec>) -> Result<(), ActionErr
     write::<PaneArgs>(list, e, &CLOSE_OTHERS, Destructive, super::close_others)?;
     write::<WindowArgs>(list, e, &CLOSE_WINDOW, Destructive, super::close_window)?;
     write::<RecallArgs>(list, e, &SCREENSET_RECALL, Mutating, super::recall)?;
-    write::<()>(list, e, &SCREENSET_SAVE, Mutating, super::save)?;
+    write::<RevisionArgs>(list, e, &SCREENSET_SAVE, Mutating, super::save)?;
     write::<SaveAsArgs>(list, e, &SCREENSET_SAVE_AS, Mutating, super::save_as)?;
-    write::<()>(list, e, &SCREENSET_RESET, Mutating, super::reset)?;
+    write::<RevisionArgs>(list, e, &SCREENSET_RESET, Mutating, super::reset)?;
     write::<DeleteArgs>(list, e, &SCREENSET_DELETE, Destructive, super::delete)?;
     Ok(())
 }
@@ -257,7 +262,8 @@ pub fn register(list: &ActionList, exec: &Arc<dyn Exec>) -> Result<(), ActionErr
 ///
 /// Its actions run on the caller's thread: for a server, a test, or a
 /// model arranging a layout to store. Each change is a
-/// `Changed { topic: "workspace" }` on the list.
+/// `Changed { topic: "workspace" }` on the list, its detail a
+/// [`super::Change`].
 #[derive(Clone)]
 pub struct HeadlessWorkspace {
     shared: Arc<Mutex<(State, Env)>>,
@@ -305,17 +311,14 @@ impl Exec for Headless {
         let mut shared = self.shared.lock().unwrap_or_else(PoisonError::into_inner);
         let (st, env) = &mut *shared;
         let before = st.workspace.clone();
+        let revision = st.revision;
         job(st, env);
-        let changed = st.workspace != before;
-        let active = st
-            .workspace
-            .active
-            .as_ref()
-            .map(|p| p.0.clone())
-            .unwrap_or_default();
+        let detail =
+            (st.revision != revision).then(|| super::Change::between(&before, st).to_json());
+        super::APP.clone_into(&mut st.actor);
         drop(shared);
-        if changed {
-            self.list.changed("workspace", &active);
+        if let Some(detail) = detail {
+            self.list.changed("workspace", &detail);
         }
         true
     }

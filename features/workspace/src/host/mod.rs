@@ -417,6 +417,10 @@ pub struct Host {
     /// window, set as it says so (before the document hears the release),
     /// for a grip's drag to end there.
     released: CopyValue<Rc<std::cell::Cell<Option<(f32, f32)>>>>,
+    /// The layout's revision, and the list its changes are told on.
+    revisions: CopyValue<actions::Revisions>,
+    /// The host's measure of its area and groups.
+    measured: CopyValue<crate::tree::Measured>,
 }
 
 /// The [`Host`] a [`WorkspaceView`] above put in context.
@@ -887,6 +891,7 @@ impl Host {
             Op::Recall(slot) => self.write(
                 crate::control::recall,
                 crate::control::RecallArgs {
+                    if_revision: None,
                     id: None,
                     slot: Some(slot),
                 },
@@ -1154,6 +1159,8 @@ pub fn WorkspaceView(
         windows: CopyValue::new(os_windows.clone()),
         pressed: Signal::new(None),
         released: CopyValue::new(Rc::default()),
+        revisions: CopyValue::new(actions::Revisions::default()),
+        measured: CopyValue::new(crate::tree::Measured::default()),
     });
     // Props change under a live host: keep it current.
     host.views.set(views);

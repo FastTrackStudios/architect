@@ -383,6 +383,8 @@ fn PopoutView(props: PopoutProps) -> Element {
         windows: CopyValue::new(Some(props.windows.clone())),
         pressed: props.pressed,
         released: CopyValue::new(Rc::default()),
+        revisions: CopyValue::new(super::actions::Revisions::default()),
+        measured: CopyValue::new(crate::tree::Measured::default()),
     });
     use_release_outside(host);
     let mut host = host;
