@@ -26,7 +26,7 @@ rustflags = ["-C", "force-frame-pointers=yes"]
 # mold instead of the default `ld.bfd`. Linking is the serial tail of every
 # build, and a `cargo test --workspace` links hundreds of test binaries.
 # mold is multi-threaded and typically turns a 30-60s link into a few
-# seconds. Comes from the dev shell (flake.nix); GCC accepts
+# seconds. Comes from the dev shell (devenv-fleet's `rust` module); GCC accepts
 # -fuse-ld=mold natively.
 [target.x86_64-unknown-linux-gnu]
 rustflags = [

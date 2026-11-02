@@ -4,20 +4,22 @@ description = "Get a dev shell up, build the workspace and run the reference fea
 weight = 10
 +++
 
-This page assumes a working Nix install with flakes enabled.
+This page assumes a working Nix install and devenv 2.4 or newer.
 
 ## Enter a dev shell
 
 ```sh
-nix develop          # the pinned rust (1.99.1), the native libraries and mold
+devenv shell         # the pinned rust (1.99.1), the native libraries and mold
 ```
 
-The repo's `flake.nix` carries the native libraries the workspace links
-against (the Dioxus desktop crates need the GTK/WebKit stack even in unit
-tests), mold, the linker `.cargo/config.toml` selects on x86-64 Linux,
-and rust 1.99.1, the release `rust-toolchain.toml` pins. CI enters the default
-shell and installs the same toolchain with rustup, with the
-`wasm32-unknown-unknown` target; see `.github/workflows/checks.yml` and
+With direnv, `cd` into the checkout does the same (`.envrc`). The repo's
+`devenv.nix` carries the native libraries the workspace links against
+(the Dioxus desktop crates need the GTK/WebKit stack even in unit tests);
+the fleet's shared module (devenv-fleet's `rust`, imported in
+`devenv.yaml`) brings mold, the linker `.cargo/config.toml` selects on
+x86-64 Linux, and rust 1.99.1, the release `rust-toolchain.toml` pins,
+with the `wasm32-unknown-unknown` target. CI runs its steps in the same
+shell, with the same rustc; see `.github/workflows/checks.yml` and
 `.github/actions/shared-rust/action.yml`.
 
 ## Build everything

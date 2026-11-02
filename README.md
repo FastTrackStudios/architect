@@ -53,7 +53,7 @@ vox over WebSocket, the HTTP face and `/health` from it
 (`examples/greeter/src/lib.rs`, `examples/greeter/src/main.rs`):
 
 ```sh
-nix develop
+devenv shell
 GREETER_BIND=127.0.0.1:4040 cargo run -p example-greeter
 curl -XPOST localhost:4040/greeter/greet -d '{"name":"cody"}'   # "hello cody"
 curl -N     localhost:4040/greeter/greeted                       # data: "hello cody"
@@ -102,7 +102,7 @@ headlessly, and `just media-test` plays the same scenario as a test.
 
 ## Install
 
-Prerequisites: Nix with flakes for the dev shell (`flake.nix`), or the
+Prerequisites: Nix and devenv for the dev shell (`devenv.nix`), or the
 pinned Rust toolchain and the GTK/WebKit libraries the desktop crates
 link against.
 
@@ -132,7 +132,7 @@ Every flag, what it implies and what it pulls: `docs/content/architecture/featur
 ## Run the examples
 
 ```sh
-nix develop
+devenv shell
 cargo test -p example-greeter       # one scenario in process, over vox and over HTTP
 cargo test -p example-scripting     # Luau over an Action List, one undo step per run
 cargo run  -p example-scripting -- run examples/scripting/scripts/close_tag.luau '{"tag":"home"}'
@@ -201,7 +201,7 @@ rules for agents: what a PR updates and how docs cite code.
 
 ## Contributing
 
-`nix develop`, then `just check`, `just test` and `just docs-check`; CI
+`devenv shell` (or direnv, through `.envrc`), then `just check`, `just test` and `just docs-check`; CI
 runs the full suite on every push to `main` (`.github/workflows/checks.yml`).
 A PR that adds, renames or removes public API or a feature flag updates
 `skills/architect/` in the same PR.

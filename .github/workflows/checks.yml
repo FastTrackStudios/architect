@@ -22,15 +22,15 @@ env:
   # rustflags and changes every crate's kache key, so nothing built here
   # would be shared with a local build or another fleet repo.
   CARGO_BUILD_WARNINGS: deny
-  # rust-toolchain.toml's pin, the fleet toolchain (studio's too). Keep
-  # the two in lockstep.
-  RUSTUP_TOOLCHAIN: "1.99.1"
   # Debug info is most of a cold target dir and nobody reads it in CI.
   CARGO_PROFILE_DEV_DEBUG: "0"
   CARGO_PROFILE_TEST_DEBUG: "0"
   CARGO_INCREMENTAL: "0"
 
-# Build jobs use the shared THEBATTLESHIP pool. The job gate provides
+# Build jobs use the shared THEBATTLESHIP pool, and every `run` step runs
+# in the repo's devenv shell (devenv.nix, set up by
+# .github/actions/shared-rust): the same nix rustc, store path and all, as
+# a local shell, so kache shares CI's builds with local ones. The job gate provides
 # repo-scoped CI_CACHE_DIR/CARGO_HOME; targets are isolated by kind and
 # slot, while kache restores reusable artifacts across slots and repos.
 # The status-only aggregator and public PR fast checks remain hosted.
@@ -39,6 +39,9 @@ jobs:
     name: Lint (fmt + clippy + boundaries + docs)
     runs-on: [self-hosted, thebattleship]
     timeout-minutes: 45
+    defaults:
+      run:
+        shell: devenv shell -- bash -e {0}
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/shared-rust
@@ -75,6 +78,9 @@ jobs:
     name: Tests
     runs-on: [self-hosted, thebattleship]
     timeout-minutes: 60
+    defaults:
+      run:
+        shell: devenv shell -- bash -e {0}
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/shared-rust
@@ -90,6 +96,9 @@ jobs:
     name: wasm check
     runs-on: [self-hosted, thebattleship]
     timeout-minutes: 30
+    defaults:
+      run:
+        shell: devenv shell -- bash -e {0}
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/shared-rust
@@ -156,6 +165,9 @@ jobs:
   # v0.5.0 and v0.6.0; this stops the next one.
   tags:
     runs-on: [self-hosted, thebattleship]
+    defaults:
+      run:
+        shell: devenv shell -- bash -e {0}
     steps:
       - uses: actions/checkout@v4
         with:

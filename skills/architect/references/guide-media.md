@@ -129,6 +129,6 @@ checking `GUIDE_TOUR_STATE` after each step:
 - `just media [ids]` films the lab's scenarios; `just media-test` plays
   them as tests; `cargo test --workspace -- every_lab_scenario` is the test
   in CI (`apps/lab/media/tests/scenarios.rs`).
-- ffmpeg and gifski come from the dev shell (`flake.nix`).
+- ffmpeg and gifski come from the dev shell (`devenv.nix`).
 - Media never go on `main`: `just media-publish` commits them to the orphan
   `media` branch; docs embed `raw.githubusercontent.com/FastTrackStudios/architect/media/<id>.gif`.

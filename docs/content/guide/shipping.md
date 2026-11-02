@@ -125,7 +125,8 @@ branch to a labelled experiment.
 ## 6. The toolchain moves together
 
 `rust-toolchain.toml` in architect and in each consumer pin the same
-rust version (1.99.1 today), and CI's `RUSTUP_TOOLCHAIN` matches it.
+rust version (1.99.1 today), and devenv-fleet's pins give every repo's
+shell and CI the same rustc.
 Bump them together: a consumer on an older toolchain than the tag it
 pins may not build it. The rustflags in `.cargo/config.toml` and the
 dependencies' dev profile in the root `Cargo.toml` are shared the same

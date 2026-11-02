@@ -8,7 +8,7 @@
 //! it), cropped to `capture.crop` and scaled to `capture.width`. Frames go
 //! to a directory as PNGs; [`encode`] makes them a GIF (gifski), `WebM` and
 //! MP4 (ffmpeg) and a poster PNG (the last frame). Both tools are run as
-//! programs, from the dev shell (`flake.nix`).
+//! programs, from the dev shell (`devenv.nix`).
 
 // Geometry reads plainer as `a + b * c`; its precision is a pixel's.
 #![allow(clippy::suboptimal_flops)]
@@ -37,7 +37,7 @@ pub enum CaptureError {
     },
     #[error("writing frame {0}: {1}")]
     Frame(PathBuf, image::ImageError),
-    #[error("{tool} is not on PATH (it comes with the dev shell: `nix develop`)")]
+    #[error("{tool} is not on PATH (it comes with the dev shell: `devenv shell`)")]
     Missing { tool: &'static str },
     #[error("{tool} failed making {out}: {status}")]
     Tool {
