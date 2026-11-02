@@ -463,6 +463,17 @@ pub(crate) fn neighbour_group(
     Ok(neighbour(&placed, l.group, direction))
 }
 
+/// The topic of a change to the saved layouts (load, save, rename, slot,
+/// options, delete): its detail is the active set's id (empty for none).
+pub const SETS_TOPIC: &str = "workspaces";
+
+/// The detail of a [`SETS_TOPIC`] event, when the saved layouts (not the
+/// working copy) differ.
+#[must_use]
+pub fn sets_changed(before: &Screensets, after: &Screensets) -> Option<String> {
+    (before.saved() != after.saved()).then(|| after.active.clone().unwrap_or_default())
+}
+
 /// What a `Changed { topic: "workspace" }` event's detail says.
 ///
 /// As JSON: which revision the layout is at now, who changed it, what kinds of

@@ -13,8 +13,9 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
-use architect::action::ActionList;
+use architect::action::{ActionList, ActionMeta, Effect};
 use dioxus::prelude::*;
+use facet::Facet;
 use futures_util::StreamExt as _;
 
 use super::{Host, Mount};
@@ -41,6 +42,25 @@ impl PartialEq for WorkspaceActions {
 }
 
 type Mirror = Arc<Mutex<(State, Env)>>;
+
+static MANAGE_META: ActionMeta = ActionMeta {
+    id: control::ids::WORKSPACES_MANAGE,
+    trait_name: "",
+    method_name: "",
+    display_name: "Manage workspace layouts",
+    description: "Opens the sheet a person manages the saved layouts in: load, save over, rename, slot, delete, and save the current layout under a name.",
+    category: "Workspace",
+    group: "Workspaces",
+    shortcut: "",
+    toggleable: false,
+    undo: false,
+};
+
+/// What `WORKSPACES_MANAGE` answers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Facet)]
+pub struct Opened {
+    pub opened: bool,
+}
 
 /// Runs writes on the window's thread; reads from the mirror.
 struct OnWindow {
@@ -110,9 +130,14 @@ impl Host {
         let env = self.env();
         let mut st = self.state();
         let before = st.workspace.clone();
+        let sets = st.screensets.clone();
         let out = f(&mut st, &env);
         if st.revision != self.revisions.peek().revision {
             self.moved_on(&before, &st);
+        }
+        let list = self.revisions.peek().list.clone();
+        if let (Some(active), Some(list)) = (control::sets_changed(&sets, &st.screensets), list) {
+            list.changed(control::SETS_TOPIC, &active);
         }
         if *self.workspace.peek() != st.workspace {
             let mut w = self.workspace;
@@ -201,6 +226,16 @@ pub(super) fn use_actions(host: Host, actions: Option<WorkspaceActions>) {
             }
         }
     });
+    // `WORKSPACES_MANAGE`: the sheet opens on the window's thread.
+    let opener = use_coroutine(
+        move |mut asks: UnboundedReceiver<futures_channel::oneshot::Sender<bool>>| async move {
+            while let Some(answer) = asks.next().await {
+                let mut managing = host.managing;
+                managing.set(true);
+                let _ = answer.send(true);
+            }
+        },
+    );
     let registered = use_hook({
         let mirror = mirror.clone();
         move || {
@@ -209,7 +244,19 @@ pub(super) fn use_actions(host: Host, actions: Option<WorkspaceActions>) {
                 tx: runner.tx(),
                 mirror,
             });
-            control::register(&list, &exec).ok().map(|()| list)
+            control::register(&list, &exec).ok()?;
+            let tx = opener.tx();
+            list.register_async(&MANAGE_META, Effect::Mutating, move |(): ()| {
+                let (answer, heard) = futures_channel::oneshot::channel();
+                let sent = tx.unbounded_send(answer).is_ok();
+                async move {
+                    Ok(Opened {
+                        opened: sent && heard.await.unwrap_or(false),
+                    })
+                }
+            })
+            .ok()?;
+            Some(list)
         }
     });
     // A person's change (a drag, a key) moves the revision on, is heard,
@@ -244,6 +291,7 @@ pub(super) fn use_actions(host: Host, actions: Option<WorkspaceActions>) {
             for id in control::ids::ALL {
                 list.unregister(id);
             }
+            list.unregister(control::ids::WORKSPACES_MANAGE);
         }
     });
 }

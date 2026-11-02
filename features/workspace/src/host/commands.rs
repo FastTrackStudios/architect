@@ -38,7 +38,6 @@ pub(super) fn WorkspaceCommands() -> Element {
                 .get(l.window)
                 .is_some_and(|win| matches!(win.center, Some(crate::model::Node::Split(_))))
     });
-    let has_sets = !host.screensets.read().sets.is_empty();
     let can_back = active
         .as_ref()
         .and_then(|p| w.pane(p))
@@ -599,9 +598,7 @@ pub(super) fn WorkspaceCommands() -> Element {
         )
     });
     rsx! {
-        if has_sets {
-            super::screens::ScreensetCommands {}
-        }
+        super::screens::ScreensetCommands {}
     }
 }
 

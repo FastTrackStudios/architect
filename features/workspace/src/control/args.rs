@@ -599,9 +599,9 @@ pub struct NeighborArgs {
     pub direction: Toward,
 }
 
-/// `SCREENSET_RECALL`: by `id`, or by `slot` (1–9).
+/// `WORKSPACES_LOAD`: a saved layout by `id`, `name` or `slot` (1–9).
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
-pub struct RecallArgs {
+pub struct LoadArgs {
     /// Run only if the layout is still at this revision (what
     /// `WORKSPACE_LAYOUT` said): otherwise nothing changes and the answer
     /// is `stale`, with the layout as it is now.
@@ -610,23 +610,66 @@ pub struct RecallArgs {
     #[facet(default)]
     pub id: Option<String>,
     #[facet(default)]
+    pub name: Option<String>,
+    #[facet(default)]
     pub slot: Option<u8>,
 }
 
-/// `SCREENSET_SAVE_AS`.
+/// `WORKSPACES_SAVE`: the active set (no `name`), or over the set of that
+/// name, or a new one.
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
-pub struct SaveAsArgs {
+pub struct SaveArgs {
     /// Run only if the layout is still at this revision (what
     /// `WORKSPACE_LAYOUT` said): otherwise nothing changes and the answer
     /// is `stale`, with the layout as it is now.
     #[facet(default)]
     pub if_revision: Option<u64>,
+    #[facet(default)]
+    pub name: Option<String>,
+}
+
+/// `WORKSPACES_RENAME`.
+#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+pub struct RenameArgs {
+    /// Run only if the layout is still at this revision (what
+    /// `WORKSPACE_LAYOUT` said): otherwise nothing changes and the answer
+    /// is `stale`, with the layout as it is now.
+    #[facet(default)]
+    pub if_revision: Option<u64>,
+    pub id: String,
     pub name: String,
+}
+
+/// `WORKSPACES_SET_SLOT`: `slot` 1–9, or unset for none.
+#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+pub struct SlotArgs {
+    /// Run only if the layout is still at this revision (what
+    /// `WORKSPACE_LAYOUT` said): otherwise nothing changes and the answer
+    /// is `stale`, with the layout as it is now.
+    #[facet(default)]
+    pub if_revision: Option<u64>,
+    pub id: String,
     #[facet(default)]
     pub slot: Option<u8>,
 }
 
-/// `SCREENSET_SAVE` and `SCREENSET_RESET`: nothing but the guard.
+/// `WORKSPACES_OPTIONS`: each option given is set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Facet)]
+pub struct OptionsArgs {
+    /// Run only if the layout is still at this revision (what
+    /// `WORKSPACE_LAYOUT` said): otherwise nothing changes and the answer
+    /// is `stale`, with the layout as it is now.
+    #[facet(default)]
+    pub if_revision: Option<u64>,
+    /// Save the live layout into the active set before loading another.
+    #[facet(default)]
+    pub save_before_load: Option<bool>,
+    /// ⌘1–9 load the set in that slot.
+    #[facet(default)]
+    pub slot_keys: Option<bool>,
+}
+
+/// `WORKSPACES_RESET`: nothing but the guard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Facet)]
 pub struct RevisionArgs {
     /// Run only if the layout is still at this revision (what
@@ -672,13 +715,16 @@ guarded!(
     ReopenArgs,
     CloseArgs,
     WindowArgs,
-    RecallArgs,
-    SaveAsArgs,
+    LoadArgs,
+    SaveArgs,
+    RenameArgs,
+    SlotArgs,
+    OptionsArgs,
     DeleteArgs,
     RevisionArgs
 );
 
-/// `SCREENSET_DELETE`.
+/// `WORKSPACES_DELETE`.
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
 pub struct DeleteArgs {
     /// Run only if the layout is still at this revision (what

@@ -9,10 +9,10 @@
 
 use super::{
     Acted, Answer, At, CloseArgs, DeleteArgs, DockBackArgs, DockPopOutArgs, DockSetArgs, Env,
-    FLOAT_AT, FloatArgs, Focus, FocusArgs, Go, GroupSetArgs, MoveArgs, NavigateArgs, OpenArgs,
-    PaneArgs, Reason, RecallArgs, ReopenArgs, ResizeArgs, RestoreArgs, SaveAsArgs, SnapTo,
-    SplitArgs, State, TabSetArgs, To, WindowArgs, WindowSetArgs, ZoomArgs, answer, area_root,
-    finish, group_id, neighbour_group, pane_id, window_id,
+    FLOAT_AT, FloatArgs, Focus, FocusArgs, Go, GroupSetArgs, LoadArgs, MoveArgs, NavigateArgs,
+    OpenArgs, OptionsArgs, PaneArgs, Reason, RenameArgs, ReopenArgs, ResizeArgs, RestoreArgs,
+    SaveArgs, SlotArgs, SnapTo, SplitArgs, State, TabSetArgs, To, WindowArgs, WindowSetArgs,
+    ZoomArgs, answer, area_root, finish, group_id, neighbour_group, pane_id, window_id,
 };
 use crate::layout::Direction;
 use crate::model::{
@@ -962,26 +962,50 @@ fn show(w: &mut Workspace, mut layout: Workspace) {
     *w = layout;
 }
 
-/// `SCREENSET_RECALL`.
+/// The set `id` or `name` names (either, not both).
+fn set_id(st: &State, id: Option<&str>, name: Option<&str>) -> Result<String, String> {
+    match (id, name) {
+        (Some(id), None) => st
+            .screensets
+            .get(id)
+            .map(|s| s.id.clone())
+            .ok_or_else(|| format!("no workspace {id:?} (WORKSPACES_LIST lists them)")),
+        (None, Some(name)) => st
+            .screensets
+            .named(name)
+            .map(|s| s.id.clone())
+            .ok_or_else(|| format!("no workspace named {name:?}")),
+        _ => Err("give `id` or `name`".to_owned()),
+    }
+}
+
+/// `WORKSPACES_LOAD`: a saved layout becomes the live one (for this class
+/// of screen). With the option on, the live layout is saved into the
+/// active set first.
 ///
 /// # Errors
 ///
-/// Neither an id nor a slot, or no such screenset.
-pub fn recall(st: &mut State, env: &Env, a: RecallArgs) -> Result<Answer, String> {
+/// None or more than one of `id`, `name`, `slot`, or no such set.
+pub fn load(st: &mut State, env: &Env, a: LoadArgs) -> Result<Answer, String> {
     let before = st.clone();
-    let id = match (a.id, a.slot) {
-        (Some(id), None) => id,
-        (None, Some(n)) => st
+    let id = match (a.slot, a.id.as_deref(), a.name.as_deref()) {
+        (Some(n), None, None) => st
             .screensets
             .in_slot(n)
             .map(|s| s.id.clone())
-            .ok_or_else(|| format!("no screenset is in slot {n}"))?,
-        _ => return Err("give `id` or `slot`".to_owned()),
+            .ok_or_else(|| format!("no workspace is in slot {n}"))?,
+        (None, id, name) => set_id(st, id, name)?,
+        _ => return Err("give one of `id`, `name`, `slot`".to_owned()),
     };
+    if st.screensets.options.save_before_load && st.screensets.active.is_some() {
+        let live = st.workspace.clone();
+        st.screensets.set_working(st.form, live);
+        let _ = st.screensets.save(st.form);
+    }
     let layout = st
         .screensets
         .recall(&id, st.form)
-        .ok_or_else(|| format!("no screenset {id:?} with a layout"))?;
+        .ok_or_else(|| format!("workspace {id:?} has no layout"))?;
     show(&mut st.workspace, layout);
     let acted = Acted {
         screenset: Some(id),
@@ -997,25 +1021,39 @@ pub fn recall(st: &mut State, env: &Env, a: RecallArgs) -> Result<Answer, String
     ))
 }
 
-/// `SCREENSET_SAVE`: the live layout into the active screenset.
+/// `WORKSPACES_SAVE`: with no `name`, the live layout into the active
+/// set; with one, over the set of that name, or as a new set (Obsidian's
+/// save). The set saved becomes active.
 ///
 /// # Errors
 ///
-/// None the caller can mend.
-pub fn save(st: &mut State, env: &Env, _: super::RevisionArgs) -> Result<Answer, String> {
+/// A blank name.
+pub fn save(st: &mut State, env: &Env, a: SaveArgs) -> Result<Answer, String> {
     let before = st.clone();
-    let Some(id) = st.screensets.active.clone() else {
-        return Ok(answer(
-            st,
-            env,
-            false,
-            Some(Reason::NoScreenset),
-            Acted::default(),
-        ));
-    };
     let live = st.workspace.clone();
-    st.screensets.set_working(st.form, live);
-    let _ = st.screensets.save(st.form);
+    let id = match a.name {
+        Some(name) if name.trim().is_empty() => {
+            return Err("a workspace needs a name".to_owned());
+        }
+        Some(name) => {
+            st.screensets.set_working(st.form, live);
+            st.screensets.save_named(&name)
+        }
+        None => {
+            let Some(id) = st.screensets.active.clone() else {
+                return Ok(answer(
+                    st,
+                    env,
+                    false,
+                    Some(Reason::NoScreenset),
+                    Acted::default(),
+                ));
+            };
+            st.screensets.set_working(st.form, live);
+            let _ = st.screensets.save(st.form);
+            id
+        }
+    };
     let acted = Acted {
         screenset: Some(id),
         ..Acted::default()
@@ -1030,23 +1068,49 @@ pub fn save(st: &mut State, env: &Env, _: super::RevisionArgs) -> Result<Answer,
     ))
 }
 
-/// `SCREENSET_SAVE_AS`: every live layout as a new screenset, which
-/// becomes active.
+/// `WORKSPACES_RENAME`.
 ///
 /// # Errors
 ///
-/// An empty name, or a slot past 9.
-pub fn save_as(st: &mut State, env: &Env, a: SaveAsArgs) -> Result<Answer, String> {
+/// No such set, a blank name, or one another set has.
+pub fn rename(st: &mut State, env: &Env, a: RenameArgs) -> Result<Answer, String> {
     let before = st.clone();
-    if a.name.trim().is_empty() {
-        return Err("a screenset needs a name".to_owned());
+    let id = set_id(st, Some(&a.id), None)?;
+    let name = a.name.trim();
+    if name.is_empty() {
+        return Err("a workspace needs a name".to_owned());
     }
+    if st.screensets.named(name).is_some_and(|s| s.id != id) {
+        return Err(format!("another workspace is named {name:?}"));
+    }
+    st.screensets.rename(&id, name);
+    let acted = Acted {
+        screenset: Some(id),
+        ..Acted::default()
+    };
+    Ok(finish(
+        st,
+        env,
+        &before,
+        Focus::AsIs,
+        acted,
+        Reason::Unchanged,
+    ))
+}
+
+/// `WORKSPACES_SET_SLOT`: a set into slot 1–9 (the set there gives it
+/// up), or out of any.
+///
+/// # Errors
+///
+/// No such set, or a slot past 9.
+pub fn set_slot(st: &mut State, env: &Env, a: SlotArgs) -> Result<Answer, String> {
+    let before = st.clone();
+    let id = set_id(st, Some(&a.id), None)?;
     if a.slot.is_some_and(|n| !(1..=9).contains(&n)) {
         return Err("a slot is 1 to 9".to_owned());
     }
-    let live = st.workspace.clone();
-    st.screensets.set_working(st.form, live);
-    let id = st.screensets.save_as(a.name, a.slot);
+    st.screensets.set_slot(&id, a.slot);
     let acted = Acted {
         screenset: Some(id),
         ..Acted::default()
@@ -1061,7 +1125,31 @@ pub fn save_as(st: &mut State, env: &Env, a: SaveAsArgs) -> Result<Answer, Strin
     ))
 }
 
-/// `SCREENSET_RESET`: back to the active screenset's saved layout.
+/// `WORKSPACES_OPTIONS`.
+///
+/// # Errors
+///
+/// Never.
+pub fn set_options(st: &mut State, env: &Env, a: OptionsArgs) -> Result<Answer, String> {
+    let before = st.clone();
+    let options = &mut st.screensets.options;
+    if let Some(on) = a.save_before_load {
+        options.save_before_load = on;
+    }
+    if let Some(on) = a.slot_keys {
+        options.slot_keys = on;
+    }
+    Ok(finish(
+        st,
+        env,
+        &before,
+        Focus::AsIs,
+        Acted::default(),
+        Reason::Unchanged,
+    ))
+}
+
+/// `WORKSPACES_RESET`: back to the active screenset's saved layout.
 ///
 /// # Errors
 ///
@@ -1094,7 +1182,7 @@ pub fn reset(st: &mut State, env: &Env, _: super::RevisionArgs) -> Result<Answer
     ))
 }
 
-/// `SCREENSET_DELETE`: a screenset the person made.
+/// `WORKSPACES_DELETE`: a set the person made.
 ///
 /// # Errors
 ///
@@ -1104,7 +1192,7 @@ pub fn delete(st: &mut State, env: &Env, a: DeleteArgs) -> Result<Answer, String
     let set = st
         .screensets
         .get(&a.id)
-        .ok_or_else(|| format!("no screenset {:?}", a.id))?;
+        .ok_or_else(|| format!("no workspace {:?}", a.id))?;
     let acted = Acted {
         screenset: Some(a.id.clone()),
         ..Acted::default()

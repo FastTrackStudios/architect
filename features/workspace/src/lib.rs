@@ -44,8 +44,8 @@ pub mod native;
 pub use guide::{ArrangedGroup, ArrangedSplit, ArrangedWindow, Arrangement, target_selector};
 #[cfg(feature = "ui")]
 pub use host::{
-    Bridge, Command, Host, PaneHandle, Popout, PresenceLayer, PresenceOverlay, TitleRow, View,
-    Views, WindowSystem, Windows, WorkspaceActions, WorkspaceStore, WorkspaceView, use_host,
+    Bridge, Command, Host, Opened, PaneHandle, Popout, PresenceLayer, PresenceOverlay, TitleRow,
+    View, Views, WindowSystem, Windows, WorkspaceActions, WorkspaceStore, WorkspaceView, use_host,
     use_pane, use_pane_status, use_presence_overlay,
 };
 pub use layout::{Direction, Placed, Slide, area_rects, neighbour, scroll_to, slides};
@@ -56,6 +56,8 @@ pub use model::{
 };
 pub use ops::{Dest, Target, WorkspaceError};
 pub use presence::{PlayheadMark, PointerMark, PresenceMarks, WashMark, css_color};
-pub use screenset::{FormClass, Layout, Recall, Screenset, Screensets};
+pub use screenset::{
+    FormClass, Layout, Recall, SavedScreensets, Screenset, ScreensetOptions, Screensets,
+};
 pub use store::{MemoryStore, Store};
 pub use switcher::{Card, CardGrid, Place, reorder_dest};

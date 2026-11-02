@@ -34,6 +34,7 @@ mod actions;
 mod commands;
 mod dock;
 mod group;
+mod manage;
 mod overlay;
 mod presence;
 mod screens;
@@ -61,7 +62,7 @@ use group::NodeView;
 use overlay::{DragLayer, DropHighlight, FloatView, MenuLayer, PhoneBody, SheetLayer};
 pub use presence::{PresenceLayer, PresenceOverlay, use_presence_overlay};
 
-pub use actions::WorkspaceActions;
+pub use actions::{Opened, WorkspaceActions};
 pub use screens::WorkspaceStore;
 pub use windows::{Bridge, Popout, WindowSystem, Windows};
 
@@ -421,6 +422,10 @@ pub struct Host {
     revisions: CopyValue<actions::Revisions>,
     /// The host's measure of its area and groups.
     measured: CopyValue<crate::tree::Measured>,
+    /// What the app calls a saved layout ("Workspace").
+    sets_noun: Signal<String>,
+    /// The sheet that manages the saved layouts is open.
+    managing: Signal<bool>,
 }
 
 /// The [`Host`] a [`WorkspaceView`] above put in context.
@@ -889,10 +894,11 @@ impl Host {
                 let _ = self.edit(|w| w.dock_back(side));
             }
             Op::Recall(slot) => self.write(
-                crate::control::recall,
-                crate::control::RecallArgs {
+                crate::control::load,
+                crate::control::LoadArgs {
                     if_revision: None,
                     id: None,
+                    name: None,
                     slot: Some(slot),
                 },
             ),
@@ -1104,6 +1110,13 @@ pub fn WorkspaceView(
     /// Where the screensets and the live layout are kept: read once when
     /// the host mounts, written when the workspace settles.
     store: Option<WorkspaceStore>,
+    /// Where this device's working copy is kept, apart from the saved sets
+    /// in `store` (which then go where they are shared: a project's
+    /// settings, the person's synced ones).
+    device_store: Option<WorkspaceStore>,
+    /// What the app calls a saved layout, in its commands and the manage
+    /// sheet: "Workspace" unless it says (Studio: "Screenset").
+    sets_noun: Option<String>,
     /// Kept filled with the current document's own status items
     /// ([`use_pane_status`]), for the app to put on its status line.
     status: Option<Signal<Vec<StatusItem>>>,
@@ -1161,6 +1174,8 @@ pub fn WorkspaceView(
         released: CopyValue::new(Rc::default()),
         revisions: CopyValue::new(actions::Revisions::default()),
         measured: CopyValue::new(crate::tree::Measured::default()),
+        sets_noun: Signal::new("Workspace".to_owned()),
+        managing: Signal::new(false),
     });
     // Props change under a live host: keep it current.
     host.views.set(views);
@@ -1200,7 +1215,11 @@ pub fn WorkspaceView(
     if *host.form.peek() != class {
         host.form.set(class);
     }
-    screens::use_kept(host, store);
+    screens::use_kept(host, store, device_store);
+    let noun = sets_noun.unwrap_or_else(|| "Workspace".to_owned());
+    if *host.sets_noun.peek() != noun {
+        host.sets_noun.set(noun);
+    }
     actions::use_actions(host, actions);
     windows::use_release_outside(host);
     use_pressed_in_popouts(host);
@@ -1290,6 +1309,7 @@ pub fn WorkspaceView(
             DragLayer {}
             MenuLayer {}
             SheetLayer {}
+            manage::ManageSheet {}
             if phone && !shell_cover {
                 switcher::SwitcherLayer { cover: false }
             }

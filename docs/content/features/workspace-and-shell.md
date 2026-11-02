@@ -79,17 +79,34 @@ root, with the page as its children; a page adds status items with
    `Workspace::close_window`, `Workspace::to_main_window`; and
    `features/workspace/src/repair.rs` `Workspace::repair`.
 3. `features/workspace/src/screenset.rs` `Screensets` (`with_builtins`,
-   `recall`, `recall_slot`, `save`, `is_dirty`, `menu_rows`), `FormClass`;
-   `features/workspace/src/store.rs` `Store`, `MemoryStore`.
-4. `features/workspace/src/drop.rs` `drop_in`, `Bar` and
+   `recall`, `recall_slot`, `save`, `save_named`, `rename`, `set_slot`,
+   `is_dirty`, `menu_rows`, `options`), `FormClass`;
+   `features/workspace/src/store.rs` `Store`, `MemoryStore`, `load_split` /
+   `save_split` (the saved sets where they are shared, the working copy on
+   the device).
+4. Saved layouts, the person's "workspaces" (Obsidian's Workspaces plugin):
+   `WORKSPACES_LIST`, `WORKSPACES_LOAD {id|name|slot}`,
+   `WORKSPACES_SAVE {name?}` (no name: the active set; a name: over the set
+   of that name, or a new one), `WORKSPACES_RENAME {id, name}`,
+   `WORKSPACES_SET_SLOT {id, slot?}`, `WORKSPACES_OPTIONS {save_before_load?,
+   slot_keys?}`, `WORKSPACES_RESET`, and `WORKSPACES_DELETE {id}`
+   (destructive, so an agent gets a confirmation ticket), in
+   `features/workspace/src/control/write.rs`. Each change of the saved sets
+   is a `Changed { topic: "workspaces" }` event. `WORKSPACES_MANAGE` opens
+   the sheet (`features/workspace/src/host/manage.rs` `ManageSheet`): every
+   set with Load, Save over, Rename, its ⌘ key, Delete, Reset, and a field
+   to save the current layout under a name. The palette lists "Load
+   workspace: <name>" for every set. `WorkspaceView`'s `sets_noun` names
+   them per app ("Workspace" by default; Studio's "Screenset").
+5. `features/workspace/src/drop.rs` `drop_in`, `Bar` and
    `features/workspace/src/layout.rs` `area_rects`, `neighbour`, `slides`:
    where a dragged tab lands; stacked tabs sliding.
-5. `features/workspace/src/host/mod.rs` `WorkspaceView`, `View`, `Views`,
+6. `features/workspace/src/host/mod.rs` `WorkspaceView`, `View`, `Views`,
    `use_pane`, `use_pane_status`, `TitleRow`; `features/workspace/src/host/commands.rs`
    registers the `WORKSPACE_*` commands.
-6. `features/workspace/src/host/windows.rs` `WindowSystem`, `Popout`, `Bridge`
+7. `features/workspace/src/host/windows.rs` `WindowSystem`, `Popout`, `Bridge`
    and `features/workspace/src/native.rs` `launch`, `launch_with_fonts`.
-7. `features/shell/src/shell/mod.rs` `AppShell`, `Tab`, `Action`, `Account`,
+8. `features/shell/src/shell/mod.rs` `AppShell`, `Tab`, `Action`, `Account`,
    `WindowChrome`, `use_shell_slots`; `features/shell/src/shell/page.rs` `Page`,
    `Toolbar`, `Breadcrumb`; `features/shell/src/shell/status.rs` `StatusItem`,
    `use_status`; `features/shell/src/screen.rs` `Screen`, `FormFactor`.
@@ -107,6 +124,11 @@ its tabs back to the main one.
 - `features/workspace/tests/workspace.rs`: every operation and invariant,
   docks, floats, windows, history, screensets, the store round trip, drops,
   sliding stacked tabs.
+- `features/workspace/tests/actions.rs`: every workspace action over MCP,
+  the saved layouts (saved over by name, renamed, slotted, deleted, with
+  their options and events), a set bringing back pop-out windows, dock
+  sizes and visibility, floats and pinned tabs, and the split store.
+- `apps/lab/scenarios/workspaces-manage.styx`: the manage sheet, played.
 - `features/workspace/tests/windows.rs`: one document's signal redraws
   another; a pop-out opens and gives its tabs back; a kept layout comes back
   on mount; a pane's status items.
@@ -116,9 +138,11 @@ its tabs back to the main one.
 ## Status
 
 Done in architect. Not yet: dragging a tab onto a group in another window;
-docks in pop-outs; the app's chords inside a pop-out. The workspace commands
-are view commands (`use_command`), not Action List actions, so MCP cannot run
-them yet. Blitz differences found building these are in
+docks in pop-outs; the app's chords inside a pop-out; saved layouts kept in
+an org's scope as team layouts. Every workspace operation is an Action List
+action (`docs/content/architecture/workspace.md`). An app keeps the saved
+sets in its settings scope of choice by passing a `store` over it (and a
+`device_store` for the working copy). Blitz differences found building these are in
 `skills/architect/references/blitz-quirks.md`.
 
 - **Task** has its own shell (`task:crates/ui/src/shell/app_shell.rs`, the

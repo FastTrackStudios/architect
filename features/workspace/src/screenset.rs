@@ -160,6 +160,27 @@ pub struct Recall {
     pub id: String,
 }
 
+/// How the screensets behave: the person's choices.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Facet)]
+pub struct ScreensetOptions {
+    /// Save the live layout into the active set before loading another
+    /// (Obsidian's "save before loading"; off by default).
+    #[facet(default)]
+    pub save_before_load: bool,
+    /// ⌘1–9 recall the set in that slot (on by default).
+    #[facet(default = true)]
+    pub slot_keys: bool,
+}
+
+impl Default for ScreensetOptions {
+    fn default() -> Self {
+        Self {
+            save_before_load: false,
+            slot_keys: true,
+        }
+    }
+}
+
 /// Every screenset, which is active, and the live (working) layout per
 /// form class.
 #[derive(Debug, Clone, PartialEq, Default, Facet)]
@@ -168,6 +189,20 @@ pub struct Screensets {
     pub active: Option<String>,
     /// What the person has arranged since recalling or saving, per class.
     pub working: Vec<Layout>,
+    #[facet(default)]
+    pub options: ScreensetOptions,
+}
+
+/// The saved half of [`Screensets`]: what a project (or the person's
+/// synced settings) keeps, apart from each device's working copy
+/// ([`Screensets::saved`], [`Screensets::joined`]).
+#[derive(Debug, Clone, PartialEq, Default, Facet)]
+pub struct SavedScreensets {
+    pub sets: Vec<Screenset>,
+    #[facet(default)]
+    pub active: Option<String>,
+    #[facet(default)]
+    pub options: ScreensetOptions,
 }
 
 impl Screensets {
@@ -301,6 +336,81 @@ impl Screensets {
     pub fn reset(&mut self, class: FormClass) -> Option<Workspace> {
         let id = self.active.clone()?;
         self.recall(&id, class)
+    }
+
+    /// The set named `name` (case aside), as a person types it.
+    #[must_use]
+    pub fn named(&self, name: &str) -> Option<&Screenset> {
+        let name = name.trim();
+        self.sets.iter().find(|s| s.name.eq_ignore_ascii_case(name))
+    }
+
+    /// Save every live layout under `name`: over the set of that name
+    /// when there is one (Obsidian's), else as a new set. Either becomes
+    /// active. Its id.
+    pub fn save_named(&mut self, name: &str) -> String {
+        match self.named(name).map(|s| s.id.clone()) {
+            Some(id) => {
+                let working = self.working.clone();
+                if let Some(set) = self.sets.iter_mut().find(|s| s.id == id) {
+                    for layout in working {
+                        set.set_layout(layout.class, layout.workspace);
+                    }
+                }
+                self.active = Some(id.clone());
+                id
+            }
+            None => self.save_as(name.trim(), None),
+        }
+    }
+
+    /// Rename set `id` (its id stays). False when there is no such set.
+    pub fn rename(&mut self, id: &str, name: impl Into<String>) -> bool {
+        self.sets
+            .iter_mut()
+            .find(|s| s.id == id)
+            .is_some_and(|set| {
+                set.name = name.into();
+                true
+            })
+    }
+
+    /// Put set `id` in slot `slot` (1–9; the set there gives it up), or
+    /// in none. False when there is no such set.
+    pub fn set_slot(&mut self, id: &str, slot: Option<u8>) -> bool {
+        if self.get(id).is_none() {
+            return false;
+        }
+        for set in &mut self.sets {
+            if set.id == id {
+                set.slot = slot;
+            } else if slot.is_some() && set.slot == slot {
+                set.slot = None;
+            }
+        }
+        true
+    }
+
+    /// The saved half, to keep where the sets are shared (a project, the
+    /// person's synced settings).
+    #[must_use]
+    pub fn saved(&self) -> SavedScreensets {
+        SavedScreensets {
+            sets: self.sets.clone(),
+            active: self.active.clone(),
+            options: self.options,
+        }
+    }
+
+    /// The saved half and a device's working copy, joined back.
+    #[must_use]
+    pub fn joined(saved: SavedScreensets, working: Vec<Layout>) -> Self {
+        Self {
+            sets: saved.sets,
+            active: saved.active,
+            working,
+            options: saved.options,
+        }
     }
 
     /// Delete a set the person made (a built-in one stays).

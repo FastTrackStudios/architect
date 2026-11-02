@@ -11,9 +11,9 @@ use facet::Facet;
 
 use super::{
     ApplyArgs, CloseArgs, DeleteArgs, DockBackArgs, DockPopOutArgs, DockSetArgs, Env, FloatArgs,
-    FocusArgs, GroupSetArgs, MoveArgs, NavigateArgs, NeighborArgs, OpenArgs, PaneArgs, RecallArgs,
-    ReopenArgs, ResizeArgs, RestoreArgs, RevisionArgs, SaveAsArgs, SplitArgs, State, TabSetArgs,
-    WindowArgs, WindowSetArgs, Write, ZoomArgs, transact,
+    FocusArgs, GroupSetArgs, LoadArgs, MoveArgs, NavigateArgs, NeighborArgs, OpenArgs, OptionsArgs,
+    PaneArgs, RenameArgs, ReopenArgs, ResizeArgs, RestoreArgs, RevisionArgs, SaveArgs, SlotArgs,
+    SplitArgs, State, TabSetArgs, WindowArgs, WindowSetArgs, Write, ZoomArgs, transact,
 };
 
 /// The actions' ids. Each is a contract (keymaps, scripts and models
@@ -45,12 +45,17 @@ pub mod ids {
     pub const CLOSE: &str = "WORKSPACE_CLOSE";
     pub const CLOSE_OTHERS: &str = "WORKSPACE_CLOSE_OTHERS";
     pub const CLOSE_WINDOW: &str = "WORKSPACE_CLOSE_WINDOW";
-    pub const SCREENSET_LIST: &str = "SCREENSET_LIST";
-    pub const SCREENSET_RECALL: &str = "SCREENSET_RECALL";
-    pub const SCREENSET_SAVE: &str = "SCREENSET_SAVE";
-    pub const SCREENSET_SAVE_AS: &str = "SCREENSET_SAVE_AS";
-    pub const SCREENSET_RESET: &str = "SCREENSET_RESET";
-    pub const SCREENSET_DELETE: &str = "SCREENSET_DELETE";
+    pub const WORKSPACES_LIST: &str = "WORKSPACES_LIST";
+    pub const WORKSPACES_LOAD: &str = "WORKSPACES_LOAD";
+    pub const WORKSPACES_SAVE: &str = "WORKSPACES_SAVE";
+    pub const WORKSPACES_RENAME: &str = "WORKSPACES_RENAME";
+    pub const WORKSPACES_SET_SLOT: &str = "WORKSPACES_SET_SLOT";
+    pub const WORKSPACES_OPTIONS: &str = "WORKSPACES_OPTIONS";
+    pub const WORKSPACES_RESET: &str = "WORKSPACES_RESET";
+    pub const WORKSPACES_DELETE: &str = "WORKSPACES_DELETE";
+    /// Opens the manage sheet: the Blitz host's own (`register` does not
+    /// put it on a list; there is no sheet without a window).
+    pub const WORKSPACES_MANAGE: &str = "WORKSPACES_MANAGE";
 
     /// Every id [`super::register`] puts on a list.
     pub const ALL: &[&str] = &[
@@ -80,12 +85,14 @@ pub mod ids {
         CLOSE,
         CLOSE_OTHERS,
         CLOSE_WINDOW,
-        SCREENSET_LIST,
-        SCREENSET_RECALL,
-        SCREENSET_SAVE,
-        SCREENSET_SAVE_AS,
-        SCREENSET_RESET,
-        SCREENSET_DELETE,
+        WORKSPACES_LIST,
+        WORKSPACES_LOAD,
+        WORKSPACES_SAVE,
+        WORKSPACES_RENAME,
+        WORKSPACES_SET_SLOT,
+        WORKSPACES_OPTIONS,
+        WORKSPACES_RESET,
+        WORKSPACES_DELETE,
     ];
 }
 
@@ -148,12 +155,14 @@ metas! {
     CLOSE = CLOSE, "Tabs", "Close panes", "Closes the panes named (all or none), each kept to reopen.";
     CLOSE_OTHERS = CLOSE_OTHERS, "Tabs", "Close the other tabs", "Closes every other unpinned tab in the pane's group.";
     CLOSE_WINDOW = CLOSE_WINDOW, "Windows", "Close a window", "Closes a pop-out window; its tabs come back to the main window.";
-    SCREENSET_LIST = SCREENSET_LIST, "Screensets", "Screensets", "Every screenset (id, name, slot, built in, the classes of screen it has layouts for), the active one, and whether the live layout differs from it.";
-    SCREENSET_RECALL = SCREENSET_RECALL, "Screensets", "Recall a screenset", "Recalls a screenset by `id` or `slot`: its layout for this class of screen becomes the live one.";
-    SCREENSET_SAVE = SCREENSET_SAVE, "Screensets", "Save the screenset", "Saves the live layout into the active screenset.";
-    SCREENSET_SAVE_AS = SCREENSET_SAVE_AS, "Screensets", "Save as a new screenset", "Saves every live layout as a new screenset named `name` (in `slot` 1–9 when given), which becomes active.";
-    SCREENSET_RESET = SCREENSET_RESET, "Screensets", "Reset to the saved layout", "Throws the live changes away: back to the active screenset's saved layout.";
-    SCREENSET_DELETE = SCREENSET_DELETE, "Screensets", "Delete a screenset", "Deletes a screenset the person made (a built-in one answers `builtin`).";
+    WORKSPACES_LIST = WORKSPACES_LIST, "Workspaces", "Saved workspace layouts", "Every saved layout (id, name, slot, built in, the classes of screen it has layouts for, dirty per class), the active one, whether the live layout differs from it, and the options.";
+    WORKSPACES_LOAD = WORKSPACES_LOAD, "Workspaces", "Load a workspace layout", "Loads a saved layout by `id`, `name` or `slot`: its layout for this class of screen becomes the live one.";
+    WORKSPACES_SAVE = WORKSPACES_SAVE, "Workspaces", "Save the workspace layout", "Saves the live layout: with no `name` into the active set; with one over the set of that name, or as a new set. It becomes active.";
+    WORKSPACES_RENAME = WORKSPACES_RENAME, "Workspaces", "Rename a workspace layout", "Renames a saved layout (`id` stays).";
+    WORKSPACES_SET_SLOT = WORKSPACES_SET_SLOT, "Workspaces", "Put a workspace layout in a slot", "Puts a saved layout in slot 1–9 (⌘1–9; the set there gives it up), or out of any when `slot` is unset.";
+    WORKSPACES_OPTIONS = WORKSPACES_OPTIONS, "Workspaces", "Workspace layout options", "Save the live layout before loading another (`save_before_load`), and whether ⌘1–9 load (`slot_keys`).";
+    WORKSPACES_RESET = WORKSPACES_RESET, "Workspaces", "Reset to the saved layout", "Throws the live changes away: back to the active set's saved layout.";
+    WORKSPACES_DELETE = WORKSPACES_DELETE, "Workspaces", "Delete a workspace layout", "Deletes a saved layout the person made (a built-in one answers `builtin`).";
 }
 
 /// Registers a write: sent to where the workspace lives, answered when it
@@ -228,7 +237,7 @@ pub fn register(list: &ActionList, exec: &Arc<dyn Exec>) -> Result<(), ActionErr
     read::<NeighborArgs, _>(list, e, &NEIGHBOR, super::neighbor)?;
     read(list, e, &VIEWS, super::views)?;
     read(list, e, &EXPORT, super::export)?;
-    read(list, e, &SCREENSET_LIST, super::screensets)?;
+    read(list, e, &WORKSPACES_LIST, super::screensets)?;
     write::<OpenArgs>(list, e, &OPEN, Mutating, super::open)?;
     write::<MoveArgs>(list, e, &MOVE, Mutating, super::move_pane)?;
     write::<SplitArgs>(list, e, &SPLIT, Mutating, super::split)?;
@@ -250,11 +259,13 @@ pub fn register(list: &ActionList, exec: &Arc<dyn Exec>) -> Result<(), ActionErr
     write::<CloseArgs>(list, e, &CLOSE, Mutating, super::close)?;
     write::<PaneArgs>(list, e, &CLOSE_OTHERS, Destructive, super::close_others)?;
     write::<WindowArgs>(list, e, &CLOSE_WINDOW, Destructive, super::close_window)?;
-    write::<RecallArgs>(list, e, &SCREENSET_RECALL, Mutating, super::recall)?;
-    write::<RevisionArgs>(list, e, &SCREENSET_SAVE, Mutating, super::save)?;
-    write::<SaveAsArgs>(list, e, &SCREENSET_SAVE_AS, Mutating, super::save_as)?;
-    write::<RevisionArgs>(list, e, &SCREENSET_RESET, Mutating, super::reset)?;
-    write::<DeleteArgs>(list, e, &SCREENSET_DELETE, Destructive, super::delete)?;
+    write::<LoadArgs>(list, e, &WORKSPACES_LOAD, Mutating, super::load)?;
+    write::<SaveArgs>(list, e, &WORKSPACES_SAVE, Mutating, super::save)?;
+    write::<RenameArgs>(list, e, &WORKSPACES_RENAME, Mutating, super::rename)?;
+    write::<SlotArgs>(list, e, &WORKSPACES_SET_SLOT, Mutating, super::set_slot)?;
+    write::<OptionsArgs>(list, e, &WORKSPACES_OPTIONS, Mutating, super::set_options)?;
+    write::<RevisionArgs>(list, e, &WORKSPACES_RESET, Mutating, super::reset)?;
+    write::<DeleteArgs>(list, e, &WORKSPACES_DELETE, Destructive, super::delete)?;
     Ok(())
 }
 
@@ -311,14 +322,19 @@ impl Exec for Headless {
         let mut shared = self.shared.lock().unwrap_or_else(PoisonError::into_inner);
         let (st, env) = &mut *shared;
         let before = st.workspace.clone();
+        let sets = st.screensets.clone();
         let revision = st.revision;
         job(st, env);
+        let saved = super::sets_changed(&sets, &st.screensets);
         let detail =
             (st.revision != revision).then(|| super::Change::between(&before, st).to_json());
         super::APP.clone_into(&mut st.actor);
         drop(shared);
         if let Some(detail) = detail {
             self.list.changed("workspace", &detail);
+        }
+        if let Some(active) = saved {
+            self.list.changed(super::SETS_TOPIC, &active);
         }
         true
     }
