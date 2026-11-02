@@ -74,6 +74,14 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo run -q -p xtask -- surfaces
 
+      # The fleet feature union (workspace-hack/Cargo.toml, FLEET section):
+      # every member's hack line is gated off on wasm, and every entry is
+      # still a crate this workspace builds. Refreshing it from the
+      # consumers is `cargo xtask fleet-deps --repo …` (xtask-tooling.md).
+      - name: fleet-deps
+        if: ${{ !cancelled() }}
+        run: cargo run -q -p xtask -- fleet-deps --check
+
   test:
     name: Tests
     runs-on: [self-hosted, thebattleship]

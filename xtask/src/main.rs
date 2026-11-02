@@ -7,6 +7,7 @@
 mod boundaries;
 mod docs;
 mod fleet;
+mod fleet_deps;
 mod git;
 mod mirror;
 mod scaffold;
@@ -117,6 +118,26 @@ enum Command {
         #[arg(short = 'n', long)]
         dry_run: bool,
     },
+    /// Write the fleet's feature union into `workspace-hack/Cargo.toml`.
+    ///
+    /// hakari unifies features inside this workspace; this adds the
+    /// consumers' (Task, studio, keyflow, frame): for every third-party
+    /// crate architect builds that a consumer builds too, the features of
+    /// every repo, so the crate builds identically everywhere and kache
+    /// shares it. Without `--repo` it only moves each member's hack line
+    /// under its gate (off on wasm). See `xtask/src/fleet_deps.rs`.
+    FleetDeps {
+        /// A consumer checkout to take the union with; repeat per repo.
+        #[arg(long = "repo")]
+        repos: Vec<PathBuf>,
+        /// Verify instead of write (CI): every hack line gated, every
+        /// fleet entry still a crate this workspace builds.
+        #[arg(long)]
+        check: bool,
+        /// Print how each consumer's features differ from architect's.
+        #[arg(long)]
+        report: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -157,7 +178,8 @@ fn main() -> ExitCode {
                     println!("wrote {}", path.display());
                 }
                 println!(
-                    "next: `cargo test -p {name}`; the contract alone: \
+                    "next: `cargo hakari manage-deps && cargo xtask fleet-deps` (its \
+                     workspace-hack line); `cargo test -p {name}`; the contract alone: \
                      `cargo check -p {name} --target wasm32-unknown-unknown`"
                 );
             })
@@ -174,6 +196,14 @@ fn main() -> ExitCode {
         } => manifests
             .iter()
             .try_for_each(|manifest| fleet::run(manifest, &tag, dry_run)),
+        Command::FleetDeps {
+            repos,
+            check,
+            report,
+        } => {
+            let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            fleet_deps::run(&root, &repos, check, report)
+        }
     };
 
     match result {

@@ -83,6 +83,8 @@ members = [
     "features/launcher/architect-launcher-core",
     "features/launcher/architect-launcher-ui",
     "features/launcher/architect-launcher-providers",
+    # ── the fleet's feature union (hakari + `cargo xtask fleet-deps`) ──
+    "workspace-hack",
     # ── repo tooling ──────────────────────────────────────────────────
     "xtask",
 ]
@@ -290,6 +292,8 @@ sha3 = "0.12"
 hex = "0.4"
 serde_json = "1.0"
 toml = "0.8"
+# xtask fleet-deps: the resolver cargo-hakari uses, per platform.
+guppy = "0.19"
 thiserror = "2.0"
 # `serde` because architect-launcher-core derives Serialize/Deserialize on
 # `DateTime<Utc>` (history.rs, userdata.rs). Without it that crate only

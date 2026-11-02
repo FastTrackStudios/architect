@@ -60,3 +60,18 @@ jobs:
           export PATH="$dl/cargo-rail:$PATH"
           git fetch -q --no-tags --depth=1 origin "$BASE"
           cargo rail change check --since "$BASE"
+      # The workspace-hack is current (workspace-hack/Cargo.toml, hakari's
+      # section): a dependency change that skipped `cargo hakari generate`,
+      # or a new member without its hack line, fails here. Neither
+      # compiles anything.
+      - name: install cargo-hakari
+        if: ${{ !cancelled() }}
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-hakari@0.9.38
+      - name: hakari
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          cargo hakari generate --diff
+          cargo hakari manage-deps --dry-run

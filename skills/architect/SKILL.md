@@ -65,7 +65,7 @@ Writing or reviewing the README itself: the fleet `readme` skill (facts list wit
 | Dioxus component kit, theme tokens, snapshots, stories | `references/architect-ui.md` | `features/ui/architect-ui/src/prelude.rs`, `ThemeProvider` |
 | What Blitz does differently, found building the shell and the lab (layout, fonts, keys, the macOS title bar, testing tools) | `references/blitz-quirks.md` | `features/workspace/src/native.rs` `launch_with_fonts`; `features/shell/src/shell/mac.rs` `fit_traffic_lights`; `features/commands/src/native.rs` `WindowKeys` |
 | Guide media: a scenario (styx) filmed headlessly into GIF/WebM/MP4 + poster, played as a test, toured live in the app (`GUIDE_TOUR_START`); targets, `done` checks, multi-window desktop, a story's scenarios, the `media` branch | `references/guide-media.md` | `features/guide/src/model.rs` `Scenario`; `features/guide/src/run.rs` `run`, `App`; `features/guide/src/capture.rs` `Recorder`; `features/guide/src/tour.rs` `use_tours`, `TourLayer`; `features/guide/src/story.rs` `test_stories` |
-| `cargo xtask`, `boundaries.toml`, fleet-bump, CI, docs check, the fleet toolchain + rustflags + dev profile every repo copies (kache sharing) | `references/xtask-tooling.md` | `xtask/src/main.rs` `Command` |
+| `cargo xtask`, `boundaries.toml`, fleet-bump, CI, docs check, the fleet toolchain + rustflags + dev profile every repo copies, the workspace-hack and fleet feature union (kache sharing) | `references/xtask-tooling.md` | `xtask/src/main.rs` `Command` |
 
 ### App plumbing modules
 
