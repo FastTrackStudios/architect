@@ -126,7 +126,11 @@ pub(super) fn WorkspaceCommands() -> Element {
         move || cycle(host, true),
     );
     use_command(
-        several(Command::new("WORKSPACE_CLOSE_OTHER_TABS", "Close other tabs").group("Tabs")),
+        several(
+            Command::new("WORKSPACE_CLOSE_OTHER_TABS", "Close other tabs")
+                .group("Tabs")
+                .destructive(),
+        ),
         move || {
             if let Some(p) = active_pane(host) {
                 host.write(control::close_others, PaneArgs { pane: p.0 });
@@ -333,11 +337,14 @@ pub(super) fn WorkspaceCommands() -> Element {
     use_command(
         Command::new("WORKSPACE_ARRANGE", "Arrange panes")
             .group("Panes")
-            .detail("hold W"),
+            .detail("hold W")
+            .read_only(),
         move || host.toggle_arrange(),
     );
     use_command(
-        Command::new("WORKSPACE_EVERY_PANE", "Show every open pane").group("Panes"),
+        Command::new("WORKSPACE_EVERY_PANE", "Show every open pane")
+            .group("Panes")
+            .read_only(),
         move || {
             if (host.phone)() {
                 host.show_switcher();

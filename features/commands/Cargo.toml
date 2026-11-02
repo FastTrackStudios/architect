@@ -90,6 +90,12 @@ zbus = { version = "5.19", optional = true, default-features = false, features =
 tokio = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
 
+[dev-dependencies]
+# A caller from outside, an authorizer (tests/run_effects.rs).
+architect-permissions = { workspace = true }
+# Drives the window's thread while an agent's call waits.
+tokio = { workspace = true }
+
 [lib]
 doctest = false
 
