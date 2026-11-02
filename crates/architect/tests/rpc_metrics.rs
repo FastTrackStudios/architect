@@ -61,28 +61,42 @@ async fn each_call_records_its_duration_by_service_and_method() {
     assert_eq!(client.echo("a".into()).await.expect("call"), "a");
     assert_eq!(client.echo("b".into()).await.expect("call"), "b");
 
-    provider.force_flush().expect("flush");
-    let finished = exporter.get_finished_metrics().expect("metrics");
-    let points: Vec<(u64, Vec<(String, String)>)> = finished
-        .iter()
-        .flat_map(opentelemetry_sdk::metrics::data::ResourceMetrics::scope_metrics)
-        .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
-        .filter(|m| m.name() == "rpc.server.duration")
-        .flat_map(|m| match m.data() {
-            AggregatedMetrics::F64(MetricData::Histogram(h)) => h
-                .data_points()
-                .map(|p| {
-                    let mut attributes: Vec<(String, String)> = p
-                        .attributes()
-                        .map(|kv| (kv.key.to_string(), kv.value.to_string()))
-                        .collect();
-                    attributes.sort();
-                    (p.count(), attributes)
-                })
-                .collect::<Vec<_>>(),
-            other => panic!("rpc.server.duration is not an f64 histogram: {other:?}"),
-        })
-        .collect();
+    // A call is recorded on the dispatching thread after its reply is sent,
+    // so the client can be back here before the second one lands: wait.
+    let mut points: Vec<(u64, Vec<(String, String)>)> = Vec::new();
+    for _ in 0..500 {
+        provider.force_flush().expect("flush");
+        let finished = exporter.get_finished_metrics().expect("metrics");
+        points = finished
+            .iter()
+            .flat_map(opentelemetry_sdk::metrics::data::ResourceMetrics::scope_metrics)
+            .flat_map(opentelemetry_sdk::metrics::data::ScopeMetrics::metrics)
+            .filter(|m| m.name() == "rpc.server.duration")
+            .flat_map(|m| match m.data() {
+                AggregatedMetrics::F64(MetricData::Histogram(h)) => h
+                    .data_points()
+                    .map(|p| {
+                        let mut attributes: Vec<(String, String)> = p
+                            .attributes()
+                            .map(|kv| (kv.key.to_string(), kv.value.to_string()))
+                            .collect();
+                        attributes.sort();
+                        (p.count(), attributes)
+                    })
+                    .collect::<Vec<_>>(),
+                other => panic!("rpc.server.duration is not an f64 histogram: {other:?}"),
+            })
+            .collect();
+        if points.iter().any(|(count, attributes)| {
+            *count >= 2
+                && attributes
+                    .iter()
+                    .any(|(k, v)| k == "rpc.method" && v == "echo")
+        }) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
     let echo = points
         .iter()
         .find(|(_, attributes)| {
