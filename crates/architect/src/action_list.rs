@@ -54,6 +54,12 @@
 //!   which action; a handler that panics is caught and answered as
 //!   [`ActionError::Failed`], never a dead host (under `panic = "unwind"`,
 //!   the default — a `panic = "abort"` build has nothing to catch).
+//! - **Confirming** (`confirm`): with [`ActionList::require_confirmation`]
+//!   on, a caller from outside that runs a destructive action (or a call
+//!   [`ActionList::set_confirm`] flags) is refused with
+//!   [`ActionError::ConfirmationRequired`] and a ticket until a person
+//!   approves it in the app ([`ActionList::approve`]); it then runs the
+//!   same call once with [`ActionCaller::with_ticket`].
 //! - **Checking**: a second registration of an id is refused
 //!   ([`ActionError::Duplicate`]) and the first stays.
 //!   [`ActionList::validate`] reports what is wrong with a whole list
@@ -85,6 +91,11 @@ use architect_permissions::{Decision, PermissionEngine, Principal};
 use facet::{Facet, Shape};
 
 use crate::action::{ActionBackend, ActionMeta};
+
+// Confirmation tickets (#237): kept in their own file, so this one only
+// gains the hooks — `Inner::confirm`, `ActionCaller::ticket`, the
+// `ConfirmationRequired` error and one `confirmed` call per run path.
+pub mod confirm;
 
 /// What running an action does to the app — what a caller (a model,
 /// above all) has to know before it runs one.
@@ -144,6 +155,15 @@ pub enum ActionError {
     Denied { id: String, reason: String },
     /// It cannot run right now, and says why.
     Disabled { id: String, reason: String },
+    /// A person must approve this call in the app first
+    /// ([`ActionList::require_confirmation`]): run it again, exactly as it
+    /// was, with `ticket` ([`ActionCaller::with_ticket`]) once they have,
+    /// within `expires_in`.
+    ConfirmationRequired {
+        id: String,
+        ticket: String,
+        expires_in: Duration,
+    },
     /// An action with this id is already registered; the first stays.
     Duplicate(String),
 }
@@ -156,6 +176,9 @@ impl std::fmt::Display for ActionError {
             Self::Failed { id, message } => write!(f, "{id}: {message}"),
             Self::Denied { id, reason } => write!(f, "{id}: not allowed: {reason}"),
             Self::Disabled { id, reason } => write!(f, "{id}: disabled: {reason}"),
+            Self::ConfirmationRequired { id, ticket, .. } => {
+                write!(f, "{id}: confirmation required: ticket {ticket}")
+            }
             Self::Duplicate(id) => write!(f, "{id}: already registered"),
         }
     }
@@ -265,6 +288,8 @@ pub type CallerAsyncHandler =
 pub struct ActionCaller {
     principal: Option<Principal>,
     context: Option<Arc<dyn Any + Send + Sync>>,
+    /// A confirmation ticket the call carries ([`Self::with_ticket`]).
+    ticket: Option<String>,
 }
 
 impl ActionCaller {
@@ -275,6 +300,7 @@ impl ActionCaller {
         Self {
             principal: None,
             context: None,
+            ticket: None,
         }
     }
 
@@ -285,6 +311,7 @@ impl ActionCaller {
         Self {
             principal: Some(principal),
             context: None,
+            ticket: None,
         }
     }
 
@@ -302,6 +329,20 @@ impl ActionCaller {
     pub fn with_context<T: Any + Send + Sync>(mut self, context: T) -> Self {
         self.context = Some(Arc::new(context));
         self
+    }
+
+    /// This caller, carrying the confirmation ticket a person approved
+    /// for this exact call ([`ActionError::ConfirmationRequired`]).
+    #[must_use]
+    pub fn with_ticket(mut self, ticket: impl Into<String>) -> Self {
+        self.ticket = Some(ticket.into());
+        self
+    }
+
+    /// The confirmation ticket the call carries, if any.
+    #[must_use]
+    pub fn ticket(&self) -> Option<&str> {
+        self.ticket.as_deref()
     }
 
     /// Who the call is made as; `None` for the app itself.
@@ -328,6 +369,7 @@ impl std::fmt::Debug for ActionCaller {
         f.debug_struct("ActionCaller")
             .field("principal", &self.principal)
             .field("has_context", &self.context.is_some())
+            .field("has_ticket", &self.ticket.is_some())
             .finish()
     }
 }
@@ -501,6 +543,8 @@ struct Inner {
     authorizer: RwLock<Option<Authorizer>>,
     events: Mutex<Events>,
     arrived: Condvar,
+    /// Confirmation tickets (`confirm`).
+    confirm: Mutex<confirm::Gate>,
 }
 
 /// The registry. Cheap to clone: every clone is the same list.
@@ -537,6 +581,7 @@ impl ActionList {
                     kept: VecDeque::new(),
                 }),
                 arrived: Condvar::new(),
+                confirm: Mutex::new(confirm::Gate::default()),
             }),
         }
     }
@@ -1105,9 +1150,11 @@ impl ActionList {
         let args = normalized(&entry, args);
         let span = tracing::info_span!("action", action.id = id, action.ok = tracing::field::Empty);
         let started = span.in_scope(|| match enabled_state(entry.enabled.as_ref()) {
-            Ok(()) => guarded_start(id, || {
-                admit_args(&entry, args)?;
-                handler(caller, args)
+            Ok(()) => self.confirmed(caller, &entry, args).and_then(|()| {
+                guarded_start(id, || {
+                    admit_args(&entry, args)?;
+                    handler(caller, args)
+                })
             }),
             Err(reason) => Err(ActionError::Disabled {
                 id: id.to_owned(),
@@ -1145,7 +1192,9 @@ impl ActionList {
         // menu, a model.
         let span = tracing::info_span!("action", action.id = id, action.ok = tracing::field::Empty);
         let out = span.in_scope(|| match enabled_state(entry.enabled.as_ref()) {
-            Ok(()) => guarded(id, || call(&entry, caller, args)),
+            Ok(()) => self
+                .confirmed(caller, &entry, args)
+                .and_then(|()| guarded(id, || call(&entry, caller, args))),
             Err(reason) => Err(ActionError::Disabled {
                 id: id.to_owned(),
                 reason,

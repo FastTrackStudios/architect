@@ -1389,6 +1389,10 @@ pub mod action {
 
     use std::sync::Arc;
 
+    /// Confirmation tickets: a person's yes before a caller from outside
+    /// runs a destructive action.
+    #[cfg(feature = "action-list")]
+    pub use crate::action_list::confirm::{CONFIRM_TOPIC, CONFIRM_TTL, ConfirmCheck, Confirmation};
     #[cfg(feature = "action-list")]
     pub use crate::action_list::{
         ActionCaller, ActionError, ActionEvent, ActionFuture, ActionInfo, ActionList, ActionOutput,
