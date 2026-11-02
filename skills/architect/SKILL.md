@@ -27,7 +27,7 @@ Paperclip projects: **Architect** and **fts-auth**. Wiki: `architect` (Task org 
 
 ## Before you rely on a version
 
-- Tags land several times a day. Run `gh release list -R FastTrackStudios/architect -L 3` for the latest, and read the consumer's root `Cargo.toml` (`[workspace.dependencies]`, plus any `[patch]` of architect) for what it pins. `CHANGELOG.md` says which tag shipped what.
+- Tags land several times a day. Run `gh release list -R FastTrackStudios/architect -L 3` for the latest, and read the consumer's root `Cargo.toml` (`[workspace.dependencies]`, plus any `[patch]` of architect) for what it pins. Each tag's GitHub Release says what it shipped (notes from `.changes/`); `CHANGELOG.md` covers tags up to v0.10.0.
 - When the consumer pins an older tag than the feature you want, repin first (recipe below); don't copy the code across.
 - Vox handshakes fail across mismatched vox revisions: server and every client pin one architect tag.
 - When the docs (`docs/content/`) and the code disagree, trust the code. `examples/greeter` is the reference feature.
@@ -158,11 +158,12 @@ Still not in architect: remote token introspection (I34). Until it lands, Task's
 - Generated HTTP face: JSON by default (`POST /<prefix>/<method>`), any verb with path params, query arguments on a `get`, byte methods (`BodyStream` / `RequestHead` / `ByteBody`, HTTP-only) and SSE; subscriptions carry no typed errors. Media, blobs and share links are service methods now; only what neither a service nor an `EngineHost` builder covers (OAuth redirects, hosted pages) goes through `.plugin(Router)`.
 - Boundaries ratchets go one way: when a count drops, lower its baseline in the same PR. Do not grandfather tags to pass the tag-order check; re-pin to a correctly numbered tag.
 - Crate layout (STA-257): one crate per feature, layers as cargo features. Don't create new `-proto`/`-<backend>`/`-ui` siblings; don't split or merge existing crates as a side effect.
-- Session's `studio:features/session/CLAUDE.md` may still say `#[roam::service]`; it means `#[architect::rpc]`.
+- Session's `studio:features/session/AGENTS.md` may still say `#[roam::service]`; it means `#[architect::rpc]`.
 
 ## Where changes go
 
 - Framework gaps go **upstream into architect** as Architect-project issues, then a tag, then a repin. Don't fork the fix into an app.
 - A PR to architect that adds, renames or removes public API or a feature flag updates this skill (`skills/architect/`) in the same PR.
+- A PR to architect that changes a crate adds a cargo-rail change file (`cargo rail change add <crates> --bump <none|patch|minor|major> -m "<note>"`, rules in `.changes/README`); `pr.yml` enforces it. Release notes come from those files, never from commits.
 - Auth engine changes go to `features/auth` / `apps/auth-server`; fts-auth is only the deployment shell.
 - The adoption backlog is in the Architect project; check it before starting overlapping work.

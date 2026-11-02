@@ -1,1 +1,7 @@
-CLAUDE.md
+# architect: agent instructions
+
+- The `architect` agent skill lives in `skills/architect/` (`SKILL.md` + `references/*.md`); `.claude/skills/architect` links to it. Downstream fleet agents learn the framework from it.
+- A PR that adds, renames or removes public API or a feature flag updates `skills/architect/` in the same PR.
+- Cite code in docs and skills as a repo path in a code span, followed by the symbol name when the citation is about one item (a whole module or test file can stand alone); never a line number. Write other repos' paths as `task:…` / `studio:…`. `cargo xtask docs` (CI) fails on any path, recipe, xtask command or package that does not exist.
+- Every PR that changes a crate adds a cargo-rail change file: `cargo rail change add <crates> --bump <none|patch|minor|major> -m "<release note>"` writes `.changes/<slug>.md` (rules in `.changes/README`; `--bump none` for changes no consumer notices). `pr.yml` fails a PR whose changed crates have none (`just ci-changes` locally). Release notes are built from the files added since the previous tag (`just release-notes`), never from commits; `CHANGELOG.md` ends at v0.10.0 and is not edited. Tags stay semver: the highest bump picks the next one (`just release-next`).
+- A lone PR is squash-merged; a stack merges with merge commits titled with each PR's title and body. Read history and bisect with `--first-parent`.

@@ -1,0 +1,20 @@
+# cargo-rail policy (0.32). Sparse: only what differs from rail's defaults.
+# Docs: https://github.com/loadingalias/cargo-rail/blob/v0.32.0/docs/config.md
+#
+# architect uses rail for release intent, as Task and studio do (the fleet
+# `release-workflow` skill, references/changelog.md): every PR that changes
+# a crate carries a change file (`cargo rail change add <crates> --bump
+# <none|patch|minor|major> -m "<note>"`, written to .changes/), checked on
+# every PR by `cargo rail change check` (pr.yml, `just ci-changes`). A
+# release's notes are built from the change files added since the previous
+# tag by scripts/release-notes.sh. Commands stay in the justfile; this file
+# only declares inputs.
+
+# Releases are a `vX.Y.Z` tag pushed by hand (release.yml publishes the
+# GitHub Release). Nothing is published to crates.io and the workspace
+# version is not the release number, so make `cargo rail release` inert.
+# The change files in .changes/ are rail's default release source.
+[release]
+publish = "none"
+github_release = false
+checks = "none"

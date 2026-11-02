@@ -57,6 +57,24 @@ lint:
 tags:
     cargo run -p xtask -- tags --verbose
 
+# Every PR that changes a crate carries a cargo-rail change file (`cargo
+# rail change add <crates> --bump none|patch|minor|major -m "…"`;
+# .changes/README). This is pr.yml's gate: against BASE when given (CI
+# passes the PR's base sha), else the merge-base with main.
+ci-changes BASE="":
+    if [ -n "{{BASE}}" ]; then cargo rail change check --since "{{BASE}}"; else cargo rail change check --merge-base; fi
+
+# A tag's release notes (the change files added since the tag before it),
+# or the draft for origin/main (or a given revision) since its newest tag.
+# release.yml publishes exactly this.
+release-notes *REF:
+    @bash scripts/release-notes.sh notes {{REF}}
+
+# The next semver tag for origin/main (or a given revision): the highest
+# change-file bump since the newest tag picks it (.changes/README).
+release-next *REF:
+    @bash scripts/release-notes.sh next {{REF}}
+
 # Film the lab's guide scenarios (apps/lab/scenarios; all of them, or
 # one by id) into target/media: <id>.gif and <id>.png, and .webm/.mp4
 # where a scenario asks. Needs ffmpeg and gifski (the dev shell has them).

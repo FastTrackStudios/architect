@@ -17,7 +17,7 @@
  *       apps/task/tailwind.css      (via apps/task/fts-theme.css)
  *       apps/fasttrackstudio/input.css (via ./fts-theme.css)
  *   - Blitz/Vello renderers `include_str!` it (they cannot fetch an
- *     external stylesheet — see the signal-UI rule in CLAUDE.md):
+ *     external stylesheet — see the signal-UI rule in studio's AGENTS.md):
  *       features/daw-ui/daw-ui/src/test_panels.rs
  *       apps/extensions/reaper-fts-extensions/src/ui_test_panel.rs
  *       libs/architect-ui/ui-snapshot/src/lib.rs

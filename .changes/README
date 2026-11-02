@@ -1,0 +1,49 @@
+Change files: release intent and release notes, one file per change
+====================================================================
+
+Every PR that changes a workspace crate adds a change file here. A
+release (a `vX.Y.Z` tag) builds its notes from the change files ADDED
+since the previous tag, read at the tagged commit, and puts them in the
+GitHub Release. Nothing is deleted or committed: the files stay here as
+the record. CHANGELOG.md ends at v0.10.0 and is no longer written. CI
+enforces the files on every PR (`cargo rail change check` in pr.yml;
+locally: `just ci-changes`). To fix a note, edit its file on main before
+tagging.
+
+Write one with cargo-rail:
+
+    cargo rail change add <every crate you changed> --bump <none|patch|minor|major> \
+      -m "Added confirmation tickets for destructive actions run by agents"
+
+It writes .changes/<slug>.md:
+
+    ---
+    "architect-commands" = "minor"
+    ---
+
+    Added confirmation tickets for destructive actions run by agents
+
+- The message is the release note, written for the app developer using
+  architect: start with a verb (Added / Fixed / Improved / Changed /
+  Removed / Deprecated / Security); name any changed type, function,
+  feature flag or action id exactly.
+- --bump: major -> "Breaking / Migration", minor -> "Added",
+  patch -> "Fixed and improved". none = nothing a consumer would notice
+  (refactor, CI, tests, docs): it satisfies the check and adds no entry.
+- Breaking changes (a PR title with `!`, a removed or renamed public item):
+  --bump major, and add a "Migration:" paragraph to the body (what
+  changed, why, the exact steps for a consumer).
+- A revert of something not yet released: delete the original change file
+  instead of adding a new one.
+
+Versions stay semver; the highest bump since the previous tag picks the
+next one (`just release-next`):
+
+    before 1.0 (0.Y.Z)   major -> 0.(Y+1).0   minor, patch, none -> 0.Y.(Z+1)
+    from 1.0  (X.Y.Z)    major -> (X+1).0.0   minor -> X.(Y+1).0   patch, none -> X.Y.(Z+1)
+
+`just release-notes [vX.Y.Z]` prints a tag's notes, or the draft for
+origin/main.
+
+This file has no .md extension on purpose: cargo-rail parses every .md in
+this directory as a change file.
