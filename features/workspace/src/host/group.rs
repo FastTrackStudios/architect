@@ -518,7 +518,7 @@ fn Tab(
             "aria-label": "{label}",
             "aria-selected": "{on}",
             onkeydown: move |e: KeyboardEvent| {
-                if e.key() == Key::Enter || e.key() == Key::Character(" ".into()) {
+                if e.key() == Key::Named(NamedKey::Enter) || e.key() == Key::Character(" ".into()) {
                     e.prevent_default();
                     let _ = host.edit(|w| w.activate(&key_open));
                 }
@@ -553,10 +553,13 @@ fn Tab(
                 if pinned {
                     Pin { size: 12, color: t.ink_3 }
                 } else if on || s.tabs > 40.0 {
+                    // Above the name: its overflowing text still takes
+                    // presses past its clip (blitz-quirks.md).
                     button {
                         style: "flex:0 0 auto; width:{tab_h - 10.0}px; height:{tab_h - 10.0}px; \
                                 border:none; border-radius:4px; background:transparent; display:flex; \
-                                align-items:center; justify-content:center; cursor:pointer;",
+                                align-items:center; justify-content:center; cursor:pointer; \
+                                position:relative; z-index:1;",
                         title: "Close {title}",
                         "aria-label": "Close {title}",
                         onpointerdown: move |e| e.stop_propagation(),
