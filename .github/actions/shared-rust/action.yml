@@ -1,0 +1,28 @@
+name: Shared THEBATTLESHIP Rust
+description: Enter the native-library shell, install the pinned toolchain and use a slot-local target backed by host kache.
+inputs:
+  kind:
+    description: Build kind (lint, test, wasm, tags).
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Slot target directory
+      shell: bash
+      env:
+        KIND: ${{ inputs.kind }}
+      run: |
+        set -euo pipefail
+        dir="${CI_CACHE_DIR:?not a shared THEBATTLESHIP runner}/$KIND/$RUNNER_NAME/target"
+        mkdir -p "$dir"
+        echo "CARGO_TARGET_DIR=$dir" >> "$GITHUB_ENV"
+        test -n "${RUSTC_WRAPPER:?host kache wrapper is required}"
+    - uses: nicknovitski/nix-develop@v1
+      with:
+        # Libraries only: keep the same pinned rustup compiler as hosted CI.
+        arguments: --accept-flake-config
+    - uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
+        components: rustfmt, clippy
+        targets: wasm32-unknown-unknown

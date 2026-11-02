@@ -143,7 +143,8 @@ impl From<AuthDevice> for PeerDevice {
 impl DeviceDirectory {
     /// The endpoint ids of every device here but `this_device` that holds
     /// a node: the peers this device serves its documents to and syncs
-    /// with directly (`crdt::p2p::Devices::replace`).
+    /// with directly (`architect_devices::Admission::set_account`, which
+    /// the devices feature's account pass keeps current).
     #[must_use]
     pub fn peer_endpoints(&self, this_device: Uuid) -> Vec<String> {
         self.devices

@@ -5,10 +5,11 @@
 //! keeps a replica live against a host; this module decides **who** a
 //! node serves them to, and mounts both lanes for one caller:
 //!
-//! - **[`Devices`]**: the endpoint ids of the owner's other devices, from
-//!   the device registry (auth's `DeviceDirectory`, its
-//!   `peer_endpoints`). Refreshed whenever the directory is; a device
-//!   taken off the account is refused on its next call.
+//! - **[`Admission`]** (`architect_devices`): the devices this node lets
+//!   in — the owner's other devices (the account pass keeps them
+//!   current), and devices paired with it for some documents
+//!   (`Grant::Paired`). A device revoked from it is refused on its next
+//!   call, and its live sessions end.
 //! - **[`Shares`]**: the live links this node has handed out
 //!   ([`DocLink`]). Each opens one document to whoever holds it, until
 //!   revoked; revoking one also ends the sessions running through it.
@@ -20,8 +21,9 @@
 //! - **[`node_router`]**: the router one caller gets: `DocSync` (live
 //!   editing) and `DocPeer` (sweeps between devices) over the node's
 //!   registry, behind a gate that resolves the caller from the endpoint
-//!   id the connection proved. Serve it with
-//!   `architect::iroh_link::serve_peers`, which makes one per connection.
+//!   id the connection proved. Serve it with `architect_devices::serve`
+//!   (`iroh_link::serve_peers_until`), which makes one per connection
+//!   and closes it when its device is revoked.
 //!
 //! ## Who is calling
 //!
@@ -34,15 +36,20 @@
 //!
 //! | Caller | May call | May open |
 //! |---|---|---|
-//! | a registered device (`Host`, in [`Devices`]) | `DocSync`, `DocPeer` | whatever the registry's authorizer allows ([`NodeAccess::admits`]: every document) |
+//! | one of the owner's devices (`Host`, `Grant::Account`) | `DocSync`, `DocPeer` | whatever the registry's authorizer allows ([`NodeAccess::admits`]: every document) |
+//! | a paired device (`Host`, `Grant::Paired`) | `DocSync` | the documents its scopes name (`docs/<id>`) |
 //! | a link's guest (`Guest`, a live key) | `DocSync` | the link's document only |
 //! | any other endpoint | nothing | nothing |
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::{Arc, PoisonError, RwLock};
 
 use architect::layer::LayerRouter;
 use architect::permissions_gate::{PermissionedRouter, PermissionsGate};
+pub use architect_devices::{Admission, Pairings};
+use architect_devices::{
+    DevicePairingDispatcher, PAIR_PERMITS, PairingHost, device_pairing_service_descriptor,
+};
 use architect_permissions::{
     Action, BoxIdentityFuture, Decision, IdentityResolver, MethodPermit, PermissionEngine,
     Principal, Resource, ServicePermits,
@@ -53,62 +60,6 @@ use crate::link::{DocLink, LINK_BEARER_PREFIX};
 use crate::peer::{DocCatalog, DocPeerDispatcher, DocPeerHost, doc_peer_service_descriptor};
 use crate::registry::DocRegistry;
 use crate::sync::{DocSync, DocSyncDispatcher, SyncDown, SyncError, doc_sync_service_descriptor};
-
-// ── Devices ────────────────────────────────────────────────────────────
-
-/// The owner's other devices this node serves, by iroh endpoint id.
-///
-/// Cheap to clone; every clone sees the same set, so the gate built for
-/// a connection sees a refresh made after it.
-#[derive(Debug, Clone, Default)]
-pub struct Devices(Arc<RwLock<HashSet<String>>>);
-
-impl Devices {
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// A set holding `endpoints`.
-    #[must_use]
-    pub fn of<I, S>(endpoints: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        let devices = Self::new();
-        devices.replace(endpoints);
-        devices
-    }
-
-    /// Make the set exactly `endpoints`: what the device registry says
-    /// now (auth's `DeviceDirectory::peer_endpoints`).
-    pub fn replace<I, S>(&self, endpoints: I)
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        let fresh: HashSet<String> = endpoints.into_iter().map(Into::into).collect();
-        *self.0.write().unwrap_or_else(PoisonError::into_inner) = fresh;
-    }
-
-    /// Stop serving one device (a lost phone), before the directory says so.
-    pub fn forget(&self, endpoint: &str) {
-        self.0
-            .write()
-            .unwrap_or_else(PoisonError::into_inner)
-            .remove(endpoint);
-    }
-
-    /// Whether `endpoint` is one of the owner's devices.
-    #[must_use]
-    pub fn admits(&self, endpoint: &str) -> bool {
-        self.0
-            .read()
-            .unwrap_or_else(PoisonError::into_inner)
-            .contains(endpoint)
-    }
-}
 
 // ── Shares ─────────────────────────────────────────────────────────────
 
@@ -218,17 +169,35 @@ impl Shares {
 
 // ── Access ─────────────────────────────────────────────────────────────
 
-/// Who a node serves: its owner's [`Devices`] and its [`Shares`].
+/// Who a node serves: the devices its [`Admission`] lets in, its
+/// [`Shares`], and, when it takes pairings, its open offers.
 #[derive(Debug, Clone, Default)]
 pub struct NodeAccess {
-    pub devices: Devices,
+    pub devices: Admission,
     pub shares: Shares,
+    /// The node's pairing offers (`architect_devices::Pairings`, over the
+    /// same `devices`): when set, [`node_router`] also serves
+    /// `DevicePairing`, which any endpoint may call.
+    pub pairings: Option<Pairings>,
 }
 
 impl NodeAccess {
     #[must_use]
-    pub const fn new(devices: Devices, shares: Shares) -> Self {
-        Self { devices, shares }
+    pub const fn new(devices: Admission, shares: Shares) -> Self {
+        Self {
+            devices,
+            shares,
+            pairings: None,
+        }
+    }
+
+    /// Take pairings: a device that redeems one of `pairings`' offers
+    /// over its connection is let into [`Self::devices`] with the offer's
+    /// scopes. Make `pairings` over the same `Admission`.
+    #[must_use]
+    pub fn pairing(mut self, pairings: Pairings) -> Self {
+        self.pairings = Some(pairings);
+        self
     }
 
     /// Who a call is from: the link's guest when it presents a live
@@ -244,27 +213,37 @@ impl NodeAccess {
             })
     }
 
-    /// Whether `who` may open `doc_id`: a registered device any document,
-    /// a link's guest the link's. Hand it to
-    /// [`DocRegistry::with_authorizer`], beside the app's own rules.
+    /// Whether `who` may open `doc_id`: one of the owner's devices any
+    /// document, a paired device the documents its scopes name, a link's
+    /// guest the link's. Hand it to [`DocRegistry::with_authorizer`],
+    /// beside the app's own rules.
     #[must_use]
     pub fn admits(&self, who: Option<&Principal>, doc_id: Uuid) -> bool {
         match who {
-            Some(Principal::Host { endpoint }) => self.devices.admits(endpoint),
+            Some(Principal::Host { endpoint }) => self.devices.allows(
+                endpoint,
+                &architect_devices::doc_resource(doc_id),
+                &Action::write(),
+            ),
             Some(Principal::Guest { link_id, .. }) => self.shares.opens(link_id, doc_id),
             _ => false,
         }
     }
 }
 
-/// The gate's engine: a registered device or a live link's guest may
-/// call; nobody else may call anything.
+/// The gate's engine: a device the node lets in or a live link's guest
+/// may call (which documents is the registry's authorizer's call);
+/// nobody else may call anything.
 impl PermissionEngine for NodeAccess {
-    fn check(&self, who: &Principal, _what: &Resource, _action: &Action) -> Decision {
+    fn check(&self, who: &Principal, what: &Resource, action: &Action) -> Decision {
         match who {
             Principal::Host { endpoint } if self.devices.admits(endpoint) => Decision::Allow,
+            // Asking to pair: `Admission` lets any endpoint.
+            host @ Principal::Host { .. } if self.pairings.is_some() => {
+                self.devices.check(host, what, action)
+            }
             Principal::Guest { link_id, .. } if self.shares.live(link_id) => Decision::Allow,
-            Principal::Host { .. } => Decision::deny("not one of this node's devices"),
+            Principal::Host { .. } => Decision::deny("not a device this node lets in"),
             Principal::Guest { .. } => Decision::deny("the link was revoked"),
             other => Decision::deny(format!("{} is not a peer", other.describe())),
         }
@@ -288,11 +267,12 @@ impl IdentityResolver for ConnectionCaller {
 // ── The router ─────────────────────────────────────────────────────────
 
 /// `DocSync` over the node's registry, ending a guest's session when its
-/// link is revoked. A device's session runs as the registry's would.
+/// link is revoked and a device's when it is revoked.
 #[derive(Clone)]
 struct NodeSync {
     registry: DocRegistry,
     shares: Shares,
+    devices: Admission,
 }
 
 impl DocSync for NodeSync {
@@ -314,6 +294,15 @@ impl DocSync for NodeSync {
                     }
                 }
             }
+            Some(Principal::Host { endpoint }) => {
+                tokio::select! {
+                    res = session => res,
+                    () = self.devices.ends(&endpoint) => {
+                        tracing::debug!(?doc_id, "p2p: a device was revoked mid-session");
+                        Err(SyncError::UnknownDoc)
+                    }
+                }
+            }
             _ => session.await,
         }
     }
@@ -327,7 +316,7 @@ const SYNC_PERMITS: ServicePermits = ServicePermits {
 };
 
 /// `DocPeer` for [`node_router`]'s gate; [`DocPeerHost`] refuses
-/// everyone but devices on top.
+/// everyone but the owner's own devices on top.
 const PEER_PERMITS: ServicePermits = ServicePermits {
     service: "DocPeer",
     methods: &[
@@ -339,9 +328,11 @@ const PEER_PERMITS: ServicePermits = ServicePermits {
 /// The router one connection from `remote` is served.
 ///
 /// `remote` is the endpoint id the connection proved. The router holds
-/// `DocSync` over `registry` for live editing, and `DocPeer` over
-/// `registry` and `catalog` for sweeps, behind a gate that answers with
-/// `access`. Anything else on the connection is refused.
+/// `DocSync` over `registry` for live editing, `DocPeer` over `registry`
+/// and `catalog` for sweeps (the owner's devices only: a sweep lists
+/// every document), and `DevicePairing` when `access` takes pairings,
+/// behind a gate that answers with `access`. Anything else on the
+/// connection is refused.
 ///
 /// `registry` must consult [`NodeAccess::admits`] in its authorizer (the
 /// gate decides who may call; the registry, which documents).
@@ -349,7 +340,7 @@ const PEER_PERMITS: ServicePermits = ServicePermits {
 /// ```rust,ignore
 /// let serving = endpoint.clone();
 /// tokio::spawn(async move {
-///     architect::iroh_link::serve_peers(&serving, move |remote| {
+///     architect_devices::serve(&serving, access.devices.clone(), move |remote| {
 ///         node_router(registry.clone(), OpenDocs(registry.clone()), access.clone(), &remote.to_string())
 ///     })
 ///     .await;
@@ -364,7 +355,7 @@ pub fn node_router<C: DocCatalog + Clone>(
 ) -> PermissionedRouter {
     let devices = access.devices.clone();
     let host = DocPeerHost::new(registry.clone(), catalog, move |endpoint| {
-        devices.admits(endpoint)
+        devices.is_account(endpoint)
     });
     let router = LayerRouter::new()
         .with(
@@ -372,9 +363,17 @@ pub fn node_router<C: DocCatalog + Clone>(
             DocSyncDispatcher::new(NodeSync {
                 registry,
                 shares: access.shares.clone(),
+                devices: access.devices.clone(),
             }),
         )
         .with(doc_peer_service_descriptor(), DocPeerDispatcher::new(host));
+    let router = match access.pairings.clone() {
+        Some(pairings) => router.with(
+            device_pairing_service_descriptor(),
+            DevicePairingDispatcher::new(PairingHost(pairings)),
+        ),
+        None => router,
+    };
     let identity = ConnectionCaller {
         access: access.clone(),
         remote: remote.to_ascii_lowercase(),
@@ -382,6 +381,7 @@ pub fn node_router<C: DocCatalog + Clone>(
     PermissionsGate::new(Arc::new(access), Arc::new(identity))
         .permit(doc_sync_service_descriptor(), &SYNC_PERMITS)
         .permit(doc_peer_service_descriptor(), &PEER_PERMITS)
+        .permit(device_pairing_service_descriptor(), &PAIR_PERMITS)
         .wrap(router)
 }
 
@@ -393,7 +393,9 @@ mod tests {
     const STRANGER: &str = "bb";
 
     fn access() -> NodeAccess {
-        NodeAccess::new(Devices::of([DEVICE]), Shares::new())
+        let devices = Admission::new();
+        devices.set_account([architect_devices::Peer::new(DEVICE, "phone", "ios")]);
+        NodeAccess::new(devices, Shares::new())
     }
 
     #[test]
@@ -409,8 +411,28 @@ mod tests {
         assert!(access.check(&device, &any, &Action::write()).allowed());
         assert!(!access.check(&stranger, &any, &Action::write()).allowed());
 
-        access.devices.forget(DEVICE);
+        access.devices.revoke(DEVICE);
         assert!(!access.admits(Some(&device), doc));
+    }
+
+    #[test]
+    fn a_paired_device_opens_the_documents_its_scopes_name() {
+        let access = access();
+        let (doc, other) = (Uuid::from_u128(1), Uuid::from_u128(2));
+        access.devices.admit(
+            architect_devices::Peer::new(STRANGER, "ipad", "ios").granted(
+                architect_devices::Grant::Paired {
+                    scopes: vec![architect_devices::Scope::doc(doc, &["write"])],
+                    by: "laptop".into(),
+                },
+            ),
+        );
+        let paired = access.caller(STRANGER, None);
+        assert!(access.admits(Some(&paired), doc));
+        assert!(!access.admits(Some(&paired), other));
+        let any = Resource::new("docs/**");
+        assert!(access.check(&paired, &any, &Action::write()).allowed());
+        assert!(!access.devices.is_account(STRANGER), "no sweeps");
     }
 
     #[test]

@@ -173,13 +173,13 @@ synced settings are one). A host never writes into a `Strict` document.
 
 Three ways a document reaches another device without the org's server,
 all over vox on iroh (`features/crdt/crdt/src/p2p.rs`). Each node keeps
-one `NodeAccess` (its `Devices` and its `Shares`) and serves every
+one `NodeAccess` (its `Admission` and its `Shares`) and serves every
 connection through `node_router`, which resolves the caller from the
 endpoint id the handshake proved:
 
 ```rust
-let access = NodeAccess::new(Devices::new(), Shares::new());
-iroh_link::serve_peers(&endpoint, move |remote| {
+let access = NodeAccess::new(Admission::new(), Shares::new());
+architect_devices::serve(&endpoint, access.devices.clone(), move |remote| {
     node_router(reg.clone(), OpenDocs(reg.clone()), access.clone(), &remote.to_string())
 });
 ```
@@ -191,11 +191,17 @@ iroh_link::serve_peers(&endpoint, move |remote| {
   `LinkKey::new(&link)` as middleware on a `DocSyncClient`, and runs
   `SyncedDoc::new(link.doc_id, doc).run(&client)`. A link is a credential;
   there are no read-only links yet.
-- **The person's devices.** Keep `Devices` current from the auth server's
-  device registry: `devices.replace(directory.peer_endpoints(this_device))`
-  on every `list_devices` or `register_device` answer. A registered device
-  may sync any document; a device taken off the account is refused on its
-  next call. Registering is in the [identity chapter](@/guide/identity.md).
+- **The person's devices.** Run the account pass,
+  `architect_devices::account::pass(&devices_client, &token, &this_device, &node, &access.devices)`
+  (or `drive`, on every reconnect): it registers this device and lets the
+  account's others into the `Admission`. An account device may sync any
+  document; a device taken off the account is refused on its next call and
+  its connection closes. Registering is in the
+  [identity chapter](@/guide/identity.md).
+- **A paired device.** A device on nobody's account redeems a pairing offer
+  (a six-digit code or a `fts-pair:` ticket) made with
+  `NodeAccess::pairing(Pairings::new(...))`, and may sync the documents the
+  offer named. See [Devices](@/architecture/devices.md).
 - **On the LAN.** Bind the endpoint with `PeerLookup::Lan` or
   `PeerLookup::N0AndLan`, advertise with `advertise_name(&endpoint, "Cody's laptop")`,
   and browse with `LanBrowser::new(endpoint.id())?.events()`

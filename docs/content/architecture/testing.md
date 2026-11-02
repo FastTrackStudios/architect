@@ -187,6 +187,25 @@ the feature installs nothing.
 Run them with
 `cargo test -p architect --features testing --test testing_sandbox --test testing_alloc --test testing_alloc_uninstalled`.
 
+### LAN discovery tests on macOS
+
+`crates/architect/tests/iroh_lan.rs` `lan_peers_dial_by_bare_id` and
+`features/crdt/crdt/tests/p2p.rs` `devices_on_one_network_find_each_other`
+find each other by multicast (mDNS-style, `_fts._udp`) on a real LAN
+interface. On macOS that traffic also needs Local Network permission,
+which the OS grants per app after a prompt. A test binary launched over
+SSH (or by launchd) has no app to prompt for: `nehelper` attributes it
+to `com.apple.sshd-session` and denies it, so every multicast send fails
+with `EHOSTUNREACH` ("No route to host") and the dial times out. Nothing
+in architect can grant that, so on macOS both tests skip, with a line
+saying why, unless `ARCHITECT_LAN_TESTS=1`.
+
+To run them on a Mac, sit at it: open a terminal app that has Local
+Network access (System Settings → Privacy & Security → Local Network;
+macOS asks the first time) and run
+`ARCHITECT_LAN_TESTS=1 cargo test --workspace -- lan_peers_dial_by_bare_id devices_on_one_network_find_each_other`.
+Linux and CI run them always.
+
 ## What goes where
 
 | Test concern | Layer |

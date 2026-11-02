@@ -82,9 +82,9 @@ Appearance › Reduce motion is the setting (`apps/lab/ui/src/lib.rs`).
 | A tablet's sidebar folding to its rail | width from the rail's to the side's | clipped, the rail shown once folded | `AppShell` |
 | The phone drawer | its travel 0–1 on `Spring::SHEET`, held by the finger, let go at its speed | slides over the page | `AppShell` |
 | A workspace dock opening, folding, folding to its rail of icons | width (height for the bottom) on `Spring::PANEL` | clipped: the tree keeps the dock's size, held to the window's edge; the rail shows once folded | `features/workspace/src/host/dock.rs` `DockView` |
-| A tab dragged along its bar | the tab follows the pointer (held), the tabs it passes slide aside by its width on `Spring::SNAPPY` | `transform`s only: the bar is not laid out again | `features/workspace/src/host/slide.rs` |
-| A tab dragged off its bar, over another | its place closes up; the other bar opens a gap where it would go | `transform`s | `slide.rs` `aside` |
-| A tab let go | every tab of the bars it touches is moved back by how far its place moved, then sprung to nothing, so nothing jumps; a tab landing in another bar starts there from where it was drawn | `transform`s | `slide.rs` `landed`, `after` |
+| A tab dragged along its bar | the tab follows the pointer (held), the tabs it passes slide aside by its width on `Spring::SNAPPY` | relative `left`s (points; a `translate` is device pixels): only the tabs move, the bar keeps its size | `features/workspace/src/host/slide.rs` |
+| A tab dragged off its bar, over another | its place closes up; the other bar opens a gap where it would go | relative `left`s | `slide.rs` `aside` |
+| A tab let go | every tab of the bars it touches is moved back by how far its place moved, then sprung to nothing, so nothing jumps; a tab landing in another bar starts there from where it was drawn | relative `left`s | `slide.rs` `landed`, `after` |
 | A drag that ends nowhere (Escape, outside with nowhere to go) | every tab springs back | | `slide.rs` `cancel` |
 | The drop highlight | fades in where a drop would land, follows the pointer from zone to zone on `Spring::TRACK`, fades out when the drag ends (over the split growing in under it) | | `features/workspace/src/host/overlay.rs` `DropHighlight` |
 | A split made by a drop | the new group's share grows 0 → its share on `Spring::PANEL`, the others giving way | clipped: laid out at the size the drop lit, held to the drop's edge | `features/workspace/src/host/group.rs` `SplitView`, `features/workspace/src/host/mod.rs` `Host::move_pane` |
@@ -102,9 +102,15 @@ and then acts sees the close).
 
 ## What Blitz draws well
 
-`transform` and `opacity` change nothing in the layout: the tabs move by
-`transform` only. A clipped box's `width` lays out only that box's row
-(the tree inside keeps its size). A stacked pane is placed by `left` in an
+`opacity` changes nothing in the layout, and a relatively placed box's
+`left` moves only that box: the tabs slide by `left`, in points (a
+`translate` moves by device pixels, half as far on a 2x screen;
+`apps/lab/media/tests/tab_slide.rs` drags a tab at 2x). A clipped box's
+`width` lays out only that box's row (the tree inside keeps its size). A
+paragraph keeps the lines of its own width while its neighbours move
+(the FTS Blitz fork's `fts-measure-2026-11`; before it a note drew the
+lines of the zero width a parent measured it at, a word per line, #152;
+`apps/lab/media/tests/reflow.rs` checks the films' every frame). A stacked pane is placed by `left` in an
 absolutely positioned strip. Blitz has no `requestAnimationFrame`; the
 wall clock's `FRAME` wakes the motions, and `FTS_FPS_LOG=1` (the FTS Blitz
 fork's `blitz-shell`) logs frames and their cost each second.

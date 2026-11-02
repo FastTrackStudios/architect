@@ -509,8 +509,7 @@ fn Tab(
                     box-sizing:border-box; display:flex; align-items:center; gap:6px; padding:{pad}; \
                     border-radius:8px 8px 0 0; white-space:nowrap; overflow:hidden; touch-action:none; \
                     user-select:none; color:{ink}; background:{fill}; border-right:1px solid {hairline}; \
-                    position:relative; z-index:{lift}; cursor:pointer; opacity:{shown}; \
-                    transform:translateX({dx}px);",
+                    position:relative; z-index:{lift}; cursor:pointer; opacity:{shown}; left:{dx}px;",
             title: "{title}",
             role: "tab",
             "data-tab": "{tab_id}",
@@ -749,8 +748,11 @@ fn Stacked(group: Group, current: PaneId) -> Element {
                             // bottom as a book's does.
                             div { style: "position:relative; flex:1 1 0; width:100%; min-height:0; overflow:hidden;",
                                 span {
-                                    style: "position:absolute; top:0; left:{SPINE / 2.0}px; transform-origin:0 0; \
-                                            transform:rotate(90deg) translateY(-7px); white-space:nowrap; \
+                                    // Turned about its top left, the line lies left of
+                                    // it: half a line right centres it on the spine
+                                    // (a `translate` is in device pixels).
+                                    style: "position:absolute; top:0; left:{SPINE / 2.0 + 7.0}px; transform-origin:0 0; \
+                                            transform:rotate(90deg); white-space:nowrap; \
                                             font-size:12px; line-height:14px; color:{t.ink_2};",
                                     "{title}"
                                 }

@@ -14,6 +14,7 @@ mod extensions;
 mod guide;
 mod items;
 mod pages;
+pub mod presence;
 mod screen;
 mod settings;
 mod vault;
@@ -1116,6 +1117,9 @@ pub fn LabApp() -> Element {
             if windowed {
                 architect_commands::WindowKeys {}
                 ListKeys {}
+                // The Dock icon, its badge and menu, the menu-bar item,
+                // background mode and opening at login.
+                presence::LabPresence { presence: presence::declare(lab, inbox_count), inbox: inbox_count }
             }
             // A column: the in-window menu bar (where there is one) takes
             // its height off the top, the shell the rest.

@@ -6,6 +6,10 @@
 //! `architect-shell` shows at once. Launched by the workspace's
 //! launcher, so a Vault tab dragged out of the window opens a window of
 //! its own.
+//!
+//! One instance: a second launch brings the first forward and ends. With
+//! `--background` (a login launch) it starts in the menu bar, with no
+//! window and no Dock icon.
 
 use architect_lab_ui::{Device, LabApp, use_window_screen};
 use dioxus::prelude::*;
@@ -23,10 +27,16 @@ fn App() -> Element {
 }
 
 fn main() {
+    if architect_presence::single_instance(architect_lab_ui::presence::ID)
+        == architect_presence::Launch::HandedOff
+    {
+        return;
+    }
     let (w, h) = first_device().size().unwrap_or((1280.0, 820.0));
     let window = WindowAttributes::default()
         .with_title("Architect — app shell lab")
-        .with_surface_size(LogicalSize::new(w, h));
+        .with_surface_size(LogicalSize::new(w, h))
+        .with_visible(!architect_presence::launched_in_background());
     // The shell draws the title bar: the content runs under a transparent
     // one, the traffic lights placed in the shell's 40pt row
     // (`use_window_chrome`).

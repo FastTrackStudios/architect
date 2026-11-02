@@ -1,0 +1,77 @@
+[package]
+name = "architect-devices"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Devices: this device on the account, an org's enrolled devices, pairing a device by code or QR, revoking, and the peer-to-peer admission every lane checks"
+
+# docs/content/architecture/devices.md. The default set is the model —
+# who a node lets in (`Admission`: the account's devices, an org's
+# enrolled ones, paired ones), what each may do, how to reach it, and the
+# pairing offers a person makes — pure data, wasm-clean, and the gate's
+# `PermissionEngine` for `Principal::Host`. `vox` is the two services
+# (pairing, per-org enrolment) and their clients; native, it also holds
+# the pairing host. `server` (native) is the org host's enrolment service
+# and the projection of enrolments into `architect_orgs::server::Members`.
+# `account` is the account pass over auth's `DeviceService`. `iroh`
+# (native) serves an endpoint whose connections close when the device is
+# revoked.
+
+[features]
+default = []
+vox = ["dep:vox", "architect/vox"]
+server = ["vox", "architect-orgs/server", "dep:architect-telemetry"]
+account = ["vox", "dep:auth-proto", "dep:chrono", "architect/platform"]
+iroh = ["architect/iroh", "dep:iroh"]
+
+[dependencies]
+architect = { workspace = true }
+# `Principal`, `Rule`, `PermissionEngine`: what a device is let do, and
+# the gate's engine for it. wasm-clean.
+architect-permissions = { workspace = true }
+# `OrgId`, `Role`: an enrolment is a role in an org. The model, wasm-clean.
+architect-orgs = { workspace = true }
+facet = { workspace = true }
+facet-json = { version = "0.50.0-rc.5" }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+# A pairing offer's code and secret are fresh random ids.
+uuid = { workspace = true }
+# `Admission::ends`: a watch every connection's closer waits on. `sync`
+# only, so the default set stays wasm-clean; `macros` for the account
+# driver's `select!` (a proc-macro, target-agnostic).
+tokio = { version = "1", default-features = false, features = ["sync", "macros"] }
+vox = { workspace = true, optional = true }
+auth-proto = { workspace = true, optional = true }
+chrono = { workspace = true, optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+iroh = { workspace = true, optional = true }
+# `server`: what an enrolment did, on the call's span (wide events).
+architect-telemetry = { workspace = true, optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# Uuid v4 needs a browser randomness source on wasm.
+uuid = { workspace = true, features = ["js"] }
+
+[dev-dependencies]
+architect-devices = { path = ".", features = ["server", "account", "iroh"] }
+architect = { workspace = true, features = ["vox", "local", "iroh"] }
+architect-orgs = { workspace = true, features = ["server"] }
+# The end-to-end test: a real issuer (in-memory SQLite) for the account's
+# devices, documents synced between nodes over loopback iroh.
+auth = { workspace = true, features = ["backend-db", "vox"] }
+crdt = { workspace = true, features = ["vox"] }
+chrono = { workspace = true }
+iroh = { workspace = true }
+sea-orm = { workspace = true }
+sea-orm-migration = { workspace = true }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+vox = { workspace = true }
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true

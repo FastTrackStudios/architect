@@ -9,14 +9,17 @@
 //! The endpoints bind loopback and dial each other by direct address,
 //! except in `devices_on_one_network_find_each_other`, which finds the
 //! other node on the local network (mDNS, `_fts._udp`) and dials it by
-//! bare id: that one needs an interface that carries multicast.
+//! bare id: that one needs an interface that carries multicast, and on
+//! macOS Local Network permission, which a test binary run over SSH
+//! never gets; it skips there unless `ARCHITECT_LAN_TESTS=1`.
 
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::indexing_slicing,
     clippy::arithmetic_side_effects,
-    clippy::panic
+    clippy::panic,
+    clippy::print_stderr
 )]
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -28,7 +31,7 @@ use architect_permissions::Principal;
 use auth_proto::device::{DeviceDirectory, PeerDevice};
 use crdt::CrdtDoc;
 use crdt::link::{DocLink, LinkKey};
-use crdt::p2p::{Devices, NodeAccess, Shares, node_router};
+use crdt::p2p::{Admission, NodeAccess, Shares, node_router};
 use crdt::peer::{DocCatalog, DocPeerClient, OpenDocs, SelfLane, pull};
 use crdt::registry::DocRegistry;
 use crdt::sync::{DocSyncClient, SyncedDoc};
@@ -74,7 +77,7 @@ async fn loopback() -> iroh::Endpoint {
 /// Serve `endpoint`'s documents: the registry admits what `NodeAccess`
 /// admits, and the node's own sweep lane (`service:self`).
 fn serve(endpoint: iroh::Endpoint) -> Node {
-    let access = NodeAccess::new(Devices::new(), Shares::new());
+    let access = NodeAccess::new(Admission::new(), Shares::new());
     let registry = DocRegistry::new(|_| Box::pin(async { Ok(CrdtDoc::ephemeral()) }))
         .with_authorizer({
             let access = access.clone();
@@ -123,6 +126,15 @@ fn directory(nodes: &[(Uuid, &Node)]) -> DeviceDirectory {
             })
             .collect(),
     }
+}
+
+/// The account's devices but `me`, as a node lets them in.
+fn account_peers(account: &DeviceDirectory, me: Uuid) -> Vec<architect_devices::Peer> {
+    account
+        .peer_endpoints(me)
+        .iter()
+        .map(|endpoint| architect_devices::Peer::new(endpoint, "device", "linux"))
+        .collect()
 }
 
 async fn sync_client(from: &iroh::Endpoint, to: impl Into<iroh::EndpointAddr>) -> DocSyncClient {
@@ -271,11 +283,11 @@ async fn registered_devices_edit_live_with_no_server() {
     laptop
         .access
         .devices
-        .replace(account.peer_endpoints(laptop_id));
+        .set_account(account_peers(&account, laptop_id));
     phone
         .access
         .devices
-        .replace(account.peer_endpoints(phone_id));
+        .set_account(account_peers(&account, phone_id));
 
     // Live: the phone's copy of the song stays attached to the laptop's.
     let song = Uuid::new_v4();
@@ -338,7 +350,7 @@ async fn an_unregistered_device_is_refused() {
     laptop
         .access
         .devices
-        .replace(account.peer_endpoints(laptop_id));
+        .set_account(account_peers(&account, laptop_id));
     let song = Uuid::new_v4();
     edit(&laptop.registry.doc(song).await.unwrap(), "tempo", "120");
 
@@ -367,15 +379,34 @@ async fn an_unregistered_device_is_refused() {
     laptop
         .access
         .devices
-        .replace(without_phone.peer_endpoints(laptop_id));
+        .set_account(account_peers(&without_phone, laptop_id));
     assert!(
         peers.list().await.is_err(),
         "a forgotten device still listed"
     );
 }
 
+/// False on macOS unless `ARCHITECT_LAN_TESTS=1`: macOS denies LAN
+/// multicast to a process without Local Network permission, and one
+/// launched over SSH cannot be granted it (no app for the prompt).
+fn lan_is_reachable() -> bool {
+    if !cfg!(target_os = "macos")
+        || std::env::var_os("ARCHITECT_LAN_TESTS").is_some_and(|v| v == "1")
+    {
+        return true;
+    }
+    eprintln!(
+        "skipped: macOS Local Network privacy blocks LAN multicast for this process; \
+         run from a terminal app granted Local Network access with ARCHITECT_LAN_TESTS=1"
+    );
+    false
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn devices_on_one_network_find_each_other() {
+    if !lan_is_reachable() {
+        return;
+    }
     let lan = || async {
         iroh_link::bind_endpoint_with(iroh::SecretKey::generate(), PeerLookup::Lan)
             .await
@@ -389,7 +420,7 @@ async fn devices_on_one_network_find_each_other() {
     laptop
         .access
         .devices
-        .replace(account.peer_endpoints(laptop_id));
+        .set_account(account_peers(&account, laptop_id));
 
     // The phone knows no address and no id yet: it looks.
     let browser = LanBrowser::new(phone.endpoint.id()).expect("browse the LAN");

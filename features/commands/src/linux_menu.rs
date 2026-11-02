@@ -40,10 +40,24 @@ const TAKEN: u8 = 1;
 /// Served, but nothing said it shows it; or not served at all.
 const NOT_TAKEN: u8 = 2;
 
-/// The tree the bus serves, and its revision (bumped with each new tree).
-struct Shared {
-    tree: Tree,
-    revision: u32,
+/// The tree a [`DbusMenu`] serves, and its revision (bumped with each new
+/// tree).
+pub struct Shared {
+    pub tree: Tree,
+    pub revision: u32,
+}
+
+impl Shared {
+    /// Serves `tree` from now on; the new revision to announce
+    /// ([`DbusMenu::announce`]) when it is not the tree served already.
+    pub fn set(&mut self, tree: Tree) -> Option<u32> {
+        if self.tree == tree {
+            return None;
+        }
+        self.tree = tree;
+        self.revision = self.revision.wrapping_add(1);
+        Some(self.revision)
+    }
 }
 
 /// The UI's end of the bus thread.
@@ -63,12 +77,12 @@ pub fn NativeMenus(bar: MenuBar) -> Element {
     let bus = use_hook(|| Rc::new(start()));
     if let Some(c) = commands {
         let tree = Tree::new(&without_platform(&bar.resolve(&c.all())));
-        let mut shared = bus.shared.lock().unwrap_or_else(PoisonError::into_inner);
-        if shared.tree != tree {
-            shared.tree = tree;
-            shared.revision = shared.revision.wrapping_add(1);
-            let revision = shared.revision;
-            drop(shared);
+        let revision = bus
+            .shared
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .set(tree);
+        if let Some(revision) = revision {
             let _ = bus.announce.send(revision);
         }
     }
@@ -176,13 +190,7 @@ impl Serve {
         let connection = zbus::Connection::session().await?;
         connection
             .object_server()
-            .at(
-                PATH,
-                DbusMenu {
-                    shared: Arc::clone(&shared),
-                    picked,
-                },
-            )
+            .at(PATH, DbusMenu::new(Arc::clone(&shared), picked))
             .await?;
         let taken = register(&connection).await;
         state.store(if taken { TAKEN } else { NOT_TAKEN }, Ordering::Release);
@@ -194,7 +202,7 @@ impl Serve {
         );
         let emitter = SignalEmitter::new(&connection, PATH)?;
         while let Some(revision) = announced.recv().await {
-            DbusMenu::layout_updated(&emitter, revision, 0).await?;
+            DbusMenu::announce(&emitter, revision).await?;
         }
         Ok(())
     }
@@ -222,13 +230,27 @@ async fn register(connection: &zbus::Connection) -> bool {
 /// A node as `GetLayout` gives it: `(ia{sv}av)`.
 type Layout = (i32, HashMap<String, OwnedValue>, Vec<OwnedValue>);
 
-/// The object a shell talks to.
-struct DbusMenu {
+/// A numbered menu as `com.canonical.dbusmenu`: the object a shell talks to.
+///
+/// It is served at a path of the app's connection. The menu bar's is at
+/// [`PATH`]; a tray item (`architect-presence`'s `StatusNotifierItem`)
+/// serves one of its own. A click comes back as a [`Pick`] on `picked`.
+pub struct DbusMenu {
     shared: Arc<Mutex<Shared>>,
     picked: mpsc::Sender<Pick>,
 }
 
 impl DbusMenu {
+    /// Serves what `shared` holds; picks go to `picked`.
+    pub const fn new(shared: Arc<Mutex<Shared>>, picked: mpsc::Sender<Pick>) -> Self {
+        Self { shared, picked }
+    }
+
+    /// Tells the shell the menu at `emitter`'s path is now `revision`.
+    pub async fn announce(emitter: &SignalEmitter<'_>, revision: u32) -> zbus::Result<()> {
+        Self::layout_updated(emitter, revision, 0).await
+    }
+
     /// The tree and its revision now, copied out so no lock is held while
     /// a reply is built.
     fn now(&self) -> (Tree, u32) {

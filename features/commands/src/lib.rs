@@ -51,7 +51,7 @@ pub use keymap::{
 #[cfg(feature = "ui")]
 pub use keys_ui::{BindingEditor, KeymapTools, WhichKeyPanel, use_keymap, use_palette_opener};
 #[cfg(all(feature = "native", target_os = "linux"))]
-pub use linux_menu::NativeMenus;
+pub use linux_menu::{DbusMenu, NativeMenus, Shared as DbusMenuState};
 pub use menu::{
     Entry, Item, Kind, Live, Menu, MenuBar, Pick, Resolved, Row, Section, Standard, Tree,
     without_platform,
