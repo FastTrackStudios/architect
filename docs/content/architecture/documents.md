@@ -247,9 +247,14 @@ synced with it.
 > over vox channels, its events per subscriber), access by the caller's
 > role in the org and per-folder grants (`features/files/src/access.rs`
 > `resolve`), version labels, and the client
-> (`features/files/src/client.rs` `FilesClient`). Next: client sync,
-> the browser and desktop integrations, adopting on-disk folders, the
-> HTTP byte face; then Task and Studio move over.
+> (`features/files/src/client.rs` `FilesClient`). Since then, the HTTP
+> byte face (`features/files/src/server/web.rs` `WebFiles`: ranged
+> reads a browser's `<video>` seeks against, read tickets, resumable
+> `PUT` uploads) and renditions (`features/files/src/server/renditions.rs`
+> `Transcoder`: a proxy, a poster and peaks for a video, peaks and AAC
+> for audio, made off the request path and kept with the version's
+> content). Next: client sync, the desktop integrations, adopting
+> on-disk folders; then Task and Studio move over.
 
 Task's Files platform (`task:features/files`, about 38,600 lines) is the
 file layer every app needs: roots of files and folders, versions,
