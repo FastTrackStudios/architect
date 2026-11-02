@@ -127,7 +127,10 @@ branch to a labelled experiment.
 `rust-toolchain.toml` in architect and in each consumer pin the same
 rust version (1.99.1 today), and CI's `RUSTUP_TOOLCHAIN` matches it.
 Bump them together: a consumer on an older toolchain than the tag it
-pins may not build it.
+pins may not build it. The rustflags in `.cargo/config.toml` and the
+dependencies' dev profile in the root `Cargo.toml` are shared the same
+way: the build cache reuses a crate across repos only when the
+compiler, every flag and the profile match.
 
 ## Where to read more
 

@@ -1,4 +1,60 @@
-# `cargo xtask <command>` runs the repo tooling (`xtask/`). An alias only:
-# no [build] or rustflags here, so cache keys stay the same as plain cargo.
+# `cargo xtask <command>` runs the repo tooling (`xtask/`).
 [alias]
 xtask = "run -q -p xtask --"
+
+# ── The fleet's rustflags ─────────────────────────────────────────────
+# Everything below is the same, flag for flag and in the same order, in
+# architect, Task, studio, keyflow and frame
+# (skills/architect/references/xtask-tooling.md, "Fleet toolchain").
+# kache keys every crate on rustc's version and every rustflag, so one
+# differing flag rebuilds the whole graph in each repo instead of sharing
+# one build of Dioxus, Blitz and architect across them. Change it in all
+# of them or in none. Never override it from CI with `RUSTFLAGS` or
+# `CARGO_TARGET_<triple>_RUSTFLAGS`: either replaces these tables.
+
+# Frame pointers: originally for the (now retired) moire fork's trace
+# capture, kept because samply/perf profiling of the audio path on NixOS
+# glibc needs intact frame-pointer chains to unwind. Cheap; keep it.
+#
+# NOTE ON PRECEDENCE: `target.<triple>.rustflags` REPLACES `build.rustflags`
+# — cargo does not merge them. So the tables below must repeat the
+# frame-pointer flag. This `[build]` table is what the other targets
+# (aarch64 darwin, iOS) get.
+[build]
+rustflags = ["-C", "force-frame-pointers=yes"]
+
+# mold instead of the default `ld.bfd`. Linking is the serial tail of every
+# build, and a `cargo test --workspace` links hundreds of test binaries.
+# mold is multi-threaded and typically turns a 30-60s link into a few
+# seconds. Comes from the dev shell (flake.nix); GCC accepts
+# -fuse-ld=mold natively.
+[target.x86_64-unknown-linux-gnu]
+rustflags = [
+  "-C", "force-frame-pointers=yes",
+  "-C", "link-arg=-fuse-ld=mold",
+  "-C", "target-cpu=x86-64-v3",
+]
+
+# x86-64-v3 (AVX2, FMA, BMI2 — Haswell, 2013, and later) on every x86-64
+# desktop target, for studio's DSP: the amps, the sampler and the FX
+# vectorise to 256 bits. A machine older than that cannot run these
+# builds. Apple Silicon (aarch64) is unaffected.
+[target.x86_64-apple-darwin]
+rustflags = [
+  "-C", "force-frame-pointers=yes",
+  "-C", "target-cpu=x86-64-v3",
+]
+
+# getrandom 0.3 refuses wasm32-unknown-unknown unless told which entropy
+# source to use — the cargo *feature* alone is not enough, it gates on this
+# cfg. The browser answer is `wasm_js` (crypto.getRandomValues). Reached
+# transitively (uuid, ahash, …), so it has to be set for the whole target
+# rather than by any one dependency.
+#
+# Note the precedence rule above: this table REPLACES `build.rustflags`, so
+# the frame-pointer flag is repeated here.
+[target.wasm32-unknown-unknown]
+rustflags = [
+  "-C", "force-frame-pointers=yes",
+  "--cfg", 'getrandom_backend="wasm_js"',
+]

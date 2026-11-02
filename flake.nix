@@ -2,11 +2,17 @@
   description = "architect — dev shell with everything the workspace links against";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  # The `ci` shell's rust: the exact release rust-toolchain.toml pins.
+  inputs.rust-overlay.url = "github:oxalica/rust-overlay";
+  inputs.rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
 
-  outputs = { self, nixpkgs }:
+  outputs = { self, nixpkgs, rust-overlay }:
     let
       systems = [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" "x86_64-darwin" ];
-      forAll = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
+      forAll = f: nixpkgs.lib.genAttrs systems (system: f (import nixpkgs {
+        inherit system;
+        overlays = [ rust-overlay.overlays.default ];
+      }));
     in
     {
       devShells = forAll (pkgs:
@@ -35,6 +41,10 @@
             # Blitz's system fonts (fontique) link fontconfig: a desktop
             # test binary needs it at run time.
             fontconfig
+            # The linker .cargo/config.toml selects for x86_64 linux
+            # (`-fuse-ld=mold`, the fleet's rustflags); without it every
+            # link fails with "cannot find -fuse-ld=mold".
+            mold
           ];
           common = with pkgs; [
             pkg-config
@@ -62,9 +72,15 @@
           # Libraries only: layers under whatever rust toolchain you already
           # have (`nix develop -c cargo test --workspace`).
           default = shell [ ];
-          # Self-contained: nixpkgs' stable toolchain on top, for CI or a
-          # machine with no rust of its own.
-          ci = shell (with pkgs; [ cargo rustc rustfmt clippy rust-analyzer ]);
+          # Self-contained: the pinned toolchain on top (rust 1.99.1, the
+          # rust-toolchain.toml pin and the fleet's; bump the two together),
+          # for a machine with no rust of its own.
+          ci = shell [
+            (pkgs.rust-bin.stable."1.99.1".default.override {
+              extensions = [ "rust-src" "rust-analyzer" "clippy" "rustfmt" ];
+              targets = [ "wasm32-unknown-unknown" ];
+            })
+          ];
         });
     };
 }

@@ -554,17 +554,87 @@ strip = "debuginfo"
 [profile.wasm-dev.package."*"]
 opt-level = 3
 
-# Dependencies at opt-level 1: gets rid of the pathological O0 debug
-# codegen at a fraction of the compile cost. Applies to dependencies only
-# — workspace members are governed by profile.dev's base opt-level.
+# ── Dependencies: the fleet's settings ──
+# Everything from here to the end of the profiles is the fleet's dev
+# profile for DEPENDENCIES, the same in architect, Task, studio, keyflow
+# and frame (skills/architect/references/xtask-tooling.md, "Fleet
+# toolchain"). kache keys a crate on its opt-level and debuginfo, and on
+# the bytes of every crate it links against, so one differing line here
+# rebuilds that crate and everything above it in each repo instead of
+# sharing one build.
+#
+# Opt-level 1: gets rid of the pathological O0 debug codegen at a fraction
+# of the compile cost. No debuginfo: a backtrace through a dependency still
+# names the function, and our own crates keep `line-tables-only` (above).
+# Applies to dependencies only: workspace members are governed by
+# profile.dev's base opt-level.
 [profile.dev.package."*"]
 opt-level = 1
+debug = false
 
-# phon's JIT engine — generates and runs the DSP graph itself. Reaches
-# this tree transitively through vox.
+# Full DWARF for dependencies too in the debugger profile.
+[profile.dev-dbg.package."*"]
+debug = 2
+
+# Dependencies kept at opt-level 3: the crates that run per sample or per
+# frame. phon is vox's JIT DSP engine; the rest is studio's list (audio
+# path, the Blitz/Vello renderer and the Dioxus core under it), kept here
+# for the crates this tree also builds.
+[profile.dev.package.blake3]
+opt-level = 3
 [profile.dev.package.phon]
 opt-level = 3
+[profile.dev.package.phon-engine]
+opt-level = 3
 [profile.dev.package.phon-jit]
+opt-level = 3
+[profile.dev.package.num-complex]
+opt-level = 3
+[profile.dev.package.dioxus-core]
+opt-level = 3
+[profile.dev.package.dioxus-native-dom]
+opt-level = 3
+[profile.dev.package.blitz-dom]
+opt-level = 3
+[profile.dev.package.blitz-paint]
+opt-level = 3
+[profile.dev.package.blitz-shell]
+opt-level = 3
+[profile.dev.package.blitz-traits]
+opt-level = 3
+[profile.dev.package.anyrender]
+opt-level = 3
+[profile.dev.package.anyrender_vello]
+opt-level = 3
+[profile.dev.package.vello]
+opt-level = 3
+[profile.dev.package.vello_encoding]
+opt-level = 3
+[profile.dev.package.wgpu]
+opt-level = 3
+[profile.dev.package.wgpu-core]
+opt-level = 3
+[profile.dev.package.wgpu-hal]
+opt-level = 3
+[profile.dev.package.naga]
+opt-level = 3
+[profile.dev.package.stylo]
+opt-level = 3
+[profile.dev.package.selectors]
+opt-level = 3
+[profile.dev.package.taffy]
+opt-level = 3
+[profile.dev.package.parley]
+opt-level = 3
+[profile.dev.package.skrifa]
+opt-level = 3
+[profile.dev.package.read-fonts]
+opt-level = 3
+[profile.dev.package.fontique]
+opt-level = 3
+[profile.dev.package.peniko]
+opt-level = 3
+[profile.dev.package.kurbo]
 opt-level = 3
 
 # Build scripts + proc macros and their deps. `package."*"` does NOT cover

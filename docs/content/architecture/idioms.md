@@ -103,8 +103,8 @@ CI (`.github/workflows/checks.yml`) runs `cargo check --workspace
 --workspace` → `cargo xtask boundaries` (the layer table and ratcheted
 source idioms in `boundaries.toml`) → `cargo xtask docs` (every path and
 command these pages name exists) → `cargo check --target
-wasm32-unknown-unknown` on the framework crates, with
-`RUSTFLAGS=-D warnings`. The xtask has no CI or idioms command; its
+wasm32-unknown-unknown` on the framework crates, with every warning
+an error (`CARGO_BUILD_WARNINGS=deny`). The xtask has no CI or idioms command; its
 commands are `feature new`, `boundaries`, `docs`, `tags`, `fleet-bump`
 and `auth-mirror`.
 
