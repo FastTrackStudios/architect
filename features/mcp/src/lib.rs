@@ -715,9 +715,22 @@ fn named_tool(tool: &str, info: &ActionInfo) -> Value {
     })
 }
 
-/// A tool's result: `value` as JSON text, cut to [`MAX_TEXT`].
+/// A tool's result: `value` as JSON text, cut to [`MAX_TEXT`]. An object
+/// that ran and fits is also the result's `structuredContent` (MCP
+/// 2025-06-18), so a host reads it without parsing the text: an A2UI
+/// surface's answer, say.
 pub(crate) fn text_result(value: &Value, is_error: bool) -> Value {
-    content_result(value.to_string(), is_error)
+    let text = value.to_string();
+    let fits = text.len() <= MAX_TEXT;
+    let mut result = content_result(text, is_error);
+    if !is_error
+        && fits
+        && value.is_object()
+        && let Some(object) = result.as_object_mut()
+    {
+        object.insert("structuredContent".to_owned(), value.clone());
+    }
+    result
 }
 
 /// A tool's result: `text` as it is, cut to [`MAX_TEXT`].
@@ -746,6 +759,20 @@ mod tests {
     use architect_permissions::{Action, Decision, PermissionEngine, Resource};
     use facet::Facet;
     use serde_json::{Value, json};
+
+    #[test]
+    fn an_object_answer_is_structured_content_too() {
+        let ok = super::text_result(&json!({ "surfaces": ["s"] }), false);
+        assert_eq!(ok["structuredContent"], json!({ "surfaces": ["s"] }));
+        assert_eq!(ok["content"][0]["text"], r#"{"surfaces":["s"]}"#);
+        let failed = super::text_result(&json!({ "code": "failed" }), true);
+        assert!(failed.get("structuredContent").is_none());
+        assert!(
+            super::text_result(&json!([1]), false)
+                .get("structuredContent")
+                .is_none()
+        );
+    }
 
     static HITS: ActionMeta = ActionMeta {
         id: "DRUMS_HITS",
@@ -1260,6 +1287,8 @@ mod tests {
             .expect("a tool");
         assert_eq!(out["isError"], false);
         assert_eq!(out["content"][0]["text"], "\"acme for anonymous\"");
+        // A string is not an object: no structured content.
+        assert!(out.get("structuredContent").is_none());
         assert_eq!(
             futures::executor::block_on(s.call_tool(&caller, "nope", json!({}))),
             Err(ToolError::NoTool("nope".into()))
