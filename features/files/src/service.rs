@@ -18,6 +18,7 @@ use crate::model::{
     UploadPlan, UploadProgress, UploadSpec, Usage, Version, VersionLabel, WriteReceipt,
 };
 use crate::path::RootPath;
+use crate::rendition::{RenditionSet, Ticket};
 
 #[architect::rpc]
 pub trait FilesService {
@@ -125,6 +126,23 @@ pub trait FilesService {
     /// into `out`.
     async fn read(&self, request: ReadRequest, out: Tx<Vec<u8>>) -> Result<ReadDone, FilesFault>;
 
+    /// A read ticket for `path` and everything under it: what a browser
+    /// appends to a byte URL (`crate::web`) for an element that cannot
+    /// send a header. Needs `Read` there; reads as the caller, and only
+    /// what they may still read when it is used.
+    async fn ticket(&self, root_id: RootId, path: RootPath) -> Result<Ticket, FilesFault>;
+
+    // ── Renditions ─────────────────────────────────────────────────
+
+    /// A version's renditions (`None`: the current one), asking for any
+    /// that are missing. Needs `Read` (and `History` for a past version).
+    async fn renditions(
+        &self,
+        root_id: RootId,
+        path: RootPath,
+        version: Option<VersionId>,
+    ) -> Result<RenditionSet, FilesFault>;
+
     // ── Versions ───────────────────────────────────────────────────
 
     /// A file's versions, oldest first (deletes included).
@@ -219,6 +237,8 @@ pub const PERMITS: ServicePermits = ServicePermits {
         MethodPermit::new("complete_upload", "read", "files/**"),
         MethodPermit::new("abort_upload", "read", "files/**"),
         MethodPermit::new("read", "read", "files/**"),
+        MethodPermit::new("ticket", "read", "files/**"),
+        MethodPermit::new("renditions", "read", "files/**"),
         MethodPermit::new("history", "read", "files/**"),
         MethodPermit::new("restore", "read", "files/**"),
         MethodPermit::new("label", "read", "files/**"),

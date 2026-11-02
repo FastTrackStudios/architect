@@ -25,7 +25,20 @@
 //!   app talks to — save safely, read back whole or by range, follow a
 //!   pinned reference, hear what changed.
 //! - `server` (native): [`server::FilesServer`], every org's files kept
-//!   under [`OrgId::path`](architect_orgs::OrgId::path).
+//!   under [`OrgId::path`](architect_orgs::OrgId::path), and its
+//!   renditions, made off the request path by a pluggable
+//!   [`server::Transcoder`].
+//! - `http` (native): `server::WebFiles`, the [`web`] byte face — ranged
+//!   reads a browser's `<video>` seeks against, renditions, resumable
+//!   `PUT` uploads — on the same access rules.
+//! - `ffmpeg` (native): `server::FfmpegTranscoder`, renditions by the
+//!   `ffmpeg` and `ffprobe` on `PATH`.
+//!
+//! Every version of a media file gets its renditions ([`rendition`]): a
+//! video a streaming proxy, a poster and peaks, an audio file peaks and
+//! an AAC transcode. They are keyed by the version's content and kept on
+//! disk beside the blobs, so they survive a restart, and one found
+//! missing is made again.
 //!
 //! [`Role`]: architect_orgs::Role
 
@@ -36,10 +49,12 @@ mod error;
 mod id;
 mod model;
 mod path;
+pub mod rendition;
 #[cfg(all(feature = "server", not(target_arch = "wasm32")))]
 pub mod server;
 #[cfg(feature = "vox")]
 mod service;
+pub mod web;
 
 pub use access::{Access, Capability, Effective, Grant, resolve, role_capabilities, stewards};
 #[cfg(feature = "vox")]
@@ -52,6 +67,10 @@ pub use model::{
     Version, VersionLabel, WriteReceipt,
 };
 pub use path::{PathError, RootPath};
+pub use rendition::{
+    MediaClass, PEAKS_PER_SECOND, PeakReducer, Peaks, RECIPE, RenditionKind, RenditionSet,
+    RenditionState, RenditionStatus, Ticket,
+};
 #[cfg(feature = "vox")]
 pub use service::{
     FilesService, FilesServiceClient, FilesServiceStream, FilesServiceStreamClient,
