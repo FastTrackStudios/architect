@@ -77,8 +77,9 @@ pub use acting::Acting;
 pub use ffmpeg::FfmpegTranscoder;
 pub use renditions::{Renditions, TranscodeError, Transcoder};
 use state::State;
-pub use ticket::TICKET_TTL_US;
-use ticket::TicketKey;
+pub use ticket::{
+    TICKET_TTL_US, TicketKey, principal_of as ticket_principal, who as ticket_subject,
+};
 #[cfg(feature = "http")]
 pub use web::WebFiles;
 
