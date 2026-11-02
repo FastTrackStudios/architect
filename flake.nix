@@ -49,8 +49,10 @@
           shell = extra: pkgs.mkShell {
             packages = common ++ linux ++ extra;
             # Point the loader at the same libraries the linker found, so
-            # a desktop test binary can also *run* from this shell.
-            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (common ++ linux);
+            # a desktop test binary can also *run* from this shell. The C++
+            # runtime too: Luau (architect-scripting, -canvas) is C++, and a
+            # test binary linking it needs libstdc++ at run time on NixOS.
+            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (common ++ linux ++ [ pkgs.stdenv.cc.cc.lib ]);
           };
         in
         {
