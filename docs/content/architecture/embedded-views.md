@@ -214,11 +214,30 @@ python3 -m http.server 18763 --directory target/paint-web-smoke
 Open `paint_web_test.html` in a WebGL2 browser; the page says whether it
 passed. Frame counts establish skipped host submissions, not GPU utilization.
 
+Feature `paint-web-ui` adds the Dioxus browser adapter in
+`features/workspace/src/paint/web_ui.rs`. Create one `WebPaintMount` per
+pane with a factory that returns a `Painter` configured for `ViewHost::Web`,
+and render `WebPaintPane { mount, theme }` inside a sized parent. Pass updated
+theme tokens as the `theme` prop. Keep `WebPaintMount::wake_handle` and call
+`WebPaintWake::wake` on the browser thread after changing shared host data,
+including when asynchronous layout completes. Wakes coalesce into animation
+frames; views that report animation continue until idle. Pointer positions are
+canvas-local logical pixels, while the adapter supplies the device pixel ratio
+through geometry once. It forwards pointer, touch, wheel, keyboard, focus and
+composition events. The example `features/workspace/examples/paint_web_pane.rs`
+shows the mount and wake contract.
+The browser check `features/workspace/examples/paint_web_pane_test.html`
+exercises hidden mount, theme, wake coalescing, idle frames, logical pointer
+input and DPR sizing. Build `paint_web_pane` with feature `paint-web-ui`, run
+`wasm-bindgen` on the resulting wasm as above, and serve the example HTML
+beside the generated files. Its frame counts measure scene recordings, not GPU
+utilization.
+
 Its limits for now: the IME's candidate window is not placed at the
 view's caret (no cursor area is set), a write to `HostData` or the
 `InputSink` needs an explicit wake, and `FrameStats` times the view's input and
-recording, not the GPU's raster. The web surface does not yet supply a Dioxus
-pane, automatic event adapters or a WebGPU backend; plugin hosts mount no
+recording, not the GPU's raster. WebGL context restoration and a WebGPU backend
+are not implemented; plugin hosts mount no
 paint view yet. A Frame
 surface can draw through it in-process instead of in a process of its
 own.

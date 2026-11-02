@@ -1320,6 +1320,7 @@ dependencies = [
  "futures-channel",
  "futures-timer",
  "futures-util",
+ "js-sys",
  "lucide-dioxus",
  "peniko",
  "rustc-hash 2.1.3",

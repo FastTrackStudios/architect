@@ -21,6 +21,9 @@ mod widget;
 #[cfg(all(feature = "paint-web", target_arch = "wasm32"))]
 pub mod web;
 
+#[cfg(all(feature = "paint-web-ui", target_arch = "wasm32"))]
+pub mod web_ui;
+
 #[cfg(all(feature = "paint-web", any(target_arch = "wasm32", test)))]
 mod web_geometry;
 

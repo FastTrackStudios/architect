@@ -216,6 +216,12 @@ layer = "L4"
 note = "host-driven WebGL2 canvas on wasm"
 
 [[row]]
+package = "architect-workspace"
+features = ["paint-web-ui"]
+layer = "L4"
+note = "Dioxus browser paint pane"
+
+[[row]]
 package = "architect-commands"
 features = ["ui"]
 layer = "L4"
