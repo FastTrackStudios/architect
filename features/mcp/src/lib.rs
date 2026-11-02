@@ -64,6 +64,16 @@
 //! the per-tool API instead of JSON-RPC text: [`Server::tools_for`] lists
 //! them, [`Server::call_tool`] runs one.
 //!
+//! **Confirmation.** When the list asks a person before a caller from
+//! outside runs a destructive action (`ActionList::require_confirmation`),
+//! the first `run` answers `isError: true` with `confirmation_required:
+//! true`, a `ticket` and `expires_in_ms`; the app shows the person a sheet
+//! naming the action, its arguments and the caller. The model runs the
+//! same call again with the ticket — `ticket` beside `id` and `args` on
+//! `run` and on a `batch` step, `_ticket` among a named tool's arguments —
+//! once they approve, and it runs once. A `watch` hears the answer as a
+//! `confirmation` change (`"<ticket> approved"` or `"<ticket> denied"`).
+//!
 //! **Errors.** A tool that fails answers `isError: true` with a JSON
 //! object (`{"error": …}`, and `takes` for bad arguments) by default;
 //! [`Server::with_errors`]`(`[`ErrorStyle::Text`]`)` answers with the
@@ -419,6 +429,9 @@ impl Server {
              (at most {} steps, not atomic: steps that ran stay done when a later one fails). \
              An action listed `enabled: false` says why it cannot run now. Read-only actions are safe to run freely; mutating ones change the open project; \
              destructive ones may not be undoable — say what you are about to do first. \
+             When one answers `confirmation_required`, a person is being asked in the app: \
+             wait (a `watch` hears `<ticket> approved` or `denied`), then run the same call \
+             again with its `ticket`. \
              `watch` tells you what has happened since a point (pass back the `next` it \
              returns), and waits for the next change when you ask it to.",
             self.name,
@@ -513,11 +526,18 @@ impl Server {
             let Some((_, info)) = self.named(who).into_iter().find(|(tool, _)| tool == name) else {
                 return Err(ToolError::NoTool(name.to_owned()));
             };
+            // A confirmation ticket rides beside the action's own arguments.
+            let mut args = args;
+            let ticket = args
+                .as_object_mut()
+                .and_then(|object| object.remove(NAMED_TICKET))
+                .and_then(|t| t.as_str().map(str::to_owned));
             let args = if wraps(&info) {
                 args.get("args").cloned()
             } else {
                 Some(args)
             };
+            let caller = with_ticket(&caller, ticket.as_deref());
             return Ok(match self.run_one(&caller, &info.id, args.as_ref()).await {
                 Ok(value) => text_result(&value, false),
                 Err(error) => self.failure_result(&error),
@@ -557,6 +577,7 @@ impl Server {
             },
             "run" => {
                 let id = args.get("id").and_then(Value::as_str).unwrap_or_default();
+                let caller = with_ticket(&caller, args.get("ticket").and_then(Value::as_str));
                 match self.run_one(&caller, id, args.get("args")).await {
                     Ok(value) => text_result(&value, false),
                     Err(error) => self.failure_result(&error),
@@ -673,7 +694,8 @@ impl Server {
         let mut failed = false;
         for (i, step) in steps.iter().enumerate() {
             let id = step.get("id").and_then(Value::as_str).unwrap_or_default();
-            match self.run_one(caller, id, step.get("args")).await {
+            let caller = with_ticket(caller, step.get("ticket").and_then(Value::as_str));
+            match self.run_one(&caller, id, step.get("args")).await {
                 Ok(value) => {
                     results.push(json!({"step": i, "id": id, "ok": true, "result": value}))
                 }
@@ -762,7 +784,7 @@ const fn tools_spec() -> &'static [ToolSpec] {
         },
         ToolSpec {
             name: "run",
-            keys: &["id", "args"],
+            keys: &["id", "args", "ticket"],
             read_only: false,
         },
         ToolSpec {
@@ -805,10 +827,11 @@ fn tools() -> Value {
         },
         {
             "name": "run",
-            "description": "Run an action. `args` is what it takes (see `describe`); leave it out for an action that takes nothing. Gives back the action's result, or what went wrong and what it takes.",
+            "description": "Run an action. `args` is what it takes (see `describe`); leave it out for an action that takes nothing. Gives back the action's result, or what went wrong and what it takes. When a person must approve the call first, it answers `confirmation_required` with a `ticket`: run the same call again with that `ticket` once they have.",
             "inputSchema": {"type": "object", "required": ["id"], "properties": {
                 "id": {"type": "string"},
                 "args": {"type": "object", "description": "The action's arguments, as its schema says."},
+                "ticket": {"type": "string", "description": "The ticket a `confirmation_required` answer gave, once a person approved it; good for this exact call, once."},
             }},
             "annotations": annotate("run"),
         },
@@ -819,6 +842,7 @@ fn tools() -> Value {
                 "steps": {"type": "array", "maxItems": MAX_BATCH_STEPS, "items": {"type": "object", "required": ["id"], "properties": {
                     "id": {"type": "string"},
                     "args": {"type": "object"},
+                    "ticket": {"type": "string"},
                 }}},
                 "stop_on_error": {"type": "boolean"},
             }},
@@ -908,6 +932,31 @@ fn failure_json(error: &ActionError) -> Value {
             "error": format!("disabled: {reason}"),
             "disabled": true,
         }),
+        ActionError::ConfirmationRequired {
+            id,
+            ticket,
+            expires_in,
+        } => json!({
+            "error": format!(
+                "confirmation_required: a person must approve {id} in the app first; \
+                 run the same call again with this ticket once they have"
+            ),
+            "confirmation_required": true,
+            "ticket": ticket,
+            "expires_in_ms": u64::try_from(expires_in.as_millis()).unwrap_or(u64::MAX),
+        }),
+    }
+}
+
+/// Where a named tool takes a confirmation ticket, beside the action's
+/// own arguments (`run` and `batch` steps take `ticket`).
+pub const NAMED_TICKET: &str = "_ticket";
+
+/// `caller`, carrying `ticket` when the call brought one.
+fn with_ticket(caller: &ActionCaller, ticket: Option<&str>) -> ActionCaller {
+    match ticket {
+        Some(ticket) => caller.clone().with_ticket(ticket),
+        None => caller.clone(),
     }
 }
 
@@ -922,6 +971,15 @@ fn failure_text(error: &ActionError) -> String {
             expected: Some(schema),
             ..
         } => format!("bad arguments: {message}. It takes: {schema}"),
+        ActionError::ConfirmationRequired {
+            id,
+            ticket,
+            expires_in,
+        } => format!(
+            "confirmation_required: a person must approve {id} in the app first. Run the same \
+             call again with ticket {ticket} once they have (it expires in {} s).",
+            expires_in.as_secs()
+        ),
         other => failure_json(other)
             .get("error")
             .and_then(Value::as_str)
