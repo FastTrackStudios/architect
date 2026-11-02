@@ -6,8 +6,9 @@
 //! one a typed hook rather than a hand-written axum route:
 //!
 //! - [`EngineHost::vox_at`]: a vox WebSocket at a parameterised path
-//!   (`/org/{slug}/vox`), with a resolver that picks the handler per
-//!   connection, served behind the host's gate.
+//!   (`/org/{slug}/vox`), with a resolver that picks the [`Lane`] per
+//!   connection (a handler, and the org its calls run in), served behind
+//!   the host's gate with the lane's scope entered outside it.
 //! - [`EngineHost::vox_at_permissioned`]: the same, for a resolver that
 //!   gates each connection itself (a gate per org).
 //! - [`EngineHost::dav`]: a `WebDAV` bridge, every verb, outside the
@@ -27,12 +28,102 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get};
 
 use super::{EngineHost, LaneGate, VOX_SUBPROTOCOL};
-use crate::permissions_gate::{PermissionedRouter, PermissionsGate};
+use crate::layer::LayerRouter;
+use crate::permissions_gate::{Gated, LaneScope, PermissionsGate};
 
 pub use crate::http::{BEARER_SUBPROTOCOL_PREFIX, RequestHead};
 
 /// The path param [`EngineHost::dav`] binds the in-mount path to.
 const DAV_PATH: &str = "dav_path";
+
+/// What an [`EngineHost::vox_at`] resolver serves a connection with: the
+/// handler, and the [`LaneScope`] its calls run in (an org).
+///
+/// Not a handler itself: the host puts its gate between the two, the
+/// scope outside, so the gate's engine checks every call in the scope.
+/// A lane cannot be served, or wrapped in a gate, any other way.
+#[derive(Clone)]
+pub struct Lane<H, S = ()> {
+    handler: H,
+    scope: S,
+}
+
+impl<H> Lane<H> {
+    /// `handler` in no scope.
+    pub const fn new(handler: H) -> Self {
+        Self { handler, scope: () }
+    }
+
+    /// The lane in `scope`: every call on it, the gate's check included,
+    /// runs there.
+    #[must_use]
+    pub fn scoped<S: LaneScope>(self, scope: S) -> Lane<H, S> {
+        Lane {
+            handler: self.handler,
+            scope,
+        }
+    }
+}
+
+/// What an [`EngineHost::vox_at`] resolver may answer with: a [`Lane`], or
+/// a bare [`LayerRouter`] (a lane in no scope).
+pub trait IntoLane {
+    /// The handler the host gates.
+    type Handler;
+    /// What the lane's calls run in.
+    type Scope: LaneScope;
+    /// The lane.
+    fn into_lane(self) -> Lane<Self::Handler, Self::Scope>;
+}
+
+impl<H, S: LaneScope> IntoLane for Lane<H, S> {
+    type Handler = H;
+    type Scope = S;
+    fn into_lane(self) -> Self {
+        self
+    }
+}
+
+impl IntoLane for LayerRouter {
+    type Handler = Self;
+    type Scope = ();
+    fn into_lane(self) -> Lane<Self> {
+        Lane::new(self)
+    }
+}
+
+/// A lane's handler on an [`ungated`](EngineHost::ungated) host: no check,
+/// every call still in the lane's scope.
+#[derive(Clone)]
+struct Unchecked<H, S> {
+    handler: H,
+    scope: S,
+}
+
+impl<H, S> vox::Handler<vox::DriverReplySink> for Unchecked<H, S>
+where
+    H: vox::Handler<vox::DriverReplySink> + Send + Sync,
+    S: LaneScope,
+{
+    fn args_have_channels(&self, method_id: vox::MethodId) -> bool {
+        self.handler.args_have_channels(method_id)
+    }
+
+    fn response_wire_shape(&self, method_id: vox::MethodId) -> Option<&'static facet::Shape> {
+        self.handler.response_wire_shape(method_id)
+    }
+
+    async fn handle(
+        &self,
+        call: vox::SelfRef<vox::RequestCall<'static>>,
+        reply: vox::DriverReplySink,
+        schemas: std::sync::Arc<vox::SchemaRecvTracker>,
+    ) {
+        self.scope
+            .enter(self.handler.handle(call, reply, schemas))
+            .await;
+    }
+}
 
 /// One `WebDAV` request, as [`EngineHost::dav`] hands it over.
 #[derive(Debug)]
@@ -57,14 +148,18 @@ impl EngineHost {
     /// host's gate.
     ///
     /// Each upgrade calls `resolve` with the request's [`RequestHead`]
-    /// first. It answers with the handler to serve the connection with (a
-    /// [`LayerRouter`](crate::LayerRouter), say the org's), or with
+    /// first. It answers with the [`Lane`] to serve the connection with
+    /// (a bare [`LayerRouter`](crate::LayerRouter), or
+    /// `Lane::new(router).scoped(org)` for an org's lane), or with
     /// anything [`IntoResponse`] that refuses it (`404` for an org this
-    /// host doesn't serve). The host wraps the handler with its gate and
-    /// the upgrade's bearer
+    /// host doesn't serve). The host wraps the lane's handler with its
+    /// gate and the upgrade's bearer
     /// ([`PermissionsGate::wrap_shared_with_bearer`]), exactly as on
-    /// `/vox`; on an [`ungated`](EngineHost::ungated) host it serves the
-    /// handler as is. The `vox.v1` subprotocol is echoed as on `/vox`.
+    /// `/vox`, and enters the lane's scope **outside** that gate, so the
+    /// gate's engine checks each call in it (`ConfinedEngine` sees the
+    /// lane's org). On an [`ungated`](EngineHost::ungated) host it serves
+    /// the handler as is, in the scope. The `vox.v1` subprotocol is echoed
+    /// as on `/vox`.
     ///
     /// A lane that needs a gate of its own per connection (each org its
     /// own engine, a share link's fixed guest) is
@@ -79,19 +174,20 @@ impl EngineHost {
     /// EngineHost::new(router, gate, bind).vox_at("/org/{slug}/vox", move |head| {
     ///     let orgs = orgs.clone();
     ///     async move {
-    ///         orgs.get(head.param("slug").unwrap_or_default())
-    ///             .map(|org| org.router())
-    ///             .ok_or(StatusCode::NOT_FOUND)
+    ///         let org = orgs.get(head.param("slug").unwrap_or_default())
+    ///             .ok_or(StatusCode::NOT_FOUND)?;
+    ///         Ok(Lane::new(org.router()).scoped(org.id()))
     ///     }
     /// })
     /// ```
     #[must_use]
-    pub fn vox_at<H, E, F, Fut>(self, path: &str, resolve: F) -> Self
+    pub fn vox_at<L, E, F, Fut>(self, path: &str, resolve: F) -> Self
     where
         F: Fn(RequestHead) -> Fut + Clone + Send + Sync + 'static,
-        Fut: Future<Output = Result<H, E>> + Send + 'static,
+        Fut: Future<Output = Result<L, E>> + Send + 'static,
         E: IntoResponse,
-        H: vox::Handler<vox::DriverReplySink> + Clone + Send + Sync + 'static,
+        L: IntoLane,
+        L::Handler: vox::Handler<vox::DriverReplySink> + Clone + Send + Sync + 'static,
     {
         let gate = self.gate.clone();
         let upgrade =
@@ -101,12 +197,15 @@ impl EngineHost {
                 let resolved = resolve(head);
                 let gate = gate.clone();
                 async move {
-                    match (resolved.await, gate) {
-                        (Ok(handler), LaneGate::Gated(gate)) => upgrade_to(
+                    match (resolved.await.map(IntoLane::into_lane), gate) {
+                        (Ok(Lane { handler, scope }), LaneGate::Gated(gate)) => upgrade_to(
                             ws,
-                            PermissionsGate::wrap_shared_with_bearer(gate, handler, bearer),
+                            PermissionsGate::wrap_shared_with_bearer(gate, handler, bearer)
+                                .scoped(scope),
                         ),
-                        (Ok(handler), LaneGate::Ungated) => upgrade_to(ws, handler),
+                        (Ok(Lane { handler, scope }), LaneGate::Ungated) => {
+                            upgrade_to(ws, Unchecked { handler, scope })
+                        }
                         (Err(refused), _) => refused.into_response(),
                     }
                 }
@@ -115,11 +214,13 @@ impl EngineHost {
     }
 
     /// [`vox_at`](Self::vox_at) for a resolver that gates each connection
-    /// itself: it answers with a [`PermissionedRouter`] (a gate per org, a
+    /// itself: it answers with a
+    /// [`PermissionedRouter`](crate::permissions_gate::PermissionedRouter) (a gate per org, a
     /// share link's [`StaticPrincipal`](crate::permissions_gate::StaticPrincipal)
-    /// lane), which is served as is, not wrapped in the host's gate a
-    /// second time. The type is the guarantee: an ungated handler does not
-    /// fit.
+    /// lane), or one [`scoped`](crate::permissions_gate::PermissionedRouter::scoped) to the lane's
+    /// org, which is served as is, not wrapped in the host's gate a second
+    /// time. The type is the guarantee: an ungated handler, or a scope
+    /// inside the gate, does not fit.
     ///
     /// ```ignore
     /// EngineHost::new(router, gate, bind).vox_at_permissioned("/org/{slug}/vox", move |head| {
@@ -129,17 +230,17 @@ impl EngineHost {
     ///             .ok_or(StatusCode::NOT_FOUND)?;
     ///         Ok(PermissionsGate::wrap_shared_with_bearer(
     ///             org.gate(), org.router(), head.bearer().map(str::to_owned),
-    ///         ))
+    ///         ).scoped(org.id()))
     ///     }
     /// })
     /// ```
     #[must_use]
-    pub fn vox_at_permissioned<H, E, F, Fut>(self, path: &str, resolve: F) -> Self
+    pub fn vox_at_permissioned<G, E, F, Fut>(self, path: &str, resolve: F) -> Self
     where
         F: Fn(RequestHead) -> Fut + Clone + Send + Sync + 'static,
-        Fut: Future<Output = Result<PermissionedRouter<H>, E>> + Send + 'static,
+        Fut: Future<Output = Result<G, E>> + Send + 'static,
         E: IntoResponse,
-        H: vox::Handler<vox::DriverReplySink> + Clone + Send + Sync + 'static,
+        G: Gated,
     {
         let upgrade =
             move |params: RawPathParams, uri: Uri, headers: HeaderMap, ws: WebSocketUpgrade| {

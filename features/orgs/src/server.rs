@@ -3,10 +3,14 @@
 //! Three pieces, mounted around the `PermissionsGate` the app already has
 //! (`architect::permissions_gate`):
 //!
-//! - [`confine`] wraps a connection's handler (a per-org lane,
-//!   `/org/{slug}/vox`) so every call on it runs in that org:
-//!   [`current_org`] answers it inside the handler, and services key their
-//!   data by it ([`OrgId::path`]).
+//! - An [`OrgId`] is a lane's scope (`architect::permissions_gate::LaneScope`):
+//!   on an `EngineHost`, `vox_at`'s resolver returns
+//!   `Lane::new(router).scoped(org)` for a per-org lane (`/org/{slug}/vox`)
+//!   and the host enters the org outside its gate; on a transport the app
+//!   serves itself, [`confine`] does the same to a gated handler. Every
+//!   call, the gate's check included, then runs in that org:
+//!   [`current_org`] answers it, and services key their data by it
+//!   ([`OrgId::path`]).
 //! - [`MembersResolver`] wraps the gate's identity resolver: when it
 //!   resolves a session it also learns, from the identity server
 //!   ([`Directory`]), which orgs that person is in and their role in each,
@@ -21,14 +25,20 @@
 //! let engine = ConfinedEngine::new(members.clone())
 //!     .role(&Role::Viewer, vec![Rule::new("**", &["read"])])
 //!     .role(&Role::Member, vec![Rule::new("**", &["read", "write"])]);
-//! let gate = Arc::new(PermissionsGate::new(Arc::new(engine), Arc::new(identity)).permit(…));
-//! // per connection, at `/org/{slug}/vox`:
+//! let gate = PermissionsGate::new(Arc::new(engine), Arc::new(identity)).permit(…);
+//! // an `EngineHost` lane, `/org/{slug}/vox`:
+//! EngineHost::new(router.clone(), gate, bind).vox_at("/org/{slug}/vox", move |head| {
+//!     let router = router.clone();
+//!     async move { Ok::<_, StatusCode>(Lane::new(router).scoped(org_of(&head)?)) }
+//! });
+//! // or per connection, on a transport of your own:
 //! let handler = confine(org_id, PermissionsGate::wrap_shared_with_bearer(gate, router, bearer));
 //! ```
 //!
 //! A lane in no org (`/vox`) is the All-organizations one: a resource
 //! there names its org (`org/<id>/…`) and needs the caller's membership
-//! of it, and a service reads across [`Members::scope_of`] the caller.
+//! of it, and a service reads across [`Members::scope_of`] the caller. A
+//! gate with no such lane sets [`ConfinedEngine::require_org`].
 
 use std::collections::HashMap;
 use std::future::Future;
@@ -36,11 +46,11 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use std::time::{Duration, Instant};
 
+use architect::permissions_gate::{LaneScope, PermissionedRouter, Scoped};
 use architect_permissions::{
     Action, BoxIdentityFuture, Decision, IdentityResolver, PermissionEngine, Principal, Resource,
     Rule,
 };
-use vox::{Handler, MethodId, ReplySink, RequestCall, SchemaRecvTracker, SelfRef};
 
 use crate::model::{Org, OrgId, Role};
 use crate::scope::Scope;
@@ -50,8 +60,8 @@ tokio::task_local! {
     static CURRENT: OrgId;
 }
 
-/// The org this call is confined to, inside a handler [`confine`] wraps.
-/// `None` on a lane in no org (the All-organizations one), or off the
+/// The org this call is confined to, on a lane scoped to an org (an
+/// `EngineHost` lane's, or [`confine`]'s). `None` on a lane in no org (the All-organizations one), or off the
 /// request task.
 #[must_use]
 pub fn current_org() -> Option<OrgId> {
@@ -64,48 +74,33 @@ pub async fn in_org<F: Future>(org: OrgId, fut: F) -> F::Output {
     CURRENT.scope(org, fut).await
 }
 
-/// A connection's handler, every call on it confined to one org.
-#[derive(Clone)]
-pub struct OrgConfined<H> {
-    inner: H,
-    org: OrgId,
+/// A gated connection, every call on it (the gate's check included)
+/// confined to one org: what [`confine`] returns.
+pub type OrgConfined<H> = Scoped<H, OrgId>;
+
+/// Confines every call `gated` handles to `org`, outside the gate.
+///
+/// The org is entered before the check, so the gate's engine
+/// ([`ConfinedEngine`]) checks the call in it. Once per connection, on a
+/// transport the app serves itself; on an
+/// `EngineHost` lane, return `Lane::new(router).scoped(org)` from
+/// `vox_at`'s resolver instead and the host does the same.
+///
+/// Only a gated handler fits: confining inside the gate, where the check
+/// cannot see the org, does not compile.
+#[must_use]
+pub const fn confine<H>(org: OrgId, gated: PermissionedRouter<H>) -> OrgConfined<H> {
+    gated.scoped(org)
 }
 
-/// Confines every call `inner` handles to `org`. Wrap the gated handler
-/// (the gate's engine then sees the org), once per connection.
-pub const fn confine<H>(org: OrgId, inner: H) -> OrgConfined<H> {
-    OrgConfined { inner, org }
-}
-
-impl<H> OrgConfined<H> {
-    #[must_use]
-    pub const fn org(&self) -> &OrgId {
-        &self.org
-    }
-}
-
-impl<R, H> Handler<R> for OrgConfined<H>
-where
-    R: ReplySink,
-    H: Handler<R>,
-{
-    fn args_have_channels(&self, method_id: MethodId) -> bool {
-        self.inner.args_have_channels(method_id)
-    }
-
-    fn response_wire_shape(&self, method_id: MethodId) -> Option<&'static facet::Shape> {
-        self.inner.response_wire_shape(method_id)
-    }
-
-    async fn handle(
-        &self,
-        call: SelfRef<RequestCall<'static>>,
-        reply: R,
-        schemas: Arc<SchemaRecvTracker>,
-    ) {
-        CURRENT
-            .scope(self.org.clone(), self.inner.handle(call, reply, schemas))
-            .await;
+/// An org is a lane's scope: every call on the lane runs in it
+/// ([`current_org`]).
+impl LaneScope for OrgId {
+    fn enter<F>(&self, call: F) -> impl Future<Output = F::Output> + Send
+    where
+        F: Future + Send,
+    {
+        CURRENT.scope(self.clone(), call)
     }
 }
 
@@ -274,12 +269,14 @@ impl<R: IdentityResolver> IdentityResolver for MembersResolver<R> {
 ///
 /// The org a check is in is the resource's (`org/<id>/…`) or else the
 /// call's ([`current_org`]); a resource in another org than the call's is
-/// refused outright. A check in no org is `inner`'s alone. An in-process
-/// service (`Principal::Service`) is in every org.
+/// refused outright. A check in no org is `inner`'s alone, unless the
+/// engine [requires an org](Self::require_org). An in-process service
+/// (`Principal::Service`) is in every org.
 pub struct ConfinedEngine {
     members: Members,
     roles: HashMap<String, Vec<Rule>>,
     inner: Option<Arc<dyn PermissionEngine>>,
+    require_org: bool,
 }
 
 impl ConfinedEngine {
@@ -289,7 +286,19 @@ impl ConfinedEngine {
             members,
             roles: HashMap::new(),
             inner: None,
+            require_org: false,
         }
+    }
+
+    /// Every check must be in an org: a call on a lane in no org, on a
+    /// resource naming none, is refused rather than passed to `inner`.
+    /// For a gate that serves only org lanes (a gate per org, or a host
+    /// with no All-organizations lane), so a lane left unscoped fails
+    /// closed instead of reading as the All-organizations one.
+    #[must_use]
+    pub const fn require_org(mut self) -> Self {
+        self.require_org = true;
+        self
     }
 
     /// What `role` may do in an org, by rules on org-relative resources
@@ -327,6 +336,9 @@ impl PermissionEngine for ConfinedEngine {
         let (org, relative) = match (named, current) {
             (Some((org, rest)), _) => (org, rest),
             (None, Some(org)) => (org, what.as_str()),
+            (None, None) if self.require_org && !matches!(who, Principal::Service { .. }) => {
+                return Decision::deny(format!("{} is in no org", what.as_str()));
+            }
             (None, None) => return self.rest(who, what, action),
         };
         if matches!(who, Principal::Service { .. }) {

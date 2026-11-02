@@ -212,13 +212,19 @@ confines every call on it (`architect-orgs` feature `server`,
    as the gate's engine (`.over(engine)` adds yours after it). It refuses a
    caller who is not a member of the call's org, any resource in another
    org, and what the caller's role there does not allow.
-4. Per connection: `confine(org_id, PermissionsGate::wrap_shared_with_bearer(gate, router, bearer))`.
+4. Per connection, the org outside the gate so the engine checks the call
+   in it: on an `EngineHost`, `vox_at`'s resolver returns
+   `Lane::new(router).scoped(org_id)`; on a transport of your own,
+   `confine(org_id, PermissionsGate::wrap_shared_with_bearer(gate, router, bearer))`
+   (it only takes a gated handler).
 5. Handlers read `current_org()` and key their data by it; work they spawn
    runs `in_org(org, fut)`.
 
-`confine` only says which org a call is in; without `ConfinedEngine` in the
-gate nothing refuses a non-member. `features/orgs/tests/server.rs` is the
-whole loop over a real vox link.
+The lane's org only says which org a call is in; without `ConfinedEngine` in
+the gate nothing refuses a non-member. A gate with no All-organizations lane
+sets `ConfinedEngine::require_org()`, so a lane left unscoped is refused.
+`features/orgs/tests/server.rs` is the whole loop over a real vox link,
+`features/orgs/tests/host_lane.rs` the same on an `EngineHost` lane.
 
 ## 6. All organizations
 

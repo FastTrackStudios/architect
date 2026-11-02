@@ -21,8 +21,8 @@ The gate is on every vox lane the host owns, by default:
 | --- | --- |
 | `/vox` | the upgrade's bearer (`Authorization: Bearer`, or the `vox.bearer.<token>` subprotocol a browser offers), per connection; per-call `authorization` metadata wins |
 | the iroh lane (`.iroh`, `.iroh_endpoint`) | `Principal::Host { endpoint }`, the endpoint id the QUIC handshake proved; a call that presents a bearer is resolved from it instead |
-| `vox_at(path, resolve)` | as `/vox`: the host wraps the handler the resolver picks |
-| `vox_at_permissioned(path, resolve)` | whatever gate the resolver put in the `PermissionedRouter` it returns (a gate per org, a share link's guest); not wrapped again |
+| `vox_at(path, resolve)` | as `/vox`: the host wraps the handler of the `Lane` the resolver picks, inside the lane's scope (`Lane::new(router).scoped(org)`), so the gate checks each call in the lane's org |
+| `vox_at_permissioned(path, resolve)` | whatever gate the resolver put in the `PermissionedRouter` it returns (a gate per org, a share link's guest), optionally `scoped(org)` outside it; not wrapped again |
 
 `EngineHost::ungated(router, bind)` is the opt-out: no gate on any lane, no
 caller in any handler, and a `warn` on every start. It is for a router whose
@@ -57,12 +57,13 @@ A gated host with a per-org vox lane, and the other mounts (after
 let gate = PermissionsGate::new(engine, Arc::new(identity))
     .permit(notes_service_descriptor(), &NOTES_PERMITS);
 EngineHost::new(router.clone(), gate, bind)
-    // The host's gate wraps the router; the resolver only picks it.
+    // The resolver picks the lane and its org; the host gates the
+    // router inside that org, so the engine checks every call there.
     .vox_at("/org/{slug}/vox", move |head: RequestHead| {
         let router = router.clone();
         async move {
             if head.param("slug") != Some("acme") { return Err(StatusCode::NOT_FOUND); }
-            Ok(router)
+            Ok(Lane::new(router).scoped(OrgId::new("acme")))
         }
     })
     .document("/.well-known/app.json", |head| async move { Ok::<_, StatusCode>(head.path().to_owned()) })
@@ -86,7 +87,9 @@ EngineHost::new(router.clone(), gate, bind)
    extra mounts, the SPA fallback and the `finish` layers. `VoxLane` wraps
    each `/vox` connection in the gate with its bearer.
 3. `crates/architect/src/host/mount.rs` `vox_at`, `vox_at_permissioned`,
-   `document`, `dav`, `DavRequest`: each hook is handed a `RequestHead`.
+   `Lane`, `document`, `dav`, `DavRequest`: each hook is handed a
+   `RequestHead`. `crates/architect/src/permissions_gate.rs` `LaneScope`,
+   `Scoped`: a lane's scope, entered outside the gate.
 4. `crates/architect/src/http/body.rs` `RequestHead`: `param`, `query_param`,
    `bearer` (the header, then the `vox.bearer.` subprotocol).
 5. `crates/architect/src/host/otlp.rs` `otlp_forward`, `OTLP_SIGNALS`: traces,
@@ -113,7 +116,11 @@ behind the gate as the `Principal::Host` it proved.
   refused on `/vox`, on a `vox_at` lane and on the iroh lane (in-process
   loopback endpoints, relays off), and a permitted one is served as itself;
   `vox_at_permissioned` keeps the resolver's own gate; `ungated` serves with
-  no caller.
+  no caller; a lane's scope (a `LaneScope`) is entered outside the gate, on
+  `vox_at` and on a `vox_at_permissioned` lane `scoped` outside its own.
+- `features/orgs/tests/host_lane.rs`: an org's `vox_at` lane refuses a member
+  of another org at the gate; `features/spaces/tests/wires.rs` the same for a
+  space-scoped lane (the org engine beside `SpacesEngine`).
 - `crates/architect/tests/host_mounts.rs`: `vox_at` resolving each upgrade from
   its parameters and bearer; `vox_at("/vox")` replacing the built-in; `dav`
   answering every verb outside the `finish` layers; `document` beating the SPA.

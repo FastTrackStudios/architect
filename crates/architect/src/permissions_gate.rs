@@ -602,6 +602,111 @@ where
     }
 }
 
+/// What every call on a lane runs in (an org, a space): a task-local the
+/// gate's engine and the handlers read, entered **around** the gate so
+/// the engine sees it while it checks the call.
+///
+/// Implemented by the scope's owner (`architect_orgs::OrgId`); `()` is no
+/// scope. A lane gets one through [`PermissionedRouter::scoped`] (a
+/// transport the app serves itself) or a
+/// [`Lane`](crate::host::Lane) returned to
+/// [`EngineHost::vox_at`](crate::host::EngineHost::vox_at); either way
+/// the scope sits outside the gate by construction.
+pub trait LaneScope: Clone + Send + Sync + 'static {
+    /// Run `call` in this scope.
+    fn enter<F>(&self, call: F) -> impl Future<Output = F::Output> + Send
+    where
+        F: Future + Send;
+}
+
+impl LaneScope for () {
+    fn enter<F>(&self, call: F) -> impl Future<Output = F::Output> + Send
+    where
+        F: Future + Send,
+    {
+        call
+    }
+}
+
+/// A gated handler whose every call runs in a [`LaneScope`] entered
+/// outside the gate: [`PermissionedRouter::scoped`].
+///
+/// Only a [`PermissionedRouter`] can be scoped, so the scope is always
+/// outside the check that reads it. Putting a `Scoped` inside another gate
+/// stacks a second check that sees no scope; the inner one, which does,
+/// still decides.
+#[derive(Clone)]
+pub struct Scoped<H, S> {
+    inner: PermissionedRouter<H>,
+    scope: S,
+}
+
+impl<H, S> Scoped<H, S> {
+    /// The scope every call runs in.
+    pub const fn scope(&self) -> &S {
+        &self.scope
+    }
+
+    /// The gated handler.
+    pub const fn inner(&self) -> &PermissionedRouter<H> {
+        &self.inner
+    }
+}
+
+impl<H> PermissionedRouter<H> {
+    /// Run every call this gate checks in `scope`, entered before the
+    /// check, so the engine sees it (`ConfinedEngine` the lane's org).
+    #[must_use]
+    pub const fn scoped<S: LaneScope>(self, scope: S) -> Scoped<H, S> {
+        Scoped { inner: self, scope }
+    }
+}
+
+impl<H, S> Handler<DriverReplySink> for Scoped<H, S>
+where
+    H: Handler<DriverReplySink> + Send + Sync,
+    S: LaneScope,
+{
+    fn args_have_channels(&self, method_id: MethodId) -> bool {
+        self.inner.args_have_channels(method_id)
+    }
+
+    fn response_wire_shape(&self, method_id: MethodId) -> Option<&'static facet::Shape> {
+        self.inner.response_wire_shape(method_id)
+    }
+
+    async fn handle(
+        &self,
+        call: SelfRef<RequestCall<'static>>,
+        reply: DriverReplySink,
+        schemas: Arc<SchemaRecvTracker>,
+    ) {
+        self.scope
+            .enter(self.inner.handle(call, reply, schemas))
+            .await;
+    }
+}
+
+/// A handler whose gate is already in place, any scope outside it: a
+/// [`PermissionedRouter`] or a [`Scoped`] one. What
+/// [`EngineHost::vox_at_permissioned`](crate::host::EngineHost::vox_at_permissioned)
+/// serves as is.
+pub trait Gated: Handler<DriverReplySink> + Clone + Send + Sync + 'static + sealed::Sealed {}
+
+impl<H> Gated for PermissionedRouter<H> where H: Handler<DriverReplySink> + Clone + Send + Sync {}
+impl<H, S> Gated for Scoped<H, S>
+where
+    H: Handler<DriverReplySink> + Clone + Send + Sync,
+    S: LaneScope,
+{
+}
+
+mod sealed {
+    pub trait Sealed {}
+    impl<H> Sealed for super::PermissionedRouter<H> {}
+    impl<H, S> Sealed for super::Scoped<H, S> {}
+}
+
 /// Reply a denial in the METHOD'S OWN response wire shape so the client
 /// decodes `VoxError::InvalidPayload(reason)` cleanly. Falls back to the
 /// type-erased `send_error` when the shape is unknown or reflective
