@@ -78,8 +78,17 @@ async fn a_call_made_in_a_span_is_dispatched_as_its_child() {
     // Outside any span: a trace of its own.
     assert_eq!(client.echo("b".into()).await.expect("call"), "b");
 
-    provider.force_flush().expect("flush");
-    let spans = exporter.get_finished_spans().expect("spans");
+    // A call's server span closes on the dispatching thread after the reply
+    // is sent, so the client can be back here before it ends: wait for both.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    let spans = loop {
+        provider.force_flush().expect("flush");
+        let spans = exporter.get_finished_spans().expect("spans");
+        if named(&spans, "EchoRpc/echo").len() >= 2 || std::time::Instant::now() > deadline {
+            break spans;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    };
     let parent = named(&spans, "song.read_back");
     let calls = named(&spans, "EchoRpc/echo");
     assert_eq!(parent.len(), 1, "{spans:#?}");
