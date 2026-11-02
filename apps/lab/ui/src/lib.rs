@@ -10,6 +10,7 @@
 //! flask) switches the shell's style live.
 
 mod arrange;
+mod confirm;
 mod extensions;
 mod guide;
 mod items;
@@ -672,6 +673,8 @@ pub fn LabApp() -> Element {
             .unwrap_or_else(|| std::sync::Arc::new(architect::action::ActionList::new()))
     });
     use_context_provider(|| list.clone());
+    // An agent's Delete waits for the person's yes, in the sheet below.
+    use_hook(|| confirm::require(&list));
     // Settings: the lab's sections, kept on this device — in a window.
     // Headless, the defaults, kept nowhere: a scenario neither reads nor
     // changes the person's own.
@@ -1177,6 +1180,7 @@ pub fn LabApp() -> Element {
                 }
             }
             architect_commands::CommandLayer {}
+            architect_commands::ConfirmSheet {}
             architect_settings::SettingsPage {}
             extensions::LabExtensions { metronome }
             architect_guide::tour::TourLayer {}

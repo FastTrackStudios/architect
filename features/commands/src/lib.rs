@@ -8,11 +8,15 @@
 //! [`PersonKeymap`] over them) and an action's [`params`] asked step by
 //! step — pure data, wasm-clean. Feature `ui` draws them in the shell:
 //! [`CommandPalette`], [`QuickOpen`] and [`ActionListView`] (with its
-//! binding editor), with scoped actions a view registers while it is
+//! binding editor), and [`ConfirmSheet`], where a person approves an
+//! agent's destructive call (the Action List's confirmation tickets),
+//! with scoped actions a view registers while it is
 //! mounted ([`use_command`]), keys run through `architect-input`.
 
 #[cfg(feature = "ui")]
 mod bridge;
+#[cfg(feature = "ui")]
+mod confirm;
 mod custom;
 #[cfg(any(test, all(feature = "native", target_os = "linux")))]
 mod dbusmenu;
@@ -40,6 +44,8 @@ mod ui;
 
 #[cfg(feature = "ui")]
 pub use bridge::{CommandsState, Ran, RunCommand, use_command_actions};
+#[cfg(feature = "ui")]
+pub use confirm::ConfirmSheet;
 pub use custom::{Condition, CustomAction, Runner, Step, StepFailed};
 pub use fuzzy::{Match, fuzzy};
 #[cfg(all(feature = "native", target_os = "ios"))]

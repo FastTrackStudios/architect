@@ -13,6 +13,11 @@ architect-presence = { workspace = true, features = ["native"] }
 architect-workspace = { workspace = true, features = ["native", "hot-reload"] }
 dioxus = { workspace = true }
 dioxus-native = { workspace = true, features = ["vello", "hot-reload"] }
+# The lab's Action List over MCP on loopback, when asked (src/mcp.rs).
+architect = { workspace = true, features = ["action-list"] }
+architect-mcp = { path = "../../../features/mcp", features = ["http"] }
+tokio = { workspace = true }
+tracing = { workspace = true }
 
 [lints]
 workspace = true

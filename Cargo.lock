@@ -648,11 +648,15 @@ dependencies = [
 name = "architect-desktop"
 version = "0.1.0"
 dependencies = [
+ "architect",
  "architect-lab-ui",
+ "architect-mcp",
  "architect-presence",
  "architect-workspace",
  "dioxus",
  "dioxus-native",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
