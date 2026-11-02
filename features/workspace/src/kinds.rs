@@ -347,12 +347,27 @@ impl KindSpec {
 
     /// The [`PAINT`] kind: a scene in Blitz's own renderer, as a pane, an
     /// overlay or an embed; it takes input (IME too), draws on the GPU
-    /// and runs actions. Not on the web or in a plugin window yet: their
-    /// hosts mount no `PaintWidget`.
+    /// and runs actions. A web host can register [`Self::paint_web`]
+    /// instead; plugin windows do not yet mount this kind.
     #[must_use]
     pub fn paint() -> Self {
         Self::new(PAINT, "architect")
             .host(ViewHost::Blitz)
+            .placement(Placement::Pane)
+            .placement(Placement::Overlay)
+            .placement(Placement::Embed)
+            .capability(Capability::Input)
+            .capability(Capability::Ime)
+            .capability(Capability::Gpu)
+            .capability(Capability::Actions)
+    }
+
+    /// The [`PAINT`] kind for a host that mounts a WebGL2 paint canvas.
+    /// The host must forward input and schedule frames itself.
+    #[must_use]
+    pub fn paint_web() -> Self {
+        Self::new(PAINT, "architect")
+            .host(ViewHost::Web)
             .placement(Placement::Pane)
             .placement(Placement::Overlay)
             .placement(Placement::Embed)
@@ -631,6 +646,21 @@ mod tests {
                 .is_err()
         );
         assert_eq!(KindId::paint().as_str(), PAINT);
+    }
+
+    #[test]
+    fn web_paint_is_an_explicit_host_registration() {
+        let mut kinds = ViewKinds::new();
+        kinds.register(KindSpec::paint_web()).expect("register");
+        let spec = kinds
+            .resolve_for(PAINT, ViewHost::Web, Placement::Pane)
+            .expect("web canvas");
+        assert!(spec.capabilities.has(Capability::Gpu));
+        assert!(
+            kinds
+                .resolve_for(PAINT, ViewHost::Plugin, Placement::PluginWindow)
+                .is_err()
+        );
     }
 
     #[test]

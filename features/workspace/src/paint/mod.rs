@@ -18,6 +18,12 @@
 #[cfg(feature = "paint-ui")]
 mod widget;
 
+#[cfg(all(feature = "paint-web", target_arch = "wasm32"))]
+pub mod web;
+
+#[cfg(all(feature = "paint-web", any(target_arch = "wasm32", test)))]
+mod web_geometry;
+
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;

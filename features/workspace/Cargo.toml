@@ -35,6 +35,8 @@ hot-reload = ["native", "dioxus-native/hot-reload", "dep:dioxus-devtools"]
 paint = ["ctx", "dep:anyrender", "dep:peniko"]
 # Drawn in-process by Blitz in a pane (`PaintPane`, a `PaintWidget`).
 paint-ui = ["paint", "ui", "dep:blitz-dom", "dep:blitz-traits", "dep:dioxus-native-dom"]
+# A host-driven WebGL2 canvas for paint scenes (wasm32 only).
+paint-web = ["paint", "dep:anyrender_vello_hybrid", "dep:vello_gpu", "dep:vello_common", "dep:rustc-hash", "dep:web-sys", "dep:wasm-bindgen"]
 
 [dependencies]
 facet = { workspace = true }
@@ -72,6 +74,12 @@ dioxus-native-dom = { workspace = true, optional = true }
 # A timer needs the browser's clock on wasm.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 futures-timer = { workspace = true, optional = true, features = ["wasm-bindgen"] }
+anyrender_vello_hybrid = { version = "=0.11.0", optional = true, features = ["webgl"] }
+vello_gpu = { version = "0.3", optional = true, features = ["webgl"] }
+vello_common = { version = "0.3", optional = true }
+rustc-hash = { version = "2", optional = true }
+web-sys = { version = "0.3", optional = true, features = ["HtmlCanvasElement", "WebGl2RenderingContext"] }
+wasm-bindgen = { version = "0.2", optional = true }
 
 [lib]
 doctest = false
@@ -100,3 +108,7 @@ workspace = true
 
 [target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
 architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
+
+[[example]]
+name = "paint_web"
+required-features = ["paint-web"]

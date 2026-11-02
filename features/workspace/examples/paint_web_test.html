@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Paint WebGL2 smoke test</title></head>
+<body>
+  <canvas id="paint"></canvas>
+  <pre id="result">Running</pre>
+  <script type="module">
+    import init, { mount, draw, press, resize, last_x, last_y } from './paint_web.js';
+    const result = document.querySelector('#result');
+    const assert = (condition, message) => { if (!condition) throw new Error(message); };
+    const pixel = gl => {
+      const rgba = new Uint8Array(4);
+      gl.readPixels(60, 60, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, rgba);
+      return Array.from(rgba).join(',');
+    };
+    try {
+      await init();
+      const canvas = document.querySelector('#paint');
+      mount(canvas);
+      assert(draw(), 'initial frame');
+      resize(160, 100, 2);
+      assert(canvas.width === 320 && canvas.height === 200, '2x dimensions');
+      assert(draw(), 'resize requests a frame');
+      const gl = canvas.getContext('webgl2');
+      assert(pixel(gl) === '255,0,0,255', 'initial scene');
+      press(17, 23);
+      assert(draw(), 'input requests a frame');
+      assert(last_x() === 17 && last_y() === 23, 'logical input coordinates');
+      assert(pixel(gl) === '0,0,255,255', 'input changes rendered pixels');
+      let frames = 0;
+      for (let i = 0; i < 120; i++) frames += Number(draw());
+      assert(frames === 0, 'idle draw calls must not render');
+      let rejected = false;
+      try { resize(0, 100, 1); } catch (_) { rejected = true; }
+      assert(rejected, 'invalid geometry must be rejected');
+      result.textContent = 'PASS: WebGL2, input, 2x resize, invalid geometry, 120 idle draws';
+      result.dataset.status = 'pass';
+    } catch (error) {
+      result.textContent = `FAIL: ${error}`;
+      result.dataset.status = 'fail';
+    }
+  </script>
+</body>
+</html>

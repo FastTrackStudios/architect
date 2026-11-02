@@ -18,11 +18,11 @@ weight = 68
 > scene each frame, drawn in-process by Blitz in the pane, with a real
 > `ViewCtx` and typed host data ([Paint views](#paint-views), features
 > `paint` and `paint-ui`). An app registers it with `KindSpec::paint`.
-> Every other kind is its own issue: raw wgpu and the web's `<canvas>`
-> (#221), WebView/HTML
+> A host-driven WebGL2 canvas for the same scene is available with feature
+> `paint-web`. Other kinds and hosts remain separate work: raw wgpu (#221), WebView/HTML
 > (#222), ImGui from Luau (#223), Frame surfaces (#224, in
-> FastTrackStudios/frame; a minimal `frame.surface` provider is its
-> `crates/frame-view`), Dioxus in-process and remote (#225), generative
+> FastTrackStudios/frame; a minimal `frame.surface` provider is the
+> frame-view crate), Dioxus in-process and remote (#225), generative
 > UI (#226). Its A2UI payload landed in #228:
 > [A2UI](@/features/a2ui.md) (`features/a2ui/src/lib.rs`), drawn as a
 > `dioxus` view.
@@ -184,11 +184,42 @@ Feature `paint-ui` is the Blitz host (`features/workspace/src/paint/widget.rs`):
 - A press or a tab gives the widget the focus. While it has it the
   window's IME is on, so composed text reaches the view.
 
+Feature `paint-web` provides `features/workspace/src/paint/web.rs`
+`WebPaintSurface`, a host-driven WebGL2 canvas on wasm. The host creates
+a `Painter` with a `ViewCtx` for `ViewHost::Web`, passes it and the canvas
+to `WebPaintSurface::new`, and registers `KindSpec::paint_web` if it uses
+the kinds registry. A host supporting both Blitz and web can register
+`KindSpec::paint().host(ViewHost::Web)` once. The view records logical
+pixels; the surface sizes the canvas and scales its scene using `Geometry`.
+The host forwards `ViewInput` in canvas-local logical pixels, forwards theme
+and size changes, and requests a browser animation frame after changes. On
+that frame it calls `draw`, and requests another only while `wants_frame`
+is true. `draw` skips an idle surface; `invalidate` marks externally changed
+data dirty. `hit` uses logical coordinates. WebGL2 initialization, rendering,
+lost contexts, and unsupported sizes return errors; context restoration and
+DOM event wiring belong to the host. `features/workspace/examples/paint_web.rs`
+and `features/workspace/examples/paint_web.html` show the host-driven path.
+The browser smoke page `features/workspace/examples/paint_web_test.html`
+checks pixels, logical input, 2× sizing, invalid dimensions and idle draws.
+From the repository root, build and serve it with a matching `wasm-bindgen`:
+
+```sh
+cargo build -p architect-workspace --example paint_web --features paint-web --target wasm32-unknown-unknown
+mkdir -p target/paint-web-smoke
+wasm-bindgen --target web --no-typescript --out-dir target/paint-web-smoke target/wasm32-unknown-unknown/debug/examples/paint_web.wasm
+cp features/workspace/examples/paint_web*.html target/paint-web-smoke/
+python3 -m http.server 18763 --directory target/paint-web-smoke
+```
+
+Open `paint_web_test.html` in a WebGL2 browser; the page says whether it
+passed. Frame counts establish skipped host submissions, not GPU utilization.
+
 Its limits for now: the IME's candidate window is not placed at the
 view's caret (no cursor area is set), a write to `HostData` or the
 `InputSink` needs an explicit wake, and `FrameStats` times the view's input and
-recording, not the GPU's raster. The web and plugin hosts mount no
-`PaintWidget` yet, so `KindSpec::paint` is for `blitz` only. A Frame
+recording, not the GPU's raster. The web surface does not yet supply a Dioxus
+pane, automatic event adapters or a WebGPU backend; plugin hosts mount no
+paint view yet. A Frame
 surface can draw through it in-process instead of in a process of its
 own.
 

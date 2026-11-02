@@ -210,6 +210,12 @@ features = ["paint-ui"]
 layer = "L4"
 
 [[row]]
+package = "architect-workspace"
+features = ["paint-web"]
+layer = "L4"
+note = "host-driven WebGL2 canvas on wasm"
+
+[[row]]
 package = "architect-commands"
 features = ["ui"]
 layer = "L4"
