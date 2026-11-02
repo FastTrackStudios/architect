@@ -86,6 +86,7 @@ futures-executor = { version = "0.3.34" }
 futures-io = { version = "0.3.34" }
 futures-sink = { version = "0.3.34" }
 futures-task = { version = "0.3.34", default-features = false, features = ["std"] }
+futures-timer = { version = "3.0.4", default-features = false, features = ["wasm-bindgen"] }
 futures-util = { version = "0.3.34", features = ["channel", "io", "sink"] }
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4.3", default-features = false, features = ["std", "sys_rng"] }
 guillotiere = { version = "0.7.0", default-features = false, features = ["std"] }

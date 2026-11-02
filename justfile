@@ -262,3 +262,29 @@ auth-replay SNAPSHOT="auth-snapshot.json" DB="./auth-replay.db":
 #   nix-shell -p chromium --run 'PLAYWRIGHT_CHROMIUM_PATH=$(which chromium) just auth-e2e'
 auth-e2e:
     cd apps/auth-server/e2e && npm install && npx playwright test
+
+# The lab's web host for an agent's UI (apps/lab/web): built for wasm32,
+# bound with wasm-bindgen (it must match Cargo.lock's, 0.2.127; the
+# devenv-fleet `dioxus` module has it), its Tailwind sheet built, all into
+# apps/lab/web/dist.
+lab-web-build:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v wasm-bindgen >/dev/null || { echo "wasm-bindgen (0.2.127) is not on PATH" >&2; exit 1; }
+    cargo build --target wasm32-unknown-unknown -p architect-lab-web
+    target=$(cargo metadata --format-version 1 --no-deps | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')
+    out=apps/lab/web/dist
+    rm -rf "$out"
+    wasm-bindgen --target web --no-typescript --out-dir "$out" "$target/wasm32-unknown-unknown/debug/architect-lab-web.wasm"
+    cp apps/lab/web/index.html "$out/"
+    cd apps/lab/web && tailwindcss -i app.css -o dist/app.css --minify
+
+# Build the lab's web host and serve it on http://127.0.0.1:8282.
+lab-web: lab-web-build
+    node apps/lab/web/serve.mjs
+
+# The web host's browser tests (apps/lab/web/e2e). On NixOS, point
+# Playwright at a system browser, as for auth-e2e:
+#   PLAYWRIGHT_CHROMIUM_PATH=$(which chromium) just lab-web-e2e
+lab-web-e2e: lab-web-build
+    cd apps/lab/web/e2e && npm install && npx playwright test

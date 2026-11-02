@@ -912,6 +912,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-lab-web"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-a2ui",
+ "architect-commands",
+ "architect-workspace-hack",
+ "crdt",
+ "dioxus",
+ "facet",
+ "futures",
+ "js-sys",
+ "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+]
+
+[[package]]
 name = "architect-launcher-core"
 version = "0.1.0"
 dependencies = [
@@ -1468,6 +1486,7 @@ dependencies = [
  "futures-lite",
  "futures-sink",
  "futures-task",
+ "futures-timer",
  "futures-util",
  "genawaiter",
  "genawaiter-macro",

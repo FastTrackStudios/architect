@@ -40,6 +40,15 @@ use crate::catalog;
 use crate::events::{self, Outcome};
 use crate::store::Surfaces;
 
+/// A press the person sees the state of under its button.
+#[derive(Clone, PartialEq, Eq)]
+enum Press {
+    /// Waiting for the person's yes: the button is off until they answer.
+    Waiting(String),
+    /// Refused, or not approved: said, and the button can be pressed again.
+    Refused(String),
+}
+
 /// What a surface's components read: the store, the list, and a count
 /// that moves on every change to the document.
 #[derive(Clone)]
@@ -48,7 +57,7 @@ pub struct A2ui {
     pub list: ActionList,
     version: Signal<u64>,
     /// Per component (`surface/id`): a pending or refused press.
-    status: Signal<HashMap<String, String>>,
+    status: Signal<HashMap<String, Press>>,
     functions: Rc<HashMap<String, Box<dyn FunctionImplementation>>>,
 }
 
@@ -352,8 +361,9 @@ fn button(d: &Drawn) -> Element {
 fn ButtonNode(at: At, variant: ButtonVariant, label: Element) -> Element {
     let a2ui = use_context::<A2ui>();
     let key = status_key(&at);
-    let said = a2ui.status.read().get(&key).cloned();
-    let busy = said.is_some();
+    let state = a2ui.status.read().get(&key).cloned();
+    let busy = matches!(state, Some(Press::Waiting(_)));
+    let said = state.map(|(Press::Waiting(w) | Press::Refused(w))| w);
     let named = at.id.clone();
     rsx! {
         div { style: "display:flex; flex-direction:column; gap:4px;",
@@ -395,13 +405,14 @@ async fn pressed(a2ui: A2ui, at: At) {
                 return;
             }
             Outcome::Refused(why) => {
-                status.write().insert(key, why);
+                status.write().insert(key, Press::Refused(why));
                 return;
             }
             Outcome::Waiting { id, ticket: t } => {
-                status
-                    .write()
-                    .insert(key.clone(), format!("Waiting for your yes to run {id}…"));
+                status.write().insert(
+                    key.clone(),
+                    Press::Waiting(format!("Waiting for your yes to run {id}…")),
+                );
                 loop {
                     futures_timer::Delay::new(Duration::from_millis(120)).await;
                     let (seen, next) = a2ui.list.events_since(since, 256, Duration::ZERO);
@@ -409,7 +420,9 @@ async fn pressed(a2ui: A2ui, at: At) {
                     match events::answered(&seen, &t) {
                         Some(true) => break,
                         Some(false) => {
-                            status.write().insert(key, format!("{id} was not approved"));
+                            status
+                                .write()
+                                .insert(key, Press::Refused(format!("{id} was not approved")));
                             return;
                         }
                         None => {}

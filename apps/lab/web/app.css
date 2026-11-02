@@ -1,0 +1,5 @@
+/* The web host's own sheet: an app's Tailwind, with its preflight and
+ * palette, built from the classes in src/ (`just lab-web`). The renderer's
+ * THEME_CSS and UTILITIES_CSS sit next to it; e2e/ checks both apply. */
+@import "tailwindcss" source(none);
+@source "./src";

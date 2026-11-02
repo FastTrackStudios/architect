@@ -149,6 +149,8 @@ What an agent can't do from a surface:
   drawn and nothing else is.
 - `features/a2ui/src/store.rs` tests: the Loro round trip, all-or-nothing
   batches, the catalog refusal.
+- `apps/lab/web/e2e/tests/a2ui.spec.ts`: the same surface in a browser,
+  with the web host (`just lab-web-e2e`).
 - `apps/lab/desktop/tests/actions.rs`: `A2UI_RENDER`, `A2UI_PATCH` and
   `A2UI_SURFACE` give the same answers over MCP and the CLI.
 
@@ -166,15 +168,21 @@ Done (architect#228):
   so `Surfaces` holds it in a `send_wrapper::SendWrapper` there
   (`features/a2ui/src/store.rs`); the browser has one thread, so the
   Action List's `Send` handlers can still hold the surfaces.
+- the lab's web host (`apps/lab/web`, #253): the agent renders a
+  surface of more than ten components with `A2UI_RENDER`, drawn with
+  dioxus-web in the browser, and a press that writes waits for the
+  person's yes in `architect_commands::ConfirmSheet`. Its browser tests
+  (`just lab-web-e2e`, Playwright) patch it live with `A2UI_PATCH`, check
+  that what the person types (`TextField`, a long one as a textarea),
+  ticks (`CheckBox`), slides (`Slider`) and picks (`Tabs`) lands in the
+  data model in Loro, that a no leaves the data alone and the button
+  usable, and that `THEME_CSS` and `UTILITIES_CSS` style the surface while
+  the page's own Tailwind sheet styles the page around it. The build is
+  cargo, then `wasm-bindgen` (on `PATH`, the version in `Cargo.lock`),
+  then `tailwindcss`; CI checks the host's wasm build.
 
 Not yet:
 
-- **Web host.** The renderer builds for the browser, but no web app
-  draws it yet: a web lab target rendering a surface from
-  `A2UI_RENDER`, its interactive components (`Slider`, `CheckBox`,
-  `TextField`, `Tabs`) and the theme's sheets next to an app's own
-  Tailwind sheet are checked in a browser by #253's second part. It needs
-  `dx` and a `wasm-bindgen` CLI in the dev shell.
 - **The lab's persistence.** The lab keeps its surfaces in an in-memory
   document. An app keeps them in one of its own documents (a `DocFile`, a
   synced doc).

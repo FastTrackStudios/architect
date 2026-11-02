@@ -1,0 +1,13 @@
+{
+  "name": "lab-web-e2e",
+  "private": true,
+  "description": "Browser tests for the lab's web host: an agent's A2UI surface, patched live and answered in the confirmation sheet.",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}
