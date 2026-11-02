@@ -37,6 +37,7 @@ When a page and the code disagree, the code is right.
 - [Presence and collaborative text](@/features/presence-and-text.md): `Here`, `Roster`, places, `TextBinding`, `crdt(text)`.
 - [Blobs](@/features/blobs.md): content-addressed bytes fetched on demand, pinned and collected.
 - [Files](@/features/files.md): `architect-files`, an org's files with versions, quota and access.
+- [Attachments](@/features/attachments.md): `architect-attachments`, files attached to documents and records, offline first, access following the parent.
 
 ## Identity
 
