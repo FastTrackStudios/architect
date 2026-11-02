@@ -414,3 +414,14 @@ note = "examples/extension: a process extension's program (architect-extensions 
 [[row]]
 package = "architect-mcp"
 layer = "L3"
+
+[[row]]
+package = "architect-control"
+layer = "L3"
+note = "the Action List on the command line: the request/answer shape MCP shares (default), the control socket (server), the actions CLI (cli)"
+
+[[row]]
+package = "architect-control"
+features = ["server", "cli"]
+layer = "L3"
+note = "the per-app control socket on its own tokio runtime, and the actions CLI; desk only"
