@@ -53,6 +53,9 @@ at the larger code that does the same thing for real
 10. [Commands, keys and menus](@/guide/commands.md): the Action List,
     the ⌘K palette, ⌘O, the action list window and its binding editor,
     keys through `architect-input`, menus, and MCP.
+    [CLI and MCP](@/guide/cli-and-mcp.md) puts every action on the
+    command line too: the control socket, the `actions` command, headless
+    mode, and the parity test.
 11. [Settings](@/guide/settings.md): settings declared once as a typed
     struct, stored by scope under an org's defaults and locks, and the
     settings page.

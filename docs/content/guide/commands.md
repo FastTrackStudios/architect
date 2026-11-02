@@ -311,6 +311,9 @@ gate (`list.set_authorizer`): the app's own doors (keys, menus) skip the
 authorizer by design, a model's do not. Bind loopback and set a token for
 any app with destructive actions.
 
+The same list is on the command line, with the same answers:
+[CLI and MCP](@/guide/cli-and-mcp.md).
+
 ## Where Task and Studio are
 
 The palette, quick open, the action list window, bindings and menus are
