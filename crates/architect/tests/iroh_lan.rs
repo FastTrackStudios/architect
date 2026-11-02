@@ -10,12 +10,18 @@
 //! Needs a network interface that carries multicast (any real LAN
 //! interface; the loopback-only sandbox some CI containers run in does
 //! not). The manual two-machine check is in `examples/iroh_lan.rs`.
+//!
+//! On macOS the multicast also needs Local Network permission, which a
+//! test binary run over SSH (or from any process macOS cannot ask) never
+//! gets: every send to the LAN fails with "No route to host", so the LAN
+//! test skips there unless `ARCHITECT_LAN_TESTS=1` (see the testing page).
 // Integration-test crate: see the matching block in `tests/iroh_link.rs`.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::panic,
-    clippy::future_not_send
+    clippy::future_not_send,
+    clippy::print_stderr
 )]
 #![cfg(feature = "iroh-lan")]
 
@@ -27,8 +33,27 @@ use architect::iroh_link::{self, PeerLookup, VOX_ALPN};
 /// plus the QUIC handshake.
 const DIAL_DEADLINE: Duration = Duration::from_secs(30);
 
+/// False on macOS unless `ARCHITECT_LAN_TESTS=1`: macOS denies LAN
+/// multicast to a process without Local Network permission, and one
+/// launched over SSH cannot be granted it (no app for the prompt).
+fn lan_is_reachable() -> bool {
+    if !cfg!(target_os = "macos")
+        || std::env::var_os("ARCHITECT_LAN_TESTS").is_some_and(|v| v == "1")
+    {
+        return true;
+    }
+    eprintln!(
+        "skipped: macOS Local Network privacy blocks LAN multicast for this process; \
+         run from a terminal app granted Local Network access with ARCHITECT_LAN_TESTS=1"
+    );
+    false
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn lan_peers_dial_by_bare_id() {
+    if !lan_is_reachable() {
+        return;
+    }
     let server = iroh_link::bind_endpoint_with(iroh::SecretKey::generate(), PeerLookup::Lan)
         .await
         .expect("bind server");

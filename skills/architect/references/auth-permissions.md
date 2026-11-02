@@ -1,6 +1,6 @@
 # Auth and permissions: the architect API
 
-Scope: `features/permissions` (+ `features/permissions/proto`), `crates/architect/src/permissions_gate.rs`, `features/auth/*`, `apps/auth-server`, `apps/mock-oauth`. The deployed issuer (Argo, secrets) is `references/fts-auth.md`. Guide: `docs/content/architecture/auth.md`.
+Scope: `features/permissions` (+ `features/permissions/proto`), `crates/architect/src/permissions_gate.rs`, `features/spaces`, `features/auth/*`, `apps/auth-server`, `apps/mock-oauth`. The deployed issuer (Argo, secrets) is `references/fts-auth.md`. Guide: `docs/content/architecture/auth.md`.
 
 In short: (1) the gate is fail-closed by default, and observe-only is the migration mode that lets everything through; (2) a consumer writes one `ServicePermits` const per service plus one `PermissionsGate` builder; (3) the caller is a `Principal` from the bearer via `SessionIdentityResolver`, `Anonymous` by default; (4) `PermissionsService::can` ignores the caller.
 
@@ -93,8 +93,22 @@ Tests to copy: `features/auth/tests/native/src/permissions_gate_tests.rs` (`esta
 
 Entry points: `features/orgs/src/server.rs` `confine`, `current_org`, `Members`, `MembersResolver`, `IdentityServer`, `ConfinedEngine`, `Directory`.
 
+## F. Spaces: rooms people are invited into
+
+`architect-spaces` (`docs/content/architecture/spaces.md`). Tests to copy: `features/spaces/tests/spaces.rs` (vox, files, documents), `features/spaces/tests/wires.rs` (WebSocket, iroh).
+
+1. `let spaces = Spaces::open(FileStore::new(&data), members.clone()).await?` — the same `Members` the gate's `MembersResolver` fills.
+2. Gate engine: `CompositeEngine::new().push(Arc::new(confined)).push(Arc::new(spaces.engine()))`. `SpacesEngine` only ever allows what a space gives, so it goes beside the org engine, never instead of it. Give `DocPermissions` the same composite engine and documents follow.
+3. Files: `FilesServer::new(…).with_grants(spaces.clone())` (feature `files`): a scope pattern `files/<root>/<path>` grants that folder to the space's members, generated per call.
+4. Mount `architect_spaces::serve(spaces.clone())` under `spaces_service_rpc_service_descriptor()` and permit it with `architect_spaces::PERMITS`; confine the lane as in E.
+5. A space's scope and grants are org-relative permission resources (`vault/Alpha/`, `doc/<id>`, `files/<root>/Mixes/`); roles are action sets; `SpacePolicy` caps people from other orgs (`external_cap`, default no `admin`) and link guests (`guest_cap`, read + comment). Effective access = org role ∪ space role, capped by the policy.
+
+Entry points: `features/spaces/src/server/mod.rs` `Spaces`, `Acting`; `features/spaces/src/server/engine.rs` `SpacesEngine`; `features/spaces/src/model.rs` `OrgSpaces`, `SpacePolicy`.
+
 ## Pitfalls
 
+- **A space reaches past the gate only as far as the handler checks.** `SpacesEngine` answers the gate's coarse `doc/**` by overlap (allowed if the caller holds the action on anything under it), so every service a space covers must check the exact resource with `caller()` in its handler. `DocPermissions` and the files feature do; a probe-style handler that skips it hands a space member everything behind the method.
+- **Confine outside the gate.** `ConfinedEngine` and `SpacesEngine` read `current_org()` during the gate's check, so `confine(org, PermissionsGate::wrap_shared_with_bearer(…))`, never the other way round. `EngineHost::vox_at` wraps the host gate outside whatever handler you return, so a `confine` inside it is invisible to the check.
 - **Org confinement is the engine's:** `confine` only says which org a call is in. Without `ConfinedEngine` as (or inside) the gate's engine, nothing refuses a non-member. Membership lags removal by up to `MEMBERS_TTL`.
 - **Fail-closed by default; Task opts out.** Task sets `UnlistedPolicy::Allow`, so its untabled services are served unchecked, and enforces only when `TASK_ENFORCE_PERMISSIONS` is exactly `1` (`task:apps/server/src/config.rs`).
 - **Observe-only lets every deny through**, including fail-closed and unlisted denials; it audits `principal: "observe-only", action: "would-deny"`, and resolves identity twice on a deny.

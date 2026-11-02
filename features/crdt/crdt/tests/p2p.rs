@@ -9,14 +9,17 @@
 //! The endpoints bind loopback and dial each other by direct address,
 //! except in `devices_on_one_network_find_each_other`, which finds the
 //! other node on the local network (mDNS, `_fts._udp`) and dials it by
-//! bare id: that one needs an interface that carries multicast.
+//! bare id: that one needs an interface that carries multicast, and on
+//! macOS Local Network permission, which a test binary run over SSH
+//! never gets; it skips there unless `ARCHITECT_LAN_TESTS=1`.
 
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
     clippy::indexing_slicing,
     clippy::arithmetic_side_effects,
-    clippy::panic
+    clippy::panic,
+    clippy::print_stderr
 )]
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -383,8 +386,27 @@ async fn an_unregistered_device_is_refused() {
     );
 }
 
+/// False on macOS unless `ARCHITECT_LAN_TESTS=1`: macOS denies LAN
+/// multicast to a process without Local Network permission, and one
+/// launched over SSH cannot be granted it (no app for the prompt).
+fn lan_is_reachable() -> bool {
+    if !cfg!(target_os = "macos")
+        || std::env::var_os("ARCHITECT_LAN_TESTS").is_some_and(|v| v == "1")
+    {
+        return true;
+    }
+    eprintln!(
+        "skipped: macOS Local Network privacy blocks LAN multicast for this process; \
+         run from a terminal app granted Local Network access with ARCHITECT_LAN_TESTS=1"
+    );
+    false
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn devices_on_one_network_find_each_other() {
+    if !lan_is_reachable() {
+        return;
+    }
     let lan = || async {
         iroh_link::bind_endpoint_with(iroh::SecretKey::generate(), PeerLookup::Lan)
             .await
