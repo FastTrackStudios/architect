@@ -100,6 +100,9 @@ jobs:
           # Files' contract and its client run in browser apps.
           cargo check --target wasm32-unknown-unknown -p architect-files
           cargo check --target wasm32-unknown-unknown -p architect-files --features vox
+          # Spaces' model and service: a browser share sheet reads them.
+          cargo check --target wasm32-unknown-unknown -p architect-spaces
+          cargo check --target wasm32-unknown-unknown -p architect-spaces --features vox
           # A guide scenario's model: a browser tour reads the same file.
           cargo check --target wasm32-unknown-unknown -p architect-guide
           # The keymap engine's Dioxus hook runs in browser shells.
