@@ -6,18 +6,36 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "architect-desktop"
+path = "src/main.rs"
+
 [dependencies]
 architect-lab-ui = { workspace = true }
+# Its Action List from the command line (`architect-desktop actions …`) and
+# its control socket; MCP on stdio, bridged onto that socket or headless.
+architect = { workspace = true, features = ["action-list"] }
+architect-control = { workspace = true, features = ["server", "cli"] }
+architect-mcp = { workspace = true, features = ["bridge", "http"] }
+# `--headless`: the lab's root in a document with no window.
+architect-guide = { workspace = true, features = ["run"] }
+architect-shell = { workspace = true }
 # One instance, and a `--background` launch starting with no window.
 architect-presence = { workspace = true, features = ["native"] }
 architect-workspace = { workspace = true, features = ["native", "hot-reload"] }
 dioxus = { workspace = true }
 dioxus-native = { workspace = true, features = ["vello", "hot-reload"] }
 # The lab's Action List over MCP on loopback, when asked (src/mcp.rs).
-architect = { workspace = true, features = ["action-list"] }
-architect-mcp = { path = "../../../features/mcp", features = ["http"] }
 tokio = { workspace = true }
 tracing = { workspace = true }
+
+[dev-dependencies]
+architect-mcp = { workspace = true, features = ["parity"] }
+clap.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

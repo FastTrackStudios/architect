@@ -5,7 +5,12 @@
 //! cargo run -p example-scripting -- live examples/scripting/scripts/burndown.luau
 //! cargo run -p example-scripting -- save "Tidy the board" examples/scripting/scripts/tidy.luau
 //! cargo run -p example-scripting -- mcp      # an MCP server on stdio, for an agent
+//! cargo run -p example-scripting -- serve    # the board on its control socket
+//! cargo run -p example-scripting -- actions list --headless
 //! ```
+//!
+//! `actions …` is the board's Action List from the command line, the same
+//! as over `mcp`: from a `serve`d board, or `--headless` from a fresh one.
 //!
 //! Each prints the run's report (`{result, log, ran, undo}`, or the error
 //! with its line), then the board and its undo steps.
@@ -15,9 +20,11 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use architect::action::ActionCaller;
+use architect_control::cli::Cli;
+use architect_control::server::Control;
 use architect_scripting::Script;
 use architect_scripting::luau::Report;
-use example_scripting::{App, agent};
+use example_scripting::{App, HeadlessBoard, agent};
 use futures::executor::block_on;
 use serde_json::Value;
 
@@ -25,15 +32,25 @@ const USAGE: &str = "usage:
   scripting run  <script.luau> [args as JSON]   run it once, as one undo step
   scripting live <script.luau>                  start it, and run its frames until it stops
   scripting save <name> <script.luau>           save it as an action, then run that action
-  scripting mcp                                 serve the board to an agent over stdio";
+  scripting mcp                                 serve the board to an agent over stdio
+  scripting serve                               serve the board on its control socket
+  scripting actions <list|describe|run|…>       the board's actions from the command line";
 
 /// The most frames `live` runs.
 const MAX_FRAMES: usize = 100;
 
 type Out = std::io::StdoutLock<'static>;
 
+/// The board's name to `--app`.
+const APP: &str = "scripting-example";
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("actions") {
+        return Cli::new(APP)
+            .headless(|| Ok(Box::new(HeadlessBoard::open()?)))
+            .main(std::env::args_os().skip(1));
+    }
     let mut out = std::io::stdout().lock();
     let done = App::new().and_then(|app| {
         let words: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -44,6 +61,7 @@ fn main() -> ExitCode {
             ["mcp"] => architect_mcp::serve_stdio(&app.mcp(agent()))
                 .map(|()| true)
                 .map_err(|e| e.to_string()),
+            ["serve"] => serve(&app, &mut out),
             _ => Err(USAGE.to_owned()),
         }
     });
@@ -54,6 +72,19 @@ fn main() -> ExitCode {
             writeln!(std::io::stderr(), "{message}").ok();
             ExitCode::from(2)
         }
+    }
+}
+
+/// Serves the board on its control socket, as the agent `mcp` serves it
+/// to, until the process is stopped.
+fn serve(app: &App, out: &mut Out) -> Result<bool, String> {
+    let serving = Control::new(APP, app.surface(agent()))
+        .and_then(Control::serve)
+        .map_err(|e| e.to_string())?;
+    line(out, &format!("{}", serving.path().display()))?;
+    out.flush().map_err(|e| e.to_string())?;
+    loop {
+        std::thread::park();
     }
 }
 

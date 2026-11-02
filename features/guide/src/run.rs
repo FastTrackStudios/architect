@@ -253,21 +253,25 @@ const POPOUT_AT: (f32, f32, f32, f32) = (80.0, 80.0, 640.0, 480.0);
 
 impl Desktop {
     fn open(app: &App, scenario: &Scenario) -> Self {
+        Self::open_view(app, scenario.view, &scenario.title)
+    }
+
+    fn open_view(app: &App, view: crate::ViewSize, title: &str) -> Self {
         let shared = Rc::new(Shared::default());
         let vdom = VirtualDom::new(app.root)
             .with_root_context(app.list.clone())
             .with_root_context(Windows::new(HeadlessWindows(shared.clone())))
-            .with_root_context(scenario.view);
+            .with_root_context(view);
         for provide in &app.contexts {
             provide(&vdom);
         }
-        let rect = content_rect(&scenario.view);
-        let scale = scenario.view.scale;
+        let rect = content_rect(&view);
+        let scale = view.scale;
         let doc = document(vdom, rect, scale, app.fonts.clone());
         let desk = Self {
             windows: vec![Window {
                 id: WindowId::main(),
-                title: scenario.title.clone(),
+                title: title.to_owned(),
                 rect,
                 doc,
             }],
@@ -376,6 +380,51 @@ impl Desktop {
             let r = crate::locate::find_in(&doc, target, resolvers, None)?;
             Some(Rect::new(w.rect.x + r.x, w.rect.y + r.y, r.w, r.h))
         })
+    }
+}
+
+/// The app with no window, kept running for as long as it is wanted.
+///
+/// Its documents are polled and laid out on the wall clock, not for a
+/// scenario's steps. What an app's headless mode is (`architect-desktop
+/// --headless`, its CLI's `actions --headless`): its root mounted as a
+/// window would mount it, so every action its components put on the
+/// Action List is there, and one that hands its work to the window's
+/// thread is answered while [`Self::pump`] is called.
+pub struct Headless {
+    desk: Desktop,
+    list: Arc<ActionList>,
+    started: Instant,
+}
+
+impl Headless {
+    /// `app`'s root in a document of `view`'s size, built.
+    #[must_use]
+    pub fn open(app: &App, view: crate::ViewSize) -> Self {
+        Self {
+            desk: Desktop::open_view(app, view, "headless"),
+            list: app.list.clone(),
+            started: Instant::now(),
+        }
+    }
+
+    /// Run what the documents have waiting (their tasks, the windows
+    /// they asked for) and lay them out at the time since they opened;
+    /// `true` when any had work.
+    pub fn pump(&mut self) -> bool {
+        self.desk.settle(self.started.elapsed().as_secs_f64())
+    }
+
+    /// The app's Action List.
+    #[must_use]
+    pub fn list(&self) -> Arc<ActionList> {
+        self.list.clone()
+    }
+
+    /// Its windows, the main one first.
+    #[must_use]
+    pub const fn desktop(&self) -> &Desktop {
+        &self.desk
     }
 }
 
