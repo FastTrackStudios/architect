@@ -17,7 +17,11 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: -D warnings
+  # Any warning fails the job (cargo's `build.warnings`). Not
+  # `RUSTFLAGS: -D warnings`: that env replaces .cargo/config.toml's
+  # rustflags and changes every crate's kache key, so nothing built here
+  # would be shared with a local build or another fleet repo.
+  CARGO_BUILD_WARNINGS: deny
   # rust-toolchain.toml's pin, the fleet toolchain (studio's too). Keep
   # the two in lockstep.
   RUSTUP_TOOLCHAIN: "1.99.1"

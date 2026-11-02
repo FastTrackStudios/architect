@@ -41,9 +41,43 @@ In the architect repo `cargo xtask` is `cargo run -p xtask --`. Consumers build 
 ## CI (`.github/workflows/pr.yml`, `.github/workflows/checks.yml`)
 
 - A PR runs `pr.yml` only: one job, `check` (the status branch protection requires), with `cargo fmt --all -- --check` and a stale-`Cargo.lock` check, about a minute. The full suite below runs after the merge, on every push to main; when main goes red, revert or fix forward.
-- `checks.yml`, on main: `RUSTFLAGS: -D warnings`. Jobs run on GitHub-hosted `ubuntu-latest` (setup in `.github/actions/hosted-rust`: apt native libs, rust 1.99.1 (the `rust-toolchain.toml` pin) via `RUSTUP_TOOLCHAIN`, rust-cache saved only on main), in parallel: `lint` (fmt, `clippy --workspace --all-targets` with no `--all-features`, `boundaries`, `docs`, `surfaces`), `test` (`test --workspace`, includes xtask tests) and `wasm`, the wasm checks of the framework crates (architect, atom, form, permissions, auth-proto, auth-client, crdt, architect-input, plus architect-input with `dioxus`).
+- `checks.yml`, on main: `CARGO_BUILD_WARNINGS: deny` (every warning fails the job; no `RUSTFLAGS`, see Fleet toolchain). Jobs run on the self-hosted THEBATTLESHIP pool (setup in `.github/actions/shared-rust`: the flake's default shell, rust 1.99.1 (the `rust-toolchain.toml` pin) via `RUSTUP_TOOLCHAIN`, a per-slot target dir over the host's kache), in parallel: `lint` (fmt, `clippy --workspace --all-targets` with no `--all-features`, `boundaries`, `docs`, `surfaces`), `test` (`test --workspace`, includes xtask tests) and `wasm`, the wasm checks of the framework crates (architect, atom, form, permissions, auth-proto, auth-client, crdt, architect-input, plus architect-input with `dioxus`).
 - Job `tags` (ubuntu, full history) runs `cargo run -p xtask -- tags --verbose`.
 - Not in CI: clippy `--all-features` (`just lint` runs it), `just ui-css-check`, `just auth-ui-css-check`, `just auth-e2e`, ui-snapshot and parity tests.
+
+## Fleet toolchain
+
+Every fleet Rust repo (architect, Task, studio, keyflow, frame) compiles with one rustc, one set of rustflags and one dependency dev profile. kache keys each crate on the rustc version, every rustflag (in order), lint levels, target, features, opt-level and debuginfo, and the bytes of each crate it links against; any difference rebuilds the whole graph per repo instead of sharing one build of Dioxus, Blitz and the registry crates. Architect's copy is the reference: `rust-toolchain.toml`, `.cargo/config.toml`, the `# ── Dependencies: the fleet's settings ──` block in the root `Cargo.toml`, `flake.nix` (its dev shell carries the pinned rust and mold).
+
+- Toolchain: `rust-toolchain.toml` `channel = "1.99.1"` (components `rustfmt`, `clippy`, `rust-src`; target `wasm32-unknown-unknown` where the repo builds wasm). A nix pin is `pkgs.rust-bin.stable."1.99.1"` (rust-overlay) and moves with the file. No nightly for builds; a separate nightly only for a tool (rustfmt options, udeps) is fine.
+- `.cargo/config.toml`, these tables and flag order exactly (a `target.<triple>` table replaces `[build]`, so each repeats the frame-pointer flag):
+  ```toml
+  [build]
+  rustflags = ["-C", "force-frame-pointers=yes"]
+
+  [target.x86_64-unknown-linux-gnu]
+  rustflags = [
+    "-C", "force-frame-pointers=yes",
+    "-C", "link-arg=-fuse-ld=mold",
+    "-C", "target-cpu=x86-64-v3",
+  ]
+
+  [target.x86_64-apple-darwin]
+  rustflags = [
+    "-C", "force-frame-pointers=yes",
+    "-C", "target-cpu=x86-64-v3",
+  ]
+
+  [target.wasm32-unknown-unknown]
+  rustflags = [
+    "-C", "force-frame-pointers=yes",
+    "--cfg", 'getrandom_backend="wasm_js"',
+  ]
+  ```
+  Frame pointers are for samply/perf on the audio path, `x86-64-v3` (AVX2/FMA, Haswell and later) for studio's DSP. mold must be in every dev shell, CI shell and nix build (crane) that links for x86-64 Linux.
+- Dependency dev profile: `[profile.dev.package."*"]` `opt-level = 1`, `debug = false`; `[profile.dev.build-override]` `opt-level = 3`, `debug = false`; `[profile.dev-dbg.package."*"]` `debug = 2`; and the same opt-level 3 list for shared hot crates (blake3, num-complex, phon, phon-engine, phon-jit, dioxus-core, dioxus-native-dom, blitz-dom, blitz-paint, blitz-shell, blitz-traits, anyrender, anyrender_vello, vello, vello_encoding, wgpu, wgpu-core, wgpu-hal, naga, stylo, selectors, taffy, parley, skrifa, read-fonts, swash, fontique, peniko, kurbo, plus studio's audio crates: rubato, fixed-resample, fast-interleave, dasp_frame, dasp_sample, rustfft, realfft, transpose, strength_reduce, primal-check, symphonia-core and its codecs/formats, zstd-safe, zstd-sys). Keep the entries for crates in your lockfile; cargo warns about the rest. Overrides on your own workspace members are free: members are never shared.
+- CI never sets `RUSTFLAGS` or `CARGO_TARGET_<triple>_RUSTFLAGS` (either replaces the tables). Deny warnings with `CARGO_BUILD_WARNINGS: deny` (cargo's `build.warnings` config, which changes no compiler flag) or `cargo clippy … -- -D warnings` (clippy args only reach workspace members). `RUSTDOCFLAGS` for `cargo doc` is fine. `CARGO_PROFILE_*_DEBUG` and `CARGO_INCREMENTAL` env only reach workspace members once `package."*"` sets `debug`.
+- Still not shared across repos: a crate whose resolved features differ between workspaces (cargo unifies features per workspace), a crate that is a workspace member in one repo and a git dependency in another (architect's own crates: path members here, git deps in Task), and different `[patch]` sources or revs.
 
 ## Cut a tag
 
@@ -64,4 +98,4 @@ In the architect repo `cargo xtask` is `cargo run -p xtask --`. Consumers build 
 5. CI clippy is laxer than `just lint`.
 6. `cargo xtask tags` on a shallow clone gives false violations.
 7. `just auth-replay` deletes its database by design.
-8. Toolchain `rust-toolchain.toml` is kept in lockstep with the consumers; bump them together.
+8. Toolchain `rust-toolchain.toml`, `.cargo/config.toml`'s rustflags and the dependency dev profile are kept in lockstep with the consumers (Fleet toolchain above); bump them together.

@@ -9,16 +9,16 @@ This page assumes a working Nix install with flakes enabled.
 ## Enter a dev shell
 
 ```sh
-nix develop          # native libraries only, over the rust you already have
-nix develop .#ci     # the same plus nixpkgs' cargo, rustc, rustfmt and clippy
+nix develop          # the pinned rust (1.99.1), the native libraries and mold
 ```
 
 The repo's `flake.nix` carries the native libraries the workspace links
 against (the Dioxus desktop crates need the GTK/WebKit stack even in unit
-tests). `rust-toolchain.toml` pins the toolchain. CI uses Task's dev
-shell instead (`nix develop --accept-flake-config github:FastTrackStudios/task#ci`),
-which pins the same toolchain and adds the `wasm32-unknown-unknown`
-target; see `.github/workflows/checks.yml`.
+tests), mold, the linker `.cargo/config.toml` selects on x86-64 Linux,
+and rust 1.99.1, the release `rust-toolchain.toml` pins. CI enters the default
+shell and installs the same toolchain with rustup, with the
+`wasm32-unknown-unknown` target; see `.github/workflows/checks.yml` and
+`.github/actions/shared-rust/action.yml`.
 
 ## Build everything
 

@@ -19,7 +19,8 @@ runs:
         test -n "${RUSTC_WRAPPER:?host kache wrapper is required}"
     - uses: nicknovitski/nix-develop@v1
       with:
-        # Libraries only: keep the same pinned rustup compiler as hosted CI.
+        # The pinned rust 1.99.1, the native libraries and mold; rustup
+        # below installs the same release with the wasm target.
         arguments: --accept-flake-config
     - name: Let rustup install under the runner's work-dir HOME
       shell: bash

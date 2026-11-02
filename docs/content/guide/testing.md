@@ -172,7 +172,8 @@ on a hosted runner.
   `Cargo.lock` unchanged.
 
 After a merge, every push to `main` runs `.github/workflows/checks.yml`,
-with `RUSTFLAGS=-D warnings` and the pinned toolchain:
+with every warning an error (`CARGO_BUILD_WARNINGS=deny`) and the
+pinned toolchain:
 
 | Job | Runs |
 |---|---|
@@ -183,7 +184,7 @@ with `RUSTFLAGS=-D warnings` and the pinned toolchain:
 | `check` | passes only when `lint`, `test` and `wasm` all succeeded |
 
 Because the PR runs only the fast checks, run the full set locally
-before opening one, with `RUSTFLAGS="-D warnings"`: fmt, clippy, the
+before opening one, with `CARGO_BUILD_WARNINGS=deny`: fmt, clippy, the
 workspace tests, the wasm `cargo check` lines copied from
 `checks.yml`, `boundaries` and `docs`. Whoever merges watches `main`
 and reverts or fixes forward when it goes red.

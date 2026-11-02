@@ -144,15 +144,19 @@ The Dioxus desktop crates need the GTK/WebKit stack even in unit tests,
 so without the shell `cargo test --workspace` fails at link time.
 
 ```sh
-nix develop          # the libraries, over the rust you already have
-nix develop .#ci     # the same plus nixpkgs' cargo, rustc, rustfmt, clippy
+nix develop          # the pinned rust (1.99.1), the libraries and mold
 ```
 
 `rust-toolchain.toml` pins the toolchain (rust 1.99.1, with `rustfmt`,
 `clippy`, `rust-src` and the `wasm32-unknown-unknown` target); rustup
-reads it. The consumers (Task, studio) pin the same version, and the
+reads it, and `flake.nix`'s shell pins the same release (shadowing any
+other rust on the machine's PATH). The
+consumers (Task, studio, keyflow, frame) pin the same version, and the
 pins move together. CI reads the same pin through `RUSTUP_TOOLCHAIN` in
-`.github/workflows/checks.yml`.
+`.github/workflows/checks.yml`. `.cargo/config.toml` carries the
+fleet's rustflags (frame pointers everywhere; mold and `x86-64-v3` on
+x86-64 Linux; `x86-64-v3` on Intel macOS), the same in every fleet repo,
+so the shell includes mold.
 
 Lints are workspace-wide (`[workspace.lints]` in the root
 `Cargo.toml`): clippy's pedantic and nursery groups are denied, and so
@@ -177,10 +181,19 @@ A cache hit needs the same key, so keep builds deterministic:
 - Name the target directory `target`.
 - Build one configuration: the commands CI runs
   (`cargo clippy --workspace --all-targets`, `cargo test --workspace`,
-  the wasm `cargo check` lines in `.github/workflows/checks.yml`), with
-  the same `RUSTFLAGS`. A `-p` subset resolves dependency features
-  differently, so it compiles every dependency under a new key. Filter
-  tests by name after `--` instead.
+  the wasm `cargo check` lines in `.github/workflows/checks.yml`). A
+  `-p` subset resolves dependency features differently, so it compiles
+  every dependency under a new key. Filter tests by name after `--`
+  instead.
+- Never set `RUSTFLAGS` or `CARGO_TARGET_<triple>_RUSTFLAGS`. Either
+  replaces the rustflags in `.cargo/config.toml`, and the key includes
+  every flag. CI makes warnings errors with `CARGO_BUILD_WARNINGS=deny`,
+  which changes no compiler flag.
+- The rustc release, the rustflags and the dependencies' dev profile
+  (`[profile.dev.package."*"]` and the opt-level 3 list in the root
+  `Cargo.toml`) are the same in every fleet repo, so a crate built for
+  one repo (Dioxus, Blitz, a registry crate) is a hit in the others.
+  Change them in all the repos or in none.
 
 ## 6. Scaffold a feature
 
