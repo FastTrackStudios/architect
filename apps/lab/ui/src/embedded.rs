@@ -3,16 +3,18 @@
 //! naming its kind —
 //!
 //! - **Dioxus**: a component in the lab's own document;
-//! - **Luau `ImGui`**: the `ImGui` demo window, the `fts.imgui-demo`
-//!   extension's script (`apps/lab/extensions/imgui-demo/demo.luau`):
-//!   Dear `ImGui`'s demo, section by section, each naming the API it still
-//!   lacks. `CANVAS_IMGUI_DEMO` shows it from anywhere;
+//! - **Luau `ImGui`**: a script of its own (`imgui_demo.luau`), its window
+//!   drawn in the pane;
 //! - **Frame surface**: a knob and a meter from a Frame document, laid out
 //!   and painted by Frame's `frame-surface` program
 //!   (FastTrackStudios/frame, `crates/frame-view`) in a process of its own,
-//!   moved by `LAB_FRAME_SET` ([`crate::extensions`]). Without the program
-//!   a stand-in says how to get it and follows the same action;
-//! - **A2UI**: the agents' surfaces (`A2UI_RENDER`).
+//!   its knob bound to the lab's drive and its meter following it
+//!   (`LAB_FRAME_SET`, [`crate::extensions`]); a save to the document
+//!   reloads it. Without the program a stand-in says how to get it and
+//!   follows the same action;
+//! - **A2UI**: the agents' surfaces (`A2UI_RENDER`, `A2UI_PATCH`), the
+//!   release demo first (`LAB_A2UI_DEMO`, `release.a2ui.json`): a form, a
+//!   list of tasks, and a button whose write waits for the person's yes.
 //!
 //! The lab never links Frame: it declares the `frame.surface` kind itself
 //! ([`kinds`]), as `frame_view::spec()` does, and shows the extension's
@@ -72,42 +74,37 @@ pub fn views() -> [View; 4] {
     ]
 }
 
-/// The screenset's layout: two columns, the `ImGui` demo the left's height
-/// (it does not scroll), Dioxus over the Frame surface over A2UI on the
-/// right, Dioxus a little taller for its swatches.
+/// The screenset's layout: three columns, Dioxus over Luau `ImGui` on the
+/// left, the Frame surface in the middle, A2UI on the right.
 #[must_use]
 pub fn workspace() -> Workspace {
     let mut w = Workspace::new();
     let _ = w.open(
-        Pane::new(LUAU_PANE, "embed.luau", "Luau ImGui"),
+        Pane::new(DIOXUS_PANE, "embed.dioxus", "Dioxus"),
         Target::Tab,
     );
     let _ = w.open(
-        Pane::new(DIOXUS_PANE, "embed.dioxus", "Dioxus"),
+        Pane::new(FRAME_PANE, "embed.frame", "Frame surface"),
         Target::Split(Side::Right),
     );
     let _ = w.open(
-        Pane::new(FRAME_PANE, "embed.frame", "Frame surface"),
-        Target::Split(Side::Bottom),
-    );
-    let _ = w.open(
         Pane::new(A2UI_PANE, "embed.a2ui", "A2UI"),
+        Target::Split(Side::Right),
+    );
+    // The surface asks for the most room, the Frame surface the least.
+    let columns = w.windows.first().and_then(|main| match &main.center {
+        Some(Node::Split(s)) if s.children.len() == 3 => Some(s.id),
+        _ => None,
+    });
+    if let Some(columns) = columns {
+        let _ = w.set_shares(columns, &[0.34, 0.29, 0.37]);
+    }
+    let _ = w.activate(&architect_workspace::PaneId::new(DIOXUS_PANE));
+    let _ = w.open(
+        Pane::new(LUAU_PANE, "embed.luau", "Luau ImGui"),
         Target::Split(Side::Bottom),
     );
-    let column = w
-        .windows
-        .first()
-        .and_then(|main| match main.center.as_ref()? {
-            Node::Split(row) => match &row.children.get(1)?.node {
-                Node::Split(column) => Some(column.id),
-                Node::Group(_) => None,
-            },
-            Node::Group(_) => None,
-        });
-    if let Some(column) = column {
-        let _ = w.set_shares(column, &[0.36, 0.33, 0.31]);
-    }
-    let _ = w.activate(&architect_workspace::PaneId::new(LUAU_PANE));
+    let _ = w.activate(&architect_workspace::PaneId::new(DIOXUS_PANE));
     w
 }
 
@@ -177,16 +174,12 @@ fn DioxusPane() -> Element {
     }
 }
 
-/// The demo's window (`demo.luau`'s context and window name).
-const DEMO_WINDOW: &str = "imgui-demo/Dear ImGui Demo";
+/// The demo script's one window (`imgui_demo.luau`'s context and name).
+const DEMO_WINDOW: &str = "imgui-demo/Window";
 
-/// The `ImGui` demo: the lab's `fts.imgui-demo` extension's script
-/// (`apps/lab/extensions/imgui-demo`), linked into the build.
-const DEMO_SCRIPT: &str = include_str!("../../extensions/imgui-demo/demo.luau");
-
-/// The Luau `ImGui` pane: the demo window, its script running while the
-/// pane shows. Its canvases are the pane's own, so the vault's tool windows
-/// never float it.
+/// The Luau `ImGui` pane: the demo script runs while the pane shows, its
+/// window drawn here. Its canvases are the pane's own, so the vault's tool
+/// windows never float it.
 #[component]
 fn LuauPane() -> Element {
     let t = use_shell().theme;
@@ -194,9 +187,9 @@ fn LuauPane() -> Element {
     let canvas = use_script_canvas(
         Runtime::new(ActionList::new()),
         ActionCaller::app(),
-        DEMO_SCRIPT.to_owned(),
+        include_str!("imgui_demo.luau").to_owned(),
         serde_json::Value::Null,
-        "ImGui demo".to_owned(),
+        "Luau ImGui".to_owned(),
         style_from_theme(&t),
     );
     let window = canvas.output().window(DEMO_WINDOW).cloned();
@@ -206,8 +199,7 @@ fn LuauPane() -> Element {
             KindHead {
                 name: "Luau ImGui",
                 kind: "luau · imgui",
-                about: "Dear ImGui's demo window, section by section, drawn by a Luau script every frame; \
-                        each section names the API architect's ImGui still lacks.",
+                about: "A Luau script's immediate-mode window: it redraws every frame, the lab paints its shapes.",
             }
             div { style: "flex: 1; position: relative; min-height: 0; margin: 4px 20px 20px; \
                           border: 1px solid {t.rule}; border-radius: 8px; overflow: hidden;",
@@ -251,7 +243,7 @@ fn FramePane() -> Element {
 const STAND_IN_POLL: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// What the Frame pane shows without `frame-surface`: where to get it, and
-/// the knob and the meter `LAB_FRAME_SET` moves, drawn plainly.
+/// the lab's drive and the level its meter follows it to, drawn plainly.
 #[component]
 fn FrameStandIn() -> Element {
     let t = use_shell().theme;
@@ -265,9 +257,9 @@ fn FrameStandIn() -> Element {
             }
         }
     });
-    let (knob, meter) = now();
-    let db = meter.mul_add(66.0, -60.0);
-    let (knob_pc, meter_pc) = (knob * 100.0, meter * 100.0);
+    let (drive, db) = now();
+    let drive_pc = drive * 100.0;
+    let level_pc = (db + 60.0) / 66.0 * 100.0;
     rsx! {
         div { style: "flex: 1; display: flex; flex-direction: column; min-height: 0; overflow-y: scroll;",
             KindHead {
@@ -280,13 +272,14 @@ fn FrameStandIn() -> Element {
                 div { style: "display: flex; flex-direction: column; gap: 6px; width: 120px;",
                     div { style: "font-size: 12px; color: {t.ink_3};", "Drive" }
                     div { style: "height: 8px; border-radius: 4px; background: {t.pill};",
-                        div { style: "width: {knob_pc}%; height: 8px; border-radius: 4px; background: #ff7a1a;" }
+                        div { style: "width: {drive_pc}%; height: 8px; border-radius: 4px; background: #ff7a1a;" }
                     }
-                    div { style: "font-size: 13px; color: {t.ink};", {format!("{knob_pc:.0}%")} }
+                    div { style: "font-size: 13px; color: {t.ink};", {format!("{drive_pc:.0}%")} }
                 }
                 div { style: "display: flex; flex-direction: column; gap: 6px;",
+                    div { style: "font-size: 12px; color: {t.ink_3};", "Level" }
                     div { style: "position: relative; width: 10px; height: 80px; border-radius: 3px; background: {t.pill}; overflow: hidden;",
-                        div { style: "position: absolute; left: 0; right: 0; bottom: 0; height: {meter_pc}%; background: #3dd67a;" }
+                        div { style: "position: absolute; left: 0; right: 0; bottom: 0; height: {level_pc}%; background: #3dd67a;" }
                     }
                     div { style: "font-size: 13px; color: {t.ink};", {format!("{db:.1} dB")} }
                 }
@@ -315,89 +308,149 @@ struct SurfaceArgs {
     surface_id: String,
 }
 
-static IMGUI_DEMO: ActionMeta = ActionMeta {
-    id: "CANVAS_IMGUI_DEMO",
+/// What `LAB_RELEASE_SHIP` takes: the release surface's form and tasks.
+#[derive(Debug, Clone, Facet)]
+struct ShipArgs {
+    version: String,
+    /// A `ChoicePicker`'s value: a list of one.
+    channel: Vec<String>,
+    tasks: Vec<ShipTask>,
+}
+
+/// One of a release's tasks.
+#[derive(Debug, Clone, Facet)]
+struct ShipTask {
+    title: String,
+    done: bool,
+}
+
+/// The demo surface's id, and who renders it: an agent, so that its
+/// button's write waits for the person's yes.
+pub const RELEASE: &str = "release";
+const DEMO_AGENT: &str = "demo-agent";
+
+static A2UI_DEMO: ActionMeta = ActionMeta {
+    id: "LAB_A2UI_DEMO",
     trait_name: "",
     method_name: "",
-    display_name: "Show the ImGui demo window",
-    description: "Goes to the vault and shows the ImGui demo window (Dear ImGui's demo, section by section, in architect's ImGui), loading the Embedded views screenset when its pane is not open.",
-    category: "Canvas",
-    group: "ImGui",
+    display_name: "Show the release surface",
+    description: "Renders the A2UI demo surface “release” in the Embedded views' A2UI pane, as the agent demo-agent: a form (version, channel), a list of tasks to tick, and a Ship it button whose LAB_RELEASE_SHIP waits for the person's yes. Patch it live with A2UI_PATCH (surfaceId release).",
+    category: "Lab",
+    group: "Embedded views",
     shortcut: "",
     toggleable: false,
     undo: false,
 };
 
-/// What `CANVAS_IMGUI_DEMO` answers: the demo's pane and window, and
-/// whether the screenset was loaded for it.
-#[derive(Debug, Clone, Facet)]
-struct DemoShown {
-    pane: String,
-    window: String,
-    loaded: bool,
+static RELEASE_SHIP: ActionMeta = ActionMeta {
+    id: "LAB_RELEASE_SHIP",
+    trait_name: "",
+    method_name: "",
+    display_name: "Ship the release",
+    description: "Ships a release (the demo's: nothing leaves the lab): version, channel (beta or stable, or a list of one), tasks ({title, done}). Answers {summary, version, channel, open}, the tasks not done. The release surface's Ship it button runs it.",
+    category: "Lab",
+    group: "Embedded views",
+    shortcut: "",
+    toggleable: false,
+    undo: false,
+};
+
+/// What `LAB_RELEASE_SHIP` answers `args` with: a line that says what
+/// shipped, and how many of its tasks were still open.
+fn shipped(args: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let version = args
+        .get("version")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| {
+            format!(
+                "`version` is the release's version, not {}",
+                args.get("version").unwrap_or(&serde_json::Value::Null)
+            )
+        })?;
+    // A ChoicePicker's value is a list.
+    let channel = match args.get("channel") {
+        Some(serde_json::Value::Array(vs)) => vs.first().and_then(serde_json::Value::as_str),
+        Some(v) => v.as_str(),
+        None => None,
+    }
+    .ok_or("`channel` is beta or stable")?;
+    if !matches!(channel, "beta" | "stable") {
+        return Err(format!("`channel` is beta or stable, not {channel}"));
+    }
+    let open: Vec<&str> = args
+        .get("tasks")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|t| t["done"] != true)
+        .filter_map(|t| t["title"].as_str())
+        .collect();
+    let summary = match open.len() {
+        0 => format!("v{version} shipped to {channel}."),
+        1 => format!("v{version} shipped to {channel}; 1 task still open."),
+        n => format!("v{version} shipped to {channel}; {n} tasks still open."),
+    };
+    Ok(
+        serde_json::json!({ "summary": summary, "version": version, "channel": channel, "open": open }),
+    )
 }
 
-/// How often, and how many times, `CANVAS_IMGUI_DEMO` looks for the
-/// vault's workspace once it asked for the vault.
-const VAULT_POLL: std::time::Duration = std::time::Duration::from_millis(50);
-const VAULT_TRIES: u32 = 100;
-
-async fn run(list: &ActionList, id: &str, args: &serde_json::Value) -> Result<Vec<u8>, String> {
-    list.run_json_async(id, args.to_string().as_bytes())
-        .await
-        .map_err(|e| format!("{id}: {e}"))
-}
-
-/// The vault, its "Embedded views" when the demo's pane is not open, and
-/// the pane focused.
-async fn show_demo(list: &ActionList) -> Result<DemoShown, String> {
-    // The workspace's actions are the vault's, there while it shows.
-    let open = architect_workspace::control::ids::OPEN;
-    if list.info(open).is_none() {
-        let go = serde_json::json!({ "id": "LAB_GO_VAULT" });
-        run(list, architect_commands::RUN_ACTION, &go).await?;
-        let mut tries = 0;
-        while list.info(open).is_none() {
-            if tries == VAULT_TRIES {
-                return Err("the vault did not show".to_owned());
+/// Puts on `list` `LAB_A2UI_DATA`, a surface's data model, which its
+/// components write as they are used; `LAB_A2UI_DEMO`, which renders the
+/// release surface; and `LAB_RELEASE_SHIP`, its button's action.
+pub fn register(list: &ActionList, surfaces: &architect_a2ui::Surfaces) {
+    let failed = |id: &str, message: String| ActionError::Failed {
+        id: id.to_owned(),
+        message,
+    };
+    let demo = surfaces.clone();
+    let _ = list.register_dynamic(
+        &A2UI_DEMO,
+        Effect::Mutating,
+        None,
+        None,
+        Arc::new(move |_: &[u8]| {
+            let fail = |e: architect_a2ui::store::SurfaceError| failed(A2UI_DEMO.id, e.to_string());
+            let mut messages = Vec::new();
+            if demo.get(RELEASE).is_some() {
+                messages.push(
+                    architect_a2ui::store::message(
+                        serde_json::json!({ "deleteSurface": { "surfaceId": RELEASE } }),
+                    )
+                    .map_err(fail)?,
+                );
             }
-            tries = tries.saturating_add(1);
-            futures_timer::Delay::new(VAULT_POLL).await;
-        }
-    }
-    let pane = serde_json::json!({ "pane": LUAU_PANE });
-    let loaded = run(list, architect_workspace::control::ids::PANE_GET, &pane)
-        .await
-        .is_err();
-    if loaded {
-        let set = serde_json::json!({ "name": "Embedded views" });
-        run(
-            list,
-            architect_workspace::control::ids::WORKSPACES_LOAD,
-            &set,
-        )
-        .await?;
-    }
-    run(list, architect_workspace::control::ids::FOCUS, &pane).await?;
-    Ok(DemoShown {
-        pane: LUAU_PANE.to_owned(),
-        window: DEMO_WINDOW.to_owned(),
-        loaded,
-    })
-}
-
-/// Puts `LAB_A2UI_DATA` on `list`: a surface's data model, which its
-/// components write as they are used; and `CANVAS_IMGUI_DEMO`, which shows
-/// the `ImGui` demo window.
-pub fn register(list: &Arc<ActionList>, surfaces: &architect_a2ui::Surfaces) {
-    let weak = Arc::downgrade(list);
-    let _ = list.register_async(&IMGUI_DEMO, Effect::Mutating, move |(): ()| {
-        let list = weak.upgrade();
-        async move {
-            let list = list.ok_or_else(|| "the lab is gone".to_owned())?;
-            show_demo(&list).await
-        }
-    });
+            messages.extend(
+                architect_a2ui::store::parse(include_str!("release.a2ui.json")).map_err(fail)?,
+            );
+            let agent = architect::action::Principal::Service {
+                name: DEMO_AGENT.to_owned(),
+            };
+            demo.apply(&messages, Some(&agent)).map_err(fail)?;
+            Ok(
+                serde_json::to_vec(&serde_json::json!({ "surfaceId": RELEASE }))
+                    .unwrap_or_default(),
+            )
+        }),
+    );
+    let _ = list.register_dynamic(
+        &RELEASE_SHIP,
+        Effect::Mutating,
+        Some(ShipArgs::SHAPE),
+        None,
+        Arc::new(move |args: &[u8]| {
+            let args: serde_json::Value =
+                serde_json::from_slice(args).map_err(|e| ActionError::BadArgs {
+                    id: RELEASE_SHIP.id.to_owned(),
+                    message: e.to_string(),
+                    expected: None,
+                })?;
+            let out = shipped(&args).map_err(|e| failed(RELEASE_SHIP.id, e))?;
+            Ok(serde_json::to_vec(&out).unwrap_or_default())
+        }),
+    );
     let surfaces = surfaces.clone();
     let bad = |message: String| ActionError::BadArgs {
         id: A2UI_DATA.id.to_owned(),
@@ -430,17 +483,61 @@ pub fn register(list: &Arc<ActionList>, surfaces: &architect_a2ui::Surfaces) {
     );
 }
 
-/// The A2UI pane: every surface an agent rendered (`A2UI_RENDER`).
+/// The A2UI pane: every surface an agent rendered (`A2UI_RENDER`); the
+/// release surface (`LAB_A2UI_DEMO`) when it first shows.
 #[component]
 fn A2uiPane() -> Element {
+    let list = use_context::<Arc<ActionList>>();
+    use_hook(move || {
+        let shown = format!(r#"{{"surfaceId":"{RELEASE}"}}"#);
+        if list.run_json(A2UI_DATA.id, shown.as_bytes()).is_err() {
+            let _ = list.run_json(A2UI_DEMO.id, b"{}");
+        }
+    });
     rsx! {
         div { style: "flex: 1; display: flex; flex-direction: column; min-height: 0;",
             KindHead {
                 name: "A2UI",
                 kind: "a2ui",
-                about: "An agent's generated UI: components from the catalog, rendered with A2UI_RENDER, drawn by architect-ui.",
+                about: "An agent's UI from the catalog: rendered with A2UI_RENDER, patched live with A2UI_PATCH. Its writes wait for your yes.",
             }
             architect_a2ui::ui::SurfacesPane {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_ship_button_ships_what_the_form_says() {
+        let surfaces =
+            architect_a2ui::Surfaces::new(crdt::CrdtDoc::ephemeral(), architect_a2ui::store::ROOT);
+        let list = ActionList::new();
+        register(&list, &surfaces);
+        // Shown when the pane opens, and again by the guide: the second
+        // replaces the first.
+        for _ in 0..2 {
+            assert!(list.run_json(A2UI_DEMO.id, b"{}").is_ok());
+        }
+        let release = surfaces.get(RELEASE);
+        let pressed = release
+            .as_ref()
+            .map(|s| architect_a2ui::events::resolve(s, "ship", ""));
+        let Some(Ok((id, args, respond))) = pressed else {
+            panic!("the Ship it button has no action: {pressed:?}");
+        };
+        assert_eq!(id, RELEASE_SHIP.id);
+        assert_eq!(respond.as_deref(), Some("/shipped"));
+        let out = list.run_json(&id, args.to_string().as_bytes());
+        let out: Option<serde_json::Value> = out.ok().and_then(|o| serde_json::from_slice(&o).ok());
+        assert_eq!(
+            out.map(|o| o["summary"].clone()),
+            Some(serde_json::json!(
+                "v0.11.0 shipped to beta; 1 task still open."
+            )),
+            "{args}"
+        );
     }
 }

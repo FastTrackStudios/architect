@@ -14,8 +14,11 @@
 //! So is Frame's `frame-surface` (FastTrackStudios/frame,
 //! `crates/frame-view`), when it is found ([`frame_surface`]): its view,
 //! of the `frame.surface` kind, is the "Embedded views" Frame pane
-//! (`crate::embedded`), and `LAB_FRAME_SET` / `LAB_FRAME_STATE` on the
-//! lab's list move and read it (a stand-in without it).
+//! (`crate::embedded`). It shows the lab's Frame document
+//! ([`frame_document`]), reloaded when it is saved, its knob bound to the
+//! lab's drive and its meter following: `LAB_FRAME_SET` / `LAB_FRAME_STATE`
+//! on the lab's list move and read the drive, and a knob turned on the
+//! surface moves it too (a stand-in without the program).
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
@@ -112,47 +115,100 @@ fn frame_dev(root: &Path) -> Option<PathBuf> {
     Some(dir)
 }
 
-/// The extension's own action that moves it (`frame-view`'s
-/// `extension.toml`).
-const SURFACE_SET: &str = "FRAME_SURFACE_SET";
+/// The lab's Frame document: `ARCHITECT_LAB_FRAME_DOCUMENT`, or
+/// `apps/lab/surfaces/drive.frame` above the working directory. A save to
+/// it reloads the surface.
+pub fn frame_document() -> Option<PathBuf> {
+    if let Some(p) = std::env::var_os("ARCHITECT_LAB_FRAME_DOCUMENT") {
+        return Some(p.into());
+    }
+    let here = std::env::current_dir().ok()?;
+    here.ancestors()
+        .map(|a| a.join("apps/lab/surfaces/drive.frame"))
+        .find(|p| p.is_file())
+}
 
-/// Where the last `LAB_FRAME_SET` left the knob and the meter, and who
-/// drew them; the stand-in draws from it.
-static LAST: Mutex<(f64, f64, &str)> = Mutex::new((0.5, 0.6, STAND_IN));
+/// The extension's own actions (`frame-view`'s `extension.toml`).
+const SURFACE_LOAD: &str = "FRAME_SURFACE_LOAD";
+const SURFACE_PARAM_SET: &str = "FRAME_SURFACE_PARAM_SET";
+const SURFACE_FEED: &str = "FRAME_SURFACE_FEED";
+const SURFACE_STATE: &str = "FRAME_SURFACE_STATE";
+
+/// The document's knob and meter: the param the lab's drive is bound to,
+/// and the feed that follows it.
+const DRIVE_PARAM: &str = "surface/drive";
+const LEVEL_FEED: &str = "level";
+
+/// The level the meter reads at `drive` (0..1): -60 dB at nothing, +6 dB
+/// at full, to a tenth of a dB.
+#[must_use]
+pub fn level_db(drive: f64) -> f64 {
+    (drive.mul_add(66.0, -60.0) * 10.0).round() / 10.0
+}
+
+/// The lab's drive, and what the surface last said of itself.
+struct Bound {
+    drive: f64,
+    by: &'static str,
+    /// Bumped by each `LAB_FRAME_SET`: a knob read from the surface while
+    /// one was under way is stale.
+    generation: u64,
+    /// Whether the extension running now was given the document.
+    loaded: bool,
+    document: Option<String>,
+    loads: u64,
+    error: Option<String>,
+}
+
+static BOUND: Mutex<Bound> = Mutex::new(Bound {
+    drive: 0.5,
+    by: STAND_IN,
+    generation: 0,
+    loaded: false,
+    document: None,
+    loads: 0,
+    error: None,
+});
+
+fn bound() -> std::sync::MutexGuard<'static, Bound> {
+    BOUND.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 /// The stand-in's name in [`FrameState::by`].
 const STAND_IN: &str = "stand-in";
 
-/// The stand-in's knob and meter (each 0..1).
+/// The stand-in's drive (0..1) and level (dB).
 pub fn frame_stand_in() -> (f64, f64) {
-    let (knob, meter, _) = *LAST.lock().unwrap_or_else(PoisonError::into_inner);
-    (knob, meter)
+    let drive = bound().drive;
+    (drive, level_db(drive))
 }
 
-/// What `LAB_FRAME_SET` takes: the knob, the meter, or both (each 0..1).
+/// What `LAB_FRAME_SET` takes: the drive, 0..1.
 #[derive(Debug, Clone, Copy, Default, Facet)]
 struct FrameSet {
-    #[facet(default)]
-    knob: Option<f64>,
-    #[facet(default)]
-    meter: Option<f64>,
+    drive: f64,
 }
 
-/// Where the Frame surface is, and who drew it: `frame-surface`, or the
-/// lab's `stand-in`.
+/// The lab's drive and the level the meter follows it to, who drew them
+/// (`frame-surface`, or the lab's `stand-in`), and the document the
+/// surface shows: its path, how many times it was read in, why the last
+/// save did not take.
 #[derive(Debug, Clone, PartialEq, Facet)]
 struct FrameState {
-    knob: f64,
-    meter: f64,
+    drive: f64,
+    level: f64,
     by: String,
+    document: Option<String>,
+    loads: u64,
+    error: Option<String>,
 }
 
 static FRAME_SET: ActionMeta = ActionMeta {
     id: "LAB_FRAME_SET",
     trait_name: "",
     method_name: "",
-    display_name: "Move the Frame surface",
-    description: "Turns the Embedded views' Frame surface's knob and sets its meter (each 0 to 1; either may be left out). Frame's frame-surface draws it when the lab found it, a stand-in otherwise.",
+    display_name: "Set the drive",
+    description: "Sets the lab's drive (0 to 1): the Embedded views' Frame surface's knob is bound to it and its meter follows it (-60 dB at 0, +6 dB at 1). Frame's frame-surface draws it when the lab found it, a stand-in otherwise. Turning the knob sets it too.",
     category: "Lab",
     group: "Embedded views",
     shortcut: "",
@@ -164,8 +220,8 @@ static FRAME_STATE: ActionMeta = ActionMeta {
     id: "LAB_FRAME_STATE",
     trait_name: "",
     method_name: "",
-    display_name: "Where the Frame surface is",
-    description: "Where the last LAB_FRAME_SET left the Embedded views' Frame surface's knob and meter (each 0 to 1), and whether frame-surface or the lab's stand-in drew them.",
+    display_name: "The drive and its surface",
+    description: "The lab's drive (0 to 1) and the level its meter reads (dB); whether frame-surface or the lab's stand-in draws them; the Frame document shown, how many times it was read in (a save reloads it), and why the last save did not take.",
     category: "Lab",
     group: "Embedded views",
     shortcut: "",
@@ -173,68 +229,161 @@ static FRAME_STATE: ActionMeta = ActionMeta {
     undo: false,
 };
 
-/// `frame-surface`'s answer (`{knob, meter}`).
-fn answered(bytes: &[u8]) -> Result<(f64, f64), String> {
-    let v: serde_json::Value = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
-    let read = |key: &str| {
-        v.get(key)
-            .and_then(serde_json::Value::as_f64)
-            .ok_or_else(|| format!("{FRAME_PROGRAM} answered without `{key}`: {v}"))
-    };
-    Ok((read("knob")?, read("meter")?))
-}
-
-fn last() -> FrameState {
-    let (knob, meter, by) = *LAST.lock().unwrap_or_else(PoisonError::into_inner);
+fn state() -> FrameState {
+    let b = bound();
     FrameState {
-        knob,
-        meter,
-        by: by.to_owned(),
+        drive: b.drive,
+        level: level_db(b.drive),
+        by: b.by.to_owned(),
+        document: b.document.clone(),
+        loads: b.loads,
+        error: b.error.clone(),
     }
 }
 
+/// Runs the extension's `id` with `args`: its answer, the surface's state.
+async fn run(
+    on: &ActionList,
+    id: &str,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let out = on
+        .run_json_async(id, args.to_string().as_bytes())
+        .await
+        .map_err(|e| e.to_string())?;
+    serde_json::from_slice(&out).map_err(|e| format!("{FRAME_PROGRAM} answered {id} oddly: {e}"))
+}
+
+/// Takes the document's part of the surface's `state`; whether it was
+/// read in again since.
+fn heard(state: &serde_json::Value) -> bool {
+    let mut b = bound();
+    let loads = state["loads"].as_u64().unwrap_or_default();
+    let reloaded = loads != b.loads;
+    b.document = state["document"].as_str().map(str::to_owned);
+    b.loads = loads;
+    b.error = state["error"].as_str().map(str::to_owned);
+    reloaded
+}
+
+/// Puts `drive` on the surface: its knob, and the meter that follows.
+async fn push(on: &ActionList, drive: f64) -> Result<serde_json::Value, String> {
+    run(
+        on,
+        SURFACE_PARAM_SET,
+        &serde_json::json!({ "addr": DRIVE_PARAM, "value": drive }),
+    )
+    .await?;
+    run(
+        on,
+        SURFACE_FEED,
+        &serde_json::json!({ "id": LEVEL_FEED, "values": [level_db(drive)] }),
+    )
+    .await
+}
+
 /// Puts `LAB_FRAME_SET` and `LAB_FRAME_STATE` on the lab's list (`lab`):
-/// a move runs the extension's own action on `extensions` while it is
-/// loaded and moves the stand-in otherwise, and is a `frame` change; the
-/// state is where the last move left it, read at once (a check's read).
+/// a set moves the lab's drive and, while the extension is loaded on
+/// `extensions`, the surface's knob and meter, and is a `frame` change;
+/// the state is read at once (a check's read).
 fn frame_actions(lab: &Arc<ActionList>, extensions: &Arc<ActionList>) {
     let (to, told) = (Arc::clone(extensions), Arc::clone(lab));
     let _ = lab.register_async(&FRAME_SET, Effect::Mutating, move |args: FrameSet| {
         let (to, told) = (Arc::clone(&to), Arc::clone(&told));
         async move {
-            let mut asked = serde_json::Map::new();
-            for (key, value) in [("knob", args.knob), ("meter", args.meter)] {
-                if let Some(v) = value {
-                    if !(0.0..=1.0).contains(&v) {
-                        return Err(format!("`{key}` is a number from 0 to 1, not {v}"));
-                    }
-                    asked.insert(key.to_owned(), v.into());
-                }
+            let drive = args.drive;
+            if !(0.0..=1.0).contains(&drive) {
+                return Err(format!("`drive` is a number from 0 to 1, not {drive}"));
             }
-            let (knob, meter, by) = if to.info(SURFACE_SET).is_some() {
-                let args = serde_json::Value::Object(asked).to_string();
-                let out = to
-                    .run_json_async(SURFACE_SET, args.as_bytes())
-                    .await
-                    .map_err(|e| e.to_string())?;
-                let (knob, meter) = answered(&out)?;
-                (knob, meter, FRAME_PROGRAM)
+            {
+                let mut b = bound();
+                b.generation = b.generation.wrapping_add(1);
+            }
+            let by = if to.info(SURFACE_PARAM_SET).is_some() {
+                heard(&push(&to, drive).await?);
+                FRAME_PROGRAM
             } else {
-                let (knob, meter, _) = *LAST.lock().unwrap_or_else(PoisonError::into_inner);
-                (
-                    args.knob.unwrap_or(knob),
-                    args.meter.unwrap_or(meter),
-                    STAND_IN,
-                )
+                STAND_IN
             };
-            *LAST.lock().unwrap_or_else(PoisonError::into_inner) = (knob, meter, by);
+            {
+                let mut b = bound();
+                b.drive = drive;
+                b.by = by;
+            }
             told.changed("frame", by);
-            Ok(last())
+            Ok(state())
         }
     });
     let _ = lab.register(&FRAME_STATE, Effect::ReadOnly, |(): ()| {
-        Ok::<_, String>(last())
+        Ok::<_, String>(state())
     });
+}
+
+/// How often the binding looks at the surface.
+const BINDING_POLL: Duration = Duration::from_millis(150);
+
+/// The binding between the lab's drive and the surface, for as long as
+/// the lab runs: an extension that loads is given the lab's document and
+/// its drive; a knob turned on the surface (dragged, or
+/// `FRAME_SURFACE_PARAM_SET` from anywhere) moves the drive and the meter
+/// with it; a save to the document is a `frame` change.
+async fn frame_binding(lab: Arc<ActionList>, extensions: Arc<ActionList>) {
+    loop {
+        futures_timer::Delay::new(BINDING_POLL).await;
+        if extensions.info(SURFACE_STATE).is_none() {
+            bound().loaded = false;
+            continue;
+        }
+        if !bound().loaded {
+            if let Some(path) = frame_document() {
+                let path = path.canonicalize().unwrap_or(path);
+                let _ = run(
+                    &extensions,
+                    SURFACE_LOAD,
+                    &serde_json::json!({ "path": path.display().to_string() }),
+                )
+                .await;
+            }
+            let drive = bound().drive;
+            if push(&extensions, drive).await.is_ok() {
+                let mut b = bound();
+                b.loaded = true;
+                b.by = FRAME_PROGRAM;
+            }
+            lab.changed("frame", FRAME_PROGRAM);
+            continue;
+        }
+        let generation = bound().generation;
+        let Ok(now) = run(&extensions, SURFACE_STATE, &serde_json::json!({})).await else {
+            continue;
+        };
+        let knob = now
+            .get("params")
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .find(|p| p.get("addr").and_then(serde_json::Value::as_str) == Some(DRIVE_PARAM))
+            .and_then(|p| p.get("value").and_then(serde_json::Value::as_f64));
+        let moved = knob.is_some_and(|knob| {
+            let mut b = bound();
+            let turned = b.generation == generation && (knob - b.drive).abs() > 1e-9;
+            if turned {
+                b.drive = knob;
+            }
+            turned
+        });
+        if moved {
+            let _ = run(
+                &extensions,
+                SURFACE_FEED,
+                &serde_json::json!({ "id": LEVEL_FEED, "values": [level_db(bound().drive)] }),
+            )
+            .await;
+        }
+        if heard(&now) || moved {
+            lab.changed("frame", FRAME_PROGRAM);
+        }
+    }
 }
 
 /// How often a loaded extension's files are checked for a save.
@@ -272,6 +421,10 @@ pub fn LabExtensions(metronome: bool) -> Element {
     architect_commands::use_action_list(Arc::clone(&list));
     let lab = use_context::<Arc<ActionList>>();
     use_hook(|| frame_actions(&lab, &list));
+    {
+        let (lab, list) = (Arc::clone(&lab), Arc::clone(&list));
+        use_future(move || frame_binding(Arc::clone(&lab), Arc::clone(&list)));
+    }
     let (extensions, from_registry) = use_hook(|| {
         // The kinds its views may be: Frame's surface besides Dioxus.
         let mut host =

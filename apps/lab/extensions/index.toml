@@ -10,11 +10,3 @@ version = "0.1.0"
 kind = "luau"
 description = "A click: its accent, volume and sound on the settings page, and an action that counts in."
 path = "metronome"
-
-[[extensions]]
-id = "fts.imgui-demo"
-name = "ImGui demo"
-version = "0.1.0"
-kind = "luau"
-description = "Dear ImGui's demo window, section by section, in architect's ImGui: what it draws, and the API each section still lacks."
-path = "imgui-demo"

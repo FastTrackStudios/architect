@@ -90,9 +90,21 @@ pub fn resolve(
                     args.insert(key.clone(), cx.resolve_dynamic_value(v));
                 }
             }
-            let respond = event
-                .want_response
-                .then(|| event.response_path.clone())
+            // The catalog (and A2UI) spell them `wantResponse` and
+            // `responsePath`; `a2ui-base` reads only `want_response` and
+            // `response_path`.
+            let raw = c.get_raw("action").and_then(|a| a.get("event"));
+            let field = |camel: &str| raw.and_then(|e| e.get(camel));
+            let wants =
+                event.want_response || field("wantResponse").and_then(Value::as_bool) == Some(true);
+            let respond = wants
+                .then(|| {
+                    event.response_path.clone().or_else(|| {
+                        field("responsePath")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                    })
+                })
                 .flatten();
             Ok((event.name, Value::Object(args), respond))
         }
