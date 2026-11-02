@@ -176,7 +176,7 @@ Cannot:
 | vox over WebSocket and iroh, one suite | `apps/auth-server/tests/surfaces.rs` `websocket_vox_stack`, `iroh_vox_stack` |
 | vox over iroh | `crates/architect/tests/iroh_link.rs` `vox_connection_over_iroh` |
 | iroh redial after a peer restart, dial error kinds | `crates/architect/tests/iroh_link.rs` `redial_by_id_after_crash_restart_behind_a_blackhole`, `a_silent_peer_times_out_without_retry_and_is_unreachable_with_it` |
-| iroh LAN, bare id | `crates/architect/tests/iroh_lan.rs` (needs a multicast interface) |
+| iroh LAN, bare id | `crates/architect/tests/iroh_lan.rs` (needs a multicast interface; skips on macOS unless `ARCHITECT_LAN_TESTS=1`) |
 | reconnect | `crates/architect/tests/reconnect_supervisor.rs` |
 | dispatch span | `crates/architect/tests/rpc_spans.rs` `dispatch_span_names_the_method` |
 | scopes | `crates/architect/tests/scoped_router.rs` |
