@@ -181,7 +181,6 @@ zerovec = { version = "0.11.9", default-features = false, features = ["alloc", "
 
 [build-dependencies]
 anstyle = { version = "1.0.14", default-features = false, features = ["std"] }
-cc = { version = "1.8.0", default-features = false, features = ["parallel"] }
 crc32fast = { version = "1.5.2", default-features = false, features = ["std"] }
 crypto-common-c65f7effa3be6d31 = { package = "crypto-common", version = "0.1.7", default-features = false, features = ["std"] }
 darling = { version = "0.20.11" }
@@ -461,7 +460,7 @@ rustc-hash = { version = "1.1.0" }
 # The fleet's feature union (`cargo xtask fleet-deps`, `xtask/src/fleet_deps.rs`):
 # every crate architect builds that a consumer builds too, with the features
 # of every repo that builds it. Regenerate it; do not edit it by hand.
-# From: task@a99e764200, studio@82ba469539, keyflow@fd88851259, frame@665c675567.
+# From: task@6d746576f7, studio@82ba469539, keyflow@fd88851259, frame@665c675567.
 
 [target.'cfg(all(target_arch = "aarch64", target_os = "macos"))'.dependencies]
 ahash = { version = "0.8.12", features = ["getrandom", "runtime-rng", "serde", "std"] }
