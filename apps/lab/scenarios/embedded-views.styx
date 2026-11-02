@@ -2,7 +2,7 @@
 // each kind the lab shows, each naming its kind; each is used once.
 id embedded-views
 title "Embedded views"
-view {width 1440, height 860}
+view {width 1440, height 960}
 capture {fps 20, width 960}
 steps (
     {
@@ -13,7 +13,7 @@ steps (
     }
     {
         id load
-        text "Embedded views: Dioxus, Luau ImGui, a Frame surface and A2UI, one pane each."
+        text "Embedded views: Luau ImGui's demo window, Dioxus, a Frame surface and A2UI, one pane each."
         do @run{id WORKSPACES_LOAD, args {name "Embedded views"}}
         done {
             on (@changed"workspace")
@@ -36,10 +36,24 @@ steps (
     }
     {
         id luau
-        text "Luau ImGui: a script's window, redrawn every frame; its button counts the presses."
-        target @at{x 396, y 651}
-        do @click{}
+        text "Luau ImGui: the ImGui demo window, a script's, redrawn every frame; CANVAS_IMGUI_DEMO brings it up."
+        do @run{id CANVAS_IMGUI_DEMO}
+        done {check ({id WORKSPACE_PANE_GET, args {pane embed-luau}, has {view embed.luau, showing true}})}
         hold 1
+    }
+    {
+        id luau-widgets
+        text "Its sections are Dear ImGui's demo's; one opens in place of the others."
+        target @text"▸ Widgets"
+        do @click{}
+        hold 0.8
+    }
+    {
+        id luau-basic
+        text "Each draws what architect's ImGui can, and names the API it still lacks."
+        target @text"▸ Basic"
+        do @click{}
+        hold 1.4
     }
     {
         id frame

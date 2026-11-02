@@ -3,8 +3,10 @@
 //! naming its kind —
 //!
 //! - **Dioxus**: a component in the lab's own document;
-//! - **Luau `ImGui`**: a script of its own (`imgui_demo.luau`), its window
-//!   drawn in the pane;
+//! - **Luau `ImGui`**: the `ImGui` demo window, the `fts.imgui-demo`
+//!   extension's script (`apps/lab/extensions/imgui-demo/demo.luau`):
+//!   Dear `ImGui`'s demo, section by section, each naming the API it still
+//!   lacks. `CANVAS_IMGUI_DEMO` shows it from anywhere;
 //! - **Frame surface**: a knob and a meter from a Frame document, laid out
 //!   and painted by Frame's `frame-surface` program
 //!   (FastTrackStudios/frame, `crates/frame-view`) in a process of its own,
@@ -25,8 +27,8 @@ use architect_canvas::ui::{
 use architect_scripting::luau::Runtime;
 use architect_shell::use_shell;
 use architect_workspace::{
-    Capability, KindSpec, Pane, Placement, Side, Target, View, ViewHost, ViewKinds, Workspace,
-    use_pane,
+    Capability, KindSpec, Node, Pane, Placement, Side, Target, View, ViewHost, ViewKinds,
+    Workspace, use_pane,
 };
 use dioxus::prelude::*;
 use facet::Facet;
@@ -70,29 +72,42 @@ pub fn views() -> [View; 4] {
     ]
 }
 
-/// The screenset's layout: two columns, Dioxus over Luau `ImGui` on the
-/// left, the Frame surface over A2UI on the right.
+/// The screenset's layout: two columns, the `ImGui` demo the left's height
+/// (it does not scroll), Dioxus over the Frame surface over A2UI on the
+/// right, Dioxus a little taller for its swatches.
 #[must_use]
 pub fn workspace() -> Workspace {
     let mut w = Workspace::new();
     let _ = w.open(
-        Pane::new(DIOXUS_PANE, "embed.dioxus", "Dioxus"),
+        Pane::new(LUAU_PANE, "embed.luau", "Luau ImGui"),
         Target::Tab,
     );
     let _ = w.open(
-        Pane::new(FRAME_PANE, "embed.frame", "Frame surface"),
+        Pane::new(DIOXUS_PANE, "embed.dioxus", "Dioxus"),
         Target::Split(Side::Right),
+    );
+    let _ = w.open(
+        Pane::new(FRAME_PANE, "embed.frame", "Frame surface"),
+        Target::Split(Side::Bottom),
     );
     let _ = w.open(
         Pane::new(A2UI_PANE, "embed.a2ui", "A2UI"),
         Target::Split(Side::Bottom),
     );
-    let _ = w.activate(&architect_workspace::PaneId::new(DIOXUS_PANE));
-    let _ = w.open(
-        Pane::new(LUAU_PANE, "embed.luau", "Luau ImGui"),
-        Target::Split(Side::Bottom),
-    );
-    let _ = w.activate(&architect_workspace::PaneId::new(DIOXUS_PANE));
+    let column = w
+        .windows
+        .first()
+        .and_then(|main| match main.center.as_ref()? {
+            Node::Split(row) => match &row.children.get(1)?.node {
+                Node::Split(column) => Some(column.id),
+                Node::Group(_) => None,
+            },
+            Node::Group(_) => None,
+        });
+    if let Some(column) = column {
+        let _ = w.set_shares(column, &[0.36, 0.33, 0.31]);
+    }
+    let _ = w.activate(&architect_workspace::PaneId::new(LUAU_PANE));
     w
 }
 
@@ -162,12 +177,16 @@ fn DioxusPane() -> Element {
     }
 }
 
-/// The demo script's one window (`imgui_demo.luau`'s context and name).
-const DEMO_WINDOW: &str = "imgui-demo/Window";
+/// The demo's window (`demo.luau`'s context and window name).
+const DEMO_WINDOW: &str = "imgui-demo/Dear ImGui Demo";
 
-/// The Luau `ImGui` pane: the demo script runs while the pane shows, its
-/// window drawn here. Its canvases are the pane's own, so the vault's tool
-/// windows never float it.
+/// The `ImGui` demo: the lab's `fts.imgui-demo` extension's script
+/// (`apps/lab/extensions/imgui-demo`), linked into the build.
+const DEMO_SCRIPT: &str = include_str!("../../extensions/imgui-demo/demo.luau");
+
+/// The Luau `ImGui` pane: the demo window, its script running while the
+/// pane shows. Its canvases are the pane's own, so the vault's tool windows
+/// never float it.
 #[component]
 fn LuauPane() -> Element {
     let t = use_shell().theme;
@@ -175,9 +194,9 @@ fn LuauPane() -> Element {
     let canvas = use_script_canvas(
         Runtime::new(ActionList::new()),
         ActionCaller::app(),
-        include_str!("imgui_demo.luau").to_owned(),
+        DEMO_SCRIPT.to_owned(),
         serde_json::Value::Null,
-        "Luau ImGui".to_owned(),
+        "ImGui demo".to_owned(),
         style_from_theme(&t),
     );
     let window = canvas.output().window(DEMO_WINDOW).cloned();
@@ -187,7 +206,8 @@ fn LuauPane() -> Element {
             KindHead {
                 name: "Luau ImGui",
                 kind: "luau · imgui",
-                about: "A Luau script's immediate-mode window: it redraws every frame, the lab paints its shapes.",
+                about: "Dear ImGui's demo window, section by section, drawn by a Luau script every frame; \
+                        each section names the API architect's ImGui still lacks.",
             }
             div { style: "flex: 1; position: relative; min-height: 0; margin: 4px 20px 20px; \
                           border: 1px solid {t.rule}; border-radius: 8px; overflow: hidden;",
@@ -295,9 +315,89 @@ struct SurfaceArgs {
     surface_id: String,
 }
 
+static IMGUI_DEMO: ActionMeta = ActionMeta {
+    id: "CANVAS_IMGUI_DEMO",
+    trait_name: "",
+    method_name: "",
+    display_name: "Show the ImGui demo window",
+    description: "Goes to the vault and shows the ImGui demo window (Dear ImGui's demo, section by section, in architect's ImGui), loading the Embedded views screenset when its pane is not open.",
+    category: "Canvas",
+    group: "ImGui",
+    shortcut: "",
+    toggleable: false,
+    undo: false,
+};
+
+/// What `CANVAS_IMGUI_DEMO` answers: the demo's pane and window, and
+/// whether the screenset was loaded for it.
+#[derive(Debug, Clone, Facet)]
+struct DemoShown {
+    pane: String,
+    window: String,
+    loaded: bool,
+}
+
+/// How often, and how many times, `CANVAS_IMGUI_DEMO` looks for the
+/// vault's workspace once it asked for the vault.
+const VAULT_POLL: std::time::Duration = std::time::Duration::from_millis(50);
+const VAULT_TRIES: u32 = 100;
+
+async fn run(list: &ActionList, id: &str, args: &serde_json::Value) -> Result<Vec<u8>, String> {
+    list.run_json_async(id, args.to_string().as_bytes())
+        .await
+        .map_err(|e| format!("{id}: {e}"))
+}
+
+/// The vault, its "Embedded views" when the demo's pane is not open, and
+/// the pane focused.
+async fn show_demo(list: &ActionList) -> Result<DemoShown, String> {
+    // The workspace's actions are the vault's, there while it shows.
+    let open = architect_workspace::control::ids::OPEN;
+    if list.info(open).is_none() {
+        let go = serde_json::json!({ "id": "LAB_GO_VAULT" });
+        run(list, architect_commands::RUN_ACTION, &go).await?;
+        let mut tries = 0;
+        while list.info(open).is_none() {
+            if tries == VAULT_TRIES {
+                return Err("the vault did not show".to_owned());
+            }
+            tries = tries.saturating_add(1);
+            futures_timer::Delay::new(VAULT_POLL).await;
+        }
+    }
+    let pane = serde_json::json!({ "pane": LUAU_PANE });
+    let loaded = run(list, architect_workspace::control::ids::PANE_GET, &pane)
+        .await
+        .is_err();
+    if loaded {
+        let set = serde_json::json!({ "name": "Embedded views" });
+        run(
+            list,
+            architect_workspace::control::ids::WORKSPACES_LOAD,
+            &set,
+        )
+        .await?;
+    }
+    run(list, architect_workspace::control::ids::FOCUS, &pane).await?;
+    Ok(DemoShown {
+        pane: LUAU_PANE.to_owned(),
+        window: DEMO_WINDOW.to_owned(),
+        loaded,
+    })
+}
+
 /// Puts `LAB_A2UI_DATA` on `list`: a surface's data model, which its
-/// components write as they are used.
-pub fn register(list: &ActionList, surfaces: &architect_a2ui::Surfaces) {
+/// components write as they are used; and `CANVAS_IMGUI_DEMO`, which shows
+/// the `ImGui` demo window.
+pub fn register(list: &Arc<ActionList>, surfaces: &architect_a2ui::Surfaces) {
+    let weak = Arc::downgrade(list);
+    let _ = list.register_async(&IMGUI_DEMO, Effect::Mutating, move |(): ()| {
+        let list = weak.upgrade();
+        async move {
+            let list = list.ok_or_else(|| "the lab is gone".to_owned())?;
+            show_demo(&list).await
+        }
+    });
     let surfaces = surfaces.clone();
     let bad = |message: String| ActionError::BadArgs {
         id: A2UI_DATA.id.to_owned(),

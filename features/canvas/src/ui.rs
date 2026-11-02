@@ -581,8 +581,10 @@ mod script {
         while let Some(first) = rx.next().await {
             // Moves coalesce; a press or a release is a frame of its own.
             let mut next = Some(first);
+            let mut pressed = false;
             while let Some(msg) = next.take() {
                 if apply(&session, &mut input, msg) {
+                    pressed = true;
                     break;
                 }
                 next = rx.try_recv().ok();
@@ -590,6 +592,13 @@ mod script {
             let report = session.frame(input.clone()).await;
             input.closed.clear();
             note(&mut status, &report, session.running());
+            // A click is known as its widget is drawn, after what it
+            // changes may have been: the frame after it draws that, as
+            // Dear ImGui's next frame would, with no input to wait for.
+            if pressed && !input.down && session.running() {
+                let report = session.frame(input.clone()).await;
+                note(&mut status, &report, session.running());
+            }
             if *output.peek() != *session.output() {
                 output.set(session.output().clone());
             }

@@ -174,6 +174,12 @@ The lab's Vault keeps one pane of each kind it shows in a screenset,
 `WORKSPACES_LOAD {"name": "Embedded views"}` over MCP and the CLI): a
 Dioxus component, a Luau script's ImGui window, a Frame surface and the
 A2UI surfaces, each naming its kind (`apps/lab/ui/src/embedded.rs`). The
+ImGui window, the left column's full height, is architect's
+`ShowDemoWindow`: a lab extension's script
+(`apps/lab/extensions/imgui-demo/demo.luau`) with the sections of Dear
+ImGui's demo, each drawing what architect's ImGui can and naming, in a
+"not implemented" line, the API it lacks. `CANVAS_IMGUI_DEMO` brings it
+up from anywhere: the Vault, the screenset, the pane focused. The
 Frame surface is FastTrackStudios/frame's `frame-surface` program, a
 process extension the lab loads when it finds it
 (`ARCHITECT_LAB_FRAME_SURFACE`, beside the lab, or on the `PATH`) and
@@ -181,7 +187,7 @@ moves with `LAB_FRAME_SET`; the lab declares the `frame.surface` kind
 itself and never links Frame. Scenario:
 [`apps/lab/scenarios/embedded-views.styx`](https://github.com/FastTrackStudios/architect/blob/main/apps/lab/scenarios/embedded-views.styx).
 
-![The Embedded views screenset: a Dioxus swatch picked, the Luau ImGui window's button pressed, the Frame surface's knob turned up, and an A2UI checkbox ticked](https://raw.githubusercontent.com/FastTrackStudios/architect/media/embedded-views.gif)
+![The Embedded views screenset: a Dioxus swatch picked, the ImGui demo window's sections, the Frame surface's knob turned up, and an A2UI checkbox ticked](https://raw.githubusercontent.com/FastTrackStudios/architect/media/embedded-views.gif)
 
 ## Kinds, hosts and the security model
 
