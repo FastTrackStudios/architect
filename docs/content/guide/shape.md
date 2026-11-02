@@ -144,13 +144,13 @@ The Dioxus desktop crates need the GTK/WebKit stack even in unit tests,
 so without the shell `cargo test --workspace` fails at link time.
 
 ```sh
-nix develop          # the libraries, over the rust you already have
-nix develop .#ci     # the same plus the pinned rust (1.99.1), rustfmt, clippy
+nix develop          # the pinned rust (1.99.1), the libraries and mold
 ```
 
 `rust-toolchain.toml` pins the toolchain (rust 1.99.1, with `rustfmt`,
 `clippy`, `rust-src` and the `wasm32-unknown-unknown` target); rustup
-reads it, and `flake.nix`'s `ci` shell pins the same release. The
+reads it, and `flake.nix`'s shell pins the same release (shadowing any
+other rust on the machine's PATH). The
 consumers (Task, studio, keyflow, frame) pin the same version, and the
 pins move together. CI reads the same pin through `RUSTUP_TOOLCHAIN` in
 `.github/workflows/checks.yml`. `.cargo/config.toml` carries the

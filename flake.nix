@@ -2,7 +2,8 @@
   description = "architect — dev shell with everything the workspace links against";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  # The `ci` shell's rust: the exact release rust-toolchain.toml pins.
+  # The shell's rust: the exact release rust-toolchain.toml pins, at the
+  # rust-overlay revision Task, studio and keyflow lock.
   inputs.rust-overlay.url = "github:oxalica/rust-overlay";
   inputs.rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
 
@@ -59,8 +60,16 @@
             ffmpeg
             gifski
           ];
+          # The fleet's rust: 1.99.1, the rust-toolchain.toml pin, from
+          # rust-overlay at the revision Task, studio and keyflow lock, so
+          # every repo's shell compiles with the same rustc and kache
+          # shares their builds. Bump with rust-toolchain.toml.
+          rust = pkgs.rust-bin.stable."1.99.1".default.override {
+            extensions = [ "rust-src" "rust-analyzer" "clippy" "rustfmt" ];
+            targets = [ "wasm32-unknown-unknown" ];
+          };
           shell = extra: pkgs.mkShell {
-            packages = common ++ linux ++ extra;
+            packages = [ rust ] ++ common ++ linux ++ extra;
             # Point the loader at the same libraries the linker found, so
             # a desktop test binary can also *run* from this shell. The C++
             # runtime too: Luau (architect-scripting, -canvas) is C++, and a
@@ -69,18 +78,13 @@
           };
         in
         {
-          # Libraries only: layers under whatever rust toolchain you already
-          # have (`nix develop -c cargo test --workspace`).
+          # The pinned rust, the native libraries and mold
+          # (`nix develop -c cargo test --workspace`). Whatever rust is on
+          # the machine's PATH is shadowed: a different rustc would miss
+          # every cache entry the fleet's builds share.
           default = shell [ ];
-          # Self-contained: the pinned toolchain on top (rust 1.99.1, the
-          # rust-toolchain.toml pin and the fleet's; bump the two together),
-          # for a machine with no rust of its own.
-          ci = shell [
-            (pkgs.rust-bin.stable."1.99.1".default.override {
-              extensions = [ "rust-src" "rust-analyzer" "clippy" "rustfmt" ];
-              targets = [ "wasm32-unknown-unknown" ];
-            })
-          ];
+          # The same shell under the name CI docs and scripts use.
+          ci = shell [ ];
         });
     };
 }
