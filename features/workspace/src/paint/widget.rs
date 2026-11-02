@@ -9,7 +9,8 @@
 //! page or as a layer of its own.
 
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use anyrender::RenderContext;
@@ -34,6 +35,7 @@ const LINE: f64 = 20.0;
 /// A [`Painter`] as a Blitz custom widget.
 pub struct PaintWidget {
     painter: Painter,
+    wake: PaintWake,
 }
 
 impl std::fmt::Debug for PaintWidget {
@@ -44,8 +46,15 @@ impl std::fmt::Debug for PaintWidget {
 
 impl PaintWidget {
     #[must_use]
-    pub const fn new(painter: Painter) -> Self {
-        Self { painter }
+    pub fn new(painter: Painter) -> Self {
+        Self {
+            painter,
+            wake: PaintWake::new(),
+        }
+    }
+
+    fn with_wake(painter: Painter, wake: PaintWake) -> Self {
+        Self { painter, wake }
     }
 }
 
@@ -58,7 +67,7 @@ impl Widget for PaintWidget {
     }
 
     fn needs_redraw(&self) -> bool {
-        self.painter.wants_frame()
+        self.wake.0.dirty.load(Ordering::Acquire) || self.painter.wants_frame()
     }
 
     fn requires_redraw(&self) -> bool {
@@ -78,12 +87,52 @@ impl Widget for PaintWidget {
         height: u32,
         scale: f64,
     ) -> Scene {
+        self.wake.0.dirty.swap(false, Ordering::AcqRel);
         let scale = if scale > 0.0 { scale } else { 1.0 };
         self.painter.frame(Geometry {
             width: (f64::from(width) / scale) as f32,
             height: (f64::from(height) / scale) as f32,
             scale: scale as f32,
         })
+    }
+}
+
+/// A cloneable, thread-safe request for a mounted pane to draw again.
+/// Requests before mounting are retained. Use one handle per mounted pane.
+#[derive(Clone, Default)]
+pub struct PaintWake(Arc<WakeState>);
+
+#[derive(Default)]
+struct WakeState {
+    dirty: AtomicBool,
+    window: Mutex<Option<Arc<dyn ShellProvider>>>,
+}
+
+impl PaintWake {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Mark the pane dirty and wake its window, including from a worker thread.
+    pub fn wake(&self) {
+        self.0.dirty.store(true, Ordering::Release);
+        let window = self
+            .0
+            .window
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        if let Some(window) = window {
+            window.request_redraw();
+        }
+    }
+
+    fn attach(&self, window: Option<Arc<dyn ShellProvider>>) {
+        *self.0.window.lock().unwrap_or_else(PoisonError::into_inner) = window;
+        if self.0.dirty.load(Ordering::Acquire) {
+            self.wake();
+        }
     }
 }
 
@@ -228,6 +277,7 @@ pub struct PaintMount {
     extras: Extras,
     stats: FrameStats,
     budget: Duration,
+    wake: PaintWake,
 }
 
 impl PartialEq for PaintMount {
@@ -253,6 +303,7 @@ impl PaintMount {
             extras: Extras::default(),
             stats: FrameStats::new(),
             budget: Duration::from_micros(16_667),
+            wake: PaintWake::new(),
         }
     }
 
@@ -276,6 +327,12 @@ impl PaintMount {
         self.budget = budget;
         self
     }
+
+    /// A handle for requesting frames after external state changes.
+    #[must_use]
+    pub fn wake_handle(&self) -> PaintWake {
+        self.wake.clone()
+    }
 }
 
 /// A pane of the paint kind: `mount`'s view, filling the pane, given the
@@ -290,6 +347,7 @@ pub fn PaintPane(mount: PaintMount) -> Element {
     let actions = try_use_context::<Arc<ActionList>>();
     let theme = architect_shell::try_use_shell().map(|s| s.theme);
     let window = try_use_context::<Arc<dyn ShellProvider>>();
+    mount.wake.attach(window.clone());
     let (widget, input) = use_hook(|| {
         let began = Instant::now();
         let clock = FrameClock::new(mount.budget, move || began.elapsed());
@@ -306,7 +364,10 @@ pub fn PaintPane(mount: PaintMount) -> Element {
         let input = ctx.input.clone();
         let view = (mount.make)(&ctx);
         let painter = Painter::boxed(ctx, view).with_stats(mount.stats.clone());
-        (CustomWidgetAttr::new(PaintWidget::new(painter)), input)
+        (
+            CustomWidgetAttr::new(PaintWidget::with_wake(painter, mount.wake.clone())),
+            input,
+        )
     });
     let focus = move |on: bool| {
         input.push(ViewInput::Focus(on));
@@ -324,5 +385,32 @@ pub fn PaintPane(mount: PaintMount) -> Element {
             onfocus: move |_| focus(true),
             onblur: move |_| blur(false),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicUsize;
+
+    #[derive(Default)]
+    struct Window(AtomicUsize);
+
+    impl ShellProvider for Window {
+        fn request_redraw(&self) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    #[test]
+    fn wake_before_and_after_mount_marks_dirty_and_wakes_the_window() {
+        let wake = PaintWake::new();
+        wake.wake();
+        let window = Arc::new(Window::default());
+        wake.attach(Some(window.clone()));
+        assert!(wake.0.dirty.swap(false, Ordering::AcqRel));
+        assert_eq!(window.0.load(Ordering::Relaxed), 1);
+        std::thread::spawn(move || wake.wake()).join().unwrap();
+        assert_eq!(window.0.load(Ordering::Relaxed), 2);
     }
 }

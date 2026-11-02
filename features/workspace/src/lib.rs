@@ -79,7 +79,7 @@ pub use ops::{Dest, Target, WorkspaceError};
 #[cfg(feature = "paint")]
 pub use paint::{FrameStats, FrameSummary, Mark, Marks, PaintView, Painter};
 #[cfg(feature = "paint-ui")]
-pub use paint::{PaintMount, PaintPane, PaintWidget, shell_tokens};
+pub use paint::{PaintMount, PaintPane, PaintWake, PaintWidget, shell_tokens};
 pub use presence::{PlayheadMark, PointerMark, PresenceMarks, WashMark, css_color};
 pub use screenset::{
     FormClass, Layout, Recall, SavedScreensets, Screenset, ScreensetOptions, Screensets,
