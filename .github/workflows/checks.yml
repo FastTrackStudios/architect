@@ -61,6 +61,12 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo run -q -p xtask -- docs
 
+      # Everything an app serves over MCP it serves on the command line
+      # too, each app with a parity test (docs/content/guide/cli-and-mcp.md).
+      - name: surfaces
+        if: ${{ !cancelled() }}
+        run: cargo run -q -p xtask -- surfaces
+
   test:
     name: Tests
     runs-on: [self-hosted, thebattleship]
