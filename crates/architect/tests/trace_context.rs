@@ -80,15 +80,15 @@ async fn a_call_made_in_a_span_is_dispatched_as_its_child() {
 
     // A call's server span closes on the dispatching thread after the reply
     // is sent, so the client can be back here before it ends: wait for both.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    let spans = loop {
+    let mut spans = Vec::new();
+    for _ in 0..500 {
         provider.force_flush().expect("flush");
-        let spans = exporter.get_finished_spans().expect("spans");
-        if named(&spans, "EchoRpc/echo").len() >= 2 || std::time::Instant::now() > deadline {
-            break spans;
+        spans = exporter.get_finished_spans().expect("spans");
+        if named(&spans, "EchoRpc/echo").len() >= 2 {
+            break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-    };
+    }
     let parent = named(&spans, "song.read_back");
     let calls = named(&spans, "EchoRpc/echo");
     assert_eq!(parent.len(), 1, "{spans:#?}");
