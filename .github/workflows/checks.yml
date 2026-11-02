@@ -3,9 +3,20 @@ name: checks
 # The full suite runs after a PR merges, on every push to main (studio's
 # shape). A PR runs only the fast checks in pr.yml; whoever merges watches
 # main and reverts or fixes forward when it goes red.
+#
+# Tests are selected the way Task's main CI does it: on a push to main,
+# `cargo rail plan` between the previous main and this commit names the
+# packages the diff reaches, and nextest runs only those (scripts/
+# ci-rail-plan.py). The whole workspace still builds, so the artifacts are
+# the ones a full run uses. Every test runs on the nightly schedule, on a
+# `v*` tag and on a manual dispatch, and whenever the plan can't be read
+# exactly (CI inputs changed, workspace-wide change, rail failing).
 on:
   push:
     branches: [main]
+    tags: ["v*"]
+  schedule:
+    - cron: "17 3 * * *"
   workflow_dispatch:
 
 # A push to main never cancels a running check: it waits as the one pending
@@ -91,12 +102,52 @@ jobs:
         shell: devenv shell -- bash -e {0}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The plan diffs against the previous main commit.
+          fetch-depth: 0
       - uses: ./.github/actions/shared-rust
         with:
           kind: test
 
+      # Fail open: anything but a push to main with a readable plan runs
+      # every test.
+      - name: plan
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          full() {
+            echo "plan: $1 -> every test"
+            printf 'full=true\ntests=true\ntest_filter=\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+          [ "$EVENT" = push ] && [ "$REF" = refs/heads/main ] || full "$EVENT on $REF"
+          git cat-file -e "$BEFORE^{commit}" 2>/dev/null || full "no previous main commit ($BEFORE)"
+          plan="$RUNNER_TEMP/rail-plan.json"
+          cargo rail plan --from "$BEFORE" --to HEAD --json > "$plan" || full "cargo rail plan failed"
+          gates="$(python3 scripts/ci-rail-plan.py "$plan")" || full "plan parse failed"
+          [ -n "$gates" ] || full "plan parse produced no gates"
+          echo "$gates" | tee -a "$GITHUB_OUTPUT"
+
+      # nextest runs each test in its own process, in parallel across every
+      # binary; the build is `--workspace` either way.
       - name: test
-        run: cargo test --workspace
+        if: ${{ steps.plan.outputs.tests == 'true' }}
+        env:
+          FILTER: ${{ steps.plan.outputs.test_filter }}
+        run: |
+          if [ -n "$FILTER" ]; then
+            cargo nextest run --workspace --profile ci --no-tests=pass -E "$FILTER"
+          else
+            cargo nextest run --workspace --profile ci --no-tests=pass
+          fi
+
+      # nextest does not run doctests; they follow a full run only.
+      - name: doctests
+        if: ${{ steps.plan.outputs.full == 'true' }}
+        run: cargo test --workspace --doc
 
   # The framework half must stay wasm-clean; the ui/story crates pull
   # native rendering (blitz/vello) and are checked natively only.
