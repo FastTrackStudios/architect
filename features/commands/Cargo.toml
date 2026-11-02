@@ -37,6 +37,8 @@ ui = [
     "dep:architect",
     "dep:futures-channel",
     "dep:futures-util",
+    # The confirmation sheet's poll and countdown (src/confirm.rs).
+    "dep:futures-timer",
 ]
 
 [dependencies]

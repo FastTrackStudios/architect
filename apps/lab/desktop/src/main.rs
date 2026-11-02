@@ -7,10 +7,18 @@
 //! launcher, so a Vault tab dragged out of the window opens a window of
 //! its own.
 //!
+//! With `ARCHITECT_LAB_MCP_PORT` set it serves its Action List over MCP on
+//! that loopback port (`mcp`).
+//!
 //! One instance: a second launch brings the first forward and ends. With
 //! `--background` (a login launch) it starts in the menu bar, with no
 //! window and no Dock icon.
 
+mod mcp;
+
+use std::sync::Arc;
+
+use architect::action::ActionList;
 use architect_lab_ui::{Device, LabApp, use_window_screen};
 use dioxus::prelude::*;
 use dioxus_native::WindowAttributes;
@@ -23,6 +31,9 @@ fn first_device() -> Device {
 #[component]
 fn App() -> Element {
     let _screen = use_window_screen(first_device());
+    // The lab's Action List, made here so MCP can serve it too.
+    let list = use_context_provider(|| Arc::new(ActionList::new()));
+    use_hook(|| mcp::serve(&list));
     rsx! { LabApp {} }
 }
 
