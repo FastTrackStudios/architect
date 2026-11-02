@@ -26,7 +26,7 @@ use std::sync::mpsc::Receiver;
 
 use blitz_shell::{BlitzShellEvent, BlitzShellProxy, View, WindowConfig};
 use blitz_traits::net::{NetHandler, NetProvider, Request};
-use dioxus::dioxus_core::ScopeId;
+use dioxus::core::ScopeId;
 use dioxus::prelude::*;
 use dioxus_native::winit::application::ApplicationHandler;
 use dioxus_native::winit::dpi::{LogicalPosition, LogicalSize};

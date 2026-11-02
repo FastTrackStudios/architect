@@ -121,11 +121,13 @@ const ACCOUNT: [(&str, &str); 7] = [
 ];
 
 /// Render a settings page: rail on the left, `body` on the right.
+#[must_use]
 pub fn document(title: &str, heading: &str, blurb: &str, nav: &Nav, body: Element) -> Response {
     shell(title, heading, blurb, nav, None, body)
 }
 
 /// As [`document`], with a script in the page — the passkey pages.
+#[must_use]
 pub fn document_with_script(
     title: &str,
     heading: &str,

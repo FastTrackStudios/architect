@@ -1252,7 +1252,7 @@ pub fn WorkspaceView(
                 if plain && arrange_key == Some(e.code()) {
                     host.set_arranging(true);
                 }
-                if e.key() == Key::Escape {
+                if e.key() == Key::Named(NamedKey::Escape) {
                     host.drag.set(None);
                     host.menu.set(None);
                     slide::cancel(host);

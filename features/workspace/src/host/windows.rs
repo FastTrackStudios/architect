@@ -437,7 +437,7 @@ fn PopoutView(props: PopoutProps) -> Element {
                 }
             },
             onkeydown: move |e| {
-                if e.key() == Key::Escape {
+                if e.key() == Key::Named(NamedKey::Escape) {
                     host.drag.set(None::<Drag>);
                     host.menu.set(None);
                 }

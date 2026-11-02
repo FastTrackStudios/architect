@@ -13,7 +13,7 @@ use architect_presence::{
     AppPresence, Badge, Call, Effect, Handoff, Heard, Lifecycle, Presence, Recorder, SHOW_WINDOW,
     STATE, TOGGLE_BACKGROUND, TOGGLE_LOGIN, UsePlatform, close_requested,
 };
-use dioxus::dioxus_core::NoOpMutations;
+use dioxus::core::NoOpMutations;
 use dioxus::prelude::*;
 
 thread_local! {

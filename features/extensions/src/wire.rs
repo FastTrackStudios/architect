@@ -3,10 +3,11 @@
 //! "Views: Dioxus, rendered remotely").
 //!
 //! The extension runs its own `VirtualDom`; what it renders crosses as
-//! Dioxus's edit stream ([`Edit`], one per `WriteMutations` call), each
-//! template sent once ([`WireTemplate`], before the first edit that loads
-//! it) and named by a number after that. The host applies the edits into
-//! a Blitz sub-document of its own. Events go back as [`ViewEvent`]s, to
+//! Dioxus's edit stream ([`Edit`], one per `WriteMutations` call): a stack
+//! machine over the host's nodes, which names a node by its Dioxus element
+//! id only when it pushes it ([`Edit::PushId`]) or registers it
+//! ([`Edit::SetId`]). The host applies the edits into a Blitz sub-document
+//! of its own. Events go back as [`ViewEvent`]s, to
 //! the handlers of the element they name.
 //!
 //! These are architect's types, not Dioxus's serde shapes, so the wire is
@@ -15,7 +16,7 @@
 use facet::Facet;
 
 /// The wire's version: a host refuses a process that speaks another.
-pub const WIRE: u32 = 1;
+pub const WIRE: u32 = 2;
 
 /// What a process says when the host connects.
 #[derive(Clone, Debug, PartialEq, Eq, Facet)]
@@ -43,48 +44,10 @@ pub struct Open {
 #[derive(Clone, Debug, PartialEq, Facet)]
 #[repr(u8)]
 pub enum Frame {
-    /// Templates first (each only once per mount), then the edits.
-    Edits {
-        templates: Vec<WireTemplate>,
-        edits: Vec<Edit>,
-    },
+    /// The edits, in order.
+    Edits { edits: Vec<Edit> },
     /// It cannot render (no such view, or its component failed).
     Failed(String),
-}
-
-/// A template, its tree flattened: nodes refer to their children by
-/// index into `nodes`.
-#[derive(Clone, Debug, PartialEq, Eq, Facet)]
-pub struct WireTemplate {
-    /// The number edits load it by.
-    pub id: u32,
-    pub nodes: Vec<WireNode>,
-    /// The template's roots, as indices into `nodes`.
-    pub roots: Vec<u32>,
-}
-
-/// One node of a template.
-#[derive(Clone, Debug, PartialEq, Eq, Facet)]
-#[repr(u8)]
-pub enum WireNode {
-    Element {
-        tag: String,
-        namespace: Option<String>,
-        /// Its static attributes; dynamic ones arrive as edits.
-        attrs: Vec<WireAttr>,
-        children: Vec<u32>,
-    },
-    Text(String),
-    /// Filled in at run time: a placeholder until an edit replaces it.
-    Dynamic,
-}
-
-/// A static attribute of a template's element.
-#[derive(Clone, Debug, PartialEq, Eq, Facet)]
-pub struct WireAttr {
-    pub name: String,
-    pub value: String,
-    pub namespace: Option<String>,
 }
 
 /// An attribute's value.
@@ -99,71 +62,51 @@ pub enum Value {
     Bool(bool),
 }
 
-/// One of Dioxus's `WriteMutations`, as data. Ids are Dioxus's element
-/// ids; `m` counts nodes on the writer's stack.
+/// One of Dioxus's `WriteMutations`, as data: a stack machine. Ids are
+/// Dioxus's element ids; `m` counts nodes on the writer's stack, the
+/// "top" is the last node pushed.
 #[derive(Clone, Debug, PartialEq, Facet)]
 #[repr(u8)]
 pub enum Edit {
-    AppendChildren {
-        id: u64,
-        m: u32,
+    /// Push the node registered as `id`.
+    PushId { id: u64 },
+    /// Register the top node as `id`, leaving it on the stack.
+    SetId { id: u64 },
+    /// Replace the top node with its `index`th child.
+    Child { index: u32 },
+    /// Drop the top node from the stack (not from the document).
+    Pop,
+    /// Make an element and push it.
+    CreateElement {
+        tag: String,
+        namespace: Option<String>,
     },
-    AssignNodeId {
-        path: Vec<u8>,
-        id: u64,
-    },
-    CreatePlaceholder {
-        id: u64,
-    },
-    CreateTextNode {
-        value: String,
-        id: u64,
-    },
-    LoadTemplate {
-        template: u32,
-        index: u32,
-        id: u64,
-    },
-    ReplaceNodeWith {
-        id: u64,
-        m: u32,
-    },
-    ReplacePlaceholder {
-        path: Vec<u8>,
-        m: u32,
-    },
-    InsertAfter {
-        id: u64,
-        m: u32,
-    },
-    InsertBefore {
-        id: u64,
-        m: u32,
-    },
+    /// Make a text node and push it.
+    CreateText { value: String },
+    /// Replace the top node with a deep copy of itself.
+    Clone,
+    /// Append the top `m` nodes to the node below them, which stays.
+    AppendChildren { m: u32 },
+    /// Put the top `m` nodes where the node below them is, and drop it.
+    ReplaceWith { m: u32 },
+    /// Put the top `m` nodes after the node below them, which stays.
+    InsertAfter { m: u32 },
+    /// Put the top `m` nodes before the node below them, which stays.
+    InsertBefore { m: u32 },
+    /// Set (or, with [`Value::None`], clear) an attribute of the top node.
     SetAttribute {
         name: String,
         namespace: Option<String>,
         value: Value,
-        id: u64,
     },
-    SetText {
-        value: String,
-        id: u64,
-    },
-    Listen {
-        name: String,
-        id: u64,
-    },
-    Unlisten {
-        name: String,
-        id: u64,
-    },
-    Remove {
-        id: u64,
-    },
-    PushRoot {
-        id: u64,
-    },
+    /// Set the top node's text.
+    SetText { value: String },
+    /// The top node has a handler for `name` events.
+    Listen { name: String },
+    /// The top node lost a handler for `name` events.
+    Unlisten { name: String },
+    /// Take the top node off the stack and out of the document.
+    Remove,
 }
 
 /// An event on one of a view's elements, for its handlers.

@@ -218,10 +218,11 @@ problem; Luau has the better sandbox and is a language people know.)
 
 An extension writes its views in Dioxus, like the app. It runs its own
 `VirtualDom` (inside its WASM component, or its process); what that
-renders crosses the boundary as Dioxus's own edit stream — templates
-(sent once, cached by their content hash) and the edits to them — and
-the host applies them into a document of its own in Blitz, with the
-same writer that applies the app's. Events go back the other way as
+renders crosses the boundary as Dioxus's own edit stream — since Dioxus
+0.8's buffered writer, a stack machine (push a node by its element id,
+create, clone, append, replace, set an attribute, register an id) — and
+the host applies it into a document of its own in Blitz, the same
+machine the app's own writer runs. Events go back the other way as
 dioxus-html's serialised event data, to the extension's handlers.
 Dioxus LiveView already works this way across a network; here the
 boundary is a function call or a local socket, well under a millisecond.

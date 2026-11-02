@@ -30,8 +30,8 @@ blitz-traits      = { workspace = true }
 
 # Vello CPU rasteriser — matches what blitz's `examples/screenshot.rs`
 # uses. CPU only so snapshots don't need a GPU in CI.
-anyrender           = "0.11"
-anyrender_vello_cpu = "0.14"
+anyrender.workspace = true
+anyrender_vello_cpu.workspace = true
 futures-util        = "0.3"
 peniko              = "0.6"
 rgb                 = "0.8"

@@ -101,7 +101,8 @@ placeholder, and follows the process when it restarts.
   running and the placeholder shows why; Start again brings it back;
   unloading shows a placeholder; a declared view the process does not draw,
   or a program that never says hello, fails to load; nonsense frames (unknown
-  ids, cycles, looping templates, raw HTML) are refused without a crash.
+  ids, cycles, a pop past the root, a child that is not there, raw HTML) are
+  refused without a crash.
 
 ## Status
 

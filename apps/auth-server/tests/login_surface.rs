@@ -622,9 +622,12 @@ async fn a_mailed_code_still_owes_the_second_factor() {
     let page = String::from_utf8_lossy(&bytes).into_owned();
     let marker = r#"aria-label="Setup key""#;
     let at = page.find(marker).expect("a setup key");
-    let before = &page[..at];
-    let value_at = before.rfind(r#"value=""#).expect("a value");
-    let secret: String = before[value_at + r#"value=""#.len()..]
+    // The whole tag: its attributes come in any order.
+    let start = page[..at].rfind('<').expect("the tag's start");
+    let end = at + page[at..].find('>').expect("the tag's end");
+    let tag = &page[start..end];
+    let value_at = tag.find(r#"value=""#).expect("a value");
+    let secret: String = tag[value_at + r#"value=""#.len()..]
         .chars()
         .take_while(|c| *c != '"')
         .collect();

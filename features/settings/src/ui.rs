@@ -955,7 +955,7 @@ fn TextView(value: String, placeholder: String, onpick: EventHandler<Value>) -> 
             oninput: move |e| draft.set(e.value()),
             onblur: move |_| onpick.call(Value::Text(draft())),
             onkeydown: move |e| {
-                if e.key() == Key::Enter {
+                if e.key() == Key::Named(NamedKey::Enter) {
                     onpick.call(Value::Text(draft()));
                 }
             },
@@ -985,7 +985,7 @@ fn ShortcutView(value: String, onpick: EventHandler<Value>) -> Element {
                     return;
                 }
                 e.prevent_default();
-                if e.key() == Key::Escape {
+                if e.key() == Key::Named(NamedKey::Escape) {
                     recording.set(false);
                     return;
                 }
@@ -1004,13 +1004,13 @@ fn ShortcutView(value: String, onpick: EventHandler<Value>) -> Element {
 fn chord(e: &KeyboardEvent) -> Option<String> {
     let key = match e.key() {
         Key::Character(c) => c.to_uppercase(),
-        Key::Tab => "Tab".to_owned(),
-        Key::Enter => "Return".to_owned(),
-        Key::ArrowLeft => "←".to_owned(),
-        Key::ArrowRight => "→".to_owned(),
-        Key::ArrowUp => "↑".to_owned(),
-        Key::ArrowDown => "↓".to_owned(),
-        _ => return None,
+        Key::Named(NamedKey::Tab) => "Tab".to_owned(),
+        Key::Named(NamedKey::Enter) => "Return".to_owned(),
+        Key::Named(NamedKey::ArrowLeft) => "←".to_owned(),
+        Key::Named(NamedKey::ArrowRight) => "→".to_owned(),
+        Key::Named(NamedKey::ArrowUp) => "↑".to_owned(),
+        Key::Named(NamedKey::ArrowDown) => "↓".to_owned(),
+        Key::Named(_) => return None,
     };
     let m = e.modifiers();
     let mut out = String::new();

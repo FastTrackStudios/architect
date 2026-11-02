@@ -9,7 +9,7 @@
 //! document.
 
 use architect_workspace::Rect;
-use blitz_dom::BaseDocument;
+use blitz_dom::{BaseDocument, NodeId};
 use dioxus::prelude::MountedData;
 
 use crate::Target;
@@ -39,7 +39,7 @@ pub fn find_in(
     doc: &BaseDocument,
     target: &Target,
     resolvers: &[Resolver],
-    outside: Option<usize>,
+    outside: Option<NodeId>,
 ) -> Option<Rect> {
     if let Target::At { x, y } = target {
         return Some(Rect::new(*x, *y, 0.0, 0.0));
@@ -97,7 +97,7 @@ pub fn size_live(mounted: &MountedData) -> Option<(f32, f32)> {
 /// the last in the page, which is the innermost of a chain of them nested
 /// (a button, its label) and, of the rest, the one drawn over the others
 /// (a menu or a popover comes after the page it opens over).
-fn by_text(doc: &BaseDocument, text: &str, outside: Option<usize>) -> Option<usize> {
+fn by_text(doc: &BaseDocument, text: &str, outside: Option<NodeId>) -> Option<NodeId> {
     doc.query_selector_all("*")
         .ok()?
         .into_iter()
@@ -113,7 +113,7 @@ fn by_text(doc: &BaseDocument, text: &str, outside: Option<usize>) -> Option<usi
 }
 
 /// Whether node `id` is `ancestor` or inside it.
-fn within(doc: &BaseDocument, id: usize, ancestor: usize) -> bool {
+fn within(doc: &BaseDocument, id: NodeId, ancestor: NodeId) -> bool {
     let mut at = Some(id);
     while let Some(n) = at {
         if n == ancestor {

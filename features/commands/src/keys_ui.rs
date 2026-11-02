@@ -602,16 +602,16 @@ pub(crate) fn AskPalette() -> Element {
     };
     let answer_key = answer.clone();
     let on_key = move |e: KeyboardEvent| match e.key() {
-        Key::ArrowDown => {
+        Key::Named(NamedKey::ArrowDown) => {
             e.prevent_default();
             selected.set(pick.saturating_add(1).min(count.saturating_sub(1)));
         }
-        Key::ArrowUp => {
+        Key::Named(NamedKey::ArrowUp) => {
             e.prevent_default();
             selected.set(pick.saturating_sub(1));
         }
-        Key::Enter => answer_key(None),
-        Key::Escape => commands.close(),
+        Key::Named(NamedKey::Enter) => answer_key(None),
+        Key::Named(NamedKey::Escape) => commands.close(),
         _ => {}
     };
     let done: Vec<String> = asking

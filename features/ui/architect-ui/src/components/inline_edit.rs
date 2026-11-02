@@ -99,10 +99,10 @@ pub fn InlineEdit(props: InlineEditProps) -> Element {
                 oninput: move |e| draft.set(e.value()),
                 onkeydown: move |e: KeyboardEvent| {
                     e.stop_propagation();
-                    if e.key() == Key::Enter {
+                    if e.key() == Key::Named(NamedKey::Enter) {
                         commit_key();
                     }
-                    if e.key() == Key::Escape {
+                    if e.key() == Key::Named(NamedKey::Escape) {
                         cancel_key();
                     }
                 },

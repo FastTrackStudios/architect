@@ -303,7 +303,7 @@ mod hooks {
     use std::collections::HashMap;
     use std::rc::Rc;
 
-    use dioxus::dioxus_core::spawn_forever;
+    use dioxus::core::spawn_forever;
     use dioxus::prelude::*;
 
     use super::{CallQueue, CallTransport, QueuedCall, Settled};
