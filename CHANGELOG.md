@@ -1,3 +1,10 @@
+# Changelog
+
+This file ends at v0.10.0 and is no longer written. Later releases take
+their notes from the cargo-rail change files in `.changes/` (see
+`.changes/README`); read them on each tag's GitHub Release, or run
+`just release-notes` for what is unreleased.
+
 ## [0.10.0] - 2026-11-02
 
 ### 🚀 Features

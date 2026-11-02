@@ -40,7 +40,7 @@ In the architect repo `cargo xtask` is `cargo run -p xtask --`. Consumers build 
 
 ## CI (`.github/workflows/pr.yml`, `.github/workflows/checks.yml`)
 
-- A PR runs `pr.yml` only: one job, `check` (the status branch protection requires), with `cargo fmt --all -- --check` and a stale-`Cargo.lock` check, about a minute. The full suite below runs after the merge, on every push to main; when main goes red, revert or fix forward.
+- A PR runs `pr.yml` only: one job, `check` (the status branch protection requires), with `cargo fmt --all -- --check`, a stale-`Cargo.lock` check and `change files` (`cargo rail change check --since` the PR's base: every crate the PR changes needs a `.changes/*.md`; `just ci-changes` locally), about a minute. The full suite below runs after the merge, on every push to main; PRs merge in batches without waiting on it, and main's run is the gate: when main goes red, fix forward or revert.
 - `checks.yml`, on main: `CARGO_BUILD_WARNINGS: deny` (every warning fails the job; no `RUSTFLAGS`, see Fleet toolchain). Jobs run on the self-hosted THEBATTLESHIP pool (setup in `.github/actions/shared-rust`: the flake's default shell, rust 1.99.1 (the `rust-toolchain.toml` pin) via `RUSTUP_TOOLCHAIN`, a per-slot target dir over the host's kache), in parallel: `lint` (fmt, `clippy --workspace --all-targets` with no `--all-features`, `boundaries`, `docs`, `surfaces`), `test` (`test --workspace`, includes xtask tests) and `wasm`, the wasm checks of the framework crates (architect, atom, form, permissions, auth-proto, auth-client, crdt, architect-input, plus architect-input with `dioxus`).
 - Job `tags` (ubuntu, full history) runs `cargo run -p xtask -- tags --verbose`.
 - Not in CI: clippy `--all-features` (`just lint` runs it), `just ui-css-check`, `just auth-ui-css-check`, `just auth-e2e`, ui-snapshot and parity tests.
@@ -81,9 +81,9 @@ Every fleet Rust repo (architect, Task, studio, keyflow, frame) compiles with on
 
 ## Cut a tag
 
-1. Merge to `main` (CI runs on PRs and `main` pushes).
-2. Add `## [X.Y.Z] - date` to `CHANGELOG.md` (the fleet's convention is a `docs(changelog): X.Y.Z` PR). The GitHub release body comes from `git log` since the previous tag (`.github/workflows/release.yml`), not from the changelog.
-3. `git tag vX.Y.Z <commit>` and push; `release.yml` fires on `v*`.
+1. Merge to `main` with each PR's change file (`.changes/README`). A lone PR is squash-merged; a stack merges with merge commits titled with each PR's title.
+2. `just release-next` names the next semver tag from the highest bump since the previous tag (before 1.0: `major` bumps the minor number, anything else the patch number); `just release-notes` prints the draft notes. Fix a note by editing its change file on `main` before tagging. Nothing edits `CHANGELOG.md`: it ends at v0.10.0.
+3. `git tag vX.Y.Z <commit>` and push; `release.yml` fires on `v*` and publishes the GitHub Release with `scripts/release-notes.sh` `notes`: the change files added since the previous tag, never the commits.
 4. `cargo xtask tags -v` must pass. Never move or renumber a published tag; `GRANDFATHERED` holds only `v0.0.2` and must never grow.
 5. Re-pin consumers: `just fleet-bump vX.Y.Z ../task ../studio`, `cargo update -p architect`, then their boundaries run.
 
