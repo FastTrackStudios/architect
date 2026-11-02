@@ -1296,12 +1296,15 @@ dependencies = [
 name = "architect-workspace"
 version = "0.1.0"
 dependencies = [
+ "anyrender",
+ "anyrender_vello_cpu",
  "architect",
  "architect-commands",
  "architect-mcp",
  "architect-shell",
  "architect-workspace",
  "architect-workspace-hack",
+ "blitz-dom",
  "blitz-shell",
  "blitz-traits",
  "crdt",
@@ -1309,12 +1312,14 @@ dependencies = [
  "dioxus-asset-resolver",
  "dioxus-devtools",
  "dioxus-native",
+ "dioxus-native-dom",
  "facet",
  "facet-json",
  "futures-channel",
  "futures-timer",
  "futures-util",
  "lucide-dioxus",
+ "peniko",
  "serde_json",
  "thiserror 2.0.20",
 ]

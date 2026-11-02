@@ -13,8 +13,13 @@ weight = 68
 > (`features/workspace/src/host/mod.rs` `View`, `Views::resolve`), and an
 > extension's `[[views]] kind` is checked when it loads
 > (`features/extensions/src/host.rs` `LoadError::ViewKind`,
-> `features/extensions/tests/view_kinds.rs`). Only `dioxus` is built in.
-> Every other kind is its own issue: GPU views (#221), WebView/HTML
+> `features/extensions/tests/view_kinds.rs`). `dioxus` is built in, and
+> `paint` is the first GPU kind (#221): a view that records an `anyrender`
+> scene each frame, drawn in-process by Blitz in the pane, with a real
+> `ViewCtx` and typed host data ([Paint views](#paint-views), features
+> `paint` and `paint-ui`). An app registers it with `KindSpec::paint`.
+> Every other kind is its own issue: raw wgpu and the web's `<canvas>`
+> (#221), WebView/HTML
 > (#222), ImGui from Luau (#223), Frame surfaces (#224, in
 > FastTrackStudios/frame; a minimal `frame.surface` provider is its
 > `crates/frame-view`), Dioxus in-process and remote (#225), generative
@@ -109,7 +114,16 @@ in a plugin and in a test.
 | `theme` (`ThemeTokens`) | the theme as tokens by name, for a kind that does not draw in a DOM | `ShellTheme` in context |
 | `input` (`InputSink`) | pointer, wheel, touch, keys, IME and focus (`ViewInput`), pushed by the host and drained by the kind | DOM events |
 | `clock` (`FrameClock`) | the host's clock and a per-frame budget; `Frame::over` says when to skip work | the window's frame |
-| `extras` (`Extras`) | typed handles a host adds: the canvas host's publisher for the `Spaces` a view draws in (`features/canvas/src/space.rs` `Spaces`), a frame engine | Dioxus context |
+| `extras` (`Extras`) | typed handles a host adds: the canvas host's publisher for the `Spaces` a view draws in (`features/canvas/src/space.rs` `Spaces`), a frame engine; shared typed data, `HostData<T>` (`Extras::with_data`, read with `ViewCtx::data`) | Dioxus context |
+
+`HostData<T>` is one value of the host's type, shared between the host
+and the view: `read` and `update` under a lock, a `version` that moves on
+every write so either side can tell it changed, and for a `Facet` type its
+schema (`HostData::shape`) and JSON both ways (`to_json`, `set_json`,
+which refuses what is not a `T` and keeps the value). A pane's own state
+can be typed the same way: `PaneHandle::state_as` reads it as a `Facet`
+type (`None` while it is something else, such as text from before), and
+`PaneHandle::set_state_as` keeps it as that type's JSON.
 
 The input set is the one remote views carry across a process boundary
 (#176), so a kind sees the same events in-process and remotely. The frame
@@ -122,6 +136,53 @@ changed (`View` gained `draws`, which is `dioxus` unless a provider's
 `View` whose render mounts its kind in the pane, building its `ViewCtx`
 from the same hooks; a non-Blitz host (a plugin window) builds the
 `ViewCtx` itself.
+
+## Paint views
+
+`features/workspace/src/paint/mod.rs` is the `paint` kind's model (feature
+`paint`: `anyrender` and `peniko`, no Dioxus, wasm-clean). A `PaintView`
+is given the pane's `ViewCtx` and answers three questions: what an input
+event changes (`input`), what this frame looks like (`paint`, an
+`anyrender` `Scene` in its own logical pixels), and what is under a point
+(`hit`). `Painter` is the host's side: it drains the ctx's `InputSink`
+into the view, asks for a frame at the pane's `Geometry` and scales it to
+physical pixels, and times each frame into `FrameStats` (the last 1024;
+`FrameStats::summary` is the count, p50, p99 and the slowest, on the
+host's `FrameClock`). `Marks` is a display list a view can paint from and
+hit-test from, so what is drawn and what the pointer finds are one list:
+`features/workspace/src/paint/tests.rs`
+`paint_and_hit_testing_read_one_list` rasterises 10 000 rectangles and
+overlapping bars on the CPU at 1× and 2× and checks the pixel under every
+probe against what `hit` finds there, before and after live input
+restyles one.
+
+Feature `paint-ui` is the Blitz host (`features/workspace/src/paint/widget.rs`):
+
+- `PaintWidget` is a Blitz custom widget around a `Painter`. Blitz gives
+  it its events in the element's own coordinates (they become
+  `ViewInput`s: pointer, touch, wheel, keys, IME preedit and commit,
+  paste) and asks it for a scene at the element's size; the window's
+  renderer (Vello on the GPU) draws that scene in the page. It asks for a
+  frame only after input changed something, or every frame while the view
+  says it is `animating`.
+- `PaintPane { mount }` is the pane: it builds the view's `ViewCtx` from
+  the pane (`use_pane`), the app's `Arc<ActionList>` in context (run as
+  the app's caller), the shell's theme as tokens (`shell_tokens`, read as
+  colours with `ThemeTokens::color`) and a clock from the pane's start.
+  `PaintMount::new(make)` names the view, `extras` the host's typed data,
+  `stats` a `FrameStats` the host reads elsewhere, `budget` the frame
+  budget.
+- A press or a tab gives the widget the focus. While it has it the
+  window's IME is on, so composed text reaches the view.
+
+Its limits for now: the IME's candidate window is not placed at the
+view's caret (no cursor area is set), a write to `HostData` or the
+`InputSink` from outside does not wake the window by itself (the next
+input or frame picks it up), and `FrameStats` times the view's input and
+recording, not the GPU's raster. The web and plugin hosts mount no
+`PaintWidget` yet, so `KindSpec::paint` is for `blitz` only. A Frame
+surface can draw through it in-process instead of in a process of its
+own.
 
 ## Composite kinds
 
@@ -172,8 +233,14 @@ one lands (`features/extensions/tests/view_kinds.rs`).
 The lab's Vault keeps one pane of each kind it shows in a screenset,
 "Embedded views" (⌘3, the palette's "Load screenset: Embedded views", or
 `WORKSPACES_LOAD {"name": "Embedded views"}` over MCP and the CLI): a
-Dioxus component, a Luau script's ImGui window, a Frame surface and the
-A2UI surfaces, each naming its kind (`apps/lab/ui/src/embedded.rs`). The
+Dioxus component, a Luau script's ImGui window, a Frame surface, the
+A2UI surfaces and a paint view, each naming its kind
+(`apps/lab/ui/src/embedded.rs`). The paint pane (`apps/lab/ui/src/paint.rs`)
+draws a 100 × 100 grid of rectangles: the pointer lights the one under it,
+a press picks one, the arrow keys move the pick and typed or composed text
+is kept, all in the pane's typed host data (`PaintState`). The line under
+the grid and `LAB_PAINT_STATE` read it, with the pane's frame count and
+p50 / p99 times. The
 Frame surface is FastTrackStudios/frame's `frame-surface` program, a
 process extension the lab loads when it finds it
 (`ARCHITECT_LAB_FRAME_SURFACE`, beside the lab, or on the `PATH`); the lab
@@ -207,7 +274,8 @@ false}}}]}` over MCP adds a task. Scenario:
 |---|---|---|---|---|---|---|
 | `dioxus` (in-process) | yes | yes | yes (nice-plug-dioxus) | input, ime, document, actions | the app's own code; runs actions as the app's caller | built in |
 | Dioxus remote (process extension) | yes | via DOM mount (#174) | no | input, actions | another process: crash-isolated, a placeholder and a restart; only the actions its manifest's capabilities name | #225 |
-| GPU view (wgpu / anyrender) | Blitz `CustomPaintSource` | WebGPU/WebGL2 `<canvas>` | nice-plug `custom_paint` | input, gpu, document, actions | linked code; draws within its frame budget, never on the audio thread | #221 |
+| `paint` (anyrender scene, in-process) | a Blitz custom widget (`PaintPane`) | not yet | not yet | input, ime, gpu, actions | linked code; draws within its frame budget, never on the audio thread | #221, built |
+| GPU view (raw wgpu) | Blitz `CustomPaintSource` | WebGPU/WebGL2 `<canvas>` | nice-plug `custom_paint` | input, gpu, document, actions | linked code; draws within its frame budget, never on the audio thread | #221 |
 | WebView / HTML | a wry child view clipped to the pane | a sandboxed `<iframe>` | no | input, untrusted | no network, a custom protocol only, CSP; every call through a host bridge onto the Action List | #222 |
 | ImGui from Luau | boxes, then a GPU view | the same | yes, through the GPU view | input, actions, untrusted | Luau's sandbox and the extension's gate | #223 |
 | Frame surface | a GPU view | a GPU view | yes (frame-plug) | input, gpu, document, actions | bindings resolve to the extension's own actions and params | #224 |

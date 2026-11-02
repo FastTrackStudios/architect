@@ -564,6 +564,26 @@ impl PaneHandle {
         }
     }
 
+    /// Its saved state as a `T` (kept as `T`'s JSON): `None` when it has
+    /// none or what it has is not a `T`.
+    #[must_use]
+    pub fn state_as<T: for<'a> facet::Facet<'a>>(&self) -> Option<T> {
+        let state = self.state();
+        if state.is_empty() {
+            return None;
+        }
+        facet_json::from_str(&state).ok()
+    }
+
+    /// Keeps `state` as its state, typed ([`state_as`](Self::state_as)
+    /// reads it back); as [`set_state`](Self::set_state), once a gesture
+    /// ends.
+    pub fn set_state_as<T: for<'a> facet::Facet<'a>>(&self, state: &T) {
+        if let Ok(json) = facet_json::to_string(state) {
+            self.set_state(json);
+        }
+    }
+
     /// Names its tab.
     pub fn set_title(&self, title: impl Into<String>) {
         let title = title.into();

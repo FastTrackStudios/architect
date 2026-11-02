@@ -18,7 +18,9 @@
 //! What a view draws *with* is its kind ([`KindId`]): the built-in
 //! `dioxus` one or one a linked crate registered in a [`ViewKinds`]
 //! (`docs/content/architecture/embedded-views.md`). Feature `ctx` is the
-//! contract a kind mounts through, [`ViewCtx`].
+//! contract a kind mounts through, [`ViewCtx`]; feature `paint` the
+//! built-in kind that paints a scene each frame, drawn in-process by Blitz
+//! under `paint-ui` (`src/paint/`).
 
 // A view's icon is a fn pointer compared by Dioxus's props: a stale
 // compare only redraws.
@@ -37,6 +39,8 @@ mod kinds;
 mod layout;
 mod model;
 mod ops;
+#[cfg(feature = "paint")]
+pub mod paint;
 mod presence;
 mod repair;
 mod screenset;
@@ -51,8 +55,8 @@ pub use drop::{Bar, Drop, bar_drop, contains, drop_at, drop_in, float_rect, snap
 pub mod native;
 #[cfg(feature = "ctx")]
 pub use ctx::{
-    Button, DocRef, Extras, Frame, FrameClock, Geometry, InputSink, Now, ThemeTokens, ViewCtx,
-    ViewInput,
+    Button, DocRef, Extras, Frame, FrameClock, Geometry, HostData, InputSink, Now, ThemeTokens,
+    ViewCtx, ViewInput,
 };
 pub use guide::{ArrangedGroup, ArrangedSplit, ArrangedWindow, Arrangement, target_selector};
 #[cfg(feature = "ui")]
@@ -62,7 +66,7 @@ pub use host::{
     use_pane, use_pane_status, use_presence_overlay,
 };
 pub use kinds::{
-    Capabilities, Capability, DIOXUS, Hosts, KindError, KindId, KindSpec, Part, Placement,
+    Capabilities, Capability, DIOXUS, Hosts, KindError, KindId, KindSpec, PAINT, Part, Placement,
     Placements, ViewHost, ViewKinds,
 };
 pub use layout::{Direction, Placed, Slide, area_rects, neighbour, scroll_to, slides};
@@ -72,6 +76,10 @@ pub use model::{
     Side, Snap, Split, SplitId, ViewKind, Window, WindowAlias, WindowId, Workspace,
 };
 pub use ops::{Dest, Target, WorkspaceError};
+#[cfg(feature = "paint")]
+pub use paint::{FrameStats, FrameSummary, Mark, Marks, PaintView, Painter};
+#[cfg(feature = "paint-ui")]
+pub use paint::{PaintMount, PaintPane, PaintWidget, shell_tokens};
 pub use presence::{PlayheadMark, PointerMark, PresenceMarks, WashMark, css_color};
 pub use screenset::{
     FormClass, Layout, Recall, SavedScreensets, Screenset, ScreensetOptions, Screensets,

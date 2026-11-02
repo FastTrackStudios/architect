@@ -16,6 +16,7 @@ mod extensions;
 mod guide;
 mod items;
 mod pages;
+mod paint;
 pub mod presence;
 mod screen;
 mod settings;

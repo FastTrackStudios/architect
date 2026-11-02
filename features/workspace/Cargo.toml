@@ -15,7 +15,10 @@ description = "The workspace: tab groups in splits, docks with ribbons, stacked 
 # reload for the main window). Plugin views come later, on `native`.
 # `ctx` is the contract every view kind mounts through (`ViewCtx`;
 # docs/content/architecture/embedded-views.md); the kinds registry is
-# in the model.
+# in the model. `paint` is the paint kind's model (src/paint/): a view
+# that records an anyrender scene each frame, its display list, its frame
+# times — wasm-clean, no Dioxus. `paint-ui` is its Blitz host: the
+# custom widget and the pane that mounts it.
 
 [features]
 default = []
@@ -28,6 +31,10 @@ actions = ["dep:architect", "dep:futures-channel"]
 ui = ["actions", "dep:dioxus", "dep:architect-shell", "architect-shell/ui", "dep:futures-timer", "dep:futures-util", "dep:lucide-dioxus", "architect-commands/ui"]
 native = ["ui", "dep:dioxus-native", "dep:blitz-shell", "dep:blitz-traits", "dep:dioxus-asset-resolver"]
 hot-reload = ["native", "dioxus-native/hot-reload", "dep:dioxus-devtools"]
+# A view that paints a scene each frame (`PaintView`, `Painter`, `Marks`).
+paint = ["ctx", "dep:anyrender", "dep:peniko"]
+# Drawn in-process by Blitz in a pane (`PaintPane`, a `PaintWidget`).
+paint-ui = ["paint", "ui", "dep:blitz-dom", "dep:blitz-traits", "dep:dioxus-native-dom"]
 
 [dependencies]
 facet = { workspace = true }
@@ -55,6 +62,12 @@ futures-channel = { version = "0.3", optional = true }
 crdt = { workspace = true, optional = true }
 # A measurement mid-drag finds the document busy and asks again shortly.
 futures-timer = { workspace = true, optional = true }
+# A paint view's scene and its colours and shapes (feature `paint`); the
+# Blitz widget it is drawn as (`paint-ui`).
+anyrender = { workspace = true, optional = true }
+peniko = { workspace = true, optional = true }
+blitz-dom = { workspace = true, optional = true, features = ["custom-widget"] }
+dioxus-native-dom = { workspace = true, optional = true }
 
 # A timer needs the browser's clock on wasm.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -64,8 +77,10 @@ futures-timer = { workspace = true, optional = true, features = ["wasm-bindgen"]
 doctest = false
 
 [dev-dependencies]
-# The kind contract's own tests (src/ctx.rs).
-architect-workspace = { path = ".", features = ["ctx"] }
+# The kind contract's own tests (src/ctx.rs, src/paint/).
+architect-workspace = { path = ".", features = ["ctx", "paint"] }
+# A paint view's scene rasterised to check it against its hit test.
+anyrender_vello_cpu = { workspace = true }
 # Every action driven over MCP against a headless workspace (tests/actions.rs).
 architect-mcp = { path = "../mcp" }
 serde_json = { workspace = true }

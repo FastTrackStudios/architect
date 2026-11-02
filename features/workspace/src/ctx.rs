@@ -13,7 +13,8 @@
 
 use std::any::{Any, TypeId};
 use std::collections::{BTreeMap, VecDeque};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use std::time::Duration;
 
 use architect::action::{ActionCaller, ActionList};
@@ -152,6 +153,15 @@ impl InputSink {
             .drain(..)
             .collect()
     }
+
+    /// Nothing waiting.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_empty()
+    }
 }
 
 /// A clock the host owns: the time now, as a duration since any fixed
@@ -253,6 +263,107 @@ impl Extras {
     pub fn get<T: Any + Send + Sync>(&self) -> Option<&T> {
         self.0.get(&TypeId::of::<T>())?.downcast_ref()
     }
+
+    /// With `data` shared: the view finds it by its type,
+    /// [`ViewCtx::data`].
+    #[must_use]
+    pub fn with_data<T: Any + Send + Sync>(self, data: HostData<T>) -> Self {
+        self.with(data)
+    }
+}
+
+/// A value the host and its views share, typed: the host writes, a view
+/// reads (and redraws when [`version`](Self::version) moves). Cheap to
+/// clone; every clone is the same value. A `T` with a [`facet::Facet`]
+/// shape is schema-typed besides: its [`shape`](Self::shape) and JSON
+/// are what an agent, a remote view or a saved pane reads it by.
+pub struct HostData<T>(Arc<Shared<T>>);
+
+struct Shared<T> {
+    value: RwLock<T>,
+    version: AtomicU64,
+}
+
+impl<T> Clone for HostData<T> {
+    fn clone(&self) -> Self {
+        Self(Arc::clone(&self.0))
+    }
+}
+
+impl<T> PartialEq for HostData<T> {
+    /// The same value, not an equal one.
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl<T> std::fmt::Debug for HostData<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HostData")
+            .field("type", &std::any::type_name::<T>())
+            .field("version", &self.version())
+            .finish()
+    }
+}
+
+impl<T> HostData<T> {
+    pub fn new(value: T) -> Self {
+        Self(Arc::new(Shared {
+            value: RwLock::new(value),
+            version: AtomicU64::new(0),
+        }))
+    }
+
+    /// `f` of the value now.
+    pub fn read<R>(&self, f: impl FnOnce(&T) -> R) -> R {
+        f(&self.0.value.read().unwrap_or_else(PoisonError::into_inner))
+    }
+
+    /// Changes the value: one more [`version`](Self::version).
+    pub fn update<R>(&self, f: impl FnOnce(&mut T) -> R) -> R {
+        let out = f(&mut self.0.value.write().unwrap_or_else(PoisonError::into_inner));
+        self.0.version.fetch_add(1, Ordering::Release);
+        out
+    }
+
+    pub fn set(&self, value: T) {
+        self.update(|v| *v = value);
+    }
+
+    /// How many times it has changed: a view that drew version `n` is
+    /// current while this is still `n`.
+    #[must_use]
+    pub fn version(&self) -> u64 {
+        self.0.version.load(Ordering::Acquire)
+    }
+}
+
+impl<T: Clone> HostData<T> {
+    #[must_use]
+    pub fn get(&self) -> T {
+        self.read(T::clone)
+    }
+}
+
+impl<T: for<'a> facet::Facet<'a>> HostData<T> {
+    /// Its schema.
+    #[must_use]
+    pub fn shape() -> &'static facet::Shape {
+        T::SHAPE
+    }
+
+    /// The value as JSON.
+    #[must_use]
+    pub fn to_json(&self) -> String {
+        self.read(|v| facet_json::to_string(v).unwrap_or_default())
+    }
+
+    /// The value from JSON: refused, unchanged, when it is not a `T`.
+    pub fn set_json(&self, json: &str) -> Result<(), String> {
+        let value: T = facet_json::from_str(json).map_err(|e| e.to_string())?;
+        self.set(value);
+        Ok(())
+    }
 }
 
 /// What every view kind is given when it mounts.
@@ -330,6 +441,12 @@ impl ViewCtx {
         self.extras = extras;
         self
     }
+
+    /// The host's shared `T`, if it gave one ([`Extras::with_data`]).
+    #[must_use]
+    pub fn data<T: Any + Send + Sync>(&self) -> Option<HostData<T>> {
+        self.extras.get::<HostData<T>>().cloned()
+    }
 }
 
 #[cfg(test)]
@@ -379,5 +496,43 @@ mod tests {
         assert_eq!(ctx.theme.get("accent"), Some("#4f7cff"));
         assert!(ctx.doc.is_none());
         assert!(ctx.actions.infos().is_empty());
+    }
+
+    #[test]
+    fn host_data_is_typed_shared_and_versioned() {
+        #[derive(Debug, Clone, PartialEq, facet::Facet)]
+        struct Meter {
+            level: f32,
+            label: String,
+        }
+        let meter = HostData::new(Meter {
+            level: 0.5,
+            label: "in".into(),
+        });
+        let ctx = ViewCtx::new(
+            PaneId::new("p1"),
+            KindId::paint(),
+            (ViewHost::Blitz, Placement::Pane),
+            (ActionList::new(), ActionCaller::app()),
+            FrameClock::new(Duration::from_millis(8), || Duration::ZERO),
+        )
+        .with_extras(Extras::default().with_data(meter.clone()));
+        let seen = ctx.data::<Meter>().expect("the host's meter");
+        assert_eq!(seen, meter);
+        assert!(ctx.data::<u32>().is_none());
+
+        let drawn = seen.version();
+        meter.update(|m| m.level = 0.75);
+        assert_eq!(seen.version(), drawn + 1);
+        assert_eq!(seen.read(|m| m.level), 0.75);
+
+        assert_eq!(HostData::<Meter>::shape().type_identifier, "Meter");
+        let json = seen.to_json();
+        assert!(json.contains("\"label\":\"in\""), "{json}");
+        assert!(seen.set_json("{\"level\":\"loud\"}").is_err());
+        assert_eq!(meter.get().level, 0.75);
+        seen.set_json(r#"{"level":1.0,"label":"out"}"#)
+            .expect("a Meter");
+        assert_eq!(meter.get().label, "out");
     }
 }

@@ -27,7 +27,13 @@ use std::fmt;
 /// remotely in a pane.
 pub const DIOXUS: &str = "dioxus";
 
-/// A kind's id: `"dioxus"`, `"gpu"`, `"frame.surface"`, `"genui"`.
+/// The in-process paint kind: a scene the view records each frame, drawn
+/// by Blitz's renderer in the pane's place (`PaintView`, feature `paint`).
+/// The app registers it ([`KindSpec::paint`]); a GPU view, a Frame
+/// surface or a chart draws through it.
+pub const PAINT: &str = "paint";
+
+/// A kind's id: `"dioxus"`, `"paint"`, `"frame.surface"`, `"genui"`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct KindId(pub String);
 
@@ -40,6 +46,12 @@ impl KindId {
     #[must_use]
     pub fn dioxus() -> Self {
         Self::new(DIOXUS)
+    }
+
+    /// The [`PAINT`] kind.
+    #[must_use]
+    pub fn paint() -> Self {
+        Self::new(PAINT)
     }
 
     #[must_use]
@@ -333,6 +345,23 @@ impl KindSpec {
             .capability(Capability::Actions)
     }
 
+    /// The [`PAINT`] kind: a scene in Blitz's own renderer, as a pane, an
+    /// overlay or an embed; it takes input (IME too), draws on the GPU
+    /// and runs actions. Not on the web or in a plugin window yet: their
+    /// hosts mount no `PaintWidget`.
+    #[must_use]
+    pub fn paint() -> Self {
+        Self::new(PAINT, "architect")
+            .host(ViewHost::Blitz)
+            .placement(Placement::Pane)
+            .placement(Placement::Overlay)
+            .placement(Placement::Embed)
+            .capability(Capability::Input)
+            .capability(Capability::Ime)
+            .capability(Capability::Gpu)
+            .capability(Capability::Actions)
+    }
+
     #[must_use]
     pub const fn host(mut self, host: ViewHost) -> Self {
         self.hosts = self.hosts.with(host);
@@ -584,6 +613,24 @@ mod tests {
                 .is_ok()
         );
         assert!(ViewKinds::empty().ids().is_empty());
+    }
+
+    #[test]
+    fn paint_is_the_gpu_kind_an_app_registers() {
+        let mut kinds = ViewKinds::new();
+        assert!(!kinds.has(PAINT));
+        kinds.register(KindSpec::paint()).expect("register");
+        let p = kinds
+            .resolve_for(PAINT, ViewHost::Blitz, Placement::Pane)
+            .expect("paint in a pane");
+        assert!(p.capabilities.has(Capability::Gpu) && p.capabilities.has(Capability::Ime));
+        assert!(!p.capabilities.has(Capability::Document));
+        assert!(
+            kinds
+                .resolve_for(PAINT, ViewHost::Web, Placement::Pane)
+                .is_err()
+        );
+        assert_eq!(KindId::paint().as_str(), PAINT);
     }
 
     #[test]
