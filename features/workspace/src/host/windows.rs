@@ -385,6 +385,8 @@ fn PopoutView(props: PopoutProps) -> Element {
         released: CopyValue::new(Rc::default()),
         revisions: CopyValue::new(super::actions::Revisions::default()),
         measured: CopyValue::new(crate::tree::Measured::default()),
+        sets_noun: Signal::new("Workspace".to_owned()),
+        managing: Signal::new(false),
     });
     use_release_outside(host);
     let mut host = host;

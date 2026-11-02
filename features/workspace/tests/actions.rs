@@ -136,11 +136,11 @@ fn the_list_is_sound_and_says_what_each_action_does_to_the_app() {
         ids::NEIGHBOR,
         ids::VIEWS,
         ids::EXPORT,
-        ids::SCREENSET_LIST,
+        ids::WORKSPACES_LIST,
     ] {
         assert_eq!(effect(read), Some(Effect::ReadOnly), "{read}");
     }
-    for destructive in [ids::CLOSE_OTHERS, ids::CLOSE_WINDOW, ids::SCREENSET_DELETE] {
+    for destructive in [ids::CLOSE_OTHERS, ids::CLOSE_WINDOW, ids::WORKSPACES_DELETE] {
         assert_eq!(
             effect(destructive),
             Some(Effect::Destructive),
@@ -687,50 +687,50 @@ fn a_layout_exports_and_applies_whole_or_not_at_all() {
 #[test]
 fn screensets_by_action() {
     let m = model();
-    let list = m.run(ids::SCREENSET_LIST, json!({}));
+    let list = m.run(ids::WORKSPACES_LIST, json!({}));
     assert_eq!(list["sets"][0]["id"], "write");
     assert_eq!(list["class"], "desk");
     assert_eq!(
-        m.run(ids::SCREENSET_SAVE, json!({}))["reason"],
+        m.run(ids::WORKSPACES_SAVE, json!({}))["reason"],
         "no_screenset"
     );
     assert_eq!(
-        m.run(ids::SCREENSET_RESET, json!({}))["reason"],
+        m.run(ids::WORKSPACES_RESET, json!({}))["reason"],
         "no_screenset"
     );
 
-    let recalled = m.run(ids::SCREENSET_RECALL, json!({"slot": 1}));
+    let recalled = m.run(ids::WORKSPACES_LOAD, json!({"slot": 1}));
     assert_eq!(recalled["screenset"], "write");
-    assert_eq!(m.run(ids::SCREENSET_LIST, json!({}))["dirty"], false);
+    assert_eq!(m.run(ids::WORKSPACES_LIST, json!({}))["dirty"], false);
     m.run(ids::CLOSE, json!({"panes": ["note-b"]}));
-    assert_eq!(m.run(ids::SCREENSET_LIST, json!({}))["dirty"], true);
-    m.run(ids::SCREENSET_RESET, json!({}));
+    assert_eq!(m.run(ids::WORKSPACES_LIST, json!({}))["dirty"], true);
+    m.run(ids::WORKSPACES_RESET, json!({}));
     assert_eq!(m.pane("note-b")["pane"], "note-b", "reset brings it back");
     m.run(ids::CLOSE, json!({"panes": ["note-b"]}));
-    assert_eq!(m.run(ids::SCREENSET_SAVE, json!({}))["changed"], true);
-    assert_eq!(m.run(ids::SCREENSET_LIST, json!({}))["dirty"], false);
+    assert_eq!(m.run(ids::WORKSPACES_SAVE, json!({}))["changed"], true);
+    assert_eq!(m.run(ids::WORKSPACES_LIST, json!({}))["dirty"], false);
 
-    let made = m.run(ids::SCREENSET_SAVE_AS, json!({"name": "Focus", "slot": 3}));
+    let made = m.run(ids::WORKSPACES_SAVE, json!({"name": "Focus"}));
     assert_eq!(made["screenset"], "focus");
     assert!(
-        m.fails(ids::SCREENSET_SAVE_AS, json!({"name": "  "}))
+        m.fails(ids::WORKSPACES_SAVE, json!({"name": "  "}))
             .contains("name")
     );
-    m.run(ids::SCREENSET_RECALL, json!({"id": "write"}));
+    m.run(ids::WORKSPACES_LOAD, json!({"id": "write"}));
     assert!(
-        m.fails(ids::SCREENSET_RECALL, json!({"slot": 9}))
+        m.fails(ids::WORKSPACES_LOAD, json!({"slot": 9}))
             .contains("slot 9")
     );
     assert_eq!(
-        m.run(ids::SCREENSET_DELETE, json!({"id": "write"}))["reason"],
+        m.run(ids::WORKSPACES_DELETE, json!({"id": "write"}))["reason"],
         "builtin"
     );
     assert_eq!(
-        m.run(ids::SCREENSET_DELETE, json!({"id": "focus"}))["changed"],
+        m.run(ids::WORKSPACES_DELETE, json!({"id": "focus"}))["changed"],
         true
     );
     assert_eq!(
-        m.run(ids::SCREENSET_LIST, json!({}))["sets"]
+        m.run(ids::WORKSPACES_LIST, json!({}))["sets"]
             .as_array()
             .map(Vec::len),
         Some(1)
@@ -872,7 +872,7 @@ fn every_change_moves_the_revision_on_and_a_stale_write_is_refused() {
         Some(r2 + 1),
         "history shows in the tree"
     );
-    let saved = m.run(ids::SCREENSET_SAVE, json!({"if_revision": 0}));
+    let saved = m.run(ids::WORKSPACES_SAVE, json!({"if_revision": 0}));
     assert_eq!(saved["reason"], "stale");
 }
 
@@ -913,4 +913,167 @@ fn a_change_event_says_its_revision_actor_kinds_and_panes() {
         kinds.contains(&json!("moved")) && kinds.contains(&json!("focus")),
         "{kinds:?}"
     );
+}
+
+#[test]
+fn workspaces_save_over_by_name_rename_slot_and_options() {
+    let m = model();
+    let since = m.list.latest();
+    let made = m.run(ids::WORKSPACES_SAVE, json!({"name": "Reading"}));
+    assert_eq!(made["screenset"], "reading");
+    // The same name again saves over it (Obsidian's), not a second set.
+    m.run(ids::CLOSE, json!({"panes": ["note-b"]}));
+    let over = m.run(ids::WORKSPACES_SAVE, json!({"name": "reading"}));
+    assert_eq!(over["screenset"], "reading");
+    let list = m.run(ids::WORKSPACES_LIST, json!({}));
+    assert_eq!(list["sets"].as_array().map(Vec::len), Some(2));
+    assert_eq!(list["active"], "reading");
+    assert_eq!(list["dirty"], false);
+
+    m.run(
+        ids::WORKSPACES_RENAME,
+        json!({"id": "reading", "name": "Study"}),
+    );
+    assert_eq!(
+        m.run(ids::WORKSPACES_LOAD, json!({"name": "study"}))["screenset"],
+        "reading"
+    );
+    assert!(
+        m.fails(
+            ids::WORKSPACES_RENAME,
+            json!({"id": "reading", "name": "Write"})
+        )
+        .contains("another")
+    );
+    assert!(
+        m.fails(ids::WORKSPACES_LOAD, json!({"name": "nope"}))
+            .contains("nope")
+    );
+
+    // A slot taken from the set that had it.
+    m.run(
+        ids::WORKSPACES_SET_SLOT,
+        json!({"id": "reading", "slot": 1}),
+    );
+    let list = m.run(ids::WORKSPACES_LIST, json!({}));
+    let slot = |id: &str| {
+        list["sets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"] == id)
+            .unwrap()["slot"]
+            .clone()
+    };
+    assert_eq!((slot("reading"), slot("write")), (json!(1), Value::Null));
+    assert_eq!(
+        m.run(ids::WORKSPACES_LOAD, json!({"slot": 1}))["screenset"],
+        "reading"
+    );
+    assert!(
+        m.fails(
+            ids::WORKSPACES_SET_SLOT,
+            json!({"id": "reading", "slot": 12})
+        )
+        .contains("1 to 9")
+    );
+
+    // Save before loading: the live change goes into the active set first.
+    m.run(
+        ids::WORKSPACES_OPTIONS,
+        json!({"save_before_load": true, "slot_keys": false}),
+    );
+    let list = m.run(ids::WORKSPACES_LIST, json!({}));
+    assert_eq!(
+        (list["save_before_load"].clone(), list["slot_keys"].clone()),
+        (json!(true), json!(false))
+    );
+    m.run(
+        ids::OPEN,
+        json!({"view": "graph", "at": {"beside": {"pane": "note-a"}}}),
+    );
+    m.run(ids::WORKSPACES_LOAD, json!({"id": "write"}));
+    m.run(ids::WORKSPACES_LOAD, json!({"id": "reading"}));
+    assert_eq!(
+        m.pane("graph")["pane"],
+        "graph",
+        "kept by the save before loading"
+    );
+
+    let deleted = m.run(ids::WORKSPACES_DELETE, json!({"id": "reading"}));
+    assert_eq!(deleted["changed"], true);
+    assert_eq!(
+        m.list.info(ids::WORKSPACES_DELETE).map(|i| i.effect),
+        Some(Effect::Destructive)
+    );
+
+    // Each change of the saved layouts is heard on `workspaces`.
+    let (events, _) = m.list.events_since(since, 256, std::time::Duration::ZERO);
+    let heard = events
+        .iter()
+        .filter(|e| matches!(&e.kind, architect::action::EventKind::Changed { topic, .. } if topic == "workspaces"))
+        .count();
+    assert!(heard >= 7, "{heard} workspaces events");
+}
+
+#[test]
+fn a_saved_layout_brings_back_windows_docks_floats_and_pins() {
+    let m = model();
+    m.run(ids::MOVE, json!({"pane": "note-b", "to": {"window": {"bounds": {"x": 40.0, "y": 50.0, "w": 600.0, "h": 400.0}}}}));
+    m.run(
+        ids::DOCK_SET,
+        json!({"side": "left", "shown": "collapsed", "size": 333.0}),
+    );
+    m.run(ids::OPEN, json!({"view": "graph", "at": {"float": {"rect": {"x": 5.0, "y": 6.0, "w": 300.0, "h": 200.0}}}}));
+    m.run(ids::FLOAT, json!({"pane": "graph", "pin": "top_right"}));
+    m.run(ids::TAB_SET, json!({"pane": "note-a", "pinned": true}));
+    m.run(ids::WORKSPACES_SAVE, json!({"name": "Everything"}));
+    let saved = m.host.state().workspace;
+
+    // Everything undone, then loaded back.
+    m.run(ids::WORKSPACES_LOAD, json!({"id": "write"}));
+    assert_eq!(m.host.state().workspace.windows.len(), 1);
+    m.run(ids::WORKSPACES_LOAD, json!({"id": "everything"}));
+    let back = m.host.state().workspace;
+    assert!(back.same_arrangement(&saved));
+    let popout = back
+        .windows
+        .iter()
+        .find(|w| w.id.0 != "main")
+        .expect("the pop-out window");
+    assert_eq!(popout.bounds.map(|b| b.w), Some(600.0));
+    let main = &back.windows[0];
+    assert_eq!(main.docks.left.size, 333.0);
+    assert_eq!(main.docks.left.shown, architect_workspace::Shown::Collapsed);
+    assert_eq!(main.floats[0].rect.w, 300.0);
+    assert!(main.floats[0].pin.is_some());
+    assert!(
+        back.pane(&architect_workspace::PaneId::new("note-a"))
+            .is_some_and(|p| p.pinned)
+    );
+}
+
+#[test]
+fn saved_sets_and_the_working_copy_are_kept_apart() {
+    use architect_workspace::{MemoryStore, store};
+    let mut sets = screensets();
+    let _ = sets.recall("write", FormClass::Desk);
+    let mut live = workspace();
+    let _ = live.close(&architect_workspace::PaneId::new("note-b"));
+    sets.set_working(FormClass::Desk, live.clone());
+    sets.options.save_before_load = true;
+    let (shared, device) = (MemoryStore::new(), MemoryStore::new());
+    assert!(store::save_split(&shared, &device, &sets));
+    assert!(
+        !shared.get().unwrap_or_default().contains("working"),
+        "the device's copy stays on the device"
+    );
+    let back = store::load_split(&shared, &device, Vec::new());
+    assert_eq!(back.working(FormClass::Desk), Some(&live));
+    assert_eq!(back.active.as_deref(), Some("write"));
+    assert!(back.options.save_before_load);
+    // Another device has the sets, and its own working copy (none yet).
+    let elsewhere = store::load_split(&shared, &MemoryStore::new(), Vec::new());
+    assert_eq!(elsewhere.sets.len(), 1);
+    assert!(elsewhere.working.is_empty());
 }

@@ -412,9 +412,12 @@ given an area.
 | `WORKSPACE_CLOSE` | mutating | `panes` (all or none; each kept to reopen) |
 | `WORKSPACE_CLOSE_OTHERS` | destructive | `pane` |
 | `WORKSPACE_CLOSE_WINDOW` | destructive | `window` |
-| `SCREENSET_LIST` | read-only | — : the sets, the active one, dirty, the class |
-| `SCREENSET_RECALL` / `_SAVE` / `_SAVE_AS` / `_RESET` | mutating | `id` or `slot` / — / `name`, `slot?` / — |
-| `SCREENSET_DELETE` | destructive | `id` (a built-in set answers `builtin`) |
+| `WORKSPACES_LIST` | read-only | — : the saved layouts (each its slot, built in, active, classes), dirty per class, the options |
+| `WORKSPACES_LOAD` | mutating | `id`, `name` or `slot` |
+| `WORKSPACES_SAVE` | mutating | `name?`: none saves the active set; a name saves over the set of that name, or as a new one |
+| `WORKSPACES_RENAME` / `_SET_SLOT` / `_OPTIONS` / `_RESET` | mutating | `id`, `name` / `id`, `slot?` / `save_before_load?`, `slot_keys?` / — |
+| `WORKSPACES_DELETE` | destructive | `id` (a built-in set answers `builtin`) |
+| `WORKSPACES_MANAGE` | mutating | — : opens the manage sheet (the Blitz host's own) |
 
 `WORKSPACE_APPLY` builds the whole new workspace before it puts it in
 place (herdr's `layout.apply`), so a layout that does not fit (a pane
@@ -441,7 +444,7 @@ The view commands:
 | `set_pinned` / `set_stacked` / `set_chrome` | `WORKSPACE_PIN_TAB`, `WORKSPACE_STACK_TABS`, `WORKSPACE_TAB_BAR` | toggles |
 | `set_dock_shown` / `set_shares` | `WORKSPACE_TOGGLE_RIGHT_DOCK`, `WORKSPACE_TOGGLE_BOTTOM_DOCK`; dragging a divider | |
 | `pop_out_dock` / `dock_back` | `WORKSPACE_POP_OUT_LEFT_DOCK`, `WORKSPACE_DOCK_BACK_LEFT_DOCK`, and the same for `RIGHT` and `BOTTOM` | the dock, ribbon and groups, into a window of its own and back; which of the pair is enabled says where the dock is |
-| screensets (`recall`, `save`, `save_as`, `reset`) | `SCREENSET_RECALL_1` … `_9` (⌘1–9), `SCREENSET_SAVE`, `SCREENSET_RESET` | |
+| screensets (`recall`, `save`, `save_named`, `reset`) | `SCREENSET_RECALL_1` … `_9` (⌘1–9, unless the option is off), `SCREENSET_SAVE`, `SCREENSET_RESET`, `WORKSPACES_LOAD_<ID>` (one per set), `WORKSPACES_MANAGE` | named with the app's `sets_noun` |
 | | `WORKSPACE_ARRANGE` | arrange mode, latched (for touch) |
 | | `WORKSPACE_EVERY_PANE` | every open pane, to pick one |
 

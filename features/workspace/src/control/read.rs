@@ -92,7 +92,7 @@ impl From<FormClass> for ClassName {
     }
 }
 
-/// One screenset, as `SCREENSET_LIST` shows it.
+/// One saved layout, as `WORKSPACES_LIST` shows it.
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
 pub struct ScreensetInfo {
     pub id: String,
@@ -103,9 +103,11 @@ pub struct ScreensetInfo {
     pub builtin: bool,
     /// The classes of screen it has a layout for.
     pub classes: Vec<ClassName>,
+    /// It is the active one.
+    pub active: bool,
 }
 
-/// `SCREENSET_LIST`.
+/// `WORKSPACES_LIST`.
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
 pub struct ScreensetsAnswer {
     pub sets: Vec<ScreensetInfo>,
@@ -115,6 +117,12 @@ pub struct ScreensetsAnswer {
     pub dirty: bool,
     /// The class of screen layouts are recalled for here.
     pub class: ClassName,
+    /// Each class whose live layout differs from the active set's.
+    pub dirty_classes: Vec<ClassName>,
+    /// The live layout is saved into the active set before another loads.
+    pub save_before_load: bool,
+    /// ⌘1–9 load the set in that slot.
+    pub slot_keys: bool,
 }
 
 /// `WORKSPACE_LAYOUT`.
@@ -201,7 +209,7 @@ pub fn views(_st: &State, env: &Env, (): ()) -> Result<ViewsAnswer, String> {
     })
 }
 
-/// `SCREENSET_LIST`.
+/// `WORKSPACES_LIST`.
 ///
 /// # Errors
 ///
@@ -218,6 +226,7 @@ pub fn screensets(st: &State, _env: &Env, (): ()) -> Result<ScreensetsAnswer, St
                 slot: set.slot,
                 builtin: set.builtin,
                 classes: set.layouts.iter().map(|l| l.class.into()).collect(),
+                active: s.active.as_deref() == Some(set.id.as_str()),
             })
             .collect(),
         active: s.active.clone(),
@@ -228,5 +237,28 @@ pub fn screensets(st: &State, _env: &Env, (): ()) -> Result<ScreensetsAnswer, St
             .and_then(|set| set.layout_for(st.form))
             .is_some_and(|saved| !saved.same_arrangement(&st.workspace)),
         class: st.form.into(),
+        dirty_classes: [
+            FormClass::Desk,
+            FormClass::TabletLandscape,
+            FormClass::TabletPortrait,
+            FormClass::PhoneLandscape,
+            FormClass::PhonePortrait,
+        ]
+        .into_iter()
+        .filter(|&c| {
+            if c == st.form {
+                return s
+                    .active
+                    .as_deref()
+                    .and_then(|id| s.get(id))
+                    .and_then(|set| set.layout_for(c))
+                    .is_some_and(|saved| !saved.same_arrangement(&st.workspace));
+            }
+            s.working(c).is_some() && s.is_dirty(c)
+        })
+        .map(Into::into)
+        .collect(),
+        save_before_load: s.options.save_before_load,
+        slot_keys: s.options.slot_keys,
     })
 }

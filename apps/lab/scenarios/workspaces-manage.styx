@@ -1,0 +1,86 @@
+// Saved workspace layouts, managed from their sheet (Obsidian's "Manage
+// workspace layouts"): the current layout saved under a name, another
+// loaded, the new one put on a key and deleted. Every button is a
+// WORKSPACES_* action, as an agent runs them.
+id workspaces-manage
+title "Manage workspace layouts"
+view {width 1440, height 860}
+capture {fps 20, width 960}
+steps (
+    {
+        id vault
+        do @run{id LAB_GO_VAULT}
+        done {on (@changed"lab"), check ({id LAB_STATE, has {tab vault}})}
+        hide true
+    }
+    {
+        id close-clicker
+        do @run{id WORKSPACE_CLOSE, args {panes (clicker)}}
+        done {on (@changed"workspace")}
+        hide true
+    }
+    {
+        id open
+        text "Manage workspace layouts, from the View menu or ⌘K."
+        do @run{id WORKSPACES_MANAGE}
+        done {on (@ran"WORKSPACES_MANAGE")}
+        hold 0.6
+    }
+    {
+        id sheet
+        target @css"[data-workspaces-sheet]"
+    }
+    {
+        id name
+        text "Save the current layout under a name."
+        target @css"[data-workspaces-name]"
+        do @click{}
+    }
+    {
+        id type
+        do @type{text "Reading"}
+    }
+    {
+        id save
+        target @css"[data-workspaces-save-new]"
+        do @click{}
+        done {
+            on (@changed"workspaces")
+            check ({id WORKSPACES_LIST, has {active reading}})
+        }
+        hold 1.0
+    }
+    {
+        id load-mix
+        text "Load another: the layout changes, the sheet stays."
+        target @css"[data-workspace-load=\"mix\"]"
+        do @click{}
+        done {
+            on (@changed"workspaces")
+            check (
+                {id WORKSPACES_LIST, has {active mix}}
+                {id WORKSPACE_LAYOUT, has {windows ({groups ({stacked true} {tabs (graph)})})}}
+            )
+        }
+        hold 1.0
+    }
+    {
+        id slot
+        text "Give it a key: ⌘1, which Write gives up."
+        target @css"[data-workspace-slot=\"reading\"]"
+        do @click{}
+        done {on (@changed"workspaces")}
+        hold 0.8
+    }
+    {
+        id delete
+        text "Delete it. A built-in layout has no Delete."
+        target @css"[data-workspace-delete=\"reading\"]"
+        do @click{}
+        done {
+            on (@changed"workspaces")
+            check ({id WORKSPACES_LIST, has {active mix}})
+        }
+        hold 1.0
+    }
+)

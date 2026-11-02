@@ -975,6 +975,8 @@ pub fn LabApp() -> Element {
                 .group("Panes")
                 .separator()
                 .group("Docks")
+                .separator()
+                .command("WORKSPACES_MANAGE")
         })
         .menu("Go", |m| {
             // The tabs, the one showing ticked: a live section, read again
