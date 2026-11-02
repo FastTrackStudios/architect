@@ -1,0 +1,81 @@
+// Embedded views: ⌘3 (WORKSPACES_LOAD "Embedded views") recalls one pane of
+// each kind the lab shows, each naming its kind; each is used once.
+id embedded-views
+title "Embedded views"
+view {width 1440, height 860}
+capture {fps 20, width 960}
+steps (
+    {
+        id vault
+        do @run{id LAB_GO_VAULT}
+        done {on (@changed"lab"), check ({id LAB_STATE, has {tab vault}})}
+        hide true
+    }
+    {
+        id load
+        text "Embedded views: Dioxus, Luau ImGui, a Frame surface and A2UI, one pane each."
+        do @run{id WORKSPACES_LOAD, args {name "Embedded views"}}
+        done {
+            on (@changed"workspace")
+            check (
+                {id WORKSPACE_PANE_GET, args {pane embed-dioxus}, has {view embed.dioxus, showing true}}
+                {id WORKSPACE_PANE_GET, args {pane embed-luau}, has {view embed.luau, showing true}}
+                {id WORKSPACE_PANE_GET, args {pane embed-frame}, has {view embed.frame, showing true}}
+                {id WORKSPACE_PANE_GET, args {pane embed-a2ui}, has {view embed.a2ui, showing true}}
+            )
+        }
+        hold 1.2
+    }
+    {
+        id dioxus
+        text "Dioxus: a component in the lab's own document; the swatch it picks is the pane's state."
+        target @text"Teal"
+        do @click{}
+        done {check ({id WORKSPACE_PANE_GET, args {pane embed-dioxus}, has {state teal}})}
+        hold 1
+    }
+    {
+        id luau
+        text "Luau ImGui: a script's window, redrawn every frame; its button counts the presses."
+        target @at{x 396, y 651}
+        do @click{}
+        hold 1
+    }
+    {
+        id frame
+        text "A Frame surface: a knob and a meter from a Frame document, moved by an action."
+        do @run{id LAB_FRAME_SET, args {knob 0.9, meter 0.85}}
+        done {
+            on (@changed"frame")
+            check ({id LAB_FRAME_STATE, has {knob 0.9, meter 0.85}})
+        }
+        hold 1.2
+    }
+    {
+        id a2ui-render
+        text "A2UI: an agent's surface, from the catalog."
+        do @run{
+            id A2UI_RENDER
+            args {messages ({createSurface {
+                surfaceId release
+                catalogId "https://architect.fasttrackstudio.dev/a2ui/catalog/v1"
+                dataModel {ship false}
+                components (
+                    {id root, component Column, children (title ship)}
+                    {id title, component Text, variant h3, text "Release checklist"}
+                    {id ship, component CheckBox, label "Ready to ship", value {path "/ship"}}
+                )
+            }})}
+        }
+        done {check ({id LAB_A2UI_DATA, args {surfaceId release}, has {ship false}})}
+        hold 0.8
+    }
+    {
+        id a2ui
+        text "Its checkbox writes the surface's data model."
+        target @css"[data-a2ui=\"CheckBox\"] [role=\"checkbox\"]"
+        do @click{}
+        done {check ({id LAB_A2UI_DATA, args {surfaceId release}, has {ship true}})}
+        hold 1.2
+    }
+)

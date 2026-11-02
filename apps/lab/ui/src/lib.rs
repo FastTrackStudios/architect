@@ -11,6 +11,7 @@
 
 mod arrange;
 mod confirm;
+mod embedded;
 mod extensions;
 mod guide;
 mod items;
@@ -683,6 +684,7 @@ pub fn LabApp() -> Element {
     });
     use_hook(|| {
         let _ = architect_a2ui::actions::register(&list, &surfaces);
+        embedded::register(&list, &surfaces);
     });
     architect_a2ui::ui::use_a2ui(surfaces, (*list).clone());
     // Settings: the lab's sections, kept on this device — in a window.
