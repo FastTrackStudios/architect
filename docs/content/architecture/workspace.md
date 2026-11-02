@@ -32,6 +32,10 @@ split any way, docked to any side, stacked, popped out into windows of
 their own, and saved as screensets to recall with a key. The app never
 lays out a pane, draws a tab, handles a drag or saves a layout.
 
+What draws a view is its kind: a Dioxus component by default, or a GPU
+scene, a web view or a Frame surface a linked crate provides (see
+[Embedded views](@/architecture/embedded-views.md)).
+
 The [app shell](@/architecture/app-shell.md) is the frame (title row,
 tabs, the separate button, the account); the workspace is what fills its
 page area on a tablet and a desk. On a phone it folds into the shell's

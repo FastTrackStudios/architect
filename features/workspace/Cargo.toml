@@ -13,9 +13,15 @@ description = "The workspace: tab groups in splits, docks with ribbons, stacked 
 # `native` is a desk app's launcher: dioxus-native's, plus pop-out OS
 # windows that share the app's state (`hot-reload` keeps `dx serve`'s
 # reload for the main window). Plugin views come later, on `native`.
+# `ctx` is the contract every view kind mounts through (`ViewCtx`;
+# docs/content/architecture/embedded-views.md); the kinds registry is
+# in the model.
 
 [features]
 default = []
+# The contract a view kind mounts through (`ViewCtx`): the host's Action
+# List, a document and its history. Wasm-clean, no Dioxus.
+ctx = ["dep:architect", "dep:crdt"]
 # Every operation as an Action List action with an explicit target
 # (src/control/list.rs): on a headless workspace, or under `ui` the host's.
 actions = ["dep:architect", "dep:futures-channel"]
@@ -45,6 +51,8 @@ architect-commands = { workspace = true }
 # a write answered from where the workspace lives.
 architect = { workspace = true, optional = true, features = ["action-list"] }
 futures-channel = { version = "0.3", optional = true }
+# A view kind's document (`ViewCtx::doc`): feature `ctx`.
+crdt = { workspace = true, optional = true }
 # A measurement mid-drag finds the document busy and asks again shortly.
 futures-timer = { workspace = true, optional = true }
 
@@ -56,6 +64,8 @@ futures-timer = { workspace = true, optional = true, features = ["wasm-bindgen"]
 doctest = false
 
 [dev-dependencies]
+# The kind contract's own tests (src/ctx.rs).
+architect-workspace = { path = ".", features = ["ctx"] }
 # Every action driven over MCP against a headless workspace (tests/actions.rs).
 architect-mcp = { path = "../mcp" }
 serde_json = { workspace = true }

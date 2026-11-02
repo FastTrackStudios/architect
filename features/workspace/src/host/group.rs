@@ -7,6 +7,7 @@ use dioxus::prelude::*;
 use lucide_dioxus::{ArrowLeft, ArrowRight, ChevronDown, Ellipsis, Pin, Plus, X};
 
 use super::{Drag, Host, LONG_PRESS_MS, Menu, Mount, Op, ThisPane, point, use_host};
+use crate::kinds::ViewHost;
 use crate::layout::{scroll_to, slides};
 use crate::model::{Axis, Chrome, Group, Node, PaneId, Split};
 
@@ -884,12 +885,24 @@ pub(super) fn PaneSlot(pane: PaneId) -> Element {
         current.set(pane.clone());
     }
     let kind = host.workspace.read().pane(&pane).map(|p| p.view.0.clone());
-    let render = kind
-        .as_ref()
-        .and_then(|k| host.views.read().get(k).map(|v| v.render.clone()));
+    // Its view, if the app has it, and what draws it, if that is here:
+    // the built-in `dioxus` kind always is.
+    let render = kind.as_ref().and_then(|k| {
+        host.views
+            .read()
+            .resolve(k, ViewHost::Blitz)
+            .map(|r| r.map(|v| v.render.clone()))
+    });
     let focus = pane.clone();
-    let body = render.map_or_else(
-        || {
+    let body = match render {
+        Some(Ok(render)) => render(pane),
+        Some(Err(why)) => rsx! {
+            div { style: "flex:1; display:flex; align-items:center; justify-content:center; \
+                          text-align:center; padding:24px; color:{t.ink_3};",
+                "{why}; the pane keeps its state until it comes back."
+            }
+        },
+        None => {
             let name = kind.unwrap_or_default();
             rsx! {
                 div { style: "flex:1; display:flex; align-items:center; justify-content:center; \
@@ -897,9 +910,8 @@ pub(super) fn PaneSlot(pane: PaneId) -> Element {
                     "No view called “{name}” in this app; the pane keeps its state until it comes back."
                 }
             }
-        },
-        |render| render(pane),
-    );
+        }
+    };
     rsx! {
         div {
             style: "flex:1 1 0; width:100%; min-width:0; min-height:0; display:flex; flex-direction:column; position:relative;",

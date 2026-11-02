@@ -55,6 +55,8 @@ remote = ["process", "ui", "dep:blitz-dom", "dep:blitz-traits", "dep:dioxus-nati
 architect-settings = { workspace = true }
 architect-orgs = { workspace = true }
 architect-commands = { workspace = true }
+# The view kinds an extension's views may name (the model, wasm-clean).
+architect-workspace = { workspace = true }
 facet = { workspace = true }
 serde = { workspace = true }
 toml = { workspace = true }
