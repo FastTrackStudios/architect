@@ -1,0 +1,74 @@
+[package]
+name = "architect-attachments"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Attachments: files attached to a document or a record, kept by content hash, offline first, uploaded resumably and deduplicated, under the org's quota, previewed through the files feature's renditions, readable by whoever may read their parent"
+
+# docs/content/architecture/documents.md, "Attachments". The default set is
+# the model and the document side — what an attachment is, what it hangs
+# off (`Parent`), and the list a document keeps of them in its own Loro
+# map, so attaching works offline and syncs with the document — pure
+# data, wasm-clean. `vox` is the service, its gate table and
+# `AttachmentsClient` (still wasm-clean). `blob` (native) is a device's
+# side over `architect::blob`: attach from the local store, push what the
+# server lacks, fetch another device's attachments by hash. `server`
+# (native) keeps every org's uploads, record attachments and quota, and
+# decides each call by the parent's permissions. `http` (native) is the
+# byte face a browser previews from.
+
+[features]
+default = []
+vox = ["dep:vox", "architect/vox", "architect-files/vox", "dep:architect-permissions", "dep:sha2", "dep:futures-util"]
+blob = ["vox", "architect/blob", "dep:tokio"]
+server = [
+    "vox",
+    "architect/blob",
+    "architect-files/server",
+    "architect-orgs/server",
+    "dep:facet-json",
+    "dep:tokio",
+]
+http = ["server", "architect/http", "architect-files/http"]
+
+[dependencies]
+architect = { workspace = true }
+architect-files = { workspace = true }
+architect-orgs = { workspace = true }
+facet = { workspace = true }
+loro = { workspace = true }
+thiserror = { workspace = true }
+uuid = { version = "1", default-features = false }
+vox = { workspace = true, optional = true }
+# `vox`: the gate's permit table; `server`: the parent's permissions.
+architect-permissions = { workspace = true, optional = true }
+# `vox`: an attachment is named by its bytes' sha256, on the device that
+# attaches it as on the server that checks it.
+sha2 = { workspace = true, optional = true }
+# `AttachmentsClient::read`: the call and the frames it sends run side by
+# side, on any executor (wasm too); the boxed futures of `blob` and `server`.
+futures-util = { version = "0.3", default-features = false, features = ["alloc"], optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+facet-json = { version = "0.50.0-rc.5", optional = true }
+tokio = { version = "1", default-features = false, features = ["fs", "io-util", "rt", "sync"], optional = true }
+
+[dev-dependencies]
+# The tests drive two devices, the server and the byte face.
+architect-attachments = { path = ".", features = ["blob", "server", "http"] }
+architect = { workspace = true, features = ["vox", "local", "http", "http-client", "blob"] }
+architect-files = { workspace = true, features = ["server"] }
+architect-permissions = { workspace = true }
+architect-spaces = { workspace = true, features = ["server"] }
+crdt = { workspace = true, features = ["blob"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+tempfile = "3"
+tokio = { workspace = true }
+vox = { workspace = true }
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
