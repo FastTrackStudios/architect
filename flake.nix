@@ -32,6 +32,9 @@
             libayatana-appindicator
             xorg.libX11
             xorg.libxcb
+            # Blitz's system fonts (fontique) link fontconfig: a desktop
+            # test binary needs it at run time.
+            fontconfig
           ];
           common = with pkgs; [
             pkg-config
