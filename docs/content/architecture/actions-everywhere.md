@@ -55,6 +55,18 @@ to the ribbon, put in a custom action, and a model can run. A check in
 `architect-ui`'s tests walks a rendered app and fails on a pressable
 element with no action.
 
+A view's own command (`architect_commands::Command`, registered with
+`use_command`) says what running it does, as an action's `Effect` does:
+read-only, mutating (the default) or destructive (`Command::destructive`,
+`Command::read_only`; `features/commands/src/palette.rs` `Effect`). A model
+reaches commands through `COMMANDS_RUN`, and runs each one with that
+command's own effect, not as a blanket write
+(`features/commands/src/bridge.rs` `use_command_actions`):
+- a destructive command waits for a person's yes, as a destructive
+  action does (the Action List's confirmation tickets);
+- an action run through `COMMANDS_RUN` is authorised as itself;
+- `COMMANDS_LIST` lists every command with its effect.
+
 ## 2. Contexts
 
 A binding belongs to a **context**: where it applies. Contexts nest —

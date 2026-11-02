@@ -226,7 +226,12 @@ fn from_info(info: &architect::action::ActionInfo) -> Command {
     let mut c = Command::new(info.id.clone(), info.display_name.clone())
         .group(group)
         .detail(info.description.clone())
-        .shortcut(info.shortcut.clone());
+        .shortcut(info.shortcut.clone())
+        .effect(match info.effect {
+            architect::action::Effect::ReadOnly => crate::Effect::ReadOnly,
+            architect::action::Effect::Mutating => crate::Effect::Mutating,
+            architect::action::Effect::Destructive => crate::Effect::Destructive,
+        });
     if let Some(on) = info.checked {
         c = c.checked(on);
     }
@@ -311,7 +316,20 @@ impl Commands {
         }
         for custom in self.keymap.read().custom() {
             if !all.iter().any(|c| c.id == custom.id) {
-                all.push(crate::keys_ui::custom_command(custom));
+                // As much as its most far-reaching step: a destructive
+                // step makes the whole of it destructive.
+                let effect = custom
+                    .steps
+                    .iter()
+                    .filter_map(|step| all.iter().find(|c| c.id == step.action))
+                    .map(|c| c.effect)
+                    .max_by_key(|e| match e {
+                        crate::Effect::ReadOnly => 0,
+                        crate::Effect::Mutating => 1,
+                        crate::Effect::Destructive => 2,
+                    })
+                    .unwrap_or_default();
+                all.push(crate::keys_ui::custom_command(custom).effect(effect));
             }
         }
         all

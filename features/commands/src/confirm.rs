@@ -77,7 +77,9 @@ pub fn ConfirmSheet() -> Element {
             },
         )
     };
-    let destructive = first.effect == Effect::Destructive;
+    // A command run through `COMMANDS_RUN` is named as itself.
+    let (name, id) = named(&first);
+    let destructive = first.effect == Effect::Destructive || ran_destructive(&first);
     let go = if destructive { t.danger } else { t.accent };
     let warn = if destructive {
         "It may not be undoable: allow it only if you meant it to happen."
@@ -95,7 +97,7 @@ pub fn ConfirmSheet() -> Element {
             onkeydown: esc,
             div {
                 role: "alertdialog",
-                "aria-label": "{caller} wants to run {first.display_name}",
+                "aria-label": "{caller} wants to run {name}",
                 style: "width: 460px; max-width: 92%; display: flex; flex-direction: column; gap: 16px; padding: 20px; \
                         border-radius: 14px; background: {t.pill}; border: 1px solid {t.rule}; box-shadow: {t.shadow_float}; \
                         color: {t.ink};",
@@ -106,7 +108,7 @@ pub fn ConfirmSheet() -> Element {
                     }
                     div { style: "display: flex; flex-direction: column; gap: 4px; min-width: 0;",
                         div { style: "font-size: 15px; font-weight: 600; line-height: 1.35;",
-                            "An agent wants to run “{first.display_name}”"
+                            "An agent wants to run “{name}”"
                         }
                         div { style: "font-size: 13px; color: {t.ink_2}; line-height: 1.4;",
                             "{warn}"
@@ -115,8 +117,8 @@ pub fn ConfirmSheet() -> Element {
                 }
                 div { style: "display: flex; flex-direction: column; gap: 10px; font-size: 13px;",
                     Field { label: "Action",
-                        span { "{first.display_name} " }
-                        span { style: "color: {t.ink_3}; font-family: ui-monospace, Menlo, monospace; font-size: 12px;", "{first.id}" }
+                        span { "{name} " }
+                        span { style: "color: {t.ink_3}; font-family: ui-monospace, Menlo, monospace; font-size: 12px;", "{id}" }
                     }
                     Field { label: "Caller",
                         span { style: "display: inline-flex; align-items: center; gap: 6px;",
@@ -194,6 +196,36 @@ fn pretty(args: &str) -> String {
 fn countdown(left: Duration) -> String {
     let secs = left.as_secs();
     format!("{}:{:02}", secs / 60, secs % 60)
+}
+
+/// The command a `COMMANDS_RUN` call names (its label, and its id after
+/// the runner's); any other call's action as it is.
+fn named(c: &Confirmation) -> (String, String) {
+    let inner = (c.id == crate::RUN_ACTION)
+        .then(|| facet_json::from_str::<crate::RunCommand>(&c.args).ok())
+        .flatten();
+    let Some(ask) = inner else {
+        return (c.display_name.clone(), c.id.clone());
+    };
+    let label = crate::ui::try_use_commands()
+        .and_then(|cmds| cmds.all().into_iter().find(|cmd| cmd.id == ask.id))
+        .map_or_else(|| ask.id.clone(), |cmd| cmd.label);
+    (label, format!("{} → {}", c.id, ask.id))
+}
+
+/// Whether a `COMMANDS_RUN` call runs a destructive command (the runner
+/// itself is only mutating).
+fn ran_destructive(c: &Confirmation) -> bool {
+    c.id == crate::RUN_ACTION
+        && facet_json::from_str::<crate::RunCommand>(&c.args)
+            .ok()
+            .and_then(|ask| {
+                crate::ui::try_use_commands()?
+                    .all()
+                    .into_iter()
+                    .find(|cmd| cmd.id == ask.id)
+            })
+            .is_some_and(|cmd| cmd.effect == crate::Effect::Destructive)
 }
 
 #[cfg(test)]

@@ -833,7 +833,8 @@ pub fn LabApp() -> Element {
         {
             let c = architect_commands::Command::new("LAB_DELETE", "Delete")
                 .group("Edit")
-                .shortcut("⌘⌫");
+                .shortcut("⌘⌫")
+                .destructive();
             // A field with text has ⌘⌫ (delete to the line's start).
             if lab.target().is_some() && !(lab.typing)() {
                 c

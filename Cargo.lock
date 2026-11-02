@@ -613,6 +613,7 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "architect-input",
+ "architect-permissions",
  "architect-shell",
  "block2 0.6.2",
  "dioxus",

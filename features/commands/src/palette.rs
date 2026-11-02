@@ -4,6 +4,36 @@
 use crate::fuzzy::{Match, fuzzy};
 use crate::recent::Recents;
 
+/// What running a command does to the app.
+///
+/// The Action List's three (`architect::action::Effect`), kept here so
+/// the model needs no `architect`. A caller from outside runs a command through `COMMANDS_RUN`
+/// with this effect, not a blanket one: a destructive command waits for a
+/// person's yes when the list asks for confirmations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum Effect {
+    /// Reads only, or changes only what is on show (a menu, an overlay).
+    ReadOnly,
+    /// Changes the app, undoably (a closed tab reopens).
+    #[default]
+    Mutating,
+    /// Changes the app in a way an undo may not bring back.
+    Destructive,
+}
+
+impl Effect {
+    /// Its name, as the Action List writes it (`read-only`, `mutating`,
+    /// `destructive`).
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::ReadOnly => "read-only",
+            Self::Mutating => "mutating",
+            Self::Destructive => "destructive",
+        }
+    }
+}
+
 /// One command as the palette shows it: from the Action List, or a
 /// scoped action a view registered while it is mounted.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,6 +52,8 @@ pub struct Command {
     pub disabled_reason: Option<String>,
     /// A toggle's state, the tick a menu shows; `None` when it is not one.
     pub checked: Option<bool>,
+    /// What running it does ([`Effect::Mutating`] unless it says).
+    pub effect: Effect,
 }
 
 impl Command {
@@ -35,6 +67,7 @@ impl Command {
             enabled: true,
             disabled_reason: None,
             checked: None,
+            effect: Effect::Mutating,
         }
     }
 
@@ -61,6 +94,26 @@ impl Command {
     pub const fn checked(mut self, on: bool) -> Self {
         self.checked = Some(on);
         self
+    }
+
+    /// What running it does to the app.
+    #[must_use]
+    pub const fn effect(mut self, effect: Effect) -> Self {
+        self.effect = effect;
+        self
+    }
+
+    /// It cannot be taken back (deletes, closes what does not reopen):
+    /// [`Effect::Destructive`].
+    #[must_use]
+    pub const fn destructive(self) -> Self {
+        self.effect(Effect::Destructive)
+    }
+
+    /// It only reads, or changes only what is on show: [`Effect::ReadOnly`].
+    #[must_use]
+    pub const fn read_only(self) -> Self {
+        self.effect(Effect::ReadOnly)
     }
 
     #[must_use]

@@ -43,7 +43,7 @@ mod recent;
 mod ui;
 
 #[cfg(feature = "ui")]
-pub use bridge::{CommandsState, Ran, RunCommand, use_command_actions};
+pub use bridge::{CommandInfo, CommandList, CommandsState, Ran, RunCommand, use_command_actions};
 #[cfg(feature = "ui")]
 pub use confirm::ConfirmSheet;
 pub use custom::{Condition, CustomAction, Runner, Step, StepFailed};
@@ -69,7 +69,7 @@ pub use native::WindowKeys;
 #[cfg(all(feature = "native", target_os = "macos"))]
 pub use native_menu::NativeMenus;
 pub use opener::{Found, OpenIn, OpenItem, Opener, Openers};
-pub use palette::{Command, Query, Ranked, Scope, rank};
+pub use palette::{Command, Effect, Query, Ranked, Scope, rank};
 pub use recent::Recents;
 #[cfg(feature = "ui")]
 pub use ui::*;
@@ -77,6 +77,10 @@ pub use ui::*;
 /// The Action List action that runs any command by id, a view's own too
 /// ([`use_command_actions`] registers it; feature `ui`).
 pub const RUN_ACTION: &str = "COMMANDS_RUN";
+
+/// The read-only Action List action that lists every command with its
+/// effect, enabled or not and why ([`use_command_actions`]; feature `ui`).
+pub const LIST_ACTION: &str = "COMMANDS_LIST";
 
 /// The read-only Action List action that says which overlay is open and
 /// what the palette's field says ([`use_command_actions`]; feature `ui`).
