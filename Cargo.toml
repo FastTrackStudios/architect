@@ -352,11 +352,11 @@ anyrender = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upst
 # hybrid renderer's resize, Vello's surface on Metal, winit's UIKit
 # backend, wgpu's Metal layer. Only the lab apps (apps/lab) reach the iOS
 # ones.
-anyrender_vello = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.0" }
-anyrender_vello_hybrid = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.0" }
-winit-uikit = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.0" }
-wgpu-hal = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.0" }
-raw-window-metal = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.0" }
+anyrender_vello = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1" }
+anyrender_vello_hybrid = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1" }
+winit-uikit = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1" }
+wgpu-hal = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1" }
+raw-window-metal = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1" }
 # Vendored one-line fix: quote scalars containing `<`/`>` — upstream
 # styx-format emits them bare but styx-parse rejects them.
 styx-format = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.1.0" }
@@ -384,11 +384,14 @@ vox-phon = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.3.0" 
 # UPSTREAM.md): dioxus-native — the iOS simulator's renderer, winit beta.4
 # to match Blitz main; dioxus-native-dom — `text_input_focused`, focus and
 # measurements that never panic on a busy document; dioxus-vdom (upstream's
-# renamed dioxus-core) — a dropped handler's owner is not a panic.
+# renamed dioxus-core) — a dropped handler's owner is not a panic, and a
+# suspense boundary inside a still-suspended boundary's background does not
+# write to the renderer (the core half of upstream #5668, Task#410: the
+# wasm-split web build's blank pages).
 [patch."https://github.com/DioxusLabs/dioxus"]
-dioxus-native = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.0" }
-dioxus-native-dom = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.0" }
-dioxus-vdom = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.0" }
+dioxus-native = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1" }
+dioxus-native-dom = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1" }
+dioxus-vdom = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1" }
 
 # ── Lints ─────────────────────────────────────────────────────────────
 [workspace.lints.rust]
