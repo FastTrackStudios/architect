@@ -25,12 +25,27 @@ use crate::ops::Dest;
 pub type Write<A> = fn(&mut State, &Env, A) -> Result<Answer, String>;
 
 /// Runs `write` so a failure changes nothing: the state is put back as
-/// it was when it says no.
+/// it was when it says no. A call planned at another revision than the
+/// layout's (`if_revision`) does not run: it answers `stale`.
 ///
 /// # Errors
 ///
 /// What `write` said.
-pub fn transact<A>(st: &mut State, env: &Env, write: Write<A>, args: A) -> Result<Answer, String> {
+pub fn transact<A: super::Guarded>(
+    st: &mut State,
+    env: &Env,
+    write: Write<A>,
+    args: A,
+) -> Result<Answer, String> {
+    if args.if_revision().is_some_and(|r| r != st.revision) {
+        return Ok(answer(
+            st,
+            env,
+            false,
+            Some(Reason::Stale),
+            Acted::default(),
+        ));
+    }
     let saved = st.clone();
     let out = write(st, env, args);
     if out.is_err() {
@@ -77,6 +92,7 @@ pub fn open(st: &mut State, env: &Env, a: OpenArgs) -> Result<Answer, String> {
         let focus = Focus::of(a.focus, &id);
         return Ok(finish(
             st,
+            env,
             &before,
             focus,
             Acted::pane(&id),
@@ -110,6 +126,7 @@ pub fn open(st: &mut State, env: &Env, a: OpenArgs) -> Result<Answer, String> {
             w.repair();
             return Ok(finish(
                 st,
+                env,
                 &before,
                 Focus::of(a.focus, &id),
                 Acted::pane(&id),
@@ -144,6 +161,7 @@ pub fn open(st: &mut State, env: &Env, a: OpenArgs) -> Result<Answer, String> {
     w.repair();
     Ok(finish(
         st,
+        env,
         &before,
         Focus::of(a.focus, &id),
         Acted::pane(&id),
@@ -156,7 +174,7 @@ pub fn open(st: &mut State, env: &Env, a: OpenArgs) -> Result<Answer, String> {
 /// # Errors
 ///
 /// A pane or destination that is not there.
-pub fn move_pane(st: &mut State, _env: &Env, a: MoveArgs) -> Result<Answer, String> {
+pub fn move_pane(st: &mut State, env: &Env, a: MoveArgs) -> Result<Answer, String> {
     let before = st.clone();
     let w = &mut st.workspace;
     let pane = pane_id(w, &a.pane)?;
@@ -172,6 +190,7 @@ pub fn move_pane(st: &mut State, _env: &Env, a: MoveArgs) -> Result<Answer, Stri
             if near == pane {
                 return Ok(answer(
                     st,
+                    env,
                     false,
                     Some(Reason::Unchanged),
                     Acted::pane(&pane),
@@ -200,6 +219,7 @@ pub fn move_pane(st: &mut State, _env: &Env, a: MoveArgs) -> Result<Answer, Stri
                 w.to_main_window(&pane).map_err(err)?;
                 return Ok(finish(
                     st,
+                    env,
                     &before,
                     Focus::of(a.focus, &pane),
                     Acted::pane(&pane),
@@ -225,11 +245,18 @@ pub fn move_pane(st: &mut State, _env: &Env, a: MoveArgs) -> Result<Answer, Stri
         _ => false,
     };
     if lone {
-        return Ok(answer(st, false, Some(Reason::OnlyTab), Acted::pane(&pane)));
+        return Ok(answer(
+            st,
+            env,
+            false,
+            Some(Reason::OnlyTab),
+            Acted::pane(&pane),
+        ));
     }
     w.move_pane(&pane, dest).map_err(err)?;
     Ok(finish(
         st,
+        env,
         &before,
         Focus::of(a.focus, &pane),
         Acted::pane(&pane),
@@ -247,6 +274,7 @@ pub fn split(st: &mut State, env: &Env, a: SplitArgs) -> Result<Answer, String> 
         st,
         env,
         MoveArgs {
+            if_revision: a.if_revision,
             to: super::To::Split {
                 pane: a.pane.clone(),
                 side: a.side,
@@ -262,7 +290,7 @@ pub fn split(st: &mut State, env: &Env, a: SplitArgs) -> Result<Answer, String> 
 /// # Errors
 ///
 /// Neither a pane nor `from` and `direction`, or a pane that is not there.
-pub fn focus(st: &mut State, _env: &Env, a: FocusArgs) -> Result<Answer, String> {
+pub fn focus(st: &mut State, env: &Env, a: FocusArgs) -> Result<Answer, String> {
     let before = st.clone();
     let w = &mut st.workspace;
     let pane = match (a.pane, a.from, a.direction) {
@@ -277,6 +305,7 @@ pub fn focus(st: &mut State, _env: &Env, a: FocusArgs) -> Result<Answer, String>
                 None => {
                     return Ok(answer(
                         st,
+                        env,
                         false,
                         Some(Reason::NoNeighbor),
                         Acted::pane(&from),
@@ -289,6 +318,7 @@ pub fn focus(st: &mut State, _env: &Env, a: FocusArgs) -> Result<Answer, String>
     w.activate(&pane).map_err(err)?;
     Ok(finish(
         st,
+        env,
         &before,
         Focus::AsIs,
         Acted::pane(&pane),
@@ -301,7 +331,7 @@ pub fn focus(st: &mut State, _env: &Env, a: FocusArgs) -> Result<Answer, String>
 /// # Errors
 ///
 /// A pane that is not there, or not in a window's center.
-pub fn zoom(st: &mut State, _env: &Env, a: ZoomArgs) -> Result<Answer, String> {
+pub fn zoom(st: &mut State, env: &Env, a: ZoomArgs) -> Result<Answer, String> {
     let before = st.clone();
     let w = &mut st.workspace;
     let pane = pane_id(w, &a.pane)?;
@@ -319,7 +349,7 @@ pub fn zoom(st: &mut State, _env: &Env, a: ZoomArgs) -> Result<Answer, String> {
         ..Acted::default()
     };
     if !matches!(window.center, Some(Node::Split(_))) {
-        return Ok(answer(st, false, Some(Reason::SingleGroup), acted));
+        return Ok(answer(st, env, false, Some(Reason::SingleGroup), acted));
     }
     let now = window.zoomed == Some(l.group);
     let on = a.mode.apply(now);
@@ -329,7 +359,7 @@ pub fn zoom(st: &mut State, _env: &Env, a: ZoomArgs) -> Result<Answer, String> {
         Reason::AlreadyUnzoomed
     };
     w.set_zoomed(l.group, on).map_err(err)?;
-    Ok(finish(st, &before, Focus::Keep, acted, same))
+    Ok(finish(st, env, &before, Focus::Keep, acted, same))
 }
 
 /// The child indices from `node` down to the group `group`.
@@ -360,11 +390,26 @@ fn split_at<'a>(node: &'a Node, path: &[usize]) -> Option<&'a Split> {
 /// # Errors
 ///
 /// None or more than one of its forms, or a target that is not there.
-pub fn resize(st: &mut State, _env: &Env, a: ResizeArgs) -> Result<Answer, String> {
+pub fn resize(st: &mut State, env: &Env, a: ResizeArgs) -> Result<Answer, String> {
     let before = st.clone();
     let w = &mut st.workspace;
     let mut acted = Acted::default();
-    match (a.split, a.dock, a.pane) {
+    let by_path = match &a.path {
+        Some(path) => {
+            let window = a.window.as_deref().unwrap_or("main");
+            Some(
+                crate::tree::split_at_path(w, window, path)
+                    .ok_or_else(|| format!("no split at {path:?} in {window:?}"))?
+                    .0,
+            )
+        }
+        None => None,
+    };
+    let split = match (a.split, by_path) {
+        (Some(_), Some(_)) => return Err("give `split` or `path`, not both".to_owned()),
+        (one, other) => one.or(other),
+    };
+    match (split, a.dock, a.pane) {
         (Some(split), None, None) => {
             let id = crate::model::SplitId(split);
             match (a.shares, a.even) {
@@ -383,18 +428,25 @@ pub fn resize(st: &mut State, _env: &Env, a: ResizeArgs) -> Result<Answer, Strin
             acted = Acted::pane(&pane);
             let amount = a.amount.unwrap_or(0.1).clamp(0.0, 1.0);
             let Some((split, shares)) = grown(w, &pane, direction.into(), amount)? else {
-                return Ok(answer(st, false, Some(Reason::NoNeighbor), acted));
+                return Ok(answer(st, env, false, Some(Reason::NoNeighbor), acted));
             };
             w.set_shares(split, &shares).map_err(err)?;
         }
         _ => {
             return Err(
-                "give one of: `split` (with `shares` or `even`), `dock` (with `size`), `pane` (with `direction`)"
+                "give one of: `split` or `path` (with `shares` or `even`), `dock` (with `size`), `pane` (with `direction`)"
                     .to_owned(),
             );
         }
     }
-    Ok(finish(st, &before, Focus::Keep, acted, Reason::Unchanged))
+    Ok(finish(
+        st,
+        env,
+        &before,
+        Focus::Keep,
+        acted,
+        Reason::Unchanged,
+    ))
 }
 
 /// The nearest split around `pane`'s group along `direction`'s axis with a
@@ -453,7 +505,7 @@ fn grown(
 /// # Errors
 ///
 /// A group that is not there, or a `current` that is not one of its tabs.
-pub fn group_set(st: &mut State, _env: &Env, a: GroupSetArgs) -> Result<Answer, String> {
+pub fn group_set(st: &mut State, env: &Env, a: GroupSetArgs) -> Result<Answer, String> {
     let before = st.clone();
     let w = &mut st.workspace;
     let group = group_id(w, a.group)?;
@@ -477,7 +529,14 @@ pub fn group_set(st: &mut State, _env: &Env, a: GroupSetArgs) -> Result<Answer, 
         group: Some(group),
         ..Acted::default()
     };
-    Ok(finish(st, &before, Focus::Keep, acted, Reason::Unchanged))
+    Ok(finish(
+        st,
+        env,
+        &before,
+        Focus::Keep,
+        acted,
+        Reason::Unchanged,
+    ))
 }
 
 /// `WORKSPACE_TAB_SET`.
@@ -485,7 +544,7 @@ pub fn group_set(st: &mut State, _env: &Env, a: GroupSetArgs) -> Result<Answer, 
 /// # Errors
 ///
 /// A pane that is not there.
-pub fn tab_set(st: &mut State, _env: &Env, a: TabSetArgs) -> Result<Answer, String> {
+pub fn tab_set(st: &mut State, env: &Env, a: TabSetArgs) -> Result<Answer, String> {
     let before = st.clone();
     let w = &mut st.workspace;
     let pane = pane_id(w, &a.pane)?;
@@ -503,6 +562,7 @@ pub fn tab_set(st: &mut State, _env: &Env, a: TabSetArgs) -> Result<Answer, Stri
     }
     Ok(finish(
         st,
+        env,
         &before,
         Focus::Keep,
         Acted::pane(&pane),
@@ -515,7 +575,7 @@ pub fn tab_set(st: &mut State, _env: &Env, a: TabSetArgs) -> Result<Answer, Stri
 /// # Errors
 ///
 /// A pane that is not there, or neither `go` nor `state` (or both).
-pub fn navigate(st: &mut State, _env: &Env, a: NavigateArgs) -> Result<Answer, String> {
+pub fn navigate(st: &mut State, env: &Env, a: NavigateArgs) -> Result<Answer, String> {
     let before = st.clone();
     let w = &mut st.workspace;
     let pane = pane_id(w, &a.pane)?;
@@ -525,6 +585,7 @@ pub fn navigate(st: &mut State, _env: &Env, a: NavigateArgs) -> Result<Answer, S
             Err(crate::WorkspaceError::NoHistory) => {
                 return Ok(answer(
                     st,
+                    env,
                     false,
                     Some(Reason::NoHistory),
                     Acted::pane(&pane),
@@ -542,6 +603,7 @@ pub fn navigate(st: &mut State, _env: &Env, a: NavigateArgs) -> Result<Answer, S
     }
     Ok(finish(
         st,
+        env,
         &before,
         Focus::Keep,
         Acted::pane(&pane),
@@ -554,7 +616,7 @@ pub fn navigate(st: &mut State, _env: &Env, a: NavigateArgs) -> Result<Answer, S
 /// # Errors
 ///
 /// Neither `shown` nor `size`.
-pub fn dock_set(st: &mut State, _env: &Env, a: DockSetArgs) -> Result<Answer, String> {
+pub fn dock_set(st: &mut State, env: &Env, a: DockSetArgs) -> Result<Answer, String> {
     let before = st.clone();
     let w = &mut st.workspace;
     if a.shown.is_none() && a.size.is_none() {
@@ -569,6 +631,7 @@ pub fn dock_set(st: &mut State, _env: &Env, a: DockSetArgs) -> Result<Answer, St
     }
     Ok(finish(
         st,
+        env,
         &before,
         Focus::Keep,
         Acted::default(),
@@ -594,13 +657,13 @@ pub fn dock_pop_out(st: &mut State, env: &Env, a: DockPopOutArgs) -> Result<Answ
         ..Acted::default()
     };
     if out.is_some() {
-        return Ok(answer(st, false, Some(Reason::AlreadyOut), acted));
+        return Ok(answer(st, env, false, Some(Reason::AlreadyOut), acted));
     }
     if !env.windows {
-        return Ok(answer(st, false, Some(Reason::NoWindows), acted));
+        return Ok(answer(st, env, false, Some(Reason::NoWindows), acted));
     }
     if w.dock(side).is_none_or(|d| d.root.is_none()) {
-        return Ok(answer(st, false, Some(Reason::DockEmpty), acted));
+        return Ok(answer(st, env, false, Some(Reason::DockEmpty), acted));
     }
     let bounds = a.bounds.or_else(|| env.dock_bounds(side));
     let id = w.pop_out_dock(side, bounds).map_err(err)?;
@@ -608,7 +671,14 @@ pub fn dock_pop_out(st: &mut State, env: &Env, a: DockPopOutArgs) -> Result<Answ
         window: Some(id),
         ..Acted::default()
     };
-    Ok(finish(st, &before, Focus::Keep, acted, Reason::Unchanged))
+    Ok(finish(
+        st,
+        env,
+        &before,
+        Focus::Keep,
+        acted,
+        Reason::Unchanged,
+    ))
 }
 
 /// `WORKSPACE_DOCK_BACK`.
@@ -616,13 +686,14 @@ pub fn dock_pop_out(st: &mut State, env: &Env, a: DockPopOutArgs) -> Result<Answ
 /// # Errors
 ///
 /// None the caller can mend.
-pub fn dock_back(st: &mut State, _env: &Env, a: DockBackArgs) -> Result<Answer, String> {
+pub fn dock_back(st: &mut State, env: &Env, a: DockBackArgs) -> Result<Answer, String> {
     let before = st.clone();
     let side: Side = a.side.into();
     let w = &mut st.workspace;
     if w.dock_window(side).is_none() {
         return Ok(answer(
             st,
+            env,
             false,
             Some(Reason::DockNotOut),
             Acted::default(),
@@ -633,7 +704,14 @@ pub fn dock_back(st: &mut State, _env: &Env, a: DockBackArgs) -> Result<Answer, 
         window: Some(WindowId::main()),
         ..Acted::default()
     };
-    Ok(finish(st, &before, Focus::Keep, acted, Reason::Unchanged))
+    Ok(finish(
+        st,
+        env,
+        &before,
+        Focus::Keep,
+        acted,
+        Reason::Unchanged,
+    ))
 }
 
 /// `WORKSPACE_FLOAT`.
@@ -641,7 +719,7 @@ pub fn dock_back(st: &mut State, _env: &Env, a: DockBackArgs) -> Result<Answer, 
 /// # Errors
 ///
 /// A pane that is not there.
-pub fn float(st: &mut State, _env: &Env, a: FloatArgs) -> Result<Answer, String> {
+pub fn float(st: &mut State, env: &Env, a: FloatArgs) -> Result<Answer, String> {
     let before = st.clone();
     let w = &mut st.workspace;
     let pane = pane_id(w, &a.pane)?;
@@ -683,6 +761,7 @@ pub fn float(st: &mut State, _env: &Env, a: FloatArgs) -> Result<Answer, String>
     }
     Ok(finish(
         st,
+        env,
         &before,
         Focus::of(a.focus, &pane),
         Acted::pane(&pane),
@@ -695,13 +774,14 @@ pub fn float(st: &mut State, _env: &Env, a: FloatArgs) -> Result<Answer, String>
 /// # Errors
 ///
 /// A pane that is not there, or not floating.
-pub fn minimise(st: &mut State, _env: &Env, a: PaneArgs) -> Result<Answer, String> {
+pub fn minimise(st: &mut State, env: &Env, a: PaneArgs) -> Result<Answer, String> {
     let before = st.clone();
     let w = &mut st.workspace;
     let pane = pane_id(w, &a.pane)?;
     w.minimise(&pane).map_err(err)?;
     Ok(finish(
         st,
+        env,
         &before,
         Focus::AsIs,
         Acted::pane(&pane),
@@ -714,7 +794,7 @@ pub fn minimise(st: &mut State, _env: &Env, a: PaneArgs) -> Result<Answer, Strin
 /// # Errors
 ///
 /// A pane that is not there, or not floating.
-pub fn restore(st: &mut State, _env: &Env, a: RestoreArgs) -> Result<Answer, String> {
+pub fn restore(st: &mut State, env: &Env, a: RestoreArgs) -> Result<Answer, String> {
     let before = st.clone();
     let w = &mut st.workspace;
     let pane = pane_id(w, &a.pane)?;
@@ -722,6 +802,7 @@ pub fn restore(st: &mut State, _env: &Env, a: RestoreArgs) -> Result<Answer, Str
     if !float.minimised && !a.focus {
         return Ok(answer(
             st,
+            env,
             false,
             Some(Reason::NotMinimised),
             Acted::pane(&pane),
@@ -730,6 +811,7 @@ pub fn restore(st: &mut State, _env: &Env, a: RestoreArgs) -> Result<Answer, Str
     float.minimised = false;
     Ok(finish(
         st,
+        env,
         &before,
         Focus::of(a.focus, &pane),
         Acted::pane(&pane),
@@ -742,7 +824,7 @@ pub fn restore(st: &mut State, _env: &Env, a: RestoreArgs) -> Result<Answer, Str
 /// # Errors
 ///
 /// A window that is not there, or bounds for the main window.
-pub fn window_set(st: &mut State, _env: &Env, a: WindowSetArgs) -> Result<Answer, String> {
+pub fn window_set(st: &mut State, env: &Env, a: WindowSetArgs) -> Result<Answer, String> {
     let before = st.clone();
     let w = &mut st.workspace;
     let window = window_id(w, &a.window)?;
@@ -761,7 +843,14 @@ pub fn window_set(st: &mut State, _env: &Env, a: WindowSetArgs) -> Result<Answer
         window: Some(window),
         ..Acted::default()
     };
-    Ok(finish(st, &before, Focus::Keep, acted, Reason::Unchanged))
+    Ok(finish(
+        st,
+        env,
+        &before,
+        Focus::Keep,
+        acted,
+        Reason::Unchanged,
+    ))
 }
 
 /// `WORKSPACE_REOPEN`.
@@ -769,12 +858,13 @@ pub fn window_set(st: &mut State, _env: &Env, a: WindowSetArgs) -> Result<Answer
 /// # Errors
 ///
 /// None the caller can mend.
-pub fn reopen(st: &mut State, _env: &Env, a: ReopenArgs) -> Result<Answer, String> {
+pub fn reopen(st: &mut State, env: &Env, a: ReopenArgs) -> Result<Answer, String> {
     let before = st.clone();
     let reopened = st.workspace.reopen().map_err(err)?;
     let Some(pane) = reopened else {
         return Ok(answer(
             st,
+            env,
             false,
             Some(Reason::NothingClosed),
             Acted::default(),
@@ -782,6 +872,7 @@ pub fn reopen(st: &mut State, _env: &Env, a: ReopenArgs) -> Result<Answer, Strin
     };
     Ok(finish(
         st,
+        env,
         &before,
         Focus::of(a.focus, &pane),
         Acted::pane(&pane),
@@ -794,7 +885,7 @@ pub fn reopen(st: &mut State, _env: &Env, a: ReopenArgs) -> Result<Answer, Strin
 /// # Errors
 ///
 /// A pane that is not there (then nothing is closed).
-pub fn close(st: &mut State, _env: &Env, a: CloseArgs) -> Result<Answer, String> {
+pub fn close(st: &mut State, env: &Env, a: CloseArgs) -> Result<Answer, String> {
     let before = st.clone();
     let w = &mut st.workspace;
     let panes = a
@@ -808,7 +899,14 @@ pub fn close(st: &mut State, _env: &Env, a: CloseArgs) -> Result<Answer, String>
         }
     }
     let acted = panes.first().map(Acted::pane).unwrap_or_default();
-    Ok(finish(st, &before, Focus::Keep, acted, Reason::Unchanged))
+    Ok(finish(
+        st,
+        env,
+        &before,
+        Focus::Keep,
+        acted,
+        Reason::Unchanged,
+    ))
 }
 
 /// `WORKSPACE_CLOSE_OTHERS`: every other unpinned tab in the pane's group.
@@ -816,13 +914,14 @@ pub fn close(st: &mut State, _env: &Env, a: CloseArgs) -> Result<Answer, String>
 /// # Errors
 ///
 /// A pane that is not there.
-pub fn close_others(st: &mut State, _env: &Env, a: PaneArgs) -> Result<Answer, String> {
+pub fn close_others(st: &mut State, env: &Env, a: PaneArgs) -> Result<Answer, String> {
     let before = st.clone();
     let w = &mut st.workspace;
     let pane = pane_id(w, &a.pane)?;
     w.close_others(&pane).map_err(err)?;
     Ok(finish(
         st,
+        env,
         &before,
         Focus::Keep,
         Acted::pane(&pane),
@@ -836,7 +935,7 @@ pub fn close_others(st: &mut State, _env: &Env, a: PaneArgs) -> Result<Answer, S
 /// # Errors
 ///
 /// A window that is not there, or the main window.
-pub fn close_window(st: &mut State, _env: &Env, a: WindowArgs) -> Result<Answer, String> {
+pub fn close_window(st: &mut State, env: &Env, a: WindowArgs) -> Result<Answer, String> {
     let before = st.clone();
     let w = &mut st.workspace;
     let window = window_id(w, &a.window)?;
@@ -845,7 +944,14 @@ pub fn close_window(st: &mut State, _env: &Env, a: WindowArgs) -> Result<Answer,
         window: Some(window),
         ..Acted::default()
     };
-    Ok(finish(st, &before, Focus::Keep, acted, Reason::Unchanged))
+    Ok(finish(
+        st,
+        env,
+        &before,
+        Focus::Keep,
+        acted,
+        Reason::Unchanged,
+    ))
 }
 
 /// The workspace becomes `layout` (a screenset's), its ids still never
@@ -861,7 +967,7 @@ fn show(w: &mut Workspace, mut layout: Workspace) {
 /// # Errors
 ///
 /// Neither an id nor a slot, or no such screenset.
-pub fn recall(st: &mut State, _env: &Env, a: RecallArgs) -> Result<Answer, String> {
+pub fn recall(st: &mut State, env: &Env, a: RecallArgs) -> Result<Answer, String> {
     let before = st.clone();
     let id = match (a.id, a.slot) {
         (Some(id), None) => id,
@@ -881,7 +987,14 @@ pub fn recall(st: &mut State, _env: &Env, a: RecallArgs) -> Result<Answer, Strin
         screenset: Some(id),
         ..Acted::default()
     };
-    Ok(finish(st, &before, Focus::AsIs, acted, Reason::Unchanged))
+    Ok(finish(
+        st,
+        env,
+        &before,
+        Focus::AsIs,
+        acted,
+        Reason::Unchanged,
+    ))
 }
 
 /// `SCREENSET_SAVE`: the live layout into the active screenset.
@@ -889,11 +1002,12 @@ pub fn recall(st: &mut State, _env: &Env, a: RecallArgs) -> Result<Answer, Strin
 /// # Errors
 ///
 /// None the caller can mend.
-pub fn save(st: &mut State, _env: &Env, (): ()) -> Result<Answer, String> {
+pub fn save(st: &mut State, env: &Env, _: super::RevisionArgs) -> Result<Answer, String> {
     let before = st.clone();
     let Some(id) = st.screensets.active.clone() else {
         return Ok(answer(
             st,
+            env,
             false,
             Some(Reason::NoScreenset),
             Acted::default(),
@@ -906,7 +1020,14 @@ pub fn save(st: &mut State, _env: &Env, (): ()) -> Result<Answer, String> {
         screenset: Some(id),
         ..Acted::default()
     };
-    Ok(finish(st, &before, Focus::AsIs, acted, Reason::Unchanged))
+    Ok(finish(
+        st,
+        env,
+        &before,
+        Focus::AsIs,
+        acted,
+        Reason::Unchanged,
+    ))
 }
 
 /// `SCREENSET_SAVE_AS`: every live layout as a new screenset, which
@@ -915,7 +1036,7 @@ pub fn save(st: &mut State, _env: &Env, (): ()) -> Result<Answer, String> {
 /// # Errors
 ///
 /// An empty name, or a slot past 9.
-pub fn save_as(st: &mut State, _env: &Env, a: SaveAsArgs) -> Result<Answer, String> {
+pub fn save_as(st: &mut State, env: &Env, a: SaveAsArgs) -> Result<Answer, String> {
     let before = st.clone();
     if a.name.trim().is_empty() {
         return Err("a screenset needs a name".to_owned());
@@ -930,7 +1051,14 @@ pub fn save_as(st: &mut State, _env: &Env, a: SaveAsArgs) -> Result<Answer, Stri
         screenset: Some(id),
         ..Acted::default()
     };
-    Ok(finish(st, &before, Focus::AsIs, acted, Reason::Unchanged))
+    Ok(finish(
+        st,
+        env,
+        &before,
+        Focus::AsIs,
+        acted,
+        Reason::Unchanged,
+    ))
 }
 
 /// `SCREENSET_RESET`: back to the active screenset's saved layout.
@@ -938,11 +1066,12 @@ pub fn save_as(st: &mut State, _env: &Env, a: SaveAsArgs) -> Result<Answer, Stri
 /// # Errors
 ///
 /// None the caller can mend.
-pub fn reset(st: &mut State, _env: &Env, (): ()) -> Result<Answer, String> {
+pub fn reset(st: &mut State, env: &Env, _: super::RevisionArgs) -> Result<Answer, String> {
     let before = st.clone();
     let Some(id) = st.screensets.active.clone() else {
         return Ok(answer(
             st,
+            env,
             false,
             Some(Reason::NoScreenset),
             Acted::default(),
@@ -955,7 +1084,14 @@ pub fn reset(st: &mut State, _env: &Env, (): ()) -> Result<Answer, String> {
         screenset: Some(id),
         ..Acted::default()
     };
-    Ok(finish(st, &before, Focus::AsIs, acted, Reason::Unchanged))
+    Ok(finish(
+        st,
+        env,
+        &before,
+        Focus::AsIs,
+        acted,
+        Reason::Unchanged,
+    ))
 }
 
 /// `SCREENSET_DELETE`: a screenset the person made.
@@ -963,7 +1099,7 @@ pub fn reset(st: &mut State, _env: &Env, (): ()) -> Result<Answer, String> {
 /// # Errors
 ///
 /// No such screenset.
-pub fn delete(st: &mut State, _env: &Env, a: DeleteArgs) -> Result<Answer, String> {
+pub fn delete(st: &mut State, env: &Env, a: DeleteArgs) -> Result<Answer, String> {
     let before = st.clone();
     let set = st
         .screensets
@@ -974,8 +1110,15 @@ pub fn delete(st: &mut State, _env: &Env, a: DeleteArgs) -> Result<Answer, Strin
         ..Acted::default()
     };
     if set.builtin {
-        return Ok(answer(st, false, Some(Reason::Builtin), acted));
+        return Ok(answer(st, env, false, Some(Reason::Builtin), acted));
     }
     st.screensets.delete(&a.id);
-    Ok(finish(st, &before, Focus::AsIs, acted, Reason::Unchanged))
+    Ok(finish(
+        st,
+        env,
+        &before,
+        Focus::AsIs,
+        acted,
+        Reason::Unchanged,
+    ))
 }

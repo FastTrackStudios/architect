@@ -143,6 +143,9 @@ pub struct PortableFloat {
 #[derive(Debug, Clone, PartialEq, Facet)]
 pub struct ApplyArgs {
     pub layout: PortableLayout,
+    /// Run only at this revision (`stale` otherwise).
+    #[facet(default)]
+    pub if_revision: Option<u64>,
     /// Open panes the layout does not place: kept as tabs of the main
     /// window's first group (`true`, the default), or closed, kept to
     /// reopen (`false`).
@@ -521,9 +524,16 @@ pub fn apply(st: &mut State, env: &Env, a: ApplyArgs) -> Result<Answer, String> 
     let focus = active.map_or(Focus::Keep, Focus::Take);
     Ok(finish(
         st,
+        env,
         &before,
         focus,
         Acted::default(),
         Reason::Unchanged,
     ))
+}
+
+impl super::Guarded for ApplyArgs {
+    fn if_revision(&self) -> Option<u64> {
+        self.if_revision
+    }
 }

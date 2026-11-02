@@ -89,6 +89,7 @@ pub(super) fn WorkspaceCommands() -> Element {
                 host.write(
                     control::close,
                     CloseArgs {
+                        if_revision: None,
                         panes: vec![p.0.clone()],
                     },
                 );
@@ -107,7 +108,15 @@ pub(super) fn WorkspaceCommands() -> Element {
         }
         .group("Tabs")
         .shortcut("⇧⌘T"),
-        move || host.write(control::reopen, ReopenArgs { focus: true }),
+        move || {
+            host.write(
+                control::reopen,
+                ReopenArgs {
+                    if_revision: None,
+                    focus: true,
+                },
+            );
+        },
     );
     use_command(
         several(
@@ -133,7 +142,13 @@ pub(super) fn WorkspaceCommands() -> Element {
         ),
         move || {
             if let Some(p) = active_pane(host) {
-                host.write(control::close_others, PaneArgs { pane: p.0 });
+                host.write(
+                    control::close_others,
+                    PaneArgs {
+                        if_revision: None,
+                        pane: p.0,
+                    },
+                );
             }
         },
     );
@@ -145,6 +160,7 @@ pub(super) fn WorkspaceCommands() -> Element {
                 host.write(
                     control::tab_set,
                     TabSetArgs {
+                        if_revision: None,
                         pane: p.0,
                         pinned: Some(!pinned),
                         link: None,
@@ -222,6 +238,7 @@ pub(super) fn WorkspaceCommands() -> Element {
                 host.write(
                     control::float,
                     FloatArgs {
+                        if_revision: None,
                         pane: p.0,
                         rect: None,
                         snap: None,
@@ -242,6 +259,7 @@ pub(super) fn WorkspaceCommands() -> Element {
                 host.write(
                     control::zoom,
                     ZoomArgs {
+                        if_revision: None,
                         pane: p.0,
                         mode: control::Mode::Toggle,
                     },
@@ -298,6 +316,7 @@ pub(super) fn WorkspaceCommands() -> Element {
                 host.write(
                     control::group_set,
                     GroupSetArgs {
+                        if_revision: None,
                         group: g.0,
                         stacked: Some(!on),
                         chrome: None,
@@ -325,6 +344,7 @@ pub(super) fn WorkspaceCommands() -> Element {
                 host.write(
                     control::group_set,
                     GroupSetArgs {
+                        if_revision: None,
                         group: g.0,
                         stacked: None,
                         chrome: Some(next),
@@ -423,6 +443,7 @@ pub(super) fn WorkspaceCommands() -> Element {
             host.write(
                 control::dock_set,
                 DockSetArgs {
+                    if_revision: None,
                     side,
                     shown: Some(next),
                     size: None,
@@ -469,12 +490,27 @@ pub(super) fn WorkspaceCommands() -> Element {
             pop.enabled_if(host.has_windows(), "this app opens no other windows")
         };
         use_command(pop, move || {
-            host.write(control::dock_pop_out, DockPopOutArgs { side, bounds: None });
+            host.write(
+                control::dock_pop_out,
+                DockPopOutArgs {
+                    if_revision: None,
+                    side,
+                    bounds: None,
+                },
+            );
         });
         let back = Command::new(back_id, back_label).group("Docks");
         use_command(
             back.enabled_if(out, "it is in the main window"),
-            move || host.write(control::dock_back, DockBackArgs { side }),
+            move || {
+                host.write(
+                    control::dock_back,
+                    DockBackArgs {
+                        if_revision: None,
+                        side,
+                    },
+                );
+            },
         );
     }
 
@@ -530,6 +566,7 @@ pub(super) fn WorkspaceCommands() -> Element {
                 host.write(
                     control::focus,
                     FocusArgs {
+                        if_revision: None,
                         pane: Some(item.id.clone()),
                         from: None,
                         direction: None,
@@ -579,6 +616,7 @@ fn move_active(host: Host, to: To) {
         host.write(
             control::move_pane,
             MoveArgs {
+                if_revision: None,
                 pane: p.0,
                 to,
                 focus: true,
@@ -599,6 +637,7 @@ fn split(host: Host, side: PaneSide) {
             env,
             control::split,
             SplitArgs {
+                if_revision: None,
                 pane: pane.0,
                 side,
                 focus: true,
@@ -621,6 +660,7 @@ fn focus(host: Host, direction: Toward) {
         host.write(
             control::focus,
             FocusArgs {
+                if_revision: None,
                 pane: None,
                 from: Some(p.0),
                 direction: Some(direction),
@@ -649,6 +689,7 @@ fn cycle(host: Host, back: bool) {
         host.write(
             control::focus,
             FocusArgs {
+                if_revision: None,
                 pane: Some(p.0),
                 from: None,
                 direction: None,
@@ -663,6 +704,7 @@ fn go(host: Host, go: Go) {
         host.write(
             control::navigate,
             NavigateArgs {
+                if_revision: None,
                 pane: p.0,
                 go: Some(go),
                 state: None,
@@ -737,6 +779,7 @@ fn open_view(host: Host, kind: &str, target: Option<Target>) {
         host.write(
             control::open,
             OpenArgs {
+                if_revision: None,
                 view: kind.to_owned(),
                 id: None,
                 state: None,

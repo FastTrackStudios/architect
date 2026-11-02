@@ -34,6 +34,7 @@ mod repair;
 mod screenset;
 pub mod store;
 mod switcher;
+pub mod tree;
 
 #[cfg(feature = "ui")]
 pub use bar::{TABS_COMMAND, use_tabs_button};

@@ -105,6 +105,7 @@ pub(super) fn ScreensetCommands() -> Element {
                 host.write(
                     control::recall,
                     RecallArgs {
+                        if_revision: None,
                         id: None,
                         slot: Some(n),
                     },
@@ -125,7 +126,7 @@ pub(super) fn ScreensetCommands() -> Element {
         } else {
             save.disabled("nothing has changed")
         },
-        move || host.write(control::save, ()),
+        move || host.write(control::save, control::RevisionArgs::default()),
     );
     let reset = Command::new("SCREENSET_RESET", "Reset to the saved layout").group("Screensets");
     use_command(
@@ -134,7 +135,7 @@ pub(super) fn ScreensetCommands() -> Element {
         } else {
             reset.disabled("the layout is the saved one")
         },
-        move || host.write(control::reset, ()),
+        move || host.write(control::reset, control::RevisionArgs::default()),
     );
     rsx! {}
 }

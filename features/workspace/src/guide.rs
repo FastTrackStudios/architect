@@ -39,12 +39,23 @@ pub fn target_selector(kind: &str, name: &str) -> Option<String> {
     })
 }
 
-/// The arrangement, as a check reads it: every window's groups (each its
-/// tabs in order) and splits.
+/// The arrangement, as a check and a model read it: every window's groups
+/// (each its tabs in order) and splits as flat lists, and the same window
+/// as a tree ([`crate::tree`]) with ids, paths and rectangles.
 #[derive(Debug, Clone, Default, PartialEq, Facet)]
 pub struct Arrangement {
+    /// Goes up by one with every change of the arrangement, whoever made
+    /// it: a write's `if_revision` is checked against it, and a change
+    /// event carries it (0 where nothing counts: a bare
+    /// [`Arrangement::of`]).
+    #[facet(default)]
+    pub revision: u64,
     /// The active pane's id; empty when none is.
     pub active: String,
+    /// The current document: the most recent pane in a main area (what a
+    /// command for "the document" acts on); empty when none is.
+    #[facet(default)]
+    pub current_document: String,
     pub windows: Vec<ArrangedWindow>,
 }
 
@@ -57,6 +68,23 @@ pub struct ArrangedWindow {
     pub splits: Vec<ArrangedSplit>,
     /// Its docks' groups (the main window's), left, right, bottom.
     pub docked: Vec<ArrangedGroup>,
+    /// Where it is on screen; unset for the main window.
+    #[facet(default)]
+    pub bounds: Option<crate::model::Rect>,
+    #[facet(default)]
+    pub maximized: bool,
+    /// Its workspace area as the host measured it (window points); unset
+    /// where nothing measured it.
+    #[facet(default)]
+    pub area: Option<crate::model::Rect>,
+    /// Its center as a tree.
+    #[facet(default)]
+    pub center: Option<crate::tree::LayoutNode>,
+    /// Its docks: each side's state and size, its tree when it has groups.
+    #[facet(default)]
+    pub docks: Vec<crate::tree::LayoutDock>,
+    #[facet(default)]
+    pub floats: Vec<crate::tree::LayoutFloat>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Facet)]
@@ -77,9 +105,15 @@ pub struct ArrangedSplit {
 }
 
 impl Arrangement {
-    /// The layout of `w`.
+    /// The layout of `w`, with no revision and no rectangles.
     #[must_use]
     pub fn of(w: &Workspace) -> Self {
+        Self::measured(w, 0, &crate::tree::Measured::default())
+    }
+
+    /// The layout of `w` at `revision`, its rectangles from `measured`.
+    #[must_use]
+    pub fn measured(w: &Workspace, revision: u64, measured: &crate::tree::Measured) -> Self {
         let windows = w
             .windows
             .iter()
@@ -95,16 +129,33 @@ impl Arrangement {
                         walk(root, &mut docked, &mut Vec::new());
                     }
                 }
+                let (center, docks, floats) = crate::tree::Builder {
+                    w,
+                    window: win,
+                    measured,
+                }
+                .build();
                 ArrangedWindow {
                     id: win.id.0.clone(),
                     groups,
                     splits,
                     docked,
+                    bounds: win.bounds,
+                    maximized: win.maximized,
+                    area: measured.areas.get(&win.id.0).copied(),
+                    center,
+                    docks,
+                    floats,
                 }
             })
             .collect();
         Self {
+            revision,
             active: w.active.as_ref().map(|p| p.0.clone()).unwrap_or_default(),
+            current_document: w
+                .current_document()
+                .map(|p| p.0.clone())
+                .unwrap_or_default(),
             windows,
         }
     }

@@ -273,6 +273,11 @@ pub enum To {
 /// `WORKSPACE_OPEN`: a view, opened at a place named explicitly.
 #[derive(Debug, Clone, PartialEq, Facet)]
 pub struct OpenArgs {
+    /// Run only if the layout is still at this revision (what
+    /// `WORKSPACE_LAYOUT` said): otherwise nothing changes and the answer
+    /// is `stale`, with the layout as it is now.
+    #[facet(default)]
+    pub if_revision: Option<u64>,
     /// The view's kind (`WORKSPACE_VIEWS` lists them).
     pub view: String,
     /// The pane's id. A view that is single always has its kind as id;
@@ -297,6 +302,11 @@ pub struct OpenArgs {
 /// `WORKSPACE_MOVE`.
 #[derive(Debug, Clone, PartialEq, Facet)]
 pub struct MoveArgs {
+    /// Run only if the layout is still at this revision (what
+    /// `WORKSPACE_LAYOUT` said): otherwise nothing changes and the answer
+    /// is `stale`, with the layout as it is now.
+    #[facet(default)]
+    pub if_revision: Option<u64>,
     pub pane: String,
     pub to: To,
     /// Make it the active pane. Unset, the focus stays.
@@ -308,6 +318,11 @@ pub struct MoveArgs {
 /// `side` of it.
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
 pub struct SplitArgs {
+    /// Run only if the layout is still at this revision (what
+    /// `WORKSPACE_LAYOUT` said): otherwise nothing changes and the answer
+    /// is `stale`, with the layout as it is now.
+    #[facet(default)]
+    pub if_revision: Option<u64>,
     pub pane: String,
     pub side: PaneSide,
     #[facet(default)]
@@ -318,6 +333,11 @@ pub struct SplitArgs {
 /// `direction`.
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
 pub struct FocusArgs {
+    /// Run only if the layout is still at this revision (what
+    /// `WORKSPACE_LAYOUT` said): otherwise nothing changes and the answer
+    /// is `stale`, with the layout as it is now.
+    #[facet(default)]
+    pub if_revision: Option<u64>,
     #[facet(default)]
     pub pane: Option<String>,
     #[facet(default)]
@@ -330,16 +350,32 @@ pub struct FocusArgs {
 /// center, or the whole tree again.
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
 pub struct ZoomArgs {
+    /// Run only if the layout is still at this revision (what
+    /// `WORKSPACE_LAYOUT` said): otherwise nothing changes and the answer
+    /// is `stale`, with the layout as it is now.
+    #[facet(default)]
+    pub if_revision: Option<u64>,
     pub pane: String,
     #[facet(default)]
     pub mode: Mode,
 }
 
-/// `WORKSPACE_RESIZE`: one of — a split's `shares` (or `even`), a dock's
+/// `WORKSPACE_RESIZE`: one of — a split's (by `split` id or `path`) `shares` (or `even`), a dock's
 /// `size`, or `pane` grown toward `direction` by `amount` (a share of its
 /// split, 0.1 when unset).
 #[derive(Debug, Clone, PartialEq, Facet)]
 pub struct ResizeArgs {
+    /// Run only if the layout is still at this revision (what
+    /// `WORKSPACE_LAYOUT` said): otherwise nothing changes and the answer
+    /// is `stale`, with the layout as it is now.
+    #[facet(default)]
+    pub if_revision: Option<u64>,
+    /// A split by its path in the layout tree (`center/0`), for one
+    /// revision; in `window` (the main one when unset).
+    #[facet(default)]
+    pub path: Option<String>,
+    #[facet(default)]
+    pub window: Option<String>,
     #[facet(default)]
     pub split: Option<u64>,
     /// Each child's share, normalised to sum to one.
@@ -364,6 +400,11 @@ pub struct ResizeArgs {
 /// `WORKSPACE_GROUP_SET`.
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
 pub struct GroupSetArgs {
+    /// Run only if the layout is still at this revision (what
+    /// `WORKSPACE_LAYOUT` said): otherwise nothing changes and the answer
+    /// is `stale`, with the layout as it is now.
+    #[facet(default)]
+    pub if_revision: Option<u64>,
     pub group: u64,
     #[facet(default)]
     pub stacked: Option<bool>,
@@ -377,6 +418,11 @@ pub struct GroupSetArgs {
 /// `WORKSPACE_TAB_SET`.
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
 pub struct TabSetArgs {
+    /// Run only if the layout is still at this revision (what
+    /// `WORKSPACE_LAYOUT` said): otherwise nothing changes and the answer
+    /// is `stale`, with the layout as it is now.
+    #[facet(default)]
+    pub if_revision: Option<u64>,
     pub pane: String,
     #[facet(default)]
     pub pinned: Option<bool>,
@@ -391,6 +437,11 @@ pub struct TabSetArgs {
 /// one kept to go back to).
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
 pub struct NavigateArgs {
+    /// Run only if the layout is still at this revision (what
+    /// `WORKSPACE_LAYOUT` said): otherwise nothing changes and the answer
+    /// is `stale`, with the layout as it is now.
+    #[facet(default)]
+    pub if_revision: Option<u64>,
     pub pane: String,
     #[facet(default)]
     pub go: Option<Go>,
@@ -401,6 +452,11 @@ pub struct NavigateArgs {
 /// `WORKSPACE_DOCK_SET`.
 #[derive(Debug, Clone, PartialEq, Facet)]
 pub struct DockSetArgs {
+    /// Run only if the layout is still at this revision (what
+    /// `WORKSPACE_LAYOUT` said): otherwise nothing changes and the answer
+    /// is `stale`, with the layout as it is now.
+    #[facet(default)]
+    pub if_revision: Option<u64>,
     pub side: DockSide,
     #[facet(default)]
     pub shown: Option<DockShown>,
@@ -412,6 +468,11 @@ pub struct DockSetArgs {
 /// `WORKSPACE_DOCK_POP_OUT`.
 #[derive(Debug, Clone, PartialEq, Facet)]
 pub struct DockPopOutArgs {
+    /// Run only if the layout is still at this revision (what
+    /// `WORKSPACE_LAYOUT` said): otherwise nothing changes and the answer
+    /// is `stale`, with the layout as it is now.
+    #[facet(default)]
+    pub if_revision: Option<u64>,
     pub side: DockSide,
     /// Where its window goes (screen points); unset, over where it was.
     #[facet(default)]
@@ -421,6 +482,11 @@ pub struct DockPopOutArgs {
 /// `WORKSPACE_DOCK_BACK`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Facet)]
 pub struct DockBackArgs {
+    /// Run only if the layout is still at this revision (what
+    /// `WORKSPACE_LAYOUT` said): otherwise nothing changes and the answer
+    /// is `stale`, with the layout as it is now.
+    #[facet(default)]
+    pub if_revision: Option<u64>,
     pub side: DockSide,
 }
 
@@ -428,6 +494,11 @@ pub struct DockBackArgs {
 /// is not), with its rectangle, snap and pin as given.
 #[derive(Debug, Clone, PartialEq, Facet)]
 pub struct FloatArgs {
+    /// Run only if the layout is still at this revision (what
+    /// `WORKSPACE_LAYOUT` said): otherwise nothing changes and the answer
+    /// is `stale`, with the layout as it is now.
+    #[facet(default)]
+    pub if_revision: Option<u64>,
     pub pane: String,
     /// Window points.
     #[facet(default)]
@@ -450,12 +521,22 @@ pub struct FloatArgs {
 /// one pane.
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
 pub struct PaneArgs {
+    /// Run only if the layout is still at this revision (what
+    /// `WORKSPACE_LAYOUT` said): otherwise nothing changes and the answer
+    /// is `stale`, with the layout as it is now.
+    #[facet(default)]
+    pub if_revision: Option<u64>,
     pub pane: String,
 }
 
 /// `WORKSPACE_RESTORE`: a minimised float back.
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
 pub struct RestoreArgs {
+    /// Run only if the layout is still at this revision (what
+    /// `WORKSPACE_LAYOUT` said): otherwise nothing changes and the answer
+    /// is `stale`, with the layout as it is now.
+    #[facet(default)]
+    pub if_revision: Option<u64>,
     pub pane: String,
     #[facet(default)]
     pub focus: bool,
@@ -464,6 +545,11 @@ pub struct RestoreArgs {
 /// `WORKSPACE_WINDOW_SET`.
 #[derive(Debug, Clone, PartialEq, Facet)]
 pub struct WindowSetArgs {
+    /// Run only if the layout is still at this revision (what
+    /// `WORKSPACE_LAYOUT` said): otherwise nothing changes and the answer
+    /// is `stale`, with the layout as it is now.
+    #[facet(default)]
+    pub if_revision: Option<u64>,
     pub window: String,
     /// Screen points (not the main window's: the platform places it).
     #[facet(default)]
@@ -475,6 +561,11 @@ pub struct WindowSetArgs {
 /// `WORKSPACE_REOPEN`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Facet)]
 pub struct ReopenArgs {
+    /// Run only if the layout is still at this revision (what
+    /// `WORKSPACE_LAYOUT` said): otherwise nothing changes and the answer
+    /// is `stale`, with the layout as it is now.
+    #[facet(default)]
+    pub if_revision: Option<u64>,
     #[facet(default)]
     pub focus: bool,
 }
@@ -482,12 +573,22 @@ pub struct ReopenArgs {
 /// `WORKSPACE_CLOSE`: these panes, each kept to reopen.
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
 pub struct CloseArgs {
+    /// Run only if the layout is still at this revision (what
+    /// `WORKSPACE_LAYOUT` said): otherwise nothing changes and the answer
+    /// is `stale`, with the layout as it is now.
+    #[facet(default)]
+    pub if_revision: Option<u64>,
     pub panes: Vec<String>,
 }
 
 /// `WORKSPACE_CLOSE_WINDOW`.
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
 pub struct WindowArgs {
+    /// Run only if the layout is still at this revision (what
+    /// `WORKSPACE_LAYOUT` said): otherwise nothing changes and the answer
+    /// is `stale`, with the layout as it is now.
+    #[facet(default)]
+    pub if_revision: Option<u64>,
     pub window: String,
 }
 
@@ -501,6 +602,11 @@ pub struct NeighborArgs {
 /// `SCREENSET_RECALL`: by `id`, or by `slot` (1–9).
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
 pub struct RecallArgs {
+    /// Run only if the layout is still at this revision (what
+    /// `WORKSPACE_LAYOUT` said): otherwise nothing changes and the answer
+    /// is `stale`, with the layout as it is now.
+    #[facet(default)]
+    pub if_revision: Option<u64>,
     #[facet(default)]
     pub id: Option<String>,
     #[facet(default)]
@@ -510,14 +616,76 @@ pub struct RecallArgs {
 /// `SCREENSET_SAVE_AS`.
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
 pub struct SaveAsArgs {
+    /// Run only if the layout is still at this revision (what
+    /// `WORKSPACE_LAYOUT` said): otherwise nothing changes and the answer
+    /// is `stale`, with the layout as it is now.
+    #[facet(default)]
+    pub if_revision: Option<u64>,
     pub name: String,
     #[facet(default)]
     pub slot: Option<u8>,
 }
 
+/// `SCREENSET_SAVE` and `SCREENSET_RESET`: nothing but the guard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Facet)]
+pub struct RevisionArgs {
+    /// Run only if the layout is still at this revision (what
+    /// `WORKSPACE_LAYOUT` said): otherwise nothing changes and the answer
+    /// is `stale`, with the layout as it is now.
+    #[facet(default)]
+    pub if_revision: Option<u64>,
+}
+
+/// A write's arguments, which may hold an `if_revision`.
+pub trait Guarded {
+    /// The revision the call was planned at, if it says.
+    fn if_revision(&self) -> Option<u64>;
+}
+
+macro_rules! guarded {
+    ($($t:ty),*) => {$(
+        impl Guarded for $t {
+            fn if_revision(&self) -> Option<u64> {
+                self.if_revision
+            }
+        }
+    )*};
+}
+
+guarded!(
+    OpenArgs,
+    MoveArgs,
+    SplitArgs,
+    FocusArgs,
+    ZoomArgs,
+    ResizeArgs,
+    GroupSetArgs,
+    TabSetArgs,
+    NavigateArgs,
+    DockSetArgs,
+    DockPopOutArgs,
+    DockBackArgs,
+    FloatArgs,
+    PaneArgs,
+    RestoreArgs,
+    WindowSetArgs,
+    ReopenArgs,
+    CloseArgs,
+    WindowArgs,
+    RecallArgs,
+    SaveAsArgs,
+    DeleteArgs,
+    RevisionArgs
+);
+
 /// `SCREENSET_DELETE`.
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
 pub struct DeleteArgs {
+    /// Run only if the layout is still at this revision (what
+    /// `WORKSPACE_LAYOUT` said): otherwise nothing changes and the answer
+    /// is `stale`, with the layout as it is now.
+    #[facet(default)]
+    pub if_revision: Option<u64>,
     pub id: String,
 }
 
@@ -561,6 +729,9 @@ pub enum Reason {
     /// A screenset the app ships: it can be changed and reset, not
     /// deleted.
     Builtin,
+    /// The layout is no longer at the call's `if_revision`: read it again
+    /// (the answer has it) and plan from there.
+    Stale,
 }
 
 /// What every workspace write answers: whether it changed anything (and
@@ -583,5 +754,7 @@ pub struct Answer {
     /// The screenset acted on or made.
     #[facet(default)]
     pub screenset: Option<String>,
+    /// The layout's revision after it (the same as `layout.revision`).
+    pub revision: u64,
     pub layout: Arrangement,
 }
