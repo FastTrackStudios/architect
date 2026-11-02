@@ -13,7 +13,10 @@
 //! - and the action says so: an [`Effect::Destructive`] one by default,
 //!   or whatever [`ActionList::set_confirm`] decides for that call (a
 //!   mutating action flagged `confirm`, a command runner that only asks
-//!   for the commands that close something).
+//!   for the commands that close something) — or the caller does: one
+//!   made [`ActionCaller::confirming_writes`] (an agent's generated UI)
+//!   asks before every call that is not read-only, and where the list
+//!   asks no one its writes are refused.
 //!
 //! The first call is refused with [`ActionError::ConfirmationRequired`]
 //! and a ticket; the person sees it in [`ActionList::pending_confirmations`]
@@ -247,19 +250,32 @@ impl ActionList {
             return Ok(());
         };
         let id = entry.meta.id;
+        let writes = caller.confirms_writes() && entry.effect != Effect::ReadOnly;
         let (ttl, check) = {
             let gate = self.gate();
             let Some(ttl) = gate.ttl else {
-                return Ok(());
+                // Nobody to ask: a caller that asks before every write
+                // does not write.
+                return if writes {
+                    Err(ActionError::Denied {
+                        id: id.to_owned(),
+                        reason:
+                            "this app asks no one to confirm, so it runs no change from this caller"
+                                .to_owned(),
+                    })
+                } else {
+                    Ok(())
+                };
             };
             (ttl, gate.checks.get(id).cloned())
         };
         // Asked with no lock held: a check may read the list.
-        let needs = check.map_or(entry.effect == Effect::Destructive, |check| {
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check(args)))
-                // A check that panics asks: the safe side.
-                .unwrap_or(true)
-        });
+        let needs = writes
+            || check.map_or(entry.effect == Effect::Destructive, |check| {
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check(args)))
+                    // A check that panics asks: the safe side.
+                    .unwrap_or(true)
+            });
         if !needs {
             return Ok(());
         }
@@ -547,6 +563,27 @@ mod tests {
         .unwrap();
         assert!(!list.requires_confirmation());
         (list, runs)
+    }
+
+    #[test]
+    fn a_caller_confirming_writes_asks_before_a_mutating_action_too() {
+        let (list, runs) = list(Duration::from_secs(60));
+        let ui = || agent().confirming_writes();
+        // The same rename runs at once for the agent itself…
+        list.run_json_with(&agent(), "FILES_RENAME", A).unwrap();
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+        // …and waits for a person from its generated UI.
+        let ticket = ticket_of(list.run_json_with(&ui(), "FILES_RENAME", A));
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+        assert!(list.approve(&ticket));
+        list.run_json_with(&ui().with_ticket(&ticket), "FILES_RENAME", A)
+            .unwrap();
+        assert_eq!(runs.load(Ordering::SeqCst), 2);
+        // A list that asks no one runs none of its writes.
+        let (off, off_runs) = list_off();
+        let refused = off.run_json_with(&ui(), "FILES_DELETE", A).unwrap_err();
+        assert!(matches!(refused, ActionError::Denied { .. }), "{refused}");
+        assert_eq!(off_runs.load(Ordering::SeqCst), 0);
     }
 
     #[test]

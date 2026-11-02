@@ -290,6 +290,9 @@ pub struct ActionCaller {
     context: Option<Arc<dyn Any + Send + Sync>>,
     /// A confirmation ticket the call carries ([`Self::with_ticket`]).
     ticket: Option<String>,
+    /// Asks a person before any write, not only a destructive one
+    /// ([`Self::confirming_writes`]).
+    confirm_writes: bool,
 }
 
 impl ActionCaller {
@@ -301,6 +304,7 @@ impl ActionCaller {
             principal: None,
             context: None,
             ticket: None,
+            confirm_writes: false,
         }
     }
 
@@ -312,6 +316,7 @@ impl ActionCaller {
             principal: Some(principal),
             context: None,
             ticket: None,
+            confirm_writes: false,
         }
     }
 
@@ -337,6 +342,25 @@ impl ActionCaller {
     pub fn with_ticket(mut self, ticket: impl Into<String>) -> Self {
         self.ticket = Some(ticket.into());
         self
+    }
+
+    /// This caller, asking a person before every call that changes
+    /// something — a [`Effect::Mutating`] action as well as a
+    /// destructive one — however the action is configured. For a caller
+    /// whose calls a person triggers but someone else wrote: an agent's
+    /// generated UI, whose button says one thing and may run another.
+    /// Where the list asks no one ([`ActionList::require_confirmation`]
+    /// off) its writes are refused, never run unasked.
+    #[must_use]
+    pub const fn confirming_writes(mut self) -> Self {
+        self.confirm_writes = true;
+        self
+    }
+
+    /// Whether it asks before every write ([`Self::confirming_writes`]).
+    #[must_use]
+    pub const fn confirms_writes(&self) -> bool {
+        self.confirm_writes
     }
 
     /// The confirmation ticket the call carries, if any.
@@ -370,6 +394,7 @@ impl std::fmt::Debug for ActionCaller {
             .field("principal", &self.principal)
             .field("has_context", &self.context.is_some())
             .field("has_ticket", &self.ticket.is_some())
+            .field("confirms_writes", &self.confirm_writes)
             .finish()
     }
 }

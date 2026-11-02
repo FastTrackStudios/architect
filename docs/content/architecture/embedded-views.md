@@ -17,7 +17,9 @@ weight = 68
 > Every other kind is its own issue: GPU views (#221), WebView/HTML
 > (#222), ImGui from Luau (#223), Frame surfaces (#224, in
 > FastTrackStudios/frame), Dioxus in-process and remote (#225), generative
-> UI (#226, with A2UI in #228).
+> UI (#226). Its A2UI payload landed in #228:
+> [A2UI](@/features/a2ui.md) (`features/a2ui/src/lib.rs`), drawn as a
+> `dioxus` view.
 
 A workspace pane shows a **view**: `"session.mixer"`, `"vault.note"`. What
 *draws* a view is its **kind**. Until now there was one, a Dioxus

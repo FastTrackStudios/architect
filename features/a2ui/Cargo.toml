@@ -1,0 +1,61 @@
+[package]
+name = "architect-a2ui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "A2UI: agents' generated UI drawn with architect-ui — the component catalog (the security boundary), surfaces kept in Loro, events run as Action List actions with a person's yes for every write"
+
+# docs/content/features/a2ui.md. The protocol is `a2ui-base`'s (A2UI
+# v1.0: messages, JSON-Pointer data binding, functions, validation),
+# pinned exactly; only the catalog is ours. The default set is the model,
+# no Dioxus: the catalog and its generated JSON Schema and prompt, the
+# surfaces on a Loro document (`Surfaces`), events as Action List calls
+# (`Dispatcher`), and the `A2UI_*` actions that render and patch a
+# surface from MCP or the CLI. `ui` draws a surface with architect-ui
+# components on Blitz (`A2uiSurface`), and gives a workspace view of the
+# surfaces (`surfaces_view`).
+
+[features]
+default = []
+ui = [
+    "dep:dioxus",
+    "dep:architect-ui",
+    "dep:architect-workspace",
+    "architect-workspace/ui",
+    "dep:futures-timer",
+    "dep:futures-channel",
+    "dep:futures-util",
+]
+
+[dependencies]
+# A2UI v1.0, framework-agnostic: pinned exactly (single maintainer; the
+# fork-if-stalled rule is in docs/content/features/a2ui.md).
+a2ui-base = "=0.3.1"
+architect = { workspace = true, features = ["action-list"] }
+crdt = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+dioxus = { workspace = true, optional = true }
+architect-ui = { workspace = true, optional = true }
+architect-workspace = { workspace = true, optional = true }
+# A pending event's poll for the person's answer.
+futures-timer = { workspace = true, optional = true }
+# A change to a surface's document, told to the window: woken, not polled.
+futures-channel = { version = "0.3", optional = true }
+futures-util = { version = "0.3", default-features = false, optional = true }
+
+[dev-dependencies]
+# The renderer's own tests (tests/render.rs), so `cargo test --workspace`
+# builds them with it.
+architect-a2ui = { path = ".", features = ["ui"] }
+architect-guide = { workspace = true, features = ["run"] }
+futures = "0.3"
+facet = { workspace = true }
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true

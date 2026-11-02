@@ -125,6 +125,11 @@ package = "architect-canvas"
 layer = "L0"
 
 [[row]]
+package = "architect-a2ui"
+layer = "L0"
+note = "the catalog, surfaces on Loro, events as actions; a2ui-base pinned exactly"
+
+[[row]]
 package = "architect-files"
 layer = "L0"
 
@@ -225,6 +230,11 @@ layer = "L4"
 
 [[row]]
 package = "architect-canvas"
+features = ["ui"]
+layer = "L4"
+
+[[row]]
+package = "architect-a2ui"
 features = ["ui"]
 layer = "L4"
 

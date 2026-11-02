@@ -675,6 +675,16 @@ pub fn LabApp() -> Element {
     use_context_provider(|| list.clone());
     // An agent's Delete waits for the person's yes, in the sheet below.
     use_hook(|| confirm::require(&list));
+    // An agent's UI (A2UI): its surfaces on a document of their own, the
+    // `A2UI_*` actions on the list, the Vault's "Agent UI" view drawing
+    // them. Every write a surface's button makes asks first (the sheet).
+    let surfaces = use_hook(|| {
+        architect_a2ui::Surfaces::new(crdt::CrdtDoc::ephemeral(), architect_a2ui::store::ROOT)
+    });
+    use_hook(|| {
+        let _ = architect_a2ui::actions::register(&list, &surfaces);
+    });
+    architect_a2ui::ui::use_a2ui(surfaces, (*list).clone());
     // Settings: the lab's sections, kept on this device — in a window.
     // Headless, the defaults, kept nowhere: a scenario neither reads nor
     // changes the person's own.

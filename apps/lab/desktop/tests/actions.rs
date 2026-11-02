@@ -33,6 +33,44 @@ fn actions(line: &str) -> (u8, String, String) {
     )
 }
 
+/// A surface of more than ten catalog components (and one outside it).
+fn a2ui_surface() -> Value {
+    serde_json::json!({ "messages": [
+        { "createSurface": { "surfaceId": "lab-form", "catalogId": architect_a2ui::CATALOG_ID,
+          "dataModel": { "name": "Ada", "subscribe": true, "volume": 30, "plan": ["free"], "tab": 0,
+                         "items": [ { "title": "One" }, { "title": "Two" } ] },
+          "components": [
+            { "id": "root", "component": "Column", "children": ["title", "card", "tabs", "list", "row", "x"] },
+            { "id": "title", "component": "Text", "variant": "h2", "text": "Sign up" },
+            { "id": "card", "component": "Card", "child": "fields" },
+            { "id": "fields", "component": "Column", "children": ["name", "subscribe", "volume", "plan", "rule"] },
+            { "id": "name", "component": "TextField", "label": "Name", "value": { "path": "/name" } },
+            { "id": "subscribe", "component": "CheckBox", "label": "Subscribe", "value": { "path": "/subscribe" } },
+            { "id": "volume", "component": "Slider", "label": "Volume", "value": { "path": "/volume" } },
+            { "id": "plan", "component": "ChoicePicker", "label": "Plan", "value": { "path": "/plan" },
+              "options": [ { "label": "Free", "value": "free" }, { "label": "Pro", "value": "pro" } ] },
+            { "id": "rule", "component": "Divider" },
+            { "id": "tabs", "component": "Tabs", "activeTab": { "path": "/tab" },
+              "tabs": [ { "title": "One", "child": "t1" }, { "title": "Two", "child": "t2" } ] },
+            { "id": "t1", "component": "Text", "text": "First tab" },
+            { "id": "t2", "component": "Text", "text": "Second tab" },
+            { "id": "list", "component": "List", "children": { "componentId": "item", "path": "/items" } },
+            { "id": "item", "component": "Text", "text": { "path": "title" } },
+            { "id": "row", "component": "Row", "children": ["go"] },
+            { "id": "go", "component": "Button", "child": "go_label",
+              "action": { "event": { "name": "LAB_STATE" } } },
+            { "id": "go_label", "component": "Text", "text": "Where am I?" },
+            { "id": "x", "component": "Script", "src": "x.js" }
+          ] } }
+    ] })
+}
+
+fn a2ui_patch() -> Value {
+    serde_json::json!({ "messages": [
+        { "updateDataModel": { "surfaceId": "lab-form", "path": "/name", "value": "Grace" } }
+    ] })
+}
+
 /// Every action the headless lab has says the same over MCP and over its
 /// socket — the lab pumped here, so an action that hands its work to the
 /// window's thread is answered.
@@ -42,7 +80,18 @@ fn the_lab_says_the_same_over_mcp_and_the_cli() {
     lab.settle();
     let server = architect_mcp::Server::over(lab.surface());
     let report = std::thread::scope(|scope| {
-        let check = scope.spawn(|| Parity::new(&server).check());
+        let check = scope.spawn(|| {
+            Parity::new(&server)
+                // An agent's UI, rendered, patched and read back the same
+                // on both faces.
+                .run("A2UI_RENDER", Some(a2ui_surface()))
+                .run("A2UI_PATCH", Some(a2ui_patch()))
+                .run(
+                    "A2UI_SURFACE",
+                    Some(serde_json::json!({ "surfaceId": "lab-form" })),
+                )
+                .check()
+        });
         while !check.is_finished() {
             if !lab.pump() {
                 std::thread::sleep(std::time::Duration::from_millis(2));

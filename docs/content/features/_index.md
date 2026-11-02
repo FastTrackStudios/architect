@@ -60,3 +60,4 @@ When a page and the code disagree, the code is right.
 - [Extensions](@/features/extensions.md): run-time packages from registries, hot reload, project requirements.
 - [Canvas overlays and ImGui-shaped UI](@/features/canvas.md): drawing over a view in its coordinates; tool windows for scripts.
 - [Remote views](@/features/remote-views.md): a process extension's Dioxus views in workspace panes.
+- [A2UI: agents' generated UI](@/features/a2ui.md): an agent's form, list or approval drawn with architect-ui from a catalog, kept in Loro, its buttons asking before any write.

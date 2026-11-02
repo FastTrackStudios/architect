@@ -1,0 +1,1115 @@
+{
+  "$defs": {
+    "Button": {
+      "additionalProperties": false,
+      "description": "A button: its child is its label, its action an Action List action the person runs by pressing it. An action that changes something waits for the person's yes. Drawn with architect_ui::Button.",
+      "properties": {
+        "action": {
+          "description": "What pressing it runs.",
+          "properties": {
+            "event": {
+              "properties": {
+                "context": {
+                  "description": "Its arguments: literals or bindings.",
+                  "type": "object"
+                },
+                "name": {
+                  "description": "An Action List action id.",
+                  "type": "string"
+                },
+                "responsePath": {
+                  "type": "string"
+                },
+                "wantResponse": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "event"
+          ],
+          "type": "object"
+        },
+        "child": {
+          "description": "Its label (a Text).",
+          "type": "string"
+        },
+        "component": {
+          "const": "Button"
+        },
+        "id": {
+          "type": "string"
+        },
+        "variant": {
+          "description": "Its emphasis.",
+          "enum": [
+            "default",
+            "primary",
+            "borderless"
+          ],
+          "type": "string"
+        },
+        "weight": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "component",
+        "child",
+        "action"
+      ],
+      "type": "object"
+    },
+    "Card": {
+      "additionalProperties": false,
+      "description": "A card around one child. Drawn with architect_ui::Card.",
+      "properties": {
+        "child": {
+          "description": "What it holds.",
+          "type": "string"
+        },
+        "component": {
+          "const": "Card"
+        },
+        "id": {
+          "type": "string"
+        },
+        "weight": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "component",
+        "child"
+      ],
+      "type": "object"
+    },
+    "CheckBox": {
+      "additionalProperties": false,
+      "description": "A checkbox bound to a boolean. Drawn with architect_ui::Checkbox.",
+      "properties": {
+        "component": {
+          "const": "CheckBox"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "description": "What it says beside it.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "args": {
+                  "type": "object"
+                },
+                "call": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "call"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "value": {
+          "description": "Bind it to a path to keep its state.",
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "args": {
+                  "type": "object"
+                },
+                "call": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "call"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "weight": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "component",
+        "label",
+        "value"
+      ],
+      "type": "object"
+    },
+    "ChoicePicker": {
+      "additionalProperties": false,
+      "description": "A choice among options: one (a select) or several (checkboxes). Drawn with architect_ui::NativeSelect / architect_ui::Checkbox.",
+      "properties": {
+        "component": {
+          "const": "ChoicePicker"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "description": "What it asks.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "args": {
+                  "type": "object"
+                },
+                "call": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "call"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "options": {
+          "description": "The choices.",
+          "items": {
+            "properties": {
+              "label": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "args": {
+                        "type": "object"
+                      },
+                      "call": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "call"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "label",
+              "value"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "value": {
+          "description": "The chosen values; bind it to a path.",
+          "oneOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "args": {
+                  "type": "object"
+                },
+                "call": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "call"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "variant": {
+          "description": "mutuallyExclusive when absent.",
+          "enum": [
+            "mutuallyExclusive",
+            "multipleSelection"
+          ],
+          "type": "string"
+        },
+        "weight": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "component",
+        "options",
+        "value"
+      ],
+      "type": "object"
+    },
+    "Column": {
+      "additionalProperties": false,
+      "description": "Children one under another. Drawn with architect_ui::VStack.",
+      "properties": {
+        "align": {
+          "description": "Across the column.",
+          "enum": [
+            "start",
+            "center",
+            "end",
+            "stretch"
+          ],
+          "type": "string"
+        },
+        "children": {
+          "description": "Its children.",
+          "oneOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "properties": {
+                "componentId": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "componentId",
+                "path"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "component": {
+          "const": "Column"
+        },
+        "id": {
+          "type": "string"
+        },
+        "justify": {
+          "description": "Down the column.",
+          "enum": [
+            "start",
+            "center",
+            "end",
+            "spaceBetween",
+            "spaceAround",
+            "spaceEvenly",
+            "stretch"
+          ],
+          "type": "string"
+        },
+        "weight": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "component",
+        "children"
+      ],
+      "type": "object"
+    },
+    "Divider": {
+      "additionalProperties": false,
+      "description": "A rule between things. Drawn with architect_ui::Divider.",
+      "properties": {
+        "axis": {
+          "description": "Horizontal when absent.",
+          "enum": [
+            "horizontal",
+            "vertical"
+          ],
+          "type": "string"
+        },
+        "component": {
+          "const": "Divider"
+        },
+        "id": {
+          "type": "string"
+        },
+        "weight": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "component"
+      ],
+      "type": "object"
+    },
+    "Image": {
+      "additionalProperties": false,
+      "description": "An image from a URL. Drawn with img.",
+      "properties": {
+        "component": {
+          "const": "Image"
+        },
+        "description": {
+          "description": "What it shows, for a screen reader.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "args": {
+                  "type": "object"
+                },
+                "call": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "call"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "fit": {
+          "description": "contain when absent.",
+          "enum": [
+            "contain",
+            "cover",
+            "fill",
+            "none",
+            "scale-down"
+          ],
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "url": {
+          "description": "Where it is.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "args": {
+                  "type": "object"
+                },
+                "call": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "call"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "weight": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "component",
+        "url"
+      ],
+      "type": "object"
+    },
+    "List": {
+      "additionalProperties": false,
+      "description": "A list of children, often a template over a data-bound array. Drawn with architect_ui::VStack / architect_ui::HStack.",
+      "properties": {
+        "children": {
+          "description": "Its items.",
+          "oneOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "properties": {
+                "componentId": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "componentId",
+                "path"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "component": {
+          "const": "List"
+        },
+        "direction": {
+          "description": "Vertical when absent.",
+          "enum": [
+            "vertical",
+            "horizontal"
+          ],
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "weight": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "component",
+        "children"
+      ],
+      "type": "object"
+    },
+    "Row": {
+      "additionalProperties": false,
+      "description": "Children side by side. Drawn with architect_ui::HStack.",
+      "properties": {
+        "align": {
+          "description": "Across the row.",
+          "enum": [
+            "start",
+            "center",
+            "end",
+            "stretch"
+          ],
+          "type": "string"
+        },
+        "children": {
+          "description": "Its children.",
+          "oneOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "properties": {
+                "componentId": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "componentId",
+                "path"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "component": {
+          "const": "Row"
+        },
+        "id": {
+          "type": "string"
+        },
+        "justify": {
+          "description": "Along the row.",
+          "enum": [
+            "start",
+            "center",
+            "end",
+            "spaceBetween",
+            "spaceAround",
+            "spaceEvenly",
+            "stretch"
+          ],
+          "type": "string"
+        },
+        "weight": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "component",
+        "children"
+      ],
+      "type": "object"
+    },
+    "Slider": {
+      "additionalProperties": false,
+      "description": "A slider bound to a number. Drawn with architect_ui::Slider.",
+      "properties": {
+        "component": {
+          "const": "Slider"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "description": "What it sets.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "args": {
+                  "type": "object"
+                },
+                "call": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "call"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "max": {
+          "description": "100 when absent.",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "args": {
+                  "type": "object"
+                },
+                "call": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "call"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "min": {
+          "description": "0 when absent.",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "args": {
+                  "type": "object"
+                },
+                "call": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "call"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "value": {
+          "description": "Bind it to a path to keep its value.",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "args": {
+                  "type": "object"
+                },
+                "call": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "call"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "weight": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "component",
+        "value"
+      ],
+      "type": "object"
+    },
+    "Tabs": {
+      "additionalProperties": false,
+      "description": "Tabs, each showing one child. Drawn with architect_ui::Tabs.",
+      "properties": {
+        "activeTab": {
+          "description": "The tab on show; bind it to keep it.",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "args": {
+                  "type": "object"
+                },
+                "call": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "call"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "component": {
+          "const": "Tabs"
+        },
+        "id": {
+          "type": "string"
+        },
+        "tabs": {
+          "description": "Each tab's title and child.",
+          "items": {
+            "properties": {
+              "child": {
+                "type": "string"
+              },
+              "title": {
+                "oneOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "args": {
+                        "type": "object"
+                      },
+                      "call": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "call"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "title",
+              "child"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "weight": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "component",
+        "tabs"
+      ],
+      "type": "object"
+    },
+    "Text": {
+      "additionalProperties": false,
+      "description": "Text: a heading (h1-h5) or body, caption text. Drawn with architect_ui::Heading / architect_ui::Text.",
+      "properties": {
+        "component": {
+          "const": "Text"
+        },
+        "id": {
+          "type": "string"
+        },
+        "text": {
+          "description": "What it says.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "args": {
+                  "type": "object"
+                },
+                "call": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "call"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "variant": {
+          "description": "Its style; body when absent.",
+          "enum": [
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "body",
+            "caption"
+          ],
+          "type": "string"
+        },
+        "weight": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "component",
+        "text"
+      ],
+      "type": "object"
+    },
+    "TextField": {
+      "additionalProperties": false,
+      "description": "A text field bound to a string. Drawn with architect_ui::Input / architect_ui::Textarea.",
+      "properties": {
+        "component": {
+          "const": "TextField"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "description": "What it asks for.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "args": {
+                  "type": "object"
+                },
+                "call": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "call"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "value": {
+          "description": "Bind it to a path to keep what is typed.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "args": {
+                  "type": "object"
+                },
+                "call": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "call"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "variant": {
+          "description": "shortText when absent.",
+          "enum": [
+            "shortText",
+            "longText",
+            "number",
+            "obscured"
+          ],
+          "type": "string"
+        },
+        "weight": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "component",
+        "label"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://architect.fasttrackstudio.dev/a2ui/catalog/v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "The A2UI v1.0 components an architect host draws, with architect-ui. Generated from architect-a2ui's CATALOG: do not edit by hand.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/Text"
+    },
+    {
+      "$ref": "#/$defs/Row"
+    },
+    {
+      "$ref": "#/$defs/Column"
+    },
+    {
+      "$ref": "#/$defs/List"
+    },
+    {
+      "$ref": "#/$defs/Card"
+    },
+    {
+      "$ref": "#/$defs/Divider"
+    },
+    {
+      "$ref": "#/$defs/Button"
+    },
+    {
+      "$ref": "#/$defs/CheckBox"
+    },
+    {
+      "$ref": "#/$defs/TextField"
+    },
+    {
+      "$ref": "#/$defs/Slider"
+    },
+    {
+      "$ref": "#/$defs/ChoicePicker"
+    },
+    {
+      "$ref": "#/$defs/Tabs"
+    },
+    {
+      "$ref": "#/$defs/Image"
+    }
+  ],
+  "title": "architect A2UI catalog"
+}

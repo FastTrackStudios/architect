@@ -15,8 +15,8 @@ use architect_workspace::{
 };
 use dioxus::prelude::*;
 use lucide_dioxus::{
-    AudioLines, CalendarCheck, FileText, Files, Layers, Link, ListTree, MousePointerClick, Network,
-    Search, SlidersHorizontal, SquarePen, SquareTerminal, Terminal,
+    AudioLines, Bot, CalendarCheck, FileText, Files, Layers, Link, ListTree, MousePointerClick,
+    Network, Search, SlidersHorizontal, SquarePen, SquareTerminal, Terminal,
 };
 
 /// The lab's views.
@@ -85,6 +85,14 @@ fn views() -> Views {
             View::new("note", "Untitled", |_| rsx! { NoteView {} })
                 .icon(icon!(FileText))
                 .many(),
+        )
+        // An agent's generated UI: every A2UI surface rendered with
+        // `A2UI_RENDER` (from MCP or `architect-desktop actions run`),
+        // drawn with architect-ui and patched live (`architect-a2ui`).
+        .view(
+            architect_a2ui::ui::surfaces_view()
+                .icon(icon!(Bot))
+                .home(Target::Split(Side::Right)),
         )
         // A process extension's view, drawn by another process
         // (`apps/lab/clicker`).
