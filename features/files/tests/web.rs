@@ -360,10 +360,13 @@ async fn a_ticket_reads_its_folder_for_an_element_that_cannot_send_a_header() {
         )
         .await;
     assert!(begin.is_err());
-    // A ticket altered by a byte does not open.
-    let mut forged = ticket.token.clone();
-    forged.pop();
-    forged.push('A');
+    // A ticket altered by a byte does not open. Change a character in the
+    // middle to a different one: the last one may already be 'A', and in
+    // unpadded base64 it also carries spare bits that decode the same.
+    let mut chars: Vec<char> = ticket.token.chars().collect();
+    let mid = chars.len() / 2;
+    chars[mid] = if chars[mid] == 'A' { 'B' } else { 'A' };
+    let forged: String = chars.into_iter().collect();
     let forged_url = web::content_url(
         &world.base,
         &fts(),
