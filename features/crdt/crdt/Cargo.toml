@@ -32,7 +32,7 @@ default = []
 # the server host (canonical doc + fan-out), the SyncedDoc client
 # driver, and the presence channel. Pulls vox + architect's PubSub, and
 # architect's platform timers for the presence driver's housekeeping.
-vox = ["dep:vox", "dep:facet", "architect/vox", "architect/platform"]
+vox = ["dep:vox", "dep:facet", "architect/vox", "architect/platform", "architect-devices/vox"]
 # Dioxus hooks (`crdt::hooks`): use_synced_doc / use_crdt_list /
 # use_crdt_entry / use_presence_channel — the client-side bridge from a
 # syncing replica to AtomResult phase rendering. Implies the sync
@@ -63,6 +63,9 @@ architect-permissions.workspace = true
 # `Org`, `OrgId`, `Orgs` — the org a device's `OrgDocs` syncs, and the
 # person's current one (`OrgSyncs::follow`). Pure data, wasm-clean.
 architect-orgs.workspace = true
+# `Admission` — the devices a node lets in (`crdt::p2p`): the owner's,
+# paired ones, and when one is revoked. The default set, wasm-clean.
+architect-devices.workspace = true
 vox = { workspace = true, optional = true }
 facet = { workspace = true, optional = true }
 loro.workspace = true

@@ -51,6 +51,9 @@ distinction visible at a glance.
 - [Peers: documents between nodes](@/architecture/peers.md) —
   `crdt::peer`: pairwise exchange with no hub, and per-document access
   checked by every node.
+- [Devices: who a node lets in](@/architecture/devices.md) —
+  `architect-devices`: the account's devices, per-org enrolment, pairing
+  by code or QR, and one admission table every lane checks.
 - [Async diagnostics](@/architecture/diagnostics.md) — a design note for
   moiré instrumentation of the axum_ws adapter (not in the tree today).
 - [Commands: the Action List](@/architecture/commands.md) — one

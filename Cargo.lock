@@ -646,6 +646,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-devices"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-devices",
+ "architect-orgs",
+ "architect-permissions",
+ "architect-telemetry",
+ "auth",
+ "auth-proto",
+ "chrono",
+ "crdt",
+ "facet",
+ "facet-json",
+ "iroh",
+ "sea-orm",
+ "sea-orm-migration",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+ "uuid",
+ "vox",
+]
+
+[[package]]
 name = "architect-extensions"
 version = "0.1.0"
 dependencies = [
@@ -995,6 +1020,26 @@ dependencies = [
  "raw-window-handle 0.6.2",
  "tracing",
  "web-time",
+]
+
+[[package]]
+name = "architect-spaces"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-files",
+ "architect-orgs",
+ "architect-permissions",
+ "architect-spaces",
+ "crdt",
+ "facet",
+ "facet-json",
+ "iroh",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "uuid",
+ "vox",
 ]
 
 [[package]]
@@ -2793,6 +2838,7 @@ name = "crdt"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "architect-devices",
  "architect-orgs",
  "architect-permissions",
  "async-trait",

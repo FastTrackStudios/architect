@@ -26,21 +26,22 @@ lookup. After `features/crdt/crdt/tests/p2p.rs`:
 
 ```rust
 use architect::iroh_link::{self, PeerLookup};
-use crdt::p2p::{Devices, NodeAccess, Shares, node_router};
+use architect_devices::account;
+use crdt::p2p::{Admission, NodeAccess, Shares, node_router};
 use crdt::peer::OpenDocs;
 use crdt::registry::DocRegistry;
 
 let endpoint = iroh_link::bind_endpoint_with(secret_key, PeerLookup::N0AndLan).await?;
-let access = NodeAccess::new(Devices::new(), Shares::new());
+let access = NodeAccess::new(Admission::new(), Shares::new());
 let registry = DocRegistry::new(open_doc).with_authorizer({
     let access = access.clone();
     move |who, id| access.admits(who, id)
 });
-access.devices.replace(directory.peer_endpoints(this_device));   // from auth's DeviceDirectory
+account::pass(&devices_client, &token, &this_device, &node, &access.devices).await?; // the account's devices
 
 let (ep, reg, acc) = (endpoint.clone(), registry.clone(), access.clone());
 tokio::spawn(async move {
-    iroh_link::serve_peers(&ep, move |remote| {
+    architect_devices::serve(&ep, acc.devices.clone(), move |remote| {
         node_router(reg.clone(), OpenDocs(reg.clone()), acc.clone(), &remote.to_string())
     })
     .await
@@ -63,8 +64,10 @@ uses `SelfLane::open` for its own side and `pull(&local, &peer, &ours, timeout)`
    connection, built from the proved remote id.
 3. `features/crdt/crdt/src/p2p.rs` `node_router`: document sync and the peer
    lane behind a `PermissionsGate` whose engine is `NodeAccess`.
-4. `features/crdt/crdt/src/p2p.rs` `NodeAccess` (`caller`, `admits`),
-   `Devices` (`replace`, `forget`), `Shares` (`share`, `revoke`, `revoke_doc`).
+4. `features/crdt/crdt/src/p2p.rs` `NodeAccess` (`caller`, `admits`,
+   `pairing`), `Shares` (`share`, `revoke`, `revoke_doc`);
+   `features/devices/src/admission.rs` `Admission` (`set_account`, `admit`,
+   `revoke`, `ends`).
 5. `features/crdt/crdt/src/link.rs` `DocLink`, `LinkKey`: the link text and the
    middleware sending its key as a bearer.
 6. `features/crdt/crdt/src/peer.rs` `DocPeerHost`: `list` and `sync`, for

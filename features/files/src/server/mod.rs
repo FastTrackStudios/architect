@@ -40,6 +40,10 @@
 //! request's session by the gate's own `IdentityResolver`, or from a
 //! read ticket ([`crate::FilesService::ticket`]) signed with this
 //! server's key ([`FilesServer::ticket_key`]).
+//!
+//! Grants can come from elsewhere too: [`FilesServer::with_grants`] adds
+//! a [`GrantSource`] (a space's members, `architect-spaces`), asked on
+//! every call, so a change there binds on the next call here.
 
 mod acting;
 #[cfg(feature = "ffmpeg")]
@@ -50,6 +54,7 @@ mod ticket;
 #[cfg(feature = "http")]
 mod web;
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -61,7 +66,7 @@ use architect_orgs::OrgId;
 use architect_orgs::server::Members;
 use architect_permissions::Principal;
 
-use crate::access::{ALL, Access, Capability, resolve, role_capabilities, stewards};
+use crate::access::{ALL, Access, Capability, Grant, resolve, role_capabilities, stewards};
 use crate::error::FilesFault;
 use crate::id::RootId;
 use crate::model::{FilesEvent, Usage};
@@ -81,6 +86,19 @@ pub use web::WebFiles;
 /// oldest.
 const EVENT_BACKLOG: usize = 1024;
 
+/// Grants a person holds in an org's files from somewhere other than
+/// the files feature's own table: the folders a space covers, for its
+/// members (`architect-spaces`).
+///
+/// Asked whenever a call needs to know what the person holds (each call,
+/// each event of a subscription), so a membership removed there conveys
+/// nothing on the next call here. Answer from memory: it runs on every
+/// call.
+pub trait GrantSource: Send + Sync {
+    /// The live grants `user` holds in `org`'s files at `now_us`.
+    fn grants(&self, org: &OrgId, user: &str, now_us: i64) -> Vec<Grant>;
+}
+
 /// Every org's files.
 #[derive(Clone)]
 pub struct FilesServer {
@@ -88,6 +106,7 @@ pub struct FilesServer {
     default_org: Option<OrgId>,
     renditions: Option<Renditions>,
     tickets: TicketKey,
+    granted: Option<Arc<dyn GrantSource>>,
 }
 
 struct Inner {
@@ -115,6 +134,8 @@ pub(crate) struct Actor {
     baseline: Vec<Capability>,
     /// Whether they keep the org's roots.
     steward: bool,
+    /// Their grants from a [`GrantSource`], as of this call.
+    granted: Vec<Grant>,
 }
 
 impl FilesServer {
@@ -131,6 +152,7 @@ impl FilesServer {
             default_org: None,
             renditions: None,
             tickets: TicketKey::random(),
+            granted: None,
         }
     }
 
@@ -169,6 +191,16 @@ impl FilesServer {
     #[must_use]
     pub const fn ticket_key(mut self, key: [u8; 32]) -> Self {
         self.tickets = TicketKey::new(key);
+        self
+    }
+
+    /// Grants from `source` too, beside the org's own table: what a
+    /// person holds is the union. Generated grants are not listed by
+    /// `grants` and cannot be revoked here; they end where they come
+    /// from.
+    #[must_use]
+    pub fn with_grants(mut self, source: impl GrantSource + 'static) -> Self {
+        self.granted = Some(Arc::new(source));
         self
     }
 
@@ -262,6 +294,7 @@ impl FilesServer {
                 label: format!("service:{name}"),
                 baseline: ALL.to_vec(),
                 steward: true,
+                granted: Vec::new(),
             }),
             Principal::User { user_id } => {
                 let role = self.inner.members.role(who, org);
@@ -273,6 +306,11 @@ impl FilesServer {
                         .map(|r| role_capabilities(r).to_vec())
                         .unwrap_or_default(),
                     steward: role.as_ref().is_some_and(stewards),
+                    granted: self
+                        .granted
+                        .as_ref()
+                        .map(|source| source.grants(org, user_id, now_us()))
+                        .unwrap_or_default(),
                 })
             }
             Principal::Guest { .. } | Principal::Host { .. } | Principal::Anonymous => {
@@ -290,10 +328,11 @@ impl FilesServer {
         event: FilesEvent,
     ) -> Option<FilesEvent> {
         let now = now_us();
+        let grants = actor.grants(state);
         let at = |root: RootId, path: &RootPath| {
             resolve(
                 &actor.baseline,
-                &state.grants,
+                &grants,
                 actor.user.as_deref(),
                 root,
                 path,
@@ -337,11 +376,21 @@ impl FilesServer {
 }
 
 impl Actor {
+    /// Every grant that may apply to this actor: the org's table and
+    /// their generated ones.
+    fn grants<'s>(&self, state: &'s State) -> Cow<'s, [Grant]> {
+        if self.granted.is_empty() {
+            Cow::Borrowed(&state.grants)
+        } else {
+            Cow::Owned(state.grants.iter().chain(&self.granted).cloned().collect())
+        }
+    }
+
     /// What this actor holds at `path`.
     pub(crate) fn at(&self, state: &State, root: RootId, path: &RootPath) -> Access {
         resolve(
             &self.baseline,
-            &state.grants,
+            &self.grants(state),
             self.user.as_deref(),
             root,
             path,
@@ -371,7 +420,7 @@ impl Actor {
     /// grant in it.
     pub(crate) fn sees_root(&self, state: &State, root: RootId, now: i64) -> bool {
         !self.baseline.is_empty()
-            || state.grants.iter().any(|g| {
+            || self.grants(state).iter().any(|g| {
                 g.root_id == root && self.user.as_deref() == Some(g.user.as_str()) && g.is_live(now)
             })
     }

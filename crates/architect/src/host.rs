@@ -225,7 +225,15 @@ pub struct EngineHost {
     iroh: Option<IrohConfig>,
     #[cfg(feature = "iroh")]
     iroh_lookup: crate::iroh_link::PeerLookup,
+    #[cfg(feature = "iroh")]
+    iroh_until: Option<IrohUntil>,
 }
+
+/// When to close a peer's iroh connection: [`EngineHost::iroh_until`].
+#[cfg(feature = "iroh")]
+type IrohUntil = Arc<
+    dyn Fn(crate::iroh_link::iroh::EndpointId) -> Option<crate::iroh_link::PeerUntil> + Send + Sync,
+>;
 
 #[cfg(feature = "iroh")]
 enum IrohConfig {
@@ -293,6 +301,8 @@ impl EngineHost {
             iroh: None,
             #[cfg(feature = "iroh")]
             iroh_lookup: crate::iroh_link::PeerLookup::default(),
+            #[cfg(feature = "iroh")]
+            iroh_until: None,
         }
     }
 
@@ -386,6 +396,24 @@ impl EngineHost {
         self
     }
 
+    /// Close a peer's iroh connection when `until(remote)` resolves
+    /// ([`serve_peers_until`](crate::iroh_link::serve_peers_until)): a
+    /// device revoked from the host's admission loses the connections it
+    /// has, not only its next call. `architect_devices::closer` makes one
+    /// from an `Admission`.
+    #[cfg(feature = "iroh")]
+    #[must_use]
+    pub fn iroh_until(
+        mut self,
+        until: impl Fn(crate::iroh_link::iroh::EndpointId) -> Option<crate::iroh_link::PeerUntil>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Self {
+        self.iroh_until = Some(Arc::new(until));
+        self
+    }
+
     /// How the iroh endpoint finds peers and publishes itself (default
     /// [`PeerLookup::N0`](crate::iroh_link::PeerLookup::N0)). With the
     /// `iroh-lan` feature, `PeerLookup::N0AndLan` keeps a host dialable
@@ -440,9 +468,10 @@ impl EngineHost {
     }
 
     #[cfg(feature = "iroh")]
-    fn assemble(self) -> (Router, Option<(VoxLane, IrohConfig)>) {
+    fn assemble(self) -> (Router, Option<(VoxLane, IrohConfig, Option<IrohUntil>)>) {
         self.warn_if_ungated();
         let lookup = self.iroh_lookup;
+        let until = self.iroh_until;
         let lane = VoxLane {
             router: self.router,
             gate: self.gate,
@@ -458,7 +487,7 @@ impl EngineHost {
                 },
                 bound @ IrohConfig::Bound(_) => bound,
             };
-            (lane.clone(), cfg)
+            (lane.clone(), cfg, until)
         });
         (
             assemble_app(
@@ -512,8 +541,8 @@ impl EngineHost {
         let (app, iroh) = self.assemble();
 
         #[cfg(feature = "iroh")]
-        if let Some((lane, cfg)) = iroh {
-            tokio::spawn(serve_iroh(lane, cfg));
+        if let Some((lane, cfg, until)) = iroh {
+            tokio::spawn(serve_iroh(lane, cfg, until));
         }
         #[cfg(not(feature = "iroh"))]
         let _ = iroh;
@@ -662,7 +691,7 @@ fn version_json(build: &BuildInfo) -> Response {
 }
 
 #[cfg(feature = "iroh")]
-async fn serve_iroh(lane: VoxLane, cfg: IrohConfig) {
+async fn serve_iroh(lane: VoxLane, cfg: IrohConfig, until: Option<IrohUntil>) {
     let endpoint = match cfg {
         IrohConfig::Bound(endpoint) => endpoint,
         IrohConfig::Key {
@@ -674,26 +703,35 @@ async fn serve_iroh(lane: VoxLane, cfg: IrohConfig) {
             None => return,
         },
     };
-    serve_iroh_lane(&endpoint, lane).await;
+    serve_iroh_lane(&endpoint, lane, until).await;
 }
 
 /// Serve the host's router on `endpoint`: each peer connection behind
-/// the gate, calling as the `Principal::Host` its handshake proved.
+/// the gate, calling as the `Principal::Host` its handshake proved, and
+/// closed when `until` says.
 #[cfg(feature = "iroh")]
-async fn serve_iroh_lane(endpoint: &crate::iroh_link::iroh::Endpoint, lane: VoxLane) {
+async fn serve_iroh_lane(
+    endpoint: &crate::iroh_link::iroh::Endpoint,
+    lane: VoxLane,
+    until: Option<IrohUntil>,
+) {
     use crate::iroh_link;
     match lane.gate {
         LaneGate::Gated(gate) => {
             let router = lane.router;
-            iroh_link::serve_peers(endpoint, move |remote| {
-                PermissionsGate::wrap_shared_with_proved_caller(
-                    Arc::clone(&gate),
-                    router.clone(),
-                    architect_permissions::Principal::Host {
-                        endpoint: remote.to_string(),
-                    },
-                )
-            })
+            iroh_link::serve_peers_until(
+                endpoint,
+                move |remote| {
+                    PermissionsGate::wrap_shared_with_proved_caller(
+                        Arc::clone(&gate),
+                        router.clone(),
+                        architect_permissions::Principal::Host {
+                            endpoint: remote.to_string(),
+                        },
+                    )
+                },
+                move |remote| until.as_ref().and_then(|until| until(remote)),
+            )
             .await;
         }
         LaneGate::Ungated => iroh_link::serve_router(endpoint, lane.router).await,

@@ -91,21 +91,22 @@ once: who a node serves, and the router each connection gets.
 
 | Item | What it is |
 | --- | --- |
-| `Devices` | The owner's other devices, by endpoint id. Kept current from the device registry: `devices.replace(directory.peer_endpoints(this_device))` with auth's `DeviceDirectory`. Read on every call, so a device taken off the account is refused on its next call. |
+| `Admission` | The devices the node lets in, by endpoint id (`architect_devices`, [Devices](@/architecture/devices.md)): the owner's other devices (kept current by the account pass, `architect_devices::account::pass`) open any document and sweep; a paired device opens the documents its scopes name. Read on every call, so a revoked device is refused on its next call, and its live sessions end. |
 | `Shares` | The live links the node has handed out. `share(endpoint, doc_id)` mints a key and returns a `DocLink`; `revoke` and `revoke_doc` close them. |
-| `NodeAccess` | Both, answering the three questions: who the caller is (`caller`: the link's `Principal::Guest` when the call presents a live key, otherwise `Principal::Host` of the proved endpoint), whether they may call at all (it is the gate's `PermissionEngine`: registered devices and live guests only), and which documents they may open (`admits`, for `DocRegistry::with_authorizer`: a device any, a guest the link's). |
+| `NodeAccess` | Both, answering the three questions: who the caller is (`caller`: the link's `Principal::Guest` when the call presents a live key, otherwise `Principal::Host` of the proved endpoint), whether they may call at all (it is the gate's `PermissionEngine`: admitted devices and live guests only, and anyone asking to pair when it takes pairings), and which documents they may open (`admits`, for `DocRegistry::with_authorizer`: an account device any, a paired device its scopes', a guest the link's). `NodeAccess::pairing(pairings)` also serves `DevicePairing`. |
 | `node_router(registry, catalog, access, remote)` | `DocSync` and `DocPeer` over the registry, behind that gate, for the connection from `remote`. |
 
-`architect::iroh_link::serve_peers` builds one per connection from the
-endpoint id the QUIC handshake proved, which is what makes the id an
-identity rather than a claim (`serve_router`, one router for every
-caller, cannot):
+`architect_devices::serve` (`iroh_link::serve_peers_until`) builds one per
+connection from the endpoint id the QUIC handshake proved, which is what
+makes the id an identity rather than a claim (`serve_router`, one router
+for every caller, cannot), and closes the connection when its device is
+revoked:
 
 ```rust,ignore
-let access = NodeAccess::new(Devices::new(), Shares::new());
+let access = NodeAccess::new(Admission::new(), Shares::new());
 let registry = DocRegistry::new(open_or_create)
     .with_authorizer({ let access = access.clone(); move |who, id| access.admits(who, id) });
-iroh_link::serve_peers(&endpoint, move |remote| {
+architect_devices::serve(&endpoint, access.devices.clone(), move |remote| {
     node_router(registry.clone(), OpenDocs(registry.clone()), access.clone(), &remote.to_string())
 })
 .await;
