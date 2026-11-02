@@ -72,12 +72,12 @@ impl Film for Watch {
                     else {
                         continue;
                     };
-                    let width = node.final_layout.content_box_width();
+                    let width = node.final_layout().content_box_width();
                     let Some(line) = text.layout.lines().next() else {
                         continue;
                     };
                     let m = line.metrics();
-                    let advance = (m.advance - m.trailing_whitespace) / scale;
+                    let advance = (m.advance - m.hanging_advance) / scale;
                     if advance >= width || text.text.trim().is_empty() {
                         continue;
                     }
@@ -100,7 +100,7 @@ impl Film for Watch {
                 else {
                     continue;
                 };
-                let width = node.final_layout.content_box_width();
+                let width = node.final_layout().content_box_width();
                 let lines: Vec<Line> = text
                     .layout
                     .lines()
@@ -111,8 +111,7 @@ impl Film for Watch {
                             .unwrap_or_default()
                             .trim()
                             .to_owned(),
-                        advance: (line.metrics().advance - line.metrics().trailing_whitespace)
-                            / scale,
+                        advance: (line.metrics().advance - line.metrics().hanging_advance) / scale,
                     })
                     .collect();
                 if needless_breaks(&lines, width) >= NEEDLESS {
