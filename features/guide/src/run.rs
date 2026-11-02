@@ -601,7 +601,7 @@ impl Runner<'_, '_> {
                 let parsed = parse_key(key);
                 let text = match &parsed {
                     Key::Character(c) => Some(c.clone()),
-                    _ => None,
+                    Key::Named(_) => None,
                 };
                 self.key(&parsed, modifiers(mods), text.as_deref());
                 self.tick()?;

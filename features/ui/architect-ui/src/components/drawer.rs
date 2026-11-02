@@ -39,7 +39,7 @@ pub fn Drawer(props: DrawerProps) -> Element {
 
     let on_close = props.on_close;
     let close_on_escape = move |e: KeyboardEvent| {
-        if e.key() == Key::Escape {
+        if e.key() == Key::Named(NamedKey::Escape) {
             if let Some(cb) = &on_close {
                 cb.call(());
             }

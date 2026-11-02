@@ -2979,7 +2979,7 @@ fn build_crdt_block(
                     return;
                 };
                 let notify = self.notify;
-                ::architect::dioxus::dioxus_core::spawn_forever(async move {
+                ::architect::dioxus::core::spawn_forever(async move {
                     if let ::core::result::Result::Err(e) = repo.create(input).await
                         && let ::core::option::Option::Some(n) = notify
                     {
@@ -2995,7 +2995,7 @@ fn build_crdt_block(
                     return;
                 };
                 let notify = self.notify;
-                ::architect::dioxus::dioxus_core::spawn_forever(async move {
+                ::architect::dioxus::core::spawn_forever(async move {
                     if let ::core::result::Result::Err(e) = repo.update(id, input).await
                         && let ::core::option::Option::Some(n) = notify
                     {
@@ -3010,7 +3010,7 @@ fn build_crdt_block(
                     return;
                 };
                 let notify = self.notify;
-                ::architect::dioxus::dioxus_core::spawn_forever(async move {
+                ::architect::dioxus::core::spawn_forever(async move {
                     if let ::core::result::Result::Err(e) = repo.delete(id).await
                         && let ::core::option::Option::Some(n) = notify
                     {

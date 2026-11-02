@@ -537,16 +537,16 @@ pub(crate) fn chord(e: &KeyboardEvent) -> Option<String> {
     let key = match e.key() {
         Key::Character(c) if c == " " => "Space".to_owned(),
         Key::Character(c) => c.to_uppercase(),
-        Key::Tab => "Tab".to_owned(),
-        Key::Enter => "↵".to_owned(),
-        Key::Escape => "Esc".to_owned(),
-        Key::Backspace => "⌫".to_owned(),
-        Key::ArrowLeft => "←".to_owned(),
-        Key::ArrowRight => "→".to_owned(),
-        Key::ArrowUp => "↑".to_owned(),
-        Key::ArrowDown => "↓".to_owned(),
-        Key::F1 => "F1".to_owned(),
-        _ => return None,
+        Key::Named(NamedKey::Tab) => "Tab".to_owned(),
+        Key::Named(NamedKey::Enter) => "↵".to_owned(),
+        Key::Named(NamedKey::Escape) => "Esc".to_owned(),
+        Key::Named(NamedKey::Backspace) => "⌫".to_owned(),
+        Key::Named(NamedKey::ArrowLeft) => "←".to_owned(),
+        Key::Named(NamedKey::ArrowRight) => "→".to_owned(),
+        Key::Named(NamedKey::ArrowUp) => "↑".to_owned(),
+        Key::Named(NamedKey::ArrowDown) => "↓".to_owned(),
+        Key::Named(NamedKey::F1) => "F1".to_owned(),
+        Key::Named(_) => return None,
     };
     // A shifted character arrives as itself (`{` not `[`): the shift is in it.
     let shift = m.shift()
@@ -792,16 +792,16 @@ pub fn CommandPalette() -> Element {
     };
     let run_key = run_at.clone();
     let on_key = move |e: KeyboardEvent| match e.key() {
-        Key::ArrowDown => {
+        Key::Named(NamedKey::ArrowDown) => {
             e.prevent_default();
             selected.set((pick.saturating_add(1)).min(count.saturating_sub(1)));
         }
-        Key::ArrowUp => {
+        Key::Named(NamedKey::ArrowUp) => {
             e.prevent_default();
             selected.set(pick.saturating_sub(1));
         }
-        Key::Enter => run_key(pick),
-        Key::Escape => commands.close(),
+        Key::Named(NamedKey::Enter) => run_key(pick),
+        Key::Named(NamedKey::Escape) => commands.close(),
         _ => {}
     };
     let empty = match q.scope {
@@ -898,15 +898,15 @@ pub fn QuickOpen() -> Element {
     };
     let open_key = open_at.clone();
     let on_key = move |e: KeyboardEvent| match e.key() {
-        Key::ArrowDown => {
+        Key::Named(NamedKey::ArrowDown) => {
             e.prevent_default();
             selected.set((pick.saturating_add(1)).min(count.saturating_sub(1)));
         }
-        Key::ArrowUp => {
+        Key::Named(NamedKey::ArrowUp) => {
             e.prevent_default();
             selected.set(pick.saturating_sub(1));
         }
-        Key::Enter => {
+        Key::Named(NamedKey::Enter) => {
             let m = e.modifiers();
             let open_in = if m.meta() && m.alt() {
                 OpenIn::Split
@@ -917,7 +917,7 @@ pub fn QuickOpen() -> Element {
             };
             open_key(pick, open_in);
         }
-        Key::Escape => commands.close(),
+        Key::Named(NamedKey::Escape) => commands.close(),
         _ => {}
     };
     let titles: Vec<String> = items

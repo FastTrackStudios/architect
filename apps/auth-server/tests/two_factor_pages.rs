@@ -129,16 +129,24 @@ async fn post(
 
 /// The `value="…"` of the input carrying `aria-label="<label>"`.
 ///
-/// Searches backwards from the label rather than assuming an attribute
-/// order: the renderer is free to emit them in any order, and it does
-/// not put `value` where a naive forward scan would look.
+/// Reads the whole tag the label is in rather than assuming an attribute
+/// order: the renderer is free to emit them in any order (Dioxus 0.8
+/// writes a template's static attributes before its dynamic ones).
 fn value_of_input_labelled(html: &str, label: &str) -> String {
     let marker = format!(r#"aria-label="{label}""#);
     let at = html.find(&marker).expect("an input with that label");
-    let before = html.get(..at).expect("text before the label");
-    let value_at = before.rfind(r#"value=""#).expect("a value attribute");
-    before
-        .get(value_at + r#"value=""#.len()..)
+    let start = html
+        .get(..at)
+        .and_then(|b| b.rfind('<'))
+        .expect("the tag's start");
+    let end = at
+        + html
+            .get(at..)
+            .and_then(|a| a.find('>'))
+            .expect("the tag's end");
+    let tag = html.get(start..end).expect("the tag");
+    let value_at = tag.find(r#"value=""#).expect("a value attribute");
+    tag.get(value_at + r#"value=""#.len()..)
         .expect("the value")
         .split('"')
         .next()

@@ -5,35 +5,38 @@ use crate::{
 };
 use dioxus::prelude::{
     InteractionLocation, Key, KeyboardEvent, Modifiers as DioxusModifiers, ModifiersInteraction,
-    MouseEvent, PointerInteraction, WheelEvent,
+    MouseEvent, NamedKey, PointerInteraction, WheelEvent,
 };
 
 /// Convert a Dioxus key value to an input key code.
 #[must_use]
 pub fn convert_key(key: &Key) -> Option<KeyCode> {
-    match key {
-        Key::Character(c) => Some(KeyCode::Character(c.to_lowercase())),
-        Key::ArrowUp => Some(KeyCode::ArrowUp),
-        Key::ArrowDown => Some(KeyCode::ArrowDown),
-        Key::ArrowLeft => Some(KeyCode::ArrowLeft),
-        Key::ArrowRight => Some(KeyCode::ArrowRight),
-        Key::Enter => Some(KeyCode::Enter),
-        Key::Escape => Some(KeyCode::Escape),
-        Key::Tab => Some(KeyCode::Tab),
-        Key::Backspace => Some(KeyCode::Backspace),
-        Key::Delete => Some(KeyCode::Delete),
-        Key::F1 => Some(KeyCode::F(1)),
-        Key::F2 => Some(KeyCode::F(2)),
-        Key::F3 => Some(KeyCode::F(3)),
-        Key::F4 => Some(KeyCode::F(4)),
-        Key::F5 => Some(KeyCode::F(5)),
-        Key::F6 => Some(KeyCode::F(6)),
-        Key::F7 => Some(KeyCode::F(7)),
-        Key::F8 => Some(KeyCode::F(8)),
-        Key::F9 => Some(KeyCode::F(9)),
-        Key::F10 => Some(KeyCode::F(10)),
-        Key::F11 => Some(KeyCode::F(11)),
-        Key::F12 => Some(KeyCode::F(12)),
+    let Key::Named(named) = key else {
+        let Key::Character(c) = key else { return None };
+        return Some(KeyCode::Character(c.to_lowercase()));
+    };
+    match named {
+        NamedKey::ArrowUp => Some(KeyCode::ArrowUp),
+        NamedKey::ArrowDown => Some(KeyCode::ArrowDown),
+        NamedKey::ArrowLeft => Some(KeyCode::ArrowLeft),
+        NamedKey::ArrowRight => Some(KeyCode::ArrowRight),
+        NamedKey::Enter => Some(KeyCode::Enter),
+        NamedKey::Escape => Some(KeyCode::Escape),
+        NamedKey::Tab => Some(KeyCode::Tab),
+        NamedKey::Backspace => Some(KeyCode::Backspace),
+        NamedKey::Delete => Some(KeyCode::Delete),
+        NamedKey::F1 => Some(KeyCode::F(1)),
+        NamedKey::F2 => Some(KeyCode::F(2)),
+        NamedKey::F3 => Some(KeyCode::F(3)),
+        NamedKey::F4 => Some(KeyCode::F(4)),
+        NamedKey::F5 => Some(KeyCode::F(5)),
+        NamedKey::F6 => Some(KeyCode::F(6)),
+        NamedKey::F7 => Some(KeyCode::F(7)),
+        NamedKey::F8 => Some(KeyCode::F(8)),
+        NamedKey::F9 => Some(KeyCode::F(9)),
+        NamedKey::F10 => Some(KeyCode::F(10)),
+        NamedKey::F11 => Some(KeyCode::F(11)),
+        NamedKey::F12 => Some(KeyCode::F(12)),
         _ => None,
     }
 }

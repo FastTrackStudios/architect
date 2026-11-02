@@ -1,10 +1,9 @@
 //! Toast — primitive-backed notifications with FTS styling defaults.
 
-use dioxus::dioxus_core::DynamicNode;
 use dioxus::prelude::*;
 use dioxus_primitives::toast::{
     Toast as PrimitiveToast, ToastProps as PrimitiveToastProps,
-    ToastPropsWithOwner as PrimitiveToastPropsWithOwner, ToastProvider as PrimitiveToastProvider,
+    ToastProvider as PrimitiveToastProvider,
 };
 use std::time::Duration;
 
@@ -22,9 +21,7 @@ pub fn ToastProvider(
         PrimitiveToastProvider {
             default_duration,
             max_toasts,
-            render_toast: Callback::new(|props: PrimitiveToastPropsWithOwner| {
-                rsx! { {DynamicNode::Component(props.into_vcomponent(Toast))} }
-            }),
+            render_toast: Callback::new(|props: PrimitiveToastProps| rsx! { Toast { ..props } }),
             {children}
         }
     }

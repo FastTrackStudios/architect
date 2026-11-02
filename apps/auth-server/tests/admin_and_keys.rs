@@ -124,14 +124,22 @@ async fn post(
 fn value_of_input_labelled(html: &str, label: &str) -> String {
     let marker = format!(r#"aria-label="{label}""#);
     let at = html.find(&marker).expect("an input with that label");
-    let before = html.get(..at).unwrap();
-    let value_at = before.rfind(r#"value=""#).expect("a value attribute");
-    before
-        .get(value_at + r#"value=""#.len()..)
-        .unwrap()
+    let start = html
+        .get(..at)
+        .and_then(|b| b.rfind('<'))
+        .expect("the tag's start");
+    let end = at
+        + html
+            .get(at..)
+            .and_then(|a| a.find('>'))
+            .expect("the tag's end");
+    let tag = html.get(start..end).expect("the tag");
+    let value_at = tag.find(r#"value=""#).expect("a value attribute");
+    tag.get(value_at + r#"value=""#.len()..)
+        .expect("the value")
         .split('"')
         .next()
-        .unwrap()
+        .expect("its end")
         .to_owned()
 }
 

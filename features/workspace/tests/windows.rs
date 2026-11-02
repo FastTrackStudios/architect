@@ -16,7 +16,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use dioxus::dioxus_core::NoOpMutations;
+use dioxus::core::NoOpMutations;
 use dioxus::prelude::*;
 
 thread_local! {

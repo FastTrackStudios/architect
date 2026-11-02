@@ -28,7 +28,7 @@ use std::collections::BTreeMap;
 use std::future::Future;
 use std::sync::{Arc, Mutex};
 
-use dioxus::dioxus_core::spawn_forever;
+use dioxus::core::spawn_forever;
 use dioxus::prelude::*;
 use serde::Serialize;
 use serde::de::DeserializeOwned;

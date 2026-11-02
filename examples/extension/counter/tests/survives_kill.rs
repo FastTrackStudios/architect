@@ -113,7 +113,7 @@ fn view_point(doc: &BaseDocument, selector: &str) -> (f32, f32) {
     let node = view.query_selector(selector).unwrap().unwrap();
     let n = view.get_node(node).unwrap();
     let p = n.absolute_position(0.0, 0.0);
-    let size = n.final_layout.size;
+    let size = n.final_layout().size;
     (
         host.x + p.x + size.width / 2.0,
         host.y + p.y + size.height / 2.0,

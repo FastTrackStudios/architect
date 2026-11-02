@@ -94,9 +94,9 @@ pub fn toolbar_default() -> Element {
                 ToolbarButton { index: 1, lucide_dioxus::Italic { size: 14 } }
                 ToolbarButton { index: 2, lucide_dioxus::Underline { size: 14 } }
                 ToolbarSeparator {}
-                ToolbarButton { index: 3, lucide_dioxus::AlignLeft { size: 14 } }
-                ToolbarButton { index: 4, lucide_dioxus::AlignCenter { size: 14 } }
-                ToolbarButton { index: 5, lucide_dioxus::AlignRight { size: 14 } }
+                ToolbarButton { index: 3, lucide_dioxus::TextAlignStart { size: 14 } }
+                ToolbarButton { index: 4, lucide_dioxus::TextAlignCenter { size: 14 } }
+                ToolbarButton { index: 5, lucide_dioxus::TextAlignEnd { size: 14 } }
             }
         }
     }

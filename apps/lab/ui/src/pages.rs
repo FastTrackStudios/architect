@@ -8,9 +8,9 @@ use architect_shell::{
 };
 use dioxus::prelude::*;
 use lucide_dioxus::{
-    AtSign, Bold, Brackets, Building2, CalendarDays, Check, CheckCheck, Circle, CircleCheck,
+    AtSign, Bold, Brackets, Building, CalendarDays, Check, CheckCheck, Circle, CircleCheck,
     CornerDownLeft, Eraser, Feather, Flag, FlaskConical, FolderInput, Hash, Inbox, ListTodo, Plus,
-    Search, Trash2, Undo2,
+    Search, Trash, Undo2,
 };
 
 use crate::items::{Item, PROJECTS};
@@ -40,7 +40,7 @@ fn org_crumb() -> Crumb {
     let name = architect_orgs::use_org()
         .and_then(|o| o.current())
         .map_or_else(|| "All organizations".to_owned(), |o| o.name);
-    Crumb::new(name).icon(icon!(Building2))
+    Crumb::new(name).icon(icon!(Building))
 }
 
 /// The lab's own switches, in a menu of their own beside the page's:
@@ -441,7 +441,7 @@ pub fn ItemPage(tab: &'static str, id: usize) -> Element {
     };
     let moves = move_menu(lab, &item);
     let menu = Menu::new()
-        .item("Delete", icon!(Trash2), move |()| lab.remove(id, "Deleted"))
+        .item("Delete", icon!(Trash), move |()| lab.remove(id, "Deleted"))
         .danger();
     // Done names itself: the page's one verb (⌘↵).
     let done =
@@ -497,7 +497,7 @@ pub fn ItemPage(tab: &'static str, id: usize) -> Element {
                         note.set(e.value());
                     },
                     onkeydown: move |e: KeyboardEvent| {
-                        if e.key() == Key::Enter {
+                        if e.key() == Key::Named(NamedKey::Enter) {
                             e.prevent_default();
                             let text = note.peek().clone();
                             if lab.note(id, &text) {
@@ -599,13 +599,13 @@ pub fn CapturePage(tab: &'static str) -> Element {
                         text.set(e.value());
                     },
                     onkeydown: move |e: KeyboardEvent| {
-                        if e.key() == Key::Enter {
+                        if e.key() == Key::Named(NamedKey::Enter) {
                             e.prevent_default();
                             if text.peek().trim().is_empty() {
                                 nudge.set(true);
                             }
                             save();
-                        } else if e.key() == Key::Escape {
+                        } else if e.key() == Key::Named(NamedKey::Escape) {
                             // Esc lets it go, as everywhere on a Mac; Undo
                             // brings it back, so a stray Esc loses nothing.
                             let typed = text.peek().clone();

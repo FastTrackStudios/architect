@@ -149,7 +149,7 @@ pub fn Launcher(state: Signal<LauncherState>, on_close: EventHandler<()>) -> Ele
         let len = results.read().len();
         let m = evt.modifiers();
         let (ctrl, shift) = (m.ctrl(), m.shift());
-        if !matches!(evt.key(), Key::Escape) {
+        if !matches!(evt.key(), Key::Named(NamedKey::Escape)) {
             escape_armed.set(false);
         }
         if ctrl && matches!(evt.key(), Key::Character(ref c) if c == " ") {
@@ -158,7 +158,7 @@ pub fn Launcher(state: Signal<LauncherState>, on_close: EventHandler<()>) -> Ele
             return;
         }
         match evt.key() {
-            Key::ArrowDown => {
+            Key::Named(NamedKey::ArrowDown) => {
                 evt.prevent_default();
                 if len > 0 {
                     // `checked_rem`: `len > 0` above, so this always hits.
@@ -167,7 +167,7 @@ pub fn Launcher(state: Signal<LauncherState>, on_close: EventHandler<()>) -> Ele
                     }
                 }
             }
-            Key::ArrowUp => {
+            Key::Named(NamedKey::ArrowUp) => {
                 evt.prevent_default();
                 if len > 0 {
                     selected_index.set(
@@ -177,7 +177,7 @@ pub fn Launcher(state: Signal<LauncherState>, on_close: EventHandler<()>) -> Ele
                     );
                 }
             }
-            Key::Tab => {
+            Key::Named(NamedKey::Tab) => {
                 evt.prevent_default();
                 let next = match *search_mode.read() {
                     SearchMode::Items => SearchMode::Filters,
@@ -186,7 +186,7 @@ pub fn Launcher(state: Signal<LauncherState>, on_close: EventHandler<()>) -> Ele
                 search_mode.set(next);
                 selected_index.set(0);
             }
-            Key::Enter => {
+            Key::Named(NamedKey::Enter) => {
                 evt.prevent_default();
                 let r = results.read();
                 if let Some(item) = r.get(selected_index()) {
@@ -221,7 +221,7 @@ pub fn Launcher(state: Signal<LauncherState>, on_close: EventHandler<()>) -> Ele
                     }
                 }
             }
-            Key::Escape => {
+            Key::Named(NamedKey::Escape) => {
                 evt.prevent_default();
                 if escape_armed() {
                     on_close.call(());
@@ -240,17 +240,17 @@ pub fn Launcher(state: Signal<LauncherState>, on_close: EventHandler<()>) -> Ele
                     on_close.call(());
                 }
             }
-            Key::Home => {
+            Key::Named(NamedKey::Home) => {
                 evt.prevent_default();
                 selected_index.set(0);
             }
-            Key::End => {
+            Key::Named(NamedKey::End) => {
                 evt.prevent_default();
                 if len > 0 {
                     selected_index.set(len.saturating_sub(1));
                 }
             }
-            Key::PageDown => {
+            Key::Named(NamedKey::PageDown) => {
                 evt.prevent_default();
                 if len > 0 {
                     selected_index.set(
@@ -260,7 +260,7 @@ pub fn Launcher(state: Signal<LauncherState>, on_close: EventHandler<()>) -> Ele
                     );
                 }
             }
-            Key::PageUp => {
+            Key::Named(NamedKey::PageUp) => {
                 evt.prevent_default();
                 selected_index.set(selected_index().saturating_sub(10));
             }

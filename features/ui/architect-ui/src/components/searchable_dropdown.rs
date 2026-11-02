@@ -113,7 +113,7 @@ pub fn SearchableDropdown(props: SearchableDropdownProps) -> Element {
             style: "{panel_style}",
             onclick: move |evt| evt.stop_propagation(),
             onkeydown: move |evt| {
-                if evt.key() == Key::Escape {
+                if evt.key() == Key::Named(NamedKey::Escape) {
                     props.on_close.call(());
                 }
                 evt.stop_propagation();

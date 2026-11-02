@@ -18,7 +18,7 @@
 use std::fmt::Display;
 use std::future::Future;
 
-use dioxus::dioxus_core::spawn_forever;
+use dioxus::core::spawn_forever;
 use dioxus::prelude::*;
 
 use crate::notify::{Notifications, try_use_notifications};
