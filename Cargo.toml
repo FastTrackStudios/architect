@@ -59,6 +59,7 @@ members = [
     "features/shell",
     "features/guide",
     "features/presence",
+    "features/devices",
     "apps/lab/ui",
     "apps/lab/desktop",
     "apps/lab/mobile",
@@ -232,6 +233,7 @@ architect-scripting = { path = "features/scripting" }
 architect-extensions = { path = "features/extensions" }
 architect-canvas = { path = "features/canvas" }
 architect-files = { path = "features/files" }
+architect-devices = { path = "features/devices" }
 architect-lab-ui = { path = "apps/lab/ui" }
 # iOS: the UIScene lifecycle the lab app adopts (apps/lab/mobile).
 objc2 = "0.6"

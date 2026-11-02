@@ -646,6 +646,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-devices"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-devices",
+ "architect-orgs",
+ "architect-permissions",
+ "architect-telemetry",
+ "auth",
+ "auth-proto",
+ "chrono",
+ "crdt",
+ "facet",
+ "facet-json",
+ "iroh",
+ "sea-orm",
+ "sea-orm-migration",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+ "uuid",
+ "vox",
+]
+
+[[package]]
 name = "architect-extensions"
 version = "0.1.0"
 dependencies = [
@@ -2789,6 +2814,7 @@ name = "crdt"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "architect-devices",
  "architect-orgs",
  "architect-permissions",
  "async-trait",
