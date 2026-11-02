@@ -18,7 +18,10 @@ weight = 54
 > sidebar, with its ribbon and groups) pops out into a window of its own
 > and docks back (`Workspace::pop_out_dock`, `Workspace::dock_back`; the
 > `WORKSPACE_POP_OUT_*_DOCK` and `WORKSPACE_DOCK_BACK_*_DOCK` actions).
-> Still to come: dragging a tab onto a group in another window (it joins
+> Every operation is an Action List action with an explicit target
+> (`features/workspace/src/control/mod.rs`; "On the Action List" below),
+> and the view commands run them. Still to come: dragging a tab onto a
+> group in another window (it joins
 > that window's first group), floats in pop-outs, the app's chords inside
 > a pop-out. Studio's dock (`studio:features/ui/dock`) was
 > the starting point; Obsidian's workspace is the bar to clear.
@@ -284,26 +287,102 @@ cursor) is the view's business and not part of the layout.
 
 Every gesture and every key comes down to a few operations, methods on
 `Workspace` (`features/workspace/src/ops.rs`: `open`, `move_pane`,
-`close`, `set_stacked`, `set_shares`, `pop_out_dock`, `dock_back`, …),
-and the host names each one as a **view command**: an
-`architect_commands::Command` it registers with `use_command` while it
-is mounted (`features/workspace/src/host/commands.rs`
-`WorkspaceCommands`, and `features/workspace/src/host/screens.rs` for
-the screensets). Those are what the palette (⌘K), the menus and the
-keys run, so a menu, a key and the palette arrange the workspace the
-same way.
+`close`, `set_stacked`, `set_shares`, `set_zoomed`, `pop_out_dock`,
+`dock_back`, …). Each is an **Action List action** with an explicit
+target (below), and the host names the common ones as **view commands**:
+an `architect_commands::Command` it registers with `use_command` while it
+is mounted (`features/workspace/src/host/commands.rs` `WorkspaceCommands`,
+and `features/workspace/src/host/screens.rs` for the screensets). A
+command is its action run with the active pane as the target and
+`focus: true`, so a key, a menu, the palette (⌘K), a script and a model
+over MCP arrange the workspace through one code path.
 
-They are not Action List actions one by one. Two actions put the
-workspace on the app's [Action List](@/architecture/commands.md), for
-scripts, guide scenarios and a model over MCP:
+### On the Action List
 
-- `WORKSPACE_LAYOUT` (`features/workspace/src/host/actions.rs`
-  `use_workspace_actions`, read-only): the arrangement, every window's
-  groups and splits, and a `Changed { topic: "workspace" }` event on
-  each change;
-- `COMMANDS_RUN` (`features/commands/src/bridge.rs`
-  `use_command_actions`): runs any command by id, so every command below
-  is reachable from a script or MCP through it.
+`features/workspace/src/control/mod.rs` holds every action as a function
+over a `State` (the workspace, its screensets, the class of screen) and
+an `Env` (the app's views, whether pop-outs are OS windows): no Dioxus,
+no I/O. Feature `actions` puts them on an
+[Action List](@/architecture/commands.md)
+(`features/workspace/src/control/list.rs` `register`), run where the
+workspace lives:
+
+- the Blitz host, when `WorkspaceView` is given `actions`
+  (`WorkspaceActions::new(list)`): a write is sent to the window's thread
+  and answered once it ran there; a read is answered at once from a
+  mirror the host keeps current (a guide scenario's checks run
+  synchronously);
+- a `HeadlessWorkspace` (`State` and `Env` behind a lock) for a server, a
+  test, or a model arranging a layout to store
+  (`features/workspace/tests/actions.rs` drives every action over MCP).
+
+The rules every write keeps (herdr's agent API, which these follow):
+
+- **Targets are named.** A pane, a group, a window or a dock side is a
+  parameter; nothing acts on "the active pane" unless the caller passed
+  it.
+- **Focus stays put.** `Workspace::active` is the person's: a write moves
+  it only with `focus: true` (or `WORKSPACE_FOCUS`). A pane opened or
+  moved without it shows in its group; the person's group keeps showing
+  their tab.
+- **Every write answers** `Answer { changed, reason, pane, group, window,
+  screenset, layout }`. Nothing changed comes with a `Reason`
+  (`already_open`, `already_zoomed`, `only_tab`, `no_neighbor`,
+  `dock_not_out`, …), so a retry is safe and no second read is needed. A
+  call that names something not there fails, and changes nothing
+  (`control::transact`).
+- **Ids are opaque and never handed out twice** (`Workspace::next_id`
+  only grows, a recalled screenset's included). A group or a window that
+  goes because all its panes went to one other leaves an alias
+  (`Workspace::aliases`, `Workspace::resolve_group`,
+  `Workspace::resolve_window`): an id read before finds them.
+- **Modes, not toggles**, where a toggle would make a retry undo itself:
+  `WORKSPACE_ZOOM {mode: on | off | toggle}`.
+- Each change of the arrangement is a `Changed { topic: "workspace" }`
+  event.
+
+| Action | Effect | Takes |
+|---|---|---|
+| `WORKSPACE_LAYOUT` | read-only | — : every window's groups (ids, tabs, the one showing, stacked), splits, docks' groups, the active pane |
+| `WORKSPACE_PANE_GET` | read-only | `pane`: its view, title, state, window, place, group, index, shown, active, history, float |
+| `WORKSPACE_NEIGHBOR` | read-only | `pane`, `direction`: the pane showing next to it that way |
+| `WORKSPACE_VIEWS` | read-only | — : the views `WORKSPACE_OPEN` takes |
+| `WORKSPACE_EXPORT` | read-only | — : the layout as a portable tree |
+| `WORKSPACE_OPEN` | mutating | `view`, `id?`, `state?`, `title?`, `at` (`replace`, `beside`, `group`, `split`, `window`, `dock`, `float`), `focus` |
+| `WORKSPACE_MOVE` | mutating | `pane`, `to` (`group`, `beside`, `edge`, `split`, `window`, `dock`, `float`), `focus` |
+| `WORKSPACE_SPLIT` | mutating | `pane`, `side`, `focus` |
+| `WORKSPACE_FOCUS` | mutating | `pane`, or `from` and `direction` |
+| `WORKSPACE_ZOOM` | mutating | `pane`, `mode`: its center group alone in its window, the tree kept |
+| `WORKSPACE_RESIZE` | mutating | a `split`'s `shares` (or `even`), a `dock`'s `size`, or a `pane` grown toward a `direction` by an `amount` |
+| `WORKSPACE_GROUP_SET` | mutating | `group`, `stacked?`, `chrome?`, `current?` |
+| `WORKSPACE_TAB_SET` | mutating | `pane`, `pinned?`, `link?` (`""` unlinks), `title?` |
+| `WORKSPACE_NAVIGATE` | mutating | `pane`, `go` (back, forward) or `state` |
+| `WORKSPACE_DOCK_SET` | mutating | `side`, `shown?`, `size?` |
+| `WORKSPACE_DOCK_POP_OUT` / `WORKSPACE_DOCK_BACK` | mutating | `side`, `bounds?` / `side` |
+| `WORKSPACE_FLOAT` | mutating | `pane`, `rect?`, `snap?`, `pin?`, `above_all`, `focus` |
+| `WORKSPACE_MINIMISE` / `WORKSPACE_RESTORE` | mutating | `pane` (`focus` to restore to the front) |
+| `WORKSPACE_WINDOW_SET` | mutating | `window`, `bounds?`, `maximized?` |
+| `WORKSPACE_REOPEN` | mutating | `focus` |
+| `WORKSPACE_APPLY` | mutating | `layout` (`WORKSPACE_EXPORT`'s), `keep_unplaced` (default true; else unplaced panes close, kept to reopen) |
+| `WORKSPACE_CLOSE` | mutating | `panes` (all or none; each kept to reopen) |
+| `WORKSPACE_CLOSE_OTHERS` | destructive | `pane` |
+| `WORKSPACE_CLOSE_WINDOW` | destructive | `window` |
+| `SCREENSET_LIST` | read-only | — : the sets, the active one, dirty, the class |
+| `SCREENSET_RECALL` / `_SAVE` / `_SAVE_AS` / `_RESET` | mutating | `id` or `slot` / — / `name`, `slot?` / — |
+| `SCREENSET_DELETE` | destructive | `id` (a built-in set answers `builtin`) |
+
+`WORKSPACE_APPLY` builds the whole new workspace before it puts it in
+place (herdr's `layout.apply`), so a layout that does not fit (a pane
+twice, an unknown view) changes nothing. Panes keep their ids, so their
+views are not built again; groups and splits keep the ids the tree
+carries, and an export applied over itself changes nothing. A float
+keeps its snap and pin by its group; ribbons are the person's and stay.
+
+Destructive actions are marked `Effect::Destructive` only: asking the
+person before one runs is the Action List's confirmation step, a
+separate piece of work.
+
+The view commands:
 
 | Operation | Commands | What it does |
 |---|---|---|
@@ -312,11 +391,12 @@ scripts, guide scenarios and a model over MCP:
 | `close` / `close_others` / `reopen` | `WORKSPACE_CLOSE_TAB`, `WORKSPACE_CLOSE_OTHER_TABS`, `WORKSPACE_REOPEN_TAB` | |
 | a split | `WORKSPACE_SPLIT_RIGHT`, `WORKSPACE_SPLIT_DOWN` | split the active group, moving its tab |
 | `activate` / `goto_tab` / `cycle_tab` | `WORKSPACE_FOCUS_LEFT` / `_RIGHT` / `_UP` / `_DOWN`, `WORKSPACE_NEXT_TAB`, `WORKSPACE_PREVIOUS_TAB` | |
+| `set_zoomed` | `WORKSPACE_ZOOM_PANE` | the active pane's group alone in its window, and back |
 | `go` | `WORKSPACE_GO_BACK`, `WORKSPACE_GO_FORWARD` | the active pane's history |
 | `set_pinned` / `set_stacked` / `set_chrome` | `WORKSPACE_PIN_TAB`, `WORKSPACE_STACK_TABS`, `WORKSPACE_TAB_BAR` | toggles |
 | `set_dock_shown` / `set_shares` | `WORKSPACE_TOGGLE_RIGHT_DOCK`, `WORKSPACE_TOGGLE_BOTTOM_DOCK`; dragging a divider | |
 | `pop_out_dock` / `dock_back` | `WORKSPACE_POP_OUT_LEFT_DOCK`, `WORKSPACE_DOCK_BACK_LEFT_DOCK`, and the same for `RIGHT` and `BOTTOM` | the dock, ribbon and groups, into a window of its own and back; which of the pair is enabled says where the dock is |
-| screensets (`recall`, `save`, `save_as`, `reset`) | `SCREENSET_SAVE`, `SCREENSET_RESET` | |
+| screensets (`recall`, `save`, `save_as`, `reset`) | `SCREENSET_RECALL_1` … `_9` (⌘1–9), `SCREENSET_SAVE`, `SCREENSET_RESET` | |
 | | `WORKSPACE_ARRANGE` | arrange mode, latched (for touch) |
 | | `WORKSPACE_EVERY_PANE` | every open pane, to pick one |
 
@@ -441,7 +521,7 @@ lives there).
 | `Float` (inside the window) | a real window; an in-window float stays as an option |
 | `Panel { kind, state, link }` | `Pane`, plus `pinned`, `history`, cached `icon` |
 | `Screenset { variants: FormClass → Dockspace }` | the same, over `Workspace` |
-| `DockRequest` queue polled by Session | view commands, run by id (`COMMANDS_RUN` on the Action List) |
+| `DockRequest` queue polled by Session | Action List actions with explicit targets (`WORKSPACE_OPEN`, `WORKSPACE_MOVE`, …) |
 | persisted by Session (`utils::prefs`) | a store the app passes |
 | `HostPanels { kinds, scope }` (in Session) | `Views` (here) |
 

@@ -440,6 +440,10 @@ pub struct Window {
     pub docks: Docks,
     /// Floating over it; the last is the front.
     pub floats: Vec<Float>,
+    /// The group of its center shown alone, filling the center
+    /// ([`Workspace::set_zoomed`]); the rest of the tree is kept.
+    #[facet(default)]
+    pub zoomed: Option<GroupId>,
 }
 
 impl Window {
@@ -452,6 +456,7 @@ impl Window {
             center: Some(center),
             docks: Docks::default(),
             floats: Vec::new(),
+            zoomed: None,
         }
     }
 
@@ -536,6 +541,34 @@ pub struct Location {
     pub index: usize,
 }
 
+/// Where a group or a window went when it stopped existing: its panes all
+/// went to one other, so an id read before still finds them
+/// ([`Workspace::resolve_group`], [`Workspace::resolve_window`]).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Facet)]
+pub struct Aliases {
+    pub groups: Vec<GroupAlias>,
+    pub windows: Vec<WindowAlias>,
+}
+
+/// A group that went, and the group its panes went to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Facet)]
+pub struct GroupAlias {
+    pub from: GroupId,
+    pub to: GroupId,
+}
+
+/// A window that went, and the window its panes went to.
+#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+pub struct WindowAlias {
+    pub from: WindowId,
+    pub to: WindowId,
+}
+
+impl Aliases {
+    /// How many of each are kept, newest last.
+    pub const KEPT: usize = 64;
+}
+
 /// Everything a person has arranged: the main window and its pop-outs, and
 /// every pane in them.
 #[derive(Debug, Clone, PartialEq, Facet)]
@@ -550,8 +583,11 @@ pub struct Workspace {
     pub recent: Vec<PaneId>,
     /// Closed panes, newest last, to reopen.
     pub closed: Vec<ClosedPane>,
-    /// The next group or split id.
+    /// The next group or split id. Ids are never handed out twice.
     pub next_id: u64,
+    /// Ids that went, and where their panes went.
+    #[facet(default)]
+    pub aliases: Aliases,
 }
 
 impl Default for Workspace {
@@ -577,6 +613,7 @@ impl Workspace {
             recent: Vec::new(),
             closed: Vec::new(),
             next_id: 2,
+            aliases: Aliases::default(),
         }
     }
 
@@ -708,6 +745,53 @@ impl Workspace {
     #[must_use]
     pub fn window(&self, id: &WindowId) -> Option<&Window> {
         self.windows.iter().find(|w| &w.id == id)
+    }
+
+    /// Whether `other` is arranged the same: the same windows, panes,
+    /// focus and closed panes, whatever ids each would hand out next and
+    /// whatever aliases each keeps.
+    #[must_use]
+    pub fn same_arrangement(&self, other: &Self) -> bool {
+        self.windows == other.windows
+            && self.panes == other.panes
+            && self.active == other.active
+            && self.recent == other.recent
+            && self.closed == other.closed
+    }
+
+    /// The group `id` names now: itself, or, when it went, the group its
+    /// panes went to ([`Aliases`]). `None` when neither is here.
+    #[must_use]
+    pub fn resolve_group(&self, id: GroupId) -> Option<GroupId> {
+        let mut at = id;
+        for _ in 0..=Aliases::KEPT {
+            if self.group(at).is_some() {
+                return Some(at);
+            }
+            at = self.aliases.groups.iter().rev().find(|a| a.from == at)?.to;
+        }
+        None
+    }
+
+    /// The window `id` names now: itself, or, when it went, the window its
+    /// panes went to ([`Aliases`]).
+    #[must_use]
+    pub fn resolve_window(&self, id: &WindowId) -> Option<WindowId> {
+        let mut at = id.clone();
+        for _ in 0..=Aliases::KEPT {
+            if self.window(&at).is_some() {
+                return Some(at);
+            }
+            at = self
+                .aliases
+                .windows
+                .iter()
+                .rev()
+                .find(|a| a.from == at)?
+                .to
+                .clone();
+        }
+        None
     }
 
     /// The index of the pop-out the dock on `side` is in, if it popped

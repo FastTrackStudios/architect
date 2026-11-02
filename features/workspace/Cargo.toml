@@ -16,7 +16,10 @@ description = "The workspace: tab groups in splits, docks with ribbons, stacked 
 
 [features]
 default = []
-ui = ["dep:dioxus", "dep:architect-shell", "architect-shell/ui", "dep:futures-timer", "dep:futures-util", "dep:lucide-dioxus", "architect-commands/ui", "dep:architect"]
+# Every operation as an Action List action with an explicit target
+# (src/control/list.rs): on a headless workspace, or under `ui` the host's.
+actions = ["dep:architect", "dep:futures-channel"]
+ui = ["actions", "dep:dioxus", "dep:architect-shell", "architect-shell/ui", "dep:futures-timer", "dep:futures-util", "dep:lucide-dioxus", "architect-commands/ui"]
 native = ["ui", "dep:dioxus-native", "dep:blitz-shell", "dep:blitz-traits", "dep:dioxus-asset-resolver"]
 hot-reload = ["native", "dioxus-native/hot-reload", "dep:dioxus-devtools"]
 
@@ -38,8 +41,10 @@ futures-util = { version = "0.3", default-features = false, optional = true }
 # The workspace's commands, in the app's palette; by default the model
 # (the screensets as a menu's live rows), wasm-clean.
 architect-commands = { workspace = true }
-# The workspace's layout on the app's Action List (src/host/actions.rs).
+# The workspace's actions on the app's Action List (src/control/list.rs),
+# a write answered from where the workspace lives.
 architect = { workspace = true, optional = true, features = ["action-list"] }
+futures-channel = { version = "0.3", optional = true }
 # A measurement mid-drag finds the document busy and asks again shortly.
 futures-timer = { workspace = true, optional = true }
 
@@ -50,9 +55,18 @@ futures-timer = { workspace = true, optional = true, features = ["wasm-bindgen"]
 [lib]
 doctest = false
 
+[dev-dependencies]
+# Every action driven over MCP against a headless workspace (tests/actions.rs).
+architect-mcp = { path = "../mcp" }
+serde_json = { workspace = true }
+
 [[test]]
 name = "windows"
 required-features = ["ui"]
+
+[[test]]
+name = "actions"
+required-features = ["actions"]
 
 [lints]
 workspace = true

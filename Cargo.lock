@@ -1218,6 +1218,7 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "architect-commands",
+ "architect-mcp",
  "architect-shell",
  "blitz-shell",
  "blitz-traits",
@@ -1227,9 +1228,11 @@ dependencies = [
  "dioxus-native",
  "facet",
  "facet-json",
+ "futures-channel",
  "futures-timer",
  "futures-util",
  "lucide-dioxus",
+ "serde_json",
  "thiserror 2.0.20",
 ]
 

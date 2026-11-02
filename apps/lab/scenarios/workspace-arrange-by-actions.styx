@@ -1,0 +1,106 @@
+// The Vault arranged by actions alone: every step runs a workspace action
+// that names its target — what a model over MCP runs — and the person's
+// focus stays where it was until a step asks for it.
+id workspace-arrange-by-actions
+title "Arrange the Vault by actions"
+view {width 1440, height 860}
+capture {fps 20, width 960}
+steps (
+    {
+        id vault
+        do @run{id LAB_GO_VAULT}
+        done {on (@changed"lab"), check ({id LAB_STATE, has {tab vault}})}
+        hide true
+    }
+    // The Clicker pane is a process extension's view: headless its
+    // program is not running, so it goes before the take.
+    {
+        id close-clicker
+        do @run{id WORKSPACE_CLOSE, args {panes (clicker)}}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {active note-welcome, windows ({groups ({tabs (note-welcome note-shell arrange)} {tabs (graph)})})}})
+        }
+        hide true
+    }
+    {
+        id open
+        text "WORKSPACE_OPEN puts a note right after another one; the focus stays where it was."
+        do @run{id WORKSPACE_OPEN, args {view note, id note-workspace, title "The workspace", at {beside {pane note-shell}}}}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {active note-welcome, windows ({groups ({tabs (note-welcome note-shell note-workspace arrange)} {tabs (graph)})})}})
+        }
+        hold 1.0
+    }
+    {
+        id split
+        text "WORKSPACE_SPLIT moves it into a group of its own, below."
+        do @run{id WORKSPACE_SPLIT, args {pane note-workspace, side bottom}}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {windows ({groups ({tabs (note-welcome note-shell arrange)} {tabs (note-workspace)} {tabs (graph)})})}})
+        }
+        hold 1.0
+    }
+    {
+        id move
+        text "WORKSPACE_MOVE takes the outline out of the right dock, beside the graph."
+        do @run{id WORKSPACE_MOVE, args {pane outline, to {beside {pane graph}}}}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {windows ({groups ({tabs (note-welcome note-shell arrange)} {tabs (note-workspace)} {tabs (graph outline)}), docked ({tabs (files search)} {tabs (backlinks)})})}})
+        }
+        hold 1.0
+    }
+    {
+        id resize
+        text "WORKSPACE_RESIZE grows the notes toward the graph."
+        do @run{id WORKSPACE_RESIZE, args {pane note-welcome, direction right, amount 0.15}}
+        done {on (@changed"workspace")}
+        hold 0.8
+    }
+    {
+        id float
+        text "WORKSPACE_FLOAT floats the backlinks over the page."
+        do @run{id WORKSPACE_FLOAT, args {pane backlinks, rect {x 860, y 140, w 360, h 280}}}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {active note-welcome, windows ({docked ({tabs (files search)})})}})
+        }
+        hold 1.0
+    }
+    {
+        id zoom
+        text "WORKSPACE_ZOOM shows the graph's group alone; the layout is kept."
+        do @run{id WORKSPACE_ZOOM, args {pane graph, mode on}}
+        done {on (@ran"WORKSPACE_ZOOM")}
+        hold 1.0
+    }
+    {
+        id unzoom
+        do @run{id WORKSPACE_ZOOM, args {pane graph, mode off}}
+        done {on (@ran"WORKSPACE_ZOOM")}
+        hold 0.6
+    }
+    {
+        id dock
+        text "WORKSPACE_MOVE docks the backlinks back on the right."
+        do @run{id WORKSPACE_MOVE, args {pane backlinks, to {dock {side right}}}}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {windows ({docked ({tabs (files search)} {tabs (backlinks)})})}})
+        }
+        hold 0.8
+    }
+    {
+        id focus
+        text "Only WORKSPACE_FOCUS moves the person's focus."
+        do @run{id WORKSPACE_FOCUS, args {pane note-workspace}}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {active note-workspace}})
+        }
+        hold 1.0
+    }
+)

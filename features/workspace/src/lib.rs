@@ -21,6 +21,7 @@
 
 #[cfg(feature = "ui")]
 mod bar;
+pub mod control;
 mod drop;
 pub mod guide;
 #[cfg(feature = "ui")]
@@ -43,14 +44,14 @@ pub use guide::{ArrangedGroup, ArrangedSplit, ArrangedWindow, Arrangement, targe
 #[cfg(feature = "ui")]
 pub use host::{
     Bridge, Command, Host, PaneHandle, Popout, PresenceLayer, PresenceOverlay, TitleRow, View,
-    Views, WindowSystem, Windows, WorkspaceStore, WorkspaceView, use_host, use_pane,
-    use_pane_status, use_presence_overlay, use_workspace_actions,
+    Views, WindowSystem, Windows, WorkspaceActions, WorkspaceStore, WorkspaceView, use_host,
+    use_pane, use_pane_status, use_presence_overlay,
 };
 pub use layout::{Direction, Placed, Slide, area_rects, neighbour, scroll_to, slides};
 pub use model::{
-    Above, Area, Axis, Child, Chrome, ClosedPane, Corner, Dock, Docks, Float, Group, GroupId,
-    History, LinkId, Location, Node, Pane, PaneId, Pin, Rect, Ribbon, Shown, Side, Snap, Split,
-    SplitId, ViewKind, Window, WindowId, Workspace,
+    Above, Aliases, Area, Axis, Child, Chrome, ClosedPane, Corner, Dock, Docks, Float, Group,
+    GroupAlias, GroupId, History, LinkId, Location, Node, Pane, PaneId, Pin, Rect, Ribbon, Shown,
+    Side, Snap, Split, SplitId, ViewKind, Window, WindowAlias, WindowId, Workspace,
 };
 pub use ops::{Dest, Target, WorkspaceError};
 pub use presence::{PlayheadMark, PointerMark, PresenceMarks, WashMark, css_color};

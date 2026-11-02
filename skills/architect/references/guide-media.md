@@ -66,8 +66,9 @@ Rules:
 1. Give its root the Action List the runner puts in context
    (`Arc<ActionList>`), and leave out what needs a window when there is
    none (the lab: `apps/lab/ui/src/lib.rs` `LabApp`).
-2. Put what checks read on that list: `architect_workspace::use_workspace_actions`
-   (`WORKSPACE_LAYOUT`, `workspace` events), `architect_commands::use_command_actions`
+2. Put what checks read on that list: `WorkspaceView`'s `actions` prop
+   (`architect_workspace::WorkspaceActions`: `WORKSPACE_LAYOUT` and every
+   workspace action, `workspace` events), `architect_commands::use_command_actions`
    (`COMMANDS_RUN`, `COMMANDS_STATE`, `commands` events), and the app's own
    (`apps/lab/ui/src/guide.rs` `use_lab_actions`).
 3. A media crate: `features/guide/src/run.rs` `App` (root, list, fonts,

@@ -245,7 +245,7 @@ impl Screensets {
             .and_then(|id| self.get(id))
             .and_then(|s| s.layout_for(class));
         match (saved, self.working(class)) {
-            (Some(saved), Some(working)) => saved != working,
+            (Some(saved), Some(working)) => !saved.same_arrangement(working),
             (None, Some(_)) => true,
             _ => false,
         }

@@ -1,14 +1,22 @@
 //! The workspace's commands: everything a tab, a divider or a menu row
 //! does, by name and by key, in the app's palette (⌘K), and what ⌘O can
 //! open — the views, and the panes already open.
+//!
+//! Each is its workspace action ([`crate::control`]) run on the active
+//! pane's behalf with `focus: true`: a key, ⌘K and a model over the
+//! Action List run one code path.
 
 use architect_commands::{Command, OpenIn, OpenItem, Opener, use_command, use_opener};
 use dioxus::prelude::*;
 
-use super::{Host, Op, use_host};
-use crate::layout::{Direction, area_rects, neighbour};
-use crate::model::{Area, Chrome, Rect, Shown, Side};
-use crate::ops::{Dest, Target};
+use super::{Host, use_host};
+use crate::control::{
+    self, At, CloseArgs, DockBackArgs, DockPopOutArgs, DockSetArgs, DockShown, DockSide, FloatArgs,
+    FocusArgs, Go, GroupSetArgs, MoveArgs, NavigateArgs, OpenArgs, PaneArgs, PaneSide, ReopenArgs,
+    SplitArgs, TabChrome, TabSetArgs, To, Toward, ZoomArgs,
+};
+use crate::model::{Area, Chrome, GroupId, PaneId, Shown, Side};
+use crate::ops::Target;
 
 /// Registers the workspace's commands while the host is mounted (a
 /// child of [`super::WorkspaceView`], so it has the host).
@@ -24,6 +32,12 @@ pub(super) fn WorkspaceCommands() -> Element {
     let closed = !w.closed.is_empty();
     let docked = loc.is_some_and(|l| matches!(l.area, Area::Dock(_)));
     let popped = loc.is_some_and(|l| l.window > 0);
+    let split_center = loc.is_some_and(|l| {
+        l.area == Area::Center
+            && w.windows
+                .get(l.window)
+                .is_some_and(|win| matches!(win.center, Some(crate::model::Node::Split(_))))
+    });
     let has_sets = !host.screensets.read().sets.is_empty();
     let can_back = active
         .as_ref()
@@ -71,9 +85,17 @@ pub(super) fn WorkspaceCommands() -> Element {
             .group("Tabs")
             .shortcut("⌘W")),
         move || {
-            let active = host.workspace.peek().active.clone();
-            if let Some(p) = active {
-                host.run(Op::Close(p));
+            if let Some(p) = active_pane(host) {
+                host.write(
+                    control::close,
+                    CloseArgs {
+                        panes: vec![p.0.clone()],
+                    },
+                );
+                let mut sheet = host.sheet;
+                if sheet.peek().as_ref() == Some(&p) {
+                    sheet.set(None);
+                }
             }
         },
     );
@@ -85,7 +107,7 @@ pub(super) fn WorkspaceCommands() -> Element {
         }
         .group("Tabs")
         .shortcut("⇧⌘T"),
-        move || host.run(Op::Reopen),
+        move || host.write(control::reopen, ReopenArgs { focus: true }),
     );
     use_command(
         several(
@@ -93,9 +115,7 @@ pub(super) fn WorkspaceCommands() -> Element {
                 .group("Tabs")
                 .shortcut("⌃Tab"),
         ),
-        move || {
-            let _ = host.edit(|w| w.cycle_tab(false));
-        },
+        move || cycle(host, false),
     );
     use_command(
         several(
@@ -103,26 +123,30 @@ pub(super) fn WorkspaceCommands() -> Element {
                 .group("Tabs")
                 .shortcut("⌃⇧Tab"),
         ),
-        move || {
-            let _ = host.edit(|w| w.cycle_tab(true));
-        },
+        move || cycle(host, true),
     );
     use_command(
         several(Command::new("WORKSPACE_CLOSE_OTHER_TABS", "Close other tabs").group("Tabs")),
         move || {
-            let active = host.workspace.peek().active.clone();
-            if let Some(p) = active {
-                host.run(Op::CloseOthers(p));
+            if let Some(p) = active_pane(host) {
+                host.write(control::close_others, PaneArgs { pane: p.0 });
             }
         },
     );
     use_command(
         tab(Command::new("WORKSPACE_PIN_TAB", "Pin or unpin tab").group("Tabs")),
         move || {
-            let pane = host.workspace.peek().active.clone();
-            if let Some(p) = pane {
+            if let Some(p) = active_pane(host) {
                 let pinned = host.workspace.peek().pane(&p).is_some_and(|p| p.pinned);
-                host.run(Op::Pin(p, !pinned));
+                host.write(
+                    control::tab_set,
+                    TabSetArgs {
+                        pane: p.0,
+                        pinned: Some(!pinned),
+                        link: None,
+                        title: None,
+                    },
+                );
             }
         },
     );
@@ -131,30 +155,25 @@ pub(super) fn WorkspaceCommands() -> Element {
             .group("Tabs")
             .shortcut("⌘["))
         .enabled_if(can_back, "nothing to go back to"),
-        move || {
-            let active = host.workspace.peek().active.clone();
-            if let Some(p) = active {
-                let _ = host.edit(|w| w.go(&p, false));
-            }
-        },
+        move || go(host, Go::Back),
     );
     use_command(
         tab(Command::new("WORKSPACE_GO_FORWARD", "Go forward")
             .group("Tabs")
             .shortcut("⌘]"))
         .enabled_if(can_forward, "nothing to go forward to"),
-        move || {
-            let active = host.workspace.peek().active.clone();
-            if let Some(p) = active {
-                let _ = host.edit(|w| w.go(&p, true));
-            }
-        },
+        move || go(host, Go::Forward),
     );
 
     // Panes.
     for (id, label, side, key) in [
-        ("WORKSPACE_SPLIT_RIGHT", "Split right", Side::Right, "⌘\\"),
-        ("WORKSPACE_SPLIT_DOWN", "Split down", Side::Bottom, ""),
+        (
+            "WORKSPACE_SPLIT_RIGHT",
+            "Split right",
+            PaneSide::Right,
+            "⌘\\",
+        ),
+        ("WORKSPACE_SPLIT_DOWN", "Split down", PaneSide::Bottom, ""),
     ] {
         use_command(
             several(Command::new(id, label).group("Panes").shortcut(key)),
@@ -165,25 +184,25 @@ pub(super) fn WorkspaceCommands() -> Element {
         (
             "WORKSPACE_FOCUS_LEFT",
             "Focus the pane to the left",
-            Direction::Left,
+            Toward::Left,
             "⌥⌘←",
         ),
         (
             "WORKSPACE_FOCUS_RIGHT",
             "Focus the pane to the right",
-            Direction::Right,
+            Toward::Right,
             "⌥⌘→",
         ),
         (
             "WORKSPACE_FOCUS_UP",
             "Focus the pane above",
-            Direction::Up,
+            Toward::Up,
             "⌥⌘↑",
         ),
         (
             "WORKSPACE_FOCUS_DOWN",
             "Focus the pane below",
-            Direction::Down,
+            Toward::Down,
             "⌥⌘↓",
         ),
     ] {
@@ -195,9 +214,34 @@ pub(super) fn WorkspaceCommands() -> Element {
     use_command(
         tab(Command::new("WORKSPACE_FLOAT_TAB", "Float tab").group("Panes")),
         move || {
-            let active = host.workspace.peek().active.clone();
-            if let Some(p) = active {
-                host.run(Op::Move(p, Dest::Float(super::FLOAT_AT)));
+            if let Some(p) = active_pane(host) {
+                host.write(
+                    control::float,
+                    FloatArgs {
+                        pane: p.0,
+                        rect: None,
+                        snap: None,
+                        panel_width: None,
+                        pin: None,
+                        above_all: false,
+                        focus: true,
+                    },
+                );
+            }
+        },
+    );
+    use_command(
+        tab(Command::new("WORKSPACE_ZOOM_PANE", "Zoom the pane").group("Panes"))
+            .enabled_if(split_center, "its window shows one group"),
+        move || {
+            if let Some(p) = active_pane(host) {
+                host.write(
+                    control::zoom,
+                    ZoomArgs {
+                        pane: p.0,
+                        mode: control::Mode::Toggle,
+                    },
+                );
             }
         },
     );
@@ -207,10 +251,13 @@ pub(super) fn WorkspaceCommands() -> Element {
         )
         .enabled_if(host.has_windows(), "this app opens no other windows"),
         move || {
-            let active = host.workspace.peek().active.clone();
-            if let Some(p) = active {
-                host.run(Op::Move(p, Dest::Window(None)));
-            }
+            move_active(
+                host,
+                To::Window {
+                    id: None,
+                    bounds: None,
+                },
+            );
         },
     );
     use_command(
@@ -221,10 +268,13 @@ pub(super) fn WorkspaceCommands() -> Element {
         .group("Panes"))
         .enabled_if(popped, "it is in the main window"),
         move || {
-            let active = host.workspace.peek().active.clone();
-            if let Some(p) = active {
-                host.run(Op::ToMain(p));
-            }
+            move_active(
+                host,
+                To::Window {
+                    id: Some("main".to_owned()),
+                    bounds: None,
+                },
+            );
         },
     );
     use_command(
@@ -241,7 +291,15 @@ pub(super) fn WorkspaceCommands() -> Element {
             let g = host.workspace.peek().active_group();
             if let Some(g) = g {
                 let on = host.workspace.peek().group(g).is_some_and(|g| g.stacked);
-                host.run(Op::Stacked(g, !on));
+                host.write(
+                    control::group_set,
+                    GroupSetArgs {
+                        group: g.0,
+                        stacked: Some(!on),
+                        chrome: None,
+                        current: None,
+                    },
+                );
             }
         },
     );
@@ -256,11 +314,19 @@ pub(super) fn WorkspaceCommands() -> Element {
                     .group(g)
                     .map_or(Chrome::Tabs, |g| g.chrome);
                 let next = if chrome == Chrome::Bare {
-                    Chrome::Tabs
+                    TabChrome::Tabs
                 } else {
-                    Chrome::Bare
+                    TabChrome::Bare
                 };
-                host.run(Op::Chrome(g, next));
+                host.write(
+                    control::group_set,
+                    GroupSetArgs {
+                        group: g.0,
+                        stacked: None,
+                        chrome: Some(next),
+                        current: None,
+                    },
+                );
             }
         },
     );
@@ -289,24 +355,21 @@ pub(super) fn WorkspaceCommands() -> Element {
         (
             "WORKSPACE_MOVE_TO_LEFT_DOCK",
             "Move tab to the left dock",
-            Side::Left,
+            DockSide::Left,
         ),
         (
             "WORKSPACE_MOVE_TO_RIGHT_DOCK",
             "Move tab to the right dock",
-            Side::Right,
+            DockSide::Right,
         ),
         (
             "WORKSPACE_MOVE_TO_BOTTOM_DOCK",
             "Move tab to the bottom dock",
-            Side::Bottom,
+            DockSide::Bottom,
         ),
     ] {
         use_command(tab(Command::new(id, label).group("Docks")), move || {
-            let active = host.workspace.peek().active.clone();
-            if let Some(p) = active {
-                host.run(Op::Move(p, Dest::Dock(side)));
-            }
+            move_active(host, To::Dock { side });
         });
     }
     use_command(
@@ -323,13 +386,13 @@ pub(super) fn WorkspaceCommands() -> Element {
         (
             "WORKSPACE_TOGGLE_RIGHT_DOCK",
             "Show or hide the right dock",
-            Side::Right,
+            DockSide::Right,
             docks[1].1,
         ),
         (
             "WORKSPACE_TOGGLE_BOTTOM_DOCK",
             "Show or hide the bottom dock",
-            Side::Bottom,
+            DockSide::Bottom,
             docks[2].1,
         ),
     ] {
@@ -343,14 +406,21 @@ pub(super) fn WorkspaceCommands() -> Element {
             let shown = host
                 .workspace
                 .peek()
-                .dock(side)
+                .dock(side.into())
                 .map_or(Shown::Hidden, |d| d.shown);
             let next = if shown == Shown::Open {
-                Shown::Collapsed
+                DockShown::Collapsed
             } else {
-                Shown::Open
+                DockShown::Open
             };
-            host.run(Op::Dock(side, next));
+            host.write(
+                control::dock_set,
+                DockSetArgs {
+                    side,
+                    shown: Some(next),
+                    size: None,
+                },
+            );
         });
     }
 
@@ -363,21 +433,21 @@ pub(super) fn WorkspaceCommands() -> Element {
             "Move the sidebar to its own window",
             "WORKSPACE_DOCK_BACK_LEFT_DOCK",
             "Dock the sidebar back",
-            Side::Left,
+            DockSide::Left,
         ),
         (
             "WORKSPACE_POP_OUT_RIGHT_DOCK",
             "Move the right sidebar to its own window",
             "WORKSPACE_DOCK_BACK_RIGHT_DOCK",
             "Dock the right sidebar back",
-            Side::Right,
+            DockSide::Right,
         ),
         (
             "WORKSPACE_POP_OUT_BOTTOM_DOCK",
             "Move the bottom panel to its own window",
             "WORKSPACE_DOCK_BACK_BOTTOM_DOCK",
             "Dock the bottom panel back",
-            Side::Bottom,
+            DockSide::Bottom,
         ),
     ]
     .into_iter()
@@ -391,11 +461,13 @@ pub(super) fn WorkspaceCommands() -> Element {
         } else {
             pop.enabled_if(host.has_windows(), "this app opens no other windows")
         };
-        use_command(pop, move || host.run(Op::PopOutDock(side, None)));
+        use_command(pop, move || {
+            host.write(control::dock_pop_out, DockPopOutArgs { side, bounds: None });
+        });
         let back = Command::new(back_id, back_label).group("Docks");
         use_command(
             back.enabled_if(out, "it is in the main window"),
-            move || host.run(Op::DockBack(side)),
+            move || host.write(control::dock_back, DockBackArgs { side }),
         );
     }
 
@@ -414,9 +486,7 @@ pub(super) fn WorkspaceCommands() -> Element {
         );
         use_command(
             Command::new(id, format!("Open {title}")).group("Views"),
-            move || {
-                let _ = host.open(&kind);
-            },
+            move || open_view(host, &kind, None),
         );
     }
 
@@ -449,7 +519,16 @@ pub(super) fn WorkspaceCommands() -> Element {
                     })
                     .collect()
             },
-            move |item, _| host.run(Op::Show(crate::model::PaneId::new(item.id.clone()))),
+            move |item, _| {
+                host.write(
+                    control::focus,
+                    FocusArgs {
+                        pane: Some(item.id.clone()),
+                        from: None,
+                        direction: None,
+                    },
+                );
+            },
         )
     });
     use_opener(move || {
@@ -471,7 +550,7 @@ pub(super) fn WorkspaceCommands() -> Element {
                     OpenIn::Tab => Some(Target::Tab),
                     OpenIn::Split => Some(Target::Split(Side::Right)),
                 };
-                let _ = target.map_or_else(|| host.open(&item.id), |t| host.open_at(&item.id, t));
+                open_view(host, &item.id, target);
             },
         )
     });
@@ -482,62 +561,184 @@ pub(super) fn WorkspaceCommands() -> Element {
     }
 }
 
-/// Moves the active pane beside its group, on `side`.
-fn split(host: Host, side: Side) {
-    let w = host.workspace.peek();
-    let Some(pane) = w.active.clone() else {
-        return;
-    };
-    let Some(loc) = w.locate(&pane) else {
-        return;
-    };
-    drop(w);
-    host.run(Op::Move(
-        pane,
-        Dest::Edge {
-            group: loc.group,
-            side,
-        },
-    ));
+/// The active pane, the target a command acts for.
+fn active_pane(host: Host) -> Option<PaneId> {
+    host.workspace.peek().active.clone()
 }
 
-/// Moves the focus to the group beside the active one, in the center.
-fn focus(host: Host, direction: Direction) {
-    let w = host.workspace.peek();
-    let Some(from) = w.active_group() else {
+/// Moves the active pane `to`, the focus going with it.
+fn move_active(host: Host, to: To) {
+    if let Some(p) = active_pane(host) {
+        host.write(
+            control::move_pane,
+            MoveArgs {
+                pane: p.0,
+                to,
+                focus: true,
+            },
+        );
+    }
+}
+
+/// Moves the active pane into a new group beside its own, on `side`; the
+/// new group grows in from that edge.
+fn split(host: Host, side: PaneSide) {
+    let Some(pane) = active_pane(host) else {
         return;
     };
-    let Some(center) = w.windows.first().and_then(|win| win.center.clone()) else {
-        return;
+    let answer = host.act(|st, env| {
+        control::transact(
+            st,
+            env,
+            control::split,
+            SplitArgs {
+                pane: pane.0,
+                side,
+                focus: true,
+            },
+        )
+    });
+    if let Ok(a) = answer
+        && a.changed
+        && let Some(g) = a.group
+    {
+        let mut grow_size = host.grow_size;
+        grow_size.set(None);
+        host.grow_in(GroupId(g));
+    }
+}
+
+/// Moves the focus to the group beside the active pane's.
+fn focus(host: Host, direction: Toward) {
+    if let Some(p) = active_pane(host) {
+        host.write(
+            control::focus,
+            FocusArgs {
+                pane: None,
+                from: Some(p.0),
+                direction: Some(direction),
+            },
+        );
+    }
+}
+
+/// The next (or, `back`, the previous) tab of the active group, round.
+fn cycle(host: Host, back: bool) {
+    let next = {
+        let w = host.workspace.peek();
+        w.active_group().and_then(|g| w.group(g)).and_then(|g| {
+            let n = g.tabs.len();
+            let i = if back {
+                g.current
+                    .checked_sub(1)
+                    .unwrap_or_else(|| n.saturating_sub(1))
+            } else {
+                g.current.saturating_add(1).checked_rem(n)?
+            };
+            g.tabs.get(i).cloned()
+        })
     };
-    let placed = area_rects(&center, Rect::new(0.0, 0.0, 1000.0, 1000.0));
-    let Some(to) = neighbour(&placed, from, direction) else {
-        return;
-    };
-    let pane = w.group(to).and_then(|g| g.current_tab().cloned());
-    drop(w);
-    if let Some(pane) = pane {
-        host.run(Op::Show(pane));
+    if let Some(p) = next {
+        host.write(
+            control::focus,
+            FocusArgs {
+                pane: Some(p.0),
+                from: None,
+                direction: None,
+            },
+        );
+    }
+}
+
+/// Back or forward through the active pane's history.
+fn go(host: Host, go: Go) {
+    if let Some(p) = active_pane(host) {
+        host.write(
+            control::navigate,
+            NavigateArgs {
+                pane: p.0,
+                go: Some(go),
+                state: None,
+            },
+        );
     }
 }
 
 /// Moves the active pane into the center's first group.
 fn to_center(host: Host) {
-    let w = host.workspace.peek();
-    let Some(pane) = w.active.clone() else {
-        return;
-    };
-    let Some(group) = w
+    let group = host
+        .workspace
+        .peek()
         .windows
         .first()
         .and_then(|win| win.center.as_ref())
         .and_then(crate::model::Node::first_group)
-        .map(|g| g.id)
-    else {
+        .map(|g| g.id.0);
+    if let Some(group) = group {
+        move_active(host, To::Group { group, index: None });
+    }
+}
+
+/// Opens a view of `kind` at `target` (where it lives when unset), next
+/// to the active pane, the focus going to it.
+fn open_view(host: Host, kind: &str, target: Option<Target>) {
+    let Some(home) = target.or_else(|| host.views.peek().get(kind).map(|v| v.home)) else {
         return;
     };
-    drop(w);
-    host.run(Op::Move(pane, Dest::Group { group, index: None }));
+    let (active, first) = {
+        let w = host.workspace.peek();
+        let first = w.active_group().or_else(|| {
+            w.windows
+                .first()?
+                .center
+                .as_ref()?
+                .first_group()
+                .map(|g| g.id)
+        });
+        (w.active.clone(), first)
+    };
+    let in_group = || {
+        first.map(|g| At::Group {
+            group: g.0,
+            index: None,
+        })
+    };
+    let at = match (home, active) {
+        (Target::Here, Some(p)) => Some(At::Replace { pane: p.0 }),
+        (Target::Tab, Some(p)) => Some(At::Beside { pane: p.0 }),
+        (Target::Split(side), Some(p)) => Some(At::Split {
+            pane: p.0,
+            side: match side {
+                Side::Left => PaneSide::Left,
+                Side::Right => PaneSide::Right,
+                Side::Top => PaneSide::Top,
+                Side::Bottom => PaneSide::Bottom,
+            },
+        }),
+        (Target::Here | Target::Tab | Target::Split(_), None) => in_group(),
+        (Target::Window(bounds), _) => Some(At::Window { bounds }),
+        (Target::Dock(side), _) => Some(At::Dock {
+            side: match side {
+                Side::Left | Side::Top => DockSide::Left,
+                Side::Right => DockSide::Right,
+                Side::Bottom => DockSide::Bottom,
+            },
+        }),
+        (Target::Float(rect), _) => Some(At::Float { rect: Some(rect) }),
+    };
+    if let Some(at) = at {
+        host.write(
+            control::open,
+            OpenArgs {
+                view: kind.to_owned(),
+                id: None,
+                state: None,
+                title: None,
+                at,
+                focus: true,
+            },
+        );
+    }
 }
 
 /// `enabled_if` on a command: disabled with `why` unless `ok`.

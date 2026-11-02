@@ -62,6 +62,8 @@ pub enum WorkspaceError {
     NotFloating(PaneId),
     #[error("nothing to go back or forward to")]
     NoHistory,
+    #[error("{0:?} is not in a window's center")]
+    NotInCenter(GroupId),
 }
 
 type Result<T> = std::result::Result<T, WorkspaceError>;
@@ -194,7 +196,7 @@ impl Workspace {
     }
 
     /// Put an already-registered pane at `dest`.
-    fn place(&mut self, pane: PaneId, dest: Dest) -> Result<()> {
+    pub(crate) fn place(&mut self, pane: PaneId, dest: Dest) -> Result<()> {
         match dest {
             Dest::Group { group, index } => {
                 let g = self
@@ -642,6 +644,7 @@ impl Workspace {
             center: None,
             docks,
             floats: Vec::new(),
+            zoomed: None,
         });
         Ok(id)
     }
@@ -706,7 +709,7 @@ impl Workspace {
     }
 
     /// The float holding `pane`.
-    fn float_of(&mut self, pane: &PaneId) -> Result<&mut Float> {
+    pub(crate) fn float_of(&mut self, pane: &PaneId) -> Result<&mut Float> {
         let loc = self
             .locate(pane)
             .ok_or_else(|| WorkspaceError::NoSuchPane(pane.clone()))?;
@@ -877,6 +880,23 @@ impl Workspace {
             .find(|w| &w.id == window)
             .ok_or_else(|| WorkspaceError::NoSuchWindow(window.clone()))?;
         w.bounds = Some(bounds);
+        Ok(())
+    }
+
+    /// Show the center group `group` alone in its window, filling the
+    /// center (`true`), or the whole tree again (`false`). The tree is
+    /// kept; a zoomed group that goes, or splits, unzooms.
+    pub fn set_zoomed(&mut self, group: GroupId, on: bool) -> Result<()> {
+        let window = self
+            .windows
+            .iter_mut()
+            .find(|w| w.center.as_ref().is_some_and(|c| c.group(group).is_some()))
+            .ok_or(WorkspaceError::NotInCenter(group))?;
+        if on {
+            window.zoomed = Some(group);
+        } else if window.zoomed == Some(group) {
+            window.zoomed = None;
+        }
         Ok(())
     }
 

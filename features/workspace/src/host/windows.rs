@@ -390,7 +390,7 @@ fn PopoutView(props: PopoutProps) -> Element {
     let w = host.workspace.read();
     let index = host.window_index(&w);
     let window = index.and_then(|i| w.windows.get(i));
-    let center = window.and_then(|win| win.center.clone());
+    let center = window.and_then(super::shown_center);
     let title = window.map_or_else(String::new, |win| window_title(host, &w, win));
     let docks: Vec<(Side, crate::model::Dock)> = window
         .map(|win| {
