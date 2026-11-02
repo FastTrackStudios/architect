@@ -113,7 +113,7 @@ layer entry in `boundaries.toml` until it is.
   the proto into `lib.rs`, put the backend and UI behind flags, update
   dependents, delete the old crate. A fold-in PR changes no behaviour.
   Proc-macro and binary crates stay separate.
-- Repo `CLAUDE.md` files point here instead of restating a layout.
+- Repo `AGENTS.md` files point here instead of restating a layout.
 
 ## Naming rules
 
@@ -138,6 +138,6 @@ own directory.
 Before 2026-10-22 this page prescribed `features/<f>/<f>-proto`,
 `<f>-<backend>`, `<f>-ui` and a `<f>` facade as sibling crates (and a
 separate CLI's `feature new` command that never existed), and Session's
-`CLAUDE.md` prescribed a facade crate over internal `session-proto`.
+agent instructions prescribed a facade crate over internal `session-proto`.
 Both are replaced by the one-crate shape above, which studio's
-`CLAUDE.md` ("Crate rules") already follows.
+`AGENTS.md` ("Crate rules") already follows.

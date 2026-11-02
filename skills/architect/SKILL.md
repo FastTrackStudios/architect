@@ -158,7 +158,7 @@ Still not in architect: remote token introspection (I34). Until it lands, Task's
 - Generated HTTP face: JSON by default (`POST /<prefix>/<method>`), any verb with path params, query arguments on a `get`, byte methods (`BodyStream` / `RequestHead` / `ByteBody`, HTTP-only) and SSE; subscriptions carry no typed errors. Media, blobs and share links are service methods now; only what neither a service nor an `EngineHost` builder covers (OAuth redirects, hosted pages) goes through `.plugin(Router)`.
 - Boundaries ratchets go one way: when a count drops, lower its baseline in the same PR. Do not grandfather tags to pass the tag-order check; re-pin to a correctly numbered tag.
 - Crate layout (STA-257): one crate per feature, layers as cargo features. Don't create new `-proto`/`-<backend>`/`-ui` siblings; don't split or merge existing crates as a side effect.
-- Session's `studio:features/session/CLAUDE.md` may still say `#[roam::service]`; it means `#[architect::rpc]`.
+- Session's `studio:features/session/AGENTS.md` may still say `#[roam::service]`; it means `#[architect::rpc]`.
 
 ## Where changes go
 

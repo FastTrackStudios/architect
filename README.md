@@ -184,7 +184,7 @@ rules, an API map and recipes, with every repo path checked by
 `cargo xtask docs`. The fleet's skill sync vendors it from each release
 tag; in this repo `.claude/skills/architect` links to it, and
 `just skill-install` links this checkout's copy into `~/.claude/skills`
-and `~/.codex/skills`. `CLAUDE.md` (also `AGENTS.md`) holds the repo's
+and `~/.codex/skills`. `AGENTS.md` holds the repo's
 rules for agents: what a PR updates and how docs cite code.
 
 ## When not to use it
