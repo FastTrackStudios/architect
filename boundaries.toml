@@ -138,6 +138,15 @@ features = ["vox"]
 layer = "L0"
 
 [[row]]
+package = "architect-attachments"
+layer = "L0"
+
+[[row]]
+package = "architect-attachments"
+features = ["vox"]
+layer = "L0"
+
+[[row]]
 package = "architect-devices"
 layer = "L0"
 
@@ -305,6 +314,16 @@ layer = "L1"
 
 [[row]]
 package = "architect-files"
+features = ["server"]
+layer = "L1"
+
+[[row]]
+package = "architect-attachments"
+features = ["blob"]
+layer = "L1"
+
+[[row]]
+package = "architect-attachments"
 features = ["server"]
 layer = "L1"
 

@@ -295,6 +295,48 @@ used BLAKE3; a file's `ContentId` is now the blob's sha256) — so a song's
 audio is a file in its root and a blob its document points at, fetched,
 pinned and kept offline the same way.
 
+## Attachments
+
+> **Status: landed (2026-11-01)** in `architect-attachments`
+> (`features/attachments`), over the files feature's blob store and
+> renditions. Next: Task's attachments move over (TF2).
+
+An attachment is a file hung off a **parent**: a document, or a record of
+the app's (a task, a contact). Its bytes are a blob named by its sha256,
+stored once however many parents attach them, in the store documents and
+files share.
+
+- **A document lists its own** (`features/attachments/src/doc.rs`
+  `attach`, `detach`, `list`): one Loro map, `attachments`, from hash to
+  name, type, size and who added it. Attaching is an edit like any other,
+  so it works offline and reaches every replica with the document; two
+  devices that attach the same bytes meet in one entry. `doc::refs` is a
+  `crdt::BlobRefs`, so a kind that holds attachments names it in
+  `DocKind::blobs` and what it points at is kept, fetched and collected
+  like any of its blobs.
+- **A record's list is the server's**
+  (`features/attachments/src/server/mod.rs` `AttachmentsServer`, the
+  org's ledger under `org/<id>/attachments/`).
+- **Bytes travel apart, by hash.** A device that attached offline pushes
+  what the server lacks when it is back
+  (`features/attachments/src/blob.rs` `attach_local`,
+  `AttachmentsClient::push_doc`): resumable, and nothing the org already
+  holds is sent. Another device fetches them when it opens the document,
+  through `features/attachments/src/blob.rs` `AttachmentsRemote`, a
+  `Remote` for `architect::blob::Fetcher`.
+- **Access follows the parent.** Every call is checked against the org's
+  engine (its roles, its spaces) as the parent's resource, the same
+  `doc/<id>` `crdt::registry::DocPermissions` checks: `read` to list and
+  read, `write` to send and attach. A parent reads only the bytes it
+  points at, so knowing a hash reads nothing.
+- **Quota and collection.** The org's attachments count the distinct
+  blobs they hold against its quota; `release_unreferenced` lets go of
+  what no document and no record points at.
+- **Previews** are the files feature's renditions of the same bytes,
+  served ranged by the byte face
+  (`features/attachments/src/server/web.rs` `WebAttachments`) to an
+  `<img>` or `<video>` with a read ticket for the parent.
+
 ## Collaborative text
 
 > **Status: the binding landed (2026-11-01)** in `crdt`:

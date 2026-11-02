@@ -9,7 +9,7 @@
 | default (wasm-clean) | ids, paths, the model, the fault, capabilities and their resolution | `features/files/src/path.rs` `RootPath` (`parse` refuses `..`; `validate` what the wire decoded); `features/files/src/model.rs` `Root`, `Entry`, `Version`, `VersionLabel`, `Usage`, `OnConflict`, `Expect`, `FilesEvent`; `features/files/src/error.rs` `FilesFault`; `features/files/src/access.rs` `Capability`, `Grant`, `role_capabilities`, `stewards`, `resolve` |
 | `vox` | the service, its gate tables, the app's client | `features/files/src/service.rs` `FilesService` (`#[subscribe] events`), `PERMITS`, `STREAM_PERMITS`; `features/files/src/client.rs` `FilesClient` (`ensure_root`, `put` + `Save`, `get`, `read_range`, `resolve`, `get_ref`, `events`), `content_of` |
 | default (wasm-clean) | renditions' model, the byte face's routes and URLs | `features/files/src/rendition.rs` `RenditionKind` (`tag`, `mime`, `ladder`), `MediaClass`, `RenditionSet` (`state`, `settled`), `RenditionState`, `Ticket`, `Peaks` (`audiowaveform` JSON v2), `PeakReducer`, `RECIPE`; `features/files/src/web.rs` `FilesWeb` (an HTTP-only service, prefix `files/{org}`), `content_url`, `rendition_url` |
-| `server` (native) | every org's files on a server, and their renditions | `features/files/src/server/mod.rs` `FilesServer` (`new`, `default_org`, `with_grants`, `acting`, `set_quota`, `with_renditions`, `with_rendition_engine`, `rendition_engine`, `ticket_key`), `GrantSource` (grants from elsewhere — a space's members — asked per call); `features/files/src/server/acting.rs` `Acting` (in process: `locate`, `rendition`, `receive`); `features/files/src/server/renditions.rs` `Transcoder`, `TranscodeError`, `Renditions` (`new`, `concurrency`, `set`, `ready`, `schedule`, `build`) |
+| `server` (native) | every org's files on a server, and their renditions | `features/files/src/server/mod.rs` `FilesServer` (`new`, `default_org`, `with_grants`, `acting`, `set_quota`, `with_renditions`, `with_rendition_engine`, `rendition_engine`, `ticket_key`), `GrantSource` (grants from elsewhere — a space's members — asked per call); `features/files/src/server/ticket.rs` `TicketKey` (`seal`/`unseal` any claims under a prefix: another feature's tickets on the same kind of key), `who` and `principal_of` (exported as `ticket_subject`, `ticket_principal`); `features/files/src/server/acting.rs` `Acting` (in process: `locate`, `rendition`, `receive`); `features/files/src/server/renditions.rs` `Transcoder`, `TranscodeError`, `Renditions` (`new`, `concurrency`, `set`, `ready`, `schedule`, `build`) |
 | `http` (native) | the byte face a browser reads by range | `features/files/src/server/web.rs` `WebFiles` (`new(files, identity)`) |
 | `ffmpeg` (native) | renditions by the `ffmpeg`/`ffprobe` on `PATH` | `features/files/src/server/ffmpeg.rs` `FfmpegTranscoder` (`new`, `with_binaries`, `available`) |
 
@@ -68,6 +68,20 @@ let irs = files.ensure_root("signal/impulse-responses", "Impulse responses").awa
 let saved = files.put(irs.id, "Cab/4x12.wav", &wav, Save::create_only()).await?;
 let pin = saved.content; // the etag: Save::replacing(pin) next time
 ```
+
+## Attachments: files on a document or a record
+
+`architect-attachments` (`features/attachments`) hangs a blob off a `Parent` (`Parent::doc(id)`, `Parent::record(kind, id)`), named by its sha256. Design: `docs/content/architecture/documents.md` ("Attachments"); page: `docs/content/features/attachments.md`.
+
+| Flag | What | Entry points |
+|---|---|---|
+| default (wasm-clean) | the model, a document's own list, the byte face's URLs | `features/attachments/src/model.rs` `Parent` (`resource`, `parse`, `validate`), `Attachment`, `Upload`, `ReadRequest`, `AttachUsage`, `AttachFault`; `features/attachments/src/doc.rs` `attach`, `detach`, `list`, `get`, `refs` (a `crdt::BlobRefs` for `DocKind::blobs`); `features/attachments/src/web.rs` `AttachmentsWeb`, `content_url`, `rendition_url` |
+| `vox` | the service, its gate table, the client | `features/attachments/src/service.rs` `AttachmentsService` (`begin`, `send`, `attach`, `detach`, `list`, `size`, `read`, `renditions`, `ticket`, `usage`), `PERMITS` (`read` on `**`: the parent decides); `features/attachments/src/client.rs` `AttachmentsClient` (`push`, `read`), `attachment_of`, `hash_of` |
+| `blob` (native) | a device's side | `features/attachments/src/blob.rs` `attach_local` (store + pin + doc), `AttachmentsClient::push_from`, `AttachmentsClient::push_doc`, `AttachmentsRemote` (a `Remote` for `Fetcher`, with the parent's permissions) |
+| `server` (native) | every org's attachments | `features/attachments/src/server/mod.rs` `AttachmentsServer` (`new(data, blobs, engine)`, `with_docs`, `with_renditions`, `ticket_key`, `default_org`, `acting`, `set_quota`, `held`, `release_unreferenced`), `DocSource` |
+| `http` (native) | the byte face | `features/attachments/src/server/web.rs` `WebAttachments` (`new(server, identity)`) |
+
+Rules: access is the parent's, by the gate's engine on `org/<org>/doc/<id>` or `org/<org>/<kind>/<id>` (`read` to list and read, `write` to send and attach), so roles and spaces hold; a parent reads only bytes it points at; a document's list lives in the document (offline, synced), a record's on the server; the quota counts distinct blobs. Test: `features/attachments/tests/attachments.rs`.
 
 ## Not in architect yet
 

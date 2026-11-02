@@ -40,16 +40,7 @@ pub struct Claims {
 
 impl Claims {
     pub fn principal(&self) -> Option<Principal> {
-        let (kind, name) = self.who.split_once(':')?;
-        match kind {
-            "user" => Some(Principal::User {
-                user_id: name.to_owned(),
-            }),
-            "service" => Some(Principal::Service {
-                name: name.to_owned(),
-            }),
-            _ => None,
-        }
+        principal_of(&self.who)
     }
 
     /// Whether it covers `path` in `root` of `org`.
@@ -60,6 +51,7 @@ impl Claims {
 
 /// How a principal is written into a ticket; `None` for one a ticket
 /// cannot carry (a guest, a peer host, nobody).
+#[must_use]
 pub fn who(principal: &Principal) -> Option<String> {
     match principal {
         Principal::User { user_id } => Some(format!("user:{user_id}")),
@@ -68,21 +60,39 @@ pub fn who(principal: &Principal) -> Option<String> {
     }
 }
 
+/// The principal [`who`] wrote.
+#[must_use]
+pub fn principal_of(who: &str) -> Option<Principal> {
+    let (kind, name) = who.split_once(':')?;
+    match kind {
+        "user" => Some(Principal::User {
+            user_id: name.to_owned(),
+        }),
+        "service" => Some(Principal::Service {
+            name: name.to_owned(),
+        }),
+        _ => None,
+    }
+}
+
 /// Whether `token` is a ticket (and not a session).
 pub fn is_ticket(token: &str) -> bool {
     token.starts_with(PREFIX)
 }
 
-/// The key tickets are signed with.
+/// The key tickets are signed with: this feature's read tickets, and any
+/// other feature's that shares the server's key (attachments).
 #[derive(Clone)]
 pub struct TicketKey([u8; 32]);
 
 impl TicketKey {
+    #[must_use]
     pub const fn new(key: [u8; 32]) -> Self {
         Self(key)
     }
 
     /// A fresh random key: tickets read until this server stops.
+    #[must_use]
     pub fn random() -> Self {
         Self(rand::random())
     }
@@ -92,25 +102,43 @@ impl TicketKey {
         <Mac as hmac::digest::KeyInit>::new_from_slice(&self.0).ok()
     }
 
-    pub fn mint(&self, claims: &Claims) -> Option<String> {
-        let payload = URL_SAFE_NO_PAD.encode(facet_json::to_string(claims).ok()?);
-        let mut mac = self.mac()?;
-        mac.update(payload.as_bytes());
-        let sig = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
-        Some(format!("{PREFIX}{payload}.{sig}"))
+    pub(crate) fn mint(&self, claims: &Claims) -> Option<String> {
+        self.seal(PREFIX, claims)
     }
 
     /// The claims of `token` if this key signed it and it has not run
     /// out at `now_us`.
-    pub fn open(&self, token: &str, now_us: i64) -> Option<Claims> {
-        let (payload, sig) = token.strip_prefix(PREFIX)?.split_once('.')?;
+    pub(crate) fn open(&self, token: &str, now_us: i64) -> Option<Claims> {
+        let claims: Claims = self.unseal(PREFIX, token)?;
+        (claims.expires_us > now_us).then_some(claims)
+    }
+
+    /// `claims`, signed: `<prefix><payload>.<mac>`, the payload their JSON,
+    /// both URL-safe base64, so the token rides a query string as is.
+    /// `None` only if they do not serialize.
+    #[must_use]
+    pub fn seal<'f, T: Facet<'f>>(&self, prefix: &str, claims: &T) -> Option<String> {
+        let payload = URL_SAFE_NO_PAD.encode(facet_json::to_string(claims).ok()?);
+        let mut mac = self.mac()?;
+        mac.update(prefix.as_bytes());
+        mac.update(payload.as_bytes());
+        let sig = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+        Some(format!("{prefix}{payload}.{sig}"))
+    }
+
+    /// The claims in `token` if this key sealed them under `prefix`.
+    /// Whether they still hold (an expiry in them) is the caller's to
+    /// check.
+    #[must_use]
+    pub fn unseal<T: Facet<'static>>(&self, prefix: &str, token: &str) -> Option<T> {
+        let (payload, sig) = token.strip_prefix(prefix)?.split_once('.')?;
         let sig = URL_SAFE_NO_PAD.decode(sig).ok()?;
         let mut mac = self.mac()?;
+        mac.update(prefix.as_bytes());
         mac.update(payload.as_bytes());
         mac.verify_slice(&sig).ok()?;
         let json = String::from_utf8(URL_SAFE_NO_PAD.decode(payload).ok()?).ok()?;
-        let claims: Claims = facet_json::from_str(&json).ok()?;
-        (claims.expires_us > now_us).then_some(claims)
+        facet_json::from_str(&json).ok()
     }
 }
 

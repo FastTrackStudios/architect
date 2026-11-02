@@ -54,6 +54,7 @@ members = [
     "features/extensions",
     "features/canvas",
     "features/files",
+    "features/attachments",
     "features/spaces",
     "features/ui/showcase",
     "features/ui/ui-snapshot",
@@ -234,6 +235,7 @@ architect-scripting = { path = "features/scripting" }
 architect-extensions = { path = "features/extensions" }
 architect-canvas = { path = "features/canvas" }
 architect-files = { path = "features/files" }
+architect-attachments = { path = "features/attachments" }
 architect-devices = { path = "features/devices" }
 architect-spaces = { path = "features/spaces" }
 architect-lab-ui = { path = "apps/lab/ui" }
