@@ -9,7 +9,8 @@ use std::rc::Rc;
 use architect_commands::{Command, use_command};
 use dioxus::prelude::*;
 
-use super::{Host, Op, use_host};
+use super::{Host, use_host};
+use crate::control::{self, RecallArgs};
 use crate::store::{self, Store};
 
 /// The app's [`Store`], as a prop (compared by identity).
@@ -74,38 +75,6 @@ pub(super) fn use_kept(host: Host, store: Option<WorkspaceStore>) {
     });
 }
 
-/// Recall the set in slot `n` for this screen's class.
-pub(super) fn recall(host: Host, n: u8) {
-    let mut sets = host.screensets;
-    let class = *host.form.peek();
-    let layout = sets.write().recall_slot(n, class);
-    if let Some(layout) = layout {
-        let mut workspace = host.workspace;
-        workspace.set(layout);
-    }
-}
-
-/// Save the live layout into the active set.
-pub(super) fn save(host: Host) {
-    let mut sets = host.screensets;
-    let class = *host.form.peek();
-    let live = host.workspace.peek().clone();
-    let mut s = sets.write();
-    s.set_working(class, live);
-    let _ = s.save(class);
-}
-
-/// Back to the active set's saved layout.
-pub(super) fn reset(host: Host) {
-    let mut sets = host.screensets;
-    let class = *host.form.peek();
-    let layout = sets.write().reset(class);
-    if let Some(layout) = layout {
-        let mut workspace = host.workspace;
-        workspace.set(layout);
-    }
-}
-
 /// ⌘1–9, Save and Reset, in the palette, while the host has screensets.
 #[component]
 pub(super) fn ScreensetCommands() -> Element {
@@ -132,7 +101,15 @@ pub(super) fn ScreensetCommands() -> Element {
         );
         use_command(
             command.group("Screensets").shortcut(format!("⌘{n}")),
-            move || host.run(Op::Recall(n)),
+            move || {
+                host.write(
+                    control::recall,
+                    RecallArgs {
+                        id: None,
+                        slot: Some(n),
+                    },
+                );
+            },
         );
     }
     let label = active.as_ref().map_or_else(
@@ -148,7 +125,7 @@ pub(super) fn ScreensetCommands() -> Element {
         } else {
             save.disabled("nothing has changed")
         },
-        move || host.run(Op::SaveSet),
+        move || host.write(control::save, ()),
     );
     let reset = Command::new("SCREENSET_RESET", "Reset to the saved layout").group("Screensets");
     use_command(
@@ -157,7 +134,7 @@ pub(super) fn ScreensetCommands() -> Element {
         } else {
             reset.disabled("the layout is the saved one")
         },
-        move || host.run(Op::ResetSet),
+        move || host.write(control::reset, ()),
     );
     rsx! {}
 }

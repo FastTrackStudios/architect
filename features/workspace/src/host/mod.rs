@@ -61,7 +61,7 @@ use group::NodeView;
 use overlay::{DragLayer, DropHighlight, FloatView, MenuLayer, PhoneBody, SheetLayer};
 pub use presence::{PresenceLayer, PresenceOverlay, use_presence_overlay};
 
-pub use actions::use_workspace_actions;
+pub use actions::WorkspaceActions;
 pub use screens::WorkspaceStore;
 pub use windows::{Bridge, Popout, WindowSystem, Windows};
 
@@ -884,9 +884,13 @@ impl Host {
             Op::DockBack(side) => {
                 let _ = self.edit(|w| w.dock_back(side));
             }
-            Op::Recall(slot) => screens::recall(*self, slot),
-            Op::SaveSet => screens::save(*self),
-            Op::ResetSet => screens::reset(*self),
+            Op::Recall(slot) => self.write(
+                crate::control::recall,
+                crate::control::RecallArgs {
+                    id: None,
+                    slot: Some(slot),
+                },
+            ),
         }
     }
 }
@@ -1023,10 +1027,6 @@ enum Op {
     DockBack(Side),
     /// Recall the screenset in slot n (⌘n).
     Recall(u8),
-    /// Save the arrangement into the active screenset.
-    SaveSet,
-    /// Back to the active screenset's saved layout.
-    ResetSet,
 }
 
 /// A measured length, as the model's points (window sizes fit an `f32`).
@@ -1107,6 +1107,11 @@ pub fn WorkspaceView(
     /// already.
     #[props(default)]
     bridge: Bridge,
+    /// The app's Action List: every workspace action
+    /// ([`crate::control::ids`]) goes on it while the host is mounted, run
+    /// by this host, and each change of the arrangement is a
+    /// `Changed { topic: "workspace" }` event.
+    actions: Option<WorkspaceActions>,
     #[props(default)] theme: ShellTheme,
 ) -> Element {
     let os_windows = try_use_context::<Windows>();
@@ -1189,6 +1194,7 @@ pub fn WorkspaceView(
         host.form.set(class);
     }
     screens::use_kept(host, store);
+    actions::use_actions(host, actions);
     windows::use_release_outside(host);
     use_pressed_in_popouts(host);
     use_sidebar_follows_left_dock(host, in_shell && !phone);
@@ -1331,7 +1337,7 @@ fn DeskBody() -> Element {
     let Some(main) = workspace.windows.first() else {
         return rsx! {};
     };
-    let center = main.center.clone();
+    let center = shown_center(main);
     let docks = main.docks.clone();
     let floats: Vec<(usize, PaneId)> = main
         .floats
@@ -1424,6 +1430,15 @@ fn DeskBody() -> Element {
             }
         }
     }
+}
+
+/// What a window's center draws: its tree, or its zoomed group alone.
+fn shown_center(window: &crate::model::Window) -> Option<Node> {
+    let center = window.center.as_ref()?;
+    window
+        .zoomed
+        .and_then(|g| center.group(g).cloned())
+        .map_or_else(|| Some(center.clone()), |g| Some(Node::Group(g)))
 }
 
 /// A minimised float, a press away from coming back.

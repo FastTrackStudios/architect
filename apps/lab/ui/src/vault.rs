@@ -203,12 +203,12 @@ pub fn VaultPage() -> Element {
     let store = use_root_context(|| VaultStore(WorkspaceStore::new(MemoryStore::new()))).0;
     let pane_status = use_signal(Vec::new);
     let views = use_hook(views);
-    // The arrangement on the lab's Action List: a scenario's checks read
-    // it, each change is heard.
-    architect_workspace::use_workspace_actions(
-        use_context::<std::sync::Arc<architect::action::ActionList>>(),
-        workspace,
-    );
+    // The workspace on the lab's Action List: every operation, run by the
+    // host below; a scenario's checks read the arrangement, each change
+    // is heard.
+    let actions = architect_workspace::WorkspaceActions::new(use_context::<
+        std::sync::Arc<architect::action::ActionList>,
+    >());
     // A phone's action bar: the workspace's tabs button, counted.
     architect_workspace::use_tabs_button(workspace);
     // The marker lane draws over the arrangement; its tool window floats
@@ -334,6 +334,7 @@ pub fn VaultPage() -> Element {
                 store,
                 status: pane_status,
                 form: screen_class(&screen),
+                actions,
             }
         }
     }

@@ -21,6 +21,7 @@ The full guide is `docs/content/architecture/commands.md`; this page is what an 
 | CLI | feature `cli`: `actions list/describe/run/batch/schema/events/apps`, `--app`, `--headless`; the generic client `architect-actions` | `features/control/src/cli.rs` `Cli`, `ActionsArgs`, `Headless`, `ListOnly`; `features/control/src/client.rs` `Client` |
 | MCP over the socket | feature `bridge`: MCP on stdio for a running app | `features/mcp/src/bridge.rs` `serve_stdio_via`, `Bridge` |
 | Parity | feature `parity`: the same set and answers over MCP and the socket, for an app's list | `features/mcp/src/parity.rs` `Parity`; `features/mcp/tests/parity.rs`; `cargo xtask surfaces` (`xtask/src/surfaces.rs`) |
+| Workspace | every layout operation as an action with an explicit target; a headless host for servers and tests | `features/workspace/src/control/mod.rs` (`State`, `Env`, `Answer`, `Reason`, one fn per action), `features/workspace/src/control/list.rs` `register`, `HeadlessWorkspace`, `ids`; `features/workspace/tests/actions.rs` |
 | Extensions | Run-time actions and settings from packages: `EXT_LIST` / `EXT_SEARCH` / `EXT_INSTALL` / `EXT_UNINSTALL` / `EXT_RELOAD`; an extension's actions under its id's prefix | `features/extensions/src/actions.rs`; `features/extensions/src/host.rs` `Host`; `features/extensions/tests/metronome.rs` |
 | Keys | keymap bindings name action ids; an app's `Commands` runs them in the live contexts, the person's layer over the app's | `features/input/src/processor.rs` `InputProcessor`, `features/commands/src/keymap.rs` `Keymap` (see `docs/content/architecture/input.md`) |
 | Scripts | Luau over the list: `SCRIPT_RUN` / `SCRIPT_SAVE` / `SCRIPT_DESCRIBE` (and `SCRIPT_LIST`, `SCRIPT_DELETE`, `_ORG` forms); each saved script an action `SCRIPT_MY_<NAME>` / `SCRIPT_ORG_<NAME>`; a run is one undo step | `features/scripting/src/actions.rs` `Scripting`; `features/scripting/src/luau.rs` `Runtime`, `Report`; `features/scripting/tests/scripts.rs` |
@@ -167,6 +168,19 @@ let _ = ext.sync();              // load the copy of each that runs
 - A project's needs: `Requirements` in its document's `meta` (`doc::requirements`, feature `crdt`); `Extensions::open` makes a `Plan` (install / offer / missing, with an org `Policy`), `accept` installs and loads it.
 - Registry installs are copies; a folder registry's are links (an edit there reloads). `GitRegistry` shells out to `git`; `ReaPackSource` fetches through the app's `Fetch` (`LocalFetch` does `file://` only).
 - Recipe, a whole host to copy: `examples/extension` — a registry folder with a Luau extension (actions, settings, an `[[overlays]]` ruler with an ImGui tool window), a process extension (`examples/extension/counter/src/main.rs`), and the host (`examples/extension/host/src/lib.rs` `extensions`, `overlays`); walked through in `docs/content/getting-started/extension.md`.
+
+## Driving the workspace
+
+`architect-workspace` puts every layout operation on the list (feature `actions`; under `ui` the host does it when `WorkspaceView` gets `actions: WorkspaceActions::new(list)`; with no window, `HeadlessWorkspace::new(State, Env).install(&list)`). The conduct a model needs:
+
+- **Read, then address by id.** `WORKSPACE_LAYOUT` (groups with ids, tabs, splits, docks, the active pane), `WORKSPACE_PANE_GET {pane}`, `WORKSPACE_NEIGHBOR {pane, direction}`, `WORKSPACE_VIEWS` (what `WORKSPACE_OPEN` takes as `view`). Ids are opaque and never handed out twice: read them from an answer, never make them up. A group or window that went because its panes went to one other leaves an alias, so an id read before still finds them.
+- **Every target is a parameter.** `WORKSPACE_OPEN {view, id?, at: {replace|beside|group|split|window|dock|float}}`, `WORKSPACE_MOVE {pane, to: {group|beside|edge|split|window|dock|float}}`, `WORKSPACE_SPLIT {pane, side}`. Nothing falls back to "the active pane".
+- **Focus is the person's.** A write moves `active` only with `focus: true`; `WORKSPACE_FOCUS` is the one action about focus. Don't pass `focus: true` unless the person asked.
+- **Answers, not errors, for no-ops.** Every write answers `{changed, reason, pane, group, window, screenset, layout}`; `changed: false` comes with a `reason` (`already_open`, `already_zoomed`, `only_tab`, `no_neighbor`, `dock_not_out`, …), so a retry is safe and no second read is needed. An `Err` names what the call got wrong, and changed nothing.
+- **Modes, not toggles:** `WORKSPACE_ZOOM {pane, mode: on|off|toggle}`.
+- **Whole layouts:** `WORKSPACE_EXPORT` → edit → `WORKSPACE_APPLY {layout, keep_unplaced=true}`: built whole first, so one that does not fit changes nothing; panes keep their ids (their views are not rebuilt).
+- **Don't close what you didn't open.** `WORKSPACE_CLOSE` is reopenable (`WORKSPACE_REOPEN`); `WORKSPACE_CLOSE_OTHERS`, `WORKSPACE_CLOSE_WINDOW` and `SCREENSET_DELETE` are `Effect::Destructive`.
+- The view commands (`WORKSPACE_CLOSE_TAB`, `WORKSPACE_SPLIT_RIGHT`, …) are these actions with the active pane as target and `focus: true` (`features/workspace/src/host/commands.rs`).
 
 ## Pitfalls
 

@@ -10,6 +10,8 @@
 //!   group ("New tab"). A dock's own window whose last tab went closes
 //!   too, its ribbon and size going back to the main window's side.
 //! - `active` and `recent` name panes that are open.
+//! - A window's zoomed group is one of its center's, and the center is
+//!   split (a lone group has nothing to zoom out of).
 
 use std::collections::HashSet;
 
@@ -209,6 +211,16 @@ impl Workspace {
                 if let Some(group) = id.and_then(|id| center.group_mut(id)) {
                     group.tabs.extend(orphans);
                 }
+            }
+        }
+
+        for window in &mut self.windows {
+            let split = matches!(window.center, Some(Node::Split(_)));
+            let held = window
+                .zoomed
+                .is_some_and(|g| window.center.as_ref().is_some_and(|c| c.group(g).is_some()));
+            if !(split && held) {
+                window.zoomed = None;
             }
         }
 
