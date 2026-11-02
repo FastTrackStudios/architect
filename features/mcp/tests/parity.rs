@@ -102,6 +102,8 @@ fn list() -> ActionList {
     list.register(&SECRET, Effect::ReadOnly, |(): ()| Ok(42))
         .unwrap();
     list.set_authorizer(NoSecrets);
+    // A person approves a destructive call from outside first (#237).
+    list.require_confirmation(std::time::Duration::from_secs(60));
     list
 }
 
@@ -253,6 +255,33 @@ fn the_cli_lists_describes_and_runs_with_exit_codes() {
         out.starts_with("lost:"),
         "a watcher from another run is told: {out}"
     );
+}
+
+/// A destructive run waits for a person: the CLI prints the ticket and
+/// exits 7; approved in the app, `--ticket` runs it once.
+#[test]
+fn the_cli_prints_the_ticket_and_runs_with_it_once_approved() {
+    let surface = surface();
+    let list = surface.list().clone();
+    let serving = serve("confirm", surface);
+    let at = serving.path();
+    let (code, _, err) = cli(at, "run PROJECT_DELETE");
+    assert_eq!(code, 7, "{err}");
+    let pending = list.pending_confirmations();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(
+        pending[0].caller, "user:cli",
+        "the CLI's principal is who is named"
+    );
+    let ticket = pending[0].ticket.clone();
+    assert!(err.contains(&format!("--ticket {ticket}")), "{err}");
+    let (code, _, err) = cli(at, &format!("run PROJECT_DELETE --ticket {ticket}"));
+    assert_eq!(code, 7, "not approved yet: {err}");
+    assert!(list.approve(&ticket));
+    let (code, _, err) = cli(at, &format!("run PROJECT_DELETE --ticket {ticket}"));
+    assert_eq!(code, 0, "{err}");
+    let (code, _, err) = cli(at, &format!("run PROJECT_DELETE --ticket {ticket}"));
+    assert_ne!(code, 0, "a ticket runs once: {err}");
 }
 
 /// A command for an app that is not running says so, with its own code.

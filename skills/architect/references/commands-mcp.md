@@ -102,7 +102,7 @@ Cli::new("task").headless(|| Ok(Box::new(ListOnly::new(surface_for_ci())))).main
 ```
 
 - MCP's generic tools ARE the protocol's methods: never hand-write a tool table or a CLI command per action. `schema` (socket) = `actions://schema` (MCP resource); `hello` is the socket's handshake.
-- Failures carry `code` (`unknown`, `bad_args`, `failed`, `denied`, `disabled`, `duplicate`, `bad_request`, `no_method`, later `confirmation_required` with a `ticket`); MCP's JSON errors carry it too. Exit codes: `Code::exit` (1 failed, 2 usage, 3 unknown, 4 bad args, 5 denied, 6 disabled, 7 confirmation, 69 no app).
+- Failures carry `code` (`unknown`, `bad_args`, `failed`, `denied`, `disabled`, `duplicate`, `confirmation_required` with `ticket` + `expires_in_ms`, `bad_request`, `no_method`); MCP's JSON errors carry it too. A confirmation is retried with `actions run ID … --ticket T` (a `batch` step's `ticket`), the same ticket flow as MCP's `run`. Exit codes: `Code::exit` (1 failed, 2 usage, 3 unknown, 4 bad args, 5 denied, 6 disabled, 7 confirmation, 69 no app).
 - The socket's caller is the surface's principal unless `Control::with_caller(|peer| …)` says otherwise; never the trusted app. A hidden action is `unknown` to `describe` and `denied` to `run`, as over MCP.
 - `serve_if_wanted`: on in debug builds, off in release; `FTS_CONTROL=0|1` overrides. `serve` always.
 - `--headless` builds the list in-process; an app whose actions come from components mounts its root with `architect_guide::run::Headless` and pumps it (`cli::Headless::pump`) — the lab: `apps/lab/desktop/src/lib.rs` `HeadlessLab`.

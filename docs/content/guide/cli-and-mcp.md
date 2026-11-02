@@ -110,6 +110,7 @@ task actions list [--filter T] [--category C] [--effect read-only|mutating|destr
 task actions describe TASKS_CREATE [--json]
 task actions run TASKS_CREATE --arg title=Hello --arg due:='"2026-11-02"'
 task actions run TASKS_CREATE --json '{"title": "Hello"}'      # `-` reads stdin
+task actions run TASKS_DELETE --arg id=t1 --ticket 3f2a…       # once a person approved it
 task actions batch '[{"id": "A_B"}, {"id": "C_D", "args": {…}}]' [--keep-going]
 task actions schema [--api]
 task actions events [--since N] [--follow] [--json]
@@ -145,10 +146,15 @@ as `unknown`) and a run of the rest is `denied`.
 Build `Server::over(surface.clone())` and `Control::new(app, surface)`
 from one `Surface` and the two faces make a caller the same principal.
 
-Destructive actions will need a person's yes before an agent's run goes
-through (#237). That is a failure of its own,
-`confirmation_required`, carrying a `ticket`; the CLI prints the ticket
-and how to approve it, and exits 7.
+**Confirmation.** A list that asks a person first
+(`ActionList::require_confirmation`, `set_confirm`) asks for the CLI as it
+does for a model: a destructive run answers `confirmation_required` with
+a `ticket`; the CLI prints the ticket and exits 7, the app shows its
+sheet (`features/commands/src/confirm.rs` `ConfirmSheet`), and once the
+person allows it the same command with `--ticket <T>` runs it, once. A
+`batch` step takes `ticket` too. The sheet names the CLI's principal as
+the caller, so give the surface one a person recognises
+(`service:cli` in the lab).
 
 ## 5. Exit codes
 
@@ -161,7 +167,7 @@ and how to approve it, and exits 7.
 | `bad_args` | 4 | the arguments do not fit; stderr shows the schema |
 | `denied` | 5 | the caller may not run it |
 | `disabled` | 6 | it cannot run now; stderr says why |
-| `confirmation_required` | 7 | a person must approve it first; stderr shows the ticket |
+| `confirmation_required` | 7 | a person must approve it first; stderr shows the ticket and the `--ticket` retry |
 | `duplicate` | 8 | two actions share an id |
 | `unavailable` | 69 | no app answers on that socket |
 | `protocol` | 76 | the answer was not one |

@@ -96,6 +96,10 @@ pub enum ActionsCommand {
         /// anything else as indented JSON; `json` one line of JSON.
         #[arg(long, value_enum, default_value_t = Output::Text)]
         output: Output,
+        /// The ticket a `confirmation_required` answer gave, once a person
+        /// approved the call in the app: good for this exact call, once.
+        #[arg(long)]
+        ticket: Option<String>,
     },
     /// Run several actions in order, stopping at the first failure. Not
     /// atomic: what ran stays done.
@@ -351,10 +355,12 @@ impl Cli {
                 args,
                 json,
                 output,
+                ticket,
             } => {
                 let request = Request::Run {
                     id: id.clone(),
                     args: arguments(args, json.as_deref())?,
+                    ticket: ticket.clone(),
                 };
                 let as_json = *output == Output::Json;
                 let value = settled(&target.call(&request)?, out, as_json)?;
@@ -710,12 +716,21 @@ fn tell(err: &mut dyn Write, failure: &Failure) -> std::io::Result<()> {
             }
         }
         Code::ConfirmationRequired => {
-            if let Some(ticket) = &failure.ticket {
-                writeln!(err, "ticket: {ticket}")?;
-            }
+            let ticket = failure.ticket().unwrap_or("?");
+            let expires = failure
+                .confirmation
+                .as_deref()
+                .map_or_else(String::new, |t| {
+                    format!(
+                        " (it expires in {} s)",
+                        t.expires_in_ms.checked_div(1000).unwrap_or(0)
+                    )
+                });
+            writeln!(err, "ticket: {ticket}{expires}")?;
             writeln!(
                 err,
-                "a person must approve this in the app first; once they have, retry with the ticket"
+                "a person must approve this call in the app first; once they have, run the \
+                 same command again with --ticket {ticket}"
             )?;
         }
         Code::Unknown => writeln!(err, "find it with `actions list --filter …`")?,

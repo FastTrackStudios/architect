@@ -18,7 +18,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
-use architect::action::ActionList;
+use architect::action::{ActionList, Principal};
 use architect_control::Surface;
 use architect_control::cli::{Cli, Headless};
 use architect_control::server::{Control, Serving};
@@ -30,10 +30,16 @@ use dioxus::prelude::*;
 /// The lab's name to `--app`, its socket's name.
 pub const APP: &str = "architect-desktop";
 
-/// The lab's list as the CLI and MCP ask it.
+/// The lab's list as the CLI and MCP ask it, as `service:cli`.
+///
+/// A caller from outside, so the lab asks a person before it deletes (the
+/// confirmation sheet, `apps/lab/ui/src/confirm.rs`), as it asks before a
+/// model over MCP does.
 #[must_use]
 pub fn surface(list: &ActionList) -> Surface {
-    Surface::new(APP, env!("CARGO_PKG_VERSION"), list.clone())
+    Surface::new(APP, env!("CARGO_PKG_VERSION"), list.clone()).with_principal(Principal::Service {
+        name: "cli".to_owned(),
+    })
 }
 
 /// The window's control socket, when it is wanted

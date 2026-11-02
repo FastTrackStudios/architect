@@ -106,7 +106,7 @@ impl Method {
         match self {
             Self::Actions => &["filter", "category", "effect"],
             Self::Describe => &["id"],
-            Self::Run => &["id", "args"],
+            Self::Run => &["id", "args", "ticket"],
             Self::Batch => &["steps", "stop_on_error"],
             Self::Watch => &["since", "max", "wait_ms"],
             Self::Schema | Self::Hello => &[],
@@ -126,7 +126,7 @@ impl Method {
         match self {
             Self::Actions => "List the app's actions — everything it can do — by id, with what each does, its category, its effect (read-only, mutating, destructive) and whether it takes arguments. Filter by text (matches id, name, description, category, group), category, or effect.".to_owned(),
             Self::Describe => "One action in full: what it does, the JSON Schema of the arguments it takes and of what it gives back.".to_owned(),
-            Self::Run => "Run an action. `args` is what it takes (see `describe`); leave it out for an action that takes nothing. Gives back the action's result, or what went wrong and what it takes.".to_owned(),
+            Self::Run => "Run an action. `args` is what it takes (see `describe`); leave it out for an action that takes nothing. Gives back the action's result, or what went wrong and what it takes. When a person must approve the call first, it answers `confirmation_required` with a `ticket`: run the same call again with that `ticket` once they have.".to_owned(),
             Self::Batch => format!("Run several actions in order — each `{{id, args}}` — stopping at the first that fails unless `stop_on_error` is false. At most {MAX_BATCH_STEPS} steps. Not atomic: steps that ran stay done when a later one fails, and nothing is rolled back. Gives back each step's result."),
             Self::Watch => "What has happened in the app since `since` (leave it out for 'from now'): actions run, and state that changed (a topic such as tracks or project, and which). Pass back the `next` it returns to keep following. With `wait_ms`, waits up to that long (30 s at most) for something when nothing has happened yet. `lost` says events were missed (the app restarted or the watcher fell behind): read the state again.".to_owned(),
             Self::Schema => "Every action the caller may run, as one JSON Schema document: each a `{id, args}` shape, its effect and what it gives back.".to_owned(),
@@ -150,11 +150,13 @@ impl Method {
             Self::Run => json!({"type": "object", "required": ["id"], "properties": {
                 "id": {"type": "string"},
                 "args": {"type": "object", "description": "The action's arguments, as its schema says."},
+                "ticket": {"type": "string", "description": "The ticket a `confirmation_required` answer gave, once a person approved it; good for this exact call, once."},
             }}),
             Self::Batch => json!({"type": "object", "required": ["steps"], "properties": {
                 "steps": {"type": "array", "maxItems": MAX_BATCH_STEPS, "items": {"type": "object", "required": ["id"], "properties": {
                     "id": {"type": "string"},
                     "args": {"type": "object"},
+                    "ticket": {"type": "string"},
                 }}},
                 "stop_on_error": {"type": "boolean"},
             }}),
@@ -184,6 +186,8 @@ pub struct Filter {
 pub struct Step {
     pub id: String,
     pub args: Option<Value>,
+    /// A confirmation ticket a person approved for this exact call.
+    pub ticket: Option<String>,
 }
 
 /// Where a `watch` starts, how much it gives and how long it waits.
@@ -206,10 +210,13 @@ pub enum Request {
     Describe {
         id: String,
     },
-    /// `args` `None` (or `null`) for an action that takes nothing.
+    /// `args` `None` (or `null`) for an action that takes nothing;
+    /// `ticket` the one a person approved, retrying a call that answered
+    /// [`Code::ConfirmationRequired`].
     Run {
         id: String,
         args: Option<Value>,
+        ticket: Option<String>,
     },
     Batch {
         steps: Vec<Step>,
@@ -263,6 +270,7 @@ impl Request {
             Method::Run => Self::Run {
                 id: text("id").unwrap_or_default(),
                 args: params.get("args").cloned(),
+                ticket: text("ticket"),
             },
             Method::Batch => Self::Batch {
                 steps: params
@@ -278,6 +286,7 @@ impl Request {
                                     .unwrap_or_default()
                                     .to_owned(),
                                 args: s.get("args").cloned(),
+                                ticket: s.get("ticket").and_then(Value::as_str).map(str::to_owned),
                             })
                             .collect()
                     })
@@ -328,9 +337,10 @@ impl Request {
                 put("effect", f.effect.clone().map(Value::String));
             }
             Self::Describe { id } => put("id", Some(Value::String(id.clone()))),
-            Self::Run { id, args } => {
+            Self::Run { id, args, ticket } => {
                 put("id", Some(Value::String(id.clone())));
                 put("args", args.clone());
+                put("ticket", ticket.clone().map(Value::String));
             }
             Self::Batch {
                 steps,
@@ -340,8 +350,13 @@ impl Request {
                     .iter()
                     .map(|s| {
                         let mut step = json!({ "id": s.id });
-                        if let (Some(args), Some(object)) = (&s.args, step.as_object_mut()) {
-                            object.insert("args".to_owned(), args.clone());
+                        if let Some(object) = step.as_object_mut() {
+                            if let Some(args) = &s.args {
+                                object.insert("args".to_owned(), args.clone());
+                            }
+                            if let Some(ticket) = &s.ticket {
+                                object.insert("ticket".to_owned(), Value::String(ticket.clone()));
+                            }
                         }
                         step
                     })
@@ -463,11 +478,18 @@ pub struct Failure {
     pub error: String,
     /// For [`Code::BadArgs`]: the JSON Schema of what the action takes.
     pub takes: Option<Value>,
-    /// For [`Code::ConfirmationRequired`]: the ticket to retry with once a
-    /// person has approved the call, as the app gave it.
-    pub ticket: Option<Value>,
-    /// `takes` as the action's schema text, for a plain-text answer.
-    takes_text: Option<String>,
+    /// For [`Code::ConfirmationRequired`]: the ticket to retry with.
+    pub confirmation: Option<Box<Ticket>>,
+}
+
+/// A call waiting for a person's yes: the ticket to retry it with once
+/// they have given it, and how long the ticket is good for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Ticket {
+    /// The action it is for.
+    pub id: String,
+    pub ticket: String,
+    pub expires_in_ms: u64,
 }
 
 impl Failure {
@@ -478,8 +500,7 @@ impl Failure {
             code,
             error: error.into(),
             takes: None,
-            ticket: None,
-            takes_text: None,
+            confirmation: None,
         }
     }
 
@@ -501,7 +522,6 @@ impl Failure {
                 takes: expected
                     .as_deref()
                     .and_then(|s| serde_json::from_str::<Value>(s).ok()),
-                takes_text: expected.clone(),
                 ..Self::new(Code::BadArgs, format!("bad arguments: {message}"))
             },
             ActionError::Failed { message, .. } => Self::new(Code::Failed, message.clone()),
@@ -511,12 +531,37 @@ impl Failure {
             ActionError::Disabled { reason, .. } => {
                 Self::new(Code::Disabled, format!("disabled: {reason}"))
             }
+            ActionError::ConfirmationRequired {
+                id,
+                ticket,
+                expires_in,
+            } => Self {
+                confirmation: Some(Box::new(Ticket {
+                    id: id.clone(),
+                    ticket: ticket.clone(),
+                    expires_in_ms: u64::try_from(expires_in.as_millis()).unwrap_or(u64::MAX),
+                })),
+                ..Self::new(
+                    Code::ConfirmationRequired,
+                    format!(
+                        "confirmation_required: a person must approve {id} in the app first; \
+                         run the same call again with this ticket once they have"
+                    ),
+                )
+            },
         }
     }
 
+    /// The ticket to retry with, for a call that needs approval.
+    #[must_use]
+    pub fn ticket(&self) -> Option<&str> {
+        self.confirmation.as_deref().map(|t| t.ticket.as_str())
+    }
+
     /// As a JSON object: `code` and `error`, with `takes` for bad
-    /// arguments, `disabled: true` for a disabled action and `ticket` for
-    /// one that needs a person's yes.
+    /// arguments, `disabled: true` for a disabled action, and
+    /// `confirmation_required: true`, `ticket` and `expires_in_ms` for one
+    /// that needs a person's yes.
     #[must_use]
     pub fn to_json(&self) -> Value {
         let mut out = json!({ "code": self.code.as_str(), "error": self.error });
@@ -532,9 +577,15 @@ impl Failure {
                     object.insert("disabled".to_owned(), Value::Bool(true));
                 }
                 Code::ConfirmationRequired => {
+                    let ticket = self.confirmation.as_deref();
+                    object.insert("confirmation_required".to_owned(), Value::Bool(true));
                     object.insert(
                         "ticket".to_owned(),
-                        self.ticket.clone().unwrap_or(Value::Null),
+                        ticket.map_or(Value::Null, |t| Value::String(t.ticket.clone())),
+                    );
+                    object.insert(
+                        "expires_in_ms".to_owned(),
+                        ticket.map_or(Value::Null, |t| Value::from(t.expires_in_ms)),
                     );
                 }
                 _ => {}
@@ -543,15 +594,23 @@ impl Failure {
         out
     }
 
-    /// As plain text: the error, and for bad arguments the schema they
-    /// should match.
+    /// As plain text: the error, for bad arguments with the schema they
+    /// should match, for a call that needs approval with its ticket.
     #[must_use]
     pub fn to_text(&self) -> String {
-        match (&self.takes_text, &self.takes) {
-            (Some(schema), _) => format!("{}. It takes: {schema}", self.error),
-            (None, Some(schema)) => format!("{}. It takes: {schema}", self.error),
-            (None, None) => self.error.clone(),
+        if let Some(t) = self.confirmation.as_deref() {
+            return format!(
+                "confirmation_required: a person must approve {} in the app first. Run the same \
+                 call again with ticket {} once they have (it expires in {} s).",
+                t.id,
+                t.ticket,
+                t.expires_in_ms.checked_div(1000).unwrap_or(0)
+            );
         }
+        self.takes.as_ref().map_or_else(
+            || self.error.clone(),
+            |schema| format!("{}. It takes: {schema}", self.error),
+        )
     }
 
     /// Read back from [`Self::to_json`]: what a client was told. Anything
@@ -567,9 +626,19 @@ impl Failure {
             .get("error")
             .and_then(Value::as_str)
             .map_or_else(|| value.to_string(), str::to_owned);
+        let confirmation = value.get("ticket").and_then(Value::as_str).map(|ticket| {
+            Box::new(Ticket {
+                id: String::new(),
+                ticket: ticket.to_owned(),
+                expires_in_ms: value
+                    .get("expires_in_ms")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
+            })
+        });
         Self {
             takes: value.get("takes").filter(|v| !v.is_null()).cloned(),
-            ticket: value.get("ticket").filter(|v| !v.is_null()).cloned(),
+            confirmation,
             ..Self::new(code, error)
         }
     }
@@ -775,7 +844,7 @@ pub const fn effect_name(effect: Effect) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{Answer, Code, Failure, Method, Reply, Request, Step};
+    use super::{Answer, Code, Failure, Method, Reply, Request, Step, Ticket};
     use serde_json::json;
 
     /// What a client sends is what the server reads back.
@@ -785,6 +854,8 @@ mod tests {
             Request::parse("actions", &json!({"filter": "drum", "effect": "read-only"})),
             Request::parse("describe", &json!({"id": "A_B"})),
             Request::parse("run", &json!({"id": "A_B", "args": {"x": 1}})),
+            Request::parse("run", &json!({"id": "A_B", "ticket": "t1"})),
+            Request::parse("batch", &json!({"steps": [{"id": "A_B", "ticket": "t2"}]})),
             Request::parse(
                 "batch",
                 &json!({"steps": [{"id": "A_B"}, {"id": "C_D", "args": 2}]}),
@@ -803,7 +874,8 @@ mod tests {
             Ok(Request::Batch {
                 steps: vec![Step {
                     id: "X_Y".into(),
-                    args: None
+                    args: None,
+                    ticket: None,
                 }],
                 stop_on_error: true
             })
@@ -842,7 +914,11 @@ mod tests {
     #[test]
     fn failures_round_trip() {
         let sent = Failure {
-            ticket: Some(json!({"id": "t1", "expires_in_s": 60})),
+            confirmation: Some(Box::new(Ticket {
+                id: String::new(),
+                ticket: "t1".into(),
+                expires_in_ms: 60_000,
+            })),
             ..Failure::new(Code::ConfirmationRequired, "a person must approve this")
         };
         let line = Answer::Failed(sent.clone()).to_line(&json!(7));

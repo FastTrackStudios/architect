@@ -19,7 +19,8 @@
 //! `describe`; a run of every read-only action with no arguments (a run
 //! of anything else only when asked, [`Parity::run`]: a check must not
 //! delete a project); an unknown action, a stray parameter; and `watch`
-//! over all of it. Each over MCP (`Server::call_tool`) and over a socket
+//! over all of it. A call that needs a person's approval answers each
+//! face with a ticket of its own; tickets are not compared. Each over MCP (`Server::call_tool`) and over a socket
 //! served for the occasion, as the server's own principal.
 
 use std::path::PathBuf;
@@ -210,6 +211,8 @@ impl Both {
         self.requests = self.requests.saturating_add(1);
         let over_mcp = said_by_mcp(&self.mcp, method, &params);
         let over_socket = said_by_socket(&mut self.client, method, &params);
+        // Each face's call asks a person on its own: the tickets differ.
+        let (over_mcp, over_socket) = (unticketed(over_mcp), unticketed(over_socket));
         if over_mcp != over_socket {
             self.problems.push(format!(
                 "{} {params}: MCP said {over_mcp:?}, the CLI {over_socket:?}",
@@ -234,6 +237,26 @@ impl Both {
             .and_then(|t| serde_json::from_str(&t).ok())
             .unwrap_or(Value::Null)
     }
+}
+
+/// `said` with every confirmation's ticket and time left blanked: each
+/// call that needs approval is issued a ticket of its own.
+fn unticketed((mut value, failed): Said) -> Said {
+    fn blank(value: &mut Value) {
+        match value {
+            Value::Object(object) => {
+                if object.get("code").and_then(Value::as_str) == Some("confirmation_required") {
+                    object.insert("ticket".to_owned(), json!("<ticket>"));
+                    object.insert("expires_in_ms".to_owned(), json!(0));
+                }
+                object.values_mut().for_each(blank);
+            }
+            Value::Array(items) => items.iter_mut().for_each(blank),
+            _ => {}
+        }
+    }
+    blank(&mut value);
+    (value, failed)
 }
 
 /// What MCP said: a tool result's JSON and `isError`, or a refusal as the

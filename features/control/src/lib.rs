@@ -35,4 +35,4 @@ pub mod client;
 #[cfg(feature = "server")]
 pub mod server;
 
-pub use surface::Surface;
+pub use surface::{Surface, with_ticket};

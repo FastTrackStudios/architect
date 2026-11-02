@@ -100,7 +100,10 @@ impl Surface {
                 },
                 |info| Answer::Done(detail(&info)),
             ),
-            Request::Run { id, args } => match self.run_one(&caller, id, args.as_ref()).await {
+            Request::Run { id, args, ticket } => match self
+                .run_one(&with_ticket(&caller, ticket.as_deref()), id, args.as_ref())
+                .await
+            {
                 Ok(value) => Answer::Done(value),
                 Err(failure) => Answer::Failed(failure),
             },
@@ -195,7 +198,8 @@ impl Surface {
         }
         let mut results = Vec::with_capacity(steps.len());
         for (i, step) in steps.iter().enumerate() {
-            let outcome = self.run_one(caller, &step.id, step.args.as_ref()).await;
+            let caller = with_ticket(caller, step.ticket.as_deref());
+            let outcome = self.run_one(&caller, &step.id, step.args.as_ref()).await;
             let failed = outcome.is_err();
             results.push(StepResult {
                 step: i,
@@ -325,6 +329,16 @@ impl Surface {
             "latest": self.list.latest(),
         })
     }
+}
+
+/// `caller`, carrying `ticket` when the call brought one: a person's
+/// approval of this exact call (`ActionCaller::with_ticket`).
+#[must_use]
+pub fn with_ticket(caller: &ActionCaller, ticket: Option<&str>) -> ActionCaller {
+    ticket.map_or_else(
+        || caller.clone(),
+        |ticket| caller.clone().with_ticket(ticket),
+    )
 }
 
 /// A schema text as JSON.

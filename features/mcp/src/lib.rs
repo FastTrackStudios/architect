@@ -64,6 +64,16 @@
 //! the per-tool API instead of JSON-RPC text: [`Server::tools_for`] lists
 //! them, [`Server::call_tool`] runs one.
 //!
+//! **Confirmation.** When the list asks a person before a caller from
+//! outside runs a destructive action (`ActionList::require_confirmation`),
+//! the first `run` answers `isError: true` with `confirmation_required:
+//! true`, a `ticket` and `expires_in_ms`; the app shows the person a sheet
+//! naming the action, its arguments and the caller. The model runs the
+//! same call again with the ticket — `ticket` beside `id` and `args` on
+//! `run` and on a `batch` step, `_ticket` among a named tool's arguments —
+//! once they approve, and it runs once. A `watch` hears the answer as a
+//! `confirmation` change (`"<ticket> approved"` or `"<ticket> denied"`).
+//!
 //! **Errors.** A tool that fails answers `isError: true` with a JSON
 //! object (`{"code": …, "error": …}`, and `takes` for bad arguments; the
 //! codes are `architect_control::protocol::Code`) by default;
@@ -83,6 +93,7 @@ use architect::action::{ActionCaller, ActionInfo, ActionList, Effect, Principal}
 pub use architect_control::Surface;
 use architect_control::protocol::{Answer, Failure, Method, Request};
 pub use architect_control::protocol::{MAX_BATCH_STEPS, MAX_EVENTS, MAX_WAIT};
+use architect_control::with_ticket;
 use serde_json::{Value, json};
 
 pub mod discovery;
@@ -472,11 +483,18 @@ impl Server {
             let Some((_, info)) = self.named(who).into_iter().find(|(tool, _)| tool == name) else {
                 return Err(ToolError::NoTool(name.to_owned()));
             };
+            // A confirmation ticket rides beside the action's own arguments.
+            let mut arguments = arguments;
+            let ticket = arguments
+                .as_object_mut()
+                .and_then(|object| object.remove(NAMED_TICKET))
+                .and_then(|t| t.as_str().map(str::to_owned));
             let args = if wraps(&info) {
                 arguments.get("args").cloned()
             } else {
                 Some(arguments)
             };
+            let caller = with_ticket(&caller, ticket.as_deref());
             return Ok(
                 match self.surface.run_one(&caller, &info.id, args.as_ref()).await {
                     Ok(value) => text_result(&value, false),
@@ -567,6 +585,9 @@ pub(crate) fn instructions(own: &str, tools: Tools, name: &str, count: Option<us
          (at most {MAX_BATCH_STEPS} steps, not atomic: steps that ran stay done when a later one fails). \
          An action listed `enabled: false` says why it cannot run now. Read-only actions are safe to run freely; mutating ones change the open project; \
          destructive ones may not be undoable — say what you are about to do first. \
+         When one answers `confirmation_required`, a person is being asked in the app: \
+         wait (a `watch` hears `<ticket> approved` or `denied`), then run the same call \
+         again with its `ticket`. \
          `watch` tells you what has happened since a point (pass back the `next` it \
          returns), and waits for the next change when you ask it to."
     ));
@@ -640,6 +661,10 @@ pub(crate) fn generic_tools() -> Vec<Value> {
         })
         .collect()
 }
+
+/// Where a named tool takes a confirmation ticket, beside the action's
+/// own arguments (`run` and `batch` steps take `ticket`).
+pub const NAMED_TICKET: &str = "_ticket";
 
 /// Whether an action's arguments are not an object — so its named tool
 /// takes them as `{"args": …}`, MCP's input being an object always.
