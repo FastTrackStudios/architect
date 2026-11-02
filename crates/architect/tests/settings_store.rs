@@ -137,15 +137,16 @@ fn private_files_are_0600() {
     let mode = std::fs::metadata(s.path()).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o600);
 
-    // Non-private files keep the umask default.
+    // Non-private files keep the umask default: the mode this process gives
+    // any new file. (A runner with umask 077 makes that 0600 too, so compare
+    // with a file written the ordinary way rather than assume it isn't 0600.)
     let kv = FileKv::new(dir.path());
     kv.write("plain", "x").unwrap();
-    let mode = std::fs::metadata(kv.path("plain"))
-        .unwrap()
-        .permissions()
-        .mode()
-        & 0o777;
-    assert_ne!(mode, 0o600);
+    let mode_of =
+        |path: &std::path::Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    let ordinary = dir.path().join("ordinary");
+    std::fs::write(&ordinary, "x").unwrap();
+    assert_eq!(mode_of(&kv.path("plain")), mode_of(&ordinary));
 }
 
 #[test]
