@@ -1,6 +1,6 @@
 name: pr
 
-# A PR's checks: the fast ones, on a hosted runner. The full
+# A PR's checks: the fast ones, about a minute on a hosted runner. The full
 # suite (clippy, tests, wasm, boundaries, docs, tags) runs on main after the
 # merge (checks.yml). Branch protection requires this job's `check` status.
 on:
@@ -16,30 +16,14 @@ jobs:
   check:
     name: check
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     permissions:
       contents: read
-    # The repo's devenv shell (devenv.nix): the same nix rustc as a local
-    # shell and main's checks.
-    defaults:
-      run:
-        shell: devenv shell -- bash -e {0}
     steps:
       - uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v31
-      # devenv 2.4.0, from the nixpkgs revision devenv-fleet's pins.json
-      # names (`devenv.nixpkgs`); cache.nixos.org has it.
-      - name: devenv
-        shell: bash
-        run: |
-          set -euo pipefail
-          out=$(nix build --no-link --print-out-paths \
-            github:NixOS/nixpkgs/e62746b0b472753ef019baceab6f1e2e52014980#devenv)
-          echo "$out/bin" >> "$GITHUB_PATH"
-      # Evaluates the shell once and asserts its rustc is devenv-fleet's
-      # pinned store path.
+      # The pin in rust-toolchain.toml; rustup reads it.
       - name: toolchain
-        run: fleet-doctor
+        run: rustup show active-toolchain
       - name: fmt
         run: cargo fmt --all -- --check
       # The committed lockfile is the one cargo resolves: a merge that left
@@ -56,14 +40,23 @@ jobs:
           fi
       # Every crate the PR changes needs a cargo-rail change file
       # (.changes/README); release notes are built from them, never from
-      # commits. cargo-rail 0.32.0 is the dev shell's (devenv-fleet's
-      # `rust` module), the version Task and studio pin; the check
-      # compiles nothing.
+      # commits. cargo-rail is the released binary at the version Task and
+      # studio pin, checksum-verified; the check compiles nothing.
       - name: change files
         if: ${{ !cancelled() }}
         env:
+          RAIL: "0.32.0"
           BASE: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
+          dl="$RUNNER_TEMP/cargo-rail"
+          mkdir -p "$dl"
+          url="https://github.com/loadingalias/cargo-rail/releases/download/v${RAIL}"
+          curl -fsSL -o "$dl/rail.zip" "$url/cargo-rail-x86_64-unknown-linux-gnu.zip"
+          curl -fsSL -o "$dl/SHA256SUMS" "$url/SHA256SUMS"
+          (cd "$dl" && grep ' cargo-rail-x86_64-unknown-linux-gnu.zip$' SHA256SUMS \
+            | sed 's/cargo-rail-x86_64-unknown-linux-gnu.zip$/rail.zip/' | sha256sum -c --quiet)
+          unzip -q -o "$dl/rail.zip" -d "$dl"
+          export PATH="$dl/cargo-rail:$PATH"
           git fetch -q --no-tags --depth=1 origin "$BASE"
           cargo rail change check --since "$BASE"
