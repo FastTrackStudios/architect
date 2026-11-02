@@ -33,6 +33,7 @@ When a page and the code disagree, the code is right.
 - [The document file](@/features/document-file.md): `crdt::file`, one durable file per document.
 - [Org sync driver](@/features/org-sync.md): `OrgSyncs`, `OrgDocs`, `Placement`.
 - [Peer to peer](@/features/peer-to-peer.md): pairwise exchange, iroh, device admission, share links.
+- [Devices](@/features/devices.md): the account's devices, per-org enrolment, pairing by code or QR, revoking, one admission table.
 - [Presence and collaborative text](@/features/presence-and-text.md): `Here`, `Roster`, places, `TextBinding`, `crdt(text)`.
 - [Blobs](@/features/blobs.md): content-addressed bytes fetched on demand, pinned and collected.
 - [Files](@/features/files.md): `architect-files`, an org's files with versions, quota and access.

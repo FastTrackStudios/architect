@@ -74,10 +74,12 @@ ensure_registered(&devices_client, &token, registration).await?;
 
 `ensure_registered` only adds a row when nothing names the device yet,
 unless the app has a node of its own (an iroh `endpoint_id`), which it
-always keeps current. The answer is a `DeviceDirectory`; its
-`peer_endpoints(this_device)` is what the
-[documents chapter](@/guide/documents.md)'s `Devices` admits for
-device-to-device sync.
+always keeps current. The answer is a `DeviceDirectory`. An app whose device serves peers runs
+the whole pass instead, `features/devices/src/account.rs` `pass` (or
+`drive`): it registers, holds the account's shared org, and lets the
+account's other devices into the node's `Admission`, which the
+[documents chapter](@/guide/documents.md)'s `NodeAccess` checks for
+device-to-device sync. See [Devices](@/architecture/devices.md).
 
 ## 3. Permissions: gate every call
 

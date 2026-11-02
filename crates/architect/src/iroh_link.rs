@@ -235,7 +235,7 @@ where
     A: vox_core::LaneAcceptor,
 {
     let acceptor = SharedAcceptor(std::sync::Arc::new(acceptor));
-    accept_each(endpoint, move |_| acceptor.clone()).await;
+    accept_each(endpoint, move |_| acceptor.clone(), |_| None).await;
 }
 
 /// Serve every connection a handler of its own, made from the peer's
@@ -253,27 +253,59 @@ where
     F: Fn(iroh::EndpointId) -> H + Send + Sync + 'static,
     H: vox::Handler<vox::DriverReplySink> + Clone + Send + Sync + 'static,
 {
-    accept_each(endpoint, move |remote| {
-        SharedAcceptor(std::sync::Arc::new(crate::layer::handler_acceptor(make(
-            remote,
-        ))))
-    })
+    serve_peers_until(endpoint, make, |_| None).await;
+}
+
+/// When to close one peer's connection: [`serve_peers_until`] closes it
+/// once this resolves.
+pub type PeerUntil = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>>;
+
+/// The QUIC close code [`serve_peers_until`] closes a connection with.
+pub const CLOSED_FOR_PEER: u32 = 0x0004_0301;
+
+/// [`serve_peers`], closing a peer's connection when `until` says.
+///
+/// `until(remote)` runs beside the connection from `remote`; when it
+/// resolves, the connection closes ([`CLOSED_FOR_PEER`]) and every vox
+/// session on it ends. `None` keeps it open for as long as the peer
+/// does. What it is for: a device that is revoked loses the connections
+/// it already has, not only its next call (`architect_devices::Admission::ends`).
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn serve_peers_until<H, F, U>(endpoint: &iroh::Endpoint, make: F, until: U)
+where
+    F: Fn(iroh::EndpointId) -> H + Send + Sync + 'static,
+    H: vox::Handler<vox::DriverReplySink> + Clone + Send + Sync + 'static,
+    U: Fn(iroh::EndpointId) -> Option<PeerUntil> + Send + Sync + 'static,
+{
+    accept_each(
+        endpoint,
+        move |remote| {
+            SharedAcceptor(std::sync::Arc::new(crate::layer::handler_acceptor(make(
+                remote,
+            ))))
+        },
+        until,
+    )
     .await;
 }
 
 /// The accept loop behind [`serve_endpoint`] and [`serve_peers`]: one
 /// task per QUIC connection, one vox connection per bi-stream, each
-/// served through the acceptor `per_connection` made for the peer.
+/// served through the acceptor `per_connection` made for the peer, and
+/// the connection closed when the `until` made for it resolves.
 #[cfg(not(target_arch = "wasm32"))]
-async fn accept_each<A, F>(endpoint: &iroh::Endpoint, per_connection: F)
+async fn accept_each<A, F, U>(endpoint: &iroh::Endpoint, per_connection: F, until: U)
 where
     A: vox_core::LaneAcceptor + Clone,
     F: Fn(iroh::EndpointId) -> A + Send + Sync + 'static,
+    U: Fn(iroh::EndpointId) -> Option<PeerUntil> + Send + Sync + 'static,
 {
     let per_connection = std::sync::Arc::new(per_connection);
+    let until = std::sync::Arc::new(until);
     let local = endpoint.id();
     while let Some(incoming) = endpoint.accept().await {
         let per_connection = std::sync::Arc::clone(&per_connection);
+        let until = std::sync::Arc::clone(&until);
         tokio::task::spawn(async move {
             let connection = match incoming.await {
                 Ok(c) => c,
@@ -286,17 +318,38 @@ where
             // like an outbound one; a redial may need to drop it.
             tracked::insert(local, &connection);
             let acceptor = per_connection(connection.remote_id());
-            loop {
-                match connection.accept_bi().await {
-                    Ok((send, recv)) => {
-                        let link = IrohLink::new(connection.clone(), send, recv);
-                        tokio::task::spawn(serve_link(link, acceptor.clone()));
-                    }
-                    Err(e) => {
-                        debug!(error = %e, "iroh connection closed");
-                        return;
+            let accepting = async {
+                loop {
+                    match connection.accept_bi().await {
+                        Ok((send, recv)) => {
+                            let link = IrohLink::new(connection.clone(), send, recv);
+                            tokio::task::spawn(serve_link(link, acceptor.clone()));
+                        }
+                        Err(e) => {
+                            debug!(error = %e, "iroh connection closed");
+                            return;
+                        }
                     }
                 }
+            };
+            let Some(mut until) = until(connection.remote_id()) else {
+                accepting.await;
+                return;
+            };
+            let mut accepting = std::pin::pin!(accepting);
+            let ended = std::future::poll_fn(|cx| {
+                if until.as_mut().poll(cx).is_ready() {
+                    return std::task::Poll::Ready(true);
+                }
+                accepting.as_mut().poll(cx).map(|()| false)
+            })
+            .await;
+            if ended {
+                debug!(remote = %connection.remote_id(), "iroh: closing a peer's connection");
+                connection.close(
+                    iroh::endpoint::VarInt::from_u32(CLOSED_FOR_PEER),
+                    b"architect: this peer is no longer let in",
+                );
             }
         });
     }
