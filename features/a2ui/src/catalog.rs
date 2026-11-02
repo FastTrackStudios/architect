@@ -268,6 +268,123 @@ pub const CATALOG: &[ComponentDef] = &[
             ),
         ],
     },
+    ComponentDef {
+        name: "Icon",
+        draws_with: "architect_ui::lucide_dioxus",
+        doc: "An icon from the A2UI basic set, by name.",
+        props: &[req("name", Prop::OneOf(ICONS), "Which icon.")],
+    },
+    ComponentDef {
+        name: "Video",
+        draws_with: "video",
+        doc: "A video from a URL, with its controls. A host that plays no video (Blitz) says what and where it is.",
+        props: &[
+            req("url", Prop::Text, "Where it is."),
+            opt("posterUrl", Prop::Text, "An image shown before it plays."),
+        ],
+    },
+    ComponentDef {
+        name: "AudioPlayer",
+        draws_with: "audio",
+        doc: "Audio from a URL, with its controls. A host that plays no audio (Blitz) says what and where it is.",
+        props: &[
+            req("url", Prop::Text, "Where it is."),
+            opt("description", Prop::Text, "Its title or summary."),
+        ],
+    },
+    ComponentDef {
+        name: "Modal",
+        draws_with: "architect_ui::Dialog",
+        doc: "A dialog: its trigger is drawn in place, and pressing it opens the content over the app.",
+        props: &[
+            req("trigger", Prop::Child, "What opens it (a Button)."),
+            req("content", Prop::Child, "What it shows."),
+        ],
+    },
+    ComponentDef {
+        name: "DateTimeInput",
+        draws_with: "architect_ui::Input",
+        doc: "A date, a time or both, bound to an ISO 8601 string.",
+        props: &[
+            opt("label", Prop::Text, "What it asks for."),
+            req(
+                "value",
+                Prop::Text,
+                "Bind it to a path to keep what is picked; \"\" when not yet set.",
+            ),
+            opt(
+                "enableDate",
+                Prop::Boolean,
+                "Pick a date. With neither this nor enableTime, both.",
+            ),
+            opt("enableTime", Prop::Boolean, "Pick a time."),
+            opt("min", Prop::Text, "The earliest, in ISO 8601."),
+            opt("max", Prop::Text, "The latest, in ISO 8601."),
+        ],
+    },
+];
+
+/// The A2UI basic catalog's icon names: what an `Icon` may show.
+pub const ICONS: &[&str] = &[
+    "accountCircle",
+    "add",
+    "arrowBack",
+    "arrowForward",
+    "attachFile",
+    "calendarToday",
+    "call",
+    "camera",
+    "check",
+    "close",
+    "delete",
+    "download",
+    "edit",
+    "event",
+    "error",
+    "fastForward",
+    "favorite",
+    "favoriteOff",
+    "folder",
+    "help",
+    "home",
+    "info",
+    "locationOn",
+    "lock",
+    "lockOpen",
+    "mail",
+    "menu",
+    "moreVert",
+    "moreHoriz",
+    "notificationsOff",
+    "notifications",
+    "pause",
+    "payment",
+    "person",
+    "phone",
+    "photo",
+    "play",
+    "print",
+    "refresh",
+    "rewind",
+    "search",
+    "send",
+    "settings",
+    "share",
+    "shoppingCart",
+    "skipNext",
+    "skipPrevious",
+    "star",
+    "starHalf",
+    "starOff",
+    "stop",
+    "upload",
+    "visibility",
+    "visibilityOff",
+    "volumeDown",
+    "volumeMute",
+    "volumeOff",
+    "volumeUp",
+    "warning",
 ];
 
 /// The catalog's component `name`, or `None` when it is not in it (and
@@ -446,6 +563,10 @@ mod tests {
         }
         assert!(CATALOG.len() >= 10);
         assert!(component("Button").is_some());
+        // The whole A2UI v1.0 basic catalog.
+        for name in ["Modal", "Icon", "DateTimeInput", "Video", "AudioPlayer"] {
+            assert!(component(name).is_some(), "{name}");
+        }
         assert!(component("Script").is_none());
     }
 

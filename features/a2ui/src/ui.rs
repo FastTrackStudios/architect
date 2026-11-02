@@ -119,6 +119,11 @@ pub fn draws(name: &str) -> Option<fn(&Drawn) -> Element> {
         "ChoicePicker" => |d| rsx! { ChoiceNode { at: d.at.clone() } },
         "Tabs" => |d| rsx! { TabsNode { at: d.at.clone() } },
         "Image" => image,
+        "Icon" => icon,
+        "Video" => video,
+        "AudioPlayer" => audio,
+        "Modal" => |d| rsx! { ModalNode { at: d.at.clone() } },
+        "DateTimeInput" => |d| rsx! { DateNode { at: d.at.clone() } },
         _ => return None,
     };
     catalog::component(name).map(|_| draw)
@@ -342,6 +347,138 @@ fn image(d: &Drawn) -> Element {
         w => w,
     };
     rsx! { img { src: "{url}", alt: "{alt}", style: "max-width:100%; object-fit:{fit};" } }
+}
+
+/// The lucide icon for an A2UI basic icon name ([`catalog::ICONS`]).
+fn glyph(name: &str) -> Element {
+    use architect_ui::lucide_dioxus as l;
+    let size = 20;
+    match name {
+        "accountCircle" => rsx! { l::CircleUser { size } },
+        "add" => rsx! { l::Plus { size } },
+        "arrowBack" => rsx! { l::ArrowLeft { size } },
+        "arrowForward" => rsx! { l::ArrowRight { size } },
+        "attachFile" => rsx! { l::Paperclip { size } },
+        "calendarToday" => rsx! { l::Calendar { size } },
+        "call" => rsx! { l::Phone { size } },
+        "camera" => rsx! { l::Camera { size } },
+        "check" => rsx! { l::Check { size } },
+        "close" => rsx! { l::X { size } },
+        "delete" => rsx! { l::Trash { size } },
+        "download" => rsx! { l::Download { size } },
+        "edit" => rsx! { l::Pencil { size } },
+        "event" => rsx! { l::CalendarDays { size } },
+        "error" => rsx! { l::CircleAlert { size } },
+        "fastForward" => rsx! { l::FastForward { size } },
+        "favorite" => rsx! { l::Heart { size } },
+        "favoriteOff" => rsx! { l::HeartOff { size } },
+        "folder" => rsx! { l::Folder { size } },
+        "help" => rsx! { l::CircleQuestionMark { size } },
+        "home" => rsx! { l::House { size } },
+        "info" => rsx! { l::Info { size } },
+        "locationOn" => rsx! { l::MapPin { size } },
+        "lock" => rsx! { l::Lock { size } },
+        "lockOpen" => rsx! { l::LockOpen { size } },
+        "mail" => rsx! { l::Mail { size } },
+        "menu" => rsx! { l::Menu { size } },
+        "moreVert" => rsx! { l::EllipsisVertical { size } },
+        "moreHoriz" => rsx! { l::Ellipsis { size } },
+        "notificationsOff" => rsx! { l::BellOff { size } },
+        "notifications" => rsx! { l::Bell { size } },
+        "pause" => rsx! { l::Pause { size } },
+        "payment" => rsx! { l::CreditCard { size } },
+        "person" => rsx! { l::User { size } },
+        "phone" => rsx! { l::Smartphone { size } },
+        "photo" => rsx! { l::Image { size } },
+        "play" => rsx! { l::Play { size } },
+        "print" => rsx! { l::Printer { size } },
+        "refresh" => rsx! { l::RefreshCw { size } },
+        "rewind" => rsx! { l::Rewind { size } },
+        "search" => rsx! { l::Search { size } },
+        "send" => rsx! { l::Send { size } },
+        "settings" => rsx! { l::Settings { size } },
+        "share" => rsx! { l::Share2 { size } },
+        "shoppingCart" => rsx! { l::ShoppingCart { size } },
+        "skipNext" => rsx! { l::SkipForward { size } },
+        "skipPrevious" => rsx! { l::SkipBack { size } },
+        "star" => rsx! { l::Star { size } },
+        "starHalf" => rsx! { l::StarHalf { size } },
+        "starOff" => rsx! { l::StarOff { size } },
+        "stop" => rsx! { l::Square { size } },
+        "upload" => rsx! { l::Upload { size } },
+        "visibility" => rsx! { l::Eye { size } },
+        "visibilityOff" => rsx! { l::EyeOff { size } },
+        "volumeDown" => rsx! { l::Volume1 { size } },
+        "volumeMute" => rsx! { l::Volume { size } },
+        "volumeOff" => rsx! { l::VolumeOff { size } },
+        "volumeUp" => rsx! { l::Volume2 { size } },
+        "warning" => rsx! { l::TriangleAlert { size } },
+        // Not a name of the set (`read` keeps only those): nothing.
+        _ => rsx! {},
+    }
+}
+
+fn icon(d: &Drawn) -> Element {
+    let name = d.word("name");
+    rsx! {
+        span { "data-a2ui": "Icon", role: "img", "aria-label": "{name}",
+            style: "display:inline-flex; width:20px; height:20px;",
+            {glyph(name)}
+        }
+    }
+}
+
+/// A browser host: it plays `<video>` and `<audio>` and has date and time
+/// pickers. Blitz lays media out as empty boxes and edits only text, so
+/// there media say what and where they are, and a date is typed.
+const BROWSER: bool = cfg!(target_arch = "wasm32");
+
+/// Media a host cannot play: what it is, and its URL.
+fn unplayed(kind: &str, what: &str, url: &str) -> Element {
+    rsx! {
+        div { "data-a2ui": "{kind}",
+            style: "display:flex; gap:10px; align-items:center; padding:10px 12px; \
+                    border:1px solid var(--border, #888); border-radius:8px;",
+            if kind == "Video" {
+                architect_ui::lucide_dioxus::Film { size: 20 }
+            } else {
+                architect_ui::lucide_dioxus::AudioLines { size: 20 }
+            }
+            div { style: "display:flex; flex-direction:column; gap:2px; min-width:0;",
+                Text { "{what}" }
+                Text { variant: TextVariant::Muted, "{url}" }
+            }
+        }
+    }
+}
+
+fn video(d: &Drawn) -> Element {
+    let url = d.text("url");
+    if !BROWSER {
+        return unplayed("Video", "Video", &url);
+    }
+    let poster = Some(d.text("posterUrl")).filter(|p| !p.is_empty());
+    rsx! { video { "data-a2ui": "Video", src: "{url}", poster, controls: true, style: "max-width:100%;" } }
+}
+
+fn audio(d: &Drawn) -> Element {
+    let (url, what) = (d.text("url"), d.text("description"));
+    if !BROWSER {
+        let what = if what.is_empty() {
+            "Audio".to_owned()
+        } else {
+            what
+        };
+        return unplayed("AudioPlayer", &what, &url);
+    }
+    rsx! {
+        div { "data-a2ui": "AudioPlayer", style: "display:flex; flex-direction:column; gap:4px;",
+            if !what.is_empty() {
+                Text { variant: TextVariant::Small, "{what}" }
+            }
+            audio { src: "{url}", controls: true, "aria-label": "{what}" }
+        }
+    }
 }
 
 fn status_key(at: &At) -> String {
@@ -745,6 +882,93 @@ fn TabsNode(at: At) -> Element {
             }
             if let Some(id) = child {
                 Node { surface, id, base }
+            }
+        }
+    }
+}
+
+/// A Modal: its trigger in place; a press anywhere on it (a Button's
+/// action runs too) opens a dialog of its content, closed by its ✕,
+/// Escape or a press outside.
+#[component]
+fn ModalNode(at: At) -> Element {
+    let read = with_model(&at, |c, _| {
+        (
+            c.get_property::<String>("trigger"),
+            c.get_property::<String>("content"),
+        )
+    });
+    let (trigger, content) = read.unwrap_or_default();
+    let mut open = use_signal(|| false);
+    let At { surface, id, base } = at;
+    rsx! {
+        div { "data-a2ui": "Modal",
+            div { "data-a2ui-modal": "{id}", onclick: move |_| open.set(true),
+                if let Some(id) = trigger {
+                    Node { surface: surface.clone(), id, base: base.clone() }
+                }
+            }
+            Dialog { open: open(), on_close: move |()| open.set(false),
+                DialogClose { on_click: move |()| open.set(false) }
+                div { "data-a2ui-modal-content": "{id}",
+                    if let Some(id) = content {
+                        Node { surface, id, base }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// What an ISO 8601 date, time or both is typed as where the host has no
+/// picker for it (Blitz edits only text).
+fn iso_hint(kind: &str) -> &'static str {
+    match kind {
+        "date" => "YYYY-MM-DD",
+        "time" => "HH:MM",
+        _ => "YYYY-MM-DDTHH:MM",
+    }
+}
+
+#[component]
+fn DateNode(at: At) -> Element {
+    let read = with_model(&at, |c, cx| {
+        let s = |k: &str| {
+            c.get_property::<DynamicString>(k)
+                .map(|d| cx.data_context.resolve_dynamic_string(&d))
+                .unwrap_or_default()
+        };
+        let b = |k: &str| {
+            c.get_property::<DynamicBoolean>(k)
+                .is_some_and(|d| cx.data_context.resolve_dynamic_boolean(&d))
+        };
+        (
+            s("label"),
+            s("value"),
+            (b("enableDate"), b("enableTime")),
+            (s("min"), s("max")),
+            bound(c, "value", &at.base),
+        )
+    });
+    let (label, now, (date, time), (min, max), path) = read.unwrap_or_default();
+    let value = use_bound(&at, now, path, |s: &String| Value::String(s.clone()));
+    let kind = match (date, time) {
+        (true, false) => "date",
+        (false, true) => "time",
+        _ => "datetime-local",
+    };
+    let some = |s: String| Some(s).filter(|s| !s.is_empty());
+    // A browser draws its picker; Blitz a text field that says the form.
+    let input_type = Some(if BROWSER { kind } else { "text" }.to_owned());
+    rsx! {
+        label { "data-a2ui": "DateTimeInput", style: "display:flex; flex-direction:column; gap:4px;",
+            Text { variant: TextVariant::Small, "{label}" }
+            Input {
+                value,
+                input_type,
+                placeholder: iso_hint(kind),
+                min: some(min),
+                max: some(max),
             }
         }
     }

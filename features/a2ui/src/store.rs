@@ -56,6 +56,16 @@ pub enum SurfaceError {
     Unsupported(&'static str),
     #[error("the document refused the write: {0}")]
     Loro(String),
+    /// The file the surfaces are kept in ([`Surfaces::open_file`]).
+    #[error("the surfaces' file: {0}")]
+    File(String),
+}
+
+/// The kind of file [`Surfaces::open_file`] keeps: an app's own store of
+/// its agents' surfaces, not a document a person opens.
+#[must_use]
+pub fn file_kind() -> crdt::DocKind {
+    crdt::DocKind::new("architect.a2ui", "Agent UI").extension("a2ui")
 }
 
 /// One surface, read back from the document.
@@ -186,6 +196,42 @@ impl Surfaces {
     pub fn with_history(mut self, history: Arc<Mutex<crdt::History>>) -> Self {
         self.history = Some(history);
         self
+    }
+
+    /// The surfaces under [`ROOT`] in the file at `path` (a
+    /// [`DocFile`](crdt::DocFile) of [`file_kind`], made when there is
+    /// none): every apply is on disk once it has finished, so they are
+    /// there again after a restart. On a tokio runtime: the document's
+    /// writer runs on it.
+    ///
+    /// # Errors
+    ///
+    /// The file could not be read or written, or holds something else.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub async fn open_file(path: impl Into<std::path::PathBuf>) -> Result<Self, SurfaceError> {
+        use crdt::file::{DiskStorage, MAIN};
+        let file = |e: crdt::file::FileError| SurfaceError::File(e.to_string());
+        let path = path.into();
+        let kind = file_kind();
+        let new = match std::fs::metadata(&path) {
+            Ok(metadata) => metadata.len() == 0,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
+            Err(error) => return Err(SurfaceError::File(error.to_string())),
+        };
+        let storage = DiskStorage::open(&path).map_err(file)?;
+        let doc = if new {
+            crdt::DocFile::create(storage, &kind).await
+        } else {
+            crdt::DocFile::open(storage, &kind).await
+        }
+        .map_err(file)?;
+        let id = doc.id().await.ok_or_else(|| {
+            SurfaceError::File("the surfaces' file has no document id".to_owned())
+        })?;
+        let replica = CrdtDoc::open(id, doc.persistence(MAIN))
+            .await
+            .map_err(|e| SurfaceError::File(e.to_string()))?;
+        Ok(Self::new(replica, ROOT))
     }
 
     /// The document they live in.

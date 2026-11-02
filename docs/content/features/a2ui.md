@@ -48,7 +48,8 @@ view in its workspace (the lab: `apps/lab/ui/src/lib.rs` `LabApp`,
 `apps/lab/ui/src/vault.rs`):
 
 ```rust
-let surfaces = architect_a2ui::Surfaces::new(crdt::CrdtDoc::ephemeral(), architect_a2ui::store::ROOT);
+// Kept in a file (on a tokio runtime), or `Surfaces::new(CrdtDoc::ephemeral(), store::ROOT)` for none.
+let surfaces = architect_a2ui::Surfaces::open_file(dir.join("surfaces.a2ui")).await?;
 architect_a2ui::actions::register(&list, &surfaces)?;
 architect_a2ui::ui::use_a2ui(surfaces, (*list).clone()); // in the root component
 let views = Views::new().view(architect_a2ui::ui::surfaces_view());
@@ -82,7 +83,7 @@ Pressing Save asks the person first (the confirmation sheet), because
 
 | id | effect | does |
 |---|---|---|
-| `A2UI_RENDER` | mutating | applies A2UI messages. A surface it creates replaces any surface with the same id. It answers the surfaces it touched and any component outside the catalog. |
+| `A2UI_RENDER` | mutating | applies A2UI messages. A surface it creates replaces any surface with the same id. A surface it creates also opens the "Agent UI" view, or brings it forward, through the workspace's actions (`WORKSPACE_OPEN`, #234): split right of the active pane, focused. It answers the surfaces it touched, any component outside the catalog, and `shown` (false where the app has no workspace on its list). |
 | `A2UI_PATCH` | mutating | applies `updateComponents`, `updateDataModel` and `deleteSurface` to surfaces that already exist |
 | `A2UI_SURFACE` | read-only | returns one surface's components and data model (what the person entered), or every surface's id |
 | `A2UI_PRESS` | mutating | presses a component the way the person would. A write waits for the person's yes; run it again with the ticket once they approve. |
@@ -101,8 +102,20 @@ basic names, so an agent written for another A2UI renderer works. Each is
 drawn by architect-ui: `Heading`/`Text`, `HStack`/`VStack`-shaped flex,
 `Card`, `Divider`, `Button`, `Checkbox`, `Input`/`Textarea`, `Slider`,
 buttons for choices, and tabs as buttons over the active child.
-`Modal`, `Video`, `AudioPlayer`, `Icon` and `DateTimeInput` are not in it
-yet. They show as placeholders.
+`Modal`, `Video`, `AudioPlayer`, `Icon` and `DateTimeInput` (#254) are
+in it too:
+
+- `Modal` is a trigger child that opens a `Dialog` of its content child.
+- `Icon` draws a Lucide icon from a closed list of names (the catalog's
+  `ICONS`); any other name draws nothing.
+- `DateTimeInput` is an `Input` of type `date`, `time` or
+  `datetime-local` with `min`/`max`. Blitz has no date picker, so there
+  it is a text field with the ISO format as its hint.
+- `Video` and `AudioPlayer` play in a browser. Blitz has no media
+  element, so there they are a card naming what would play.
+
+Anything else an agent names (`Script`, `Iframe`, `Html`, `WebView`)
+shows as a placeholder.
 
 What an agent can't do from a surface:
 

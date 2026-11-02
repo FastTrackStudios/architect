@@ -59,6 +59,8 @@ architect-a2ui = { path = ".", features = ["ui"] }
 architect-guide = { workspace = true, features = ["run"] }
 futures = "0.3"
 facet = { workspace = true }
+# Surfaces in a file (tests/restart.rs): the document's writer runs on tokio.
+tokio = { workspace = true }
 
 [lib]
 doctest = false
