@@ -13,9 +13,20 @@
 //! One instance: a second launch brings the first forward and ends. With
 //! `--background` (a login launch) it starts in the menu bar, with no
 //! window and no Dock icon.
+//!
+//! Its Action List from the command line and over MCP (`src/lib.rs`):
+//!
+//! ```text
+//! architect-desktop actions list               # ask the running lab
+//! architect-desktop actions run LAB_STATE --headless
+//! architect-desktop --headless                 # the lab with no window, serving its socket
+//! architect-desktop mcp [--headless]           # MCP on stdio
+//! ```
 
 mod mcp;
 
+use std::process::ExitCode;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use architect::action::ActionList;
@@ -31,17 +42,29 @@ fn first_device() -> Device {
 #[component]
 fn App() -> Element {
     let _screen = use_window_screen(first_device());
-    // The lab's Action List, made here so MCP can serve it too.
+    // The lab's Action List, made here so MCP and the window's control
+    // socket serve the one its components fill (`LabApp` takes it from
+    // context).
     let list = use_context_provider(|| Arc::new(ActionList::new()));
     use_hook(|| mcp::serve(&list));
+    use_hook(|| Rc::new(architect_desktop::serve_window(&list)));
     rsx! { LabApp {} }
 }
 
-fn main() {
+fn main() -> ExitCode {
+    let first = std::env::args().nth(1);
+    match first.as_deref() {
+        Some("actions") => return architect_desktop::cli().main(std::env::args_os().skip(1)),
+        Some("mcp") => {
+            return architect_desktop::mcp(std::env::args().any(|a| a == "--headless"));
+        }
+        Some("--headless") => return architect_desktop::serve_headless(),
+        _ => {}
+    }
     if architect_presence::single_instance(architect_lab_ui::presence::ID)
         == architect_presence::Launch::HandedOff
     {
-        return;
+        return ExitCode::SUCCESS;
     }
     let (w, h) = first_device().size().unwrap_or((1280.0, 820.0));
     let window = WindowAttributes::default()
@@ -59,4 +82,5 @@ fn main() {
             .with_title_hidden(true),
     ));
     architect_workspace::native::launch_with_fonts(App, window, architect_lab_ui::FONTS);
+    ExitCode::SUCCESS
 }

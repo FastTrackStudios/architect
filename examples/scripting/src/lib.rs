@@ -10,6 +10,8 @@
 use std::sync::{Arc, Mutex, PoisonError};
 
 use architect::action::{ActionError, ActionList, ActionMeta, Effect, Principal};
+use architect_control::Surface;
+use architect_control::cli::Headless;
 use architect_mcp::{Server, Tools};
 use architect_permissions::{Action, RoleEngine, Rule};
 use architect_scripting::actions::Scripting;
@@ -407,18 +409,49 @@ impl App {
         Runtime::new(self.list.clone()).with_transactions(Arc::new(self.board.transactions()))
     }
 
+    /// The board's list as the CLI asks it (`scripting actions …`), as
+    /// `who`: the surface MCP answers from too ([`Self::mcp`]).
+    #[must_use]
+    pub fn surface(&self, who: Principal) -> Surface {
+        Surface::new("scripting-example", "0", self.list.clone()).with_principal(who)
+    }
+
     /// The MCP server a model drives the board through, as `who`: every
     /// action a tool of its own (`tasks_list`, `script_run`,
     /// `script_save`, and each saved script as it is saved).
     #[must_use]
     pub fn mcp(&self, who: Principal) -> Server {
-        Server::new("scripting-example", "0", self.list.clone())
+        Server::over(self.surface(who))
             .with_tools(Tools::Named)
-            .with_principal(who)
             .with_instructions(
                 "A task board. Call script_describe to see what a Luau script can call, \
                  script_run to run one as a single undo step, script_save to keep it as an \
                  action of its own.",
             )
     }
+}
+
+/// A fresh board with no window, for `scripting actions … --headless`:
+/// kept whole, so its actions' state lives as long as the command.
+pub struct HeadlessBoard {
+    app: App,
+}
+
+impl HeadlessBoard {
+    /// A fresh board.
+    ///
+    /// # Errors
+    ///
+    /// As [`App::new`].
+    pub fn open() -> Result<Self, String> {
+        App::new().map(|app| Self { app })
+    }
+}
+
+impl Headless for HeadlessBoard {
+    fn surface(&self) -> Surface {
+        self.app.surface(agent())
+    }
+
+    fn settle(&mut self) {}
 }

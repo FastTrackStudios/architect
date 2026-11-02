@@ -16,6 +16,11 @@ The full guide is `docs/content/architecture/commands.md`; this page is what an 
 | MCP HTTP | `POST /mcp`, origin guard, optional bearer, loopback serve | `features/mcp/src/http.rs` `router`, `serve`, `serve_loopback_or` |
 | MCP on `EngineHost` | feature `host`: `.mcp(server, token)` (loopback guard) and `.mcp_at("/org/{slug}/mcp", \|head\| async { Ok(McpTarget::new(server, caller)) / Err(impl IntoResponse) })` (no origin check; the resolver authenticates) | `features/mcp/src/host.rs` `McpHost`, `McpTarget`; `examples/greeter/tests/host_mounts.rs` |
 | MCP discovery | `<config>/fts/<name>-mcp.json` and a project's `.mcp.json` | `features/mcp/src/discovery.rs` `publish`, `read`, `unpublish`, `project_mcp_json` |
+| Shared shape | the requests both faces take and the answers both give: `Method` (`TOOLS` = MCP's generic tools), `Request::parse`, `Answer`, `Failure` + `Code` (→ exit codes) | `features/control/src/protocol.rs`; `features/control/src/surface.rs` `Surface` (`answer`, `listing`, `schema`, `api_schema`) |
+| Control socket | feature `server`: the app's user-only socket (`0600`; a named pipe on Windows), NDJSON `{id, method, params}` → `{id, result}` / `{id, error}` | `features/control/src/server.rs` `Control` (`new`, `at`, `with_caller`, `serve`, `serve_if_wanted`), `Serving`, `Peer`; `features/control/src/endpoint.rs` `socket_path`, `wanted` (`FTS_CONTROL`) |
+| CLI | feature `cli`: `actions list/describe/run/batch/schema/events/apps`, `--app`, `--headless`; the generic client `architect-actions` | `features/control/src/cli.rs` `Cli`, `ActionsArgs`, `Headless`, `ListOnly`; `features/control/src/client.rs` `Client` |
+| MCP over the socket | feature `bridge`: MCP on stdio for a running app | `features/mcp/src/bridge.rs` `serve_stdio_via`, `Bridge` |
+| Parity | feature `parity`: the same set and answers over MCP and the socket, for an app's list | `features/mcp/src/parity.rs` `Parity`; `features/mcp/tests/parity.rs`; `cargo xtask surfaces` (`xtask/src/surfaces.rs`) |
 | Extensions | Run-time actions and settings from packages: `EXT_LIST` / `EXT_SEARCH` / `EXT_INSTALL` / `EXT_UNINSTALL` / `EXT_RELOAD`; an extension's actions under its id's prefix | `features/extensions/src/actions.rs`; `features/extensions/src/host.rs` `Host`; `features/extensions/tests/metronome.rs` |
 | Keys | keymap bindings name action ids; an app's `Commands` runs them in the live contexts, the person's layer over the app's | `features/input/src/processor.rs` `InputProcessor`, `features/commands/src/keymap.rs` `Keymap` (see `docs/content/architecture/input.md`) |
 | Scripts | Luau over the list: `SCRIPT_RUN` / `SCRIPT_SAVE` / `SCRIPT_DESCRIBE` (and `SCRIPT_LIST`, `SCRIPT_DELETE`, `_ORG` forms); each saved script an action `SCRIPT_MY_<NAME>` / `SCRIPT_ORG_<NAME>`; a run is one undo step | `features/scripting/src/actions.rs` `Scripting`; `features/scripting/src/luau.rs` `Runtime`, `Report`; `features/scripting/tests/scripts.rs` |
@@ -84,6 +89,27 @@ if let Some(serving) = server.serve_loopback_or(47_811, "FTS_MCP_PORT", "FTS_MCP
 - **stdio:** `serve_stdio(&server)`. **HTTP:** `http::serve(listener, server, token)` or `serve_loopback(_or)`; the app picks the token variable. `project_mcp_json(dir, name, url)` writes the URL (never the token) into a committed `.mcp.json`.
 - **Schemas a model reads** are flat (v0.9.24): a documented field is `{"type", "description"}`, an `Option<T>` field is `T` and not required, `#[facet(deny_unknown_fields)]` adds `"additionalProperties": false`.
 
+## The command line (`architect-control`)
+
+The rule: every action is CLI- **and** MCP-accessible. Guide: `docs/content/guide/cli-and-mcp.md`.
+
+```rust
+let surface = Surface::new("task", env!("CARGO_PKG_VERSION"), list.clone()).with_principal(principal);
+let mcp = architect_mcp::Server::over(surface.clone());          // same surface → same caller
+let _serving = Control::new("task", surface)?.serve_if_wanted()?; // keep it alive
+// in main: `task actions …`
+Cli::new("task").headless(|| Ok(Box::new(ListOnly::new(surface_for_ci())))).main(std::env::args_os().skip(1));
+```
+
+- MCP's generic tools ARE the protocol's methods: never hand-write a tool table or a CLI command per action. `schema` (socket) = `actions://schema` (MCP resource); `hello` is the socket's handshake.
+- Failures carry `code` (`unknown`, `bad_args`, `failed`, `denied`, `disabled`, `duplicate`, `confirmation_required` with `ticket` + `expires_in_ms`, `bad_request`, `no_method`); MCP's JSON errors carry it too. A confirmation is retried with `actions run ID … --ticket T` (a `batch` step's `ticket`), the same ticket flow as MCP's `run`. Exit codes: `Code::exit` (1 failed, 2 usage, 3 unknown, 4 bad args, 5 denied, 6 disabled, 7 confirmation, 69 no app).
+- The socket's caller is the surface's principal unless `Control::with_caller(|peer| …)` says otherwise; never the trusted app. A hidden action is `unknown` to `describe` and `denied` to `run`, as over MCP.
+- `serve_if_wanted`: on in debug builds, off in release; `FTS_CONTROL=0|1` overrides. `serve` always.
+- `--headless` builds the list in-process; an app whose actions come from components mounts its root with `architect_guide::run::Headless` and pumps it (`cli::Headless::pump`) — the lab: `apps/lab/desktop/src/lib.rs` `HeadlessLab`.
+- `watch` is invalidation: `lost: true` (app restarted, or history overran) → re-read state.
+- An app that serves either face needs `Parity::new(&server).check()` in a test; `cargo xtask surfaces` (CI) fails otherwise. `Parity` runs only read-only actions unless given `.run(id, args)`: never point it at a live app's real data.
+- Windows: the named pipe and its client are written but not yet compiled in CI.
+
 ## Scripts (`architect-scripting`)
 
 ```rust
@@ -146,7 +172,7 @@ let _ = ext.sync();              // load the copy of each that runs
 
 1. `run_json` refuses async actions; a key or menu handler spawns `run_json_async` on the app's runtime (architect-commands' `Commands::run` does, so ⌘K runs saved scripts and service actions).
 2. The app doors skip the authorizer by design. Don't assume a key or menu run is authorized, and give the list the same engine as the router's `PermissionsGate` (`set_authorizer`): otherwise there are two planes.
-3. The MCP HTTP transport calls `handle`, so every request runs as the server's one principal. The bearer token is a gate, not an identity; per-request principals need your own transport around `handle_as` / `handle_with`.
+3. The MCP HTTP transport calls `handle`, so every request runs as the server's one principal (the control socket's default is the same: the surface's principal). The bearer token is a gate, not an identity; per-request principals need your own transport around `handle_as` / `handle_with`.
 4. The origin guard checks an `Origin` header only when present, and does not check `Host`. Bind loopback, make serving opt-in (`FTS_MCP=0` turns `serve_loopback` off), and set a token for any app with destructive actions.
 5. `batch` with missing or non-array `steps` runs zero steps without an error.
 6. `#[architect::service(actions)]` handlers do not see the caller; a per-org service registers by hand with `register_async_with`. A projected failure is the error's `Display`, not the HTTP face's `{code, message}`.

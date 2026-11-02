@@ -18,6 +18,7 @@ members = [
     "features/permissions",
     "features/permissions/proto",
     "features/mcp",
+    "features/control",
     # ── proc-macros ───────────────────────────────────────────────────
     "crates/architect-derive",
     "crates/architect-rpc-derive",
@@ -104,6 +105,8 @@ architect-form = { path = "features/form" }
 architect-input = { path = "features/input" }
 architect-permissions = { path = "features/permissions" }
 architect-permissions-proto = { path = "features/permissions/proto" }
+architect-mcp = { path = "features/mcp" }
+architect-control = { path = "features/control" }
 architect-derive = { path = "crates/architect-derive" }
 architect-rpc-derive = { path = "crates/architect-rpc-derive" }
 architect-action-derive = { path = "crates/architect-action-derive" }

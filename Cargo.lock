@@ -635,6 +635,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-control"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-permissions",
+ "clap",
+ "dirs 6.0.0",
+ "facet",
+ "futures",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "architect-derive"
 version = "0.1.0"
 dependencies = [
@@ -649,12 +663,17 @@ name = "architect-desktop"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "architect-control",
+ "architect-guide",
  "architect-lab-ui",
  "architect-mcp",
  "architect-presence",
+ "architect-shell",
  "architect-workspace",
+ "clap",
  "dioxus",
  "dioxus-native",
+ "serde_json",
  "tokio",
  "tracing",
 ]
@@ -875,8 +894,11 @@ name = "architect-mcp"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "architect-control",
+ "architect-mcp",
  "architect-permissions",
  "axum",
+ "clap",
  "dirs 6.0.0",
  "facet",
  "futures",
@@ -4480,6 +4502,7 @@ name = "example-scripting"
 version = "0.1.0"
 dependencies = [
  "architect",
+ "architect-control",
  "architect-mcp",
  "architect-permissions",
  "architect-scripting",

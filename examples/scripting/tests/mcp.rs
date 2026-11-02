@@ -159,3 +159,16 @@ fn a_viewer_is_refused_part_way() {
     assert!(!failed, "{read}");
     assert_eq!(report(&read)["result"]["open"], 3);
 }
+
+/// The board says the same over MCP and over its control socket: every
+/// action the agent may run, listed, described and (the read-only ones)
+/// run the same on both.
+#[test]
+fn mcp_and_the_cli_agree() {
+    let app = App::new().expect("the board");
+    let report = architect_mcp::parity::Parity::new(&app.mcp(agent()))
+        .run("TASKS_LIST", None)
+        .check()
+        .unwrap_or_else(|mismatch| panic!("{mismatch}"));
+    assert!(report.actions >= 5, "{report:?}");
+}

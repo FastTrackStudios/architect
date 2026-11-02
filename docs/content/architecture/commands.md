@@ -265,7 +265,8 @@ tokio::spawn(architect_mcp::http::serve(listener, server, Some(token)));
   with no principal runs as the server's (`with_principal`), never as
   the trusted app.
 - A failed tool answers `isError: true` with a JSON object
-  (`{"error": …}`, plus `takes` for bad arguments) by default.
+  (`{"code": …, "error": …}`, plus `takes` for bad arguments) by default — the
+  same JSON the control socket answers (`docs/content/guide/cli-and-mcp.md`).
   `with_errors(ErrorStyle::Text)` answers with the plain message instead:
   a handler's `Err` text as it is, bad arguments as `bad arguments: …
   It takes: {schema}`.

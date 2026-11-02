@@ -10,6 +10,7 @@ mod fleet;
 mod git;
 mod mirror;
 mod scaffold;
+mod surfaces;
 mod tags;
 
 use std::path::PathBuf;
@@ -91,6 +92,17 @@ enum Command {
     /// `task:apps/…`; sketches sit between `<!-- doc-check: off -->` and
     /// `<!-- doc-check: on -->`.
     Docs,
+    /// Check that every app serving its Action List over MCP serves it on
+    /// the command line too (and the reverse), each with a parity test.
+    ///
+    /// Reads every member's `src/` and `tests/`: a crate that serves MCP
+    /// (`serve_stdio`, `serve_loopback`, `McpHost`, …) must mount
+    /// `architect_control`'s `actions` CLI or control socket, and test with
+    /// `architect_mcp::parity::Parity` that both list the identical set
+    /// and answer alike. Also that MCP's generic tools come from the
+    /// control protocol's `Method::TOOLS`. See
+    /// `docs/content/guide/cli-and-mcp.md`.
+    Surfaces,
     /// Repoint every architect-owned git dep in a manifest at one tag.
     ///
     /// Bumping these one crate at a time is how a consumer ends up with
@@ -131,6 +143,10 @@ fn main() -> ExitCode {
                 .map(|c| c.get_name().to_owned())
                 .collect();
             docs::run_cli(&root, commands)
+        }
+        Command::Surfaces => {
+            let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            surfaces::run_cli(&root)
         }
         Command::Feature {
             action: FeatureAction::New { name },

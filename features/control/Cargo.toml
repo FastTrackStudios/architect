@@ -1,0 +1,49 @@
+[package]
+name = "architect-control"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "An app's Action List from the command line: one request and answer shape shared with MCP, a user-only local socket, and an embeddable `actions` CLI"
+
+# The Action List's surfaces (docs/content/guide/cli-and-mcp.md). The default
+# set is the shape both faces speak: `protocol` (requests, answers, failures
+# and their codes, the methods and what each takes) and `Surface`, which
+# answers a request for a caller. `architect-mcp` renders those answers as
+# MCP tool results; this crate's socket and CLI as JSON lines.
+#
+# `server` is the per-app local control endpoint: a socket only this user
+# can open (a named pipe on Windows), newline-delimited JSON, on its own
+# thread and runtime so an app with none (a Blitz window) can serve it.
+# `client` speaks to it, with no runtime. `cli` is the `actions` command an
+# app embeds as its own subcommand (`task actions …`), and the generic
+# client `architect-actions`.
+
+[features]
+default = []
+server = ["dep:tokio"]
+client = []
+cli = ["client", "dep:clap"]
+
+[[bin]]
+name = "architect-actions"
+path = "src/bin/architect-actions.rs"
+required-features = ["cli"]
+
+[dependencies]
+architect = { workspace = true, features = ["action-list"] }
+serde_json.workspace = true
+# `Surface::answer` is a future; the socket and a headless run drive it on
+# a thread of their own.
+futures = "0.3"
+# Where an app's socket is: the user's runtime directory.
+dirs = "6"
+tokio = { workspace = true, optional = true }
+clap = { workspace = true, optional = true }
+
+[dev-dependencies]
+architect-permissions.workspace = true
+facet.workspace = true
+
+[lints]
+workspace = true

@@ -11,11 +11,17 @@ architect = { workspace = true, features = ["action-list"] }
 # step of the board's `crdt::History`.
 architect-scripting = { workspace = true, features = ["luau", "crdt"] }
 architect-mcp = { path = "../../features/mcp" }
+# `scripting actions …` and `scripting serve`: the board from the command
+# line, the same as over MCP.
+architect-control = { workspace = true, features = ["server", "cli"] }
 architect-permissions.workspace = true
 crdt.workspace = true
 facet.workspace = true
 futures = "0.3"
 serde_json.workspace = true
+
+[dev-dependencies]
+architect-mcp = { path = "../../features/mcp", features = ["parity"] }
 
 [[bin]]
 name = "scripting"

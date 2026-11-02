@@ -75,16 +75,25 @@
 //! `confirmation` change (`"<ticket> approved"` or `"<ticket> denied"`).
 //!
 //! **Errors.** A tool that fails answers `isError: true` with a JSON
-//! object (`{"error": …}`, and `takes` for bad arguments) by default;
+//! object (`{"code": …, "error": …}`, and `takes` for bad arguments; the
+//! codes are `architect_control::protocol::Code`) by default;
 //! [`Server::with_errors`]`(`[`ErrorStyle::Text`]`)` answers with the
 //! message as plain text instead.
 
-use std::collections::BTreeMap;
-use std::time::Duration;
+//! **The same answers as the command line.** The generic tools are the
+//! requests of `architect-control`'s protocol: parsed by
+//! `architect_control::protocol::Request::parse` and answered by
+//! [`Surface::answer`], which the app's control socket and its `actions`
+//! CLI answer with too. This crate only renders an answer as a tool
+//! result, so a model and a script told the same thing get the same JSON.
 
-use architect::action::{
-    ActionCaller, ActionError, ActionEvent, ActionInfo, ActionList, Effect, EventKind, Principal,
-};
+use std::collections::BTreeMap;
+
+use architect::action::{ActionCaller, ActionInfo, ActionList, Effect, Principal};
+pub use architect_control::Surface;
+use architect_control::protocol::{Answer, Failure, Method, Request};
+pub use architect_control::protocol::{MAX_BATCH_STEPS, MAX_EVENTS, MAX_WAIT};
+use architect_control::with_ticket;
 use serde_json::{Value, json};
 
 pub mod discovery;
@@ -93,6 +102,13 @@ pub mod discovery;
 pub mod host;
 #[cfg(feature = "http")]
 pub mod http;
+// MCP over stdio for an app that is running elsewhere, through its
+// control socket.
+#[cfg(feature = "bridge")]
+pub mod bridge;
+// The same set and the same answers over MCP and the control socket.
+#[cfg(feature = "parity")]
+pub mod parity;
 
 pub use discovery::{
     DISABLE_ENV, Discovery, disabled, discovery_path, project_mcp_json, publish, publish_in, read,
@@ -108,15 +124,6 @@ pub const PROTOCOL_VERSIONS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05
 
 /// The most text one tool result carries before it is cut.
 pub const MAX_TEXT: usize = 100_000;
-
-/// The longest a `watch` waits for something to happen.
-pub const MAX_WAIT: Duration = Duration::from_secs(30);
-
-/// The most events one `watch` returns.
-pub const MAX_EVENTS: usize = 500;
-
-/// The most steps one `batch` runs; a longer one is refused whole.
-pub const MAX_BATCH_STEPS: usize = 64;
 
 /// A JSON-RPC error code: the method is not one this server has.
 const METHOD_NOT_FOUND: i64 = -32_601;
@@ -146,9 +153,9 @@ pub enum Tools {
 /// How a [`Server`] tells a model that a tool failed.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ErrorStyle {
-    /// A JSON object: `{"error": "…"}`, with `takes` (the arguments'
-    /// schema) for bad arguments and `disabled: true` for a disabled
-    /// action.
+    /// A JSON object: `{"code": …, "error": "…"}`, with `takes` (the
+    /// arguments' schema) for bad arguments and `disabled: true` for a
+    /// disabled action — what the control socket answers, too.
     #[default]
     Json,
     /// The message as plain text (`bad arguments: … It takes: {schema}`),
@@ -181,20 +188,18 @@ impl std::error::Error for ToolError {}
 /// Who the server's own calls are made as, when a caller names nobody.
 static ANONYMOUS: Principal = Principal::Anonymous;
 
-/// The principal a call is made as: [`Server::as_model`] always sets one.
+/// The principal a call is made as: [`Surface::caller`] always sets one.
 fn principal_of(caller: &ActionCaller) -> &Principal {
     caller.principal().unwrap_or(&ANONYMOUS)
 }
 
-/// The server: an app's name, what it tells a model on connecting, and
-/// its Action List.
+/// The server: an app's [`Surface`] (its name, version, Action List and
+/// principal), what it tells a model on connecting, and which tools it
+/// offers.
 #[derive(Clone, Debug)]
 pub struct Server {
-    name: String,
-    version: String,
+    surface: Surface,
     instructions: String,
-    list: ActionList,
-    principal: Principal,
     tools: Tools,
     /// Action id → tool name, where it is not the id in lower case.
     tool_names: BTreeMap<String, String>,
@@ -205,12 +210,16 @@ impl Server {
     /// A server for `list`, introducing itself as `name` `version`.
     #[must_use]
     pub fn new(name: impl Into<String>, version: impl Into<String>, list: ActionList) -> Self {
+        Self::over(Surface::new(name, version, list))
+    }
+
+    /// A server over `surface`: the one the app's control socket serves
+    /// too, so both make a caller that names nobody the same principal.
+    #[must_use]
+    pub fn over(surface: Surface) -> Self {
         Self {
-            name: name.into(),
-            version: version.into(),
+            surface,
             instructions: String::new(),
-            list,
-            principal: Principal::Anonymous,
             tools: Tools::Generic,
             tool_names: BTreeMap::new(),
             errors: ErrorStyle::Json,
@@ -255,7 +264,7 @@ impl Server {
     /// message [`Self::handle`] answers. `Anonymous` unless set.
     #[must_use]
     pub fn with_principal(mut self, principal: Principal) -> Self {
-        self.principal = principal;
+        self.surface = self.surface.with_principal(principal);
         self
     }
 
@@ -270,7 +279,14 @@ impl Server {
     /// The list it serves.
     #[must_use]
     pub const fn list(&self) -> &ActionList {
-        &self.list
+        self.surface.list()
+    }
+
+    /// The surface it answers from: what the app's control socket serves
+    /// for the CLI.
+    #[must_use]
+    pub const fn surface(&self) -> &Surface {
+        &self.surface
     }
 
     /// One JSON-RPC message in, its reply out — `None` for a
@@ -281,7 +297,7 @@ impl Server {
     /// await [`Self::handle_async`].
     #[must_use]
     pub fn handle(&self, message: &str) -> Option<String> {
-        self.handle_as(&self.principal, message)
+        self.handle_as(self.surface.principal(), message)
     }
 
     /// One JSON-RPC message in, its reply out, as `who` — for a transport
@@ -315,7 +331,7 @@ impl Server {
 
     /// [`Self::handle_with`], awaiting async actions.
     pub async fn handle_with_async(&self, caller: &ActionCaller, message: &str) -> Option<String> {
-        let caller = self.as_model(caller);
+        let caller = self.surface.caller(caller);
         let request: Value = match serde_json::from_str(message) {
             Ok(v) => v,
             Err(e) => {
@@ -336,14 +352,6 @@ impl Server {
             Err((code, message)) => error_reply(&id, code, &message),
         };
         Some(reply.to_string())
-    }
-
-    /// `caller`, made as the server's principal when it names none.
-    fn as_model(&self, caller: &ActionCaller) -> ActionCaller {
-        match caller.principal() {
-            Some(_) => caller.clone(),
-            None => caller.clone().with_principal(self.principal.clone()),
-        }
     }
 
     async fn dispatch(
@@ -370,25 +378,21 @@ impl Server {
                     .await
                     .map_err(|e| (INVALID_PARAMS, e.to_string()))
             }
-            "resources/list" => Ok(json!({ "resources": [{
-                "uri": "actions://list",
-                "name": "Action List",
-                "description": "Every action the app has: id, what it does, its effect, whether it takes arguments.",
-                "mimeType": "application/json",
-            }]})),
+            "resources/list" => Ok(json!({ "resources": resources() })),
             "resources/read" => {
                 let uri = params
                     .get("uri")
                     .and_then(Value::as_str)
                     .unwrap_or_default();
-                if uri != "actions://list" {
-                    return Err((INVALID_PARAMS, format!("no resource {uri}")));
-                }
-                let all: Vec<Value> = self.list.infos_for(who).iter().map(summary).collect();
+                let text = match uri {
+                    "actions://list" => Value::Array(self.surface.listing(who)).to_string(),
+                    "actions://schema" => self.surface.schema(who).to_string(),
+                    _ => return Err((INVALID_PARAMS, format!("no resource {uri}"))),
+                };
                 Ok(json!({ "contents": [{
                     "uri": uri,
                     "mimeType": "application/json",
-                    "text": Value::Array(all).to_string(),
+                    "text": text,
                 }]}))
             }
             _ => Err((METHOD_NOT_FOUND, format!("no method {method}"))),
@@ -396,61 +400,18 @@ impl Server {
     }
 
     fn initialize(&self, who: &Principal, params: &Value) -> Value {
-        let asked = params
-            .get("protocolVersion")
-            .and_then(Value::as_str)
-            .unwrap_or(PROTOCOL_VERSION);
-        let version = if PROTOCOL_VERSIONS.contains(&asked) {
-            asked
-        } else {
-            PROTOCOL_VERSION
-        };
-        let mut instructions = self.instructions.clone();
-        if !instructions.is_empty() {
-            instructions.push_str("\n\n");
-        }
-        if self.tools == Tools::Named {
-            instructions.push_str(&format!(
-                "Each of {}'s actions ({} of them) is a tool of its own — the same actions its \
-                 keys and menus run. A tool's hints say whether it only reads, changes the app, \
-                 or may not be undoable: say what you are about to do before a destructive one.",
-                self.name,
-                self.list.infos_for(who).len(),
-            ));
-            return self.initialized(version, instructions);
-        }
-        if self.tools == Tools::Both {
-            instructions.push_str("Each action is also a tool of its own, named after it. ");
-        }
-        instructions.push_str(&format!(
-            "Everything {} can do is an action in its Action List ({} of them) — the same \
-             actions its keys and menus run. Find one with `actions` (filter by text), read what \
-             it takes with `describe`, run it with `run`, or several in order with `batch` \
-             (at most {} steps, not atomic: steps that ran stay done when a later one fails). \
-             An action listed `enabled: false` says why it cannot run now. Read-only actions are safe to run freely; mutating ones change the open project; \
-             destructive ones may not be undoable — say what you are about to do first. \
-             When one answers `confirmation_required`, a person is being asked in the app: \
-             wait (a `watch` hears `<ticket> approved` or `denied`), then run the same call \
-             again with its `ticket`. \
-             `watch` tells you what has happened since a point (pass back the `next` it \
-             returns), and waits for the next change when you ask it to.",
-            self.name,
-            self.list.infos_for(who).len(),
-            MAX_BATCH_STEPS,
-        ));
-        self.initialized(version, instructions)
-    }
-
-    fn initialized(&self, version: &str, instructions: String) -> Value {
-        json!({
-            "protocolVersion": version,
-            "capabilities": {
-                "tools": { "listChanged": false },
-                "resources": { "listChanged": false, "subscribe": false },
-            },
-            "serverInfo": { "name": self.name, "version": self.version },
-            "instructions": instructions,
-        })
+        let count = self.list().infos_for(who).len();
+        initialized(
+            params,
+            self.surface.name(),
+            self.surface.version(),
+            instructions(
+                &self.instructions,
+                self.tools,
+                self.surface.name(),
+                Some(count),
+            ),
+        )
     }
 
     /// The tools `who` is offered, each as a `tools/list` entry (`name`,
@@ -460,10 +421,7 @@ impl Server {
     pub fn tools_for(&self, who: &Principal) -> Vec<Value> {
         let mut out = match self.tools {
             Tools::Named => Vec::new(),
-            Tools::Generic | Tools::Both => match tools() {
-                Value::Array(generic) => generic,
-                _ => Vec::new(),
-            },
+            Tools::Generic | Tools::Both => generic_tools(),
         };
         if self.tools != Tools::Generic {
             out.extend(
@@ -480,11 +438,11 @@ impl Server {
     /// those are offered.
     fn named(&self, who: &Principal) -> Vec<(String, ActionInfo)> {
         let mut taken: Vec<String> = match self.tools {
-            Tools::Both => tools_spec().iter().map(|t| t.name.to_owned()).collect(),
+            Tools::Both => Method::TOOLS.iter().map(|t| t.name().to_owned()).collect(),
             Tools::Generic | Tools::Named => Vec::new(),
         };
         let mut out = Vec::new();
-        for info in self.list.infos_for(who) {
+        for info in self.list().infos_for(who) {
             let tool = self.tool_name(&info.id);
             if taken.contains(&tool) {
                 continue;
@@ -512,14 +470,13 @@ impl Server {
         name: &str,
         arguments: Value,
     ) -> Result<Value, ToolError> {
-        let caller = self.as_model(caller);
+        let caller = self.surface.caller(caller);
         let who = principal_of(&caller);
-        let args = arguments;
         let generic = match self.tools {
             Tools::Named => None,
-            Tools::Generic | Tools::Both => tools_spec().iter().find(|t| t.name == name),
+            Tools::Generic | Tools::Both => Method::TOOLS.into_iter().find(|m| m.name() == name),
         };
-        let Some(spec) = generic else {
+        let Some(method) = generic else {
             if self.tools == Tools::Generic {
                 return Err(ToolError::NoTool(name.to_owned()));
             }
@@ -527,216 +484,133 @@ impl Server {
                 return Err(ToolError::NoTool(name.to_owned()));
             };
             // A confirmation ticket rides beside the action's own arguments.
-            let mut args = args;
-            let ticket = args
+            let mut arguments = arguments;
+            let ticket = arguments
                 .as_object_mut()
                 .and_then(|object| object.remove(NAMED_TICKET))
                 .and_then(|t| t.as_str().map(str::to_owned));
             let args = if wraps(&info) {
-                args.get("args").cloned()
+                arguments.get("args").cloned()
             } else {
-                Some(args)
+                Some(arguments)
             };
             let caller = with_ticket(&caller, ticket.as_deref());
-            return Ok(match self.run_one(&caller, &info.id, args.as_ref()).await {
-                Ok(value) => text_result(&value, false),
-                Err(error) => self.failure_result(&error),
-            });
-        };
-        // An argument the tool does not take is a mistake to say, not to
-        // ignore: the caller meant something by it.
-        if let Some(object) = args.as_object() {
-            let unknown: Vec<&String> = object
-                .keys()
-                .filter(|k| !spec.keys.contains(&k.as_str()))
-                .collect();
-            if !unknown.is_empty() {
-                return Err(ToolError::BadParams(format!(
-                    "{name} takes {:?}, not {unknown:?}",
-                    spec.keys
-                )));
-            }
-        }
-        Ok(match name {
-            "actions" => text_result(&self.actions(who, &args), false),
-            "describe" => match args
-                .get("id")
-                .and_then(Value::as_str)
-                .and_then(|id| self.list.info_for(who, id))
-            {
-                Some(info) => text_result(&detail(&info), false),
-                None => match self.errors {
-                    ErrorStyle::Json => text_result(
-                        &json!({"error": "no such action — find it with `actions`"}),
-                        true,
-                    ),
-                    ErrorStyle::Text => {
-                        content_result("no such action — find it with `actions`".to_owned(), true)
-                    }
-                },
-            },
-            "run" => {
-                let id = args.get("id").and_then(Value::as_str).unwrap_or_default();
-                let caller = with_ticket(&caller, args.get("ticket").and_then(Value::as_str));
-                match self.run_one(&caller, id, args.get("args")).await {
+            return Ok(
+                match self.surface.run_one(&caller, &info.id, args.as_ref()).await {
                     Ok(value) => text_result(&value, false),
-                    Err(error) => self.failure_result(&error),
-                }
-            }
-            "batch" => {
-                let (value, failed) = self.batch(&caller, &args).await;
-                text_result(&value, failed)
-            }
-            "watch" => text_result(&self.watch(&args), false),
-            _ => return Err(ToolError::NoTool(name.to_owned())),
-        })
-    }
-
-    fn actions(&self, who: &Principal, args: &Value) -> Value {
-        let text = args
-            .get("filter")
-            .and_then(Value::as_str)
-            .map(str::to_lowercase);
-        let category = args
-            .get("category")
-            .and_then(Value::as_str)
-            .map(str::to_lowercase);
-        let effect = args
-            .get("effect")
-            .and_then(Value::as_str)
-            .map(str::to_lowercase);
-        let found: Vec<Value> = self
-            .list
-            .infos_for(who)
-            .iter()
-            .filter(|i| {
-                text.as_deref().is_none_or(|t| {
-                    [
-                        &i.id,
-                        &i.display_name,
-                        &i.description,
-                        &i.category,
-                        &i.group,
-                    ]
-                    .iter()
-                    .any(|f| f.to_lowercase().contains(t))
-                })
-            })
-            .filter(|i| {
-                category
-                    .as_deref()
-                    .is_none_or(|c| i.category.to_lowercase() == c)
-            })
-            .filter(|i| effect.as_deref().is_none_or(|e| effect_name(i.effect) == e))
-            .map(summary)
-            .collect();
-        json!({ "count": found.len(), "actions": found })
-    }
-
-    /// Run one action as `caller`, its JSON result or what went wrong.
-    async fn run_one(
-        &self,
-        caller: &ActionCaller,
-        id: &str,
-        args: Option<&Value>,
-    ) -> Result<Value, ActionError> {
-        let bytes = match args {
-            None | Some(Value::Null) => Vec::new(),
-            Some(v) => v.to_string().into_bytes(),
+                    Err(failure) => self.failure_result(&failure),
+                },
+            );
         };
-        let out = self.list.run_json_async_with(caller, id, &bytes).await?;
-        Ok(serde_json::from_slice(&out).unwrap_or(Value::Null))
+        let request = match Request::parse(method.name(), &arguments) {
+            Ok(request) => request,
+            Err(refused) => return Err(ToolError::BadParams(refused.error)),
+        };
+        Ok(self.render(&self.surface.answer(&caller, &request).await))
     }
 
-    /// What went wrong, as the server tells it: a JSON object, or the
-    /// message as a JSON string ([`ErrorStyle::Text`]).
-    fn failure(&self, error: &ActionError) -> Value {
-        match self.errors {
-            ErrorStyle::Json => failure_json(error),
-            ErrorStyle::Text => Value::String(failure_text(error)),
+    /// An answer as a tool result, in the server's [`ErrorStyle`].
+    fn render(&self, answer: &Answer) -> Value {
+        match answer {
+            Answer::Done(value) => text_result(value, false),
+            Answer::Failed(failure) => self.failure_result(failure),
+            Answer::Batch(batch) => text_result(
+                &batch.to_json(self.errors == ErrorStyle::Text),
+                batch.failure().is_some(),
+            ),
         }
     }
 
     /// A tool result saying what went wrong, in the server's style.
-    fn failure_result(&self, error: &ActionError) -> Value {
+    fn failure_result(&self, failure: &Failure) -> Value {
         match self.errors {
-            ErrorStyle::Json => text_result(&failure_json(error), true),
-            ErrorStyle::Text => content_result(failure_text(error), true),
+            ErrorStyle::Json => text_result(&failure.to_json(), true),
+            ErrorStyle::Text => content_result(failure.to_text(), true),
         }
     }
+}
 
-    /// Each step runs as `caller`, through the same door as `run` — a
-    /// step is authorized on its own. Not atomic: what ran stays done.
-    async fn batch(&self, caller: &ActionCaller, args: &Value) -> (Value, bool) {
-        let stop = args
-            .get("stop_on_error")
-            .and_then(Value::as_bool)
-            .unwrap_or(true);
-        let steps = args
-            .get("steps")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default();
-        if steps.len() > MAX_BATCH_STEPS {
-            return (
-                json!({
-                    "error": format!(
-                        "{} steps; a batch runs at most {MAX_BATCH_STEPS} — split it",
-                        steps.len()
-                    ),
-                    "ran": 0,
-                    "of": steps.len(),
-                }),
-                true,
-            );
-        }
-        let mut results = Vec::with_capacity(steps.len());
-        let mut failed = false;
-        for (i, step) in steps.iter().enumerate() {
-            let id = step.get("id").and_then(Value::as_str).unwrap_or_default();
-            let caller = with_ticket(caller, step.get("ticket").and_then(Value::as_str));
-            match self.run_one(&caller, id, step.get("args")).await {
-                Ok(value) => {
-                    results.push(json!({"step": i, "id": id, "ok": true, "result": value}))
-                }
-                Err(error) => {
-                    failed = true;
-                    let error = self.failure(&error);
-                    results.push(json!({"step": i, "id": id, "ok": false, "error": error}));
-                    if stop {
-                        break;
-                    }
-                }
-            }
-        }
-        (
-            json!({ "ran": results.len(), "of": steps.len(), "results": results }),
-            failed,
-        )
-    }
+/// What `initialize` answers: the revision asked for (when this server
+/// speaks it), what the server is, what the model is told.
+pub(crate) fn initialized(
+    params: &Value,
+    name: &str,
+    version: &str,
+    instructions: String,
+) -> Value {
+    let asked = params
+        .get("protocolVersion")
+        .and_then(Value::as_str)
+        .unwrap_or(PROTOCOL_VERSION);
+    let version_spoken = if PROTOCOL_VERSIONS.contains(&asked) {
+        asked
+    } else {
+        PROTOCOL_VERSION
+    };
+    json!({
+        "protocolVersion": version_spoken,
+        "capabilities": {
+            "tools": { "listChanged": false },
+            "resources": { "listChanged": false, "subscribe": false },
+        },
+        "serverInfo": { "name": name, "version": version },
+        "instructions": instructions,
+    })
+}
 
-    fn watch(&self, args: &Value) -> Value {
-        let since = args
-            .get("since")
-            .and_then(Value::as_u64)
-            .unwrap_or_else(|| self.list.latest());
-        let max = args
-            .get("max")
-            .and_then(Value::as_u64)
-            .and_then(|m| usize::try_from(m).ok())
-            .unwrap_or(100)
-            .min(MAX_EVENTS);
-        let wait = args
-            .get("wait_ms")
-            .and_then(Value::as_u64)
-            .map_or(Duration::ZERO, Duration::from_millis)
-            .min(MAX_WAIT);
-        let (events, next) = self.list.events_since(since, max, wait);
-        json!({
-            "next": next,
-            "events": events.iter().map(event).collect::<Vec<_>>(),
-        })
+/// What a model is told on connecting: the app's own words, then how to
+/// use the tools on offer. `count` is how many actions it may run, when
+/// known.
+pub(crate) fn instructions(own: &str, tools: Tools, name: &str, count: Option<usize>) -> String {
+    let mut text = own.to_owned();
+    if !text.is_empty() {
+        text.push_str("\n\n");
     }
+    let count = count.map_or_else(String::new, |n| format!(" ({n} of them)"));
+    if tools == Tools::Named {
+        text.push_str(&format!(
+            "Each of {name}'s actions{count} is a tool of its own — the same actions its \
+             keys and menus run. A tool's hints say whether it only reads, changes the app, \
+             or may not be undoable: say what you are about to do before a destructive one."
+        ));
+        return text;
+    }
+    if tools == Tools::Both {
+        text.push_str("Each action is also a tool of its own, named after it. ");
+    }
+    text.push_str(&format!(
+        "Everything {name} can do is an action in its Action List{count} — the same \
+         actions its keys and menus run. Find one with `actions` (filter by text), read what \
+         it takes with `describe`, run it with `run`, or several in order with `batch` \
+         (at most {MAX_BATCH_STEPS} steps, not atomic: steps that ran stay done when a later one fails). \
+         An action listed `enabled: false` says why it cannot run now. Read-only actions are safe to run freely; mutating ones change the open project; \
+         destructive ones may not be undoable — say what you are about to do first. \
+         When one answers `confirmation_required`, a person is being asked in the app: \
+         wait (a `watch` hears `<ticket> approved` or `denied`), then run the same call \
+         again with its `ticket`. \
+         `watch` tells you what has happened since a point (pass back the `next` it \
+         returns), and waits for the next change when you ask it to."
+    ));
+    text
+}
+
+/// The resources every server lists: the list, and the list as JSON
+/// Schema (the control socket's `schema`).
+pub(crate) fn resources() -> Value {
+    json!([
+        {
+            "uri": "actions://list",
+            "name": "Action List",
+            "description": "Every action the app has: id, what it does, its effect, whether it takes arguments.",
+            "mimeType": "application/json",
+        },
+        {
+            "uri": "actions://schema",
+            "name": "Action List schema",
+            "description": "Every action as one JSON Schema document: each a `{id, args}` run, its effect and what it gives back.",
+            "mimeType": "application/json",
+        },
+    ])
 }
 
 /// Serve `server` over stdin/stdout, one JSON-RPC message a line, until
@@ -746,6 +620,11 @@ impl Server {
 ///
 /// Reading stdin or writing stdout failed.
 pub fn serve_stdio(server: &Server) -> std::io::Result<()> {
+    serve_lines(|line| server.handle(line))
+}
+
+/// stdin's lines, each answered by `answer` on stdout, until stdin closes.
+pub(crate) fn serve_lines(answer: impl Fn(&str) -> Option<String>) -> std::io::Result<()> {
     use std::io::{BufRead as _, Write as _};
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
@@ -754,7 +633,7 @@ pub fn serve_stdio(server: &Server) -> std::io::Result<()> {
         if line.trim().is_empty() {
             continue;
         }
-        if let Some(reply) = server.handle(&line) {
+        if let Some(reply) = answer(&line) {
             stdout.write_all(reply.as_bytes())?;
             stdout.write_all(b"\n")?;
             stdout.flush()?;
@@ -763,103 +642,29 @@ pub fn serve_stdio(server: &Server) -> std::io::Result<()> {
     Ok(())
 }
 
-/// A tool: its name, the arguments it takes, and how it is described.
-struct ToolSpec {
-    name: &'static str,
-    keys: &'static [&'static str],
-    read_only: bool,
+/// The generic tools, as `tools/list` gives them: the control protocol's
+/// methods, each with its description, parameters and hints.
+pub(crate) fn generic_tools() -> Vec<Value> {
+    Method::TOOLS
+        .iter()
+        .map(|m| {
+            json!({
+                "name": m.name(),
+                "description": m.description(),
+                "inputSchema": m.input_schema(),
+                "annotations": {
+                    "readOnlyHint": m.read_only(),
+                    "destructiveHint": !m.read_only(),
+                    "openWorldHint": false,
+                },
+            })
+        })
+        .collect()
 }
 
-const fn tools_spec() -> &'static [ToolSpec] {
-    &[
-        ToolSpec {
-            name: "actions",
-            keys: &["filter", "category", "effect"],
-            read_only: true,
-        },
-        ToolSpec {
-            name: "describe",
-            keys: &["id"],
-            read_only: true,
-        },
-        ToolSpec {
-            name: "run",
-            keys: &["id", "args", "ticket"],
-            read_only: false,
-        },
-        ToolSpec {
-            name: "batch",
-            keys: &["steps", "stop_on_error"],
-            read_only: false,
-        },
-        ToolSpec {
-            name: "watch",
-            keys: &["since", "max", "wait_ms"],
-            read_only: true,
-        },
-    ]
-}
-
-/// The tools, as `tools/list` gives them.
-fn tools() -> Value {
-    let annotate = |name: &str| {
-        let read_only = tools_spec().iter().any(|t| t.name == name && t.read_only);
-        json!({ "readOnlyHint": read_only, "destructiveHint": !read_only, "openWorldHint": false })
-    };
-    json!([
-        {
-            "name": "actions",
-            "description": "List the app's actions — everything it can do — by id, with what each does, its category, its effect (read-only, mutating, destructive) and whether it takes arguments. Filter by text (matches id, name, description, category, group), category, or effect.",
-            "inputSchema": {"type": "object", "properties": {
-                "filter": {"type": "string", "description": "Text to look for."},
-                "category": {"type": "string"},
-                "effect": {"type": "string", "enum": ["read-only", "mutating", "destructive"]},
-            }},
-            "annotations": annotate("actions"),
-        },
-        {
-            "name": "describe",
-            "description": "One action in full: what it does, the JSON Schema of the arguments it takes and of what it gives back.",
-            "inputSchema": {"type": "object", "required": ["id"], "properties": {
-                "id": {"type": "string", "description": "The action's id, from `actions`."},
-            }},
-            "annotations": annotate("describe"),
-        },
-        {
-            "name": "run",
-            "description": "Run an action. `args` is what it takes (see `describe`); leave it out for an action that takes nothing. Gives back the action's result, or what went wrong and what it takes. When a person must approve the call first, it answers `confirmation_required` with a `ticket`: run the same call again with that `ticket` once they have.",
-            "inputSchema": {"type": "object", "required": ["id"], "properties": {
-                "id": {"type": "string"},
-                "args": {"type": "object", "description": "The action's arguments, as its schema says."},
-                "ticket": {"type": "string", "description": "The ticket a `confirmation_required` answer gave, once a person approved it; good for this exact call, once."},
-            }},
-            "annotations": annotate("run"),
-        },
-        {
-            "name": "batch",
-            "description": format!("Run several actions in order — each `{{id, args}}` — stopping at the first that fails unless `stop_on_error` is false. At most {MAX_BATCH_STEPS} steps. Not atomic: steps that ran stay done when a later one fails, and nothing is rolled back. Gives back each step's result."),
-            "inputSchema": {"type": "object", "required": ["steps"], "properties": {
-                "steps": {"type": "array", "maxItems": MAX_BATCH_STEPS, "items": {"type": "object", "required": ["id"], "properties": {
-                    "id": {"type": "string"},
-                    "args": {"type": "object"},
-                    "ticket": {"type": "string"},
-                }}},
-                "stop_on_error": {"type": "boolean"},
-            }},
-            "annotations": annotate("batch"),
-        },
-        {
-            "name": "watch",
-            "description": "What has happened in the app since `since` (leave it out for 'from now'): actions run, and state that changed (a topic such as tracks or project, and which). Pass back the `next` it returns to keep following. With `wait_ms`, waits up to that long (30 s at most) for something when nothing has happened yet.",
-            "inputSchema": {"type": "object", "properties": {
-                "since": {"type": "integer", "minimum": 0},
-                "max": {"type": "integer", "minimum": 1},
-                "wait_ms": {"type": "integer", "minimum": 0},
-            }},
-            "annotations": annotate("watch"),
-        },
-    ])
-}
+/// Where a named tool takes a confirmation ticket, beside the action's
+/// own arguments (`run` and `batch` steps take `ticket`).
+pub const NAMED_TICKET: &str = "_ticket";
 
 /// Whether an action's arguments are not an object — so its named tool
 /// takes them as `{"args": …}`, MCP's input being an object always.
@@ -910,91 +715,13 @@ fn named_tool(tool: &str, info: &ActionInfo) -> Value {
     })
 }
 
-/// What went wrong, as a JSON object: `error`, with `takes` for bad
-/// arguments and `disabled` for a disabled action.
-fn failure_json(error: &ActionError) -> Value {
-    match error {
-        ActionError::Unknown(id) => json!({
-            "error": format!("no action {id} — find it with `actions`"),
-        }),
-        ActionError::Duplicate(id) => json!({
-            "error": format!("{id} is registered more than once"),
-        }),
-        ActionError::BadArgs {
-            message, expected, ..
-        } => json!({
-            "error": format!("bad arguments: {message}"),
-            "takes": expected.as_deref().and_then(|s| serde_json::from_str::<Value>(s).ok()),
-        }),
-        ActionError::Failed { message, .. } => json!({ "error": message }),
-        ActionError::Denied { reason, .. } => json!({ "error": format!("not allowed: {reason}") }),
-        ActionError::Disabled { reason, .. } => json!({
-            "error": format!("disabled: {reason}"),
-            "disabled": true,
-        }),
-        ActionError::ConfirmationRequired {
-            id,
-            ticket,
-            expires_in,
-        } => json!({
-            "error": format!(
-                "confirmation_required: a person must approve {id} in the app first; \
-                 run the same call again with this ticket once they have"
-            ),
-            "confirmation_required": true,
-            "ticket": ticket,
-            "expires_in_ms": u64::try_from(expires_in.as_millis()).unwrap_or(u64::MAX),
-        }),
-    }
-}
-
-/// Where a named tool takes a confirmation ticket, beside the action's
-/// own arguments (`run` and `batch` steps take `ticket`).
-pub const NAMED_TICKET: &str = "_ticket";
-
-/// `caller`, carrying `ticket` when the call brought one.
-fn with_ticket(caller: &ActionCaller, ticket: Option<&str>) -> ActionCaller {
-    match ticket {
-        Some(ticket) => caller.clone().with_ticket(ticket),
-        None => caller.clone(),
-    }
-}
-
-/// What went wrong, as plain text: a failed handler's own message as it
-/// is; the rest as [`failure_json`]'s `error`, bad arguments followed by
-/// the schema they should match.
-fn failure_text(error: &ActionError) -> String {
-    match error {
-        ActionError::Failed { message, .. } => message.clone(),
-        ActionError::BadArgs {
-            message,
-            expected: Some(schema),
-            ..
-        } => format!("bad arguments: {message}. It takes: {schema}"),
-        ActionError::ConfirmationRequired {
-            id,
-            ticket,
-            expires_in,
-        } => format!(
-            "confirmation_required: a person must approve {id} in the app first. Run the same \
-             call again with ticket {ticket} once they have (it expires in {} s).",
-            expires_in.as_secs()
-        ),
-        other => failure_json(other)
-            .get("error")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned(),
-    }
-}
-
 /// A tool's result: `value` as JSON text, cut to [`MAX_TEXT`].
-fn text_result(value: &Value, is_error: bool) -> Value {
+pub(crate) fn text_result(value: &Value, is_error: bool) -> Value {
     content_result(value.to_string(), is_error)
 }
 
 /// A tool's result: `text` as it is, cut to [`MAX_TEXT`].
-fn content_result(mut text: String, is_error: bool) -> Value {
+pub(crate) fn content_result(mut text: String, is_error: bool) -> Value {
     if text.len() > MAX_TEXT {
         let mut cut = MAX_TEXT;
         while !text.is_char_boundary(cut) {
@@ -1008,65 +735,8 @@ fn content_result(mut text: String, is_error: bool) -> Value {
     json!({ "content": [{ "type": "text", "text": text }], "isError": is_error })
 }
 
-fn error_reply(id: &Value, code: i64, message: &str) -> Value {
+pub(crate) fn error_reply(id: &Value, code: i64, message: &str) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } })
-}
-
-const fn effect_name(effect: Effect) -> &'static str {
-    match effect {
-        Effect::ReadOnly => "read-only",
-        Effect::Mutating => "mutating",
-        Effect::Destructive => "destructive",
-    }
-}
-
-/// An action as the list shows it: enough to choose one.
-fn summary(info: &ActionInfo) -> Value {
-    json!({
-        "id": info.id,
-        "name": info.display_name,
-        "description": info.description,
-        "category": info.category,
-        "effect": effect_name(info.effect),
-        "takes_args": info.params_schema.is_some(),
-        "shortcut": (!info.shortcut.is_empty()).then_some(&info.shortcut),
-        "enabled": info.enabled,
-        "disabled_reason": info.disabled_reason,
-        "checked": info.checked,
-    })
-}
-
-/// An action in full, its schemas as JSON.
-fn detail(info: &ActionInfo) -> Value {
-    let schema = |s: &Option<String>| {
-        s.as_deref()
-            .and_then(|s| serde_json::from_str::<Value>(s).ok())
-    };
-    json!({
-        "id": info.id,
-        "name": info.display_name,
-        "description": info.description,
-        "category": info.category,
-        "group": info.group,
-        "effect": effect_name(info.effect),
-        "shortcut": (!info.shortcut.is_empty()).then_some(&info.shortcut),
-        "takes": schema(&info.params_schema),
-        "gives": schema(&info.result_schema),
-        "enabled": info.enabled,
-        "disabled_reason": info.disabled_reason,
-        "checked": info.checked,
-    })
-}
-
-fn event(e: &ActionEvent) -> Value {
-    match &e.kind {
-        EventKind::Ran { id, ok } => json!({"seq": e.seq, "ran": id, "ok": ok}),
-        EventKind::Changed { topic, detail } => {
-            json!({"seq": e.seq, "changed": topic, "which": detail})
-        }
-        EventKind::Registered { id } => json!({"seq": e.seq, "registered": id}),
-        EventKind::Unregistered { id } => json!({"seq": e.seq, "unregistered": id}),
-    }
 }
 
 #[cfg(test)]
@@ -1614,7 +1284,10 @@ mod tests {
             json!({"track": "a"}),
         ))
         .expect("a tool");
-        assert_eq!(out["content"][0]["text"], r#"{"error":"no track a"}"#);
+        assert_eq!(
+            out["content"][0]["text"],
+            r#"{"code":"failed","error":"no track a"}"#
+        );
 
         let s = org_server().with_errors(ErrorStyle::Text);
         let out =
