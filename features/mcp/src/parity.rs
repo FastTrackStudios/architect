@@ -290,9 +290,13 @@ fn said_by_socket(client: &mut Client, method: Method, params: &Value) -> Said {
     }
 }
 
-/// A socket path no other check uses.
+/// A socket path no other check uses, in a directory of this process's
+/// own: the control server lets in only the user who owns the socket's
+/// directory, and a shared temp dir (`/tmp`) is root's.
 fn scratch_socket() -> PathBuf {
     static NEXT: AtomicU32 = AtomicU32::new(0);
     let n = NEXT.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!("architect-parity-{}-{n}.sock", std::process::id()))
+    std::env::temp_dir()
+        .join(format!("architect-parity-{}", std::process::id()))
+        .join(format!("{n}.sock"))
 }
