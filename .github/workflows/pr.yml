@@ -68,7 +68,7 @@ jobs:
         if: ${{ !cancelled() }}
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-hakari@0.9.39
+          tool: cargo-hakari@0.9.38
       - name: hakari
         if: ${{ !cancelled() }}
         run: |
