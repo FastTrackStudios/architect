@@ -6,6 +6,7 @@ use thiserror::Error;
 
 use crate::id::{GrantId, LabelId, RootId, UploadId, VersionId};
 use crate::path::{PathError, RootPath};
+use crate::rendition::RenditionKind;
 
 #[derive(Debug, Clone, PartialEq, Eq, Facet, Error)]
 #[repr(u8)]
@@ -72,6 +73,16 @@ pub enum FilesFault {
     Io(String),
     #[error("internal: {0}")]
     Internal(String),
+
+    // ── Renditions ─────────────────────────────────────────────────
+    /// The rendition is being made (or waits its turn): ask again soon.
+    #[error("the {0} rendition is being made")]
+    RenditionPending(RenditionKind),
+    /// There is no such rendition of this version: its kind does not
+    /// apply to the source, the transcoder failed on it, or the server
+    /// makes no renditions.
+    #[error("no {kind} rendition: {reason}")]
+    NoRendition { kind: RenditionKind, reason: String },
 }
 
 impl FilesFault {
@@ -91,6 +102,61 @@ impl FilesFault {
     /// Whether retrying unchanged could succeed.
     #[must_use]
     pub const fn is_transient(&self) -> bool {
-        matches!(self, Self::Io(_))
+        matches!(self, Self::Io(_) | Self::RenditionPending(_))
+    }
+}
+
+/// How a fault reads on the HTTP face (`crate::web`).
+impl architect::http::HttpError for FilesFault {
+    fn status(&self) -> u16 {
+        match self {
+            Self::Unauthenticated => 401,
+            Self::Denied { .. } => 403,
+            Self::NoOrg
+            | Self::RootNotFound(_)
+            | Self::PathNotFound(_)
+            | Self::VersionNotFound(_)
+            | Self::LabelNotFound(_)
+            | Self::UploadNotFound(_)
+            | Self::GrantNotFound(_)
+            | Self::NoRendition { .. } => 404,
+            Self::Exists { .. } | Self::Incomplete(_) => 409,
+            Self::Stale { .. } => 412,
+            Self::QuotaExceeded { .. } => 507,
+            Self::BadPath(_)
+            | Self::NotADirectory(_)
+            | Self::NotAFile(_)
+            | Self::IntoSelf { .. }
+            | Self::Invalid(_) => 400,
+            Self::RenditionPending(_) | Self::Io(_) => 503,
+            Self::Internal(_) => 500,
+        }
+    }
+
+    fn code(&self) -> &'static str {
+        match self {
+            Self::Unauthenticated => "unauthenticated",
+            Self::NoOrg => "no_org",
+            Self::RootNotFound(_) => "root_not_found",
+            Self::PathNotFound(_) => "path_not_found",
+            Self::VersionNotFound(_) => "version_not_found",
+            Self::LabelNotFound(_) => "label_not_found",
+            Self::UploadNotFound(_) => "upload_not_found",
+            Self::GrantNotFound(_) => "grant_not_found",
+            Self::Exists { .. } => "exists",
+            Self::BadPath(_) => "bad_path",
+            Self::NotADirectory(_) => "not_a_directory",
+            Self::NotAFile(_) => "not_a_file",
+            Self::IntoSelf { .. } => "into_self",
+            Self::Invalid(_) => "invalid",
+            Self::Denied { .. } => "denied",
+            Self::Stale { .. } => "stale",
+            Self::QuotaExceeded { .. } => "quota_exceeded",
+            Self::Incomplete(_) => "incomplete",
+            Self::Io(_) => "io",
+            Self::Internal(_) => "internal",
+            Self::RenditionPending(_) => "rendition_pending",
+            Self::NoRendition { .. } => "no_rendition",
+        }
     }
 }

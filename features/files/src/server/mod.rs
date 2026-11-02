@@ -32,12 +32,29 @@
 //! In process (a server's own job, a test), [`FilesServer::acting`] is
 //! the same service for an explicit org and principal.
 //!
+//! **Renditions** ([`FilesServer::with_renditions`], `renditions.rs`):
+//! every version that lands schedules its media's renditions, made by
+//! the [`Transcoder`] given (`FfmpegTranscoder`, feature `ffmpeg`) off
+//! the request path, kept under `<data>/renditions/`.
+//!
+//! **The byte face** (feature `http`, `WebFiles`): the same service for
+//! a browser, over `crate::web`'s routes, the caller resolved from the
+//! request's session by the gate's own `IdentityResolver`, or from a
+//! read ticket ([`crate::FilesService::ticket`]) signed with this
+//! server's key ([`FilesServer::ticket_key`]).
+//!
 //! Grants can come from elsewhere too: [`FilesServer::with_grants`] adds
 //! a [`GrantSource`] (a space's members, `architect-spaces`), asked on
 //! every call, so a change there binds on the next call here.
 
 mod acting;
+#[cfg(feature = "ffmpeg")]
+mod ffmpeg;
+mod renditions;
 mod state;
+mod ticket;
+#[cfg(feature = "http")]
+mod web;
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -58,7 +75,14 @@ use crate::model::{FilesEvent, Usage};
 use crate::path::RootPath;
 
 pub use acting::Acting;
+#[cfg(feature = "ffmpeg")]
+pub use ffmpeg::FfmpegTranscoder;
+pub use renditions::{Renditions, TranscodeError, Transcoder};
 use state::State;
+pub use ticket::TICKET_TTL_US;
+use ticket::TicketKey;
+#[cfg(feature = "http")]
+pub use web::WebFiles;
 
 /// How many events a slow subscriber may fall behind before it loses the
 /// oldest.
@@ -82,6 +106,8 @@ pub trait GrantSource: Send + Sync {
 pub struct FilesServer {
     inner: Arc<Inner>,
     default_org: Option<OrgId>,
+    renditions: Option<Renditions>,
+    tickets: TicketKey,
     granted: Option<Arc<dyn GrantSource>>,
 }
 
@@ -126,8 +152,48 @@ impl FilesServer {
                 orgs: Mutex::new(HashMap::new()),
             }),
             default_org: None,
+            renditions: None,
+            tickets: TicketKey::random(),
             granted: None,
         }
+    }
+
+    /// Make renditions of every media version with `transcoder`, one at
+    /// a time, recorded under `<data>/renditions/` with their bytes in
+    /// the blob store. Without it a rendition is
+    /// [`FilesFault::NoRendition`].
+    #[must_use]
+    pub fn with_renditions(self, transcoder: impl Transcoder) -> Self {
+        let engine = Renditions::new(
+            self.inner.data.join("renditions"),
+            self.inner.blobs.clone(),
+            transcoder,
+        );
+        self.with_rendition_engine(engine)
+    }
+
+    /// Renditions made by `engine` (one built with
+    /// [`Renditions::concurrency`], or shared with another server).
+    #[must_use]
+    pub fn with_rendition_engine(mut self, engine: Renditions) -> Self {
+        self.renditions = Some(engine);
+        self
+    }
+
+    /// The renditions, if this server makes them: to build one now
+    /// ([`Renditions::build`]) or ask after one in a job of the app's.
+    #[must_use]
+    pub const fn rendition_engine(&self) -> Option<&Renditions> {
+        self.renditions.as_ref()
+    }
+
+    /// Sign read tickets with `key`, so every server sharing it (and this
+    /// one after a restart) reads the others'. Without it the key is
+    /// random, and tickets read until the server stops.
+    #[must_use]
+    pub const fn ticket_key(mut self, key: [u8; 32]) -> Self {
+        self.tickets = TicketKey::new(key);
+        self
     }
 
     /// Grants from `source` too, beside the org's own table: what a
@@ -211,6 +277,15 @@ impl FilesServer {
 
     pub(crate) fn blobs(&self) -> &LocalFs {
         &self.inner.blobs
+    }
+
+    pub(crate) const fn tickets(&self) -> &TicketKey {
+        &self.tickets
+    }
+
+    /// Whether `who` holds a role in `org` (a service is in every org).
+    pub(crate) fn is_member(&self, org: &OrgId, who: &Principal) -> bool {
+        matches!(who, Principal::Service { .. }) || self.inner.members.role(who, org).is_some()
     }
 
     /// Who `who` is in `org`, for the files feature.

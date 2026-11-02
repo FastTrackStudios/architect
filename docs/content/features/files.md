@@ -1,6 +1,6 @@
 +++
 title = "Files"
-description = "architect-files: an org's files in roots, a version per save, labels, resumable uploads and ranged reads over vox, quota, access by role and per-folder grants."
+description = "architect-files: an org's files in roots, a version per save, labels, resumable uploads and ranged reads over vox and HTTP, renditions, quota, access by role and per-folder grants."
 weight = 26
 +++
 
@@ -57,6 +57,28 @@ let bytes = files.read_range(root.id, "Cab/4x12.wav", 1_000, 1_010).await?;
 
 `Save::replacing(etag)` saves over a known version and fails on a conflict.
 
+### In a browser
+
+Feature `http` mounts the byte face, `WebFiles`, beside the vox lane. It
+answers `Range` with `206`, so a `<video>` seeks against it, and it takes
+uploads as plain resumable `PUT`s. It resolves each request's caller with the
+gate's own identity resolver. A media element cannot send a header, so it
+loads with a read ticket, minted over the org's lane. With
+`FilesServer::with_renditions` every media version gets its renditions, made
+off the request path: a proxy, a poster and peaks for a video, peaks and an
+AAC transcode for audio. From `features/files/tests/web.rs`:
+
+```rust
+let files = FilesServer::new(&data, LocalFs::new(data.join("blobs")), members.clone())
+    .with_renditions(FfmpegTranscoder::new());          // feature `ffmpeg`
+let web = WebFiles::new(files.clone(), identity);       // the gate's resolver
+let app = architect::layers![architect_files::web::Service].provide_http(&web);
+
+// The page: a ticket for the folder, then plain URLs.
+let ticket = files_client.ticket(root, "Cuts").await?;
+let src = web::rendition_url("", &org, root, RenditionKind::Proxy, &path, None, Some(&ticket.token));
+```
+
 ## Code tour
 
 1. `features/files/src/service.rs` `FilesService`: the wire: roots, browse,
@@ -74,6 +96,15 @@ let bytes = files.read_range(root.id, "Cab/4x12.wav", 1_000, 1_010).await?;
 6. `features/files/src/server/state.rs` `State`: an org's tree, versions,
    labels, grants and uploads.
 7. `features/files/src/path.rs` `RootPath`: paths inside a root, `..` refused.
+8. `features/files/src/web.rs` `FilesWeb`: the HTTP routes, and
+   `content_url` / `rendition_url` for a page to build them (wasm-clean).
+   `features/files/src/server/web.rs` `WebFiles` serves them.
+9. `features/files/src/rendition.rs` `RenditionKind`, `RenditionSet`,
+   `Peaks`; `features/files/src/server/renditions.rs` `Transcoder`,
+   `Renditions`: what is made, how, and where it is kept.
+   `features/files/src/server/ffmpeg.rs` `FfmpegTranscoder` is the real one.
+10. `features/files/src/server/ticket.rs`: read tickets, signed with the
+    server's key (`FilesServer::ticket_key`), checked again on every use.
 
 `FilesClient::put` hashes the bytes and calls `begin_upload`; the server
 answers with only the ranges it still needs (none if the org holds that
@@ -93,13 +124,24 @@ absent; an org sees only its own files and non-members are kept out; a quota
 bounds an org's bytes; an upload resumes and known bytes are not sent; events
 reach only who may see them; files survive a restart.
 
+`features/files/tests/web.rs` (feature `http`, a real socket): a browser reads
+by range as its session, a viewer reads, nobody, a stranger and another org's
+member do not, and past versions read by id. A ticket reads its folder only,
+writes nothing, does not open when forged, and stops when its minter leaves
+the org. An upload resumes over `PUT`s. A video's renditions are served
+ranged. `features/files/tests/renditions.rs`: what each class yields; the
+same bytes share renditions; renditions survive a restart and one whose blob
+is gone is made again, alone; a failed kind is reported and not asked again.
+The ignored `ffmpeg_makes_a_proxy_a_poster_and_peaks` runs the real `ffmpeg`.
+
 ## Status
 
-The core is done in architect. `FilesServer` refuses device (`Host`) and link
+The core is done in architect, and so are the HTTP byte face, the browser's
+ranged reads and renditions. `FilesServer` refuses device (`Host`) and link
 (`Guest`) callers, so files do not reach peers yet. Not yet: client sync
-(selective sync, offline copies); the browser's ranged reads and an HTTP byte
-face; desktop integrations (daemon, FUSE, File Provider, WebDAV); renditions,
-search, review and share links; federation.
+(selective sync, offline copies); a service worker that answers `Range` from
+offline copies; desktop integrations (daemon, FUSE, File Provider, WebDAV);
+filmstrips; search, review and share links; federation.
 
 - **Task** runs its own Files crates (`task:features/files`); moving onto
   `architect-files` comes after the gaps above.

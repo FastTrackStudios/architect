@@ -13,7 +13,10 @@ description = "Files: an org's roots of files and folders, versions and their la
 # the store an app talks to (still wasm-clean). `server` (native) is the
 # feature a server mounts: every org's files kept under `OrgId::path`,
 # bytes in the content-addressed blob store documents share, access by
-# the caller's role in the org and the grants on its folders.
+# the caller's role in the org and the grants on its folders, and the
+# renditions a pluggable transcoder makes of its media. `http` (native) is
+# the byte face a browser reads by range; `ffmpeg` (native) the transcoder
+# that runs the `ffmpeg` on PATH.
 
 [features]
 default = []
@@ -22,10 +25,15 @@ server = [
     "vox",
     "architect/blob",
     "architect-orgs/server",
+    "dep:base64",
     "dep:facet-json",
+    "dep:hmac",
+    "dep:rand",
     "dep:tokio",
     "uuid/v4",
 ]
+http = ["server", "architect/http"]
+ffmpeg = ["server", "tokio/process"]
 
 [dependencies]
 architect = { workspace = true }
@@ -44,14 +52,20 @@ futures-util = { version = "0.3", default-features = false, features = ["alloc"]
 sha2 = { workspace = true, optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# `server`: read tickets are signed (HMAC-SHA256) with a key the server
+# holds, and travel as URL-safe base64.
+base64 = { workspace = true, optional = true }
 facet-json = { version = "0.50.0-rc.5", optional = true }
+hmac = { version = "0.12", optional = true }
+rand = { workspace = true, optional = true }
 tokio = { version = "1", default-features = false, features = ["fs", "io-util", "rt", "sync"], optional = true }
 
 [dev-dependencies]
 # The tests drive the server and the client: build them with both.
-architect-files = { path = ".", features = ["server"] }
-architect = { workspace = true, features = ["vox", "local"] }
+architect-files = { path = ".", features = ["server", "http", "ffmpeg"] }
+architect = { workspace = true, features = ["vox", "local", "http", "http-client"] }
 architect-permissions = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
 tempfile = "3"
 tokio = { workspace = true }
 vox = { workspace = true }
