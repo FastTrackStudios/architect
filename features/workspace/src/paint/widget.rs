@@ -64,6 +64,9 @@ impl PaintWidget {
     }
 }
 
+#[cfg(test)]
+mod document_tests;
+
 impl Widget for PaintWidget {
     fn handle_event(&mut self, event: &UiEvent) {
         self.sync_theme();

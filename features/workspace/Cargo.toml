@@ -81,6 +81,8 @@ doctest = false
 architect-workspace = { path = ".", features = ["ctx", "paint"] }
 # A paint view's scene rasterised to check it against its hit test.
 anyrender_vello_cpu = { workspace = true }
+# Exercise the mounted widget through Blitz's document painter.
+blitz-paint = { workspace = true, features = ["custom-widget"] }
 # Every action driven over MCP against a headless workspace (tests/actions.rs).
 architect-mcp = { path = "../mcp" }
 serde_json = { workspace = true }

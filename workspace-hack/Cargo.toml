@@ -147,6 +147,7 @@ signature = { version = "3.0.0", default-features = false, features = ["alloc", 
 simd-adler32 = { version = "0.3.10" }
 skrifa = { version = "0.44.0", default-features = false, features = ["autohint_shaping", "std"] }
 slab = { version = "0.4.12" }
+slotmap = { version = "1.1.1", features = ["serde"] }
 smallvec = { version = "1.16.4", default-features = false, features = ["const_new", "serde"] }
 spki = { version = "0.8.0", default-features = false, features = ["pem", "std"] }
 stable_deref_trait = { version = "1.2.1" }
@@ -215,7 +216,9 @@ syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.119", features = ["extr
 thiserror = { version = "2.0.20" }
 time-macros = { version = "0.2.32", default-features = false, features = ["formatting", "parsing", "serde"] }
 toml_datetime-dff4ba8e3ae991db = { package = "toml_datetime", version = "1.1.1", features = ["serde"] }
+toml_parser = { version = "1.1.3" }
 twox-hash = { version = "2.1.4", default-features = false, features = ["xxhash64"] }
+winnow = { version = "1.0.4" }
 xxhash-rust = { version = "0.8.18", default-features = false, features = ["const_xxh64"] }
 zerocopy = { version = "0.8.57", default-features = false, features = ["derive", "simd"] }
 
@@ -263,6 +266,7 @@ tower = { version = "0.5.3", default-features = false, features = ["log", "make"
 tower-http = { version = "0.6.11", default-features = false, features = ["follow-redirect"] }
 tungstenite = { version = "0.29.0", features = ["native-tls"] }
 twox-hash = { version = "2.1.4" }
+winnow = { version = "1.0.4" }
 
 [target.x86_64-unknown-linux-gnu.build-dependencies]
 bitflags = { version = "2.13.2", default-features = false, features = ["std"] }

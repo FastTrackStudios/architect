@@ -177,7 +177,9 @@ Feature `paint-ui` is the Blitz host (`features/workspace/src/paint/widget.rs`):
   mounted pane needs its own handle. Shell theme changes update the
   existing view's `ViewCtx::theme` and request a frame; read tokens during
   input or paint rather than caching them only at construction. A custom
-  host can update a `Painter` with `Painter::set_theme`.
+  host can update a `Painter` with `Painter::set_theme`. Mounted Blitz
+  document tests in `features/workspace/src/paint/widget/document_tests.rs`
+  check both paths against CPU-rendered pixels and confirm they return idle.
 - A press or a tab gives the widget the focus. While it has it the
   window's IME is on, so composed text reaches the view.
 
