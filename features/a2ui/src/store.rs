@@ -139,7 +139,7 @@ pub struct Applied {
 /// The surfaces of one document. Cheap to clone.
 #[derive(Clone)]
 pub struct Surfaces {
-    doc: CrdtDoc,
+    doc: DocHandle,
     root: Arc<str>,
     history: Option<Arc<Mutex<crdt::History>>>,
 }
@@ -153,11 +153,29 @@ impl std::fmt::Debug for Surfaces {
     }
 }
 
+/// How [`Surfaces`] holds its document. In the browser a [`CrdtDoc`] is
+/// not `Send` (its `IndexedDB` storage is not), while the Action List's
+/// handlers that hold the surfaces must be. The browser has one thread, so
+/// there the handle is wrapped, and it never leaves that thread.
+#[cfg(not(target_arch = "wasm32"))]
+type DocHandle = CrdtDoc;
+#[cfg(target_arch = "wasm32")]
+type DocHandle = send_wrapper::SendWrapper<CrdtDoc>;
+
+#[cfg(not(target_arch = "wasm32"))]
+const fn handle(doc: CrdtDoc) -> DocHandle {
+    doc
+}
+#[cfg(target_arch = "wasm32")]
+fn handle(doc: CrdtDoc) -> DocHandle {
+    send_wrapper::SendWrapper::new(doc)
+}
+
 impl Surfaces {
     /// The surfaces under `root` in `doc`.
     pub fn new(doc: CrdtDoc, root: impl Into<String>) -> Self {
         Self {
-            doc,
+            doc: handle(doc),
             root: Arc::from(root.into()),
             history: None,
         }
@@ -172,7 +190,11 @@ impl Surfaces {
 
     /// The document they live in.
     #[must_use]
-    pub const fn doc(&self) -> &CrdtDoc {
+    #[allow(
+        clippy::missing_const_for_fn,
+        reason = "in the browser it goes through the handle's Deref"
+    )]
+    pub fn doc(&self) -> &CrdtDoc {
         &self.doc
     }
 
