@@ -56,10 +56,17 @@ impl PaintWidget {
     fn with_wake(painter: Painter, wake: PaintWake) -> Self {
         Self { painter, wake }
     }
+
+    fn frame(&mut self, geometry: Geometry) -> Scene {
+        self.wake.0.dirty.swap(false, Ordering::AcqRel);
+        self.sync_theme();
+        self.painter.frame(geometry)
+    }
 }
 
 impl Widget for PaintWidget {
     fn handle_event(&mut self, event: &UiEvent) {
+        self.sync_theme();
         if let Some(input) = view_input(event) {
             self.painter.ctx().input.push(input);
         }
@@ -87,9 +94,8 @@ impl Widget for PaintWidget {
         height: u32,
         scale: f64,
     ) -> Scene {
-        self.wake.0.dirty.swap(false, Ordering::AcqRel);
         let scale = if scale > 0.0 { scale } else { 1.0 };
-        self.painter.frame(Geometry {
+        self.frame(Geometry {
             width: (f64::from(width) / scale) as f32,
             height: (f64::from(height) / scale) as f32,
             scale: scale as f32,
@@ -106,6 +112,22 @@ pub struct PaintWake(Arc<WakeState>);
 struct WakeState {
     dirty: AtomicBool,
     window: Mutex<Option<Arc<dyn ShellProvider>>>,
+    theme: Mutex<Option<ThemeTokens>>,
+}
+
+impl PaintWidget {
+    fn sync_theme(&mut self) {
+        let theme = self
+            .wake
+            .0
+            .theme
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        if let Some(theme) = theme {
+            self.painter.set_theme(theme);
+        }
+    }
 }
 
 impl PaintWake {
@@ -133,6 +155,16 @@ impl PaintWake {
         if self.0.dirty.load(Ordering::Acquire) {
             self.wake();
         }
+    }
+
+    fn set_theme(&self, theme: ThemeTokens) {
+        let mut current = self.0.theme.lock().unwrap_or_else(PoisonError::into_inner);
+        if current.as_ref() == Some(&theme) {
+            return;
+        }
+        *current = Some(theme);
+        drop(current);
+        self.wake();
     }
 }
 
@@ -348,6 +380,9 @@ pub fn PaintPane(mount: PaintMount) -> Element {
     let theme = architect_shell::try_use_shell().map(|s| s.theme);
     let window = try_use_context::<Arc<dyn ShellProvider>>();
     mount.wake.attach(window.clone());
+    mount
+        .wake
+        .set_theme(theme.as_ref().map(shell_tokens).unwrap_or_default());
     let (widget, input) = use_hook(|| {
         let began = Instant::now();
         let clock = FrameClock::new(mount.budget, move || began.elapsed());
@@ -391,6 +426,9 @@ pub fn PaintPane(mount: PaintMount) -> Element {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::PaneId;
+    use dioxus::core::NoOpMutations;
+    use std::cell::RefCell;
     use std::sync::atomic::AtomicUsize;
 
     #[derive(Default)]
@@ -412,5 +450,184 @@ mod tests {
         assert_eq!(window.0.load(Ordering::Relaxed), 1);
         std::thread::spawn(move || wake.wake()).join().unwrap();
         assert_eq!(window.0.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn a_reattached_pane_wakes_its_new_window() {
+        let wake = PaintWake::new();
+        let main = Arc::new(Window::default());
+        let popout = Arc::new(Window::default());
+        wake.attach(Some(main.clone()));
+        wake.wake();
+        wake.0.dirty.store(false, Ordering::Release);
+        wake.attach(Some(popout.clone()));
+        wake.wake();
+        assert_eq!(main.0.load(Ordering::Relaxed), 1);
+        assert_eq!(popout.0.load(Ordering::Relaxed), 1);
+    }
+
+    struct Probe {
+        seen: Arc<Mutex<Vec<String>>>,
+        wake_on_paint: Option<PaintWake>,
+    }
+
+    impl PaintView for Probe {
+        fn input(&mut self, ctx: &ViewCtx, _: &ViewInput) -> bool {
+            self.seen.lock().unwrap().push(format!(
+                "input:{}",
+                ctx.theme.get("accent").unwrap_or("none")
+            ));
+            false
+        }
+
+        fn paint(&mut self, ctx: &ViewCtx, _: &mut Scene) {
+            self.seen.lock().unwrap().push(format!(
+                "paint:{}",
+                ctx.theme.get("accent").unwrap_or("none")
+            ));
+            if let Some(wake) = self.wake_on_paint.take() {
+                wake.wake();
+            }
+        }
+    }
+
+    #[test]
+    fn theme_and_wake_reach_an_existing_widget_without_losing_a_concurrent_wake() {
+        let wake = PaintWake::new();
+        let window = Arc::new(Window::default());
+        wake.attach(Some(window.clone()));
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let ctx = ViewCtx::new(
+            PaneId::new("probe"),
+            KindId::paint(),
+            (ViewHost::Blitz, Placement::Pane),
+            (ActionList::new(), ActionCaller::app()),
+            FrameClock::new(Duration::from_millis(16), || Duration::ZERO),
+        );
+        let probe = Probe {
+            seen: seen.clone(),
+            wake_on_paint: None,
+        };
+        let mut widget = PaintWidget::with_wake(Painter::new(ctx, probe), wake.clone());
+        let geometry = Geometry {
+            width: 20.0,
+            height: 10.0,
+            scale: 2.0,
+        };
+        let _ = widget.frame(geometry);
+        assert!(!widget.needs_redraw());
+
+        wake.set_theme(ThemeTokens::default().with("accent", "red"));
+        assert!(widget.needs_redraw());
+        widget.handle_event(&UiEvent::Paste("x".into()));
+        let _ = widget.frame(geometry);
+        assert_eq!(
+            &*seen.lock().unwrap(),
+            &["paint:none", "input:red", "paint:red"]
+        );
+        assert!(!widget.needs_redraw());
+        let requests = window.0.load(Ordering::Relaxed);
+        wake.set_theme(ThemeTokens::default().with("accent", "red"));
+        assert_eq!(window.0.load(Ordering::Relaxed), requests);
+        assert!(!widget.needs_redraw());
+
+        let ctx = widget.painter.ctx().clone();
+        widget.painter = Painter::new(
+            ctx,
+            Probe {
+                seen,
+                wake_on_paint: Some(wake.clone()),
+            },
+        );
+        wake.wake();
+        let _ = widget.frame(geometry);
+        assert!(
+            widget.needs_redraw(),
+            "a wake during paint must survive that frame"
+        );
+        let _ = widget.frame(geometry);
+        assert!(!widget.needs_redraw());
+    }
+
+    thread_local! {
+        static THEME: RefCell<Option<Signal<ShellTheme>>> = const { RefCell::new(None) };
+        static MOUNT_WAKE: RefCell<Option<PaintWake>> = const { RefCell::new(None) };
+    }
+
+    #[component]
+    fn TestPaintPane() -> Element {
+        let mount = use_hook(|| {
+            let mount = PaintMount::new(|_| Probe {
+                seen: Arc::new(Mutex::new(Vec::new())),
+                wake_on_paint: None,
+            });
+            MOUNT_WAKE.with(|slot| *slot.borrow_mut() = Some(mount.wake_handle()));
+            mount
+        });
+        rsx! { PaintPane { mount } }
+    }
+
+    fn theme_app() -> Element {
+        let theme = use_signal(ShellTheme::default);
+        THEME.with(|slot| *slot.borrow_mut() = Some(theme));
+        let workspace = use_signal(|| {
+            let mut workspace = crate::Workspace::new();
+            workspace
+                .open(
+                    crate::Pane::new("paint", "paint-test", "Paint"),
+                    crate::Target::Tab,
+                )
+                .unwrap();
+            workspace
+        });
+        let views = use_hook(|| {
+            crate::Views::new().view(crate::View::new(
+                "paint-test",
+                "Paint",
+                |_| rsx! { TestPaintPane {} },
+            ))
+        });
+        let screen = architect_shell::Screen {
+            width: 1000.0,
+            height: 800.0,
+            touch: false,
+            insets: Default::default(),
+        };
+        rsx! {
+            architect_shell::AppShell { screen, theme: theme(), tabs: vec![], current: None,
+                on_tab: |_| (),
+                crate::WorkspaceView { workspace, views }
+            }
+        }
+    }
+
+    #[test]
+    fn shell_theme_change_reaches_mounted_pane_without_remounting() {
+        let mut dom = VirtualDom::new(theme_app);
+        dom.rebuild_in_place();
+        let wake = MOUNT_WAKE.with(|slot| slot.borrow().clone().expect("mounted"));
+        let original = Arc::clone(&wake.0);
+        wake.0.dirty.store(false, Ordering::Release);
+        dom.in_runtime(|| {
+            THEME.with(|slot| {
+                let mut theme = slot.borrow().unwrap();
+                theme.write().accent = "#123456";
+            })
+        });
+        dom.render_immediate(&mut NoOpMutations);
+        let current = MOUNT_WAKE.with(|slot| slot.borrow().clone().unwrap());
+        assert!(Arc::ptr_eq(&original, &current.0));
+        assert!(current.0.dirty.load(Ordering::Acquire));
+        assert_eq!(
+            current
+                .0
+                .theme
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .get("accent"),
+            Some("#123456")
+        );
     }
 }

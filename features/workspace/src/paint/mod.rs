@@ -289,6 +289,14 @@ impl Painter {
         self.dirty = true;
     }
 
+    /// Update the tokens seen by input and paint, requesting a frame if changed.
+    pub fn set_theme(&mut self, theme: ThemeTokens) {
+        if self.ctx.theme != theme {
+            self.ctx.theme = theme;
+            self.invalidate();
+        }
+    }
+
     /// Whether a frame would show something new: input changed it, input
     /// is waiting, or it is moving.
     #[must_use]

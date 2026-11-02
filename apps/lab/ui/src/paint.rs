@@ -57,16 +57,12 @@ pub struct Grid {
     state: HostData<PaintState>,
     hover: Option<u64>,
     picked: Option<u64>,
-    sheet: Color,
-    lit: Color,
-    pick: Color,
 }
 
 impl Grid {
     /// Its state in the host's [`PaintState`] (a fresh one without it).
     #[must_use]
     pub fn new(ctx: &ViewCtx) -> Self {
-        let token = |name: &str, or: Color| ctx.theme.color(name).unwrap_or(or);
         Self {
             marks: Marks::new(),
             laid: None,
@@ -75,9 +71,6 @@ impl Grid {
                 .unwrap_or_else(|| HostData::new(PaintState::default())),
             hover: None,
             picked: None,
-            sheet: token("sheet", Color::from_rgba8(24, 24, 27, 255)),
-            lit: token("accent", Color::from_rgba8(255, 122, 26, 255)),
-            pick: token("ink", Color::from_rgba8(250, 250, 250, 255)),
         }
     }
 
@@ -204,14 +197,18 @@ impl PaintView for Grid {
     }
 
     fn paint(&mut self, ctx: &ViewCtx, scene: &mut Scene) {
+        let token = |name: &str, or: Color| ctx.theme.color(name).unwrap_or(or);
+        let sheet = token("sheet", Color::from_rgba8(24, 24, 27, 255));
+        let lit = token("accent", Color::from_rgba8(255, 122, 26, 255));
+        let pick = token("ink", Color::from_rgba8(250, 250, 250, 255));
         let (width, height) = (ctx.geometry.width, ctx.geometry.height);
         self.lay_out(width, height);
         let all = Rect::new(0.0, 0.0, f64::from(width), f64::from(height));
-        scene.fill(Fill::NonZero, Affine::IDENTITY, self.sheet, None, &all);
+        scene.fill(Fill::NonZero, Affine::IDENTITY, sheet, None, &all);
         self.marks.paint(scene, Affine::IDENTITY);
         // The lit and the picked drawn again over themselves: the same
         // rectangles the hit test finds.
-        for (id, fill) in [(self.hover, self.lit), (self.picked, self.pick)] {
+        for (id, fill) in [(self.hover, lit), (self.picked, pick)] {
             if let Some(mark) = id.and_then(|id| self.mark(id)) {
                 scene.fill(Fill::NonZero, Affine::IDENTITY, fill, None, &mark.rect);
             }

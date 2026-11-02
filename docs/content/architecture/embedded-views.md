@@ -174,14 +174,16 @@ Feature `paint-ui` is the Blitz host (`features/workspace/src/paint/widget.rs`):
   budget. Clone `PaintMount::wake_handle` before mounting and call
   `PaintWake::wake` after external data changes; it marks the pane dirty
   and requests a window redraw, including from a worker thread. Each
-  mounted pane needs its own handle.
+  mounted pane needs its own handle. Shell theme changes update the
+  existing view's `ViewCtx::theme` and request a frame; read tokens during
+  input or paint rather than caching them only at construction. A custom
+  host can update a `Painter` with `Painter::set_theme`.
 - A press or a tab gives the widget the focus. While it has it the
   window's IME is on, so composed text reaches the view.
 
 Its limits for now: the IME's candidate window is not placed at the
 view's caret (no cursor area is set), a write to `HostData` or the
-`InputSink` needs an explicit wake, theme tokens are captured at mount,
-and `FrameStats` times the view's input and
+`InputSink` needs an explicit wake, and `FrameStats` times the view's input and
 recording, not the GPU's raster. The web and plugin hosts mount no
 `PaintWidget` yet, so `KindSpec::paint` is for `blitz` only. A Frame
 surface can draw through it in-process instead of in a process of its
