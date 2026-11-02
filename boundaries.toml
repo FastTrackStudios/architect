@@ -137,6 +137,15 @@ package = "architect-files"
 features = ["vox"]
 layer = "L0"
 
+[[row]]
+package = "architect-spaces"
+layer = "L0"
+
+[[row]]
+package = "architect-spaces"
+features = ["vox"]
+layer = "L0"
+
 # ── L4 ui ─────────────────────────────────────────────────────────────────
 [[row]]
 package = "crdt"
@@ -288,6 +297,16 @@ layer = "L1"
 [[row]]
 package = "architect-files"
 features = ["server"]
+layer = "L1"
+
+[[row]]
+package = "architect-spaces"
+features = ["server"]
+layer = "L1"
+
+[[row]]
+package = "architect-spaces"
+features = ["files"]
 layer = "L1"
 
 [[row]]

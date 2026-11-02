@@ -1,0 +1,58 @@
+[package]
+name = "architect-spaces"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Spaces: a scope below the org (a project, a wiki, a folder, a document, a session) with its own members, from this org or another, roles that compile to permits, per-resource grants and an org policy that caps them, enforced by the permissions gate, documents and files"
+
+# docs/content/architecture/spaces.md. The default set is the model — a
+# space, its members and roles, the org's policy and what they compile to
+# — pure data, wasm-clean. `vox` is the service (`SpacesService`) and its
+# gate table. `server` (native) keeps every org's spaces, serves the
+# service for the gate's caller, and is the gate's engine for spaces
+# (`SpacesEngine`). `files` generates the files feature's folder grants
+# from the spaces.
+
+[features]
+default = []
+vox = ["dep:vox", "architect/vox"]
+server = [
+    "vox",
+    "architect-orgs/server",
+    "dep:facet-json",
+    "dep:tokio",
+    "uuid/v4",
+]
+files = ["server", "dep:architect-files", "architect-files/server", "uuid/v5"]
+
+[dependencies]
+architect = { workspace = true }
+architect-orgs = { workspace = true }
+architect-permissions = { workspace = true }
+facet = { workspace = true }
+thiserror = { workspace = true }
+uuid = { version = "1", default-features = false }
+vox = { workspace = true, optional = true }
+architect-files = { workspace = true, optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+facet-json = { version = "0.50.0-rc.5", optional = true }
+tokio = { version = "1", default-features = false, features = ["fs", "io-util", "rt", "sync"], optional = true }
+
+[dev-dependencies]
+# The tests drive the server, the files feature and every wire.
+architect-spaces = { path = ".", features = ["files"] }
+architect = { workspace = true, features = ["vox", "local", "host", "connect", "iroh"] }
+architect-files = { workspace = true, features = ["server"] }
+crdt = { workspace = true }
+iroh = { workspace = true }
+tempfile = "3"
+tokio = { workspace = true }
+vox = { workspace = true }
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
