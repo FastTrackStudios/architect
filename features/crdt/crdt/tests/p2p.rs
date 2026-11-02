@@ -28,7 +28,7 @@ use architect_permissions::Principal;
 use auth_proto::device::{DeviceDirectory, PeerDevice};
 use crdt::CrdtDoc;
 use crdt::link::{DocLink, LinkKey};
-use crdt::p2p::{Devices, NodeAccess, Shares, node_router};
+use crdt::p2p::{Admission, NodeAccess, Shares, node_router};
 use crdt::peer::{DocCatalog, DocPeerClient, OpenDocs, SelfLane, pull};
 use crdt::registry::DocRegistry;
 use crdt::sync::{DocSyncClient, SyncedDoc};
@@ -74,7 +74,7 @@ async fn loopback() -> iroh::Endpoint {
 /// Serve `endpoint`'s documents: the registry admits what `NodeAccess`
 /// admits, and the node's own sweep lane (`service:self`).
 fn serve(endpoint: iroh::Endpoint) -> Node {
-    let access = NodeAccess::new(Devices::new(), Shares::new());
+    let access = NodeAccess::new(Admission::new(), Shares::new());
     let registry = DocRegistry::new(|_| Box::pin(async { Ok(CrdtDoc::ephemeral()) }))
         .with_authorizer({
             let access = access.clone();
@@ -123,6 +123,15 @@ fn directory(nodes: &[(Uuid, &Node)]) -> DeviceDirectory {
             })
             .collect(),
     }
+}
+
+/// The account's devices but `me`, as a node lets them in.
+fn account_peers(account: &DeviceDirectory, me: Uuid) -> Vec<architect_devices::Peer> {
+    account
+        .peer_endpoints(me)
+        .iter()
+        .map(|endpoint| architect_devices::Peer::new(endpoint, "device", "linux"))
+        .collect()
 }
 
 async fn sync_client(from: &iroh::Endpoint, to: impl Into<iroh::EndpointAddr>) -> DocSyncClient {
@@ -271,11 +280,11 @@ async fn registered_devices_edit_live_with_no_server() {
     laptop
         .access
         .devices
-        .replace(account.peer_endpoints(laptop_id));
+        .set_account(account_peers(&account, laptop_id));
     phone
         .access
         .devices
-        .replace(account.peer_endpoints(phone_id));
+        .set_account(account_peers(&account, phone_id));
 
     // Live: the phone's copy of the song stays attached to the laptop's.
     let song = Uuid::new_v4();
@@ -338,7 +347,7 @@ async fn an_unregistered_device_is_refused() {
     laptop
         .access
         .devices
-        .replace(account.peer_endpoints(laptop_id));
+        .set_account(account_peers(&account, laptop_id));
     let song = Uuid::new_v4();
     edit(&laptop.registry.doc(song).await.unwrap(), "tempo", "120");
 
@@ -367,7 +376,7 @@ async fn an_unregistered_device_is_refused() {
     laptop
         .access
         .devices
-        .replace(without_phone.peer_endpoints(laptop_id));
+        .set_account(account_peers(&without_phone, laptop_id));
     assert!(
         peers.list().await.is_err(),
         "a forgotten device still listed"
@@ -389,7 +398,7 @@ async fn devices_on_one_network_find_each_other() {
     laptop
         .access
         .devices
-        .replace(account.peer_endpoints(laptop_id));
+        .set_account(account_peers(&account, laptop_id));
 
     // The phone knows no address and no id yet: it looks.
     let browser = LanBrowser::new(phone.endpoint.id()).expect("browse the LAN");
