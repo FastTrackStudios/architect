@@ -149,13 +149,20 @@ pub struct Preset {
 }
 
 /// A view it adds to the workspace: listed by the host, mounted by the
-/// app (remote Dioxus views and frame documents are later work).
+/// app.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 pub struct ViewDecl {
     pub id: String,
     pub title: String,
     #[serde(default)]
     pub icon: String,
+    /// The view kind that draws it (`kind = "frame.surface"`;
+    /// `docs/content/architecture/embedded-views.md`): `dioxus` when it
+    /// says none — a process extension's own Dioxus view, drawn remotely.
+    /// A kind the app has no provider for refuses the load
+    /// (`host::LoadError::ViewKind`).
+    #[serde(default = "dioxus")]
+    pub kind: String,
     /// A frame document in the package that draws it, for a data view.
     #[serde(default)]
     pub document: Option<String>,
@@ -178,6 +185,10 @@ pub struct OverlayDecl {
     pub plane: String,
     /// The script that draws it, in the package.
     pub script: String,
+}
+
+fn dioxus() -> String {
+    architect_workspace::DIOXUS.to_owned()
 }
 
 fn over() -> String {

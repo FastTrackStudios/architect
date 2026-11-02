@@ -11,6 +11,9 @@ document data to an app while it runs. It is a folder with an
 `extension.toml` and one of four kinds: `data` (declarations only), `luau`
 (actions as [scripts](@/features/scripting.md)), `process` (its own program,
 over vox, see [Remote views](@/features/remote-views.md)) or `wasm` (planned).
+Each `[[views]]` entry names the view kind that draws it (`kind`, `dioxus`
+when it names none); a kind the app has no provider for refuses the load
+with the reason (see [Embedded views](@/architecture/embedded-views.md)).
 Extensions install from git registries, folder registries or ReaPack
 indexes; a built-in can be shadowed by a newer install or a development copy;
 editing a loaded extension reloads it as a diff, and a broken save keeps the

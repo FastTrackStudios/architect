@@ -14,6 +14,11 @@
 //! the model only: no Dioxus, no I/O, no clock. The host that draws it and
 //! turns pointer drags into operations is the crate's `ui` feature:
 //! [`WorkspaceView`], given the app's [`Views`].
+//!
+//! What a view draws *with* is its kind ([`KindId`]): the built-in
+//! `dioxus` one or one a linked crate registered in a [`ViewKinds`]
+//! (`docs/content/architecture/embedded-views.md`). Feature `ctx` is the
+//! contract a kind mounts through, [`ViewCtx`].
 
 // A view's icon is a fn pointer compared by Dioxus's props: a stale
 // compare only redraws.
@@ -22,10 +27,13 @@
 #[cfg(feature = "ui")]
 mod bar;
 pub mod control;
+#[cfg(feature = "ctx")]
+mod ctx;
 mod drop;
 pub mod guide;
 #[cfg(feature = "ui")]
 mod host;
+mod kinds;
 mod layout;
 mod model;
 mod ops;
@@ -41,12 +49,21 @@ pub use bar::{TABS_COMMAND, use_tabs_button};
 pub use drop::{Bar, Drop, bar_drop, contains, drop_at, drop_in, float_rect, snap_at};
 #[cfg(feature = "native")]
 pub mod native;
+#[cfg(feature = "ctx")]
+pub use ctx::{
+    Button, DocRef, Extras, Frame, FrameClock, Geometry, InputSink, Now, ThemeTokens, ViewCtx,
+    ViewInput,
+};
 pub use guide::{ArrangedGroup, ArrangedSplit, ArrangedWindow, Arrangement, target_selector};
 #[cfg(feature = "ui")]
 pub use host::{
     Bridge, Command, Host, Opened, PaneHandle, Popout, PresenceLayer, PresenceOverlay, TitleRow,
     View, Views, WindowSystem, Windows, WorkspaceActions, WorkspaceStore, WorkspaceView, use_host,
     use_pane, use_pane_status, use_presence_overlay,
+};
+pub use kinds::{
+    Capabilities, Capability, DIOXUS, Hosts, KindError, KindId, KindSpec, Part, Placement,
+    Placements, ViewHost, ViewKinds,
 };
 pub use layout::{Direction, Placed, Slide, area_rects, neighbour, scroll_to, slides};
 pub use model::{

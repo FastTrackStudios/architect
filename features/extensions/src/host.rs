@@ -28,6 +28,7 @@ use architect::action::{
 use architect_scripting::Transactions;
 use architect_scripting::luau::{Gate, Limits, Runtime};
 use architect_settings::{Owner, Registry, Section};
+use architect_workspace::{KindError, ViewKinds};
 use semver::Version;
 use serde_json::Value;
 
@@ -353,6 +354,11 @@ pub enum LoadError {
     ActionTaken(String),
     /// One of its settings sections clashes with another's.
     Sections(String),
+    /// One of its views is of a kind this app has no provider for.
+    ViewKind {
+        view: String,
+        why: KindError,
+    },
 }
 
 impl std::fmt::Display for LoadError {
@@ -364,6 +370,7 @@ impl std::fmt::Display for LoadError {
             Self::Action { id, why } => write!(f, "{id}: {why}"),
             Self::ActionTaken(id) => write!(f, "{id} is another's action"),
             Self::Sections(why) => write!(f, "its settings: {why}"),
+            Self::ViewKind { view, why } => write!(f, "its view {view}: {why}"),
         }
     }
 }
@@ -428,6 +435,8 @@ struct Inner {
     list: ActionList,
     sections: Arc<dyn SectionSink>,
     runners: Mutex<Vec<Arc<dyn Runner>>>,
+    /// The view kinds the app provides: what its views may name.
+    kinds: Mutex<ViewKinds>,
     loaded: Mutex<BTreeMap<String, Running>>,
     listeners: Mutex<Vec<Listener>>,
 }
@@ -456,6 +465,7 @@ impl Host {
                 list,
                 sections: Arc::new(sections),
                 runners: Mutex::new(vec![Arc::new(DataRunner), Arc::new(LuauRunner::new())]),
+                kinds: Mutex::new(ViewKinds::new()),
                 loaded: Mutex::new(BTreeMap::new()),
                 listeners: Mutex::new(Vec::new()),
             }),
@@ -474,6 +484,18 @@ impl Host {
             runners.retain(|r| r.kind() != runner.kind());
             runners.push(Arc::new(runner));
         }
+        self
+    }
+
+    /// Takes views of `kinds` (the app's [`ViewKinds`], the ones its
+    /// linked crates registered); without it, only the built-in `dioxus`.
+    #[must_use]
+    pub fn with_view_kinds(self, kinds: ViewKinds) -> Self {
+        *self
+            .inner
+            .kinds
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = kinds;
         self
     }
 
@@ -608,6 +630,7 @@ impl Host {
         let runner = self
             .runner(manifest.kind)
             .ok_or(LoadError::NoRunner(manifest.kind))?;
+        self.check_views(manifest)?;
         let list = &self.inner.list;
         let mut loaded = self
             .inner
@@ -691,6 +714,26 @@ impl Host {
             kept,
             took: started.elapsed(),
         })
+    }
+
+    /// Refuses a view of a kind nobody here provides, before anything of
+    /// the extension starts.
+    fn check_views(&self, manifest: &Manifest) -> Result<(), LoadError> {
+        let kinds = self
+            .inner
+            .kinds
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        for view in &manifest.views {
+            kinds
+                .resolve(&view.kind)
+                .map_err(|why| LoadError::ViewKind {
+                    view: view.id.clone(),
+                    why,
+                })?;
+        }
+        drop(kinds);
+        Ok(())
     }
 
     /// Unloads `id`: its actions off the list, its settings off the page.

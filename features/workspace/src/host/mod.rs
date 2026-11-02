@@ -50,6 +50,7 @@ use architect_shell::{IconFn, ShellTheme, StatusItem};
 use dioxus::prelude::*;
 
 use crate::drop::{Bar, Drop};
+use crate::kinds::{KindError, KindId, Placement, ViewHost, ViewKinds};
 use crate::model::{
     Area, Axis, GroupId, Node, Pane, PaneId, Rect, Shown, Side, SplitId, ViewKind, WindowId,
     Workspace,
@@ -81,6 +82,10 @@ pub struct View {
     /// that is costly to draw twice, or that says so to others as it
     /// mounts and goes (a published canvas, a remote process's view).
     pub still: bool,
+    /// What draws it: the built-in `dioxus` kind unless a kind's
+    /// provider made it ([`View::drawn_by`]). A pane whose view's kind is
+    /// not in [`Views::kinds`] shows why in its place.
+    pub draws: KindId,
     render: Rc<dyn Fn(PaneId) -> Element>,
 }
 
@@ -100,6 +105,7 @@ impl View {
             home: Target::Tab,
             single: true,
             still: false,
+            draws: KindId::dioxus(),
             render: Rc::new(render),
         }
     }
@@ -131,19 +137,28 @@ impl View {
         self.still = true;
         self
     }
+
+    /// Drawn by `kind`, not the built-in `dioxus` one: what a kind's
+    /// provider returns, its render mounting the kind in the pane.
+    #[must_use]
+    pub fn drawn_by(mut self, kind: impl Into<String>) -> Self {
+        self.draws = KindId::new(kind);
+        self
+    }
 }
 
-/// The views an app offers.
+/// The views an app offers, and the kinds that draw them.
 #[derive(Clone, Default)]
-pub struct Views(Rc<Vec<View>>);
+pub struct Views(Rc<Vec<View>>, Rc<ViewKinds>);
 
 impl PartialEq for Views {
     fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.0, &other.0)
+        Rc::ptr_eq(&self.0, &other.0) && Rc::ptr_eq(&self.1, &other.1)
     }
 }
 
 impl Views {
+    /// No views yet; the built-in `dioxus` kind.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -155,9 +170,39 @@ impl Views {
         self
     }
 
+    /// Draws with `kinds` (the built-in `dioxus` one and those the app's
+    /// linked crates registered) in place of the built-in one alone.
+    #[must_use]
+    pub fn with_kinds(mut self, kinds: ViewKinds) -> Self {
+        self.1 = Rc::new(kinds);
+        self
+    }
+
+    /// The kinds it draws with.
+    #[must_use]
+    pub fn kinds(&self) -> &ViewKinds {
+        &self.1
+    }
+
     #[must_use]
     pub fn get(&self, kind: &str) -> Option<&View> {
         self.0.iter().find(|v| v.kind.0 == kind)
+    }
+
+    /// View `kind` and what draws it, mounted in a pane of `host`.
+    ///
+    /// # Errors
+    ///
+    /// Its kind is not provided here, or not for `host` or a pane. `None`
+    /// when there is no such view.
+    #[must_use]
+    pub fn resolve(&self, kind: &str, host: ViewHost) -> Option<Result<&View, KindError>> {
+        let view = self.get(kind)?;
+        Some(
+            self.1
+                .resolve_for(view.draws.as_str(), host, Placement::Pane)
+                .map(|_| view),
+        )
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &View> {
