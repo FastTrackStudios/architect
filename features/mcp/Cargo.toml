@@ -20,9 +20,18 @@ http = ["dep:axum", "dep:tokio"]
 # `McpHost` (`.mcp(…)`, `.mcp_at(…)`): MCP mounted on architect's
 # `EngineHost`, per path, with a resolver for the server and caller.
 host = ["http", "architect/host"]
+# `bridge::serve_stdio_via`: MCP over stdio for an app running elsewhere,
+# through its control socket.
+bridge = ["architect-control/client"]
+# `parity::Parity`: an app's test that MCP and its control socket list the
+# same actions and answer the same requests the same way.
+parity = ["bridge", "architect-control/server"]
 
 [dependencies]
 architect = { path = "../../crates/architect", features = ["action-list"] }
+# The request and answer shape (and `Surface`, which answers) shared with
+# the control socket and the `actions` CLI.
+architect-control.workspace = true
 serde_json.workspace = true
 # `Server::handle` drives an async action to its end on the calling thread.
 futures = "0.3"
@@ -32,6 +41,11 @@ axum = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 
 [dev-dependencies]
+# tests/parity.rs: the CLI, the socket and the bridge against this
+# crate's server.
+architect-control = { workspace = true, features = ["server", "cli"] }
+architect-mcp = { path = ".", features = ["parity"] }
+clap.workspace = true
 architect-permissions.workspace = true
 facet.workspace = true
 tokio.workspace = true
