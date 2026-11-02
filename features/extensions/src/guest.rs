@@ -29,15 +29,13 @@ use std::str::FromStr as _;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use architect::{EventSink, Services, layers};
-use dioxus::dioxus_core::{
-    AttributeValue, ElementId, Event, Template, TemplateAttribute, TemplateNode, VirtualDom,
-    WriteMutations,
-};
+use dioxus::core::{BorrowedAttributeValue, ElementId, Event, VirtualDom, WriteMutations};
 use dioxus::html::geometry::{ClientPoint, Coordinates, ElementPoint, PagePoint, ScreenPoint};
 use dioxus::html::input_data::{MouseButton, decode_mouse_button_set};
 use dioxus::html::{
-    Code, Key, Location, Modifiers, PlatformEventData, SerializedFocusData, SerializedFormData,
-    SerializedHtmlEventConverter, SerializedKeyboardData, SerializedMouseData, set_event_converter,
+    Code, Key, Location, Modifiers, NamedKey, PlatformEventData, SerializedFocusData,
+    SerializedFormData, SerializedHtmlEventConverter, SerializedKeyboardData, SerializedMouseData,
+    set_event_converter,
 };
 use dioxus::prelude::Element;
 use serde_json::Value as Json;
@@ -46,8 +44,7 @@ use tokio::sync::mpsc;
 use crate::manifest::API;
 use crate::proto::{ProcessError, ProcessExtension, ProcessExtensionStreamSource, SOCKET};
 use crate::wire::{
-    Edit, EventData, Frame, Hello, KeyData, Mods, Open, Pointer, Value, ViewEvent, WIRE, WireAttr,
-    WireNode, WireTemplate,
+    Edit, EventData, Frame, Hello, KeyData, Mods, Open, Pointer, Value, ViewEvent, WIRE,
 };
 
 type ActionFuture = Pin<Box<dyn Future<Output = Result<Json, String>> + Send>>;
@@ -308,7 +305,7 @@ fn dispatch(vdom: &VirtualDom, event: ViewEvent) {
     vdom.runtime().handle_event(
         &event.name,
         Event::new(data, event.bubbles),
-        ElementId(element),
+        ElementId::from_raw(element),
     );
 }
 
@@ -343,7 +340,7 @@ fn keyboard(k: &KeyData) -> SerializedKeyboardData {
         _ => Location::Standard,
     };
     SerializedKeyboardData::new(
-        Key::from_str(&k.key).unwrap_or(Key::Unidentified),
+        Key::from_str(&k.key).unwrap_or(Key::Named(NamedKey::Unidentified)),
         Code::from_str(&k.code).unwrap_or(Code::Unidentified),
         location,
         k.repeat,
@@ -352,12 +349,9 @@ fn keyboard(k: &KeyData) -> SerializedKeyboardData {
     )
 }
 
-/// Writes a `VirtualDom`'s mutations as the wire's [`Edit`]s, each
-/// template the first time it is loaded.
+/// Writes a `VirtualDom`'s mutations as the wire's [`Edit`]s.
 #[derive(Debug, Default)]
 pub struct WireWriter {
-    templates: HashMap<Template, u32>,
-    fresh: Vec<WireTemplate>,
     edits: Vec<Edit>,
 }
 
@@ -365,200 +359,120 @@ impl WireWriter {
     /// Nothing written since the last [`take`](Self::take).
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        self.fresh.is_empty() && self.edits.is_empty()
+        self.edits.is_empty()
     }
 
     /// What was written since the last take, as one frame.
     pub fn take(&mut self) -> Frame {
         Frame::Edits {
-            templates: std::mem::take(&mut self.fresh),
             edits: std::mem::take(&mut self.edits),
         }
     }
 }
 
 fn wire_id(id: ElementId) -> u64 {
-    u64::try_from(id.0).unwrap_or(u64::MAX)
+    u64::try_from(id.raw()).unwrap_or(u64::MAX)
 }
 
 fn count(m: usize) -> u32 {
     u32::try_from(m).unwrap_or(u32::MAX)
 }
 
-/// `template`, flattened.
-fn wire_template(id: u32, template: &Template) -> WireTemplate {
-    let mut nodes = Vec::new();
-    let roots = template
-        .roots()
-        .iter()
-        .map(|root| flatten(root, &mut nodes))
-        .collect();
-    WireTemplate { id, nodes, roots }
-}
-
-fn flatten(node: &TemplateNode, nodes: &mut Vec<WireNode>) -> u32 {
-    let made = match node {
-        TemplateNode::Element {
-            tag,
-            namespace,
-            attrs,
-            children,
-        } => {
-            let children = children.iter().map(|c| flatten(c, nodes)).collect();
-            let attrs = attrs
-                .iter()
-                .filter_map(|a| match a {
-                    TemplateAttribute::Static {
-                        name,
-                        value,
-                        namespace,
-                    } => Some(WireAttr {
-                        name: (*name).to_owned(),
-                        value: (*value).to_owned(),
-                        namespace: namespace.map(str::to_owned),
-                    }),
-                    TemplateAttribute::Dynamic { .. } => None,
-                })
-                .collect();
-            WireNode::Element {
-                tag: (*tag).to_owned(),
-                namespace: namespace.map(str::to_owned),
-                attrs,
-                children,
-            }
-        }
-        TemplateNode::Text { text } => WireNode::Text((*text).to_owned()),
-        TemplateNode::Dynamic { .. } => WireNode::Dynamic,
-    };
-    nodes.push(made);
-    count(nodes.len().saturating_sub(1))
-}
-
 impl WriteMutations for WireWriter {
-    fn append_children(&mut self, id: ElementId, m: usize) {
-        self.edits.push(Edit::AppendChildren {
-            id: wire_id(id),
-            m: count(m),
-        });
+    fn push_id(&mut self, id: ElementId) {
+        self.edits.push(Edit::PushId { id: wire_id(id) });
     }
 
-    fn assign_node_id(&mut self, path: &'static [u8], id: ElementId) {
-        self.edits.push(Edit::AssignNodeId {
-            path: path.to_vec(),
-            id: wire_id(id),
-        });
+    fn set_id(&mut self, id: ElementId) {
+        self.edits.push(Edit::SetId { id: wire_id(id) });
     }
 
-    fn create_placeholder(&mut self, id: ElementId) {
-        self.edits.push(Edit::CreatePlaceholder { id: wire_id(id) });
-    }
-
-    fn create_text_node(&mut self, value: &str, id: ElementId) {
-        self.edits.push(Edit::CreateTextNode {
-            value: value.to_owned(),
-            id: wire_id(id),
-        });
-    }
-
-    fn load_template(&mut self, template: Template, index: usize, id: ElementId) {
-        let next = count(self.templates.len());
-        let fresh = &mut self.fresh;
-        let template = *self.templates.entry(template).or_insert_with(|| {
-            fresh.push(wire_template(next, &template));
-            next
-        });
-        self.edits.push(Edit::LoadTemplate {
-            template,
+    fn child(&mut self, index: usize) {
+        self.edits.push(Edit::Child {
             index: count(index),
-            id: wire_id(id),
         });
     }
 
-    fn replace_node_with(&mut self, id: ElementId, m: usize) {
-        self.edits.push(Edit::ReplaceNodeWith {
-            id: wire_id(id),
-            m: count(m),
+    fn pop(&mut self) {
+        self.edits.push(Edit::Pop);
+    }
+
+    fn create_element(&mut self, tag: &str, ns: Option<&str>) {
+        self.edits.push(Edit::CreateElement {
+            tag: tag.to_owned(),
+            namespace: ns.map(str::to_owned),
         });
     }
 
-    fn replace_placeholder_with_nodes(&mut self, path: &'static [u8], m: usize) {
-        self.edits.push(Edit::ReplacePlaceholder {
-            path: path.to_vec(),
-            m: count(m),
+    fn create_text(&mut self, value: &str) {
+        self.edits.push(Edit::CreateText {
+            value: value.to_owned(),
         });
     }
 
-    fn insert_nodes_after(&mut self, id: ElementId, m: usize) {
-        self.edits.push(Edit::InsertAfter {
-            id: wire_id(id),
-            m: count(m),
-        });
+    fn clone(&mut self) {
+        self.edits.push(Edit::Clone);
     }
 
-    fn insert_nodes_before(&mut self, id: ElementId, m: usize) {
-        self.edits.push(Edit::InsertBefore {
-            id: wire_id(id),
-            m: count(m),
-        });
+    fn append_children(&mut self, m: usize) {
+        self.edits.push(Edit::AppendChildren { m: count(m) });
     }
 
-    fn set_attribute(
-        &mut self,
-        name: &'static str,
-        ns: Option<&'static str>,
-        value: &AttributeValue,
-        id: ElementId,
-    ) {
+    fn replace_with(&mut self, m: usize) {
+        self.edits.push(Edit::ReplaceWith { m: count(m) });
+    }
+
+    fn insert_after(&mut self, m: usize) {
+        self.edits.push(Edit::InsertAfter { m: count(m) });
+    }
+
+    fn insert_before(&mut self, m: usize) {
+        self.edits.push(Edit::InsertBefore { m: count(m) });
+    }
+
+    fn set_attribute(&mut self, name: &str, ns: Option<&str>, value: BorrowedAttributeValue<'_>) {
         let value = match value {
-            AttributeValue::Text(t) => Value::Text(t.clone()),
-            AttributeValue::Float(f) => Value::Float(*f),
-            AttributeValue::Int(i) => Value::Int(*i),
-            AttributeValue::Bool(b) => Value::Bool(*b),
-            AttributeValue::None => Value::None,
-            // Handlers stay here; values of any other type cannot cross.
-            AttributeValue::Listener(_) | AttributeValue::Any(_) => return,
+            BorrowedAttributeValue::Text(t) => Value::Text(t.to_owned()),
+            BorrowedAttributeValue::Float(f) => Value::Float(f),
+            BorrowedAttributeValue::Int(i) => Value::Int(i),
+            BorrowedAttributeValue::Bool(b) => Value::Bool(b),
+            BorrowedAttributeValue::None => Value::None,
+            // Values of any other type cannot cross.
+            BorrowedAttributeValue::Any(_) => return,
         };
         self.edits.push(Edit::SetAttribute {
             name: name.to_owned(),
             namespace: ns.map(str::to_owned),
             value,
-            id: wire_id(id),
         });
     }
 
-    fn set_node_text(&mut self, value: &str, id: ElementId) {
+    fn set_text(&mut self, value: &str) {
         self.edits.push(Edit::SetText {
             value: value.to_owned(),
-            id: wire_id(id),
         });
     }
 
-    fn create_event_listener(&mut self, name: &'static str, id: ElementId) {
+    fn add_event_listener(&mut self, name: &str) {
         // A mounted element is measured in the host, not here.
         if name == "mounted" {
             return;
         }
         self.edits.push(Edit::Listen {
             name: name.to_owned(),
-            id: wire_id(id),
         });
     }
 
-    fn remove_event_listener(&mut self, name: &'static str, id: ElementId) {
+    fn remove_event_listener(&mut self, name: &str) {
         if name == "mounted" {
             return;
         }
         self.edits.push(Edit::Unlisten {
             name: name.to_owned(),
-            id: wire_id(id),
         });
     }
 
-    fn remove_node(&mut self, id: ElementId) {
-        self.edits.push(Edit::Remove { id: wire_id(id) });
-    }
-
-    fn push_root(&mut self, id: ElementId) {
-        self.edits.push(Edit::PushRoot { id: wire_id(id) });
+    fn remove(&mut self) {
+        self.edits.push(Edit::Remove);
     }
 }

@@ -30,7 +30,7 @@ use architect_extensions::host::{Host, LoadError, SharedSections};
 use architect_extensions::process::{ProcessRunner, Processes, Restart, State};
 use architect_extensions::proto::SOCKET;
 use architect_extensions::remote::{RemoteDocument, RemoteView, mounted_views};
-use architect_extensions::wire::{Edit, Frame, Value, WireNode, WireTemplate};
+use architect_extensions::wire::{Edit, Frame, Value};
 use architect_extensions::{Origin, Package};
 use blitz_dom::{BaseDocument, Document, DocumentConfig};
 use blitz_traits::events::{
@@ -202,10 +202,10 @@ fn in_app(doc: &BaseDocument, selector: &str) -> Option<String> {
 }
 
 /// The middle of `node` in `doc`.
-fn middle(doc: &BaseDocument, node: usize) -> (f32, f32) {
+fn middle(doc: &BaseDocument, node: blitz_dom::NodeId) -> (f32, f32) {
     let n = doc.get_node(node).unwrap();
     let at = n.absolute_position(0.0, 0.0);
-    let size = n.final_layout.size;
+    let size = n.final_layout().size;
     (at.x + size.width / 2.0, at.y + size.height / 2.0)
 }
 
@@ -369,32 +369,24 @@ fn a_program_that_never_says_hello_does_not_load() {
 /// A frame that builds `<div id="a">x</div>` under the root, as element 1.
 fn div() -> Frame {
     Frame::Edits {
-        templates: vec![WireTemplate {
-            id: 0,
-            nodes: vec![
-                WireNode::Text("x".to_owned()),
-                WireNode::Element {
-                    tag: "div".to_owned(),
-                    namespace: None,
-                    attrs: vec![],
-                    children: vec![0],
-                },
-            ],
-            roots: vec![1],
-        }],
         edits: vec![
-            Edit::LoadTemplate {
-                template: 0,
-                index: 0,
-                id: 1,
+            Edit::PushId { id: 0 },
+            Edit::CreateElement {
+                tag: "div".to_owned(),
+                namespace: None,
             },
+            Edit::SetId { id: 1 },
+            Edit::CreateText {
+                value: "x".to_owned(),
+            },
+            Edit::AppendChildren { m: 1 },
             Edit::SetAttribute {
                 name: "id".to_owned(),
                 namespace: None,
                 value: Value::Text("a".to_owned()),
-                id: 1,
             },
-            Edit::AppendChildren { id: 0, m: 1 },
+            Edit::AppendChildren { m: 1 },
+            Edit::Pop,
         ],
     }
 }
@@ -411,99 +403,64 @@ fn a_view_that_sends_nonsense_fails_and_never_takes_the_app_down() {
     let at = view.document().query_selector("#a").unwrap().unwrap();
     assert_eq!(view.document().get_node(at).unwrap().text_content(), "x");
 
+    let edits = |edits: Vec<Edit>| Frame::Edits { edits };
     let nonsense: Vec<(&str, Frame)> = vec![
         (
             "an element it never made",
-            Frame::Edits {
-                templates: vec![],
-                edits: vec![Edit::Remove { id: 99 }],
-            },
+            edits(vec![Edit::PushId { id: 99 }]),
         ),
+        ("the root", edits(vec![Edit::Remove])),
         (
-            "the root",
-            Frame::Edits {
-                templates: vec![],
-                edits: vec![Edit::Remove { id: 0 }],
-            },
+            "the root, pushed",
+            edits(vec![Edit::PushId { id: 0 }, Edit::Remove]),
         ),
         (
             "more nodes than the stack",
-            Frame::Edits {
-                templates: vec![],
-                edits: vec![Edit::AppendChildren { id: 1, m: 5 }],
-            },
+            edits(vec![Edit::AppendChildren { m: 5 }]),
         ),
         (
             "a node into itself",
-            Frame::Edits {
-                templates: vec![],
-                edits: vec![
-                    Edit::PushRoot { id: 1 },
-                    Edit::AppendChildren { id: 1, m: 1 },
-                ],
-            },
+            edits(vec![
+                Edit::PushId { id: 1 },
+                Edit::PushId { id: 1 },
+                Edit::AppendChildren { m: 1 },
+            ]),
         ),
         (
             "the root into the view",
-            Frame::Edits {
-                templates: vec![],
-                edits: vec![
-                    Edit::PushRoot { id: 0 },
-                    Edit::AppendChildren { id: 1, m: 1 },
-                ],
-            },
+            edits(vec![
+                Edit::PushId { id: 1 },
+                Edit::PushId { id: 0 },
+                Edit::AppendChildren { m: 1 },
+            ]),
         ),
         (
-            "a path that leads nowhere",
-            Frame::Edits {
-                templates: vec![],
-                edits: vec![
-                    Edit::PushRoot { id: 1 },
-                    Edit::AssignNodeId {
-                        path: vec![7, 7],
-                        id: 2,
-                    },
-                ],
-            },
+            "a child that is not there",
+            edits(vec![Edit::PushId { id: 1 }, Edit::Child { index: 7 }]),
         ),
+        ("a pop past the root", edits(vec![Edit::Pop])),
         (
-            "a template that loops",
-            Frame::Edits {
-                templates: vec![WireTemplate {
-                    id: 1,
-                    nodes: vec![WireNode::Element {
-                        tag: "div".to_owned(),
-                        namespace: None,
-                        attrs: vec![],
-                        children: vec![0],
-                    }],
-                    roots: vec![0],
-                }],
-                edits: vec![],
-            },
-        ),
-        (
-            "a template it never sent",
-            Frame::Edits {
-                templates: vec![],
-                edits: vec![Edit::LoadTemplate {
-                    template: 9,
-                    index: 0,
-                    id: 3,
-                }],
-            },
+            "a handler on a node with no id",
+            edits(vec![
+                Edit::CreateElement {
+                    tag: "div".to_owned(),
+                    namespace: None,
+                },
+                Edit::Listen {
+                    name: "click".to_owned(),
+                },
+            ]),
         ),
         (
             "raw HTML",
-            Frame::Edits {
-                templates: vec![],
-                edits: vec![Edit::SetAttribute {
+            edits(vec![
+                Edit::PushId { id: 1 },
+                Edit::SetAttribute {
                     name: "dangerous_inner_html".to_owned(),
                     namespace: None,
                     value: Value::Text("<script></script>".to_owned()),
-                    id: 1,
-                }],
-            },
+                },
+            ]),
         ),
         (
             "a failure of its own",

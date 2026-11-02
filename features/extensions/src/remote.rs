@@ -13,7 +13,7 @@
 //! mounts again by itself.
 //!
 //! The applier trusts nothing: an edit naming a node it does not have, a
-//! path that leads nowhere, a move that would make a cycle, or a frame
+//! child that is not there, a move that would make a cycle, or a frame
 //! too large fails the view (the placeholder says so) instead of the app.
 //! Not yet: pointer, touch, wheel and scroll events (Blitz scrolls the
 //! sub-document itself), IME, `mounted` measurements, the shell's
@@ -27,8 +27,8 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use blitz_dom::{
-    BaseDocument, DEFAULT_CSS, DocGuard, DocGuardMut, Document, DocumentConfig, EventDriver,
-    EventHandler, LocalName, Namespace, Node, QualName,
+    BaseDocument, DocGuard, DocGuardMut, Document, DocumentConfig, EventDriver, EventHandler,
+    LocalName, Namespace, Node, NodeId, QualName, UserAgentStylesheet,
 };
 use blitz_traits::events::{
     BlitzKeyEvent, BlitzPointerEvent, DomEvent, DomEventData, EventState, Location, Modifiers,
@@ -40,14 +40,8 @@ use futures::channel::mpsc;
 use futures::{FutureExt as _, StreamExt as _};
 
 use crate::process::{Process, Processes, State};
-use crate::wire::{
-    Edit, EventData, Frame, KeyData, Mods, Pointer, Value, ViewEvent, WireNode, WireTemplate,
-};
+use crate::wire::{Edit, EventData, Frame, KeyData, Mods, Pointer, Value, ViewEvent};
 
-/// At most this many templates per mount.
-const MAX_TEMPLATES: usize = 4096;
-/// At most this many nodes in one template.
-const MAX_TEMPLATE_NODES: usize = 10_000;
 /// At most this many edits in one frame.
 const MAX_EDITS: usize = 200_000;
 
@@ -60,13 +54,13 @@ const DIOXUS_ID: &str = "data-dioxus-id";
 pub struct RemoteDocument {
     doc: BaseDocument,
     /// Where the view's nodes go (Dioxus's element 0).
-    root: usize,
-    stack: Vec<usize>,
+    root: NodeId,
+    /// The edits' stack: each node, and the element id it was pushed or
+    /// registered as. The root stays at the bottom.
+    stack: Vec<(NodeId, Option<u64>)>,
     /// Dioxus element id → node, and back.
-    ids: HashMap<u64, usize>,
-    elements: HashMap<usize, u64>,
-    /// Each template's roots, built once, cloned on each load.
-    templates: HashMap<u32, Vec<usize>>,
+    ids: HashMap<u64, NodeId>,
+    elements: HashMap<NodeId, u64>,
     /// How many handlers there are for each event.
     listeners: HashMap<String, u32>,
     events: mpsc::UnboundedSender<ViewEvent>,
@@ -76,7 +70,7 @@ impl std::fmt::Debug for RemoteDocument {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RemoteDocument")
             .field("root", &self.root)
-            .field("templates", &self.templates.len())
+            .field("stack", &self.stack.len())
             .field("listeners", &self.listeners)
             .finish_non_exhaustive()
     }
@@ -95,7 +89,7 @@ impl RemoteDocument {
     #[must_use]
     pub fn new(events: mpsc::UnboundedSender<ViewEvent>) -> Self {
         let mut doc = BaseDocument::new(DocumentConfig::default());
-        doc.add_user_agent_stylesheet(DEFAULT_CSS);
+        doc.add_user_agent_stylesheet(UserAgentStylesheet::default_sheet());
         let mut m = doc.mutate();
         let html = m.create_element(qual("html", None), Vec::new());
         let page = m.doc.root_node().id;
@@ -109,10 +103,9 @@ impl RemoteDocument {
         Self {
             doc,
             root,
-            stack: vec![root],
+            stack: vec![(root, Some(0))],
             ids: HashMap::from([(0, root)]),
             elements: HashMap::from([(root, 0)]),
-            templates: HashMap::new(),
             listeners: HashMap::new(),
             events,
         }
@@ -131,15 +124,12 @@ impl RemoteDocument {
     /// The view failed, or the frame is not one this document can apply
     /// (it is left as far as it got; the view should be dropped).
     pub fn apply(&mut self, frame: Frame) -> Result<(), String> {
-        let (templates, edits) = match frame {
-            Frame::Edits { templates, edits } => (templates, edits),
+        let edits = match frame {
+            Frame::Edits { edits } => edits,
             Frame::Failed(why) => return Err(why),
         };
         if edits.len() > MAX_EDITS {
             return Err(format!("a frame of {} edits is too large", edits.len()));
-        }
-        for template in &templates {
-            self.template(template)?;
         }
         for edit in edits {
             self.edit(edit)?;
@@ -147,66 +137,7 @@ impl RemoteDocument {
         Ok(())
     }
 
-    fn template(&mut self, t: &WireTemplate) -> Result<(), String> {
-        if self.templates.len() >= MAX_TEMPLATES {
-            return Err("too many templates".to_owned());
-        }
-        if t.nodes.len() > MAX_TEMPLATE_NODES {
-            return Err(format!("template {} is too large", t.id));
-        }
-        if self.templates.contains_key(&t.id) {
-            return Err(format!("template {} was sent twice", t.id));
-        }
-        // A node's children come before it, each one child of one parent,
-        // so the tree is built in order and cannot loop.
-        let mut made = Vec::with_capacity(t.nodes.len());
-        let mut taken = vec![false; t.nodes.len()];
-        let mut m = self.doc.mutate();
-        for (at, node) in t.nodes.iter().enumerate() {
-            let id = match node {
-                WireNode::Element {
-                    tag,
-                    namespace,
-                    attrs,
-                    children,
-                } => {
-                    let mut kids = Vec::with_capacity(children.len());
-                    for &c in children {
-                        let c = usize::try_from(c).map_err(|e| e.to_string())?;
-                        if c >= at || taken.get(c).copied().unwrap_or(true) {
-                            return Err(format!("template {} is not a tree", t.id));
-                        }
-                        if let Some(slot) = taken.get_mut(c) {
-                            *slot = true;
-                        }
-                        kids.extend(made.get(c).copied());
-                    }
-                    let el = m.create_element(qual(tag, namespace.as_deref()), Vec::new());
-                    for a in attrs {
-                        set_attr(&mut m, el, &a.name, a.namespace.as_deref(), Some(&a.value))?;
-                    }
-                    m.append_children(el, &kids);
-                    el
-                }
-                WireNode::Text(text) => m.create_text_node(text),
-                WireNode::Dynamic => m.create_comment_node(),
-            };
-            made.push(id);
-        }
-        let mut roots = Vec::with_capacity(t.roots.len());
-        for &r in &t.roots {
-            let r = usize::try_from(r).map_err(|e| e.to_string())?;
-            if taken.get(r).copied().unwrap_or(true) {
-                return Err(format!("template {} has a bad root", t.id));
-            }
-            roots.extend(made.get(r).copied());
-        }
-        drop(m);
-        self.templates.insert(t.id, roots);
-        Ok(())
-    }
-
-    fn node(&self, id: u64) -> Result<usize, String> {
+    fn node(&self, id: u64) -> Result<NodeId, String> {
         self.ids
             .get(&id)
             .copied()
@@ -214,32 +145,56 @@ impl RemoteDocument {
             .ok_or_else(|| format!("no element {id}"))
     }
 
-    fn pop(&mut self, m: u32) -> Result<Vec<usize>, String> {
+    /// The top of the stack.
+    fn top(&self) -> Result<(NodeId, Option<u64>), String> {
+        self.stack
+            .last()
+            .copied()
+            .filter(|(n, _)| self.doc.get_node(*n).is_some())
+            .ok_or_else(|| "an edit on an empty stack".to_owned())
+    }
+
+    /// Takes the top entry off the stack; never the root.
+    fn pop_one(&mut self) -> Result<(NodeId, Option<u64>), String> {
+        if self.stack.len() <= 1 {
+            return Err("an edit took more nodes than there are".to_owned());
+        }
+        self.stack
+            .pop()
+            .ok_or_else(|| "an edit took more nodes than there are".to_owned())
+    }
+
+    /// Takes the top `m` nodes off the stack, in stack order; never the
+    /// root, and always with one node left below them.
+    fn pop(&mut self, m: u32) -> Result<Vec<NodeId>, String> {
         let m = usize::try_from(m).map_err(|e| e.to_string())?;
-        // The root stays at the bottom of the stack.
         let keep = self
             .stack
             .len()
             .checked_sub(m)
             .filter(|k| *k >= 1)
             .ok_or("an edit took more nodes than there are")?;
-        Ok(self.stack.split_off(keep))
+        Ok(self
+            .stack
+            .split_off(keep)
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect())
     }
 
-    fn walk(&self, path: &[u8]) -> Result<usize, String> {
-        let mut at = *self.stack.last().ok_or("nothing to walk from")?;
-        for &i in path {
-            at = self
-                .doc
-                .get_node(at)
-                .and_then(|n| n.children.get(usize::from(i)).copied())
-                .ok_or("a path that leads nowhere")?;
+    /// Replaces the top of the stack with `node`, which has no id yet.
+    fn set_top(&mut self, node: NodeId) -> Result<(), String> {
+        if self.stack.len() <= 1 {
+            return Err("an edit reached outside the view".to_owned());
         }
-        Ok(at)
+        if let Some(top) = self.stack.last_mut() {
+            *top = (node, None);
+        }
+        Ok(())
     }
 
     /// Whether `node` is `inside` or below it.
-    fn within(&self, node: usize, inside: usize) -> bool {
+    fn within(&self, node: NodeId, inside: NodeId) -> bool {
         let mut at = Some(node);
         while let Some(n) = at {
             if n == inside {
@@ -252,7 +207,7 @@ impl RemoteDocument {
 
     /// `kids` may go under `parent`: none of them is it or above it, and
     /// none is (or holds) the root.
-    fn placeable(&self, parent: usize, kids: &[usize]) -> Result<(), String> {
+    fn placeable(&self, parent: NodeId, kids: &[NodeId]) -> Result<(), String> {
         if kids
             .iter()
             .any(|&k| self.within(parent, k) || self.within(self.root, k))
@@ -265,7 +220,7 @@ impl RemoteDocument {
     /// `anchor`'s parent, when it may be replaced or moved beside: not the
     /// root (whose parent is the host's), and in a tree (Dioxus builds
     /// subtrees apart, then puts them in).
-    fn parent_of(&self, anchor: usize) -> Result<usize, String> {
+    fn parent_of(&self, anchor: NodeId) -> Result<NodeId, String> {
         self.doc
             .get_node(anchor)
             .and_then(|n| n.parent)
@@ -273,15 +228,19 @@ impl RemoteDocument {
             .ok_or_else(|| "an edit reached outside the view".to_owned())
     }
 
-    fn map(&mut self, node: usize, id: u64) {
+    fn map(&mut self, node: NodeId, id: u64) {
         if let Some(old) = self.ids.insert(id, node) {
             self.elements.remove(&old);
         }
-        self.elements.insert(node, id);
+        if let Some(old) = self.elements.insert(node, id)
+            && old != id
+        {
+            self.ids.remove(&old);
+        }
     }
 
     /// Forgets the ids of `node` and everything below it.
-    fn forget(&mut self, node: usize) {
+    fn forget(&mut self, node: NodeId) {
         let mut pending = vec![node];
         while let Some(n) = pending.pop() {
             if let Some(node) = self.doc.get_node(n) {
@@ -293,75 +252,80 @@ impl RemoteDocument {
         }
     }
 
-    fn replace(&mut self, anchor: usize, kids: &[usize]) -> Result<(), String> {
-        let parent = self.parent_of(anchor)?;
-        self.placeable(parent, kids)?;
-        self.forget(anchor);
-        let mut m = self.doc.mutate();
-        m.insert_nodes_before(anchor, kids);
-        m.remove_and_drop_node(anchor);
+    /// Takes `node` (not the root) out of the document, its ids with it.
+    fn drop_node(&mut self, node: NodeId) -> Result<(), String> {
+        if self.within(self.root, node) {
+            return Err("an edit reached outside the view".to_owned());
+        }
+        self.forget(node);
+        self.doc.mutate().remove_and_drop_node(node);
         Ok(())
     }
 
     fn edit(&mut self, edit: Edit) -> Result<(), String> {
         match edit {
-            Edit::AppendChildren { id, m } => {
-                let parent = self.node(id)?;
+            Edit::PushId { id } => {
+                let node = self.node(id)?;
+                self.stack.push((node, Some(id)));
+            }
+            Edit::SetId { id } => {
+                let (node, _) = self.top()?;
+                if node == self.root && id != 0 {
+                    return Err("an edit reached outside the view".to_owned());
+                }
+                self.map(node, id);
+                if let Some(top) = self.stack.last_mut() {
+                    top.1 = Some(id);
+                }
+            }
+            Edit::Child { index } => {
+                let (node, _) = self.top()?;
+                let child = usize::try_from(index)
+                    .ok()
+                    .and_then(|i| self.doc.get_node(node)?.children.get(i).copied())
+                    .ok_or("a child that is not there")?;
+                self.set_top(child)?;
+            }
+            Edit::Pop => {
+                self.pop_one()?;
+            }
+            Edit::CreateElement { tag, namespace } => {
+                let node = self
+                    .doc
+                    .mutate()
+                    .create_element(qual(&tag, namespace.as_deref()), Vec::new());
+                self.stack.push((node, None));
+            }
+            Edit::CreateText { value } => {
+                let node = self.doc.mutate().create_text_node(&value);
+                self.stack.push((node, None));
+            }
+            Edit::Clone => {
+                let (node, _) = self.top()?;
+                if self.within(self.root, node) {
+                    return Err("an edit reached outside the view".to_owned());
+                }
+                let copy = self.doc.mutate().deep_clone_node(node);
+                self.set_top(copy)?;
+            }
+            Edit::AppendChildren { m } => {
                 let kids = self.pop(m)?;
+                let (parent, _) = self.top()?;
                 self.placeable(parent, &kids)?;
                 self.doc.mutate().append_children(parent, &kids);
             }
-            Edit::AssignNodeId { path, id } => {
-                let node = self.walk(&path)?;
-                if let Some(old) = self.ids.get(&id).copied()
-                    && old != node
-                    && !self.within(old, self.root)
-                {
-                    self.forget(old);
-                    self.doc.mutate().remove_node_if_unparented(old);
-                }
-                self.map(node, id);
-            }
-            Edit::CreatePlaceholder { id } => {
-                let node = self.doc.mutate().create_comment_node();
-                self.map(node, id);
-                self.stack.push(node);
-            }
-            Edit::CreateTextNode { value, id } => {
-                let node = self.doc.mutate().create_text_node(&value);
-                self.map(node, id);
-                self.stack.push(node);
-            }
-            Edit::LoadTemplate {
-                template,
-                index,
-                id,
-            } => {
-                let index = usize::try_from(index).map_err(|e| e.to_string())?;
-                let root = self
-                    .templates
-                    .get(&template)
-                    .and_then(|roots| roots.get(index))
-                    .copied()
-                    .ok_or_else(|| format!("no template {template} root {index}"))?;
-                let node = self.doc.mutate().deep_clone_node(root);
-                self.map(node, id);
-                self.stack.push(node);
-            }
-            Edit::ReplaceNodeWith { id, m } => {
-                let anchor = self.node(id)?;
+            Edit::ReplaceWith { m } => {
                 let kids = self.pop(m)?;
-                self.replace(anchor, &kids)?;
+                let (anchor, _) = self.pop_one()?;
+                let parent = self.parent_of(anchor)?;
+                self.placeable(parent, &kids)?;
+                self.doc.mutate().insert_nodes_before(anchor, &kids);
+                self.drop_node(anchor)?;
             }
-            Edit::ReplacePlaceholder { path, m } => {
-                let kids = self.pop(m)?;
-                let anchor = self.walk(&path)?;
-                self.replace(anchor, &kids)?;
-            }
-            Edit::InsertAfter { id, m } | Edit::InsertBefore { id, m } => {
+            Edit::InsertAfter { m } | Edit::InsertBefore { m } => {
                 let after = matches!(edit, Edit::InsertAfter { .. });
-                let anchor = self.node(id)?;
                 let kids = self.pop(m)?;
+                let (anchor, _) = self.top()?;
                 let parent = self.parent_of(anchor)?;
                 self.placeable(parent, &kids)?;
                 let mut doc = self.doc.mutate();
@@ -375,9 +339,8 @@ impl RemoteDocument {
                 name,
                 namespace,
                 value,
-                id,
             } => {
-                let node = self.node(id)?;
+                let (node, _) = self.top()?;
                 let value = match value {
                     Value::None => None,
                     Value::Bool(false) if name == "checked" => None,
@@ -389,34 +352,27 @@ impl RemoteDocument {
                 let mut m = self.doc.mutate();
                 set_attr(&mut m, node, &name, namespace.as_deref(), value.as_deref())?;
             }
-            Edit::SetText { value, id } => {
-                let node = self.node(id)?;
+            Edit::SetText { value } => {
+                let (node, _) = self.top()?;
                 self.doc.mutate().set_node_text(node, &value);
             }
-            Edit::Listen { name, id } => {
-                let node = self.node(id)?;
+            Edit::Listen { name } => {
+                let (node, id) = self.top()?;
+                let id = id.ok_or("a handler on a node with no element id")?;
                 let mut m = self.doc.mutate();
                 set_attr(&mut m, node, DIOXUS_ID, None, Some(&id.to_string()))?;
                 drop(m);
                 let n = self.listeners.entry(name).or_default();
                 *n = n.saturating_add(1);
             }
-            Edit::Unlisten { name, .. } => {
+            Edit::Unlisten { name } => {
                 if let Some(n) = self.listeners.get_mut(&name) {
                     *n = n.saturating_sub(1);
                 }
             }
-            Edit::Remove { id } => {
-                let node = self.node(id)?;
-                if node == self.root {
-                    return Err("an edit reached outside the view".to_owned());
-                }
-                self.forget(node);
-                self.doc.mutate().remove_and_drop_node(node);
-            }
-            Edit::PushRoot { id } => {
-                let node = self.node(id)?;
-                self.stack.push(node);
+            Edit::Remove => {
+                let (node, _) = self.pop_one()?;
+                self.drop_node(node)?;
             }
         }
         Ok(())
@@ -427,7 +383,7 @@ impl RemoteDocument {
 /// renderer does: the `style` namespace is one CSS property.
 fn set_attr(
     m: &mut blitz_dom::DocumentMutator<'_>,
-    node: usize,
+    node: NodeId,
     name: &str,
     namespace: Option<&str>,
     value: Option<&str>,
@@ -480,7 +436,7 @@ struct Forward<'a> {
 impl EventHandler for Forward<'_> {
     fn handle_event(
         &mut self,
-        chain: &[usize],
+        chain: &[NodeId],
         event: &mut DomEvent,
         doc: &mut dyn Document,
         _: &mut EventState,
@@ -597,7 +553,7 @@ enum Shown {
 }
 
 /// Runs `f` on the host's document, when it is free.
-async fn with_doc<R>(node: &NodeHandle, f: impl FnOnce(&mut BaseDocument, usize) -> R) -> R {
+async fn with_doc<R>(node: &NodeHandle, f: impl FnOnce(&mut BaseDocument, NodeId) -> R) -> R {
     loop {
         // A task runs while nothing else holds the document; this checks
         // anyway, and waits a frame if something does.
@@ -610,7 +566,7 @@ async fn with_doc<R>(node: &NodeHandle, f: impl FnOnce(&mut BaseDocument, usize)
 }
 
 /// The view's document in `node`, to apply a frame to.
-fn remote(doc: &mut BaseDocument, node: usize) -> Option<&mut RemoteDocument> {
+fn remote(doc: &mut BaseDocument, node: NodeId) -> Option<&mut RemoteDocument> {
     let sub: &mut dyn Any = doc.subdoc_mut(node)?;
     sub.downcast_mut::<RemoteDocument>()
 }
@@ -827,7 +783,7 @@ pub fn RemoteView(processes: Processes, extension: String, view: String) -> Elem
 /// The nodes of `doc` that hold a [`RemoteDocument`]: the panes showing
 /// a process extension's view.
 #[must_use]
-pub fn mounted_views(doc: &BaseDocument) -> Vec<usize> {
+pub fn mounted_views(doc: &BaseDocument) -> Vec<NodeId> {
     doc.sub_document_node_ids()
         .into_iter()
         .filter(|n| {
