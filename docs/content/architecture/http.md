@@ -329,7 +329,8 @@ back the axum `Router` for in-process tests.
 Every vox lane the host owns sits behind the `PermissionsGate` given to
 `EngineHost::new(router, gate, bind)`: `/vox` resolves the caller from the
 upgrade's bearer, the iroh lane uses the endpoint id the handshake proved
-(`Principal::Host`), and each `vox_at` lane is wrapped like `/vox`.
+(`Principal::Host`), and each `vox_at` lane is wrapped like `/vox`, inside
+the lane's scope (its org), which the host enters outside the gate.
 `EngineHost::ungated(router, bind)` is the explicit opt-out, for a server
 like this one whose services check their own tokens; it logs a `warn` on
 every start. The HTTP face is not behind the vox gate: a generated route
@@ -345,12 +346,13 @@ route (`crates/architect/src/host/mount.rs`):
 ```rust,ignore
 EngineHost::new(vox, gate, bind)
     // A vox WebSocket at a parameterised path. The resolver picks the
-    // handler per connection, or refuses it; the host's gate wraps it.
+    // lane per connection (a handler and its org), or refuses it; the
+    // host's gate wraps the handler inside the org.
     .vox_at("/org/{slug}/vox", move |head: RequestHead| {
         let orgs = orgs.clone();
         async move {
             orgs.get(head.param("slug").unwrap_or_default())
-                .map(|org| org.router())
+                .map(|org| Lane::new(org.router()).scoped(org.id()))
                 .ok_or(StatusCode::NOT_FOUND)
         }
     })
@@ -363,8 +365,8 @@ EngineHost::new(vox, gate, bind)
 
 | Method | Serves | The hook gets | The hook answers |
 |---|---|---|---|
-| `vox_at(path, resolve)` | a vox WebSocket at `path` (`any` verb; `vox.v1` echoed), behind the host's gate and the upgrade's bearer | `RequestHead` | `Ok(handler)` (a `LayerRouter`, say), or `Err(impl IntoResponse)` to refuse the upgrade |
-| `vox_at_permissioned(path, resolve)` | the same, served as the resolver gated it, not wrapped again | `RequestHead` | `Ok(PermissionedRouter)` (a gate per org, a share link's `StaticPrincipal` lane), or `Err(impl IntoResponse)` |
+| `vox_at(path, resolve)` | a vox WebSocket at `path` (`any` verb; `vox.v1` echoed), behind the host's gate and the upgrade's bearer | `RequestHead` | `Ok(Lane::new(handler).scoped(org))`, or a bare `LayerRouter` (a lane in no scope), or `Err(impl IntoResponse)` to refuse the upgrade |
+| `vox_at_permissioned(path, resolve)` | the same, served as the resolver gated it, not wrapped again | `RequestHead` | `Ok(PermissionedRouter)` (a gate per org, a share link's `StaticPrincipal` lane) or one `.scoped(org)` outside its gate, or `Err(impl IntoResponse)` |
 | `document(path, describe)` | `GET path`, before the SPA fallback | `RequestHead` | `Ok(impl IntoResponse)` or `Err(impl IntoResponse)` |
 | `dav(mount, handle)` | every verb at `mount`, `mount/` and below it, **outside** `finish` | `DavRequest`: `head`, `mount` as addressed (`/org/acme/dav`), `rel` (decoded, no leading `/`), the whole `request` | a `Response` |
 

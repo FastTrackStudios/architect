@@ -83,7 +83,7 @@ them apart; only the dial differs.
 | WebSocket | `EngineHost` mounts `/vox` (subprotocol `vox.v1`) | a browser sends its bearer as the `vox.bearer.<token>` subprotocol |
 | iroh | `.iroh(key_path, id_path)` on the host | QUIC, dialled by bare endpoint id; `.iroh_lookup(PeerLookup::N0AndLan)` (feature `iroh-lan`) adds LAN lookup |
 | in-process | `LocalServer::serve(router, scope)` | a vox memory link: desktop apps, CLIs, tests (feature `local`) |
-| per-path | `.vox_at("/org/{slug}/vox", resolve)` | a resolver picks the handler per connection |
+| per-path | `.vox_at("/org/{slug}/vox", resolve)` | a resolver picks the `Lane` (handler and org) per connection; the gate checks inside its org |
 
 The iroh key file is created `0600`; `id_path`, when given, receives
 the endpoint id so other processes can find it.
@@ -237,12 +237,13 @@ builder methods on the host, not hand-written routes
 
 ```rust
 EngineHost::new(vox, gate, bind)
-    // The host's gate wraps the router the resolver picks.
+    // The resolver picks the lane: a router and the org its calls run in.
+    // The host's gate wraps the router inside that org.
     .vox_at("/org/{slug}/vox", move |head: RequestHead| {
         let orgs = orgs.clone();
         async move {
             orgs.get(head.param("slug").unwrap_or_default())
-                .map(|org| org.router())
+                .map(|org| Lane::new(org.router()).scoped(org.id()))
                 .ok_or(StatusCode::NOT_FOUND)
         }
     })
@@ -253,8 +254,8 @@ EngineHost::new(vox, gate, bind)
 
 | Mount | Serves | Feature |
 |---|---|---|
-| `.vox_at(path, resolve)` | a vox WebSocket at a parameterised path behind the host's gate; the resolver refuses with a status before the upgrade | `host` |
-| `.vox_at_permissioned(path, resolve)` | the same, for a resolver that returns a `PermissionedRouter` it gated itself (a gate per org, a share link's guest) | `host` |
+| `.vox_at(path, resolve)` | a vox WebSocket at a parameterised path behind the host's gate, inside the `Lane`'s scope (its org) so the gate checks there; the resolver refuses with a status before the upgrade | `host` |
+| `.vox_at_permissioned(path, resolve)` | the same, for a resolver that returns a `PermissionedRouter` it gated itself (a gate per org, a share link's guest), optionally `.scoped(org)` | `host` |
 | `.document(path, describe)` | a `GET` document ahead of the SPA fallback | `host` |
 | `.dav(mount, handle)` | every WebDAV verb at and below `mount`, outside the `finish` layers so CORS does not answer `OPTIONS` | `host` |
 | `.otlp_forward(at, upstream, authorize)` | `POST {at}/v1/{traces,logs,metrics}` forwarded to a collector once `authorize(head)` is `Ok`; other signals `404`, a dead collector `502` | `otlp-forward` |

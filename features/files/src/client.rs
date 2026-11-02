@@ -7,6 +7,8 @@
 //! | read them back | [`FilesClient::get`], [`FilesClient::read_range`] |
 //! | follow a pinned reference | [`FilesClient::resolve`], [`FilesClient::get_ref`] |
 //! | hear what changed | [`FilesClient::events`] |
+//! | play it in a browser | [`FilesClient::ticket`], then [`crate::web::content_url`] |
+//! | its proxy, poster, peaks | [`FilesClient::renditions`], [`crate::web::rendition_url`] |
 //!
 //! It opens no connection: it is built from a vox `Caller` (a browser's
 //! WebSocket, a native client's, a test's in-process link), and drives
@@ -23,11 +25,12 @@ use futures_util::future::{Either, join, select};
 use sha2::Digest as _;
 
 use crate::error::FilesFault;
-use crate::id::{ContentId, RootId, UploadId};
+use crate::id::{ContentId, RootId, UploadId, VersionId};
 use crate::model::{
     ByteRange, Entry, Expect, FilesEvent, OnConflict, ReadRequest, Root, UploadFrame, UploadSpec,
 };
 use crate::path::RootPath;
+use crate::rendition::{RenditionSet, Ticket};
 use crate::service::{FilesServiceClient, FilesServiceStreamClient};
 
 /// Bytes per upload frame: small enough that vox's credit paces a slow
@@ -380,6 +383,25 @@ impl FilesClient {
             range: None,
         })
         .await
+    }
+
+    // ── In a browser ───────────────────────────────────────────────
+
+    /// A read ticket for `path` and what is under it, for a byte URL an
+    /// element that cannot send a header loads (`<video src>`).
+    pub async fn ticket(&self, root: RootId, path: &str) -> Result<Ticket> {
+        Ok(self.service.ticket(root, parse(path)?).await?)
+    }
+
+    /// A version's renditions (`None`: the current one), asking for any
+    /// that are missing.
+    pub async fn renditions(
+        &self,
+        root: RootId,
+        path: &str,
+        version: Option<VersionId>,
+    ) -> Result<RenditionSet> {
+        Ok(self.service.renditions(root, parse(path)?, version).await?)
     }
 
     // ── Live ───────────────────────────────────────────────────────

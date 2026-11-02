@@ -2,8 +2,9 @@
 //! manage spaces.
 //!
 //! The org is never an argument: a call runs in the org of the lane it
-//! arrived on (`architect_orgs::server::confine`), and the caller is the
-//! principal the permissions gate resolved. Who may do what to a space is
+//! arrived on (the lane's scope: an `EngineHost` `Lane`, or
+//! `architect_orgs::server::confine`), and the caller is the principal
+//! the permissions gate resolved. Who may do what to a space is
 //! the space's: its managers (`admin` on `spaces/<id>`) and the org's
 //! owners and admins change it, its members see it.
 

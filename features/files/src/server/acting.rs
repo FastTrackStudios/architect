@@ -10,7 +10,7 @@ use architect_permissions::Principal;
 use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _, AsyncWriteExt as _};
 
 use super::state::{Batch, Node, RootState, Stamp, State, Upload, add_range, root_entry};
-use super::{Actor, FilesServer, OrgFiles, io, now_us};
+use super::{Actor, FilesServer, OrgFiles, io, now_us, ticket};
 use crate::access::{Access, Capability, Effective, Grant, canonical};
 use crate::client::FRAME;
 use crate::error::FilesFault;
@@ -21,7 +21,11 @@ use crate::model::{
     VersionLabel, WriteReceipt,
 };
 use crate::path::RootPath;
+use crate::rendition::{RenditionSet, Ticket};
 use crate::service::{FilesService, FilesServiceStreamSource};
+
+/// Why a server with no transcoder has no renditions.
+pub(super) const NO_RENDITIONS: &str = "this server makes no renditions";
 
 /// [`FilesService`] for one principal in one org
 /// ([`FilesServer::acting`]).
@@ -86,6 +90,15 @@ impl Acting {
         *state = next;
         drop(state);
         for event in events {
+            if let (Some(renditions), FilesEvent::Changed { entries, .. }) =
+                (&self.server.renditions, &event)
+            {
+                // Every version that lands gets its renditions, off this
+                // call's path.
+                for content in entries.iter().filter_map(|e| e.content.clone()) {
+                    renditions.schedule(content);
+                }
+            }
             files.hub.publish(event);
         }
         Ok(out)
@@ -182,6 +195,148 @@ impl Acting {
                 other => io(other),
             })?;
         Ok(ContentId::new(hash.to_hex()))
+    }
+
+    /// The bytes of `path`'s current version (or `version`, which needs
+    /// `History`), if the caller may read them: their content and length.
+    pub async fn locate(
+        &self,
+        root_id: RootId,
+        path: &RootPath,
+        version: Option<VersionId>,
+    ) -> Result<(ContentId, u64), FilesFault> {
+        let found = self
+            .view(|state, actor| {
+                actor.need(state, root_id, path, Capability::Read)?;
+                if version.is_some() {
+                    actor.need(state, root_id, path, Capability::History)?;
+                }
+                let node = state
+                    .root(root_id)?
+                    .nodes
+                    .get(path.as_str())
+                    .filter(|n| n.is_file())
+                    .ok_or_else(|| FilesFault::PathNotFound(path.clone()))?;
+                version.map_or_else(
+                    || {
+                        node.current()
+                            .filter(|v| v.content.is_some())
+                            .cloned()
+                            .ok_or_else(|| FilesFault::PathNotFound(path.clone()))
+                    },
+                    |id| {
+                        node.versions
+                            .iter()
+                            .find(|v| v.id == id)
+                            .cloned()
+                            .ok_or(FilesFault::VersionNotFound(id))
+                    },
+                )
+            })
+            .await?;
+        let content = found
+            .content
+            .ok_or_else(|| FilesFault::invalid("that version is a delete: it has no bytes"))?;
+        Ok((content, found.size))
+    }
+
+    /// Where the blob `content` is on disk.
+    pub(crate) fn blob_path(&self, content: &ContentId) -> Result<std::path::PathBuf, FilesFault> {
+        let hash =
+            Sha256::from_hex(content.as_str()).map_err(|e| FilesFault::Internal(e.to_string()))?;
+        Ok(self.server.blobs().path_for(&hash))
+    }
+
+    /// The `kind` rendition of a file's version, if the caller may read
+    /// the version: where its bytes are, and their length.
+    pub async fn rendition(
+        &self,
+        root_id: RootId,
+        path: &RootPath,
+        version: Option<VersionId>,
+        kind: crate::rendition::RenditionKind,
+    ) -> Result<(std::path::PathBuf, u64), FilesFault> {
+        let (content, _) = self.locate(root_id, path, version).await?;
+        let renditions =
+            self.server
+                .renditions
+                .as_ref()
+                .ok_or_else(|| FilesFault::NoRendition {
+                    kind,
+                    reason: NO_RENDITIONS.into(),
+                })?;
+        let (hash, size) = renditions.ready(&content, kind).await?;
+        Ok((self.server.blobs().path_for(&hash), size))
+    }
+
+    /// Write an upload's chunks (`(offset, bytes)`, any order) into its
+    /// staging file. What arrived counts even when `chunks` breaks off:
+    /// the client resumes from the server's account of it.
+    pub async fn receive<S>(&self, upload_id: UploadId, chunks: S) -> Result<Received, FilesFault>
+    where
+        S: futures_util::Stream<Item = Result<(u64, Vec<u8>), FilesFault>>,
+    {
+        use futures_util::StreamExt as _;
+        let (files, _) = self.ctx().await?;
+        let upload = self
+            .view(|state, actor| Self::upload(state, actor, upload_id).cloned())
+            .await?;
+        if !upload.staged {
+            return Ok(Received {
+                upload_id,
+                written: 0,
+                needed: Vec::new(),
+            });
+        }
+        let mut file = tokio::fs::OpenOptions::new()
+            .write(true)
+            .open(files.staging(upload_id))
+            .await
+            .map_err(io)?;
+        let mut got: Vec<ByteRange> = Vec::new();
+        let mut written = 0u64;
+        let mut chunks = std::pin::pin!(chunks);
+        let outcome = loop {
+            let (offset, bytes) = match chunks.next().await {
+                Some(Ok(chunk)) => chunk,
+                None => break Ok(()),
+                Some(Err(e)) => break Err(e),
+            };
+            let len = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+            let end = offset.saturating_add(len);
+            if end > upload.spec.size {
+                break Err(FilesFault::invalid(format!(
+                    "bytes {offset}..{end} lie past the file's {} bytes",
+                    upload.spec.size
+                )));
+            }
+            if let Err(e) = write_at(&mut file, offset, &bytes).await {
+                break Err(e);
+            }
+            add_range(&mut got, ByteRange { start: offset, end });
+            written = written.saturating_add(len);
+        };
+        file.sync_data().await.map_err(io)?;
+        let needed = self
+            .mutate(|state, actor, _| {
+                let label = actor.label.clone();
+                let upload = state
+                    .uploads
+                    .iter_mut()
+                    .find(|u| u.id == upload_id && u.by == label)
+                    .ok_or(FilesFault::UploadNotFound(upload_id))?;
+                for range in &got {
+                    add_range(&mut upload.received, *range);
+                }
+                Ok((upload.needed(), Vec::new()))
+            })
+            .await?;
+        outcome?;
+        Ok(Received {
+            upload_id,
+            written,
+            needed,
+        })
     }
 }
 
@@ -524,74 +679,24 @@ impl FilesService for Acting {
     async fn send_bytes(
         &self,
         upload_id: UploadId,
-        mut frames: Rx<UploadFrame>,
+        frames: Rx<UploadFrame>,
     ) -> Result<Received, FilesFault> {
-        let (files, _) = self.ctx().await?;
-        let upload = self
-            .view(|state, actor| Self::upload(state, actor, upload_id).cloned())
-            .await?;
-        if !upload.staged {
-            return Ok(Received {
-                upload_id,
-                written: 0,
-                needed: Vec::new(),
-            });
-        }
-        let mut file = tokio::fs::OpenOptions::new()
-            .write(true)
-            .open(files.staging(upload_id))
-            .await
-            .map_err(io)?;
-        let mut got: Vec<ByteRange> = Vec::new();
-        let mut written = 0u64;
-        let outcome = loop {
-            let frame = match frames.recv().await {
-                Ok(Some(frame)) => frame,
-                Ok(None) => break Ok(()),
-                Err(e) => break Err(FilesFault::Io(format!("the upload stream broke: {e:?}"))),
-            };
-            let mut owned = None;
-            let _ = frame.map(|f| owned = Some(f));
-            let Some(UploadFrame::Chunk { offset, bytes }) = owned else {
-                break Ok(());
-            };
-            let len = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
-            let end = offset.saturating_add(len);
-            if end > upload.spec.size {
-                break Err(FilesFault::invalid(format!(
-                    "bytes {offset}..{end} lie past the file's {} bytes",
-                    upload.spec.size
-                )));
-            }
-            if let Err(e) = write_at(&mut file, offset, &bytes).await {
-                break Err(e);
-            }
-            add_range(&mut got, ByteRange { start: offset, end });
-            written = written.saturating_add(len);
-        };
-        file.sync_data().await.map_err(io)?;
-        // What arrived counts even when the stream broke: the client
-        // resumes from the server's account of it.
-        let needed = self
-            .mutate(|state, actor, _| {
-                let label = actor.label.clone();
-                let upload = state
-                    .uploads
-                    .iter_mut()
-                    .find(|u| u.id == upload_id && u.by == label)
-                    .ok_or(FilesFault::UploadNotFound(upload_id))?;
-                for range in &got {
-                    add_range(&mut upload.received, *range);
+        let chunks = futures_util::stream::unfold(frames, |mut frames| async move {
+            let chunk = match frames.recv().await {
+                Ok(Some(frame)) => {
+                    let mut owned = None;
+                    let _ = frame.map(|f| owned = Some(f));
+                    match owned {
+                        Some(UploadFrame::Chunk { offset, bytes }) => Ok((offset, bytes)),
+                        Some(UploadFrame::Finished) | None => return None,
+                    }
                 }
-                Ok((upload.needed(), Vec::new()))
-            })
-            .await?;
-        outcome?;
-        Ok(Received {
-            upload_id,
-            written,
-            needed,
-        })
+                Ok(None) => return None,
+                Err(e) => Err(FilesFault::Io(format!("the upload stream broke: {e:?}"))),
+            };
+            Some((chunk, frames))
+        });
+        self.receive(upload_id, chunks).await
     }
 
     async fn complete_upload(
@@ -683,39 +788,7 @@ impl FilesService for Acting {
 
     async fn read(&self, request: ReadRequest, out: Tx<Vec<u8>>) -> Result<ReadDone, FilesFault> {
         let path = request.path.validate()?;
-        let version = self
-            .view(|state, actor| {
-                actor.need(state, request.root_id, &path, Capability::Read)?;
-                if request.version.is_some() {
-                    actor.need(state, request.root_id, &path, Capability::History)?;
-                }
-                let node = state
-                    .root(request.root_id)?
-                    .nodes
-                    .get(path.as_str())
-                    .filter(|n| n.is_file())
-                    .ok_or_else(|| FilesFault::PathNotFound(path.clone()))?;
-                request.version.map_or_else(
-                    || {
-                        node.current()
-                            .filter(|v| v.content.is_some())
-                            .cloned()
-                            .ok_or_else(|| FilesFault::PathNotFound(path.clone()))
-                    },
-                    |id| {
-                        node.versions
-                            .iter()
-                            .find(|v| v.id == id)
-                            .cloned()
-                            .ok_or(FilesFault::VersionNotFound(id))
-                    },
-                )
-            })
-            .await?;
-        let content = version
-            .content
-            .ok_or_else(|| FilesFault::invalid("that version is a delete: it has no bytes"))?;
-        let total = version.size;
+        let (content, total) = self.locate(request.root_id, &path, request.version).await?;
         let range = request.range.map_or(
             ByteRange {
                 start: 0,
@@ -753,6 +826,47 @@ impl FilesService for Acting {
             total,
             range,
         })
+    }
+
+    async fn ticket(&self, root_id: RootId, path: RootPath) -> Result<Ticket, FilesFault> {
+        let path = path.validate()?;
+        self.view(|state, actor| actor.need(state, root_id, &path, Capability::Read))
+            .await?;
+        let who = ticket::who(&self.who).ok_or(FilesFault::Unauthenticated)?;
+        let expires_us = now_us().saturating_add(ticket::TICKET_TTL_US);
+        let token = self
+            .server
+            .tickets()
+            .mint(&ticket::Claims {
+                org: self.org.0.clone(),
+                root: root_id,
+                path,
+                who,
+                expires_us,
+            })
+            .ok_or_else(|| FilesFault::Internal("could not sign a ticket".into()))?;
+        Ok(Ticket { token, expires_us })
+    }
+
+    // ── Renditions ─────────────────────────────────────────────────
+
+    async fn renditions(
+        &self,
+        root_id: RootId,
+        path: RootPath,
+        version: Option<VersionId>,
+    ) -> Result<RenditionSet, FilesFault> {
+        let path = path.validate()?;
+        let (content, _) = self.locate(root_id, &path, version).await?;
+        match &self.server.renditions {
+            Some(renditions) => renditions.set(&content).await,
+            None => Ok(RenditionSet {
+                content,
+                class: None,
+                kinds: Vec::new(),
+                problem: Some(NO_RENDITIONS.into()),
+            }),
+        }
     }
 
     // ── Versions ───────────────────────────────────────────────────
@@ -1175,6 +1289,17 @@ impl FilesService for FilesServer {
     }
     async fn read(&self, request: ReadRequest, out: Tx<Vec<u8>>) -> Result<ReadDone, FilesFault> {
         FilesService::read(&self.for_call()?, request, out).await
+    }
+    async fn ticket(&self, root_id: RootId, path: RootPath) -> Result<Ticket, FilesFault> {
+        self.for_call()?.ticket(root_id, path).await
+    }
+    async fn renditions(
+        &self,
+        root_id: RootId,
+        path: RootPath,
+        version: Option<VersionId>,
+    ) -> Result<RenditionSet, FilesFault> {
+        self.for_call()?.renditions(root_id, path, version).await
     }
     async fn history(&self, root_id: RootId, path: RootPath) -> Result<Vec<Version>, FilesFault> {
         self.for_call()?.history(root_id, path).await

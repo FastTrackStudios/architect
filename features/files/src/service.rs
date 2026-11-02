@@ -1,8 +1,9 @@
 //! The wire (feature `vox`): one service, its events beside it.
 //!
 //! The org is never an argument: a call runs in the org of the lane it
-//! arrived on (`architect_orgs::server::confine`), and the caller is the
-//! principal the permissions gate resolved. Bytes ride vox channels — an
+//! arrived on (the lane's scope: an `EngineHost` `Lane`, or
+//! `architect_orgs::server::confine`), and the caller is the principal
+//! the permissions gate resolved. Bytes ride vox channels — an
 //! upload's frames in ([`FilesService::send_bytes`]), a read's out
 //! ([`FilesService::read`]) — with vox's credit as flow control, so
 //! neither side buffers a whole file.
@@ -18,6 +19,7 @@ use crate::model::{
     UploadPlan, UploadProgress, UploadSpec, Usage, Version, VersionLabel, WriteReceipt,
 };
 use crate::path::RootPath;
+use crate::rendition::{RenditionSet, Ticket};
 
 #[architect::rpc]
 pub trait FilesService {
@@ -125,6 +127,23 @@ pub trait FilesService {
     /// into `out`.
     async fn read(&self, request: ReadRequest, out: Tx<Vec<u8>>) -> Result<ReadDone, FilesFault>;
 
+    /// A read ticket for `path` and everything under it: what a browser
+    /// appends to a byte URL (`crate::web`) for an element that cannot
+    /// send a header. Needs `Read` there; reads as the caller, and only
+    /// what they may still read when it is used.
+    async fn ticket(&self, root_id: RootId, path: RootPath) -> Result<Ticket, FilesFault>;
+
+    // ── Renditions ─────────────────────────────────────────────────
+
+    /// A version's renditions (`None`: the current one), asking for any
+    /// that are missing. Needs `Read` (and `History` for a past version).
+    async fn renditions(
+        &self,
+        root_id: RootId,
+        path: RootPath,
+        version: Option<VersionId>,
+    ) -> Result<RenditionSet, FilesFault>;
+
     // ── Versions ───────────────────────────────────────────────────
 
     /// A file's versions, oldest first (deletes included).
@@ -219,6 +238,8 @@ pub const PERMITS: ServicePermits = ServicePermits {
         MethodPermit::new("complete_upload", "read", "files/**"),
         MethodPermit::new("abort_upload", "read", "files/**"),
         MethodPermit::new("read", "read", "files/**"),
+        MethodPermit::new("ticket", "read", "files/**"),
+        MethodPermit::new("renditions", "read", "files/**"),
         MethodPermit::new("history", "read", "files/**"),
         MethodPermit::new("restore", "read", "files/**"),
         MethodPermit::new("label", "read", "files/**"),

@@ -1,8 +1,10 @@
 //! The same space over the other wires: a person from another org, a
 //! commenter in a space, reads and comments on its document and nothing
-//! else over a WebSocket (the token on the upgrade) and over iroh (the
-//! token on each call, the device proved by the handshake); removing
-//! them binds on their next call on the same connection.
+//! else over a WebSocket (an `EngineHost` org lane, the token on the
+//! upgrade) and over iroh (the token on each call, the device proved by
+//! the handshake); removing them binds on their next call on the same
+//! connection. On the host's lane the org is entered outside the gate,
+//! so a person in no space of it is refused at the gate.
 //!
 //! Every server and client is in-process on loopback: the WebSocket over
 //! `127.0.0.1:0`, iroh endpoints with relays off dialled by direct
@@ -21,11 +23,9 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use architect::connect::{Endpoint, Pool};
-use architect::http::axum::extract::Path;
-use architect::http::axum::extract::ws::WebSocketUpgrade;
-use architect::http::axum::http::HeaderMap;
-use architect::http::axum::routing::any;
-use architect::http::axum::{Router, serve};
+use architect::host::{EngineHost, Lane, RequestHead};
+use architect::http::axum::http::StatusCode;
+use architect::http::axum::serve;
 use architect::iroh_link::{self, VOX_ALPN};
 use architect::local::RawLaneCaller;
 use architect::permissions_gate::{AUTHORIZATION_METADATA_KEY, PermissionsGate};
@@ -33,7 +33,7 @@ use architect_orgs::OrgId;
 use architect_orgs::server::confine;
 use architect_permissions::Principal;
 use architect_spaces::server::MemoryStore;
-use architect_spaces::{COMMENTER, NewSpace, SpaceId, SpacesService, Subject};
+use architect_spaces::{COMMENTER, NewSpace, SpaceId, SpacesService, SpacesServiceClient, Subject};
 use common::{WorkspaceClient, World, hp, sign_in, user, world};
 use uuid::Uuid;
 
@@ -104,44 +104,68 @@ async fn carol_comments_then_is_removed(world: &World, docs: &WorkspaceClient, w
     assert!(docs.comment(DOC.to_string(), "?".into()).await.is_err());
 }
 
-/// The bearer from an upgrade's `Authorization` header.
-fn bearer_of(headers: &HeaderMap) -> Option<String> {
-    headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .map(|t| t.trim().to_owned())
-}
-
-/// `/org/{slug}/vox` over a WebSocket: each connection gated with its
-/// upgrade's bearer, confined to the slug's org.
+/// `/org/{slug}/vox` on an `EngineHost`, built the documented way: the
+/// resolver returns the slug's org as the lane's scope, and the host
+/// gates each connection with its upgrade's bearer inside that scope.
 async fn serve_ws(world: &World) -> SocketAddr {
-    let (gate, router) = (Arc::clone(&world.gate), world.router.clone());
-    let lane = move |Path(slug): Path<String>, headers: HeaderMap, ws: WebSocketUpgrade| {
-        let (gate, router) = (Arc::clone(&gate), router.clone());
-        async move {
-            let handler = confine(
-                OrgId::new(slug),
-                PermissionsGate::wrap_shared_with_bearer(gate, router, bearer_of(&headers)),
-            );
-            ws.protocols(["vox.v1"])
-                .on_upgrade(move |socket| architect::axum_ws::serve_router(socket, handler))
-        }
-    };
-    let app = Router::new().route("/org/{slug}/vox", any(lane));
+    let router = world.router.clone();
+    let host = EngineHost::new(router.clone(), (*world.gate).clone(), "127.0.0.1:0").vox_at(
+        "/org/{slug}/vox",
+        move |head: RequestHead| {
+            let router = router.clone();
+            async move {
+                let org = OrgId::new(head.param("slug").ok_or(StatusCode::NOT_FOUND)?);
+                Ok::<_, StatusCode>(Lane::new(router).scoped(org))
+            }
+        },
+    );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let at = listener.local_addr().unwrap();
+    let app = host.into_app();
     tokio::spawn(async move { serve(listener, app).await });
     at
+}
+
+/// `who`'s workspace and spaces on `hp`'s lane over a WebSocket.
+async fn on_hp(at: SocketAddr, who: &str) -> (WorkspaceClient, SpacesServiceClient) {
+    let endpoint = Endpoint::url(format!("ws://{at}/org/hp/vox")).with_bearer(Some(who.to_owned()));
+    let pool = Pool::default();
+    (
+        pool.client(&endpoint).await.unwrap(),
+        pool.client(&endpoint).await.unwrap(),
+    )
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn over_a_websocket() {
     let world = world(MemoryStore::new()).await;
     let at = serve_ws(&world).await;
-    let endpoint = Endpoint::url(format!("ws://{at}/org/hp/vox")).with_bearer(Some("carol".into()));
-    let docs: WorkspaceClient = Pool::default().client(&endpoint).await.unwrap();
+    let (docs, _) = on_hp(at, "carol").await;
     carol_comments_then_is_removed(&world, &docs, "websocket").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_person_from_another_org_is_refused_at_the_gate() {
+    let world = world(MemoryStore::new()).await;
+    a_space(&world).await;
+    let at = serve_ws(&world).await;
+
+    // Carol is in `fts` and in no space of `hp`: the gate sees `hp` and
+    // refuses her, before any handler runs.
+    let (docs, spaces) = on_hp(at, "carol").await;
+    let refused = docs
+        .read_doc(DOC.to_string())
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(refused.contains("permission denied"), "{refused}");
+    let refused = spaces.spaces().await.unwrap_err().to_string();
+    assert!(refused.contains("permission denied"), "{refused}");
+
+    // Alice owns `hp`: the same lane serves her.
+    let (docs, spaces) = on_hp(at, "alice").await;
+    docs.read_doc(DOC.to_string()).await.unwrap();
+    assert_eq!(spaces.spaces().await.unwrap().len(), 1);
 }
 
 /// Presents `Bearer <token>` on every call: a person signed in on a peer

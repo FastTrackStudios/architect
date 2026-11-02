@@ -8,7 +8,10 @@
 |---|---|---|
 | default (wasm-clean) | ids, paths, the model, the fault, capabilities and their resolution | `features/files/src/path.rs` `RootPath` (`parse` refuses `..`; `validate` what the wire decoded); `features/files/src/model.rs` `Root`, `Entry`, `Version`, `VersionLabel`, `Usage`, `OnConflict`, `Expect`, `FilesEvent`; `features/files/src/error.rs` `FilesFault`; `features/files/src/access.rs` `Capability`, `Grant`, `role_capabilities`, `stewards`, `resolve` |
 | `vox` | the service, its gate tables, the app's client | `features/files/src/service.rs` `FilesService` (`#[subscribe] events`), `PERMITS`, `STREAM_PERMITS`; `features/files/src/client.rs` `FilesClient` (`ensure_root`, `put` + `Save`, `get`, `read_range`, `resolve`, `get_ref`, `events`), `content_of` |
-| `server` (native) | every org's files on a server | `features/files/src/server/mod.rs` `FilesServer` (`new`, `default_org`, `with_grants`, `acting`, `set_quota`), `GrantSource` (grants from elsewhere — a space's members — asked per call); `features/files/src/server/acting.rs` `Acting` |
+| default (wasm-clean) | renditions' model, the byte face's routes and URLs | `features/files/src/rendition.rs` `RenditionKind` (`tag`, `mime`, `ladder`), `MediaClass`, `RenditionSet` (`state`, `settled`), `RenditionState`, `Ticket`, `Peaks` (`audiowaveform` JSON v2), `PeakReducer`, `RECIPE`; `features/files/src/web.rs` `FilesWeb` (an HTTP-only service, prefix `files/{org}`), `content_url`, `rendition_url` |
+| `server` (native) | every org's files on a server, and their renditions | `features/files/src/server/mod.rs` `FilesServer` (`new`, `default_org`, `with_grants`, `acting`, `set_quota`, `with_renditions`, `with_rendition_engine`, `rendition_engine`, `ticket_key`), `GrantSource` (grants from elsewhere — a space's members — asked per call); `features/files/src/server/ticket.rs` `TicketKey` (`seal`/`unseal` any claims under a prefix: another feature's tickets on the same kind of key), `who` and `principal_of` (exported as `ticket_subject`, `ticket_principal`); `features/files/src/server/acting.rs` `Acting` (in process: `locate`, `rendition`, `receive`); `features/files/src/server/renditions.rs` `Transcoder`, `TranscodeError`, `Renditions` (`new`, `concurrency`, `set`, `ready`, `schedule`, `build`) |
+| `http` (native) | the byte face a browser reads by range | `features/files/src/server/web.rs` `WebFiles` (`new(files, identity)`) |
+| `ffmpeg` (native) | renditions by the `ffmpeg`/`ffprobe` on `PATH` | `features/files/src/server/ffmpeg.rs` `FfmpegTranscoder` (`new`, `with_binaries`, `available`) |
 
 ## Rules it keeps
 
@@ -19,6 +22,9 @@
 - **History replaces trash.** Delete appends a delete version; `restore` brings it back. A move keeps a file's history; a copy starts its own.
 - **Saves are safe.** `Save::replacing(etag)` refuses with `Stale` when the file moved on; a taken destination is the caller's choice (`OnConflict`), never the server's.
 - **Dedup is per org.** An upload naming content the org already references sends nothing; content only another org holds is not proof of having the bytes.
+- **The byte face is not behind the vox gate.** `WebFiles` resolves the caller itself: a session through the gate's own `IdentityResolver` (pass the `MembersResolver`, so orgs are learnt), from `Authorization: Bearer` or `?token=`; then membership of the URL's org (`403` otherwise, as `ConfinedEngine` refuses), then role and grant per path as on vox. `FilesFault` implements `architect::http::HttpError` (`401`/`403`/`404`/`409`/`412`/`503`/`507`, codes like `path_not_found`, `rendition_pending`).
+- **Media elements use tickets.** `<video>`/`<audio>`/`<img>` cannot send a header: mint `FilesService::ticket(root, path)` over the lane (needs `Read`), put `token` in `content_url`/`rendition_url`. A ticket (`fft1.…`, HMAC-SHA256, `TICKET_TTL_US` = 6 h) reads its path and below in one root, never writes, and is re-checked against the minter's access on every use. Its key is random per process unless `FilesServer::ticket_key` sets one (share it across replicas).
+- **Renditions are off the request path.** Every `Changed` entry with content schedules its source (`Renditions::schedule`, `concurrency` builds at a time, default 1); a request reports `RenditionState::Pending` (`503 rendition_pending` on the byte route) and schedules what is missing. Keyed by the version's content (same bytes share them), addressed by path + version. Video yields `Proxy` (H.264/AAC MP4, ≤720p, faststart), `Poster` (JPEG), `Peaks`; audio `Peaks`, `Audio` (AAC MP4); other nothing. Records live at `<data>/renditions/<hh>/<hex>.json` (atomic, per rendition): they survive a restart, a record of another `RECIPE` or one whose blob is gone is made again. Failures are remembered until restart (`RenditionState::Failed`, `RenditionSet::problem` for a failed probe), then retried.
 - **Quota** counts live files' bytes (`State::used`); every change that grows it past `Usage::quota` fails with `QuotaExceeded`. The deployment sets it (`FilesServer::set_quota`), not a member.
 
 ## Recipe: mount it
@@ -31,11 +37,28 @@ let router = LayerRouter::new()
 let gate = PermissionsGate::new(Arc::new(ConfinedEngine::new(members.clone())), Arc::new(identity))
     .permit(files_service_rpc_service_descriptor(), &architect_files::PERMITS)
     .permit(files_service_stream_service_descriptor(), &architect_files::STREAM_PERMITS);
-// per connection at /org/{slug}/vox:
+// an EngineHost lane at /org/{slug}/vox (the host gates inside the org):
+host.vox_at("/org/{slug}/vox", move |head| { let router = router.clone(); async move { Ok::<_, StatusCode>(Lane::new(router).scoped(org_of(&head)?)) } })
+// or per connection on a transport of your own:
 confine(org, PermissionsGate::wrap_shared_with_bearer(gate, router, bearer))
 ```
 
 `features/files/tests/files.rs` is the whole loop over a real vox link: roles, grants, absence, quota, resumed and deduplicated uploads, per-subscriber events, restart.
+
+## Recipe: the byte face and renditions
+
+```rust
+let files = FilesServer::new(&data, LocalFs::new(data.join("blobs")), members.clone())
+    .with_renditions(FfmpegTranscoder::new())   // feature `ffmpeg`; any `Transcoder` works
+    .ticket_key(key);                            // shared by every replica
+let web = WebFiles::new(files.clone(), gate.identity_resolver());
+let app = architect::layers![architect_files::web::Service].provide_http(&web);
+// routes: GET files/{org}/{root}/content/{*path}, …/rendition/{kind}/{*path},
+// …/renditions/{*path} (?version=&token=); POST files/{org}/uploads,
+// PUT/GET/DELETE …/uploads/{upload} (?offset=), POST …/uploads/{upload}/complete
+```
+
+Page side: `let t = files.ticket(root, "Cuts").await?;` then `web::rendition_url("", &org, root, RenditionKind::Proxy, &path, None, Some(&t.token))` as the `<video src>`; poll `files.renditions(root, path, None)` until `settled()`. Tests: `features/files/tests/web.rs`, `features/files/tests/renditions.rs` (a fake `Transcoder`; the ignored `ffmpeg_makes_a_proxy_a_poster_and_peaks` runs real `ffmpeg`).
 
 ## Recipe: an app's store
 
@@ -46,6 +69,20 @@ let saved = files.put(irs.id, "Cab/4x12.wav", &wav, Save::create_only()).await?;
 let pin = saved.content; // the etag: Save::replacing(pin) next time
 ```
 
+## Attachments: files on a document or a record
+
+`architect-attachments` (`features/attachments`) hangs a blob off a `Parent` (`Parent::doc(id)`, `Parent::record(kind, id)`), named by its sha256. Design: `docs/content/architecture/documents.md` ("Attachments"); page: `docs/content/features/attachments.md`.
+
+| Flag | What | Entry points |
+|---|---|---|
+| default (wasm-clean) | the model, a document's own list, the byte face's URLs | `features/attachments/src/model.rs` `Parent` (`resource`, `parse`, `validate`), `Attachment`, `Upload`, `ReadRequest`, `AttachUsage`, `AttachFault`; `features/attachments/src/doc.rs` `attach`, `detach`, `list`, `get`, `refs` (a `crdt::BlobRefs` for `DocKind::blobs`); `features/attachments/src/web.rs` `AttachmentsWeb`, `content_url`, `rendition_url` |
+| `vox` | the service, its gate table, the client | `features/attachments/src/service.rs` `AttachmentsService` (`begin`, `send`, `attach`, `detach`, `list`, `size`, `read`, `renditions`, `ticket`, `usage`), `PERMITS` (`read` on `**`: the parent decides); `features/attachments/src/client.rs` `AttachmentsClient` (`push`, `read`), `attachment_of`, `hash_of` |
+| `blob` (native) | a device's side | `features/attachments/src/blob.rs` `attach_local` (store + pin + doc), `AttachmentsClient::push_from`, `AttachmentsClient::push_doc`, `AttachmentsRemote` (a `Remote` for `Fetcher`, with the parent's permissions) |
+| `server` (native) | every org's attachments | `features/attachments/src/server/mod.rs` `AttachmentsServer` (`new(data, blobs, engine)`, `with_docs`, `with_renditions`, `ticket_key`, `default_org`, `acting`, `set_quota`, `held`, `release_unreferenced`), `DocSource` |
+| `http` (native) | the byte face | `features/attachments/src/server/web.rs` `WebAttachments` (`new(server, identity)`) |
+
+Rules: access is the parent's, by the gate's engine on `org/<org>/doc/<id>` or `org/<org>/<kind>/<id>` (`read` to list and read, `write` to send and attach), so roles and spaces hold; a parent reads only bytes it points at; a document's list lives in the document (offline, synced), a record's on the server; the quota counts distinct blobs. Test: `features/attachments/tests/attachments.rs`.
+
 ## Not in architect yet
 
-Client sync (selective sync, offline copies, the device catalogue), the browser integration (service worker answering `Range`), the HTTP byte face, desktop integrations (daemon, FUSE, File Provider, WebDAV), adopting on-disk folders in place, renditions (`files-transcode`), search, review/share links, federation and peering, project versions, divergent versions, storage locations. Task and Studio still run Task's own Files.
+Client sync (selective sync, offline copies, the device catalogue), the browser integration (service worker answering `Range` from offline copies), desktop integrations (daemon, FUSE, File Provider, WebDAV), adopting on-disk folders in place, filmstrips and a rendition-ready event (poll `renditions`), collecting rendition blobs (nothing yet hands their hashes to `LocalFs::collect`), search, review/share links, federation and peering, project versions, divergent versions, storage locations. Task and Studio still run Task's own Files.

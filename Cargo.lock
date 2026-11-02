@@ -552,6 +552,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-attachments"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-attachments",
+ "architect-files",
+ "architect-orgs",
+ "architect-permissions",
+ "architect-spaces",
+ "crdt",
+ "facet",
+ "facet-json",
+ "futures-util",
+ "loro",
+ "reqwest 0.12.28",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "uuid",
+ "vox",
+]
+
+[[package]]
 name = "architect-auth"
 version = "0.1.0"
 dependencies = [
@@ -696,9 +720,13 @@ dependencies = [
  "architect-files",
  "architect-orgs",
  "architect-permissions",
+ "base64 0.22.1",
  "facet",
  "facet-json",
  "futures-util",
+ "hmac 0.12.1",
+ "rand 0.8.7",
+ "reqwest 0.12.28",
  "sha2 0.10.9",
  "tempfile",
  "thiserror 2.0.20",

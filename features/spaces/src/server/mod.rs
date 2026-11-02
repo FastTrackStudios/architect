@@ -23,7 +23,9 @@
 //!     .permit(…);
 //! let router = LayerRouter::new()
 //!     .with(spaces_service_rpc_service_descriptor(), architect_spaces::serve(spaces.clone()));
-//! // per connection, at `/org/{slug}/vox`:
+//! // an `EngineHost` lane at `/org/{slug}/vox`: the host gates inside the org
+//! host.vox_at("/org/{slug}/vox", move |head| async move { Ok(Lane::new(router).scoped(org_of(&head)?)) });
+//! // or per connection, on a transport of your own:
 //! let handler = confine(org, PermissionsGate::wrap_shared_with_bearer(gate, router, bearer));
 //! ```
 

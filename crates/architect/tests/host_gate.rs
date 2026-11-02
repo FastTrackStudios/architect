@@ -1,6 +1,7 @@
 //! `EngineHost` gates every vox lane it owns: the built-in `/vox`, a
 //! `vox_at` lane and the iroh lane each refuse a caller the gate does not
-//! permit and serve one it does. On iroh the caller is the endpoint id
+//! permit and serve one it does. A lane's scope is entered outside the
+//! gate, so the engine checks each call in it. On iroh the caller is the endpoint id
 //! the handshake proved. `EngineHost::ungated` is the explicit opt-out.
 //!
 //! Every server and client is in-process on loopback: `WebSocket`s over
@@ -19,9 +20,9 @@ use std::sync::Arc;
 
 use architect::LayerRouter;
 use architect::connect::{Endpoint, Pool};
-use architect::host::{EngineHost, RequestHead};
+use architect::host::{EngineHost, Lane, RequestHead};
 use architect::http::axum::http::StatusCode;
-use architect::permissions_gate::{PermissionsGate, StaticPrincipal};
+use architect::permissions_gate::{LaneScope, PermissionsGate, StaticPrincipal};
 use architect_permissions::{
     Action, BoxIdentityFuture, Decision, IdentityResolver, MethodPermit, PermissionEngine,
     Principal, Resource, ServicePermits,
@@ -159,6 +160,98 @@ async fn a_vox_at_lane_is_gated_by_the_host() {
     assert_eq!(
         ask(at, "/org/acme/vox", Some("alice")).await.unwrap(),
         "user:alice"
+    );
+}
+
+tokio::task_local! {
+    /// The tenant a call runs in: a lane scope the gate's engine reads.
+    static TENANT: String;
+}
+
+/// A lane's tenant, entered around the gate.
+#[derive(Clone)]
+struct Tenant(String);
+
+impl LaneScope for Tenant {
+    fn enter<F>(&self, call: F) -> impl Future<Output = F::Output> + Send
+    where
+        F: Future + Send,
+    {
+        TENANT.scope(self.0.clone(), call)
+    }
+}
+
+/// Lets alice into `acme` only: what it decides depends on the scope
+/// being set while the gate checks.
+struct AcmeOnly;
+
+impl PermissionEngine for AcmeOnly {
+    fn check(&self, who: &Principal, _what: &Resource, _action: &Action) -> Decision {
+        let tenant = TENANT.try_with(Clone::clone).ok();
+        match (who, tenant.as_deref()) {
+            (Principal::User { user_id }, Some("acme")) if user_id == "alice" => Decision::Allow,
+            _ => Decision::Deny {
+                reason: format!("{} not in {tenant:?}", who.describe()),
+            },
+        }
+    }
+}
+
+fn tenant_gate() -> PermissionsGate {
+    PermissionsGate::new(Arc::new(AcmeOnly), Arc::new(Sessions))
+        .permit(gate_probe_service_descriptor(), &PERMITS)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_vox_at_lanes_scope_is_entered_outside_the_hosts_gate() {
+    let host = EngineHost::new(router(), tenant_gate(), "127.0.0.1:0").vox_at(
+        "/t/{tenant}/vox",
+        |head: RequestHead| async move {
+            let tenant = Tenant(head.param("tenant").unwrap_or_default().to_owned());
+            Ok::<_, StatusCode>(Lane::new(router()).scoped(tenant))
+        },
+    );
+    let at = spawn(host).await;
+
+    assert_eq!(
+        ask(at, "/t/acme/vox", Some("alice")).await.unwrap(),
+        "user:alice",
+        "the gate saw the lane's tenant"
+    );
+    assert_denied(
+        ask(at, "/t/other/vox", Some("alice")).await,
+        "another tenant",
+    );
+    // `/vox` is in no scope: the engine sees no tenant.
+    assert_denied(ask(at, "/vox", Some("alice")).await, "/vox, no tenant");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_permissioned_lane_may_be_scoped_outside_its_gate() {
+    let lane_gate = Arc::new(tenant_gate());
+    let host = EngineHost::new(router(), gate(None), "127.0.0.1:0").vox_at_permissioned(
+        "/t/{tenant}/vox",
+        move |head: RequestHead| {
+            let lane_gate = Arc::clone(&lane_gate);
+            async move {
+                let tenant = Tenant(head.param("tenant").unwrap_or_default().to_owned());
+                let bearer = head.bearer().map(str::to_owned);
+                Ok::<_, StatusCode>(
+                    PermissionsGate::wrap_shared_with_bearer(lane_gate, router(), bearer)
+                        .scoped(tenant),
+                )
+            }
+        },
+    );
+    let at = spawn(host).await;
+
+    assert_eq!(
+        ask(at, "/t/acme/vox", Some("alice")).await.unwrap(),
+        "user:alice"
+    );
+    assert_denied(
+        ask(at, "/t/other/vox", Some("alice")).await,
+        "another tenant",
     );
 }
 

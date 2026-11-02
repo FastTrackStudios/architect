@@ -31,6 +31,15 @@ macro_rules! uuid_id {
                 std::fmt::Display::fmt(&self.0, f)
             }
         }
+
+        /// From its hyphenated text: what a URL's path or query carries.
+        impl std::str::FromStr for $name {
+            type Err = uuid::Error;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                Uuid::parse_str(s).map(Self)
+            }
+        }
     };
 }
 
