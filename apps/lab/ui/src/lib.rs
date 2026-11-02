@@ -15,6 +15,8 @@ mod embedded;
 mod extensions;
 mod guide;
 mod items;
+#[cfg(feature = "keyflow-lab")]
+mod keyflow;
 mod pages;
 mod paint;
 pub mod presence;

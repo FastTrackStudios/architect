@@ -6,7 +6,12 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+keyflow-lab = ["dep:keyflow", "dep:keyflow-ui"]
+
 [dependencies]
+keyflow = { git = "https://github.com/FastTrackStudios/keyflow", rev = "460556341dfe1fd2c3617fa4817bed432cd39b9e", features = ["text", "paint"], default-features = false, optional = true }
+keyflow-ui = { git = "https://github.com/FastTrackStudios/keyflow", rev = "460556341dfe1fd2c3617fa4817bed432cd39b9e", features = ["native-chart-editor"], default-features = false, optional = true }
 architect-shell = { workspace = true, features = ["ui"] }
 # The Embedded views' paint pane (src/paint.rs): the paint kind on Blitz.
 architect-workspace = { workspace = true, features = ["ui", "paint-ui"] }

@@ -69,14 +69,21 @@ pub const PAINT_PANE: &str = "embed-paint";
 
 /// The views of the five.
 #[must_use]
-pub fn views() -> [View; 5] {
-    [
+pub fn views() -> Vec<View> {
+    vec![
         View::new("embed.dioxus", "Dioxus", |_| rsx! { DioxusPane {} }),
         View::new("embed.luau", "Luau ImGui", |_| rsx! { LuauPane {} }).still(),
         View::new("embed.frame", "Frame surface", |_| rsx! { FramePane {} })
             .drawn_by(FRAME_SURFACE)
             .still(),
         View::new("embed.a2ui", "A2UI", |_| rsx! { A2uiPane {} }),
+        #[cfg(feature = "keyflow-lab")]
+        View::new(
+            "embed.keyflow",
+            "Keyflow",
+            |_| rsx! { crate::keyflow::KeyflowPane {} },
+        )
+        .drawn_by(PAINT),
         View::new(
             "embed.paint",
             "Paint",
@@ -115,6 +122,11 @@ pub fn workspace() -> Workspace {
     let _ = w.open(
         Pane::new(PAINT_PANE, "embed.paint", "Paint"),
         Target::Split(Side::Bottom),
+    );
+    #[cfg(feature = "keyflow-lab")]
+    let _ = w.open(
+        Pane::new("embed-keyflow", "embed.keyflow", "Keyflow"),
+        Target::Tab,
     );
     let _ = w.activate(&architect_workspace::PaneId::new(DIOXUS_PANE));
     let _ = w.open(
