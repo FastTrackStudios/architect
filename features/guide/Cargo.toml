@@ -82,7 +82,7 @@ architect-story-runtime = { workspace = true, optional = true }
 # The film: Blitz's painter on the CPU rasteriser (no GPU), as
 # architect-story-snapshots and ui-snapshot render.
 blitz-paint = { workspace = true, optional = true }
-anyrender = { version = "0.11", optional = true }
+anyrender = { workspace = true, optional = true }
 anyrender_vello_cpu = { workspace = true, optional = true }
 peniko = { workspace = true, optional = true }
 kurbo = { workspace = true, optional = true }

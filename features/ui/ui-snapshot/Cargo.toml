@@ -18,7 +18,7 @@ blitz-traits.workspace = true
 
 # Deterministic (CPU) image rendering — no GPU dependency, reproducible
 # pixel output across machines.
-anyrender = "0.11"
+anyrender.workspace = true
 anyrender_vello_cpu.workspace = true
 peniko.workspace = true
 kurbo.workspace = true

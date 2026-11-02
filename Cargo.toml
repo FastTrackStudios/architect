@@ -195,26 +195,28 @@ webauthn-rs = { version = "0.5", features = [
 ] }
 
 # ── UI framework ──────────────────────────────────────────────────────
-# dioxus 0.8 line — git rev pinned; it must stay in lockstep across every
-# dioxus-* entry AND the FTS fork branches of primitives/lucide, which pin
-# the same rev.
-dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a522d078b70bb4b4d62a5f9a99ddfc", default-features = false, features = ["lib"] }
-dioxus-native = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a522d078b70bb4b4d62a5f9a99ddfc", features = ["prelude", "system-fonts", "svg", "autofocus", "incremental", "data-uri"] }
-dioxus-native-dom = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a522d078b70bb4b4d62a5f9a99ddfc" }
+# dioxus 0.8 line — git rev pinned (main 430cfb56, the 0.8.0-alpha.3 line);
+# it must stay in lockstep across every dioxus-* entry AND the FTS fork tags
+# of primitives, lucide and sdk (dioxus-sdk-time, through primitives), which
+# pin the same rev, and the vendor fork's dioxus crates in the `[patch]`
+# below.
+dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["lib"] }
+dioxus-native = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["prelude", "system-fonts", "svg", "autofocus", "data-uri"] }
+dioxus-native-dom = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41" }
 # Server-side rendering, for pages that must exist before the viewer has
 # run any script — the auth server's sign-in and sign-up screens. Same
 # pinned rev as the rest of the line.
-dioxus-ssr = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a522d078b70bb4b4d62a5f9a99ddfc" }
-blitz-dom = "=0.3.0-beta.1"
-blitz-paint = "=0.3.0-beta.1"
-blitz-traits = "=0.3.0-beta.1"
+dioxus-ssr = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41" }
+blitz-dom = "=0.3.0-beta.4"
+blitz-paint = "=0.3.0-beta.4"
+blitz-traits = "=0.3.0-beta.4"
 # The workspace's pop-out windows drive Blitz's window views themselves
 # (architect-workspace `native`), and serve the bundle's assets to them.
-blitz-shell = "=0.3.0-beta.1"
-dioxus-asset-resolver = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a522d078b70bb4b4d62a5f9a99ddfc" }
-dioxus-devtools = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a522d078b70bb4b4d62a5f9a99ddfc" }
-dioxus-primitives = { git = "https://github.com/FastTrackStudios/dioxus-components", package = "dioxus-primitives", branch = "main", default-features = false }
-lucide-dioxus = { git = "https://github.com/FastTrackStudios/lucide", branch = "main", features = ["all-icons"] }
+blitz-shell = "=0.3.0-beta.4"
+dioxus-asset-resolver = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41" }
+dioxus-devtools = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41" }
+dioxus-primitives = { git = "https://github.com/FastTrackStudios/dioxus-components", package = "dioxus-primitives", tag = "fts-upstream-2026-11", default-features = false }
+lucide-dioxus = { git = "https://github.com/FastTrackStudios/lucide", tag = "fts-upstream-2026-11", features = ["all-icons"] }
 clsx = "0.1.1"
 tw_merge = "0.1.21"
 nucleo-matcher = "0.3"
@@ -243,7 +245,8 @@ nice-plug-dioxus = { git = "https://github.com/FastTrackStudios/nice-plug.git", 
 atomic_float = "1.1"
 
 # ── Rendering / snapshot gate (features/ui/ui-snapshot) ───────────────
-anyrender_vello_cpu = "0.14"
+anyrender = "0.14"
+anyrender_vello_cpu = "0.18"
 peniko = "0.6"
 kurbo = "0.13"
 png = "0.17"
@@ -320,28 +323,32 @@ proptest = "1"
 
 # ── Patches ───────────────────────────────────────────────────────────
 [patch.crates-io]
-# Blitz from the FTS fork: the 0.3.0-beta.1 line with fts-focus (focus
-# follows pointerdown), fts-pointer (touch as pointer events) and the iOS
-# safe-area work (BLITZ_SAFE_AREA=0: the page is the whole window; the
-# safe area re-read every frame; a finger's tap slop), and fts-measure (a
-# measure leaves an inline layout's lines as laid out). dioxus git pins
-# `=0.3.0-beta.1`. One tag across all blitz crates.
-blitz-dom = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-measure-2026-11" }
-blitz-traits = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-measure-2026-11" }
-blitz-paint = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-measure-2026-11" }
-blitz-shell = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-measure-2026-11" }
-blitz-net = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-measure-2026-11" }
-blitz-html = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-measure-2026-11" }
-anyrender = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-measure-2026-11" }
-# The renderer and windowing forks a Blitz app needs on iOS (each one's
-# reason is in vendor's README): Vello's surface on Metal, winit's UIKit
-# backend, wgpu's Metal layer. Only the lab apps (apps/lab)
-# reach them.
-anyrender_vello = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.6.1" }
-anyrender_vello_hybrid = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.6.1" }
-winit-uikit = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.6.1" }
-wgpu-hal = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.6.1" }
-raw-window-metal = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.6.1" }
+# Blitz from the FTS fork: DioxusLabs/blitz main (0.3.0-beta.4+) with
+# fts-focus (focus follows pointerdown), fts-pointer (touch as pointer
+# events), the iOS safe-area and pacing work (BLITZ_SAFE_AREA=0: the page
+# is the whole window; the safe area re-read every frame; a finger's tap
+# slop), layered compositing of texture widgets, and fts-measure (a measure
+# leaves an inline layout's lines as laid out); its FTS.md lists where it
+# departs from upstream's tests. dioxus git pins `=0.3.0-beta.4`. One tag
+# across all blitz crates, and anyrender (0.14 + the compositing seam)
+# from the same tag.
+blitz-dom = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11" }
+blitz-traits = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11" }
+blitz-paint = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11" }
+blitz-shell = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11" }
+blitz-net = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11" }
+blitz-html = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11" }
+anyrender = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11" }
+# The renderer and windowing forks a Blitz app needs (each one's reason is
+# in vendor's README): Vello's window renderer and the compositor, the
+# hybrid renderer's resize, Vello's surface on Metal, winit's UIKit
+# backend, wgpu's Metal layer. Only the lab apps (apps/lab) reach the iOS
+# ones.
+anyrender_vello = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.0" }
+anyrender_vello_hybrid = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.0" }
+winit-uikit = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.0" }
+wgpu-hal = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.0" }
+raw-window-metal = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.0" }
 # Vendored one-line fix: quote scalars containing `<`/`>` — upstream
 # styx-format emits them bare but styx-parse rejects them.
 styx-format = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.1.0" }
@@ -365,13 +372,15 @@ facet-core = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.4.0
 # every real schema exchange with "schema decode consumed N of M bytes".
 vox-phon = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.3.0" }
 
-# dioxus-native from the FTS vendor fork, at the tag studio ships: the
-# window's events to the app (`use_window_event`), touch handed to Dioxus
-# handlers, and the fixes iOS needs.
+# The Dioxus crates from the FTS vendor fork (each one's reason is in its
+# UPSTREAM.md): dioxus-native — the iOS simulator's renderer, winit beta.4
+# to match Blitz main; dioxus-native-dom — `text_input_focused`, focus and
+# measurements that never panic on a busy document; dioxus-vdom (upstream's
+# renamed dioxus-core) — a dropped handler's owner is not a panic.
 [patch."https://github.com/DioxusLabs/dioxus"]
-dioxus-native = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.6.1" }
-dioxus-native-dom = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.6.1" }
-dioxus-core = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.6.1" }
+dioxus-native = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.0" }
+dioxus-native-dom = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.0" }
+dioxus-vdom = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.0" }
 
 # ── Lints ─────────────────────────────────────────────────────────────
 [workspace.lints.rust]
