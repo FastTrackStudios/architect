@@ -1,6 +1,13 @@
 //! Exercise an external wake through a mounted Blitz document and its painter.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::cast_precision_loss,
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic
+)]
 
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -94,11 +101,21 @@ fn app() -> Element {
     rsx! { div { style: "width: 400px; height: 300px;", crate::WorkspaceView { workspace, views } } }
 }
 
-fn paint(doc: &DioxusDocument) -> Vec<u8> {
+fn paint(doc: &DioxusDocument, scale: u32) -> Vec<u8> {
     render_to_buffer::<VelloCpuImageRenderer, _>(
-        |scene| blitz_paint::paint_scene(scene, &mut doc.inner.borrow_mut(), 1.0, 400, 300, 0, 0),
-        400,
-        300,
+        |scene| {
+            blitz_paint::paint_scene(
+                scene,
+                &mut doc.inner.borrow_mut(),
+                f64::from(scale),
+                400 * scale,
+                300 * scale,
+                0,
+                0,
+            )
+        },
+        400 * scale,
+        300 * scale,
     )
 }
 
@@ -112,12 +129,26 @@ fn has_solid_color(pixels: &[u8], color: [u8; 4]) -> bool {
 
 #[test]
 fn external_wake_changes_pixels_in_a_blitz_document() {
+    let one = wake_at_scale(1);
+    let two = wake_at_scale(2);
+    assert!(
+        two >= one * 3 && two <= one * 5,
+        "a 2x scale should cover about four times as many pixels"
+    );
+}
+
+fn wake_at_scale(scale: u32) -> usize {
     BLUE.with(|color| color.store(false, Ordering::Release));
     let window = Arc::new(Window::default());
     let shell: Arc<dyn ShellProvider> = window.clone();
     let vdom = VirtualDom::new(app).with_root_context(shell.clone());
     let config = DocumentConfig {
-        viewport: Some(Viewport::new(400, 300, 1.0, ColorScheme::Dark)),
+        viewport: Some(Viewport::new(
+            400 * scale,
+            300 * scale,
+            scale as f32,
+            ColorScheme::Dark,
+        )),
         shell_provider: Some(shell),
         ..Default::default()
     };
@@ -129,7 +160,7 @@ fn external_wake_changes_pixels_in_a_blitz_document() {
         }
     }
     doc.inner.borrow_mut().resolve(0.0);
-    let before = paint(&doc);
+    let before = paint(&doc, scale);
     assert!(has_solid_color(&before, [255, 0, 0, 255]));
     assert!(!doc.inner.borrow().widgets_need_redraw());
     let requested = window.0.load(Ordering::Relaxed);
@@ -137,9 +168,13 @@ fn external_wake_changes_pixels_in_a_blitz_document() {
     WAKE.with(|wake| wake.borrow().as_ref().unwrap().wake());
     assert!(window.0.load(Ordering::Relaxed) > requested);
     assert!(doc.inner.borrow().widgets_need_redraw());
-    let after = paint(&doc);
+    let after = paint(&doc, scale);
     assert!(has_solid_color(&after, [0, 0, 255, 255]));
     assert!(!doc.inner.borrow().widgets_need_redraw());
+    before
+        .chunks_exact(4)
+        .filter(|pixel| *pixel == [255, 0, 0, 255])
+        .count()
 }
 
 struct ThemedSolid;
@@ -228,7 +263,7 @@ fn shell_theme_change_repaints_a_blitz_document() {
         }
     }
     doc.inner.borrow_mut().resolve(0.0);
-    assert!(has_solid_color(&paint(&doc), [255, 0, 0, 255]));
+    assert!(has_solid_color(&paint(&doc, 1), [255, 0, 0, 255]));
     doc.vdom.in_runtime(|| {
         THEME.with(|slot| {
             let mut theme = slot.borrow().unwrap();
@@ -242,6 +277,6 @@ fn shell_theme_change_repaints_a_blitz_document() {
     }
     doc.inner.borrow_mut().resolve(0.1);
     assert!(doc.inner.borrow().widgets_need_redraw());
-    assert!(has_solid_color(&paint(&doc), [0, 0, 255, 255]));
+    assert!(has_solid_color(&paint(&doc, 1), [0, 0, 255, 255]));
     assert!(!doc.inner.borrow().widgets_need_redraw());
 }
