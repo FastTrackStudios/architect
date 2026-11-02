@@ -39,7 +39,7 @@ use crate::LayerRouter;
 use crate::permissions_gate::PermissionsGate;
 
 mod mount;
-pub use mount::{BEARER_SUBPROTOCOL_PREFIX, DavRequest, RequestHead};
+pub use mount::{BEARER_SUBPROTOCOL_PREFIX, DavRequest, IntoLane, Lane, RequestHead};
 #[cfg(feature = "otlp-forward")]
 mod otlp;
 #[cfg(feature = "otlp-forward")]
@@ -260,7 +260,8 @@ impl EngineHost {
     ///   the caller `Principal::Host` of the endpoint id the handshake
     ///   proved.
     /// - Every [`vox_at`](Self::vox_at) lane: the resolver's handler is
-    ///   wrapped like `/vox`.
+    ///   wrapped like `/vox`, inside the lane's scope (its org), so the
+    ///   gate checks each call in it.
     ///
     /// The gate's [`coverage`](PermissionsGate::coverage) of `router` is
     /// reported through `tracing` here, as [`PermissionsGate::wrap`] does.

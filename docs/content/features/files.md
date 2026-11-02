@@ -44,6 +44,8 @@ let gate = Arc::new(
         .permit(files_service_rpc_service_descriptor(), &PERMITS)
         .permit(files_service_stream_service_descriptor(), &STREAM_PERMITS),
 );
+// On a transport of your own; an EngineHost lane returns
+// `Lane::new(router).scoped(org)` from `vox_at` and the host does the same.
 let handler = confine(OrgId::new("fts"), PermissionsGate::wrap_shared_with_bearer(gate, router, bearer));
 
 // Client, on the org's lane

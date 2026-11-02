@@ -37,7 +37,9 @@ let router = LayerRouter::new()
 let gate = PermissionsGate::new(Arc::new(ConfinedEngine::new(members.clone())), Arc::new(identity))
     .permit(files_service_rpc_service_descriptor(), &architect_files::PERMITS)
     .permit(files_service_stream_service_descriptor(), &architect_files::STREAM_PERMITS);
-// per connection at /org/{slug}/vox:
+// an EngineHost lane at /org/{slug}/vox (the host gates inside the org):
+host.vox_at("/org/{slug}/vox", move |head| { let router = router.clone(); async move { Ok::<_, StatusCode>(Lane::new(router).scoped(org_of(&head)?)) } })
+// or per connection on a transport of your own:
 confine(org, PermissionsGate::wrap_shared_with_bearer(gate, router, bearer))
 ```
 

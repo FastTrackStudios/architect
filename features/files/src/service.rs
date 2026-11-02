@@ -1,8 +1,9 @@
 //! The wire (feature `vox`): one service, its events beside it.
 //!
 //! The org is never an argument: a call runs in the org of the lane it
-//! arrived on (`architect_orgs::server::confine`), and the caller is the
-//! principal the permissions gate resolved. Bytes ride vox channels — an
+//! arrived on (the lane's scope: an `EngineHost` `Lane`, or
+//! `architect_orgs::server::confine`), and the caller is the principal
+//! the permissions gate resolved. Bytes ride vox channels — an
 //! upload's frames in ([`FilesService::send_bytes`]), a read's out
 //! ([`FilesService::read`]) — with vox's credit as flow control, so
 //! neither side buffers a whole file.

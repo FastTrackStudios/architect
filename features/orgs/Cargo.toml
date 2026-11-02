@@ -20,7 +20,7 @@ default = []
 auth = ["dep:auth-proto", "dep:auth-client"]
 ui = ["dep:dioxus", "dep:architect-shell", "architect-shell/ui", "dep:architect-atom"]
 commands = ["dep:architect-commands"]
-server = ["dep:architect-permissions", "dep:vox", "dep:tokio"]
+server = ["dep:architect", "architect/vox", "dep:architect-permissions", "dep:tokio"]
 
 [dependencies]
 facet = { workspace = true }
@@ -36,15 +36,15 @@ futures-util = { version = "0.3", default-features = false, features = ["alloc"]
 # An org's own documents (its roster, its catalogue): a v5 id from the org's.
 uuid = { version = "1", default-features = false, features = ["v5"] }
 
-# `server`: the gate's engine and identity traits, a vox handler wrapper,
-# and the task-local the confined org rides in.
+# `server`: the gate's engine and identity traits, the org as the gate's
+# lane scope, and the task-local the confined org rides in.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+architect = { workspace = true, optional = true }
 architect-permissions = { workspace = true, optional = true }
-vox = { workspace = true, optional = true }
 tokio = { version = "1", default-features = false, features = ["rt", "sync", "time"], optional = true }
 
 [dev-dependencies]
-architect = { workspace = true, features = ["vox", "local"] }
+architect = { workspace = true, features = ["vox", "local", "host", "connect"] }
 architect-permissions = { workspace = true }
 tokio = { workspace = true }
 vox = { workspace = true }
