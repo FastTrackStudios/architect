@@ -123,8 +123,12 @@ connection comes up and again on every reconnect
 list and says why (`OrgHandle::stale`). Every app asks the same identity
 server with the same session, so every app shows the same orgs.
 
-**Server.** A per-org lane (`/org/{slug}/vox`) wraps its gated handler
-in `confine(org, …)`: every call on it runs in that org
+**Server.** A per-org lane (`/org/{slug}/vox`) is scoped to its org,
+outside the gate: on an `EngineHost`, `vox_at`'s resolver returns
+`Lane::new(router).scoped(org)` and the host gates the router inside the
+org; on a transport the app serves itself, `confine(org, gated)` wraps the
+gated handler (nothing else fits, so the org can't end up inside the
+check). Every call on it, the gate's check included, runs in that org
 (`current_org()`), and services key their data by it. The gate's
 identity is wrapped in `MembersResolver`, which learns each session's
 orgs from the identity server (`IdentityServer` over an

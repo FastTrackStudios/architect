@@ -88,10 +88,10 @@ Tests to copy: `features/auth/tests/native/src/permissions_gate_tests.rs` (`esta
 1. Members: `Members::new()`, shared by the two pieces below.
 2. Identity: `MembersResolver::new(sessions, IdentityServer(orgs_client), members.clone())` wraps the resolver you already have; on each resolve it asks the identity server (`OrganizationService::list_organizations`, through any of its clients) which orgs the session is in, at most once per `MEMBERS_TTL` (`with_ttl`). An unanswered session is in no org.
 3. Engine: `ConfinedEngine::new(members).role(&Role::Member, vec![Rule::new("**", &["read", "write"])])`, rules written org-relative (`vault/**`); `.over(engine)` adds your existing engine after it. A non-member is refused; so is a resource in another org (`org/<other>/…`); an in-process `Principal::Service` is in every org.
-4. Per connection on an org's lane (`/org/{slug}/vox`): `confine(org_id, PermissionsGate::wrap_shared_with_bearer(gate, router, bearer))`. Handlers read `current_org()` and key data by `OrgId::path`. Spawned work runs `in_org(org, fut)`.
-5. A lane in no org is the All-organizations one: resources there name their org (`OrgId::path`), and a service reads across `Members::scope_of(&principal)`.
+4. Per connection on an org's lane (`/org/{slug}/vox`): on an `EngineHost`, `vox_at`'s resolver returns `Lane::new(router).scoped(org_id)` (`crates/architect/src/host/mount.rs` `Lane`) and the host enters the org outside its gate; on a transport you serve yourself, `confine(org_id, PermissionsGate::wrap_shared_with_bearer(gate, router, bearer))` does the same (it only takes a `PermissionedRouter`, so the org is always outside the check; `PermissionedRouter::scoped` is the generic form). Handlers read `current_org()` and key data by `OrgId::path`. Spawned work runs `in_org(org, fut)`. Test to copy: `features/orgs/tests/host_lane.rs`.
+5. A lane in no org is the All-organizations one: resources there name their org (`OrgId::path`), and a service reads across `Members::scope_of(&principal)`. A gate with no such lane sets `ConfinedEngine::require_org()`: a call in no org is then refused, so a lane left unscoped fails closed.
 
-Entry points: `features/orgs/src/server.rs` `confine`, `current_org`, `Members`, `MembersResolver`, `IdentityServer`, `ConfinedEngine`, `Directory`.
+Entry points: `features/orgs/src/server.rs` `confine`, `current_org`, `Members`, `MembersResolver`, `IdentityServer`, `ConfinedEngine`, `Directory`; `crates/architect/src/permissions_gate.rs` `LaneScope`, `Scoped`.
 
 ## F. Spaces: rooms people are invited into
 
@@ -108,7 +108,6 @@ Entry points: `features/spaces/src/server/mod.rs` `Spaces`, `Acting`; `features/
 ## Pitfalls
 
 - **A space reaches past the gate only as far as the handler checks.** `SpacesEngine` answers the gate's coarse `doc/**` by overlap (allowed if the caller holds the action on anything under it), so every service a space covers must check the exact resource with `caller()` in its handler. `DocPermissions` and the files feature do; a probe-style handler that skips it hands a space member everything behind the method.
-- **Confine outside the gate.** `ConfinedEngine` and `SpacesEngine` read `current_org()` during the gate's check, so `confine(org, PermissionsGate::wrap_shared_with_bearer(…))`, never the other way round. `EngineHost::vox_at` wraps the host gate outside whatever handler you return, so a `confine` inside it is invisible to the check.
 - **Org confinement is the engine's:** `confine` only says which org a call is in. Without `ConfinedEngine` as (or inside) the gate's engine, nothing refuses a non-member. Membership lags removal by up to `MEMBERS_TTL`.
 - **Fail-closed by default; Task opts out.** Task sets `UnlistedPolicy::Allow`, so its untabled services are served unchecked, and enforces only when `TASK_ENFORCE_PERMISSIONS` is exactly `1` (`task:apps/server/src/config.rs`).
 - **Observe-only lets every deny through**, including fail-closed and unlisted denials; it audits `principal: "observe-only", action: "would-deny"`, and resolves identity twice on a deny.
