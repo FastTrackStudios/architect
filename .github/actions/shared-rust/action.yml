@@ -21,6 +21,12 @@ runs:
       with:
         # Libraries only: keep the same pinned rustup compiler as hosted CI.
         arguments: --accept-flake-config
+    - name: Let rustup install under the runner's work-dir HOME
+      shell: bash
+      # Each runner sets HOME to its own work dir, not the service user's
+      # passwd home, and rustup-init refuses that ("$HOME differs from
+      # euid-obtained home directory") on a runner with no rustup yet.
+      run: echo RUSTUP_INIT_SKIP_SUDO_CHECK=yes >> "$GITHUB_ENV"
     - uses: dtolnay/rust-toolchain@master
       with:
         toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
