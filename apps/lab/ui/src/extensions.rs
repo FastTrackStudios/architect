@@ -412,6 +412,39 @@ fn builtin() -> Option<Package> {
     .ok()
 }
 
+/// The extensions' own actions, offered on the lab's list too.
+const EXT_ACTIONS: &[&str] = &[
+    "EXT_LIST",
+    "EXT_SEARCH",
+    "EXT_INSTALL",
+    "EXT_UNINSTALL",
+    "EXT_RELOAD",
+    "EXT_CHECK",
+    "EXT_CLONE",
+];
+
+/// Offers `ids` of `from` on `to`, as they are described there, each run
+/// on `from` as whoever ran it on `to` (`to`'s authorizer and
+/// confirmation asked first).
+fn forward(to: &Arc<ActionList>, from: &Arc<ActionList>, ids: &[&str]) {
+    for id in ids {
+        let Some(info) = from.info(id) else {
+            continue;
+        };
+        let (from, id) = (Arc::clone(from), (*id).to_owned());
+        let handler: architect::action::CallerAsyncHandler = Arc::new(
+            move |caller: &architect::action::ActionCaller, args: &[u8]| {
+                let (from, id, caller, args) =
+                    (Arc::clone(&from), id.clone(), caller.clone(), args.to_vec());
+                let run: architect::action::ActionFuture =
+                    Box::pin(async move { from.run_json_async_with(&caller, &id, &args).await });
+                Ok(run)
+            },
+        );
+        let _ = to.register_forwarded_with(&info, handler);
+    }
+}
+
 /// Runs the lab's extensions while mounted, the metronome while
 /// `metronome` is on.
 #[component]
@@ -436,7 +469,9 @@ pub fn LabExtensions(metronome: bool) -> Element {
             .unwrap_or_else(|_| std::env::temp_dir().join("architect-lab"));
         let clicker = clicker(&root);
         let frame = frame_dev(&root);
-        let mut extensions = Extensions::new(host, Installs::new(root.join("extensions")));
+        // `EXT_CLONE` puts its copies beside the development ones.
+        let mut extensions = Extensions::new(host, Installs::new(root.join("extensions")))
+            .with_dev_root(root.join("dev"));
         let found = registry();
         match &found {
             Some(dir) => extensions = extensions.with_source(FolderRegistry::new(dir)),
@@ -447,6 +482,10 @@ pub fn LabExtensions(metronome: bool) -> Element {
             }
         }
         let _ = extensions.install_actions();
+        // What is wrong with them is in the lab's `APP_STATUS`, and their
+        // `EXT_*` actions on the lab's list (the CLI's and MCP's).
+        extensions.report_problems(lab.problems());
+        forward(&lab, &list, EXT_ACTIONS);
         // Off until the switch says otherwise.
         let _ = extensions.disable(METRONOME);
         for dir in clicker.into_iter().chain(frame) {

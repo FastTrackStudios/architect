@@ -21,7 +21,12 @@
 //! architect-desktop actions run LAB_STATE --headless
 //! architect-desktop --headless                 # the lab with no window, serving its socket
 //! architect-desktop mcp [--headless]           # MCP on stdio
+//! architect-desktop actions shot /tmp/lab.png  # the window, drawn by the lab (APP_SHOT)
+//! architect-desktop extensions check <folder>  # EXT_CHECK with no window; nonzero when it fails
 //! ```
+//!
+//! In a window it keeps `<app dir>/AGENTS.md` and `actions.schema.json`
+//! written from its live list (`architect_control::guide`).
 
 mod mcp;
 
@@ -48,6 +53,10 @@ fn App() -> Element {
     let list = use_context_provider(|| Arc::new(ActionList::new()));
     use_hook(|| mcp::serve(&list));
     use_hook(|| Rc::new(architect_desktop::serve_window(&list)));
+    // `APP_SHOT`: the window draws itself to a PNG.
+    architect_workspace::shot::use_app_shot(&list);
+    // `<app dir>/AGENTS.md`: the agents' guide, from the live list.
+    use_hook(|| Rc::new(architect_desktop::keep_guide_written(&list)));
     rsx! { LabApp {} }
 }
 
@@ -59,6 +68,10 @@ fn main() -> ExitCode {
             return architect_desktop::mcp(std::env::args().any(|a| a == "--headless"));
         }
         Some("--headless") => return architect_desktop::serve_headless(),
+        Some("extensions") => {
+            let rest: Vec<String> = std::env::args().skip(2).collect();
+            return architect_desktop::extensions(&rest);
+        }
         _ => {}
     }
     if architect_presence::single_instance(architect_lab_ui::presence::ID)
