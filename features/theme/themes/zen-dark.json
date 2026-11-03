@@ -1,0 +1,29 @@
+{
+  "label": "Zen Dark",
+  "appearance": "dark",
+  "palette": {
+    "background": "#21221e",
+    "foreground": "#c6c4b6",
+    "accent": "#a3ad8f",
+    "surface": "#282923",
+    "border": "#383931",
+    "danger": "#c98078",
+    "chart": ["#a3ad8f", "#8fa3b8", "#c0ab86", "#a795ad", "#85a8a0"]
+  },
+  "overrides": {
+    "accent": "#363730",
+    "destructive-foreground": "#21221e",
+    "input": "#30312a",
+    "letter-spacing": "0.01em",
+    "muted": "#30312a",
+    "muted-foreground": "#8b897c",
+    "primary-foreground": "#21221e",
+    "radius": "0.75rem",
+    "secondary": "#30312a",
+    "shadow-opacity": "0.06",
+    "sidebar": "#282923",
+    "sidebar-accent": "#363730",
+    "sidebar-primary-foreground": "#21221e",
+    "signal-danger": "oklch(0.60 0.22 28)"
+  }
+}

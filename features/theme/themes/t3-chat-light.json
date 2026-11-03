@@ -1,0 +1,34 @@
+{
+  "label": "T3 Chat Light",
+  "appearance": "light",
+  "palette": {
+    "background": "#faf5fa",
+    "foreground": "#501854",
+    "accent": "#a84370",
+    "surface": "#faf5fa",
+    "border": "#efbdeb",
+    "danger": "#ab4347",
+    "chart": ["#d926a2", "#6c12b9", "#274754", "#e8c468", "#f4a462"]
+  },
+  "overrides": {
+    "accent": "#f1c4e6",
+    "accent-foreground": "#77347c",
+    "input": "#e7c1dc",
+    "muted": "#f6e5f3",
+    "muted-foreground": "#834588",
+    "popover": "#ffffff",
+    "radius": "0.5rem",
+    "ring": "#db2777",
+    "secondary": "#f1c4e6",
+    "secondary-foreground": "#77347c",
+    "sidebar": "#f3e4f6",
+    "sidebar-accent": "#f8f8f7",
+    "sidebar-accent-foreground": "#454554",
+    "sidebar-border": "#eceae9",
+    "sidebar-foreground": "#ac1668",
+    "sidebar-primary": "#454554",
+    "sidebar-primary-foreground": "#faf1f7",
+    "sidebar-ring": "#db2777",
+    "signal-danger": "oklch(0.60 0.22 28)"
+  }
+}

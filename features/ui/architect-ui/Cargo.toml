@@ -15,6 +15,9 @@ tracing = { workspace = true }
 tw_merge = { workspace = true }
 nucleo-matcher = { workspace = true }
 palette = { workspace = true }
+# Runtime themes: the presets are its built-in theme files, and
+# `ThemeStoreProvider` follows its store.
+architect-theme = { workspace = true, features = ["dioxus"] }
 
 # Story registration. Always on — every component declares its stories
 # inline next to its implementation, and the `#[story]` macro auto-
