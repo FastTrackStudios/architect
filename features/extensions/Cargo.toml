@@ -49,11 +49,13 @@ guest = [
     "dep:dioxus",
     "dep:tracing",
 ]
-remote = ["process", "ui", "dep:architect-theme", "architect-theme/dioxus", "dep:blitz-dom", "dep:blitz-traits", "dep:dioxus-native-dom", "dep:futures-timer"]
+remote = ["process", "ui", "architect-theme/dioxus", "dep:blitz-dom", "dep:blitz-traits", "dep:dioxus-native-dom", "dep:futures-timer"]
 
 [dependencies]
-# The host's theme into a process view's document (feature `remote`).
-architect-theme = { workspace = true, optional = true }
+# Its theme tokens checked (the model); its themes into the app's store
+# (`host`), the theme to a process (`process`, `guest`), the host's
+# theme into a process view's document (`remote`).
+architect-theme = { workspace = true }
 architect-settings = { workspace = true }
 architect-orgs = { workspace = true }
 architect-commands = { workspace = true }
@@ -88,6 +90,8 @@ architect-extensions = { path = ".", features = ["host", "crdt", "guest", "remot
 futures = "0.3"
 tempfile = "3"
 crdt = { workspace = true }
+# THEME_LIST / THEME_SET / THEME_PROBLEMS over an extension's themes.
+architect-theme = { workspace = true, features = ["actions"] }
 
 [lib]
 doctest = false

@@ -16,6 +16,12 @@
 //!    bindings and its place on the ribbon), one gone is taken off, a new
 //!    one added; its settings sections are replaced, their values kept;
 //! 4. an [`Event`] says so, with how long it took, or why it failed.
+//!
+//! With the app's theme store ([`Host::with_themes`]), an extension's
+//! `[[themes]]` files and `[tokens]` go into it as it loads, as a diff
+//! on a reload, and out as it unloads ([`theme_contribution`]). A theme
+//! file that does not read is a theme problem (`THEME_PROBLEMS`), never a
+//! failed load.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -28,6 +34,7 @@ use architect::action::{
 use architect_scripting::Transactions;
 use architect_scripting::luau::{Gate, Limits, Runtime};
 use architect_settings::{Owner, Registry, Section};
+use architect_theme::{Contribution, Problem, Theme, ThemeStore};
 use architect_workspace::{KindError, ViewKinds};
 use semver::Version;
 use serde_json::Value;
@@ -439,6 +446,9 @@ struct Inner {
     kinds: Mutex<ViewKinds>,
     loaded: Mutex<BTreeMap<String, Running>>,
     listeners: Mutex<Vec<Listener>>,
+    /// The app's themes, when it gave them: what extensions' themes and
+    /// tokens go into.
+    themes: Mutex<Option<ThemeStore>>,
 }
 
 /// Loads extensions onto one Action List and one settings registry.
@@ -468,6 +478,7 @@ impl Host {
                 kinds: Mutex::new(ViewKinds::new()),
                 loaded: Mutex::new(BTreeMap::new()),
                 listeners: Mutex::new(Vec::new()),
+                themes: Mutex::new(None),
             }),
         }
     }
@@ -497,6 +508,28 @@ impl Host {
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = kinds;
         self
+    }
+
+    /// Puts loaded extensions' themes and tokens in `store` (the app's):
+    /// in as each loads, as a diff on a reload, out as it unloads.
+    #[must_use]
+    pub fn with_themes(self, store: ThemeStore) -> Self {
+        *self
+            .inner
+            .themes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(store);
+        self
+    }
+
+    /// The theme store it puts extensions' themes in, when it has one.
+    #[must_use]
+    pub fn themes(&self) -> Option<ThemeStore> {
+        self.inner
+            .themes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     /// Whether it runs extensions of `kind`.
@@ -687,6 +720,10 @@ impl Host {
             // Each id was free or ours a moment ago, under the lock.
             let _ = list.register_forwarded_with(&info, handler);
         }
+        // Its themes and tokens, as a diff: never a reason to fail.
+        if let Some(store) = self.themes() {
+            store.contribute(&manifest.id, theme_contribution(package));
+        }
         if let Some(old) = loaded.remove(&manifest.id) {
             old.instance.stop();
         }
@@ -752,11 +789,46 @@ impl Host {
             self.inner.list.unregister(action);
         }
         self.inner.sections.withdraw(id);
+        if let Some(store) = self.themes() {
+            store.withdraw(id);
+        }
         running.instance.stop();
         tracing::info_span!("ext.unload", ext.id = %id).in_scope(|| {});
         self.emit(&Event::Unloaded { id: id.to_owned() });
         true
     }
+}
+
+/// What `package` adds to the app's themes: each `[[themes]]` file read
+/// (its id the file's name; [`Source::Extension`](architect_theme::Source::Extension)),
+/// the ones that do not read as problems, and its `[tokens]`.
+#[must_use]
+pub fn theme_contribution(package: &Package) -> Contribution {
+    let manifest = &package.manifest;
+    let mut out = Contribution {
+        tokens: manifest.tokens.clone(),
+        ..Contribution::default()
+    };
+    for path in manifest.theme_files() {
+        let source = architect_theme::Source::Extension {
+            id: manifest.id.clone(),
+            file: path.clone(),
+        };
+        let id = std::path::Path::new(&path)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&path)
+            .to_owned();
+        let read = package
+            .text(&path)
+            .map_err(|e| vec![Problem::new(&id, &source, format!("cannot be read: {e}"))])
+            .and_then(|text| Theme::parse(&id, &text, source.clone()));
+        match read {
+            Ok(theme) => out.themes.push(theme),
+            Err(problems) => out.failed.push((id, problems)),
+        }
+    }
+    out
 }
 
 /// How the list describes an extension's action.

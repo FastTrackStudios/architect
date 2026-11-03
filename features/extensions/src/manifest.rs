@@ -31,6 +31,10 @@
 //!
 //! [[themes]]
 //! path = "themes/metronome-night.json"
+//!
+//! [tokens]                     # its own tokens' defaults, in its namespace
+//! "metronome.beat" = "$brand"
+//! "metronome.off-beat" = "mix($ink-3, $brand, 0.25)"
 //! ```
 
 use architect_settings::{Block, Choice, Control, Section, Setting, Value};
@@ -199,9 +203,10 @@ fn over() -> String {
 }
 
 /// A theme it contributes: a theme file (`architect_theme`'s format) in
-/// the package, its id the file's name. The app reads it beside its own
-/// (`architect_theme::fs::ThemeDirs::extension` with
-/// [`Manifest::theme_files`]).
+/// the package, its id the file's name. A host with the app's theme store
+/// (`host::Host::with_themes`) puts it there while the extension is
+/// loaded; a file that does not read is a theme problem, not a failed
+/// load.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ThemeDecl {
@@ -350,6 +355,14 @@ pub struct Manifest {
     pub keys: Vec<KeyDecl>,
     #[serde(default)]
     pub themes: Vec<ThemeDecl>,
+    /// Its own theme tokens' defaults, by name: literals or expressions
+    /// over the app's tokens (`"clicker.face" = "mix($card, $brand,
+    /// 0.12)"`). Each name is in its namespace
+    /// ([`Self::token_namespace`]). Loaded, they are the theme store's
+    /// extension layer, so a theme, the app or the person still says the
+    /// last word.
+    #[serde(default)]
+    pub tokens: std::collections::BTreeMap<String, String>,
 }
 
 fn api() -> String {
@@ -388,6 +401,9 @@ pub enum ManifestError {
     Duplicate(String),
     /// An overlay on a plane that is not `under`, `over` or `top`.
     BadPlane { overlay: String, plane: String },
+    /// A theme token outside its namespace, not a token name, or whose
+    /// value does not read.
+    BadToken { token: String, why: String },
 }
 
 impl std::fmt::Display for ManifestError {
@@ -407,6 +423,7 @@ impl std::fmt::Display for ManifestError {
             Self::BadPath(p) => write!(f, "{p} is outside the package"),
             Self::BadSetting { key, why } => write!(f, "setting {key}: {why}"),
             Self::Duplicate(id) => write!(f, "{id} is declared twice"),
+            Self::BadToken { token, why } => write!(f, "theme token {token}: {why}"),
             Self::BadPlane { overlay, plane } => {
                 write!(
                     f,
@@ -517,6 +534,23 @@ impl Manifest {
                 return Err(ManifestError::BadPath(theme.path.clone()));
             }
         }
+        let namespace = format!("{}.", self.token_namespace());
+        for (token, value) in &self.tokens {
+            let bad = |why: String| ManifestError::BadToken {
+                token: token.clone(),
+                why,
+            };
+            if !architect_theme::valid_token(token) {
+                return Err(bad(architect_theme::TOKEN_NAME_RULE.to_owned()));
+            }
+            if !token.starts_with(&namespace) {
+                return Err(bad(format!("not in its namespace ({namespace}…)")));
+            }
+            if value.trim().is_empty() {
+                return Err(bad("empty".to_owned()));
+            }
+            architect_theme::expr::parse(value).map_err(bad)?;
+        }
         let keys = format!("{}.", self.id);
         for section in &self.sections {
             if !seen.insert(section.id.as_str()) {
@@ -530,6 +564,17 @@ impl Manifest {
             }
         }
         Ok(())
+    }
+
+    /// The namespace of its theme tokens: the last part of its id, `_`
+    /// as `-` (`lab.clicker` → `clicker`, so `clicker.face`).
+    #[must_use]
+    pub fn token_namespace(&self) -> String {
+        self.id
+            .rsplit('.')
+            .next()
+            .unwrap_or(&self.id)
+            .replace('_', "-")
     }
 
     /// The theme files it contributes, relative to its package.
