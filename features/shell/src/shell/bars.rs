@@ -15,7 +15,7 @@ pub(super) fn BottomBar(
     screen: Screen,
 ) -> Element {
     let shell = use_shell();
-    let t = shell.theme;
+    let t = shell.theme.clone();
     let ins = screen.insets;
     let tabs: Vec<Tab> = tabs.into_iter().take(4).collect();
     if shell.style == ShellStyle::TabBar {
@@ -60,11 +60,11 @@ pub(super) fn BottomBar(
 #[component]
 fn BarTab(tab: Tab, on: bool, on_tab: EventHandler<&'static str>, labelled: bool) -> Element {
     let t = use_shell().theme;
-    let colour = if on { t.ink } else { t.ink_3 };
+    let colour = if on { &*t.ink } else { &*t.ink_3 };
     let (fill, radius, height) = if labelled {
         ("transparent", 10, "100%")
     } else if on {
-        (t.active, 23, "46px")
+        (&*t.active, 23, "46px")
     } else {
         ("transparent", 23, "46px")
     };
@@ -76,7 +76,7 @@ fn BarTab(tab: Tab, on: bool, on_tab: EventHandler<&'static str>, labelled: bool
                     align-items: center; justify-content: center; gap: 3px; border: none; border-radius: {radius}px; \
                     background: {fill}; color: {colour}; font-family: {t.font}; font-size: 11px; font-weight: 650;",
             onclick: move |_| on_tab.call(id),
-            {(tab.icon)(Icon { size: 22, color: colour })}
+            {(tab.icon)(Icon { size: 22, color: colour.into() })}
             if labelled { span { "{tab.label}" } }
             if let Some(b) = tab.badge.clone() { Badge { text: b } }
         }
@@ -87,7 +87,7 @@ fn BarTab(tab: Tab, on: bool, on_tab: EventHandler<&'static str>, labelled: bool
 #[component]
 pub(super) fn RoundButton(action: Action) -> Element {
     let shell = use_shell();
-    let t = shell.theme;
+    let t = shell.theme.clone();
     // A finger's size on a touch screen, a mouse's on a desk.
     let (size, icon) = if shell.desk() { (44.0, 18) } else { (54.0, 22) };
     let press = action.on_press;
@@ -99,7 +99,7 @@ pub(super) fn RoundButton(action: Action) -> Element {
                     display: flex; align-items: center; justify-content: center; padding: 0; background: {t.pill}; \
                     border: 1px solid {t.rule}; color: {t.ink}; box-shadow: {t.shadow_lift};",
             onclick: move |_| press.call(()),
-            {(action.icon)(Icon { size: icon, color: t.ink })}
+            {(action.icon)(Icon { size: icon, color: t.ink.clone() })}
             if shell.desk() {
                 span { class: "tip", style: "right: 0; bottom: {size + 8.0}px;", "{action.label}" }
             }
@@ -119,7 +119,7 @@ fn PlainButton(action: Action, labelled: bool) -> Element {
                     justify-content: center; gap: 3px; border: none; border-radius: 10px; background: transparent; \
                     color: {t.ink}; font-family: {t.font}; font-size: 11px; font-weight: 650;",
             onclick: move |_| press.call(()),
-            {(action.icon)(Icon { size: 22, color: t.ink })}
+            {(action.icon)(Icon { size: 22, color: t.ink.clone() })}
             if labelled { span { "{action.label}" } }
         }
     }
@@ -136,7 +136,7 @@ pub(super) fn Rail(
     screen: Screen,
 ) -> Element {
     let shell = use_shell();
-    let t = shell.theme;
+    let t = shell.theme.clone();
     let ins = screen.insets;
     // On a tablet the separate button floats at the page's bottom right
     // instead, and on a desk it is in the top bar: the rail's foot is the
@@ -177,9 +177,9 @@ pub(super) fn Rail(
 fn RailTab(tab: Tab, on: bool, on_tab: EventHandler<&'static str>) -> Element {
     let t = use_shell().theme;
     let (fill, colour) = if on {
-        (t.active, t.ink)
+        (&*t.active, &*t.ink)
     } else {
-        ("transparent", t.ink_3)
+        ("transparent", &*t.ink_3)
     };
     let id = tab.id;
     rsx! {
@@ -189,7 +189,7 @@ fn RailTab(tab: Tab, on: bool, on_tab: EventHandler<&'static str>) -> Element {
                     justify-content: center; gap: 4px; border: none; border-radius: 12px; background: {fill}; \
                     color: {colour}; font-family: {t.font}; font-size: 11px; font-weight: 650;",
             onclick: move |_| on_tab.call(id),
-            {(tab.icon)(Icon { size: 21, color: colour })}
+            {(tab.icon)(Icon { size: 21, color: colour.into() })}
             span { "{tab.label}" }
             if let Some(b) = tab.badge.clone() { Badge { text: b } }
         }
@@ -201,9 +201,9 @@ fn RailTab(tab: Tab, on: bool, on_tab: EventHandler<&'static str>) -> Element {
 pub(super) fn SideTab(tab: Tab, on: bool, on_tab: EventHandler<&'static str>) -> Element {
     let t = use_shell().theme;
     let (fill, colour, weight) = if on {
-        (t.accent_soft, t.ink, 700)
+        (&*t.accent_soft, &*t.ink, 700)
     } else {
-        ("transparent", t.ink_2, 560)
+        ("transparent", &*t.ink_2, 560)
     };
     let id = tab.id;
     rsx! {
@@ -213,7 +213,7 @@ pub(super) fn SideTab(tab: Tab, on: bool, on_tab: EventHandler<&'static str>) ->
                     border: none; border-radius: 10px; background: {fill}; color: {colour}; font-family: {t.font}; \
                     font-size: 15px; font-weight: {weight}; text-align: left;",
             onclick: move |_| on_tab.call(id),
-            {(tab.icon)(Icon { size: 19, color: colour })}
+            {(tab.icon)(Icon { size: 19, color: colour.into() })}
             span { style: "flex: 1; text-align: left;", "{tab.label}" }
             if let Some(b) = tab.badge.clone() {
                 span { style: "min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box; border-radius: 9px; \

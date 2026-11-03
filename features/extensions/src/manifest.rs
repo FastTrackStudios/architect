@@ -28,6 +28,9 @@
 //! title = "Accent the downbeat"
 //! control = "switch"
 //! default = true
+//!
+//! [[themes]]
+//! path = "themes/metronome-night.json"
 //! ```
 
 use architect_settings::{Block, Choice, Control, Section, Setting, Value};
@@ -195,6 +198,17 @@ fn over() -> String {
     "over".to_owned()
 }
 
+/// A theme it contributes: a theme file (`architect_theme`'s format) in
+/// the package, its id the file's name. The app reads it beside its own
+/// (`architect_theme::fs::ThemeDirs::extension` with
+/// [`Manifest::theme_files`]).
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ThemeDecl {
+    /// The file, relative to the package (`themes/night.json`).
+    pub path: String,
+}
+
 /// An opener for ⌘O: items of `kind`, found by the action `action`
 /// (`{query}` in, a list of `{id, title}` out).
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
@@ -334,6 +348,8 @@ pub struct Manifest {
     pub data: Vec<DataDecl>,
     #[serde(default)]
     pub keys: Vec<KeyDecl>,
+    #[serde(default)]
+    pub themes: Vec<ThemeDecl>,
 }
 
 fn api() -> String {
@@ -492,6 +508,15 @@ impl Manifest {
             }
             inside(&overlay.script)?;
         }
+        for theme in &self.themes {
+            inside(&theme.path)?;
+            if !std::path::Path::new(&theme.path)
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("json"))
+            {
+                return Err(ManifestError::BadPath(theme.path.clone()));
+            }
+        }
         let keys = format!("{}.", self.id);
         for section in &self.sections {
             if !seen.insert(section.id.as_str()) {
@@ -505,6 +530,12 @@ impl Manifest {
             }
         }
         Ok(())
+    }
+
+    /// The theme files it contributes, relative to its package.
+    #[must_use]
+    pub fn theme_files(&self) -> Vec<String> {
+        self.themes.iter().map(|t| t.path.clone()).collect()
     }
 
     /// Its settings sections as the settings page takes them, each owned
@@ -746,6 +777,22 @@ choices = [{ value = "wood", label = "Woodblock" }, { value = "beep", label = "B
         assert!(
             matches!(volume.control, Control::Slider { max, .. } if (max - 100.0).abs() < f64::EPSILON)
         );
+    }
+
+    #[test]
+    fn themes_are_json_files_inside_the_package() {
+        let with = |theme: &str| Manifest::parse(&format!("{METRONOME}\n[[themes]]\n{theme}"));
+        let m = with("path = \"themes/night.json\"").unwrap();
+        assert_eq!(m.theme_files(), ["themes/night.json"]);
+        assert!(matches!(
+            with("path = \"../night.json\""),
+            Err(ManifestError::BadPath(_))
+        ));
+        assert!(matches!(
+            with("path = \"themes/night.toml\""),
+            Err(ManifestError::BadPath(_))
+        ));
+        assert!(with("path = \"night.json\"\nlabel = \"x\"").is_err());
     }
 
     #[test]

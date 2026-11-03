@@ -448,7 +448,7 @@ struct Shown {
 pub(super) fn SwitcherLayer(cover: bool) -> Element {
     let host = use_host();
     let s = host.switch;
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let shell = architect_shell::try_use_shell();
     let area = (host.float_area)().unwrap_or_default();
     let header = if (host.phone_header)() {
@@ -667,11 +667,11 @@ pub(super) fn SwitcherLayer(cover: bool) -> Element {
                         padding:0 8px {geo.bottom}px; z-index:3; display:flex; align-items:center; \
                         justify-content:space-between; background:{t.desk}; border-top:1px solid {t.rule};",
                 BarButton { name: "new", label: "New tab", on: move |()| toggle_menu(host, SwitchMenu::New),
-                    Plus { size: 22, color: t.ink }
+                    Plus { size: 22, color: t.ink.to_string() }
                 }
                 BarButton { name: "tabs", label: "{count}, more", on: move |()| toggle_menu(host, SwitchMenu::Tabs),
                     span { style: "font-size:15px; font-weight:600;", "{count}" }
-                    ChevronDown { size: 16, color: t.ink_2 }
+                    ChevronDown { size: 16, color: t.ink_2.to_string() }
                 }
                 BarButton { name: "done", label: "Done", on: move |()| done(host),
                     span { style: "font-size:16px; font-weight:650; color:{t.accent};", "Done" }
@@ -702,7 +702,7 @@ fn BarButton(
     on: EventHandler<()>,
     children: Element,
 ) -> Element {
-    let t = *use_host().theme.read();
+    let t = use_host().theme.read().clone();
     rsx! {
         button {
             "data-switcher": "{name}",
@@ -741,7 +741,7 @@ fn CardView(
 ) -> Element {
     let host = use_host();
     let s = host.switch;
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     // Where it is in the grid, as it moves: it follows its slot.
     let pane = card.pane.clone();
     let place = use_hook(|| {
@@ -797,7 +797,7 @@ fn CardView(
     let opacity = if zooming { 1.0 } else { zoom } * fade * 0.7f32.mul_add(-swiped, 1.0);
     let chrome = if zooming { zoom } else { 1.0 };
     let layer = if zooming || lifted { 2 } else { 1 };
-    let lift_shadow = if lifted { t.shadow_float } else { "none" };
+    let lift_shadow = if lifted { &*t.shadow_float } else { "none" };
     let (pw, ph) = (geo.pane.w, geo.pane.h);
     let ring = 3.0_f32;
     let (ring_w, ring_h) = (
@@ -843,8 +843,8 @@ fn CardView(
                         style: "position:absolute; left:0; top:0; right:0; bottom:0; display:flex; \
                                 align-items:center; justify-content:center; background:{t.sheet};",
                         {icon.map_or_else(
-                            || rsx! { File { size: 40, color: t.ink_3 } },
-                            |icon| icon(Icon { size: 40, color: t.ink_3 }),
+                            || rsx! { File { size: 40, color: t.ink_3.to_string() } },
+                            |icon| icon(Icon { size: 40, color: t.ink_3.clone() }),
                         )}
                     }
                 }
@@ -1286,7 +1286,7 @@ fn run(host: Host, a: Act) {
 #[component]
 fn SwitcherMenu(menu: SwitchMenu, bar_h: f32, w: f32) -> Element {
     let host = use_host();
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let rows = match menu {
         SwitchMenu::Tabs => tabs_rows(host),
         SwitchMenu::New => new_rows(host),
@@ -1321,7 +1321,7 @@ fn SwitcherMenu(menu: SwitchMenu, bar_h: f32, w: f32) -> Element {
 #[component]
 fn MenuRow(row: Row) -> Element {
     let host = use_host();
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     match row {
         Row::Heading(text) => rsx! {
             div { style: "padding:8px 12px 4px; color:{t.ink_3}; font-size:12px; font-weight:600;", "{text}" }
@@ -1332,7 +1332,7 @@ fn MenuRow(row: Row) -> Element {
             checked,
             danger,
         } => {
-            let ink = if danger { t.danger } else { t.ink };
+            let ink = if danger { &*t.danger } else { &*t.ink };
             rsx! {
                 button {
                     style: "display:flex; align-items:center; justify-content:space-between; gap:8px; \
@@ -1341,7 +1341,7 @@ fn MenuRow(row: Row) -> Element {
                     onclick: move |_| run(host, act.clone()),
                     span { "{label}" }
                     if checked {
-                        Check { size: 16, color: t.accent }
+                        Check { size: 16, color: t.accent.to_string() }
                     }
                 }
             }

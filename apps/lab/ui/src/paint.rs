@@ -199,7 +199,7 @@ impl PaintView for Grid {
     fn paint(&mut self, ctx: &ViewCtx, scene: &mut Scene) {
         let token = |name: &str, or: Color| ctx.theme.color(name).unwrap_or(or);
         let sheet = token("sheet", Color::from_rgba8(24, 24, 27, 255));
-        let lit = token("accent", Color::from_rgba8(255, 122, 26, 255));
+        let lit = token("brand", Color::from_rgba8(255, 122, 26, 255));
         let pick = token("ink", Color::from_rgba8(250, 250, 250, 255));
         let (width, height) = (ctx.geometry.width, ctx.geometry.height);
         self.lay_out(width, height);

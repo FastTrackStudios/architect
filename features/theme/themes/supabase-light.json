@@ -1,0 +1,36 @@
+{
+  "label": "Supabase Light",
+  "appearance": "light",
+  "palette": {
+    "background": "#fcfcfc",
+    "foreground": "#171717",
+    "accent": "#72e3ad",
+    "surface": "#fcfcfc",
+    "border": "#dfdfdf",
+    "danger": "#ca3214",
+    "chart": ["#72e3ad", "#3b82f6", "#8b5cf6", "#f59e0b", "#10b981"]
+  },
+  "overrides": {
+    "accent": "#ededed",
+    "accent-foreground": "#202020",
+    "destructive-foreground": "#fffcfc",
+    "font-mono": "monospace",
+    "font-sans": "Outfit, sans-serif",
+    "font-serif": "ui-serif, Georgia, Cambria, \"Times New Roman\", Times, serif",
+    "input": "#f6f6f6",
+    "letter-spacing": "0.025em",
+    "muted": "#ededed",
+    "muted-foreground": "#202020",
+    "popover-foreground": "#525252",
+    "primary-foreground": "#1e2723",
+    "radius": "0.5rem",
+    "secondary": "#fdfdfd",
+    "shadow-opacity": "0.17",
+    "sidebar": "#fcfcfc",
+    "sidebar-accent": "#ededed",
+    "sidebar-accent-foreground": "#202020",
+    "sidebar-foreground": "#707070",
+    "sidebar-primary-foreground": "#1e2723",
+    "signal-danger": "oklch(0.60 0.22 28)"
+  }
+}

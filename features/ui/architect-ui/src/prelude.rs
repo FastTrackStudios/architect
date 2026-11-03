@@ -73,7 +73,7 @@ pub use crate::typography::{Heading, HeadingLevel, Text, TextVariant};
 pub use crate::theme::{
     default_theme_preset, default_theme_state, theme_preset, theme_presets, tokens, use_theme,
     ThemeContext, ThemeMode, ThemePreset, ThemeProvider, ThemeRuntimeStyle, ThemeScope, ThemeState,
-    ThemeStyle, ThemeStyles, ThemeSwitcher, ThemeToken,
+    ThemeStoreProvider, ThemeStyle, ThemeStyles, ThemeSwitcher, ThemeToken,
 };
 
 // Class merging utilities. The primary component API is the `architect_ui::cn!`

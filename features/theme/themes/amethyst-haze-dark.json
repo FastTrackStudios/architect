@@ -1,0 +1,29 @@
+{
+  "label": "Amethyst Haze Dark",
+  "appearance": "dark",
+  "palette": {
+    "background": "#1a1823",
+    "foreground": "#e0ddef",
+    "accent": "#a995c9",
+    "surface": "#232030",
+    "border": "#302c40",
+    "danger": "#e57373",
+    "chart": ["#a995c9", "#f2b8c6", "#77b8a1", "#f0c88d", "#a0bbe3"]
+  },
+  "overrides": {
+    "accent": "#372e3f",
+    "accent-foreground": "#f2b8c6",
+    "destructive-foreground": "#1a1823",
+    "input": "#2a273a",
+    "muted": "#242031",
+    "muted-foreground": "#a09aad",
+    "primary-foreground": "#1a1823",
+    "secondary": "#5a5370",
+    "sidebar": "#16141e",
+    "sidebar-accent": "#372e3f",
+    "sidebar-accent-foreground": "#f2b8c6",
+    "sidebar-border": "#2a273a",
+    "sidebar-primary-foreground": "#1a1823",
+    "signal-danger": "oklch(0.60 0.22 28)"
+  }
+}

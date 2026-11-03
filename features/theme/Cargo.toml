@@ -1,0 +1,49 @@
+[package]
+name = "architect-theme"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Runtime themes: a small palette resolved into every semantic token, a cascade of layers (app, org, person, device, workspace, pick, preview), theme files that hot-reload, and THEME_* actions"
+
+# docs/content/architecture/theming.md. The default set is the model: the
+# palette, the resolver, the cascade and the store — pure data, wasm-clean.
+# `fs` reads theme files from folders and extensions, watches them and
+# installs an app's shipped ones; `actions` puts THEME_* on an Action
+# List; `dioxus` gives the store to a Dioxus app as a signal.
+
+[features]
+default = []
+fs = ["dep:notify"]
+actions = ["dep:architect"]
+dioxus = ["dep:dioxus", "dep:futures-channel", "dep:futures-util"]
+
+[dependencies]
+facet = { workspace = true }
+# Theme files: JSON with comments, read strictly.
+facet-json = { version = "0.50.0-rc.5" }
+# An unknown token, logged once.
+tracing = { workspace = true }
+architect = { workspace = true, optional = true, features = ["action-list"] }
+dioxus = { workspace = true, optional = true }
+# A store change, from any thread, to the window's signal.
+futures-channel = { version = "0.3", optional = true }
+futures-util = { version = "0.3", default-features = false, optional = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+notify = { version = "8", optional = true }
+
+[dev-dependencies]
+architect-theme = { path = ".", features = ["fs", "actions", "dioxus"] }
+facet-value = { version = "0.50.0-rc.7" }
+futures = "0.3"
+tempfile = "3"
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }

@@ -1,0 +1,26 @@
+{
+  "label": "Nord Light",
+  "appearance": "light",
+  "palette": {
+    "background": "#eceff4",
+    "foreground": "#2e3440",
+    "accent": "#5e81ac",
+    "surface": "#e5e9f0",
+    "border": "#d8dee9",
+    "danger": "#bf616a",
+    "chart": ["#5e81ac", "#88c0d0", "#a3be8c", "#ebcb8b", "#b48ead"]
+  },
+  "overrides": {
+    "accent": "#d8dee9",
+    "destructive-foreground": "#eceff4",
+    "muted": "#d8dee9",
+    "muted-foreground": "#4c566a",
+    "primary-foreground": "#eceff4",
+    "radius": "0.5rem",
+    "secondary": "#d8dee9",
+    "sidebar": "#e5e9f0",
+    "sidebar-accent": "#d8dee9",
+    "sidebar-primary-foreground": "#eceff4",
+    "signal-danger": "oklch(0.60 0.22 28)"
+  }
+}

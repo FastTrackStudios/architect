@@ -1,0 +1,27 @@
+{
+  "label": "Tokyo Night Light",
+  "appearance": "light",
+  "palette": {
+    "background": "#e1e2e7",
+    "foreground": "#343b59",
+    "accent": "#2e7de9",
+    "surface": "#e9e9ed",
+    "border": "#c4c8da",
+    "danger": "#f52a65",
+    "chart": ["#2e7de9", "#9854f1", "#587539", "#8c6c3e", "#007197"]
+  },
+  "overrides": {
+    "accent": "#d5d6db",
+    "destructive-foreground": "#ffffff",
+    "input": "#d5d6db",
+    "muted": "#d5d6db",
+    "muted-foreground": "#6172b0",
+    "primary-foreground": "#e1e2e7",
+    "radius": "0.5rem",
+    "secondary": "#d5d6db",
+    "sidebar": "#d5d6db",
+    "sidebar-accent": "#c4c8da",
+    "sidebar-primary-foreground": "#e1e2e7",
+    "signal-danger": "oklch(0.60 0.22 28)"
+  }
+}

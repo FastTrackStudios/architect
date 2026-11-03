@@ -1,0 +1,27 @@
+{
+  "label": "Rosé Pine Light",
+  "appearance": "light",
+  "palette": {
+    "background": "#faf4ed",
+    "foreground": "#575279",
+    "accent": "#907aa9",
+    "surface": "#fffaf3",
+    "border": "#dfdad9",
+    "danger": "#b4637a",
+    "chart": ["#907aa9", "#286983", "#56949f", "#ea9d34", "#d7827e"]
+  },
+  "overrides": {
+    "accent": "#f2e9e1",
+    "destructive-foreground": "#faf4ed",
+    "input": "#f2e9e1",
+    "muted": "#f2e9e1",
+    "muted-foreground": "#797593",
+    "primary-foreground": "#faf4ed",
+    "radius": "0.5rem",
+    "secondary": "#f2e9e1",
+    "sidebar": "#fffaf3",
+    "sidebar-accent": "#f2e9e1",
+    "sidebar-primary-foreground": "#faf4ed",
+    "signal-danger": "oklch(0.60 0.22 28)"
+  }
+}

@@ -47,7 +47,7 @@ pub(super) fn ManageSheet() -> Element {
     if !(host.managing)() {
         return rsx! {};
     }
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let noun = host.sets_noun.read().clone();
     let lower = noun.to_lowercase();
     let (rows, dirty) = {
@@ -149,7 +149,7 @@ pub(super) fn ManageSheet() -> Element {
 #[component]
 fn SetRow(row: Row, dirty: bool) -> Element {
     let host = use_host();
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let mut renaming = use_signal(|| None::<String>);
     let id = row.id.clone();
     let button = format!(

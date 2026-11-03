@@ -1,0 +1,35 @@
+{
+  "label": "FastTrackStudio Light",
+  "appearance": "light",
+  "palette": {
+    "background": "#fafafa",
+    "foreground": "#18181b",
+    "accent": "#0f766e",
+    "surface": "#ffffff",
+    "border": "#e4e4e7",
+    "danger": "#dc2626",
+    "chart": ["#6366f1", "#a78bfa", "#38bdf8", "#10b981", "#fbbf24"]
+  },
+  "overrides": {
+    "accent": "#eef2ff",
+    "accent-foreground": "#4338ca",
+    "font-mono": "JetBrains Mono, Fira Code, monospace",
+    "font-sans": "Inter, ui-sans-serif, system-ui, sans-serif",
+    "font-serif": "Georgia, serif",
+    "muted": "#f4f4f5",
+    "muted-foreground": "#71717a",
+    "primary": "#6366f1",
+    "ring": "#6366f1",
+    "secondary": "#f4f4f5",
+    "shadow-blur": "4px",
+    "shadow-color": "hsl(244 50% 20% / 0.1)",
+    "shadow-offset-y": "2px",
+    "shadow-opacity": "0.12",
+    "sidebar": "#f4f4f5",
+    "sidebar-accent": "#eef2ff",
+    "sidebar-accent-foreground": "#4338ca",
+    "sidebar-primary": "#6366f1",
+    "sidebar-ring": "#6366f1",
+    "signal-danger": "oklch(0.60 0.22 28)"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "label": "Violet Bloom Dark",
+  "appearance": "dark",
+  "palette": {
+    "background": "#1a1b1e",
+    "foreground": "#f0f0f0",
+    "accent": "#8c5cff",
+    "surface": "#222327",
+    "border": "#33353a",
+    "danger": "#f87171",
+    "chart": ["#4ade80", "#8c5cff", "#fca5a5", "#5993f4", "#a0a0a0"]
+  },
+  "overrides": {
+    "accent": "#1e293b",
+    "accent-foreground": "#79c0ff",
+    "destructive-foreground": "#ffffff",
+    "font-mono": "IBM Plex Mono, monospace",
+    "font-sans": "Plus Jakarta Sans, sans-serif",
+    "font-serif": "Lora, serif",
+    "letter-spacing": "-0.025em",
+    "muted": "#2a2c33",
+    "muted-foreground": "#a0a0a0",
+    "primary-foreground": "#ffffff",
+    "radius": "1.4rem",
+    "secondary": "#2a2c33",
+    "shadow-offset-y": "2px",
+    "shadow-opacity": "0.16",
+    "sidebar": "#161618",
+    "sidebar-accent": "#2a2c33",
+    "sidebar-accent-foreground": "#8c5cff",
+    "sidebar-primary-foreground": "#ffffff",
+    "signal-danger": "oklch(0.60 0.22 28)",
+    "spacing": "0.27rem"
+  }
+}

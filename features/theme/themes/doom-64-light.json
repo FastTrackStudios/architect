@@ -1,0 +1,34 @@
+{
+  "label": "Doom 64 Light",
+  "appearance": "light",
+  "palette": {
+    "background": "#cccccc",
+    "foreground": "#1f1f1f",
+    "accent": "#b71c1c",
+    "surface": "#b0b0b0",
+    "border": "#505050",
+    "danger": "#ff6f00",
+    "chart": ["#b71c1c", "#556b2f", "#4682b4", "#ff6f00", "#8d6e63"]
+  },
+  "overrides": {
+    "accent": "#4682b4",
+    "accent-foreground": "#ffffff",
+    "destructive-foreground": "#000000",
+    "font-mono": "\"Source Code Pro\", monospace",
+    "font-sans": "\"Oxanium\", sans-serif",
+    "font-serif": "ui-serif, Georgia, Cambria, \"Times New Roman\", Times, serif",
+    "letter-spacing": "0em",
+    "muted": "#b8b8b8",
+    "muted-foreground": "#4a4a4a",
+    "radius": "0px",
+    "secondary": "#556b2f",
+    "secondary-foreground": "#ffffff",
+    "shadow-blur": "4px",
+    "shadow-offset-y": "2px",
+    "shadow-opacity": "0.4",
+    "sidebar": "#b0b0b0",
+    "sidebar-accent": "#4682b4",
+    "sidebar-accent-foreground": "#ffffff",
+    "signal-danger": "oklch(0.60 0.22 28)"
+  }
+}

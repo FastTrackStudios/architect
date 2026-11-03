@@ -59,3 +59,7 @@ distinction visible at a glance.
 - [Commands: the Action List](@/architecture/commands.md) — one
   registry every key, menu, palette, CLI and MCP model runs an app's
   commands through; `architect-mcp`; per-action timings.
+- [Theming](@/architecture/theming.md) — `architect-theme`: a palette
+  resolved into every token, the cascade from the app's default to a
+  preview, theme files that hot-reload, `THEME_*` actions, and how the
+  shell, architect-ui and paint views follow one store.

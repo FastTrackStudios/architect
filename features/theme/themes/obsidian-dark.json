@@ -1,0 +1,27 @@
+{
+  "label": "Obsidian Dark",
+  "appearance": "dark",
+  "palette": {
+    "background": "#1e1e1e",
+    "foreground": "#dadada",
+    "accent": "#7f6df2",
+    "surface": "#161616",
+    "border": "#363636",
+    "danger": "#fb464c",
+    "chart": ["#7f6df2", "#4d8dff", "#44cf6e", "#e0ac00", "#fa99cd"]
+  },
+  "overrides": {
+    "accent": "#303030",
+    "destructive-foreground": "#ffffff",
+    "muted": "#262626",
+    "muted-foreground": "#9c9c9c",
+    "popover": "#262626",
+    "primary-foreground": "#fbfbfb",
+    "radius": "0.5rem",
+    "secondary": "#262626",
+    "sidebar": "#161616",
+    "sidebar-accent": "#303030",
+    "sidebar-primary-foreground": "#fbfbfb",
+    "signal-danger": "oklch(0.60 0.22 28)"
+  }
+}

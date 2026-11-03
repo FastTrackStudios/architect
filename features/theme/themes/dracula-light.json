@@ -1,0 +1,23 @@
+{
+  "label": "Dracula Light",
+  "appearance": "light",
+  "palette": {
+    "background": "#f8f8f2",
+    "foreground": "#282a36",
+    "accent": "#6f42c1",
+    "surface": "#ffffff",
+    "border": "#d6d6e7",
+    "danger": "#dc2626",
+    "chart": ["#6f42c1", "#0e7490", "#15803d", "#c2410c", "#be185d"]
+  },
+  "overrides": {
+    "accent": "#e6e6f0",
+    "muted": "#e6e6f0",
+    "muted-foreground": "#6272a4",
+    "radius": "0.5rem",
+    "secondary": "#e6e6f0",
+    "sidebar": "#efeff9",
+    "sidebar-accent": "#e6e6f0",
+    "signal-danger": "oklch(0.60 0.22 28)"
+  }
+}

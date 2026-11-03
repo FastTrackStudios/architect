@@ -1,0 +1,28 @@
+{
+  "label": "Neo Brutalism Dark",
+  "appearance": "dark",
+  "palette": {
+    "background": "#000000",
+    "foreground": "#ffffff",
+    "accent": "#ff6666",
+    "surface": "#333333",
+    "border": "#ffffff",
+    "danger": "#ffffff",
+    "chart": ["#ff6666", "#ffff33", "#3399ff", "#33cc33", "#cc33cc"]
+  },
+  "overrides": {
+    "accent": "#3399ff",
+    "accent-foreground": "#000000",
+    "destructive-foreground": "#000000",
+    "muted": "#1a1a1a",
+    "muted-foreground": "#cccccc",
+    "primary-foreground": "#000000",
+    "radius": "0px",
+    "secondary": "#ffff33",
+    "secondary-foreground": "#000000",
+    "sidebar-accent": "#3399ff",
+    "sidebar-accent-foreground": "#000000",
+    "sidebar-primary-foreground": "#000000",
+    "signal-danger": "oklch(0.60 0.22 28)"
+  }
+}

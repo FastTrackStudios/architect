@@ -1,0 +1,29 @@
+{
+  "label": "Graphite Dark",
+  "appearance": "dark",
+  "palette": {
+    "background": "#1a1a1a",
+    "foreground": "#d9d9d9",
+    "accent": "#a0a0a0",
+    "surface": "#202020",
+    "border": "#353535",
+    "danger": "#e06666",
+    "chart": ["#a0a0a0", "#7e9ca0", "#707070", "#585858", "#404040"]
+  },
+  "overrides": {
+    "accent": "#404040",
+    "destructive-foreground": "#ffffff",
+    "font-mono": "Fira Code, monospace",
+    "font-sans": "Inter, sans-serif",
+    "font-serif": "Georgia, serif",
+    "input": "#303030",
+    "muted": "#2a2a2a",
+    "muted-foreground": "#808080",
+    "primary-foreground": "#1a1a1a",
+    "secondary": "#303030",
+    "sidebar": "#1f1f1f",
+    "sidebar-accent": "#404040",
+    "sidebar-primary-foreground": "#1a1a1a",
+    "signal-danger": "oklch(0.60 0.22 28)"
+  }
+}

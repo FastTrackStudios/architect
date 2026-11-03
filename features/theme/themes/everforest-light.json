@@ -1,0 +1,27 @@
+{
+  "label": "Everforest Light",
+  "appearance": "light",
+  "palette": {
+    "background": "#fdf6e3",
+    "foreground": "#5c6a72",
+    "accent": "#8da101",
+    "surface": "#f4f0d9",
+    "border": "#e6e2cc",
+    "danger": "#f85552",
+    "chart": ["#8da101", "#3a94c5", "#35a77c", "#dfa000", "#df69ba"]
+  },
+  "overrides": {
+    "accent": "#efebd4",
+    "destructive-foreground": "#fdf6e3",
+    "input": "#efebd4",
+    "muted": "#efebd4",
+    "muted-foreground": "#939f91",
+    "primary-foreground": "#fdf6e3",
+    "radius": "0.5rem",
+    "secondary": "#efebd4",
+    "sidebar": "#f4f0d9",
+    "sidebar-accent": "#efebd4",
+    "sidebar-primary-foreground": "#fdf6e3",
+    "signal-danger": "oklch(0.60 0.22 28)"
+  }
+}

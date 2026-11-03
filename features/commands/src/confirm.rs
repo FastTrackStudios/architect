@@ -80,7 +80,7 @@ pub fn ConfirmSheet() -> Element {
     // A command run through `COMMANDS_RUN` is named as itself.
     let (name, id) = named(&first);
     let destructive = first.effect == Effect::Destructive || ran_destructive(&first);
-    let go = if destructive { t.danger } else { t.accent };
+    let go = if destructive { &*t.danger } else { &*t.accent };
     let warn = if destructive {
         "It may not be undoable: allow it only if you meant it to happen."
     } else {
@@ -122,7 +122,7 @@ pub fn ConfirmSheet() -> Element {
                     }
                     Field { label: "Caller",
                         span { style: "display: inline-flex; align-items: center; gap: 6px;",
-                            Bot { size: 14, color: t.ink_2 }
+                            Bot { size: 14, color: t.ink_2.to_string() }
                             span { style: "font-family: ui-monospace, Menlo, monospace; font-size: 12px;", "{caller}" }
                         }
                     }

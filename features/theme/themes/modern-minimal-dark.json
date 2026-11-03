@@ -1,0 +1,27 @@
+{
+  "label": "Modern Minimal Dark",
+  "appearance": "dark",
+  "palette": {
+    "background": "#171717",
+    "foreground": "#e5e5e5",
+    "accent": "#3b82f6",
+    "surface": "#262626",
+    "border": "#404040",
+    "danger": "#ef4444",
+    "chart": ["#60a5fa", "#3b82f6", "#2563eb", "#1d4ed8", "#1e40af"]
+  },
+  "overrides": {
+    "accent": "#1e3a8a",
+    "accent-foreground": "#bfdbfe",
+    "destructive-foreground": "#ffffff",
+    "muted": "#1f1f1f",
+    "muted-foreground": "#a3a3a3",
+    "primary-foreground": "#ffffff",
+    "radius": "0.375rem",
+    "sidebar": "#171717",
+    "sidebar-accent": "#1e3a8a",
+    "sidebar-accent-foreground": "#bfdbfe",
+    "sidebar-primary-foreground": "#ffffff",
+    "signal-danger": "oklch(0.60 0.22 28)"
+  }
+}

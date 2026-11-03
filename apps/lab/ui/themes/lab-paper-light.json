@@ -1,0 +1,15 @@
+// The lab's own light theme: warm paper, ink-blue accent.
+{
+  "label": "Lab Paper",
+  "appearance": "light",
+  "palette": {
+    "background": "#f7f4ee",
+    "foreground": "#22201c",
+    "accent": "#1d4ed8",
+    "surface": "#fffdf8",
+    "danger": "#b42318"
+  },
+  "overrides": {
+    "radius": "0.375rem"
+  }
+}
