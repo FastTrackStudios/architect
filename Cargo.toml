@@ -61,6 +61,7 @@ members = [
     "features/ui/showcase",
     "features/ui/ui-snapshot",
     "features/shell",
+    "features/theme",
     "features/guide",
     "features/presence",
     "features/devices",
@@ -133,6 +134,7 @@ ui-snapshot = { path = "features/ui/ui-snapshot" }
 # guide media: scenarios as films, tests and tours.
 architect-guide = { path = "features/guide" }
 architect-presence = { path = "features/presence" }
+architect-theme = { path = "features/theme" }
 # story — the component workbench (stories, snapshots, parity, fuzz).
 architect-story-core = { path = "features/story/architect-story-core" }
 architect-story-macros = { path = "features/story/architect-story-macros" }

@@ -1,0 +1,32 @@
+{
+  "label": "Modern Minimal Light",
+  "appearance": "light",
+  "palette": {
+    "background": "#ffffff",
+    "foreground": "#333333",
+    "accent": "#3b82f6",
+    "surface": "#ffffff",
+    "border": "#e5e7eb",
+    "danger": "#ef4444",
+    "chart": ["#3b82f6", "#2563eb", "#1d4ed8", "#1e40af", "#1e3a8a"]
+  },
+  "overrides": {
+    "accent": "#e0f2fe",
+    "accent-foreground": "#1e3a8a",
+    "destructive-foreground": "#ffffff",
+    "font-mono": "JetBrains Mono, monospace",
+    "font-sans": "Inter, sans-serif",
+    "font-serif": "Source Serif 4, serif",
+    "muted": "#f9fafb",
+    "muted-foreground": "#6b7280",
+    "primary-foreground": "#ffffff",
+    "radius": "0.375rem",
+    "secondary": "#f3f4f6",
+    "secondary-foreground": "#4b5563",
+    "sidebar": "#f9fafb",
+    "sidebar-accent": "#e0f2fe",
+    "sidebar-accent-foreground": "#1e3a8a",
+    "sidebar-primary-foreground": "#ffffff",
+    "signal-danger": "oklch(0.60 0.22 28)"
+  }
+}
