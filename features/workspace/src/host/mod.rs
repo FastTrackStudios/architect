@@ -994,6 +994,8 @@ impl Host {
                     slot: Some(slot),
                 },
             ),
+            // Run where the commands are (the menu row does it).
+            Op::Run { .. } => {}
         }
     }
 }
@@ -1130,6 +1132,33 @@ enum Op {
     DockBack(Side),
     /// Recall the screenset in slot n (⌘n).
     Recall(u8),
+    /// Run another's entry (an extension's context-menu row) on a pane:
+    /// its command, told the pane and its view.
+    Run {
+        command: String,
+        pane: PaneId,
+        view: String,
+    },
+}
+
+/// One row others add to a target's context menu: its label and the
+/// command it runs (told the target: [`architect::action::Invocation`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContextEntry {
+    pub label: String,
+    pub command: String,
+}
+
+/// What others add to a pane's context menu (an extension's
+/// `[[context]]` rows), asked for by target (`view:<kind>`) and id (the
+/// pane's) each time the menu opens: provide it above the workspace.
+#[derive(Clone)]
+pub struct ContextEntries(pub Rc<dyn Fn(&str, &str) -> Vec<ContextEntry>>);
+
+impl ContextEntries {
+    pub fn new(f: impl Fn(&str, &str) -> Vec<ContextEntry> + 'static) -> Self {
+        Self(Rc::new(f))
+    }
 }
 
 /// A measured length, as the model's points (window sizes fit an `f32`).

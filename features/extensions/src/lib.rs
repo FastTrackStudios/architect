@@ -33,6 +33,10 @@
 //! data in its document ([`doc`]); `ui` brings loaded extensions' sections
 //! onto the settings page ([`ui::use_extension_sections`]).
 
+// A linked-in view's root is a fn pointer compared by Dioxus's props: a
+// stale compare only redraws.
+#![cfg_attr(feature = "ui", allow(unpredictable_function_pointer_comparisons))]
+
 pub mod catalog;
 pub mod contrib;
 pub mod index;
@@ -55,6 +59,8 @@ pub mod guest;
 pub mod host;
 #[cfg(feature = "host")]
 pub mod install;
+#[cfg(feature = "ui")]
+pub mod interface;
 #[cfg(any(feature = "linked", all(feature = "guest", unix)))]
 pub mod linked;
 #[cfg(all(feature = "process", unix))]

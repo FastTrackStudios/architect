@@ -143,6 +143,22 @@ impl std::fmt::Debug for Chrome {
 }
 
 impl Chrome {
+    /// This chrome over `under`: its fillers, hidden slots and looks win;
+    /// the tabs, status items and bar buttons of both, `under`'s first.
+    #[must_use]
+    pub fn over(&self, under: &Self) -> Self {
+        let mut out = under.clone();
+        out.tabs.extend(self.tabs.iter().cloned());
+        out.status.extend(self.status.iter().cloned());
+        out.bar.extend(self.bar.iter().cloned());
+        out.fillers
+            .extend(self.fillers.iter().map(|(k, v)| (*k, v.clone())));
+        out.hidden.extend(self.hidden.iter().copied());
+        out.looks
+            .extend(self.looks.iter().map(|(k, v)| (*k, v.clone())));
+        out
+    }
+
     /// Who fills `slot`, when not the shell.
     #[must_use]
     pub fn filler(&self, slot: Slot) -> Option<&Filler> {

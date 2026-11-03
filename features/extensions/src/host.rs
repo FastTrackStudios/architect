@@ -741,6 +741,12 @@ impl std::fmt::Debug for Host {
     }
 }
 
+impl PartialEq for Host {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+    }
+}
+
 impl Host {
     /// A host over `list`, putting settings in `sections`, running data
     /// and Luau extensions.

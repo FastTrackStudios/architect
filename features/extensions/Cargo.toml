@@ -35,7 +35,18 @@ crdt = ["dep:crdt"]
 # linked into the app as a built-in (its views Dioxus components in the
 # app's document), or served as a process by `guest`.
 linked = ["host", "dep:dioxus"]
-ui = ["host", "linked", "dep:dioxus", "dep:futures", "architect-settings/ui"]
+ui = [
+    "host",
+    "linked",
+    "dep:dioxus",
+    "dep:futures",
+    "dep:futures-timer",
+    "architect-settings/ui",
+    "dep:architect-shell",
+    "architect-shell/ui",
+    "architect-workspace/ui",
+    "architect-commands/ui",
+]
 # The wire and the protocol (`wire`, `proto`); the derives key on `vox`.
 vox = ["dep:architect", "architect/vox", "dep:vox", "dep:thiserror"]
 process = [
@@ -64,6 +75,9 @@ architect-theme = { workspace = true }
 architect-settings = { workspace = true }
 architect-orgs = { workspace = true }
 architect-commands = { workspace = true }
+# The shell's chrome an extension's tabs, status items and slots go into
+# (`ui`, `interface`).
+architect-shell = { workspace = true, optional = true }
 # The view kinds an extension's views may name (the model, wasm-clean).
 architect-workspace = { workspace = true }
 facet = { workspace = true }

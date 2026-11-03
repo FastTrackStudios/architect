@@ -954,6 +954,7 @@ dependencies = [
  "architect-orgs",
  "architect-scripting",
  "architect-settings",
+ "architect-shell",
  "architect-theme",
  "architect-workspace",
  "architect-workspace-hack",
