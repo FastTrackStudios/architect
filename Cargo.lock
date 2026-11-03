@@ -832,6 +832,7 @@ dependencies = [
  "architect-extensions",
  "architect-scripting",
  "architect-shell",
+ "architect-theme",
  "architect-workspace",
  "architect-workspace-hack",
  "dioxus",
@@ -1060,9 +1061,14 @@ dependencies = [
 name = "architect-lab-clicker"
 version = "0.1.0"
 dependencies = [
+ "architect",
+ "architect-canvas",
  "architect-extensions",
+ "architect-scripting",
+ "architect-theme",
  "architect-workspace-hack",
  "dioxus",
+ "futures",
  "serde_json",
 ]
 
@@ -1270,6 +1276,7 @@ dependencies = [
  "architect-mcp",
  "architect-permissions",
  "architect-scripting",
+ "architect-theme",
  "architect-workspace-hack",
  "crdt",
  "facet",
