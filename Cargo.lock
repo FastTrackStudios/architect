@@ -965,6 +965,7 @@ dependencies = [
  "facet",
  "futures",
  "futures-timer",
+ "regex",
  "roxmltree 0.21.2",
  "semver",
  "serde",

@@ -34,6 +34,7 @@
 //! onto the settings page ([`ui::use_extension_sections`]).
 
 pub mod catalog;
+pub mod contrib;
 pub mod index;
 pub mod manifest;
 pub mod package;
@@ -66,6 +67,7 @@ pub mod watch;
 pub mod wire;
 
 pub use catalog::{Candidate, Chosen, Origin, choose};
+pub use contrib::{Contribution, Contributions};
 pub use index::{Hit, Index, Listing, Location};
 pub use manifest::{API, Kind, MANIFEST, Manifest, ManifestError, Reach};
 pub use package::{Files, Package, PackageError};

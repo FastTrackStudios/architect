@@ -66,6 +66,8 @@ serde = { workspace = true }
 toml = { workspace = true }
 semver = "1"
 roxmltree = "0.21"
+# URL openers' patterns (`[[openers]] urls`): wasm-clean.
+regex = "1"
 architect = { workspace = true, optional = true, features = ["action-list"] }
 architect-scripting = { workspace = true, optional = true }
 serde_json = { workspace = true }

@@ -36,10 +36,21 @@
 //! "metronome.beat" = "$brand"
 //! "metronome.off-beat" = "mix($ink-3, $brand, 0.25)"
 //! ```
+//!
+//! What it adds to the interface — openers for files, document kinds and
+//! links, document kinds, tabs, status items, menu and context-menu
+//! entries, action-bar buttons, hooks and slots — are the tables of a
+//! [`Contribution`] (`crate::contrib`), read into
+//! [`Manifest::contributes`].
 
 use architect_settings::{Block, Choice, Control, Section, Setting, Value};
 use semver::Version;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+
+pub use crate::contrib::{
+    BarDecl, ContextDecl, Contribution, DocKindDecl, HookDecl, MenuDecl, OpenerDecl, Refused,
+    Rules, SlotDecl, StatusDecl, TabDecl,
+};
 
 /// The extension API this build speaks: a manifest naming a newer one
 /// (`api = "0.2"` here) is refused, an older one in the same `0.x` taken.
@@ -155,9 +166,48 @@ pub struct Preset {
     pub args: Option<String>,
 }
 
+/// Where a view lives when nothing says otherwise: the main area, or a
+/// dock.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Home {
+    #[default]
+    Main,
+    Left,
+    Right,
+    Bottom,
+}
+
+/// How a view opens (herdr's pane placements, on the workspace's own):
+/// a tab, a split beside the active group, over the window (`overlay`:
+/// a layer, `popup`: a modal one, sized), alone in its window
+/// (`zoomed`), or floating.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ViewPlacement {
+    #[default]
+    Tab,
+    Split,
+    Overlay,
+    Popup,
+    Zoomed,
+    Float,
+}
+
+/// What its open panes do when the extension unloads.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OnUnload {
+    /// Stay, saying it is gone, until it comes back or they are closed.
+    #[default]
+    Placeholder,
+    /// Close (kept to reopen).
+    Close,
+}
+
 /// A view it adds to the workspace: listed by the host, mounted by the
 /// app.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct ViewDecl {
     pub id: String,
     pub title: String,
@@ -173,6 +223,31 @@ pub struct ViewDecl {
     /// A frame document in the package that draws it, for a data view.
     #[serde(default)]
     pub document: Option<String>,
+    /// Where it lives: the main area or a dock (`left`, `right`,
+    /// `bottom`).
+    #[serde(default)]
+    pub home: Home,
+    /// How it opens: `tab`, `split`, `overlay`, `popup`, `zoomed`,
+    /// `float`.
+    #[serde(default)]
+    pub placement: ViewPlacement,
+    /// A popup's, overlay's or float's size, points.
+    #[serde(default)]
+    pub width: Option<f32>,
+    #[serde(default)]
+    pub height: Option<f32>,
+    /// What its panes do when it unloads.
+    #[serde(default)]
+    pub on_unload: OnUnload,
+}
+
+impl ViewDecl {
+    /// Its kind in the app's workspace: `<extension id>/<view id>`, so two
+    /// extensions' views never meet, and a pane says whose it is.
+    #[must_use]
+    pub fn workspace_kind(&self, extension: &str) -> String {
+        format!("{extension}/{}", self.id)
+    }
 }
 
 /// A layer it draws over a kind of view (`session.arrange`).
@@ -212,18 +287,6 @@ fn over() -> String {
 pub struct ThemeDecl {
     /// The file, relative to the package (`themes/night.json`).
     pub path: String,
-}
-
-/// An opener for ⌘O: items of `kind`, found by the action `action`
-/// (`{query}` in, a list of `{id, title}` out).
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
-pub struct OpenerDecl {
-    pub kind: String,
-    pub title: String,
-    /// What a query starts with to ask only this opener (`click:`).
-    #[serde(default)]
-    pub prefix: String,
-    pub action: String,
 }
 
 /// Where in a project an extension keeps its own data.
@@ -348,8 +411,6 @@ pub struct Manifest {
     #[serde(default)]
     pub overlays: Vec<OverlayDecl>,
     #[serde(default)]
-    pub openers: Vec<OpenerDecl>,
-    #[serde(default)]
     pub data: Vec<DataDecl>,
     #[serde(default)]
     pub keys: Vec<KeyDecl>,
@@ -363,6 +424,11 @@ pub struct Manifest {
     /// last word.
     #[serde(default)]
     pub tokens: std::collections::BTreeMap<String, String>,
+    /// What it adds to the interface: its `[[openers]]`, `[[doc_kinds]]`,
+    /// `[[tabs]]`, `[[status]]`, `[[menus]]`, `[[context]]`, `[[bar]]`,
+    /// `[[hooks]]` and `[[slots]]`.
+    #[serde(flatten)]
+    pub contributes: Contribution,
 }
 
 fn api() -> String {
@@ -404,6 +470,10 @@ pub enum ManifestError {
     /// A theme token outside its namespace, not a token name, or whose
     /// value does not read.
     BadToken { token: String, why: String },
+    /// One of its interface contributions breaks a rule (an unknown view,
+    /// event, target or slot; an action outside its reach; a pattern that
+    /// does not compile).
+    Contribution(Refused),
 }
 
 impl std::fmt::Display for ManifestError {
@@ -424,6 +494,7 @@ impl std::fmt::Display for ManifestError {
             Self::BadSetting { key, why } => write!(f, "setting {key}: {why}"),
             Self::Duplicate(id) => write!(f, "{id} is declared twice"),
             Self::BadToken { token, why } => write!(f, "theme token {token}: {why}"),
+            Self::Contribution(r) => r.fmt(f),
             Self::BadPlane { overlay, plane } => {
                 write!(
                     f,
@@ -551,6 +622,9 @@ impl Manifest {
             }
             architect_theme::expr::parse(value).map_err(bad)?;
         }
+        self.contributes
+            .check(&self.rules(&self.view_ids()))
+            .map_err(ManifestError::Contribution)?;
         let keys = format!("{}.", self.id);
         for section in &self.sections {
             if !seen.insert(section.id.as_str()) {
@@ -564,6 +638,25 @@ impl Manifest {
             }
         }
         Ok(())
+    }
+
+    /// Its views' ids.
+    #[must_use]
+    pub fn view_ids(&self) -> Vec<String> {
+        self.views.iter().map(|v| v.id.clone()).collect()
+    }
+
+    /// What its contributions are checked against: its namespace, its
+    /// capabilities, `views`, its kind. A contribution made at run time
+    /// (a guest's, a script's) is checked against the same.
+    #[must_use]
+    pub fn rules<'a>(&'a self, views: &'a [String]) -> Rules<'a> {
+        Rules {
+            prefix: self.action_prefix(),
+            reach: &self.capabilities.actions,
+            views,
+            luau: self.kind == Kind::Luau,
+        }
     }
 
     /// The namespace of its theme tokens: the last part of its id, `_`
@@ -898,6 +991,126 @@ choices = [{ value = "wood", label = "Woodblock" }, { value = "beep", label = "B
         assert!(matches!(
             with("id = \"metronome\"\nview = \"v\"\nscript = \"c.luau\""),
             Err(ManifestError::Duplicate(_))
+        ));
+    }
+
+    const CONTRIB: &str = r#"
+id = "lab.contrib"
+name = "Board"
+version = "0.1.0"
+kind = "process"
+
+[capabilities]
+actions = ["WORKSPACE_"]
+
+[entry]
+path = "architect-lab-contrib"
+
+[[actions]]
+id = "LAB_CONTRIB_PIN"
+name = "Pin to the board"
+
+[[views]]
+id = "board"
+title = "Board"
+placement = "split"
+on_unload = "close"
+
+[[views]]
+id = "chart"
+title = "Chart"
+home = "right"
+
+[[views]]
+id = "bar"
+title = "Board status bar"
+
+[[openers]]
+id = "kf"
+title = "Keyflow chart"
+files = ["kf"]
+view = "chart"
+
+[[openers]]
+id = "issue"
+title = "GitHub issue"
+urls = ['^https://github\.com/[^/]+/[^/]+/issues/\d+$']
+action = "LAB_CONTRIB_PIN"
+
+[[doc_kinds]]
+id = "keyflow.chart"
+name = "Chart"
+files = ["kf"]
+view = "chart"
+
+[[tabs]]
+id = "board"
+title = "Board"
+icon = "layout-dashboard"
+view = "board"
+
+[[status]]
+id = "pins"
+text = "No pins"
+action = "LAB_CONTRIB_PIN"
+
+[[menus]]
+menu = "View"
+action = "LAB_CONTRIB_PIN"
+
+[[context]]
+target = "view:note"
+action = "LAB_CONTRIB_PIN"
+title = "Pin to the board"
+
+[[bar]]
+action = "LAB_CONTRIB_PIN"
+title = "Pin"
+icon = "pin"
+
+[[hooks]]
+on = "startup"
+action = "LAB_CONTRIB_PIN"
+
+[[hooks]]
+on = "changed:workspace"
+action = "WORKSPACE_LAYOUT"
+
+[[slots]]
+slot = "status"
+view = "bar"
+"#;
+
+    #[test]
+    fn a_manifest_reads_what_it_adds_to_the_interface() {
+        use super::{Home, OnUnload, ViewPlacement};
+        let m = Manifest::parse(CONTRIB).unwrap();
+        let c = &m.contributes;
+        assert_eq!(c.openers.len(), 2);
+        assert_eq!(c.openers[0].files, ["kf"]);
+        assert!(c.openers[1].urls[0].starts_with("^https"));
+        assert_eq!(
+            (c.tabs.len(), c.status.len(), c.menus.len(), c.context.len()),
+            (1, 1, 1, 1)
+        );
+        assert_eq!((c.bar.len(), c.hooks.len(), c.slots.len()), (1, 2, 1));
+        assert_eq!(m.views[0].placement, ViewPlacement::Split);
+        assert_eq!(m.views[0].on_unload, OnUnload::Close);
+        assert_eq!(m.views[1].home, Home::Right);
+        assert_eq!(m.views[1].workspace_kind(&m.id), "lab.contrib/chart");
+
+        let bad = |from: &str, to: &str| Manifest::parse(&CONTRIB.replacen(from, to, 1));
+        assert!(matches!(
+            bad("view = \"board\"", "view = \"nope\""),
+            Err(ManifestError::Contribution(_))
+        ));
+        assert!(matches!(
+            bad("on = \"startup\"", "on = \"teatime\""),
+            Err(ManifestError::Contribution(_))
+        ));
+        assert!(matches!(
+            bad("actions = [\"WORKSPACE_\"]", "actions = []"),
+            Err(ManifestError::Contribution(_))
         ));
     }
 
