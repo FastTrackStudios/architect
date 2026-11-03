@@ -399,7 +399,7 @@ vox-phon = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.3.0" 
 # wasm-split web build's blank pages).
 [patch."https://github.com/DioxusLabs/dioxus"]
 dioxus-native = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1" }
-dioxus-native-dom = { git = "https://www.github.com/FastTrackStudios/vendor", rev = "ba4ac02415f9b6c6dc4a7466f490364b2c00fcbf" }
+dioxus-native-dom = { git = "https://www.github.com/FastTrackStudios/vendor", rev = "25bf4bcdfd0b6acb268ca91a93bc8ff8da683a96" }
 dioxus-vdom = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1" }
 
 # ── Lints ─────────────────────────────────────────────────────────────
@@ -662,7 +662,7 @@ blitz-html = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5
 anyrender = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
 
 [patch."https://github.com/FastTrackStudios/vendor"]
-dioxus-native-dom = { git = "https://www.github.com/FastTrackStudios/vendor", rev = "ba4ac02415f9b6c6dc4a7466f490364b2c00fcbf" }
+dioxus-native-dom = { git = "https://www.github.com/FastTrackStudios/vendor", rev = "25bf4bcdfd0b6acb268ca91a93bc8ff8da683a96" }
 
 [patch."https://github.com/FastTrackStudios/architect"]
 architect = { path = "crates/architect" }
