@@ -196,9 +196,14 @@ fn view_input(event: &UiEvent) -> Option<ViewInput> {
                 BlitzWheelDelta::Lines(x, y) => (x * LINE, y * LINE),
                 BlitzWheelDelta::Pixels(x, y) => (x, y),
             };
+            // The pointer's point, as the pointer events give it.
+            let (x, y) = (w.coords.client_x, w.coords.client_y);
             ViewInput::Wheel {
                 dx: narrow(dx),
                 dy: narrow(dy),
+                x,
+                y,
+                mods: modifiers(w.mods),
             }
         }
         UiEvent::KeyDown(k) | UiEvent::KeyUp(k) => ViewInput::Key {

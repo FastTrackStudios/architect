@@ -241,6 +241,7 @@ fn GroupView(group: Group, edges: Edges) -> Element {
     };
     let id = group.id;
     let names = tab_names(&group);
+    let header = host.pane_header(&current);
     rsx! {
         div {
             style: "flex:1 1 0; min-width:0; min-height:0; display:flex; flex-direction:column; \
@@ -256,7 +257,7 @@ fn GroupView(group: Group, edges: Edges) -> Element {
                     Stacked { group: group.clone(), current: current.clone() }
                 } else {
                     div { style: "flex:1 1 0; width:100%; min-width:0; min-height:0; display:flex; flex-direction:column;",
-                        if group.chrome == Chrome::Tabs {
+                        if group.chrome == Chrome::Tabs && header {
                             PaneHeader { key: "h{current.0}", pane: current.clone() }
                         }
                         PaneSlot { key: "{current.0}", pane: current.clone() }

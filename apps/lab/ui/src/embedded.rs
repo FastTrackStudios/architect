@@ -79,10 +79,18 @@ pub fn views() -> Vec<View> {
         View::new("embed.a2ui", "A2UI", |_| rsx! { A2uiPane {} }),
         #[cfg(feature = "keyflow-lab")]
         View::new(
-            "embed.keyflow",
-            "Keyflow",
-            |_| rsx! { crate::keyflow::KeyflowPane {} },
+            "embed.keyflow-editor",
+            "Keyflow editor",
+            |_| rsx! { crate::keyflow::KeyflowEditorPane {} },
         )
+        .headless(),
+        #[cfg(feature = "keyflow-lab")]
+        View::new(
+            "embed.keyflow-chart",
+            "Keyflow chart",
+            |_| rsx! { crate::keyflow::KeyflowChartPane {} },
+        )
+        .headless()
         .drawn_by(PAINT),
         View::new(
             "embed.paint",
@@ -125,7 +133,12 @@ pub fn workspace() -> Workspace {
     );
     #[cfg(feature = "keyflow-lab")]
     let _ = w.open(
-        Pane::new("embed-keyflow", "embed.keyflow", "Keyflow"),
+        Pane::new("embed-keyflow-editor", "embed.keyflow-editor", "Editor"),
+        Target::Tab,
+    );
+    #[cfg(feature = "keyflow-lab")]
+    let _ = w.open(
+        Pane::new("embed-keyflow-chart", "embed.keyflow-chart", "Chart"),
         Target::Tab,
     );
     let _ = w.activate(&architect_workspace::PaneId::new(DIOXUS_PANE));
@@ -432,6 +445,8 @@ fn shipped(args: &serde_json::Value) -> Result<serde_json::Value, String> {
 /// `LAB_PAINT_STATE`, the paint pane's.
 pub fn register(list: &ActionList, surfaces: &architect_a2ui::Surfaces) {
     crate::paint::register(list);
+    #[cfg(feature = "keyflow-lab")]
+    crate::keyflow::register(list);
     let failed = |id: &str, message: String| ActionError::Failed {
         id: id.to_owned(),
         message,

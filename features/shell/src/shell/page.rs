@@ -4,7 +4,7 @@
 use dioxus::prelude::*;
 use lucide_dioxus::{Check, ChevronLeft, Ellipsis, PanelRight};
 
-use super::{Action, DragStrip, FormFactor, Icon, IconFn, ShellStyle, Side, use_shell};
+use super::{Action, FormFactor, Icon, IconFn, ShellStyle, Side, use_shell};
 
 // ── The ⋯ menu ──────────────────────────────────────────────────────────────
 
@@ -812,11 +812,10 @@ pub(super) fn MenuRow(entry: MenuEntry, open: Signal<bool>) -> Element {
     }
 }
 
-/// A desk's page bar, Obsidian's way: the title row holds the page as a
-/// tab (rounded at the top, the page's colour, running on into it), the
-/// rest of the row moving the window; under it the page's header — the way
-/// back, the breadcrumb, the page's toolbar. Clear at each end of the
-/// sides' fixed buttons where they sit over the title row.
+/// A desk's page bar: the page's header under the title row, the way back,
+/// the breadcrumb, the page's toolbar. The page's tab is not here: the shell
+/// draws it in the title row it runs across the window ([`DeskTab`]), from
+/// `desk_tab`, which this sets while the page is mounted.
 #[component]
 fn DeskBar(
     title: String,
@@ -829,31 +828,14 @@ fn DeskBar(
     let shell = use_shell();
     let t = shell.theme;
     let ins = shell.screen.insets;
-    let row = shell.title_row();
-    let (left, right) = shell.title_clearance();
-    let pad_left = left.max(4.0);
-    let tab_h = (row - 6.0).max(24.0);
-    let chrome = shell.window_chrome().cloned();
-    rsx! {
-        div {
-            style: "position: relative; flex-shrink: 0; box-sizing: border-box; height: {row + ins.top}px; \
-                    padding: {ins.top}px {right}px 0 {pad_left}px; display: flex; align-items: flex-end; \
-                    background: {t.title_bar};",
-            // The bar's rule, under everything but the tab (drawn over it).
-            div { style: "position: absolute; left: 0; right: 0; bottom: 0; height: 1px; background: {t.rule};" }
-            div {
-                style: "position: relative; z-index: 1; flex: 0 1 200px; max-width: 200px; min-width: 72px; \
-                        height: {tab_h}px; box-sizing: border-box; display: flex; align-items: center; \
-                        padding: 0 12px; border-radius: 8px 8px 0 0; background: {t.desk}; color: {t.ink}; \
-                        font-family: {t.font}; font-size: 13px; white-space: nowrap; overflow: hidden;",
-                "{title}"
-            }
-            if let Some(c) = chrome {
-                DragStrip { chrome: c, width: None }
-            } else {
-                span { style: "flex: 1;" }
-            }
+    let mut desk_tab = shell.desk_tab;
+    use_effect(use_reactive!(|title| desk_tab.set(Some(title))));
+    use_drop(move || {
+        if desk_tab.try_peek().is_ok_and(|tab| tab.is_some()) {
+            desk_tab.set(None);
         }
+    });
+    rsx! {
         div {
             style: "position: relative; flex-shrink: 0; box-sizing: border-box; height: 44px; \
                     padding: 0 {20.0 + ins.right}px 0 20px; display: flex; align-items: center; gap: 10px;",
@@ -874,6 +856,23 @@ fn DeskBar(
             }
             if let Some(trailing) = trailing { {trailing} }
             ToolbarView { toolbar, size: ToolSize::DESK }
+        }
+    }
+}
+
+/// A desk's page as its tab in the title row: rounded, the page's colour,
+/// centred in the row's height.
+#[component]
+pub(super) fn DeskTab(title: String) -> Element {
+    let shell = use_shell();
+    let t = shell.theme;
+    let tab_h = (shell.title_row() - 6.0).max(24.0);
+    rsx! {
+        div {
+            style: "flex: 0 1 200px; max-width: 200px; min-width: 72px; height: {tab_h}px; box-sizing: border-box; \
+                    display: flex; align-items: center; padding: 0 12px; border-radius: 8px; background: {t.desk}; \
+                    color: {t.ink}; font-family: {t.font}; font-size: 13px; white-space: nowrap; overflow: hidden;",
+            "{title}"
         }
     }
 }
