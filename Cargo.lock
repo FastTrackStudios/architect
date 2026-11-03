@@ -5525,13 +5525,15 @@ dependencies = [
 [[package]]
 name = "editor-keyflow"
 version = "0.0.1-alpha"
-source = "git+https://github.com/FastTrackStudios/keyflow?rev=460556341dfe1fd2c3617fa4817bed432cd39b9e#460556341dfe1fd2c3617fa4817bed432cd39b9e"
+source = "git+https://github.com/FastTrackStudios/keyflow?rev=6eed23f37657f68fc0e634ddd7bf6b487101f5eb#6eed23f37657f68fc0e634ddd7bf6b487101f5eb"
 dependencies = [
  "dioxus",
  "editor-state",
  "editor-view",
  "editor-vim",
  "engraver",
+ "futures-channel",
+ "futures-util",
  "gloo-timers 0.3.0",
  "keyflow-lang",
  "thiserror 2.0.20",
@@ -5542,7 +5544,7 @@ dependencies = [
 [[package]]
 name = "editor-state"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/editor?rev=888c3b9e92f6a241c11a649e96109b66bdec78ed#888c3b9e92f6a241c11a649e96109b66bdec78ed"
+source = "git+https://github.com/FastTrackStudios/editor?rev=f70f074443c3654833f970eaf49968e27c47c006#f70f074443c3654833f970eaf49968e27c47c006"
 dependencies = [
  "editor-syntax",
  "ropey",
@@ -5555,7 +5557,7 @@ dependencies = [
 [[package]]
 name = "editor-syntax"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/editor?rev=888c3b9e92f6a241c11a649e96109b66bdec78ed#888c3b9e92f6a241c11a649e96109b66bdec78ed"
+source = "git+https://github.com/FastTrackStudios/editor?rev=f70f074443c3654833f970eaf49968e27c47c006#f70f074443c3654833f970eaf49968e27c47c006"
 dependencies = [
  "arborium",
  "arborium-theme",
@@ -5565,11 +5567,13 @@ dependencies = [
 [[package]]
 name = "editor-view"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/editor?rev=888c3b9e92f6a241c11a649e96109b66bdec78ed#888c3b9e92f6a241c11a649e96109b66bdec78ed"
+source = "git+https://github.com/FastTrackStudios/editor?rev=f70f074443c3654833f970eaf49968e27c47c006#f70f074443c3654833f970eaf49968e27c47c006"
 dependencies = [
  "dioxus",
  "editor-state",
  "editor-vim",
+ "futures-channel",
+ "futures-util",
  "ropey",
  "serde",
  "serde_json",
@@ -5581,7 +5585,7 @@ dependencies = [
 [[package]]
 name = "editor-vim"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/editor?rev=888c3b9e92f6a241c11a649e96109b66bdec78ed#888c3b9e92f6a241c11a649e96109b66bdec78ed"
+source = "git+https://github.com/FastTrackStudios/editor?rev=f70f074443c3654833f970eaf49968e27c47c006#f70f074443c3654833f970eaf49968e27c47c006"
 dependencies = [
  "editor-state",
  "tracing",
@@ -5671,7 +5675,7 @@ checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
 [[package]]
 name = "engraver"
 version = "0.0.1-alpha"
-source = "git+https://github.com/FastTrackStudios/keyflow?rev=460556341dfe1fd2c3617fa4817bed432cd39b9e#460556341dfe1fd2c3617fa4817bed432cd39b9e"
+source = "git+https://github.com/FastTrackStudios/keyflow?rev=6eed23f37657f68fc0e634ddd7bf6b487101f5eb#6eed23f37657f68fc0e634ddd7bf6b487101f5eb"
 dependencies = [
  "anyrender",
  "bitflags 2.13.2",
@@ -8844,7 +8848,7 @@ dependencies = [
 [[package]]
 name = "keyflow"
 version = "0.0.1-alpha"
-source = "git+https://github.com/FastTrackStudios/keyflow?rev=460556341dfe1fd2c3617fa4817bed432cd39b9e#460556341dfe1fd2c3617fa4817bed432cd39b9e"
+source = "git+https://github.com/FastTrackStudios/keyflow?rev=6eed23f37657f68fc0e634ddd7bf6b487101f5eb#6eed23f37657f68fc0e634ddd7bf6b487101f5eb"
 dependencies = [
  "color-eyre",
  "colored 3.1.1",
@@ -8863,7 +8867,7 @@ dependencies = [
 [[package]]
 name = "keyflow-lang"
 version = "0.0.1-alpha"
-source = "git+https://github.com/FastTrackStudios/keyflow?rev=460556341dfe1fd2c3617fa4817bed432cd39b9e#460556341dfe1fd2c3617fa4817bed432cd39b9e"
+source = "git+https://github.com/FastTrackStudios/keyflow?rev=6eed23f37657f68fc0e634ddd7bf6b487101f5eb#6eed23f37657f68fc0e634ddd7bf6b487101f5eb"
 dependencies = [
  "keyflow-proto",
  "thiserror 2.0.20",
@@ -8873,7 +8877,7 @@ dependencies = [
 [[package]]
 name = "keyflow-proto"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/keyflow?rev=460556341dfe1fd2c3617fa4817bed432cd39b9e#460556341dfe1fd2c3617fa4817bed432cd39b9e"
+source = "git+https://github.com/FastTrackStudios/keyflow?rev=6eed23f37657f68fc0e634ddd7bf6b487101f5eb#6eed23f37657f68fc0e634ddd7bf6b487101f5eb"
 dependencies = [
  "architect",
  "color-palette",
@@ -8889,7 +8893,7 @@ dependencies = [
 [[package]]
 name = "keyflow-ui"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/keyflow?rev=460556341dfe1fd2c3617fa4817bed432cd39b9e#460556341dfe1fd2c3617fa4817bed432cd39b9e"
+source = "git+https://github.com/FastTrackStudios/keyflow?rev=6eed23f37657f68fc0e634ddd7bf6b487101f5eb#6eed23f37657f68fc0e634ddd7bf6b487101f5eb"
 dependencies = [
  "anyrender",
  "architect-ui",
