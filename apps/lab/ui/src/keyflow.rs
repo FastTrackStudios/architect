@@ -122,6 +122,19 @@ pub fn KeyflowChartPane() -> Element {
             }
         }
     });
+    // The chart follows the app's theme (a typed slice: it repaints only when
+    // these colours change), until KEYFLOW_SET_CHART_THEME pins it.
+    let colours = architect_theme::use_themed::<ChartColours>();
+    let follow = shared.clone();
+    use_effect(move || {
+        let c = colours();
+        if CHART_PINNED.load(Ordering::Relaxed) {
+            return;
+        }
+        *CHART_DARK.write() = c.dark;
+        follow.data.update(|s| s.theme = Some(c.theme()));
+        follow.mount.wake.wake();
+    });
     rsx! {
         div { style: "display:flex; flex-direction:column; height:100%; min-height:0;",
             div { style: "flex:1; min-height:0;",
@@ -149,6 +162,41 @@ pub fn chart_workspace() -> Workspace {
 /// The editor's colours: the dark pane of the Architect theme. The chrome
 /// and caret read these custom properties.
 const EDITOR_COLOURS: &str = "--code-bg:#202024; --background:#202024; --foreground:#e9e9ee; --ink:#e9e9ee; --ink-soft:#9a9aa6; --accent:#3ec7a8;";
+
+/// The chart's slice of the app's theme: its paper, its ink, its staff.
+#[derive(Clone, PartialEq)]
+struct ChartColours {
+    dark: bool,
+    paper: architect_theme::Rgba,
+    ink: architect_theme::Rgba,
+    staff: architect_theme::Rgba,
+}
+
+impl architect_theme::FromResolved for ChartColours {
+    fn from_resolved(r: &architect_theme::Resolved) -> Self {
+        Self {
+            dark: r.scheme() == architect_theme::Scheme::Dark,
+            paper: r.color("card"),
+            ink: r.color("card-foreground"),
+            staff: r.color("muted-foreground"),
+        }
+    }
+}
+
+impl ChartColours {
+    fn theme(&self) -> ChartTheme {
+        let c = |x: architect_theme::Rgba| Color::new([x.r, x.g, x.b, x.a]);
+        let mut theme = ChartTheme::default();
+        theme.render.background_color = c(self.paper);
+        theme.render.foreground_color = c(self.ink);
+        theme.render.staff_color = c(self.staff);
+        theme
+    }
+}
+
+/// Set once KEYFLOW_SET_CHART_THEME has chosen the chart's theme: from then
+/// on it no longer follows the app's.
+static CHART_PINNED: AtomicBool = AtomicBool::new(false);
 
 fn dark_theme() -> ChartTheme {
     let mut theme = ChartTheme::default();
@@ -198,6 +246,7 @@ fn apply(chart: &KeyflowChart, command: ChartCommand) {
     match command {
         ChartCommand::View(view) => chart.data.update(|s| s.view = view),
         ChartCommand::Dark(dark) => {
+            CHART_PINNED.store(true, Ordering::Relaxed);
             *CHART_DARK.write() = dark;
             let theme = if dark { dark_theme() } else { ChartTheme::default() };
             chart.data.update(|s| s.theme = Some(theme));
