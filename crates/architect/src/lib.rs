@@ -1389,6 +1389,12 @@ pub mod action {
 
     use std::sync::Arc;
 
+    /// `APP_STATUS` and the registries it reads: what an agent is told
+    /// about a running app in one call.
+    #[cfg(feature = "action-list")]
+    pub use crate::action_list::app::{
+        self as app_status, APP_STATUS, Problem, Problems, StatusBoard,
+    };
     /// Confirmation tickets: a person's yes before a caller from outside
     /// runs a destructive action.
     #[cfg(feature = "action-list")]
