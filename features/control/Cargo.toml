@@ -38,6 +38,8 @@ serde_json.workspace = true
 futures = "0.3"
 # Where an app's socket is: the user's runtime directory.
 dirs = "6"
+# The guide's writer says when a write failed (`guide`).
+tracing.workspace = true
 tokio = { workspace = true, optional = true }
 clap = { workspace = true, optional = true }
 
