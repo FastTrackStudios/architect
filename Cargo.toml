@@ -350,13 +350,13 @@ proptest = "1"
 # departs from upstream's tests. dioxus git pins `=0.3.0-beta.4`. One tag
 # across all blitz crates, and anyrender (0.14 + the compositing seam)
 # from the same tag.
-blitz-dom = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11" }
-blitz-traits = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11" }
-blitz-paint = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11" }
-blitz-shell = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11" }
-blitz-net = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11" }
-blitz-html = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11" }
-anyrender = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11" }
+blitz-dom = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
+blitz-traits = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
+blitz-paint = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
+blitz-shell = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
+blitz-net = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
+blitz-html = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
+anyrender = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
 # The renderer and windowing forks a Blitz app needs (each one's reason is
 # in vendor's README): Vello's window renderer and the compositor, the
 # hybrid renderer's resize, Vello's surface on Metal, winit's UIKit
@@ -400,7 +400,7 @@ vox-phon = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.3.0" 
 # wasm-split web build's blank pages).
 [patch."https://github.com/DioxusLabs/dioxus"]
 dioxus-native = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1" }
-dioxus-native-dom = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1" }
+dioxus-native-dom = { git = "https://www.github.com/FastTrackStudios/vendor", rev = "ba4ac02415f9b6c6dc4a7466f490364b2c00fcbf" }
 dioxus-vdom = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1" }
 
 # ── Lints ─────────────────────────────────────────────────────────────
@@ -651,3 +651,28 @@ opt-level = 3
 [profile.dev.build-override]
 opt-level = 3
 debug = false
+
+# Provisional Keyflow native IME integration; return to released tags later.
+[patch."https://github.com/FastTrackStudios/blitz"]
+blitz-dom = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
+blitz-traits = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
+blitz-paint = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
+blitz-shell = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
+blitz-net = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
+blitz-html = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
+anyrender = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101" }
+
+[patch."https://github.com/FastTrackStudios/vendor"]
+dioxus-native-dom = { git = "https://www.github.com/FastTrackStudios/vendor", rev = "ba4ac02415f9b6c6dc4a7466f490364b2c00fcbf" }
+
+[patch."https://github.com/FastTrackStudios/architect"]
+architect = { path = "crates/architect" }
+architect-action-derive = { path = "crates/architect-action-derive" }
+architect-derive = { path = "crates/architect-derive" }
+architect-rpc-derive = { path = "crates/architect-rpc-derive" }
+architect-permissions = { path = "features/permissions" }
+architect-ui = { path = "features/ui/architect-ui" }
+architect-story-core = { path = "features/story/architect-story-core" }
+architect-story-macros = { path = "features/story/architect-story-macros" }
+architect-story-runtime = { path = "features/story/architect-story-runtime" }
+architect-workspace = { path = "features/workspace" }

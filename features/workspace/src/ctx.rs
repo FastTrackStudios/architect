@@ -96,10 +96,16 @@ pub enum ViewInput {
         y: f32,
         button: Button,
     },
-    /// Scrolled by `dx, dy` logical pixels.
+    /// Scrolled by `dx, dy` logical pixels. `x, y` are the pointer's
+    /// position in the view's logical pixels (the same space as
+    /// [`PointerMove`](Self::PointerMove)); `mods` are the held modifier
+    /// names as [`Key`](Self::Key) gives them (`"Mod"`, `"Shift"`, `"Alt"`).
     Wheel {
         dx: f32,
         dy: f32,
+        x: f32,
+        y: f32,
+        mods: Vec<&'static str>,
     },
     /// A finger, by its id: `phase` is `"start"`, `"move"`, `"end"` or
     /// `"cancel"`.
@@ -474,7 +480,13 @@ mod tests {
     fn input_drains_in_order() {
         let sink = InputSink::new();
         sink.push(ViewInput::Focus(true));
-        sink.push(ViewInput::Wheel { dx: 0.0, dy: 3.0 });
+        sink.push(ViewInput::Wheel {
+            dx: 0.0,
+            dy: 3.0,
+            x: 0.0,
+            y: 0.0,
+            mods: Vec::new(),
+        });
         assert_eq!(sink.drain().len(), 2);
         assert!(sink.drain().is_empty());
     }

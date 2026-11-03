@@ -15,6 +15,8 @@ mod embedded;
 mod extensions;
 mod guide;
 mod items;
+#[cfg(feature = "keyflow-lab")]
+mod keyflow;
 mod pages;
 mod paint;
 pub mod presence;
@@ -28,7 +30,7 @@ use architect_shell::{self as shell, AppShell, ShellStyle};
 use dioxus::prelude::*;
 use lucide_dioxus::{
     ArrowLeft, CalendarDays, CheckCheck, CircleQuestionMark, Command as CommandIcon, Feather,
-    Inbox, Keyboard, ListTodo, NotebookText, Plus, Search, Settings2, Undo2, Users,
+    Inbox, Keyboard, LayoutGrid, ListTodo, NotebookText, Plus, Search, Settings2, Undo2, Users,
 };
 
 pub use screen::{Device, use_window_chrome, use_window_screen};
@@ -817,6 +819,18 @@ pub fn LabApp() -> Element {
             move || lab.jump(Route::Tab(to)),
         );
     }
+    // Keyflow's "New Chart" is a root command, so ⌘K has it from every view.
+    #[cfg(feature = "keyflow-lab")]
+    {
+        let chart_commands = commands.clone();
+        architect_commands::use_command(
+            architect_commands::Command::new("LAB_NEW_CHART", "New Chart").group("Keyflow"),
+            move || {
+                lab.jump(Route::Tab("vault"));
+                let _ = chart_commands.run_with("WORKSPACES_LOAD", r#"{"name":"Chart"}"#);
+            },
+        );
+    }
     architect_commands::use_command(
         architect_commands::Command::new("LAB_TOGGLE_DETAILS", "Details")
             .group("View")
@@ -1043,6 +1057,9 @@ pub fn LabApp() -> Element {
         shell::Tab::new("tasks", "Tasks", icon!(ListTodo)),
         shell::Tab::new("schedule", "Schedule", icon!(CalendarDays)),
         shell::Tab::new("vault", "Vault", icon!(NotebookText)),
+        // The Vault's "Embedded views" screenset, one tap away: on_tab
+        // below loads it into the Vault.
+        shell::Tab::new("embedded", "Embedded", icon!(LayoutGrid)),
     ];
     // Which workspace the lab shows; `None` is all of them.
     // The person's organizations (the identity server's, here made up):
@@ -1169,7 +1186,17 @@ pub fn LabApp() -> Element {
                         tabs,
                         // The help is over a tab, not one of them.
                         current: (!matches!(route, Route::Help(_))).then(|| route.tab()),
-                        on_tab: move |id| lab.jump(Route::Tab(id)),
+                        on_tab: move |id: &'static str| {
+                            if id == "embedded" {
+                                lab.jump(Route::Tab("vault"));
+                                let _ = commands.run_with(
+                                    "WORKSPACES_LOAD",
+                                    r#"{"name":"Embedded views"}"#,
+                                );
+                            } else {
+                                lab.jump(Route::Tab(id));
+                            }
+                        },
                         separate: capture,
                         brand: rsx! { Brand {} },
                         account: shell::Account::new("Cody Wright")

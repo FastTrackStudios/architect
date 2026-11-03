@@ -13,6 +13,9 @@ path = "src/lib.rs"
 name = "architect-desktop"
 path = "src/main.rs"
 
+[features]
+keyflow-lab = ["architect-lab-ui/keyflow-lab"]
+
 [dependencies]
 architect-lab-ui = { workspace = true }
 # An agent's surfaces, kept in their file across restarts (src/main.rs).

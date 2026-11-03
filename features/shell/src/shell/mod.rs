@@ -343,6 +343,9 @@ pub struct Shell {
     /// What the page puts in the left sidebar instead of the app's `left`
     /// (a workspace's left dock): [`use_shell_slots`].
     page_left: Signal<Option<Element>>,
+    /// The page's tab on a desk, drawn in the title row beside the sidebar
+    /// (its desk bar sets it).
+    desk_tab: Signal<Option<String>>,
     /// What the page adds to a desk's ribbon, under the app's sections.
     rail_extra: Signal<Option<Element>>,
     /// What the page draws over the whole shell, its bars too:
@@ -749,6 +752,7 @@ pub fn AppShell(
     let left_w = use_signal(|| LEFT_WIDTH);
     let right_w = use_signal(|| RIGHT_WIDTH);
     let page_left = use_signal(|| None::<Element>);
+    let desk_tab = use_signal(|| None::<String>);
     let page_status = use_signal(Vec::<StatusItem>::new);
     // The page's items first (its own, at a bar's left), then the app's.
     let all_status: Vec<StatusItem> = page_status().into_iter().chain(status).collect();
@@ -778,6 +782,7 @@ pub fn AppShell(
         brand,
         floats_separate: frame(screen, style) == Frame::Sidebar,
         page_left,
+        desk_tab,
         rail_extra,
         cover,
         page_status,
@@ -1006,16 +1011,33 @@ pub fn AppShell(
     let left_clip = (lw + screen.insets.left - rail_w).mul_add(left_amount, rail_w);
     let right_clip = (rw + screen.insets.right) * right_amount;
     let resizable = form == FormFactor::Desk;
-    // On a desk the title bar runs across the top of the sides too: their
-    // edges start under it, and their heads draw their part of it.
+    // On a desk the title bar runs across the whole top, over the sides and
+    // the ribbon: they all start under it.
     let desk = form == FormFactor::Desk;
+    let root_dir = if desk { "column" } else { "row" };
+    // The sidebar's title sits in the title bar while a sidebar is docked.
+    let bar_title = if docked_left && !page_side {
+        title.clone()
+    } else {
+        None
+    };
+    // The page's tab starts where the page's column does, past the docked
+    // sidebar; otherwise clear of the window's and the sidebar's buttons.
+    let tabs_left = if left_clip > 0.0 {
+        RIBBON + left_clip + 4.0
+    } else if has_left {
+        shell.content_left()
+    } else if shell.window_chrome().is_some() {
+        shell.controls_left()
+    } else {
+        RIBBON + 4.0
+    };
     // A corner badge sits under the floating button: lift it clear.
     let badge_room = if desk && status_style == StatusStyle::Badge && !all_status.is_empty() {
         STATUS_BADGE
     } else {
         0.0
     };
-    let bar_h = shell.title_row() + screen.insets.top;
     let (left_edge, left_pad_top) = if desk {
         (String::new(), 0.0)
     } else {
@@ -1036,19 +1058,23 @@ pub fn AppShell(
     rsx! {
         div {
             style: "position: relative; width: 100%; height: 100%; overflow: hidden; display: flex; \
-                    flex-direction: row; background: {t.desk}; color: {t.ink}; font-family: {t.font};",
+                    flex-direction: {root_dir}; background: {t.desk}; color: {t.ink}; font-family: {t.font};",
             onpointerdown,
             onpointermove,
             onpointerup,
             onpointercancel,
             document::Style { {shell_css(&t)} }
             crate::motion::MotionFrames {}
+            // A desk's title bar runs across the whole window, over the ribbon,
+            // the sidebar and the page; the middle row starts under it.
+            if frame == Frame::Sidebar && desk {
+                DeskTitleRow { title: bar_title, tabs_left }
+            }
+            // The middle row: a desk's ribbon, then the sides and the page.
+            div { style: "flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: {direction};",
             if frame == Frame::Sidebar && desk {
                 DeskRibbon { tabs: tabs.clone(), current, on_tab: pick }
             }
-            // Everything right of the ribbon, over a desk's status bar.
-            div { style: "flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column;",
-            div { style: "flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: {direction};",
             match frame {
                 Frame::Rail => rsx! {
                     Rail { tabs: tabs.clone(), current, on_tab: pick, screen: side_screen }
@@ -1064,12 +1090,9 @@ pub fn AppShell(
                                 display: flex; flex-direction: column; \
                                 background: {t.sheet}; {left_edge} \
                                 padding-top: {left_pad_top}px; padding-left: {screen.insets.left}px;",
-                        if desk && page_side {
-                            div { style: "position: absolute; top: {bar_h}px; bottom: 0; right: 0; width: 1px; background: {t.rule};" }
-                        } else if desk {
-                            DeskSidebarHead { title: title }
-                            // The sidebar's edge, under the title bar (which runs over it).
-                            div { style: "position: absolute; top: {bar_h}px; bottom: 0; right: 0; width: 1px; background: {t.rule};" }
+                        if desk {
+                            // The sidebar's edge, in the middle row under the title bar.
+                            div { style: "position: absolute; top: 0; bottom: 0; right: 0; width: 1px; background: {t.rule};" }
                         } else {
                             SidebarHead { title: title }
                         }
@@ -1133,17 +1156,9 @@ pub fn AppShell(
                                 display: flex; flex-direction: column; \
                                 overflow-y: scroll; background: {t.sheet}; {right_edge} \
                                 padding-top: {right_pad_top}px; padding-right: {screen.insets.right}px;",
-                        // A desk's title row, under the side's fixed button:
-                        // the title bar, running on over the side.
+                        // A desk's edge, in the middle row under the title bar.
                         if form == FormFactor::Desk {
-                            div { style: "height: {bar_h}px; flex-shrink: 0; display: flex; box-sizing: border-box; \
-                                          padding-top: {screen.insets.top}px; background: {t.title_bar}; \
-                                          border-bottom: 1px solid {t.rule};",
-                                if let Some(w) = window {
-                                    DragStrip { chrome: w, width: None }
-                                }
-                            }
-                            div { style: "position: absolute; top: {bar_h}px; bottom: 0; left: 0; width: 1px; background: {t.rule};" }
+                            div { style: "position: absolute; top: 0; bottom: 0; left: 0; width: 1px; background: {t.rule};" }
                         }
                         {right}
                         if resizable {
@@ -1157,9 +1172,9 @@ pub fn AppShell(
                 PhoneFoot { tabs: tabs, current, on_tab: pick, separate: separate, screen }
             }
             }
+            // A desk's status bar runs across the whole window's foot.
             if desk && status_style == StatusStyle::Bar && !all_status.is_empty() {
                 StatusBar { items: all_status.clone() }
-            }
             }
             if desk && status_style == StatusStyle::Badge {
                 StatusBadge { items: all_status }
@@ -1281,19 +1296,23 @@ fn SidebarHead(title: Option<String>) -> Element {
     }
 }
 
-/// A desk's sidebar head: the title row (the window's buttons and the
-/// sidebar's button over its start, then the app's name, the rest moving
-/// the window). The workspace switcher is at the sidebar's foot.
+/// A desk's title bar, across the window's top over the ribbon, the sides
+/// and the page: the docked sidebar's name after the sidebar's button (the
+/// window's buttons and the sidebar's button sit over its start), the rest
+/// moving the window. The page's tab sits in it from `tabs_left`, over the
+/// drag area (which runs on past it). The middle row starts under it.
 #[component]
-fn DeskSidebarHead(title: Option<String>) -> Element {
+fn DeskTitleRow(title: Option<String>, tabs_left: f64) -> Element {
     let shell = use_shell();
     let t = shell.theme;
     let row = shell.title_row();
     let top = shell.screen.insets.top;
-    let start = shell.sidebar_title_left();
+    // Past the window's buttons and the sidebar's button, where the name is.
+    let start = if title.is_some() { shell.content_left() } else { 0.0 };
     let chrome = shell.window;
+    let tab = (shell.desk_tab)();
     rsx! {
-        div { style: "height: {row + top}px; flex-shrink: 0; box-sizing: border-box; display: flex; align-items: center; \
+        div { style: "position: relative; height: {row + top}px; flex-shrink: 0; box-sizing: border-box; display: flex; align-items: center; \
                       padding: {top}px 10px 0 {start}px; background: {t.title_bar}; border-bottom: 1px solid {t.rule};",
             if let Some(title) = title {
                 span { style: "flex-shrink: 0; white-space: nowrap; font-size: 15px; font-weight: 700; \
@@ -1303,6 +1322,13 @@ fn DeskSidebarHead(title: Option<String>) -> Element {
             }
             if let Some(c) = chrome {
                 DragStrip { chrome: c, width: None }
+            }
+            // The page's tab: as tall as the row, its tab centred in it. Only
+            // as wide as the tab, so the drag area beside it still moves the window.
+            if let Some(tab) = tab {
+                div { style: "position: absolute; left: {tabs_left}px; top: {top}px; height: {row}px; display: flex; align-items: center;",
+                    page::DeskTab { title: tab }
+                }
             }
         }
     }
@@ -1558,9 +1584,9 @@ mod tests {
     }
 }
 
-/// A desk's ribbon: the window's left edge under the title bar, the app's
-/// sections as icons, then what the page adds (a workspace's views and
-/// pinned commands). Its head is its part of the title bar.
+/// A desk's ribbon: the window's left edge in the middle row, under the
+/// title bar, the app's sections as icons, then what the page adds (a
+/// workspace's views and pinned commands).
 #[component]
 fn DeskRibbon(
     tabs: Vec<Tab>,
@@ -1569,19 +1595,10 @@ fn DeskRibbon(
 ) -> Element {
     let shell = use_shell();
     let t = shell.theme;
-    let bar_h = shell.title_row() + shell.screen.insets.top;
     let extra = (shell.rail_extra)();
-    let chrome = shell.window;
     rsx! {
         div {
             style: "width: {RIBBON}px; flex-shrink: 0; display: flex; flex-direction: column; background: {t.desk};",
-            div {
-                style: "height: {bar_h}px; flex-shrink: 0; box-sizing: border-box; display: flex; \
-                        background: {t.title_bar}; border-bottom: 1px solid {t.rule};",
-                if let Some(c) = chrome {
-                    DragStrip { chrome: c, width: None }
-                }
-            }
             div {
                 style: "flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; \
                         gap: 4px; padding: 8px 0; border-right: 1px solid {t.rule};",

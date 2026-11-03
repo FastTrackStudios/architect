@@ -82,6 +82,9 @@ pub struct View {
     /// that is costly to draw twice, or that says so to others as it
     /// mounts and goes (a published canvas, a remote process's view).
     pub still: bool,
+    /// Its pane's header row (back, forward, title, menu) is drawn; a view
+    /// whose tab already names it turns that off ([`View::headless`]).
+    pub header: bool,
     /// What draws it: the built-in `dioxus` kind unless a kind's
     /// provider made it ([`View::drawn_by`]). A pane whose view's kind is
     /// not in [`Views::kinds`] shows why in its place.
@@ -105,6 +108,7 @@ impl View {
             home: Target::Tab,
             single: true,
             still: false,
+            header: true,
             draws: KindId::dioxus(),
             render: Rc::new(render),
         }
@@ -135,6 +139,14 @@ impl View {
     #[must_use]
     pub const fn still(mut self) -> Self {
         self.still = true;
+        self
+    }
+
+    /// No header row over its pane (back, forward, title, menu): for a view
+    /// whose tab already names it, so the pane is just its content.
+    #[must_use]
+    pub const fn headless(mut self) -> Self {
+        self.header = false;
         self
     }
 
@@ -477,6 +489,21 @@ pub struct Host {
 #[must_use]
 pub fn use_host() -> Host {
     use_context()
+}
+
+impl Host {
+    /// Whether a pane's header row is drawn: not for a view that left it
+    /// out ([`View::headless`]).
+    fn pane_header(&self, pane: &PaneId) -> bool {
+        let workspace = self.workspace.read();
+        let Some(p) = workspace.pane(pane) else {
+            return true;
+        };
+        self.views
+            .read()
+            .get(&p.view.0)
+            .map_or(true, |v| v.header)
+    }
 }
 
 /// The pane a slot draws, kept current: Dioxus may hand a slot another
