@@ -16,7 +16,8 @@ weight = 68
 > `features/extensions/tests/view_kinds.rs`). Only `dioxus` is built in.
 > Every other kind is its own issue: GPU views (#221), WebView/HTML
 > (#222), ImGui from Luau (#223), Frame surfaces (#224, in
-> FastTrackStudios/frame), Dioxus in-process and remote (#225), generative
+> FastTrackStudios/frame; a minimal `frame.surface` provider is its
+> `crates/frame-view`), Dioxus in-process and remote (#225), generative
 > UI (#226). Its A2UI payload landed in #228:
 > [A2UI](@/features/a2ui.md) (`features/a2ui/src/lib.rs`), drawn as a
 > `dioxus` view.
@@ -165,6 +166,40 @@ kind the app has no provider for refuses the load with its reason,
 `its view panel: no provider for the view kind “frame.surface” in this app
 (it has: dioxus)`, a loaded copy stays as it was, and nothing of the new
 one lands (`features/extensions/tests/view_kinds.rs`).
+
+## The lab's gallery
+
+The lab's Vault keeps one pane of each kind it shows in a screenset,
+"Embedded views" (⌘3, the palette's "Load screenset: Embedded views", or
+`WORKSPACES_LOAD {"name": "Embedded views"}` over MCP and the CLI): a
+Dioxus component, a Luau script's ImGui window, a Frame surface and the
+A2UI surfaces, each naming its kind (`apps/lab/ui/src/embedded.rs`). The
+Frame surface is FastTrackStudios/frame's `frame-surface` program, a
+process extension the lab loads when it finds it
+(`ARCHITECT_LAB_FRAME_SURFACE`, beside the lab, or on the `PATH`); the lab
+declares the `frame.surface` kind itself and never links Frame. It shows
+the lab's Frame document, `apps/lab/surfaces/drive.frame`
+(`ARCHITECT_LAB_FRAME_DOCUMENT` names another), and a save to it reloads
+the surface. The document's knob is bound to the lab's drive and its meter
+follows the drive: `LAB_FRAME_SET {"drive": 0.9}` turns the knob and moves
+the meter to -0.6 dB, turning the knob by hand sets the drive, and
+`LAB_FRAME_STATE` reads the drive, the level, the document and how many
+times it was read in. The extension's own actions (`FRAME_SURFACE_LOAD`,
+`FRAME_SURFACE_PARAM_SET`, `FRAME_SURFACE_FEED`, `FRAME_SURFACE_STATE`) are
+Action List actions too, so MCP and the CLI can drive the surface
+directly.
+
+The A2UI pane opens on the release demo (`LAB_A2UI_DEMO`): a form with a
+version and a channel, a list of tasks to tick, and a Ship it button. An
+agent rendered it, so the button's `LAB_RELEASE_SHIP` waits for the
+person's yes before it runs, and its answer is written back into the
+surface. The surface can be patched live, for example
+`A2UI_PATCH {"messages": [{"updateDataModel": {"surfaceId": "release",
+"path": "/tasks/2", "value": {"title": "Notarize the build", "done":
+false}}}]}` over MCP adds a task. Scenario:
+[`apps/lab/scenarios/embedded-views.styx`](https://github.com/FastTrackStudios/architect/blob/main/apps/lab/scenarios/embedded-views.styx).
+
+![The Embedded views screenset: a Dioxus swatch picked, the Luau ImGui window's button pressed, the Frame surface's knob turned up with its meter following, and the A2UI release surface patched with a task and shipped after a confirmation](https://raw.githubusercontent.com/FastTrackStudios/architect/media/embedded-views.gif)
 
 ## Kinds, hosts and the security model
 

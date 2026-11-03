@@ -4,7 +4,8 @@
 //! at the bottom from "Open a view"). Drag a tab anywhere — out of the
 //! window for a window of its own, on a desk — hold W to grab a pane
 //! without tabs, right-click (or ⋯, or hold a finger on) a tab for the
-//! rest. ⌘1 recalls the "Write" screenset, ⌘2 "Mix" (the notes stacked).
+//! rest. ⌘1 recalls the "Write" screenset, ⌘2 "Mix" (the notes stacked),
+//! ⌘3 "Embedded views" (a pane of each kind of view: `crate::embedded`).
 //! The arrangement tab has a script's marker lane over it, and the
 //! script's tool window floats.
 
@@ -19,9 +20,12 @@ use lucide_dioxus::{
     Network, Search, SlidersHorizontal, SquarePen, SquareTerminal, Terminal,
 };
 
-/// The lab's views.
+/// The lab's views, and the kinds that draw them.
 fn views() -> Views {
-    Views::new()
+    let views = Views::new().with_kinds(crate::embedded::kinds());
+    crate::embedded::views()
+        .into_iter()
+        .fold(views, Views::view)
         .view(
             View::new("files", "Files", |_| rsx! { FilesView {} })
                 .icon(icon!(Files))
@@ -185,7 +189,8 @@ fn mix_workspace() -> Workspace {
     w
 }
 
-/// The vault's screensets: "Write" (where it starts) and "Mix".
+/// The vault's screensets: "Write" (where it starts), "Mix" and
+/// "Embedded views".
 fn screensets() -> Screensets {
     Screensets::default().with_builtins([
         Screenset::new("Write")
@@ -194,6 +199,9 @@ fn screensets() -> Screensets {
         Screenset::new("Mix")
             .slot(2)
             .layout(FormClass::Desk, mix_workspace()),
+        Screenset::new("Embedded views")
+            .slot(3)
+            .layout(FormClass::Desk, crate::embedded::workspace()),
     ])
 }
 
@@ -283,7 +291,7 @@ pub fn VaultPage() -> Element {
     // screenset is the vault's.
     let mut items = pane_status();
     if let Some(set) = set {
-        items.push(StatusItem::new("screenset", set).hint("⌘1 Write, ⌘2 Mix"));
+        items.push(StatusItem::new("screenset", set).hint("⌘1 Write, ⌘2 Mix, ⌘3 Embedded views"));
     }
     architect_shell::use_status(items);
     // On a desk the workspace's tabs are the title row (Obsidian's): no page
