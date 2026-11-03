@@ -232,3 +232,80 @@ fn an_agents_surface_renders_patches_and_asks_before_a_write() {
     assert_eq!(reloaded.get("form"), surfaces.get("form"));
     assert_eq!(reloaded.get("form").unwrap().data["user"]["name"], "Grace");
 }
+
+/// The rest of the A2UI basic catalog.
+fn the_rest() -> Value {
+    json!({ "messages": [
+        { "createSurface": { "surfaceId": "form", "catalogId": CATALOG_ID,
+          "dataModel": { "when": "2026-11-02" },
+          "components": [
+            { "id": "root", "component": "Column", "children": ["star", "clip", "song", "day", "more"] },
+            { "id": "star", "component": "Icon", "name": "star" },
+            { "id": "clip", "component": "Video", "url": "https://example.com/a.mp4" },
+            { "id": "song", "component": "AudioPlayer", "url": "https://example.com/a.mp3", "description": "A song" },
+            { "id": "day", "component": "DateTimeInput", "label": "When", "enableDate": true,
+              "value": { "path": "/when" } },
+            { "id": "more", "component": "Modal", "trigger": "open", "content": "inside" },
+            { "id": "open", "component": "Button", "child": "open_label",
+              "action": { "event": { "name": "A2UI_CATALOG" } } },
+            { "id": "open_label", "component": "Text", "text": "Open it" },
+            { "id": "inside", "component": "Text", "text": "Inside the modal" }
+          ] } }
+    ] })
+}
+
+/// Modal, Icon, DateTimeInput, Video and AudioPlayer on Blitz: an icon of
+/// the set, media that say what and where they are (Blitz plays none), a
+/// date typed as text, and a modal whose content a press on its trigger
+/// opens.
+#[test]
+fn the_rest_of_the_basic_catalog_draws_on_blitz() {
+    let list = Arc::new(ActionList::new());
+    let surfaces = Surfaces::new(CrdtDoc::ephemeral(), ROOT);
+    actions::register(&list, &surfaces).unwrap();
+    list.validate().unwrap();
+    let out = futures::executor::block_on(list.run_json_async_with(
+        &agent(),
+        actions::RENDER,
+        the_rest().to_string().as_bytes(),
+    ))
+    .unwrap();
+    let out: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(out["outsideCatalog"], json!([]), "{out}");
+
+    let app = App::new(root, list.clone()).context(surfaces.clone());
+    let mut lab = Headless::open(&app, ViewSize::default());
+    for kind in ["Icon", "Video", "AudioPlayer", "DateTimeInput", "Modal"] {
+        shown(&mut lab, &Target::Css(format!("[data-a2ui=\"{kind}\"]")));
+    }
+    shown(
+        &mut lab,
+        &Target::Css("[data-a2ui=\"Icon\"][aria-label=\"star\"] svg".to_owned()),
+    );
+    shown(
+        &mut lab,
+        &Target::Text("https://example.com/a.mp4".to_owned()),
+    );
+    shown(&mut lab, &Target::Text("A song".to_owned()));
+    shown(
+        &mut lab,
+        &Target::Css("[data-a2ui=\"DateTimeInput\"] input[type=\"text\"]".to_owned()),
+    );
+    shown(&mut lab, &Target::Text("Open it".to_owned()));
+    absent(&mut lab, &Target::Text("Inside the modal".to_owned()));
+
+    // A press on the trigger opens it.
+    let scenario = architect_guide::load(
+        r#"
+id a2ui-modal
+title "A modal opens on its trigger"
+view {width 1280, height 800}
+steps (
+    { id open, target @text"Open it", do @click{} }
+    { id inside, target @text"Inside the modal" }
+)
+"#,
+    )
+    .unwrap();
+    architect_guide::run::run(&app, &scenario, None).unwrap();
+}

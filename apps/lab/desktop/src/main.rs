@@ -27,9 +27,10 @@ mod mcp;
 
 use std::process::ExitCode;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use architect::action::ActionList;
+use architect_a2ui::Surfaces;
 use architect_lab_ui::{Device, LabApp, use_window_screen};
 use dioxus::prelude::*;
 use dioxus_native::WindowAttributes;
@@ -39,6 +40,41 @@ fn first_device() -> Device {
     Device::named(&std::env::var("ARCHITECT_DEVICE").unwrap_or_default())
 }
 
+/// The lab's agents' surfaces in their file
+/// ([`architect_lab_ui::surfaces_file`]), so the "Agent UI" shows them
+/// again after a restart. Opened once, for every window: one writer to the
+/// file. `None` when it cannot be: the lab goes on with surfaces kept
+/// nowhere, and says why in the log.
+fn surfaces() -> Option<Surfaces> {
+    /// The surfaces, and the runtime their file is written on for the
+    /// app's life (the window's own runs no tokio).
+    static OPENED: OnceLock<Option<(Surfaces, tokio::runtime::Runtime)>> = OnceLock::new();
+    let open = || {
+        let path = architect_lab_ui::surfaces_file()?;
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).ok()?;
+        }
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .thread_name("lab-surfaces")
+            .enable_all()
+            .build()
+            .inspect_err(|error| tracing::error!(%error, "the surfaces' runtime did not start"))
+            .ok()?;
+        let surfaces = runtime
+            .block_on(Surfaces::open_file(&path))
+            .inspect_err(|error| {
+                tracing::error!(%error, path = %path.display(), "the lab's surfaces are kept nowhere");
+            })
+            .ok()?;
+        Some((surfaces, runtime))
+    };
+    OPENED
+        .get_or_init(open)
+        .as_ref()
+        .map(|(surfaces, _)| surfaces.clone())
+}
+
 #[component]
 fn App() -> Element {
     let _screen = use_window_screen(first_device());
@@ -46,6 +82,13 @@ fn App() -> Element {
     // socket serve the one its components fill (`LabApp` takes it from
     // context).
     let list = use_context_provider(|| Arc::new(ActionList::new()));
+    // An agent's surfaces, kept on this device (`LabApp` takes them from
+    // context too).
+    use_hook(|| {
+        if let Some(surfaces) = surfaces() {
+            provide_context(surfaces);
+        }
+    });
     use_hook(|| mcp::serve(&list));
     use_hook(|| Rc::new(architect_desktop::serve_window(&list)));
     rsx! { LabApp {} }

@@ -31,7 +31,7 @@ fn every_component_in_the_schema_is_drawn_and_nothing_else_is() {
             "{name} is in the schema but nothing draws it"
         );
     }
-    for name in ["Script", "Iframe", "Html", "Video", "Modal", ""] {
+    for name in ["Script", "Iframe", "Html", "WebView", ""] {
         assert!(architect_a2ui::ui::draws(name).is_none(), "{name} is drawn");
     }
 }

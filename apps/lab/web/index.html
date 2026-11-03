@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>architect lab · web</title>
+    <!-- The app's own Tailwind sheet (app.css); the renderer adds
+         architect-ui's THEME_CSS and UTILITIES_CSS next to it. -->
+    <link rel="stylesheet" href="./app.css" />
+  </head>
+  <body>
+    <div id="main"></div>
+    <script type="module">
+      import init, { a2ui } from "./architect-lab-web.js";
+      // The page's door to the Action List, as an agent (src/main.rs).
+      window.a2ui = async (id, args) => JSON.parse(await a2ui(id, JSON.stringify(args ?? {})));
+      await init();
+    </script>
+  </body>
+</html>

@@ -1,5 +1,92 @@
 {
   "$defs": {
+    "AudioPlayer": {
+      "additionalProperties": false,
+      "description": "Audio from a URL, with its controls. A host that plays no audio (Blitz) says what and where it is. Drawn with audio.",
+      "properties": {
+        "component": {
+          "const": "AudioPlayer"
+        },
+        "description": {
+          "description": "Its title or summary.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "args": {
+                  "type": "object"
+                },
+                "call": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "call"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "url": {
+          "description": "Where it is.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "args": {
+                  "type": "object"
+                },
+                "call": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "call"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "weight": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "component",
+        "url"
+      ],
+      "type": "object"
+    },
     "Button": {
       "additionalProperties": false,
       "description": "A button: its child is its label, its action an Action List action the person runs by pressing it. An action that changes something waits for the person's yes. Drawn with architect_ui::Button.",
@@ -396,6 +483,225 @@
       ],
       "type": "object"
     },
+    "DateTimeInput": {
+      "additionalProperties": false,
+      "description": "A date, a time or both, bound to an ISO 8601 string. Drawn with architect_ui::Input.",
+      "properties": {
+        "component": {
+          "const": "DateTimeInput"
+        },
+        "enableDate": {
+          "description": "Pick a date. With neither this nor enableTime, both.",
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "args": {
+                  "type": "object"
+                },
+                "call": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "call"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "enableTime": {
+          "description": "Pick a time.",
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "args": {
+                  "type": "object"
+                },
+                "call": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "call"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "description": "What it asks for.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "args": {
+                  "type": "object"
+                },
+                "call": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "call"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "max": {
+          "description": "The latest, in ISO 8601.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "args": {
+                  "type": "object"
+                },
+                "call": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "call"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "min": {
+          "description": "The earliest, in ISO 8601.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "args": {
+                  "type": "object"
+                },
+                "call": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "call"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "value": {
+          "description": "Bind it to a path to keep what is picked; \"\" when not yet set.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "args": {
+                  "type": "object"
+                },
+                "call": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "call"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "weight": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "component",
+        "value"
+      ],
+      "type": "object"
+    },
     "Divider": {
       "additionalProperties": false,
       "description": "A rule between things. Drawn with architect_ui::Divider.",
@@ -421,6 +727,92 @@
       "required": [
         "id",
         "component"
+      ],
+      "type": "object"
+    },
+    "Icon": {
+      "additionalProperties": false,
+      "description": "An icon from the A2UI basic set, by name. Drawn with architect_ui::lucide_dioxus.",
+      "properties": {
+        "component": {
+          "const": "Icon"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "description": "Which icon.",
+          "enum": [
+            "accountCircle",
+            "add",
+            "arrowBack",
+            "arrowForward",
+            "attachFile",
+            "calendarToday",
+            "call",
+            "camera",
+            "check",
+            "close",
+            "delete",
+            "download",
+            "edit",
+            "event",
+            "error",
+            "fastForward",
+            "favorite",
+            "favoriteOff",
+            "folder",
+            "help",
+            "home",
+            "info",
+            "locationOn",
+            "lock",
+            "lockOpen",
+            "mail",
+            "menu",
+            "moreVert",
+            "moreHoriz",
+            "notificationsOff",
+            "notifications",
+            "pause",
+            "payment",
+            "person",
+            "phone",
+            "photo",
+            "play",
+            "print",
+            "refresh",
+            "rewind",
+            "search",
+            "send",
+            "settings",
+            "share",
+            "shoppingCart",
+            "skipNext",
+            "skipPrevious",
+            "star",
+            "starHalf",
+            "starOff",
+            "stop",
+            "upload",
+            "visibility",
+            "visibilityOff",
+            "volumeDown",
+            "volumeMute",
+            "volumeOff",
+            "volumeUp",
+            "warning"
+          ],
+          "type": "string"
+        },
+        "weight": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "component",
+        "name"
       ],
       "type": "object"
     },
@@ -574,6 +966,36 @@
         "id",
         "component",
         "children"
+      ],
+      "type": "object"
+    },
+    "Modal": {
+      "additionalProperties": false,
+      "description": "A dialog: its trigger is drawn in place, and pressing it opens the content over the app. Drawn with architect_ui::Dialog.",
+      "properties": {
+        "component": {
+          "const": "Modal"
+        },
+        "content": {
+          "description": "What it shows.",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "trigger": {
+          "description": "What opens it (a Button).",
+          "type": "string"
+        },
+        "weight": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "component",
+        "trigger",
+        "content"
       ],
       "type": "object"
     },
@@ -1065,6 +1487,93 @@
         "label"
       ],
       "type": "object"
+    },
+    "Video": {
+      "additionalProperties": false,
+      "description": "A video from a URL, with its controls. A host that plays no video (Blitz) says what and where it is. Drawn with video.",
+      "properties": {
+        "component": {
+          "const": "Video"
+        },
+        "id": {
+          "type": "string"
+        },
+        "posterUrl": {
+          "description": "An image shown before it plays.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "args": {
+                  "type": "object"
+                },
+                "call": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "call"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "url": {
+          "description": "Where it is.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            {
+              "properties": {
+                "args": {
+                  "type": "object"
+                },
+                "call": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "call"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "weight": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "component",
+        "url"
+      ],
+      "type": "object"
     }
   },
   "$id": "https://architect.fasttrackstudio.dev/a2ui/catalog/v1",
@@ -1109,6 +1618,21 @@
     },
     {
       "$ref": "#/$defs/Image"
+    },
+    {
+      "$ref": "#/$defs/Icon"
+    },
+    {
+      "$ref": "#/$defs/Video"
+    },
+    {
+      "$ref": "#/$defs/AudioPlayer"
+    },
+    {
+      "$ref": "#/$defs/Modal"
+    },
+    {
+      "$ref": "#/$defs/DateTimeInput"
     }
   ],
   "title": "architect A2UI catalog"

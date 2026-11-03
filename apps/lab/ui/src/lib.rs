@@ -652,6 +652,19 @@ pub fn font_context() -> dioxus_native::FontContext {
     ctx
 }
 
+/// Where a desk window keeps the lab's agents' surfaces, beside its
+/// settings: `<app dir>/surfaces.a2ui`, opened with
+/// [`Surfaces::open_file`](architect_a2ui::Surfaces::open_file) and given
+/// to [`LabApp`] in context, so the "Agent UI" shows them again after a
+/// restart. `None` when there is no such directory.
+#[cfg(not(target_arch = "wasm32"))]
+#[must_use]
+pub fn surfaces_file() -> Option<std::path::PathBuf> {
+    architect::settings::app_dir("architect-lab")
+        .ok()
+        .map(|dir| dir.join("surfaces.a2ui"))
+}
+
 /// The lab's root. The host publishes the window as a
 /// `Signal<shell::Screen>` ([`use_window_screen`]) above it.
 ///
@@ -680,8 +693,12 @@ pub fn LabApp() -> Element {
     // An agent's UI (A2UI): its surfaces on a document of their own, the
     // `A2UI_*` actions on the list, the Vault's "Agent UI" view drawing
     // them. Every write a surface's button makes asks first (the sheet).
+    // A desk window's host gives them in context, kept in their file
+    // ([`surfaces_file`]); otherwise they are kept nowhere.
     let surfaces = use_hook(|| {
-        architect_a2ui::Surfaces::new(crdt::CrdtDoc::ephemeral(), architect_a2ui::store::ROOT)
+        try_consume_context::<architect_a2ui::Surfaces>().unwrap_or_else(|| {
+            architect_a2ui::Surfaces::new(crdt::CrdtDoc::ephemeral(), architect_a2ui::store::ROOT)
+        })
     });
     use_hook(|| {
         let _ = architect_a2ui::actions::register(&list, &surfaces);

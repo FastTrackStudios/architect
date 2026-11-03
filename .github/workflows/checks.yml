@@ -147,6 +147,9 @@ jobs:
           # draws (architect-ui, dioxus-primitives, Loro).
           cargo check --target wasm32-unknown-unknown -p architect-a2ui
           cargo check --target wasm32-unknown-unknown -p architect-a2ui --features ui
+          # The lab's web host: that renderer, the confirmation sheet and
+          # dioxus-web together (its browser tests: `just lab-web-e2e`).
+          cargo check --target wasm32-unknown-unknown -p architect-lab-web
 
   # The one status main's branch protection requires (context `check`).
   # It passes only when every job above succeeded; a skipped or cancelled

@@ -38,6 +38,14 @@ pub struct InputProps {
     #[props(default)]
     pub input_type: Option<String>,
 
+    /// The least it takes (a number, a date, a time), when it has one.
+    #[props(default)]
+    pub min: Option<String>,
+
+    /// The most it takes, when it has one.
+    #[props(default)]
+    pub max: Option<String>,
+
     #[props(default = false)]
     pub disabled: bool,
 
@@ -77,6 +85,8 @@ pub fn Input(props: InputProps) -> Element {
             r#type: props.input_type.clone().unwrap_or_else(|| "text".to_string()),
             value: "{value}",
             placeholder: "{props.placeholder}",
+            min: props.min.clone(),
+            max: props.max.clone(),
             disabled: if props.disabled { Some(true) } else { None },
             readonly: if props.readonly { Some(true) } else { None },
             oninput: move |e: FormEvent| {

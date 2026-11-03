@@ -4,7 +4,7 @@
 //!
 //! | id | effect | does |
 //! |---|---|---|
-//! | `A2UI_RENDER` | mutating | applies A2UI messages; a surface it creates replaces one of the same id |
+//! | `A2UI_RENDER` | mutating | applies A2UI messages; a surface it creates replaces one of the same id, and the app's [`VIEW`] opens (or comes forward) to show it |
 //! | `A2UI_PATCH` | mutating | applies updates to surfaces that exist (no `createSurface`) |
 //! | `A2UI_SURFACE` | read-only | one surface (its components and data model), or every surface's id |
 //! | `A2UI_PRESS` | mutating | presses a component, as the person would: its action runs as the surface's author and a write waits for the person's yes |
@@ -143,43 +143,87 @@ fn sync(id: &'static str, work: Arc<Work>) -> CallerAsyncHandler {
     })
 }
 
-fn render(surfaces: &Surfaces) -> CallerAsyncHandler {
-    let surfaces = surfaces.clone();
-    sync(
-        RENDER,
-        Arc::new(move |caller, args| {
-            let mut messages = messages_of(RENDER, &args)?;
-            // A surface rendered again is replaced: deleted first, in the
-            // same step.
-            let existing = surfaces.ids();
-            let mut replace = Vec::new();
-            for m in &messages {
-                if let A2uiPayload::CreateSurface(p) = &m.payload
-                    && existing.contains(&p.create_surface.surface_id)
-                {
-                    replace.push(A2uiMessage {
-                        version: VERSION.to_owned(),
-                        payload: A2uiPayload::DeleteSurface(DeleteSurfacePayload {
-                            delete_surface: DeleteSurfaceData {
-                                surface_id: p.create_surface.surface_id.clone(),
-                            },
-                        }),
-                    });
-                }
+/// The workspace's actions a render shows its surface with (#234).
+const LAYOUT: &str = "WORKSPACE_LAYOUT";
+const OPEN: &str = "WORKSPACE_OPEN";
+
+/// Opens the [`VIEW`] (or brings it forward) through the workspace's
+/// actions, as the app: beside the active pane, or in the right dock when
+/// none is. False when the app has no workspace on its list now (the
+/// lab's is the Vault's) or it would not.
+async fn show(list: &ActionList) -> bool {
+    let app = ActionCaller::app();
+    let Ok(layout) = list.run_json_async_with(&app, LAYOUT, b"{}").await else {
+        return false;
+    };
+    let active = serde_json::from_slice::<Value>(&layout)
+        .ok()
+        .and_then(|l| l.get("active").and_then(Value::as_str).map(str::to_owned))
+        .filter(|a| !a.is_empty() && a != VIEW);
+    let at = active.map_or_else(
+        || json!({ "dock": { "side": "right" } }),
+        |pane| json!({ "split": { "pane": pane, "side": "right" } }),
+    );
+    // Focused: open, or open already and brought forward.
+    let args = json!({ "view": VIEW, "at": at, "focus": true });
+    list.run_json_async_with(&app, OPEN, args.to_string().as_bytes())
+        .await
+        .is_ok()
+}
+
+fn render(list: &ActionList, surfaces: &Surfaces) -> CallerAsyncHandler {
+    let (list, surfaces) = (list.clone(), surfaces.clone());
+    Arc::new(move |caller: &ActionCaller, args: &[u8]| {
+        let args = args_of(RENDER, args)?;
+        let (mut out, created) = apply_render(&surfaces, caller, &args)?;
+        let list = list.clone();
+        let run: ActionFuture = Box::pin(async move {
+            out["shown"] = json!(created && show(&list).await);
+            Ok(serde_json::to_vec(&out).unwrap_or_default())
+        });
+        Ok(run)
+    })
+}
+
+/// Applies a render's messages; the answer, and whether it created a
+/// surface.
+fn apply_render(
+    surfaces: &Surfaces,
+    caller: &ActionCaller,
+    args: &Value,
+) -> Result<(Value, bool), ActionError> {
+    let mut messages = messages_of(RENDER, args)?;
+    // A surface rendered again is replaced: deleted first, in the same
+    // step.
+    let existing = surfaces.ids();
+    let mut replace = Vec::new();
+    let mut created = false;
+    for m in &messages {
+        if let A2uiPayload::CreateSurface(p) = &m.payload {
+            created = true;
+            if existing.contains(&p.create_surface.surface_id) {
+                replace.push(A2uiMessage {
+                    version: VERSION.to_owned(),
+                    payload: A2uiPayload::DeleteSurface(DeleteSurfacePayload {
+                        delete_surface: DeleteSurfaceData {
+                            surface_id: p.create_surface.surface_id.clone(),
+                        },
+                    }),
+                });
             }
-            let replaced = replace.len();
-            replace.append(&mut messages);
-            let mut applied =
-                surfaces
-                    .apply(&replace, caller.principal())
-                    .map_err(|e| ActionError::Failed {
-                        id: RENDER.to_owned(),
-                        message: e.to_string(),
-                    })?;
-            applied.deleted.drain(..replaced.min(applied.deleted.len()));
-            Ok(answer(&surfaces, &applied))
-        }),
-    )
+        }
+    }
+    let replaced = replace.len();
+    replace.append(&mut messages);
+    let mut applied =
+        surfaces
+            .apply(&replace, caller.principal())
+            .map_err(|e| ActionError::Failed {
+                id: RENDER.to_owned(),
+                message: e.to_string(),
+            })?;
+    applied.deleted.drain(..replaced.min(applied.deleted.len()));
+    Ok((answer(surfaces, &applied), created))
 }
 
 fn patch(surfaces: &Surfaces) -> CallerAsyncHandler {
@@ -305,11 +349,11 @@ pub fn register(list: &ActionList, surfaces: &Surfaces) -> Result<(), ActionErro
         &info(
             RENDER,
             "Render an agent UI",
-            "Shows the person a UI: applies A2UI v1.0 messages (createSurface, updateComponents, updateDataModel, deleteSurface), drawn with the app's components. A surface rendered again is replaced. Only the catalog's components are drawn (A2UI_CATALOG has them and a prompt). Answers the surfaces touched and any component outside the catalog.",
+            "Shows the person a UI: applies A2UI v1.0 messages (createSurface, updateComponents, updateDataModel, deleteSurface), drawn with the app's components. A surface rendered again is replaced. Only the catalog's components are drawn (A2UI_CATALOG has them and a prompt). Answers the surfaces touched and any component outside the catalog. A surface it creates is shown: the app opens its Agent UI view, or brings it forward (`shown`).",
             Effect::Mutating,
             &messages_schema(),
         ),
-        render(surfaces),
+        render(list, surfaces),
     )?;
     list.register_forwarded_with(
         &info(

@@ -40,8 +40,9 @@ tracing = { workspace = true }
 dioxus = { workspace = true, optional = true }
 architect-ui = { workspace = true, optional = true }
 architect-workspace = { workspace = true, optional = true }
-# A pending event's poll for the person's answer.
-futures-timer = { workspace = true, optional = true }
+# A pending event's poll for the person's answer; in a browser, on its
+# timers.
+futures-timer = { workspace = true, optional = true, features = ["wasm-bindgen"] }
 # A change to a surface's document, told to the window: woken, not polled.
 futures-channel = { version = "0.3", optional = true }
 futures-util = { version = "0.3", default-features = false, optional = true }
@@ -58,6 +59,8 @@ architect-a2ui = { path = ".", features = ["ui"] }
 architect-guide = { workspace = true, features = ["run"] }
 futures = "0.3"
 facet = { workspace = true }
+# Surfaces in a file (tests/restart.rs): the document's writer runs on tokio.
+tokio = { workspace = true }
 
 [lib]
 doctest = false
