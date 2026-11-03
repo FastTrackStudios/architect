@@ -488,6 +488,17 @@ impl ThemeStore {
         changed
     }
 
+    /// The theme as it would show with `layer` at `kind` — the store
+    /// unchanged: one region's look in a cascade (a layout node's own
+    /// over the workspace's), the layers above it still on top.
+    #[must_use]
+    pub fn resolve_with(&self, kind: LayerKind, layer: Layer) -> Resolved {
+        let s = self.lock();
+        let mut layers = s.layers.clone();
+        layers.set(kind, layer);
+        evaluate(&s.full, &layers, s.system).1
+    }
+
     /// Puts `layer` at `kind`; false when nothing that shows changed.
     pub fn set(&self, kind: LayerKind, layer: Layer) -> bool {
         self.apply(|s| s.layers.set(kind, layer))

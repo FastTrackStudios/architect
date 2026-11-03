@@ -3,10 +3,13 @@
 
 mod bar;
 mod bars;
+mod chrome;
 mod keyboard;
 #[cfg(target_os = "macos")]
 mod mac;
 mod page;
+#[cfg(test)]
+mod snapshot_tests;
 mod status;
 mod workspaces;
 
@@ -24,6 +27,7 @@ pub use bar::{
 };
 use bar::{BarModel, PhoneFoot};
 use bars::{Rail, RoundButton, SideTab};
+pub use chrome::{Chrome, Filler, Slot, intern, named_icon, use_chrome};
 pub use keyboard::{Keyboard, install_keyboard, keyboard, set_keyboard_height, set_typing};
 #[cfg(target_os = "macos")]
 pub use mac::fit_traffic_lights;
@@ -793,6 +797,26 @@ pub fn AppShell(
 ) -> Element {
     let stored = architect_theme::use_themed::<ShellTheme>();
     let theme = theme.unwrap_or_else(|| stored());
+    // What others add and how the slots are filled (`use_chrome`); with
+    // none above, the shell's own, as it always was.
+    let chrome = try_use_context::<Signal<Chrome>>()
+        .map(|c| c())
+        .unwrap_or_default();
+    let tabs: Vec<Tab> = if chrome.tabs.is_empty() {
+        tabs
+    } else {
+        tabs.into_iter()
+            .chain(chrome.tabs.iter().cloned())
+            .collect()
+    };
+    let status: Vec<StatusItem> = status
+        .into_iter()
+        .chain(chrome.status.iter().cloned())
+        .collect();
+    let actions: Vec<BarAction> = actions
+        .into_iter()
+        .chain(chrome.bar.iter().cloned())
+        .collect();
     let mut drawer = use_signal(|| None::<Side>);
     let fold = use_signal(|| None::<bool>);
     let right_away = use_signal(|| false);
@@ -811,6 +835,9 @@ pub fn AppShell(
     // way, so it stays put when such a page comes and goes.
     let page_side = page_left.read().is_some();
     let left = page_left().or(left);
+    // A slot's filler replaces its content; a hidden one has none.
+    let left = slot_content(&chrome, Slot::Left, left);
+    let right = slot_content(&chrome, Slot::Right, right);
     let has_left = left.is_some();
     let has_right = right.is_some();
     let shell = Shell {
@@ -1115,12 +1142,16 @@ pub fn AppShell(
             // A desk's title bar runs across the whole window, over the ribbon,
             // the sidebar and the page; the middle row starts under it.
             if frame == Frame::Sidebar && desk {
-                DeskTitleRow { title: bar_title, tabs_left }
+                SlotView { slot: Slot::Title,
+                    DeskTitleRow { title: bar_title, tabs_left }
+                }
             }
             // The middle row: a desk's ribbon, then the sides and the page.
             div { style: "flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: {direction};",
             if frame == Frame::Sidebar && desk {
-                DeskRibbon { tabs: tabs.clone(), current, on_tab: pick }
+                SlotView { slot: Slot::Ribbon,
+                    DeskRibbon { tabs: tabs.clone(), current, on_tab: pick }
+                }
             }
             match frame {
                 Frame::Rail => rsx! {
@@ -1220,8 +1251,10 @@ pub fn AppShell(
             }
             }
             // A desk's status bar runs across the whole window's foot.
-            if desk && status_style == StatusStyle::Bar && !all_status.is_empty() {
-                StatusBar { items: all_status.clone() }
+            if desk && status_style == StatusStyle::Bar && (chrome.filler(Slot::Status).is_some() || !all_status.is_empty()) {
+                SlotView { slot: Slot::Status,
+                    StatusBar { items: all_status.clone() }
+                }
             }
             if desk && status_style == StatusStyle::Badge {
                 StatusBadge { items: all_status }
@@ -1273,6 +1306,67 @@ pub fn AppShell(
             {cover()}
         }
     }
+}
+
+/// `content` for `slot` as the chrome has it: a filler's, none when it is
+/// hidden, else as given.
+fn slot_content(chrome: &Chrome, slot: Slot, content: Option<Element>) -> Option<Element> {
+    if chrome.is_hidden(slot) {
+        return None;
+    }
+    match chrome.filler(slot) {
+        Some(f) => Some((f.render)()),
+        None => content.map(|c| slot_look(chrome, slot, c)),
+    }
+}
+
+/// `own` in `slot`'s look, when the chrome gives it one.
+fn slot_look(chrome: &Chrome, slot: Slot, own: Element) -> Element {
+    if chrome.looks.contains_key(&slot) {
+        rsx! { SlotLook { slot, {own} } }
+    } else {
+        own
+    }
+}
+
+/// A slot of the shell: its filler, nothing when it is hidden, or the
+/// shell's own component (`children`, drawn as it always is — in the
+/// slot's own look when the chrome gives one).
+#[component]
+fn SlotView(slot: Slot, children: Element) -> Element {
+    let chrome = try_use_context::<Signal<Chrome>>()
+        .map(|c| c())
+        .unwrap_or_default();
+    if chrome.is_hidden(slot) {
+        return rsx! {};
+    }
+    match chrome.filler(slot) {
+        Some(f) => (f.render)(),
+        None => slot_look(&chrome, slot, children),
+    }
+}
+
+/// The shell's own component in a slot's look: the shell below it reads
+/// the workspace's theme with the slot's overrides on top (the cascade's
+/// nearest node).
+#[component]
+fn SlotLook(slot: Slot, children: Element) -> Element {
+    let outer = use_context::<Signal<Shell>>();
+    let chrome = try_use_context::<Signal<Chrome>>()
+        .map(|c| c())
+        .unwrap_or_default();
+    let store = architect_theme::try_use_theme().map(|t| t.store());
+    let look = chrome.looks.get(&slot).cloned().unwrap_or_default();
+    let theme = chrome::slot_theme(store.as_ref(), &look);
+    let mut shell = outer();
+    if let Some(theme) = theme {
+        shell.theme = theme;
+    }
+    let mut inner = use_context_provider(|| Signal::new(shell.clone()));
+    if *inner.peek() != shell {
+        inner.set(shell);
+    }
+    rsx! { {children} }
 }
 
 /// A side open over the page: a sheet the full height of the screen, its
@@ -1378,7 +1472,9 @@ fn DeskTitleRow(title: Option<String>, tabs_left: f64) -> Element {
             // as wide as the tab, so the drag area beside it still moves the window.
             if let Some(tab) = tab {
                 div { style: "position: absolute; left: {tabs_left}px; top: {top}px; height: {row}px; display: flex; align-items: center;",
-                    page::DeskTab { title: tab }
+                    SlotView { slot: Slot::Tabs,
+                        page::DeskTab { title: tab }
+                    }
                 }
             }
         }
