@@ -550,7 +550,23 @@ pub fn ThemeStoreProvider(
     if *state.peek() != next {
         state.set(next);
     }
+    // The same variables on `:root` too, as an app-level sheet: a view that
+    // is mounted into the document outside this provider's div (a process
+    // extension's remote view, a portal, a pop-over layer) still reads the
+    // live theme through `var(--…)`, not its fallbacks.
+    let root_vars = {
+        let st = state.read();
+        format!(":root {{ {} }}", st.active_style().css_variables())
+    };
+    // Handed down too, for documents this sheet doesn't reach (a process
+    // extension's view is a sub-document: `architect_theme::RootCss`).
+    let mut root_css =
+        use_context_provider(|| architect_theme::RootCss(Signal::new(String::new()))).0;
+    if *root_css.peek() != root_vars {
+        root_css.set(root_vars.clone());
+    }
     rsx! {
+        document::Style { {root_vars} }
         ThemeProvider { state, allow_layout_scale, class, {children} }
     }
 }

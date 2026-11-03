@@ -407,7 +407,10 @@ pub struct Host {
     views: CopyValue<Views>,
     commands: CopyValue<Vec<Command>>,
     on_command: CopyValue<Option<EventHandler<String>>>,
-    theme: CopyValue<ShellTheme>,
+    /// The colours, a signal so every pane, tab bar and dock repaints when
+    /// the app's theme changes (a `CopyValue` here kept them on the theme
+    /// the host was first drawn with).
+    theme: Signal<ShellTheme>,
     sizes: Signal<Sizes>,
     phone: Signal<bool>,
     title_row: Signal<Option<TitleRow>>,
@@ -1233,7 +1236,7 @@ pub fn WorkspaceView(
         views: CopyValue::new(views.clone()),
         commands: CopyValue::new(commands.clone()),
         on_command: CopyValue::new(on_command),
-        theme: CopyValue::new(theme.clone()),
+        theme: Signal::new(theme.clone()),
         sizes: Signal::new(Sizes::FINE),
         phone: Signal::new(phone),
         title_row: Signal::new(None),
@@ -1276,7 +1279,9 @@ pub fn WorkspaceView(
     host.views.set(views);
     host.commands.set(commands);
     host.on_command.set(on_command);
-    host.theme.set(theme.clone());
+    if *host.theme.peek() != theme {
+        host.theme.set(theme.clone());
+    }
     let sizes = if coarse { Sizes::COARSE } else { Sizes::FINE };
     if *host.sizes.peek() != sizes {
         host.sizes.set(sizes);

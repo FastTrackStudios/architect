@@ -64,6 +64,8 @@ pub struct RemoteDocument {
     /// How many handlers there are for each event.
     listeners: HashMap<String, u32>,
     events: mpsc::UnboundedSender<ViewEvent>,
+    /// The host's theme, as a `<style>` in the head: its text node.
+    theme: NodeId,
 }
 
 impl std::fmt::Debug for RemoteDocument {
@@ -99,6 +101,12 @@ impl RemoteDocument {
         m.append_children(html, &[head, body]);
         let root = m.create_element(qual("main", None), Vec::new());
         m.append_children(body, &[root]);
+        // The host's theme (`set_theme_css`): the view's own sheets come
+        // after it, so a view still wins where it sets a colour itself.
+        let style = m.create_element(qual("style", None), Vec::new());
+        let theme = m.create_text_node("");
+        m.append_children(style, &[theme]);
+        m.append_children(head, &[style]);
         drop(m);
         Self {
             doc,
@@ -108,7 +116,16 @@ impl RemoteDocument {
             elements: HashMap::from([(root, 0)]),
             listeners: HashMap::new(),
             events,
+            theme,
         }
+    }
+
+    /// Sets the host's theme for the view: CSS (the host's `:root`
+    /// custom properties, `architect_theme::RootCss`), so the view's
+    /// `var(--…)` follow the app's theme live. A sub-document doesn't see
+    /// the host's own sheets.
+    pub fn set_theme_css(&mut self, css: &str) {
+        self.doc.mutate().set_node_text(self.theme, css);
     }
 
     /// Its Blitz document, to read.
@@ -603,6 +620,7 @@ async fn follow(
     view: String,
     mut shown: Signal<Shown>,
     mut retry: mpsc::UnboundedReceiver<()>,
+    theme: Option<Signal<String>>,
 ) {
     loop {
         let Some(process) = processes.get(&extension) else {
@@ -646,7 +664,11 @@ async fn follow(
         };
         let events = session.events.clone();
         with_doc(&node, |doc, at| {
-            doc.set_sub_document(at, Box::new(RemoteDocument::new(events)));
+            let mut remote = RemoteDocument::new(events);
+            if let Some(css) = theme {
+                remote.set_theme_css(&css.peek());
+            }
+            doc.set_sub_document(at, Box::new(remote));
         })
         .await;
         let mut failed = None;
@@ -711,6 +733,25 @@ pub fn RemoteView(processes: Processes, extension: String, view: String) -> Elem
         (to, std::rc::Rc::new(std::cell::RefCell::new(Some(from))))
     });
     let mut mounted = use_signal(|| false);
+    // The app's theme, into the view's document now and on every change.
+    let theme = architect_theme::try_use_root_css();
+    let mut node_at = use_signal(|| None::<NodeHandle>);
+    use_effect(move || {
+        let Some(css) = theme.map(|t| t()) else {
+            return;
+        };
+        let Some(node) = node_at.peek().clone() else {
+            return;
+        };
+        spawn(async move {
+            with_doc(&node, |doc, at| {
+                if let Some(r) = remote(doc, at) {
+                    r.set_theme_css(&css);
+                }
+            })
+            .await;
+        });
+    });
     let follow_with = {
         let (processes, extension) = (processes.clone(), extension.clone());
         move |node: NodeHandle| {
@@ -722,6 +763,7 @@ pub fn RemoteView(processes: Processes, extension: String, view: String) -> Elem
                     view.clone(),
                     shown,
                     retry,
+                    theme,
                 ));
             }
         }
@@ -754,6 +796,7 @@ pub fn RemoteView(processes: Processes, extension: String, view: String) -> Elem
                 onmounted: move |e: MountedEvent| {
                     if !mounted() && let Some(node) = e.data().downcast::<NodeHandle>() {
                         mounted.set(true);
+                        node_at.set(Some(node.clone()));
                         follow_with(node.clone());
                     }
                 },
