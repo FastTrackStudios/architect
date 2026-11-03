@@ -136,7 +136,7 @@ fn texts(frame: &Frame) -> Vec<String> {
 
 #[test]
 fn the_guest_gets_the_theme_on_open_and_on_every_switch() {
-    assert_eq!((WIRE_MIN, THEMED_WIRE, WIRE), (2, 3, 3));
+    assert_eq!((WIRE_MIN, THEMED_WIRE, WIRE), (2, 3, 4));
     let dir = tempfile::tempdir().unwrap();
     let store = ThemeStore::default();
     let (host, processes) = host(dir.path(), &store);

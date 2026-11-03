@@ -22,6 +22,14 @@
 //! on a reload, and out as it unloads ([`theme_contribution`]). A theme
 //! file that does not read is a theme problem (`THEME_PROBLEMS`), never a
 //! failed load.
+//!
+//! What an extension adds to the interface ([`Contributions`]: its
+//! openers, tabs, status items, menu entries, hooks, slots…) goes into
+//! the host's registry ([`Host::contributions`]) as it loads, as a diff
+//! on a reload, and out with its runtime state as it unloads. Its hooks
+//! run on the events the host hears ([`Host::emit`], [`Host::watch`]):
+//! `startup` once as it first loads, the app's `changed:<topic>` and the
+//! names they map to (`workspace.changed`, `theme.changed`, …).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -30,6 +38,7 @@ use std::time::{Duration, Instant};
 
 use architect::action::{
     ActionCaller, ActionError, ActionFuture, ActionInfo, ActionList, CallerAsyncHandler, Effect,
+    EventKind, Invocation, InvocationSource,
 };
 use architect_scripting::Transactions;
 use architect_scripting::luau::{Gate, Limits, Runtime};
@@ -40,6 +49,7 @@ use semver::Version;
 use serde_json::Value;
 
 use crate::catalog::Origin;
+use crate::contrib::{Contributions, HookDecl};
 use crate::manifest::{ActionDecl, Kind, Manifest, Reach};
 use crate::package::{Package, PackageError};
 
@@ -121,6 +131,9 @@ pub struct Context<'a> {
     pub gate: Gate,
     /// What the instance it replaces saved ([`Instance::save_state`]).
     pub state: Option<Vec<u8>>,
+    /// The app's contributions: where what it adds at run time goes (as
+    /// the extension `owner`, checked against its manifest).
+    pub contributions: &'a Contributions,
 }
 
 /// Runs one kind of extension.
@@ -147,6 +160,13 @@ pub trait Instance: Send + Sync {
 
     /// Its state, for the instance that replaces it on a reload.
     fn save_state(&self) -> Option<Vec<u8>> {
+        None
+    }
+
+    /// Runs its hook `decl`'s script (a `luau` extension's), as `caller`
+    /// with the event as `args`: `None` when it runs no scripts.
+    fn hook(&self, decl: &HookDecl, caller: &ActionCaller, args: Value) -> Option<ActionFuture> {
+        let _ = (decl, caller, args);
         None
     }
 
@@ -224,6 +244,8 @@ struct Luau {
     runtime: Runtime,
     /// Each script action's source.
     scripts: BTreeMap<String, Arc<str>>,
+    /// Each hook script's source, by its path.
+    hooks: BTreeMap<String, Arc<str>>,
     /// The undo step's prefix: the extension's name.
     name: String,
 }
@@ -241,15 +263,27 @@ impl Runner for LuauRunner {
             Runtime::check(&source).map_err(|e| format!("{path}: {e}"))?;
             scripts.insert(decl.id.clone(), Arc::from(source));
         }
+        let mut hooks = BTreeMap::new();
+        for decl in &package.manifest.contributes.hooks {
+            let Some(path) = &decl.script else { continue };
+            let source = package.text(path).map_err(|e| e.to_string())?;
+            Runtime::check(&source).map_err(|e| format!("{path}: {e}"))?;
+            hooks.insert(path.clone(), Arc::from(source));
+        }
         let mut runtime = Runtime::new(cx.list.clone())
             .with_gate(cx.gate)
-            .with_limits(self.limits);
+            .with_limits(self.limits)
+            .with_module(Arc::new(luau_ext::Ext::new(
+                &package.manifest,
+                cx.contributions.clone(),
+            )));
         if let Some(t) = &self.transactions {
             runtime = runtime.with_transactions(Arc::clone(t));
         }
         Ok(Box::new(Luau {
             runtime,
             scripts,
+            hooks,
             name: package.manifest.name.clone(),
         }))
     }
@@ -267,8 +301,11 @@ impl Instance for Luau {
         let step = format!("{}: {}", self.name, decl.name);
         Ok(Arc::new(move |caller: &ActionCaller, args: &[u8]| {
             let args = json_args(&id, args)?;
-            let (runtime, source, caller, id, step) = (
-                runtime.clone(),
+            // Where it was run from, as `ctx`.
+            let runtime = runtime
+                .clone()
+                .with_module(Arc::new(luau_ext::Ctx::of(caller.invocation())));
+            let (source, caller, id, step) = (
                 Arc::clone(&source),
                 caller.clone(),
                 id.clone(),
@@ -287,6 +324,174 @@ impl Instance for Luau {
             Ok(run)
         }))
     }
+
+    fn hook(&self, decl: &HookDecl, caller: &ActionCaller, args: Value) -> Option<ActionFuture> {
+        let path = decl.script.as_ref()?;
+        let file = self.hooks.get(path)?;
+        // The whole file, or one function of the table it returns.
+        let source: String = match &decl.function {
+            Some(f) => format!(
+                "local __hooks = (function(...) {file}\nend)(...)\nreturn __hooks[{f:?}](args)"
+            ),
+            None => file.to_string(),
+        };
+        let runtime = self
+            .runtime
+            .clone()
+            .with_module(Arc::new(luau_ext::Ctx::of(caller.invocation())));
+        let (caller, id) = (caller.clone(), format!("{} hook {}", self.name, decl.on));
+        let step = id.clone();
+        Some(Box::pin(async move {
+            let report = runtime.run(&caller, &source, args, &step).await;
+            report
+                .result
+                .map(|v| v.to_string().into_bytes())
+                .map_err(|e| ActionError::Failed {
+                    id,
+                    message: e.to_string(),
+                })
+        }))
+    }
+}
+
+/// What a Luau extension reaches past the Action List: `ext` (its id,
+/// and what it adds at run time) and `ctx` (where the run came from).
+mod luau_ext {
+    use architect::action::Invocation;
+    use architect_scripting::luau::mlua::{self, Lua, LuaSerdeExt as _, Value as LuaValue};
+    use architect_scripting::luau::{Module, raise};
+
+    use crate::contrib::{Contribution, Contributions, StateWrite};
+    use crate::manifest::Manifest;
+
+    /// `ext`: `id`; `contribute(table)` puts what it adds at run time (in
+    /// place of what it added before; checked as its manifest's tables
+    /// are); `state{key, text, kind?, icon?, target?, seq?, ttl_ms?}`
+    /// writes its runtime state; `clear(key?)`.
+    pub(super) struct Ext {
+        manifest: Manifest,
+        contributions: Contributions,
+    }
+
+    impl Ext {
+        pub(super) fn new(manifest: &Manifest, contributions: Contributions) -> Self {
+            Self {
+                manifest: manifest.clone(),
+                contributions,
+            }
+        }
+    }
+
+    impl Module for Ext {
+        fn global(&self) -> &str {
+            "ext"
+        }
+
+        fn path(&self) -> &str {
+            "ext"
+        }
+
+        fn install(&self, lua: &Lua) -> mlua::Result<LuaValue> {
+            let t = lua.create_table()?;
+            t.set("id", self.manifest.id.clone())?;
+            let (m, c) = (self.manifest.clone(), self.contributions.clone());
+            t.set(
+                "contribute",
+                lua.create_function(move |lua, value: LuaValue| {
+                    let added: Contribution = lua.from_value(value)?;
+                    let views = m.view_ids();
+                    added
+                        .check(&m.rules(&views))
+                        .map_err(|e| raise(lua, e.to_string()))?;
+                    let diff = c
+                        .put_runtime(&m.id, added)
+                        .ok_or_else(|| raise(lua, format!("{} is not loaded", m.id)))?;
+                    lua.to_value(&diff)
+                })?,
+            )?;
+            let (id, c) = (self.manifest.id.clone(), self.contributions.clone());
+            t.set(
+                "state",
+                lua.create_function(move |lua, value: LuaValue| {
+                    let mut write: StateWrite = lua.from_value(value)?;
+                    write.source = format!("ext:{id}");
+                    let applied = c
+                        .set_state(write, super::now_ms())
+                        .map_err(|e| raise(lua, e.to_string()))?;
+                    lua.to_value(&applied)
+                })?,
+            )?;
+            let (id, c) = (self.manifest.id.clone(), self.contributions.clone());
+            t.set(
+                "clear",
+                lua.create_function(move |_, key: Option<String>| {
+                    Ok(c.clear_state(&format!("ext:{id}"), key.as_deref()))
+                })?,
+            )?;
+            Ok(LuaValue::Table(t))
+        }
+    }
+
+    /// `ctx`: where this run came from (`ctx.source`, `ctx.target`,
+    /// `ctx.pane`, `ctx.url`, `ctx.event`, …), `{source = "app"}` when
+    /// the door said nothing.
+    pub(super) struct Ctx(serde_json::Value);
+
+    impl Ctx {
+        pub(super) fn of(invocation: Option<&Invocation>) -> Self {
+            Self(super::invocation_json(invocation))
+        }
+    }
+
+    impl Module for Ctx {
+        fn global(&self) -> &str {
+            "ctx"
+        }
+
+        fn path(&self) -> &str {
+            "ctx"
+        }
+
+        fn install(&self, lua: &Lua) -> mlua::Result<LuaValue> {
+            lua.to_value(&self.0)
+        }
+    }
+}
+
+/// The time now, ms since the epoch: the clock runtime state is kept on.
+#[must_use]
+pub fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+}
+
+/// An invocation as JSON (what `ctx` is, and what a process is sent):
+/// `{"source": "app"}` for none.
+#[must_use]
+pub fn invocation_json(invocation: Option<&Invocation>) -> Value {
+    let Some(i) = invocation else {
+        return serde_json::json!({ "source": InvocationSource::App.name() });
+    };
+    let mut out = serde_json::Map::new();
+    out.insert("source".into(), Value::from(i.source.name()));
+    for (name, field) in [
+        ("target", &i.target),
+        ("id", &i.id),
+        ("window", &i.window),
+        ("pane", &i.pane),
+        ("view", &i.view),
+        ("selection", &i.selection),
+        ("url", &i.url),
+        ("path", &i.path),
+        ("event", &i.event),
+        ("detail", &i.detail),
+    ] {
+        if let Some(v) = field {
+            out.insert(name.into(), Value::from(v.as_str()));
+        }
+    }
+    Value::Object(out)
 }
 
 /// An action's arguments as JSON: nothing is `null`.
@@ -438,6 +643,53 @@ struct Running {
 
 type Listener = Arc<dyn Fn(&Event) + Send + Sync>;
 
+/// What runs a hook's work: the app's executor, or a thread of its own.
+pub type Spawn = Arc<dyn Fn(ActionFuture) + Send + Sync>;
+
+/// A view an extension asks the app to open (`EXT_VIEW_OPEN`, an opener
+/// with a view): the app's window opens it where it says.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ViewOpen {
+    /// The extension.
+    pub extension: String,
+    /// Its view's id, and the workspace kind it is (`<extension>/<view>`).
+    pub view: String,
+    pub kind: String,
+    pub title: String,
+    /// What it shows (a file's path, a link): the pane's state.
+    pub state: Option<String>,
+    pub home: crate::manifest::Home,
+    pub placement: crate::manifest::ViewPlacement,
+    pub width: Option<f32>,
+    pub height: Option<f32>,
+    /// Where the open came from.
+    pub invocation: Invocation,
+}
+
+/// What [`Host::open`] opens.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Opening {
+    /// A file, by its path: claimed by its extension or its document kind.
+    Path(String),
+    /// A link, claimed by a pattern.
+    Url(String),
+    /// A document of a kind, and its path when it has one.
+    DocKind { kind: String, path: Option<String> },
+}
+
+impl Opening {
+    fn describe(&self) -> String {
+        match self {
+            Self::Path(p) => p.clone(),
+            Self::Url(u) => u.clone(),
+            Self::DocKind { kind, .. } => format!("a {kind} document"),
+        }
+    }
+}
+
+/// What opens a [`ViewOpen`] in the app's window: its answer, or why not.
+pub type ViewOpener = Arc<dyn Fn(ViewOpen) -> Result<Value, String> + Send + Sync>;
+
 struct Inner {
     list: ActionList,
     sections: Arc<dyn SectionSink>,
@@ -449,6 +701,20 @@ struct Inner {
     /// The app's themes, when it gave them: what extensions' themes and
     /// tokens go into.
     themes: Mutex<Option<ThemeStore>>,
+    /// Hears the theme change, for `theme.changed` hooks.
+    theme_heard: Mutex<Option<architect_theme::Subscription>>,
+    /// What loaded extensions add to the interface.
+    contributions: Contributions,
+    /// Where hooks' work runs.
+    spawn: Mutex<Spawn>,
+    /// The ids whose `startup` hooks have run: once per extension per
+    /// host, not again on a reload.
+    started: Mutex<BTreeSet<String>>,
+    /// The hooks running now (owner and hook): one does not start again
+    /// before it ends.
+    running: Arc<Mutex<BTreeSet<String>>>,
+    /// What opens extensions' views in the app's window.
+    view_opener: Mutex<Option<ViewOpener>>,
 }
 
 /// Loads extensions onto one Action List and one settings registry.
@@ -479,8 +745,168 @@ impl Host {
                 loaded: Mutex::new(BTreeMap::new()),
                 listeners: Mutex::new(Vec::new()),
                 themes: Mutex::new(None),
+                theme_heard: Mutex::new(None),
+                contributions: Contributions::new(),
+                spawn: Mutex::new(Arc::new(|work: ActionFuture| {
+                    std::thread::spawn(move || {
+                        let _ = futures::executor::block_on(work);
+                    });
+                })),
+                started: Mutex::new(BTreeSet::new()),
+                running: Arc::default(),
+                view_opener: Mutex::new(None),
             }),
         }
+    }
+
+    /// Puts what extensions add to the interface in `contributions` (the
+    /// app's, shared with its window) in place of the host's own.
+    #[must_use]
+    pub fn with_contributions(mut self, contributions: Contributions) -> Self {
+        if let Some(inner) = Arc::get_mut(&mut self.inner) {
+            inner.contributions = contributions;
+        }
+        self
+    }
+
+    /// Runs hooks' work with `spawn` (the app's executor) in place of a
+    /// thread each.
+    #[must_use]
+    pub fn with_spawn(self, spawn: impl Fn(ActionFuture) + Send + Sync + 'static) -> Self {
+        *self
+            .inner
+            .spawn
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Arc::new(spawn);
+        self
+    }
+
+    /// Opens extensions' views with `opener` (the app's window's), from
+    /// now on.
+    pub fn set_view_opener(
+        &self,
+        opener: impl Fn(ViewOpen) -> Result<Value, String> + Send + Sync + 'static,
+    ) {
+        *self
+            .inner
+            .view_opener
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(Arc::new(opener));
+    }
+
+    /// Opens extension `extension`'s view `view` (showing `state`), as its
+    /// manifest places it unless `placement` says otherwise.
+    ///
+    /// # Errors
+    ///
+    /// It is not loaded, has no such view, or the app has no window to
+    /// open it in.
+    pub fn open_view(
+        &self,
+        extension: &str,
+        view: &str,
+        state: Option<String>,
+        placement: Option<crate::manifest::ViewPlacement>,
+        invocation: Invocation,
+    ) -> Result<Value, String> {
+        let decl = self
+            .get(extension)
+            .ok_or_else(|| format!("{extension} is not loaded"))?
+            .manifest
+            .views
+            .into_iter()
+            .find(|v| v.id == view)
+            .ok_or_else(|| format!("{extension} has no view {view}"))?;
+        let opener = self
+            .inner
+            .view_opener
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+            .ok_or("this app opens no extension views (no window)")?;
+        opener(ViewOpen {
+            extension: extension.to_owned(),
+            kind: decl.workspace_kind(extension),
+            view: decl.id,
+            title: decl.title,
+            state,
+            home: decl.home,
+            placement: placement.unwrap_or(decl.placement),
+            width: decl.width,
+            height: decl.height,
+            invocation,
+        })
+    }
+
+    /// Opens `what` (a file's path, a link, a document kind) with the
+    /// first opener that claims it: in its view, or with its action
+    /// (given `{path}` or `{url}`, and the invocation). A file or document
+    /// opened raises `doc.opened`. What opened it, and how.
+    ///
+    /// # Errors
+    ///
+    /// Nothing claims it, or its opener failed.
+    pub async fn open(&self, what: Opening, mut invocation: Invocation) -> Result<Value, String> {
+        let reg = &self.inner.contributions;
+        let (claims, state, field) = match &what {
+            Opening::Path(p) => (reg.open_path(p), p.clone(), "path"),
+            Opening::Url(u) => (reg.open_url(u), u.clone(), "url"),
+            Opening::DocKind { kind, path } => (
+                reg.open_doc_kind(kind),
+                path.clone().unwrap_or_default(),
+                "path",
+            ),
+        };
+        let by = claims
+            .into_iter()
+            .next()
+            .ok_or_else(|| format!("nothing opens {}", what.describe()))?;
+        if invocation.source == InvocationSource::App {
+            invocation.source = if field == "url" {
+                InvocationSource::Link
+            } else {
+                InvocationSource::Open
+            };
+        }
+        if field == "url" {
+            invocation.url = Some(state.clone());
+        } else {
+            invocation.path = Some(state.clone());
+        }
+        let opener = by.item.key().to_owned();
+        let answer = if let Some(view) = &by.item.view {
+            let opened = self.open_view(
+                &by.owner,
+                view,
+                (!state.is_empty()).then(|| state.clone()),
+                None,
+                invocation,
+            )?;
+            serde_json::json!({ "opened_by": by.owner, "opener": opener, "view": view, "opened": opened })
+        } else {
+            let caller = ActionCaller::app().with_invocation(invocation);
+            let args = serde_json::json!({ field: state }).to_string();
+            let out = self
+                .inner
+                .list
+                .run_json_async_with(&caller, &by.item.action, args.as_bytes())
+                .await
+                .map_err(|e| e.to_string())?;
+            let result: Value = serde_json::from_slice(&out).unwrap_or(Value::Null);
+            serde_json::json!({ "opened_by": by.owner, "opener": opener, "action": by.item.action, "result": result })
+        };
+        if field == "path" {
+            self.emit("doc.opened", &state);
+        }
+        Ok(answer)
+    }
+
+    /// What loaded extensions add to the interface: their openers, tabs,
+    /// status items, menu and context entries, hooks, slots, and the
+    /// runtime state beside them.
+    #[must_use]
+    pub fn contributions(&self) -> &Contributions {
+        &self.inner.contributions
     }
 
     /// Runs `runner`'s kind with it, in place of the one there was.
@@ -514,6 +940,17 @@ impl Host {
     /// in as each loads, as a diff on a reload, out as it unloads.
     #[must_use]
     pub fn with_themes(self, store: ThemeStore) -> Self {
+        let weak = Arc::downgrade(&self.inner);
+        let heard = store.subscribe(move |r| {
+            if let Some(inner) = weak.upgrade() {
+                Self { inner }.emit("theme.changed", r.id());
+            }
+        });
+        *self
+            .inner
+            .theme_heard
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(heard);
         *self
             .inner
             .themes
@@ -563,7 +1000,7 @@ impl Host {
             .push(Arc::new(listener));
     }
 
-    fn emit(&self, event: &Event) {
+    fn tell(&self, event: &Event) {
         let listeners = self
             .inner
             .listeners
@@ -631,6 +1068,19 @@ impl Host {
         );
         let _entered = span.enter();
         let result = self.swap_in(package, origin, started);
+        if result.is_ok() {
+            let id = &manifest.id;
+            let first = self
+                .inner
+                .started
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(id.clone());
+            if first {
+                self.emit_to(Some(id), "startup", id);
+            }
+            self.emit("extension.loaded", id);
+        }
         span.record(
             "ext.outcome",
             match &result {
@@ -643,8 +1093,8 @@ impl Host {
             u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
         );
         match &result {
-            Ok(change) => self.emit(&Event::Loaded(change.clone())),
-            Err(error) => self.emit(&Event::Failed {
+            Ok(change) => self.tell(&Event::Loaded(change.clone())),
+            Err(error) => self.tell(&Event::Failed {
                 id: manifest.id.clone(),
                 error: error.clone(),
             }),
@@ -681,6 +1131,7 @@ impl Host {
                     list,
                     gate: gate(manifest),
                     state: old.and_then(|o| o.instance.save_state()),
+                    contributions: &self.inner.contributions,
                 },
             )
             .map_err(LoadError::Start)?;
@@ -724,6 +1175,11 @@ impl Host {
         if let Some(store) = self.themes() {
             store.contribute(&manifest.id, theme_contribution(package));
         }
+        // What it adds to the interface, as a diff (what it added at run
+        // time stays until its new instance says otherwise).
+        self.inner
+            .contributions
+            .put(&manifest.id, manifest.contributes.clone());
         if let Some(old) = loaded.remove(&manifest.id) {
             old.instance.stop();
         }
@@ -773,6 +1229,164 @@ impl Host {
         Ok(())
     }
 
+    /// Raises app event `on` (`workspace.changed`, `doc.opened`,
+    /// `changed:<topic>`) with `detail`: every loaded extension's hooks on
+    /// it run, each as the app with the event in its invocation and as
+    /// `{event, detail}` arguments, inside its extension's capabilities.
+    /// A hook still running from before is not started again. How many
+    /// started.
+    pub fn emit(&self, on: &str, detail: &str) -> usize {
+        self.emit_to(None, on, detail)
+    }
+
+    /// [`Self::emit`] to `only` one extension's hooks.
+    fn emit_to(&self, only: Option<&str>, on: &str, detail: &str) -> usize {
+        let hooks: Vec<_> = self
+            .inner
+            .contributions
+            .hooks(on)
+            .into_iter()
+            .filter(|h| only.is_none_or(|o| o == h.owner))
+            .collect();
+        if hooks.is_empty() {
+            return 0;
+        }
+        let spawn = self
+            .inner
+            .spawn
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        let mut started = 0_usize;
+        for by in hooks {
+            let key = format!(
+                "{}/{}/{}",
+                by.owner,
+                by.item.on,
+                by.item
+                    .action
+                    .as_deref()
+                    .or(by.item.script.as_deref())
+                    .unwrap_or_default()
+            );
+            let caller = ActionCaller::app().with_invocation(Invocation {
+                event: Some(on.to_owned()),
+                detail: Some(detail.to_owned()),
+                ..Invocation::new(InvocationSource::Hook)
+            });
+            let args = serde_json::json!({ "event": on, "detail": detail });
+            let Some(work) = self.hook_work(&by.owner, &by.item, &caller, args) else {
+                continue;
+            };
+            {
+                let mut running = self
+                    .inner
+                    .running
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner);
+                if !running.insert(key.clone()) {
+                    continue;
+                }
+            }
+            let running = Arc::clone(&self.inner.running);
+            let (owner, hook) = (by.owner.clone(), on.to_owned());
+            spawn(Box::pin(async move {
+                let out = work.await;
+                let _span = tracing::info_span!(
+                    "ext.hook",
+                    ext.id = %owner,
+                    ext.hook = %hook,
+                    ext.outcome = if out.is_ok() { "ran" } else { "failed" },
+                    ext.error = out.as_ref().err().map(ToString::to_string),
+                )
+                .entered();
+                running
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .remove(&key);
+                out
+            }));
+            started = started.saturating_add(1);
+        }
+        started
+    }
+
+    /// A hook's work: its action through the list (inside its extension's
+    /// gate), or its script on its instance.
+    fn hook_work(
+        &self,
+        owner: &str,
+        decl: &HookDecl,
+        caller: &ActionCaller,
+        args: Value,
+    ) -> Option<ActionFuture> {
+        let loaded = self
+            .inner
+            .loaded
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let running = loaded.get(owner)?;
+        if decl.script.is_some() {
+            return running.instance.hook(decl, caller, args);
+        }
+        let action = decl.action.clone()?;
+        let gate = gate(&running.loaded.manifest);
+        drop(loaded);
+        let list = self.inner.list.clone();
+        let info = list.info(&action)?;
+        if let Err(why) = gate(&info) {
+            tracing::warn!(ext.id = %owner, ext.hook_action = %action, ext.why = %why, "a hook was refused");
+            return None;
+        }
+        let caller = caller.clone();
+        let args = args.to_string().into_bytes();
+        Some(Box::pin(async move {
+            list.run_json_async_with(&caller, &action, &args).await
+        }))
+    }
+
+    /// Hears `list`'s events (the app's) on a thread of its own, for as
+    /// long as the host lives: each `Changed{topic}` raises
+    /// `changed:<topic>` and, for the app's topics, its name
+    /// (`workspace` → `workspace.changed`, `theme`, `selection`, `doc` →
+    /// `doc.opened`).
+    pub fn watch(&self, list: &ActionList) {
+        let weak = Arc::downgrade(&self.inner);
+        let list = list.clone();
+        let mut since = list.latest();
+        let _ = std::thread::Builder::new()
+            .name("ext-hooks".to_owned())
+            .spawn(move || {
+                loop {
+                    let (events, next) = list.events_since(since, 64, Duration::from_millis(500));
+                    since = next;
+                    let Some(inner) = weak.upgrade() else { return };
+                    let host = Self { inner };
+                    for e in events {
+                        if let EventKind::Changed { topic, detail } = e.kind {
+                            host.emit_changed(&topic, &detail);
+                        }
+                    }
+                }
+            });
+    }
+
+    /// Raises `changed:<topic>`, and the app event the topic names.
+    pub fn emit_changed(&self, topic: &str, detail: &str) -> usize {
+        let named = match topic {
+            "workspace" => Some("workspace.changed"),
+            "theme" => Some("theme.changed"),
+            "selection" => Some("selection.changed"),
+            "doc" => Some("doc.opened"),
+            _ => None,
+        };
+        let mut n = self.emit(&format!("changed:{topic}"), detail);
+        if let Some(named) = named {
+            n = n.saturating_add(self.emit(named, detail));
+        }
+        n
+    }
+
     /// Unloads `id`: its actions off the list, its settings off the page.
     /// False when it was not loaded.
     pub fn unload(&self, id: &str) -> bool {
@@ -792,9 +1406,11 @@ impl Host {
         if let Some(store) = self.themes() {
             store.withdraw(id);
         }
+        self.inner.contributions.withdraw(id);
         running.instance.stop();
         tracing::info_span!("ext.unload", ext.id = %id).in_scope(|| {});
-        self.emit(&Event::Unloaded { id: id.to_owned() });
+        self.tell(&Event::Unloaded { id: id.to_owned() });
+        self.emit("extension.unloaded", id);
         true
     }
 }

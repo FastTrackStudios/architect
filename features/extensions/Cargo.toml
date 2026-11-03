@@ -28,6 +28,7 @@ host = [
     "dep:architect-scripting",
     "architect-scripting/luau",
     "dep:tracing",
+    "dep:futures",
 ]
 crdt = ["dep:crdt"]
 ui = ["host", "dep:dioxus", "dep:futures", "architect-settings/ui"]

@@ -18,8 +18,10 @@
 use facet::Facet;
 
 /// The wire's version. 3 added the theme as data ([`ThemeData`],
-/// `ProcessExtension::theme`).
-pub const WIRE: u32 = 3;
+/// `ProcessExtension::theme`); 4 an action's invocation
+/// (`ProcessExtension::run_in`) and what a process adds at run time
+/// ([`Update`], `ProcessExtension::updates`).
+pub const WIRE: u32 = 4;
 
 /// The oldest wire a host still speaks: a process at 2 runs as before,
 /// its views themed through CSS only (it is never sent [`ThemeData`]).
@@ -28,6 +30,26 @@ pub const WIRE_MIN: u32 = 2;
 
 /// The first wire a process is sent the theme on.
 pub const THEMED_WIRE: u32 = 3;
+
+/// The first wire a process is sent its actions' invocations on, and
+/// asked for its [`Update`]s.
+pub const CONTRIB_WIRE: u32 = 4;
+
+/// What a process adds or changes at run time, as it happens (wire 4 on):
+/// its contributions, in place of the ones it sent before, or its runtime
+/// state. JSON in the manifest's own shapes (`crate::contrib`), checked by
+/// the host against its manifest as a manifest's tables are.
+#[derive(Clone, Debug, PartialEq, Eq, Facet)]
+#[repr(u8)]
+pub enum Update {
+    /// A `Contribution` as JSON: everything it adds at run time now.
+    Contribute { json: String },
+    /// A `StateWrite` as JSON (its source is the extension's, whatever it
+    /// says).
+    State { json: String },
+    /// Clears one key of its runtime state, or all of it (`None`).
+    Clear { key: Option<String> },
+}
 
 /// The app's theme, as data: what a process that paints itself (on the
 /// GPU, or working out colours) themes with. Sent as it connects and on
