@@ -2,12 +2,15 @@
 //! written from the app's live Action List (#268 H2).
 //!
 //! herdr writes `AGENTS.md` into its home folder on every start, and a
-//! test fails when the guide misses a command. Here the guide is the
-//! app's own [`Guide::preamble`] (a hand-written template; architect's
-//! default when the app has none) followed by every action the CLI's
-//! caller may run, grouped by the id's area (`WORKSPACE_`, `THEME_`): its
-//! effect, its arguments (name, type, whether required) and what it does.
-//! Beside it, `actions.schema.json` is what `actions schema` prints.
+//! test fails when the guide misses a command. Here the guide is three
+//! parts: the app's own opening ([`Guide::preamble`], a hand-written
+//! template: what the app is and what its folder holds; architect's
+//! [`DEFAULT_INTRO`] when it has none), architect's [`RULES`] (how to
+//! inspect, change things safely, themes, workspaces, extensions and the
+//! dev loop), then every action the CLI's caller may run, grouped by the
+//! id's area (`WORKSPACE_`, `THEME_`): its effect, its arguments (name,
+//! type, whether required) and what it does. Beside it,
+//! `actions.schema.json` is what `actions schema` prints.
 //!
 //! An app's actions come and go while it runs (a page's, an extension's),
 //! so [`Guide::keep_written`] writes both once the app has settled and
@@ -36,8 +39,12 @@ pub const GUIDE_FILE: &str = "AGENTS.md";
 /// The schema's file name.
 pub const SCHEMA_FILE: &str = "actions.schema.json";
 
-/// architect's preamble, for an app that has none of its own.
-pub const DEFAULT_PREAMBLE: &str = include_str!("guide_preamble.md");
+/// architect's opening, for an app that has none of its own.
+pub const DEFAULT_INTRO: &str = include_str!("guide_intro.md");
+
+/// architect's part of every guide: inspect before acting, changing
+/// things safely, themes, workspaces, extensions and the dev loop.
+pub const RULES: &str = include_str!("guide_rules.md");
 
 /// The escape hatch's chord, as the guide names it.
 pub const ESCAPE_CHORD: &str = "Ctrl+Alt+Shift+Escape (Cmd+Alt+Shift+Escape on macOS)";
@@ -78,7 +85,7 @@ impl Guide {
         Self {
             actions: format!("{app} actions"),
             app,
-            preamble: DEFAULT_PREAMBLE.to_owned(),
+            preamble: DEFAULT_INTRO.to_owned(),
         }
     }
 
@@ -89,8 +96,8 @@ impl Guide {
         self
     }
 
-    /// The app's own preamble: a template with the placeholders the
-    /// module names.
+    /// The app's own opening, in place of architect's: a template with
+    /// the placeholders the module names. [`RULES`] follow it.
     #[must_use]
     pub fn preamble(mut self, template: impl Into<String>) -> Self {
         self.preamble = template.into();
@@ -104,17 +111,17 @@ impl Guide {
         let infos = surface.list().infos_for(surface.principal());
         let mut out = header(&self.app);
         out.push_str("\n\n");
-        out.push_str(
-            &self
-                .preamble
+        let fill = |template: &str| {
+            template
                 .replace("{{app}}", &self.app)
                 .replace("{{dir}}", &dir.display().to_string())
                 .replace("{{actions}}", &self.actions)
-                .replace("{{escape}}", ESCAPE_CHORD),
-        );
-        if !out.ends_with('\n') {
-            out.push('\n');
-        }
+                .replace("{{escape}}", ESCAPE_CHORD)
+        };
+        out.push_str(fill(&self.preamble).trim_end());
+        out.push_str("\n\n");
+        out.push_str(fill(RULES).trim_end());
+        out.push('\n');
         out.push_str(&reference(&infos, &self.actions));
         out
     }

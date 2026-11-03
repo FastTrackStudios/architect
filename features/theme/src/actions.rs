@@ -458,5 +458,40 @@ pub fn register(list: &ActionList, store: &ThemeStore) -> Result<(), ActionError
     list.register(&INSPECT, Effect::ReadOnly, move |args: InspectArgs| {
         Ok(inspect(&s, args.prefix.as_deref()))
     })?;
+    report(list, store);
     Ok(())
 }
+
+/// The theme's part of `APP_STATUS`: its `theme` section (the choice,
+/// the theme and scheme showing, the revision) and its problems, each
+/// with its file and field (`architect::action::app_status`).
+pub fn report(list: &ActionList, store: &ThemeStore) {
+    let s = store.clone();
+    list.status().section(STATUS_SECTION, move || {
+        let mut now = get(&s, Some(&[] as &[String]));
+        now.tokens.clear();
+        facet_json::to_string(&now).unwrap_or_else(|_| "{}".to_owned())
+    });
+    let s = store.clone();
+    list.problems().source(STATUS_SECTION, move || {
+        s.problems()
+            .into_iter()
+            .map(|p| {
+                let mut out = architect::action::Problem::new(
+                    STATUS_SECTION,
+                    format!("{}: {}", p.theme, p.message),
+                );
+                if p.source != "builtin" && p.source != "memory" {
+                    out = out.file(p.source);
+                }
+                if let Some(field) = p.field {
+                    out = out.field(field);
+                }
+                out
+            })
+            .collect()
+    });
+}
+
+/// The theme's section of `APP_STATUS`, and its problems' source.
+pub const STATUS_SECTION: &str = "theme";

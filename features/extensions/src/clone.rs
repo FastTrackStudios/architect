@@ -108,6 +108,14 @@ impl Extensions {
         })
     }
 
+    /// Puts [`Self::problems`] among `problems` (an app's list's,
+    /// `ActionList::problems`), as the `extensions` source: what
+    /// `APP_STATUS` lists.
+    pub fn report_problems(&self, problems: &architect::action::Problems) {
+        let me = self.clone();
+        problems.source("extensions", move || me.problems());
+    }
+
     /// What is wrong with the extensions now: a folder that does not read,
     /// and each one's last failed load. Each is a [`Problem`] from
     /// `extension`, its file and field when they are known.
