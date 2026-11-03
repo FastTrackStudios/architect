@@ -78,7 +78,8 @@ static CLONE: ActionMeta = meta(
     "Clone an extension",
     "Copies extension `id` (built in or installed: what the app ships stays as it is) into the \
      development folder as `as` (`<id>-copy` unless given; its actions and settings move to that \
-     namespace) and runs the copy, which reloads when its files change. Answers its id and folder.",
+     namespace) and runs the copy, which reloads when its files change. Answers its id, folder and \
+     whether it loaded. A process extension with actions is refused (its program answers them by id).",
 );
 
 /// `EXT_CHECK`'s arguments.
@@ -226,6 +227,7 @@ impl Extensions {
                     json!({
                         "id": cloned.id,
                         "folder": cloned.folder.display().to_string(),
+                        "loaded": me.host().get(&cloned.id).is_some(),
                         "events": events,
                     })
                     .to_string(),

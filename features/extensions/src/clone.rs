@@ -58,8 +58,9 @@ impl Extensions {
     ///
     /// # Errors
     ///
-    /// No development folder, no such extension, the new id taken or not
-    /// an id, or a file that could not be copied.
+    /// No development folder, no such extension, a process extension with
+    /// actions (its program answers them by their old ids), the new id
+    /// taken or not an id, or a file that could not be copied.
     pub fn clone_to_dev(&self, id: &str, as_id: Option<&str>) -> Result<Cloned, String> {
         let root = self
             .dev_root()
@@ -69,6 +70,14 @@ impl Extensions {
             .iter()
             .find(|c| c.runs.id == id)
             .ok_or_else(|| format!("no extension {id} (EXT_LIST lists them)"))?;
+        if from.runs.package.manifest.kind == crate::manifest::Kind::Process
+            && !from.runs.package.manifest.actions.is_empty()
+        {
+            return Err(format!(
+                "{id} is a process extension: its program answers its actions by their ids, so a copy \
+                 under a new id would not run; copy its source and build it under the new id instead"
+            ));
+        }
         let new_id = as_id.map_or_else(|| format!("{id}-copy"), |a| a.trim().to_owned());
         if chosen.iter().any(|c| c.runs.id == new_id) {
             return Err(format!("an extension {new_id} exists: give `as`"));

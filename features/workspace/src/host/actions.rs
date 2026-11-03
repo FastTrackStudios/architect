@@ -132,6 +132,9 @@ fn status_of(mirror: &Mirror, overlays: &Overlays) -> String {
     facet_json::to_string(&status).unwrap_or_else(|_| "{}".to_owned())
 }
 
+/// How many times a measurement that found nothing is asked again.
+const MEASURE_AGAIN: u32 = 20;
+
 /// The workspace's section of `APP_STATUS`.
 pub const STATUS_SECTION: &str = "workspace";
 
@@ -391,7 +394,17 @@ pub(super) fn use_actions(host: Host, actions: Option<WorkspaceActions>) {
         *mirror.lock().unwrap_or_else(PoisonError::into_inner) = (host.state(), host.env());
         let mirror = mirror.clone();
         spawn(async move {
-            let measured = host.measure().await;
+            let mut measured = host.measure().await;
+            // Mounted before its first frame was laid out, nothing measures
+            // yet: ask again shortly, a few times (`APP_SHOT`'s pane crop
+            // and the layout's rects need it before the first change).
+            for _ in 0..MEASURE_AGAIN {
+                if !measured.groups.is_empty() {
+                    break;
+                }
+                futures_timer::Delay::new(std::time::Duration::from_millis(50)).await;
+                measured = host.measure().await;
+            }
             if *host.measured.peek() != measured {
                 let mut m = host.measured;
                 m.set(measured);
