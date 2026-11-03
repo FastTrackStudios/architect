@@ -2,6 +2,11 @@
 # (src/main.rs) and shown in a pane of the Vault (apps/lab/ui/src/vault.rs).
 # The lab runs it as a development copy when the program is built beside
 # the lab's own (`cargo build --workspace`).
+#
+# It is themeable all the way: its view styles itself with the app's CSS
+# variables and reads the theme as data; its ImGui window (window.luau)
+# reads `theme`; its own tokens below default to the palette; and it
+# contributes a theme, Clicker Neon.
 id = "lab.clicker"
 name = "Clicker"
 version = "0.1.0"
@@ -23,3 +28,15 @@ effect = "read_only"
 id = "counter"
 title = "Clicker"
 icon = "mouse-pointer-click"
+
+[[themes]]
+path = "themes/clicker-neon.json"
+
+# Its own tokens, defaults that follow whatever theme shows. A theme file,
+# the app or the person may set any of them (THEME_TOKEN_SET).
+[tokens]
+"clicker.face" = "mix($card, $brand, 0.22)"
+"clicker.face-hover" = "mix($card, $brand, 0.38)"
+"clicker.edge" = "mix($border, $brand, 0.5)"
+"clicker.count" = "$brand"
+"clicker.radius" = "10"

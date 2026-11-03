@@ -9,7 +9,12 @@
 //!
 //! The clicker (`apps/lab/clicker`) is a process extension: when its
 //! program was built beside the lab's, it runs as a development copy and
-//! its view is the Vault's Clicker pane ([`processes`]).
+//! its view is the Vault's Clicker pane ([`processes`]). It is the lab's
+//! themed extension: its theme (Clicker Neon) and its `clicker.*` tokens
+//! go into the lab's theme store while it is loaded (`Host::with_themes`),
+//! its process is sent the theme as data (`ProcessRunner::with_theme`),
+//! and its ImGui window ([`ClickerWindow`], `window.luau` from its
+//! package) reads `theme`.
 //!
 //! So is Frame's `frame-surface` (FastTrackStudios/frame,
 //! `crates/frame-view`), when it is found ([`frame_surface`]): its view,
@@ -46,7 +51,75 @@ pub fn processes() -> Processes {
     PROCESSES.clone()
 }
 
-/// The clicker as a development copy: its manifest and a link to its
+/// The clicker's package, past its program: the manifest, its theme and
+/// its ImGui window.
+const CLICKER_FILES: [(&str, &str); 3] = [
+    (
+        "extension.toml",
+        include_str!("../../clicker/extension.toml"),
+    ),
+    (
+        "themes/clicker-neon.json",
+        include_str!("../../clicker/themes/clicker-neon.json"),
+    ),
+    ("window.luau", include_str!("../../clicker/window.luau")),
+];
+
+/// The clicker's ImGui window's script: from its development copy (a
+/// save there shows when the pane opens again), else the one built in.
+fn clicker_window() -> String {
+    architect::settings::app_dir("architect-lab")
+        .ok()
+        .and_then(|root| {
+            std::fs::read_to_string(root.join("dev").join(CLICKER).join("window.luau")).ok()
+        })
+        .unwrap_or_else(|| include_str!("../../clicker/window.luau").to_owned())
+}
+
+/// The clicker's window (`window.luau`'s context and name).
+const CLICKER_WINDOW: &str = "clicker/Window";
+
+/// The Vault's "Clicker window" pane: the clicker's `ImGui` window, a Luau
+/// script the lab runs from its package, in the app's theme.
+#[component]
+pub fn ClickerWindow() -> Element {
+    use architect::action::ActionCaller;
+    use architect_canvas::ui::{
+        WindowEvent, WindowView, style_from_theme, use_canvases, use_script_canvas,
+    };
+    let t = architect_shell::use_shell().theme;
+    let _canvases = use_canvases();
+    let canvas = use_script_canvas(
+        architect_scripting::luau::Runtime::new(ActionList::new()),
+        ActionCaller::app(),
+        use_hook(clicker_window),
+        serde_json::Value::Null,
+        "Clicker window".to_owned(),
+        style_from_theme(&t),
+    );
+    let window = canvas.output().window(CLICKER_WINDOW).cloned();
+    let failed = canvas.status().error.map(|e| e.to_string());
+    rsx! {
+        div { style: "flex: 1; position: relative; min-height: 0;",
+            match (window, failed) {
+                (Some(window), _) => rsx! {
+                    WindowView {
+                        window,
+                        on_event: move |e: WindowEvent| canvas.window_event(CLICKER_WINDOW, e),
+                    }
+                },
+                (None, Some(e)) => rsx! {
+                    div { style: "padding: 12px; font-size: 12px; color: {t.ink_2};", "The script stopped: {e}" }
+                },
+                (None, None) => rsx! {
+                    div { style: "padding: 12px; font-size: 12px; color: {t.ink_3};", "Starting the script…" }
+                },
+            }
+        }
+    }
+}
+
+/// The clicker as a development copy: its package and a link to its
 /// program, when the program sits beside the lab's.
 fn clicker(root: &std::path::Path) -> Option<PathBuf> {
     let program = std::env::current_exe()
@@ -56,12 +129,10 @@ fn clicker(root: &std::path::Path) -> Option<PathBuf> {
         return None;
     }
     let dir = root.join("dev").join(CLICKER);
-    std::fs::create_dir_all(&dir).ok()?;
-    std::fs::write(
-        dir.join("extension.toml"),
-        include_str!("../../clicker/extension.toml"),
-    )
-    .ok()?;
+    std::fs::create_dir_all(dir.join("themes")).ok()?;
+    for (path, text) in CLICKER_FILES {
+        std::fs::write(dir.join(path), text).ok()?;
+    }
     let link = dir.join("architect-lab-clicker");
     let _ = std::fs::remove_file(&link);
     std::os::unix::fs::symlink(&program, &link).ok()?;
@@ -425,11 +496,20 @@ pub fn LabExtensions(metronome: bool) -> Element {
         let (lab, list) = (Arc::clone(&lab), Arc::clone(&list));
         use_future(move || frame_binding(Arc::clone(&lab), Arc::clone(&list)));
     }
+    let themes = architect_theme::try_use_theme().map(|t| t.store());
     let (extensions, from_registry) = use_hook(|| {
         // The kinds its views may be: Frame's surface besides Dioxus.
         let mut host =
             Host::new((*list).clone(), sections.clone()).with_view_kinds(crate::embedded::kinds());
-        if let Ok(runner) = ProcessRunner::new() {
+        // Extensions' themes and tokens into the lab's store; the theme,
+        // as data, to its processes.
+        if let Some(store) = &themes {
+            host = host.with_themes(store.clone());
+        }
+        if let Ok(mut runner) = ProcessRunner::new() {
+            if let Some(store) = &themes {
+                runner = runner.with_theme(store.clone());
+            }
             host = host.with_runner(runner.with_processes(processes()));
         }
         let root = architect::settings::app_dir("architect-lab")

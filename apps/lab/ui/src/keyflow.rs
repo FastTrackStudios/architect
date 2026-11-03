@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use architect::action::{ActionError, ActionList, ActionMeta, Effect};
 use architect_workspace::paint::PaintPane;
-use architect_workspace::{HostData, Pane, Side, Target, Workspace};
 use architect_workspace::paint::peniko::Color;
+use architect_workspace::{HostData, Pane, Side, Target, Workspace};
 use dioxus::prelude::*;
 use editor_keyflow::view::{KeyflowEditor, PANE_CSS, editor_view::EDITOR_CSS};
 use facet::Facet;
@@ -100,7 +100,8 @@ fn EditorStyles() -> Element {
 /// names it), and the caret in the lab's teal. The caret's shape is the
 /// editor's own (a zero-width box with its bar hung off it, so the text
 /// never moves); a host sets only its colour, through `--editor-caret`.
-const LAB_OVERRIDES: &str = ".kf-pane-head { display: none; } .editor-root { --editor-caret: #3ec7a8; }";
+const LAB_OVERRIDES: &str =
+    ".kf-pane-head { display: none; } .editor-root { --editor-caret: #3ec7a8; }";
 
 /// The chart preview alone, with the theme toggle over it.
 #[component]
@@ -248,7 +249,11 @@ fn apply(chart: &KeyflowChart, command: ChartCommand) {
         ChartCommand::Dark(dark) => {
             CHART_PINNED.store(true, Ordering::Relaxed);
             *CHART_DARK.write() = dark;
-            let theme = if dark { dark_theme() } else { ChartTheme::default() };
+            let theme = if dark {
+                dark_theme()
+            } else {
+                ChartTheme::default()
+            };
             chart.data.update(|s| s.theme = Some(theme));
         }
     }

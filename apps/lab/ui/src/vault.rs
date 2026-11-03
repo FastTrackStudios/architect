@@ -114,6 +114,16 @@ fn views() -> Views {
             .home(Target::Split(Side::Right))
             .still(),
         )
+        // The clicker's ImGui window: a Luau script from its package,
+        // in the app's theme (`theme`, the clicker's own tokens).
+        .view(
+            View::new("clicker.window", "Clicker window", |_| {
+                rsx! { crate::extensions::ClickerWindow {} }
+            })
+            .icon(icon!(SlidersHorizontal))
+            .home(Target::Split(Side::Right))
+            .still(),
+        )
 }
 
 /// The vault's notes (the lab has no files yet).
@@ -157,6 +167,10 @@ fn first_workspace() -> Workspace {
             Target::Dock(Side::Right),
         ),
         (Pane::new("clicker", "clicker", "Clicker"), Target::Tab),
+        (
+            Pane::new("clicker-window", "clicker.window", "Clicker window"),
+            Target::Tab,
+        ),
     ];
     for (pane, target) in opens {
         let _ = w.open(pane, target);

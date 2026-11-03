@@ -11,6 +11,16 @@ architect-extensions = { workspace = true, features = ["guest"] }
 dioxus = { workspace = true }
 serde_json = { workspace = true }
 
+[dev-dependencies]
+# Its package, as the lab loads it: its theme in THEME_LIST, its tokens,
+# its ImGui window drawn in the theme.
+architect = { workspace = true, features = ["action-list"] }
+architect-extensions = { workspace = true, features = ["host"] }
+architect-theme = { workspace = true, features = ["actions"] }
+architect-canvas = { workspace = true, features = ["luau"] }
+architect-scripting = { workspace = true, features = ["luau"] }
+futures = "0.3"
+
 [lints]
 workspace = true
 
