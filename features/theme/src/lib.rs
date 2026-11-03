@@ -46,5 +46,6 @@ pub use store::{
 
 #[cfg(feature = "dioxus")]
 pub use dioxus::{
-    ThemeHandle, try_use_theme, use_resolved, use_theme, use_theme_store, use_themed,
+    RootCss, ThemeHandle, try_use_root_css, try_use_theme, use_resolved, use_theme,
+    use_theme_store, use_themed,
 };

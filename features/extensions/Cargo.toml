@@ -49,9 +49,11 @@ guest = [
     "dep:dioxus",
     "dep:tracing",
 ]
-remote = ["process", "ui", "dep:blitz-dom", "dep:blitz-traits", "dep:dioxus-native-dom", "dep:futures-timer"]
+remote = ["process", "ui", "dep:architect-theme", "architect-theme/dioxus", "dep:blitz-dom", "dep:blitz-traits", "dep:dioxus-native-dom", "dep:futures-timer"]
 
 [dependencies]
+# The host's theme into a process view's document (feature `remote`).
+architect-theme = { workspace = true, optional = true }
 architect-settings = { workspace = true }
 architect-orgs = { workspace = true }
 architect-commands = { workspace = true }
