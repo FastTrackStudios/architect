@@ -489,15 +489,28 @@ fn push_css_var(css: &mut String, key: &str, value: &str) {
     css.push(';');
 }
 
-/// Every resolved token, as the CSS variables [`ThemeProvider`] sets.
+/// architect's resolved tokens (the undotted ones), as the CSS variables
+/// [`ThemeProvider`] sets. An app's namespaced tokens (`arrange.item.edge`)
+/// stay out unless asked for ([`ThemeStyle::from_resolved_with`]).
 impl architect_theme::FromResolved for ThemeStyle {
     fn from_resolved(resolved: &architect_theme::Resolved) -> Self {
-        Self::new(
-            resolved
-                .tokens()
-                .iter()
-                .map(|(key, value)| ThemeToken::new(key.clone(), value.clone())),
-        )
+        Self::from_resolved_with(resolved, &[])
+    }
+}
+
+impl ThemeStyle {
+    /// architect's tokens and, opted in, an app's tokens in `namespaces`
+    /// (`["arrange"]`: `arrange.item.edge` as `--arrange-item-edge`).
+    #[must_use]
+    pub fn from_resolved_with(resolved: &architect_theme::Resolved, namespaces: &[&str]) -> Self {
+        let own = resolved
+            .css_tokens()
+            .map(|(key, value)| ThemeToken::new(key, value));
+        let apps = resolved
+            .css_namespaced(namespaces)
+            .into_iter()
+            .map(|(key, value)| ThemeToken::new(key, value));
+        Self::new(own.chain(apps))
     }
 }
 
@@ -507,8 +520,14 @@ impl ThemeState {
     /// family (the id without `-light` / `-dark`).
     #[must_use]
     pub fn from_resolved(resolved: &architect_theme::Resolved) -> Self {
-        use architect_theme::FromResolved as _;
-        let style = ThemeStyle::from_resolved(resolved);
+        Self::from_resolved_with(resolved, &[])
+    }
+
+    /// [`Self::from_resolved`], with an app's tokens in `namespaces` as
+    /// CSS variables too ([`ThemeStyle::from_resolved_with`]).
+    #[must_use]
+    pub fn from_resolved_with(resolved: &architect_theme::Resolved, namespaces: &[&str]) -> Self {
+        let style = ThemeStyle::from_resolved_with(resolved, namespaces);
         Self {
             mode: mode_of(resolved.scheme()),
             preset: family(resolved.id()).to_owned(),
@@ -538,14 +557,20 @@ fn family(id: &str) -> &str {
 /// (`architect_theme::use_theme_store` above it): every change the store
 /// makes — a pick, a preview, a token, a theme file saved — reaches the
 /// CSS variables. With no store above, the built-in default.
+///
+/// Only architect's tokens become variables. `css_namespaces` opts an
+/// app's namespaced tokens in: `["arrange"]` writes `arrange.item.edge`
+/// as `--arrange-item-edge`.
 #[component]
 pub fn ThemeStoreProvider(
     #[props(default = false)] allow_layout_scale: bool,
     #[props(default)] class: String,
+    #[props(default)] css_namespaces: Vec<String>,
     children: Element,
 ) -> Element {
     let resolved = architect_theme::use_resolved();
-    let next = ThemeState::from_resolved(&resolved);
+    let namespaces: Vec<&str> = css_namespaces.iter().map(String::as_str).collect();
+    let next = ThemeState::from_resolved_with(&resolved, &namespaces);
     let mut state = use_signal(|| next.clone());
     if *state.peek() != next {
         state.set(next);

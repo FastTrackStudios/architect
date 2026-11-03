@@ -953,6 +953,7 @@ dependencies = [
  "architect-orgs",
  "architect-scripting",
  "architect-settings",
+ "architect-theme",
  "architect-workspace",
  "architect-workspace-hack",
  "blitz-dom",

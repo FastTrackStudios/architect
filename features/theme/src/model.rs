@@ -227,8 +227,10 @@ pub struct ThemeFile {
     pub extends: Option<String>,
     #[facet(default)]
     pub palette: Palette,
-    /// Any token by name (`"card"`, `"radius"`, `"ink-3"`, a component
-    /// role an app adds): the last word, after everything is derived.
+    /// Any token by name (`"card"`, `"radius"`, `"ink-3"`, an app's own
+    /// `"arrange.item.edge"`): the last word, after everything is derived.
+    /// A value may name other tokens (`"mix($border, $foreground, 0.2)"`,
+    /// `crate::expr`).
     #[facet(default)]
     pub overrides: BTreeMap<String, String>,
 }
@@ -242,6 +244,9 @@ pub enum Source {
     File(String),
     /// A file an extension contributes (its id, the file).
     Extension { id: String, file: String },
+    /// Built in memory by the app ([`Theme::from_tokens`]): an import from
+    /// another format, a document's variables. A reload keeps it.
+    Memory,
 }
 
 impl Source {
@@ -252,6 +257,7 @@ impl Source {
             Self::Builtin => "builtin",
             Self::File(_) => "file",
             Self::Extension { .. } => "extension",
+            Self::Memory => "memory",
         }
     }
 }
@@ -262,6 +268,7 @@ impl fmt::Display for Source {
             Self::Builtin => f.write_str("builtin"),
             Self::File(path) => f.write_str(path),
             Self::Extension { id, file } => write!(f, "{id}: {file}"),
+            Self::Memory => f.write_str("memory"),
         }
     }
 }
@@ -270,7 +277,7 @@ impl fmt::Display for Source {
 /// field, what.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Problem {
-    /// The theme's id.
+    /// The theme's id (the layer's name, for a layer's override).
     pub theme: String,
     /// Its file (or `builtin`).
     pub source: String,
@@ -365,20 +372,7 @@ impl Theme {
             problems
                 .push(Problem::new(id, &source, "at most five chart colours").at("palette.chart"));
         }
-        for (name, value) in &file.overrides {
-            if !valid_token(name) {
-                problems.push(
-                    Problem::new(
-                        id,
-                        &source,
-                        "a token name is lowercase letters, digits and `-`",
-                    )
-                    .at(format!("overrides.{name}")),
-                );
-            } else if value.trim().is_empty() {
-                problems.push(Problem::new(id, &source, "empty").at(format!("overrides.{name}")));
-            }
-        }
+        check_overrides(id, &source, &file.overrides, &mut problems);
         if file.extends.as_deref() == Some(id) {
             problems.push(Problem::new(id, &source, "a theme cannot extend itself").at("extends"));
         }
@@ -389,6 +383,69 @@ impl Theme {
         }
     }
 }
+
+impl Theme {
+    /// A theme built in memory: `tokens` by name (literals or
+    /// expressions, `crate::expr`) over what `scheme`'s default palette
+    /// derives. For an import from another format or a document's
+    /// variables; [`crate::ThemeStore::insert_theme`] adds or replaces it
+    /// while the app runs.
+    ///
+    /// The names are checked as a theme file's overrides are: a name that
+    /// is not dot-separated `[a-z0-9-]` segments, an empty value or an
+    /// expression that does not read is a [`Problem`]. A palette name
+    /// (`background`) sets that token only: nothing is derived from it.
+    pub fn from_tokens(
+        id: &str,
+        scheme: Scheme,
+        tokens: BTreeMap<String, String>,
+    ) -> Result<Self, Vec<Problem>> {
+        let source = Source::Memory;
+        let mut problems = Vec::new();
+        if !valid_id(id) {
+            problems.push(
+                Problem::new(
+                    id,
+                    &source,
+                    "a theme id is lowercase letters, digits and `-`",
+                )
+                .at("id"),
+            );
+        }
+        check_overrides(id, &source, &tokens, &mut problems);
+        if !problems.is_empty() {
+            return Err(problems);
+        }
+        let file = ThemeFile {
+            appearance: Some(scheme),
+            overrides: tokens,
+            ..ThemeFile::default()
+        };
+        Ok(Self::new(id, file, source))
+    }
+}
+
+/// Each override's name and value, as strictly as a theme file reads.
+fn check_overrides(
+    id: &str,
+    source: &Source,
+    overrides: &BTreeMap<String, String>,
+    problems: &mut Vec<Problem>,
+) {
+    for (name, value) in overrides {
+        let at = format!("overrides.{name}");
+        if !valid_token(name) {
+            problems.push(Problem::new(id, source, TOKEN_NAME_RULE).at(at));
+        } else if value.trim().is_empty() {
+            problems.push(Problem::new(id, source, "empty").at(at));
+        } else if let Err(e) = crate::expr::parse(value) {
+            problems.push(Problem::new(id, source, e).at(at));
+        }
+    }
+}
+
+/// What a token name is, said for a person.
+pub const TOKEN_NAME_RULE: &str = "a token name is lowercase letters, digits and `-`, in segments separated by `.` (`arrange.item.edge`)";
 
 /// facet's message, with the field it names pulled out when it names one.
 fn parse_problem(id: &str, source: &Source, message: &str) -> Problem {
@@ -413,11 +470,13 @@ pub fn valid_id(id: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
-/// A token name: lowercase letters, digits and `-` (a CSS variable's
-/// name without its `--`).
+/// A token name: segments of lowercase letters, digits and `-`,
+/// separated by `.`. architect's own are one segment (`ink-2`, a CSS
+/// variable's name without its `--`); an app's are namespaced
+/// (`arrange.item.edge`).
 #[must_use]
 pub fn valid_token(name: &str) -> bool {
-    valid_id(name)
+    name.split('.').all(valid_id)
 }
 
 /// The themes the app knows, by id, and what was wrong reading them.
@@ -441,6 +500,11 @@ impl Registry {
 
     pub fn report(&mut self, problems: impl IntoIterator<Item = Problem>) {
         self.problems.extend(problems);
+    }
+
+    /// Removes theme `id`.
+    pub fn remove(&mut self, id: &str) {
+        self.themes.remove(id);
     }
 
     #[must_use]

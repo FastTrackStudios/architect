@@ -4,10 +4,11 @@
 //! broadcast-if-changed).
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
 use crate::model::{Appearance, Problem, Registry, Scheme, Source, Theme, ThemeChoice};
-use crate::resolve::{Resolved, resolve};
+use crate::resolve::{Resolved, resolve_in};
 
 /// A layer of the cascade, lowest first: each one's choice, appearance
 /// and overrides win over those below it.
@@ -69,7 +70,8 @@ impl LayerKind {
 pub struct Layer {
     pub choice: Option<ThemeChoice>,
     pub appearance: Option<Appearance>,
-    /// Tokens by name, over the theme's.
+    /// Tokens by name, over the theme's: literals or expressions
+    /// (`crate::expr`), evaluated after every layer is in.
     pub overrides: BTreeMap<String, String>,
 }
 
@@ -136,25 +138,33 @@ impl Layers {
     pub fn compose(&self, system: Scheme) -> Composed {
         let mut choice =
             ThemeChoice::pair(crate::builtin::DEFAULT_LIGHT, crate::builtin::DEFAULT_DARK);
+        let mut chosen_by = LayerKind::Builtin;
         let mut appearance = Appearance::System;
         let mut overrides = BTreeMap::new();
-        for layer in self.0.values() {
+        let mut set_by = BTreeMap::new();
+        for (kind, layer) in &self.0 {
             if let Some(c) = &layer.choice {
                 choice = c.clone();
+                chosen_by = *kind;
             }
             if let Some(a) = layer.appearance {
                 appearance = a;
             }
-            overrides.extend(layer.overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
+            for (k, v) in &layer.overrides {
+                overrides.insert(k.clone(), v.clone());
+                set_by.insert(k.clone(), *kind);
+            }
         }
         let scheme = appearance.scheme(system);
         let theme = choice.pick(scheme).to_owned();
         Composed {
             choice,
+            chosen_by,
             appearance,
             scheme,
             theme,
             overrides,
+            set_by,
         }
     }
 }
@@ -163,6 +173,8 @@ impl Layers {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Composed {
     pub choice: ThemeChoice,
+    /// The layer whose choice it is.
+    pub chosen_by: LayerKind,
     pub appearance: Appearance,
     /// The scheme the appearance asks for (a single choice's theme may
     /// be the other).
@@ -171,6 +183,8 @@ pub struct Composed {
     pub theme: String,
     /// Every layer's overrides, the higher over the lower.
     pub overrides: BTreeMap<String, String>,
+    /// The layer each override is from.
+    pub set_by: BTreeMap<String, LayerKind>,
 }
 
 /// One theme the store knows, as a picker or `THEME_LIST` shows it.
@@ -200,6 +214,8 @@ struct State {
 
 struct Inner {
     state: Mutex<State>,
+    /// `state.current`'s revision, readable without the lock.
+    revision: AtomicU64,
     listeners: Mutex<(u64, Vec<(u64, Listener)>)>,
     reloader: Mutex<Option<Reloader>>,
 }
@@ -207,9 +223,11 @@ struct Inner {
 /// An app's themes: the registry, the layers, the system's scheme, and
 /// the theme they resolve to.
 ///
-/// One per app; clones share it. `Send` and
-/// `Sync`: the Action List's handlers, a file watcher and the window all
-/// hold it.
+/// One per app; clones share it. `Send` and `Sync`: the Action List's
+/// handlers, a file watcher, a worker and the window all hold it. A
+/// reader on any thread gets a whole [`Resolved`] ([`Self::current`], an
+/// `Arc` taken under the lock), and [`Self::revision`] is an atomic a UI
+/// thread polls per frame.
 #[derive(Clone)]
 pub struct ThemeStore {
     inner: Arc<Inner>,
@@ -262,6 +280,7 @@ impl ThemeStore {
                 }),
                 listeners: Mutex::new((0, Vec::new())),
                 reloader: Mutex::new(None),
+                revision: AtomicU64::new(0),
             }),
         }
     }
@@ -276,9 +295,11 @@ impl ThemeStore {
         self.lock().current.clone()
     }
 
+    /// The revision of the theme showing; lock-free, cheap enough to poll
+    /// every frame. It changes after [`Self::current`] does.
     #[must_use]
     pub fn revision(&self) -> u64 {
-        self.lock().current.revision()
+        self.inner.revision.load(Ordering::Acquire)
     }
 
     /// The layers, composed.
@@ -324,12 +345,14 @@ impl ThemeStore {
     }
 
     /// Everything wrong: theme files, parents, a chosen theme that is
-    /// not there.
+    /// not there, and the token expressions that did not resolve (an
+    /// unknown `$name`, a cycle), each drawn magenta.
     #[must_use]
     pub fn problems(&self) -> Vec<Problem> {
         let s = self.lock();
         let mut out = s.registry.problems();
         out.extend(s.missing.clone());
+        out.extend(s.current.problems().iter().cloned());
         out
     }
 
@@ -347,6 +370,7 @@ impl ThemeStore {
                 let revision = s.current.revision().saturating_add(1);
                 s.composed = composed;
                 s.current = resolved.at_revision(revision);
+                self.inner.revision.store(revision, Ordering::Release);
             }
             (changed, s.current.clone())
         };
@@ -434,18 +458,38 @@ impl ThemeStore {
         self.apply(|s| s.registry = registry)
     }
 
+    /// Adds `theme`, or replaces the one of its id, while the app runs
+    /// (an import, a document's variables: [`Theme::from_tokens`]). The
+    /// theme showing is resolved again; true, and the revision bumped,
+    /// only when what shows changed.
+    pub fn insert_theme(&self, theme: Theme) -> bool {
+        self.apply(|s| s.registry.insert(theme))
+    }
+
+    /// Removes theme `id` (a chosen one falls back to the built-in
+    /// default, with the problem said).
+    pub fn remove_theme(&self, id: &str) -> bool {
+        self.apply(|s| s.registry.remove(id))
+    }
+
     /// How [`Self::reload`] re-reads the themes (`fs::ThemeDirs` gives one).
     pub fn set_reloader(&self, reloader: Reloader) {
         *lock(&self.inner.reloader) = Some(reloader);
     }
 
-    /// Re-reads the themes with the reloader; false when there is none or
-    /// nothing that shows changed.
+    /// Re-reads the themes with the reloader (the in-memory ones,
+    /// [`Source::Memory`], are kept); false when there is none or nothing
+    /// that shows changed.
     pub fn reload(&self) -> bool {
         let Some(reloader) = lock(&self.inner.reloader).clone() else {
             return false;
         };
-        let next = reloader(&self.registry());
+        let previous = self.registry();
+        let mut next = reloader(&previous);
+        // What the app built in memory is not on disk: it stays.
+        for theme in previous.iter().filter(|t| t.source == Source::Memory) {
+            next.insert(theme.clone());
+        }
         self.set_registry(next)
     }
 
@@ -506,6 +550,17 @@ fn evaluate(
             ),
         ),
     };
-    let resolved = resolve(&theme, registry).with_overrides(&composed.overrides);
+    let chosen_by = if missing.is_some() {
+        LayerKind::Builtin
+    } else {
+        composed.chosen_by
+    };
+    let resolved = resolve_in(
+        &theme,
+        registry,
+        Some(chosen_by),
+        &composed.overrides,
+        &composed.set_by,
+    );
     (composed, resolved, missing)
 }

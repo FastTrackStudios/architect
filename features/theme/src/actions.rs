@@ -8,10 +8,11 @@
 //! | `THEME_SET` | mutating | the pick: `one`, or `light` / `dark` halves, and/or `appearance` |
 //! | `THEME_PREVIEW` | mutating | shows a theme over everything until `THEME_PREVIEW_END` |
 //! | `THEME_PREVIEW_END` | mutating | ends the preview |
-//! | `THEME_TOKEN_SET` | mutating | a token overridden in the person's layer |
-//! | `THEME_TOKEN_RESET` | mutating | one (or every) override of the person's layer removed |
+//! | `THEME_TOKEN_SET` | mutating | a token overridden (a literal or an expression) in a layer, the person's by default |
+//! | `THEME_TOKEN_RESET` | mutating | one (or every) override of a layer removed, the person's by default |
 //! | `THEME_RELOAD` | mutating | the theme files read again |
-//! | `THEME_PROBLEMS` | read-only | what is wrong with the theme files and the choice |
+//! | `THEME_PROBLEMS` | read-only | what is wrong with the theme files, the choice and the token expressions |
+//! | `THEME_INSPECT` | read-only | each token (all, or those under a prefix): its value, who set it, whether it is an expression |
 //!
 //! Every write answers whether anything that shows changed, and the
 //! revision after it. None is destructive: each is undone by another.
@@ -24,7 +25,7 @@ use std::collections::BTreeMap;
 use architect::action::{ActionError, ActionList, ActionMeta, Effect};
 use facet::Facet;
 
-use crate::model::{Appearance, ThemeChoice, valid_token};
+use crate::model::{Appearance, TOKEN_NAME_RULE, ThemeChoice, valid_token};
 use crate::store::{LayerKind, ThemeStore};
 
 pub mod ids {
@@ -37,6 +38,7 @@ pub mod ids {
     pub const TOKEN_RESET: &str = "THEME_TOKEN_RESET";
     pub const RELOAD: &str = "THEME_RELOAD";
     pub const PROBLEMS: &str = "THEME_PROBLEMS";
+    pub const INSPECT: &str = "THEME_INSPECT";
 
     /// Every id [`super::register`] puts on a list.
     pub const ALL: &[&str] = &[
@@ -49,6 +51,7 @@ pub mod ids {
         TOKEN_RESET,
         RELOAD,
         PROBLEMS,
+        INSPECT,
     ];
 }
 
@@ -75,10 +78,11 @@ metas! {
     SET = SET, "Set the theme", "Picks the theme: `one` always shows it; `light` / `dark` set that half of the pair (the other half stays). `appearance` is system, light or dark. Answers whether anything changed and the revision.";
     PREVIEW = PREVIEW, "Preview a theme", "Shows theme `id` over every other choice until THEME_PREVIEW_END; nothing is kept.";
     PREVIEW_END = PREVIEW_END, "End the theme preview", "Ends THEME_PREVIEW: the chosen theme shows again.";
-    TOKEN_SET = TOKEN_SET, "Set a theme token", "Overrides token `name` (as THEME_GET names it: `primary`, `ink-3`, `radius`) with `value` (any CSS value) in the person's layer, over every theme.";
-    TOKEN_RESET = TOKEN_RESET, "Reset a theme token", "Removes the person's override of token `name`, or every one when `name` is left out.";
+    TOKEN_SET = TOKEN_SET, "Set a theme token", "Overrides token `name` (as THEME_GET names it: `primary`, `ink-3`, `radius`, an app's `arrange.item.edge`) with `value` in `layer` (app, org, person, device, workspace, pick, preview; person when left out), over every theme. A value is any CSS value, or an expression over other tokens: `$border`, `mix($border, $foreground, 0.2)`, `alpha($ink, 0.3)`.";
+    TOKEN_RESET = TOKEN_RESET, "Reset a theme token", "Removes `layer`'s (the person's when left out) override of token `name`, or every one when `name` is left out.";
     RELOAD = RELOAD, "Reload themes", "Reads the theme files again. A file that no longer reads keeps its last good theme and is reported (THEME_PROBLEMS).";
-    PROBLEMS = PROBLEMS, "Theme problems", "What is wrong: theme files that do not read (file, field, message), missing or looping parents, a chosen theme that is not there.";
+    PROBLEMS = PROBLEMS, "Theme problems", "What is wrong: theme files that do not read (file, field, message), missing or looping parents, a chosen theme that is not there, token expressions that name no token or loop (drawn magenta).";
+    INSPECT = INSPECT, "Inspect theme tokens", "Every token of the theme showing (or those whose name starts with `prefix`, such as `arrange.`): its value, its origin (derived, theme, layer), the layer and the theme or layer id that set it, and the expression when it is one.";
 }
 
 /// One theme, as `THEME_LIST` answers it.
@@ -159,6 +163,9 @@ pub struct IdArgs {
 pub struct TokenSetArgs {
     pub name: String,
     pub value: String,
+    /// The layer (`person` when left out).
+    #[facet(default)]
+    pub layer: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Facet)]
@@ -166,6 +173,40 @@ pub struct TokenResetArgs {
     /// Every override when left out.
     #[facet(default)]
     pub name: Option<String>,
+    /// The layer (`person` when left out).
+    #[facet(default)]
+    pub layer: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Facet)]
+pub struct InspectArgs {
+    /// Only the tokens whose name starts with it (`arrange.`, `ink`).
+    #[facet(default)]
+    pub prefix: Option<String>,
+}
+
+/// One token, as `THEME_INSPECT` answers it.
+#[derive(Debug, Clone, Facet)]
+pub struct TokenOut {
+    pub name: String,
+    /// The final value (an expression's, evaluated).
+    pub value: String,
+    /// `derived`, `theme` or `layer`.
+    pub origin: String,
+    /// The layer that set it, or whose choice shows the theme that did.
+    pub layer: Option<String>,
+    /// The theme (or the layer) that set it.
+    pub id: String,
+    pub reference: bool,
+    /// The expression as written, when it is one.
+    pub expression: Option<String>,
+}
+
+#[derive(Debug, Clone, Facet)]
+pub struct InspectOut {
+    pub theme: String,
+    pub revision: u64,
+    pub tokens: Vec<TokenOut>,
 }
 
 /// A write's answer.
@@ -237,6 +278,64 @@ pub fn get(store: &ThemeStore, tokens: Option<&[String]>) -> GetOut {
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect(),
     }
+}
+
+/// `THEME_INSPECT`'s answer for `store`: every token under `prefix`.
+#[must_use]
+pub fn inspect(store: &ThemeStore, prefix: Option<&str>) -> InspectOut {
+    let current = store.current();
+    let tokens = current
+        .tokens()
+        .iter()
+        .filter(|(k, _)| prefix.is_none_or(|p| k.starts_with(p)))
+        .map(|(name, value)| {
+            let source = current.source(name);
+            TokenOut {
+                name: name.clone(),
+                value: value.clone(),
+                origin: source.map_or("derived", |s| s.origin.as_str()).to_owned(),
+                layer: source.and_then(|s| s.layer).map(|l| l.as_str().to_owned()),
+                id: source.map_or_else(|| current.id().to_owned(), |s| s.id.clone()),
+                reference: source.is_some_and(crate::TokenSource::is_reference),
+                expression: source.and_then(|s| s.expression.clone()),
+            }
+        })
+        .collect();
+    InspectOut {
+        theme: current.id().to_owned(),
+        revision: current.revision(),
+        tokens,
+    }
+}
+
+/// A token action's `layer`: the person's when left out; never the
+/// built-in one (architect's own).
+fn layer_arg(layer: Option<&str>) -> Result<LayerKind, String> {
+    let Some(name) = layer else {
+        return Ok(LayerKind::Person);
+    };
+    match LayerKind::parse(name) {
+        Some(LayerKind::Builtin) => Err("the builtin layer is architect's own".to_owned()),
+        Some(kind) => Ok(kind),
+        None => Err(format!(
+            "{name:?} is not a layer (app, org, person, device, workspace, pick, preview)"
+        )),
+    }
+}
+
+/// `THEME_TOKEN_SET` on `store`.
+pub fn token_set(store: &ThemeStore, args: &TokenSetArgs) -> Result<Changed, String> {
+    if !valid_token(&args.name) {
+        return Err(format!("{:?}: {TOKEN_NAME_RULE}", args.name));
+    }
+    let value = args.value.trim();
+    if value.is_empty() {
+        return Err("an empty value: THEME_TOKEN_RESET removes an override".to_owned());
+    }
+    crate::expr::parse(value)?;
+    let layer = layer_arg(args.layer.as_deref())?;
+    let did = store.set_token(layer, &args.name, value);
+    Ok(changed(store, did))
 }
 
 /// `THEME_SET` on `store`.
@@ -318,24 +417,15 @@ pub fn register(list: &ActionList, store: &ThemeStore) -> Result<(), ActionError
     })?;
     let s = store.clone();
     list.register(&TOKEN_SET, Effect::Mutating, move |args: TokenSetArgs| {
-        if !valid_token(&args.name) {
-            return Err(format!(
-                "{:?}: a token name is lowercase letters, digits and `-`",
-                args.name
-            ));
-        }
-        if args.value.trim().is_empty() {
-            return Err("an empty value: THEME_TOKEN_RESET removes an override".to_owned());
-        }
-        let did = s.set_token(LayerKind::Person, &args.name, args.value.trim());
-        Ok(changed(&s, did))
+        token_set(&s, &args)
     })?;
     let s = store.clone();
     list.register(
         &TOKEN_RESET,
         Effect::Mutating,
         move |args: TokenResetArgs| {
-            let did = s.reset_token(LayerKind::Person, args.name.as_deref());
+            let layer = layer_arg(args.layer.as_deref())?;
+            let did = s.reset_token(layer, args.name.as_deref());
             Ok(changed(&s, did))
         },
     )?;
@@ -359,6 +449,10 @@ pub fn register(list: &ActionList, store: &ThemeStore) -> Result<(), ActionError
                 })
                 .collect(),
         })
+    })?;
+    let s = store.clone();
+    list.register(&INSPECT, Effect::ReadOnly, move |args: InspectArgs| {
+        Ok(inspect(&s, args.prefix.as_deref()))
     })?;
     Ok(())
 }
