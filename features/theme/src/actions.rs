@@ -468,7 +468,8 @@ pub fn register(list: &ActionList, store: &ThemeStore) -> Result<(), ActionError
 pub fn report(list: &ActionList, store: &ThemeStore) {
     let s = store.clone();
     list.status().section(STATUS_SECTION, move || {
-        let mut now = get(&s, Some(&[] as &[String]));
+        let none: &[String] = &[];
+        let mut now = get(&s, Some(none));
         now.tokens.clear();
         facet_json::to_string(&now).unwrap_or_else(|_| "{}".to_owned())
     });

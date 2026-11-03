@@ -153,7 +153,7 @@ impl Problems {
         };
         let mut out = Vec::new();
         for (key, read) in pulled {
-            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read())) {
+            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(read.as_ref())) {
                 Ok(found) => out.extend(found),
                 Err(_) => out.push(Problem::new(key, "its problem source panicked")),
             }
@@ -217,6 +217,8 @@ impl StatusBoard {
     /// when it gave something that is not JSON or panicked.
     #[must_use]
     pub fn read(&self) -> Vec<(String, String)> {
+        // Taken out of the lock first: a section may read the board.
+        #[allow(clippy::needless_collect)]
         let sections: Vec<(String, Section)> = self
             .sections
             .read()
@@ -228,15 +230,16 @@ impl StatusBoard {
             .into_iter()
             .filter(|(name, _)| !RESERVED.contains(&name.as_str()))
             .map(|(name, read)| {
-                let json = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read())) {
-                    Ok(json) => match check_json(json.as_bytes()) {
-                        Ok(()) => json,
-                        Err(why) => {
-                            error_json(&format!("it gave something that is not JSON: {why}"))
-                        }
-                    },
-                    Err(_) => error_json("it panicked"),
-                };
+                let json = std::panic::catch_unwind(std::panic::AssertUnwindSafe(read.as_ref()))
+                    .map_or_else(
+                        |_| error_json("it panicked"),
+                        |json| match check_json(json.as_bytes()) {
+                            Ok(()) => json,
+                            Err(why) => {
+                                error_json(&format!("it gave something that is not JSON: {why}"))
+                            }
+                        },
+                    );
                 (name, json)
             })
             .collect()

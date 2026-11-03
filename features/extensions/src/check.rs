@@ -20,6 +20,7 @@
 //!
 //! Then it is unloaded and its process stopped.
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -99,15 +100,14 @@ impl CheckReport {
     }
 
     fn problem(&mut self, stage: &str, message: impl Into<String>) -> &mut CheckProblem {
-        self.problems.push(CheckProblem {
+        let problem = CheckProblem {
             stage: stage.to_owned(),
             file: None,
             field: None,
             line: None,
             message: message.into(),
-        });
-        let last = self.problems.len().saturating_sub(1);
-        &mut self.problems[last]
+        };
+        self.problems.push_mut(problem)
     }
 
     /// The first problem, one line: what a command line prints.
@@ -118,7 +118,7 @@ impl CheckReport {
             |p| {
                 let mut at = p.file.clone().unwrap_or_default();
                 if let Some(line) = p.line {
-                    at.push_str(&format!(":{line}"));
+                    let _ = write!(at, ":{line}");
                 }
                 if let Some(field) = &p.field {
                     if !at.is_empty() {
@@ -300,7 +300,9 @@ impl Checker {
         view: &str,
     ) -> Result<u32, String> {
         use crate::process::State;
-        let deadline = std::time::Instant::now() + self.frame_within;
+        let deadline = std::time::Instant::now()
+            .checked_add(self.frame_within)
+            .unwrap_or_else(std::time::Instant::now);
         let process = processes.get(id).ok_or("its process is not running")?;
         loop {
             match process.state() {

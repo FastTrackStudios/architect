@@ -1657,7 +1657,7 @@ fn known_names(entry: &Entry, args: &[u8]) -> Result<(), ActionError> {
     let Ok(sent) = facet_json::from_slice::<facet_value::Value>(args) else {
         return Ok(());
     };
-    let Some(sent) = sent.as_object().filter(|o| o.len() > 0) else {
+    let Some(sent) = sent.as_object().filter(|o| !o.is_empty()) else {
         return Ok(());
     };
     let Some(valid) = arg_names(entry) else {
@@ -1665,7 +1665,7 @@ fn known_names(entry: &Entry, args: &[u8]) -> Result<(), ActionError> {
     };
     let unknown: Vec<&str> = sent
         .keys()
-        .map(|k| k.as_str())
+        .map(facet_value::VString::as_str)
         .filter(|k| !valid.iter().any(|v| v == k))
         .collect();
     if unknown.is_empty() {

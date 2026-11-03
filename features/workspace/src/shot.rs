@@ -192,7 +192,9 @@ fn pane_rect(list: &ActionList, pane: &str) -> Result<Rect, String> {
         .ok_or_else(|| format!("pane {pane} has not been measured yet"))
 }
 
-/// Paints the document as the window would and writes the PNG.
+/// Paints the document as the window would and writes the PNG. On the
+/// window's thread: the document is the window's own, not `Send`.
+#[allow(clippy::future_not_send)]
 async fn take(live: &LiveDocument, job: &Job) -> Result<Shot, String> {
     // The document is busy while the window applies a frame's changes:
     // try again between two frames.
@@ -254,8 +256,18 @@ fn crop(
     scale: f64,
 ) -> Result<(Vec<u8>, u32, u32), String> {
     let px = |v: f32| {
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let p = (f64::from(v) * scale).round().max(0.0) as u32;
+        let p = (f64::from(v) * scale).round();
+        // Clamped to the image's size below; a negative or NaN one is 0.
+        #[allow(
+            clippy::as_conversions,
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss
+        )]
+        let p = if p.is_finite() {
+            p.clamp(0.0, 65_535.0) as u32
+        } else {
+            0
+        };
         p
     };
     let (x, y) = (px(rect.x).min(width), px(rect.y).min(height));
@@ -266,12 +278,16 @@ fn crop(
     if w == 0 || h == 0 {
         return Err("the pane is outside the window".to_owned());
     }
-    let stride = width as usize * 4;
-    let mut out = Vec::with_capacity(w as usize * h as usize * 4);
+    let size = |n: u32| usize::try_from(n).unwrap_or(usize::MAX);
+    let stride = size(width).saturating_mul(4);
+    let line_len = size(w).saturating_mul(4);
+    let mut out = Vec::with_capacity(line_len.saturating_mul(size(h)));
     for row in y..y.saturating_add(h) {
-        let start = row as usize * stride + x as usize * 4;
+        let start = size(row)
+            .saturating_mul(stride)
+            .saturating_add(size(x).saturating_mul(4));
         let line = pixels
-            .get(start..start + w as usize * 4)
+            .get(start..start.saturating_add(line_len))
             .ok_or("the shot is smaller than its window")?;
         out.extend_from_slice(line);
     }
