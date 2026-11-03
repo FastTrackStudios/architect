@@ -113,6 +113,17 @@ Cli::new("task").headless(|| Ok(Box::new(ListOnly::new(surface_for_ci())))).main
 - An app that serves either face needs `Parity::new(&server).check()` in a test; `cargo xtask surfaces` (CI) fails otherwise. `Parity` runs only read-only actions unless given `.run(id, args)`: never point it at a live app's real data.
 - Windows: the named pipe and its client are written but not yet compiled in CI.
 
+## Agent tools on a running app (#268)
+
+What lets a coding agent change a running app and check its own work (herdr's `status`, `shot`, `check` and generated guide):
+
+- **Unknown argument names are refused** at every door (`crates/architect/src/action_list.rs` `ActionList`): a top-level name the params schema's `properties` don't have answers `bad_args` `unknown argument(s): x; valid arguments: a, b` before anything runs (an action taking nothing: `valid arguments: none`). Open schemas (`additionalProperties`) take any. A destructive call from outside answers `confirmation_required` at once: an agent never waits on a dialog.
+- **`APP_STATUS`** (`crates/architect/src/action_list/app.rs` `register`): every `StatusBoard` section (`ActionList::status`) by name, then `problems` (every `Problems` source: `source`, `file`, `field`, `message`) and `confirmations`. A part of the app plugs in on the list it already has: `list.status().section(name, || json)`, `list.problems().source(key, || vec![Problem::new(..)])` (pulled per read) or `.report(key, problems)` (pushed; empty clears). The workspace host gives `workspace` (`features/workspace/src/host/actions.rs` `WorkspaceStatus`), `architect_theme::actions::register` gives `theme` (`features/theme/src/actions.rs` `report`), extensions report with `Extensions::report_problems(list.problems())`.
+- **`APP_SHOT {path?, pane?}`** (`features/workspace/src/shot.rs` `use_app_shot`, feature `native`): the launcher keeps the main window's Blitz document in context (`LiveDocument`); a shot repaints it on the CPU (`anyrender_vello_cpu`) at the window's pixel size and scale, on the window's thread; `pane` crops to `WORKSPACE_PANE_GET`'s `rect`. `actions shot [file.png] [--pane id]` runs it. Not shot: pop-out windows, and what a custom widget draws on the GPU only.
+- **The generated guide** (`features/control/src/guide.rs` `Guide`): `Guide::new(app).preamble(template).keep_written(surface, app_dir, settle)` writes `<app dir>/AGENTS.md` (header, the app's opening, architect's `RULES`, every action by area with effect and arguments) and `actions.schema.json`, again whenever an action comes or goes. Test it names every action (`apps/lab/desktop/tests/agent_tools.rs`).
+- **`EXT_CHECK {folder}`** (`features/extensions/src/check.rs` `Checker`; `Host::checker` for the app's view kinds): manifest (field, TOML line), Luau scripts (file, line), a load in a host of its own, each view rendered once (a process view's first frame, feature `remote`). **`EXT_CLONE {id, as?}`** (`features/extensions/src/clone.rs` `Extensions::clone_to_dev`; needs `with_dev_root`).
+- **Workspaces:** `WORKSPACES_CLONE {name, as?}`; `WORKSPACES_SAVE` over a built-in set from outside the app answers `builtin`; `WORKSPACES_RESTORE_BUILTINS` puts the shipped sets back (`Env::shipped`). **The escape hatch** Ctrl+Alt+Shift+Escape (Cmd on macOS) is `Commands::escape_hatch` (`features/commands/src/ui.rs`), heard before any binding; `Keymap::bind` refuses it.
+
 ## Scripts (`architect-scripting`)
 
 ```rust
@@ -157,7 +168,7 @@ let host = Host::new(list.clone(), SharedSections::new(registry)); // `ui`: use_
 let ext = Extensions::new(host, Installs::new(data_dir.join("extensions")))
     .with_source(GitRegistry::new(url, cache_dir))   // or FolderRegistry, ReaPackSource
     .with_builtin(Package::embedded(include_str!(".../extension.toml"), &[("x.luau", include_str!(".../x.luau"))])?);
-ext.install_actions()?;          // EXT_LIST / EXT_SEARCH / EXT_INSTALL / EXT_UNINSTALL / EXT_RELOAD
+ext.install_actions()?;          // EXT_LIST / EXT_SEARCH / EXT_INSTALL / EXT_UNINSTALL / EXT_RELOAD / EXT_CHECK / EXT_CLONE
 let _ = ext.sync();              // load the copy of each that runs
 // on a timer: ext.reload_changed()  — hot reload; a failed one keeps its last good copy
 ```
@@ -184,7 +195,7 @@ let _ = ext.sync();              // load the copy of each that runs
 - **The tree.** Besides the flat `groups`/`splits`/`docked`, each window has `center` (nested `split`/`group` with `id`, `path` like `center/0/1`, `rect`, `measured`), `docks`, `floats`, `area`, `bounds` (`features/workspace/src/tree.rs`). Rects are window points: measured by the Blitz host, else laid out from shares. A path addresses a split for one revision (`WORKSPACE_RESIZE {path, shares}`).
 - **Whole layouts:** `WORKSPACE_EXPORT` → edit → `WORKSPACE_APPLY {layout, keep_unplaced=true}`: built whole first, so one that does not fit changes nothing; panes keep their ids (their views are not rebuilt).
 - **Don't close what you didn't open.** `WORKSPACE_CLOSE` is reopenable (`WORKSPACE_REOPEN`); `WORKSPACE_CLOSE_OTHERS`, `WORKSPACE_CLOSE_WINDOW` and `WORKSPACES_DELETE` are `Effect::Destructive`.
-- **Saved layouts** ("workspaces"): `WORKSPACES_LIST` first; `WORKSPACES_LOAD {id|name|slot}`, `WORKSPACES_SAVE {name?}` (a name saves over the set of that name), `WORKSPACES_RENAME`, `WORKSPACES_SET_SLOT`, `WORKSPACES_OPTIONS`, `WORKSPACES_RESET`, `WORKSPACES_DELETE`; each change is a `Changed {topic: "workspaces"}` event.
+- **Saved layouts** ("workspaces"): `WORKSPACES_LIST` first; `WORKSPACES_LOAD {id|name|slot}`, `WORKSPACES_SAVE {name?}` (a name saves over the set of that name), `WORKSPACES_RENAME`, `WORKSPACES_SET_SLOT`, `WORKSPACES_OPTIONS`, `WORKSPACES_RESET`, `WORKSPACES_DELETE`, `WORKSPACES_CLONE {name, as?}`, `WORKSPACES_RESTORE_BUILTINS`; each change is a `Changed {topic: "workspaces"}` event. A built-in set is the person's: a model's save over it answers `builtin`; clone it, then save.
 - The view commands (`WORKSPACE_CLOSE_TAB`, `WORKSPACE_SPLIT_RIGHT`, …) are these actions with the active pane as target and `focus: true` (`features/workspace/src/host/commands.rs`).
 
 ## Pitfalls

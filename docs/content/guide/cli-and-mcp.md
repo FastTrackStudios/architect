@@ -205,6 +205,38 @@ CLI's exit codes, headless mode and the MCP bridge).
 or the reverse, when one that serves either has no `Parity` test, or when
 MCP's generic tools stop being built from `Method::TOOLS`.
 
+## 7. Tools for an agent changing the running app
+
+What herdr gives a coding agent that restyles and restructures its
+window, every architect app can give through its list (#268):
+
+- **A guide in the app's folder.** `architect_control::guide::Guide`
+  writes `<app dir>/AGENTS.md` and `actions.schema.json` from the live
+  list: the app's own opening (a template), architect's rules (inspect
+  first, change safely, themes, workspaces, extensions, the dev loop),
+  then every action by area with its effect and arguments. `keep_written`
+  writes it again whenever an action comes or goes. The lab's:
+  `apps/lab/desktop/src/lib.rs` `keep_guide_written`, its opening
+  `apps/lab/desktop/src/AGENTS.preamble.md`.
+- **`APP_STATUS`**: one read of what is on screen and what is wrong. Its
+  parts are the list's `StatusBoard` sections (the workspace host's, the
+  theme's) and its `Problems` (the theme files', the extensions', each
+  with source, file, field and message); `architect::action::app_status::register`
+  puts it on the list.
+- **`APP_SHOT`** and `actions shot [file.png] [--pane id]`: the window
+  drawn by the app itself, its Blitz document painted again on the CPU at
+  the window's pixel size (`features/workspace/src/shot.rs`).
+- **`EXT_CHECK {folder}`**: an extension loaded once on its own and each
+  view rendered once, `ok` or the exact problem;
+  `architect-desktop extensions check <folder>` does it with no window
+  and exits nonzero when it fails. **`EXT_CLONE`** and
+  **`WORKSPACES_CLONE`** copy what the app ships before it is changed.
+- **Safety at the door.** An argument name an action does not take is
+  refused with the names it takes; a destructive call from outside is
+  `confirmation_required` (exit code 7), never a dialog. The escape hatch,
+  Ctrl+Alt+Shift+Escape (Cmd on macOS), resets the built-in layouts and
+  the person's keys and cannot be rebound.
+
 ## Where Task and Studio are
 
 Neither embeds the `actions` command or serves a control socket yet; each

@@ -1091,10 +1091,11 @@ fn builtin_from_outside(st: &State, env: &Env, id: &str) -> Option<Answer> {
     })
 }
 
-/// `WORKSPACES_CLONE`: a copy of set `name` (by name or id), not built
-/// in and in no slot, named `as` (`<name> copy` unless given). It becomes
-/// the active set, the live layout staying as it is, so what is saved
-/// next goes to the copy (herdr's `layout.clone`).
+/// `WORKSPACES_CLONE`: a copy of set `name` (by name or id).
+///
+/// Not built in and in no slot, named `as` (`<name> copy` unless given).
+/// It becomes the active set, the live layout staying as it is, so what
+/// is saved next goes to the copy (herdr's `layout.clone`).
 ///
 /// # Errors
 ///
@@ -1144,10 +1145,11 @@ pub fn clone_set(st: &mut State, env: &Env, a: super::CloneArgs) -> Result<Answe
     ))
 }
 
-/// `WORKSPACES_RESTORE_BUILTINS`, the escape hatch: every set the app
-/// ships back as it ships it ([`Env::shipped`]), a changed one kept as a
-/// copy (`<name> (edited)`) first, and the first of them (by slot) shown
-/// as the live layout.
+/// `WORKSPACES_RESTORE_BUILTINS`, the escape hatch.
+///
+/// Every set the app ships back as it ships it ([`Env::shipped`]), a
+/// changed one kept as a copy (`<name> (edited)`) first, and the first of
+/// them (by slot) shown as the live layout.
 ///
 /// # Errors
 ///

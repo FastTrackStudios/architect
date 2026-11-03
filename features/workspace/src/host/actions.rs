@@ -199,7 +199,7 @@ impl Host {
         );
         env.windows = self.has_windows();
         env.measured = self.measured.peek().clone();
-        env.shipped = self.shipped.peek().clone();
+        env.shipped.clone_from(&self.shipped.peek());
         for side in Docks::SIDES {
             if let Some(bounds) = self.dock_bounds(side) {
                 env.set_dock_bounds(side, bounds);

@@ -157,10 +157,10 @@ fn problem(id: &str, error: &LoadError) -> Problem {
             let (field, line, message) = crate::check::manifest_fields(e);
             let mut p = Problem::new(
                 "extension",
-                match line {
-                    Some(line) => format!("{id}: line {line}: {message}"),
-                    None => format!("{id}: {message}"),
-                },
+                line.map_or_else(
+                    || format!("{id}: {message}"),
+                    |line| format!("{id}: line {line}: {message}"),
+                ),
             );
             if let Some(folder) = &folder {
                 p = p.file(folder.join(MANIFEST).display().to_string());

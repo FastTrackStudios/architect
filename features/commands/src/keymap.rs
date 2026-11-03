@@ -27,10 +27,12 @@ const NORMAL: &str = "normal";
 /// The action string that removes a binding.
 const UNBIND: &str = "unbind";
 
-/// The escape hatch, as the guide names it: Ctrl+Alt+Shift+Escape, or
-/// Cmd+Alt+Shift+Escape on macOS. It always works and nobody can rebind
-/// it ([`is_escape_hatch`]): it drops the person's key changes and runs
-/// [`ESCAPE_HATCH_ACTION`] (`Commands::escape_hatch`).
+/// The escape hatch, as the guide names it.
+///
+/// Ctrl+Alt+Shift+Escape, or Cmd+Alt+Shift+Escape on macOS. It always
+/// works and nobody can rebind it ([`is_escape_hatch`]): it drops the
+/// person's key changes and runs [`ESCAPE_HATCH_ACTION`]
+/// (`Commands::escape_hatch`).
 pub const ESCAPE_HATCH: &str = "Ctrl+Alt+Shift+Escape (Cmd+Alt+Shift+Escape on macOS)";
 
 /// What the escape hatch runs besides resetting the keys: every built-in

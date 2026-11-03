@@ -161,7 +161,7 @@ impl Guide {
             .spawn(move || {
                 let list = surface.list().clone();
                 let mut since = list.latest();
-                let mut due = Some(Instant::now() + settle);
+                let mut due = Instant::now().checked_add(settle);
                 while !stopped.load(Ordering::Relaxed) {
                     let wait = due.map_or(Duration::from_millis(500), |at| {
                         at.saturating_duration_since(Instant::now())
@@ -177,7 +177,7 @@ impl Guide {
                     });
                     if moved {
                         // Wait for the rest of a burst (a page mounting).
-                        due = Some(Instant::now() + Duration::from_millis(300));
+                        due = Instant::now().checked_add(Duration::from_millis(300));
                     }
                     if due.is_some_and(|at| Instant::now() >= at) {
                         due = None;
@@ -305,7 +305,7 @@ fn type_of(prop: &Value) -> String {
     if let Some(choices) = prop.get("enum").and_then(Value::as_array) {
         return choices
             .iter()
-            .map(|c| c.to_string())
+            .map(Value::to_string)
             .collect::<Vec<_>>()
             .join(" | ");
     }
