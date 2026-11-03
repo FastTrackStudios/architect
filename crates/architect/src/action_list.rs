@@ -270,6 +270,101 @@ type CallerHandler =
 pub type CallerAsyncHandler =
     Arc<dyn Fn(&ActionCaller, &[u8]) -> Result<ActionFuture, ActionError> + Send + Sync>;
 
+/// Where a run came from: the palette, a menu, a target's context menu,
+/// a key, a hook, a link, an agent. What a door that runs an action for a
+/// person (or an event) says of it, so an action that takes no arguments
+/// still knows what it was run on ([`ActionCaller::with_invocation`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Facet)]
+#[repr(u8)]
+pub enum InvocationSource {
+    /// The app's own code, or nothing said.
+    #[default]
+    App,
+    /// ⌘K.
+    Palette,
+    /// The menu bar.
+    Menu,
+    /// A target's context menu (right-click, ⋯): [`Invocation::target`].
+    ContextMenu,
+    /// A key.
+    Key,
+    /// A manifest hook: [`Invocation::event`].
+    Hook,
+    /// A link clicked: [`Invocation::url`].
+    Link,
+    /// A file or document opened: [`Invocation::path`].
+    Open,
+    /// A model or an agent (MCP, the CLI).
+    Agent,
+    /// A script.
+    Script,
+}
+
+impl InvocationSource {
+    /// Its name, as JSON and a script see it (`context_menu`).
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::App => "app",
+            Self::Palette => "palette",
+            Self::Menu => "menu",
+            Self::ContextMenu => "context_menu",
+            Self::Key => "key",
+            Self::Hook => "hook",
+            Self::Link => "link",
+            Self::Open => "open",
+            Self::Agent => "agent",
+            Self::Script => "script",
+        }
+    }
+}
+
+/// What a run was invoked from and on: the source, and whatever it knew
+/// (the target a context menu was opened on, the window, pane and view,
+/// the selection, the link, the file, the event a hook heard). Every
+/// field but the source may be unset.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Facet)]
+pub struct Invocation {
+    pub source: InvocationSource,
+    /// What a context menu was opened on (`pane`, `tab`, `file`,
+    /// `view:<kind>`), with its id in [`Self::id`].
+    pub target: Option<String>,
+    /// The target's id (a pane id, a file's path).
+    pub id: Option<String>,
+    pub window: Option<String>,
+    pub pane: Option<String>,
+    /// The view kind showing in [`Self::pane`].
+    pub view: Option<String>,
+    /// What was selected, as text.
+    pub selection: Option<String>,
+    /// The link that was clicked.
+    pub url: Option<String>,
+    /// The file or document that was opened.
+    pub path: Option<String>,
+    /// The event a hook heard (`workspace.changed`) and what it said.
+    pub event: Option<String>,
+    pub detail: Option<String>,
+}
+
+impl Invocation {
+    /// Invoked from `source`, nothing else known.
+    #[must_use]
+    pub fn new(source: InvocationSource) -> Self {
+        Self {
+            source,
+            ..Self::default()
+        }
+    }
+
+    /// A context menu's run on `target` (`pane`) `id`.
+    #[must_use]
+    pub fn on(mut self, target: impl Into<String>, id: impl Into<String>) -> Self {
+        self.target = Some(target.into());
+        self.id = Some(id.into());
+        self
+    }
+}
+
 /// Who runs an action, and what it runs in: what a handler registered
 /// with [`ActionList::register_with`] is handed with its arguments.
 ///
@@ -288,6 +383,8 @@ pub type CallerAsyncHandler =
 pub struct ActionCaller {
     principal: Option<Principal>,
     context: Option<Arc<dyn Any + Send + Sync>>,
+    /// Where it was invoked from ([`Self::with_invocation`]).
+    invocation: Option<Arc<Invocation>>,
     /// A confirmation ticket the call carries ([`Self::with_ticket`]).
     ticket: Option<String>,
     /// Asks a person before any write, not only a destructive one
@@ -303,6 +400,7 @@ impl ActionCaller {
         Self {
             principal: None,
             context: None,
+            invocation: None,
             ticket: None,
             confirm_writes: false,
         }
@@ -315,6 +413,7 @@ impl ActionCaller {
         Self {
             principal: Some(principal),
             context: None,
+            invocation: None,
             ticket: None,
             confirm_writes: false,
         }
@@ -334,6 +433,21 @@ impl ActionCaller {
     pub fn with_context<T: Any + Send + Sync>(mut self, context: T) -> Self {
         self.context = Some(Arc::new(context));
         self
+    }
+
+    /// This caller, saying where the run was invoked from and on: kept
+    /// apart from [`Self::with_context`], so a door's context and the
+    /// invocation travel together.
+    #[must_use]
+    pub fn with_invocation(mut self, invocation: Invocation) -> Self {
+        self.invocation = Some(Arc::new(invocation));
+        self
+    }
+
+    /// Where the run was invoked from, when the door said.
+    #[must_use]
+    pub fn invocation(&self) -> Option<&Invocation> {
+        self.invocation.as_deref()
     }
 
     /// This caller, carrying the confirmation ticket a person approved
@@ -393,6 +507,7 @@ impl std::fmt::Debug for ActionCaller {
         f.debug_struct("ActionCaller")
             .field("principal", &self.principal)
             .field("has_context", &self.context.is_some())
+            .field("invocation", &self.invocation)
             .field("has_ticket", &self.ticket.is_some())
             .field("confirms_writes", &self.confirm_writes)
             .finish()
@@ -2460,6 +2575,57 @@ mod tests {
 
         list.validate().expect("valid");
         list.probe_hostile_args().expect("sound");
+    }
+
+    /// A door says where a run came from apart from its context: a
+    /// context menu's target reaches the handler beside the door's own
+    /// context, and a plain run carries none.
+    #[test]
+    fn a_handler_reads_where_it_was_invoked_from() {
+        let list = ActionList::new();
+        list.register_with(
+            &ActionMeta {
+                id: "PANE_WHERE",
+                trait_name: "",
+                method_name: "",
+                display_name: "Where",
+                description: "Where it was run from.",
+                category: "",
+                group: "",
+                shortcut: "",
+                toggleable: false,
+                undo: false,
+            },
+            Effect::ReadOnly,
+            |cx: &ActionCaller, (): ()| {
+                let org = cx.context::<Org>().map_or("none", |o| o.0);
+                Ok::<_, String>(cx.invocation().map_or_else(
+                    || format!("nowhere in {org}"),
+                    |i| {
+                        format!(
+                            "{} on {} {} in {org}",
+                            i.source.name(),
+                            i.target.as_deref().unwrap_or("-"),
+                            i.id.as_deref().unwrap_or("-")
+                        )
+                    },
+                ))
+            },
+        )
+        .expect("registered");
+        let caller = ActionCaller::app()
+            .with_context(Org("acme"))
+            .with_invocation(
+                super::Invocation::new(super::InvocationSource::ContextMenu).on("pane", "note-1"),
+            );
+        assert_eq!(
+            list.run_json_with(&caller, "PANE_WHERE", b"").expect("ran"),
+            br#""context_menu on pane note-1 in acme""#.to_vec()
+        );
+        assert_eq!(
+            list.run_json("PANE_WHERE", b"").expect("ran"),
+            br#""nowhere in none""#.to_vec()
+        );
     }
 
     /// (#58 item 5) A handler may answer with JSON another serializer
