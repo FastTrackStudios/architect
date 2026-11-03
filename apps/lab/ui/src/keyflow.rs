@@ -97,10 +97,10 @@ fn EditorStyles() -> Element {
 }
 
 /// The lab's own tweaks to the editor's chrome: no pane header (the tab
-/// names it). The caret is a mark on the character under the cursor (see
-/// `native_caret_decoration`): an inset shadow is its bar, so the mark keeps
-/// its text and width.
-const LAB_OVERRIDES: &str = ".kf-pane-head { display: none; } .ed-native-caret, .ed-native-caret-end { display: inline-block; width: 2px; height: 1.1em; margin: 0; border: none; background: #3ec7a8; vertical-align: text-bottom; }";
+/// names it), and the caret in the lab's teal. The caret's shape is the
+/// editor's own (a zero-width box with its bar hung off it, so the text
+/// never moves); a host sets only its colour, through `--editor-caret`.
+const LAB_OVERRIDES: &str = ".kf-pane-head { display: none; } .editor-root { --editor-caret: #3ec7a8; }";
 
 /// The chart preview alone, with the theme toggle over it.
 #[component]
