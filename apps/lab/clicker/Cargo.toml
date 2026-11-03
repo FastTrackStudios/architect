@@ -11,6 +11,11 @@ architect-extensions = { workspace = true, features = ["guest"] }
 dioxus = { workspace = true }
 serde_json = { workspace = true }
 
+[dev-dependencies]
+# EXT_CHECK on the clicker's own folder: its program started, its view
+# rendered once (tests/check.rs).
+architect-extensions = { workspace = true, features = ["guest", "host", "process", "remote"] }
+
 [lints]
 workspace = true
 

@@ -42,6 +42,10 @@ pub mod reapack;
 
 #[cfg(feature = "host")]
 pub mod actions;
+#[cfg(feature = "host")]
+pub mod check;
+#[cfg(feature = "host")]
+pub mod clone;
 #[cfg(feature = "crdt")]
 pub mod doc;
 #[cfg(feature = "host")]
