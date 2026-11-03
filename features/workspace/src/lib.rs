@@ -55,6 +55,8 @@ pub use bar::{TABS_COMMAND, use_tabs_button};
 pub use drop::{Bar, Drop, bar_drop, contains, drop_at, drop_in, float_rect, snap_at};
 #[cfg(feature = "native")]
 pub mod native;
+#[cfg(feature = "native")]
+pub mod shot;
 #[cfg(feature = "ctx")]
 pub use ctx::{
     Button, DocRef, Extras, Frame, FrameClock, Geometry, HostData, InputSink, Now, ThemeTokens,

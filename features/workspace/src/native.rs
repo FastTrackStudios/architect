@@ -14,6 +14,10 @@
 //! (`architect_commands::WindowKeys`) are heard in the main window only;
 //! keys in a pop-out reach what has the focus there.
 //!
+//! The main window's document is in context as a
+//! [`crate::shot::LiveDocument`], what `APP_SHOT` paints
+//! ([`crate::shot::use_app_shot`]).
+//!
 //! The main window is in context as a [`MainWindow`]: an app that keeps
 //! running with no window (`architect-presence`'s background mode) says
 //! what closing it does, and quits the loop itself.
@@ -95,6 +99,10 @@ pub fn launch_with_fonts(
         },
     );
     let doc = document(vdom, &proxy, fonts);
+    // `APP_SHOT` paints this document again (`crate::shot`).
+    let live = crate::shot::LiveDocument::new(doc.inner.clone());
+    doc.vdom
+        .in_scope(ScopeId::ROOT, move || provide_context(live));
     let config =
         WindowConfig::with_attributes(Box::new(doc), DioxusNativeWindowRenderer::new(), window);
     let app = App {
