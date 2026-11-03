@@ -403,6 +403,43 @@ impl Commands {
         })
     }
 
+    /// Runs action `id` (with `args`, JSON, when given) as the app, saying
+    /// where it was invoked from: a context menu's target, a status
+    /// item, a contributed menu row. A command registered with
+    /// [`use_command`] runs as [`Self::run`] does (it takes no
+    /// invocation). False when there is no such action, it is disabled,
+    /// or it said no; an async one is spawned and counts as run once
+    /// started.
+    #[must_use = "false when it did not run"]
+    pub fn run_invoked(
+        &self,
+        id: &str,
+        args: Option<&str>,
+        invocation: architect::action::Invocation,
+    ) -> bool {
+        let list = self
+            .lists
+            .read()
+            .iter()
+            .find(|l| l.info(id).is_some_and(|i| i.enabled))
+            .cloned();
+        let Some(list) = list else {
+            return self.run(id);
+        };
+        let mut recents = self.recents;
+        recents.write().touch(id);
+        let caller = architect::action::ActionCaller::app().with_invocation(invocation);
+        let args = args.unwrap_or_default().as_bytes().to_vec();
+        if !list.is_async(id) {
+            return list.run_json_with(&caller, id, &args).is_ok();
+        }
+        let id = id.to_owned();
+        spawn(async move {
+            let _ = list.run_json_async_with(&caller, &id, &args).await;
+        });
+        true
+    }
+
     /// Action `id`'s params schema, when an app list has it.
     pub(crate) fn params_schema(&self, id: &str) -> Option<String> {
         self.lists
