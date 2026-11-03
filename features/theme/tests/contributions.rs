@@ -195,3 +195,26 @@ fn a_reload_of_the_app_files_keeps_the_contributions() {
     store.reload();
     assert!(store.registry().contains("clicker-neon"));
 }
+
+#[test]
+fn a_theme_files_override_restyles_an_extensions_token() {
+    let store = ThemeStore::default();
+    let mut c = clicker();
+    let mut neon = neon();
+    neon.file
+        .overrides
+        .insert("clicker.count".to_owned(), "$info".to_owned());
+    c.themes = vec![neon];
+    store.contribute("lab.clicker", c);
+    // Under another theme, the extension's default.
+    let r = store.current();
+    assert_eq!(r.get("clicker.count"), r.get("brand"));
+    // Under its own theme, the theme's word.
+    store.pick("clicker-neon").unwrap();
+    let r = store.current();
+    assert_eq!(r.get("clicker.count"), r.get("info"));
+    assert_eq!(r.source("clicker.count").unwrap().origin, Origin::Theme);
+    // And the person's over both.
+    store.set_token(LayerKind::Person, "clicker.count", "#010203");
+    assert_eq!(store.current().get("clicker.count"), Some("#010203"));
+}

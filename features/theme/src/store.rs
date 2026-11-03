@@ -17,8 +17,9 @@ pub enum LayerKind {
     /// architect's: `FastTrackStudio` light and dark, by the system.
     Builtin,
     /// What loaded extensions contribute: their own tokens' defaults
-    /// (`clicker.face`), under everything the app and the person say
-    /// ([`ThemeStore::contribute`]).
+    /// (`clicker.face`), under everything the app and the person say, and
+    /// under the theme's own overrides too, so a theme file restyles an
+    /// extension ([`ThemeStore::contribute`]).
     Extension,
     /// The app's default (Studio's own pair).
     App,

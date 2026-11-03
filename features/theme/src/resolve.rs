@@ -209,16 +209,25 @@ pub(crate) fn resolve_in(
         });
     let mut raw = derive(&palette, scheme);
     let mut by: BTreeMap<String, By<'_>> = raw.keys().map(|k| (k.clone(), By::Derived)).collect();
+    let layer_of = |name: &str| set_by.get(name).copied().unwrap_or(LayerKind::Builtin);
+    // The extension layer is extensions' defaults for their own tokens:
+    // under the theme's overrides, so a theme file restyles them too.
+    let (defaults, layered): (Vec<_>, Vec<_>) = overrides
+        .iter()
+        .partition(|(name, _)| layer_of(name) == LayerKind::Extension);
+    for (name, value) in defaults {
+        raw.insert(name.clone(), value.clone());
+        by.insert(name.clone(), By::Layer(LayerKind::Extension));
+    }
     for t in chain.iter().rev() {
         for (name, value) in &t.file.overrides {
             raw.insert(name.clone(), value.clone());
             by.insert(name.clone(), By::Theme(t));
         }
     }
-    for (name, value) in overrides {
+    for (name, value) in layered {
         raw.insert(name.clone(), value.clone());
-        let layer = set_by.get(name).copied().unwrap_or(LayerKind::Builtin);
-        by.insert(name.clone(), By::Layer(layer));
+        by.insert(name.clone(), By::Layer(layer_of(name)));
     }
 
     let mut eval = Eval::new(&raw);
