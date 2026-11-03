@@ -15,7 +15,10 @@ description = "The workspace: tab groups in splits, docks with ribbons, stacked 
 # reload for the main window). Plugin views come later, on `native`.
 # `ctx` is the contract every view kind mounts through (`ViewCtx`;
 # docs/content/architecture/embedded-views.md); the kinds registry is
-# in the model.
+# in the model. `paint` is the paint kind's model (src/paint/): a view
+# that records an anyrender scene each frame, its display list, its frame
+# times — wasm-clean, no Dioxus. `paint-ui` is its Blitz host: the
+# custom widget and the pane that mounts it.
 
 [features]
 default = []
@@ -28,6 +31,14 @@ actions = ["dep:architect", "dep:futures-channel"]
 ui = ["actions", "dep:dioxus", "dep:architect-shell", "architect-shell/ui", "dep:futures-timer", "dep:futures-util", "dep:lucide-dioxus", "architect-commands/ui"]
 native = ["ui", "dep:dioxus-native", "dep:blitz-shell", "dep:blitz-traits", "dep:dioxus-asset-resolver"]
 hot-reload = ["native", "dioxus-native/hot-reload", "dep:dioxus-devtools"]
+# A view that paints a scene each frame (`PaintView`, `Painter`, `Marks`).
+paint = ["ctx", "dep:anyrender", "dep:peniko"]
+# Drawn in-process by Blitz in a pane (`PaintPane`, a `PaintWidget`).
+paint-ui = ["paint", "ui", "dep:blitz-dom", "dep:blitz-traits", "dep:dioxus-native-dom"]
+# A host-driven WebGL2 canvas for paint scenes (wasm32 only).
+paint-web = ["paint", "dep:anyrender_vello_hybrid", "dep:vello_gpu", "dep:vello_common", "dep:rustc-hash", "dep:web-sys", "dep:wasm-bindgen"]
+# Dioxus canvas, DOM input and demand-driven browser frames.
+paint-web-ui = ["paint-web", "dep:dioxus", "dioxus/web", "dep:js-sys"]
 
 [dependencies]
 facet = { workspace = true }
@@ -55,17 +66,34 @@ futures-channel = { version = "0.3", optional = true }
 crdt = { workspace = true, optional = true }
 # A measurement mid-drag finds the document busy and asks again shortly.
 futures-timer = { workspace = true, optional = true }
+# A paint view's scene and its colours and shapes (feature `paint`); the
+# Blitz widget it is drawn as (`paint-ui`).
+anyrender = { workspace = true, optional = true }
+peniko = { workspace = true, optional = true }
+blitz-dom = { workspace = true, optional = true, features = ["custom-widget"] }
+dioxus-native-dom = { workspace = true, optional = true }
 
 # A timer needs the browser's clock on wasm.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 futures-timer = { workspace = true, optional = true, features = ["wasm-bindgen"] }
+anyrender_vello_hybrid = { version = "=0.11.0", optional = true, features = ["webgl"] }
+vello_gpu = { version = "0.3", optional = true, features = ["webgl"] }
+vello_common = { version = "0.3", optional = true }
+rustc-hash = { version = "2", optional = true }
+web-sys = { version = "0.3", optional = true, features = ["HtmlCanvasElement", "WebGl2RenderingContext", "Window", "Location", "Element", "DomRect", "PointerEvent", "WheelEvent", "KeyboardEvent", "CompositionEvent"] }
+wasm-bindgen = { version = "0.2", optional = true }
+js-sys = { version = "0.3", optional = true }
 
 [lib]
 doctest = false
 
 [dev-dependencies]
-# The kind contract's own tests (src/ctx.rs).
-architect-workspace = { path = ".", features = ["ctx"] }
+# The kind contract's own tests (src/ctx.rs, src/paint/).
+architect-workspace = { path = ".", features = ["ctx", "paint"] }
+# A paint view's scene rasterised to check it against its hit test.
+anyrender_vello_cpu = { workspace = true }
+# Exercise the mounted widget through Blitz's document painter.
+blitz-paint = { workspace = true, features = ["custom-widget"] }
 # Every action driven over MCP against a headless workspace (tests/actions.rs).
 architect-mcp = { path = "../mcp" }
 serde_json = { workspace = true }
@@ -83,3 +111,11 @@ workspace = true
 
 [target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
 architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
+
+[[example]]
+name = "paint_web"
+required-features = ["paint-web"]
+
+[[example]]
+name = "paint_web_pane"
+required-features = ["paint-web-ui"]

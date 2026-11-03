@@ -495,3 +495,58 @@ fn the_sidebar_pops_out_into_a_window_that_draws_it_and_docks_back() {
     });
     assert_eq!(back, (1, None));
 }
+
+// A pane's state, typed: kept as its type's JSON, read back as the type,
+// and `None` for a state that is not one.
+
+#[derive(Debug, Clone, PartialEq, facet::Facet)]
+struct Scroll {
+    top: f32,
+    zoom: u32,
+}
+
+thread_local! {
+    static PANE: RefCell<Option<architect_workspace::PaneHandle>> = const { RefCell::new(None) };
+}
+
+#[component]
+fn Scrolled() -> Element {
+    let pane = architect_workspace::use_pane();
+    PANE.with(|p| *p.borrow_mut() = Some(pane.clone()));
+    rsx! { "{pane.id.0}" }
+}
+
+fn typed_app() -> Element {
+    let workspace = use_signal(|| {
+        let mut w = Workspace::new();
+        let mut pane = Pane::new("s", "scrolled", "s");
+        pane.state = "plain text".into();
+        w.open(pane, Target::Tab).unwrap();
+        w
+    });
+    WORKSPACE.with(|s| *s.borrow_mut() = Some(workspace));
+    let views =
+        use_hook(|| Views::new().view(View::new("scrolled", "Scrolled", |_| rsx! { Scrolled {} })));
+    rsx! { WorkspaceView { workspace, views } }
+}
+
+#[test]
+fn a_panes_state_is_kept_and_read_as_its_type() {
+    let mut main = VirtualDom::new(typed_app);
+    main.rebuild_in_place();
+    let workspace = WORKSPACE.with(|s| s.borrow().unwrap());
+    let pane = PANE.with(|p| p.borrow().clone().expect("the pane drew"));
+    assert_eq!(main.in_runtime(|| pane.state_as::<Scroll>()), None);
+
+    let kept = Scroll { top: 12.5, zoom: 3 };
+    main.in_runtime(|| pane.set_state_as(&kept));
+    main.render_immediate(&mut NoOpMutations);
+    assert_eq!(main.in_runtime(|| pane.state_as::<Scroll>()), Some(kept));
+    let raw = main.in_runtime(|| {
+        workspace
+            .peek()
+            .pane(&PaneId::new("s"))
+            .map(|p| p.state.clone())
+    });
+    assert_eq!(raw.as_deref(), Some(r#"{"top":12.5,"zoom":3}"#));
+}

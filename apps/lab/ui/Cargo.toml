@@ -8,7 +8,8 @@ publish = false
 
 [dependencies]
 architect-shell = { workspace = true, features = ["ui"] }
-architect-workspace = { workspace = true, features = ["ui"] }
+# The Embedded views' paint pane (src/paint.rs): the paint kind on Blitz.
+architect-workspace = { workspace = true, features = ["ui", "paint-ui"] }
 architect-commands = { workspace = true, features = ["native"] }
 architect-settings = { workspace = true, features = ["ui", "store"] }
 architect-orgs = { workspace = true, features = ["ui"] }

@@ -88,6 +88,12 @@ package = "architect-workspace"
 layer = "L0"
 
 [[row]]
+package = "architect-workspace"
+features = ["paint"]
+layer = "L0"
+note = "the paint kind's model: anyrender and peniko, no Dioxus or Blitz"
+
+[[row]]
 package = "architect-shell"
 layer = "L0"
 
@@ -197,6 +203,23 @@ layer = "L4"
 package = "architect-workspace"
 features = ["ui"]
 layer = "L4"
+
+[[row]]
+package = "architect-workspace"
+features = ["paint-ui"]
+layer = "L4"
+
+[[row]]
+package = "architect-workspace"
+features = ["paint-web"]
+layer = "L4"
+note = "host-driven WebGL2 canvas on wasm"
+
+[[row]]
+package = "architect-workspace"
+features = ["paint-web-ui"]
+layer = "L4"
+note = "Dioxus browser paint pane"
 
 [[row]]
 package = "architect-commands"

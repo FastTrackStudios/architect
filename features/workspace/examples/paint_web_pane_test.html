@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Paint pane browser test</title></head>
+<body>
+  <div id="main" style="display:none"></div>
+  <pre id="result">Running</pre>
+  <script type="module">
+    import init, {frames, external_update, last_x, last_y} from './paint_web_pane.js';
+    const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+    const check = (ok, message) => { if (!ok) throw Error(message); };
+    try {
+      await init();
+      await delay(100);
+      check(frames() === 0, 'hidden pane rendered');
+      document.querySelector('#main').style.display = '';
+      await delay(200);
+      const canvas = document.querySelector('canvas');
+      check(frames() === 1, 'shown pane did not render');
+      document.querySelector('#theme').click();
+      await delay(100);
+      check(frames() === 2, 'theme did not invalidate');
+      external_update();
+      await delay(100);
+      check(frames() === 3, 'wakes did not coalesce');
+      await delay(150);
+      check(frames() === 3, 'idle pane rendered');
+      const rect = canvas.getBoundingClientRect();
+      canvas.dispatchEvent(new PointerEvent('pointerdown', {bubbles:true, clientX:rect.left+20, clientY:rect.top+30, pointerId:1, pointerType:'mouse'}));
+      await delay(100);
+      check(Math.abs(last_x()-20) < 1 && Math.abs(last_y()-30) < 1, 'pointer is not logical');
+      const area = document.querySelector('#area');
+      area.style.width = '200px'; area.style.height = '120px';
+      await delay(150);
+      check(canvas.width === Math.round(200*devicePixelRatio) && canvas.height === Math.round(120*devicePixelRatio), 'backing size does not match DPR');
+      check(!document.querySelector('[role=alert]'), 'pane reported an error');
+      document.querySelector('#result').textContent = 'PASS';
+    } catch (error) {
+      document.querySelector('#result').textContent = 'FAIL: ' + error.message;
+      throw error;
+    }
+  </script>
+</body>
+</html>

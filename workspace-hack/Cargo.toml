@@ -60,9 +60,11 @@ deranged = { version = "0.5.8", features = ["serde"] }
 derive_more = { version = "2.1.1", features = ["add", "add_assign", "debug", "deref", "deref_mut", "display", "from", "from_str", "into_iterator", "try_into"] }
 digest-93f6ce9d446188ac = { package = "digest", version = "0.10.7", features = ["mac", "std"] }
 digest-a6292c17cd707f01 = { package = "digest", version = "0.11.3", features = ["alloc", "mac", "oid", "rand_core"] }
-dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["desktop", "router"] }
-dioxus-asset-resolver = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["native"] }
+dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["desktop", "router", "web"] }
+dioxus-asset-resolver = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["native", "web"] }
+dioxus-cli-config = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["web"] }
 dioxus-html = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["serialize"] }
+dioxus-interpreter-js = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["binary-protocol", "minimal_bindings", "serialize", "webonly"] }
 dioxus-native = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1", features = ["autofocus", "data-uri", "prelude", "vello"] }
 dioxus-primitives = { git = "https://github.com/FastTrackStudios/dioxus-components", tag = "fts-upstream-2026-11", default-features = false, features = ["router"] }
 dioxus-vdom = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1", default-features = false, features = ["serialize"] }
@@ -147,6 +149,8 @@ signature = { version = "3.0.0", default-features = false, features = ["alloc", 
 simd-adler32 = { version = "0.3.10" }
 skrifa = { version = "0.44.0", default-features = false, features = ["autohint_shaping", "std"] }
 slab = { version = "0.4.12" }
+sledgehammer_bindgen = { version = "0.6.0", default-features = false, features = ["web"] }
+slotmap = { version = "1.1.1", features = ["serde"] }
 smallvec = { version = "1.16.4", default-features = false, features = ["const_new", "serde"] }
 spki = { version = "0.8.0", default-features = false, features = ["pem", "std"] }
 stable_deref_trait = { version = "1.2.1" }
@@ -189,7 +193,7 @@ data-encoding = { version = "2.11.1", default-features = false, features = ["all
 derive_more = { version = "2.1.1", features = ["as_ref", "constructor", "deref", "deref_mut", "display", "from", "is_variant", "try_unwrap", "unwrap"] }
 derive_more-impl = { version = "2.1.1", features = ["add", "add_assign", "as_ref", "constructor", "debug", "deref", "deref_mut", "display", "from", "from_str", "into_iterator", "is_variant", "try_into", "try_unwrap", "unwrap"] }
 digest-93f6ce9d446188ac = { package = "digest", version = "0.10.7", features = ["std"] }
-dioxus-config-macro = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["desktop"] }
+dioxus-config-macro = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["desktop", "web"] }
 displaydoc = { version = "0.2.7" }
 either = { version = "1.18.0", default-features = false, features = ["use_std"] }
 half = { version = "2.7.1", features = ["num-traits"] }
@@ -209,13 +213,16 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_core = { version = "1.0.229", default-features = false, features = ["alloc", "result", "std"] }
 sha2 = { version = "0.10.9" }
 slab = { version = "0.4.12" }
+sledgehammer_bindgen_macro = { version = "0.6.5", features = ["web"] }
 syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3.0.6", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109" }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.119", features = ["extra-traits", "full", "visit", "visit-mut"] }
 thiserror = { version = "2.0.20" }
 time-macros = { version = "0.2.32", default-features = false, features = ["formatting", "parsing", "serde"] }
 toml_datetime-dff4ba8e3ae991db = { package = "toml_datetime", version = "1.1.1", features = ["serde"] }
+toml_parser = { version = "1.1.3" }
 twox-hash = { version = "2.1.4", default-features = false, features = ["xxhash64"] }
+winnow = { version = "1.0.4" }
 xxhash-rust = { version = "0.8.18", default-features = false, features = ["const_xxh64"] }
 zerocopy = { version = "0.8.57", default-features = false, features = ["derive", "simd"] }
 
@@ -223,6 +230,7 @@ zerocopy = { version = "0.8.57", default-features = false, features = ["derive",
 aes-gcm = { version = "0.10.3" }
 bigdecimal = { version = "0.4.11", features = ["serde"] }
 bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
+bumpalo = { version = "3.20.3", features = ["collections"] }
 crossbeam-epoch = { version = "0.9.21" }
 event-listener-strategy = { version = "0.5.4" }
 futures-lite = { version = "2.6.1" }
@@ -263,9 +271,11 @@ tower = { version = "0.5.3", default-features = false, features = ["log", "make"
 tower-http = { version = "0.6.11", default-features = false, features = ["follow-redirect"] }
 tungstenite = { version = "0.29.0", features = ["native-tls"] }
 twox-hash = { version = "2.1.4" }
+winnow = { version = "1.0.4" }
 
 [target.x86_64-unknown-linux-gnu.build-dependencies]
 bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
+bumpalo = { version = "3.20.3" }
 either = { version = "1.18.0" }
 libc = { version = "0.2.189" }
 naga = { version = "30.0.1", default-features = false, features = ["glsl-out", "wgsl-in", "wgsl-out"] }
@@ -281,6 +291,7 @@ aes-gcm = { version = "0.10.3" }
 bigdecimal = { version = "0.4.11", features = ["serde"] }
 bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
 block2 = { version = "0.6.2" }
+bumpalo = { version = "3.20.3", features = ["collections"] }
 crossbeam-epoch = { version = "0.9.21" }
 dispatch2 = { version = "0.3.1" }
 errno = { version = "0.3.14" }
@@ -324,6 +335,7 @@ twox-hash = { version = "2.1.4" }
 
 [target.aarch64-apple-darwin.build-dependencies]
 bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
+bumpalo = { version = "3.20.3" }
 either = { version = "1.18.0" }
 errno = { version = "0.3.14", default-features = false, features = ["std"] }
 indexmap = { version = "2.14.2" }
@@ -340,6 +352,7 @@ aes-gcm = { version = "0.10.3" }
 bigdecimal = { version = "0.4.11", features = ["serde"] }
 bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
 block2 = { version = "0.6.2" }
+bumpalo = { version = "3.20.3", features = ["collections"] }
 crossbeam-epoch = { version = "0.9.21" }
 dispatch2 = { version = "0.3.1" }
 errno = { version = "0.3.14" }
@@ -383,6 +396,7 @@ twox-hash = { version = "2.1.4" }
 
 [target.x86_64-apple-darwin.build-dependencies]
 bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
+bumpalo = { version = "3.20.3" }
 either = { version = "1.18.0" }
 errno = { version = "0.3.14", default-features = false, features = ["std"] }
 indexmap = { version = "2.14.2" }
@@ -398,6 +412,7 @@ rustc-hash = { version = "1.1.0" }
 aes-gcm = { version = "0.10.3" }
 bigdecimal = { version = "0.4.11", features = ["serde"] }
 bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
+bumpalo = { version = "3.20.3", features = ["collections"] }
 crossbeam-epoch = { version = "0.9.21" }
 dispatch2 = { version = "0.3.1" }
 errno = { version = "0.3.14" }
@@ -443,6 +458,7 @@ twox-hash = { version = "2.1.4" }
 
 [target.aarch64-apple-ios.build-dependencies]
 bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
+bumpalo = { version = "3.20.3" }
 either = { version = "1.18.0" }
 errno = { version = "0.3.14", default-features = false, features = ["std"] }
 indexmap = { version = "2.14.2" }
