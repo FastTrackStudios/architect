@@ -346,6 +346,93 @@ reloads on every save; its logs and panics stream to the terminal and to
 the app's diagnostics. A development copy shadows an installed one with
 the same id until the session ends.
 
+## Extensions and themes
+
+An extension, and every GUI it draws, follows the app's theme live, the
+same as the app's own views
+([theming](@/architecture/theming.md)). It can also add to the theme: a
+theme of its own, and tokens of its own that default to the palette.
+
+**What a manifest adds** (`features/extensions/src/manifest.rs`
+`ThemeDecl`, `Manifest::tokens`, `Manifest::token_namespace`):
+
+```toml
+[[themes]]
+path = "themes/clicker-neon.json"   # a theme file; its id is the file's name
+
+[tokens]                             # its own tokens, in its namespace
+"clicker.face" = "mix($card, $brand, 0.22)"
+"clicker.count" = "$brand"
+"clicker.radius" = "10"
+```
+
+A token's namespace is the last part of the extension's id (`lab.clicker`
+gives `clicker.`). Its names and values are checked as a theme's
+overrides are, when the manifest is read.
+
+**Into the app's store.** A host given the app's store
+(`features/extensions/src/host.rs` `Host::with_themes`) contributes each
+extension's themes and tokens as it loads (`theme_contribution`,
+`architect_theme::ThemeStore::contribute`). On a reload they go in as a
+diff, so a development copy's saved theme file shows at once. They come
+out as it unloads (`ThemeStore::withdraw`). `THEME_LIST` shows such a
+theme with the source `extension:<id>`, and `THEME_SET` picks it like any
+other. A file that does not read is a `THEME_PROBLEMS` entry, never a
+failed load, and the extension's last good theme of that id stays. The
+tokens are the store's `Extension` layer: defaults under the theme's own
+overrides, so a theme file can restyle an extension, and under the app's
+and the person's layers. The store's revision moves only when what shows
+changes.
+
+**Each kind of GUI follows it:**
+
+| GUI | how it themes | live |
+|---|---|---|
+| A process extension's Dioxus view | the host's `:root` CSS variables in its sub-document (`features/extensions/src/remote.rs` `RemoteDocument::set_theme_css`); `var(--brand)`, and an extension's own namespace when the app opts it in (`ThemeStoreProvider { css_namespaces }`) | on every change |
+| A process that paints itself or works out colours | the theme as data (wire 3, below): `Guest::theme()`, `Guest::on_theme`, `guest::use_theme()` give an `architect_theme::Resolved` | as it connects and on every change |
+| A Luau script | `theme` (`features/scripting/src/theme.rs` `ThemeModule`): `theme.color(name)`, `theme.number`, `theme.value`, `theme.scheme`, `theme.revision`, `theme.snapshot()`, `theme.subscribe(fn)` | a frozen snapshot per revision, made again at the first frame after a change |
+| A Luau `ImGui` window | its style from the theme's tokens (`features/canvas/src/imgui.rs` `Style::from_theme`, `Col`), applied again on every change (`Session::set_theme`; `use_script_canvas` follows the store above it); `ImGui.PushStyleColor` overrides one colour | restyled and drawn again on every change |
+
+**The theme as data, on the wire.** The host sends a process the
+resolved tokens, the scheme and the revision
+(`features/extensions/src/wire.rs` `ThemeData`, the
+`ProcessExtension::theme` method in `features/extensions/src/proto.rs`)
+right after hello, before any view opens, and again on each real change
+(`features/extensions/src/process.rs` `ProcessRunner::with_theme`). The
+wire is version 3. A host still runs a wire-2 process (`WIRE_MIN`) and
+sends it no theme. vox names a method by its service and its name, so
+the new method moves no other. A host built before wire 3 refuses a
+wire-3 process, since it checks the version exactly.
+
+**A script's snapshot.** A script reads one theme for a whole run, and a
+live script one per frame. The snapshot is keyed by the store's revision
+and made again only when it moves (herdr's `__theme_revision`), so reading
+`theme.color` in a loop costs a table lookup. `theme` is a mutable global
+to Luau's compiler (`Module::live_fields`), so `theme.scheme` is read
+each time, never folded when the chunk loads.
+
+**ImGui's colours** (the table on `Col`): each style colour is the
+theme's `imgui.<name>` token when it has one, else a derivation from the
+shell's tokens.
+
+| `ImGui.Col_` | token | default |
+|---|---|---|
+| `Text` / `TextDisabled` | `imgui.text` / `imgui.text-disabled` | `$ink` / `$ink-3` |
+| `WindowBg` | `imgui.window-bg` | `$sheet` |
+| `FrameBg` / `FrameBgHovered` / `FrameBgActive` | `imgui.frame-bg…` | `$pill`, `mix($pill, $ink, 0.08)`, `mix($pill, $ink, 0.16)` |
+| `Button` / `ButtonHovered` / `ButtonActive` | `imgui.button…` | `mix($pill, $brand, 0.18)`, `0.32`, `0.5` |
+| `SliderGrab` / `SliderGrabActive` | `imgui.slider-grab…` | `$brand`, `mix($brand, $ink, 0.3)` |
+| `CheckMark` | `imgui.check-mark` | `$brand` |
+| `Separator` | `imgui.separator` | `$rule` |
+| `PlotHistogram` (a progress bar) | `imgui.plot-histogram` | `$chart-1` |
+
+**The lab's example** is the clicker (`apps/lab/clicker`): it contributes
+Clicker Neon and `clicker.*` tokens, its process view styles itself with
+`var(--clicker-face)` and works out a ramp from the theme as data, and
+its `ImGui` window (`apps/lab/clicker/window.luau`, the Vault's "Clicker
+window" pane) reads `theme`. `apps/lab/clicker/tests/themed.rs` checks
+all of it headless.
+
 ## Immediate-mode UI for scripts (ReaImGui's)
 
 A script that wants a window draws it every frame, ReaImGui's way. We do
@@ -356,7 +443,8 @@ not build a toolkit for it, and we do not need C++:
   the app's own wgpu device, and a Blitz custom widget shows it — so a
   script's window is a pane like any other: docked, tabbed, stacked,
   saved in screensets. The widget forwards the pointer and keys to egui.
-  Its style comes from the shell's theme.
+  Its style comes from the app's theme, live ("Extensions and themes"
+  above).
 - **Scripts see ReaImGui's API.** A Luau table shaped like ReaImGui's
   (`local ImGui = require 'imgui' '0.10'`, `ImGui.Begin(ctx, …)`,
   `ImGui.Button(ctx, label)`), implemented on egui, so most ReaImGui
