@@ -557,6 +557,7 @@ dependencies = [
  "futures-channel",
  "futures-timer",
  "futures-util",
+ "send_wrapper",
  "serde_json",
  "thiserror 2.0.20",
  "tracing",
