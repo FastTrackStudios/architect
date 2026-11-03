@@ -1299,20 +1299,23 @@ impl ActionList {
         let Run::Async(handler) = &entry.run else {
             return self.run_checked(caller, id, args);
         };
-        known_names(&entry, args)?;
+        let sent = args;
         let args = normalized(&entry, args);
         let span = tracing::info_span!("action", action.id = id, action.ok = tracing::field::Empty);
-        let started = span.in_scope(|| match enabled_state(entry.enabled.as_ref()) {
-            Ok(()) => self.confirmed(caller, &entry, args).and_then(|()| {
-                guarded_start(id, || {
-                    admit_args(&entry, args)?;
-                    handler(caller, args)
-                })
-            }),
-            Err(reason) => Err(ActionError::Disabled {
-                id: id.to_owned(),
-                reason,
-            }),
+        let started = span.in_scope(|| {
+            known_names(&entry, sent)?;
+            match enabled_state(entry.enabled.as_ref()) {
+                Ok(()) => self.confirmed(caller, &entry, args).and_then(|()| {
+                    guarded_start(id, || {
+                        admit_args(&entry, args)?;
+                        handler(caller, args)
+                    })
+                }),
+                Err(reason) => Err(ActionError::Disabled {
+                    id: id.to_owned(),
+                    reason,
+                }),
+            }
         });
         let out = match started {
             Ok(work) => std::panic::AssertUnwindSafe(work)
@@ -1338,21 +1341,24 @@ impl ActionList {
         args: &[u8],
     ) -> Result<Vec<u8>, ActionError> {
         let entry = self.admitted(caller, id)?;
-        known_names(&entry, args)?;
+        let sent = args;
         let args = normalized(&entry, args);
         // One span per action run: the action's wide event. What it does
         // marks its stages on it (`architect_telemetry::timing`), so where
         // an action's time went is one record, whoever ran it — a key, a
         // menu, a model.
         let span = tracing::info_span!("action", action.id = id, action.ok = tracing::field::Empty);
-        let out = span.in_scope(|| match enabled_state(entry.enabled.as_ref()) {
-            Ok(()) => self
-                .confirmed(caller, &entry, args)
-                .and_then(|()| guarded(id, || call(&entry, caller, args))),
-            Err(reason) => Err(ActionError::Disabled {
-                id: id.to_owned(),
-                reason,
-            }),
+        let out = span.in_scope(|| {
+            known_names(&entry, sent)?;
+            match enabled_state(entry.enabled.as_ref()) {
+                Ok(()) => self
+                    .confirmed(caller, &entry, args)
+                    .and_then(|()| guarded(id, || call(&entry, caller, args))),
+                Err(reason) => Err(ActionError::Disabled {
+                    id: id.to_owned(),
+                    reason,
+                }),
+            }
         });
         span.record("action.ok", out.is_ok());
         drop(span);
