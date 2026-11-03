@@ -22,6 +22,7 @@ mod paint;
 pub mod presence;
 mod screen;
 mod settings;
+mod theme;
 mod vault;
 
 use architect_orgs::{Capabilities, Org, Orgs, Role};
@@ -627,15 +628,6 @@ fn edit_command(
     c.group("Edit")
 }
 
-/// The stylesheet: the page's ground, and hover and press feedback
-/// (`.lp`; an inset shadow, so it shows over a row's own background).
-const CSS: &str = "\
-html, body { margin: 0; padding: 0; background: #09090b; }\
-button { cursor: pointer; }\
-.lp:hover { box-shadow: inset 0 0 0 999px rgba(255,255,255,0.035); }\
-.lp:active { background-color: rgba(255,255,255,0.07); }\
-";
-
 /// The lab's face, the same on every desk and phone.
 ///
 /// Inter (variable, OFL: `assets/fonts/OFL.txt`), `FastTrackStudio`'s, the
@@ -690,6 +682,8 @@ pub fn LabApp() -> Element {
             .unwrap_or_else(|| std::sync::Arc::new(architect::action::ActionList::new()))
     });
     use_context_provider(|| list.clone());
+    // Themes: one store for the app, its THEME_* actions on the list.
+    let theme = theme::use_lab_theme(windowed, &list);
     // An agent's Delete waits for the person's yes, in the sheet below.
     use_hook(|| confirm::require(&list));
     // An agent's UI (A2UI): its surfaces on a document of their own, the
@@ -794,6 +788,7 @@ pub fn LabApp() -> Element {
     // Every command (a view's own too) and the palette's state, on the
     // lab's list; the lab's own state beside them.
     architect_commands::use_command_actions(list.clone());
+    theme::use_theme_commands(theme, &commands);
     guide::use_lab_actions(&list, &lab);
     // Guided tours of two of the lab's scenarios, from ⌘K (Help) or the
     // Action List (`GUIDE_TOUR_START`).
@@ -1016,6 +1011,8 @@ pub fn LabApp() -> Element {
         .menu("View", |m| {
             m.command("LAB_TOGGLE_DETAILS")
                 .separator()
+                .commands(["LAB_THEME_CHOOSE", "LAB_THEME_SCHEME"])
+                .separator()
                 .group("Panes")
                 .separator()
                 .group("Docks")
@@ -1165,9 +1162,10 @@ pub fn LabApp() -> Element {
     rsx! {
         div {
             style: "position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; overflow: hidden;",
-            document::Style { {CSS} }
+            document::Style { {theme::page_css(&theme.resolved().read())} }
             // The window's chords (⌘K, ⌘W, …), whatever has the focus.
             if windowed {
+                theme::SystemScheme {}
                 architect_commands::WindowKeys {}
                 ListKeys {}
                 // The Dock icon, its badge and menu, the menu-bar item,
@@ -1175,7 +1173,9 @@ pub fn LabApp() -> Element {
                 presence::LabPresence { presence: presence::declare(lab, inbox_count), inbox: inbox_count }
             }
             // A column: the in-window menu bar (where there is one) takes
-            // its height off the top, the shell the rest.
+            // its height off the top, the shell the rest. Under
+            // architect-ui's root, its CSS variables the theme's.
+            architect_ui::theme::ThemeStoreProvider {
             div { style: "position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column;",
                 NativeMenus { bar: menus, windowed }
                 div { style: "position: relative; flex: 1 1 0; min-height: 0;",
@@ -1239,6 +1239,7 @@ pub fn LabApp() -> Element {
                     }
                 }
             }
+            }
             architect_commands::CommandLayer {}
             architect_commands::ConfirmSheet {}
             architect_settings::SettingsPage {}
@@ -1252,15 +1253,15 @@ pub fn LabApp() -> Element {
 /// The lab's brand, T3 Code's way: a mark and a two-tone wordmark.
 #[component]
 fn Brand() -> Element {
-    let font = shell::use_shell().theme.font;
+    let t = shell::use_shell().theme;
     rsx! {
-        div { style: "display: flex; align-items: center; gap: 8px; font-family: {font};",
-            span { style: "width: 26px; height: 26px; border-radius: 7px; background: #e4e4e7; display: flex; \
-                           align-items: center; justify-content: center; color: #09090b; font-size: 14px; font-weight: 800;",
+        div { style: "display: flex; align-items: center; gap: 8px; font-family: {t.font};",
+            span { style: "width: 26px; height: 26px; border-radius: 7px; background: {t.ink}; display: flex; \
+                           align-items: center; justify-content: center; color: {t.desk}; font-size: 14px; font-weight: 800;",
                 "A"
             }
-            span { style: "font-size: 19px; font-weight: 750; letter-spacing: -0.03em; color: #e4e4e7;", "Architect" }
-            span { style: "font-size: 19px; font-weight: 500; letter-spacing: -0.03em; color: #8f8f99;", "Lab" }
+            span { style: "font-size: 19px; font-weight: 750; letter-spacing: -0.03em; color: {t.ink};", "Architect" }
+            span { style: "font-size: 19px; font-weight: 500; letter-spacing: -0.03em; color: {t.ink_3};", "Lab" }
         }
     }
 }

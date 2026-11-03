@@ -32,6 +32,8 @@ default = []
 router = ["dioxus/router", "dioxus-primitives/router"]
 
 [dev-dependencies]
+# tests/theme_store.rs drives a VirtualDom's futures.
+futures = "0.3"
 # Always available to tests/ — heavy (pulls Blitz CPU rasteriser) but
 # `cargo build` never compiles dev-deps so the lib build stays light.
 architect-story-snapshots = { workspace = true }

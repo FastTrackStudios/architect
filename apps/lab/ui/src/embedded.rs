@@ -182,7 +182,7 @@ fn DioxusPane() -> Element {
     let color = SWATCHES
         .iter()
         .find(|(name, _)| name.eq_ignore_ascii_case(&picked))
-        .map_or(t.pill, |(_, c)| *c);
+        .map_or(&*t.pill, |(_, c)| *c);
     rsx! {
         div { style: "flex: 1; display: flex; flex-direction: column; min-height: 0; overflow-y: scroll;",
             KindHead {

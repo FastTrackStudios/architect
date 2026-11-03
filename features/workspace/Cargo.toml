@@ -24,11 +24,11 @@ description = "The workspace: tab groups in splits, docks with ribbons, stacked 
 default = []
 # The contract a view kind mounts through (`ViewCtx`): the host's Action
 # List, a document and its history. Wasm-clean, no Dioxus.
-ctx = ["dep:architect", "dep:crdt"]
+ctx = ["dep:architect", "dep:crdt", "dep:architect-theme"]
 # Every operation as an Action List action with an explicit target
 # (src/control/list.rs): on a headless workspace, or under `ui` the host's.
 actions = ["dep:architect", "dep:futures-channel"]
-ui = ["actions", "dep:dioxus", "dep:architect-shell", "architect-shell/ui", "dep:futures-timer", "dep:futures-util", "dep:lucide-dioxus", "architect-commands/ui"]
+ui = ["actions", "dep:dioxus", "dep:architect-theme", "architect-theme/dioxus", "dep:architect-shell", "architect-shell/ui", "dep:futures-timer", "dep:futures-util", "dep:lucide-dioxus", "architect-commands/ui"]
 native = ["ui", "dep:dioxus-native", "dep:blitz-shell", "dep:blitz-traits", "dep:dioxus-asset-resolver"]
 hot-reload = ["native", "dioxus-native/hot-reload", "dep:dioxus-devtools"]
 # A view that paints a scene each frame (`PaintView`, `Painter`, `Marks`).
@@ -41,6 +41,9 @@ paint-web = ["paint", "dep:anyrender_vello_hybrid", "dep:vello_gpu", "dep:vello_
 paint-web-ui = ["paint-web", "dep:dioxus", "dioxus/web", "dep:js-sys"]
 
 [dependencies]
+# A view's theme tokens from a resolved theme (`ctx`); the Blitz host
+# follows the app's theme store (`ui`).
+architect-theme = { workspace = true, optional = true }
 facet = { workspace = true }
 facet-json = { version = "0.50.0-rc.5" }
 thiserror = { workspace = true }

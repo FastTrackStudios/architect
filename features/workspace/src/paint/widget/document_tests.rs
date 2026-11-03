@@ -185,7 +185,7 @@ impl PaintView for ThemedSolid {
     }
 
     fn paint(&mut self, ctx: &ViewCtx, scene: &mut Scene) {
-        let color = ctx.theme.color("accent").unwrap();
+        let color = ctx.theme.color("brand").unwrap();
         scene.fill(
             Fill::NonZero,
             Affine::IDENTITY,
@@ -209,7 +209,7 @@ fn ThemedPane() -> Element {
 
 fn themed_app() -> Element {
     let theme = use_signal(|| architect_shell::ShellTheme {
-        accent: "#ff0000",
+        accent: "#ff0000".into(),
         ..Default::default()
     });
     THEME.with(|slot| *slot.borrow_mut() = Some(theme));
@@ -267,7 +267,7 @@ fn shell_theme_change_repaints_a_blitz_document() {
     doc.vdom.in_runtime(|| {
         THEME.with(|slot| {
             let mut theme = slot.borrow().unwrap();
-            theme.write().accent = "#0000ff";
+            theme.write().accent = "#0000ff".into();
         })
     });
     for _ in 0..16 {

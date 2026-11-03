@@ -140,7 +140,7 @@ fn move_menu(lab: Lab, item: &Item) -> Menu {
 #[component]
 pub fn ListPage(tab: &'static str) -> Element {
     let shell = use_shell();
-    let (t, keys) = (shell.theme, shell.shows_keys());
+    let (t, keys) = (shell.theme.clone(), shell.shows_keys());
     let lab = use_context::<Lab>();
     let project = if tab == "tasks" {
         (lab.project)()
@@ -247,7 +247,7 @@ pub fn ListPage(tab: &'static str) -> Element {
                                 border: none; border-radius: 8px; background: {t.pill}; color: {t.ink}; \
                                 font-family: {t.font}; font-size: 13px; font-weight: 600;",
                         onclick: move |_| lab.undo(),
-                        Undo2 { size: 14, color: t.ink }
+                        Undo2 { size: 14, color: t.ink.to_string() }
                         "Undo"
                         if keys {
                             span { style: "font-size: 12px; font-weight: 500; color: {t.ink_3};", "⌘Z" }
@@ -292,7 +292,7 @@ const fn keys_hint(can_finish: bool) -> &'static str {
 #[component]
 fn Empty(tab: &'static str, project: Option<&'static str>) -> Element {
     let shell = use_shell();
-    let (t, keys) = (shell.theme, shell.shows_keys());
+    let (t, keys) = (shell.theme.clone(), shell.shows_keys());
     let lab = use_context::<Lab>();
     let (new_label, _) = new_one(tab);
     let what = project.map_or_else(
@@ -315,7 +315,7 @@ fn Empty(tab: &'static str, project: Option<&'static str>) -> Element {
         div { style: "display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 24px 0; \
                       font-family: {t.font};",
             if clear {
-                CheckCheck { size: 28, color: t.accent }
+                CheckCheck { size: 28, color: t.accent.to_string() }
             }
             span { style: "font-size: 16px; font-weight: 650; color: {t.ink};", "{what}" }
             span { style: "font-size: 14px; color: {t.ink_3};", "{then}" }
@@ -351,20 +351,24 @@ fn Row(
     on_done: Option<EventHandler<()>>,
 ) -> Element {
     let t = use_shell().theme;
-    let (name_ink, fade) = if done { (t.ink_3, 0.4) } else { (t.ink, 1.0) };
+    let (name_ink, fade) = if done {
+        (&*t.ink_3, 0.4)
+    } else {
+        (&*t.ink, 1.0)
+    };
     // The row the keys act on: the accent's wash and its bar, the one mark
     // for where the keys are (a row added or put back is selected too).
     // A row just added that the keys have left: a quieter fill.
     let fill = if selected {
-        t.accent_soft
+        &*t.accent_soft
     } else if fresh {
-        t.pill
+        &*t.pill
     } else {
         "transparent"
     };
     // Where the keys are: a bar along the row's start, not colour alone.
-    let bar = if selected { t.accent } else { "transparent" };
-    let rule = if first { "transparent" } else { t.rule };
+    let bar = if selected { &*t.accent } else { "transparent" };
+    let rule = if first { "transparent" } else { &*t.rule };
     let lead = if on_done.is_some() { 0 } else { 16 };
     rsx! {
         div {
@@ -379,9 +383,9 @@ fn Row(
                             border: none; background: transparent; padding: 0;",
                     onclick: move |_| on_done.call(()),
                     if done {
-                        CircleCheck { size: 20, color: t.accent }
+                        CircleCheck { size: 20, color: t.accent.to_string() }
                     } else {
-                        Circle { size: 20, color: t.ink_3 }
+                        Circle { size: 20, color: t.ink_3.to_string() }
                     }
                 }
             }
@@ -522,7 +526,7 @@ pub fn ItemPage(tab: &'static str, id: usize) -> Element {
 #[component]
 pub fn CapturePage(tab: &'static str) -> Element {
     let shell = use_shell();
-    let (t, keys) = (shell.theme, shell.shows_keys());
+    let (t, keys) = (shell.theme.clone(), shell.shows_keys());
     let lab = use_context::<Lab>();
     let mut text = use_signal(String::new);
     let mut nudge = use_signal(|| false);
@@ -658,7 +662,7 @@ fn spaced(s: &str, word: &str) -> String {
 #[component]
 pub fn LeftSide() -> Element {
     let shell = use_shell();
-    let (t, keys) = (shell.theme, shell.shows_keys());
+    let (t, keys) = (shell.theme.clone(), shell.shows_keys());
     let lab = use_context::<Lab>();
     let commands = use_context::<architect_commands::Commands>();
     let route = (lab.route)();
@@ -679,7 +683,7 @@ pub fn LeftSide() -> Element {
                     display: flex; align-items: center; justify-content: flex-start; gap: 8px; padding: 0 12px; \
                     font-family: {t.font}; text-align: left;",
             onclick: move |_| commands.show(architect_commands::Overlay::QuickOpen),
-            Search { size: 16, color: t.ink_3 }
+            Search { size: 16, color: t.ink_3.to_string() }
             span { style: "flex: 1; font-size: 14px; color: {t.ink_3};", "Search" }
             if keys {
                 span { style: "font-size: 12px; color: {t.ink_3};", "⌘O" }
@@ -687,12 +691,12 @@ pub fn LeftSide() -> Element {
         }
         div { style: "display: flex; flex-direction: column; gap: 2px; padding: 4px 8px; font-family: {t.font};",
             SideRow { label: "Inbox", count: inbox, on: in_inbox,
-                icon: rsx! { Inbox { size: 18, color: if in_inbox { t.ink } else { t.ink_3 } } },
+                icon: rsx! { Inbox { size: 18, color: if in_inbox { &*t.ink } else { &*t.ink_3 } } },
                 on_press: move |()| lab.jump(Route::Tab("inbox")) }
             span { style: "font-size: 12px; font-weight: 650; color: {t.ink_3}; padding: 14px 12px 6px;", "Projects" }
             for (p, n) in counts {
                 SideRow { key: "{p}", label: p, count: n, on: project == Some(p),
-                    icon: rsx! { Hash { size: 18, color: if project == Some(p) { t.ink } else { t.ink_3 } } },
+                    icon: rsx! { Hash { size: 18, color: if project == Some(p) { &*t.ink } else { &*t.ink_3 } } },
                     on_press: move |()| lab.show_project(p) }
             }
         }
@@ -709,9 +713,9 @@ fn SideRow(
 ) -> Element {
     let t = use_shell().theme;
     let (bg, colour, weight) = if on {
-        (t.active, t.ink, 650)
+        (&*t.active, &*t.ink, 650)
     } else {
-        ("transparent", t.ink_2, 500)
+        ("transparent", &*t.ink_2, 500)
     };
     rsx! {
         button {
@@ -735,7 +739,7 @@ fn SideRow(
 #[component]
 pub fn RightSide() -> Element {
     let shell = use_shell();
-    let (t, keys) = (shell.theme, shell.shows_keys());
+    let (t, keys) = (shell.theme.clone(), shell.shows_keys());
     let lab = use_context::<Lab>();
     let commands = use_context::<architect_commands::Commands>();
     let on_list = matches!((lab.route)(), Route::Tab(_));

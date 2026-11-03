@@ -390,7 +390,7 @@ fn ActionBar(items: Vec<BarAction>, bottom: f64, screen: Screen) -> Element {
 #[component]
 fn BarButton(action: BarAction, enabled: bool) -> Element {
     let t = use_shell().theme;
-    let colour = if enabled { t.ink_2 } else { t.ink_3 };
+    let colour = if enabled { &*t.ink_2 } else { &*t.ink_3 };
     let opacity = if enabled { 1.0 } else { 0.45 };
     let id = action.id.clone();
     rsx! {
@@ -407,7 +407,7 @@ fn BarButton(action: BarAction, enabled: bool) -> Element {
                     run(&id);
                 }
             },
-            {(action.icon)(Icon { size: 22, color: colour })}
+            {(action.icon)(Icon { size: 22, color: colour.into() })}
             if let Some(badge) = action.badge {
                 // Obsidian's tab count: a number in a rounded square at
                 // the icon's corner.
@@ -539,7 +539,7 @@ fn KeyboardBar(
                     let _ = document::eval("document.activeElement && document.activeElement.blur();");
                     on_dismiss.call(());
                 },
-                KeyboardOff { size: 20, color: t.ink_2 }
+                KeyboardOff { size: 20, color: t.ink_2.to_string() }
             }
         }
     }
@@ -562,7 +562,7 @@ fn in_view(count: usize, x: f64, room: f64) -> (usize, usize) {
 #[component]
 fn EditButton(action: BarAction, enabled: bool, slid: Rc<Cell<Option<Slide>>>) -> Element {
     let t = use_shell().theme;
-    let colour = if enabled { t.ink } else { t.ink_3 };
+    let colour = if enabled { &*t.ink } else { &*t.ink_3 };
     let opacity = if enabled { 1.0 } else { 0.45 };
     let id = action.id.clone();
     rsx! {
@@ -586,7 +586,7 @@ fn EditButton(action: BarAction, enabled: bool, slid: Rc<Cell<Option<Slide>>>) -
                     run(&id);
                 }
             },
-            {(action.icon)(Icon { size: 20, color: colour })}
+            {(action.icon)(Icon { size: 20, color: colour.into() })}
         }
     }
 }

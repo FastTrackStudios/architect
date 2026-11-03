@@ -56,6 +56,20 @@ impl std::fmt::Debug for DocRef {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ThemeTokens(pub BTreeMap<String, String>);
 
+/// A resolved theme's every token (`architect_theme`): what a paint
+/// view reads its colours from, live (`PaintPane` follows the store).
+impl From<&architect_theme::Resolved> for ThemeTokens {
+    fn from(resolved: &architect_theme::Resolved) -> Self {
+        Self(resolved.tokens().clone())
+    }
+}
+
+impl architect_theme::FromResolved for ThemeTokens {
+    fn from_resolved(resolved: &architect_theme::Resolved) -> Self {
+        Self::from(resolved)
+    }
+}
+
 impl ThemeTokens {
     #[must_use]
     pub fn with(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {

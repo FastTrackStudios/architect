@@ -465,6 +465,6 @@ const fn narrow(v: f64) -> f32 {
 }
 
 /// A file row's fill: the accent, faint, behind the note on show.
-const fn lit(on: bool, t: &architect_shell::ShellTheme) -> &'static str {
-    if on { t.accent_soft } else { "transparent" }
+fn lit(on: bool, t: &architect_shell::ShellTheme) -> &str {
+    if on { &t.accent_soft } else { "transparent" }
 }

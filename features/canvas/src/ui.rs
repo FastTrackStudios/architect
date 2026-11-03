@@ -58,13 +58,13 @@ pub fn window_pane(id: &str) -> PaneId {
 pub fn style_from_theme(theme: &ShellTheme) -> Style {
     let base = Style::default();
     let pick = |css: &str, or: Color| Color::from_css(css).unwrap_or(or);
-    let accent = pick(theme.accent, base.slider_grab);
-    let rule = pick(theme.rule, base.frame_hovered);
+    let accent = pick(&theme.accent, base.slider_grab);
+    let rule = pick(&theme.rule, base.frame_hovered);
     Style {
-        text: pick(theme.ink, base.text),
-        text_disabled: pick(theme.ink_3, base.text_disabled),
-        window_bg: pick(theme.sheet, base.window_bg),
-        frame_bg: pick(theme.pill, base.frame_bg),
+        text: pick(&theme.ink, base.text),
+        text_disabled: pick(&theme.ink_3, base.text_disabled),
+        window_bg: pick(&theme.sheet, base.window_bg),
+        frame_bg: pick(&theme.pill, base.frame_bg),
         frame_hovered: rule,
         button: rule,
         button_active: accent.faded(0.5),
