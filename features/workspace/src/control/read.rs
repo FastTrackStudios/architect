@@ -49,6 +49,10 @@ pub struct PaneInfo {
     pub float_rect: Option<Rect>,
     #[facet(default)]
     pub minimised: bool,
+    /// Where it is drawn (window points), as the host measured its group
+    /// or float; unset where nothing measured it (headless).
+    #[facet(default)]
+    pub rect: Option<Rect>,
 }
 
 /// `WORKSPACE_NEIGHBOR`: the pane showing next to one, toward a direction.
@@ -143,7 +147,7 @@ pub fn layout(st: &State, env: &Env, (): ()) -> Result<Arrangement, String> {
 /// # Errors
 ///
 /// A pane that is not there.
-pub fn pane_get(st: &State, _env: &Env, a: PaneArgs) -> Result<PaneInfo, String> {
+pub fn pane_get(st: &State, env: &Env, a: PaneArgs) -> Result<PaneInfo, String> {
     let w = &st.workspace;
     let id = pane_id(w, &a.pane)?;
     let pane = w.pane(&id).ok_or("no such pane")?;
@@ -177,6 +181,9 @@ pub fn pane_get(st: &State, _env: &Env, a: PaneArgs) -> Result<PaneInfo, String>
         can_go_forward: !pane.history.forward.is_empty(),
         float_rect: float.map(|f| f.rect),
         minimised: float.is_some_and(|f| f.minimised),
+        rect: float
+            .map(|f| f.rect)
+            .or_else(|| env.measured.groups.get(&at.group.0).copied()),
     })
 }
 

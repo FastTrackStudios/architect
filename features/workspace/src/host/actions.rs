@@ -43,6 +43,98 @@ impl PartialEq for WorkspaceActions {
 
 type Mirror = Arc<Mutex<(State, Env)>>;
 
+/// What the host has open over the panes, as `APP_STATUS` tells it.
+type Overlays = Arc<Mutex<Vec<String>>>;
+
+/// The workspace's part of `APP_STATUS` (its `workspace` section).
+#[derive(Debug, Clone, Facet)]
+pub struct WorkspaceStatus {
+    /// The layout's revision: what a write's `if_revision` is checked
+    /// against.
+    pub revision: u64,
+    /// The focused pane's id, and its title; empty when none is.
+    pub focused: String,
+    pub focused_title: String,
+    /// Its windows: each one's groups (id, tabs, the tab showing), its
+    /// docks' groups and how many floats it has.
+    pub windows: Vec<WindowStatus>,
+    /// The saved layout (screenset) in use, when one is.
+    #[facet(default)]
+    pub screenset: Option<ScreensetStatus>,
+    /// What is open over the panes: `menu`, `sheet`, `manage`, `drag`.
+    pub overlays: Vec<String>,
+}
+
+/// One window in [`WorkspaceStatus`].
+#[derive(Debug, Clone, Facet)]
+pub struct WindowStatus {
+    pub id: String,
+    pub groups: Vec<crate::guide::ArrangedGroup>,
+    pub docked: Vec<crate::guide::ArrangedGroup>,
+    pub floats: usize,
+}
+
+/// The screenset in [`WorkspaceStatus`].
+#[derive(Debug, Clone, Facet)]
+pub struct ScreensetStatus {
+    pub id: String,
+    pub name: String,
+    pub builtin: bool,
+    /// The live layout differs from what it saved.
+    pub dirty: bool,
+}
+
+/// The `workspace` section from the mirror and what is open over it.
+fn status_of(mirror: &Mirror, overlays: &Overlays) -> String {
+    let (st, env) = mirror
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    let arranged = crate::guide::Arrangement::measured(&st.workspace, st.revision, &env.measured);
+    let focused_title = st
+        .workspace
+        .active
+        .as_ref()
+        .and_then(|id| st.workspace.pane(id))
+        .map(|p| p.title.clone())
+        .unwrap_or_default();
+    let screenset = st
+        .screensets
+        .active
+        .as_deref()
+        .and_then(|id| st.screensets.get(id))
+        .map(|set| ScreensetStatus {
+            id: set.id.clone(),
+            name: set.name.clone(),
+            builtin: set.builtin,
+            dirty: st.screensets.is_dirty(st.form),
+        });
+    let status = WorkspaceStatus {
+        revision: st.revision,
+        focused: arranged.active.clone(),
+        focused_title,
+        windows: arranged
+            .windows
+            .into_iter()
+            .map(|w| WindowStatus {
+                id: w.id,
+                groups: w.groups,
+                docked: w.docked,
+                floats: w.floats.len(),
+            })
+            .collect(),
+        screenset,
+        overlays: overlays
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone(),
+    };
+    facet_json::to_string(&status).unwrap_or_else(|_| "{}".to_owned())
+}
+
+/// The workspace's section of `APP_STATUS`.
+pub const STATUS_SECTION: &str = "workspace";
+
 static MANAGE_META: ActionMeta = ActionMeta {
     id: control::ids::WORKSPACES_MANAGE,
     trait_name: "",
@@ -104,6 +196,7 @@ impl Host {
         );
         env.windows = self.has_windows();
         env.measured = self.measured.peek().clone();
+        env.shipped = self.shipped.peek().clone();
         for side in Docks::SIDES {
             if let Some(bounds) = self.dock_bounds(side) {
                 env.set_dock_bounds(side, bounds);
@@ -236,15 +329,35 @@ pub(super) fn use_actions(host: Host, actions: Option<WorkspaceActions>) {
             }
         },
     );
+    // What is open over the panes, for `APP_STATUS`.
+    let overlays: Overlays = use_hook(|| Arc::new(Mutex::new(Vec::new())));
+    {
+        let overlays = overlays.clone();
+        use_effect(move || {
+            let open: Vec<String> = [
+                ("menu", host.menu.read().is_some()),
+                ("sheet", host.sheet.read().is_some()),
+                ("manage", *host.managing.read()),
+                ("drag", host.drag.read().is_some()),
+            ]
+            .into_iter()
+            .filter(|(_, open)| *open)
+            .map(|(name, _)| name.to_owned())
+            .collect();
+            *overlays.lock().unwrap_or_else(PoisonError::into_inner) = open;
+        });
+    }
     let registered = use_hook({
         let mirror = mirror.clone();
         move || {
             let list = list?;
             let exec: Arc<dyn Exec> = Arc::new(OnWindow {
                 tx: runner.tx(),
-                mirror,
+                mirror: mirror.clone(),
             });
             control::register(&list, &exec).ok()?;
+            list.status()
+                .section(STATUS_SECTION, move || status_of(&mirror, &overlays));
             let tx = opener.tx();
             list.register_async(&MANAGE_META, Effect::Mutating, move |(): ()| {
                 let (answer, heard) = futures_channel::oneshot::channel();
@@ -292,6 +405,7 @@ pub(super) fn use_actions(host: Host, actions: Option<WorkspaceActions>) {
                 list.unregister(id);
             }
             list.unregister(control::ids::WORKSPACES_MANAGE);
+            list.status().remove(STATUS_SECTION);
         }
     });
 }

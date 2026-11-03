@@ -486,6 +486,10 @@ pub struct Host {
     sets_noun: Signal<String>,
     /// The sheet that manages the saved layouts is open.
     managing: Signal<bool>,
+    /// The screensets the app gave before anything was read from its
+    /// store: the built-in ones as shipped, for the escape hatch
+    /// (`WORKSPACES_RESTORE_BUILTINS`).
+    shipped: CopyValue<Vec<crate::screenset::Screenset>>,
 }
 
 /// The [`Host`] a [`WorkspaceView`] above put in context.
@@ -1284,6 +1288,14 @@ pub fn WorkspaceView(
         window: CopyValue::new(WindowId::main()),
         status: Signal::new(Vec::new()),
         status_serial: CopyValue::new(0),
+        shipped: CopyValue::new(screensets.map_or_else(Vec::new, |s| {
+            s.peek()
+                .sets
+                .iter()
+                .filter(|s| s.builtin)
+                .cloned()
+                .collect()
+        })),
         screensets: screensets.unwrap_or_else(|| Signal::new(Screensets::default())),
         form: Signal::new(FormClass::Desk),
         scrolls: Signal::new(HashMap::new()),

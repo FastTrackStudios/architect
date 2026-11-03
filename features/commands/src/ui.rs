@@ -377,6 +377,16 @@ impl Commands {
         self.run_custom(id)
     }
 
+    /// The escape hatch ([`crate::keymap::ESCAPE_HATCH`]): the person's
+    /// key changes dropped, and [`crate::keymap::ESCAPE_HATCH_ACTION`] run
+    /// on whichever list has it (every built-in workspace layout back as
+    /// shipped). Its chord runs this before anything else; nothing can
+    /// rebind it.
+    pub fn escape_hatch(&self) {
+        self.edit_keymap(Keymap::reset_all);
+        let _ = self.run_with(crate::keymap::ESCAPE_HATCH_ACTION, "{}");
+    }
+
     /// Runs action `id` with `args` (JSON). False when there is no such
     /// action in the app's lists, it is disabled, or it said no. An async
     /// action is spawned, and counts as run once started.
@@ -557,6 +567,12 @@ impl Commands {
     /// it is the key asked about.
     #[must_use = "true when the chord was used"]
     pub fn handle_chord(&self, chord: &str) -> bool {
+        // Before anything a person bound, a recording or an overlay: it
+        // always works.
+        if crate::keymap::is_escape_hatch(chord) {
+            self.escape_hatch();
+            return true;
+        }
         if self.recording.peek().is_some() {
             return self.record_chord(chord);
         }

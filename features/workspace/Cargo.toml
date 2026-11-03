@@ -107,6 +107,8 @@ blitz-paint = { workspace = true, features = ["custom-widget"] }
 # Every action driven over MCP against a headless workspace (tests/actions.rs).
 architect-mcp = { path = "../mcp" }
 serde_json = { workspace = true }
+# An async action run as the app itself (tests/actions.rs, the escape hatch).
+futures = "0.3"
 
 [[test]]
 name = "windows"
