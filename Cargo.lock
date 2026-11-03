@@ -1541,6 +1541,7 @@ dependencies = [
  "dioxus-native-dom",
  "facet",
  "facet-json",
+ "futures",
  "futures-channel",
  "futures-timer",
  "futures-util",

@@ -387,6 +387,8 @@ fn PopoutView(props: PopoutProps) -> Element {
         measured: CopyValue::new(crate::tree::Measured::default()),
         sets_noun: Signal::new("Workspace".to_owned()),
         managing: Signal::new(false),
+        // A pop-out writes nothing back to the shipped sets.
+        shipped: CopyValue::new(Vec::new()),
     });
     use_release_outside(host);
     let mut host = host;

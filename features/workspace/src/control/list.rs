@@ -10,10 +10,10 @@ use architect::action::{ActionCaller, ActionError, ActionList, ActionMeta, Effec
 use facet::Facet;
 
 use super::{
-    ApplyArgs, CloseArgs, DeleteArgs, DockBackArgs, DockPopOutArgs, DockSetArgs, Env, FloatArgs,
-    FocusArgs, GroupSetArgs, LoadArgs, MoveArgs, NavigateArgs, NeighborArgs, OpenArgs, OptionsArgs,
-    PaneArgs, RenameArgs, ReopenArgs, ResizeArgs, RestoreArgs, RevisionArgs, SaveArgs, SlotArgs,
-    SplitArgs, State, TabSetArgs, WindowArgs, WindowSetArgs, Write, ZoomArgs, transact,
+    ApplyArgs, CloneArgs, CloseArgs, DeleteArgs, DockBackArgs, DockPopOutArgs, DockSetArgs, Env,
+    FloatArgs, FocusArgs, GroupSetArgs, LoadArgs, MoveArgs, NavigateArgs, NeighborArgs, OpenArgs,
+    OptionsArgs, PaneArgs, RenameArgs, ReopenArgs, ResizeArgs, RestoreArgs, RevisionArgs, SaveArgs,
+    SlotArgs, SplitArgs, State, TabSetArgs, WindowArgs, WindowSetArgs, Write, ZoomArgs, transact,
 };
 
 /// The actions' ids. Each is a contract (keymaps, scripts and models
@@ -53,6 +53,9 @@ pub mod ids {
     pub const WORKSPACES_OPTIONS: &str = "WORKSPACES_OPTIONS";
     pub const WORKSPACES_RESET: &str = "WORKSPACES_RESET";
     pub const WORKSPACES_DELETE: &str = "WORKSPACES_DELETE";
+    pub const WORKSPACES_CLONE: &str = "WORKSPACES_CLONE";
+    /// The escape hatch's workspace half (`architect_commands`'s chord).
+    pub const WORKSPACES_RESTORE_BUILTINS: &str = "WORKSPACES_RESTORE_BUILTINS";
     /// Opens the manage sheet: the Blitz host's own (`register` does not
     /// put it on a list; there is no sheet without a window).
     pub const WORKSPACES_MANAGE: &str = "WORKSPACES_MANAGE";
@@ -93,6 +96,8 @@ pub mod ids {
         WORKSPACES_OPTIONS,
         WORKSPACES_RESET,
         WORKSPACES_DELETE,
+        WORKSPACES_CLONE,
+        WORKSPACES_RESTORE_BUILTINS,
     ];
 }
 
@@ -157,7 +162,9 @@ metas! {
     CLOSE_WINDOW = CLOSE_WINDOW, "Windows", "Close a window", "Closes a pop-out window; its tabs come back to the main window.";
     WORKSPACES_LIST = WORKSPACES_LIST, "Workspaces", "Saved workspace layouts", "Every saved layout (id, name, slot, built in, the classes of screen it has layouts for, dirty per class), the active one, whether the live layout differs from it, and the options.";
     WORKSPACES_LOAD = WORKSPACES_LOAD, "Workspaces", "Load a workspace layout", "Loads a saved layout by `id`, `name` or `slot`: its layout for this class of screen becomes the live one.";
-    WORKSPACES_SAVE = WORKSPACES_SAVE, "Workspaces", "Save the workspace layout", "Saves the live layout: with no `name` into the active set; with one over the set of that name, or as a new set. It becomes active.";
+    WORKSPACES_SAVE = WORKSPACES_SAVE, "Workspaces", "Save the workspace layout", "Saves the live layout: with no `name` into the active set; with one over the set of that name, or as a new set. It becomes active. A built-in set is the person's: saved over from outside the app it answers `builtin` (WORKSPACES_CLONE it first).";
+    WORKSPACES_CLONE = WORKSPACES_CLONE, "Workspaces", "Clone a workspace layout", "Copies saved layout `name` (a built-in one, above all) as a set of your own named `as` (`<name> copy` unless given; a name taken is refused). The copy becomes the active set and the live layout stays as it is: WORKSPACES_SAVE then saves into the copy.";
+    WORKSPACES_RESTORE_BUILTINS = WORKSPACES_RESTORE_BUILTINS, "Workspaces", "Restore the built-in layouts", "The escape hatch: every built-in layout back as the app ships it (a changed one is kept first as `<name> (edited)`), and the first shown. Ctrl+Alt+Shift+Escape (Cmd on macOS) runs it, and drops the person's key changes too.";
     WORKSPACES_RENAME = WORKSPACES_RENAME, "Workspaces", "Rename a workspace layout", "Renames a saved layout (`id` stays).";
     WORKSPACES_SET_SLOT = WORKSPACES_SET_SLOT, "Workspaces", "Put a workspace layout in a slot", "Puts a saved layout in slot 1–9 (⌘1–9; the set there gives it up), or out of any when `slot` is unset.";
     WORKSPACES_OPTIONS = WORKSPACES_OPTIONS, "Workspaces", "Workspace layout options", "Save the live layout before loading another (`save_before_load`), and whether ⌘1–9 load (`slot_keys`).";
@@ -266,6 +273,14 @@ pub fn register(list: &ActionList, exec: &Arc<dyn Exec>) -> Result<(), ActionErr
     write::<OptionsArgs>(list, e, &WORKSPACES_OPTIONS, Mutating, super::set_options)?;
     write::<RevisionArgs>(list, e, &WORKSPACES_RESET, Mutating, super::reset)?;
     write::<DeleteArgs>(list, e, &WORKSPACES_DELETE, Destructive, super::delete)?;
+    write::<CloneArgs>(list, e, &WORKSPACES_CLONE, Mutating, super::clone_set)?;
+    write::<RevisionArgs>(
+        list,
+        e,
+        &WORKSPACES_RESTORE_BUILTINS,
+        Mutating,
+        super::restore_builtins,
+    )?;
     Ok(())
 }
 

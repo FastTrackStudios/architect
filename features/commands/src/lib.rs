@@ -51,8 +51,9 @@ pub use fuzzy::{Match, fuzzy};
 #[cfg(all(feature = "native", target_os = "ios"))]
 pub use ios_menu::NativeMenus;
 pub use keymap::{
-    Binding, Clash, Conflict, EVERYWHERE, Keymap, Layer, PersonKeymap, Rebind, display_chord,
-    display_keys, normalize_keys, parse_glyph_chord, parse_shortcut,
+    Binding, Clash, Conflict, ESCAPE_HATCH, ESCAPE_HATCH_ACTION, EVERYWHERE, Keymap, Layer,
+    PersonKeymap, Rebind, display_chord, display_keys, is_escape_hatch, normalize_keys,
+    parse_glyph_chord, parse_shortcut,
 };
 #[cfg(feature = "ui")]
 pub use keys_ui::{BindingEditor, KeymapTools, WhichKeyPanel, use_keymap, use_palette_opener};
