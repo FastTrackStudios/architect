@@ -16,7 +16,8 @@
 //! | `defer(fn)` | a live script only ([`Runtime::start`]): calls `fn` on the next [`Live::frame`] |
 //!
 //! An app adds globals of its own with [`Module`]s ([`Runtime::with_module`]):
-//! `architect-canvas`'s `ImGui` and `Canvas`, for one.
+//! `architect-canvas`'s `ImGui` and `Canvas`, for one, and the app's theme
+//! (`theme`, [`crate::theme::ThemeModule`]).
 //!
 //! A script either runs once ([`Runtime::run`]) or lives
 //! ([`Runtime::start`]): its first run sets up, and each function it hands
@@ -148,6 +149,25 @@ pub trait Module: Send + Sync {
     ///
     /// When Luau does (out of memory).
     fn install(&self, lua: &Lua) -> mlua::Result<LuaValue>;
+
+    /// Whether its fields change while a script runs (`theme.scheme`):
+    /// then a script's `Global.field` is read each time it runs, never
+    /// resolved once as Luau does for a sandbox's globals.
+    fn live_fields(&self) -> bool {
+        false
+    }
+
+    /// A live script's frame is starting ([`Live::frame`]), before what
+    /// it deferred runs: catch up with the host (the theme's snapshot,
+    /// `crate::theme::ThemeModule`). An error stops the script.
+    ///
+    /// # Errors
+    ///
+    /// What it calls in the script fails.
+    fn frame(&self, lua: &Lua) -> mlua::Result<()> {
+        let _ = lua;
+        Ok(())
+    }
 }
 
 /// An error a [`Module`]'s function raises: the script stops (or its
@@ -349,6 +369,16 @@ impl Runtime {
         // Kept in the registry, not captured: a Luau value a Rust closure
         // holds keeps its state alive for ever.
         lua.set_named_registry_value(MODULES, modules)?;
+        // Luau resolves `Global.field` once, as a chunk loads, in a
+        // sandbox; a module whose fields move is read each time.
+        lua.set_compiler(
+            mlua::chunk::Compiler::new().set_mutable_globals(
+                self.modules
+                    .iter()
+                    .filter(|m| m.live_fields())
+                    .map(|m| m.global().to_owned()),
+            ),
+        );
         globals.set(
             "require",
             lua.create_function(|lua, path: String| {
@@ -530,6 +560,9 @@ impl Live {
         let result = self
             .runtime
             .step(&self.step, async {
+                for module in &self.runtime.modules {
+                    module.frame(&self.lua).map_err(|e| script_error(&e))?;
+                }
                 let due = self.take().map_err(|e| script_error(&e))?;
                 for f in due {
                     f.call_async::<()>(()).await.map_err(|e| script_error(&e))?;
