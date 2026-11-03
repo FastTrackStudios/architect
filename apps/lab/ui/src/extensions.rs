@@ -485,13 +485,17 @@ fn builtin() -> Option<Package> {
 }
 
 /// The extension actions an agent reaches on the lab's own list (its
-/// control socket, MCP): forwarded to the extensions' list.
-const FORWARDED: [&str; 13] = [
+/// control socket, MCP): forwarded to the extensions' list, each run there
+/// as whoever ran it on the lab's (the lab's authorizer and confirmation
+/// asked first).
+const FORWARDED: [&str; 15] = [
     "EXT_LIST",
     "EXT_SEARCH",
     "EXT_INSTALL",
     "EXT_UNINSTALL",
     "EXT_RELOAD",
+    "EXT_CHECK",
+    "EXT_CLONE",
     "EXT_CONTRIBUTIONS",
     "EXT_OPEN",
     "EXT_VIEW_OPEN",
@@ -562,7 +566,9 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
             .unwrap_or_else(|_| std::env::temp_dir().join("architect-lab"));
         let clicker = clicker(&root);
         let frame = frame_dev(&root);
-        let mut extensions = Extensions::new(host, Installs::new(root.join("extensions")));
+        // `EXT_CLONE` puts its copies beside the development ones.
+        let mut extensions = Extensions::new(host, Installs::new(root.join("extensions")))
+            .with_dev_root(root.join("dev"));
         // The Board: one Rust value, linked in as a built-in.
         if let Ok(with) = extensions.clone().with_linked(&architect_lab_board::Board) {
             extensions = with;
@@ -578,6 +584,9 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         }
         let _ = extensions.install_actions();
         let _ = extensions.install_contribution_actions();
+        // What is wrong with them is in the lab's `APP_STATUS`, and their
+        // `EXT_*` actions on the lab's list (the CLI's and MCP's).
+        extensions.report_problems(lab.problems());
         forward(&lab, &list, &FORWARDED);
         // Off until the switch says otherwise.
         let _ = extensions.disable(METRONOME);

@@ -36,6 +36,20 @@ use lucide_dioxus::{
 
 pub use screen::{Device, use_window_chrome, use_window_screen};
 
+/// `EXT_CHECK` as the lab runs it — its view kinds, process extensions —
+/// for `architect-desktop extensions check <folder>` with no window.
+#[must_use]
+pub fn extension_checker() -> architect_extensions::check::Checker {
+    architect_extensions::check::Checker::new().with_view_kinds(embedded::kinds())
+}
+
+/// The lab's folder: its settings, themes, extensions in development and
+/// the agents' guide (`AGENTS.md`). `$ARCHITECT_LAB_CONFIG_DIR` when set.
+#[must_use]
+pub fn app_dir() -> Option<std::path::PathBuf> {
+    architect::settings::app_dir("architect-lab").ok()
+}
+
 /// Where the lab is: a tab's list, one item of it (by its id), a new one
 /// being written for it, or the help (over the tab it was asked from).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -677,6 +691,11 @@ pub fn LabApp() -> Element {
             .unwrap_or_else(|| std::sync::Arc::new(architect::action::ActionList::new()))
     });
     use_context_provider(|| list.clone());
+    // `APP_STATUS`: what is on screen and what is wrong, from every part
+    // of the lab that reports it (the workspace, the theme, extensions).
+    use_hook(|| {
+        let _ = architect::action::app_status::register(&list);
+    });
     // Themes: one store for the app, its THEME_* actions on the list.
     let theme = theme::use_lab_theme(windowed, &list);
     // An agent's Delete waits for the person's yes, in the sheet below.

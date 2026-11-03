@@ -54,6 +54,55 @@ pub fn serve_window(list: &ActionList) -> Option<Serving> {
         .flatten()
 }
 
+/// The lab's opening of its agents' guide (`architect_control::guide`).
+pub const GUIDE_PREAMBLE: &str = include_str!("AGENTS.preamble.md");
+
+/// The lab's agents' guide, for `list`.
+#[must_use]
+pub fn guide() -> architect_control::guide::Guide {
+    architect_control::guide::Guide::new(APP).preamble(GUIDE_PREAMBLE)
+}
+
+/// Keeps `<app dir>/AGENTS.md` and `actions.schema.json` written from
+/// `list` while the window runs: once it has settled, and again whenever
+/// an action comes or goes. `None` with no app folder.
+#[must_use]
+pub fn keep_guide_written(list: &ActionList) -> Option<architect_control::guide::KeptWritten> {
+    let dir = architect_lab_ui::app_dir()?;
+    Some(guide().keep_written(surface(list), dir, Duration::from_millis(1500)))
+}
+
+/// `architect-desktop extensions check <folder>`: the extension checked
+/// as the lab would load it, its report printed as JSON; nonzero when it
+/// does not pass.
+#[must_use]
+pub fn extensions(args: &[String]) -> ExitCode {
+    let [verb, folder] = args else {
+        let _ = writeln!(
+            std::io::stderr(),
+            "usage: architect-desktop extensions check <folder>"
+        );
+        return ExitCode::from(2);
+    };
+    if verb != "check" {
+        let _ = writeln!(
+            std::io::stderr(),
+            "usage: architect-desktop extensions check <folder>"
+        );
+        return ExitCode::from(2);
+    }
+    let report =
+        architect_lab_ui::extension_checker().check(&architect_extensions::check::folder(folder));
+    let json = facet_json::to_string(&report).unwrap_or_default();
+    let _ = writeln!(std::io::stdout(), "{json}");
+    if report.ok {
+        ExitCode::SUCCESS
+    } else {
+        let _ = writeln!(std::io::stderr(), "architect-desktop: {}", report.summary());
+        ExitCode::from(1)
+    }
+}
+
 /// The lab with no window: its root in a headless document, its list.
 pub struct HeadlessLab {
     app: architect_guide::run::Headless,
