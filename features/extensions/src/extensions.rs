@@ -94,6 +94,27 @@ impl Extensions {
         self
     }
 
+    /// An in-process extension linked into the build (`crate::linked`):
+    /// its manifest a built-in package, its code run here while that copy
+    /// is the one that runs. An installed or development copy of its id
+    /// overrides it (and runs as its kind says: a process, its program
+    /// built from the same crate).
+    ///
+    /// # Errors
+    ///
+    /// Its manifest is refused.
+    #[cfg(feature = "linked")]
+    pub fn with_linked(
+        self,
+        extension: &dyn crate::linked::Extension,
+    ) -> Result<Self, crate::ManifestError> {
+        let package = Package::embedded(extension.manifest(), extension.files())?;
+        self.inner
+            .host
+            .link(&package.manifest.id, crate::linked::Builder::of(extension));
+        Ok(self.with_builtin(package))
+    }
+
     /// Installs only what `policy` allows (the organization's), from now.
     pub fn set_policy(&self, policy: Option<Policy>) {
         *lock(&self.inner.policy) = policy;

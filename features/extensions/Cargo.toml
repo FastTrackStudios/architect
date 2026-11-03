@@ -31,7 +31,11 @@ host = [
     "dep:futures",
 ]
 crdt = ["dep:crdt"]
-ui = ["host", "dep:dioxus", "dep:futures", "architect-settings/ui"]
+# In-process extensions (`linked`): one trait a crate implements, run
+# linked into the app as a built-in (its views Dioxus components in the
+# app's document), or served as a process by `guest`.
+linked = ["host", "dep:dioxus"]
+ui = ["host", "linked", "dep:dioxus", "dep:futures", "architect-settings/ui"]
 # The wire and the protocol (`wire`, `proto`); the derives key on `vox`.
 vox = ["dep:architect", "architect/vox", "dep:vox", "dep:thiserror"]
 process = [
@@ -89,7 +93,7 @@ futures-timer = { workspace = true, optional = true }
 [dev-dependencies]
 # Its own host, so `cargo test --workspace` builds the tests with it; the
 # guest too, since the remote-view tests spawn themselves as one.
-architect-extensions = { path = ".", features = ["host", "crdt", "guest", "remote"] }
+architect-extensions = { path = ".", features = ["host", "crdt", "guest", "remote", "linked"] }
 futures = "0.3"
 tempfile = "3"
 crdt = { workspace = true }

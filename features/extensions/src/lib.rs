@@ -55,6 +55,8 @@ pub mod guest;
 pub mod host;
 #[cfg(feature = "host")]
 pub mod install;
+#[cfg(any(feature = "linked", all(feature = "guest", unix)))]
+pub mod linked;
 #[cfg(all(feature = "process", unix))]
 pub mod process;
 #[cfg(feature = "vox")]

@@ -163,6 +163,12 @@ pub trait Instance: Send + Sync {
         None
     }
 
+    /// What its code adds to the interface past its manifest's tables (an
+    /// in-process extension's builder's).
+    fn declared(&self) -> Option<crate::contrib::Contribution> {
+        None
+    }
+
     /// Runs its hook `decl`'s script (a `luau` extension's), as `caller`
     /// with the event as `args`: `None` when it runs no scripts.
     fn hook(&self, decl: &HookDecl, caller: &ActionCaller, args: Value) -> Option<ActionFuture> {
@@ -715,6 +721,9 @@ struct Inner {
     running: Arc<Mutex<BTreeSet<String>>>,
     /// What opens extensions' views in the app's window.
     view_opener: Mutex<Option<ViewOpener>>,
+    /// The in-process extensions linked into the app, built, by id.
+    #[cfg(feature = "linked")]
+    linked: Mutex<BTreeMap<String, Arc<crate::linked::Builder>>>,
 }
 
 /// Loads extensions onto one Action List and one settings registry.
@@ -755,6 +764,8 @@ impl Host {
                 started: Mutex::new(BTreeSet::new()),
                 running: Arc::default(),
                 view_opener: Mutex::new(None),
+                #[cfg(feature = "linked")]
+                linked: Mutex::new(BTreeMap::new()),
             }),
         }
     }
@@ -899,6 +910,50 @@ impl Host {
             self.emit("doc.opened", &state);
         }
         Ok(answer)
+    }
+
+    /// Links in-process extension `built` as `id`'s built-in copy: when
+    /// that copy runs, it runs here ([`crate::linked`]).
+    #[cfg(feature = "linked")]
+    pub fn link(&self, id: &str, built: crate::linked::Builder) {
+        self.inner
+            .linked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(id.to_owned(), Arc::new(built));
+    }
+
+    /// The component of view `view` of `extension`, when the copy of it
+    /// running is the one linked in (a process copy's is drawn remotely).
+    #[cfg(feature = "linked")]
+    #[must_use]
+    pub fn linked_view(
+        &self,
+        extension: &str,
+        view: &str,
+    ) -> Option<fn() -> dioxus::prelude::Element> {
+        if self.get(extension)?.origin != Origin::Builtin {
+            return None;
+        }
+        self.inner
+            .linked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(extension)?
+            .view_root(view)
+    }
+
+    /// The in-process extensions linked in, built: for their root context.
+    #[cfg(feature = "linked")]
+    #[must_use]
+    pub fn linked(&self) -> Vec<(String, Arc<crate::linked::Builder>)> {
+        self.inner
+            .linked
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .map(|(id, b)| (id.clone(), Arc::clone(b)))
+            .collect()
     }
 
     /// What loaded extensions add to the interface: their openers, tabs,
@@ -1110,9 +1165,12 @@ impl Host {
     ) -> Result<Change, LoadError> {
         let manifest = &package.manifest;
         manifest.check().map_err(|e| LoadError::Package(e.into()))?;
-        let runner = self
-            .runner(manifest.kind)
-            .ok_or(LoadError::NoRunner(manifest.kind))?;
+        let runner = match self.linked_runner(&manifest.id, origin) {
+            Some(linked) => linked,
+            None => self
+                .runner(manifest.kind)
+                .ok_or(LoadError::NoRunner(manifest.kind))?,
+        };
         self.check_views(manifest)?;
         let list = &self.inner.list;
         let mut loaded = self
@@ -1177,9 +1235,11 @@ impl Host {
         }
         // What it adds to the interface, as a diff (what it added at run
         // time stays until its new instance says otherwise).
-        self.inner
-            .contributions
-            .put(&manifest.id, manifest.contributes.clone());
+        let declared = match instance.declared() {
+            Some(code) => manifest.contributes.merged(&code),
+            None => manifest.contributes.clone(),
+        };
+        self.inner.contributions.put(&manifest.id, declared);
         if let Some(old) = loaded.remove(&manifest.id) {
             old.instance.stop();
         }
@@ -1207,6 +1267,25 @@ impl Host {
             kept,
             took: started.elapsed(),
         })
+    }
+
+    /// The runner for an in-process extension `id` linked in, when the
+    /// copy loading is the built-in one.
+    #[allow(clippy::unused_self)]
+    fn linked_runner(&self, id: &str, origin: Origin) -> Option<Arc<dyn Runner>> {
+        #[cfg(feature = "linked")]
+        if origin == Origin::Builtin {
+            let built = self
+                .inner
+                .linked
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .get(id)
+                .cloned()?;
+            return Some(Arc::new(linked::Runner(built)));
+        }
+        let _ = (id, origin);
+        None
     }
 
     /// Refuses a view of a kind nobody here provides, before anything of
@@ -1502,4 +1581,80 @@ fn preset(list: &ActionList, manifest: &Manifest, decl: &ActionDecl) -> CallerAs
             Box::pin(async move { list.run_json_async_with(&caller, &target, &args).await });
         Ok(run)
     })
+}
+
+/// In-process extensions' runner (feature `linked`).
+#[cfg(feature = "linked")]
+mod linked {
+    use std::sync::Arc;
+
+    use architect::action::{ActionCaller, ActionError, ActionFuture, CallerAsyncHandler};
+
+    use super::{Context, Instance, invocation_json, json_args};
+    use crate::contrib::Contribution;
+    use crate::linked::Builder;
+    use crate::manifest::{ActionDecl, Kind};
+    use crate::package::Package;
+
+    pub(super) struct Runner(pub(super) Arc<Builder>);
+
+    impl super::Runner for Runner {
+        fn kind(&self) -> Kind {
+            // Whatever its manifest says (its process copy's kind): it is
+            // chosen by its id, not its kind.
+            Kind::Process
+        }
+
+        fn start(&self, package: &Package, _: Context<'_>) -> Result<Box<dyn Instance>, String> {
+            let m = &package.manifest;
+            if let Some(view) = self
+                .0
+                .view_ids()
+                .into_iter()
+                .find(|v| !m.views.iter().any(|d| &d.id == v))
+            {
+                return Err(format!(
+                    "its code draws {view}, which its manifest does not declare"
+                ));
+            }
+            if let Some(a) = m.actions.iter().find(|a| {
+                a.preset.is_none() && a.script.is_none() && self.0.action_fn(&a.id).is_none()
+            }) {
+                return Err(format!("its code does not run its action {}", a.id));
+            }
+            let views = m.view_ids();
+            self.0
+                .contribution()
+                .check(&m.rules(&views))
+                .map_err(|e| e.to_string())?;
+            Ok(Box::new(Linked(Arc::clone(&self.0))))
+        }
+    }
+
+    struct Linked(Arc<Builder>);
+
+    impl Instance for Linked {
+        fn action(&self, decl: &ActionDecl) -> Result<CallerAsyncHandler, String> {
+            let run = self
+                .0
+                .action_fn(&decl.id)
+                .ok_or_else(|| format!("its code does not run {}", decl.id))?;
+            let id = decl.id.clone();
+            Ok(Arc::new(move |caller: &ActionCaller, args: &[u8]| {
+                let args = json_args(&id, args)?;
+                let cx = invocation_json(caller.invocation());
+                let (work, id) = (run(args, cx), id.clone());
+                let out: ActionFuture = Box::pin(async move {
+                    work.await
+                        .map(|v| v.to_string().into_bytes())
+                        .map_err(|message| ActionError::Failed { id, message })
+                });
+                Ok(out)
+            }))
+        }
+
+        fn declared(&self) -> Option<Contribution> {
+            Some(self.0.contribution().clone())
+        }
+    }
 }
