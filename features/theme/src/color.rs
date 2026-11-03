@@ -72,6 +72,14 @@ impl Rgba {
         }
     }
 
+    /// Packed as `0xRRGGBBAA`: Dear `ImGui`'s (and `ReaImGui`'s) colour
+    /// integer.
+    #[must_use]
+    pub fn packed(self) -> u32 {
+        let [r, g, b, a] = [self.r, self.g, self.b, self.a].map(|c| u32::from(byte(c)));
+        (r << 24) | (g << 16) | (b << 8) | a
+    }
+
     /// WCAG 2 relative luminance (alpha ignored).
     #[must_use]
     pub fn luminance(self) -> f32 {

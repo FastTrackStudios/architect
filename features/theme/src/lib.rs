@@ -44,7 +44,7 @@ pub use resolve::{
     FromResolved, Origin, Projected, Resolved, TokenSource, css_name, derive, names, resolve,
 };
 pub use store::{
-    Composed, Layer, LayerKind, Layers, Reloader, Subscription, ThemeInfo, ThemeStore,
+    Composed, Contribution, Layer, LayerKind, Layers, Reloader, Subscription, ThemeInfo, ThemeStore,
 };
 
 #[cfg(feature = "dioxus")]

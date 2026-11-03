@@ -16,6 +16,10 @@ use crate::resolve::{Resolved, resolve_in};
 pub enum LayerKind {
     /// architect's: `FastTrackStudio` light and dark, by the system.
     Builtin,
+    /// What loaded extensions contribute: their own tokens' defaults
+    /// (`clicker.face`), under everything the app and the person say
+    /// ([`ThemeStore::contribute`]).
+    Extension,
     /// The app's default (Studio's own pair).
     App,
     /// The organization's default.
@@ -33,8 +37,9 @@ pub enum LayerKind {
 }
 
 impl LayerKind {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Builtin,
+        Self::Extension,
         Self::App,
         Self::Org,
         Self::Person,
@@ -48,6 +53,7 @@ impl LayerKind {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Builtin => "builtin",
+            Self::Extension => "extension",
             Self::App => "app",
             Self::Org => "org",
             Self::Person => "person",
@@ -203,13 +209,100 @@ pub type Reloader = Arc<dyn Fn(&Registry) -> Registry + Send + Sync>;
 
 type Listener = Arc<dyn Fn(&Resolved) + Send + Sync>;
 
+/// What one owner other than the app (an extension, by its id) adds to
+/// the themes while it is there ([`ThemeStore::contribute`]): themes,
+/// and its own tokens' defaults.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Contribution {
+    /// Its themes ([`Source::Extension`] when they are an extension's
+    /// files).
+    pub themes: Vec<Theme>,
+    /// The theme files that did not read: the theme's id and why. The
+    /// owner's last good theme of that id stays.
+    pub failed: Vec<(String, Vec<Problem>)>,
+    /// Its tokens' defaults by name, literals or expressions
+    /// (`"clicker.face": "mix($card, $brand, 0.12)"`): the
+    /// [`LayerKind::Extension`] layer, under the app's and the person's.
+    pub tokens: BTreeMap<String, String>,
+}
+
+impl Contribution {
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.themes.is_empty() && self.failed.is_empty() && self.tokens.is_empty()
+    }
+}
+
 struct State {
+    /// The app's themes: built in, its folders, the ones it built.
     registry: Registry,
+    /// Every owner's contribution, by owner.
+    contributions: BTreeMap<String, Contribution>,
+    /// `registry` and the contributed themes: what everything reads.
+    full: Registry,
+    /// The contributions' problems: files that did not read, an id or a
+    /// token someone else has.
+    contributed: Vec<Problem>,
     layers: Layers,
     system: Scheme,
     composed: Composed,
     current: Resolved,
     missing: Option<Problem>,
+}
+
+impl State {
+    /// `full` and `contributed` again, from `registry` and the
+    /// contributions; the contributions' tokens as the extension layer.
+    fn merge(&mut self) -> Layers {
+        let mut full = self.registry.clone();
+        let mut problems = Vec::new();
+        let mut tokens: BTreeMap<String, String> = BTreeMap::new();
+        let mut token_owner: BTreeMap<String, String> = BTreeMap::new();
+        for (owner, c) in &self.contributions {
+            for (_, why) in &c.failed {
+                problems.extend(why.iter().cloned());
+            }
+            for theme in &c.themes {
+                if full.contains(&theme.id) {
+                    problems.push(
+                        Problem::new(
+                            &theme.id,
+                            &theme.source,
+                            format!("{owner}: another theme has the id {:?}", theme.id),
+                        )
+                        .at("id"),
+                    );
+                } else {
+                    full.insert(theme.clone());
+                }
+            }
+            for (name, value) in &c.tokens {
+                if let Some(first) = token_owner.get(name) {
+                    problems.push(Problem {
+                        theme: owner.clone(),
+                        source: format!("extension {owner}"),
+                        field: Some(format!("tokens.{name}")),
+                        message: format!("{first} has this token already"),
+                    });
+                    continue;
+                }
+                token_owner.insert(name.clone(), owner.clone());
+                tokens.insert(name.clone(), value.clone());
+            }
+        }
+        self.full = full;
+        self.contributed = problems;
+        let mut layers = self.layers.clone();
+        if !tokens.is_empty() {
+            // What the app set on the extension layer itself wins.
+            let mut layer = layers.get(LayerKind::Extension);
+            for (name, value) in tokens {
+                layer.overrides.entry(name).or_insert(value);
+            }
+            layers.set(LayerKind::Extension, layer);
+        }
+        layers
+    }
 }
 
 struct Inner {
@@ -271,7 +364,10 @@ impl ThemeStore {
         Self {
             inner: Arc::new(Inner {
                 state: Mutex::new(State {
+                    full: registry.clone(),
                     registry,
+                    contributions: BTreeMap::new(),
+                    contributed: Vec::new(),
                     layers,
                     system,
                     composed,
@@ -318,22 +414,24 @@ impl ThemeStore {
         self.lock().system
     }
 
+    /// Every theme it knows: the app's and the contributed ones.
     #[must_use]
     pub fn registry(&self) -> Registry {
-        self.lock().registry.clone()
+        self.lock().full.clone()
     }
 
     /// Every theme, by id.
     #[must_use]
     pub fn themes(&self) -> Vec<ThemeInfo> {
         let s = self.lock();
-        let problems = s.registry.problems();
-        s.registry
+        let mut problems = s.full.problems();
+        problems.extend(s.contributed.iter().cloned());
+        s.full
             .iter()
             .map(|t: &Theme| ThemeInfo {
                 id: t.id.clone(),
                 label: t.label.clone(),
-                scheme: s.registry.scheme_of(&t.id),
+                scheme: s.full.scheme_of(&t.id),
                 source: t.source.clone(),
                 problems: problems
                     .iter()
@@ -350,7 +448,8 @@ impl ThemeStore {
     #[must_use]
     pub fn problems(&self) -> Vec<Problem> {
         let s = self.lock();
-        let mut out = s.registry.problems();
+        let mut out = s.full.problems();
+        out.extend(s.contributed.iter().cloned());
         out.extend(s.missing.clone());
         out.extend(s.current.problems().iter().cloned());
         out
@@ -363,7 +462,8 @@ impl ThemeStore {
         let (changed, current) = {
             let mut s = self.lock();
             f(&mut s);
-            let (composed, resolved, missing) = evaluate(&s.registry, &s.layers, s.system);
+            let layers = s.merge();
+            let (composed, resolved, missing) = evaluate(&s.full, &layers, s.system);
             s.missing = missing;
             let changed = composed != s.composed || !resolved.same_look(&s.current);
             if changed {
@@ -406,7 +506,7 @@ impl ThemeStore {
     pub fn pick(&self, id: &str) -> Result<bool, String> {
         let scheme = self
             .lock()
-            .registry
+            .full
             .scheme_of(id)
             .ok_or_else(|| format!("no theme {id:?}"))?;
         let choice = self.composed().choice.with_pick(id, scheme);
@@ -415,7 +515,7 @@ impl ThemeStore {
 
     /// Shows `id` until [`Self::end_preview`], over every other layer.
     pub fn preview(&self, id: &str) -> Result<bool, String> {
-        if !self.lock().registry.contains(id) {
+        if !self.lock().full.contains(id) {
             return Err(format!("no theme {id:?}"));
         }
         Ok(self.update(LayerKind::Preview, |l| {
@@ -472,6 +572,50 @@ impl ThemeStore {
         self.apply(|s| s.registry.remove(id))
     }
 
+    /// Puts `owner`'s contribution (an extension's themes and tokens,
+    /// as it loads or reloads) in place of the one it had: a diff, so a
+    /// theme or a token it no longer has goes, and the revision moves
+    /// only when what shows changed. A file in [`Contribution::failed`]
+    /// keeps the owner's last good theme of its id, and is a problem
+    /// ([`Self::problems`]). A theme whose id the app (or an earlier
+    /// owner) has, or a token another owner set, is left out, with the
+    /// problem said.
+    pub fn contribute(&self, owner: &str, contribution: Contribution) -> bool {
+        self.apply(|s| {
+            let mut next = contribution;
+            if let Some(before) = s.contributions.get(owner) {
+                for (id, _) in &next.failed {
+                    if next.themes.iter().any(|t| &t.id == id) {
+                        continue;
+                    }
+                    if let Some(good) = before.themes.iter().find(|t| &t.id == id) {
+                        next.themes.push(good.clone());
+                    }
+                }
+            }
+            if next.is_empty() {
+                s.contributions.remove(owner);
+            } else {
+                s.contributions.insert(owner.to_owned(), next);
+            }
+        })
+    }
+
+    /// Takes everything `owner` contributed away (an extension unloads):
+    /// a theme of its that shows falls back to the built-in default, with
+    /// the problem said.
+    pub fn withdraw(&self, owner: &str) -> bool {
+        self.apply(|s| {
+            s.contributions.remove(owner);
+        })
+    }
+
+    /// What `owner` contributes now.
+    #[must_use]
+    pub fn contribution(&self, owner: &str) -> Option<Contribution> {
+        self.lock().contributions.get(owner).cloned()
+    }
+
     /// How [`Self::reload`] re-reads the themes (`fs::ThemeDirs` gives one).
     pub fn set_reloader(&self, reloader: Reloader) {
         *lock(&self.inner.reloader) = Some(reloader);
@@ -484,7 +628,7 @@ impl ThemeStore {
         let Some(reloader) = lock(&self.inner.reloader).clone() else {
             return false;
         };
-        let previous = self.registry();
+        let previous = self.lock().registry.clone();
         let mut next = reloader(&previous);
         // What the app built in memory is not on disk: it stays.
         for theme in previous.iter().filter(|t| t.source == Source::Memory) {
