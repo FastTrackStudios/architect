@@ -12,11 +12,85 @@
 //!
 //! These are architect's types, not Dioxus's serde shapes, so the wire is
 //! versioned here ([`WIRE`]) and checked at hello, whatever Dioxus does.
+//! The host also sends the app's theme as data ([`ThemeData`]), beside the
+//! CSS it gives a view's document.
 
 use facet::Facet;
 
-/// The wire's version: a host refuses a process that speaks another.
-pub const WIRE: u32 = 2;
+/// The wire's version. 3 added the theme as data ([`ThemeData`],
+/// `ProcessExtension::theme`).
+pub const WIRE: u32 = 3;
+
+/// The oldest wire a host still speaks: a process at 2 runs as before,
+/// its views themed through CSS only (it is never sent [`ThemeData`]).
+/// A host refuses one outside `WIRE_MIN..=WIRE`.
+pub const WIRE_MIN: u32 = 2;
+
+/// The first wire a process is sent the theme on.
+pub const THEMED_WIRE: u32 = 3;
+
+/// The app's theme, as data: what a process that paints itself (on the
+/// GPU, or working out colours) themes with. Sent as it connects and on
+/// every change (wire 3 on).
+#[derive(Clone, Debug, PartialEq, Eq, Facet)]
+pub struct ThemeData {
+    /// The theme showing.
+    pub id: String,
+    /// `light` or `dark`.
+    pub scheme: String,
+    /// The app's theme revision: it moves on every change.
+    pub revision: u64,
+    /// Every resolved token (architect's and the app's dotted ones), its
+    /// final CSS value.
+    pub tokens: Vec<Token>,
+}
+
+/// One resolved token.
+#[derive(Clone, Debug, PartialEq, Eq, Facet)]
+pub struct Token {
+    pub name: String,
+    pub value: String,
+}
+
+impl ThemeData {
+    /// The theme `resolved`, to send.
+    #[must_use]
+    pub fn from_resolved(resolved: &architect_theme::Resolved) -> Self {
+        Self {
+            id: resolved.id().to_owned(),
+            scheme: resolved.scheme().as_str().to_owned(),
+            revision: resolved.revision(),
+            tokens: resolved
+                .tokens()
+                .iter()
+                .map(|(name, value)| Token {
+                    name: name.clone(),
+                    value: value.clone(),
+                })
+                .collect(),
+        }
+    }
+
+    /// The theme, received: `color`, `number`, `value` as the host reads
+    /// them.
+    #[must_use]
+    pub fn to_resolved(&self) -> architect_theme::Resolved {
+        let scheme = if self.scheme == "light" {
+            architect_theme::Scheme::Light
+        } else {
+            architect_theme::Scheme::Dark
+        };
+        architect_theme::Resolved::new(
+            &self.id,
+            scheme,
+            self.tokens
+                .iter()
+                .map(|t| (t.name.clone(), t.value.clone()))
+                .collect(),
+        )
+        .at_revision(self.revision)
+    }
+}
 
 /// What a process says when the host connects.
 #[derive(Clone, Debug, PartialEq, Eq, Facet)]

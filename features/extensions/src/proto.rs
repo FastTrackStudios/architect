@@ -10,7 +10,7 @@
 // The router that serves it asks for `Send` futures itself.
 #![allow(async_fn_in_trait)]
 
-use crate::wire::{Frame, Hello, Open, ViewEvent};
+use crate::wire::{Frame, Hello, Open, ThemeData, ViewEvent};
 
 /// The environment variable a host starts a process extension with: the
 /// path of the local socket to connect to.
@@ -45,4 +45,8 @@ pub trait ProcessExtension {
     /// Mounts a view: its frames, from the first render on.
     #[subscribe]
     fn view(&self, open: Open) -> Frame;
+    /// The app's theme: as it connects, and on every change. Only to a
+    /// process that said wire [`THEMED_WIRE`](crate::wire::THEMED_WIRE)
+    /// or later (last, so the methods before it keep their places).
+    async fn theme(&self, theme: ThemeData) -> Result<(), ProcessError>;
 }

@@ -12,6 +12,12 @@
 //! open as streams of edits ([`Process::open`]), which `remote` mounts in
 //! a pane.
 //!
+//! With the app's theme store ([`ProcessRunner::with_theme`]), a process
+//! that speaks wire 3 or later is sent the theme as data
+//! ([`ThemeData`]) as it connects and on every change, for a process that
+//! paints itself (`guest::Guest::theme`). Its views' documents get the
+//! theme as CSS either way (`remote`).
+//!
 //! Not yet: stdio as a transport, lazy start and stopping idle ones,
 //! handing state over on a reload (`save-state`), the host service an
 //! extension calls back into, Windows.
@@ -33,7 +39,7 @@ use crate::host::{Context, Instance, Runner};
 use crate::manifest::{API, ActionDecl, Kind, Manifest};
 use crate::package::Package;
 use crate::proto::{ProcessExtensionClient, ProcessExtensionStreamClient, SOCKET};
-use crate::wire::{Frame, Hello, Open, ViewEvent, WIRE};
+use crate::wire::{Frame, Hello, Open, THEMED_WIRE, ThemeData, ViewEvent, WIRE, WIRE_MIN};
 
 /// How a process that died is started again.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -519,8 +525,11 @@ fn uncovered(manifest: &Manifest, hello: &Hello) -> Option<String> {
     if hello.api != API {
         return Some(format!("it speaks API {}, this app {API}", hello.api));
     }
-    if hello.wire != WIRE {
-        return Some(format!("it speaks wire {}, this app {WIRE}", hello.wire));
+    if !(WIRE_MIN..=WIRE).contains(&hello.wire) {
+        return Some(format!(
+            "it speaks wire {}, this app {WIRE_MIN} to {WIRE}",
+            hello.wire
+        ));
     }
     if let Some(view) = manifest
         .views
@@ -542,11 +551,55 @@ async fn stopped(stop: &mut watch::Receiver<bool>) {
 }
 
 /// Runs a process extension for as long as it is loaded.
+/// The app's theme, to one process: a revision that moves on every change.
+struct ThemeFeed {
+    store: architect_theme::ThemeStore,
+    changes: watch::Receiver<u64>,
+    _subscription: architect_theme::Subscription,
+}
+
+impl ThemeFeed {
+    fn new(store: architect_theme::ThemeStore) -> Self {
+        let (tx, changes) = watch::channel(store.revision());
+        let subscription = store.subscribe(move |r| {
+            tx.send_replace(r.revision());
+        });
+        Self {
+            store,
+            changes,
+            _subscription: subscription,
+        }
+    }
+
+    /// Sends the theme now to `link`'s process.
+    async fn send(&mut self, link: &Link, id: &str) {
+        self.changes.borrow_and_update();
+        let theme = ThemeData::from_resolved(&self.store.current());
+        let revision = theme.revision;
+        if let Err(e) = link.client.theme(theme).await {
+            tracing::warn!(ext.id = %id, ext.theme_revision = revision, error = ?e, "the theme did not reach it");
+        }
+    }
+}
+
+/// Resolves when the theme changed (never, with none).
+async fn theme_changed(feed: Option<&mut ThemeFeed>) {
+    match feed {
+        Some(feed) => {
+            if feed.changes.changed().await.is_err() {
+                std::future::pending::<()>().await;
+            }
+        }
+        None => std::future::pending().await,
+    }
+}
+
 async fn supervise(
     process: Process,
     launch_with: Launch,
     manifest: Manifest,
     restart: Restart,
+    theme: Option<architect_theme::ThemeStore>,
     first: std::sync::mpsc::Sender<Result<(), String>>,
 ) {
     let inner = &process.inner;
@@ -571,6 +624,15 @@ async fn supervise(
             }) => {
                 generation = generation.wrapping_add(1);
                 let pid = child.id().unwrap_or_default();
+                // The theme, before any view opens; then on every change.
+                let mut feed = theme
+                    .clone()
+                    .filter(|_| hello.wire >= THEMED_WIRE)
+                    .map(ThemeFeed::new);
+                if let Some(feed) = feed.as_mut() {
+                    feed.send(&link, &inner.id).await;
+                }
+                let themed = link.clone();
                 *inner.link.lock().unwrap_or_else(PoisonError::into_inner) = Some(link);
                 *inner.hello.lock().unwrap_or_else(PoisonError::into_inner) = Some(hello);
                 *inner.pid.lock().unwrap_or_else(PoisonError::into_inner) = Some(pid);
@@ -582,13 +644,23 @@ async fn supervise(
                     let _ = first.send(Ok(()));
                 }
                 let up = Instant::now();
-                let ended = tokio::select! {
-                    status = child.wait() => Some(status.map_or_else(|e| e.to_string(), exited)),
-                    () = stopped(&mut stop) => {
-                        let _ = child.kill().await;
-                        None
+                let ended = loop {
+                    tokio::select! {
+                        status = child.wait() => {
+                            break Some(status.map_or_else(|e| e.to_string(), exited));
+                        }
+                        () = stopped(&mut stop) => {
+                            let _ = child.kill().await;
+                            break None;
+                        }
+                        () = theme_changed(feed.as_mut()) => {
+                            if let Some(feed) = feed.as_mut() {
+                                feed.send(&themed, &inner.id).await;
+                            }
+                        }
                     }
                 };
+                drop((feed, themed));
                 inner
                     .link
                     .lock()
@@ -643,6 +715,7 @@ pub struct ProcessRunner {
     restart: Restart,
     socket_dir: PathBuf,
     hello_within: Duration,
+    theme: Option<architect_theme::ThemeStore>,
 }
 
 impl Drop for ProcessRunner {
@@ -683,7 +756,16 @@ impl ProcessRunner {
             restart: Restart::default(),
             socket_dir: std::env::temp_dir(),
             hello_within: Duration::from_secs(10),
+            theme: None,
         })
+    }
+
+    /// Sends its processes the app's theme as data ([`ThemeData`]): as
+    /// each connects, and on every change of `store`.
+    #[must_use]
+    pub fn with_theme(mut self, store: architect_theme::ThemeStore) -> Self {
+        self.theme = Some(store);
+        self
     }
 
     /// How a process that died is started again.
@@ -796,6 +878,7 @@ impl Runner for ProcessRunner {
             launch,
             manifest.clone(),
             self.restart,
+            self.theme.clone(),
             first,
         ));
         let waited = self.hello_within.saturating_add(Duration::from_secs(1));

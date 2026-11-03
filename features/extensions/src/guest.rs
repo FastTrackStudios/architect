@@ -18,6 +18,13 @@
 //! go to the host as [`Frame`]s ([`WireWriter`]), the host's events come
 //! back to its handlers. A view whose component panics takes down its
 //! thread only; the host sees its stream end.
+//!
+//! The host's theme reaches it two ways: a view's document has the app's
+//! `:root` CSS variables (`var(--brand)`), and the theme comes as data
+//! too (wire 3 on): [`Guest::theme`] reads it, [`Guest::on_theme`] is
+//! told of every change, and [`use_theme`] gives it to a view as a
+//! signal, so a process that paints itself or works out its own colours
+//! (`theme.color("clicker.face")`) follows the app's theme.
 
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
@@ -26,9 +33,10 @@ use std::path::Path;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::str::FromStr as _;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use architect::{EventSink, Services, layers};
+use architect_theme::Resolved;
 use dioxus::core::{BorrowedAttributeValue, ElementId, Event, VirtualDom, WriteMutations};
 use dioxus::html::geometry::{ClientPoint, Coordinates, ElementPoint, PagePoint, ScreenPoint};
 use dioxus::html::input_data::{MouseButton, decode_mouse_button_set};
@@ -44,11 +52,40 @@ use tokio::sync::mpsc;
 use crate::manifest::API;
 use crate::proto::{ProcessError, ProcessExtension, ProcessExtensionStreamSource, SOCKET};
 use crate::wire::{
-    Edit, EventData, Frame, Hello, KeyData, Mods, Open, Pointer, Value, ViewEvent, WIRE,
+    Edit, EventData, Frame, Hello, KeyData, Mods, Open, Pointer, ThemeData, Value, ViewEvent, WIRE,
 };
 
 type ActionFuture = Pin<Box<dyn Future<Output = Result<Json, String>> + Send>>;
 type Action = Arc<dyn Fn(Json) -> ActionFuture + Send + Sync>;
+type ThemeListener = Arc<dyn Fn(&Resolved) + Send + Sync>;
+
+/// The theme the host last sent, for every view of this process.
+fn theme_cell() -> &'static tokio::sync::watch::Sender<Option<Resolved>> {
+    static THEME: OnceLock<tokio::sync::watch::Sender<Option<Resolved>>> = OnceLock::new();
+    THEME.get_or_init(|| tokio::sync::watch::Sender::new(None))
+}
+
+/// The host's theme in a view, as a signal: `None` until the first
+/// arrives (from a host that sends none, never), then every change.
+/// Reading it subscribes the component.
+#[must_use]
+pub fn use_theme() -> Option<Resolved> {
+    use dioxus::prelude::{ReadableExt as _, WritableExt as _, use_future, use_signal};
+    let mut theme = use_signal(Guest::theme);
+    use_future(move || async move {
+        let mut changes = theme_cell().subscribe();
+        loop {
+            let now = changes.borrow_and_update().clone();
+            if *theme.peek() != now {
+                theme.set(now);
+            }
+            if changes.changed().await.is_err() {
+                return;
+            }
+        }
+    });
+    theme.read().clone()
+}
 
 /// Why a guest stopped serving.
 #[derive(Debug, thiserror::Error)]
@@ -68,6 +105,7 @@ pub enum GuestError {
 pub struct Guest {
     views: BTreeMap<String, fn() -> Element>,
     actions: BTreeMap<String, Action>,
+    on_theme: Vec<ThemeListener>,
 }
 
 impl std::fmt::Debug for Guest {
@@ -75,6 +113,7 @@ impl std::fmt::Debug for Guest {
         f.debug_struct("Guest")
             .field("views", &self.views.keys().collect::<Vec<_>>())
             .field("actions", &self.actions.keys().collect::<Vec<_>>())
+            .field("on_theme", &self.on_theme.len())
             .finish()
     }
 }
@@ -103,6 +142,23 @@ impl Guest {
         let run: Action = Arc::new(move |args| Box::pin(run(args)));
         self.actions.insert(id.into(), run);
         self
+    }
+
+    /// Calls `listener` with the host's theme each time it arrives: as
+    /// the host connects, and on every change (on the thread that serves
+    /// the host: hand heavy work on).
+    #[must_use]
+    pub fn on_theme(mut self, listener: impl Fn(&Resolved) + Send + Sync + 'static) -> Self {
+        self.on_theme.push(Arc::new(listener));
+        self
+    }
+
+    /// The host's theme as it last sent it (`None` before the first, or
+    /// from a host that sends none): `color`, `number`, `value`, `scheme`,
+    /// `revision` as the host reads them.
+    #[must_use]
+    pub fn theme() -> Option<Resolved> {
+        theme_cell().borrow().clone()
     }
 
     /// Serves the host that started this process, until it goes.
@@ -193,6 +249,15 @@ impl ProcessExtension for Served {
             .cloned()
             .ok_or(ProcessError::NoPane(pane))?;
         to.send(event).map_err(|_| ProcessError::NoPane(pane))
+    }
+
+    async fn theme(&self, theme: ThemeData) -> Result<(), ProcessError> {
+        let resolved = theme.to_resolved();
+        theme_cell().send_replace(Some(resolved.clone()));
+        for listener in &self.guest.on_theme {
+            listener(&resolved);
+        }
+        Ok(())
     }
 
     async fn close(&self, pane: u64) -> Result<(), ProcessError> {
