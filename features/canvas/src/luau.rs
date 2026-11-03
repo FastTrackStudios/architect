@@ -35,7 +35,13 @@
 //! | `PushID(ctx, id)`, `PopID(ctx)` | — |
 //! | `IsItemHovered(ctx)`, `IsItemActive(ctx)` | the last item's |
 //! | `SetNextWindowSize(ctx, w, h, cond?)`, `SetNextWindowPos(ctx, x, y, cond?)` | — |
-//! | `WindowFlags_*`, `Cond_*` | Dear `ImGui`'s values |
+//! | `PushStyleColor(ctx, idx, rgba)`, `PopStyleColor(ctx, count?)` | — (a colour of the style, over the theme's, until popped) |
+//! | `WindowFlags_*`, `Cond_*`, `Col_*` | Dear `ImGui`'s values |
+//!
+//! The windows' style follows the app's theme ([`Session::set_theme`],
+//! `Style::from_theme`), and a script reads the theme itself through
+//! `theme` (`architect_scripting::theme`): `theme.color('brand')` is a
+//! colour `TextColored` and `PushStyleColor` take.
 //!
 //! `Canvas` draws over a view, in its coordinates:
 //!
@@ -60,10 +66,12 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use architect::action::ActionCaller;
 use architect_scripting::luau::mlua::{self, Lua, UserData, UserDataRef, Value as LuaValue};
 use architect_scripting::luau::{Live, Module, Report, Runtime, raise};
+use architect_scripting::theme::{ThemeCell, ThemeModule};
+use architect_theme::Resolved;
 use serde_json::Value;
 
 use crate::geometry::{Color, Point, Rect, Size};
-use crate::imgui::{Input, Style, Ui, UiError, cond, window_flags};
+use crate::imgui::{Col, Input, Style, Ui, UiError, cond, window_flags};
 use crate::layer::{LayerId, Overlays, Plane, ViewPointer};
 use crate::space::Spaces;
 use crate::{Output, Shape};
@@ -283,6 +291,24 @@ impl Module for ImGuiModule {
                 Ok(())
             },
         )?;
+        self.widget(
+            lua,
+            &t,
+            "PushStyleColor",
+            |ui, _, (idx, rgba): (u32, u32)| {
+                // An index this UI does not draw is taken and left alone.
+                if let Some(col) = Col::from_index(idx) {
+                    ui.push_style_color(col, Color(rgba));
+                }
+                Ok(())
+            },
+        )?;
+        self.widget(lua, &t, "PopStyleColor", |ui, _, count: Option<usize>| {
+            ui.pop_style_color(count.unwrap_or(1))
+        })?;
+        for col in Col::ALL {
+            t.set(format!("Col_{}", col.name()), col.index())?;
+        }
         for (name, value) in [
             ("WindowFlags_None", window_flags::NONE),
             ("WindowFlags_NoTitleBar", window_flags::NO_TITLE_BAR),
@@ -521,6 +547,8 @@ pub struct Session {
     windows: Arc<Mutex<Windows>>,
     overlays: Arc<Mutex<Overlays>>,
     output: Output,
+    /// The theme its script reads (`theme`) and its windows are styled by.
+    theme: ThemeCell,
 }
 
 impl std::fmt::Debug for Session {
@@ -543,8 +571,37 @@ impl Session {
         args: Value,
         step: &str,
     ) -> (Report, Option<Self>) {
+        Self::launch(runtime, caller, source, args, step, None).await
+    }
+
+    /// [`Self::start`], its windows styled by `theme` and its script
+    /// reading it (`theme`) from the first frame on; then
+    /// [`Self::set_theme`] on every change.
+    pub async fn start_themed(
+        runtime: &Runtime,
+        caller: &ActionCaller,
+        source: &str,
+        args: Value,
+        step: &str,
+        theme: &Resolved,
+    ) -> (Report, Option<Self>) {
+        Self::launch(runtime, caller, source, args, step, Some(theme)).await
+    }
+
+    async fn launch(
+        runtime: &Runtime,
+        caller: &ActionCaller,
+        source: &str,
+        args: Value,
+        step: &str,
+        theme: Option<&Resolved>,
+    ) -> (Report, Option<Self>) {
         let windows = Arc::new(Mutex::new(Windows::default()));
         let overlays = Arc::new(Mutex::new(Overlays::new()));
+        let cell = ThemeCell::new(theme.cloned().unwrap_or_default());
+        if let Some(theme) = theme {
+            lock(&windows).ui.set_style(Style::from_theme(theme));
+        }
         let runtime = runtime
             .clone()
             .with_module(Arc::new(ImGuiModule {
@@ -552,7 +609,8 @@ impl Session {
             }))
             .with_module(Arc::new(CanvasModule {
                 overlays: Arc::clone(&overlays),
-            }));
+            }))
+            .with_module(Arc::new(ThemeModule::new(cell.clone())));
         begin(&windows, &overlays, Input::default());
         let (report, live) = runtime.start(caller, source, args, step).await;
         let output = end(&windows, &overlays);
@@ -561,6 +619,7 @@ impl Session {
             windows,
             overlays,
             output,
+            theme: cell,
         });
         (report, session)
     }
@@ -602,9 +661,22 @@ impl Session {
         lock(&self.overlays).pointer(view, pointer);
     }
 
-    /// Its windows' look (the shell's theme).
+    /// Its windows' look, as given (what the script pushed is dropped).
     pub fn set_style(&self, style: Style) {
         lock(&self.windows).ui.set_style(style);
+    }
+
+    /// The app's theme changed: its windows restyled
+    /// ([`Style::from_theme`]) and its script's `theme` moved on, from the
+    /// next frame (the host asks for one). False when it is the theme it
+    /// had.
+    #[allow(clippy::must_use_candidate)] // A courtesy most callers ignore.
+    pub fn set_theme(&self, theme: &Resolved) -> bool {
+        if !self.theme.set(theme) {
+            return false;
+        }
+        self.set_style(Style::from_theme(theme));
+        true
     }
 }
 

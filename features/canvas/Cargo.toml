@@ -26,9 +26,12 @@ ui = [
     "architect-workspace/ui",
     "dep:architect-shell",
     "architect-shell/ui",
+    "architect-theme/dioxus",
 ]
 
 [dependencies]
+# The theme's tokens as the windows' style (`imgui::Style::from_theme`).
+architect-theme = { workspace = true }
 architect = { workspace = true, optional = true, features = ["action-list"] }
 architect-scripting = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }

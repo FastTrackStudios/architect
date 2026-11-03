@@ -352,6 +352,7 @@ mod script {
     use architect::action::ActionCaller;
     use architect_scripting::ScriptError;
     use architect_scripting::luau::Runtime;
+    use architect_theme::Resolved;
     use architect_workspace::{Pane, Rect as PaneRect, Target, Workspace};
     use dioxus::prelude::*;
     use futures::StreamExt;
@@ -383,6 +384,8 @@ mod script {
         View(String, ViewPointer),
         Window(String, WindowEvent),
         Closed(String),
+        /// The app's theme changed.
+        Theme(Resolved),
     }
 
     /// One script on the canvas: what it draws and how it is going.
@@ -473,8 +476,13 @@ mod script {
         })
     }
 
-    /// Runs `source` as a live script on `runtime` as `caller`, its windows
-    /// styled by `theme`, in the [`Canvases`] in context (when there are).
+    /// Runs `source` as a live script on `runtime` as `caller`, in the
+    /// [`Canvases`] in context (when there are).
+    ///
+    /// Under the app's theme store (`architect_theme::use_theme_store`)
+    /// its windows follow the theme ([`crate::imgui::Style::from_theme`]),
+    /// restyled and drawn again on every change, and its script reads it
+    /// as `theme`; `style` is the look with no store above.
     pub fn use_script_canvas(
         runtime: Runtime,
         caller: ActionCaller,
@@ -485,6 +493,7 @@ mod script {
     ) -> ScriptCanvas {
         let output = use_signal(Output::default);
         let status = use_signal(Status::default);
+        let themed = architect_theme::try_use_theme().map(|t| t.resolved());
         let tx = use_coroutine(move |rx: UnboundedReceiver<Msg>| {
             let (runtime, caller, source, args, step, style) = (
                 runtime.clone(),
@@ -494,6 +503,7 @@ mod script {
                 step.clone(),
                 style.clone(),
             );
+            let theme = themed.map(|t| t.peek().clone());
             drive(
                 Start {
                     runtime,
@@ -502,11 +512,18 @@ mod script {
                     args,
                     step,
                     style,
+                    theme,
                 },
                 rx,
                 output,
                 status,
             )
+        });
+        // Every theme change, to the script: its windows restyled, a frame.
+        use_effect(move || {
+            if let Some(theme) = themed {
+                tx.send(Msg::Theme(theme.read().clone()));
+            }
         });
         let canvas = ScriptCanvas { output, status, tx };
         let canvases = try_use_context::<Canvases>();
@@ -530,6 +547,8 @@ mod script {
         args: Value,
         step: String,
         style: Style,
+        /// The app's theme, when it has a store.
+        theme: Option<Resolved>,
     }
 
     const LOG_KEPT: usize = 100;
@@ -558,14 +577,29 @@ mod script {
         mut output: Signal<Output>,
         mut status: Signal<Status>,
     ) {
-        let (report, session) = Session::start(
-            &start.runtime,
-            &start.caller,
-            &start.source,
-            start.args,
-            &start.step,
-        )
-        .await;
+        let (report, session) = match &start.theme {
+            Some(theme) => {
+                Session::start_themed(
+                    &start.runtime,
+                    &start.caller,
+                    &start.source,
+                    start.args,
+                    &start.step,
+                    theme,
+                )
+                .await
+            }
+            None => {
+                Session::start(
+                    &start.runtime,
+                    &start.caller,
+                    &start.source,
+                    start.args,
+                    &start.step,
+                )
+                .await
+            }
+        };
         let Some(mut session) = session else {
             note(&mut status, &report, false);
             return;
@@ -574,7 +608,9 @@ mod script {
             note(&mut status, &report, false);
             return;
         }
-        session.set_style(start.style);
+        if start.theme.is_none() {
+            session.set_style(start.style);
+        }
         note(&mut status, &report, session.running());
         output.set(session.output().clone());
         let mut input = Input::default();
@@ -634,6 +670,10 @@ mod script {
             Msg::Closed(id) => {
                 input.sizes.remove(&id);
                 input.closed.insert(id);
+                false
+            }
+            Msg::Theme(theme) => {
+                session.set_theme(&theme);
                 false
             }
         }
