@@ -55,4 +55,31 @@ fn switching_the_store_changes_the_css_variables() {
     futures::executor::block_on(dom.wait_for_work());
     dom.render_immediate(&mut dioxus::core::NoOpMutations);
     assert!(css().contains("--radius: 3px;"), "{}", css());
+
+    // An app's namespaced token stays off the root unless opted in.
+    store.set_token(LayerKind::App, "arrange.item.edge", "$border");
+    futures::executor::block_on(dom.wait_for_work());
+    dom.render_immediate(&mut dioxus::core::NoOpMutations);
+    assert!(!css().contains("arrange"), "{}", css());
+}
+
+#[test]
+fn an_apps_namespaces_are_css_variables_only_when_asked_for() {
+    use architect_ui::theme::ThemeStyle;
+    let store = ThemeStore::default();
+    store.set(
+        LayerKind::App,
+        Layer::default()
+            .token("arrange.item.edge", "#123456")
+            .token("mixer.strip", "#654321"),
+    );
+    let r = store.current();
+    let plain = ThemeStyle::from_resolved_with(&r, &[]).css_variables();
+    assert!(
+        !plain.contains("arrange") && !plain.contains("mixer"),
+        "{plain}"
+    );
+    let opted = ThemeStyle::from_resolved_with(&r, &["arrange"]).css_variables();
+    assert!(opted.contains("--arrange-item-edge: #123456;"), "{opted}");
+    assert!(!opted.contains("mixer"), "{opted}");
 }

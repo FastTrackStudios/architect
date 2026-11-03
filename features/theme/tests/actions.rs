@@ -51,7 +51,7 @@ fn every_action_is_valid_and_marked() {
     list.probe_hostile_args().unwrap();
     for id in ids::ALL {
         let info = list.infos().into_iter().find(|i| i.id == *id).unwrap();
-        let reads = matches!(*id, ids::LIST | ids::GET | ids::PROBLEMS);
+        let reads = matches!(*id, ids::LIST | ids::GET | ids::PROBLEMS | ids::INSPECT);
         assert_eq!(
             info.effect,
             if reads {
@@ -146,4 +146,74 @@ fn reload_and_problems_report_a_broken_file() {
     let problems = field(&problems, "problems").as_array().unwrap();
     assert_eq!(problems.len(), 1);
     assert!(text(&problems[0], "text").contains("broken.json"));
+}
+
+#[test]
+fn inspect_and_tokens_in_any_layer() {
+    let (list, store) = listed();
+    let set = json(
+        &list,
+        ids::TOKEN_SET,
+        r#"{"name":"arrange.item.edge","value":"mix($border, $foreground, 0.2)","layer":"app"}"#,
+    );
+    assert!(is_true(&set, "changed"));
+    assert!(
+        store
+            .layer(LayerKind::App)
+            .overrides
+            .contains_key("arrange.item.edge")
+    );
+    assert!(store.layer(LayerKind::Person).overrides.is_empty());
+
+    let got = json(&list, ids::INSPECT, r#"{"prefix":"arrange."}"#);
+    let tokens = field(&got, "tokens").as_array().unwrap();
+    assert_eq!(tokens.len(), 1);
+    let edge = &tokens[0];
+    assert_eq!(text(edge, "name"), "arrange.item.edge");
+    assert_eq!(
+        text(edge, "value"),
+        store.current().value("arrange.item.edge")
+    );
+    assert_eq!(text(edge, "origin"), "layer");
+    assert_eq!(text(edge, "layer"), "app");
+    assert!(is_true(edge, "reference"));
+    assert_eq!(text(edge, "expression"), "mix($border, $foreground, 0.2)");
+
+    let all = json(&list, ids::INSPECT, "{}");
+    let all = field(&all, "tokens").as_array().unwrap();
+    let ink = all.iter().find(|t| text(t, "name") == "ink").unwrap();
+    assert_eq!(text(ink, "origin"), "derived");
+    assert_eq!(text(ink, "id"), "fasttrackstudio-dark");
+    assert!(!is_true(ink, "reference"));
+
+    // An unknown reference: set, drawn magenta, and in THEME_PROBLEMS.
+    json(
+        &list,
+        ids::TOKEN_SET,
+        r#"{"name":"arrange.row.a","value":"$nope"}"#,
+    );
+    assert_eq!(store.current().get("arrange.row.a"), Some("#ff00ff"));
+    let problems = json(&list, ids::PROBLEMS, "{}");
+    let problems = field(&problems, "problems").as_array().unwrap();
+    assert_eq!(problems.len(), 1);
+    assert_eq!(
+        text(&problems[0], "text"),
+        "person layer: overrides.arrange.row.a: `$nope` names no token"
+    );
+
+    let reset = json(&list, ids::TOKEN_RESET, r#"{"layer":"app"}"#);
+    assert!(is_true(&reset, "changed"));
+    assert!(store.layer(LayerKind::App).overrides.is_empty());
+
+    for bad in [
+        r#"{"name":"a.b","value":"mix($a)"}"#,
+        r#"{"name":"a..b","value":"1"}"#,
+        r#"{"name":"a","value":"1","layer":"builtin"}"#,
+        r#"{"name":"a","value":"1","layer":"nowhere"}"#,
+    ] {
+        assert!(
+            list.run_json(ids::TOKEN_SET, bad.as_bytes()).is_err(),
+            "{bad}"
+        );
+    }
 }

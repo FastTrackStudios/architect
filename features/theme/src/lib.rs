@@ -23,6 +23,7 @@
 
 pub mod builtin;
 pub mod color;
+pub mod expr;
 mod model;
 pub mod resolve;
 mod store;
@@ -39,7 +40,9 @@ pub use model::{
     Appearance, Palette, Problem, Registry, Scheme, Source, Theme, ThemeChoice, ThemeFile,
     valid_id, valid_token,
 };
-pub use resolve::{FromResolved, Projected, Resolved, derive, names, resolve};
+pub use resolve::{
+    FromResolved, Origin, Projected, Resolved, TokenSource, css_name, derive, names, resolve,
+};
 pub use store::{
     Composed, Layer, LayerKind, Layers, Reloader, Subscription, ThemeInfo, ThemeStore,
 };

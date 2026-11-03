@@ -10,8 +10,10 @@ weight = 69
 > `ShellTheme`, `AppShell`), architect-ui's root
 > (`features/ui/architect-ui/src/theme/runtime.rs` `ThemeStoreProvider`)
 > and paint panes (`features/workspace/src/paint/widget.rs` `PaintPane`)
-> follow it. The lab uses it (`apps/lab/ui/src/theme.rs`). Not yet: the
-> Appearance settings page (#185) and persisting the layers.
+> follow it. The lab uses it (`apps/lab/ui/src/theme.rs`). An app's own
+> namespaced tokens, expressions over other tokens, numbers, provenance
+> and `THEME_INSPECT` landed with it (below). Not yet: the Appearance
+> settings page (#185) and persisting the layers.
 
 An app built on architect is themeable at run time, all of it: the shell,
 architect-ui's components, a GPU paint view, an extension's view. One
@@ -56,10 +58,12 @@ picks the deep shade or white that reads better. It is deterministic: the
 same theme and registry give the same map, byte for byte.
 
 The result is a `Resolved` (`features/theme/src/resolve.rs` `Resolved`):
-the token map, the scheme, the theme's id and a revision. Read a token
-with `get` (an `Option`), `value` or `color`. An unknown name answers
-magenta (`#ff00ff`) and is logged once per name, so a typo shows on
-screen instead of quietly falling back.
+the token map, the scheme, the theme's id, where each value came from,
+and a revision. Read a token with `get` (an `Option`), `value`, `color`
+or `number`. An unknown name answers magenta (`#ff00ff`), or `NaN` from
+`number`, and is logged once per name, so a typo shows on screen instead
+of quietly falling back. `misses` lists the names asked for and not
+found since it was resolved, for tests and an inspector.
 
 The token names (`features/theme/src/resolve.rs` `names`):
 
@@ -75,8 +79,9 @@ The token names (`features/theme/src/resolve.rs` `names`):
 - the rest: `font-sans`, `font-serif`, `font-mono`, `radius`, `spacing`,
   `letter-spacing`, `shadow-*`.
 
-An override may name any token, these or a new one. That is how an app
-adds its own roles (below).
+An override may name any token, these or a new one, and its value may
+name other tokens (`mix($border, $foreground, 0.2)`). That is how an app
+adds its own tokens (below).
 
 ## Choosing: the cascade
 
@@ -110,23 +115,30 @@ start.
 
 `ThemeStore` (`features/theme/src/store.rs` `ThemeStore`) is one per app,
 `Send` and `Sync`, and its clones share it. Every write (`set`, `update`,
-`pick`, `preview`, `set_token`, `set_system`, `set_registry`, `reload`)
-composes the layers, resolves again, and returns `false` when nothing
-that shows changed. On a real change it bumps the revision and calls each
-`subscribe`r once, on the thread that made the change.
+`pick`, `preview`, `set_token`, `set_system`, `set_registry`,
+`insert_theme`, `remove_theme`, `reload`) composes the layers, resolves
+again, and returns `false` when nothing that shows changed. On a real
+change it bumps the revision and calls each `subscribe`r once, on the
+thread that made the change.
+
+A worker or a render thread reads it without waiting on anyone:
+`revision` is an atomic, cheap enough to poll every frame, and `current`
+hands out the whole `Resolved` (an `Arc`), never a half-written one. Poll
+the revision, and take `current` only when it moved.
 
 A consumer keeps a typed slice and compares it, so it redraws only when
 its own part changes (herdr's `Vt::set_theme`): implement `FromResolved`
 and hold a `Projected<T>`. Its `update` returns true only when `T`
-differs.
+differs, and its `revision` says which theme it was cut from (a recorded
+scene stamps it).
 
 ## Theme files (feature `fs`)
 
 A theme file is `<id>.json` in a themes folder: JSON, comments allowed,
-read strictly. An unknown field, a palette value that is not a colour, or
-a token name that is not lowercase-and-dashes is a `Problem` naming the
-file and the field (`themes/night.json: palette.accent: "teal-ish" is not
-a colour`).
+read strictly. An unknown field, a palette value that is not a colour, a
+token name that is not dot-separated lowercase-and-dashes segments, or an
+expression that does not read is a `Problem` naming the file and the field
+(`themes/night.json: palette.accent: "teal-ish" is not a colour`).
 
 ```json
 // themes/studio-night.json
@@ -141,7 +153,7 @@ a colour`).
   },
   "overrides": {
     "radius": "0.375rem",
-    "arrange-clip": "#1e293b"
+    "arrange.item.edge": "mix($rule, $brand, 0.3)"
   }
 }
 ```
@@ -185,9 +197,10 @@ command line:
 | `THEME_GET` | read-only | the choice, appearance, system scheme, the theme showing, revision, tokens (all, or `tokens: ["brand", "ink-*"]`) |
 | `THEME_SET` | mutating | the `Pick` layer: `one`, or `light` / `dark`, and/or `appearance` |
 | `THEME_PREVIEW` / `THEME_PREVIEW_END` | mutating | the `Preview` layer |
-| `THEME_TOKEN_SET` / `THEME_TOKEN_RESET` | mutating | an override in the `Person` layer |
+| `THEME_TOKEN_SET` / `THEME_TOKEN_RESET` | mutating | an override (a literal or an expression) in a `layer`, the `Person` one when left out |
 | `THEME_RELOAD` | mutating | the files read again |
-| `THEME_PROBLEMS` | read-only | every problem, with its file and field |
+| `THEME_PROBLEMS` | read-only | every problem, with its file (or layer) and field; an expression that does not resolve included |
+| `THEME_INSPECT` | read-only | each token, or those starting with `prefix`: its value, origin (`derived`, `theme`, `layer`), the layer and theme or layer id that set it, and its expression |
 
 Every write answers `{changed, revision}`. None is destructive, since each
 is undone by another, so a caller that confirms writes asks for each of
@@ -221,23 +234,99 @@ next turn. Below it:
 A host without Dioxus (a REAPER extension, a process extension's guest)
 reads `ThemeStore::current` and `subscribe`s.
 
-## A domain app's own roles
+## An app's own tokens
 
 architect's tokens are semantic: ground, ink, brand, status. A domain app
-names its components' roles on top of them, as tokens of its own: Studio's
-arrangement clip, track header, meter ladder, MIDI note, piano key. Two
-ways, used together:
+names its own on top of them: Studio's arrangement items, track panel,
+mixer strips, MIDI notes. They live in the same resolved map, so one
+cascade, one inspector and one set of actions cover them, and a person or
+an agent can restyle any of them at run time.
 
-1. **Defaults derived in the app.** The app's slice (`struct ArrangeTheme
-   { clip, clip_selected, grid, … }`) implements `FromResolved` and
-   derives each role from architect's tokens, its own name first:
-   `r.get("arrange-clip").unwrap_or_else(|| mix(card, brand, 0.2))`. Every
-   theme then paints the arrangement sensibly with no knowledge of it.
-2. **Themes that say more.** A theme file sets the role directly in
-   `overrides` (`"arrange-clip": "#1e293b"`), and so does a person with
-   `THEME_TOKEN_SET`. Nothing in architect needs to know the name.
+**Names.** An app's token is namespaced: segments of lowercase letters,
+digits and `-`, separated by `.` (`arrange.item.edge`, `mixer.meter.safe`,
+`editor.pitch-0`; `features/theme/src/model.rs` `valid_token`).
+architect's own stay one segment. Theme files, layers, `Theme::from_tokens`
+and `THEME_TOKEN_SET` all take them.
 
-Frame's theme roles map the same way: a Frame surface reads its roles
-from the resolved map, prefixed by the app (`frame-…`), with architect's
-tokens as the fallback. Keep role names lowercase-and-dashes and prefixed
-by the domain, so two apps' roles never collide in one map.
+**Defaults that follow the palette.** A value may name other tokens
+(`features/theme/src/expr.rs`):
+
+```text
+value := expr | literal            any other CSS value is a literal, kept as is
+expr  := $name                     the final value of token `name`
+       | mix(arg, arg, t)          two colours mixed in OKLab, t from 0 to 1
+       | alpha(arg, t)             a colour with alpha t
+arg   := expr | literal            a colour (#fff, rgb(…)) or a number (0.2, 20%)
+```
+
+A value is an expression only when the whole of it is one (it starts
+with `$`, `mix(` or `alpha(`). Expressions are evaluated last: after
+derivation and after every layer's overrides are in, the higher over the
+lower. So a later layer's literal wins over a lower layer's expression,
+and a reference sees the final value of what it names: a person who sets
+`border` moves every app token mixed from `$border`. An unknown name, a
+cycle (`$a` → `$b` → `$a`), a value that is not a colour where one goes,
+or a `t` outside 0 to 1 draws that token magenta and is a `Problem` naming
+the token and the reason (the app layer's `overrides.arrange.a`: `$nope`
+names no token), in `ThemeStore::problems` and `THEME_PROBLEMS`. A token that
+reads a broken one is magenta too, and says which.
+
+An app ships its defaults as an `App` layer of expressions, so they follow
+whatever theme the person picks, and a theme file or a person still says
+the last word:
+
+```rust,ignore
+store.set(LayerKind::App, Layer::default()
+    .token("arrange.item.edge", "mix($border, $foreground, 0.2)")
+    .token("arrange.grid.bar", "alpha($ink, 0.18)")
+    .token("arrange.cursor.play", "$warn")
+    .token("arrange.item.body-alpha", "0.42"));
+
+#[derive(PartialEq)]
+struct ArrangePalette { edge: Rgba, grid_bar: Rgba, body_alpha: f32 }
+
+impl FromResolved for ArrangePalette {
+    fn from_resolved(r: &Resolved) -> Self {
+        Self {
+            edge: r.color("arrange.item.edge"),
+            grid_bar: r.color("arrange.grid.bar"),
+            body_alpha: r.number("arrange.item.body-alpha"), // NaN when missing
+        }
+    }
+}
+
+let mut arrange = Projected::<ArrangePalette>::new(&store.current());
+// per frame, on the render thread:
+if store.revision() != arrange.revision() && arrange.update(&store.current()) {
+    // re-record only what reads the arrangement's slice
+}
+```
+
+`Resolved::number` reads a plain number (`0.42`, `12`), through a `$ref`
+too. A theme's geometry (an item's radius, an edge's width) is numbers in
+the app's own units.
+
+**Where a value came from.** `Resolved::source(name)` is a `TokenSource`:
+its `origin` (`Derived` from a palette, a `Theme`'s overrides, or a
+`Layer`'s), the `layer` (the one that set it, or the one whose choice shows
+the theme), the theme or layer `id`, and the `expression` as written when
+it was one. `THEME_INSPECT {prefix: "arrange."}` answers the same for an
+agent.
+
+**Themes built in memory.** An import from another format (a REAPER
+theme) or a document's variables is `Theme::from_tokens(id, scheme,
+tokens)`, checked as strictly as a file. `ThemeStore::insert_theme` adds
+it or replaces the one of its id while the app runs, and bumps the
+revision only when what shows changed. A reload of the files keeps it.
+
+**CSS.** architect-ui writes only architect's (undotted) tokens on the
+root (`Resolved::css_tokens`), so app tokens don't flood every document.
+An app whose own CSS wants some opts in by namespace:
+`ThemeStoreProvider { css_namespaces: vec!["arrange".into()], … }`
+writes `arrange.item.edge` as `--arrange-item-edge`
+(`Resolved::css_namespaced`, `css_name`). A dotted name whose dashed form
+is one of architect's (`ink.2` and `ink-2`) is left out; architect's wins.
+Paint views read every token through `ctx.theme`, dotted ones included.
+
+Keep the namespaces the app's own (`arrange.`, `mixer.`, `editor.`), so
+two apps' tokens never collide in one map.

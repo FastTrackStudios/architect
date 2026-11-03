@@ -5,7 +5,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use crate::color::{BLACK, MAGENTA, Rgba, WHITE, contrast, with_contrast};
-use crate::model::{Palette, Registry, Scheme, Theme};
+use crate::expr::Expr;
+use crate::model::{Palette, Problem, Registry, Scheme, Theme};
+use crate::store::LayerKind;
 
 /// The token names architect derives, by who reads them. A name not here
 /// still resolves when a theme's overrides set it (an app's own roles).
@@ -141,11 +143,36 @@ pub fn default_palette(scheme: Scheme) -> Palette {
 ///
 /// The palette (its parents' under it, the scheme's default
 /// under those) derived into every name in [`names`], then the
-/// overrides, the parents' first. Deterministic: the same theme and
-/// registry give the same map. A missing or looping parent is left out
-/// (it is one of [`Registry::problems`]).
+/// overrides, the parents' first, then every expression
+/// (`crate::expr`) evaluated against the final value of what it names.
+/// Deterministic: the same theme and registry give the same map. A
+/// missing or looping parent is left out (it is one of
+/// [`Registry::problems`]).
 #[must_use]
 pub fn resolve(theme: &Theme, registry: &Registry) -> Resolved {
+    resolve_in(theme, registry, None, &BTreeMap::new(), &BTreeMap::new())
+}
+
+/// Who wrote a token's value, before it is evaluated.
+#[derive(Clone, Copy)]
+enum By<'a> {
+    Derived,
+    Theme(&'a Theme),
+    Layer(LayerKind),
+}
+
+/// [`resolve`] under the cascade: `chosen_by` is the layer whose choice
+/// shows `theme`, `overrides` every layer's (the higher over the lower)
+/// and `set_by` the layer each came from. The layers' values go in after
+/// the theme's, so a later literal wins, and only then is anything
+/// evaluated: a reference sees the final value of what it names.
+pub(crate) fn resolve_in(
+    theme: &Theme,
+    registry: &Registry,
+    chosen_by: Option<LayerKind>,
+    overrides: &BTreeMap<String, String>,
+    set_by: &BTreeMap<String, LayerKind>,
+) -> Resolved {
     let mut chain = vec![theme];
     let mut seen = BTreeSet::from([theme.id.as_str()]);
     let mut next = theme.file.extends.as_deref();
@@ -180,13 +207,168 @@ pub fn resolve(theme: &Theme, registry: &Registry) -> Resolved {
         .fold(default_palette(scheme), |under, t| {
             t.file.palette.over(&under)
         });
-    let mut tokens = derive(&palette, scheme);
+    let mut raw = derive(&palette, scheme);
+    let mut by: BTreeMap<String, By<'_>> = raw.keys().map(|k| (k.clone(), By::Derived)).collect();
     for t in chain.iter().rev() {
         for (name, value) in &t.file.overrides {
-            tokens.insert(name.clone(), value.clone());
+            raw.insert(name.clone(), value.clone());
+            by.insert(name.clone(), By::Theme(t));
         }
     }
-    Resolved::new(&theme.id, scheme, tokens)
+    for (name, value) in overrides {
+        raw.insert(name.clone(), value.clone());
+        let layer = set_by.get(name).copied().unwrap_or(LayerKind::Builtin);
+        by.insert(name.clone(), By::Layer(layer));
+    }
+
+    let mut eval = Eval::new(&raw);
+    let mut tokens = BTreeMap::new();
+    let mut sources = BTreeMap::new();
+    let mut problems = Vec::new();
+    for (name, value) in &raw {
+        let who = by.get(name).copied().unwrap_or(By::Derived);
+        let reference = crate::expr::is_expression(value);
+        let final_value = if reference {
+            eval.value_of(name).unwrap_or_else(|reason| {
+                problems.push(problem(theme, name, who, reason));
+                MAGENTA_CSS.to_owned()
+            })
+        } else {
+            value.clone()
+        };
+        tokens.insert(name.clone(), final_value);
+        sources.insert(
+            name.clone(),
+            TokenSource {
+                origin: match who {
+                    By::Derived => Origin::Derived,
+                    By::Theme(_) => Origin::Theme,
+                    By::Layer(_) => Origin::Layer,
+                },
+                layer: match who {
+                    By::Layer(kind) => Some(kind),
+                    By::Derived | By::Theme(_) => chosen_by,
+                },
+                id: match who {
+                    By::Derived => theme.id.clone(),
+                    By::Theme(t) => t.id.clone(),
+                    By::Layer(kind) => kind.as_str().to_owned(),
+                },
+                expression: reference.then(|| value.trim().to_owned()),
+            },
+        );
+    }
+    Resolved::build(&theme.id, scheme, tokens, sources, problems)
+}
+
+/// A token whose expression does not resolve, said for a person.
+fn problem(theme: &Theme, name: &str, who: By<'_>, reason: String) -> Problem {
+    let field = format!("overrides.{name}");
+    match who {
+        By::Theme(t) => Problem::new(&t.id, &t.source, reason).at(field),
+        By::Layer(kind) => Problem {
+            theme: kind.as_str().to_owned(),
+            source: format!("{} layer", kind.as_str()),
+            field: Some(field),
+            message: reason,
+        },
+        By::Derived => Problem::new(&theme.id, &theme.source, reason).at(field),
+    }
+}
+
+/// What an expression that does not resolve shows: magenta.
+const MAGENTA_CSS: &str = "#ff00ff";
+
+/// Evaluates expressions against the raw map, each name once, finding
+/// the cycles.
+struct Eval<'a> {
+    raw: &'a BTreeMap<String, String>,
+    done: BTreeMap<&'a str, Result<String, String>>,
+    /// The names being evaluated, outermost first.
+    stack: Vec<&'a str>,
+    /// Each name on a cycle, and the cycle.
+    cycles: BTreeMap<&'a str, String>,
+}
+
+impl<'a> Eval<'a> {
+    const fn new(raw: &'a BTreeMap<String, String>) -> Self {
+        Self {
+            raw,
+            done: BTreeMap::new(),
+            stack: Vec::new(),
+            cycles: BTreeMap::new(),
+        }
+    }
+
+    /// The final value of `name` (a name in the map).
+    fn value_of(&mut self, name: &str) -> Result<String, String> {
+        let Some((name, raw)) = self.raw.get_key_value(name) else {
+            return Err(format!("`${name}` names no token"));
+        };
+        let name = name.as_str();
+        if let Some(done) = self.done.get(name) {
+            return done.clone();
+        }
+        if let Some(at) = self.stack.iter().position(|n| *n == name) {
+            let looped = self.stack.get(at..).unwrap_or_default().to_vec();
+            let path: Vec<String> = looped
+                .iter()
+                .chain([&name])
+                .map(|n| format!("${n}"))
+                .collect();
+            let cycle = format!("a cycle: {}", path.join(" → "));
+            for n in looped {
+                self.cycles.entry(n).or_insert_with(|| cycle.clone());
+            }
+            return Err(cycle);
+        }
+        self.stack.push(name);
+        let result = match crate::expr::parse(raw) {
+            Ok(None) => Ok(raw.clone()),
+            Ok(Some(expr)) => self.eval(&expr),
+            Err(e) => Err(e),
+        };
+        self.stack.pop();
+        let result = self.cycles.get(name).map_or(result, |c| Err(c.clone()));
+        self.done.insert(name, result.clone());
+        result
+    }
+
+    fn eval(&mut self, expr: &Expr) -> Result<String, String> {
+        match expr {
+            Expr::Lit(text) => Ok(text.clone()),
+            Expr::Ref(name) => {
+                if !self.raw.contains_key(name) {
+                    return Err(format!("`${name}` names no token"));
+                }
+                self.value_of(name)
+                    .map_err(|why| format!("`${name}` does not resolve ({why})"))
+            }
+            Expr::Mix(a, b, t) => {
+                let (a, b, t) = (self.colour(a)?, self.colour(b)?, self.fraction(t)?);
+                Ok(a.mix(b, t).to_css())
+            }
+            Expr::Alpha(a, t) => {
+                let (a, t) = (self.colour(a)?, self.fraction(t)?);
+                Ok(a.alpha(t).to_css())
+            }
+        }
+    }
+
+    fn colour(&mut self, expr: &Expr) -> Result<Rgba, String> {
+        let value = self.eval(expr)?;
+        Rgba::parse(&value).ok_or_else(|| format!("{value:?} is not a colour"))
+    }
+
+    fn fraction(&mut self, expr: &Expr) -> Result<f32, String> {
+        let value = self.eval(expr)?;
+        let n = crate::expr::number(&value).ok_or_else(|| format!("{value:?} is not a number"))?;
+        if (0.0..=1.0).contains(&n) {
+            Ok(n)
+        } else {
+            Err(format!("{value} is not between 0 and 1"))
+        }
+    }
 }
 
 /// Every derived token from a full palette (each colour set; a missing
@@ -369,21 +551,82 @@ fn ink_on(fill: Rgba) -> Rgba {
     with_contrast(best, &[fill], 4.6, far)
 }
 
-/// A theme resolved: one flat map of tokens (CSS values by name, no
-/// leading `--`), its scheme, the theme it is, and a revision the store
-/// bumps on every change. Cheap to clone.
+/// Where a token's final value came from ([`Resolved::source`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Origin {
+    /// Derived from the theme's palette.
+    Derived,
+    /// A theme file's (or an in-memory theme's) `overrides`.
+    Theme,
+    /// A layer's override (`Layer::token`, `THEME_TOKEN_SET`).
+    Layer,
+}
+
+impl Origin {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Derived => "derived",
+            Self::Theme => "theme",
+            Self::Layer => "layer",
+        }
+    }
+}
+
+/// Who set a token's final value.
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TokenSource {
+    pub origin: Origin,
+    /// The layer that set it ([`Origin::Layer`]), or the one whose choice
+    /// shows the theme that did; `None` for a theme resolved on its own
+    /// ([`resolve`]).
+    pub layer: Option<LayerKind>,
+    /// The theme that derived or set it (a parent's id when the parent's
+    /// overrides did), or the layer's name.
+    pub id: String,
+    /// The expression as written, when the value named other tokens
+    /// (`mix($border, $foreground, 0.2)`); the value itself is evaluated.
+    pub expression: Option<String>,
+}
+
+impl TokenSource {
+    /// Whether the value was an expression over other tokens.
+    #[must_use]
+    pub const fn is_reference(&self) -> bool {
+        self.expression.is_some()
+    }
+}
+
+/// A theme resolved: one flat map of tokens (CSS values by name).
+///
+/// No leading `--`. With it: its scheme, the theme it is, where each value
+/// came from, what did not resolve, and a revision the store bumps on
+/// every change. Cheap to clone (an `Arc`): a reader on any thread holds one
+/// whole, consistent snapshot.
+#[derive(Debug, Clone)]
 pub struct Resolved {
     inner: Arc<Inner>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 struct Inner {
     id: String,
     scheme: Scheme,
     tokens: BTreeMap<String, String>,
+    sources: BTreeMap<String, TokenSource>,
+    problems: Vec<Problem>,
     revision: u64,
+    /// The names asked for and not there, since it was resolved.
+    misses: Mutex<BTreeSet<String>>,
 }
+
+impl PartialEq for Resolved {
+    fn eq(&self, other: &Self) -> bool {
+        self.inner.revision == other.inner.revision && self.same_look(other)
+    }
+}
+
+impl Eq for Resolved {}
 
 impl Default for Resolved {
     /// The built-in default theme, revision 0.
@@ -393,14 +636,28 @@ impl Default for Resolved {
 }
 
 impl Resolved {
+    /// Literal `tokens`, as they are (nothing evaluated, no sources).
     #[must_use]
     pub fn new(id: &str, scheme: Scheme, tokens: BTreeMap<String, String>) -> Self {
+        Self::build(id, scheme, tokens, BTreeMap::new(), Vec::new())
+    }
+
+    fn build(
+        id: &str,
+        scheme: Scheme,
+        tokens: BTreeMap<String, String>,
+        sources: BTreeMap<String, TokenSource>,
+        problems: Vec<Problem>,
+    ) -> Self {
         Self {
             inner: Arc::new(Inner {
                 id: id.to_owned(),
                 scheme,
                 tokens,
+                sources,
+                problems,
                 revision: 0,
+                misses: Mutex::default(),
             }),
         }
     }
@@ -408,30 +665,16 @@ impl Resolved {
     /// The same, at `revision`.
     #[must_use]
     pub fn at_revision(&self, revision: u64) -> Self {
+        let i = &self.inner;
         Self {
             inner: Arc::new(Inner {
-                id: self.inner.id.clone(),
-                scheme: self.inner.scheme,
-                tokens: self.inner.tokens.clone(),
+                id: i.id.clone(),
+                scheme: i.scheme,
+                tokens: i.tokens.clone(),
+                sources: i.sources.clone(),
+                problems: i.problems.clone(),
                 revision,
-            }),
-        }
-    }
-
-    /// The same, with `overrides` over its tokens.
-    #[must_use]
-    pub fn with_overrides(&self, overrides: &BTreeMap<String, String>) -> Self {
-        if overrides.is_empty() {
-            return self.clone();
-        }
-        let mut tokens = self.inner.tokens.clone();
-        tokens.extend(overrides.iter().map(|(k, v)| (k.clone(), v.clone())));
-        Self {
-            inner: Arc::new(Inner {
-                id: self.inner.id.clone(),
-                scheme: self.inner.scheme,
-                tokens,
-                revision: self.inner.revision,
+                misses: Mutex::default(),
             }),
         }
     }
@@ -452,10 +695,41 @@ impl Resolved {
         self.inner.revision
     }
 
-    /// Every token.
+    /// Every token, architect's and the app's (dotted) alike.
     #[must_use]
     pub fn tokens(&self) -> &BTreeMap<String, String> {
         &self.inner.tokens
+    }
+
+    /// architect's own tokens, the undotted ones: what a UI kit writes as
+    /// CSS variables (`--ink-2`). An app's namespaced tokens are left out
+    /// ([`Self::css_namespaced`] asks for them).
+    pub fn css_tokens(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.inner
+            .tokens
+            .iter()
+            .filter(|(k, _)| !k.contains('.'))
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+    }
+
+    /// An app's dotted tokens in `namespaces` (`["arrange", "mixer"]`: each
+    /// name starting `arrange.` or `mixer.`), as CSS variable names
+    /// ([`css_name`]: `arrange-item-edge`) and values, by name. The
+    /// opt-in for an app whose own CSS reads `var(--arrange-item-edge)`.
+    /// A name that would collide with one of architect's undotted tokens
+    /// (`ink.2` and `ink-2`) is left out: architect's wins.
+    #[must_use]
+    pub fn css_namespaced(&self, namespaces: &[&str]) -> Vec<(String, &str)> {
+        self.inner
+            .tokens
+            .iter()
+            .filter(|(k, _)| {
+                k.split_once('.')
+                    .is_some_and(|(head, _)| namespaces.contains(&head))
+            })
+            .map(|(k, v)| (css_name(k), v.as_str()))
+            .filter(|(css, _)| !self.inner.tokens.contains_key(css))
+            .collect()
     }
 
     /// The token `name`, if the theme has it.
@@ -465,46 +739,114 @@ impl Resolved {
     }
 
     /// The token `name`'s value; magenta (`#ff00ff`) for a name the
-    /// theme does not have, so the mistake shows — and is logged, once
-    /// per name.
+    /// theme does not have, so the mistake shows — logged, once per name,
+    /// and kept in [`Self::misses`].
     #[must_use]
     pub fn value(&self, name: &str) -> &str {
         self.get(name).unwrap_or_else(|| {
-            unknown(name);
-            "#ff00ff"
+            self.miss(name);
+            MAGENTA_CSS
         })
     }
 
     /// The token `name` as a colour; magenta for a name the theme does
-    /// not have (logged once) or a value that is not a colour.
+    /// not have (logged once, a miss) or a value that is not a colour.
     #[must_use]
     pub fn color(&self, name: &str) -> Rgba {
         Rgba::parse(self.value(name)).unwrap_or(MAGENTA)
     }
 
-    /// Whether it looks the same as `other` (the revision aside).
+    /// The token `name` as a number (`0.4`, `12`): an alpha, a weight, a
+    /// size in the app's own units. `NaN` for a name the theme does not
+    /// have (logged once, a miss) or a value that is not a plain number
+    /// (logged once).
+    #[must_use]
+    pub fn number(&self, name: &str) -> f32 {
+        let Some(value) = self.get(name) else {
+            self.miss(name);
+            return f32::NAN;
+        };
+        match value.trim().parse::<f32>() {
+            Ok(n) if n.is_finite() => n,
+            _ => {
+                log_once(name, "theme token is not a number, read as NaN");
+                f32::NAN
+            }
+        }
+    }
+
+    /// Who set token `name`'s final value: derived from a theme's palette,
+    /// a theme's overrides, or a layer's, and whether it was an expression.
+    /// `None` for a name it does not have (or a [`Self::new`] map).
+    #[must_use]
+    pub fn source(&self, name: &str) -> Option<&TokenSource> {
+        self.inner.sources.get(name)
+    }
+
+    /// The expressions that did not resolve (an unknown `$name`, a cycle,
+    /// a value that is not a colour): each token named, drawn magenta.
+    #[must_use]
+    pub fn problems(&self) -> &[Problem] {
+        &self.inner.problems
+    }
+
+    /// The names asked for ([`Self::value`], [`Self::color`],
+    /// [`Self::number`]) and not found since it was resolved, sorted.
+    #[must_use]
+    pub fn misses(&self) -> Vec<String> {
+        self.inner
+            .misses
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .cloned()
+            .collect()
+    }
+
+    fn miss(&self, name: &str) {
+        let first = self
+            .inner
+            .misses
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(name.to_owned());
+        if first {
+            log_once(name, "unknown theme token, drawn magenta");
+        }
+    }
+
+    /// Whether it looks the same as `other` (the revision aside): the
+    /// same theme, scheme and tokens, set by the same layers, with the
+    /// same problems.
     #[must_use]
     pub fn same_look(&self, other: &Self) -> bool {
-        self.inner.id == other.inner.id
-            && self.inner.scheme == other.inner.scheme
-            && self.inner.tokens == other.inner.tokens
+        let (a, b) = (&self.inner, &other.inner);
+        a.id == b.id
+            && a.scheme == b.scheme
+            && a.tokens == b.tokens
+            && a.sources == b.sources
+            && a.problems == b.problems
     }
 }
 
-/// Logs an unknown token, once per name for the process.
-fn unknown(name: &str) {
-    static SEEN: OnceLock<Mutex<BTreeSet<String>>> = OnceLock::new();
+/// A token name as a CSS variable's (without its `--`): the dots become
+/// dashes, `arrange.item.edge` → `arrange-item-edge`.
+#[must_use]
+pub fn css_name(name: &str) -> String {
+    name.replace('.', "-")
+}
+
+/// Logs `message` for token `name`, once per name and message for the
+/// process.
+fn log_once(name: &str, message: &'static str) {
+    static SEEN: OnceLock<Mutex<BTreeSet<(String, &'static str)>>> = OnceLock::new();
     let first = SEEN
         .get_or_init(Mutex::default)
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
-        .insert(name.to_owned());
+        .insert((name.to_owned(), message));
     if first {
-        tracing::warn!(
-            target: "architect_theme",
-            token = name,
-            "unknown theme token, drawn magenta"
-        );
+        tracing::warn!(target: "architect_theme", token = name, "{message}");
     }
 }
 
@@ -535,6 +877,13 @@ impl<T: FromResolved + PartialEq> Projected<T> {
     #[must_use]
     pub const fn get(&self) -> &T {
         &self.value
+    }
+
+    /// The revision of the theme it was last cut from: a recording stamps
+    /// it to say which theme it was drawn with.
+    #[must_use]
+    pub const fn revision(&self) -> u64 {
+        self.revision
     }
 
     /// Takes `resolved`; true when the slice it gives differs from the

@@ -15,8 +15,11 @@ working set.
   theme files. Files are authored. The app persists the layers it owns.
 - Writes return whether anything changed. Don't redraw or persist on
   `false`.
-- An unknown token is magenta on purpose. Fix the name, don't add a
-  fallback.
+- An unknown token is magenta on purpose (`number` is `NaN`). Fix the
+  name, don't add a fallback.
+- App tokens stay off architect-ui's `:root` CSS. Opt a namespace in with
+  `ThemeStoreProvider { css_namespaces: vec!["arrange".into()] }`
+  (`--arrange-item-edge`).
 
 ## Recipes
 
@@ -53,11 +56,36 @@ let meter = use_themed::<Meter>();          // Dioxus: a memo
 let mut kept = Projected::<Meter>::new(&r); // anywhere: kept.update(&next) -> changed?
 ```
 
-**A domain app's roles (Studio).** Name them with the app's prefix
-(`arrange-clip`, `mixer-strip`, `midi-note`). Derive defaults from
-architect's tokens in the slice's `from_resolved`
-(`r.get("arrange-clip")` first, else a mix of `card` and `brand`). Themes
-and people set them in `overrides` / `THEME_TOKEN_SET`.
+**An app's own tokens (Studio).** Namespace them (`arrange.item.edge`,
+`mixer.meter.safe`: dot-separated `[a-z0-9-]` segments). Ship the
+defaults as an `App` layer of expressions over architect's tokens, so they
+follow every palette; a theme file or a person still overrides them.
+
+```rust,ignore
+store.set(LayerKind::App, Layer::default()
+    .token("arrange.item.edge", "mix($border, $foreground, 0.2)") // OKLab, t 0..1
+    .token("arrange.grid.bar", "alpha($ink, 0.18)")
+    .token("arrange.cursor.play", "$warn")
+    .token("arrange.item.body-alpha", "0.42"));
+// in from_resolved: r.color("arrange.item.edge"), r.number("arrange.item.body-alpha")
+```
+
+Expressions (`features/theme/src/expr.rs`) are `$name`, `mix(a, b, t)`,
+`alpha(a, t)`, nested; anything else is a literal. They evaluate after
+every layer is in, so a reference sees the final value. An unknown name or
+a cycle is magenta and a `Problem` (`ThemeStore::problems`,
+`THEME_PROBLEMS`). `Resolved::source(name)` (`TokenSource`) says who set a
+value; `Resolved::misses()` lists names asked for and absent;
+`THEME_INSPECT {prefix}` shows both to an agent.
+
+**A theme built in memory (an import).**
+`Theme::from_tokens(id, scheme, tokens)` then
+`store.insert_theme(theme)`: replaces the one of that id at run time,
+bumps the revision only if what shows changed, survives `reload`.
+
+**A render thread or worker.** Poll `store.revision()` (atomic, no lock)
+each frame. When it moved, `projected.update(&store.current())`, and
+re-record only on `true`. `Projected::revision()` stamps a recording.
 
 **Extension themes.** `[[themes]] path = "themes/x.json"` in
 `extension.toml` (`features/extensions/src/manifest.rs` `ThemeDecl`). The
@@ -73,7 +101,9 @@ reloads.
   `brand-soft`. `accent` is architect-ui's hover wash. Paint views read
   `brand`.
 - `THEME_SET` writes the `Pick` layer and `THEME_TOKEN_SET` the `Person`
-  layer. A `Preview` covers both until `THEME_PREVIEW_END`.
+  layer unless given `layer`.
+- An override of `border` that reads `$border` is a cycle, not "the value
+  below": a reference always sees the final value. A `Preview` covers both until `THEME_PREVIEW_END`.
 - A store change made off the UI thread (an action, the watcher) reaches
   Dioxus on the next turn, through `use_theme_store`'s channel. Don't
   read the store in render and expect it to subscribe: read
