@@ -111,3 +111,19 @@ pub fn use_themed<T: FromResolved + PartialEq + 'static>() -> Memo<T> {
         )
     })
 }
+
+/// The theme as CSS custom properties on `:root` (`:root { --background: …; … }`),
+/// as the app's UI kit writes them (architect-ui's `ThemeStoreProvider`).
+///
+/// For a document the app's own sheets don't reach: a process extension's
+/// view is a Blitz sub-document of its own, so it gets this sheet from its
+/// host and reads the live theme through `var(--…)`.
+#[derive(Clone, Copy)]
+pub struct RootCss(pub Signal<String>);
+
+/// The `:root` sheet ([`RootCss`]) if the UI kit gives one above this
+/// component; reading it subscribes the component.
+#[must_use]
+pub fn try_use_root_css() -> Option<Signal<String>> {
+    try_use_context::<RootCss>().map(|r| r.0)
+}
