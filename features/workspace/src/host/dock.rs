@@ -151,7 +151,7 @@ fn Ribbon(
     commands_only: bool,
 ) -> Element {
     let host = use_host();
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let s = (host.sizes)();
     let Some(ribbon) = dock.ribbon.clone() else {
         return rsx! {};
@@ -261,7 +261,7 @@ fn Ribbon(
 #[component]
 fn DockGrip(side: Side) -> Element {
     let mut host = use_host();
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let s = (host.sizes)();
     if !host.has_windows() || (host.phone)() {
         return rsx! {};
@@ -273,7 +273,7 @@ fn DockGrip(side: Side) -> Element {
         (false, _) => "Move the dock to its own window",
     };
     let pressed = matches!((host.drag)(), Some(Drag::DockGrip { side: d, .. }) if d == side);
-    let fill = if pressed { t.active } else { "transparent" };
+    let fill = if pressed { &*t.active } else { "transparent" };
     // The pointer's moves and its release come to the element pressed
     // (Blitz's); in the shell's ribbon that is outside the host's root, so
     // the grip hears them itself. Let go outside the window, the platform
@@ -305,9 +305,9 @@ fn DockGrip(side: Side) -> Element {
                 host.run(if out { Op::DockBack(side) } else { Op::PopOutDock(side, None) });
             },
             if out {
-                PanelLeftOpen { size: 16, color: t.ink_3 }
+                PanelLeftOpen { size: 16, color: t.ink_3.to_string() }
             } else {
-                ExternalLink { size: 16, color: t.ink_3 }
+                ExternalLink { size: 16, color: t.ink_3.to_string() }
             }
         }
     }
@@ -439,10 +439,10 @@ fn RibbonButton(
     onpress: EventHandler<()>,
 ) -> Element {
     let host = use_host();
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let s = (host.sizes)();
-    let ink = if on { t.ink } else { t.ink_3 };
-    let fill = if on { t.active } else { "transparent" };
+    let ink = if on { &*t.ink } else { &*t.ink_3 };
+    let fill = if on { &*t.active } else { "transparent" };
     let short: String = label.chars().take(2).collect();
     rsx! {
         button {
@@ -452,7 +452,7 @@ fn RibbonButton(
             title: "{label}",
             "aria-label": "{label}",
             onclick: move |_| onpress.call(()),
-            {icon.map_or_else(|| rsx! { "{short}" }, |icon| icon(Icon { size: 18, color: ink }))}
+            {icon.map_or_else(|| rsx! { "{short}" }, |icon| icon(Icon { size: 18, color: ink.into() }))}
         }
     }
 }
@@ -462,7 +462,7 @@ fn RibbonButton(
 #[component]
 fn Rail(side: Side, root: Node) -> Element {
     let host = use_host();
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let across = side.axis() == Axis::Row;
     let shape = if across {
         format!("width:{RAIL}px; flex-direction:column;", RAIL = super::RAIL)
@@ -504,14 +504,14 @@ fn Rail(side: Side, root: Node) -> Element {
 #[component]
 fn DockDivider(side: Side) -> Element {
     let mut host = use_host();
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let s = (host.sizes)();
     let cursor = if side.axis() == Axis::Row {
         "ew-resize"
     } else {
         "ns-resize"
     };
-    let (line, grip) = super::group::hairline(side.axis(), s.divider, t.rule, cursor);
+    let (line, grip) = super::group::hairline(side.axis(), s.divider, &t.rule, cursor);
     rsx! {
         div { style: "{line}",
         div {
@@ -535,7 +535,7 @@ fn DockDivider(side: Side) -> Element {
 #[component]
 pub(super) fn ShellLeftDock() -> Element {
     let host = use_host();
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let s = (host.sizes)();
     if host.workspace.read().dock_window(Side::Left).is_some() {
         let top = (host.title_row)().map_or(12.0, |r| r.height + 12.0);

@@ -587,14 +587,14 @@ pub(crate) fn chord(e: &KeyboardEvent) -> Option<String> {
 }
 
 /// A row's fill: lit when picked.
-pub(crate) const fn fill(on: bool, t: &ShellTheme) -> &'static str {
-    if on { t.active } else { "transparent" }
+pub(crate) fn fill(on: bool, t: &ShellTheme) -> &str {
+    if on { &t.active } else { "transparent" }
 }
 
 /// A row's quiet ink: a step up on the picked row, where `ink_3` falls
 /// under 4.5:1 on `fill`.
-pub(crate) const fn quiet(on: bool, t: &ShellTheme) -> &'static str {
-    if on { t.ink_2 } else { t.ink_3 }
+pub(crate) fn quiet(on: bool, t: &ShellTheme) -> &str {
+    if on { &t.ink_2 } else { &t.ink_3 }
 }
 
 pub(crate) fn theme() -> ShellTheme {
@@ -647,7 +647,7 @@ pub(crate) fn Frame(
                 onclick: move |e| e.stop_propagation(),
                 div { style: "flex-shrink: 0; height: 48px; display: flex; align-items: center; gap: 10px; padding: 0 14px; \
                               border-bottom: 1px solid {t.rule};",
-                    Search { size: 16, color: t.ink_3 }
+                    Search { size: 16, color: t.ink_3.to_string() }
                     input {
                         r#type: "text",
                         value: "{query}",
@@ -682,7 +682,7 @@ pub(crate) fn Frame(
 #[component]
 pub(crate) fn Kbd(text: String, #[props(default)] on: bool) -> Element {
     let t = theme();
-    let ink = if on { t.ink_2 } else { t.ink_3 };
+    let ink = if on { &*t.ink_2 } else { &*t.ink_3 };
     rsx! {
         span { style: "flex-shrink: 0; padding: 1px 6px; border-radius: 4px; border: 1px solid {t.rule}; \
                        color: {ink}; font-size: 11px; font-family: {t.font};",
@@ -701,7 +701,7 @@ fn count(n: usize) -> f32 {
 
 /// `text` with the characters at `positions` lit.
 #[component]
-fn Lit(text: String, positions: Vec<usize>, ink: &'static str, lit: &'static str) -> Element {
+fn Lit(text: String, positions: Vec<usize>, ink: String, lit: String) -> Element {
     // Runs of lit and unlit characters, so a row is a few spans, not one
     // per character.
     let mut runs: Vec<(bool, String)> = Vec::new();
@@ -858,9 +858,9 @@ pub fn CommandPalette() -> Element {
 pub(crate) fn CommandRow(row: Ranked, on: bool, onpress: EventHandler<()>) -> Element {
     let t = theme();
     let c = row.command;
-    let fill = if on { t.active } else { "transparent" };
+    let fill = if on { &*t.active } else { "transparent" };
     let quiet = quiet(on, &t);
-    let ink = if c.enabled { t.ink } else { quiet };
+    let ink = if c.enabled { &*t.ink } else { quiet };
     rsx! {
         div {
             class: "lp",
@@ -872,7 +872,7 @@ pub(crate) fn CommandRow(row: Ranked, on: bool, onpress: EventHandler<()>) -> El
                 if !c.group.is_empty() {
                     span { style: "flex-shrink: 0; color: {quiet};", "{c.group}:" }
                 }
-                Lit { text: c.label.clone(), positions: row.positions, ink, lit: t.ink }
+                Lit { text: c.label.clone(), positions: row.positions, ink: ink.to_owned(), lit: t.ink.to_string() }
                 if let Some(why) = c.disabled_reason.clone() {
                     span { style: "color: {quiet}; font-size: 12px; white-space: nowrap;", "— {why}" }
                 }
@@ -966,7 +966,7 @@ pub fn QuickOpen() -> Element {
                         move |_| open_at(i, OpenIn::Here)
                     },
                     span { style: "flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden;",
-                        Lit { text: f.item.title.clone(), positions: f.positions.clone(), ink: t.ink_2, lit: t.ink }
+                        Lit { text: f.item.title.clone(), positions: f.positions.clone(), ink: t.ink_2.to_string(), lit: t.ink.to_string() }
                         if !f.item.detail.is_empty() {
                             span { style: "color: {quiet(i == pick, &t)}; font-size: 11px; white-space: nowrap; overflow: hidden;", "{f.item.detail}" }
                         }
@@ -1015,7 +1015,7 @@ pub fn ActionListView() -> Element {
         div { style: "flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; font-family: {t.font};",
             div { style: "flex-shrink: 0; display: flex; align-items: center; gap: 10px; padding: 10px 14px; \
                           border-bottom: 1px solid {t.rule};",
-                CommandIcon { size: 15, color: t.ink_3 }
+                CommandIcon { size: 15, color: t.ink_3.clone() }
                 input {
                     r#type: "text",
                     value: "{filter}",
@@ -1057,7 +1057,7 @@ fn ActionRow(command: Command) -> Element {
         return rsx! {};
     };
     let t = theme();
-    let ink = if command.enabled { t.ink } else { t.ink_3 };
+    let ink = if command.enabled { &*t.ink } else { &*t.ink_3 };
     let id = command.id.clone();
     rsx! {
         div { style: "display: flex; align-items: center; gap: 10px; min-height: 32px; padding: 0 14px; \

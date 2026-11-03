@@ -499,10 +499,7 @@ impl Host {
         let Some(p) = workspace.pane(pane) else {
             return true;
         };
-        self.views
-            .read()
-            .get(&p.view.0)
-            .map_or(true, |v| v.header)
+        self.views.read().get(&p.view.0).map_or(true, |v| v.header)
     }
 }
 
@@ -1222,15 +1219,21 @@ pub fn WorkspaceView(
     /// by this host, and each change of the arrangement is a
     /// `Changed { topic: "workspace" }` event.
     actions: Option<WorkspaceActions>,
-    #[props(default)] theme: ShellTheme,
+    /// Its colours; left out, the shell's (which follow the app's theme
+    /// store), else the default.
+    #[props(default, into)]
+    theme: Option<ShellTheme>,
 ) -> Element {
+    let theme = theme
+        .or_else(|| architect_shell::try_use_shell().map(|s| s.theme))
+        .unwrap_or_default();
     let os_windows = try_use_context::<Windows>();
     let mut host = use_context_provider(|| Host {
         workspace,
         views: CopyValue::new(views.clone()),
         commands: CopyValue::new(commands.clone()),
         on_command: CopyValue::new(on_command),
-        theme: CopyValue::new(theme),
+        theme: CopyValue::new(theme.clone()),
         sizes: Signal::new(Sizes::FINE),
         phone: Signal::new(phone),
         title_row: Signal::new(None),
@@ -1273,7 +1276,7 @@ pub fn WorkspaceView(
     host.views.set(views);
     host.commands.set(commands);
     host.on_command.set(on_command);
-    host.theme.set(theme);
+    host.theme.set(theme.clone());
     let sizes = if coarse { Sizes::COARSE } else { Sizes::FINE };
     if *host.sizes.peek() != sizes {
         host.sizes.set(sizes);
@@ -1451,7 +1454,7 @@ fn use_sidebar_follows_left_dock(host: Host, in_shell: bool) {
 #[component]
 fn DeskBody() -> Element {
     let host = use_host();
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let workspace = host.workspace.read();
     let Some(main) = workspace.windows.first() else {
         return rsx! {};
@@ -1564,7 +1567,7 @@ fn shown_center(window: &crate::model::Window) -> Option<Node> {
 #[component]
 fn MinimisedChip(pane: PaneId) -> Element {
     let host = use_host();
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let title = host
         .workspace
         .read()
@@ -1587,7 +1590,7 @@ fn MinimisedChip(pane: PaneId) -> Element {
 #[component]
 fn WindowChip(window: WindowId, count: usize) -> Element {
     let host = use_host();
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let tabs = if count == 1 { "tab" } else { "tabs" };
     rsx! {
         button {
@@ -1603,7 +1606,7 @@ fn WindowChip(window: WindowId, count: usize) -> Element {
 #[component]
 fn EmptyCenter() -> Element {
     let host = use_host();
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let s = (host.sizes)();
     rsx! {
         div {

@@ -1092,6 +1092,8 @@ dependencies = [
  "architect-scripting",
  "architect-settings",
  "architect-shell",
+ "architect-theme",
+ "architect-ui",
  "architect-workspace",
  "architect-workspace-hack",
  "crdt",
@@ -1308,9 +1310,11 @@ dependencies = [
 name = "architect-shell"
 version = "0.1.0"
 dependencies = [
+ "architect-theme",
  "architect-workspace-hack",
  "block2 0.6.2",
  "dioxus",
+ "futures",
  "futures-channel",
  "futures-timer",
  "futures-util",
@@ -1469,6 +1473,7 @@ dependencies = [
  "clsx",
  "dioxus",
  "dioxus-primitives",
+ "futures",
  "linkme",
  "lucide-dioxus",
  "nucleo-matcher",
@@ -1499,6 +1504,7 @@ dependencies = [
  "architect-commands",
  "architect-mcp",
  "architect-shell",
+ "architect-theme",
  "architect-workspace",
  "architect-workspace-hack",
  "blitz-dom",

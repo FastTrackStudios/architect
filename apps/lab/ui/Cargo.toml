@@ -15,6 +15,10 @@ keyflow-ui = { git = "https://github.com/FastTrackStudios/keyflow", rev = "6eed2
 # The source editor on its own, for the Editor tab (src/keyflow.rs).
 editor-keyflow = { git = "https://github.com/FastTrackStudios/keyflow", rev = "6eed23f37657f68fc0e634ddd7bf6b487101f5eb", features = ["native"], optional = true }
 architect-shell = { workspace = true, features = ["ui"] }
+# Runtime themes: the store, its files and watcher, THEME_* (src/theme.rs).
+architect-theme = { workspace = true, features = ["fs", "actions", "dioxus"] }
+# architect-ui's root: its CSS variables follow the store.
+architect-ui = { workspace = true }
 # The Embedded views' paint pane (src/paint.rs): the paint kind on Blitz.
 architect-workspace = { workspace = true, features = ["ui", "paint-ui"] }
 architect-commands = { workspace = true, features = ["native"] }

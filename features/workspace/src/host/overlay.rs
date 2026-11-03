@@ -21,7 +21,7 @@ use super::slide::Landing;
 #[component]
 pub(super) fn FloatView(index: usize, pane: PaneId) -> Element {
     let mut host = use_host();
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let workspace = host.workspace.read();
     let Some(float) = workspace
         .windows
@@ -111,7 +111,7 @@ pub(super) fn FloatView(index: usize, pane: PaneId) -> Element {
 #[component]
 fn FloatButton(label: &'static str, icon: FloatIcon, onpress: EventHandler<()>) -> Element {
     let host = use_host();
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     rsx! {
         button {
             style: "flex:0 0 auto; width:24px; height:24px; border:none; border-radius:5px; \
@@ -121,8 +121,8 @@ fn FloatButton(label: &'static str, icon: FloatIcon, onpress: EventHandler<()>) 
             onpointerdown: move |e| e.stop_propagation(),
             onclick: move |_| onpress.call(()),
             match icon {
-                FloatIcon::Minimise => rsx! { Minus { size: 14, color: t.ink_3 } },
-                FloatIcon::Dock => rsx! { PanelRight { size: 14, color: t.ink_3 } },
+                FloatIcon::Minimise => rsx! { Minus { size: 14, color: t.ink_3.to_string() } },
+                FloatIcon::Dock => rsx! { PanelRight { size: 14, color: t.ink_3.to_string() } },
             }
         }
     }
@@ -141,7 +141,7 @@ enum FloatIcon {
 #[component]
 pub(super) fn DragLayer() -> Element {
     let host = use_host();
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let Some(drag) = (host.drag)() else {
         return rsx! {};
     };
@@ -226,7 +226,7 @@ fn highlight_of(drag: Option<&Drag>) -> Option<Rect> {
 #[component]
 pub(super) fn DropHighlight() -> Element {
     let host = use_host();
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let x = use_motion(0.0, Spring::TRACK, 0.25);
     let y = use_motion(0.0, Spring::TRACK, 0.25);
     let w = use_motion(0.0, Spring::TRACK, 0.25);
@@ -657,7 +657,7 @@ const Z_MENU: u8 = layer::MENU;
 #[component]
 pub(super) fn MenuLayer() -> Element {
     let mut host = use_host();
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let Some(menu) = (host.menu)() else {
         return rsx! {};
     };
@@ -674,7 +674,7 @@ pub(super) fn MenuLayer() -> Element {
     let (scrim, place) = anchored.map_or_else(
         || {
             (
-                t.scrim.to_owned(),
+                t.scrim.to_string(),
                 "position:relative; margin:auto; max-width:90%; max-height:85%;".to_owned(),
             )
         },
@@ -717,7 +717,7 @@ enum Item {
 #[component]
 fn MenuRow(item: Item) -> Element {
     let mut host = use_host();
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let s = (host.sizes)();
     match item {
         Item::Heading(text) => rsx! {
@@ -727,7 +727,7 @@ fn MenuRow(item: Item) -> Element {
             // A mouse's rows (28pt, 13px) or a finger's (44pt, 15px).
             let row_font = if s.button > 40.0 { 15 } else { 13 };
             let danger = matches!(op, Op::Close(_) | Op::CloseOthers(_));
-            let ink = if danger { t.danger } else { t.ink };
+            let ink = if danger { &*t.danger } else { &*t.ink };
             rsx! {
                 button {
                     style: "display:flex; justify-content:flex-start; text-align:left; padding:0 12px; \
@@ -894,7 +894,7 @@ fn open_items(host: Host) -> Vec<Item> {
 #[component]
 pub(super) fn PhoneBody() -> Element {
     let mut host = use_host();
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let workspace = host.workspace.read();
     let pane = super::switcher::phone_pane(&workspace);
     let title = pane
@@ -927,7 +927,7 @@ pub(super) fn PhoneBody() -> Element {
                                 font-weight:600; cursor:pointer;",
                         "aria-label": "{count} {tabs}",
                         onclick: move |_| host.switcher.set(true),
-                        Layers { size: 16, color: t.ink_2 }
+                        Layers { size: 16, color: t.ink_2.to_string() }
                         "{count} {tabs}"
                     }
                 }
@@ -961,7 +961,7 @@ pub(super) fn PhoneBody() -> Element {
 #[component]
 pub(super) fn SheetLayer() -> Element {
     let mut host = use_host();
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let Some(pane) = (host.sheet)() else {
         return rsx! {};
     };
@@ -987,7 +987,7 @@ pub(super) fn SheetLayer() -> Element {
                     title: "Close",
                     "aria-label": "Close {title}",
                     onclick: move |_| host.sheet.set(None),
-                    X { size: 18, color: t.ink_2 }
+                    X { size: 18, color: t.ink_2.to_string() }
                 }
             }
             div { style: "flex:1 1 0; min-height:0; display:flex; position:relative;",
