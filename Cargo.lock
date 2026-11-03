@@ -1111,6 +1111,7 @@ dependencies = [
  "architect-commands",
  "architect-extensions",
  "architect-guide",
+ "architect-lab-board",
  "architect-orgs",
  "architect-presence",
  "architect-scripting",

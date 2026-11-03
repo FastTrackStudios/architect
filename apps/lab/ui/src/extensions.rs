@@ -33,6 +33,7 @@ use architect::action::{ActionList, ActionMeta, Effect};
 use architect_extensions::extensions::Extensions;
 use architect_extensions::host::Host;
 use architect_extensions::install::{FolderRegistry, Installs};
+use architect_extensions::interface::{ExtensionUi, use_extension_ui};
 use architect_extensions::process::{ProcessRunner, Processes};
 use architect_extensions::ui::use_extension_sections;
 use architect_extensions::{Package, VersionReq};
@@ -483,10 +484,51 @@ fn builtin() -> Option<Package> {
     .ok()
 }
 
-/// Runs the lab's extensions while mounted, the metronome while
-/// `metronome` is on.
-#[component]
-pub fn LabExtensions(metronome: bool) -> Element {
+/// The extension actions an agent reaches on the lab's own list (its
+/// control socket, MCP): forwarded to the extensions' list.
+const FORWARDED: [&str; 13] = [
+    "EXT_LIST",
+    "EXT_SEARCH",
+    "EXT_INSTALL",
+    "EXT_UNINSTALL",
+    "EXT_RELOAD",
+    "EXT_CONTRIBUTIONS",
+    "EXT_OPEN",
+    "EXT_VIEW_OPEN",
+    "EXT_STATE_SET",
+    "EXT_STATE_CLEAR",
+    "EXT_EMIT",
+    "EXT_ENABLE",
+    "EXT_DISABLE",
+];
+
+/// Puts `ids` of `from` on `to`, run on `from` as whoever ran them.
+fn forward(to: &ActionList, from: &ActionList, ids: &[&str]) {
+    for id in ids {
+        let Some(info) = from.info(id) else { continue };
+        let (list, id) = (from.clone(), (*id).to_owned());
+        let _ = to.register_forwarded_with(
+            &info,
+            Arc::new(
+                move |caller: &architect::action::ActionCaller, args: &[u8]| {
+                    let (list, caller, id, args) =
+                        (list.clone(), caller.clone(), id.clone(), args.to_vec());
+                    Ok(
+                        Box::pin(async move { list.run_json_async_with(&caller, &id, &args).await })
+                            as architect::action::ActionFuture,
+                    )
+                },
+            ),
+        );
+    }
+}
+
+/// Runs the lab's extensions — the metronome while `metronome` is on, the
+/// clicker and Frame's surface when their programs are found, and the
+/// Board (`apps/lab/board`), linked in (`ARCHITECT_LAB_BOARD_PROCESS=1`
+/// runs its program as a development copy instead) — and puts what they
+/// add into the window: call it in the lab's root, above the shell.
+pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
     let sections = use_extension_sections();
     let list = use_hook(|| Arc::new(ActionList::new()));
     architect_commands::use_action_list(Arc::clone(&list));
@@ -497,6 +539,7 @@ pub fn LabExtensions(metronome: bool) -> Element {
         use_future(move || frame_binding(Arc::clone(&lab), Arc::clone(&list)));
     }
     let themes = architect_theme::try_use_theme().map(|t| t.store());
+    use_context_provider(processes);
     let (extensions, from_registry) = use_hook(|| {
         // The kinds its views may be: Frame's surface besides Dioxus.
         let mut host =
@@ -512,11 +555,17 @@ pub fn LabExtensions(metronome: bool) -> Element {
             }
             host = host.with_runner(runner.with_processes(processes()));
         }
+        // Hooks hear the lab's own events (workspace.changed, …).
+        host.watch(&lab);
         let root = architect::settings::app_dir("architect-lab")
             .unwrap_or_else(|_| std::env::temp_dir().join("architect-lab"));
         let clicker = clicker(&root);
         let frame = frame_dev(&root);
         let mut extensions = Extensions::new(host, Installs::new(root.join("extensions")));
+        // The Board: one Rust value, linked in as a built-in.
+        if let Ok(with) = extensions.clone().with_linked(&architect_lab_board::Board) {
+            extensions = with;
+        }
         let found = registry();
         match &found {
             Some(dir) => extensions = extensions.with_source(FolderRegistry::new(dir)),
@@ -527,11 +576,14 @@ pub fn LabExtensions(metronome: bool) -> Element {
             }
         }
         let _ = extensions.install_actions();
+        let _ = extensions.install_contribution_actions();
+        forward(&lab, &list, &FORWARDED);
         // Off until the switch says otherwise.
         let _ = extensions.disable(METRONOME);
-        for dir in clicker.into_iter().chain(frame) {
+        for dir in clicker.into_iter().chain(frame).chain(board_dev(&root)) {
             let _ = extensions.dev(dir);
         }
+        let _ = extensions.sync();
         (extensions, found.is_some())
     });
     let follow = extensions.clone();
@@ -545,8 +597,9 @@ pub fn LabExtensions(metronome: bool) -> Element {
             let _ = follow.disable(METRONOME);
         }
     }));
+    let polled = extensions.clone();
     use_future(move || {
-        let extensions = extensions.clone();
+        let extensions = polled.clone();
         async move {
             loop {
                 futures_timer::Delay::new(POLL).await;
@@ -554,5 +607,52 @@ pub fn LabExtensions(metronome: bool) -> Element {
             }
         }
     });
-    rsx! {}
+    // The Board's root context, provided here for every view below.
+    use_hook(|| {
+        for (_, built) in extensions.host().linked() {
+            built.provide_context();
+        }
+    });
+    use_extension_ui(extensions.host().clone(), Arc::clone(&lab))
+}
+
+/// The Board as a development copy running its program, when
+/// `ARCHITECT_LAB_BOARD_PROCESS=1` and the program sits beside the lab's.
+fn board_dev(root: &Path) -> Option<PathBuf> {
+    if std::env::var_os("ARCHITECT_LAB_BOARD_PROCESS").is_none_or(|v| v != "1") {
+        return None;
+    }
+    let program = std::env::current_exe()
+        .ok()?
+        .with_file_name("architect-lab-board");
+    if !program.is_file() {
+        return None;
+    }
+    let dir = root.join("dev").join(architect_lab_board::ID);
+    std::fs::create_dir_all(&dir).ok()?;
+    std::fs::write(
+        dir.join("extension.toml"),
+        include_str!("../../board/extension.toml"),
+    )
+    .ok()?;
+    let link = dir.join("architect-lab-board");
+    let _ = std::fs::remove_file(&link);
+    std::os::unix::fs::symlink(&program, &link).ok()?;
+    Some(dir)
+}
+
+/// A tab an extension added (`lab.board/board`): its view, under a page
+/// bar with its title.
+#[component]
+pub fn ExtensionTab(ui: ExtensionUi, id: &'static str) -> Element {
+    let Some((extension, tab)) = ui.tab(id) else {
+        return rsx! {};
+    };
+    rsx! {
+        architect_shell::Page { title: tab.title.clone(), scroll: false,
+            div { style: "flex: 1; min-height: 0; display: flex; flex-direction: column;",
+                architect_extensions::interface::ExtensionView { ui, extension, view: tab.view }
+            }
+        }
+    }
 }

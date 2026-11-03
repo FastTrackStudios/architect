@@ -20,11 +20,13 @@ use lucide_dioxus::{
     Network, Search, SlidersHorizontal, SquarePen, SquareTerminal, Terminal,
 };
 
-/// The lab's views, and the kinds that draw them.
-fn views() -> Views {
+/// The lab's views, and the kinds that draw them, with the views loaded
+/// extensions add (`extra`).
+fn views(extra: Vec<View>) -> Views {
     let views = Views::new().with_kinds(crate::embedded::kinds());
     crate::embedded::views()
         .into_iter()
+        .chain(extra)
         .fold(views, Views::view)
         .view(
             View::new("files", "Files", |_| rsx! { FilesView {} })
@@ -240,7 +242,10 @@ pub fn VaultPage() -> Element {
     let sets = use_signal(screensets);
     let store = use_root_context(|| VaultStore(WorkspaceStore::new(MemoryStore::new()))).0;
     let pane_status = use_signal(Vec::new);
-    let views = use_hook(views);
+    // The lab's views, and every view a loaded extension adds (made again
+    // when one loads or unloads).
+    let ui = try_use_context::<architect_extensions::interface::ExtensionUi>();
+    let views = use_memo(move || views(ui.map(|u| u.views()).unwrap_or_default()))();
     // The workspace on the lab's Action List: every operation, run by the
     // host below; a scenario's checks read the arrangement, each change
     // is heard.
@@ -410,6 +415,23 @@ fn FilesView() -> Element {
                     "{title}"
                 }
             }
+            // A file of a kind the lab has no view for: an extension's
+            // opener claims it (the Board's, for `.kf`).
+            for file in ["Songs/Intro.kf"] {
+                button {
+                    key: "{file}",
+                    class: "lp",
+                    style: "display: flex; align-items: center; justify-content: flex-start; min-height: 30px; padding: 0 10px; border: none; \
+                            border-radius: 6px; background: transparent; color: {t.ink_2}; \
+                            font-size: 13px; text-align: left; cursor: pointer;",
+                    onclick: move |_| {
+                        if let Some(ui) = try_consume_context::<architect_extensions::interface::ExtensionUi>() {
+                            let _ = ui.open_path(file);
+                        }
+                    },
+                    "{file}"
+                }
+            }
         }
     }
 }
@@ -419,6 +441,9 @@ fn screen_class(screen: &Screen) -> FormClass {
     let (w, h) = (narrow(screen.width), narrow(screen.height));
     FormClass::of(w, h, screen.form() != FormFactor::Desk)
 }
+
+/// The issue a note links to.
+const ISSUE: &str = "https://github.com/FastTrackStudios/architect/issues/179";
 
 /// A note's body (the lab's notes are all this one).
 const WELCOME: &str = "Notes open as tabs. Drag a tab to a pane's edge to split it, or to the window's edge to dock it; \
@@ -439,6 +464,23 @@ fn NoteView() -> Element {
         div { style: "flex: 1; display: flex; flex-direction: column; gap: 12px; padding: 28px 36px; overflow-y: scroll;",
             div { style: "font-size: 26px; font-weight: 750; color: {t.ink};", "{title}" }
             div { style: "max-width: 560px; font-size: 14px; line-height: 1.6; color: {t.ink_2};", "{WELCOME}" }
+            // A link: Ctrl- or Cmd-click opens it with the extension that
+            // claims its pattern (the Board's, for a GitHub issue).
+            div { style: "font-size: 13px; color: {t.ink_3};",
+                "Tracked in "
+                a {
+                    style: "color: {t.accent}; text-decoration: underline; cursor: pointer;",
+                    onclick: move |e: MouseEvent| {
+                        if architect_extensions::interface::link_press(&e)
+                            && let Some(ui) = try_consume_context::<architect_extensions::interface::ExtensionUi>()
+                        {
+                            let _ = ui.open_link(ISSUE);
+                        }
+                    },
+                    "{ISSUE}"
+                }
+                " (Ctrl- or Cmd-click)"
+            }
             button {
                 class: "lp",
                 style: "align-self: flex-start; min-height: 32px; padding: 0 14px; border-radius: 8px; \

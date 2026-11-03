@@ -768,6 +768,13 @@ pub fn LabApp() -> Element {
         .unwrap_or(false);
     // Commands: the palette (⌘K), quick open (⌘O), and every command's key.
     let commands = architect_commands::use_commands_provider();
+    // Extensions, and what they add to the window: the shell's chrome
+    // (above the shell), a pane's context menu, the menus, their views.
+    let ext_ui = extensions::use_lab_extensions(metronome);
+    use_context_provider(|| ext_ui);
+    let mut chrome = shell::use_chrome();
+    let contributed = use_memo(move || ext_ui.chrome());
+    use_effect(move || chrome.set(contributed()));
     // Every command (a view's own too) and the palette's state, on the
     // lab's list; the lab's own state beside them.
     architect_commands::use_command_actions(list.clone());
@@ -1021,7 +1028,9 @@ pub fn LabApp() -> Element {
                 "WORKSPACE_GO_FORWARD",
             ])
         })
-        .menu("Help", |m| m.commands(["LAB_HELP", "LAB_SHOW_COMMANDS"]));
+        .menu("Help", |m| m.commands(["LAB_HELP", "LAB_SHOW_COMMANDS"]))
+        // What extensions add to each menu.
+        .contributed(move |menu| ext_ui.menu_rows(menu));
     let route = (lab.route)();
     let inbox_count = lab.lists.read().count("inbox");
     let tabs = vec![
@@ -1171,7 +1180,9 @@ pub fn LabApp() -> Element {
                         // The help is over a tab, not one of them.
                         current: (!matches!(route, Route::Help(_))).then(|| route.tab()),
                         on_tab: move |id: &'static str| {
-                            if id == "embedded" {
+                            if ext_ui.is_tab(id) {
+                                lab.jump(Route::Tab(id));
+                            } else if id == "embedded" {
                                 lab.jump(Route::Tab("vault"));
                                 let _ = commands.run_with(
                                     "WORKSPACES_LOAD",
@@ -1198,7 +1209,7 @@ pub fn LabApp() -> Element {
                         left: rsx! { pages::LeftSide {} },
                         // The details are the lists': the Vault's panes are its own,
                         // an item's page is its details, the help is the help.
-                        right: if (lab.right)() && matches!(route, Route::Tab(t) if t != "vault") { Some(rsx! { pages::RightSide {} }) } else { None },
+                        right: if (lab.right)() && matches!(route, Route::Tab(t) if t != "vault" && !ext_ui.is_tab(t)) { Some(rsx! { pages::RightSide {} }) } else { None },
                         on_pull: move |()| lab.jump(Route::Tab("vault")),
                         window: window_chrome,
                         status,
@@ -1215,6 +1226,7 @@ pub fn LabApp() -> Element {
                         ],
                         match route {
                             Route::Tab("vault") => rsx! { vault::VaultPage {} },
+                            Route::Tab(tab) if ext_ui.is_tab(tab) => rsx! { extensions::ExtensionTab { key: "{tab}", ui: ext_ui, id: tab } },
                             Route::Tab(tab) => rsx! { pages::ListPage { key: "{tab}", tab } },
                             Route::Item(tab, id) => rsx! { pages::ItemPage { tab, id } },
                             Route::Capture(tab) => rsx! { pages::CapturePage { key: "{tab}", tab } },
@@ -1227,7 +1239,7 @@ pub fn LabApp() -> Element {
             architect_commands::CommandLayer {}
             architect_commands::ConfirmSheet {}
             architect_settings::SettingsPage {}
-            extensions::LabExtensions { metronome }
+            architect_extensions::interface::ExtensionOverlays { ui: ext_ui }
             architect_guide::tour::TourLayer {}
             screen::DeviceChrome {}
         }

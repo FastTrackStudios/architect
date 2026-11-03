@@ -170,7 +170,7 @@ impl ExtensionUi {
             chrome.fillers.insert(
                 slot,
                 Filler::new(format!("ext:{owner}"), kind, move || {
-                    rsx! { ExtensionView { ui: me, extension: e.clone(), view: v.clone() } }
+                    rsx! { ExtensionView { ui: me, extension: e.clone(), view: v.clone(), fill: false } }
                 }),
             );
         }
@@ -529,14 +529,26 @@ pub fn ExtensionOverlays(ui: ExtensionUi) -> Element {
 
 /// Extension `extension`'s view `view`: its linked-in component, its
 /// process's remote view, or — when it is not loaded — a placeholder.
+/// It fills its parent (a pane); `fill: false` sizes it to its content
+/// (a slot of the shell's: a status bar, a ribbon).
 #[component]
-pub fn ExtensionView(ui: ExtensionUi, extension: String, view: String) -> Element {
+pub fn ExtensionView(
+    ui: ExtensionUi,
+    extension: String,
+    view: String,
+    #[props(default = true)] fill: bool,
+) -> Element {
+    let size = if fill {
+        "flex: 1; min-height: 0;"
+    } else {
+        "flex-shrink: 0;"
+    };
     let _ = (ui.revision)();
     let host = ui.host();
     if host.get(&extension).is_none() {
         let name = extension.clone();
         return rsx! {
-            div { style: "flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; \
+            div { style: "{size} display: flex; align-items: center; justify-content: center; padding: 24px; \
                           font-size: 13px; color: var(--muted-foreground); text-align: center;",
                 "{name} is not loaded: its view comes back when it does."
             }
@@ -544,15 +556,23 @@ pub fn ExtensionView(ui: ExtensionUi, extension: String, view: String) -> Elemen
     }
     if let Some(root) = host.linked_view(&extension, &view) {
         return rsx! {
-            div { style: "flex: 1; min-height: 0; display: flex; flex-direction: column;",
+            div { style: "{size} display: flex; flex-direction: column;",
                 LinkedRoot { key: "{extension}/{view}", root }
             }
         };
     }
     #[cfg(all(feature = "remote", unix))]
     if let Some(processes) = try_use_context::<crate::process::Processes>() {
+        // A remote document is sized by its box: a slot's is a bar's height.
+        let remote = if fill {
+            "flex: 1; min-height: 0; display: flex; flex-direction: column;"
+        } else {
+            "flex-shrink: 0; height: 26px; display: flex; flex-direction: column;"
+        };
         return rsx! {
-            crate::remote::RemoteView { processes, extension, view }
+            div { style: "{remote}",
+                crate::remote::RemoteView { processes, extension, view }
+            }
         };
     }
     rsx! {
