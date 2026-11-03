@@ -28,6 +28,7 @@ host = [
     "dep:architect-scripting",
     "architect-scripting/luau",
     "dep:tracing",
+    # `EXT_CHECK` answers from a thread of its own.
     "dep:futures",
 ]
 crdt = ["dep:crdt"]

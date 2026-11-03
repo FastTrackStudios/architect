@@ -823,6 +823,25 @@ pub fn RemoteView(processes: Processes, extension: String, view: String) -> Elem
     }
 }
 
+/// How many elements a view's document holds, its root's own aside:
+/// what `EXT_CHECK` says a first frame drew.
+#[must_use]
+pub fn element_count(doc: &BaseDocument) -> u32 {
+    let mut count = 0_u32;
+    let mut next = vec![doc.root_node().id];
+    while let Some(id) = next.pop() {
+        let Some(node) = doc.get_node(id) else {
+            continue;
+        };
+        if node.is_element() {
+            count = count.saturating_add(1);
+        }
+        next.extend(node.children.iter().copied());
+    }
+    // `html`, `head`, `style`, `body` and `main` are the document's own.
+    count.saturating_sub(5)
+}
+
 /// The nodes of `doc` that hold a [`RemoteDocument`]: the panes showing
 /// a process extension's view.
 #[must_use]

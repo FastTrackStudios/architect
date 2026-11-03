@@ -992,6 +992,37 @@ impl Host {
         self
     }
 
+    /// Runs `runner`'s kind with it from now, in place of the one there
+    /// was ([`Self::with_runner`] on a host already shared).
+    pub fn add_runner(&self, runner: impl Runner + 'static) {
+        let mut runners = self
+            .inner
+            .runners
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        runners.retain(|r| r.kind() != runner.kind());
+        runners.push(Arc::new(runner));
+    }
+
+    /// The view kinds it takes.
+    #[must_use]
+    pub fn view_kinds(&self) -> ViewKinds {
+        self.inner
+            .kinds
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// An `EXT_CHECK` checker that knows what this host knows: its view
+    /// kinds, and whether it runs process extensions.
+    #[must_use]
+    pub fn checker(&self) -> crate::check::Checker {
+        crate::check::Checker::new()
+            .with_view_kinds(self.view_kinds())
+            .with_processes(self.runs(Kind::Process))
+    }
+
     /// Takes views of `kinds` (the app's [`ViewKinds`], the ones its
     /// linked crates registered); without it, only the built-in `dioxus`.
     #[must_use]
