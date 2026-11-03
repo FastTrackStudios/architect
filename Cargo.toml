@@ -69,6 +69,7 @@ members = [
     "apps/lab/desktop",
     "apps/lab/mobile",
     "apps/lab/clicker",
+    "apps/lab/board",
     "apps/lab/media",
     # ── story (component workbench) ───────────────────────────────────
     "features/story/architect-story-core",

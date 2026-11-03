@@ -111,7 +111,7 @@ impl Extensions {
         let package = Package::embedded(extension.manifest(), extension.files())?;
         self.inner
             .host
-            .link(&package.manifest.id, crate::linked::Builder::of(extension));
+            .link(&package.manifest, crate::linked::Builder::of(extension));
         Ok(self.with_builtin(package))
     }
 

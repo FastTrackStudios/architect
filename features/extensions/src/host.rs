@@ -915,7 +915,12 @@ impl Host {
     /// Links in-process extension `built` as `id`'s built-in copy: when
     /// that copy runs, it runs here ([`crate::linked`]).
     #[cfg(feature = "linked")]
-    pub fn link(&self, id: &str, built: crate::linked::Builder) {
+    pub fn link(&self, manifest: &Manifest, built: crate::linked::Builder) {
+        built.handle().connect(Arc::new(linked::Sink {
+            manifest: manifest.clone(),
+            contributions: self.inner.contributions.clone(),
+        }));
+        let id = &manifest.id;
         self.inner
             .linked
             .lock()
@@ -1590,11 +1595,45 @@ mod linked {
 
     use architect::action::{ActionCaller, ActionError, ActionFuture, CallerAsyncHandler};
 
-    use super::{Context, Instance, invocation_json, json_args};
-    use crate::contrib::Contribution;
+    use super::{Context, Instance, invocation_json, json_args, now_ms};
+    use crate::contrib::{Contribution, Contributions, StateWrite};
     use crate::linked::Builder;
-    use crate::manifest::{ActionDecl, Kind};
+    use crate::manifest::{ActionDecl, Kind, Manifest};
     use crate::package::Package;
+
+    /// A linked extension's runtime additions, into the registry: checked
+    /// as its manifest's tables are, its state its own.
+    pub(super) struct Sink {
+        pub(super) manifest: Manifest,
+        pub(super) contributions: Contributions,
+    }
+
+    impl crate::linked::Sink for Sink {
+        fn contribute(&self, contribution: Contribution) {
+            let views = self.manifest.view_ids();
+            match contribution.check(&self.manifest.rules(&views)) {
+                Ok(()) => {
+                    self.contributions
+                        .put_runtime(&self.manifest.id, contribution);
+                }
+                Err(why) => {
+                    tracing::warn!(ext.id = %self.manifest.id, ext.why = %why, "a contribution was refused");
+                }
+            }
+        }
+
+        fn set_state(&self, mut write: StateWrite) {
+            write.source = format!("ext:{}", self.manifest.id);
+            if let Err(why) = self.contributions.set_state(write, now_ms()) {
+                tracing::warn!(ext.id = %self.manifest.id, ext.why = %why, "state was refused");
+            }
+        }
+
+        fn clear_state(&self, key: Option<&str>) {
+            self.contributions
+                .clear_state(&format!("ext:{}", self.manifest.id), key);
+        }
+    }
 
     pub(super) struct Runner(pub(super) Arc<Builder>);
 

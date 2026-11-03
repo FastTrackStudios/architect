@@ -45,7 +45,76 @@ use std::sync::Arc;
 use dioxus::prelude::Element;
 use serde_json::Value as Json;
 
-use crate::contrib::Contribution;
+use crate::contrib::{Contribution, StateWrite};
+
+/// Where an extension's runtime additions go: the host's registry when it
+/// is linked in, the host over the wire when it runs as a process.
+pub trait Sink: Send + Sync {
+    fn contribute(&self, contribution: Contribution);
+    fn set_state(&self, write: StateWrite);
+    fn clear_state(&self, key: Option<&str>);
+}
+
+/// An extension's way to add to the interface at run time, the same
+/// linked in or as a process ([`Builder::handle`]): keep a clone (a
+/// `OnceLock` of the crate's) and call it from its actions and views.
+/// Before the extension runs, it does nothing.
+#[derive(Clone, Default)]
+pub struct Handle(Arc<std::sync::Mutex<Option<Arc<dyn Sink>>>>);
+
+impl std::fmt::Debug for Handle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Handle")
+            .field(&self.sink().is_some())
+            .finish()
+    }
+}
+
+impl Handle {
+    fn sink(&self) -> Option<Arc<dyn Sink>> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Where it goes from now on (the host's, or the guest's).
+    pub fn connect(&self, sink: Arc<dyn Sink>) {
+        *self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(sink);
+    }
+
+    /// What it adds at run time now, in place of what it added before.
+    pub fn contribute(&self, contribution: Contribution) {
+        if let Some(s) = self.sink() {
+            s.contribute(contribution);
+        }
+    }
+
+    /// One piece of its runtime state (a status item's text).
+    pub fn set_state(&self, write: StateWrite) {
+        if let Some(s) = self.sink() {
+            s.set_state(write);
+        }
+    }
+
+    /// Its status item `key`'s text, now.
+    pub fn status(&self, key: &str, text: impl Into<String>) {
+        self.set_state(StateWrite {
+            key: key.to_owned(),
+            text: text.into(),
+            ..StateWrite::default()
+        });
+    }
+
+    pub fn clear_state(&self, key: Option<&str>) {
+        if let Some(s) = self.sink() {
+            s.clear_state(key);
+        }
+    }
+}
 
 /// What an in-process action gives back.
 pub type ActionFuture = Pin<Box<dyn Future<Output = Result<Json, String>> + Send>>;
@@ -83,6 +152,7 @@ pub struct Builder {
     pub(crate) views: BTreeMap<String, fn() -> Element>,
     pub(crate) contribution: Contribution,
     pub(crate) context: Vec<Provide>,
+    pub(crate) handle: Handle,
 }
 
 impl std::fmt::Debug for Builder {
@@ -150,6 +220,12 @@ impl Builder {
         self
     }
 
+    /// Its way to add to the interface at run time: keep a clone.
+    #[must_use]
+    pub fn handle(&self) -> Handle {
+        self.handle.clone()
+    }
+
     /// Its actions' ids.
     #[must_use]
     pub fn action_ids(&self) -> Vec<String> {
@@ -196,7 +272,20 @@ impl crate::guest::Guest {
     /// sent as the host connects.
     #[must_use]
     pub fn extension(extension: &dyn Extension) -> Self {
+        struct Wire;
+        impl Sink for Wire {
+            fn contribute(&self, contribution: Contribution) {
+                crate::guest::contribute(&contribution);
+            }
+            fn set_state(&self, write: StateWrite) {
+                crate::guest::set_state(&write);
+            }
+            fn clear_state(&self, key: Option<&str>) {
+                crate::guest::clear_state(key);
+            }
+        }
         let built = Builder::of(extension);
+        built.handle.connect(Arc::new(Wire));
         let mut guest = Self::new();
         for (id, root) in &built.views {
             guest = guest.view(id.clone(), *root);

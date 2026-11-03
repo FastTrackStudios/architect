@@ -1,0 +1,37 @@
+[package]
+name = "architect-lab-board"
+description = "The lab's example extension: one linked::Extension that the lab links in and that also runs as its own process (apps/lab/board/extension.toml) — a tab, a status item, a context-menu entry, a .kf opener, a URL opener, a startup hook, and its own status bar in the shell's status slot."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+doctest = false
+
+[[bin]]
+name = "architect-lab-board"
+path = "src/main.rs"
+
+[dependencies]
+# The trait and the guest (its process copy); the lab adds `linked`.
+architect-extensions = { workspace = true, features = ["guest"] }
+dioxus = { workspace = true }
+serde_json = { workspace = true }
+# Its views look again when the board changes (in the app's document or
+# its own process's).
+futures-timer = { workspace = true }
+
+[dev-dependencies]
+# Both ways: linked into a host, and its program run by one.
+architect = { workspace = true, features = ["action-list"] }
+architect-extensions = { workspace = true, features = ["host", "linked", "process"] }
+architect-settings = { workspace = true }
+futures = "0.3"
+tempfile = "3"
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../../workspace-hack" }

@@ -1059,6 +1059,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-lab-board"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-extensions",
+ "architect-settings",
+ "architect-workspace-hack",
+ "dioxus",
+ "futures",
+ "futures-timer",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "architect-lab-clicker"
 version = "0.1.0"
 dependencies = [
