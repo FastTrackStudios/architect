@@ -139,10 +139,6 @@ fn remote(doc: &mut BaseDocument, node: NodeId) -> Option<&mut RemoteDocument> {
 /// own, its pane's events back to its handlers.
 #[component]
 pub fn PageView(mount: Mount) -> Element {
-    #[cfg(feature = "a2ui")]
-    if mount.page.kind == crate::files::PageKind::A2ui {
-        return rsx! { crate::a2ui::A2uiPage { mount } };
-    }
     let busy = use_signal(|| false);
     let why = use_signal(|| None::<String>);
     let meters = try_use_context::<Meters>();

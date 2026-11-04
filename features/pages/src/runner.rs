@@ -420,12 +420,10 @@ impl Pages {
         &self.0.host
     }
 
-    /// Whether it runs pages of `kind` (an `.a2ui.json` page is drawn
-    /// by feature `a2ui`, on the window's thread: it is data, not code).
+    /// Whether it runs pages of `kind` (none runs `.a2ui.json` yet).
     #[must_use]
     pub fn runs(&self, kind: PageKind) -> bool {
-        (kind == PageKind::A2ui && cfg!(feature = "a2ui"))
-            || self.0.loaders.contains_key(kind.extension())
+        self.0.loaders.contains_key(kind.extension())
     }
 
     /// Whether `other` is this one (a clone of it).
