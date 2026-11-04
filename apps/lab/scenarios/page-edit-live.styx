@@ -1,0 +1,63 @@
+// A page edited live: the Board's tab is a TSX file. Saved, the pane
+// redraws; saved broken, the last good page stays and `board.tsx.error`
+// says where (mapped to the .tsx line); fixed, it is gone. Filmed for the
+// README; played as a test.
+id page-edit-live
+title "A TSX page, edited live, and its .error loop"
+view {width 1280, height 760}
+capture {fps 12, width 960, cursor false}
+steps (
+    {
+        id vault
+        do @run{id LAB_GO_VAULT}
+        done {on (@changed"lab"), check ({id LAB_STATE, has {tab vault}})}
+        hide true
+    }
+    {id write, do @run{id WORKSPACES_LOAD, args {name Write}}, hide true}
+    {
+        id board
+        do @run{id EXT_VIEW_OPEN, args {extension lab.board, view board, placement zoomed}}
+        done {check ({id WORKSPACE_LAYOUT, has {active "lab.board/board"}})}
+        hide true
+    }
+    {id first, do @pause{seconds 0.6}}
+    {
+        id caption
+        do @run{id FILM_CAPTION, args {text "pages/lab.board/board.tsx: save it and the pane follows"}}
+        hold 0.6
+    }
+    {
+        id say-edit
+        do @run{id FILM_TERMINAL, args {line "$ $EDITOR pages/lab.board/board.tsx", title "editor — the lab's folder"}}
+        hold 0.6
+    }
+    {
+        id edit
+        do @run{id FILM_WRITE, args {path "pages/lab.board/board.tsx", text "import { h, useState } from \"architect\";\n\nexport default function BoardPage() {\n  const [n, setN] = useState(0);\n  return (\n    <div style={{ display: \"flex\", flexDirection: \"column\", gap: 12, padding: 28 }}>\n      <div style={{ fontSize: 26, fontWeight: 700, color: \"$primary\" }}>Hello from a page</div>\n      <div style={{ color: \"$muted-foreground\" }}>A .tsx file in the lab's folder, on QuickJS.</div>\n      <button style={{ padding: \"6px 14px\", borderRadius: 6 }} onClick={() => setN(n + 1)}>Clicked {n} times</button>\n    </div>\n  );\n}\n"}}
+    }
+    // A page draws in a document of its own: its text is waited for by time.
+    {id saved, do @pause{seconds 1.8}}
+    {
+        id say-broken
+        do @run{id FILM_TERMINAL, args {line "  <div style={{ fontSize: 26 }>        saved: a typo"}}
+    }
+    {
+        id broken
+        do @run{id FILM_WRITE, args {path "pages/lab.board/board.tsx", text "import { h } from \"architect\";\n\nexport default function BoardPage() {\n  return (\n    <div style={{ fontSize: 26 }>Hello again</div>\n  );\n}\n"}}
+    }
+    {id wait-error, do @pause{seconds 1.0}}
+    {
+        id say-error
+        do @run{id FILM_TERMINAL, args {line "  → the last good page stays; board.tsx.error has the line"}}
+        hold 1.6
+    }
+    {
+        id say-fixed
+        do @run{id FILM_TERMINAL, args {line "  <div style={{ fontSize: 26 }}>       saved: fixed"}}
+    }
+    {
+        id fixed
+        do @run{id FILM_WRITE, args {path "pages/lab.board/board.tsx", text "import { h } from \"architect\";\n\nexport default function BoardPage() {\n  return (\n    <div style={{ display: \"flex\", flexDirection: \"column\", gap: 12, padding: 28 }}>\n      <div style={{ fontSize: 26, fontWeight: 700, color: \"$primary\" }}>Fixed, and live again</div>\n      <div style={{ color: \"$muted-foreground\" }}>The .error file is gone with the next good save.</div>\n    </div>\n  );\n}\n"}}
+    }
+    {id live, do @pause{seconds 2.0}}
+)

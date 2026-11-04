@@ -1,0 +1,45 @@
+// The shell on a desk: each page picks its sidebar's start (the Inbox
+// opens it, the Vault starts folded to a rail, the account and workspace
+// switcher at its foot), and the Vault's tabs sit in the window's title
+// row. Filmed for the README; played as a test.
+id shell-title-tabs-rail
+title "Title-row tabs and a sidebar that folds to a rail"
+view {width 1280, height 760}
+capture {fps 12, width 960}
+steps (
+    {
+        id inbox
+        do @run{id FILM_CAPTION, args {text "The Inbox opens its sidebar"}}
+        hold 1.4
+    }
+    {
+        id vault
+        target @text"Vault"
+        do @click{}
+        done {on (@changed"lab"), check ({id LAB_STATE, has {tab vault}})}
+    }
+    {
+        id said
+        do @run{id FILM_CAPTION, args {text "The Vault starts folded to a rail; its tabs are the title row"}}
+        hold 1.6
+    }
+    {
+        id tab
+        target @tab"note-shell"
+        do @click{}
+        done {check ({id WORKSPACE_LAYOUT, has {active note-shell}})}
+        hold 1.0
+    }
+    {
+        id open
+        target @css"[aria-label=\"Toggle the sidebar\"]"
+        do @click{}
+        hold 1.4
+    }
+    {
+        id fold
+        target @css"[aria-label=\"Toggle the sidebar\"]"
+        do @click{}
+        hold 1.4
+    }
+)

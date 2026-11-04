@@ -1,0 +1,66 @@
+// A theme file edited live: the lab's themes folder is read again on every
+// save. A token can be an expression over others (`mix(…)`, `$ref`); one
+// that names no token draws magenta and is reported, and fixing it brings
+// the theme back. Filmed for the README; played as a test.
+id theme-file-live
+title "A theme file, edited and saved: the app follows"
+view {width 1280, height 760}
+capture {fps 12, width 960, cursor false}
+steps (
+    {
+        id amber
+        do @run{id THEME_SET, args {one lab-amber-dark, layer pick}}
+        done {check ({id THEME_GET, args {tokens (primary)}, has {theme lab-amber-dark, tokens {primary "#f59e0b"}}})}
+        hide true
+    }
+    {
+        id caption
+        do @run{id FILM_CAPTION, args {text "themes/lab-amber-dark.json, saved: the app follows"}}
+        hold 0.2
+    }
+    {
+        id show
+        do @run{id FILM_TERMINAL, args {line "$ $EDITOR themes/lab-amber-dark.json", title "editor — the lab's folder"}}
+        hold 1.2
+    }
+    {
+        id blue
+        do @run{id FILM_WRITE, args {path "themes/lab-amber-dark.json", text "{\"label\": \"Lab Amber\", \"extends\": \"fasttrackstudio-dark\", \"overrides\": {\"primary\": \"#38bdf8\", \"ring\": \"#38bdf8\", \"brand-ink\": \"#04131f\"}}"}}
+        done {check ({id THEME_GET, args {tokens (primary)}, has {tokens {primary "#38bdf8"}}}), timeout 8}
+    }
+    {
+        id blue-said
+        do @run{id FILM_TERMINAL, args {line "  \"primary\": \"#38bdf8\"                     saved"}}
+        hold 1.6
+    }
+    {
+        id mix
+        do @run{id FILM_WRITE, args {path "themes/lab-amber-dark.json", text "{\"label\": \"Lab Amber\", \"extends\": \"fasttrackstudio-dark\", \"overrides\": {\"primary\": \"mix(#38bdf8, #f43f5e, 0.6)\", \"ring\": \"$primary\", \"brand-ink\": \"#04131f\"}}"}}
+        done {check ({id THEME_INSPECT, args {prefix ring}, has {tokens ({name ring, expression "$primary"})}}), timeout 8}
+    }
+    {
+        id mix-said
+        do @run{id FILM_TERMINAL, args {line "  \"primary\": \"mix(#38bdf8, #f43f5e, 0.6)\"   saved"}}
+        hold 1.6
+    }
+    {
+        id broken
+        do @run{id FILM_WRITE, args {path "themes/lab-amber-dark.json", text "{\"label\": \"Lab Amber\", \"extends\": \"fasttrackstudio-dark\", \"overrides\": {\"primary\": \"$nope\", \"ring\": \"$primary\", \"brand-ink\": \"#04131f\"}}"}}
+        done {check ({id THEME_PROBLEMS, has {problems ({field "overrides.primary"} {field "overrides.ring"})}}), timeout 8}
+    }
+    {
+        id broken-said
+        do @run{id FILM_TERMINAL, args {line "  \"primary\": \"$nope\"     → magenta, in THEME_PROBLEMS"}}
+        hold 1.8
+    }
+    {
+        id fixed
+        do @run{id FILM_WRITE, args {path "themes/lab-amber-dark.json", text "{\"label\": \"Lab Amber\", \"extends\": \"fasttrackstudio-dark\", \"overrides\": {\"primary\": \"#a3e635\", \"ring\": \"$primary\", \"brand-ink\": \"#0f1a02\"}}"}}
+        done {check ({id THEME_GET, args {tokens (primary)}, has {tokens {primary "#a3e635"}}} {id THEME_PROBLEMS, has {problems ()}}), timeout 8}
+    }
+    {
+        id fixed-said
+        do @run{id FILM_TERMINAL, args {line "  \"primary\": \"#a3e635\"                     saved"}}
+        hold 1.6
+    }
+)

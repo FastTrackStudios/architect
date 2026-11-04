@@ -1,0 +1,60 @@
+// Inline embeds: a note's ```kf fence drawn as a chart by the Board
+// extension's page, inside the note; the Board turned off, the plain
+// fence comes back, and on again, the chart. Filmed for the README;
+// played as a test.
+id embeds-in-a-note
+title "Inline embeds: an extension draws a block of a note"
+view {width 1280, height 760}
+capture {fps 12, width 960, cursor false}
+steps (
+    {
+        id vault
+        do @run{id LAB_GO_VAULT}
+        done {on (@changed"lab"), check ({id LAB_STATE, has {tab vault}})}
+        hide true
+    }
+    {id write, do @run{id WORKSPACES_LOAD, args {name Write}}, hide true}
+    {
+        id open
+        do @run{id WORKSPACE_OPEN, args {view note, id note-chart, title "A chart in a note", at {replace {pane note-welcome}}}}
+        hide true
+    }
+    {
+        id focus
+        do @run{id WORKSPACE_FOCUS, args {pane note-chart}}
+        done {check ({id WORKSPACE_LAYOUT, has {active note-chart}})}
+        hide true
+    }
+    {id chart, target @css"[data-embed]", hold 0.2}
+    {
+        id caption
+        do @run{id FILM_CAPTION, args {text "```kf in a note: drawn by the Board extension's page"}}
+        hold 2.0
+    }
+    {
+        id say-off
+        do @run{id FILM_TERMINAL, args {line "$ architect-desktop actions run EXT_DISABLE --arg id=lab.board"}}
+        hold 0.4
+    }
+    {
+        id off
+        do @run{id EXT_DISABLE, args {id lab.board}}
+        done {on (@ran"EXT_DISABLE")}
+    }
+    {
+        id plain
+        do @run{id FILM_CAPTION, args {text "Its extension off: the plain fence comes back"}}
+        hold 2.0
+    }
+    {
+        id say-on
+        do @run{id FILM_TERMINAL, args {line "$ architect-desktop actions run EXT_ENABLE --arg id=lab.board"}}
+        hold 0.4
+    }
+    {
+        id on
+        do @run{id EXT_ENABLE, args {id lab.board}}
+        done {on (@ran"EXT_ENABLE")}
+    }
+    {id back, target @css"[data-embed]", hold 2.0}
+)
