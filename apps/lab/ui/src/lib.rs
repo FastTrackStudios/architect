@@ -646,6 +646,14 @@ pub fn font_context() -> dioxus_native::FontContext {
     ctx
 }
 
+/// The lab's own layout (`layouts/main.json`, written read-only on every
+/// start): the shell as it is, nothing over it.
+const MAIN_LAYOUT: &str = r#"{
+  "name": "Architect Lab",
+  "chrome": {}
+}
+"#;
+
 /// The lab's root. The host publishes the window as a
 /// `Signal<shell::Screen>` ([`use_window_screen`]) above it.
 ///
@@ -772,9 +780,41 @@ pub fn LabApp() -> Element {
     // (above the shell), a pane's context menu, the menus, their views.
     let ext_ui = extensions::use_lab_extensions(metronome);
     use_context_provider(|| ext_ui);
+    // The interface as files (layouts/<name>.json, keys.json under the
+    // lab's folder), live: the layout shown fills the shell's slots over
+    // what extensions fill, sets the window's look and arrangement.
+    let home = use_hook(|| {
+        let dir = architect::settings::app_dir("architect-lab")
+            .unwrap_or_else(|_| std::env::temp_dir().join("architect-lab"));
+        let home = architect_workspace::home::Home::open(dir, &[("main", MAIN_LAYOUT)]);
+        let _ = architect_workspace::home::actions::register(&list, &home);
+        home
+    });
+    let home_rev = architect_workspace::home::ui::use_home(home.clone());
+    architect_workspace::home::ui::use_home_apply(
+        home.clone(),
+        home_rev,
+        architect_theme::try_use_theme().map(|t| t.store()),
+        list.clone(),
+    );
     let mut chrome = shell::use_chrome();
     let contributed = use_memo(move || ext_ui.chrome());
-    use_effect(move || chrome.set(contributed()));
+    let laid_out = {
+        let home = home.clone();
+        use_memo(move || {
+            let _ = home_rev();
+            let layout = home.current().unwrap_or_default();
+            let owner = format!("layout:{}", home.active());
+            architect_workspace::home::ui::chrome_of(&layout, |view| {
+                let (extension, v) = view.split_once('/')?;
+                let (e, v) = (extension.to_owned(), v.to_owned());
+                Some(shell::Filler::new(owner.clone(), view, move || {
+                    rsx! { architect_extensions::interface::ExtensionView { ui: ext_ui, extension: e.clone(), view: v.clone(), fill: false } }
+                }))
+            })
+        })
+    };
+    use_effect(move || chrome.set(laid_out().over(&contributed())));
     // Every command (a view's own too) and the palette's state, on the
     // lab's list; the lab's own state beside them.
     architect_commands::use_command_actions(list.clone());

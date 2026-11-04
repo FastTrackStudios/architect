@@ -33,6 +33,8 @@ pub mod control;
 mod ctx;
 mod drop;
 pub mod guide;
+#[cfg(feature = "home")]
+pub mod home;
 #[cfg(feature = "ui")]
 mod host;
 mod kinds;
