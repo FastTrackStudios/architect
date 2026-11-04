@@ -4,8 +4,9 @@
 //! its regions became slots (`git show 5528d33:features/shell`): with no
 //! chrome above it, and with an empty one, the shell writes exactly that.
 //! Recorded again when a page could draw the title row (`use_title_row`):
-//! every element, attribute, text and listener as before, the right
-//! sidebar's template now shared with the left's (two elements fewer).
+//! every attribute, text and listener as before; only how Dioxus splits
+//! the elements into templates moved (the ribbon's and the sides' optional
+//! piece of a page's title row).
 
 // `icon!` casts its closure to the fn pointer, as an app's does.
 #![allow(clippy::as_conversions)]

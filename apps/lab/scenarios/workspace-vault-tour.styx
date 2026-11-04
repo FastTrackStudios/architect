@@ -36,6 +36,14 @@ steps (
         done {check ({id WORKSPACE_LAYOUT, has {active note-welcome}})}
         hide true
     }
+    // The Vault opens with its sidebar folded (`SidebarDefault::Collapsed`):
+    // show it, as a person would, for the files in the left dock.
+    {
+        id sidebar
+        target @css"[aria-label=\"Toggle the sidebar\"]"
+        do @click{}
+        hide true
+    }
     {
         id look
         text "The Vault: its tabs are the window's title row, its files in the left dock."

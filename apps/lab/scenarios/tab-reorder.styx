@@ -19,7 +19,10 @@ steps (
         id drag
         text "Drag a tab along the bar: the others make room, and it lands where you let go."
         target @tab"note-welcome"
-        do @drag{to @tab"arrange", edge right, seconds 1.0}
+        // A fixed distance, past the last tab's middle: the Arrangement tab
+        // slides aside as the drag passes it, so an end found on it each
+        // frame pulls the pointer back short of it.
+        do @drag{dx 420, seconds 1.0}
         done {
             on (@changed"workspace")
             check ({id WORKSPACE_LAYOUT, has {windows ({groups ({tabs (note-shell arrange note-welcome)} {tabs (graph)})})}})

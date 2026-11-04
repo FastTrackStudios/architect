@@ -1236,19 +1236,13 @@ pub fn AppShell(
     } else {
         RIBBON + 4.0
     };
-    // A page that draws the title row itself starts at the window's top,
-    // over the shell's row (one row): the page, and a sidebar it fills.
+    // A page that draws the title row itself starts at the window's top
+    // (one row): the shell draws no row across the window, only its piece
+    // over what is beside the page (the ribbon, the app's sidebar, the
+    // right side). Laid out, not lifted over the shell's row: Blitz finds
+    // a press only inside its element's parents' boxes.
     let page_title = frame == Frame::Sidebar && shell.page_draws_title_row();
-    let lift = if page_title {
-        // Drawn over the shell's row (under its fixed buttons).
-        format!(
-            " margin-top: -{}px; z-index: 1;",
-            shell.title_row() + screen.insets.top
-        )
-    } else {
-        String::new()
-    };
-    let side_lift = if page_side { lift.as_str() } else { "" };
+    let spacer_title = if page_title { bar_title.clone() } else { None };
     // A corner badge sits under the floating button: lift it clear.
     let badge_room = if desk && status_style == StatusStyle::Badge && !all_status.is_empty() {
         STATUS_BADGE
@@ -1284,7 +1278,7 @@ pub fn AppShell(
             crate::motion::MotionFrames {}
             // A desk's title bar runs across the whole window, over the ribbon,
             // the sidebar and the page; the middle row starts under it.
-            if frame == Frame::Sidebar && desk {
+            if frame == Frame::Sidebar && desk && !page_title {
                 SlotView { slot: Slot::Title,
                     DeskTitleRow { title: bar_title, tabs_left }
                 }
@@ -1293,7 +1287,7 @@ pub fn AppShell(
             div { style: "flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: {direction};",
             if frame == Frame::Sidebar && desk {
                 SlotView { slot: Slot::Ribbon,
-                    DeskRibbon { tabs: tabs.clone(), current, on_tab: pick, folded: !docked_now.0 }
+                    DeskRibbon { tabs: tabs.clone(), current, on_tab: pick, folded: !docked_now.0, title_row: page_title }
                 }
             }
             match frame {
@@ -1305,7 +1299,7 @@ pub fn AppShell(
                     Rail { tabs: tabs.clone(), current, on_tab: pick, screen: side_screen }
                 },
                 Frame::Sidebar => rsx! {
-                    div { style: "position: relative; width: {left_clip}px; flex-shrink: 0; overflow: hidden;{side_lift}",
+                    div { style: "position: relative; width: {left_clip}px; flex-shrink: 0; overflow: hidden;",
                     div {
                         style: "position: absolute; top: 0; bottom: 0; left: 0; width: {lw}px; \
                                 display: flex; flex-direction: column; \
@@ -1314,6 +1308,11 @@ pub fn AppShell(
                         if desk {
                             // The sidebar's edge, in the middle row under the title bar.
                             div { style: "position: absolute; top: 0; bottom: 0; right: 0; width: 1px; background: {t.rule};" }
+                            // The app's sidebar beside a page that draws the
+                            // title row: its piece of the row.
+                            if page_title && !page_side {
+                                TitlePiece { title: spacer_title, left: shell.sidebar_title_left() }
+                            }
                         } else {
                             SidebarHead { title: title }
                         }
@@ -1356,7 +1355,7 @@ pub fn AppShell(
             // The page. It gives way by `left`, not `translateX`, which
             // Blitz moves by device pixels (a third as far on a 3x phone).
             div {
-                style: "position: relative; left: {page_shift}px;{lift} flex: 1; min-width: 0; min-height: 0; \
+                style: "position: relative; left: {page_shift}px; flex: 1; min-width: 0; min-height: 0; \
                         display: flex; flex-direction: column;",
                 {children}
                 if float_separate {
@@ -1380,6 +1379,9 @@ pub fn AppShell(
                         // A desk's edge, in the middle row under the title bar.
                         if form == FormFactor::Desk {
                             div { style: "position: absolute; top: 0; bottom: 0; left: 0; width: 1px; background: {t.rule};" }
+                        }
+                        if page_title {
+                            TitlePiece { title: None, left: 0.0 }
                         }
                         {right}
                         if resizable {
@@ -1618,6 +1620,31 @@ fn DeskTitleRow(title: Option<String>, tabs_left: f64) -> Element {
                         page::DeskTab { title: tab }
                     }
                 }
+            }
+        }
+    }
+}
+
+/// A piece of a desk's title row over what is beside a page that draws
+/// the row itself ([`use_title_row`]): as tall, the title bar's colour
+/// over its rule, `title` (the app's, beside its docked sidebar) from
+/// `left`, the rest moving the window.
+#[component]
+fn TitlePiece(title: Option<String>, left: f64) -> Element {
+    let shell = use_shell();
+    let t = shell.theme.clone();
+    let height = shell.title_row() + shell.screen.insets.top;
+    rsx! {
+        div { style: "height: {height}px; flex-shrink: 0; box-sizing: border-box; display: flex; align-items: center; \
+                      padding: {shell.screen.insets.top}px 0 0 {left}px; background: {t.title_bar}; border-bottom: 1px solid {t.rule};",
+            if let Some(title) = title {
+                span { style: "flex-shrink: 0; white-space: nowrap; font-size: 15px; font-weight: 700; \
+                               letter-spacing: -0.01em; color: {t.ink};",
+                    "{title}"
+                }
+            }
+            if let Some(c) = shell.window {
+                DragStrip { chrome: c, width: None }
             }
         }
     }
@@ -1991,6 +2018,9 @@ fn DeskRibbon(
     current: Option<&'static str>,
     on_tab: EventHandler<&'static str>,
     folded: bool,
+    /// The page draws the title row: the ribbon starts at the window's top
+    /// with its piece of the row.
+    title_row: bool,
 ) -> Element {
     let shell = use_shell();
     let t = shell.theme.clone();
@@ -2003,6 +2033,9 @@ fn DeskRibbon(
     rsx! {
         div {
             style: "width: {RIBBON}px; flex-shrink: 0; display: flex; flex-direction: column; background: {t.desk};",
+            if title_row {
+                TitlePiece { title: None, left: 0.0 }
+            }
             div {
                 style: "flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; \
                         gap: 4px; padding: 8px 0; border-right: 1px solid {t.rule};",

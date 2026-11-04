@@ -435,7 +435,20 @@ async fn measure_for_drop(mut host: Host, pane: PaneId) {
             for float in main.floats.iter().rev().filter(|f| !f.minimised) {
                 ids.push(float.group.id);
             }
-            for dock in [&main.docks.left, &main.docks.right, &main.docks.bottom] {
+            // The left dock in the shell's sidebar shows only while the
+            // sidebar does: folded, its groups are not on screen (their
+            // last measures are stale) and take no drop.
+            let shell_folded = *host.in_shell.peek()
+                && try_consume_context::<Signal<architect_shell::Shell>>()
+                    .is_some_and(|s| s.peek().folded());
+            for (side, dock) in [
+                (Side::Left, &main.docks.left),
+                (Side::Right, &main.docks.right),
+                (Side::Bottom, &main.docks.bottom),
+            ] {
+                if side == Side::Left && shell_folded {
+                    continue;
+                }
                 if dock.shown == crate::Shown::Open {
                     if let Some(root) = &dock.root {
                         groups_of(root, &mut ids);
