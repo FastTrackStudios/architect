@@ -196,6 +196,31 @@ impl Extensions {
             .collect()
     }
 
+    /// The listing `req` picks for `id` (the policy's say included), and
+    /// its source.
+    pub(crate) fn find_listed(
+        &self,
+        id: &str,
+        req: &VersionReq,
+    ) -> Result<(Arc<dyn Source>, Listing), InstallError> {
+        self.find(id, req)
+    }
+
+    /// Every listing of `id`, each with its source's name.
+    pub(crate) fn listed(&self, id: &str) -> Vec<(String, Listing)> {
+        self.sources()
+            .iter()
+            .filter_map(|s| s.index().ok().map(|i| (s.name(), i)))
+            .flat_map(|(source, index)| {
+                index
+                    .listings
+                    .into_iter()
+                    .filter(|l| l.id == id)
+                    .map(move |l| (source.clone(), l))
+            })
+            .collect()
+    }
+
     /// The newest listing of `id` that `req` takes and the policy
     /// allows, and the registry it is in.
     fn find(&self, id: &str, req: &VersionReq) -> Result<(Arc<dyn Source>, Listing), InstallError> {

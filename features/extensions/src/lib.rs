@@ -50,6 +50,8 @@ pub mod reapack;
 #[cfg(feature = "host")]
 pub mod actions;
 #[cfg(feature = "host")]
+pub mod actions_manage;
+#[cfg(feature = "host")]
 pub mod check;
 #[cfg(feature = "host")]
 pub mod clone;
@@ -79,6 +81,8 @@ pub mod linked;
 pub mod logs;
 #[cfg(feature = "host")]
 mod luau_host;
+#[cfg(feature = "host")]
+pub mod manage;
 #[cfg(all(feature = "process", unix))]
 pub mod process;
 #[cfg(feature = "vox")]
