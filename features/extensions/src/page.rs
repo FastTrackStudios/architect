@@ -2,8 +2,7 @@
 //! pin, turn off, remove — and see what each one adds, asks for and runs
 //! as — in the app's theme, with architect-ui's components.
 //!
-//! - [`ExtensionsPage`]: search every registry (by name, kind and what it
-//!   adds: `browse`), a list, and the page of the one picked — what it
+//! - An extension's page (the `extension` kind's): what it
 //!   adds, the capabilities it asks for (granted or not, each grant
 //!   revocable), its versions and pin, where it runs, its recent log, and
 //!   "built in, overridden by 1.4.0-dev" with the way back.
@@ -11,13 +10,26 @@
 //!   will let it do, granted on this device or in the organization.
 //! - [`MissingExtensions`]: a project's "This project uses …" with
 //!   "Install all", the same consent prompt for all of them.
-//! - [`use_extensions_page`]: the page as a section of the settings page
+//! - [`ManagerPage`]: the extensions manager's page (`crate::manager`):
+//!   every kind it manages, searched together, each item's page and ops;
+//!   an extension's page is the one above.
+//! - [`use_manager_page`]: the manager as a section of the settings page
 //!   (`architect_settings::use_section_page`) and ⌘O's `ext:` opener; an
-//!   app with a workspace puts [`ExtensionsView`] in a view kind of its
-//!   own as well.
+//!   app with a workspace puts [`ManagerView`] in a view kind of its own
+//!   as well (it is the `manager` extension's view too).
 //!
 //! Every colour is the theme's (`var(--…)`, architect-ui's classes over
 //! the store's CSS variables); nothing here names one.
+
+// `rsx!` clones what each closure takes (clippy reads them as redundant);
+// an extension's info is a `serde_json::Value`, whose indexing gives
+// `Null` for what is not there and never panics; a hook takes what its
+// context keeps.
+#![allow(
+    clippy::redundant_clone,
+    clippy::indexing_slicing,
+    clippy::needless_pass_by_value
+)]
 
 use architect_ui::prelude::*;
 use dioxus::prelude::*;
@@ -26,6 +38,7 @@ use semver::VersionReq;
 use crate::browse::{Browse, Row, Where};
 use crate::consent::Scope;
 use crate::manage::{Installed, Preview};
+use crate::manager::{Item, Manager};
 use crate::project::Plan;
 
 /// The settings section the page is.
@@ -49,8 +62,11 @@ struct Asking {
 #[derive(Clone, Copy)]
 struct State {
     query: Signal<String>,
-    selected: Signal<Option<String>>,
-    /// Bumped after every change: what reads the extensions reads again.
+    /// The kind shown (every kind when `None`).
+    kind: Signal<Option<String>>,
+    /// The item picked: its kind and id.
+    selected: Signal<Option<(String, String)>>,
+    /// Bumped after every change: what reads the items reads again.
     rev: Signal<u64>,
     asking: Signal<Option<Asking>>,
     note: Signal<Option<(bool, String)>>,
@@ -62,7 +78,8 @@ fn state() -> State {
 
 fn bump(s: State) {
     let mut rev = s.rev;
-    rev += 1;
+    let next = rev.peek().wrapping_add(1);
+    rev.set(next);
 }
 
 fn say(s: State, ok: bool, text: impl Into<String>) {
@@ -70,12 +87,16 @@ fn say(s: State, ok: bool, text: impl Into<String>) {
     note.set(Some((ok, text.into())));
 }
 
-/// The page in context: a settings section and ⌘O's `ext:` (call it
-/// under the settings provider and the commands provider).
-pub fn use_extensions_page(browse: Browse) {
+/// The manager in context: a settings section ("Extensions") and ⌘O's
+/// `ext:` over every kind (call it under the settings provider and the
+/// commands provider). `browse` is the extensions' catalog, for the
+/// extension kind's own page.
+pub fn use_manager_page(manager: Manager, browse: Browse) {
     use_context_provider(|| browse.clone());
+    use_context_provider(|| manager.clone());
     let s = use_context_provider(|| State {
         query: Signal::new(String::new()),
+        kind: Signal::new(None),
         selected: Signal::new(None),
         rev: Signal::new(0),
         asking: Signal::new(None),
@@ -83,27 +104,34 @@ pub fn use_extensions_page(browse: Browse) {
     });
     architect_settings::use_section_page(
         || architect_settings::Section::new(SECTION, "Extensions").icon("puzzle"),
-        ExtensionsSection,
+        ManagerSection,
     );
     let settings = architect_settings::try_use_settings();
-    let rows = browse.clone();
+    let items = manager.clone();
     architect_commands::use_opener(move || {
         architect_commands::Opener::new(
             "ext",
             "Extensions",
             move |query| {
-                rows.rows(query)
+                items
+                    .list(None, query)
                     .into_iter()
-                    .take(30)
-                    .map(|r| {
-                        architect_commands::OpenItem::new("ext", r.id.clone(), r.name.clone())
-                            .detail(format!("{} · {} · {}", r.at.label(), r.kind, r.version))
+                    .take(40)
+                    .map(|i| {
+                        architect_commands::OpenItem::new(
+                            "ext",
+                            format!("{}\u{1f}{}", i.kind, i.id),
+                            i.name.clone(),
+                        )
+                        .detail(format!("{} · {}", i.kind, i.source))
                     })
                     .collect()
             },
             move |item, _| {
-                let mut selected = s.selected;
-                selected.set(Some(item.id.clone()));
+                if let Some((kind, id)) = item.id.split_once('\u{1f}') {
+                    let mut selected = s.selected;
+                    selected.set(Some((kind.to_owned(), id.to_owned())));
+                }
                 if let Some(h) = settings {
                     h.show(Some(SECTION));
                 }
@@ -112,76 +140,204 @@ pub fn use_extensions_page(browse: Browse) {
     });
 }
 
-/// The page as the settings page's section (what
-/// [`use_extensions_page`] registers).
+/// The manager as the settings page's section.
 #[component]
-pub fn ExtensionsSection() -> Element {
-    let browse = use_context::<Browse>();
-    rsx! { ExtensionsPage { browse } }
+pub fn ManagerSection() -> Element {
+    let manager = use_context::<Manager>();
+    rsx! { ManagerPage { manager } }
 }
 
-/// The page in a workspace pane.
+/// The manager in a workspace pane (and the `manager` extension's view).
 #[component]
-pub fn ExtensionsView() -> Element {
-    let browse = use_context::<Browse>();
+pub fn ManagerView() -> Element {
+    let manager = use_context::<Manager>();
     rsx! {
         div { style: "height: 100%; overflow-y: scroll; padding: 20px 24px; background: var(--background); color: var(--foreground);",
-            ExtensionsPage { browse }
+            ManagerPage { manager }
         }
     }
 }
 
-/// The extensions page.
+/// The manager's page: kinds, search across them, the list, and the
+/// page of the item picked.
 #[component]
-pub fn ExtensionsPage(browse: Browse) -> Element {
+pub fn ManagerPage(manager: Manager) -> Element {
     let s = state();
     let _ = (s.rev)();
     let query = (s.query)();
-    let rows = browse.rows(&query);
-    let selected = (s.selected)().or_else(|| rows.first().map(|r| r.id.clone()));
-    let picked = selected
+    let kind = (s.kind)();
+    let items = manager.list(kind.as_deref(), &query);
+    let selected = (s.selected)()
+        .filter(|(k, i)| items.iter().any(|x| &x.kind == k && &x.id == i))
+        .or_else(|| items.first().map(|i| (i.kind.clone(), i.id.clone())));
+    let mut kinds = vec![(String::new(), "All".to_owned())];
+    kinds.extend(
+        manager
+            .kinds()
+            .iter()
+            .map(|k| (k.id().to_owned(), k.title().to_owned())),
+    );
+    let browse = try_use_context::<Browse>();
+    let org = browse
         .as_ref()
-        .and_then(|id| rows.iter().find(|r| &r.id == id).cloned());
-    let org = browse.extensions().host().grants().and_then(|g| g.org());
+        .and_then(|b| b.extensions().host().grants())
+        .and_then(|g| g.org());
     rsx! {
         style { {architect_ui::UTILITIES_CSS} }
         div { style: "display: flex; flex-direction: column; gap: 14px; font-family: inherit; color: var(--foreground);",
-            if let Some((ok, text)) = (s.note)() {
-                Alert { variant: if ok { AlertVariant::Default } else { AlertVariant::Destructive },
-                    AlertDescription { "{text}" }
-                }
-            }
-            div { style: "display: flex; gap: 16px; align-items: flex-start;",
-                // The list.
-                div { style: "flex: 0 0 300px; display: flex; flex-direction: column; gap: 8px;",
-                    Input { value: s.query, placeholder: "Search: name, kind:luau, adds:tab".to_owned() }
-                    div { style: "font-size: 12px; color: var(--muted-foreground);",
-                        "{rows.len()} extension(s)"
-                    }
-                    div { style: "display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 10px; overflow: hidden;",
-                        if rows.is_empty() {
-                            EmptyState { message: "Nothing matches".to_owned() }
-                        }
-                        for r in rows.iter().cloned() {
-                            RowItem { key: "{r.id}", on: selected.as_deref() == Some(r.id.as_str()), row: r }
-                        }
-                    }
-                }
-                // The one picked.
-                div { style: "flex: 1; min-width: 0;",
-                    if let Some(row) = picked {
-                        Detail { key: "{row.id}", browse: browse.clone(), row }
-                    } else {
-                        EmptyState { message: "Pick an extension".to_owned() }
-                    }
-                }
-            }
-            if let Some(asking) = (s.asking)() {
+            if let (Some(asking), Some(browse)) = ((s.asking)(), browse.clone()) {
                 ConsentPrompt {
                     previews: asking.previews.clone(),
                     org,
                     action: match asking.purpose { For::Install { .. } => "Install", For::Update => "Update", For::Grant => "Grant" }.to_owned(),
                     on_answer: move |scope: Option<Scope>| answer(&browse, s, &asking, scope),
+                }
+            }
+            if let Some((ok, text)) = (s.note)() {
+                Alert { variant: if ok { AlertVariant::Default } else { AlertVariant::Destructive },
+                    AlertDescription { "{text}" }
+                }
+            }
+            SegmentedControl {
+                value: kind.clone().unwrap_or_default(),
+                options: kinds,
+                on_change: move |v: String| {
+                    let mut k = s.kind;
+                    k.set((!v.is_empty()).then_some(v));
+                },
+            }
+            // Side by side when there is room; the page under the list in
+            // a narrow pane.
+            div { style: "display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start;",
+                div { style: "flex: 1 1 260px; max-width: 360px; display: flex; flex-direction: column; gap: 8px;",
+                    Input { value: s.query, placeholder: "Search every kind".to_owned() }
+                    div { style: "font-size: 12px; color: var(--muted-foreground);",
+                        "{items.len()} item(s) · by name, kind, source"
+                    }
+                    div { style: "display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 10px; overflow: hidden;",
+                        if items.is_empty() {
+                            EmptyState { message: "Nothing matches".to_owned() }
+                        }
+                        for i in items.iter().cloned() {
+                            ItemRow {
+                                key: "{i.kind}/{i.id}",
+                                on: selected.as_ref().is_some_and(|(k, id)| k == &i.kind && id == &i.id),
+                                item: i,
+                            }
+                        }
+                    }
+                }
+                div { style: "flex: 999 1 380px; min-width: 0;",
+                    match (selected, browse) {
+                        (Some((k, id)), Some(browse)) if k == "extension" => {
+                            let row = browse.rows("").into_iter().find(|r| r.id == id);
+                            rsx! {
+                                if let Some(row) = row {
+                                    Detail { key: "{row.id}", browse, row }
+                                }
+                            }
+                        }
+                        (Some((k, id)), _) => rsx! { ItemPage { key: "{k}/{id}", manager: manager.clone(), kind: k, id } },
+                        (None, _) => rsx! { EmptyState { message: "Pick an item".to_owned() } },
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn ItemRow(on: bool, item: Item) -> Element {
+    let s = state();
+    let ground = if on { "var(--accent)" } else { "transparent" };
+    let key = (item.kind.clone(), item.id.clone());
+    rsx! {
+        button {
+            style: "display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: 10px 12px; border: none; \
+                    border-bottom: 1px solid var(--border); background: {ground}; color: var(--foreground); text-align: left; cursor: pointer;",
+            onclick: move |_| {
+                let mut selected = s.selected;
+                selected.set(Some(key.clone()));
+            },
+            div { style: "display: flex; align-items: center; gap: 6px;",
+                span { style: "font-size: 13px; font-weight: 600; flex: 1;", "{item.name}" }
+                Badge { variant: BadgeVariant::Outline, "{item.kind}" }
+                if !item.problems.is_empty() {
+                    Badge { variant: BadgeVariant::Destructive, "{item.problems.len()} problem(s)" }
+                }
+            }
+            div { style: "display: flex; gap: 6px; font-size: 11px; color: var(--muted-foreground);",
+                if let Some(v) = &item.version { span { "{v}" } }
+                span { "{item.source}" }
+                if item.enabled == Some(false) { span { "· off" } }
+                if item.enabled == Some(true) && item.kind != "extension" { span { "· on" } }
+            }
+        }
+    }
+}
+
+/// Any kind's item page: its parts, problems and ops.
+#[component]
+fn ItemPage(manager: Manager, kind: String, id: String) -> Element {
+    let s = state();
+    let _ = (s.rev)();
+    let Some(d) = manager.get(&kind, &id) else {
+        return rsx! { EmptyState { message: "It is gone".to_owned() } };
+    };
+    let item = d.item.clone();
+    rsx! {
+        div { style: "display: flex; flex-direction: column; gap: 14px;",
+            Card {
+                CardHeader {
+                    CardTitle { "{item.name}" }
+                    CardDescription { "{item.summary}" }
+                }
+                CardContent {
+                    div { style: "display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px;",
+                        Badge { variant: BadgeVariant::Secondary, "{item.kind}" }
+                        if let Some(v) = &item.version { Badge { variant: BadgeVariant::Outline, "{v}" } }
+                        if item.enabled == Some(true) { Badge { "On" } }
+                        if item.enabled == Some(false) { Badge { variant: BadgeVariant::Outline, "Off" } }
+                    }
+                    KeyValueRow { label: "Id".to_owned(), value: item.id.clone() }
+                    KeyValueRow { label: "Source".to_owned(), value: item.source.clone(), mono: false }
+                }
+                CardFooter {
+                    div { style: "display: flex; flex-wrap: wrap; gap: 8px;",
+                        for op in item.ops.iter().cloned() {
+                            Button {
+                                key: "{op.id}",
+                                variant: if op.destructive { ButtonVariant::Destructive } else { ButtonVariant::Outline },
+                                on_click: {
+                                    let (manager, kind, id, op) = (manager.clone(), kind.clone(), id.clone(), op.clone());
+                                    move |_| {
+                                        match manager.run(&kind, &id, &op.id, &serde_json::Value::Null) {
+                                            Ok(_) => say(s, true, format!("{}: done.", op.label)),
+                                            Err(e) => say(s, false, e),
+                                        }
+                                        bump(s);
+                                    }
+                                },
+                                "{op.label}"
+                            }
+                        }
+                    }
+                }
+            }
+            if !item.problems.is_empty() {
+                Alert { variant: AlertVariant::Destructive,
+                    AlertTitle { "Problems" }
+                    AlertDescription {
+                        for (i, p) in item.problems.iter().enumerate() { div { key: "{i}", "{p}" } }
+                    }
+                }
+            }
+            for part in d.parts.iter().cloned() {
+                Section { key: "{part.title}", title: part.title.clone(),
+                    if part.lines.is_empty() { Muted { text: "Nothing yet.".to_owned() } }
+                    for (i, line) in part.lines.iter().enumerate() {
+                        div { key: "{i}", style: "font-size: 12px; color: var(--foreground); white-space: pre-wrap; font-family: ui-monospace, monospace;", "{line}" }
+                    }
                 }
             }
         }
@@ -245,34 +401,6 @@ fn outcome(installed: &Installed, name: &str) -> String {
     }
 }
 
-#[component]
-fn RowItem(on: bool, row: Row) -> Element {
-    let s = state();
-    let ground = if on { "var(--accent)" } else { "transparent" };
-    let id = row.id.clone();
-    rsx! {
-        button {
-            style: "display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: 10px 12px; border: none; \
-                    border-bottom: 1px solid var(--border); background: {ground}; color: var(--foreground); text-align: left; cursor: pointer;",
-            onclick: move |_| {
-                let mut selected = s.selected;
-                selected.set(Some(id.clone()));
-            },
-            div { style: "display: flex; align-items: center; gap: 6px;",
-                span { style: "font-size: 13px; font-weight: 600; flex: 1;", "{row.name}" }
-                Badge { variant: if row.at == Where::Available { BadgeVariant::Outline } else { BadgeVariant::Secondary }, "{row.at.label()}" }
-            }
-            div { style: "display: flex; gap: 6px; font-size: 11px; color: var(--muted-foreground);",
-                span { "{row.kind}" }
-                span { "{row.version}" }
-                if row.overrides_builtin { span { "· overrides built-in" } }
-                if row.disabled { span { "· off" } }
-                if let Some(n) = &row.newer { span { "· {n} available" } }
-            }
-        }
-    }
-}
-
 /// The page of one extension.
 #[component]
 fn Detail(browse: Browse, row: Row) -> Element {
@@ -298,20 +426,7 @@ fn Detail(browse: Browse, row: Row) -> Element {
             })
         }
     });
-    let about: Option<Preview> = preview.read().clone().or_else(|| {
-        let chosen = ext.chosen().into_iter().find(|c| c.runs.id == row.id)?;
-        let m = chosen.runs.package.manifest.clone();
-        let listing = crate::index::Listing {
-            id: m.id.clone(),
-            name: m.name.clone(),
-            version: m.version.clone(),
-            kind: m.kind.name().to_owned(),
-            description: m.description.clone(),
-            category: String::new(),
-            location: crate::index::Location::Path(String::new()),
-        };
-        Some(ext.preview_of(&m, &listing, row.registry.as_deref().unwrap_or("")))
-    });
+    let about: Option<Preview> = preview.read().clone().or_else(|| browse.about(&row.id));
     let versions: Vec<String> = info["versions"]
         .as_array()
         .map(|v| {
@@ -651,11 +766,11 @@ pub fn ConsentPrompt(
     if let Some(o) = &org {
         options.push((format!("org:{o}"), format!("Organization {o}")));
     }
+    // In the page's flow, above what it is about: an overlay inside a
+    // scrolling section is clipped by it (Blitz).
     rsx! {
-        div {
-            style: "position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 1000; display: flex; align-items: center; \
-                    justify-content: center; background: color-mix(in srgb, var(--background) 70%, transparent);",
-            div { style: "width: 520px; max-width: 92%;",
+        div { style: "display: flex; justify-content: center;",
+            div { style: "width: 560px; max-width: 100%; border: 2px solid var(--primary); border-radius: 14px;",
                 Card {
                     CardHeader {
                         CardTitle { "{action} {names.join(\", \")}?" }

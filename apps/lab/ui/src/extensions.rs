@@ -37,6 +37,8 @@ use architect_extensions::host::Host;
 use architect_extensions::hostapi::{AppContext, SettingValues};
 use architect_extensions::install::{FolderRegistry, Installs};
 use architect_extensions::interface::{ExtensionUi, use_extension_ui};
+use architect_extensions::manager::extension::ManagerExtension;
+use architect_extensions::manager::{Manager, kinds};
 use architect_extensions::process::{ProcessRunner, Processes};
 use architect_extensions::ui::use_extension_sections;
 use architect_extensions::{Package, VersionReq};
@@ -497,7 +499,7 @@ fn builtin() -> Option<Package> {
 /// control socket, MCP): forwarded to the extensions' list, each run there
 /// as whoever ran it on the lab's (the lab's authorizer and confirmation
 /// asked first).
-const FORWARDED: [&str; 24] = [
+const FORWARDED: [&str; 28] = [
     "EXT_LIST",
     "EXT_SEARCH",
     "EXT_INSTALL",
@@ -514,6 +516,10 @@ const FORWARDED: [&str; 24] = [
     "EXT_GRANTS",
     "EXT_LOGS",
     "EXT_HOST_CALL",
+    "MANAGER_KINDS",
+    "MANAGER_LIST",
+    "MANAGER_GET",
+    "MANAGER_RUN",
     "EXT_CONTRIBUTIONS",
     "EXT_OPEN",
     "EXT_VIEW_OPEN",
@@ -567,6 +573,9 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
     // a copy kept here, and changes sent back to the page's store.
     let values = use_hook(LabValues::default);
     use_settings_bridge(&values);
+    // The extensions manager: its kinds are added below, once what they
+    // manage exists (the layouts' in the lab's root).
+    let manager = use_hook(Manager::new);
     let (extensions, from_registry) = use_hook(|| {
         // The kinds its views may be: Frame's surface besides Dioxus.
         let mut host =
@@ -601,8 +610,15 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         // `EXT_CLONE` puts its copies beside the development ones.
         let mut extensions = Extensions::new(host, Installs::new(root.join("extensions")))
             .with_dev_root(root.join("dev"));
-        // The Board: one Rust value, linked in as a built-in.
+        // The Board: one Rust value, linked in as a built-in. The
+        // extensions manager is one too.
         if let Ok(with) = extensions.clone().with_linked(&architect_lab_board::Board) {
+            extensions = with;
+        }
+        if let Ok(with) = extensions
+            .clone()
+            .with_linked(&ManagerExtension::new(manager.clone()))
+        {
             extensions = with;
         }
         let found = registry();
@@ -619,7 +635,6 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         // What is wrong with them is in the lab's `APP_STATUS`, and their
         // `EXT_*` actions on the lab's list (the CLI's and MCP's).
         extensions.report_problems(lab.problems());
-        forward(&lab, &list, &FORWARDED);
         // An agent's grant waits for the person's yes, on the lab's list
         // too (the sheet).
         Extensions::confirm_on(&lab);
@@ -629,6 +644,8 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
             let _ = extensions.dev(dir);
         }
         let _ = extensions.sync();
+        // After the first load: the linked manager's MANAGER_* exist now.
+        forward(&lab, &list, &FORWARDED);
         (extensions, found.is_some())
     });
     let follow = extensions.clone();
@@ -662,7 +679,17 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
     });
     // The extensions page: a settings section, ⌘O's `ext:`, the Vault's
     // "Extensions" view.
-    architect_extensions::page::use_extensions_page(Browse::new(extensions.clone()));
+    let browse = use_hook(|| Browse::new(extensions.clone()));
+    use_hook(|| {
+        manager.register(kinds::ExtensionKind::new(browse.clone()));
+        manager.register(kinds::ScriptKind::new(extensions.clone()));
+        manager.register(kinds::WorkerKind::new(processes()));
+        if let Some(store) = &themes {
+            manager.register(kinds::ThemeKind::new(store.clone(), (*lab).clone()));
+        }
+        manager.confirm_on(&lab);
+    });
+    architect_extensions::page::use_manager_page(manager.clone(), browse);
     use_extension_ui(extensions.host().clone(), Arc::clone(&lab))
 }
 

@@ -430,3 +430,126 @@ fn the_page_finds_extensions_by_name_kind_and_what_they_add() {
         "the way back"
     );
 }
+
+/// The extensions manager: extensions, themes and layouts in one list,
+/// searched together; each kind's ops as `MANAGER_RUN`; the manager itself
+/// a linked-in extension with its own actions.
+#[test]
+fn the_manager_lists_and_acts_on_every_kind() {
+    use architect_extensions::browse::Browse;
+    use architect_extensions::manager::extension::ManagerExtension;
+    use architect_extensions::manager::{Manager, kinds};
+    let tmp = tempfile::tempdir().unwrap();
+    let (list, _, host) = app(tmp.path());
+    let manager = Manager::new();
+    let registry = tmp.path().join("registry");
+    copy(&lab_registry(), &registry);
+    let ext = Extensions::new(host, Installs::new(tmp.path().join("installs")))
+        .with_source(FolderRegistry::new(&registry))
+        .with_linked(&ManagerExtension::new(manager.clone()))
+        .unwrap();
+    ext.install_actions().unwrap();
+    let _ = ext.sync();
+    let home_dir = tmp.path().join("home");
+    let home = architect_workspace::home::Home::open(&home_dir, &[("main", "{}")]);
+    std::fs::write(home_dir.join("layouts/broken.json"), "{ \"chrome\": ").unwrap();
+    let _ = home.poll();
+    manager.register(kinds::ExtensionKind::new(Browse::new(ext.clone())));
+    manager.register(kinds::ScriptKind::new(ext.clone()));
+    manager.register(kinds::ThemeKind::new(
+        architect_theme::ThemeStore::default(),
+        list.clone(),
+    ));
+    manager.register(kinds::LayoutKind::new(home.clone()));
+    let app = ActionCaller::app();
+
+    // The manager is an extension, built in.
+    assert_eq!(
+        ext.host().get("manager").unwrap().origin,
+        architect_extensions::Origin::Builtin
+    );
+    let kinds_now = run(&list, &app, "MANAGER_KINDS", &json!({})).unwrap();
+    let names: Vec<&str> = kinds_now["kinds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|k| k["kind"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["extension", "script", "theme", "layout"]);
+
+    // One search across kinds.
+    let found = run(
+        &list,
+        &app,
+        "MANAGER_LIST",
+        &json!({ "query": "metronome" }),
+    )
+    .unwrap();
+    assert_eq!(found["items"][0]["kind"], "extension", "{found}");
+    let themes = run(&list, &app, "MANAGER_LIST", &json!({ "kind": "theme" })).unwrap();
+    assert!(!themes["items"].as_array().unwrap().is_empty(), "{themes}");
+    let layouts = run(&list, &app, "MANAGER_LIST", &json!({ "kind": "layout" })).unwrap();
+    let broken = layouts["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["id"] == "layout:broken")
+        .unwrap();
+    assert!(
+        !broken["problems"].as_array().unwrap().is_empty(),
+        "{layouts}"
+    );
+
+    // Ops: a built-in layout cloned to edit; the broken file removed.
+    run(
+        &list,
+        &app,
+        "MANAGER_RUN",
+        &json!({ "kind": "layout", "id": "layout:main", "op": "clone" }),
+    )
+    .unwrap();
+    assert!(home_dir.join("layouts/main-copy.json").is_file());
+    run(
+        &list,
+        &app,
+        "MANAGER_RUN",
+        &json!({ "kind": "layout", "id": "layout:broken", "op": "remove" }),
+    )
+    .unwrap();
+    assert!(home.problems().is_empty());
+    // An agent removing something is asked first.
+    manager.confirm_on(&list);
+    list.require_confirmation(Duration::from_secs(60));
+    match run(
+        &list,
+        &ActionCaller::new(bob()),
+        "MANAGER_RUN",
+        &json!({ "kind": "layout", "id": "layout:main-copy", "op": "remove" }),
+    ) {
+        Err(ActionError::ConfirmationRequired { .. }) => {}
+        other => panic!("not asked: {other:?}"),
+    }
+    // Installing through the manager still asks for consent where it is kept
+    // (here it is not: it installs).
+    let out = run(
+        &list,
+        &app,
+        "MANAGER_RUN",
+        &json!({ "kind": "extension", "id": ID, "op": "install" }),
+    )
+    .unwrap();
+    assert_eq!(out["loaded"], true, "{out}");
+    let got = run(
+        &list,
+        &app,
+        "MANAGER_GET",
+        &json!({ "kind": "script", "id": "fts.metronome/status.luau" }),
+    )
+    .unwrap();
+    assert!(
+        got["parts"][0]["lines"]
+            .to_string()
+            .contains("host.setting"),
+        "{got}"
+    );
+}

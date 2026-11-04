@@ -28,7 +28,7 @@ use crate::install::InstallError;
 use crate::manifest::{Capabilities, Kind, MANIFEST, Manifest};
 
 /// What a version would be and do, read before it is installed.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Preview {
     pub id: String,
     pub name: String,

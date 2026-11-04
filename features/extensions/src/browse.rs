@@ -99,12 +99,10 @@ fn matches(row: &Row, query: &str) -> bool {
     .to_lowercase();
     query.split_whitespace().all(|word| {
         let word = word.to_lowercase();
-        if let Some(k) = word.strip_prefix("kind:") {
-            row.kind == k
-        } else if let Some(a) = word.strip_prefix("adds:") {
-            row.adds.iter().any(|l| l.to_lowercase().contains(a))
-        } else {
-            hay.contains(&word)
+        match (word.strip_prefix("kind:"), word.strip_prefix("adds:")) {
+            (Some(k), _) => row.kind == k,
+            (_, Some(a)) => row.adds.iter().any(|l| l.to_lowercase().contains(a)),
+            _ => hay.contains(&word),
         }
     })
 }
@@ -139,6 +137,37 @@ impl Browse {
             .unwrap_or_else(PoisonError::into_inner)
             .get(id)
             .cloned()
+    }
+
+    /// What `id` is and does: the copy here's manifest read, or a
+    /// registry version's preview once read.
+    #[must_use]
+    pub fn about(&self, id: &str) -> Option<Preview> {
+        let ext = &self.extensions;
+        let Some(c) = ext.chosen().into_iter().find(|c| c.runs.id == id) else {
+            return self.preview(id);
+        };
+        let m = &c.runs.package.manifest;
+        let listing = crate::index::Listing {
+            id: m.id.clone(),
+            name: m.name.clone(),
+            version: m.version.clone(),
+            kind: m.kind.name().to_owned(),
+            description: m.description.clone(),
+            category: String::new(),
+            location: crate::index::Location::Path(String::new()),
+        };
+        let mut p = ext.preview_of(m, &listing, "");
+        p.location = c.runs.package.dir().map_or_else(
+            || "the app's own build".to_owned(),
+            |dir| dir.display().to_string(),
+        );
+        let linked = ext.host().linked().iter().any(|(l, _)| l == id);
+        if linked && c.runs.origin == Origin::Builtin {
+            "linked into the app: runs in its process, its views in its window"
+                .clone_into(&mut p.runner);
+        }
+        Some(p)
     }
 
     /// Every row matching `query`: those here first (by name), then those

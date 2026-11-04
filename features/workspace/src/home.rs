@@ -325,6 +325,20 @@ impl Home {
             s.problems.remove(&format!("layouts/{name}.json"));
             changed.layouts.push(name);
         }
+        // A broken file that went (it never had a layout): its problem too.
+        let stale: Vec<String> = s
+            .problems
+            .keys()
+            .filter(|f| {
+                f.strip_prefix("layouts/")
+                    .and_then(|f| f.strip_suffix(".json"))
+                    .is_some_and(|n| !seen.iter().any(|s| s == n))
+            })
+            .cloned()
+            .collect();
+        for file in stale {
+            s.problems.remove(&file);
+        }
         // What the person changed by hand.
         let state_dir = layouts.join(".state");
         for name in seen {

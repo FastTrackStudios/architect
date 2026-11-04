@@ -85,6 +85,8 @@ pub mod logs;
 mod luau_host;
 #[cfg(feature = "host")]
 pub mod manage;
+#[cfg(feature = "manager")]
+pub mod manager;
 #[cfg(feature = "page")]
 pub mod page;
 #[cfg(all(feature = "process", unix))]

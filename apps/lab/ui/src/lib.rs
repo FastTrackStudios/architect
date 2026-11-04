@@ -807,6 +807,12 @@ pub fn LabApp() -> Element {
             .unwrap_or_else(|_| std::env::temp_dir().join("architect-lab"));
         let home = architect_workspace::home::Home::open(dir, &[("main", MAIN_LAYOUT)]);
         let _ = architect_workspace::home::actions::register(&list, &home);
+        // Layouts and keys.json in the extensions manager.
+        if let Some(manager) = try_consume_context::<architect_extensions::manager::Manager>() {
+            manager.register(architect_extensions::manager::kinds::LayoutKind::new(
+                home.clone(),
+            ));
+        }
         home
     });
     let home_rev = architect_workspace::home::ui::use_home(home.clone());

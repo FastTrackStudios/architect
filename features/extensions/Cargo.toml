@@ -52,7 +52,12 @@ ui = [
 ]
 # The extensions page (`page`): search, install with consent, update, pin,
 # grants and logs, in architect-ui's components and the app's theme.
-page = ["ui", "dep:architect-ui"]
+page = ["ui", "manager", "dep:architect-ui"]
+# The extensions manager (`manager`): one place for everything that
+# customizes the app — extensions, scripts, workers, themes, layouts and
+# keys, and kinds the app adds — with its MANAGER_* actions; linked in as
+# an extension of its own.
+manager = ["host", "linked", "architect-workspace/home"]
 # The wire and the protocol (`wire`, `proto`); the derives key on `vox`.
 vox = ["dep:architect", "architect/vox", "dep:vox", "dep:thiserror"]
 process = [
@@ -115,14 +120,16 @@ futures-timer = { workspace = true, optional = true }
 [dev-dependencies]
 # Its own host, so `cargo test --workspace` builds the tests with it; the
 # guest too, since the remote-view tests spawn themselves as one.
-architect-extensions = { path = ".", features = ["host", "crdt", "guest", "remote", "linked"] }
+architect-extensions = { path = ".", features = ["host", "crdt", "guest", "remote", "linked", "manager"] }
 futures = "0.3"
 tempfile = "3"
 crdt = { workspace = true }
 # THEME_LIST / THEME_SET / THEME_PROBLEMS over an extension's themes.
 architect-theme = { workspace = true, features = ["actions"] }
-# tests/host_service.rs: a gate that sees who calls.
+# tests/host_service.rs: a gate that sees who calls; the manager's
+# layouts kind.
 architect-permissions = { workspace = true }
+architect-workspace = { workspace = true, features = ["home"] }
 
 [lib]
 doctest = false

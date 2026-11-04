@@ -77,7 +77,7 @@ fn views(extra: Vec<View>) -> Views {
         // The extensions page, in a pane (it is a settings section too).
         .view(
             View::new("extensions", "Extensions", |_| {
-                rsx! { architect_extensions::page::ExtensionsView {} }
+                rsx! { architect_extensions::page::ManagerView {} }
             })
             .icon(icon!(Puzzle))
             .home(Target::Split(Side::Right)),
