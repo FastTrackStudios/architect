@@ -270,6 +270,9 @@ architect-lab-ui = { path = "apps/lab/ui" }
 objc2 = "0.6"
 objc2-ui-kit = "0.3"
 futures-timer = "3"
+# The platform's file pickers (architect-extensions `pickers`); blitz-shell
+# builds it already, with these (default) features.
+rfd = "0.17.2"
 
 # ── Plugin framework (features/ui) ────────────────────────────────────
 # The ONE sanctioned non-path exception in the monorepo; carried verbatim.

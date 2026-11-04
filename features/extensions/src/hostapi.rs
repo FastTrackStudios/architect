@@ -132,8 +132,11 @@ pub(crate) struct Services {
     app_list: Mutex<Option<architect::action::ActionList>>,
     /// Data kept in memory, when there is no data root.
     data: Mutex<BTreeMap<String, BTreeMap<String, Value>>>,
-    /// The app's interface, for extensions.
-    ui: Mutex<Arc<dyn HostUi>>,
+    /// The app's interface, for extensions (none given: [`NoUi`]).
+    ui: Mutex<Option<Arc<dyn HostUi>>>,
+    /// The window's own interface, kept for whoever draws it
+    /// (`host_ui_view::WindowUi::lend`).
+    window: Mutex<Option<Arc<dyn std::any::Any + Send + Sync>>>,
     /// What extensions set on rows and tabs.
     decorations: Decorations,
     /// The paths a person picked for each extension, for the run: each
@@ -167,7 +170,8 @@ impl Default for Services {
             data_root: Mutex::new(None),
             app_list: Mutex::new(None),
             data: Mutex::new(BTreeMap::new()),
-            ui: Mutex::new(Arc::new(NoUi)),
+            ui: Mutex::new(None),
+            window: Mutex::new(None),
             decorations: Decorations::default(),
             picked: Mutex::new(BTreeMap::new()),
         }
@@ -264,13 +268,38 @@ impl Host {
 
     /// [`Self::with_ui`] on a host already shared.
     pub fn set_ui(&self, ui: Arc<dyn HostUi>) {
-        *lock(&self.services().ui) = ui;
+        *lock(&self.services().ui) = Some(ui);
+    }
+
+    /// Gives `ui` unless the app gave one already (what the window's
+    /// overlays do as they mount): whether it took it.
+    pub fn offer_ui(&self, ui: Arc<dyn HostUi>) -> bool {
+        let mut now = lock(&self.services().ui);
+        if now.is_some() {
+            return false;
+        }
+        *now = Some(ui);
+        true
+    }
+
+    /// The window's interface, kept with the host for whoever draws it,
+    /// made by `make` the first time it is asked for.
+    pub(crate) fn window_slot<T: Clone + Send + Sync + 'static>(&self, make: impl FnOnce() -> T) -> T {
+        let mut slot = lock(&self.services().window);
+        if let Some(kept) = slot.as_ref().and_then(|k| k.downcast_ref::<T>()) {
+            return kept.clone();
+        }
+        let made = make();
+        *slot = Some(Arc::new(made.clone()));
+        made
     }
 
     /// The interface extensions are lent.
     #[must_use]
     pub fn ui(&self) -> Arc<dyn HostUi> {
-        lock(&self.services().ui).clone()
+        lock(&self.services().ui)
+            .clone()
+            .unwrap_or_else(|| Arc::new(NoUi))
     }
 
     /// What extensions set on rows and tabs at run time (`decorate`).
@@ -682,15 +711,18 @@ impl ExtensionApi {
                 let kind = pick.kind;
                 let paths = host.ui().pick(&Self::asker(manifest), pick).await?;
                 if let Some(paths) = &paths {
-                    let mut picked = lock(&host.services().picked);
-                    let mine = picked.entry(self.id.clone()).or_default();
-                    for p in paths {
-                        mine.push(Picked {
+                    let now: Vec<Picked> = paths
+                        .iter()
+                        .map(|p| Picked {
                             path: expand(p),
                             write: matches!(kind, PickKind::Save | PickKind::Folder),
                             folder: kind == PickKind::Folder,
-                        });
-                    }
+                        })
+                        .collect();
+                    lock(&host.services().picked)
+                        .entry(self.id.clone())
+                        .or_default()
+                        .extend(now);
                 }
                 Ok(crate::hostui::pick_answer(kind, paths))
             }
@@ -712,7 +744,7 @@ impl ExtensionApi {
                     .map_or(Value::Null, Value::String))
             }
             HostRequest::Decorate { target, decoration } => {
-                host.decorations().set(&self.id, target, decoration);
+                host.decorations().set(&self.id, &target, decoration);
                 Ok(Value::Null)
             }
             HostRequest::Log { text, level } => {

@@ -122,6 +122,11 @@ web = [
     "dep:js-sys",
     "dep:web-sys",
 ]
+# The platform's file and folder pickers and save dialogs for extensions'
+# `pick` calls (`host_ui_view::WindowUi`): rfd, the same the shell's file
+# inputs use (the portal on Linux, the system's panels on macOS and
+# Windows). Without it a pick is unsupported.
+pickers = ["ui", "dep:rfd"]
 remote = ["process", "ui", "architect-theme/dioxus", "dep:blitz-dom", "dep:blitz-traits", "dep:dioxus-native-dom", "dep:futures-timer"]
 
 [dependencies]
@@ -215,8 +220,13 @@ architect-theme = { workspace = true, features = ["actions"] }
 # layouts kind.
 architect-permissions = { workspace = true }
 architect-workspace = { workspace = true, features = ["home"] }
+# tests/host_ui_view.rs: a badged file-tree row and the interface's layer, as HTML.
+dioxus-ssr = { workspace = true }
 
 # iOS forbids JIT: Wasmtime interprets there (Pulley).
+[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
+rfd = { workspace = true, optional = true }
+
 [target.'cfg(target_os = "ios")'.dependencies]
 wasmtime = { version = "50.0.1", optional = true, default-features = false, features = ["pulley"] }
 

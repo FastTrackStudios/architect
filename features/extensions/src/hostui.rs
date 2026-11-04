@@ -1,9 +1,8 @@
-//! The app's interface, as the host service lends it to extensions (#306):
-//! notifications, the clipboard, pickers and save dialogs, prompts, a
-//! context menu at a point, and icons and badges on file-tree rows and
-//! tabs.
+//! The app's interface, as the host service lends it to extensions (#306).
 //!
-//! The calls are `crate::hostcall`'s (`notify`, `clipboard_read`,
+//! Notifications, the clipboard, pickers and save dialogs, prompts, a
+//! context menu at a point, and icons and badges on file-tree rows and
+//! tabs. The calls are `crate::hostcall`'s (`notify`, `clipboard_read`,
 //! `clipboard_write`, `pick`, `prompt`, `menu`, `decorate`), each gated by
 //! `capabilities.ui` (`crate::capabilities::UI`); the host answers them
 //! through the app's [`HostUi`] ([`Host::set_ui`](crate::host::Host::set_ui)):
@@ -328,7 +327,7 @@ impl std::fmt::Debug for Decorations {
 impl Decorations {
     /// `from`'s decoration on `target`, in place of the one it set there
     /// (`None`: takes it off).
-    pub fn set(&self, from: &str, target: Target, decoration: Option<Decoration>) {
+    pub fn set(&self, from: &str, target: &Target, decoration: Option<Decoration>) {
         {
             let mut set = lock(&self.set);
             let on = set.entry(target.clone()).or_default();
@@ -340,7 +339,7 @@ impl Decorations {
                 });
             }
             if on.is_empty() {
-                set.remove(&target);
+                set.remove(target);
             }
         }
         self.changed();
@@ -546,16 +545,16 @@ mod tests {
             badge: Some(b.to_owned()),
             ..Decoration::default()
         };
-        d.set("a", row.clone(), Some(badge("1")));
-        d.set("a", row.clone(), Some(badge("2")));
-        d.set("b", row.clone(), Some(badge("x")));
+        d.set("a", &row, Some(badge("1")));
+        d.set("a", &row, Some(badge("2")));
+        d.set("b", &row, Some(badge("x")));
         let on: Vec<_> = d.of(&row).into_iter().map(|x| x.from).collect();
         assert_eq!(on, ["a", "b"]);
         assert_eq!(d.of(&row)[0].decoration.badge.as_deref(), Some("2"));
         let before = d.revision();
         d.withdraw("a");
         assert!(d.revision() > before);
-        d.set("b", row.clone(), None);
+        d.set("b", &row, None);
         assert!(d.of(&row).is_empty());
         assert!(d.all().is_empty());
     }

@@ -163,10 +163,12 @@ pub struct FileFilter {
     pub extensions: Vec<String>,
 }
 
-/// A file or folder picker, or a save dialog. Its answer: a path (`open`,
-/// `folder`, `save`), a list of them (`open_many`), or `null` when the
-/// person cancelled. A path picked is one the extension may read (`save`:
-/// write; `folder`: read and write in) for the run.
+/// A file or folder picker, or a save dialog.
+///
+/// Its answer: a path (`open`, `folder`, `save`), a list of them
+/// (`open_many`), or `null` when the person cancelled. A path picked is
+/// one the extension may read (`save`: write; `folder`: read and write
+/// in) for the run.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Pick {

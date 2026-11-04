@@ -78,6 +78,8 @@ pub mod host;
 pub mod host_proto;
 #[cfg(feature = "host")]
 pub mod hostapi;
+#[cfg(feature = "ui")]
+pub mod host_ui_view;
 #[cfg(feature = "host")]
 pub mod hostui;
 #[cfg(feature = "host")]

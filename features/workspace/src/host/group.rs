@@ -509,6 +509,11 @@ fn Tab(
     let fade_from = transparent_of(&fade_to);
     let key_open = menu.clone();
     let mounted = menu.clone();
+    // What extensions put on it (`TabBadges`), after its name.
+    let badges = try_use_context::<super::TabBadges>().and_then(|b| {
+        let kind = host.workspace.peek().pane(&menu).map(|p| p.view.0.clone())?;
+        Some((b.0)(&kind, &menu.0))
+    });
     let label = if pinned {
         format!("{title}, pinned")
     } else {
@@ -558,6 +563,7 @@ fn Tab(
                     span { style: "position:absolute; top:0; right:0; bottom:0; width:16px; \
                                    background:linear-gradient(to right, {fade_from}, {fade_to});" }
                 }
+                {badges}
             }
             if !icons {
                 if pinned {

@@ -67,7 +67,7 @@ pub use guide::{ArrangedGroup, ArrangedSplit, ArrangedWindow, Arrangement, targe
 #[cfg(feature = "ui")]
 pub use host::{
     Bridge, Command, ContextEntries, ContextEntry, Host, Opened, PaneHandle, Popout, PresenceLayer,
-    PresenceOverlay, TitleRow, View, Views, WindowSystem, Windows, WorkspaceActions,
+    PresenceOverlay, TabBadges, TitleRow, View, Views, WindowSystem, Windows, WorkspaceActions,
     WorkspaceStore, WorkspaceView, use_host, use_pane, use_pane_status, use_presence_overlay,
 };
 pub use kinds::{
