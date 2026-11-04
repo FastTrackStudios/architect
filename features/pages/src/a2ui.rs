@@ -149,8 +149,7 @@ impl std::fmt::Debug for A2uiEngine {
 
 /// `text`'s JSON, a mistake said with its file, line and column.
 fn json(file: &str, text: &str) -> Result<Value, String> {
-    serde_json::from_str(text)
-        .map_err(|e| format!("{file}:{}:{}: {e}", e.line(), e.column()))
+    serde_json::from_str(text).map_err(|e| format!("{file}:{}:{}: {e}", e.line(), e.column()))
 }
 
 impl A2uiEngine {
@@ -194,9 +193,9 @@ impl A2uiEngine {
             Value::Array(messages) => self.messages(file, messages),
             Value::Object(o) => {
                 if let Some(messages) = o.get("messages") {
-                    let messages = messages
-                        .as_array()
-                        .ok_or_else(|| format!("{file}: \"messages\" is a list of A2UI messages"))?;
+                    let messages = messages.as_array().ok_or_else(|| {
+                        format!("{file}: \"messages\" is a list of A2UI messages")
+                    })?;
                     self.messages(file, messages)?;
                 }
                 if let Some(components) = o.get("components") {
@@ -289,7 +288,11 @@ impl A2uiEngine {
                         .and_then(Value::as_u64)
                         .map(|ms| Duration::from_millis(ms.max(100))),
                 ),
-                _ => return Err(format!("{file}: bind \"{path}\" is an action id or {{action, args, every}}")),
+                _ => {
+                    return Err(format!(
+                        "{file}: bind \"{path}\" is an action id or {{action, args, every}}"
+                    ));
+                }
             };
             self.binds.push(Bind {
                 path: pointer(path),
@@ -470,7 +473,10 @@ impl A2uiEngine {
             "h3" => ("h3", "font-size: 16px; font-weight: 650; margin: 0;"),
             "h4" => ("h4", "font-size: 14px; font-weight: 650; margin: 0;"),
             "h5" => ("h5", "font-size: 13px; font-weight: 650; margin: 0;"),
-            "caption" => ("span", "font-size: 12px; color: var(--muted-foreground, #888);"),
+            "caption" => (
+                "span",
+                "font-size: 12px; color: var(--muted-foreground, #888);",
+            ),
             _ => ("span", ""),
         };
         let mut t = el(tag, style);
@@ -500,7 +506,9 @@ impl A2uiEngine {
     /// list, each with its template path.
     fn children(&self, c: &ComponentModel, base: &str) -> Vec<(String, String)> {
         match c.children() {
-            Some(ChildList::Static(ids)) => ids.into_iter().map(|id| (id, base.to_owned())).collect(),
+            Some(ChildList::Static(ids)) => {
+                ids.into_iter().map(|id| (id, base.to_owned())).collect()
+            }
             Some(ChildList::Template { component_id, path }) => {
                 let cx = self.context(&c.id, base);
                 match cx.data_context.get(&path) {
@@ -531,7 +539,9 @@ impl A2uiEngine {
         };
         let mut b = el(
             "button",
-            &format!("{style} padding: 6px 12px; border-radius: 8px; font: inherit; cursor: pointer;"),
+            &format!(
+                "{style} padding: 6px 12px; border-radius: 8px; font: inherit; cursor: pointer;"
+            ),
         );
         if let Some(child) = c.child() {
             b.children.push(self.node(&child, base, depth + 1));
@@ -544,10 +554,16 @@ impl A2uiEngine {
                 base: base.to_owned(),
             },
         );
-        let mut wrap = el("div", "display: flex; flex-direction: column; gap: 4px; align-items: flex-start;");
+        let mut wrap = el(
+            "div",
+            "display: flex; flex-direction: column; gap: 4px; align-items: flex-start;",
+        );
         wrap.children.push(b);
         if let Some(said) = self.said.get(&key) {
-            let mut note = el("span", "font-size: 12px; color: var(--muted-foreground, #888);");
+            let mut note = el(
+                "span",
+                "font-size: 12px; color: var(--muted-foreground, #888);",
+            );
             note.children.push(text(said));
             wrap.children.push(note);
         }
@@ -594,7 +610,10 @@ impl A2uiEngine {
         let variant = word(c, "variant");
         let path = bound(c, "value", base);
         let mut wrap = el("label", "display: flex; flex-direction: column; gap: 4px;");
-        let mut l = el("span", "font-size: 12px; color: var(--muted-foreground, #888);");
+        let mut l = el(
+            "span",
+            "font-size: 12px; color: var(--muted-foreground, #888);",
+        );
         l.children.push(text(&label));
         wrap.children.push(l);
         let long = variant == "longText";
@@ -633,8 +652,12 @@ impl A2uiEngine {
         let (value, min, max) = (n("value", 0.0), n("min", 0.0), n("max", 100.0));
         let path = bound(c, "value", base);
         let mut wrap = el("label", "display: flex; flex-direction: column; gap: 4px;");
-        let mut l = el("span", "font-size: 12px; color: var(--muted-foreground, #888);");
-        l.children.push(text(&format!("{label}: {}", number(value))));
+        let mut l = el(
+            "span",
+            "font-size: 12px; color: var(--muted-foreground, #888);",
+        );
+        l.children
+            .push(text(&format!("{label}: {}", number(value))));
         wrap.children.push(l);
         let mut input = el("input", "");
         attr(&mut input, "type", "range");
@@ -661,7 +684,10 @@ impl A2uiEngine {
                         let label = o
                             .get("label")
                             .and_then(|l| serde_json::from_value::<DynamicString>(l.clone()).ok())
-                            .map_or_else(|| value.clone(), |d| cx.data_context.resolve_dynamic_string(&d));
+                            .map_or_else(
+                                || value.clone(),
+                                |d| cx.data_context.resolve_dynamic_string(&d),
+                            );
                         Some((label, value))
                     })
                     .collect()
@@ -674,7 +700,10 @@ impl A2uiEngine {
         let many = word(c, "variant") == "multipleSelection";
         let path = bound(c, "value", base);
         let mut wrap = el("div", "display: flex; flex-direction: column; gap: 4px;");
-        let mut l = el("span", "font-size: 12px; color: var(--muted-foreground, #888);");
+        let mut l = el(
+            "span",
+            "font-size: 12px; color: var(--muted-foreground, #888);",
+        );
         l.children.push(text(&label));
         wrap.children.push(l);
         let mut row = el("div", "display: flex; flex-wrap: wrap; gap: 6px;");
@@ -925,7 +954,10 @@ impl Engine for A2uiEngine {
                     // What it changed shows now: its bindings read again.
                     let now = Instant::now();
                     for (i, bind) in self.binds.iter_mut().enumerate() {
-                        let out = self.calls.values().any(|c| matches!(c, Call::Bind(b) if *b == i));
+                        let out = self
+                            .calls
+                            .values()
+                            .any(|c| matches!(c, Call::Bind(b) if *b == i));
                         if !out {
                             bind.next = Some(now);
                         }
@@ -1079,4 +1111,3 @@ fn placeholder(id: &str, why: &str) -> Element {
     p.children.push(text(why));
     p
 }
-

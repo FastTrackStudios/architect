@@ -234,7 +234,9 @@ fn a_broken_a2ui_save_keeps_the_last_good_page_and_says_where() {
     std::fs::write(&path, PAGE).unwrap();
     let pages = pages(list);
     let mut pane = Pane::open(&pages, &path);
-    pane.wait_until("the page", |p| p.text(".a2ui-Button").as_deref() == Some("Pin"));
+    pane.wait_until("the page", |p| {
+        p.text(".a2ui-Button").as_deref() == Some("Pin")
+    });
     // A trailing comma on line 3: not JSON.
     std::thread::sleep(Duration::from_millis(15));
     std::fs::write(

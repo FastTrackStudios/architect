@@ -581,10 +581,9 @@ impl UserData for Handle {
         // `w:on_message(fn)`: `worker.on_message(w, fn)`, as a page's
         // handle says it (`w.onMessage(fn)` in TypeScript).
         for which in ["message", "progress", "done"] {
-            methods.add_method(
-                format!("on_{which}"),
-                move |lua, h, f: mlua::Function| set_callback(lua, &h.0, which, f),
-            );
+            methods.add_method(format!("on_{which}"), move |lua, h, f: mlua::Function| {
+                set_callback(lua, &h.0, which, f)
+            });
         }
     }
 }

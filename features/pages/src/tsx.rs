@@ -189,10 +189,12 @@ pub fn remap<'a>(
             .clone()
             .into_iter()
             .find(|(name, _)| *name == module)
-            .map(|(_, map)| match place.and_then(|(l, c)| map.original(l, c)) {
-                Some((l, c)) => format!("{}:{l}:{c}", map.file),
-                None => map.file.clone(),
-            })
+            .map(
+                |(_, map)| match place.and_then(|(l, c)| map.original(l, c)) {
+                    Some((l, c)) => format!("{}:{l}:{c}", map.file),
+                    None => map.file.clone(),
+                },
+            )
             .unwrap_or_else(|| {
                 let rel = module
                     .strip_prefix(root)
@@ -333,17 +335,18 @@ export default function Board({ pins }: Props) {
         // line is not the source's.
         let src = "type A = { a: number };\ninterface B { b: string }\n\nexport function f(x: A) {\n  const y: number = x.a;\n  throw new Error(\"boom \" + y);\n}\n";
         let (code, map) = transpile_mapped(Path::new("p.tsx"), src).unwrap();
-        let printed = code
-            .lines()
-            .position(|l| l.contains("throw"))
-            .unwrap();
+        let printed = code.lines().position(|l| l.contains("throw")).unwrap();
         let col = code.lines().nth(printed).unwrap().find("throw").unwrap();
         let line = u32::try_from(printed + 1).unwrap();
         let col = u32::try_from(col + 1).unwrap();
         assert_eq!(map.original(line, col), Some((6, 3)), "{code}");
         let text = format!("Error: boom 1\n    at f (/r/p.tsx:{line}:{col})\n");
         let said = remap(&text, "/r", [("/r/p.tsx", &map)]);
-        assert_eq!(said.lines().next(), Some("p.tsx:6:3: Error: boom 1"), "{said}");
+        assert_eq!(
+            said.lines().next(),
+            Some("p.tsx:6:3: Error: boom 1"),
+            "{said}"
+        );
         assert!(said.contains("at f (p.tsx:6:3)"), "{said}");
         // A plain module's path is made relative, its place kept.
         let said = remap("x\n    at g (/r/job.js:4:2)", "/r", [("/r/p.tsx", &map)]);

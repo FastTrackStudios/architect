@@ -467,10 +467,15 @@ export default function Board({ pins = [] }: Props) {
     // Its stack is the file's too: `boom` threw at 13, `Board` called it
     // at 18.
     assert!(error.contains("board.tsx:18:"), "{error}");
-    assert!(!error.contains(&dir.path().display().to_string()), "{error}");
+    assert!(
+        !error.contains(&dir.path().display().to_string()),
+        "{error}"
+    );
     let problems = pages.status_problems();
     assert!(
-        problems.iter().any(|p| p.message.contains("board.tsx:13:29")),
+        problems
+            .iter()
+            .any(|p| p.message.contains("board.tsx:13:29")),
         "{problems:?}"
     );
     let banner = pane.text(".page-error").unwrap();

@@ -33,8 +33,14 @@ pub const PAGES: &[(&str, &str)] = &[
     ("board.tsx", include_str!("../pages/board.tsx")),
     ("kf.tsx", include_str!("../pages/kf.tsx")),
     ("primes.js", include_str!("../pages/primes.js")),
-    ("summary.a2ui.json", include_str!("../pages/summary.a2ui.json")),
-    ("luau-primes.luau", include_str!("../pages/luau-primes.luau")),
+    (
+        "summary.a2ui.json",
+        include_str!("../pages/summary.a2ui.json"),
+    ),
+    (
+        "luau-primes.luau",
+        include_str!("../pages/luau-primes.luau"),
+    ),
     ("count.luau", include_str!("../pages/count.luau")),
 ];
 
