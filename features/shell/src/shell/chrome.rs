@@ -121,6 +121,9 @@ pub struct Chrome {
     pub fillers: BTreeMap<Slot, Filler>,
     /// The slots shown empty.
     pub hidden: BTreeSet<Slot>,
+    /// The slots drawn by the shell's own component, whatever fills them
+    /// under this chrome ([`Self::over`]): a layout saying `shell/status`.
+    pub own: BTreeSet<Slot>,
     /// A slot's own look: token overrides over the workspace's (each a
     /// token's name and value, a literal or an expression).
     pub looks: BTreeMap<Slot, BTreeMap<String, String>>,
@@ -137,6 +140,7 @@ impl std::fmt::Debug for Chrome {
             .field("bar", &self.bar.len())
             .field("fillers", &self.fillers)
             .field("hidden", &self.hidden)
+            .field("own", &self.own)
             .field("looks", &self.looks)
             .finish()
     }
@@ -151,6 +155,10 @@ impl Chrome {
         out.tabs.extend(self.tabs.iter().cloned());
         out.status.extend(self.status.iter().cloned());
         out.bar.extend(self.bar.iter().cloned());
+        for slot in &self.own {
+            out.fillers.remove(slot);
+        }
+        out.own.extend(self.own.iter().copied());
         out.fillers
             .extend(self.fillers.iter().map(|(k, v)| (*k, v.clone())));
         out.hidden.extend(self.hidden.iter().copied());

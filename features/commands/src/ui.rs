@@ -405,7 +405,8 @@ impl Commands {
 
     /// Runs action `id` (with `args`, JSON, when given) as the app, saying
     /// where it was invoked from: a context menu's target, a status
-    /// item, a contributed menu row. A command registered with
+    /// item, a contributed menu row; its work outlives the component
+    /// that asked (a menu row unmounts as it runs). A command registered with
     /// [`use_command`] runs as [`Self::run`] does (it takes no
     /// invocation). False when there is no such action, it is disabled,
     /// or it said no; an async one is spawned and counts as run once
@@ -434,7 +435,8 @@ impl Commands {
             return list.run_json_with(&caller, id, &args).is_ok();
         }
         let id = id.to_owned();
-        spawn(async move {
+        // Past the caller's scope: a menu row is gone as it runs.
+        dioxus::core::spawn_forever(async move {
             let _ = list.run_json_async_with(&caller, &id, &args).await;
         });
         true

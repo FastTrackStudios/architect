@@ -678,8 +678,8 @@ pub mod ui {
     }
 
     /// The shell's chrome a layout asks for: each slot's view (made by
-    /// `fill`; `shell/<slot>` or one `fill` does not know is the shell's
-    /// own), hidden, its look.
+    /// `fill`; `shell/<slot>` is the shell's own over whatever an
+    /// extension put there), hidden, its look.
     #[must_use]
     pub fn chrome_of(layout: &LayoutFile, fill: impl Fn(&str) -> Option<Filler>) -> Chrome {
         let mut chrome = Chrome::default();
@@ -690,11 +690,16 @@ pub mod ui {
             if spec.hidden == Some(true) {
                 chrome.hidden.insert(slot);
             }
-            if let Some(view) = &spec.view
-                && !view.starts_with("shell/")
-                && let Some(filler) = fill(view)
-            {
-                chrome.fillers.insert(slot, filler);
+            match spec.view.as_deref() {
+                Some(view) if view.starts_with("shell/") => {
+                    chrome.own.insert(slot);
+                }
+                Some(view) => {
+                    if let Some(filler) = fill(view) {
+                        chrome.fillers.insert(slot, filler);
+                    }
+                }
+                None => {}
             }
             if !spec.tokens.is_empty() {
                 chrome.looks.insert(slot, spec.tokens.clone());
