@@ -178,7 +178,7 @@ impl Crumb {
 #[component]
 pub fn Breadcrumb(crumbs: Vec<Crumb>, #[props(into)] current: String) -> Element {
     let shell = use_shell();
-    let t = shell.theme;
+    let t = shell.theme.clone();
     let (drag, zoom) = shell
         .window
         .as_ref()
@@ -219,7 +219,7 @@ fn CrumbItem(crumb: Crumb) -> Element {
                     color: {t.ink_2}; font-family: {t.font}; font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden;",
             onclick: move |_| if let Some(p) = press { p.call(()) },
             if let Some(icon) = crumb.icon {
-                {icon(Icon { size: 14, color: t.ink_3 })}
+                {icon(Icon { size: 14, color: t.ink_3.clone() })}
             }
             span { style: "min-width: 0; overflow: hidden;", "{crumb.label}" }
         }
@@ -442,7 +442,7 @@ fn Group(group: ToolGroup, size: ToolSize) -> Element {
 #[component]
 fn ToolButton(tool: Tool, size: ToolSize, side: f64, framed: bool) -> Element {
     let shell = use_shell();
-    let t = shell.theme;
+    let t = shell.theme.clone();
     // A long menu scrolls inside the window rather than running past it.
     let menu_most = (shell.screen.height - shell.screen.insets.bottom - side - 72.0).max(160.0);
     let mut open = use_signal(|| false);
@@ -477,7 +477,7 @@ fn ToolButton(tool: Tool, size: ToolSize, side: f64, framed: bool) -> Element {
                     style: "position: relative; height: {side}px; {pad} {frame} flex-shrink: 0; display: flex; align-items: center; justify-content: center; \
                             gap: 6px; color: {t.ink}; font-family: {t.font}; font-size: {size.font}px; font-weight: 650;",
                     onclick: move |_| press.call(()),
-                    {(action.icon)(Icon { size: size.icon, color: t.ink })}
+                    {(action.icon)(Icon { size: size.icon, color: t.ink.clone() })}
                     if action.show_label {
                         span { "{action.label}" }
                     } else {
@@ -492,7 +492,7 @@ fn ToolButton(tool: Tool, size: ToolSize, side: f64, framed: bool) -> Element {
             menu,
             badge,
         } => {
-            let fill = if open() { t.active } else { "transparent" };
+            let fill = if open() { &*t.active } else { "transparent" };
             let fill_style = if framed {
                 String::new()
             } else {
@@ -506,7 +506,7 @@ fn ToolButton(tool: Tool, size: ToolSize, side: f64, framed: bool) -> Element {
                         style: "position: relative; height: {side}px; {icon_only} {frame} {fill_style} display: flex; align-items: center; \
                                 justify-content: center;",
                         onclick: move |_| open.toggle(),
-                        {icon(Icon { size: size.icon, color: t.ink })}
+                        {icon(Icon { size: size.icon, color: t.ink.clone() })}
                         if !open() {
                             span { class: "tip", style: "right: 0; top: {side + 6.0}px;", "{label}" }
                         }
@@ -591,7 +591,7 @@ pub fn Page(
     children: Element,
 ) -> Element {
     let shell = use_shell();
-    let t = shell.theme;
+    let t = shell.theme.clone();
     let ins = shell.screen.insets;
     let toolbar = toolbar.unwrap_or_else(|| Toolbar::of(action, menu, badge));
     let phone = shell.form() == FormFactor::Phone;
@@ -619,7 +619,7 @@ pub fn Page(
     // The brand leads a root page; its title goes large into the body.
     let branded = on_back.is_none() && lead.is_none() && shell.brand.is_some() && phone;
     let bar_h = touch_bar_height(&shell);
-    let fade_to = with_alpha(t.desk, 0.0);
+    let fade_to = with_alpha(&t.desk, 0.0);
     rsx! {
         div { style: "position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column;",
             div {
@@ -680,7 +680,7 @@ fn TouchBar(
     branded: bool,
 ) -> Element {
     let shell = use_shell();
-    let t = shell.theme;
+    let t = shell.theme.clone();
     let screen = shell.screen;
     let phone = shell.form() == FormFactor::Phone;
     let upright_phone = phone && !screen.landscape() && shell.style != ShellStyle::RailOnly;
@@ -721,7 +721,7 @@ fn TouchBar(
                     style: "width: 40px; height: 40px; margin-left: -10px; flex-shrink: 0; border: none; border-radius: 20px; \
                             background: transparent; display: flex; align-items: center; justify-content: center;",
                     onclick: move |_| back.call(()),
-                    ChevronLeft { size: 26, color: t.ink }
+                    ChevronLeft { size: 26, color: t.ink.to_string() }
                 }
             }
             if let Some(brand) = brand {
@@ -765,7 +765,7 @@ fn touch_bar_height(shell: &super::Shell) -> f64 {
 #[component]
 pub(super) fn MenuRow(entry: MenuEntry, open: Signal<bool>) -> Element {
     let shell = use_shell();
-    let t = shell.theme;
+    let t = shell.theme.clone();
     // A finger's row, or a mouse's.
     let (row_h, font) = if shell.screen.touch {
         (46, 16)
@@ -780,7 +780,7 @@ pub(super) fn MenuRow(entry: MenuEntry, open: Signal<bool>) -> Element {
             div { style: "padding: 10px 16px 4px; font-size: 12px; font-weight: 650; color: {t.ink_3};", "{text}" }
         },
         MenuEntry::Item(row) => {
-            let colour = if row.danger { t.danger } else { t.ink };
+            let colour = if row.danger { &*t.danger } else { &*t.ink };
             let pick = row.on_select;
             rsx! {
                 button {
@@ -794,14 +794,14 @@ pub(super) fn MenuRow(entry: MenuEntry, open: Signal<bool>) -> Element {
                     },
                     span { style: "width: 20px; display: flex; justify-content: center;",
                         if let Some(icon) = row.icon {
-                            {icon(Icon { size: 18, color: if row.danger { t.danger } else { t.ink_3 } })}
+                            {icon(Icon { size: 18, color: (if row.danger { &*t.danger } else { &*t.ink_3 }).into() })}
                         } else if row.checked {
-                            Check { size: 18, color: t.ink }
+                            Check { size: 18, color: t.ink.to_string() }
                         }
                     }
                     span { style: "flex: 1; min-width: 0; white-space: nowrap; overflow: hidden;", "{row.label}" }
                     if row.icon.is_some() && row.checked {
-                        Check { size: 16, color: t.ink }
+                        Check { size: 16, color: t.ink.to_string() }
                     }
                     if let Some(n) = row.note {
                         span { style: "font-size: 13px; color: {t.ink_3};", "{n}" }
@@ -826,7 +826,7 @@ fn DeskBar(
     trailing: Option<Element>,
 ) -> Element {
     let shell = use_shell();
-    let t = shell.theme;
+    let t = shell.theme.clone();
     let ins = shell.screen.insets;
     let mut desk_tab = shell.desk_tab;
     use_effect(use_reactive!(|title| desk_tab.set(Some(title))));
@@ -846,7 +846,7 @@ fn DeskBar(
                     style: "width: 28px; height: 28px; margin-left: -6px; flex-shrink: 0; border: none; border-radius: 7px; \
                             background: transparent; display: flex; align-items: center; justify-content: center;",
                     onclick: move |_| back.call(()),
-                    ChevronLeft { size: 18, color: t.ink_2 }
+                    ChevronLeft { size: 18, color: t.ink_2.to_string() }
                 }
             }
             if let Some(lead) = lead {
@@ -865,7 +865,7 @@ fn DeskBar(
 #[component]
 pub(super) fn DeskTab(title: String) -> Element {
     let shell = use_shell();
-    let t = shell.theme;
+    let t = shell.theme.clone();
     let tab_h = (shell.title_row() - 6.0).max(24.0);
     rsx! {
         div {

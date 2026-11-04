@@ -1,0 +1,48 @@
+# The extensions manager, linked into an app (features/extensions/src/manager).
+# A development copy of `manager` overrides it like any built-in.
+id = "manager"
+name = "Extensions"
+version = "0.1.0"
+kind = "process"
+api = "0.1"
+description = "Everything that customizes the app in one place: extensions, Luau scripts, workers, themes, layouts and keys, and any kind the app adds."
+authors = ["FastTrackStudio"]
+
+[entry]
+path = "architect-manager"
+
+[[actions]]
+id = "MANAGER_KINDS"
+name = "Manager: kinds"
+description = "What the extensions manager manages: each kind (extension, script, worker, theme, layout, and any the app adds), how many items, how many problems."
+group = "Extensions"
+effect = "read_only"
+
+[[actions]]
+id = "MANAGER_LIST"
+name = "Manager: list"
+description = "Every item the manager manages, or one kind's (`kind`), matching `query` (words in its name, id, kind, source or summary): id, name, version, source, on or off, problems and the ops it offers."
+group = "Extensions"
+effect = "read_only"
+params = '{"type":"object","properties":{"kind":{"type":"string"},"query":{"type":"string"}}}'
+
+[[actions]]
+id = "MANAGER_GET"
+name = "Manager: get"
+description = "Item `id` of `kind`'s page: what it adds, what it asks for and was granted, where it runs, its versions, log and problems."
+group = "Extensions"
+effect = "read_only"
+params = '{"type":"object","properties":{"kind":{"type":"string"},"id":{"type":"string"}},"required":["kind","id"]}'
+
+[[actions]]
+id = "MANAGER_RUN"
+name = "Manager: run an op"
+description = "Runs op `op` (one MANAGER_LIST names for the item: install, enable, disable, update, pin, clone, remove, revoke, builtin, use, restart, stop) on item `id` of `kind`, with `args` (`version`, `as`). A destructive op from a caller from outside needs the person's yes; installing what asks for capabilities answers needs_consent."
+group = "Extensions"
+effect = "mutating"
+params = '{"type":"object","properties":{"kind":{"type":"string"},"id":{"type":"string"},"op":{"type":"string"},"args":{"type":"object"}},"required":["kind","id","op"]}'
+
+[[views]]
+id = "manager"
+title = "Extensions"
+icon = "puzzle"

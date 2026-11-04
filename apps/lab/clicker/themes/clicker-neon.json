@@ -1,0 +1,18 @@
+// The clicker's own theme: a dark violet ground, a hot pink accent. It is
+// in the app's THEME_LIST (source `extension:lab.clicker`) while the
+// clicker is loaded; `THEME_SET {"one": "clicker-neon"}` shows it. A save
+// to this file in the clicker's development copy shows at once.
+{
+  "label": "Clicker Neon",
+  "appearance": "dark",
+  "palette": {
+    "background": "#0d0721",
+    "foreground": "#f5e9ff",
+    "accent": "#ff2bd6",
+    "info": "#22d3ee",
+    "chart": ["#ff2bd6", "#22d3ee", "#a3e635", "#facc15", "#a78bfa"]
+  },
+  "overrides": {
+    "clicker.count": "$info"
+  }
+}

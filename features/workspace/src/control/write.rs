@@ -1036,6 +1036,11 @@ pub fn save(st: &mut State, env: &Env, a: SaveArgs) -> Result<Answer, String> {
             return Err("a workspace needs a name".to_owned());
         }
         Some(name) => {
+            if let Some(id) = st.screensets.named(&name).map(|s| s.id.clone())
+                && let Some(refused) = builtin_from_outside(st, env, &id)
+            {
+                return Ok(refused);
+            }
             st.screensets.set_working(st.form, live);
             st.screensets.save_named(&name)
         }
@@ -1049,6 +1054,9 @@ pub fn save(st: &mut State, env: &Env, a: SaveArgs) -> Result<Answer, String> {
                     Acted::default(),
                 ));
             };
+            if let Some(refused) = builtin_from_outside(st, env, &id) {
+                return Ok(refused);
+            }
             st.screensets.set_working(st.form, live);
             let _ = st.screensets.save(st.form);
             id
@@ -1056,6 +1064,119 @@ pub fn save(st: &mut State, env: &Env, a: SaveArgs) -> Result<Answer, String> {
     };
     let acted = Acted {
         screenset: Some(id),
+        ..Acted::default()
+    };
+    Ok(finish(
+        st,
+        env,
+        &before,
+        Focus::AsIs,
+        acted,
+        Reason::Unchanged,
+    ))
+}
+
+/// A save over built-in set `id` by a caller from outside the app (an
+/// agent, a script run as someone): refused, `builtin`. What the app
+/// ships is the person's to change, not a caller's: it clones it first
+/// (`WORKSPACES_CLONE`). `None` when the save may go ahead.
+fn builtin_from_outside(st: &State, env: &Env, id: &str) -> Option<Answer> {
+    let builtin = st.screensets.get(id).is_some_and(|s| s.builtin);
+    (builtin && st.actor != super::APP).then(|| {
+        let acted = Acted {
+            screenset: Some(id.to_owned()),
+            ..Acted::default()
+        };
+        answer(st, env, false, Some(Reason::Builtin), acted)
+    })
+}
+
+/// `WORKSPACES_CLONE`: a copy of set `name` (by name or id).
+///
+/// Not built in and in no slot, named `as` (`<name> copy` unless given).
+/// It becomes the active set, the live layout staying as it is, so what
+/// is saved next goes to the copy (herdr's `layout.clone`).
+///
+/// # Errors
+///
+/// No such set, a blank name, or a name another set has.
+pub fn clone_set(st: &mut State, env: &Env, a: super::CloneArgs) -> Result<Answer, String> {
+    let before = st.clone();
+    let from = st
+        .screensets
+        .named(&a.name)
+        .or_else(|| st.screensets.get(&a.name))
+        .cloned()
+        .ok_or_else(|| {
+            format!(
+                "no workspace named {:?} (WORKSPACES_LIST lists them)",
+                a.name
+            )
+        })?;
+    let name = a
+        .as_name
+        .map_or_else(|| format!("{} copy", from.name), |n| n.trim().to_owned());
+    if name.is_empty() {
+        return Err("a workspace needs a name".to_owned());
+    }
+    if st.screensets.named(&name).is_some() {
+        return Err(format!("another workspace is named {name:?}: give `as`"));
+    }
+    let id = st
+        .screensets
+        .clone_set(&from.id, &name)
+        .ok_or("no such workspace")?;
+    // The live layout stays as it is (what was being changed is kept),
+    // now the copy's working one.
+    st.screensets.active = Some(id.clone());
+    let live = st.workspace.clone();
+    st.screensets.set_working(st.form, live);
+    let acted = Acted {
+        screenset: Some(id),
+        ..Acted::default()
+    };
+    Ok(finish(
+        st,
+        env,
+        &before,
+        Focus::AsIs,
+        acted,
+        Reason::Unchanged,
+    ))
+}
+
+/// `WORKSPACES_RESTORE_BUILTINS`, the escape hatch.
+///
+/// Every set the app ships back as it ships it ([`Env::shipped`]), a
+/// changed one kept as a copy (`<name> (edited)`) first, and the first of
+/// them (by slot) shown as the live layout.
+///
+/// # Errors
+///
+/// None the caller can mend.
+pub fn restore_builtins(
+    st: &mut State,
+    env: &Env,
+    _: super::RevisionArgs,
+) -> Result<Answer, String> {
+    let before = st.clone();
+    if env.shipped.is_empty() {
+        return Ok(answer(
+            st,
+            env,
+            false,
+            Some(Reason::NoScreenset),
+            Acted::default(),
+        ));
+    }
+    let first = st.screensets.restore_builtins(&env.shipped);
+    if let Some(id) = &first
+        && let Some(layout) = st.screensets.recall(id, st.form)
+    {
+        show(&mut st.workspace, layout);
+    }
+    let acted = Acted {
+        screenset: first,
         ..Acted::default()
     };
     Ok(finish(

@@ -50,7 +50,12 @@ fn grid() -> Marks {
             let (col, row) = ((id % COLS) as f64, (id / COLS) as f64);
             Mark {
                 id,
-                rect: Rect::new(col * W, row * H, col * W + W - 1.0, row * H + H - 1.0),
+                rect: Rect::new(
+                    col * W,
+                    row * H,
+                    f64::mul_add(col, W, W) - 1.0,
+                    f64::mul_add(row, H, H) - 1.0,
+                ),
                 fill: shade(id),
             }
         })
@@ -137,8 +142,14 @@ fn probes() -> Vec<Point> {
     let mut at = Vec::new();
     for id in 0..COLS * ROWS {
         let (col, row) = ((id % COLS) as f64, (id / COLS) as f64);
-        at.push(Point::new(col * W + 3.5, row * H + 2.5));
-        at.push(Point::new(col * W + 7.5, row * H + 5.5));
+        at.push(Point::new(
+            f64::mul_add(col, W, 3.5),
+            f64::mul_add(row, H, 2.5),
+        ));
+        at.push(Point::new(
+            f64::mul_add(col, W, 7.5),
+            f64::mul_add(row, H, 5.5),
+        ));
     }
     let mut seed = 0x2545_f491_u64;
     for _ in 0..2000 {
@@ -186,7 +197,7 @@ fn agrees(painter: &Painter, pixels: &[u8], scale: f64) {
 
 /// Whether the mark under `at` is the lit one (the probe's own pointer).
 fn painter_lit(painter: &Painter, at: Point) -> bool {
-    LIT.with(|l| l.get()) == painter.hit(at)
+    LIT.with(std::cell::Cell::get) == painter.hit(at)
 }
 
 thread_local! {
@@ -225,7 +236,7 @@ fn frame_times_for_ten_thousand_rects() {
     let stats = painter.stats();
     let mut raster_times = Vec::new();
     for i in 0..240_u16 {
-        let x = f32::from(i % 100) * 8.0 + 3.5;
+        let x = f32::mul_add(f32::from(i % 100), 8.0, 3.5);
         painter
             .ctx()
             .input

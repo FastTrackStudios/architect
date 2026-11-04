@@ -466,3 +466,43 @@ fn a_tree_numbers_the_bar_and_says_what_a_pick_runs() {
     assert_eq!(tree.pick(1), None);
     assert_eq!(tree.pick(99), None);
 }
+
+/// What others add to a menu (an extension's `[[menus]]`) is a live
+/// section in every menu, asked for by the menu's title each time the bar
+/// is resolved: its rows come and go, and a menu with none is as it was.
+#[test]
+fn contributed_rows_join_their_menu_and_go_with_whoever_added_them() {
+    let added: Rc<RefCell<Vec<(String, String)>>> = Rc::default();
+    let rows = Rc::clone(&added);
+    let bar = MenuBar::standard("Lab")
+        .menu("View", |m| m.command("WORKSPACE_SPLIT_RIGHT"))
+        .contributed(move |menu| {
+            rows.borrow()
+                .iter()
+                .filter(|(m, _)| m == menu)
+                .map(|(_, id)| Live::new("Close tab", id.clone()))
+                .collect()
+        });
+    let view = |bar: &MenuBar| {
+        bar.resolve(&commands())
+            .into_iter()
+            .find(|m| m.title == "View")
+            .map(|m| m.items)
+            .unwrap_or_default()
+    };
+    let before = view(&bar);
+    assert_eq!(before.len(), 1, "no separator left trailing: {before:?}");
+    added
+        .borrow_mut()
+        .push(("View".into(), "WORKSPACE_CLOSE_TAB".into()));
+    let after = view(&bar);
+    assert_eq!(after.len(), 3);
+    assert_eq!(after[1], Item::Separator);
+    assert!(matches!(&after[2], Item::Live(l) if l.command == "WORKSPACE_CLOSE_TAB"));
+    added.borrow_mut().clear();
+    assert_eq!(view(&bar), before);
+    assert!(
+        bar.resolve(&commands()).iter().all(|m| m.title != "File"),
+        "an empty menu stays away"
+    );
+}

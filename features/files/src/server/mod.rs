@@ -316,9 +316,10 @@ impl FilesServer {
                         .unwrap_or_default(),
                 })
             }
-            Principal::Guest { .. } | Principal::Host { .. } | Principal::Anonymous => {
-                Err(FilesFault::Unauthenticated)
-            }
+            Principal::Guest { .. }
+            | Principal::Host { .. }
+            | Principal::Extension { .. }
+            | Principal::Anonymous => Err(FilesFault::Unauthenticated),
         }
     }
 

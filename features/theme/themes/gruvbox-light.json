@@ -1,0 +1,27 @@
+{
+  "label": "Gruvbox Light",
+  "appearance": "light",
+  "palette": {
+    "background": "#fbf1c7",
+    "foreground": "#3c3836",
+    "accent": "#b57614",
+    "surface": "#f2e5bc",
+    "border": "#d5c4a1",
+    "danger": "#9d0006",
+    "chart": ["#b57614", "#076678", "#79740e", "#af3a03", "#8f3f71"]
+  },
+  "overrides": {
+    "accent": "#ebdbb2",
+    "destructive-foreground": "#fbf1c7",
+    "input": "#ebdbb2",
+    "muted": "#ebdbb2",
+    "muted-foreground": "#7c6f64",
+    "primary-foreground": "#fbf1c7",
+    "radius": "0.375rem",
+    "secondary": "#ebdbb2",
+    "sidebar": "#f2e5bc",
+    "sidebar-accent": "#ebdbb2",
+    "sidebar-primary-foreground": "#fbf1c7",
+    "signal-danger": "oklch(0.60 0.22 28)"
+  }
+}

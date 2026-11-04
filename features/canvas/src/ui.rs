@@ -58,13 +58,13 @@ pub fn window_pane(id: &str) -> PaneId {
 pub fn style_from_theme(theme: &ShellTheme) -> Style {
     let base = Style::default();
     let pick = |css: &str, or: Color| Color::from_css(css).unwrap_or(or);
-    let accent = pick(theme.accent, base.slider_grab);
-    let rule = pick(theme.rule, base.frame_hovered);
+    let accent = pick(&theme.accent, base.slider_grab);
+    let rule = pick(&theme.rule, base.frame_hovered);
     Style {
-        text: pick(theme.ink, base.text),
-        text_disabled: pick(theme.ink_3, base.text_disabled),
-        window_bg: pick(theme.sheet, base.window_bg),
-        frame_bg: pick(theme.pill, base.frame_bg),
+        text: pick(&theme.ink, base.text),
+        text_disabled: pick(&theme.ink_3, base.text_disabled),
+        window_bg: pick(&theme.sheet, base.window_bg),
+        frame_bg: pick(&theme.pill, base.frame_bg),
         frame_hovered: rule,
         button: rule,
         button_active: accent.faded(0.5),
@@ -352,7 +352,10 @@ mod script {
     use architect::action::ActionCaller;
     use architect_scripting::ScriptError;
     use architect_scripting::luau::Runtime;
-    use architect_workspace::{Pane, Rect as PaneRect, Target, Workspace};
+    use architect_theme::Resolved;
+    use architect_workspace::{
+        FRAME_BUDGET, Meters, Pane, Rect as PaneRect, Target, ViewMeter, Workspace,
+    };
     use dioxus::prelude::*;
     use futures::StreamExt;
     use futures::channel::mpsc::UnboundedReceiver;
@@ -376,6 +379,9 @@ mod script {
         pub error: Option<ScriptError>,
         /// What it printed, newest last (the last hundred lines).
         pub log: Vec<String>,
+        /// A frame is running past its budget now: what it drew last
+        /// stays on screen, marked busy (`architect_shell::BusyBadge`).
+        pub busy: bool,
     }
 
     enum Msg {
@@ -383,6 +389,8 @@ mod script {
         View(String, ViewPointer),
         Window(String, WindowEvent),
         Closed(String),
+        /// The app's theme changed.
+        Theme(Resolved),
     }
 
     /// One script on the canvas: what it draws and how it is going.
@@ -391,6 +399,7 @@ mod script {
         output: Signal<Output>,
         status: Signal<Status>,
         tx: Coroutine<Msg>,
+        meter: CopyValue<ViewMeter>,
     }
 
     impl ScriptCanvas {
@@ -404,6 +413,13 @@ mod script {
         #[must_use]
         pub fn status(&self) -> Status {
             self.status.read().clone()
+        }
+
+        /// Its frames' times (not reactive): in the [`Meters`] in
+        /// context, when there are, under its step's name.
+        #[must_use]
+        pub fn meter(&self) -> ViewMeter {
+            self.meter.peek().clone()
         }
 
         /// A view of kind `view` shows with `spaces` (`None`: it is gone).
@@ -473,8 +489,19 @@ mod script {
         })
     }
 
-    /// Runs `source` as a live script on `runtime` as `caller`, its windows
-    /// styled by `theme`, in the [`Canvases`] in context (when there are).
+    /// Runs `source` as a live script on `runtime` as `caller`, in the
+    /// [`Canvases`] in context (when there are).
+    ///
+    /// Under the app's theme store (`architect_theme::use_theme_store`)
+    /// its windows follow the theme ([`crate::imgui::Style::from_theme`]),
+    /// restyled and drawn again on every change, and its script reads it
+    /// as `theme`; `style` is the look with no store above.
+    ///
+    /// The script runs on its own thread; this drives it from a Dioxus
+    /// task that only awaits. A frame for each input, each worker's news
+    /// and each `wake_after`; each frame measured against a frame's
+    /// budget ([`ScriptCanvas::meter`], `step` in the [`Meters`] in
+    /// context), and [`Status::busy`] while one runs past it.
     pub fn use_script_canvas(
         runtime: Runtime,
         caller: ActionCaller,
@@ -485,6 +512,14 @@ mod script {
     ) -> ScriptCanvas {
         let output = use_signal(Output::default);
         let status = use_signal(Status::default);
+        let meters = try_use_context::<Meters>();
+        let meter = use_hook(|| {
+            CopyValue::new(meters.map_or_else(
+                || ViewMeter::new(&step, FRAME_BUDGET),
+                |m| m.meter(&step, FRAME_BUDGET),
+            ))
+        });
+        let themed = architect_theme::try_use_theme().map(|t| t.resolved());
         let tx = use_coroutine(move |rx: UnboundedReceiver<Msg>| {
             let (runtime, caller, source, args, step, style) = (
                 runtime.clone(),
@@ -494,6 +529,7 @@ mod script {
                 step.clone(),
                 style.clone(),
             );
+            let theme = themed.map(|t| t.peek().clone());
             drive(
                 Start {
                     runtime,
@@ -502,13 +538,26 @@ mod script {
                     args,
                     step,
                     style,
+                    theme,
+                    meter: meter.peek().clone(),
                 },
                 rx,
                 output,
                 status,
             )
         });
-        let canvas = ScriptCanvas { output, status, tx };
+        // Every theme change, to the script: its windows restyled, a frame.
+        use_effect(move || {
+            if let Some(theme) = themed {
+                tx.send(Msg::Theme(theme.read().clone()));
+            }
+        });
+        let canvas = ScriptCanvas {
+            output,
+            status,
+            tx,
+            meter,
+        };
         let canvases = try_use_context::<Canvases>();
         use_hook(move || {
             if let Some(c) = canvases {
@@ -519,6 +568,8 @@ mod script {
             if let Some(c) = canvases {
                 c.remove(canvas);
             }
+            // Gone mid-frame: no longer busy.
+            meter.peek().set_busy(false);
         });
         canvas
     }
@@ -530,6 +581,9 @@ mod script {
         args: Value,
         step: String,
         style: Style,
+        /// The app's theme, when it has a store.
+        theme: Option<Resolved>,
+        meter: ViewMeter,
     }
 
     const LOG_KEPT: usize = 100;
@@ -558,14 +612,29 @@ mod script {
         mut output: Signal<Output>,
         mut status: Signal<Status>,
     ) {
-        let (report, session) = Session::start(
-            &start.runtime,
-            &start.caller,
-            &start.source,
-            start.args,
-            &start.step,
-        )
-        .await;
+        let (report, session) = match &start.theme {
+            Some(theme) => {
+                Session::start_themed(
+                    &start.runtime,
+                    &start.caller,
+                    &start.source,
+                    start.args,
+                    &start.step,
+                    theme,
+                )
+                .await
+            }
+            None => {
+                Session::start(
+                    &start.runtime,
+                    &start.caller,
+                    &start.source,
+                    start.args,
+                    &start.step,
+                )
+                .await
+            }
+        };
         let Some(mut session) = session else {
             note(&mut status, &report, false);
             return;
@@ -574,13 +643,19 @@ mod script {
             note(&mut status, &report, false);
             return;
         }
-        session.set_style(start.style);
+        if start.theme.is_none() {
+            session.set_style(start.style);
+        }
         note(&mut status, &report, session.running());
         output.set(session.output().clone());
         let mut input = Input::default();
-        while let Some(first) = rx.next().await {
+        let meter = start.meter;
+        loop {
+            let Some(first) = next_turn(&session, &mut rx).await else {
+                return;
+            };
             // Moves coalesce; a press or a release is a frame of its own.
-            let mut next = Some(first);
+            let mut next = first;
             let mut pressed = false;
             while let Some(msg) = next.take() {
                 if apply(&session, &mut input, msg) {
@@ -589,14 +664,14 @@ mod script {
                 }
                 next = rx.try_recv().ok();
             }
-            let report = session.frame(input.clone()).await;
+            let report = metered(&mut session, &input, &meter, status).await;
             input.closed.clear();
             note(&mut status, &report, session.running());
             // A click is known as its widget is drawn, after what it
             // changes may have been: the frame after it draws that, as
             // Dear ImGui's next frame would, with no input to wait for.
             if pressed && !input.down && session.running() {
-                let report = session.frame(input.clone()).await;
+                let report = metered(&mut session, &input, &meter, status).await;
                 note(&mut status, &report, session.running());
             }
             if *output.peek() != *session.output() {
@@ -608,6 +683,41 @@ mod script {
                 return;
             }
         }
+    }
+
+    /// Waits for what calls for the next frame: a message (`Some(Some)`),
+    /// the script's own ask — a worker's news, its `wake_after` —
+    /// (`Some(None)`), or the host going (`None`).
+    async fn next_turn(session: &Session, rx: &mut UnboundedReceiver<Msg>) -> Option<Option<Msg>> {
+        use futures::FutureExt as _;
+        let tick = session.wake_after();
+        let ticked = async {
+            match tick {
+                Some(after) => futures_timer::Delay::new(after).await,
+                None => std::future::pending().await,
+            }
+        };
+        futures::select! {
+            msg = rx.next() => msg.map(Some),
+            () = Box::pin(session.woken()).fuse() => Some(None),
+            () = Box::pin(ticked).fuse() => Some(None),
+        }
+    }
+
+    /// One frame, measured: busy while it runs past its budget.
+    async fn metered(
+        session: &mut Session,
+        input: &Input,
+        meter: &ViewMeter,
+        mut status: Signal<Status>,
+    ) -> architect_scripting::luau::Report {
+        let report = session
+            .frame_metered(input.clone(), meter, || status.write().busy = true)
+            .await;
+        if status.peek().busy {
+            status.write().busy = false;
+        }
+        report
     }
 
     /// Takes `msg` in; whether it pressed or let go.
@@ -634,6 +744,10 @@ mod script {
             Msg::Closed(id) => {
                 input.sizes.remove(&id);
                 input.closed.insert(id);
+                false
+            }
+            Msg::Theme(theme) => {
+                session.set_theme(&theme);
                 false
             }
         }

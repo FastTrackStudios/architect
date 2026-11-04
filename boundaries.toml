@@ -131,6 +131,21 @@ package = "architect-canvas"
 layer = "L0"
 
 [[row]]
+package = "architect-pages"
+layer = "L0"
+
+[[row]]
+package = "architect-theme"
+layer = "L0"
+note = "the palette, resolver, cascade and store: pure data"
+
+[[row]]
+package = "architect-theme"
+features = ["actions"]
+layer = "L0"
+note = "THEME_* on an Action List"
+
+[[row]]
 package = "architect-a2ui"
 layer = "L0"
 note = "the catalog, surfaces on Loro, events as actions; a2ui-base pinned exactly"
@@ -257,8 +272,18 @@ features = ["ui"]
 layer = "L4"
 
 [[row]]
+package = "architect-pages"
+features = ["ui"]
+layer = "L4"
+
+[[row]]
 package = "architect-a2ui"
 features = ["ui"]
+layer = "L4"
+
+[[row]]
+package = "architect-theme"
+features = ["dioxus"]
 layer = "L4"
 
 [[row]]

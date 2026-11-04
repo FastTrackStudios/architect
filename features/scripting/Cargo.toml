@@ -17,7 +17,7 @@ description = "Scripts: Luau programs over the Action List, each saved one an ac
 
 [features]
 default = []
-luau = ["dep:mlua", "dep:architect", "dep:serde_json", "dep:tracing"]
+luau = ["dep:mlua", "dep:architect", "dep:architect-theme", "dep:serde_json", "dep:tracing", "dep:futures", "dep:tokio"]
 crdt = ["dep:crdt"]
 settings = ["dep:architect", "architect/settings"]
 
@@ -31,6 +31,12 @@ crdt = { workspace = true, optional = true }
 mlua = { version = "0.12", optional = true, features = ["luau", "async", "send", "serde"] }
 serde_json = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
+# A run on its VM thread, and the channel its caller awaits (`vm`).
+futures = { version = "0.3", optional = true }
+# The app's runtime a script's action calls run on (`vm::Dispatch`).
+tokio = { workspace = true, optional = true }
+# The app's theme for scripts (`theme`, feature `luau`): the model only.
+architect-theme = { workspace = true, optional = true }
 
 [dev-dependencies]
 # Its own runtime, so `cargo test --workspace` builds the tests with it.
@@ -39,6 +45,7 @@ architect-mcp = { path = "../mcp" }
 architect-permissions.workspace = true
 futures = "0.3"
 serde_json.workspace = true
+tokio = { workspace = true }
 crdt = { workspace = true }
 
 [lib]

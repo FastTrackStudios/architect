@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use architect::action::{ActionError, ActionList, ActionMeta, Effect};
 use architect_workspace::paint::PaintPane;
-use architect_workspace::{HostData, Pane, Side, Target, Workspace};
 use architect_workspace::paint::peniko::Color;
+use architect_workspace::{HostData, Pane, Side, Target, Workspace};
 use dioxus::prelude::*;
 use editor_keyflow::view::{KeyflowEditor, PANE_CSS, editor_view::EDITOR_CSS};
 use facet::Facet;
@@ -59,7 +59,7 @@ pub fn KeyflowEditorPane() -> Element {
         return rsx! { div { "Could not parse the sample chart" } };
     };
     let data = shared.data.clone();
-    let wake = shared.mount.wake.clone();
+    let wake = shared.mount.wake;
     rsx! {
         EditorStyles {}
         div {
@@ -100,7 +100,8 @@ fn EditorStyles() -> Element {
 /// names it), and the caret in the lab's teal. The caret's shape is the
 /// editor's own (a zero-width box with its bar hung off it, so the text
 /// never moves); a host sets only its colour, through `--editor-caret`.
-const LAB_OVERRIDES: &str = ".kf-pane-head { display: none; } .editor-root { --editor-caret: #3ec7a8; }";
+const LAB_OVERRIDES: &str =
+    ".kf-pane-head { display: none; } .editor-root { --editor-caret: #3ec7a8; }";
 
 /// The chart preview alone, with the theme toggle over it.
 #[component]
@@ -116,16 +117,29 @@ pub fn KeyflowChartPane() -> Element {
             loop {
                 futures_timer::Delay::new(COMMAND_POLL).await;
                 for command in drain() {
-                    apply(&chart, command);
+                    apply(&chart, &command);
                 }
                 publish(&chart);
             }
         }
     });
+    // The chart follows the app's theme (a typed slice: it repaints only when
+    // these colours change), until KEYFLOW_SET_CHART_THEME pins it.
+    let colours = architect_theme::use_themed::<ChartColours>();
+    let follow = shared.clone();
+    use_effect(move || {
+        let c = colours();
+        if CHART_PINNED.load(Ordering::Relaxed) {
+            return;
+        }
+        *CHART_DARK.write() = c.dark;
+        follow.data.update(|s| s.theme = Some(c.theme()));
+        follow.mount.wake.wake();
+    });
     rsx! {
         div { style: "display:flex; flex-direction:column; height:100%; min-height:0;",
             div { style: "flex:1; min-height:0;",
-                PaintPane { mount: shared.mount.mount.clone() }
+                PaintPane { mount: shared.mount.mount }
             }
         }
     }
@@ -149,6 +163,41 @@ pub fn chart_workspace() -> Workspace {
 /// The editor's colours: the dark pane of the Architect theme. The chrome
 /// and caret read these custom properties.
 const EDITOR_COLOURS: &str = "--code-bg:#202024; --background:#202024; --foreground:#e9e9ee; --ink:#e9e9ee; --ink-soft:#9a9aa6; --accent:#3ec7a8;";
+
+/// The chart's slice of the app's theme: its paper, its ink, its staff.
+#[derive(Clone, PartialEq)]
+struct ChartColours {
+    dark: bool,
+    paper: architect_theme::Rgba,
+    ink: architect_theme::Rgba,
+    staff: architect_theme::Rgba,
+}
+
+impl architect_theme::FromResolved for ChartColours {
+    fn from_resolved(r: &architect_theme::Resolved) -> Self {
+        Self {
+            dark: r.scheme() == architect_theme::Scheme::Dark,
+            paper: r.color("card"),
+            ink: r.color("card-foreground"),
+            staff: r.color("muted-foreground"),
+        }
+    }
+}
+
+impl ChartColours {
+    fn theme(&self) -> ChartTheme {
+        let c = |x: architect_theme::Rgba| Color::new([x.r, x.g, x.b, x.a]);
+        let mut theme = ChartTheme::default();
+        theme.render.background_color = c(self.paper);
+        theme.render.foreground_color = c(self.ink);
+        theme.render.staff_color = c(self.staff);
+        theme
+    }
+}
+
+/// Set once `KEYFLOW_SET_CHART_THEME` has chosen the chart's theme: from then
+/// on it no longer follows the app's.
+static CHART_PINNED: AtomicBool = AtomicBool::new(false);
 
 fn dark_theme() -> ChartTheme {
     let mut theme = ChartTheme::default();
@@ -194,12 +243,17 @@ fn drain() -> Vec<ChartCommand> {
 }
 
 /// Applies a waiting change on the UI thread, then asks for a frame.
-fn apply(chart: &KeyflowChart, command: ChartCommand) {
+fn apply(chart: &KeyflowChart, command: &ChartCommand) {
     match command {
-        ChartCommand::View(view) => chart.data.update(|s| s.view = view),
+        ChartCommand::View(view) => chart.data.update(|s| s.view = *view),
         ChartCommand::Dark(dark) => {
-            *CHART_DARK.write() = dark;
-            let theme = if dark { dark_theme() } else { ChartTheme::default() };
+            CHART_PINNED.store(true, Ordering::Relaxed);
+            *CHART_DARK.write() = *dark;
+            let theme = if *dark {
+                dark_theme()
+            } else {
+                ChartTheme::default()
+            };
             chart.data.update(|s| s.theme = Some(theme));
         }
     }
@@ -350,9 +404,16 @@ fn decode(id: &str, bytes: &[u8]) -> Result<serde_json::Value, ActionError> {
     serde_json::from_slice(bytes).map_err(|e| bad(id, e.to_string()))
 }
 
+/// A field of a request's arguments: `null` when it is missing, as indexing
+/// the JSON gives.
+fn arg<'a>(args: &'a serde_json::Value, key: &str) -> &'a serde_json::Value {
+    static NULL: serde_json::Value = serde_json::Value::Null;
+    args.get(key).unwrap_or(&NULL)
+}
+
 /// What the setters return.
-fn ok() -> Result<Vec<u8>, ActionError> {
-    Ok(serde_json::to_vec(&serde_json::json!({ "ok": true })).unwrap_or_default())
+fn ok() -> Vec<u8> {
+    serde_json::to_vec(&serde_json::json!({ "ok": true })).unwrap_or_default()
 }
 
 /// Puts the Keyflow actions on `list`.
@@ -387,7 +448,7 @@ pub fn register(list: &ActionList) {
         Arc::new(|_: &[u8]| {
             let id = KEYFLOW_FOCUS_EDITOR.id;
             editor_keyflow::view::focus(EDITOR_ID).map_err(|e| failed(id, e))?;
-            ok()
+            Ok(ok())
         }),
     );
     let _ = list.register_dynamic(
@@ -398,11 +459,11 @@ pub fn register(list: &ActionList) {
         Arc::new(|bytes: &[u8]| {
             let id = KEYFLOW_SET_SOURCE.id;
             let args = decode(id, bytes)?;
-            let text = args["text"]
+            let text = arg(&args, "text")
                 .as_str()
                 .ok_or_else(|| bad(id, "text: a string"))?;
             editor_keyflow::view::set_text(EDITOR_ID, text).map_err(|e| failed(id, e))?;
-            ok()
+            Ok(ok())
         }),
     );
     let _ = list.register_dynamic(
@@ -413,20 +474,20 @@ pub fn register(list: &ActionList) {
         Arc::new(|bytes: &[u8]| {
             let id = KEYFLOW_SET_CURSOR.id;
             let args = decode(id, bytes)?;
-            if let Some(offset) = args["offset"].as_u64() {
+            if let Some(offset) = arg(&args, "offset").as_u64() {
                 let offset = usize::try_from(offset).unwrap_or(usize::MAX);
                 editor_keyflow::view::set_cursor(EDITOR_ID, offset).map_err(|e| failed(id, e))?;
             } else {
-                let line = args["line"]
+                let line = arg(&args, "line")
                     .as_u64()
                     .ok_or_else(|| bad(id, "offset, or line (and col)"))?;
-                let col = args["col"].as_u64().unwrap_or(0);
+                let col = arg(&args, "col").as_u64().unwrap_or(0);
                 let line = usize::try_from(line).unwrap_or(usize::MAX);
                 let col = usize::try_from(col).unwrap_or(usize::MAX);
                 editor_keyflow::view::set_cursor_at(EDITOR_ID, line, col)
                     .map_err(|e| failed(id, e))?;
             }
-            ok()
+            Ok(ok())
         }),
     );
     let _ = list.register_dynamic(
@@ -437,7 +498,7 @@ pub fn register(list: &ActionList) {
         Arc::new(|bytes: &[u8]| {
             let id = KEYFLOW_CHART_VIEW.id;
             let args = decode(id, bytes)?;
-            let zoom = match &args["zoom"] {
+            let zoom = match arg(&args, "zoom") {
                 serde_json::Value::Null => None,
                 zoom => Some(
                     zoom.as_f64()
@@ -445,10 +506,10 @@ pub fn register(list: &ActionList) {
                 ),
             };
             let scroll = (
-                args["scrollX"]
+                arg(&args, "scrollX")
                     .as_f64()
                     .ok_or_else(|| bad(id, "scrollX: a number"))?,
-                args["scrollY"]
+                arg(&args, "scrollY")
                     .as_f64()
                     .ok_or_else(|| bad(id, "scrollY: a number"))?,
             );
@@ -458,7 +519,7 @@ pub fn register(list: &ActionList) {
                 zoom: zoom.map(|zoom: f64| zoom.clamp(0.25, 4.0)),
                 scroll,
             }));
-            ok()
+            Ok(ok())
         }),
     );
     let _ = list.register_dynamic(
@@ -469,11 +530,11 @@ pub fn register(list: &ActionList) {
         Arc::new(|bytes: &[u8]| {
             let id = KEYFLOW_SET_CHART_THEME.id;
             let args = decode(id, bytes)?;
-            let dark = args["dark"]
+            let dark = arg(&args, "dark")
                 .as_bool()
                 .ok_or_else(|| bad(id, "dark: a boolean"))?;
             queue(ChartCommand::Dark(dark));
-            ok()
+            Ok(ok())
         }),
     );
 }

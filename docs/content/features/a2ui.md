@@ -161,11 +161,20 @@ Done (architect#228):
 - events as actions, confirmed;
 - the `A2UI_*` actions over MCP and the CLI;
 - the renderer on Blitz, and the lab's "Agent UI" view.
+- the default build and `ui` compile to `wasm32-unknown-unknown` (CI's
+  wasm job checks both, #253). In the browser a `CrdtDoc` is not `Send`,
+  so `Surfaces` holds it in a `send_wrapper::SendWrapper` there
+  (`features/a2ui/src/store.rs`); the browser has one thread, so the
+  Action List's `Send` handlers can still hold the surfaces.
 
 Not yet:
 
-- **Web host.** The renderer is plain Dioxus over architect-ui, but no
-  web build of it has been run or tested. That is a follow-up issue.
+- **Web host.** The renderer builds for the browser, but no web app
+  draws it yet: a web lab target rendering a surface from
+  `A2UI_RENDER`, its interactive components (`Slider`, `CheckBox`,
+  `TextField`, `Tabs`) and the theme's sheets next to an app's own
+  Tailwind sheet are checked in a browser by #253's second part. It needs
+  `dx` and a `wasm-bindgen` CLI in the dev shell.
 - **The lab's persistence.** The lab keeps its surfaces in an in-memory
   document. An app keeps them in one of its own documents (a `DocFile`, a
   synced doc).

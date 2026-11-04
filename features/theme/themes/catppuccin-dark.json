@@ -1,0 +1,27 @@
+{
+  "label": "Catppuccin Dark",
+  "appearance": "dark",
+  "palette": {
+    "background": "#1e1e2e",
+    "foreground": "#cdd6f4",
+    "accent": "#cba6f7",
+    "surface": "#181825",
+    "border": "#45475a",
+    "danger": "#f38ba8",
+    "chart": ["#cba6f7", "#89b4fa", "#a6e3a1", "#f9e2af", "#f5c2e7"]
+  },
+  "overrides": {
+    "accent": "#313244",
+    "destructive-foreground": "#1e1e2e",
+    "input": "#313244",
+    "muted": "#313244",
+    "muted-foreground": "#a6adc8",
+    "primary-foreground": "#1e1e2e",
+    "radius": "0.5rem",
+    "secondary": "#313244",
+    "sidebar": "#181825",
+    "sidebar-accent": "#313244",
+    "sidebar-primary-foreground": "#1e1e2e",
+    "signal-danger": "oklch(0.60 0.22 28)"
+  }
+}

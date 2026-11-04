@@ -1,0 +1,27 @@
+{
+  "label": "Obsidian Light",
+  "appearance": "light",
+  "palette": {
+    "background": "#ffffff",
+    "foreground": "#222222",
+    "accent": "#705dcf",
+    "surface": "#f6f6f6",
+    "border": "#e0e0e0",
+    "danger": "#e93147",
+    "chart": ["#705dcf", "#086ddd", "#08b94e", "#e0ac00", "#d53984"]
+  },
+  "overrides": {
+    "accent": "#eae8fb",
+    "accent-foreground": "#46389e",
+    "destructive-foreground": "#ffffff",
+    "muted": "#f2f3f5",
+    "muted-foreground": "#5c5c5c",
+    "popover": "#ffffff",
+    "radius": "0.5rem",
+    "secondary": "#f2f3f5",
+    "sidebar": "#f6f6f6",
+    "sidebar-accent": "#eae8fb",
+    "sidebar-accent-foreground": "#46389e",
+    "signal-danger": "oklch(0.60 0.22 28)"
+  }
+}

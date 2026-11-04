@@ -424,6 +424,59 @@ impl Screensets {
         deleted
     }
 
+    /// Copy set `id` as a new set named `name` (not built in, in no
+    /// slot); its id. `None` when there is no such set.
+    pub fn clone_set(&mut self, id: &str, name: &str) -> Option<String> {
+        let from = self.get(id)?.clone();
+        let base = slug(name);
+        let mut new_id = base.clone();
+        let mut n = 2u32;
+        while self.get(&new_id).is_some() {
+            new_id = format!("{base}-{n}");
+            n = n.saturating_add(1);
+        }
+        self.sets.push(Screenset {
+            id: new_id.clone(),
+            name: name.to_owned(),
+            slot: None,
+            builtin: false,
+            layouts: from.layouts,
+        });
+        Some(new_id)
+    }
+
+    /// Every set in `shipped` back as shipped: one the person changed is
+    /// kept first as a set of their own (`<name> (edited)`, no slot), and
+    /// the working copies of a restored set are dropped. The first shipped
+    /// set (by slot, then order), to show.
+    pub fn restore_builtins(&mut self, shipped: &[Screenset]) -> Option<String> {
+        for set in shipped {
+            match self.sets.iter().position(|s| s.id == set.id) {
+                Some(at) => {
+                    let kept = self.sets.get(at).cloned();
+                    if let Some(kept) = kept.filter(|k| k.layouts != set.layouts) {
+                        let name = format!("{} (edited)", kept.name);
+                        if self.named(&name).is_none() {
+                            let _ = self.clone_set(&kept.id, &name);
+                        }
+                    }
+                    if let Some(slot) = self.sets.get_mut(at) {
+                        *slot = set.clone();
+                    }
+                }
+                None => self.sets.push(set.clone()),
+            }
+        }
+        self.working.clear();
+        let first = shipped
+            .iter()
+            .filter(|s| s.slot.is_some())
+            .min_by_key(|s| s.slot)
+            .or_else(|| shipped.first())?;
+        self.active = Some(first.id.clone());
+        Some(first.id.clone())
+    }
+
     /// Serialise (facet JSON).
     pub fn to_json(&self) -> Result<String, String> {
         facet_json::to_string(self).map_err(|e| e.to_string())

@@ -59,7 +59,7 @@ pub fn InWindowMenus(bar: MenuBar) -> Element {
                     button {
                         class: "lp",
                         style: "height: 24px; padding: 0 8px; border: none; border-radius: 5px; color: {t.ink}; \
-                                font-family: {t.font}; font-size: 13px; background: {fill(showing == Some(id), t.active)};",
+                                font-family: {t.font}; font-size: 13px; background: {fill(showing == Some(id), &t.active)};",
                         onclick: move |_| open.set(if showing == Some(id) { None } else { Some(id) }),
                         // Once one is open, moving along opens the next.
                         onmouseenter: move |_| {
@@ -88,7 +88,7 @@ fn theme() -> ShellTheme {
     try_use_shell().map(|s| s.theme).unwrap_or_default()
 }
 
-const fn fill(on: bool, active: &'static str) -> &'static str {
+const fn fill(on: bool, active: &str) -> &str {
     if on { active } else { "transparent" }
 }
 
@@ -110,7 +110,7 @@ fn MenuRows(nodes: Vec<Tree>, depth: u8, on_pick: EventHandler<Pick>) -> Element
                     MenuRows { nodes: node.children, depth: depth.saturating_add(1), on_pick }
                 },
                 Kind::Row(row) => {
-                    let ink = if row.enabled { t.ink } else { t.ink_3 };
+                    let ink = if row.enabled { &*t.ink } else { &*t.ink_3 };
                     let enabled = row.enabled;
                     let pick = row.pick.clone();
                     rsx! {

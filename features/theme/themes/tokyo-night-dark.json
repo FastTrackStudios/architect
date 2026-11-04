@@ -1,0 +1,26 @@
+{
+  "label": "Tokyo Night Dark",
+  "appearance": "dark",
+  "palette": {
+    "background": "#1a1b26",
+    "foreground": "#c0caf5",
+    "accent": "#7aa2f7",
+    "surface": "#16161e",
+    "border": "#292e42",
+    "danger": "#f7768e",
+    "chart": ["#7aa2f7", "#bb9af7", "#9ece6a", "#e0af68", "#7dcfff"]
+  },
+  "overrides": {
+    "accent": "#292e42",
+    "destructive-foreground": "#16161e",
+    "muted": "#292e42",
+    "muted-foreground": "#565f89",
+    "primary-foreground": "#16161e",
+    "radius": "0.5rem",
+    "secondary": "#292e42",
+    "sidebar": "#16161e",
+    "sidebar-accent": "#292e42",
+    "sidebar-primary-foreground": "#16161e",
+    "signal-danger": "oklch(0.60 0.22 28)"
+  }
+}
