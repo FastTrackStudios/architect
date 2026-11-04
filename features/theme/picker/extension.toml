@@ -1,0 +1,63 @@
+# The theme picker (features/theme/picker/src/lib.rs): ⌘K's "Choose a
+# theme…" and "Light or dark", and ⌘O's `theme:` source. One Rust value
+# (`ThemePicker`, a linked::Extension): an app links it in as a built-in,
+# and its program (src/main.rs) serves the same value as a process when
+# a development copy runs (EXT_CLONE {"id":"theme.picker"}). Everything
+# it does goes through the host service, so it is the same both ways.
+id = "theme.picker"
+name = "Theme picker"
+version = "0.1.0"
+kind = "process"
+api = "0.1"
+description = "Choose a theme from ⌘K or ⌘O (theme:), and switch between light and dark."
+authors = ["FastTrackStudio"]
+
+[entry]
+path = "architect-theme-picker"
+
+[source]
+git = "https://github.com/FastTrackStudios/architect"
+rev = "main"
+path = "features/theme/picker"
+
+# The theme store's THEME_* (the core's), and COMMANDS_SHOW to open ⌘O.
+[capabilities]
+actions = ["THEME_LIST", "THEME_GET", "THEME_SET", "COMMANDS_SHOW"]
+effect = "mutating"
+
+[[actions]]
+id = "THEME_PICKER_CHOOSE"
+name = "Choose a theme…"
+description = "Opens ⌘O on its themes (`theme:`): pick one and it shows, kept as the person's."
+group = "View"
+effect = "mutating"
+
+[[actions]]
+id = "THEME_PICKER_SCHEME"
+name = "Light or dark"
+description = "Switches the appearance to the other scheme (light to dark, dark to light), kept as the person's."
+group = "View"
+effect = "mutating"
+
+[[actions]]
+id = "THEME_PICKER_FIND"
+name = "Theme picker: find"
+description = "⌘O's `theme:`: every theme whose label or id has `query`'s words: `{items: [{id, title, detail}]}` (detail: light or dark, and whether it shows)."
+group = "View"
+effect = "read_only"
+params = '{"type":"object","properties":{"query":{"type":"string"}}}'
+
+[[actions]]
+id = "THEME_PICKER_PICK"
+name = "Theme picker: pick"
+description = "Shows theme `id` as the person's: its half of the light and dark pair, and that appearance when the other one shows."
+group = "View"
+effect = "mutating"
+params = '{"type":"object","properties":{"id":{"type":"string"}},"required":["id"]}'
+
+[[openers]]
+kind = "theme"
+title = "Themes"
+prefix = "theme"
+action = "THEME_PICKER_FIND"
+open = "THEME_PICKER_PICK"

@@ -1,0 +1,31 @@
+// The theme picker, a built-in extension (`theme.picker`): ⌘K's
+// "Choose a theme…" opens ⌘O on its themes; a few letters and ↵ show one.
+id theme-picker
+title "Choose a theme"
+view {width 1440, height 860}
+capture {fps 20, width 960}
+steps (
+    {
+        id choose
+        text "Choose a theme… opens ⌘O on the themes."
+        do @run{id THEME_PICKER_CHOOSE}
+        done {
+            on (@changed"commands")
+            check ({id COMMANDS_STATE, has {overlay quick-open}})
+        }
+        hold 0.8
+    }
+    {
+        id find
+        text "Type a few letters of its name."
+        do @type{text "catppuccin light"}
+        hold 0.8
+    }
+    {
+        id pick
+        text "↵ shows it, kept as yours."
+        do @key{key Enter}
+        done {check ({id THEME_GET, has {theme catppuccin-light}})}
+        hold 1.2
+    }
+)

@@ -92,9 +92,9 @@ pub struct OpenerDecl {
     /// ⌘O's is given `{query}` and answers `{items: [{id, title,
     /// detail?}]}`, best first.
     pub action: String,
-    /// ⌘O: the action that opens an item picked, given `{id, in}` (`in`:
-    /// `here`, `tab` or `split`). Unset, `action` is, given `{open: id,
-    /// in}`.
+    /// ⌘O: the action that opens an item picked, given `{id}`, and `in`
+    /// (`here`, `tab` or `split`) when its params name it. Unset, `action`
+    /// is, given `{open: id}` (and `in`).
     pub open: String,
     /// The file extensions it claims, without the dot (`kf`, `tar.gz`).
     pub files: Vec<String>,

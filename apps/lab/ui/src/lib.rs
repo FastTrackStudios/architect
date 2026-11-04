@@ -875,7 +875,6 @@ pub fn LabApp() -> Element {
     // Every command (a view's own too) and the palette's state, on the
     // lab's list; the lab's own state beside them.
     architect_commands::use_command_actions(list.clone());
-    theme::use_theme_commands(theme, &commands);
     guide::use_lab_actions(&list, &lab);
     // Guided tours of two of the lab's scenarios, from ⌘K (Help) or the
     // Action List (`GUIDE_TOUR_START`).

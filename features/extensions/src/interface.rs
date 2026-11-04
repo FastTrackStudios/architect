@@ -512,6 +512,21 @@ fn use_quick_open(host: Host, revision: Signal<u64>) {
         return;
     };
     let mine = use_hook(|| Rc::new(std::cell::RefCell::new(Vec::<String>::new())));
+    // What an item picked runs, here: ⌘O closes as it opens.
+    let opens = use_coroutine(
+        move |mut asks: mpsc::UnboundedReceiver<(ActionList, String, String)>| async move {
+            while let Some((list, open, args)) = asks.next().await {
+                let caller = architect::action::ActionCaller::app()
+                    .with_invocation(Invocation::new(InvocationSource::Palette));
+                if let Err(e) = list
+                    .run_json_async_with(&caller, &open, args.as_bytes())
+                    .await
+                {
+                    tracing::warn!(ext.action = %open, error = %e, "an extension's ⌘O item did not open");
+                }
+            }
+        },
+    );
     use_effect(move || {
         let _ = revision();
         let now = host.contributions().quick_open();
@@ -520,7 +535,12 @@ fn use_quick_open(host: Host, revision: Signal<u64>) {
             commands.remove_opener(gone);
         }
         for by in now {
-            commands.register_opener(quick_opener(host.list().clone(), commands, &by.item));
+            commands.register_opener(quick_opener(
+                host.list().clone(),
+                commands,
+                opens.tx(),
+                &by.item,
+            ));
         }
         *mine.borrow_mut() = kinds;
     });
@@ -544,6 +564,7 @@ use architect_commands::{OpenIn, OpenItem, Opener};
 fn quick_opener(
     list: ActionList,
     commands: architect_commands::Commands,
+    opens: mpsc::UnboundedSender<(ActionList, String, String)>,
     decl: &contrib::OpenerDecl,
 ) -> Opener {
     let answers: Answers = Rc::default();
@@ -606,23 +627,18 @@ fn quick_opener(
             OpenIn::Tab => "tab",
             OpenIn::Split => "split",
         };
-        let args = if by_id {
-            json!({ "id": item.id, "in": place })
-        } else {
-            json!({ "open": item.id, "in": place })
+        let key = if by_id { "id" } else { "open" };
+        let mut args = json!({ key: item.id });
+        // Where it goes, to an action that takes it (`in` in its params).
+        let takes_in = list
+            .info(&open)
+            .and_then(|i| i.params_schema)
+            .is_some_and(|p| p.contains("\"in\""));
+        if takes_in {
+            args["in"] = json!(place);
         }
-        .to_string();
-        let (list, open) = (list.clone(), open.clone());
-        spawn(async move {
-            let caller = architect::action::ActionCaller::app()
-                .with_invocation(Invocation::new(InvocationSource::Palette));
-            if let Err(e) = list
-                .run_json_async_with(&caller, &open, args.as_bytes())
-                .await
-            {
-                tracing::warn!(ext.action = %open, error = %e, "an extension's ⌘O item did not open");
-            }
-        });
+        let args = args.to_string();
+        let _ = opens.unbounded_send((list.clone(), open.clone(), args));
     };
     Opener::new(kind, decl.title.clone(), items, opened)
 }

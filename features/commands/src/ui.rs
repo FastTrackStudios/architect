@@ -533,8 +533,9 @@ impl Commands {
         o.set(Some(overlay));
     }
 
-    /// ⌘O, its field set to `query` (`theme:` asks only the theme
-    /// opener).
+    /// ⌘O asked `query`: `kind:` alone (`theme:`) lists only that
+    /// opener's items, the field empty under its title for the person to
+    /// narrow; anything else is put in the field.
     pub fn show_quick_open(&self, query: &str) {
         let mut seed = self.seed;
         seed.set(Some(query.to_owned()));
@@ -972,17 +973,46 @@ pub fn QuickOpen() -> Element {
     let t = theme();
     let mut query = use_signal(String::new);
     let mut selected = use_signal(|| 0usize);
-    // A field set from outside (`COMMANDS_SHOW`, an extension's picker).
+    // Asked from outside (`COMMANDS_SHOW`, an extension's picker): one
+    // opener's items (`theme:`), the field empty for the person to narrow;
+    // or the field set.
+    let mut only = use_signal(|| None::<String>);
     use_effect(move || {
         let mut seed = commands.seed;
-        if let Some(q) = seed() {
-            seed.set(None);
-            query.set(q);
+        let Some(q) = seed() else { return };
+        seed.set(None);
+        let kind = q
+            .strip_suffix(':')
+            .map(str::trim)
+            .filter(|k| commands.openers.peek().borrow().title(k).is_some());
+        match kind {
+            Some(k) => {
+                only.set(Some(k.to_owned()));
+                query.set(String::new());
+            }
+            None => {
+                only.set(None);
+                query.set(q);
+            }
         }
     });
     // An opener that answers later (an extension's) bumps the version.
     let _ = (commands.version)();
-    let found: Vec<Found> = commands.openers.read().borrow().search(&query.read());
+    let asked = match only() {
+        Some(kind) => format!("{kind}:{}", query.read()),
+        None => query.read().clone(),
+    };
+    let found: Vec<Found> = commands.openers.read().borrow().search(&asked);
+    let placeholder = only()
+        .and_then(|k| {
+            commands
+                .openers
+                .peek()
+                .borrow()
+                .title(&k)
+                .map(|t| format!("{t}…"))
+        })
+        .unwrap_or_else(|| "Open…  (note: to look in one place)".to_owned());
     let count = found.len();
     use_effect(move || {
         let _ = query();
@@ -1040,7 +1070,7 @@ pub fn QuickOpen() -> Element {
         })
         .collect();
     rsx! {
-        Frame { placeholder: "Open…  (note: to look in one place)", query, on_key,
+        Frame { placeholder, query, on_key,
             if items.is_empty() {
                 div { style: "padding: 18px 12px; color: {t.ink_3}; font-size: 13px;", "Nothing to open matches" }
             }
