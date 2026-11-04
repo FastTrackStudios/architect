@@ -15,7 +15,13 @@
 //! `ARCHITECT_GOLDEN=record` writes them again. One test plays the runs in
 //! turn, as the lab's folder (`ARCHITECT_LAB_CONFIG_DIR`) is the process's.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    // A scenario is written as text, step by step.
+    clippy::format_push_string
+)]
 
 use std::path::{Path, PathBuf};
 
