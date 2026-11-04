@@ -62,12 +62,14 @@
 //! shows changes (the view's spaces, the pointer over a region).
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
 
 use architect::action::ActionCaller;
 use architect_scripting::luau::mlua::{self, Lua, UserData, UserDataRef, Value as LuaValue};
 use architect_scripting::luau::{Live, Module, Report, Runtime, raise};
 use architect_scripting::theme::{ThemeCell, ThemeModule};
 use architect_theme::Resolved;
+use architect_workspace::ViewMeter;
 use serde_json::Value;
 
 use crate::geometry::{Color, Point, Rect, Size};
@@ -541,7 +543,13 @@ fn spaces_table(lua: &Lua, s: &Spaces) -> mlua::Result<mlua::Table> {
 /// The host publishes what its views show ([`Self::publish`]) and the
 /// pointer over them ([`Self::pointer`]), and asks for a frame when
 /// something changed — a pointer press or release, a view scrolled, a
-/// pane resized ([`Self::frame`]) — not on a timer.
+/// pane resized ([`Self::frame`]), a worker's news ([`Self::woken`]),
+/// an animation's next step ([`Self::wake_after`]) — not on a timer.
+///
+/// Its script runs on a thread of its own (`architect_scripting::luau`):
+/// a frame is awaited, never run on the host's thread, so a script that
+/// runs long keeps the host's last good frame on screen and the app
+/// answering ([`Self::frame_metered`]).
 pub struct Session {
     live: Live,
     windows: Arc<Mutex<Windows>>,
@@ -638,6 +646,45 @@ impl Session {
     #[must_use]
     pub const fn output(&self) -> &Output {
         &self.output
+    }
+
+    /// [`Self::frame`], measured by `meter`: once the frame has run past
+    /// the meter's budget, `busy` is called and the meter is busy until
+    /// it ends (its host keeps showing the last good frame, marked busy).
+    /// The frame runs on the script's thread; this only waits.
+    pub async fn frame_metered(
+        &mut self,
+        input: Input,
+        meter: &ViewMeter,
+        busy: impl FnOnce(),
+    ) -> Report {
+        use futures::future::{Either, select};
+        let started = Instant::now();
+        let budget = meter.budget();
+        let frame = std::pin::pin!(self.frame(input));
+        let report = match select(frame, futures_timer::Delay::new(budget)).await {
+            Either::Left((report, _)) => report,
+            Either::Right(((), frame)) => {
+                meter.set_busy(true);
+                busy();
+                frame.await
+            }
+        };
+        meter.record(started.elapsed());
+        report
+    }
+
+    /// Resolves when its script asks for a frame with no input: one of
+    /// its workers posted news ([`Live::woken`]).
+    pub async fn woken(&self) {
+        self.live.woken().await;
+    }
+
+    /// The frame its script asked for with no input (`wake_after(ms)`,
+    /// an animation's next step): how soon, taking the ask.
+    #[must_use]
+    pub fn wake_after(&self) -> Option<Duration> {
+        self.live.wake_after()
     }
 
     /// Whether it has a next frame: false once it stops deferring.
