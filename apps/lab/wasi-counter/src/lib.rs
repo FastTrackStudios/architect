@@ -2,6 +2,11 @@
 //! the lab draws in a pane, and an action that asks the app for its
 //! themes through the host service. Built for `wasm32-wasip2`.
 
+// A WASI component, built for wasm32-wasip2 only. On a native workspace build
+// (`cargo test --workspace`) it is empty: its WIT exports have names like
+// `architect:extension/guest@0.1.0#actions` that a native linker (mold) rejects.
+#![cfg(target_arch = "wasm32")]
+
 use std::cell::{Cell, RefCell};
 
 use architect_extension_wasi::{Extension, host, refresh};
