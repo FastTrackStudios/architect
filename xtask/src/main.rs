@@ -5,6 +5,7 @@
 //! them in. Nothing here is part of the published crate surface.
 
 mod boundaries;
+mod builtins;
 mod docs;
 mod fleet;
 mod fleet_deps;
@@ -104,6 +105,15 @@ enum Command {
     /// control protocol's `Method::TOOLS`. See
     /// `docs/content/guide/cli-and-mcp.md`.
     Surfaces,
+    /// Check that every built-in extension crate builds both ways: linked
+    /// in (`--lib`) and as a process (`--bin`), WASI once its runner
+    /// lands.
+    ///
+    /// A built-in extension crate is an `extension.toml` with a `[source]`
+    /// beside a `Cargo.toml`: one `linked::Extension` value an app links
+    /// in, which `EXT_CLONE` builds as a process in the development
+    /// folder. See `docs/content/architecture/extensions.md`.
+    Builtins,
     /// Repoint every architect-owned git dep in a manifest at one tag.
     ///
     /// Bumping these one crate at a time is how a consumer ends up with
@@ -168,6 +178,10 @@ fn main() -> ExitCode {
         Command::Surfaces => {
             let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
             surfaces::run_cli(&root)
+        }
+        Command::Builtins => {
+            let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            builtins::run_cli(&root)
         }
         Command::Feature {
             action: FeatureAction::New { name },
