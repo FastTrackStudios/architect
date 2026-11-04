@@ -740,6 +740,9 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         // service runs the lab's actions on its list.
         host.watch(&lab);
         host.set_app_list((*lab).clone());
+        // Every extension's actions on the lab's list too, as they come
+        // and go: what its control socket, CLI and MCP run.
+        host.forward_actions_to(&lab);
         let root = architect::settings::app_dir("architect-lab")
             .unwrap_or_else(|_| std::env::temp_dir().join("architect-lab"));
         // The host service: consent kept on this device (an installed

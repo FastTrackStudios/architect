@@ -72,6 +72,8 @@ pub mod host;
 #[cfg(feature = "vox")]
 pub mod host_proto;
 #[cfg(feature = "host")]
+mod forward;
+#[cfg(feature = "host")]
 pub mod hostapi;
 #[cfg(feature = "host")]
 pub mod install;
