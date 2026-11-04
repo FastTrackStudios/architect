@@ -965,7 +965,6 @@ dependencies = [
 name = "architect-extension-wasi"
 version = "0.1.0"
 dependencies = [
- "architect-workspace-hack",
  "dioxus",
  "dioxus-html",
  "serde_json",
@@ -977,7 +976,6 @@ name = "architect-extension-wasi-hazards"
 version = "0.1.0"
 dependencies = [
  "architect-extension-wasi",
- "architect-workspace-hack",
  "dioxus",
  "serde_json",
 ]
@@ -1192,7 +1190,6 @@ name = "architect-lab-wasi-counter"
 version = "0.1.0"
 dependencies = [
  "architect-extension-wasi",
- "architect-workspace-hack",
  "dioxus",
  "serde_json",
 ]
