@@ -282,10 +282,10 @@ rendered by the app.
 
 ## WASI components
 
-> **Landed (2026-11-03, #167 part 1)** behind the `wasi` feature of
-> `architect-extensions`, desktop and Android: Wasmtime with the
-> component model and Cranelift. Workers (part 2) and iOS / the web
-> (part 3) are next.
+> **Landed (2026-11-03, #167 parts 1 and 2)** behind the `wasi` feature
+> of `architect-extensions`, desktop and Android: Wasmtime with the
+> component model and Cranelift, and workers (more instances of a
+> component on a pool). iOS / the web (part 3) are next.
 
 A `kind = "wasm"` extension is a WebAssembly component against the
 `architect:extension` world (`features/extensions/wit/extension.wit`),
@@ -298,7 +298,8 @@ kind = "wasm"
 component = "my_extension.wasm"
 ```
 
-**The world.** It imports `host` and exports `guest`:
+**The world.** It imports `host` and `worker`, and exports `guest` and
+`work`:
 
 | | | |
 |---|---|---|
@@ -309,6 +310,8 @@ component = "my_extension.wasm"
 | export | `invoke` | runs an action: JSON args, the invocation as JSON |
 | export | `render`, `on-event`, `pending`, `close` | a view: its first edits, its handlers' edits, what changed after an action, unmount |
 | export | `save-state` | its state for a reload |
+| import | `spawn`, `post`, `cancel`, `progress`, `cancelled`, `receive` | its workers ("Workers" below) |
+| export | `run`, `on-message`, `on-progress`, `on-done` | a worker's run; its owner's news |
 
 A view's edits are the remote-view wire's (`wire::Edit`, the world's
 `edit`), so the same `RemoteDocument` applies them: the runner puts each
@@ -398,14 +401,102 @@ view is the Vault's "WASI Counter" pane.
 misbehaves on purpose (`features/extensions/tests/wasi-hazards`) and
 checks the view, a refused call, both limits, unload and the cache.
 
+**Workers.** There are no threads in a component: its heavy work goes
+to a worker, another instance of the same component
+(`features/extensions/src/wasi/workers.rs`). A `[[workers]]` entry of a
+`wasm` package names what it runs: an `entry` of the component itself
+(the name its `work.run` is given), or a separate component in the
+package (`entry = "workers/primes.wasm"`, given the worker's id):
+
+```toml
+[[workers]]
+id = "primes"
+entry = "count-primes"
+```
+
+Its owner (the extension's instance, from a handler or an action)
+spawns it; the runner instantiates the compiled component again, its
+code shared from the compile cache, on a thread of its `wasi::Pool`, with
+a memory limit and an epoch deadline of its own
+(`WasiRunner::with_worker_limits`; `Limits::worker`: 64 MiB and 60 s of
+its own time for the whole run). The two share nothing but JSON
+messages, in the same API the other runners have
+(`features/extensions/tests/wasi_wit.rs` checks the names):
+
+| the owner | the worker | Luau / process |
+|---|---|---|
+| `spawn(name, args)`: a handle | `run(entry, worker, args)`: its result | `worker.spawn`, `spawn_work` |
+| `post(w, msg)` | `post(0, msg)` | `w:post`, `Work::post` |
+| `cancel(w)` | `cancelled()`, `receive(ms)` | `w:cancel`, `worker.cancelled`, `worker.receive` |
+| `on-message`, `on-progress`, `on-done` | `progress(done, total, note)` | `worker.on_message`, `on_progress`, `on_done`, `Work::progress` |
+
+- **News** comes into the owner between its own calls, at most once
+  every 16 ms (`wasi::NEWS_EVERY`): every message in order, progress
+  coalesced to the latest, the end once; then its views' changes. A
+  click on its view waits behind one round of news at most.
+- **Back-pressure**: each way a queue holds 64 messages (`wasi::QUEUE`).
+  An owner's `post` to a full one fails at once (a view never waits); a
+  worker's waits (that time is the host's, not counted against it). An
+  instance has at most 8 workers running or waiting for the pool
+  (`wasi::MAX_WORKERS`).
+- **Cancellation**: `cancel`, its owner trapping (it starts again
+  fresh, its workers do not follow it) and unloading stop a worker at
+  its next epoch tick, whether it looks at `cancelled()` or not.
+- **Limits**: a worker past its memory or time traps alone; its owner
+  hears `failed` and why, and runs on.
+- **The pool** (`wasi::Pool`, `WasiRunner::with_pool`; one thread fewer
+  than the machine has, at most four): threads start as workers are
+  spawned and stop after 30 s idle. `Stats::workers` and
+  `Stats::workers_alive` say what runs; the manager's `component` kind
+  shows how many.
+- A worker reaches its owner only: its `host` imports other than `log`
+  are refused.
+
+In the Rust guest, `Extension::worker(entry, |work, args| …)` is the
+worker's function and `worker::spawn(name, args)` gives a `Worker`
+(dropping it cancels it); `Work` is the worker's side (`progress`,
+`post`, `receive`, `cancelled`, `check`) and `WorkState` the owner's
+(`status`, `progress`, `messages`, `result`, `fraction`), the same as a
+process's (`features/extensions/src/work.rs`). News updates the state
+and calls `refresh`, so views read it as they render:
+
+```rust
+Extension::new()
+    .action("ACME_PRIMES", |args| {
+        let w = worker::spawn("primes", &args)?;   // keep `w`: dropping it cancels
+        Ok(json!({ "worker": w.id() }))
+    })
+    .worker("count-primes", |work, args| {
+        for i in 0..n { work.check()?; work.progress(i as f64, n as f64, ""); /* … */ }
+        Ok(json!(found))
+    })
+```
+
+The lab's WASI Counter counts primes in a worker (`LAB_WASI_COUNTER_PRIMES`,
+`LAB_WASI_COUNTER_JOB`, its "Count primes" button) with a progress bar,
+while the counter answers clicks. `features/extensions/tests/wasi.rs`
+measures that (`a_worker_job_keeps_the_view_within_its_frame_budget`:
+each click's time from its event to the frame that shows it, into a
+`ViewMeter` with `REMOTE_BUDGET`; p99 about 4 ms in a debug build with
+the job running), and checks cancellation on unload, both limits,
+back-pressure both ways and the pool.
+
+**Its actions on the app's own list.** A host puts an extension's
+actions on its list (the extensions' own, which ⌘K reads among the
+app's lists). An app whose control socket, CLI and MCP serve another
+list forwards them there with `Host::forward_actions_to`
+(`features/extensions/src/forward.rs`), as extensions load, reload and
+unload; each runs on the host's list as whoever ran it. The lab does,
+so `architect-desktop actions run LAB_WASI_COUNTER_ADD` reaches the
+counter (as `LAB_CLICKER_CLICKS` reaches the clicker).
+
 **Size.** Wasmtime and Cranelift add about 19 MB to a stripped
 `architect-desktop` built with the dev profile (opt-level 1): behind the
 feature, off by default.
 
-**Next.** Part 2: workers — parallelism from more instances, never
-threads in one. Part 3: iOS, where there is no JIT (Wasmtime's Pulley
+**Next.** Part 3: iOS, where there is no JIT (Wasmtime's Pulley
 interpreter, a smaller memory reservation), and the web (components
-transpiled with jco). Then WASI 0.3's async (`component-model-async`),
+transpiled with jco; a worker there is a Web Worker). Then WASI 0.3's async (`component-model-async`),
 what a component adds at run time (`updates`), and timers in its views.
 
 ## Processes over vox
@@ -741,7 +832,7 @@ script = "workers/primes.luau"   # luau and process packages
 |---|---|---|---|
 | Luau | its own VM thread, one Luau state per session; one-off runs (actions, hooks) on a pool | another Luau state of the declared script, on the pool | its owner's state goes, or the extension unloads (`WorkerGroup::cancel_all`) |
 | Process | one thread per open view in the process, one event at a time | `guest::spawn_work`: a thread of the process | its `WorkHandle` drops (the view closed) |
-| WASI (next) | one instance of the component, its exports called with a fuel budget | another instance of the same component on a pool thread; on the web, a Web Worker | its instance is dropped |
+| WASI | one instance of the component on a thread of its own, each call within an epoch deadline | another instance of the same component on a thread of `wasi::Pool` (on the web, next, a Web Worker) | its owner cancels it, traps or is unloaded |
 | Linked | the app's Dioxus tree: a linked extension is first-party code and keeps to the rule itself | its own thread or task | as the code says |
 
 **Luau** (`features/scripting/src/vm.rs`, `features/scripting/src/worker.rs`):
