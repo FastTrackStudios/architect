@@ -263,7 +263,18 @@ pub fn use_window_chrome() -> Option<WindowChrome> {
     // resize that leaves it, and the row stayed without its lights.
     let mut full = use_signal(|| window.fullscreen().is_some());
     let watched = window.clone();
+    // The window's focus, to extensions' `app.focused` / `app.blurred`
+    // hooks: raised on the lab's list, which their host watches.
+    let list = try_consume_context::<std::sync::Arc<architect::action::ActionList>>();
     dioxus_native::use_window_event(move |event, _| {
+        if let (WindowEvent::Focused(focused), Some(list)) = (event, &list) {
+            let topic = if *focused {
+                "app.focused"
+            } else {
+                "app.blurred"
+            };
+            list.changed(topic, "{}");
+        }
         if matches!(
             event,
             WindowEvent::SurfaceResized(_)
