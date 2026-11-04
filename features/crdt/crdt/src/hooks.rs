@@ -614,10 +614,11 @@ pub fn use_roster(presence: Presence, me: &str) -> Signal<Roster> {
 
 /// This person on `presence`: a [`Here`] that publishes `state()` as soon
 /// as the channel joins (and again on every rejoin), and sends what its
-/// throttles hold on a timer. `me` and `state` are taken on first render;
-/// change the state with [`Here::edit_state`]. A view calls
-/// [`Here::pointer`] as the pointer moves over it and
-/// [`Here::no_pointer`] when it leaves.
+/// throttles hold on a timer.
+///
+/// `me` and `state` are taken on first render; change the state with
+/// [`Here::edit_state`]. A view calls [`Here::pointer`] as the pointer
+/// moves over it and [`Here::no_pointer`] when it leaves.
 #[must_use]
 pub fn use_here(presence: Presence, me: &str, state: impl FnOnce() -> PeerState) -> Here<Presence> {
     let here = use_hook(|| Here::new(presence, me, state()));
