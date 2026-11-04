@@ -993,6 +993,12 @@ title = "GitHub issue"
 urls = ['^https://github\.com/[^/]+/[^/]+/issues/\d+$']
 action = "LAB_BOARD_ISSUE"
 
+[[openers]]                 # a ⌘O source: kind:… asks only it
+kind = "theme"
+title = "Themes"
+action = "THEME_PICKER_FIND" # {query} in, {items: [{id, title, detail?, recency?}]} out
+open = "THEME_PICKER_PICK"  # an item picked: {id} (and `in` when its params take it)
+
 [[doc_kinds]]               # a document kind, registered while loaded
 id = "keyflow.chart"
 name = "Keyflow chart"
@@ -1041,6 +1047,23 @@ unload withdraws everything the extension added and its runtime state.
 `menus`, `context` on a target, `bar`, `slots` (the latest claim wins),
 `open_path` (by extension, then by document kind), `open_url` (by
 pattern), `open_doc_kind`, `doc_kind_of`.
+
+**⌘O's sources.** An `[[openers]]` with a `kind` (no `files`,
+`doc_kinds` or `urls`) is one of ⌘O's sources, the same as the app's own
+(`architect_commands::Opener`): `use_extension_ui` registers each one
+while its extension is loaded (`features/extensions/src/interface.rs`
+`use_extension_ui`, `Contributions::quick_open`). A query runs its
+`action` with `{query}`; a linked extension's answer is used at once, a
+process's when it arrives (the palette looks again, the last answer
+shown meanwhile). An item picked runs `open` with `{id}`. `COMMANDS_SHOW
+{"overlay": "quick-open", "query": "theme:"}` opens ⌘O on one source
+alone, under its title.
+
+**A settings section drawn by a view.** `[[sections]] view = "section"`
+puts one of its views on the settings page as a section of its own (the
+extensions manager's); `group = ""` puts it in the first, untitled group.
+The page draws it through `architect_settings::SectionViews`, which
+`use_extension_ui` provides (a linked view's component as it is).
 
 **Opening.** `Host::open` takes a file's path, a link or a document
 kind to the first opener that claims it: its view opens through the
@@ -1329,6 +1352,62 @@ native inside the linked extension. Opening a remote view costs about
 it, which says it is the mount's fixed cost, not the view's work). A
 process serves 64 view opens per connection today: closed ones are not
 given back, so the benchmark starts it again every 50.
+
+### The rule: a new user-facing feature is a linked extension
+
+A feature a person sees (a page, a picker, a palette source, a settings
+section of its own, a tab) is written as a `linked::Extension` in a crate
+of its own with an `extension.toml` and a `[source]`, uses only what a
+third party could (its manifest's tables, its builder, the host
+service), and is linked into the app with `Extensions::with_linked`. So
+it can be turned off, cloned to a development copy (`EXT_CLONE`) that
+overrides it live, and put back. Reach the app's state through the host
+service (`linked::Handle::host`: the app's actions), not through Rust
+handles to the app's internals: then its process copy does the same.
+
+**The core** stays compiled in, not extensions: workspace and view kinds
+(the `paint` kind included), the shell's slots (`Chrome`), the theme
+store and its `THEME_*`, the Action List and the control socket, CRDT
+documents, settings storage and the settings page's frame, input, the
+extension host and its host service, native host kernels.
+
+**Built in now:**
+
+| built-in | crate | adds | its dev copy |
+|---|---|---|---|
+| `theme.picker` | `features/theme/picker` | ⌘K's "Choose a theme…" and "Light or dark", ⌘O's `theme:` | `EXT_CLONE` (`features/theme/picker/tests/dev_loop.rs`); both ways in `features/theme/picker/tests/both_ways.rs` |
+| `manager` (the extensions page) | `features/extensions/src/manager` | `MANAGER_*`, its views, its settings section, ⌘O's `ext:` | none yet: its kinds are the app's Rust values (below) |
+| `lab.board` | `apps/lab/board` | the lab's example: a tab, a status slot, openers, hooks | `EXT_CLONE` (`apps/lab/board/tests/dev_loop.rs`) |
+
+`apps/lab/media/tests/builtins.rs` checks that the default lab looks
+the same as before these moved: the main window's document at the end of
+four scenarios (the Inbox, settings on Appearance and on Extensions, ⌘O's
+`ext:`) against `apps/lab/media/tests/golden/`, recorded from the base.
+The only difference is the theme picker's own row in the extensions list.
+
+**Not moved yet, each waiting on a decision:**
+
+- **The settings page itself** (the sheet, `APP_SETTINGS` / ⌘, and the
+  palette's `#`). A full-window sheet is neither a slot nor a popup view
+  (`ExtensionOverlays` draws its own frame), and `APP_SETTINGS` is in no
+  extension's namespace. Either the host gets a layer an extension's view
+  draws over the window in its own frame, or the sheet stays the core's
+  frame with sections (as now) the extensions' part.
+- **The manager's dev copy.** Its kinds (extensions, scripts, workers,
+  themes, layouts, pages) are Rust values the app registers, so a process
+  copy has nothing to list. Its `MANAGER_*` would move to the host (the
+  core already owns what they read) and its page would read them through
+  the host service; the page is then the built-in.
+- **The lab's pages** (Inbox, Tasks, Schedule, Vault and their item,
+  capture and help routes). Their state (`Lab`: the route, the lists,
+  undo and redo, the selection) is the lab's root's, and every lab
+  command reads it. Linked, a page could read it from context; a dev copy
+  could not, so it needs that state to move into the extension (the lists
+  as a document of its own, the route as the workspace's), which is the
+  lab's rewrite, not a move.
+- **The Appearance section** stays with settings: its rows are the
+  theme store's layers kept as settings (`appearance.*`, in no
+  extension's namespace).
 
 ## First-party extensions: the API, linked in
 
