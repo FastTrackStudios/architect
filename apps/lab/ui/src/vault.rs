@@ -499,6 +499,7 @@ fn FilesView() -> Element {
                 button {
                     key: "{id}",
                     class: "lp",
+                    "data-file": "{title}.md",
                     "aria-current": if open_now.as_deref() == Some(id) { "page" } else { "false" },
                     style: "display: flex; align-items: center; justify-content: flex-start; min-height: 30px; padding: 0 10px; border: none; \
                             border-radius: 6px; background: {lit(open_now.as_deref() == Some(id), &t)}; color: {t.ink}; \
@@ -510,6 +511,12 @@ fn FilesView() -> Element {
                         move |_| {
                             let _ = pane.workspace().write().open(note(id, title), Target::Here);
                         }
+                    },
+                    // Right-click: the file's context menu, with what
+                    // extensions add for it (`[[context]] target = "file"`).
+                    oncontextmenu: {
+                        let pane = pane.clone();
+                        move |e: MouseEvent| pane.context_menu("file", format!("{title}.md"), &e)
                     },
                     "{title}"
                 }
@@ -527,6 +534,10 @@ fn FilesView() -> Element {
                         if let Some(ui) = try_consume_context::<architect_extensions::interface::ExtensionUi>() {
                             let _ = ui.open_path(file);
                         }
+                    },
+                    oncontextmenu: {
+                        let pane = pane.clone();
+                        move |e: MouseEvent| pane.context_menu("file", file, &e)
                     },
                     "{file}"
                 }

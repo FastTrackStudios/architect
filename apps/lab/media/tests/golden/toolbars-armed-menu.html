@@ -1,0 +1,80 @@
+<div role="toolbar" aria-label="Metronome" data-toolbar="fts.metronome/note" style="display:flex; flex-direction:column; gap:2px; flex:0 0 auto;">
+  <div style="display:flex; flex-wrap:wrap; align-items:center; gap:4px;">
+    <div style="position:relative; flex:0 0 auto; display:flex;">
+      <button data-tool="FTS_METRONOME_CLICK" title="Click" aria-label="Click" aria-pressed="true" style="width:24px; height:24px; padding:0; display:flex; align-items:center; justify-content:center; gap:6px; border:none; border-radius:6px; cursor:pointer; background:transparent; color:#f87171; font-size:12px; box-shadow: inset 0 0 0 1px #f87171;" click="&lt;rust func&gt;" data-dioxus-id="" contextmenu="&lt;rust func&gt;" data-armed="true">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" fill="none" stroke="#f87171" stroke-width="2">
+          <line x1="10" x2="14" y1="2" y2="2" />
+          <line x1="12" x2="15" y1="14" y2="11" />
+          <circle cx="12" cy="14" r="8" />
+        </svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<div role="toolbar" aria-label="Metronome" data-toolbar="fts.metronome/transport" style="flex:1 1 0; display:flex; flex-direction:column; gap:4px; padding:8px; background:#0e0e11; overflow:visible;">
+  <div style="display:flex; flex-wrap:wrap; align-items:center; gap:4px;">
+    <div style="position:relative; flex:0 0 auto; display:flex;">
+      <button data-tool="FTS_METRONOME_CLICK" title="Click" aria-label="Click" aria-pressed="true" style=" height:28px; padding:0 8px; display:flex; align-items:center; justify-content:center; gap:6px; border:none; border-radius:6px; cursor:pointer; background:transparent; color:#f87171; font-size:12px; box-shadow: inset 0 0 0 1px #f87171;" click="&lt;rust func&gt;" data-dioxus-id="" contextmenu="&lt;rust func&gt;" data-armed="true">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" fill="none" stroke="#f87171" stroke-width="2">
+          <line x1="10" x2="14" y1="2" y2="2" />
+          <line x1="12" x2="15" y1="14" y2="11" />
+          <circle cx="12" cy="14" r="8" />
+        </svg>
+        <span>
+          Click
+        </span>
+      </button>
+    </div>
+    <div role="separator" style="flex:0 0 auto; width:1px; align-self:stretch; min-height:18px; background:#2b2b31; margin:0 2px;" />
+    <div role="group" style="flex:0 0 auto; display:flex; flex-direction:column; align-items:center; gap:2px;" aria-label="Count in" data-group="Count in">
+      <div style="display:flex; border:1px solid #2b2b31; border-radius:7px; overflow:visible;">
+        <div style="position:relative; flex:0 0 auto; display:flex;">
+          <button data-tool="FTS_METRONOME_COUNT_IN" title="Count in" aria-label="Count in" style=" height:28px; padding:0 8px; display:flex; align-items:center; justify-content:center; gap:6px; border:none; border-radius:0; cursor:pointer; background:transparent; color:#a1a1aa; font-size:12px; " click="&lt;rust func&gt;" data-dioxus-id="" contextmenu="&lt;rust func&gt;">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" fill="none" stroke="#a1a1aa" stroke-width="2">
+              <path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z" />
+            </svg>
+            <span>
+              Count in
+            </span>
+          </button>
+        </div>
+        <div style="position:relative; flex:0 0 auto; display:flex;">
+          <button data-tool="menu:More" title="More" aria-label="More" aria-haspopup="menu" aria-expanded="true" style=" height:28px; padding:0 8px; display:flex; align-items:center; justify-content:center; gap:6px; border:none; border-radius:0; cursor:pointer; background:transparent; color:#a1a1aa; font-size:12px; " click="&lt;rust func&gt;" data-dioxus-id="" contextmenu="&lt;rust func&gt;">
+            <span>
+              More
+            </span>
+            <span style="font-size:9px; opacity:0.7;">
+              ▾
+            </span>
+          </button>
+          <div role="menu" data-menu="2.1" style="position:absolute; top:calc(100% + 4px); left:0; z-index:60; min-width:180px; display:flex; flex-direction:column; padding:4px; border-radius:8px; background:#1a1a1f; border:1px solid #2b2b31; box-shadow:0 16px 44px rgba(0,0,0,0.55);">
+            <div style="padding:6px 8px 2px 8px; font-size:11px; font-weight:600; color:#8f8f99;">
+              Click
+            </div>
+            <button role="menuitemcheckbox" aria-checked="true" data-tool="FTS_METRONOME_CLICK" style="display:flex; align-items:center; gap:6px; padding:0 8px 0 0px; min-height:26px; border:none; border-radius:5px; background:transparent; color:#e4e4e7; font-size:12px; text-align:left; cursor:pointer;" click="&lt;rust func&gt;" data-dioxus-id="">
+              <span style="flex:0 0 auto; width:14px; text-align:center; color:#2dd4bf;">
+                ✓
+              </span>
+              <span>
+                Metronome: click
+              </span>
+            </button>
+            <div role="separator" style="height:1px; margin:4px 6px; background:#2b2b31;" />
+            <button role="menuitem" aria-expanded="false" style="display:flex; justify-content:space-between; padding:0 8px 0 8px; min-height:26px; border:none; border-radius:5px; background:transparent; color:#e4e4e7; font-size:12px; cursor:pointer;" click="&lt;rust func&gt;" data-dioxus-id="">
+              <span>
+                Status
+              </span>
+              <span>
+                ›
+              </span>
+            </button>
+          </div>
+        </div>
+      </div>
+      <span style="font-size:10px; color:#8f8f99;">
+        Count in
+      </span>
+    </div>
+  </div>
+</div>

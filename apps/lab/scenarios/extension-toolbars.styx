@@ -1,0 +1,91 @@
+// An extension's toolbars and context-menu entries (#307): the metronome
+// switched on puts a toolbar in the right dock and one in every note's
+// header, its click a toggle whose buttons show on and off; its entries
+// in a tab's and a Markdown file's context menus run told which tab, which
+// file. Played as a test: each run's `last` is what the click was told.
+id extension-toolbars
+title "Toolbars and context menus from an extension"
+view {width 1440, height 860}
+capture {fps 12, width 960}
+steps (
+    {id open, do @run{id APP_SETTINGS}, hide true}
+    {id workspace, target @text"Workspace", do @click{}, hide true}
+    {
+        id load
+        target @css"[id=\"setting-workspace.metronome\"] [role=\"switch\"]"
+        do @click{}
+        hide true
+    }
+    {id loaded, target @text"Metronome", done {timeout 20}, hide true}
+    {id close, target @css"[aria-label=\"Close settings\"]", do @click{}, hide true}
+    {
+        id vault
+        do @run{id LAB_GO_VAULT}
+        done {on (@changed"lab"), check ({id LAB_STATE, has {tab vault}})}
+        hide true
+    }
+    {
+        id welcome
+        target @tab"note-welcome"
+        do @click{}
+        done {check ({id WORKSPACE_LAYOUT, has {active note-welcome}})}
+        hide true
+    }
+    // Its toolbar in the right dock: a pane of its own there.
+    {
+        id docked
+        text "Its toolbar in the right dock, and one in the note's header."
+        target @css"[data-toolbar=\"fts.metronome/transport\"]"
+        done {timeout 20}
+        hold 0.8
+    }
+    {
+        id click-on
+        text "The click is a toggle: its buttons show it on."
+        target @css"[data-toolbar=\"fts.metronome/note\"] [data-tool=\"FTS_METRONOME_CLICK\"]"
+        do @click{}
+        done {
+            check ({id FTS_METRONOME_STATUS, has {click true, last {source toolbar, target "view:note", pane note-welcome}}})
+        }
+        hold 0.8
+    }
+    {
+        id tab-menu
+        text "Right-click a tab: the extension's entry is in its menu, ticked."
+        target @tab"note-welcome"
+        do @click{secondary true}
+        hold 0.6
+    }
+    {
+        id tab-entry
+        target @text"Click (from this tab)"
+        do @click{}
+        done {
+            check ({id FTS_METRONOME_STATUS, has {click false, last {source context_menu, target tab, id note-welcome}}})
+        }
+        hold 0.6
+    }
+    // The files are in the left dock, behind the folded sidebar.
+    {
+        id sidebar
+        target @css"[aria-label=\"Toggle the sidebar\"]"
+        do @click{}
+        hide true
+    }
+    {
+        id file-menu
+        text "Right-click a file: its entry runs told which file."
+        target @css"[data-file=\"Welcome.md\"]"
+        do @click{secondary true}
+        hold 0.6
+    }
+    {
+        id file-entry
+        target @text"Click (from this file)"
+        do @click{}
+        done {
+            check ({id FTS_METRONOME_STATUS, has {click true, last {source context_menu, target file, path "Welcome.md"}}})
+        }
+        hold 0.8
+    }
+)
