@@ -8,6 +8,12 @@
 #[cfg(target_os = "ios")]
 mod scene;
 
+use std::rc::Rc;
+use std::sync::Arc;
+
+use architect::action::{ActionList, Principal};
+use architect_control::Surface;
+use architect_control::server::Control;
 use architect_lab_ui::{Device, LabApp, use_window_screen};
 use dioxus::prelude::*;
 use dioxus_native::{Config, WindowAttributes, launch_cfg};
@@ -29,7 +35,27 @@ fn App() -> Element {
         });
     }
     let _screen = use_window_screen(Device::Native);
+    // The lab's Action List on its control socket, as the desk lab's
+    // (on in a debug build, `FTS_CONTROL=0|1` says otherwise): in the
+    // simulator, with `FTS_CONTROL_DIR=<a short folder on the Mac>`,
+    // `architect-desktop actions --app <it>/architect-mobile.sock run …`
+    // drives the phone (`scripts/mac-live-check.sh ios-act`).
+    let list = use_context_provider(|| Arc::new(ActionList::new()));
+    use_hook(|| Rc::new(serve_control(&list)));
     rsx! { LabApp {} }
+}
+
+/// The control socket, when it is wanted and could be bound.
+fn serve_control(list: &ActionList) -> Option<architect_control::server::Serving> {
+    let surface = Surface::new("architect-mobile", env!("CARGO_PKG_VERSION"), list.clone())
+        .with_principal(Principal::Service {
+            name: "cli".to_owned(),
+        });
+    Control::new("architect-mobile", surface)
+        .ok()?
+        .serve_if_wanted()
+        .ok()
+        .flatten()
 }
 
 fn main() {

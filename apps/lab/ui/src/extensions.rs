@@ -91,7 +91,8 @@ pub fn processes() -> Processes {
 pub const WASI_COUNTER: &str = "lab.wasi-counter";
 
 /// The WASI Counter as a development copy: its manifest and its component,
-/// when the component was built (`ARCHITECT_LAB_WASI_COUNTER`, else
+/// when the component was built (`ARCHITECT_LAB_WASI_COUNTER`, else beside
+/// the lab's executable — in its app bundle — else
 /// `target/wasi-guest/wasm32-wasip2/{debug,release}` beside the lab's
 /// own `target/`).
 #[cfg(feature = "wasi")]
@@ -99,6 +100,11 @@ fn wasi_counter(root: &Path) -> Option<PathBuf> {
     const WASM: &str = "architect_lab_wasi_counter.wasm";
     let built = std::env::var_os("ARCHITECT_LAB_WASI_COUNTER")
         .map(PathBuf::from)
+        .or_else(|| {
+            // An app bundle with the component in it (the iOS lab's).
+            let exe = std::env::current_exe().ok()?;
+            Some(exe.parent()?.join(WASM)).filter(|p| p.is_file())
+        })
         .or_else(|| {
             // target/<profile>/architect-desktop → target/wasi-guest/…
             let target = std::env::current_exe()

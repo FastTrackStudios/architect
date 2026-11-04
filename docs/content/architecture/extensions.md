@@ -286,7 +286,9 @@ rendered by the app.
 > **Landed (2026-11-03, #167 parts 1 and 2)** behind the `wasi` feature
 > of `architect-extensions`, desktop and Android: Wasmtime with the
 > component model and Cranelift, and workers (more instances of a
-> component on a pool). iOS / the web (part 3) are next.
+> component on a pool). **iOS (2026-11-04, #167 part 3)**: the same
+> runner, workers too, on Wasmtime's Pulley interpreter. The web (the
+> rest of part 3) is next.
 
 A `kind = "wasm"` extension is a WebAssembly component against the
 `architect:extension` world (`features/extensions/wit/extension.wit`),
@@ -491,13 +493,66 @@ unload; each runs on the host's list as whoever ran it. The lab does,
 so `architect-desktop actions run LAB_WASI_COUNTER_ADD` reaches the
 counter.
 
+**iOS: Pulley, no JIT.** iOS lets no app make memory executable, so
+there `wasi::PULLEY` is on and the engine (`features/extensions/src/wasi.rs`
+`config`) is Wasmtime's portable interpreter instead of native code:
+
+- Cranelift still compiles each component, to Pulley bytecode
+  (`Config::target("pulley64")`), which is data, not code; the compile
+  cache keeps it as it keeps native code (the engine's settings are in
+  the cache key, so a Pulley `.cwasm` and a native one never mix).
+  Compiling on the phone, once, is what the cache is for; precompiling
+  on the Mac (`Engine::precompile_component` with the same settings)
+  would only save that first start;
+- traps are found by the interpreter, not by signals
+  (`signals_based_traps(false)`);
+- each linear memory reserves `wasi::PULLEY_RESERVATION` (64 MiB, the
+  default memory limit) with no guard, where native code reserves
+  4 GiB and a guard so its loads need no bounds check: an iOS app has a
+  few GiB of address space in all, and Pulley checks each access itself;
+- the limits are the same code: the epoch still ticks every 10 ms and
+  the interpreter checks it as native code does, and the
+  `ResourceLimiter` is the store's, not the engine's. Every test in
+  `features/extensions/tests/wasi.rs` passes on Pulley too
+  (`cargo test -p architect-extensions --features pulley --test wasi`:
+  the feature `pulley` makes the interpreter the engine anywhere), and
+  `the_engine_is_the_platforms` checks which one ran. The same test
+  binary built for `aarch64-apple-ios-sim` passes in the Simulator
+  (`xcrun simctl spawn <udid> <binary>`, `ARCHITECT_WASI_GUESTS` passed
+  as `SIMCTL_CHILD_ARCHITECT_WASI_GUESTS`).
+
+A call costs more interpreted. `an_action_calls_latency` (ignored; run it
+with `--ignored --nocapture`) times `LAB_WASI_COUNTER_ADD` through the
+app's list into the component and back, 2000 times, on an M4 Mac mini
+in the dev profile:
+
+| Engine | p50 | p90 | p99 | compile + load |
+|---|---|---|---|---|
+| Cranelift, native (macOS) | 11.6 µs | 12.8 µs | 13.9 µs | 156 ms |
+| Pulley, interpreted (macOS, `pulley`) | 32.5 µs | 34.5 µs | 44.5 µs | 161 ms |
+| Pulley, interpreted (iOS 27 Simulator, the test binary under `xcrun simctl spawn`) | 36.8 µs | 39.8 µs | 44.7 µs | 168 ms |
+
+About three times a native call, and still far inside a frame:
+an extension's action or a view's event is not where the time goes. A
+component doing real work in a loop pays more (an interpreter is
+typically several times slower on hot code); that is what workers are
+for, and they run on the same engine: on the Simulator, the lab's
+"Count primes" worker counts the 148933 primes below two million in
+about 13 s while its view answers each click.
+
+The lab runs it on the Simulator: `architect-mobile --features wasi`
+(`apps/lab/mobile`, built and bundled by `apps/lab/mobile/ios/build-app.sh`) finds the WASI Counter's component beside its
+executable in its app bundle (or at `ARCHITECT_LAB_WASI_COUNTER`) and
+serves its Action List on a control socket as the desk lab does
+(`FTS_CONTROL_DIR` puts it in a folder on the Mac), so
+`scripts/mac-live-check.sh` drives it ([A live check on a Mac](@/guide/live-check-mac.md)).
+
 **Size.** Wasmtime and Cranelift add about 19 MB to a stripped
 `architect-desktop` built with the dev profile (opt-level 1): behind the
 feature, off by default.
 
-**Next.** Part 3: iOS, where there is no JIT (Wasmtime's Pulley
-interpreter, a smaller memory reservation), and the web (components
-transpiled with jco; a worker there is a Web Worker). Then WASI 0.3's async (`component-model-async`),
+**Next.** The rest of part 3: the web (components transpiled with
+jco; a worker there is a Web Worker). Then WASI 0.3's async (`component-model-async`),
 what a component adds at run time (`updates`), and timers in its views.
 
 ## Processes over vox

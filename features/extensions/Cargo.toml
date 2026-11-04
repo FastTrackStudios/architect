@@ -84,7 +84,7 @@ guest = [
     "dep:dioxus",
     "dep:tracing",
 ]
-# WASI components (`wasi`, desktop and Android): Wasmtime with the
+# WASI components (`wasi`, desktop, Android and iOS): Wasmtime with the
 # component model, Cranelift compiling, epoch interruption and a memory
 # limit per instance, the compiled code cached on disk by the component's
 # hash; the `architect:extension` world (`wit/`). Off by default: it is
@@ -100,6 +100,12 @@ wasi = [
     "dep:futures",
     "dep:sha2",
 ]
+# Wasmtime's Pulley interpreter in place of Cranelift's native code (the
+# components compiled to Pulley bytecode, interpreted, a small memory
+# reservation): always so on iOS, which allows no JIT (the target table
+# below); this feature makes it so elsewhere, to test and measure it
+# (docs/content/architecture/extensions.md, "WASI components").
+pulley = ["wasi", "wasmtime/pulley"]
 remote = ["process", "ui", "architect-theme/dioxus", "dep:blitz-dom", "dep:blitz-traits", "dep:dioxus-native-dom", "dep:futures-timer"]
 
 [dependencies]
@@ -173,6 +179,10 @@ architect-theme = { workspace = true, features = ["actions"] }
 # layouts kind.
 architect-permissions = { workspace = true }
 architect-workspace = { workspace = true, features = ["home"] }
+
+# iOS forbids JIT: Wasmtime interprets there (Pulley).
+[target.'cfg(target_os = "ios")'.dependencies]
+wasmtime = { version = "50.0.1", optional = true, default-features = false, features = ["pulley"] }
 
 [lib]
 doctest = false
