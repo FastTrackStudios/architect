@@ -12,6 +12,10 @@
 //! type, whether required) and what it does. Beside it,
 //! `actions.schema.json` is what `actions schema` prints.
 //!
+//! Beside them, the files an app names with [`Guide::file`] (the page
+//! API's `architect.d.ts` and `architect.d.luau`, from `architect_pages`'
+//! codegen) are written too, and the guide lists them.
+//!
 //! An app's actions come and go while it runs (a page's, an extension's),
 //! so [`Guide::keep_written`] writes both once the app has settled and
 //! again whenever an action joins or leaves the list.
@@ -63,6 +67,15 @@ pub struct Guide {
     app: String,
     actions: String,
     preamble: String,
+    files: Vec<Beside>,
+}
+
+/// A file written beside the guide ([`Guide::file`]).
+#[derive(Clone, Debug)]
+struct Beside {
+    name: String,
+    about: String,
+    text: String,
 }
 
 /// What [`Guide::write`] wrote.
@@ -70,6 +83,8 @@ pub struct Guide {
 pub struct Written {
     pub guide: PathBuf,
     pub schema: PathBuf,
+    /// The files named with [`Guide::file`], as written.
+    pub files: Vec<PathBuf>,
     /// The guide's size, bytes.
     pub bytes: usize,
     /// How many actions it names.
@@ -86,7 +101,29 @@ impl Guide {
             actions: format!("{app} actions"),
             app,
             preamble: DEFAULT_INTRO.to_owned(),
+            files: Vec::new(),
         }
+    }
+
+    /// Writes `text` as `name` beside the guide every time it is written,
+    /// and lists it in the guide's "Files beside this guide" with `about`
+    /// (what it is, what to do with it). A second one by `name` replaces
+    /// the first.
+    #[must_use]
+    pub fn file(
+        mut self,
+        name: impl Into<String>,
+        about: impl Into<String>,
+        text: impl Into<String>,
+    ) -> Self {
+        let name = name.into();
+        self.files.retain(|f| f.name != name);
+        self.files.push(Beside {
+            name,
+            about: about.into(),
+            text: text.into(),
+        });
+        self
     }
 
     /// The command that reaches the running app (`task actions`).
@@ -122,6 +159,17 @@ impl Guide {
         out.push_str("\n\n");
         out.push_str(fill(RULES).trim_end());
         out.push('\n');
+        if !self.files.is_empty() {
+            out.push_str("\n## Files beside this guide\n\n");
+            for f in &self.files {
+                let _ = writeln!(
+                    out,
+                    "- `{}`: {}",
+                    dir.join(&f.name).display(),
+                    f.about.trim_end()
+                );
+            }
+        }
         out.push_str(&reference(&infos, &self.actions));
         out
     }
@@ -141,9 +189,16 @@ impl Guide {
         let schema_path = dir.join(SCHEMA_FILE);
         replace(&guide_path, guide.as_bytes())?;
         replace(&schema_path, schema.as_bytes())?;
+        let mut files = Vec::new();
+        for f in &self.files {
+            let path = dir.join(&f.name);
+            replace(&path, f.text.as_bytes())?;
+            files.push(path);
+        }
         Ok(Written {
             guide: guide_path,
             schema: schema_path,
+            files,
             bytes: guide.len(),
             actions: surface.list().infos_for(surface.principal()).len(),
         })
@@ -419,6 +474,44 @@ mod tests {
         let schema: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(dir.join(SCHEMA_FILE)).unwrap()).unwrap();
         assert_eq!(schema["oneOf"].as_array().map(Vec::len), Some(2));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The files an app names are written beside the guide on every
+    /// write, and the guide lists each with what it is.
+    #[test]
+    fn files_beside_the_guide_are_written_and_named() {
+        let surface = Surface::new("demo", "1", ActionList::new());
+        let dir = std::env::temp_dir().join(format!("guide-files-{}", std::process::id()));
+        let guide = Guide::new("demo")
+            .file(
+                "architect.d.ts",
+                "the page API's TypeScript types",
+                "declare module \"architect\" {}\n",
+            )
+            .file(
+                "architect.d.luau",
+                "the page API's Luau types",
+                "export type X = {}\n",
+            );
+        let written = guide.write(&surface, &dir).unwrap();
+        assert_eq!(
+            written.files,
+            [dir.join("architect.d.ts"), dir.join("architect.d.luau")]
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("architect.d.ts")).unwrap(),
+            "declare module \"architect\" {}\n"
+        );
+        let text = std::fs::read_to_string(dir.join(GUIDE_FILE)).unwrap();
+        assert!(text.contains("## Files beside this guide"), "{text}");
+        assert!(
+            text.contains(&format!(
+                "- `{}`: the page API's TypeScript types",
+                dir.join("architect.d.ts").display()
+            )),
+            "{text}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
