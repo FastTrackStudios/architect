@@ -73,6 +73,8 @@ fn the_guide_names_every_action_of_the_lab() {
         APP_STATUS,
         "EXT_CHECK",
         "EXT_CLONE",
+        // The extension views' frame times (#274), forwarded from the extensions' list.
+        "EXT_VIEWS",
         "WORKSPACES_CLONE",
         "WORKSPACES_RESTORE_BUILTINS",
         "THEME_SET",

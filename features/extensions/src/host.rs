@@ -368,6 +368,7 @@ impl Instance for Luau {
             .ok_or_else(|| format!("{} has no script", decl.id))?;
         let me = Self {
             runtime: self.runtime.clone(),
+            workers: self.workers.clone(),
             scripts: BTreeMap::new(),
             hooks: BTreeMap::new(),
             name: self.name.clone(),
