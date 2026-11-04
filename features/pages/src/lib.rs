@@ -37,6 +37,8 @@ pub mod codegen;
 pub mod host;
 #[cfg(feature = "js")]
 pub mod js;
+#[cfg(feature = "luau")]
+pub mod luau;
 #[cfg(feature = "runner")]
 pub mod runner;
 #[cfg(feature = "js")]

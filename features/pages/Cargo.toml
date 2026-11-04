@@ -94,7 +94,7 @@ architect-extensions = { workspace = true, features = ["host", "linked", "ui", "
 architect-settings = { workspace = true }
 blitz-traits = { workspace = true }
 architect-scripting = { workspace = true, features = ["luau"] }
-architect-pages = { path = ".", features = ["codegen", "js", "ui"] }
+architect-pages = { path = ".", features = ["codegen", "js", "luau", "ui"] }
 futures = "0.3"
 tempfile = "3"
 tokio = { workspace = true }
