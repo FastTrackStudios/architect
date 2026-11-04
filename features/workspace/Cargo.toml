@@ -24,13 +24,17 @@ description = "The workspace: tab groups in splits, docks with ribbons, stacked 
 default = []
 # The contract a view kind mounts through (`ViewCtx`): the host's Action
 # List, a document and its history. Wasm-clean, no Dioxus.
-ctx = ["dep:architect", "dep:crdt"]
+ctx = ["dep:architect", "dep:crdt", "dep:architect-theme"]
 # Every operation as an Action List action with an explicit target
 # (src/control/list.rs): on a headless workspace, or under `ui` the host's.
 actions = ["dep:architect", "dep:futures-channel"]
-ui = ["actions", "dep:dioxus", "dep:architect-shell", "architect-shell/ui", "dep:futures-timer", "dep:futures-util", "dep:lucide-dioxus", "architect-commands/ui"]
-native = ["ui", "dep:dioxus-native", "dep:blitz-shell", "dep:blitz-traits", "dep:dioxus-asset-resolver"]
+ui = ["actions", "dep:dioxus", "dep:architect-theme", "architect-theme/dioxus", "dep:architect-shell", "architect-shell/ui", "dep:futures-timer", "dep:futures-util", "dep:lucide-dioxus", "architect-commands/ui"]
+# `APP_SHOT` (src/shot.rs): the window's document painted on the CPU to a PNG.
+native = ["ui", "dep:dioxus-native", "dep:blitz-shell", "dep:blitz-traits", "dep:dioxus-asset-resolver", "dep:blitz-dom", "dep:blitz-paint", "dep:anyrender", "dep:anyrender_vello_cpu", "dep:peniko", "dep:png"]
 hot-reload = ["native", "dioxus-native/hot-reload", "dep:dioxus-devtools"]
+# The interface as files (src/home.rs): layouts/<name>.json, keys.json,
+# watched, last-good with a .error beside a broken one, .state/ apart.
+home = ["actions", "dep:serde_json"]
 # A view that paints a scene each frame (`PaintView`, `Painter`, `Marks`).
 paint = ["ctx", "dep:anyrender", "dep:peniko"]
 # Drawn in-process by Blitz in a pane (`PaintPane`, a `PaintWidget`).
@@ -41,8 +45,13 @@ paint-web = ["paint", "dep:anyrender_vello_hybrid", "dep:vello_gpu", "dep:vello_
 paint-web-ui = ["paint-web", "dep:dioxus", "dioxus/web", "dep:js-sys"]
 
 [dependencies]
+# A view's theme tokens from a resolved theme (`ctx`); the Blitz host
+# follows the app's theme store (`ui`).
+architect-theme = { workspace = true, optional = true }
 facet = { workspace = true }
 facet-json = { version = "0.50.0-rc.5" }
+# The interface files' actions answer in JSON (`home`).
+serde_json = { workspace = true, optional = true }
 thiserror = { workspace = true }
 dioxus = { workspace = true, optional = true }
 architect-shell = { workspace = true, optional = true }
@@ -71,6 +80,11 @@ futures-timer = { workspace = true, optional = true }
 anyrender = { workspace = true, optional = true }
 peniko = { workspace = true, optional = true }
 blitz-dom = { workspace = true, optional = true, features = ["custom-widget"] }
+# `APP_SHOT` (feature `native`): the window's document painted on the CPU
+# and written as a PNG.
+blitz-paint = { workspace = true, optional = true, features = ["custom-widget"] }
+anyrender_vello_cpu = { workspace = true, optional = true }
+png = { workspace = true, optional = true }
 dioxus-native-dom = { workspace = true, optional = true }
 
 # A timer needs the browser's clock on wasm.
@@ -89,7 +103,9 @@ doctest = false
 
 [dev-dependencies]
 # The kind contract's own tests (src/ctx.rs, src/paint/).
-architect-workspace = { path = ".", features = ["ctx", "paint"] }
+architect-workspace = { path = ".", features = ["ctx", "paint", "home"] }
+# The interface files' tests (src/home.rs).
+tempfile = "3"
 # A paint view's scene rasterised to check it against its hit test.
 anyrender_vello_cpu = { workspace = true }
 # Exercise the mounted widget through Blitz's document painter.
@@ -97,6 +113,10 @@ blitz-paint = { workspace = true, features = ["custom-widget"] }
 # Every action driven over MCP against a headless workspace (tests/actions.rs).
 architect-mcp = { path = "../mcp" }
 serde_json = { workspace = true }
+# An async action run as the app itself (tests/actions.rs, the escape hatch).
+futures = "0.3"
+# A shot's PNG read back (tests/shot.rs).
+png = { workspace = true }
 
 [[test]]
 name = "windows"
@@ -105,6 +125,10 @@ required-features = ["ui"]
 [[test]]
 name = "actions"
 required-features = ["actions"]
+
+[[test]]
+name = "shot"
+required-features = ["native"]
 
 [lints]
 workspace = true

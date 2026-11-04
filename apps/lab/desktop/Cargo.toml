@@ -13,6 +13,9 @@ path = "src/lib.rs"
 name = "architect-desktop"
 path = "src/main.rs"
 
+[features]
+keyflow-lab = ["architect-lab-ui/keyflow-lab"]
+
 [dependencies]
 architect-lab-ui = { workspace = true }
 # Its Action List from the command line (`architect-desktop actions …`) and
@@ -26,6 +29,9 @@ architect-shell = { workspace = true }
 # One instance, and a `--background` launch starting with no window.
 architect-presence = { workspace = true, features = ["native"] }
 architect-workspace = { workspace = true, features = ["native", "hot-reload"] }
+# `extensions check <folder>` (EXT_CHECK with no window), its report as JSON.
+architect-extensions = { workspace = true, features = ["host", "process", "remote"] }
+facet-json = { version = "0.50.0-rc.5" }
 dioxus = { workspace = true }
 dioxus-native = { workspace = true, features = ["vello", "hot-reload"] }
 # The lab's Action List over MCP on loopback, when asked (src/mcp.rs).
@@ -38,6 +44,12 @@ architect-a2ui = { workspace = true }
 architect-mcp = { workspace = true, features = ["parity"] }
 clap.workspace = true
 serde_json.workspace = true
+# The agent tools against the lab and the parts it wires (tests/agent_tools.rs).
+architect-theme = { workspace = true, features = ["fs", "actions"] }
+architect-settings = { workspace = true }
+architect-workspace = { workspace = true, features = ["home"] }
+futures = "0.3"
+tempfile = "3"
 
 [lints]
 workspace = true

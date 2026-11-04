@@ -707,8 +707,25 @@ fn screensets_by_action() {
     m.run(ids::WORKSPACES_RESET, json!({}));
     assert_eq!(m.pane("note-b")["pane"], "note-b", "reset brings it back");
     m.run(ids::CLOSE, json!({"panes": ["note-b"]}));
+    // A built-in set is the person's: a model saving over it is refused,
+    // and clones it to change it.
+    let refused = m.run(ids::WORKSPACES_SAVE, json!({}));
+    assert_eq!(
+        (refused["changed"].clone(), refused["reason"].clone()),
+        (json!(false), json!("builtin"))
+    );
+    assert_eq!(
+        m.run(ids::WORKSPACES_SAVE, json!({"name": "write"}))["reason"],
+        "builtin"
+    );
+    let clone = m.run(
+        ids::WORKSPACES_CLONE,
+        json!({"name": "Write", "as": "My write"}),
+    );
+    assert_eq!(clone["screenset"], "my-write");
     assert_eq!(m.run(ids::WORKSPACES_SAVE, json!({}))["changed"], true);
     assert_eq!(m.run(ids::WORKSPACES_LIST, json!({}))["dirty"], false);
+    m.run(ids::WORKSPACES_DELETE, json!({"id": "my-write"}));
 
     let made = m.run(ids::WORKSPACES_SAVE, json!({"name": "Focus"}));
     assert_eq!(made["screenset"], "focus");
@@ -1076,4 +1093,108 @@ fn saved_sets_and_the_working_copy_are_kept_apart() {
     let elsewhere = store::load_split(&shared, &MemoryStore::new(), Vec::new());
     assert_eq!(elsewhere.sets.len(), 1);
     assert!(elsewhere.working.is_empty());
+}
+
+/// `WORKSPACES_CLONE` copies a set under a new name (refusing one taken
+/// and a name it takes but does not know); the copy is active, not built
+/// in, in no slot, and the built-in one stays as it was.
+#[test]
+fn a_built_in_set_is_cloned_to_change_it() {
+    let m = model();
+    m.run(ids::WORKSPACES_LOAD, json!({"slot": 1}));
+    let clone = m.run(ids::WORKSPACES_CLONE, json!({"name": "write"}));
+    assert_eq!(clone["screenset"], "write-copy");
+    m.run(ids::CLOSE, json!({"panes": ["note-b"]}));
+    assert_eq!(m.run(ids::WORKSPACES_SAVE, json!({}))["changed"], true);
+    let sets = m.run(ids::WORKSPACES_LIST, json!({}));
+    assert_eq!(sets["active"], "write-copy", "{sets}");
+    let copy = sets["sets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == "write-copy")
+        .cloned()
+        .unwrap();
+    assert_eq!(
+        (copy["builtin"].clone(), copy["slot"].clone()),
+        (json!(false), Value::Null),
+        "{copy}"
+    );
+    assert!(
+        m.fails(
+            ids::WORKSPACES_CLONE,
+            json!({"name": "write", "as": "Write copy"})
+        )
+        .contains("another workspace")
+    );
+    assert!(
+        m.fails(ids::WORKSPACES_CLONE, json!({"name": "nope"}))
+            .contains("no workspace")
+    );
+    // The built-in one was not touched: loading it brings note-b back.
+    m.run(ids::WORKSPACES_LOAD, json!({"id": "write"}));
+    assert_eq!(m.pane("note-b")["pane"], "note-b");
+    // A misspelt argument is refused with the names it takes.
+    let typo = m.fails(ids::WORKSPACES_CLONE, json!({"nam": "write"}));
+    assert!(typo.contains("unknown argument(s): nam"), "{typo}");
+    assert!(
+        typo.contains("valid arguments: if_revision, name, as"),
+        "{typo}"
+    );
+}
+
+/// The escape hatch's workspace half: a built-in set the person changed
+/// (saved over, as the app itself may) and a live layout moved around
+/// come back as shipped; the change is kept as `<name> (edited)`.
+#[test]
+fn the_escape_hatch_restores_the_built_in_layouts() {
+    let list = ActionList::new();
+    let shipped = screensets().sets;
+    let host = HeadlessWorkspace::new(
+        State::new(workspace()).with_screensets(screensets()),
+        env().with_shipped(shipped.clone()),
+    );
+    host.install(&list).unwrap();
+    let run = |id: &str, args: Value| -> Value {
+        let out = futures::executor::block_on(list.run_json_async(id, args.to_string().as_bytes()))
+            .unwrap();
+        serde_json::from_slice(&out).unwrap()
+    };
+    run(ids::WORKSPACES_LOAD, json!({"slot": 1}));
+    run(ids::CLOSE, json!({"panes": ["note-b"]}));
+    // The app itself (a person's save) may save over a built-in set.
+    assert_eq!(run(ids::WORKSPACES_SAVE, json!({}))["changed"], true);
+    run(ids::CLOSE, json!({"panes": ["files"]}));
+    let changed = host.state();
+    assert!(
+        changed
+            .workspace
+            .pane(&architect_workspace::PaneId::new("note-b"))
+            .is_none()
+    );
+    let back = run(ids::WORKSPACES_RESTORE_BUILTINS, json!({}));
+    assert_eq!(
+        (back["changed"].clone(), back["screenset"].clone()),
+        (json!(true), json!("write"))
+    );
+    let st = host.state();
+    for pane in ["note-a", "note-b", "files", "search"] {
+        assert!(
+            st.workspace
+                .pane(&architect_workspace::PaneId::new(pane))
+                .is_some(),
+            "{pane} is back"
+        );
+    }
+    let write = st.screensets.get("write").unwrap();
+    assert_eq!(
+        write.layouts, shipped[0].layouts,
+        "the built-in set is as shipped"
+    );
+    let edited = st
+        .screensets
+        .named("Write (edited)")
+        .expect("the change is kept");
+    assert!(!edited.builtin);
+    assert!(!st.screensets.is_dirty(st.form));
 }

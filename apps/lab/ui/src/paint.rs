@@ -199,7 +199,7 @@ impl PaintView for Grid {
     fn paint(&mut self, ctx: &ViewCtx, scene: &mut Scene) {
         let token = |name: &str, or: Color| ctx.theme.color(name).unwrap_or(or);
         let sheet = token("sheet", Color::from_rgba8(24, 24, 27, 255));
-        let lit = token("accent", Color::from_rgba8(255, 122, 26, 255));
+        let lit = token("brand", Color::from_rgba8(255, 122, 26, 255));
         let pick = token("ink", Color::from_rgba8(250, 250, 250, 255));
         let (width, height) = (ctx.geometry.width, ctx.geometry.height);
         self.lay_out(width, height);
@@ -266,9 +266,9 @@ pub fn PaintLabPane() -> Element {
 
 /// The line under the grid.
 fn status() -> String {
-    let (state, stats) = shared();
+    let (state, timing) = shared();
     let s = state.get();
-    let f = stats.summary();
+    let f = timing.summary();
     let cell = |id: Option<u64>| id.map_or_else(|| "–".to_owned(), |id| id.to_string());
     format!(
         "under {} · picked {} · typed “{}{}” · {} frames, p50 {:.2} ms, p99 {:.2} ms",
@@ -308,9 +308,9 @@ pub fn register(list: &ActionList) {
         None,
         None,
         Arc::new(|_: &[u8]| {
-            let (state, stats) = shared();
+            let (state, timing) = shared();
             let s = state.get();
-            let f = stats.summary();
+            let f = timing.summary();
             let out = serde_json::json!({
                 "hover": s.hover,
                 "picked": s.picked,

@@ -6,16 +6,34 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+keyflow-lab = ["dep:keyflow", "dep:keyflow-ui", "dep:editor-keyflow"]
+
 [dependencies]
+keyflow = { git = "https://github.com/FastTrackStudios/keyflow", rev = "6eed23f37657f68fc0e634ddd7bf6b487101f5eb", features = ["text", "paint"], default-features = false, optional = true }
+keyflow-ui = { git = "https://github.com/FastTrackStudios/keyflow", rev = "6eed23f37657f68fc0e634ddd7bf6b487101f5eb", features = ["native-chart-editor"], default-features = false, optional = true }
+# The source editor on its own, for the Editor tab (src/keyflow.rs).
+editor-keyflow = { git = "https://github.com/FastTrackStudios/keyflow", rev = "6eed23f37657f68fc0e634ddd7bf6b487101f5eb", features = ["native"], optional = true }
 architect-shell = { workspace = true, features = ["ui"] }
+# Runtime themes: the store, its files and watcher, THEME_* (src/theme.rs).
+architect-theme = { workspace = true, features = ["fs", "actions", "dioxus"] }
+# architect-ui's root: its CSS variables follow the store.
+architect-ui = { workspace = true }
 # The Embedded views' paint pane (src/paint.rs): the paint kind on Blitz.
-architect-workspace = { workspace = true, features = ["ui", "paint-ui"] }
+architect-workspace = { workspace = true, features = ["ui", "paint-ui", "home"] }
 architect-commands = { workspace = true, features = ["native"] }
 architect-settings = { workspace = true, features = ["ui", "store"] }
 architect-orgs = { workspace = true, features = ["ui"] }
-architect-extensions = { workspace = true, features = ["ui", "remote"] }
+architect-extensions = { workspace = true, features = ["ui", "remote", "page"] }
+# The lab's example extension, linked in (apps/lab/board).
+architect-lab-board = { path = "../board" }
+# Pages as files (apps/lab/board/pages/board.tsx, overrides under the
+# lab's folder `pages/`): TSX on QuickJS, drawn in a pane, live on save.
+architect-pages = { workspace = true, features = ["js", "luau", "ui", "codegen"] }
 architect-canvas = { workspace = true, features = ["ui", "luau"] }
 architect-scripting = { workspace = true, features = ["luau"] }
+# A slow or busy extension view, to the log (`extensions::LogSlowViews`).
+tracing = { workspace = true }
 # Guided tours of the lab's scenarios, live in the window.
 architect-guide = { workspace = true, features = ["ui"] }
 serde_json = { workspace = true }
@@ -33,6 +51,8 @@ dioxus-native = { workspace = true }
 architect-presence = { workspace = true }
 lucide-dioxus = { workspace = true }
 futures-timer = { workspace = true }
+# `LAB_GO` hears its asks on the window's thread (src/guide.rs).
+futures-util = { version = "0.3", default-features = false }
 
 [target.'cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))'.dependencies]
 architect-presence = { workspace = true, features = ["native"] }

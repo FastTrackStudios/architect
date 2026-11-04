@@ -1,0 +1,35 @@
+{
+  "label": "T3 Chat Dark",
+  "appearance": "dark",
+  "palette": {
+    "background": "#221d27",
+    "foreground": "#d2c4de",
+    "accent": "#a3004c",
+    "surface": "#2c2632",
+    "border": "#3b3237",
+    "danger": "#301015",
+    "chart": ["#a84370", "#934dcb", "#e88c30", "#af57db", "#e23670"]
+  },
+  "overrides": {
+    "accent": "#463753",
+    "accent-foreground": "#f8f1f5",
+    "card-foreground": "#dbc5d2",
+    "input": "#3e343c",
+    "muted": "#28222d",
+    "muted-foreground": "#c2b6cf",
+    "popover": "#100a0e",
+    "popover-foreground": "#f8f1f5",
+    "primary-foreground": "#efc0d8",
+    "ring": "#db2777",
+    "secondary": "#362d3d",
+    "secondary-foreground": "#d4c7e1",
+    "sidebar": "#181117",
+    "sidebar-accent": "#261922",
+    "sidebar-accent-foreground": "#f4f4f5",
+    "sidebar-border": "#000000",
+    "sidebar-foreground": "#e0cad6",
+    "sidebar-primary": "#1d4ed8",
+    "sidebar-ring": "#db2777",
+    "signal-danger": "oklch(0.60 0.22 28)"
+  }
+}

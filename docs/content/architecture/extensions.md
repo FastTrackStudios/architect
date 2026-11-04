@@ -70,6 +70,23 @@ weight = 67
 > and idle stop, state handed over on a reload, the host service an
 > extension calls back into, pointer, wheel and IME events, the
 > allowlist, Windows.
+> **Contributions, hooks and in-process extensions landed (2026-11-03)**
+> in the same crate. An extension adds to the interface past its actions,
+> settings and themes — openers for files, document kinds and links,
+> document kinds, tabs, status items, menu and context-menu entries, a
+> phone's bar buttons, hooks, and the shell's slots it fills
+> (`features/extensions/src/contrib.rs` `Contribution`, read into
+> `Manifest::contributes`); the host keeps them by owner
+> (`Contributions`), as a diff on a reload and withdrawn on unload, and
+> runs the hooks (`features/extensions/src/host.rs` `Host::emit`,
+> `Host::watch`). Actions are told where they were invoked from
+> (`crates/architect/src/action_list.rs` `Invocation`). One Rust value
+> runs linked in or as a process (`features/extensions/src/linked.rs`
+> `Extension`). The window side is `features/extensions/src/interface.rs`
+> `use_extension_ui`. The lab's Board is one (`apps/lab/board`). See
+> "Contributions" and "One trait, three ways to run it" below. Not yet:
+> WASM, a process view told its pane's state, hooks on a phone.
+>
 > The rest of this page is proposed (2026-10-31). Decided: one crate, `architect-extensions`, with four kinds — data,
 > WebAssembly components, Luau scripts, and processes over vox — and a
 > git-based registry. Proposed for UI: Dioxus views rendered remotely (the
@@ -346,6 +363,93 @@ reloads on every save; its logs and panics stream to the terminal and to
 the app's diagnostics. A development copy shadows an installed one with
 the same id until the session ends.
 
+## Extensions and themes
+
+An extension, and every GUI it draws, follows the app's theme live, the
+same as the app's own views
+([theming](@/architecture/theming.md)). It can also add to the theme: a
+theme of its own, and tokens of its own that default to the palette.
+
+**What a manifest adds** (`features/extensions/src/manifest.rs`
+`ThemeDecl`, `Manifest::tokens`, `Manifest::token_namespace`):
+
+```toml
+[[themes]]
+path = "themes/clicker-neon.json"   # a theme file; its id is the file's name
+
+[tokens]                             # its own tokens, in its namespace
+"clicker.face" = "mix($card, $brand, 0.22)"
+"clicker.count" = "$brand"
+"clicker.radius" = "10"
+```
+
+A token's namespace is the last part of the extension's id (`lab.clicker`
+gives `clicker.`). Its names and values are checked as a theme's
+overrides are, when the manifest is read.
+
+**Into the app's store.** A host given the app's store
+(`features/extensions/src/host.rs` `Host::with_themes`) contributes each
+extension's themes and tokens as it loads (`theme_contribution`,
+`architect_theme::ThemeStore::contribute`). On a reload they go in as a
+diff, so a development copy's saved theme file shows at once. They come
+out as it unloads (`ThemeStore::withdraw`). `THEME_LIST` shows such a
+theme with the source `extension:<id>`, and `THEME_SET` picks it like any
+other. A file that does not read is a `THEME_PROBLEMS` entry, never a
+failed load, and the extension's last good theme of that id stays. The
+tokens are the store's `Extension` layer: defaults under the theme's own
+overrides, so a theme file can restyle an extension, and under the app's
+and the person's layers. The store's revision moves only when what shows
+changes.
+
+**Each kind of GUI follows it:**
+
+| GUI | how it themes | live |
+|---|---|---|
+| A process extension's Dioxus view | the host's `:root` CSS variables in its sub-document (`features/extensions/src/remote.rs` `RemoteDocument::set_theme_css`); `var(--brand)`, and an extension's own namespace when the app opts it in (`ThemeStoreProvider { css_namespaces }`) | on every change |
+| A process that paints itself or works out colours | the theme as data (wire 3, below): `Guest::theme()`, `Guest::on_theme`, `guest::use_theme()` give an `architect_theme::Resolved` | as it connects and on every change |
+| A Luau script | `theme` (`features/scripting/src/theme.rs` `ThemeModule`): `theme.color(name)`, `theme.number`, `theme.value`, `theme.scheme`, `theme.revision`, `theme.snapshot()`, `theme.subscribe(fn)` | a frozen snapshot per revision, made again at the first frame after a change |
+| A Luau `ImGui` window | its style from the theme's tokens (`features/canvas/src/imgui.rs` `Style::from_theme`, `Col`), applied again on every change (`Session::set_theme`; `use_script_canvas` follows the store above it); `ImGui.PushStyleColor` overrides one colour | restyled and drawn again on every change |
+
+**The theme as data, on the wire.** The host sends a process the
+resolved tokens, the scheme and the revision
+(`features/extensions/src/wire.rs` `ThemeData`, the
+`ProcessExtension::theme` method in `features/extensions/src/proto.rs`)
+right after hello, before any view opens, and again on each real change
+(`features/extensions/src/process.rs` `ProcessRunner::with_theme`). The
+wire is version 3. A host still runs a wire-2 process (`WIRE_MIN`) and
+sends it no theme. vox names a method by its service and its name, so
+the new method moves no other. A host built before wire 3 refuses a
+wire-3 process, since it checks the version exactly.
+
+**A script's snapshot.** A script reads one theme for a whole run, and a
+live script one per frame. The snapshot is keyed by the store's revision
+and made again only when it moves (herdr's `__theme_revision`), so reading
+`theme.color` in a loop costs a table lookup. `theme` is a mutable global
+to Luau's compiler (`Module::live_fields`), so `theme.scheme` is read
+each time, never folded when the chunk loads.
+
+**ImGui's colours** (the table on `Col`): each style colour is the
+theme's `imgui.<name>` token when it has one, else a derivation from the
+shell's tokens.
+
+| `ImGui.Col_` | token | default |
+|---|---|---|
+| `Text` / `TextDisabled` | `imgui.text` / `imgui.text-disabled` | `$ink` / `$ink-3` |
+| `WindowBg` | `imgui.window-bg` | `$sheet` |
+| `FrameBg` / `FrameBgHovered` / `FrameBgActive` | `imgui.frame-bg…` | `$pill`, `mix($pill, $ink, 0.08)`, `mix($pill, $ink, 0.16)` |
+| `Button` / `ButtonHovered` / `ButtonActive` | `imgui.button…` | `mix($pill, $brand, 0.18)`, `0.32`, `0.5` |
+| `SliderGrab` / `SliderGrabActive` | `imgui.slider-grab…` | `$brand`, `mix($brand, $ink, 0.3)` |
+| `CheckMark` | `imgui.check-mark` | `$brand` |
+| `Separator` | `imgui.separator` | `$rule` |
+| `PlotHistogram` (a progress bar) | `imgui.plot-histogram` | `$chart-1` |
+
+**The lab's example** is the clicker (`apps/lab/clicker`): it contributes
+Clicker Neon and `clicker.*` tokens, its process view styles itself with
+`var(--clicker-face)` and works out a ramp from the theme as data, and
+its `ImGui` window (`apps/lab/clicker/window.luau`, the Vault's "Clicker
+window" pane) reads `theme`. `apps/lab/clicker/tests/themed.rs` checks
+all of it headless.
+
 ## Immediate-mode UI for scripts (ReaImGui's)
 
 A script that wants a window draws it every frame, ReaImGui's way. We do
@@ -356,7 +460,8 @@ not build a toolkit for it, and we do not need C++:
   the app's own wgpu device, and a Blitz custom widget shows it — so a
   script's window is a pane like any other: docked, tabbed, stacked,
   saved in screensets. The widget forwards the pointer and keys to egui.
-  Its style comes from the shell's theme.
+  Its style comes from the app's theme, live ("Extensions and themes"
+  above).
 - **Scripts see ReaImGui's API.** A Luau table shaped like ReaImGui's
   (`local ImGui = require 'imgui' '0.10'`, `ImGui.Begin(ctx, …)`,
   `ImGui.Button(ctx, label)`), implemented on egui, so most ReaImGui
@@ -474,6 +579,282 @@ Not everything should be one. Every extension pays for its boundary:
 dodeca split its own features into plugins to keep the core light, and
 took it back: the core got lighter, the product got harder.
 
+## Responsive by design: views and workers
+
+The guarantee: **an extension's GUI never waits on its own heavy work,
+and the app's UI never waits on any extension**, on every platform.
+Every runner gives an extension two roles, and the host keeps them
+apart:
+
+- **A view** handles input and answers with edits or paint commands
+  within a frame's budget (16 ms for a Luau window, 33 ms for a
+  process's view, the socket's round trip included). It runs on a
+  thread of its own, never the app's UI thread; the host awaits it.
+- **A worker** does the heavy work: its own instance, its own state and
+  memory, on a host thread pool, spoken to by messages only (Zellij's
+  plugin workers, a browser's Web Workers). A view spawns it, posts it
+  messages, and reads its progress and result; it is cancelled when the
+  view or the extension goes, and runs within its own step or CPU limit.
+
+An extension declares its workers in `extension.toml`:
+
+```toml
+[[workers]]
+id = "primes"
+script = "workers/primes.luau"   # luau and process packages
+# entry = "primes"               # process and wasm: the program's own name for it
+```
+
+(`features/extensions/src/manifest.rs` `WorkerDecl`.)
+
+### Per runner
+
+| | the view runs | a worker is | cancelled when |
+|---|---|---|---|
+| Luau | its own VM thread, one Luau state per session; one-off runs (actions, hooks) on a pool | another Luau state of the declared script, on the pool | its owner's state goes, or the extension unloads (`WorkerGroup::cancel_all`) |
+| Process | one thread per open view in the process, one event at a time | `guest::spawn_work`: a thread of the process | its `WorkHandle` drops (the view closed) |
+| WASI (next) | one instance of the component, its exports called with a fuel budget | another instance of the same component on a pool thread; on the web, a Web Worker | its instance is dropped |
+| Linked | the app's Dioxus tree: a linked extension is first-party code and keeps to the rule itself | its own thread or task | as the code says |
+
+**Luau** (`features/scripting/src/vm.rs`, `features/scripting/src/worker.rs`):
+no script runs on its caller's thread. `Runtime::run` takes a thread of
+an elastic pool (one that grows when every thread is busy, so a script
+that runs a script never waits for one) and the caller awaits a channel;
+dropping the future stops the script at its next step. `Runtime::start`
+gives a live script (an `ImGui` window, an overlay) a thread of its own
+for its life; each `Live::frame` runs there. `Limits::frame` (500 ms by
+default) stops a frame that runs past it, saying to use a worker;
+`Limits::steps` still stops a runaway loop; `Limits::worker` gives
+workers far more steps and five minutes of CPU. The theme reaches a
+script on any thread: `ThemeCell` is shared, and each frame takes its
+snapshot at the start (`ThemeModule`).
+
+A script spawns a worker by name and reads it each frame, immediate
+mode, with no callbacks needed:
+
+```lua
+local job = worker.spawn('primes', { n = 3000000 })
+local function loop()
+  local p = job:progress()          -- {done, total, fraction, note}
+  ImGui.ProgressBar(ctx, p and p.fraction or 0)
+  if job:status() == 'done' then ImGui.Text(ctx, job:result() .. ' primes') end
+  wake_after(33)                    -- the next frame comes by itself
+  defer(loop)
+end
+```
+
+The worker sees `args`, `worker.progress(done, total, note)`,
+`worker.post(msg)`, `worker.receive(ms)` / `worker.poll()`,
+`worker.on_message(fn)` and `worker.cancelled()`; no actions, no
+`ImGui`, no theme. Its news wakes the view's host for a frame
+(`Live::woken`); `wake_after(ms)` asks for an animation frame. A
+one-off run waits with `job:join()` or `job:next()`; a view must not.
+
+**Process guests** (`features/extensions/src/work.rs`): a view's thread
+renders one event at a time, so the rule is that a handler starts work
+and returns. `Guest::spawn_work` (`spawn_work`) runs a closure on a
+thread of its own with a `Work` to report through (`progress`, `post`,
+`check` for cancellation); `use_work` gives a view its state as a
+signal. Every event is answered with a frame, empty when nothing
+changed (wire 5, `ANSWERED_WIRE`), so the host times each one.
+
+### Budgets and degradation
+
+The host measures every frame of a view it does not draw itself
+(`features/workspace/src/meter.rs` `ViewMeter`): a Luau window's time on
+its own thread (`Session::frame_metered`), a process view's time from
+the event to its answering frame (`features/extensions/src/remote.rs`
+`RemoteView`). Past the budget, the pane keeps its last good frame and
+shows a small busy mark in the shell's theme
+(`features/shell/src/shell/busy.rs` `BusyBadge`); the rest of the app
+answers as ever, since nothing on the UI thread waits. Each view's p50,
+p99, slowest and slow-frame count are in the app's `Meters` (provided in
+context, `<extension>/<view>` or the script's step name), read by
+`EXT_VIEWS` (`features/extensions/src/views.rs` `install_view_actions`).
+`Meters::with_report` takes a `ViewReport`, told when a view turns slow
+or busy and when it recovers: the seam an app wires to its status board.
+
+The lab shows all of it with the clicker (`apps/lab/clicker`): its
+"Heavy job" pane counts primes in a worker with a live progress bar and
+a spinner that keeps turning; its "Naughty view" spins 300 ms a frame on
+its own thread and is marked busy while every other pane answers; its
+process view counts primes with `use_work` and has a button that blocks
+its own view thread for two seconds, so its pane goes busy and comes
+back. `features/scripting/tests/workers.rs`,
+`features/canvas/tests/responsive.rs` and
+`features/extensions/tests/workers.rs` measure it.
+
+## Contributions: what an extension adds to the interface
+
+Past actions, settings, views and themes, an extension adds to the
+interface the way the app's own features do, declared in its manifest or
+sent at run time. The same tables are one type,
+`features/extensions/src/contrib.rs` `Contribution`, whichever way they
+arrive: a manifest's (`Manifest::contributes`), a process guest's
+(`features/extensions/src/guest.rs` `contribute`), a Luau script's
+(`ext.contribute{…}`), an in-process extension's builder
+(`features/extensions/src/linked.rs` `Builder::contribute`). Each is
+checked against its owner's namespace, capabilities and views
+(`Contribution::check`): an action it names is its own or one its
+`[capabilities] actions` reach, a view one of its `[[views]]`, an event,
+a target and a slot ones there are, a URL pattern one that compiles.
+
+```toml
+[[openers]]                 # a claim: files by extension, kinds, links
+id = "kf"
+title = "Keyflow chart"
+files = ["kf"]
+view = "chart"              # or action = "…": given ctx.path / ctx.url
+
+[[openers]]
+id = "issue"
+title = "GitHub issue"
+urls = ['^https://github\.com/[^/]+/[^/]+/issues/\d+$']
+action = "LAB_BOARD_ISSUE"
+
+[[doc_kinds]]               # a document kind, registered while loaded
+id = "keyflow.chart"
+name = "Keyflow chart"
+files = ["kf"]
+view = "chart"
+
+[[tabs]]                    # an app section showing one of its views
+id = "board"
+title = "Board"
+icon = "layout-dashboard"   # a lucide name
+view = "board"
+
+[[status]]                  # a status item; its text changes at run time
+id = "pins"
+text = "Nothing pinned"
+side = "left"
+
+[[menus]]                   # a row in a named menu of the menu bar
+menu = "View"
+action = "LAB_BOARD_CLEAR"
+
+[[context]]                 # a row in a target's context menu
+target = "view:note"        # pane, tab, view:<kind>, file, file:<ext>, doc:<kind>, link, selection
+action = "LAB_BOARD_PIN"
+title = "Pin to the board"
+
+[[bar]]                     # a button on a phone's action bar
+action = "LAB_BOARD_PIN"
+icon = "pin"
+
+[[hooks]]                   # on an app event: one action, or a Luau script
+on = "startup"              # workspace.changed, doc.opened, theme.changed, selection.changed, changed:<topic>
+action = "LAB_BOARD_HELLO"
+
+[[slots]]                   # a shell region it fills with one of its views
+slot = "status"             # ribbon, left, right, tabs, status, title
+view = "status-bar"
+```
+
+**The registry.** `features/extensions/src/host.rs` `Host::contributions`
+is the app's `Contributions`: a load puts the manifest's set (with an
+in-process builder's beside it), a reload puts it again as a diff (what
+was added at run time stays until the new instance says otherwise), an
+unload withdraws everything the extension added and its runtime state.
+`Contributions` answers the window's questions: `tabs`, `status`,
+`menus`, `context` on a target, `bar`, `slots` (the latest claim wins),
+`open_path` (by extension, then by document kind), `open_url` (by
+pattern), `open_doc_kind`, `doc_kind_of`.
+
+**Opening.** `Host::open` takes a file's path, a link or a document
+kind to the first opener that claims it: its view opens through the
+app's view opener (`Host::set_view_opener`), or its action runs with
+`ctx.path` / `ctx.url`. A file opened raises `doc.opened`. In the
+window, a link's Ctrl- or Cmd-click goes there
+(`features/extensions/src/interface.rs` `ExtensionUi::open_link`,
+`link_press`); `EXT_OPEN` does it from the Action List.
+
+### Hooks and the invocation
+
+A hook runs on an app event (`contrib::EVENTS`, or `changed:<topic>`
+for any Action List topic): its action through the list, inside the
+extension's gate, or a Luau script — the whole file, or `function` of
+the table it returns. `startup` runs once per extension as it first
+loads (not on a reload); `extension.loaded` and `extension.unloaded`
+for every load; `theme.changed` from the theme store; the app's list
+events through `Host::watch` (`workspace` → `workspace.changed`,
+`selection` → `selection.changed`, `doc` → `doc.opened`). One run of a
+hook at a time: an event while it runs does not start it again.
+`EXT_EMIT` raises one by hand.
+
+Every run carries where it came from
+(`crates/architect/src/action_list.rs` `Invocation`,
+`ActionCaller::with_invocation`): the source (palette, menu,
+context menu, key, hook, link, open, agent, script) and what it knew —
+the target and its id, window, pane, view, selection, url, path, event.
+A Luau action reads it as `ctx`; a process at wire 4 is sent it
+(`ProcessExtension::run_in`, `Guest::action_in`); an in-process action
+gets it as its second argument. So an action needs no arguments to act
+on what it was invoked on: "Pin to the board" on a note's tab pins that
+note.
+
+### Views: placement and ownership
+
+A `[[views]]` entry says where the view lives (`home`: `main`, `left`,
+`right`, `bottom`) and how it opens (`placement`: `tab`, `split`,
+`overlay`, `popup`, `zoomed`, `float`, with `width` and `height`). In
+the window each is a workspace view of kind `<extension>/<view>`
+(`ExtensionUi::views`); `EXT_VIEW_OPEN` and a view opener place it
+through `WORKSPACE_OPEN` and `WORKSPACE_ZOOM`, or as a layer over the
+window (`ExtensionOverlays`; a second popup answers `busy`). What its
+panes do when the extension unloads is its `on_unload`: `placeholder`
+(the pane says the extension is not loaded, and comes back with it) or
+`close`.
+
+### Owned runtime state
+
+Anything set at run time — a status item's text, a badge, metadata on a
+target — is owned by its source (`ext:<id>`, `agent:<name>`, `app`),
+sequenced (a `seq` at or below the last kept is dropped as stale),
+time-limited (`ttl_ms`), capped (64 keys a source, 80 characters of one
+line), and withdrawn with an extension when it unloads
+(`contrib::StateWrite`, `Contributions::set_state`). An extension writes
+its own through its guest (`guest::set_state`), `ext.state{…}` in Luau,
+or its `linked::Handle`; an agent through `EXT_STATE_SET`, which refuses
+an `ext:` source.
+
+| action | what it does |
+|---|---|
+| `EXT_CONTRIBUTIONS` | every extension's contributions (declared and at run time), the slots, the runtime state |
+| `EXT_OPEN` | `{path}`, `{url}` or `{doc_kind, path?}` to its opener |
+| `EXT_VIEW_OPEN` | `{extension, view, state?, placement?}` |
+| `EXT_STATE_SET` / `EXT_STATE_CLEAR` | runtime state, by source and key |
+| `EXT_EMIT` | raises `{event, detail?}` |
+| `EXT_ENABLE` / `EXT_DISABLE` | turns `{id}` on or off at once |
+
+`Extensions::install_contribution_actions` puts them on the host's list.
+
+## One trait, three ways to run it
+
+`features/extensions/src/linked.rs` `Extension` is a crate's extension
+in Rust: its manifest's text, and `build`, which gives a `Builder` its
+actions (`action`, `action_in` with the invocation), its views (Dioxus
+components), what it adds past its manifest (`contribute`), and its root
+context (`context`). Its `Builder::handle` is how its code adds at run
+time, the same linked in or not.
+
+- **Linked in.** `Extensions::with_linked` registers it as a built-in
+  (`Origin::Builtin`): when that copy runs, the host runs it in process
+  (`Host::linked_view` gives its views' components to
+  `ExtensionView`). It is turned off and on like any extension
+  (`EXT_DISABLE`, `EXT_ENABLE`), and an installed or development copy of
+  its id overrides it.
+- **As a process.** Its crate's `main` is
+  `Guest::extension(&Board).serve()`; its manifest's `[entry]` names
+  that program. A development copy of the same id runs it out of
+  process, its views drawn remotely, and the app cannot tell the
+  difference in what it adds.
+- **As WASM**, when the WASM runner lands, against the same trait.
+
+`apps/lab/board/tests/both_ways.rs` runs the lab's Board both ways and
+checks they add the same things, run the same hook and read the same
+context menu's target.
+
 ## First-party extensions: the API, linked in
 
 So the rule is: **write auxiliary features against the extension API,
@@ -506,16 +887,96 @@ Good first-party extensions are auxiliary and not realtime: chart and
 lyric views, importers and exporters, publishing, overlays, analytics.
 The engine, the timeline, transport and DSP stay core.
 
-## Capabilities
+## Capabilities, the host service and consent
 
-An extension's manifest names what it needs: the network hosts, the
-folders, the action namespaces it may run, whether it may change or
-destroy (an action's effect: read-only, mutating, destructive). The
-person grants them when installing, and can revoke them. Every call
-across the boundary is checked, and the span records `ext.id` and the
-`perm.*` outcome ([logging](@/architecture/diagnostics.md)). Each
-extension runs in its own Wasmtime store with fuel and memory limits,
-off the audio thread and off the engine's thread.
+An extension's manifest names what it needs in `[capabilities]`: the
+action namespaces it may run past its own (`actions`) and the most they
+may change (`effect`: read-only, mutating, destructive), what of the
+app's state it may read (`reads`: `org`, `selection`, `documents`), the
+folders past its own and the network hosts
+(`features/extensions/src/manifest.rs` `Capabilities`;
+`features/extensions/src/capabilities.rs` turns them into the lines a
+person reads, `Capabilities::grows_from`, and into what may run,
+`Capabilities::within`).
+
+**The host service** is what an extension asks the app for, the same
+over every way it runs (`features/extensions/src/hostcall.rs`
+`HostRequest`, `HostAnswer`, JSON): run an app action, read the current
+organization or the selection, open and read documents, read and write
+files (its own folder, or `capabilities.folders`), read and write its
+own settings and data, log a line. `Host::api` gives one extension's
+session (`features/extensions/src/hostapi.rs` `ExtensionApi::call`),
+checked against what it may reach now. A process calls it over its own
+connection (the host serves `features/extensions/src/host_proto.rs`
+`ExtensionHost`; the guest calls `guest::host`), a Luau script through
+its `host` global (`features/extensions/src/luau_host.rs`), an
+in-process extension through `linked::Handle::host`; the WASM runner
+maps one JSON-in, JSON-out import onto the same call. What the app knows
+comes from its `hostapi::AppContext` (organization, selection,
+documents) and `SettingValues`; data and files live under
+`Host::with_data_root`; `Host::set_app_list` names the app's list when
+extensions have one of their own.
+
+An action an extension runs is run as `Principal::Extension { id,
+on_behalf_of }` (`features/permissions/src/lib.rs`): the person or agent
+whose run it is part of, or `None` for the app itself. A list's
+authorizer or a server's gate tells it apart from the person's;
+`RoleEngine` gives it at most the rules of `on_behalf_of`. Acting for
+the app itself it is not asked to confirm (the person granted it on
+install); acting for an agent it asks as the agent would. Each call is
+a span, `ext.host_call`, with `perm.capability`, `perm.decision`,
+`perm.reason` and `perm.principal` (set with
+`architect_telemetry::wide::set` too); a refusal is `HostError::Refused
+{capability, why}` and a line in the extension's log.
+
+**Consent** (`features/extensions/src/consent.rs` `Grants`): an
+installed extension runs with what it asks *and* a person granted, kept
+per device or per organization (only while it is the current one) in a
+file the app names (`Host::with_grants`), revocable at once
+(`Grants::revoke`): the next call, hook or script is refused what it
+lost. A built-in or a development copy runs with what it asks. Install
+shows the capabilities (`EXT_PREVIEW`, the consent prompt); an update
+whose capabilities grow waits for a yes (`EXT_UPDATE`'s
+`needs_consent`). An agent asking to install with a grant, or to grant,
+is answered `confirmation_required` with a ticket at once, never left
+waiting (`Extensions::confirm_on`).
+
+| action | what it does |
+|---|---|
+| `EXT_PREVIEW` | what a version would be and do, before it is installed: kind, runner, capabilities and which need a yes, contributions, hooks, network and files, its git ref |
+| `EXT_INSTALL` | `{id, version?, grant?, pin?}`; without a grant one that asks for more answers `needs_consent` |
+| `EXT_UPDATE` | to the newest each pin allows; unchanged ones skipped |
+| `EXT_PIN` | keeps an install at a version range, or `unpin` |
+| `EXT_GRANT` / `EXT_REVOKE` / `EXT_GRANTS` | a person's yes, taking it back, and what each may reach now |
+| `EXT_LOGS` | `{id, since?, limit?}`: a process's stdout and stderr, Luau prints and errors, failed hooks, refused calls |
+| `EXT_HOST_CALL` | one host-service call as an extension, for the caller |
+| `EXT_INFO` | which copy runs, versions, pin, grants, what it may reach |
+
+## The extensions manager
+
+One place in every app for everything that customizes it
+(`features/extensions/src/manager/mod.rs` `Manager`, feature `manager`):
+a registry of kinds (`ItemKind`: list, get, run an op). It comes with
+extensions (any runner, which copy runs and the way back to the
+built-in), Luau scripts and their hooks, workers (process extensions'
+processes), themes and the interface files (layouts and `keys.json`)
+(`features/extensions/src/manager/kinds.rs`). An app adds a kind of its
+own — audio plugins, a page kind, WASI components — by implementing
+`ItemKind` and calling `Manager::register`. Agents get every operation
+as `MANAGER_KINDS`, `MANAGER_LIST {kind?, query?}`, `MANAGER_GET {kind,
+id}` and `MANAGER_RUN {kind, id, op, args?}`; a destructive op from
+outside asks the person first (`Manager::confirm_on`).
+
+The manager is itself a linked-in extension
+(`features/extensions/src/manager/extension.rs` `ManagerExtension`,
+id `manager`), overridable by a development copy. Its page
+(`features/extensions/src/page.rs` `ManagerPage`, feature `page`, in
+architect-ui's components and the theme's variables) is a settings
+section and a workspace view (`use_manager_page`, `ManagerView`), with
+⌘O's `ext:`; an extension's page there shows what it adds, what it asks
+for (granted or not, each grant revocable), versions and pin, where it
+runs and its log, and installs through the consent prompt. A project's
+missing extensions use the same components (`MissingExtensions`).
 
 ## Packaging
 

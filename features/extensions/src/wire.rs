@@ -12,11 +12,119 @@
 //!
 //! These are architect's types, not Dioxus's serde shapes, so the wire is
 //! versioned here ([`WIRE`]) and checked at hello, whatever Dioxus does.
+//! The host also sends the app's theme as data ([`ThemeData`]), beside the
+//! CSS it gives a view's document.
 
 use facet::Facet;
 
-/// The wire's version: a host refuses a process that speaks another.
-pub const WIRE: u32 = 2;
+/// The wire's version.
+///
+/// 3 added the theme as data ([`ThemeData`], `ProcessExtension::theme`);
+/// 4 an action's invocation (`ProcessExtension::run_in`) and what a
+/// process adds at run time ([`Update`], `ProcessExtension::updates`); 5
+/// a frame for every event ([`ANSWERED_WIRE`]).
+pub const WIRE: u32 = 5;
+
+/// The oldest wire a host still speaks: a process at 2 runs as before,
+/// its views themed through CSS only (it is never sent [`ThemeData`]).
+/// A host refuses one outside `WIRE_MIN..=WIRE`.
+pub const WIRE_MIN: u32 = 2;
+
+/// The first wire a process is sent the theme on.
+pub const THEMED_WIRE: u32 = 3;
+
+/// The first wire a process is sent its actions' invocations on, and
+/// asked for its [`Update`]s.
+pub const CONTRIB_WIRE: u32 = 4;
+
+/// The first wire a process answers every event with a frame.
+///
+/// The frame is empty when the event changed nothing; its host times each
+/// frame from the event that asked for it, and marks the view busy while
+/// one runs past its budget. An older process's view is timed by its
+/// frames alone (never busy).
+pub const ANSWERED_WIRE: u32 = 5;
+
+/// What a process adds or changes at run time, as it happens (wire 4 on):
+/// its contributions, in place of the ones it sent before, or its runtime
+/// state.
+///
+/// JSON in the manifest's own shapes (`crate::contrib`), checked by the host
+/// against its manifest as a manifest's tables are.
+#[derive(Clone, Debug, PartialEq, Eq, Facet)]
+#[repr(u8)]
+pub enum Update {
+    /// A `Contribution` as JSON: everything it adds at run time now.
+    Contribute { json: String },
+    /// A `StateWrite` as JSON (its source is the extension's, whatever it
+    /// says).
+    State { json: String },
+    /// Clears one key of its runtime state, or all of it (`None`).
+    Clear { key: Option<String> },
+}
+
+/// The app's theme, as data: what a process that paints itself (on the
+/// GPU, or working out colours) themes with. Sent as it connects and on
+/// every change (wire 3 on).
+#[derive(Clone, Debug, PartialEq, Eq, Facet)]
+pub struct ThemeData {
+    /// The theme showing.
+    pub id: String,
+    /// `light` or `dark`.
+    pub scheme: String,
+    /// The app's theme revision: it moves on every change.
+    pub revision: u64,
+    /// Every resolved token (architect's and the app's dotted ones), its
+    /// final CSS value.
+    pub tokens: Vec<Token>,
+}
+
+/// One resolved token.
+#[derive(Clone, Debug, PartialEq, Eq, Facet)]
+pub struct Token {
+    pub name: String,
+    pub value: String,
+}
+
+impl ThemeData {
+    /// The theme `resolved`, to send.
+    #[must_use]
+    pub fn from_resolved(resolved: &architect_theme::Resolved) -> Self {
+        Self {
+            id: resolved.id().to_owned(),
+            scheme: resolved.scheme().as_str().to_owned(),
+            revision: resolved.revision(),
+            tokens: resolved
+                .tokens()
+                .iter()
+                .map(|(name, value)| Token {
+                    name: name.clone(),
+                    value: value.clone(),
+                })
+                .collect(),
+        }
+    }
+
+    /// The theme, received: `color`, `number`, `value` as the host reads
+    /// them.
+    #[must_use]
+    pub fn to_resolved(&self) -> architect_theme::Resolved {
+        let scheme = if self.scheme == "light" {
+            architect_theme::Scheme::Light
+        } else {
+            architect_theme::Scheme::Dark
+        };
+        architect_theme::Resolved::new(
+            &self.id,
+            scheme,
+            self.tokens
+                .iter()
+                .map(|t| (t.name.clone(), t.value.clone()))
+                .collect(),
+        )
+        .at_revision(self.revision)
+    }
+}
 
 /// What a process says when the host connects.
 #[derive(Clone, Debug, PartialEq, Eq, Facet)]

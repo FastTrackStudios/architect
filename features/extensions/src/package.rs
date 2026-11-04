@@ -78,9 +78,17 @@ impl Package {
         manifest: &str,
         files: &[(&'static str, &'static str)],
     ) -> Result<Self, ManifestError> {
+        let parsed = Manifest::parse(manifest)?;
+        let mut files = files.to_vec();
+        // Its own text among its files, so a copy can be written out
+        // (`EXT_CLONE`); an embedded package is made once, so it is kept
+        // for the process's life.
+        if !files.iter().any(|(p, _)| *p == MANIFEST) {
+            files.push((MANIFEST, Box::leak(manifest.to_owned().into_boxed_str())));
+        }
         Ok(Self {
-            manifest: Manifest::parse(manifest)?,
-            files: Files::Embedded(files.to_vec()),
+            manifest: parsed,
+            files: Files::Embedded(files),
         })
     }
 

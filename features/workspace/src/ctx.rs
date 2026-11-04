@@ -56,6 +56,20 @@ impl std::fmt::Debug for DocRef {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ThemeTokens(pub BTreeMap<String, String>);
 
+/// A resolved theme's every token (`architect_theme`): what a paint
+/// view reads its colours from, live (`PaintPane` follows the store).
+impl From<&architect_theme::Resolved> for ThemeTokens {
+    fn from(resolved: &architect_theme::Resolved) -> Self {
+        Self(resolved.tokens().clone())
+    }
+}
+
+impl architect_theme::FromResolved for ThemeTokens {
+    fn from_resolved(resolved: &architect_theme::Resolved) -> Self {
+        Self::from(resolved)
+    }
+}
+
 impl ThemeTokens {
     #[must_use]
     pub fn with(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
@@ -96,10 +110,16 @@ pub enum ViewInput {
         y: f32,
         button: Button,
     },
-    /// Scrolled by `dx, dy` logical pixels.
+    /// Scrolled by `dx, dy` logical pixels. `x, y` are the pointer's
+    /// position in the view's logical pixels (the same space as
+    /// [`PointerMove`](Self::PointerMove)); `mods` are the held modifier
+    /// names as [`Key`](Self::Key) gives them (`"Mod"`, `"Shift"`, `"Alt"`).
     Wheel {
         dx: f32,
         dy: f32,
+        x: f32,
+        y: f32,
+        mods: Vec<&'static str>,
     },
     /// A finger, by its id: `phase` is `"start"`, `"move"`, `"end"` or
     /// `"cancel"`.
@@ -273,8 +293,9 @@ impl Extras {
 }
 
 /// A value the host and its views share, typed: the host writes, a view
-/// reads (and redraws when [`version`](Self::version) moves). Cheap to
-/// clone; every clone is the same value. A `T` with a [`facet::Facet`]
+/// reads (and redraws when [`version`](Self::version) moves).
+///
+/// Cheap to clone; every clone is the same value. A `T` with a [`facet::Facet`]
 /// shape is schema-typed besides: its [`shape`](Self::shape) and JSON
 /// are what an agent, a remote view or a saved pane reads it by.
 pub struct HostData<T>(Arc<Shared<T>>);
@@ -348,7 +369,7 @@ impl<T: Clone> HostData<T> {
 impl<T: for<'a> facet::Facet<'a>> HostData<T> {
     /// Its schema.
     #[must_use]
-    pub fn shape() -> &'static facet::Shape {
+    pub const fn shape() -> &'static facet::Shape {
         T::SHAPE
     }
 
@@ -474,7 +495,13 @@ mod tests {
     fn input_drains_in_order() {
         let sink = InputSink::new();
         sink.push(ViewInput::Focus(true));
-        sink.push(ViewInput::Wheel { dx: 0.0, dy: 3.0 });
+        sink.push(ViewInput::Wheel {
+            dx: 0.0,
+            dy: 3.0,
+            x: 0.0,
+            y: 0.0,
+            mods: Vec::new(),
+        });
         assert_eq!(sink.drain().len(), 2);
         assert!(sink.drain().is_empty());
     }
@@ -523,7 +550,7 @@ mod tests {
 
         let drawn = seen.version();
         meter.update(|m| m.level = 0.75);
-        assert_eq!(seen.version(), drawn + 1);
+        assert_eq!(seen.version(), drawn.saturating_add(1));
         assert_eq!(seen.read(|m| m.level), 0.75);
 
         assert_eq!(HostData::<Meter>::shape().type_identifier, "Meter");

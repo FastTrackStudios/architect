@@ -1,0 +1,34 @@
+{
+  "label": "Zen Light",
+  "appearance": "light",
+  "palette": {
+    "background": "#f8f7f4",
+    "foreground": "#4a4a44",
+    "accent": "#78826b",
+    "surface": "#f1f0ea",
+    "border": "#e2e1d7",
+    "danger": "#b3574e",
+    "chart": ["#78826b", "#7a8ba0", "#a08e6f", "#8f7f95", "#6f9089"]
+  },
+  "overrides": {
+    "accent": "#e6e5db",
+    "accent-foreground": "#55554e",
+    "destructive-foreground": "#f8f7f4",
+    "input": "#ecebe3",
+    "letter-spacing": "0.01em",
+    "muted": "#ecebe3",
+    "muted-foreground": "#8b8a80",
+    "primary-foreground": "#f8f7f4",
+    "radius": "0.75rem",
+    "ring": "#9aa38b",
+    "secondary": "#ecebe3",
+    "secondary-foreground": "#55554e",
+    "shadow-opacity": "0.06",
+    "sidebar": "#f1f0ea",
+    "sidebar-accent": "#e6e5db",
+    "sidebar-accent-foreground": "#55554e",
+    "sidebar-primary-foreground": "#f8f7f4",
+    "sidebar-ring": "#9aa38b",
+    "signal-danger": "oklch(0.60 0.22 28)"
+  }
+}

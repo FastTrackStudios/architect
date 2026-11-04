@@ -8,7 +8,7 @@ Crate `architect-ui` (`features/ui/architect-ui`); house rules in `features/ui/A
 |---|---|---|
 | `components/` | ~70 modules of Dioxus components (list below) | `features/ui/architect-ui/src/components/mod.rs` |
 | `layout/`, `typography/` | `Divider`, `HStack`, `Spacer`, `VStack`; `Heading`, `Text` | `features/ui/architect-ui/src/layout`, `features/ui/architect-ui/src/typography` |
-| `theme/` | `ThemeProvider`, `ThemeScope`, `ThemeRuntimeStyle`, `ThemeSwitcher`; presets; CSS-var tokens | `features/ui/architect-ui/src/theme/runtime.rs` `ThemeProvider`, `theme_preset`, `default_theme_state`; `features/ui/architect-ui/src/theme/tokens.rs` |
+| `theme/` | `ThemeProvider`, `ThemeStoreProvider` (follows an `architect-theme` store), `ThemeScope`, `ThemeRuntimeStyle`, `ThemeSwitcher`; presets (architect-theme's built-in theme files, in light/dark pairs); CSS-var tokens | `features/ui/architect-ui/src/theme/runtime.rs` `ThemeProvider`, `ThemeStoreProvider`, `theme_preset`, `default_theme_state`; `features/ui/architect-ui/src/theme/tokens.rs` |
 | `cn` | Tailwind class merge | `features/ui/architect-ui/src/cn.rs` `merge`, `merge_slice`, `cn` |
 | Embedded CSS | `THEME_CSS`, `UTILITIES_CSS` consts | `features/ui/architect-ui/src/lib.rs` |
 | `prelude` | flat re-export of components, theme, layout, typography | `features/ui/architect-ui/src/prelude.rs` |
@@ -25,7 +25,7 @@ Crate `architect-ui` (`features/ui/architect-ui`); house rules in `features/ui/A
    - Injected: `document::Style { {architect_ui::THEME_CSS} }` and `document::Style { {architect_ui::UTILITIES_CSS} }`. Use this when the app's Tailwind does not scan architect-ui.
    - Scanned (studio's pattern): `@import` `fts-theme.css` and `@source` architect-ui's `src/**/*.rs` from a stable checkout path.
    Prefer `@import` of `features/ui/architect-ui/assets/fts-theme.css` over a vendored copy (Task vendors one; keeping it in step is manual).
-4. Theme: `let state = use_signal(default_theme_state);` then `ThemeProvider { state, … }`. Presets via `theme_preset("doom-64")`; default preset name `"default"`.
+4. Theme: in an app, `architect_theme::use_theme_store(..)` at the root and `ThemeStoreProvider { … }` (runtime themes, `references/theming.md`). A fixed theme: `let state = use_signal(default_theme_state);` then `ThemeProvider { state, … }`. Presets via `theme_preset("doom-64")` (each is the built-in files `<name>-light` / `<name>-dark`); default preset name `"default"`.
 5. Nested regions: `ThemeScope { styles, mode, allow_layout_scale }`.
 6. Stories assume a host `ThemeProvider` and must not add one.
 7. Classes used only inside architect-ui are missing from a downstream sheet unless you inject `UTILITIES_CSS` or scan the crate.

@@ -69,14 +69,29 @@ pub const PAINT_PANE: &str = "embed-paint";
 
 /// The views of the five.
 #[must_use]
-pub fn views() -> [View; 5] {
-    [
+pub fn views() -> Vec<View> {
+    vec![
         View::new("embed.dioxus", "Dioxus", |_| rsx! { DioxusPane {} }),
         View::new("embed.luau", "Luau ImGui", |_| rsx! { LuauPane {} }).still(),
         View::new("embed.frame", "Frame surface", |_| rsx! { FramePane {} })
             .drawn_by(FRAME_SURFACE)
             .still(),
         View::new("embed.a2ui", "A2UI", |_| rsx! { A2uiPane {} }),
+        #[cfg(feature = "keyflow-lab")]
+        View::new(
+            "embed.keyflow-editor",
+            "Keyflow editor",
+            |_| rsx! { crate::keyflow::KeyflowEditorPane {} },
+        )
+        .headless(),
+        #[cfg(feature = "keyflow-lab")]
+        View::new(
+            "embed.keyflow-chart",
+            "Keyflow chart",
+            |_| rsx! { crate::keyflow::KeyflowChartPane {} },
+        )
+        .headless()
+        .drawn_by(PAINT),
         View::new(
             "embed.paint",
             "Paint",
@@ -115,6 +130,16 @@ pub fn workspace() -> Workspace {
     let _ = w.open(
         Pane::new(PAINT_PANE, "embed.paint", "Paint"),
         Target::Split(Side::Bottom),
+    );
+    #[cfg(feature = "keyflow-lab")]
+    let _ = w.open(
+        Pane::new("embed-keyflow-editor", "embed.keyflow-editor", "Editor"),
+        Target::Tab,
+    );
+    #[cfg(feature = "keyflow-lab")]
+    let _ = w.open(
+        Pane::new("embed-keyflow-chart", "embed.keyflow-chart", "Chart"),
+        Target::Tab,
     );
     let _ = w.activate(&architect_workspace::PaneId::new(DIOXUS_PANE));
     let _ = w.open(
@@ -157,7 +182,7 @@ fn DioxusPane() -> Element {
     let color = SWATCHES
         .iter()
         .find(|(name, _)| name.eq_ignore_ascii_case(&picked))
-        .map_or(t.pill, |(_, c)| *c);
+        .map_or(&*t.pill, |(_, c)| *c);
     rsx! {
         div { style: "flex: 1; display: flex; flex-direction: column; min-height: 0; overflow-y: scroll;",
             KindHead {
@@ -420,6 +445,8 @@ fn shipped(args: &serde_json::Value) -> Result<serde_json::Value, String> {
 /// `LAB_PAINT_STATE`, the paint pane's.
 pub fn register(list: &ActionList, surfaces: &architect_a2ui::Surfaces) {
     crate::paint::register(list);
+    #[cfg(feature = "keyflow-lab")]
+    crate::keyflow::register(list);
     let failed = |id: &str, message: String| ActionError::Failed {
         id: id.to_owned(),
         message,

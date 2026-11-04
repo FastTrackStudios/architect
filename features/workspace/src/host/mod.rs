@@ -82,6 +82,9 @@ pub struct View {
     /// that is costly to draw twice, or that says so to others as it
     /// mounts and goes (a published canvas, a remote process's view).
     pub still: bool,
+    /// Its pane's header row (back, forward, title, menu) is drawn; a view
+    /// whose tab already names it turns that off ([`View::headless`]).
+    pub header: bool,
     /// What draws it: the built-in `dioxus` kind unless a kind's
     /// provider made it ([`View::drawn_by`]). A pane whose view's kind is
     /// not in [`Views::kinds`] shows why in its place.
@@ -105,6 +108,7 @@ impl View {
             home: Target::Tab,
             single: true,
             still: false,
+            header: true,
             draws: KindId::dioxus(),
             render: Rc::new(render),
         }
@@ -135,6 +139,14 @@ impl View {
     #[must_use]
     pub const fn still(mut self) -> Self {
         self.still = true;
+        self
+    }
+
+    /// No header row over its pane (back, forward, title, menu): for a view
+    /// whose tab already names it, so the pane is just its content.
+    #[must_use]
+    pub const fn headless(mut self) -> Self {
+        self.header = false;
         self
     }
 
@@ -395,7 +407,10 @@ pub struct Host {
     views: CopyValue<Views>,
     commands: CopyValue<Vec<Command>>,
     on_command: CopyValue<Option<EventHandler<String>>>,
-    theme: CopyValue<ShellTheme>,
+    /// The colours, a signal so every pane, tab bar and dock repaints when
+    /// the app's theme changes (a `CopyValue` here kept them on the theme
+    /// the host was first drawn with).
+    theme: Signal<ShellTheme>,
     sizes: Signal<Sizes>,
     phone: Signal<bool>,
     title_row: Signal<Option<TitleRow>>,
@@ -471,12 +486,28 @@ pub struct Host {
     sets_noun: Signal<String>,
     /// The sheet that manages the saved layouts is open.
     managing: Signal<bool>,
+    /// The screensets the app gave before anything was read from its
+    /// store: the built-in ones as shipped, for the escape hatch
+    /// (`WORKSPACES_RESTORE_BUILTINS`).
+    shipped: CopyValue<Vec<crate::screenset::Screenset>>,
 }
 
 /// The [`Host`] a [`WorkspaceView`] above put in context.
 #[must_use]
 pub fn use_host() -> Host {
     use_context()
+}
+
+impl Host {
+    /// Whether a pane's header row is drawn: not for a view that left it
+    /// out ([`View::headless`]).
+    fn pane_header(&self, pane: &PaneId) -> bool {
+        let workspace = self.workspace.read();
+        let Some(p) = workspace.pane(pane) else {
+            return true;
+        };
+        self.views.read().get(&p.view.0).map_or(true, |v| v.header)
+    }
 }
 
 /// The pane a slot draws, kept current: Dioxus may hand a slot another
@@ -967,6 +998,8 @@ impl Host {
                     slot: Some(slot),
                 },
             ),
+            // Run where the commands are (the menu row does it).
+            Op::Run { .. } => {}
         }
     }
 }
@@ -1103,6 +1136,33 @@ enum Op {
     DockBack(Side),
     /// Recall the screenset in slot n (⌘n).
     Recall(u8),
+    /// Run another's entry (an extension's context-menu row) on a pane:
+    /// its command, told the pane and its view.
+    Run {
+        command: String,
+        pane: PaneId,
+        view: String,
+    },
+}
+
+/// One row others add to a target's context menu: its label and the
+/// command it runs (told the target: [`architect::action::Invocation`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContextEntry {
+    pub label: String,
+    pub command: String,
+}
+
+/// What others add to a pane's context menu (an extension's
+/// `[[context]]` rows), asked for by target (`view:<kind>`) and id (the
+/// pane's) each time the menu opens: provide it above the workspace.
+#[derive(Clone)]
+pub struct ContextEntries(pub Rc<dyn Fn(&str, &str) -> Vec<ContextEntry>>);
+
+impl ContextEntries {
+    pub fn new(f: impl Fn(&str, &str) -> Vec<ContextEntry> + 'static) -> Self {
+        Self(Rc::new(f))
+    }
 }
 
 /// A measured length, as the model's points (window sizes fit an `f32`).
@@ -1195,15 +1255,21 @@ pub fn WorkspaceView(
     /// by this host, and each change of the arrangement is a
     /// `Changed { topic: "workspace" }` event.
     actions: Option<WorkspaceActions>,
-    #[props(default)] theme: ShellTheme,
+    /// Its colours; left out, the shell's (which follow the app's theme
+    /// store), else the default.
+    #[props(default, into)]
+    theme: Option<ShellTheme>,
 ) -> Element {
+    let theme = theme
+        .or_else(|| architect_shell::try_use_shell().map(|s| s.theme))
+        .unwrap_or_default();
     let os_windows = try_use_context::<Windows>();
     let mut host = use_context_provider(|| Host {
         workspace,
         views: CopyValue::new(views.clone()),
         commands: CopyValue::new(commands.clone()),
         on_command: CopyValue::new(on_command),
-        theme: CopyValue::new(theme),
+        theme: Signal::new(theme.clone()),
         sizes: Signal::new(Sizes::FINE),
         phone: Signal::new(phone),
         title_row: Signal::new(None),
@@ -1222,6 +1288,14 @@ pub fn WorkspaceView(
         window: CopyValue::new(WindowId::main()),
         status: Signal::new(Vec::new()),
         status_serial: CopyValue::new(0),
+        shipped: CopyValue::new(screensets.map_or_else(Vec::new, |s| {
+            s.peek()
+                .sets
+                .iter()
+                .filter(|s| s.builtin)
+                .cloned()
+                .collect()
+        })),
         screensets: screensets.unwrap_or_else(|| Signal::new(Screensets::default())),
         form: Signal::new(FormClass::Desk),
         scrolls: Signal::new(HashMap::new()),
@@ -1246,7 +1320,9 @@ pub fn WorkspaceView(
     host.views.set(views);
     host.commands.set(commands);
     host.on_command.set(on_command);
-    host.theme.set(theme);
+    if *host.theme.peek() != theme {
+        host.theme.set(theme.clone());
+    }
     let sizes = if coarse { Sizes::COARSE } else { Sizes::FINE };
     if *host.sizes.peek() != sizes {
         host.sizes.set(sizes);
@@ -1424,7 +1500,7 @@ fn use_sidebar_follows_left_dock(host: Host, in_shell: bool) {
 #[component]
 fn DeskBody() -> Element {
     let host = use_host();
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let workspace = host.workspace.read();
     let Some(main) = workspace.windows.first() else {
         return rsx! {};
@@ -1537,7 +1613,7 @@ fn shown_center(window: &crate::model::Window) -> Option<Node> {
 #[component]
 fn MinimisedChip(pane: PaneId) -> Element {
     let host = use_host();
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let title = host
         .workspace
         .read()
@@ -1560,7 +1636,7 @@ fn MinimisedChip(pane: PaneId) -> Element {
 #[component]
 fn WindowChip(window: WindowId, count: usize) -> Element {
     let host = use_host();
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let tabs = if count == 1 { "tab" } else { "tabs" };
     rsx! {
         button {
@@ -1576,7 +1652,7 @@ fn WindowChip(window: WindowId, count: usize) -> Element {
 #[component]
 fn EmptyCenter() -> Element {
     let host = use_host();
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let s = (host.sizes)();
     rsx! {
         div {

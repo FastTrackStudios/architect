@@ -136,6 +136,9 @@ pub struct Env {
     /// Pop-outs open as OS windows (`WORKSPACE_DOCK_POP_OUT` needs them).
     pub windows: bool,
     pub dock_bounds: BTreeMap<u8, Rect>,
+    /// The screensets the app ships, as it ships them: what
+    /// `WORKSPACES_RESTORE_BUILTINS` (the escape hatch) puts back.
+    pub shipped: Vec<crate::screenset::Screenset>,
 }
 
 impl Env {
@@ -149,7 +152,15 @@ impl Env {
             },
             windows: false,
             dock_bounds: BTreeMap::new(),
+            shipped: Vec::new(),
         }
+    }
+
+    /// The screensets the app ships ([`Self::shipped`]).
+    #[must_use]
+    pub fn with_shipped(mut self, shipped: Vec<crate::screenset::Screenset>) -> Self {
+        self.shipped = shipped;
+        self
     }
 
     /// Pop-outs are OS windows here.

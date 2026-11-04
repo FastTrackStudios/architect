@@ -53,7 +53,7 @@ impl PaintWidget {
         }
     }
 
-    fn with_wake(painter: Painter, wake: PaintWake) -> Self {
+    const fn with_wake(painter: Painter, wake: PaintWake) -> Self {
         Self { painter, wake }
     }
 
@@ -196,9 +196,14 @@ fn view_input(event: &UiEvent) -> Option<ViewInput> {
                 BlitzWheelDelta::Lines(x, y) => (x * LINE, y * LINE),
                 BlitzWheelDelta::Pixels(x, y) => (x, y),
             };
+            // The pointer's point, as the pointer events give it.
+            let (x, y) = (w.coords.client_x, w.coords.client_y);
             ViewInput::Wheel {
                 dx: narrow(dx),
                 dy: narrow(dy),
+                x,
+                y,
+                mods: modifiers(w.mods),
             }
         }
         UiEvent::KeyDown(k) | UiEvent::KeyUp(k) => ViewInput::Key {
@@ -210,18 +215,14 @@ fn view_input(event: &UiEvent) -> Option<ViewInput> {
             preedit: text.clone(),
             commit: None,
         },
-        UiEvent::Ime(BlitzImeEvent::Commit(text)) => ViewInput::Ime {
+        // Pasted text is committed text.
+        UiEvent::Ime(BlitzImeEvent::Commit(text)) | UiEvent::Paste(text) => ViewInput::Ime {
             preedit: String::new(),
             commit: Some(text.clone()),
         },
         UiEvent::Ime(BlitzImeEvent::Disabled) => ViewInput::Ime {
             preedit: String::new(),
             commit: None,
-        },
-        // Pasted text is committed text.
-        UiEvent::Paste(text) => ViewInput::Ime {
-            preedit: String::new(),
-            commit: Some(text.clone()),
         },
         UiEvent::Ime(BlitzImeEvent::Enabled | BlitzImeEvent::DeleteSurrounding { .. })
         | UiEvent::AppleStandardKeybinding(_) => return None,
@@ -277,31 +278,46 @@ const fn narrow(v: f64) -> f32 {
     v as f32
 }
 
-/// The shell's theme as a view's tokens: its colours by field name,
-/// `_` as `-` (`"ink-2"`, `"accent-soft"`).
+/// The shell's theme as a view's tokens.
+///
+/// By the names a resolved theme gives them (`architect_theme`): its fields with `_` as `-`
+/// (`"ink-2"`), the accent trio as `"brand"`, `"brand-ink"`,
+/// `"brand-soft"` (`"accent"` is architect-ui's hover wash). What a pane
+/// gets when the app has a shell but no theme store.
 #[must_use]
 pub fn shell_tokens(theme: &ShellTheme) -> ThemeTokens {
     [
-        ("desk", theme.desk),
-        ("sheet", theme.sheet),
-        ("title-bar", theme.title_bar),
-        ("pill", theme.pill),
-        ("rule", theme.rule),
-        ("active", theme.active),
-        ("ink", theme.ink),
-        ("ink-2", theme.ink_2),
-        ("ink-3", theme.ink_3),
-        ("accent", theme.accent),
-        ("accent-ink", theme.accent_ink),
-        ("danger", theme.danger),
-        ("scrim", theme.scrim),
-        ("accent-soft", theme.accent_soft),
-        ("font", theme.font),
+        ("desk", &theme.desk),
+        ("sheet", &theme.sheet),
+        ("title-bar", &theme.title_bar),
+        ("pill", &theme.pill),
+        ("rule", &theme.rule),
+        ("active", &theme.active),
+        ("ink", &theme.ink),
+        ("ink-2", &theme.ink_2),
+        ("ink-3", &theme.ink_3),
+        ("brand", &theme.accent),
+        ("brand-ink", &theme.accent_ink),
+        ("danger", &theme.danger),
+        ("scrim", &theme.scrim),
+        ("brand-soft", &theme.accent_soft),
+        ("font", &theme.font),
     ]
     .into_iter()
     .fold(ThemeTokens::default(), |t, (name, value)| {
-        t.with(name, value)
+        t.with(name, value.to_string())
     })
+}
+
+/// The tokens a pane sees now: the app's theme store's whole resolved
+/// theme when there is one, else the shell's colours, else none.
+fn pane_tokens() -> ThemeTokens {
+    if let Some(store) = architect_theme::try_use_theme() {
+        return ThemeTokens::from(&*store.resolved().read());
+    }
+    architect_shell::try_use_shell()
+        .map(|s| shell_tokens(&s.theme))
+        .unwrap_or_default()
 }
 
 /// What a [`PaintPane`] mounts: its view, made once from the pane's
@@ -380,12 +396,10 @@ impl PaintMount {
 pub fn PaintPane(mount: PaintMount) -> Element {
     let pane = crate::use_pane();
     let actions = try_use_context::<Arc<ActionList>>();
-    let theme = architect_shell::try_use_shell().map(|s| s.theme);
+    let theme = pane_tokens();
     let window = try_use_context::<Arc<dyn ShellProvider>>();
     mount.wake.attach(window.clone());
-    mount
-        .wake
-        .set_theme(theme.as_ref().map(shell_tokens).unwrap_or_default());
+    mount.wake.set_theme(theme.clone());
     let (widget, input) = use_hook(|| {
         let began = Instant::now();
         let clock = FrameClock::new(mount.budget, move || began.elapsed());
@@ -397,7 +411,7 @@ pub fn PaintPane(mount: PaintMount) -> Element {
             (actions, ActionCaller::app()),
             clock,
         )
-        .with_theme(theme.as_ref().map(shell_tokens).unwrap_or_default())
+        .with_theme(theme)
         .with_extras(mount.extras.clone());
         let input = ctx.input.clone();
         let view = (mount.make)(&ctx);
@@ -594,7 +608,7 @@ mod tests {
             width: 1000.0,
             height: 800.0,
             touch: false,
-            insets: Default::default(),
+            insets: architect_shell::Insets::default(),
         };
         rsx! {
             architect_shell::AppShell { screen, theme: theme(), tabs: vec![], current: None,
@@ -614,8 +628,8 @@ mod tests {
         dom.in_runtime(|| {
             THEME.with(|slot| {
                 let mut theme = slot.borrow().unwrap();
-                theme.write().accent = "#123456";
-            })
+                theme.write().accent = "#123456".into();
+            });
         });
         dom.render_immediate(&mut NoOpMutations);
         let current = MOUNT_WAKE.with(|slot| slot.borrow().clone().unwrap());
@@ -629,7 +643,7 @@ mod tests {
                 .unwrap()
                 .as_ref()
                 .unwrap()
-                .get("accent"),
+                .get("brand"),
             Some("#123456")
         );
     }

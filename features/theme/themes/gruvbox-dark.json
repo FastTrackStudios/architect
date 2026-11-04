@@ -1,0 +1,27 @@
+{
+  "label": "Gruvbox Dark",
+  "appearance": "dark",
+  "palette": {
+    "background": "#282828",
+    "foreground": "#ebdbb2",
+    "accent": "#fabd2f",
+    "surface": "#32302f",
+    "border": "#504945",
+    "danger": "#fb4934",
+    "chart": ["#fabd2f", "#83a598", "#b8bb26", "#fe8019", "#d3869b"]
+  },
+  "overrides": {
+    "accent": "#3c3836",
+    "destructive-foreground": "#282828",
+    "input": "#3c3836",
+    "muted": "#3c3836",
+    "muted-foreground": "#a89984",
+    "primary-foreground": "#282828",
+    "radius": "0.375rem",
+    "secondary": "#3c3836",
+    "sidebar": "#32302f",
+    "sidebar-accent": "#3c3836",
+    "sidebar-primary-foreground": "#282828",
+    "signal-danger": "oklch(0.60 0.22 28)"
+  }
+}

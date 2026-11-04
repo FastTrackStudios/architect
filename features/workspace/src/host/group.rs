@@ -99,7 +99,7 @@ pub(super) fn NodeView(node: Node, #[props(default)] edges: Edges) -> Element {
 #[component]
 fn SplitView(split: Split, edges: Edges) -> Element {
     let mut host = use_host();
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let s = (host.sizes)();
     let id = split.id;
     let axis = split.axis;
@@ -109,7 +109,7 @@ fn SplitView(split: Split, edges: Edges) -> Element {
     } else {
         "ns-resize"
     };
-    let (hair_line, hair_grip) = hairline(axis, s.divider, t.rule, cursor);
+    let (hair_line, hair_grip) = hairline(axis, s.divider, &t.rule, cursor);
     let shares: Vec<f32> = split.children.iter().map(|c| c.share).collect();
     // A child group growing in (a split just made) or giving its room up
     // (closing) takes that share of its own.
@@ -235,12 +235,13 @@ fn SplitView(split: Split, edges: Edges) -> Element {
 #[component]
 fn GroupView(group: Group, edges: Edges) -> Element {
     let host = use_host();
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let Some(current) = group.current_tab().cloned() else {
         return rsx! {};
     };
     let id = group.id;
     let names = tab_names(&group);
+    let header = host.pane_header(&current);
     rsx! {
         div {
             style: "flex:1 1 0; min-width:0; min-height:0; display:flex; flex-direction:column; \
@@ -256,7 +257,7 @@ fn GroupView(group: Group, edges: Edges) -> Element {
                     Stacked { group: group.clone(), current: current.clone() }
                 } else {
                     div { style: "flex:1 1 0; width:100%; min-width:0; min-height:0; display:flex; flex-direction:column;",
-                        if group.chrome == Chrome::Tabs {
+                        if group.chrome == Chrome::Tabs && header {
                             PaneHeader { key: "h{current.0}", pane: current.clone() }
                         }
                         PaneSlot { key: "{current.0}", pane: current.clone() }
@@ -278,7 +279,7 @@ fn GroupView(group: Group, edges: Edges) -> Element {
 #[component]
 fn TabBar(group: Group, current: PaneId, edges: Edges) -> Element {
     let host = use_host();
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let s = (host.sizes)();
     let icons = group.chrome == Chrome::Icons;
     let row = (host.title_row)().filter(|_| edges.top);
@@ -296,7 +297,11 @@ fn TabBar(group: Group, current: PaneId, edges: Edges) -> Element {
     let lift = (height - s.tabs + 6.0).max(6.0);
     // On the title row the bar is the window's title bar, its rule under
     // every tab but the current one (which runs on into its pane).
-    let bar = if row.is_some() { t.title_bar } else { t.desk };
+    let bar = if row.is_some() {
+        &*t.title_bar
+    } else {
+        &*t.desk
+    };
     let ruled = row.is_some();
     let current_index = group.tabs.iter().position(|p| *p == current);
     // The group the keyboard acts on: its current tab carries the accent.
@@ -353,7 +358,7 @@ fn TabBar(group: Group, current: PaneId, edges: Edges) -> Element {
                     title: "New tab",
                     "aria-label": "New tab",
                     onclick: move |_| host.show_open_menu(),
-                    Plus { size: 16, color: t.ink_3 }
+                    Plus { size: 16, color: t.ink_3.to_string() }
                 }
             }
             // The empty part of the bar: on the title row, the window's.
@@ -376,7 +381,7 @@ fn TabBar(group: Group, current: PaneId, edges: Edges) -> Element {
                     title: "Every tab",
                     "aria-label": "Every tab",
                     onclick: move |e: MouseEvent| host.open_menu(Menu::Tabs(group.id), super::click_point(&e)),
-                    ChevronDown { size: 16, color: t.ink_3 }
+                    ChevronDown { size: 16, color: t.ink_3.to_string() }
                 }
             } else {
                 button {
@@ -384,7 +389,7 @@ fn TabBar(group: Group, current: PaneId, edges: Edges) -> Element {
                     title: "Tab menu",
                     "aria-label": "Tab menu",
                     onclick: move |e: MouseEvent| host.open_menu(Menu::Pane(menu_for.clone()), super::click_point(&e)),
-                    Ellipsis { size: 16, color: t.ink_3 }
+                    Ellipsis { size: 16, color: t.ink_3.to_string() }
                 }
             }
         }
@@ -396,7 +401,7 @@ fn TabBar(group: Group, current: PaneId, edges: Edges) -> Element {
 #[component]
 fn PaneHeader(pane: PaneId) -> Element {
     let host = use_host();
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let s = (host.sizes)();
     let workspace = host.workspace.read();
     let Some(p) = workspace.pane(&pane) else {
@@ -406,12 +411,13 @@ fn PaneHeader(pane: PaneId) -> Element {
     let back = !p.history.back.is_empty();
     let forward = !p.history.forward.is_empty();
     drop(workspace);
+    let (nav_on, nav_off) = (t.ink_2.clone(), t.rule.clone());
     let nav = move |on: bool| {
         format!(
             "flex:0 0 auto; width:{w}px; height:{w}px; border:none; border-radius:6px; background:transparent; \
              color:{ink}; font-size:15px; display:flex; align-items:center; justify-content:center;",
             w = s.button,
-            ink = if on { t.ink_2 } else { t.rule },
+            ink = if on { &nav_on } else { &nav_off },
         )
     };
     let (go_back, go_forward, menu) = (pane.clone(), pane.clone(), pane);
@@ -426,7 +432,7 @@ fn PaneHeader(pane: PaneId) -> Element {
                 onclick: move |_| {
                     let _ = host.edit(|w| w.go(&go_back, false));
                 },
-                ArrowLeft { size: 16, color: if back { t.ink_2 } else { t.rule } }
+                ArrowLeft { size: 16, color: if back { &*t.ink_2 } else { &*t.rule } }
             }
             button {
                 style: nav(forward),
@@ -435,7 +441,7 @@ fn PaneHeader(pane: PaneId) -> Element {
                 onclick: move |_| {
                     let _ = host.edit(|w| w.go(&go_forward, true));
                 },
-                ArrowRight { size: 16, color: if forward { t.ink_2 } else { t.rule } }
+                ArrowRight { size: 16, color: if forward { &*t.ink_2 } else { &*t.rule } }
             }
             div { style: "flex:1 1 0; min-width:0; overflow:hidden; white-space:nowrap; text-align:center;", "{title}" }
             button {
@@ -443,7 +449,7 @@ fn PaneHeader(pane: PaneId) -> Element {
                 title: "More options",
                 "aria-label": "More options",
                 onclick: move |e: MouseEvent| host.open_menu(Menu::Pane(menu.clone()), super::click_point(&e)),
-                Ellipsis { size: 16, color: t.ink_2 }
+                Ellipsis { size: 16, color: t.ink_2.to_string() }
             }
         }
     }
@@ -479,24 +485,28 @@ fn Tab(
     };
     let lift = if dragged { 4 } else { u8::from(on) };
     let shown = u8::from(!off_bar);
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let s = (host.sizes)();
-    let ink = if on { t.ink } else { t.ink_3 };
-    let fill = if on { t.sheet } else { "transparent" };
+    let ink = if on { &*t.ink } else { &*t.ink_3 };
+    let fill = if on { &*t.sheet } else { "transparent" };
     let pad = if icons { "0 8px" } else { "0 6px 0 12px" };
     let least = if icons { 0.0 } else { TAB_MIN };
     let (grow, most) = if icons { (0, 48.0) } else { (1, TAB_MAX) };
     // The current tab gives up its room last, so its name reads whole
     // while the others narrow.
     let shrink = if on { 0.2 } else { 1.0 };
-    let hairline = if rule { t.rule } else { "transparent" };
+    let hairline = if rule { &*t.rule } else { "transparent" };
     let tab_h = s.tabs - 6.0;
     let press = pane.clone();
     let menu = pane.clone();
     let close = pane;
     let icon_size = if s.tabs > 40.0 { 18 } else { 14 };
-    let fade_to = if on { t.sheet } else { bar_colour(&host) };
-    let fade_from = transparent_of(fade_to);
+    let fade_to = if on {
+        t.sheet.clone()
+    } else {
+        bar_colour(&host)
+    };
+    let fade_from = transparent_of(&fade_to);
     let key_open = menu.clone();
     let mounted = menu.clone();
     let label = if pinned {
@@ -539,7 +549,7 @@ fn Tab(
                               background:{t.accent};" }
             }
             if let Some(icon) = icon {
-                {icon(architect_shell::Icon { size: icon_size, color: ink })}
+                {icon(architect_shell::Icon { size: icon_size, color: ink.into() })}
             }
             if !icons || icon.is_none() {
                 // A long name fades out at its end (Blitz has no ellipsis).
@@ -551,7 +561,7 @@ fn Tab(
             }
             if !icons {
                 if pinned {
-                    Pin { size: 12, color: t.ink_3 }
+                    Pin { size: 12, color: t.ink_3.to_string() }
                 } else if on || s.tabs > 40.0 {
                     // Above the name: its overflowing text still takes
                     // presses past its clip (blitz-quirks.md).
@@ -567,7 +577,7 @@ fn Tab(
                             e.stop_propagation();
                             host.close_from_tab(close.clone());
                         },
-                        X { size: 14, color: t.ink_3 }
+                        X { size: 14, color: t.ink_3.to_string() }
                     }
                 }
             }
@@ -585,7 +595,7 @@ fn Tab(
 #[component]
 fn Stacked(group: Group, current: PaneId) -> Element {
     let mut host = use_host();
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let workspace = host.workspace.read();
     let panes: Vec<(PaneId, String, Option<architect_shell::IconFn>)> = group
         .tabs
@@ -720,7 +730,7 @@ fn Stacked(group: Group, current: PaneId) -> Element {
                         div {
                             style: "flex:0 0 {SPINE}px; display:flex; flex-direction:column; align-items:center; \
                                     gap:8px; padding-top:8px; touch-action:none; user-select:none; cursor:pointer; \
-                                    background:{spine_fill(pane == current, t)}; \
+                                    background:{spine_fill(pane == current, &t)}; \
                                     border-right:1px solid {t.rule}; color:{t.ink_3};",
                             title: "{title}",
                             "aria-label": "{title}",
@@ -743,7 +753,7 @@ fn Stacked(group: Group, current: PaneId) -> Element {
                                 }
                             },
                             if let Some(icon) = icon {
-                                {icon(architect_shell::Icon { size: 14, color: t.ink_3 })}
+                                {icon(architect_shell::Icon { size: 14, color: t.ink_3.clone() })}
                             }
                             // The name down the spine, turned to read top to
                             // bottom as a book's does.
@@ -802,7 +812,7 @@ fn slide_shadow(cover: f32) -> String {
 #[component]
 fn Grip(group: Group, current: PaneId) -> Element {
     let mut host = use_host();
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let s = (host.sizes)();
     let workspace = host.workspace.read();
     let panes: Vec<(PaneId, String)> = group
@@ -822,7 +832,7 @@ fn Grip(group: Group, current: PaneId) -> Element {
              white-space:nowrap; font-weight:600; color:{}; background:{}; border:1px solid {};",
             s.button,
             t.ink,
-            if on { t.active } else { t.sheet },
+            if on { &*t.active } else { &*t.sheet },
             t.rule,
         )
     };
@@ -878,7 +888,7 @@ fn Grip(group: Group, current: PaneId) -> Element {
 pub(super) fn PaneSlot(pane: PaneId) -> Element {
     let named = pane.0.clone();
     let host = use_host();
-    let t = *host.theme.read();
+    let t = host.theme.read().clone();
     let this = use_context_provider(|| ThisPane(Signal::new(pane.clone())));
     if *this.0.peek() != pane {
         let mut current = this.0;
@@ -949,8 +959,8 @@ fn pane_names(node: &Node) -> String {
         .join(" ")
 }
 
-const fn spine_fill(on: bool, t: architect_shell::ShellTheme) -> &'static str {
-    if on { t.sheet } else { t.desk }
+fn spine_fill(on: bool, t: &architect_shell::ShellTheme) -> &str {
+    if on { &t.sheet } else { &t.desk }
 }
 
 /// A divider, Obsidian's: a one-point line in the layout, and over it an
@@ -978,17 +988,17 @@ pub(super) fn hairline(axis: Axis, grip: f32, rule: &str, cursor: &str) -> (Stri
 
 /// What an inactive tab sits on: the title bar's colour on the title row,
 /// the desk's elsewhere.
-fn bar_colour(host: &super::Host) -> &'static str {
-    let t = *host.theme.peek();
+fn bar_colour(host: &super::Host) -> std::sync::Arc<str> {
+    let t = host.theme.peek();
     if host.title_row.peek().is_some() {
-        t.title_bar
+        t.title_bar.clone()
     } else {
-        t.desk
+        t.desk.clone()
     }
 }
 
 /// `#rrggbb` fully transparent (`#rrggbb00`), for a fade into it.
-fn transparent_of(hex: &'static str) -> String {
+fn transparent_of(hex: &str) -> String {
     if hex.len() == 7 && hex.starts_with('#') {
         format!("{hex}00")
     } else {

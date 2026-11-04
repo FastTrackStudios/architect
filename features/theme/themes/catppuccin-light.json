@@ -1,0 +1,24 @@
+{
+  "label": "Catppuccin Light",
+  "appearance": "light",
+  "palette": {
+    "background": "#eff1f5",
+    "foreground": "#4c4f69",
+    "accent": "#8839ef",
+    "surface": "#e6e9ef",
+    "border": "#bcc0cc",
+    "danger": "#d20f39",
+    "chart": ["#8839ef", "#1e66f5", "#40a02b", "#df8e1d", "#ea76cb"]
+  },
+  "overrides": {
+    "accent": "#ccd0da",
+    "input": "#ccd0da",
+    "muted": "#ccd0da",
+    "muted-foreground": "#6c6f85",
+    "radius": "0.5rem",
+    "secondary": "#ccd0da",
+    "sidebar": "#e6e9ef",
+    "sidebar-accent": "#ccd0da",
+    "signal-danger": "oklch(0.60 0.22 28)"
+  }
+}
