@@ -144,6 +144,22 @@ fn views(extra: Vec<View>) -> Views {
             .home(Target::Split(Side::Right))
             .still(),
         )
+        // A WASI component's view (`apps/lab/wasi-counter`, feature
+        // `wasi`), drawn as a process's is.
+        .view(
+            View::new("wasi.counter", "WASI Counter", |_| {
+                rsx! {
+                    architect_extensions::remote::RemoteView {
+                        processes: crate::extensions::processes(),
+                        extension: crate::extensions::WASI_COUNTER,
+                        view: "counter",
+                    }
+                }
+            })
+            .icon(icon!(Cpu))
+            .home(Target::Split(Side::Right))
+            .still(),
+        )
         // The clicker's ImGui window: a Luau script from its package,
         // in the app's theme (`theme`, the clicker's own tokens).
         .view(

@@ -53,6 +53,8 @@ members = [
     "features/orgs",
     "features/scripting",
     "features/extensions",
+    "features/extensions/wasi-guest",
+    "features/extensions/tests/wasi-hazards",
     "features/canvas",
     "features/a2ui",
     "features/pages",
@@ -71,6 +73,7 @@ members = [
     "apps/lab/mobile",
     "apps/lab/clicker",
     "apps/lab/board",
+    "apps/lab/wasi-counter",
     "apps/lab/media",
     # ── story (component workbench) ───────────────────────────────────
     "features/story/architect-story-core",
@@ -245,6 +248,7 @@ architect-settings-derive = { path = "features/settings/derive" }
 architect-orgs = { path = "features/orgs" }
 architect-scripting = { path = "features/scripting" }
 architect-extensions = { path = "features/extensions" }
+architect-extension-wasi = { path = "features/extensions/wasi-guest" }
 architect-canvas = { path = "features/canvas" }
 architect-a2ui = { path = "features/a2ui" }
 architect-pages = { path = "features/pages" }

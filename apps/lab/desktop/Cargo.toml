@@ -15,6 +15,8 @@ path = "src/main.rs"
 
 [features]
 keyflow-lab = ["architect-lab-ui/keyflow-lab"]
+# WASI component extensions: Wasmtime and Cranelift in the binary.
+wasi = ["architect-lab-ui/wasi"]
 
 [dependencies]
 architect-lab-ui = { workspace = true }

@@ -24,7 +24,7 @@
 
 contract-target = "wasm32-unknown-unknown"
 host-dirs = ["apps"]
-unmapped-ok = ["features/auth/tests", "features/crdt/tests"]
+unmapped-ok = ["features/auth/tests", "features/crdt/tests", "features/extensions/tests"]
 single-source = ["architect", "architect-*", "auth", "auth-*", "crdt", "crdt-*", "ui-snapshot"]
 
 [forbidden]
@@ -464,6 +464,17 @@ package = "architect-extensions"
 features = ["guest"]
 layer = "L1"
 note = "a process extension's own side: its Dioxus views as an edit stream, served over vox; desk only"
+
+[[row]]
+package = "architect-extensions"
+features = ["wasi"]
+layer = "L1"
+note = "WASI component extensions: Wasmtime and Cranelift, a store per instance, epoch and memory limits; desktop and Android"
+
+[[row]]
+package = "architect-extension-wasi"
+layer = "L1"
+note = "a WASI component extension's own side, built for wasm32-wasip2: its Dioxus views as the world's edits, the host service through wit-bindgen"
 
 [[row]]
 package = "example-extension-host"

@@ -79,6 +79,22 @@ guest = [
     "dep:dioxus",
     "dep:tracing",
 ]
+# WASI components (`wasi`, desktop and Android): Wasmtime with the
+# component model, Cranelift compiling, epoch interruption and a memory
+# limit per instance, the compiled code cached on disk by the component's
+# hash; the `architect:extension` world (`wit/`). Off by default: it is
+# Wasmtime's size (see docs/content/architecture/extensions.md, "WASI
+# components").
+wasi = [
+    "host",
+    # A view's edits are the wire's (`wire`).
+    "vox",
+    "dep:wasmtime",
+    "dep:wasmtime-wasi",
+    "dep:tokio",
+    "dep:futures",
+    "dep:sha2",
+]
 remote = ["process", "ui", "architect-theme/dioxus", "dep:blitz-dom", "dep:blitz-traits", "dep:dioxus-native-dom", "dep:futures-timer"]
 
 [dependencies]
@@ -119,11 +135,24 @@ blitz-dom = { workspace = true, optional = true }
 blitz-traits = { workspace = true, optional = true }
 dioxus-native-dom = { workspace = true, optional = true }
 futures-timer = { workspace = true, optional = true }
+wasmtime = { version = "50.0.1", optional = true, default-features = false, features = [
+    "std",
+    "runtime",
+    "cranelift",
+    "component-model",
+    "async",
+    "parallel-compilation",
+    "addr2line",
+] }
+wasmtime-wasi = { version = "50.0.1", optional = true, default-features = false, features = ["p2"] }
+sha2 = { workspace = true, optional = true }
 
 [dev-dependencies]
 # Its own host, so `cargo test --workspace` builds the tests with it; the
 # guest too, since the remote-view tests spawn themselves as one.
-architect-extensions = { path = ".", features = ["host", "crdt", "guest", "remote", "linked", "manager"] }
+architect-extensions = { path = ".", features = ["host", "crdt", "guest", "remote", "linked", "manager", "wasi"] }
+# tests/wasi.rs: the WIT world read, to compare with the wire's types.
+wit-parser = "0.261"
 futures = "0.3"
 tempfile = "3"
 crdt = { workspace = true }

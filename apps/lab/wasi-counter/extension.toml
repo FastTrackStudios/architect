@@ -1,0 +1,38 @@
+# A WASI component extension: Rust built for wasm32-wasip2
+# (`cargo build -p architect-lab-wasi-counter --target wasm32-wasip2`, in
+# `devenv --profile wasi shell`), run by the app's `wasi` runner in a
+# sandbox of its own: its memory and each call's time limited, the app
+# reached only through the host service.
+id = "lab.wasi-counter"
+name = "WASI Counter"
+version = "0.1.0"
+kind = "wasm"
+api = "0.1"
+description = "A counter in a WASI component: its view drawn by the app, an action that asks the app which themes it has."
+authors = ["FastTrackStudios"]
+
+[wasm]
+component = "architect_lab_wasi_counter.wasm"
+
+# What it may ask the app for: the theme list, nothing that changes it.
+[capabilities]
+actions = ["THEME_LIST"]
+effect = "read_only"
+
+[[actions]]
+id = "LAB_WASI_COUNTER_ADD"
+name = "WASI Counter: add one"
+description = "Adds one (or `by`) to the counter; its view shows it."
+effect = "mutating"
+params = '{"type":"object","properties":{"by":{"type":"integer"}}}'
+
+[[actions]]
+id = "LAB_WASI_COUNTER_ASK"
+name = "WASI Counter: ask the app"
+description = "Asks the app for its themes (THEME_LIST, through the host service) and shows how many."
+effect = "read_only"
+
+[[views]]
+id = "counter"
+title = "WASI Counter"
+icon = "cpu"

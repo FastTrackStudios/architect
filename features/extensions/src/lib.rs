@@ -99,6 +99,8 @@ pub mod remote;
 pub mod ui;
 #[cfg(feature = "host")]
 pub mod views;
+#[cfg(feature = "wasi")]
+pub mod wasi;
 #[cfg(feature = "host")]
 pub mod watch;
 #[cfg(feature = "vox")]

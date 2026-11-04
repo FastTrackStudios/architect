@@ -28,6 +28,12 @@
 //! blocks its view thread). Every such view is measured into the lab's
 //! `Meters` (`EXT_VIEWS`).
 //!
+//! With the `wasi` feature, the WASI Counter (`apps/lab/wasi-counter`)
+//! is a WASI component extension: when its component was built
+//! (`target/wasi-guest`, or at `ARCHITECT_LAB_WASI_COUNTER`) it runs as a
+//! development copy in Wasmtime, its view the Vault's "WASI Counter" pane
+//! ([`WASI_COUNTER`]), drawn by the same `RemoteView` as the clicker's.
+//!
 //! So is Frame's `frame-surface` (FastTrackStudios/frame,
 //! `crates/frame-view`), when it is found ([`frame_surface`]): its view,
 //! of the `frame.surface` kind, is the "Embedded views" Frame pane
@@ -67,9 +73,59 @@ pub const CLICKER: &str = "lab.clicker";
 
 static PROCESSES: LazyLock<Processes> = LazyLock::new(Processes::default);
 
+/// The WASI components running, for the manager's `component` kind.
+#[cfg(feature = "wasi")]
+static COMPONENTS: Mutex<Option<architect_extensions::wasi::Components>> = Mutex::new(None);
+
+#[cfg(feature = "wasi")]
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
 /// The process extensions running, for the panes that show their views.
 pub fn processes() -> Processes {
     PROCESSES.clone()
+}
+
+/// The WASI Counter's id, as the Vault's pane names it.
+pub const WASI_COUNTER: &str = "lab.wasi-counter";
+
+/// The WASI Counter as a development copy: its manifest and its component,
+/// when the component was built (`ARCHITECT_LAB_WASI_COUNTER`, else
+/// `target/wasi-guest/wasm32-wasip2/{debug,release}` beside the lab's
+/// own `target/`).
+#[cfg(feature = "wasi")]
+fn wasi_counter(root: &Path) -> Option<PathBuf> {
+    const WASM: &str = "architect_lab_wasi_counter.wasm";
+    let built = std::env::var_os("ARCHITECT_LAB_WASI_COUNTER")
+        .map(PathBuf::from)
+        .or_else(|| {
+            // target/<profile>/architect-desktop → target/wasi-guest/…
+            let target = std::env::current_exe()
+                .ok()?
+                .parent()?
+                .parent()?
+                .to_path_buf();
+            ["debug", "release"]
+                .iter()
+                .map(|p| target.join("wasi-guest/wasm32-wasip2").join(p).join(WASM))
+                .find(|p| p.is_file())
+        })
+        .filter(|p| p.is_file())?;
+    let dir = root.join("dev").join(WASI_COUNTER);
+    std::fs::create_dir_all(&dir).ok()?;
+    std::fs::write(
+        dir.join("extension.toml"),
+        include_str!("../../wasi-counter/extension.toml"),
+    )
+    .ok()?;
+    std::fs::copy(&built, dir.join(WASM)).ok()?;
+    Some(dir)
+}
+
+#[cfg(not(feature = "wasi"))]
+const fn wasi_counter(_: &Path) -> Option<PathBuf> {
+    None
 }
 
 /// The clicker's package, past its program: the manifest, its theme,
@@ -663,6 +719,23 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
             }
             host = host.with_runner(runner.with_processes(processes()));
         }
+        // WASI components: in Wasmtime, their views among the processes,
+        // compiled once (the cache beside the lab's settings).
+        #[cfg(feature = "wasi")]
+        {
+            let mut runner = architect_extensions::wasi::WasiRunner::new()
+                .with_processes(processes())
+                .with_cache(
+                    architect::settings::app_dir("architect-lab")
+                        .unwrap_or_else(|_| std::env::temp_dir().join("architect-lab"))
+                        .join("wasi-cache"),
+                );
+            if let Some(store) = &themes {
+                runner = runner.with_theme(store.clone());
+            }
+            *lock(&COMPONENTS) = Some(runner.components());
+            host = host.with_runner(runner);
+        }
         // Hooks hear the lab's own events (workspace.changed, …); the host
         // service runs the lab's actions on its list.
         host.watch(&lab);
@@ -681,6 +754,7 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
             .with_setting_values(values.clone());
         let clicker = clicker(&root);
         let frame = frame_dev(&root);
+        let wasi = wasi_counter(&root);
         // `EXT_CLONE` puts its copies beside the development ones.
         let mut extensions = Extensions::new(host, Installs::new(root.join("extensions")))
             .with_dev_root(root.join("dev"));
@@ -724,6 +798,7 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         for dir in clicker
             .into_iter()
             .chain(frame)
+            .chain(wasi)
             .chain(board_dev(&root))
             .chain(metronome_dir)
         {
@@ -765,6 +840,13 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         manager.register(kinds::ExtensionKind::new(browse.clone()).with_meters(meters.clone()));
         manager.register(kinds::ScriptKind::new(extensions.clone()));
         manager.register(kinds::WorkerKind::new(processes()));
+        #[cfg(feature = "wasi")]
+        {
+            let components = lock(&COMPONENTS).clone();
+            if let Some(components) = components {
+                manager.register(kinds::ComponentKind::new(components));
+            }
+        }
         if let Some(store) = &themes {
             manager.register(kinds::ThemeKind::new(store.clone(), (*lab).clone()));
         }

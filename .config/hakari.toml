@@ -50,4 +50,20 @@ workspace-members = [
     "architect-settings-derive",
     "architect-story-macros",
     "crdt-derive",
+    # The WASI guests: built for wasm32-wasip2 only, and their wit-bindgen
+    # is not a host dependency.
+    "architect-extension-wasi",
+    "architect-extension-wasi-hazards",
+    "architect-lab-wasi-counter",
+]
+
+# The optional WASI runtime (`architect-extensions`' `wasi` feature, Wasmtime
+# and its compiler and parsers) and the WIT parser its tests read the world
+# with: their crates stay out of the hack, so a build without `wasi` compiles
+# none of them, and the fleet hack is the same for every repo that does not
+# enable it.
+third-party = [
+    { name = "wasmtime" },
+    { name = "wasmtime-wasi" },
+    { name = "wit-parser" },
 ]

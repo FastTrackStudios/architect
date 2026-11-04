@@ -426,6 +426,15 @@ pub struct Entry {
     pub args: Vec<String>,
 }
 
+/// A WASM extension's component (`[wasm]`): what the `wasi` runner
+/// instantiates against the `architect:extension` world.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct WasmDecl {
+    /// The component (`extension.wasm`), in the package.
+    pub component: String,
+}
+
 /// `extension.toml`, read.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct Manifest {
@@ -447,6 +456,10 @@ pub struct Manifest {
     pub capabilities: Capabilities,
     #[serde(default)]
     pub entry: Entry,
+    /// A `wasm` extension's component (`[wasm] component`; `[entry] path`
+    /// still names one).
+    #[serde(default)]
+    pub wasm: WasmDecl,
     #[serde(default)]
     pub actions: Vec<ActionDecl>,
     #[serde(default)]
@@ -596,6 +609,16 @@ impl Manifest {
         Ok(())
     }
 
+    /// A `wasm` extension's component, in its package: `[wasm] component`,
+    /// else `[entry] path`; `None` when it names neither.
+    #[must_use]
+    pub fn component(&self) -> Option<&str> {
+        [&self.wasm.component, &self.entry.path]
+            .into_iter()
+            .find(|p| !p.is_empty())
+            .map(String::as_str)
+    }
+
     /// Reads and checks `extension.toml`'s text.
     ///
     /// # Errors
@@ -674,6 +697,9 @@ impl Manifest {
         }
         if !self.entry.path.is_empty() {
             inside(&self.entry.path)?;
+        }
+        if !self.wasm.component.is_empty() {
+            inside(&self.wasm.component)?;
         }
         for view in &self.views {
             if let Some(doc) = &view.document {

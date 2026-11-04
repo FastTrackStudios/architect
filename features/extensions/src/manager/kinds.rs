@@ -327,6 +327,8 @@ impl ItemKind for WorkerKind {
             .ids()
             .into_iter()
             .filter_map(|id| self.processes.get(&id))
+            // A WASI component is the `component` kind's.
+            .filter(|p| !p.is_local())
             .map(|p| {
                 let mut i = Item::new("worker", p.id(), p.name());
                 i.source = format!("process of {}", p.id());
@@ -591,4 +593,71 @@ impl ItemKind for LayoutKind {
             other => Err(format!("a layout has no op {other}")),
         }
     }
+}
+
+/// Each WASI component running (`component`): its memory against its
+/// limit, its calls, the times it trapped and why.
+#[cfg(feature = "wasi")]
+pub struct ComponentKind {
+    components: crate::wasi::Components,
+}
+
+#[cfg(feature = "wasi")]
+impl ComponentKind {
+    #[must_use]
+    pub const fn new(components: crate::wasi::Components) -> Self {
+        Self { components }
+    }
+}
+
+#[cfg(feature = "wasi")]
+impl ItemKind for ComponentKind {
+    fn id(&self) -> &'static str {
+        "component"
+    }
+
+    fn title(&self) -> &'static str {
+        "Components"
+    }
+
+    fn list(&self) -> Vec<Item> {
+        self.components
+            .all()
+            .into_iter()
+            .map(|c| {
+                let mut i = Item::new("component", &c.id, &c.name);
+                i.source = format!("WASI component of {}", c.id);
+                i.enabled = Some(c.alive());
+                i.summary = format!(
+                    "{} of {} MiB, {} calls, {} traps, {} ms a call at most",
+                    format_mib(c.memory()),
+                    c.limits.memory >> 20,
+                    c.calls(),
+                    c.traps(),
+                    c.limits.call.as_millis()
+                );
+                i.problems.extend(c.last_trap());
+                i.ops.push(Op::new("restart", "Restart"));
+                i
+            })
+            .collect()
+    }
+
+    fn run(&self, id: &str, op: &str, _: &Value) -> Result<Value, String> {
+        let c = self
+            .components
+            .get(id)
+            .ok_or_else(|| format!("no component {id}"))?;
+        match op {
+            "restart" => c.restart(),
+            other => return Err(format!("a component has no op {other}")),
+        }
+        Ok(json!({ "component": id, "op": op }))
+    }
+}
+
+#[cfg(feature = "wasi")]
+fn format_mib(bytes: usize) -> String {
+    let tenths = bytes.saturating_mul(10) >> 20;
+    format!("{}.{} MiB", tenths / 10, tenths % 10)
 }

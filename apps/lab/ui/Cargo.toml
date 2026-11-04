@@ -8,6 +8,9 @@ publish = false
 
 [features]
 keyflow-lab = ["dep:keyflow", "dep:keyflow-ui", "dep:editor-keyflow"]
+# WASI component extensions (Wasmtime): the WASI Counter
+# (`apps/lab/wasi-counter`) when its component was built.
+wasi = ["architect-extensions/wasi"]
 
 [dependencies]
 keyflow = { git = "https://github.com/FastTrackStudios/keyflow", rev = "337842d994b8025aadd810c49281cc9cc8a10985", features = ["text", "paint"], default-features = false, optional = true }
