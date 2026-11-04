@@ -293,3 +293,33 @@ fn a_missing_or_looping_parent_is_a_problem() {
     // Still resolves (the loop broken, the parent left out).
     let _ = resolve(registry.get("a").unwrap(), &registry);
 }
+
+/// A region's look over the workspace's (a layout node's), the store
+/// unchanged, a person's pick still on top.
+#[test]
+fn a_region_resolves_its_own_look_over_the_workspace_layer() {
+    use architect_theme::{Layer, LayerKind, ThemeChoice, ThemeStore};
+    let store = ThemeStore::default();
+    let before = store.current();
+    let node = store.resolve_with(
+        LayerKind::Workspace,
+        Layer::default().token("brand", "#ff0000"),
+    );
+    assert_eq!(node.get("brand"), Some("#ff0000"));
+    assert_eq!(store.current(), before, "the store is as it was");
+    store.set(LayerKind::Pick, Layer::default().token("brand", "#00ff00"));
+    let node = store.resolve_with(
+        LayerKind::Workspace,
+        Layer::default().token("brand", "#ff0000"),
+    );
+    assert_eq!(
+        node.get("brand"),
+        Some("#00ff00"),
+        "a pick wins over a layout"
+    );
+    let node = store.resolve_with(
+        LayerKind::Workspace,
+        Layer::default().choice(ThemeChoice::One("nord-light".into())),
+    );
+    assert_eq!(node.id(), "nord-light");
+}

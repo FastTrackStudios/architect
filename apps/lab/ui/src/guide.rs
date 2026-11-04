@@ -51,9 +51,61 @@ static STATE: ActionMeta = ActionMeta {
     undo: false,
 };
 
-/// Puts `LAB_STATE` on `list`, and tells it (`lab`) when the lab moves.
+static GO: ActionMeta = ActionMeta {
+    id: "LAB_GO",
+    trait_name: "",
+    method_name: "",
+    display_name: "Go to a tab",
+    description: "Shows tab `tab` (inbox, tasks, schedule or vault), as ⌃⌘1–4 do. The Vault's workspace actions (WORKSPACE_*) are on the list while it shows.",
+    category: "Lab",
+    group: "Go",
+    shortcut: "",
+    toggleable: false,
+    undo: false,
+};
+
+/// What `LAB_GO` takes.
+#[derive(Debug, Clone, Facet)]
+pub struct GoArgs {
+    /// `inbox`, `tasks`, `schedule` or `vault`.
+    pub tab: String,
+}
+
+/// Puts `LAB_STATE` and `LAB_GO` on `list`, and tells it (`lab`) when
+/// the lab moves.
 pub fn use_lab_actions(list: &Arc<ActionList>, lab: &Lab) {
     let lab = *lab;
+    // `LAB_GO` runs on the window's thread, where the route lives.
+    let goes = use_coroutine(
+        move |mut asks: UnboundedReceiver<&'static str>| async move {
+            use futures_util::StreamExt as _;
+            while let Some(tab) = asks.next().await {
+                lab.jump(Route::Tab(tab));
+            }
+        },
+    );
+    use_hook({
+        let list = list.clone();
+        move || {
+            let tx = goes.tx();
+            let _ = list.register(&GO, Effect::Mutating, move |a: GoArgs| {
+                let tab = crate::TABS
+                    .iter()
+                    .map(|(_, _, t)| *t)
+                    .find(|t| *t == a.tab)
+                    .ok_or_else(|| {
+                        format!("no tab {:?}: inbox, tasks, schedule or vault", a.tab)
+                    })?;
+                tx.unbounded_send(tab)
+                    .map_err(|_| "the lab is gone".to_owned())?;
+                Ok::<_, String>(LabState {
+                    tab: tab.to_owned(),
+                    page: "list".to_owned(),
+                    bar: String::new(),
+                })
+            });
+        }
+    });
     let kept = use_hook(|| Arc::new(Mutex::new(LabState::of(*lab.route.peek()))));
     use_hook({
         let list = list.clone();

@@ -36,6 +36,20 @@ use lucide_dioxus::{
 
 pub use screen::{Device, use_window_chrome, use_window_screen};
 
+/// `EXT_CHECK` as the lab runs it — its view kinds, process extensions —
+/// for `architect-desktop extensions check <folder>` with no window.
+#[must_use]
+pub fn extension_checker() -> architect_extensions::check::Checker {
+    architect_extensions::check::Checker::new().with_view_kinds(embedded::kinds())
+}
+
+/// The lab's folder: its settings, themes, extensions in development and
+/// the agents' guide (`AGENTS.md`). `$ARCHITECT_LAB_CONFIG_DIR` when set.
+#[must_use]
+pub fn app_dir() -> Option<std::path::PathBuf> {
+    architect::settings::app_dir("architect-lab").ok()
+}
+
 /// Where the lab is: a tab's list, one item of it (by its id), a new one
 /// being written for it, or the help (over the tab it was asked from).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -646,6 +660,14 @@ pub fn font_context() -> dioxus_native::FontContext {
     ctx
 }
 
+/// The lab's own layout (`layouts/main.json`, written read-only on every
+/// start): the shell as it is, nothing over it.
+const MAIN_LAYOUT: &str = r#"{
+  "name": "Architect Lab",
+  "chrome": {}
+}
+"#;
+
 /// The lab's root. The host publishes the window as a
 /// `Signal<shell::Screen>` ([`use_window_screen`]) above it.
 ///
@@ -669,6 +691,11 @@ pub fn LabApp() -> Element {
             .unwrap_or_else(|| std::sync::Arc::new(architect::action::ActionList::new()))
     });
     use_context_provider(|| list.clone());
+    // `APP_STATUS`: what is on screen and what is wrong, from every part
+    // of the lab that reports it (the workspace, the theme, extensions).
+    use_hook(|| {
+        let _ = architect::action::app_status::register(&list);
+    });
     // Themes: one store for the app, its THEME_* actions on the list.
     let theme = theme::use_lab_theme(windowed, &list);
     // An agent's Delete waits for the person's yes, in the sheet below.
@@ -768,6 +795,51 @@ pub fn LabApp() -> Element {
         .unwrap_or(false);
     // Commands: the palette (⌘K), quick open (⌘O), and every command's key.
     let commands = architect_commands::use_commands_provider();
+    // Extensions, and what they add to the window: the shell's chrome
+    // (above the shell), a pane's context menu, the menus, their views.
+    let ext_ui = extensions::use_lab_extensions(metronome);
+    use_context_provider(|| ext_ui);
+    // The interface as files (layouts/<name>.json, keys.json under the
+    // lab's folder), live: the layout shown fills the shell's slots over
+    // what extensions fill, sets the window's look and arrangement.
+    let home = use_hook(|| {
+        let dir = architect::settings::app_dir("architect-lab")
+            .unwrap_or_else(|_| std::env::temp_dir().join("architect-lab"));
+        let home = architect_workspace::home::Home::open(dir, &[("main", MAIN_LAYOUT)]);
+        let _ = architect_workspace::home::actions::register(&list, &home);
+        // Layouts and keys.json in the extensions manager.
+        if let Some(manager) = try_consume_context::<architect_extensions::manager::Manager>() {
+            manager.register(architect_extensions::manager::kinds::LayoutKind::new(
+                home.clone(),
+            ));
+        }
+        home
+    });
+    let home_rev = architect_workspace::home::ui::use_home(home.clone());
+    architect_workspace::home::ui::use_home_apply(
+        home.clone(),
+        home_rev,
+        architect_theme::try_use_theme().map(|t| t.store()),
+        list.clone(),
+    );
+    let mut chrome = shell::use_chrome();
+    let contributed = use_memo(move || ext_ui.chrome());
+    let laid_out = {
+        let home = home;
+        use_memo(move || {
+            let _ = home_rev();
+            let layout = home.current().unwrap_or_default();
+            let owner = format!("layout:{}", home.active());
+            architect_workspace::home::ui::chrome_of(&layout, |view| {
+                let (extension, v) = view.split_once('/')?;
+                let (e, v) = (extension.to_owned(), v.to_owned());
+                Some(shell::Filler::new(owner.clone(), view, move || {
+                    rsx! { architect_extensions::interface::ExtensionView { ui: ext_ui, extension: e.clone(), view: v.clone(), fill: false } }
+                }))
+            })
+        })
+    };
+    use_effect(move || chrome.set(laid_out().over(&contributed())));
     // Every command (a view's own too) and the palette's state, on the
     // lab's list; the lab's own state beside them.
     architect_commands::use_command_actions(list.clone());
@@ -1021,7 +1093,9 @@ pub fn LabApp() -> Element {
                 "WORKSPACE_GO_FORWARD",
             ])
         })
-        .menu("Help", |m| m.commands(["LAB_HELP", "LAB_SHOW_COMMANDS"]));
+        .menu("Help", |m| m.commands(["LAB_HELP", "LAB_SHOW_COMMANDS"]))
+        // What extensions add to each menu.
+        .contributed(move |menu| ext_ui.menu_rows(menu));
     let route = (lab.route)();
     let inbox_count = lab.lists.read().count("inbox");
     let tabs = vec![
@@ -1171,7 +1245,9 @@ pub fn LabApp() -> Element {
                         // The help is over a tab, not one of them.
                         current: (!matches!(route, Route::Help(_))).then(|| route.tab()),
                         on_tab: move |id: &'static str| {
-                            if id == "embedded" {
+                            if ext_ui.is_tab(id) {
+                                lab.jump(Route::Tab(id));
+                            } else if id == "embedded" {
                                 lab.jump(Route::Tab("vault"));
                                 let _ = commands.run_with(
                                     "WORKSPACES_LOAD",
@@ -1198,7 +1274,7 @@ pub fn LabApp() -> Element {
                         left: rsx! { pages::LeftSide {} },
                         // The details are the lists': the Vault's panes are its own,
                         // an item's page is its details, the help is the help.
-                        right: if (lab.right)() && matches!(route, Route::Tab(t) if t != "vault") { Some(rsx! { pages::RightSide {} }) } else { None },
+                        right: if (lab.right)() && matches!(route, Route::Tab(t) if t != "vault" && !ext_ui.is_tab(t)) { Some(rsx! { pages::RightSide {} }) } else { None },
                         on_pull: move |()| lab.jump(Route::Tab("vault")),
                         window: window_chrome,
                         status,
@@ -1215,6 +1291,7 @@ pub fn LabApp() -> Element {
                         ],
                         match route {
                             Route::Tab("vault") => rsx! { vault::VaultPage {} },
+                            Route::Tab(tab) if ext_ui.is_tab(tab) => rsx! { extensions::ExtensionTab { key: "{tab}", ui: ext_ui, id: tab } },
                             Route::Tab(tab) => rsx! { pages::ListPage { key: "{tab}", tab } },
                             Route::Item(tab, id) => rsx! { pages::ItemPage { tab, id } },
                             Route::Capture(tab) => rsx! { pages::CapturePage { key: "{tab}", tab } },
@@ -1227,7 +1304,7 @@ pub fn LabApp() -> Element {
             architect_commands::CommandLayer {}
             architect_commands::ConfirmSheet {}
             architect_settings::SettingsPage {}
-            extensions::LabExtensions { metronome }
+            architect_extensions::interface::ExtensionOverlays { ui: ext_ui }
             architect_guide::tour::TourLayer {}
             screen::DeviceChrome {}
         }

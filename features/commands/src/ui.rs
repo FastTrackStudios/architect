@@ -377,6 +377,16 @@ impl Commands {
         self.run_custom(id)
     }
 
+    /// The escape hatch ([`crate::keymap::ESCAPE_HATCH`]): the person's
+    /// key changes dropped, and [`crate::keymap::ESCAPE_HATCH_ACTION`] run
+    /// on whichever list has it (every built-in workspace layout back as
+    /// shipped). Its chord runs this before anything else; nothing can
+    /// rebind it.
+    pub fn escape_hatch(&self) {
+        self.edit_keymap(Keymap::reset_all);
+        let _ = self.run_with(crate::keymap::ESCAPE_HATCH_ACTION, "{}");
+    }
+
     /// Runs action `id` with `args` (JSON). False when there is no such
     /// action in the app's lists, it is disabled, or it said no. An async
     /// action is spawned, and counts as run once started.
@@ -401,6 +411,45 @@ impl Commands {
             });
             true
         })
+    }
+
+    /// Runs action `id` (with `args`, JSON, when given) as the app, saying
+    /// where it was invoked from: a context menu's target, a status
+    /// item, a contributed menu row; its work outlives the component
+    /// that asked (a menu row unmounts as it runs). A command registered with
+    /// [`use_command`] runs as [`Self::run`] does (it takes no
+    /// invocation). False when there is no such action, it is disabled,
+    /// or it said no; an async one is spawned and counts as run once
+    /// started.
+    #[must_use = "false when it did not run"]
+    pub fn run_invoked(
+        &self,
+        id: &str,
+        args: Option<&str>,
+        invocation: architect::action::Invocation,
+    ) -> bool {
+        let list = self
+            .lists
+            .read()
+            .iter()
+            .find(|l| l.info(id).is_some_and(|i| i.enabled))
+            .cloned();
+        let Some(list) = list else {
+            return self.run(id);
+        };
+        let mut recents = self.recents;
+        recents.write().touch(id);
+        let caller = architect::action::ActionCaller::app().with_invocation(invocation);
+        let args = args.unwrap_or_default().as_bytes().to_vec();
+        if !list.is_async(id) {
+            return list.run_json_with(&caller, id, &args).is_ok();
+        }
+        let id = id.to_owned();
+        // Past the caller's scope: a menu row is gone as it runs.
+        dioxus::core::spawn_forever(async move {
+            let _ = list.run_json_async_with(&caller, &id, &args).await;
+        });
+        true
     }
 
     /// Action `id`'s params schema, when an app list has it.
@@ -518,6 +567,12 @@ impl Commands {
     /// it is the key asked about.
     #[must_use = "true when the chord was used"]
     pub fn handle_chord(&self, chord: &str) -> bool {
+        // Before anything a person bound, a recording or an overlay: it
+        // always works.
+        if crate::keymap::is_escape_hatch(chord) {
+            self.escape_hatch();
+            return true;
+        }
         if self.recording.peek().is_some() {
             return self.record_chord(chord);
         }

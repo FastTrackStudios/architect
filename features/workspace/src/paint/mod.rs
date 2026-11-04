@@ -1,8 +1,9 @@
 //! The `paint` kind (feature `paint`;
 //! `docs/content/architecture/embedded-views.md`, "Paint views"): a view
 //! that records a scene each frame, drawn in-process by the host's own
-//! renderer in the pane's place. A GPU view, a Frame surface or a chart
-//! draws through it.
+//! renderer in the pane's place.
+//!
+//! A GPU view, a Frame surface or a chart draws through it.
 //!
 //! A [`PaintView`] is given the pane's [`ViewCtx`] — its size, its input
 //! (IME too), the frame clock, the theme's tokens, the host's typed data
@@ -42,6 +43,7 @@ use peniko::{Color, Fill};
 pub use widget::{PaintMount, PaintPane, PaintWake, PaintWidget, shell_tokens};
 
 use crate::ctx::{Geometry, ThemeTokens, ViewCtx, ViewInput};
+use crate::meter::percentile;
 
 /// A view of the [`PAINT`](crate::PAINT) kind.
 pub trait PaintView: 'static {
@@ -96,12 +98,12 @@ impl Marks {
     }
 
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.0.len()
     }
 
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
@@ -149,7 +151,7 @@ impl ThemeTokens {
         let value = self.get(name)?;
         peniko::color::parse_color(value)
             .ok()
-            .map(|c| c.to_alpha_color())
+            .map(peniko::color::DynamicColor::to_alpha_color)
     }
 }
 
@@ -221,18 +223,6 @@ impl FrameStats {
     }
 }
 
-/// The nearest-rank `p`th percentile of `sorted`.
-fn percentile(sorted: &[Duration], p: usize) -> Duration {
-    if sorted.is_empty() {
-        return Duration::ZERO;
-    }
-    let rank = sorted.len().saturating_mul(p).div_ceil(100).max(1);
-    sorted
-        .get(rank.saturating_sub(1))
-        .copied()
-        .unwrap_or_default()
-}
-
 /// The host's side of a paint view: its ctx, the view, its frame times.
 pub struct Painter {
     ctx: ViewCtx,
@@ -294,7 +284,7 @@ impl Painter {
 
     /// Request a frame after view data changes outside the input queue.
     /// The host must also wake its renderer if it is sleeping.
-    pub fn invalidate(&mut self) {
+    pub const fn invalidate(&mut self) {
         self.dirty = true;
     }
 

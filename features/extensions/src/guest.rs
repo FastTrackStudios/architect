@@ -25,6 +25,22 @@
 //! told of every change, and [`use_theme`] gives it to a view as a
 //! signal, so a process that paints itself or works out its own colours
 //! (`theme.color("clicker.face")`) follows the app's theme.
+//!
+//! A view's thread renders one event at a time: a handler that computes
+//! for a second freezes its pane for that second (its host marks it
+//! busy). Heavy work goes to [`spawn_work`] ([`use_work`] in a view): a
+//! thread of its own, its progress and results back to the view as they
+//! come, cancelled when the view closes (`crate::work`). Every event is
+//! answered with a frame, empty when nothing changed (wire 5), so the
+//! host times each one.
+//!
+//! What it adds to the app's interface at run time — tabs, status items,
+//! openers, menu entries, hooks, slots ([`Contribution`]) — and its
+//! runtime state (a status item's text) go to the host as they change:
+//! [`contribute`], [`set_state`], [`clear_state`], from anywhere in the
+//! process (wire 4 on). An action registered with [`Guest::action_in`]
+//! is told where it was invoked from (the palette, a context menu and
+//! its target, a hook and its event) as JSON.
 
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
@@ -49,14 +65,73 @@ use dioxus::prelude::Element;
 use serde_json::Value as Json;
 use tokio::sync::mpsc;
 
+use crate::contrib::{Contribution, StateWrite};
 use crate::manifest::API;
 use crate::proto::{ProcessError, ProcessExtension, ProcessExtensionStreamSource, SOCKET};
 use crate::wire::{
-    Edit, EventData, Frame, Hello, KeyData, Mods, Open, Pointer, ThemeData, Value, ViewEvent, WIRE,
+    Edit, EventData, Frame, Hello, KeyData, Mods, Open, Pointer, ThemeData, Update, Value,
+    ViewEvent, WIRE,
+};
+pub use crate::work::{
+    Progress, UseWork, Work, WorkHandle, WorkState, WorkStatus, spawn_work, use_work,
 };
 
 type ActionFuture = Pin<Box<dyn Future<Output = Result<Json, String>> + Send>>;
-type Action = Arc<dyn Fn(Json) -> ActionFuture + Send + Sync>;
+type Action = Arc<dyn Fn(Json, Json) -> ActionFuture + Send + Sync>;
+
+/// What this process has to tell the host, waiting for it to listen.
+struct Outbox {
+    pending: Mutex<std::collections::VecDeque<Update>>,
+    /// The contribution it last sent: sent again to a host that listens
+    /// anew.
+    last: Mutex<Option<String>>,
+    arrived: tokio::sync::Notify,
+}
+
+fn outbox() -> &'static Outbox {
+    static OUTBOX: OnceLock<Outbox> = OnceLock::new();
+    OUTBOX.get_or_init(|| Outbox {
+        pending: Mutex::new(std::collections::VecDeque::new()),
+        last: Mutex::new(None),
+        arrived: tokio::sync::Notify::new(),
+    })
+}
+
+fn post(update: Update) {
+    let out = outbox();
+    out.pending
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .push_back(update);
+    out.arrived.notify_one();
+}
+
+/// Puts what this process adds to the app's interface now (its tabs,
+/// status items, openers, menu and context entries, hooks, slots), in
+/// place of what it put before.
+///
+/// Checked by the host against its manifest, as the manifest's own
+/// tables are.
+pub fn contribute(contribution: &Contribution) {
+    let json = serde_json::to_string(contribution).unwrap_or_default();
+    *outbox().last.lock().unwrap_or_else(PoisonError::into_inner) = Some(json.clone());
+    post(Update::Contribute { json });
+}
+
+/// Writes one piece of its runtime state (a status item's text: its key
+/// the item's id). Its source is always its own.
+pub fn set_state(write: &StateWrite) {
+    post(Update::State {
+        json: serde_json::to_string(write).unwrap_or_default(),
+    });
+}
+
+/// Clears one key of its runtime state, or all of it.
+pub fn clear_state(key: Option<&str>) {
+    post(Update::Clear {
+        key: key.map(str::to_owned),
+    });
+}
 type ThemeListener = Arc<dyn Fn(&Resolved) + Send + Sync>;
 
 /// The theme the host last sent, for every view of this process.
@@ -139,8 +214,29 @@ impl Guest {
         F: Fn(Json) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<Json, String>> + Send + 'static,
     {
-        let run: Action = Arc::new(move |args| Box::pin(run(args)));
+        let run: Action = Arc::new(move |args, _| Box::pin(run(args)));
         self.actions.insert(id.into(), run);
+        self
+    }
+
+    /// Its action `id`, told where it was invoked from: JSON arguments and
+    /// the invocation (`{source, target?, id?, pane?, view?, url?, path?,
+    /// event?, …}`; `{source: "app"}` from a host that says nothing).
+    #[must_use]
+    pub fn action_in<F, Fut>(mut self, id: impl Into<String>, run: F) -> Self
+    where
+        F: Fn(Json, Json) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<Json, String>> + Send + 'static,
+    {
+        let run: Action = Arc::new(move |args, cx| Box::pin(run(args, cx)));
+        self.actions.insert(id.into(), run);
+        self
+    }
+
+    /// What it adds to the interface from the start ([`contribute`]).
+    #[must_use]
+    pub fn contribution(self, contribution: &Contribution) -> Self {
+        contribute(contribution);
         self
     }
 
@@ -159,6 +255,16 @@ impl Guest {
     #[must_use]
     pub fn theme() -> Option<Resolved> {
         theme_cell().borrow().clone()
+    }
+
+    /// Runs `work` on a thread of its own, off every view's thread
+    /// ([`spawn_work`]): its progress and results go to its
+    /// [`WorkHandle`]; dropping that cancels it.
+    pub fn spawn_work<F>(work: F) -> WorkHandle
+    where
+        F: FnOnce(&Work) -> Result<Json, String> + Send + 'static,
+    {
+        spawn_work(work)
     }
 
     /// Serves the host that started this process, until it goes.
@@ -192,9 +298,59 @@ impl Guest {
             .establish_connection()
             .await
             .map_err(|e| GuestError::Connect(format!("{e:?}")))?;
+        // The host service, the other way (a host from before it serves
+        // none: `host` says so).
+        if let Ok(client) = connection
+            .open_lane::<crate::host_proto::ExtensionHostClient>()
+            .await
+        {
+            *host_slot().lock().unwrap_or_else(PoisonError::into_inner) = Some(client);
+        }
         connection.closed().await;
+        host_slot()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
         Ok(())
     }
+}
+
+fn host_slot() -> &'static Mutex<Option<crate::host_proto::ExtensionHostClient>> {
+    static HOST: OnceLock<Mutex<Option<crate::host_proto::ExtensionHostClient>>> = OnceLock::new();
+    HOST.get_or_init(|| Mutex::new(None))
+}
+
+/// Asks the host service (`crate::hostcall`), from anywhere in the
+/// process once it is connected.
+///
+/// It runs an app action, reads the selection or a setting, keeps data —
+/// checked by the host against what this extension may reach.
+///
+/// # Errors
+///
+/// The host refused or failed, or there is no host to ask (not connected
+/// yet, or a host that serves no host service).
+pub async fn host(
+    request: crate::hostcall::HostRequest,
+) -> Result<Json, crate::hostcall::HostError> {
+    let client = host_slot()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()
+        .ok_or_else(|| crate::hostcall::HostError::Failed {
+            message: "no host service: not connected, or the host serves none".to_owned(),
+        })?;
+    let text = serde_json::to_string(&request).map_err(|e| crate::hostcall::HostError::Failed {
+        message: e.to_string(),
+    })?;
+    let answer = client
+        .call(text)
+        .await
+        .map_err(architect::vox_into_app::<ProcessError>)
+        .map_err(|e| crate::hostcall::HostError::Failed {
+            message: format!("the host service: {e}"),
+        })?;
+    crate::hostcall::HostAnswer::from_json(&answer).into_result()
 }
 
 /// The views open now, by pane: where their events go.
@@ -223,6 +379,17 @@ impl ProcessExtension for Served {
     }
 
     async fn run(&self, action: String, args: String) -> Result<String, ProcessError> {
+        self.run_in(action, args, String::new()).await
+    }
+
+    async fn run_in(
+        &self,
+        action: String,
+        args: String,
+        invocation: String,
+    ) -> Result<String, ProcessError> {
+        let cx = serde_json::from_str(&invocation)
+            .unwrap_or_else(|_| serde_json::json!({ "source": "app" }));
         let run = self
             .guest
             .actions
@@ -234,7 +401,7 @@ impl ProcessExtension for Served {
         } else {
             serde_json::from_str(&args).map_err(|e| ProcessError::Failed(e.to_string()))?
         };
-        run(args)
+        run(args, cx)
             .await
             .map(|out| out.to_string())
             .map_err(ProcessError::Failed)
@@ -271,6 +438,38 @@ impl ProcessExtension for Served {
 }
 
 impl ProcessExtensionStreamSource for Served {
+    fn updates_attach(&self, _since: u64, sink: EventSink<Update>) {
+        tokio::spawn(async move {
+            let out = outbox();
+            // A host that listens anew hears what is added now first.
+            let last = out
+                .last
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone();
+            if let Some(json) = last {
+                if sink.send(Update::Contribute { json }).await.is_err() {
+                    return;
+                }
+            }
+            loop {
+                let next = out
+                    .pending
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .pop_front();
+                match next {
+                    Some(update) => {
+                        if sink.send(update).await.is_err() {
+                            return;
+                        }
+                    }
+                    None => out.arrived.notified().await,
+                }
+            }
+        });
+    }
+
     fn view_attach(&self, open: Open, sink: EventSink<Frame>) {
         let root = self.guest.views.get(&open.view).copied();
         let (to, events) = mpsc::unbounded_channel();
@@ -341,11 +540,14 @@ fn render(
                 },
                 () = vdom.wait_for_work() => None,
             };
+            // An event is always answered (wire 5): its host times the
+            // frame from it, empty or not.
+            let answers = event.is_some();
             if let Some(event) = event {
                 dispatch(&vdom, event);
             }
             vdom.render_immediate(&mut writer);
-            if !writer.is_empty() && sink.send(writer.take()).await.is_err() {
+            if (answers || !writer.is_empty()) && sink.send(writer.take()).await.is_err() {
                 return;
             }
         }

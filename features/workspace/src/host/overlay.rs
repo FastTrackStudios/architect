@@ -717,6 +717,7 @@ enum Item {
 #[component]
 fn MenuRow(item: Item) -> Element {
     let mut host = use_host();
+    let commands = architect_commands::try_use_commands();
     let t = host.theme.read().clone();
     let s = (host.sizes)();
     match item {
@@ -736,7 +737,21 @@ fn MenuRow(item: Item) -> Element {
                     onclick: move |_| {
                         host.menu.set(None);
                         host.switcher.set(false);
-                        host.run(op.clone());
+                        if let Op::Run { command, pane, view } = &op {
+                            let invocation = architect::action::Invocation {
+                                pane: Some(pane.0.clone()),
+                                view: Some(view.clone()),
+                                ..architect::action::Invocation::new(
+                                    architect::action::InvocationSource::ContextMenu,
+                                )
+                                .on(format!("view:{view}"), pane.0.clone())
+                            };
+                            if let Some(c) = commands {
+                                let _ = c.run_invoked(command, None, invocation);
+                            }
+                        } else {
+                            host.run(op.clone());
+                        }
                     },
                     "{label}"
                 }
@@ -854,6 +869,20 @@ fn pane_items(host: Host, pane: &PaneId) -> Vec<Item> {
         items.push(act("Reopen closed tab", Op::Reopen));
     }
     items.push(act("Open a view…", Op::OpenMenu));
+    // What others add for this pane's view (an extension's rows).
+    if let Some(entries) = try_consume_context::<super::ContextEntries>() {
+        let view = p.view.0.clone();
+        for e in (entries.0)(&format!("view:{view}"), &pane.0) {
+            items.push(act(
+                &e.label,
+                Op::Run {
+                    command: e.command,
+                    pane: pane.clone(),
+                    view: view.clone(),
+                },
+            ));
+        }
+    }
     if tabs > 1 {
         items.push(act("Close others", Op::CloseOthers(pane.clone())));
     }

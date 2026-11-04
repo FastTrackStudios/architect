@@ -18,6 +18,12 @@
 //! paints itself (`guest::Guest::theme`). Its views' documents get the
 //! theme as CSS either way (`remote`).
 //!
+//! A process that speaks wire 4 or later is given each action's
+//! invocation (`run_in`) and is listened to for what it adds at run time
+//! ([`Update`]): its contributions and runtime state go into the host's
+//! registry, checked against its manifest, and come off when it dies or
+//! is unloaded.
+//!
 //! Not yet: stdio as a transport, lazy start and stopping idle ones,
 //! handing state over on a reload (`save-state`), the host service an
 //! extension calls back into, Windows.
@@ -35,11 +41,14 @@ use futures::channel::mpsc;
 use tokio::io::{AsyncBufReadExt as _, BufReader};
 use tokio::sync::{Notify, watch};
 
-use crate::host::{Context, Instance, Runner};
+use crate::contrib::{Contribution, Contributions, StateWrite};
+use crate::host::{Context, Instance, Runner, invocation_json, now_ms};
 use crate::manifest::{API, ActionDecl, Kind, Manifest};
 use crate::package::Package;
 use crate::proto::{ProcessExtensionClient, ProcessExtensionStreamClient, SOCKET};
-use crate::wire::{Frame, Hello, Open, THEMED_WIRE, ThemeData, ViewEvent, WIRE, WIRE_MIN};
+use crate::wire::{
+    CONTRIB_WIRE, Frame, Hello, Open, THEMED_WIRE, ThemeData, Update, ViewEvent, WIRE, WIRE_MIN,
+};
 
 /// How a process that died is started again.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -297,15 +306,33 @@ impl Process {
     ///
     /// It is not running, has no such action, or the action failed.
     pub async fn run(&self, action: &str, args: String) -> Result<String, String> {
+        self.run_in(action, args, None).await
+    }
+
+    /// Runs its action `action` with JSON `args`, telling it where the run
+    /// came from (`context`, an invocation as JSON) when it speaks wire 4
+    /// or later.
+    ///
+    /// # Errors
+    ///
+    /// It is not running, has no such action, or the action failed.
+    pub async fn run_in(
+        &self,
+        action: &str,
+        args: String,
+        context: Option<String>,
+    ) -> Result<String, String> {
         let link = self.link()?;
         let action = action.to_owned();
+        let knows = self.hello().is_some_and(|h| h.wire >= CONTRIB_WIRE);
         self.inner
             .rt
             .spawn(async move {
-                link.client
-                    .run(action, args)
-                    .await
-                    .map_err(architect::vox_into_app::<crate::proto::ProcessError>)
+                let ran = match context {
+                    Some(context) if knows => link.client.run_in(action, args, context).await,
+                    _ => link.client.run(action, args).await,
+                };
+                ran.map_err(architect::vox_into_app::<crate::proto::ProcessError>)
                     .map_err(|e| e.to_string())
             })
             .await
@@ -409,6 +436,29 @@ struct Launch {
     args: Vec<String>,
     socket_dir: PathBuf,
     hello_within: Duration,
+    /// Its session with the host service, served on its connection.
+    api: crate::hostapi::ExtensionApi,
+    /// Where its output goes (`EXT_LOGS`).
+    logs: crate::logs::Logs,
+}
+
+/// The host service, served on a process's own connection: its calls
+/// are its own.
+#[derive(Clone)]
+struct HostServed {
+    api: crate::hostapi::ExtensionApi,
+}
+
+impl architect::Services for HostServed {
+    fn layers() -> impl architect::Layer<Self> {
+        architect::layers![crate::host_proto::Service]
+    }
+}
+
+impl crate::host_proto::ExtensionHost for HostServed {
+    async fn call(&self, request: String) -> Result<String, crate::proto::ProcessError> {
+        Ok(self.api.call_json(&request).await)
+    }
 }
 
 /// The socket a start listens on.
@@ -448,11 +498,14 @@ async fn launch(id: &str, launch: &Launch) -> Result<Started, String> {
     };
     // Its output is its log.
     if let Some(out) = child.stdout.take() {
-        tokio::spawn(log_lines(id.to_owned(), out));
+        tokio::spawn(log_lines(id.to_owned(), out, launch.logs.clone(), "stdout"));
     }
     if let Some(err) = child.stderr.take() {
-        tokio::spawn(log_lines(id.to_owned(), err));
+        tokio::spawn(log_lines(id.to_owned(), err, launch.logs.clone(), "stderr"));
     }
+    let served = HostServed {
+        api: launch.api.clone(),
+    };
     let introduced = tokio::time::timeout(launch.hello_within, async {
         let stream = tokio::select! {
             accepted = listener.accept() => accepted.map_err(|e| e.to_string())?,
@@ -460,7 +513,9 @@ async fn launch(id: &str, launch: &Launch) -> Result<Started, String> {
                 return Err(status.map_or_else(|e| e.to_string(), |s| exited(s)));
             }
         };
+        // The host service, for the lane it opens to us.
         let connection = vox_core::initiator_on(vox_stream::StreamLink::unix(stream))
+            .on_lane(architect::Services::into_router(served).acceptor())
             .establish_connection()
             .await
             .map_err(|e| format!("connecting: {e:?}"))?;
@@ -504,10 +559,16 @@ async fn launch(id: &str, launch: &Launch) -> Result<Started, String> {
     }
 }
 
-async fn log_lines(id: String, from: impl tokio::io::AsyncRead + Unpin) {
+async fn log_lines(
+    id: String,
+    from: impl tokio::io::AsyncRead + Unpin,
+    logs: crate::logs::Logs,
+    stream: &'static str,
+) {
     let mut lines = BufReader::new(from).lines();
     while let Ok(Some(line)) = lines.next_line().await {
-        tracing::info!(ext.id = %id, ext.output = %line);
+        tracing::info!(ext.id = %id, ext.stream = stream, ext.output = %line);
+        logs.push(&id, crate::logs::Level::Info, stream, line);
     }
 }
 
@@ -594,12 +655,68 @@ async fn theme_changed(feed: Option<&mut ThemeFeed>) {
     }
 }
 
+/// Applies one [`Update`] from `manifest`'s process to `contributions`.
+fn apply(manifest: &Manifest, contributions: &Contributions, update: Update) -> Result<(), String> {
+    let source = format!("ext:{}", manifest.id);
+    match update {
+        Update::Contribute { json } => {
+            let added: Contribution =
+                serde_json::from_str(&json).map_err(|e| format!("its contribution: {e}"))?;
+            let views = manifest.view_ids();
+            added
+                .check(&manifest.rules(&views))
+                .map_err(|e| e.to_string())?;
+            contributions.put_runtime(&manifest.id, added);
+        }
+        Update::State { json } => {
+            let mut write: StateWrite =
+                serde_json::from_str(&json).map_err(|e| format!("its state: {e}"))?;
+            write.source = source;
+            contributions
+                .set_state(write, now_ms())
+                .map_err(|e| e.to_string())?;
+        }
+        Update::Clear { key } => {
+            contributions.clear_state(&source, key.as_deref());
+        }
+    }
+    Ok(())
+}
+
+/// Listens to `link`'s process for what it adds at run time, until it
+/// stops sending.
+async fn listen(link: Link, manifest: Manifest, contributions: Contributions) {
+    let (tx, mut rx) = vox::channel::<Update>();
+    let stream = link.stream.clone();
+    let mut call = std::pin::pin!(stream.updates(0, tx));
+    loop {
+        tokio::select! {
+            biased;
+            _ = &mut call => break,
+            update = rx.recv() => match update {
+                Ok(Some(update)) => {
+                    let mut got = None;
+                    let _ = update.map(|u| got = Some(u));
+                    if let Some(update) = got
+                        && let Err(why) = apply(&manifest, &contributions, update)
+                    {
+                        tracing::warn!(ext.id = %manifest.id, ext.why = %why, "an update was refused");
+                    }
+                }
+                _ => break,
+            },
+        }
+    }
+}
+
+#[allow(clippy::too_many_lines)]
 async fn supervise(
     process: Process,
     launch_with: Launch,
     manifest: Manifest,
     restart: Restart,
     theme: Option<architect_theme::ThemeStore>,
+    contributions: Contributions,
     first: std::sync::mpsc::Sender<Result<(), String>>,
 ) {
     let inner = &process.inner;
@@ -633,6 +750,14 @@ async fn supervise(
                     feed.send(&link, &inner.id).await;
                 }
                 let themed = link.clone();
+                // What it adds at run time, while it runs.
+                let listening = (hello.wire >= CONTRIB_WIRE).then(|| {
+                    tokio::spawn(listen(
+                        link.clone(),
+                        manifest.clone(),
+                        contributions.clone(),
+                    ))
+                });
                 *inner.link.lock().unwrap_or_else(PoisonError::into_inner) = Some(link);
                 *inner.hello.lock().unwrap_or_else(PoisonError::into_inner) = Some(hello);
                 *inner.pid.lock().unwrap_or_else(PoisonError::into_inner) = Some(pid);
@@ -640,6 +765,12 @@ async fn supervise(
                 span.in_scope(|| {
                     tracing::info!(ext.pid = pid, ext.generation = generation, "started");
                 });
+                launch_with.logs.push(
+                    &inner.id,
+                    crate::logs::Level::Info,
+                    "process",
+                    format!("started (pid {pid}, generation {generation})"),
+                );
                 if let Some(first) = first.take() {
                     let _ = first.send(Ok(()));
                 }
@@ -661,6 +792,12 @@ async fn supervise(
                     }
                 };
                 drop((feed, themed));
+                // Gone with it: what it added at run time, and its state.
+                if let Some(listening) = listening {
+                    listening.abort();
+                }
+                contributions.put_runtime(&manifest.id, Contribution::default());
+                contributions.clear_state(&format!("ext:{}", manifest.id), None);
                 inner
                     .link
                     .lock()
@@ -680,6 +817,12 @@ async fn supervise(
             Err(why) => {
                 if let Some(first) = first.take() {
                     // It never ran: the load fails, the last good copy stays.
+                    launch_with.logs.push(
+                        &inner.id,
+                        crate::logs::Level::Error,
+                        "process",
+                        format!("did not start: {why}"),
+                    );
                     let _ = first.send(Err(why));
                     inner.state.send_replace(State::Stopped);
                     return;
@@ -689,6 +832,16 @@ async fn supervise(
         };
         attempts = attempts.saturating_add(1);
         let restarting = attempts <= restart.attempts;
+        launch_with.logs.push(
+            &inner.id,
+            crate::logs::Level::Error,
+            "process",
+            if restarting {
+                format!("{why}; restarting")
+            } else {
+                why.clone()
+            },
+        );
         span.in_scope(|| tracing::warn!(ext.why = %why, ext.restarting = restarting, "exited"));
         inner.state.send_replace(State::Exited { why, restarting });
         if restarting {
@@ -815,16 +968,17 @@ impl Instance for Loaded {
     fn action(&self, decl: &ActionDecl) -> Result<CallerAsyncHandler, String> {
         let process = self.process.clone();
         let id = decl.id.clone();
-        Ok(Arc::new(move |_: &ActionCaller, args: &[u8]| {
+        Ok(Arc::new(move |caller: &ActionCaller, args: &[u8]| {
             let args = String::from_utf8(args.to_vec()).map_err(|e| ActionError::BadArgs {
                 id: id.clone(),
                 message: e.to_string(),
                 expected: None,
             })?;
+            let context = invocation_json(caller.invocation()).to_string();
             let (process, id) = (process.clone(), id.clone());
             let run: ActionFuture = Box::pin(async move {
                 process
-                    .run(&id, args)
+                    .run_in(&id, args, Some(context))
                     .await
                     .map(String::into_bytes)
                     .map_err(|message| ActionError::Failed { id, message })
@@ -844,7 +998,7 @@ impl Runner for ProcessRunner {
         Kind::Process
     }
 
-    fn start(&self, package: &Package, _: Context<'_>) -> Result<Box<dyn Instance>, String> {
+    fn start(&self, package: &Package, cx: Context<'_>) -> Result<Box<dyn Instance>, String> {
         let manifest = &package.manifest;
         let dir = package
             .dir()
@@ -858,6 +1012,8 @@ impl Runner for ProcessRunner {
             args: manifest.entry.args.clone(),
             socket_dir: self.socket_dir.clone(),
             hello_within: self.hello_within,
+            api: cx.api.clone(),
+            logs: cx.logs.clone(),
         };
         let process = Process {
             inner: Arc::new(Inner {
@@ -879,6 +1035,7 @@ impl Runner for ProcessRunner {
             manifest.clone(),
             self.restart,
             self.theme.clone(),
+            cx.contributions.clone(),
             first,
         ));
         let waited = self.hello_within.saturating_add(Duration::from_secs(1));

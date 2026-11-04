@@ -293,8 +293,9 @@ impl Extras {
 }
 
 /// A value the host and its views share, typed: the host writes, a view
-/// reads (and redraws when [`version`](Self::version) moves). Cheap to
-/// clone; every clone is the same value. A `T` with a [`facet::Facet`]
+/// reads (and redraws when [`version`](Self::version) moves).
+///
+/// Cheap to clone; every clone is the same value. A `T` with a [`facet::Facet`]
 /// shape is schema-typed besides: its [`shape`](Self::shape) and JSON
 /// are what an agent, a remote view or a saved pane reads it by.
 pub struct HostData<T>(Arc<Shared<T>>);
@@ -368,7 +369,7 @@ impl<T: Clone> HostData<T> {
 impl<T: for<'a> facet::Facet<'a>> HostData<T> {
     /// Its schema.
     #[must_use]
-    pub fn shape() -> &'static facet::Shape {
+    pub const fn shape() -> &'static facet::Shape {
         T::SHAPE
     }
 
@@ -549,7 +550,7 @@ mod tests {
 
         let drawn = seen.version();
         meter.update(|m| m.level = 0.75);
-        assert_eq!(seen.version(), drawn + 1);
+        assert_eq!(seen.version(), drawn.saturating_add(1));
         assert_eq!(seen.read(|m| m.level), 0.75);
 
         assert_eq!(HostData::<Meter>::shape().type_identifier, "Meter");

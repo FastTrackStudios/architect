@@ -1,0 +1,7 @@
+# cargo-nextest config: `just test` and main CI (.github/workflows/checks.yml).
+
+[profile.ci]
+# Report every failing test of a run, not just the first.
+fail-fast = false
+status-level = "fail"
+final-status-level = "fail"
