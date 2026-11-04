@@ -59,7 +59,9 @@ fn looks_the_same(name: &str, steps: &str) {
     }
     let want = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("{}: {e} (ARCHITECT_GOLDEN=record)", path.display()));
-    if want != last.0 {
+    // An element's `data-dioxus-id` is the order it was mounted in, not
+    // how it looks: a component that draws nothing moves every id after it.
+    if without_ids(&want) != without_ids(&last.0) {
         let got = path.with_extension("got.html");
         std::fs::write(&got, &last.0).unwrap();
         let first = want
@@ -74,6 +76,22 @@ fn looks_the_same(name: &str, steps: &str) {
             got.display()
         );
     }
+}
+
+/// `html` with each `data-dioxus-id="…"` emptied.
+fn without_ids(html: &str) -> String {
+    const ID: &str = "data-dioxus-id=\"";
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+    while let Some(at) = rest.find(ID) {
+        let (head, tail) = rest.split_at(at.saturating_add(ID.len()));
+        out.push_str(head);
+        rest = tail
+            .find('"')
+            .map_or("", |end| tail.get(end..).unwrap_or(""));
+    }
+    out.push_str(rest);
+    out
 }
 
 /// The lab as it opens: the Inbox, its shell, its chrome.

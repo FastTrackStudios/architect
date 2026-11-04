@@ -791,6 +791,17 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         {
             extensions = with;
         }
+        // The settings page: its window, ⌘, (the app's APP_SETTINGS, which
+        // the lab lets it own) and its point, settings.sections.
+        extensions
+            .host()
+            .allow_reserved(architect_settings_sheet::ID, &["APP_SETTINGS"]);
+        if let Ok(with) = extensions
+            .clone()
+            .with_linked(&architect_settings_sheet::SettingsSheet)
+        {
+            extensions = with;
+        }
         let found = registry();
         match &found {
             Some(dir) => extensions = extensions.with_source(FolderRegistry::new(dir)),

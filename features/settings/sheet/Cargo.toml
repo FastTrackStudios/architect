@@ -1,0 +1,38 @@
+[package]
+name = "architect-settings-sheet"
+description = "The settings page as a built-in extension (extension.toml): ⌘, (the app's APP_SETTINGS) opens its window, a sheet over the app; its sections are the contributions to its point, settings.sections. Linked into an app, or run as its own process, through the host service either way."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+doctest = false
+
+[[bin]]
+name = "architect-settings-sheet"
+path = "src/main.rs"
+
+[dependencies]
+# The trait and the guest (its process copy); an app adds `linked`.
+architect-extensions = { workspace = true, features = ["guest"] }
+# The page's frame: the core's components it draws.
+architect-settings = { workspace = true, features = ["ui"] }
+architect-shell = { workspace = true, features = ["ui"] }
+architect-theme = { workspace = true }
+dioxus = { workspace = true }
+serde_json = { workspace = true }
+# Its view looks again when its sections change.
+futures-timer = { workspace = true }
+
+[dev-dependencies]
+architect = { workspace = true, features = ["action-list"] }
+architect-extensions = { workspace = true, features = ["host", "linked", "process"] }
+futures = "0.3"
+tempfile = "3"
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../../workspace-hack" }
