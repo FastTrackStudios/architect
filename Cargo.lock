@@ -1230,6 +1230,7 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "architect-extensions",
+ "architect-workspace-hack",
  "js-sys",
  "serde_json",
  "wasm-bindgen",
