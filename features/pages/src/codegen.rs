@@ -264,6 +264,9 @@ export interface Worker {
   post(message: unknown): void;
   onMessage(fn: (message: unknown) => void): void;
   onDone(fn: (result: unknown, error: string | undefined) => void): void;
+  /** Stops it (a Luau worker's `w:cancel()`). */
+  cancel(): void;
+  /** `cancel`, as a Web Worker says it. */
   terminate(): void;
 }
 export const worker: {
@@ -319,7 +322,7 @@ declare function clearInterval(id: number): void;
 "#;
 
 /// The Luau element builder's surface (`crate::luau`).
-const LUAU_RUNTIME: &str = r"
+const LUAU_RUNTIME: &str = r#"
 -- ── The element builder: what a Luau page has ─────────────────────────
 
 -- One element under construction: each method returns it, to chain.
@@ -345,4 +348,23 @@ export type Builder = {
 --   actions.run(id, args?), state.query(id, args?): as every script
 --   theme.value(name), theme.scheme, theme.revision: the app's theme
 --   embed(): an inline embed's input ({ claim, source, props }), nil in a pane
-";
+--   set_timeout(fn, ms), set_interval(fn, ms): a timer's id; clear_timeout(id), clear_interval(id)
+--   worker.spawn(file, args?): a Worker running `file`, a `.luau` of the page's folder
+
+-- How far a worker said it is.
+export type WorkerProgress = { done: number, total: number?, fraction: number?, note: string? }
+
+-- A worker: a script of the page's folder in a Luau state of its own, spoken to by messages.
+export type Worker = {
+	id: number,
+	name: string,
+	post: (self: Worker, message: any) -> (),
+	cancel: (self: Worker) -> (),
+	status: (self: Worker) -> "running" | "done" | "failed" | "cancelled",
+	progress: (self: Worker) -> WorkerProgress?,
+	result: (self: Worker) -> (any, string?),
+	on_message: (self: Worker, fn: (message: any) -> ()) -> (),
+	on_progress: (self: Worker, fn: (progress: WorkerProgress) -> ()) -> (),
+	on_done: (self: Worker, fn: (result: any, error: string?) -> ()) -> (),
+}
+"#;

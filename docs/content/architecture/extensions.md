@@ -994,6 +994,7 @@ script = "workers/primes.luau"   # luau and process packages
 | Process | one thread per open view in the process, one event at a time | `guest::spawn_work`: a thread of the process | its `WorkHandle` drops (the view closed) |
 | WASI | one instance of the component on a thread of its own, each call within an epoch deadline | another instance of the same component on a thread of `wasi::Pool` (on the web, next, a Web Worker) | its owner cancels it, traps or is unloaded |
 | Linked | the app's Dioxus tree: a linked extension is first-party code and keeps to the rule itself | its own thread or task | as the code says |
+| Page (TSX, Luau) | one thread per open page, each call within `PageLimits::frame` | TSX: a `.js`/`.ts` file of the page's folder in a `QuickJS` runtime of its own thread; Luau: a `.luau` file of it in a Luau state on the scripting pool | its page closes, or the handle's `cancel()` |
 
 **Luau** (`features/scripting/src/vm.rs`, `features/scripting/src/worker.rs`):
 no script runs on its caller's thread. `Runtime::run` takes a thread of
@@ -1028,6 +1029,19 @@ The worker sees `args`, `worker.progress(done, total, note)`,
 `ImGui`, no theme. Its news wakes the view's host for a frame
 (`Live::woken`); `wake_after(ms)` asks for an animation frame. A
 one-off run waits with `job:join()` or `job:next()`; a view must not.
+
+**Pages** (`docs/content/architecture/pages.md`) spawn a file of their
+own folder by its name and hear from it through callbacks, a frame
+after each: a TSX page's handle says `w.post`, `w.onMessage`,
+`w.onDone`, `w.cancel()`; a Luau page's is a Luau view's worker
+(`features/pages/src/luau.rs`, over `Workers::install_owner` and
+`deliver` in `features/scripting/src/worker.rs`), with `w:on_message`,
+`w:on_progress`, `w:on_done` besides `worker.on_message(w, fn)`. Both
+have `set_timeout` / `set_interval` (a TSX page's `setTimeout`) run on
+the page's thread. The names are the world's `worker` import and `work`
+export, spelled each runner's way; `features/extensions/tests/wasi_wit.rs`
+`the_page_runners_say_the_same_worker_names` fails when a page's
+generated types drift from them.
 
 **Process guests** (`features/extensions/src/work.rs`): a view's thread
 renders one event at a time, so the rule is that a handler starts work

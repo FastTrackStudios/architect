@@ -469,6 +469,14 @@ impl Pages {
         self.with_runner(PageKind::Luau, crate::luau::loader())
     }
 
+    /// A2UI JSON pages (`crate::a2ui`), drawn through the app's A2UI
+    /// catalog.
+    #[cfg(feature = "a2ui")]
+    #[must_use]
+    pub fn with_a2ui(self) -> Self {
+        self.with_runner(PageKind::A2ui, crate::a2ui::loader())
+    }
+
     #[must_use]
     pub fn app_dir(&self) -> Option<&Path> {
         self.0.app_dir.as_deref()
@@ -479,7 +487,7 @@ impl Pages {
         &self.0.host
     }
 
-    /// Whether it runs pages of `kind` (none runs `.a2ui.json` yet).
+    /// Whether it runs pages of `kind`.
     #[must_use]
     pub fn runs(&self, kind: PageKind) -> bool {
         self.0.loaders.contains_key(kind.extension())
@@ -726,7 +734,7 @@ impl Pages {
     pub fn check_file(&self, path: &Path) -> Result<Checked, String> {
         let page = PageFile::new(path, files::Origin::Extension).ok_or_else(|| {
             format!(
-                "{}: not a page file (.tsx, .ts, .jsx, .js, .luau)",
+                "{}: not a page file (.tsx, .ts, .jsx, .js, .luau, .a2ui.json)",
                 path.display()
             )
         })?;

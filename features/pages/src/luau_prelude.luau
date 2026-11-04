@@ -129,6 +129,57 @@ function page.dirty()
 	return dirty
 end
 
+-- Timers, as a TSX page's setTimeout / setInterval: run by the page's
+-- thread (page.tick), each a frame of its own.
+local timers = {}
+local next_timer = 1
+
+local function add_timer(fn, ms, every)
+	local id = next_timer
+	next_timer += 1
+	local wait = math.max(0, tonumber(ms) or 0)
+	timers[id] = { fn = fn, at = host.now() + wait, every = if every then math.max(wait, 1) else 0 }
+	return id
+end
+
+local function clear_timer(id)
+	timers[id] = nil
+end
+
+-- Runs the timers that are due; how many ms until the next (-1: none).
+function page.tick()
+	local now = host.now()
+	local due = {}
+	for id, t in timers do
+		if t.at <= now then
+			table.insert(due, id)
+		end
+	end
+	table.sort(due)
+	for _, id in due do
+		local t = timers[id]
+		if t then
+			if t.every > 0 then
+				t.at = now + t.every
+			else
+				timers[id] = nil
+			end
+			dirty = true
+			t.fn()
+		end
+	end
+	local soonest = -1
+	for _, t in timers do
+		if soonest < 0 or t.at < soonest then
+			soonest = t.at
+		end
+	end
+	if soonest < 0 then
+		return -1
+	end
+	return math.max(0, soonest - host.now())
+end
+
 local api = {
 	el = el,
 	text = text,
@@ -139,6 +190,14 @@ local api = {
 	invalidate = function()
 		dirty = true
 	end,
+	set_timeout = function(fn, ms)
+		return add_timer(fn, ms, false)
+	end,
+	set_interval = function(fn, ms)
+		return add_timer(fn, ms, true)
+	end,
+	clear_timeout = clear_timer,
+	clear_interval = clear_timer,
 }
 for _, tag in { "div", "span", "button", "input", "p", "ul", "li", "h1", "h2", "h3", "label", "a", "img", "section" } do
 	api[tag] = function()

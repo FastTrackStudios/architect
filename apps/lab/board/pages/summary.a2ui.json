@@ -1,0 +1,35 @@
+{
+  "components": [
+    { "id": "root", "component": "Column", "children": ["title", "about", "form", "pins", "clear"] },
+    { "id": "title", "component": "Text", "text": "The board, in A2UI", "variant": "h2" },
+    {
+      "id": "about",
+      "component": "Text",
+      "variant": "caption",
+      "text": "pages/summary.a2ui.json: a declarative page drawn through the app's A2UI catalog, its data bound to LAB_BOARD_STATE, its buttons the Board's actions."
+    },
+    { "id": "form", "component": "Row", "align": "end", "children": ["draft", "pin"] },
+    { "id": "draft", "component": "TextField", "label": "Title", "value": { "path": "/draft" } },
+    {
+      "id": "pin",
+      "component": "Button",
+      "variant": "primary",
+      "child": "pin-label",
+      "action": { "event": { "name": "LAB_BOARD_PIN", "context": { "title": { "path": "/draft" } } } }
+    },
+    { "id": "pin-label", "component": "Text", "text": "Pin" },
+    { "id": "pins", "component": "List", "children": { "componentId": "pin-card", "path": "/board/pins" } },
+    { "id": "pin-card", "component": "Card", "child": "pin-title" },
+    { "id": "pin-title", "component": "Text", "text": { "path": "" } },
+    {
+      "id": "clear",
+      "component": "Button",
+      "variant": "borderless",
+      "child": "clear-label",
+      "action": { "event": { "name": "LAB_BOARD_CLEAR" } }
+    },
+    { "id": "clear-label", "component": "Text", "text": "Clear the board" }
+  ],
+  "data": { "draft": "", "board": { "pins": [] } },
+  "bind": { "/board": { "action": "LAB_BOARD_STATE", "every": 1000 } }
+}

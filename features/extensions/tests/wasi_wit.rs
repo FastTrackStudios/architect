@@ -303,3 +303,66 @@ fn the_worker_interfaces_are_the_other_runners() {
         );
     }
 }
+
+/// A page's worker says the same names as the others
+/// (`docs/content/architecture/pages.md`): a TSX page's handle in
+/// camelCase, a Luau page's in `snake_case`, as their generated types
+/// write them (`architect-pages`' `types/architect.d.ts` and
+/// `architect.d.luau`, which its own `tests/types.rs` keeps equal to
+/// what its runtimes give).
+#[test]
+fn the_page_runners_say_the_same_worker_names() {
+    let w = world();
+    let types = Path::new(env!("CARGO_MANIFEST_DIR")).join("../pages/types");
+    let ts = std::fs::read_to_string(types.join("architect.d.ts")).unwrap();
+    let luau = std::fs::read_to_string(types.join("architect.d.luau")).unwrap();
+    let camel = |wit: &str| {
+        let mut out = String::new();
+        let mut up = false;
+        for c in wit.chars() {
+            if c == '-' {
+                up = true;
+            } else if up {
+                out.push(c.to_ascii_uppercase());
+                up = false;
+            } else {
+                out.push(c);
+            }
+        }
+        out
+    };
+    // What an owner calls on its worker, by the world's names: the
+    // `worker` import's and the `work` export's callbacks.
+    let owner: [(&str, &str); 5] = [
+        ("post", "worker"),
+        ("cancel", "worker"),
+        ("on-message", "work"),
+        ("on-progress", "work"),
+        ("on-done", "work"),
+    ];
+    for (f, interface) in owner {
+        assert!(
+            functions(&w, interface).iter().any(|g| g == f),
+            "{interface} has no {f}"
+        );
+        // A Luau page's handle: `w:on_message(fn)`.
+        let snake = f.replace('-', "_");
+        assert!(
+            luau.contains(&format!("\t{snake}: (self: Worker")),
+            "architect.d.luau's Worker has no {snake}"
+        );
+        // A TSX page's handle: `w.onMessage(fn)`. Its workers say no
+        // progress (a QuickJS worker posts messages only).
+        if f != "on-progress" {
+            let name = camel(f);
+            assert!(
+                ts.contains(&format!("  {name}(")),
+                "architect.d.ts's Worker has no {name}"
+            );
+        }
+    }
+    // Both start one with `worker.spawn(file, args)`.
+    assert!(functions(&w, "worker").iter().any(|g| g == "spawn"));
+    assert!(ts.contains("spawn(file: string, args?: unknown): Worker;"));
+    assert!(luau.contains("worker.spawn(file, args?)"));
+}

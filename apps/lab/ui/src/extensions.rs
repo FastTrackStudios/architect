@@ -1047,12 +1047,22 @@ fn lab_pages(
     let pages = architect_pages::runner::Pages::new(host)
         .with_app_dir(&root)
         .with_js()
-        .with_luau();
+        .with_luau()
+        .with_a2ui();
     let id = architect_lab_board::ID;
     match write_builtin(&root, id, architect_lab_board::PAGES) {
         Ok(dir) => {
             if let Some(page) = PageFile::new(dir.join("board.tsx"), Origin::Builtin) {
                 pages.declare(id, "board", page);
+            }
+            // Its A2UI and Luau pages (`[[views]] summary`, `luau-primes`).
+            for (view, file) in [
+                ("summary", "summary.a2ui.json"),
+                ("luau-primes", "luau-primes.luau"),
+            ] {
+                if let Some(page) = PageFile::new(dir.join(file), Origin::Builtin) {
+                    pages.declare(id, view, page);
+                }
             }
             // Its ```kf embed's page (`[[embeds]] id = "kf"`).
             if let Some(page) = PageFile::new(dir.join("kf.tsx"), Origin::Builtin) {

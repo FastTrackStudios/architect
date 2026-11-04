@@ -252,6 +252,9 @@ declare module "architect" {
     post(message: unknown): void;
     onMessage(fn: (message: unknown) => void): void;
     onDone(fn: (result: unknown, error: string | undefined) => void): void;
+    /** Stops it (a Luau worker's `w:cancel()`). */
+    cancel(): void;
+    /** `cancel`, as a Web Worker says it. */
     terminate(): void;
   }
   export const worker: {
