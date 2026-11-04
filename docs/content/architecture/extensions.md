@@ -246,8 +246,9 @@ boundary is a function call or a local socket, well under a millisecond.
 
 - **Where it mounts:** a Blitz sub-document (Blitz's own iframe: it has
   its own ids, its own styles, is laid out, painted and given events by
-  the host document) sized by the pane it is in. A shared-tree mount
-  (content-sized, routed events) is the later step, if panels need it.
+  the host document) sized by the pane it is in; inside a document, as
+  an inline embed, the same sub-document sized to its content ("Inline
+  embeds" below).
 - **What it may use:** an allowlist, as Shopify's remote UI keeps one —
   the elements and CSS properties Blitz draws, no raw HTML, no custom
   widgets; the shell's components (buttons, rows, menus) as named
@@ -1051,8 +1052,113 @@ an `ext:` source.
 | `EXT_STATE_SET` / `EXT_STATE_CLEAR` | runtime state, by source and key |
 | `EXT_EMIT` | raises `{event, detail?}` |
 | `EXT_ENABLE` / `EXT_DISABLE` | turns `{id}` on or off at once |
+| `EXT_EMBEDS` | every inline embed and its claims, or `{claim}`'s (`fence:kf`) |
 
 `Extensions::install_contribution_actions` puts them on the host's list.
+
+## Inline embeds
+
+An extension draws a block of a document, inside it, where the block
+is: a fenced block by its language, a note by its frontmatter `type:`,
+an embed (`![[…]]`) by the type of what it points at. It is how Keyflow
+shows a chart in a note and Studio a song card in the Vault
+(`task:crates/widgets/src/lib.rs` `WidgetRegistry` is the shape it
+backs). An embed is a contribution like the others: declared, or sent at
+run time, and withdrawn when its extension unloads, the plain block
+coming back.
+
+```toml
+[[embeds]]
+id = "kf"
+title = "Keyflow chart"
+page = "pages/kf.tsx"         # or view = "chart": one of its [[views]]
+claims = { fence = ["kf"] }   # also note_type = ["song"], embed_type = ["setlist"]
+max_height = 420              # points; past it, it scrolls (480 when unset)
+```
+
+(`features/extensions/src/contrib.rs` `EmbedDecl`, `EmbedClaims`,
+`Claim`; checked by `Contribution::check`: one view or one page in its
+package, at least one claim.)
+
+**The host's side.** An app asks
+`features/extensions/src/embeds.rs` `Embeds::resolve` (`Host::embeds`)
+whether a block is claimed — the first loaded extension that claims it
+wins — and mounts `EmbedView` where it is:
+
+```rust
+let claim = Claim::fence(&info).unwrap();      // the info string's first word
+rsx! {
+    EmbedView { claim, source: body, props: json!({ "info": info }),
+        fallback: rsx! { PlainFence { info, body } } }
+}
+```
+
+`source` is the block's text, `props` the host's own properties (a
+note's frontmatter, the fence's info string); the view is drawn again
+when either changes. With nothing claiming it, or once its extension
+goes, `fallback` shows. `EXT_EMBEDS` lists the claims, or answers which
+extension draws one.
+
+**How it is drawn** follows the view:
+
+| the view is | it mounts | its size | its input |
+|---|---|---|---|
+| linked in | a component in the host's own document; its events are the document's | laid out by the host's document, up to `max_height` | `linked::use_embed` |
+| a page (TSX/JS on `QuickJS`, Luau) | a `RemoteDocument` sub-document (`features/pages/src/ui.rs` `PageEmbed`, provided by `use_embed_pages`) | its content's, measured | `useEmbed()`; Luau `embed()` |
+| a process's | a `RemoteDocument` sub-document (`features/extensions/src/remote.rs` `RemoteEmbed`) | its content's, measured | `linked::use_embed`, sent as `wire::EMBED_EVENT` to its root |
+
+**Content-sized.** A pane's sub-document is as tall as its pane; an
+embed's is laid out at the host's width with its own height left to its
+content (`RemoteDocument::fit_content`: the page as tall as what is in
+it, not the viewport). The host reads that height
+(`RemoteDocument::content_height`, every `remote::MEASURE_EVERY`) and
+sets the embed's box to it, between `embeds::MIN_HEIGHT` and
+`max_height` (`remote::embed_height`); past `max_height` the
+sub-document scrolls itself. So the host lays out the height: the text
+below an embed moves when it grows, as below an image.
+
+**Events, focus and keys** go through the host document as Blitz gives
+them to any sub-document: a click in the embed reaches the view's
+handlers, focus follows the pointer into it, and a focused field inside
+it takes the keys. A linked view is in the host's document, so it is
+simply part of it.
+
+**Theme.** A sub-document gets the host's `:root` CSS
+(`RemoteDocument::set_theme_css`), live; a linked view reads
+`var(--…)` from the host's own sheets. Either way a theme switch redraws
+the embed in the new theme.
+
+**Responsive.** An embed keeps to "Responsive by design": a page or
+process embed runs on its own thread, its frames timed into the same
+`Meters` (`<extension>/embed.<id>`, or its view's name) and marked busy
+with `BusyBadge` past the budget, while the document around it answers
+as ever. Nothing on the host's UI thread waits for an embed.
+
+**In the lab** (`apps/lab/ui/src/note.rs` `NoteBody`): the Vault's
+"A chart in a note" has a ```` ```kf ```` fence the Board draws as a chart
+(`apps/lab/board/pages/kf.tsx`, a page embed), and "Amazing Grace" is a
+`type: song` note the Board gives its song card
+(`apps/lab/board/src/lib.rs` `SongCard`, a linked embed). Edit a note
+("Edit") and the chart is drawn again and resized; turn the Board off
+(`EXT_DISABLE {"id":"lab.board"}`) and the plain fence comes back.
+`features/pages/tests/embed.rs` and
+`features/extensions/tests/remote_view.rs` check that a claimed fence
+resolves, mounts, takes its content's height and goes when unloaded.
+
+**The FastTrackStudios editor** renders fences through a registry of
+`FencePlugin`s (`editor_state::plugin`) that return an HTML string,
+synchronously, cached per pass. An embed is a live view with a size, so
+backing that registry needs an editor-side hook it does not have: a
+widget decoration that mounts a Dioxus element (or names a node the
+host attaches a sub-document to) at the fence, a height it is told back
+for its line layout, and the fence's text as it is edited. With that,
+the editor's fence languages are `Embeds::fences`, and each widget an
+`EmbedView`. Until then the lab draws its notes itself.
+
+**The web host** has no Blitz sub-documents: there an embed's view
+would be drawn by the extension's own Dioxus tree into an element of the
+page (linked views work as they are), or a page's tree rendered into
+a shadow root, its height read with a `ResizeObserver`.
 
 ## One trait, three ways to run it
 
