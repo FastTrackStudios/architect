@@ -65,8 +65,8 @@ fn guests() -> Option<PathBuf> {
     ] {
         cmd.env_remove(var);
     }
-    let built = cmd.current_dir(root()).status();
-    match built {
+    let exit = cmd.current_dir(root()).status();
+    match exit {
         Ok(s) if s.success() => Some(target.join("wasm32-wasip2/debug")),
         other => {
             skip(&format!("the WASI components did not build ({other:?})"));
