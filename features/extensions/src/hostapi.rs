@@ -889,7 +889,8 @@ impl ExtensionApi {
                 (info(moved), Some(DocEvent::Renamed { from: path, to }))
             }
             HostRequest::MoveDocument { path, folder } => {
-                let to = moved_to(&path, &folder).map_err(|message| HostError::Failed { message })?;
+                let to =
+                    moved_to(&path, &folder).map_err(|message| HostError::Failed { message })?;
                 let moved = docs.rename(&path, &to, &by)?;
                 (info(moved), Some(DocEvent::Renamed { from: path, to }))
             }

@@ -69,6 +69,10 @@ const METRONOME: &str = "fts.metronome";
 /// The metronome's folder in the lab's registry.
 const METRONOME_DIR: &str = "metronome";
 
+/// `lab.tidy`'s folder beside the lab's registry (not in its index: a
+/// development copy, `ARCHITECT_LAB_TIDY=1`).
+const TIDY_DIR: &str = "tidy";
+
 /// The clicker's id, as the Vault's pane names it.
 pub const CLICKER: &str = "lab.clicker";
 
@@ -875,12 +879,20 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
             .as_ref()
             .map(|dir| dir.join(METRONOME_DIR))
             .filter(|dir| dir.join("extension.toml").is_file());
+        // `lab.tidy` (the document API's, beside the registry, not in its
+        // index) when `ARCHITECT_LAB_TIDY=1`.
+        let tidy_dir = found
+            .as_ref()
+            .filter(|_| std::env::var_os("ARCHITECT_LAB_TIDY").is_some_and(|v| v == "1"))
+            .map(|dir| dir.join(TIDY_DIR))
+            .filter(|dir| dir.join("extension.toml").is_file());
         for dir in clicker
             .into_iter()
             .chain(frame)
             .chain(wasi)
             .chain(board_dev(&root))
             .chain(metronome_dir)
+            .chain(tidy_dir)
         {
             let _ = extensions.dev(dir);
         }
@@ -958,9 +970,7 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
 /// One for the run.
 pub fn documents() -> CrdtDocuments {
     static DOCS: LazyLock<CrdtDocuments> = LazyLock::new(|| {
-        let docs = CrdtDocuments::new()
-            .with_space(NOTES)
-            .with_space(ARCHIVE);
+        let docs = CrdtDocuments::new().with_space(NOTES).with_space(ARCHIVE);
         let lab = architect::action::Principal::Service {
             name: "architect-lab".to_owned(),
         };

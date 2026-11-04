@@ -2194,7 +2194,8 @@ notes; the lab gives its spaces, `notes` and `archive`
 the calls answer `unsupported`; `read_document` falls back to
 `AppContext::document`. In a browser they are not there yet.
 
-The lab's `lab.tidy` (`apps/lab/extensions/tidy`, in its registry) makes,
+The lab's `lab.tidy` (`apps/lab/extensions/tidy`, beside its registry; the
+lab runs it as a development copy with `ARCHITECT_LAB_TIDY=1`) makes,
 tidies, renames, files away and watches notes: `LAB_TIDY_NEW`,
 `LAB_TIDY_TIDY` (one transaction), `LAB_TIDY_RENAME`, `LAB_TIDY_FILE`,
 `LAB_TIDY_WATCH`, `LAB_TIDY_LIST`.

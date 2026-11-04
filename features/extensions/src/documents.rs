@@ -83,7 +83,9 @@ pub fn checked_path(path: &str) -> Result<&str, String> {
         || path.starts_with('/')
         || path.ends_with('/')
         || path.contains('\\')
-        || path.split('/').any(|p| p.is_empty() || p == "." || p == "..");
+        || path
+            .split('/')
+            .any(|p| p.is_empty() || p == "." || p == "..");
     if bad {
         Err(format!(
             "{path:?} is not a document's path (relative, `/`-separated, no `..`)"
@@ -244,8 +246,17 @@ mod tests {
         assert!(!is_under("notesx/a.md", Some("notes")));
         assert!(is_under("a.md", None));
         let info = DocInfo::of("notes/a.md");
-        assert_eq!((info.name.as_str(), info.space.as_deref()), ("a.md", Some("notes")));
+        assert_eq!(
+            (info.name.as_str(), info.space.as_deref()),
+            ("a.md", Some("notes"))
+        );
         let e: DocEdit = serde_json::from_str(r#"{"insert":{"at":1,"text":"x"}}"#).unwrap();
-        assert_eq!(e, DocEdit::Insert { at: 1, text: "x".to_owned() });
+        assert_eq!(
+            e,
+            DocEdit::Insert {
+                at: 1,
+                text: "x".to_owned()
+            }
+        );
     }
 }

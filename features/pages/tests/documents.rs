@@ -116,17 +116,20 @@ impl Documents for Memo {
                 }
                 DocEdit::Append { text } => chars.extend(text.chars()),
                 DocEdit::Delete { at, len } => {
-                    chars.drain(*at..at + len);
+                    let end = at.saturating_add(*len).min(chars.len());
+                    chars.drain((*at).min(end)..end);
                 }
                 DocEdit::Replace { text } => chars = text.chars().collect(),
             }
         }
         *text = chars.into_iter().collect();
+        let after = text.clone();
+        drop(texts);
         self.steps
             .lock()
             .unwrap()
             .push((step.to_owned(), by.describe()));
-        Ok(text.clone())
+        Ok(after)
     }
 
     fn rename(&self, path: &str, to: &str, _by: &Principal) -> Result<DocInfo, DocError> {
@@ -135,11 +138,17 @@ impl Documents for Memo {
             .remove(path)
             .ok_or_else(|| DocError::NotFound(path.to_owned()))?;
         texts.insert(to.to_owned(), text);
+        drop(texts);
         Ok(DocInfo::of(to))
     }
 
     fn delete(&self, path: &str, _by: &Principal) -> Result<(), DocError> {
-        self.texts.lock().unwrap().remove(path).map(|_| ()).ok_or_else(|| DocError::NotFound(path.to_owned()))
+        self.texts
+            .lock()
+            .unwrap()
+            .remove(path)
+            .map(|_| ())
+            .ok_or_else(|| DocError::NotFound(path.to_owned()))
     }
 }
 

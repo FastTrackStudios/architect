@@ -106,6 +106,7 @@ impl CrdtDocuments {
         inner.place(path)?;
         let history = History::new(doc.loro(), KEEP);
         inner.docs.insert(path.to_owned(), Entry { doc, history });
+        drop(inner);
         Ok(())
     }
 
@@ -120,11 +121,15 @@ impl CrdtDocuments {
     }
 
     /// Undoes document `path`'s last step: its name.
+    // What it undid is for whoever wants it.
+    #[allow(clippy::must_use_candidate)]
     pub fn undo(&self, path: &str) -> Option<String> {
         self.lock().docs.get_mut(path)?.history.undo()
     }
 
     /// Redoes the step of document `path` undone last: its name.
+    // What it redid is for whoever wants it.
+    #[allow(clippy::must_use_candidate)]
     pub fn redo(&self, path: &str) -> Option<String> {
         self.lock().docs.get_mut(path)?.history.redo()
     }
@@ -257,6 +262,7 @@ impl Documents for CrdtDocuments {
         // Its undo starts after what it was made with.
         let history = History::new(doc.loro(), KEEP);
         inner.docs.insert(path.to_owned(), Entry { doc, history });
+        drop(inner);
         Ok(DocInfo::of(path))
     }
 
@@ -283,6 +289,7 @@ impl Documents for CrdtDocuments {
                 apply(&text, edits)
             })
             .map_err(DocError::Failed)?;
+        drop(inner);
         Ok(text.to_string())
     }
 
@@ -295,6 +302,7 @@ impl Documents for CrdtDocuments {
         if let Some(entry) = inner.docs.remove(path) {
             inner.docs.insert(to.to_owned(), entry);
         }
+        drop(inner);
         Ok(DocInfo::of(to))
     }
 
@@ -332,8 +340,13 @@ mod tests {
             .edit(
                 "notes/a.md",
                 &[
-                    DocEdit::Insert { at: 0, text: "# ".to_owned() },
-                    DocEdit::Append { text: " world".to_owned() },
+                    DocEdit::Insert {
+                        at: 0,
+                        text: "# ".to_owned(),
+                    },
+                    DocEdit::Append {
+                        text: " world".to_owned(),
+                    },
                     DocEdit::Delete { at: 0, len: 1 },
                 ],
                 "Tidy",
@@ -343,8 +356,13 @@ mod tests {
         assert_eq!(after, " hello world");
         assert_eq!(docs.steps("notes/a.md"), ["Tidy"]);
         assert!(
-            docs.edit("notes/a.md", &[DocEdit::Delete { at: 5, len: 99 }], "No", &ext())
-                .is_err()
+            docs.edit(
+                "notes/a.md",
+                &[DocEdit::Delete { at: 5, len: 99 }],
+                "No",
+                &ext()
+            )
+            .is_err()
         );
         assert_eq!(docs.steps("notes/a.md"), ["Tidy"], "nothing changed");
         assert_eq!(docs.undo("notes/a.md").as_deref(), Some("Tidy"));
@@ -368,18 +386,25 @@ mod tests {
         person.commit();
         docs.edit(
             "a.md",
-            &[DocEdit::Append { text: " three".to_owned() }],
+            &[DocEdit::Append {
+                text: " three".to_owned(),
+            }],
             "More",
             &ext(),
         )
         .unwrap();
-        let theirs = person.export(ExportMode::updates(&ours.loro().oplog_vv())).unwrap();
+        let theirs = person
+            .export(ExportMode::updates(&ours.loro().oplog_vv()))
+            .unwrap();
         ours.loro().import(&theirs).unwrap();
         person
             .import(&ours.loro().export(ExportMode::Snapshot).unwrap())
             .unwrap();
         assert_eq!(docs.text("a.md").as_deref(), Some("Zero one two three"));
-        assert_eq!(CrdtDocuments::text_of(&person).to_string(), "Zero one two three");
+        assert_eq!(
+            CrdtDocuments::text_of(&person).to_string(),
+            "Zero one two three"
+        );
         assert!(authors_of(&person).contains(&"extension:lab.tidy for user:bob".to_owned()));
     }
 }

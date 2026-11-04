@@ -39,7 +39,8 @@ fn lab_documents() -> CrdtDocuments {
     let app = Principal::Service {
         name: "lab".to_owned(),
     };
-    docs.create("notes/Welcome.md", "# Welcome\n", &app).unwrap();
+    docs.create("notes/Welcome.md", "# Welcome\n", &app)
+        .unwrap();
     docs
 }
 
@@ -55,12 +56,9 @@ fn host(docs: &CrdtDocuments, tmp: &Path) -> (ActionList, Host) {
 }
 
 fn run(list: &ActionList, id: &str, args: &Value) -> Value {
-    let out = block_on(list.run_json_async_with(
-        &ActionCaller::app(),
-        id,
-        args.to_string().as_bytes(),
-    ))
-    .unwrap_or_else(|e| panic!("{id}: {e}"));
+    let out =
+        block_on(list.run_json_async_with(&ActionCaller::app(), id, args.to_string().as_bytes()))
+            .unwrap_or_else(|e| panic!("{id}: {e}"));
     serde_json::from_slice(&out).unwrap_or(Value::Null)
 }
 
@@ -134,7 +132,10 @@ fn a_lab_extension_creates_tidies_renames_and_watches_documents() {
     assert_eq!(renamed["path"], "notes/Today.md", "{renamed}");
     heard(&list, "doc.renamed notes/Inbox.md -> notes/Today.md");
     // Its history went with it.
-    assert_eq!(docs.redo("notes/Today.md").as_deref(), Some("Tidy notes/Inbox.md"));
+    assert_eq!(
+        docs.redo("notes/Today.md").as_deref(),
+        Some("Tidy notes/Inbox.md")
+    );
 
     let filed = run(&list, "LAB_TIDY_FILE", &json!({ "path": "notes/Today.md" }));
     assert_eq!(filed["path"], "archive/Today.md", "{filed}");
@@ -167,11 +168,13 @@ fn the_persons_concurrent_edits_merge_with_the_extensions() {
     person
         .import(&ours.loro().export(ExportMode::Snapshot).unwrap())
         .unwrap();
-    CrdtDocuments::text_of(&person)
-        .insert(2, "Big ")
-        .unwrap();
+    CrdtDocuments::text_of(&person).insert(2, "Big ").unwrap();
     person.commit();
-    run(&list, "LAB_TIDY_TIDY", &json!({ "path": "notes/Welcome.md" }));
+    run(
+        &list,
+        "LAB_TIDY_TIDY",
+        &json!({ "path": "notes/Welcome.md" }),
+    );
     // Each side's changes to the other.
     let from_person = person
         .export(ExportMode::updates(&ours.loro().oplog_vv()))
@@ -220,7 +223,8 @@ reads = ["documents"]
 fn load(host: &Host, dir: &Path, manifest: &str) {
     std::fs::create_dir_all(dir).unwrap();
     std::fs::write(dir.join("extension.toml"), manifest).unwrap();
-    host.load(&Package::read(dir).unwrap(), Origin::Dev).unwrap();
+    host.load(&Package::read(dir).unwrap(), Origin::Dev)
+        .unwrap();
 }
 
 fn refused(r: Result<Value, HostError>) -> String {
@@ -279,7 +283,10 @@ fn without_the_capability_it_is_refused() {
     ] {
         assert_eq!(refused(block_on(reader.call(request))), "writes.documents");
     }
-    assert_eq!(docs.text("notes/Welcome.md").as_deref(), Some("# Welcome\n"));
+    assert_eq!(
+        docs.text("notes/Welcome.md").as_deref(),
+        Some("# Welcome\n")
+    );
     assert!(docs.list(None).unwrap().len() == 1, "nothing changed");
 
     // With it: a path outside the spaces, or `..`, is not one.
@@ -293,7 +300,10 @@ fn without_the_capability_it_is_refused() {
         path: "elsewhere/x.md".to_owned(),
         text: String::new(),
     }));
-    assert!(matches!(nowhere, Err(HostError::NotFound { .. })), "{nowhere:?}");
+    assert!(
+        matches!(nowhere, Err(HostError::NotFound { .. })),
+        "{nowhere:?}"
+    );
     block_on(tidy.call(HostRequest::DeleteDocument {
         path: "notes/Welcome.md".to_owned(),
     }))

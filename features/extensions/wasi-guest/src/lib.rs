@@ -741,7 +741,11 @@ pub mod host {
     /// # Errors
     ///
     /// Refused, no document, or an edit outside its text.
-    pub fn edit_document(path: &str, edits: &Json, name: Option<&str>) -> Result<String, HostError> {
+    pub fn edit_document(
+        path: &str,
+        edits: &Json,
+        name: Option<&str>,
+    ) -> Result<String, HostError> {
         wit_host::edit_document(path, &edits.to_string(), name)
             .map_err(|e| HostError::from_text(&e))
     }

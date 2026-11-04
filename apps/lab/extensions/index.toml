@@ -10,11 +10,3 @@ version = "0.1.0"
 kind = "luau"
 description = "A click: its accent, volume and sound on the settings page, and an action that counts in."
 path = "metronome"
-
-[[extensions]]
-id = "lab.tidy"
-name = "Tidy"
-version = "0.1.0"
-kind = "luau"
-description = "Keeps the lab's notes tidy: makes, tidies (one undo step), renames and files notes, and hears every change to them."
-path = "tidy"
