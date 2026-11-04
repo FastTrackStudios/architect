@@ -26,7 +26,7 @@
 //! A Button's `action` runs its Action List action with its context read
 //! through the data model, the page's capabilities its reach (as a TSX
 //! page's `actions.run`); `wantResponse` with `responsePath` writes the
-//! answer back. A TextField, CheckBox, Slider, ChoicePicker or Tabs bound
+//! answer back. A `TextField`, `CheckBox`, `Slider`, `ChoicePicker` or `Tabs` bound
 //! to a path (`{"path": "/draft"}`) writes it as the person changes it.
 //!
 //! Only the catalog is drawn (`architect_a2ui::catalog`, the security
@@ -89,13 +89,13 @@ struct Bind {
 enum Handler {
     /// A Button pressed: its component and template path.
     Press { id: String, base: String },
-    /// A TextField typed in.
+    /// A `TextField` typed in.
     Text { path: String, number: bool },
-    /// A CheckBox clicked.
+    /// A `CheckBox` clicked.
     Toggle { path: String, now: bool },
     /// A Slider moved.
     Slide { path: String },
-    /// A ChoicePicker's option clicked.
+    /// A `ChoicePicker`'s option clicked.
     Choose {
         path: String,
         value: String,
@@ -421,7 +421,8 @@ impl A2uiEngine {
                      background: var(--card, transparent); color: var(--card-foreground, inherit);",
                 );
                 if let Some(child) = c.child() {
-                    card.children.push(self.node(&child, base, depth + 1));
+                    card.children
+                        .push(self.node(&child, base, depth.saturating_add(1)));
                 }
                 card
             }
@@ -497,7 +498,9 @@ impl A2uiEngine {
         );
         let mut stack = el("div", &style);
         for (child, at) in self.children(c, base) {
-            stack.children.push(self.node(&child, &at, depth + 1));
+            stack
+                .children
+                .push(self.node(&child, &at, depth.saturating_add(1)));
         }
         stack
     }
@@ -544,7 +547,8 @@ impl A2uiEngine {
             ),
         );
         if let Some(child) = c.child() {
-            b.children.push(self.node(&child, base, depth + 1));
+            b.children
+                .push(self.node(&child, base, depth.saturating_add(1)));
         }
         self.on(
             &mut b,
@@ -762,14 +766,13 @@ impl A2uiEngine {
             })
             .unwrap_or_default();
         let path = bound(c, "activeTab", base);
-        let active = match &path {
+        let shown = match &path {
             Some(_) => c
                 .get_property::<DynamicNumber>("activeTab")
-                .map(|d| cx.data_context.resolve_dynamic_number(&d)),
-            None => self.tabs.get(&key).map(|&i| i as f64),
+                .map(|d| cx.data_context.resolve_dynamic_number(&d))
+                .map_or(0, index),
+            None => self.tabs.get(&key).copied().unwrap_or(0),
         };
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let shown = active.unwrap_or(0.0).max(0.0) as usize;
         let shown = shown.min(tabs.len().saturating_sub(1));
         let mut wrap = el("div", "display: flex; flex-direction: column; gap: 8px;");
         let mut bar = el(
@@ -805,7 +808,8 @@ impl A2uiEngine {
         wrap.children.push(bar);
         if let Some((_, child)) = tabs.get(shown) {
             let child = child.clone();
-            wrap.children.push(self.node(&child, base, depth + 1));
+            wrap.children
+                .push(self.node(&child, base, depth.saturating_add(1)));
         }
         wrap
     }
@@ -993,6 +997,17 @@ impl Engine for A2uiEngine {
     fn dirty(&self) -> bool {
         self.dirty
     }
+}
+
+/// A data model's number as a list index: its whole part, 0 below 0.
+#[allow(
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "a tab's index: a small whole number, clamped at 0, and `as` saturates"
+)]
+const fn index(n: f64) -> usize {
+    n.max(0.0) as usize
 }
 
 /// `path` as a JSON pointer (`/board`).

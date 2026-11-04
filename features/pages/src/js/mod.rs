@@ -179,9 +179,14 @@ impl Files {
     /// `why` (an error, a stack) at its sources' places, the page's
     /// folder's paths relative to it ([`tsx::remap`]).
     fn said(&self, why: &str) -> String {
-        let maps = self.maps.lock().unwrap_or_else(PoisonError::into_inner);
         let root = self.root.display().to_string();
-        tsx::remap(why, &root, maps.iter().map(|(k, v)| (k.as_str(), v)))
+        let held = self.maps.lock().unwrap_or_else(PoisonError::into_inner);
+        let maps: Vec<(&str, &tsx::SourceMap)> =
+            held.iter().map(|(k, v)| (k.as_str(), v)).collect();
+        let said = tsx::remap(why, &root, &maps);
+        drop(maps);
+        drop(held);
+        said
     }
 
     fn inside(&self, path: &Path) -> Option<PathBuf> {

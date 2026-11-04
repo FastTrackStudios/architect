@@ -129,7 +129,7 @@ impl Pane {
         }
     }
 
-    fn click(&mut self, selector: &str) {
+    fn click(&self, selector: &str) {
         let doc = self.view.document();
         let node = doc.query_selector(selector).unwrap().unwrap();
         let element = doc

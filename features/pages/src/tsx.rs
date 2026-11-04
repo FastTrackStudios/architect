@@ -115,6 +115,9 @@ pub fn transpile_mapped(
             ..CodegenOptions::default()
         })
         .build(&program);
+    // The map's type is `oxc_sourcemap`'s, which this crate does not
+    // name: its method is reached through a closure.
+    #[allow(clippy::redundant_closure_for_method_calls)]
     let mut tokens: Vec<[u32; 4]> = printed
         .map
         .iter()
@@ -162,53 +165,43 @@ impl SourceMap {
     }
 }
 
-/// `text` (an error, a stack) with each `<module>:<line>:<column>` of a
-/// mapped module said as its source's (`board.tsx:12:5`), and other
-/// modules' paths of the page's folder made relative to `root`. When its
-/// first line names no place, the first place found leads it, so an
-/// error's first line says where it is.
+/// `text` (an error, a stack) with its mapped modules' places said as
+/// their sources'.
+///
+/// Each `<module>:<line>:<column>` of a module in `maps` becomes its
+/// source's (`board.tsx:12:5`), and other paths under `root` are made
+/// relative to it. When its first line names no place, the first place
+/// found leads it, so an error's first line says where it is.
 #[must_use]
-pub fn remap<'a>(
-    text: &str,
-    root: &str,
-    maps: impl IntoIterator<Item = (&'a str, &'a SourceMap)> + Clone,
-) -> String {
+pub fn remap(text: &str, root: &str, maps: &[(&str, &SourceMap)]) -> String {
     let mut out = String::with_capacity(text.len());
     let mut first: Option<String> = None;
     let mut rest = text;
-    while let Some(at) = rest.find(root) {
-        out.push_str(&rest[..at]);
-        let tail = &rest[at..];
-        // The longest module name that starts here.
-        let module = tail
-            .split(|c: char| c == ':' || c == ')' || c.is_whitespace())
-            .next()
-            .unwrap_or_default();
-        let (place, used) = place_after(&tail[module.len()..]);
-        let shown = maps
-            .clone()
-            .into_iter()
-            .find(|(name, _)| *name == module)
-            .map(
-                |(_, map)| match place.and_then(|(l, c)| map.original(l, c)) {
-                    Some((l, c)) => format!("{}:{l}:{c}", map.file),
-                    None => map.file.clone(),
-                },
-            )
-            .unwrap_or_else(|| {
+    while let Some((before, tail)) = rest.find(root).and_then(|at| rest.split_at_checked(at)) {
+        out.push_str(before);
+        // The module name that starts here, and what follows it.
+        let end = tail
+            .find(|c: char| c == ':' || c == ')' || c.is_whitespace())
+            .unwrap_or(tail.len());
+        let (module, after) = tail.split_at_checked(end).unwrap_or((tail, ""));
+        let (place, used) = place_after(after);
+        let shown = maps.iter().find(|(name, _)| *name == module).map_or_else(
+            || {
                 let rel = module
                     .strip_prefix(root)
                     .map_or(module, |r| r.trim_start_matches(['/', '\\']));
-                match place {
-                    Some((l, c)) => format!("{rel}:{l}:{c}"),
-                    None => rel.to_owned(),
-                }
-            });
+                at_place(rel, place)
+            },
+            |(_, map)| {
+                let original = place.and_then(|(line, column)| map.original(line, column));
+                at_place(&map.file, original)
+            },
+        );
         if place.is_some() && first.is_none() {
             first = Some(shown.clone());
         }
         out.push_str(&shown);
-        rest = &tail[module.len().saturating_add(used)..];
+        rest = after.get(used..).unwrap_or_default();
     }
     out.push_str(rest);
     match first {
@@ -219,25 +212,37 @@ pub fn remap<'a>(
     }
 }
 
-/// `:<line>:<column>` at the start of `s`: the place, and how much of `s`
-/// it took.
-fn place_after(s: &str) -> (Option<(u32, u32)>, usize) {
-    let digits = |t: &str| t.bytes().take_while(u8::is_ascii_digit).count();
-    let Some(t) = s.strip_prefix(':') else {
+/// `file:line:column`, or `file` with no place.
+fn at_place(file: &str, place: Option<(u32, u32)>) -> String {
+    match place {
+        Some((line, column)) => format!("{file}:{line}:{column}"),
+        None => file.to_owned(),
+    }
+}
+
+/// `:<line>:<column>` (or `:<line>`) at the start of `text`: the place,
+/// and how many bytes of `text` it took.
+fn place_after(text: &str) -> (Option<(u32, u32)>, usize) {
+    /// The number at the start of `text`, and its length.
+    fn number(text: &str) -> Option<(u32, usize)> {
+        let len = text.bytes().take_while(u8::is_ascii_digit).count();
+        let n = text.get(..len)?.parse().ok()?;
+        Some((n, len))
+    }
+    let Some((line, line_len)) = text.strip_prefix(':').and_then(number) else {
         return (None, 0);
     };
-    let n = digits(t);
-    let Ok(line) = t[..n].parse::<u32>() else {
-        return (None, 0);
-    };
-    let t = &t[n..];
-    let Some(c) = t.strip_prefix(':') else {
-        return (Some((line, 1)), n.saturating_add(1));
-    };
-    let m = digits(c);
-    match c[..m].parse::<u32>() {
-        Ok(column) => (Some((line, column)), n.saturating_add(m).saturating_add(2)),
-        Err(_) => (Some((line, 1)), n.saturating_add(1)),
+    let taken = line_len.saturating_add(1);
+    let column = text
+        .get(taken..)
+        .and_then(|t| t.strip_prefix(':'))
+        .and_then(number);
+    match column {
+        Some((column, column_len)) => (
+            Some((line, column)),
+            taken.saturating_add(column_len).saturating_add(1),
+        ),
+        None => (Some((line, 1)), taken),
     }
 }
 
@@ -341,7 +346,7 @@ export default function Board({ pins }: Props) {
         let col = u32::try_from(col + 1).unwrap();
         assert_eq!(map.original(line, col), Some((6, 3)), "{code}");
         let text = format!("Error: boom 1\n    at f (/r/p.tsx:{line}:{col})\n");
-        let said = remap(&text, "/r", [("/r/p.tsx", &map)]);
+        let said = remap(&text, "/r", &[("/r/p.tsx", &map)]);
         assert_eq!(
             said.lines().next(),
             Some("p.tsx:6:3: Error: boom 1"),
@@ -349,7 +354,7 @@ export default function Board({ pins }: Props) {
         );
         assert!(said.contains("at f (p.tsx:6:3)"), "{said}");
         // A plain module's path is made relative, its place kept.
-        let said = remap("x\n    at g (/r/job.js:4:2)", "/r", [("/r/p.tsx", &map)]);
+        let said = remap("x\n    at g (/r/job.js:4:2)", "/r", &[("/r/p.tsx", &map)]);
         assert!(said.starts_with("job.js:4:2: x"), "{said}");
     }
 

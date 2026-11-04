@@ -52,7 +52,7 @@ impl Pane {
             .ok()
             .flatten()
             .and_then(|n| doc.get_node(n))
-            .map_or_else(String::new, |n| n.outer_html())
+            .map_or_else(String::new, blitz_dom::Node::outer_html)
     }
 
     fn attr(&self, selector: &str, name: &str) -> Option<String> {
@@ -81,7 +81,7 @@ impl Pane {
         }
     }
 
-    fn send(&mut self, selector: &str, name: &str, data: EventData) {
+    fn send(&self, selector: &str, name: &str, data: EventData) {
         let element = self
             .attr(selector, "data-dioxus-id")
             .unwrap_or_else(|| panic!("no {selector}"))
@@ -150,9 +150,11 @@ fn board() -> (ActionList, Arc<Mutex<Vec<String>>>) {
     .unwrap();
     let theirs = Arc::clone(&pins);
     list.register_async(&PIN, Effect::Mutating, move |pin: Pin| {
-        let mut all = theirs.lock().unwrap();
-        all.push(pin.title.clone());
-        let n = all.len();
+        let n = {
+            let mut all = theirs.lock().unwrap();
+            all.push(pin.title);
+            all.len()
+        };
         async move { Ok::<_, String>(format!("{n} pinned")) }
     })
     .unwrap();
