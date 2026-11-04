@@ -39,6 +39,8 @@ pub mod js;
 pub mod runner;
 #[cfg(feature = "js")]
 pub mod tsx;
+#[cfg(feature = "ui")]
+pub mod ui;
 
 pub use api::{Attr, Element, Listener, PageError, PageEvent};
 pub use diff::Mirror;

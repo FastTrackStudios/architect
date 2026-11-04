@@ -301,9 +301,9 @@ impl AppHost {
             kept.drain(..over);
         }
         if let Some(f) = &self.notify {
-            f(notice)
+            f(notice);
         } else {
-            tracing::info!(kind = %notice.kind, text = %notice.text, "a page's notice")
+            tracing::info!(kind = %notice.kind, text = %notice.text, "a page's notice");
         }
     }
 

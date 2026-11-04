@@ -44,6 +44,8 @@ ui = [
     "runner",
     "dep:dioxus",
     "dep:futures-timer",
+    "dep:blitz-dom",
+    "dep:dioxus-native-dom",
     "architect-extensions/remote",
     "architect-extensions/ui",
     "dep:architect-shell",
@@ -82,12 +84,16 @@ oxc_diagnostics = { version = "0.157", optional = true }
 dioxus = { workspace = true, optional = true }
 futures-timer = { workspace = true, optional = true }
 architect-shell = { workspace = true, optional = true }
+blitz-dom = { workspace = true, optional = true }
+dioxus-native-dom = { workspace = true, optional = true }
 architect-a2ui = { workspace = true, optional = true }
 
 [dev-dependencies]
+# A window to mount pages in, headless (`tests/pane.rs`).
+architect-extensions = { workspace = true, features = ["host", "linked", "ui", "remote"] }
+architect-settings = { workspace = true }
+blitz-traits = { workspace = true }
 architect-scripting = { workspace = true, features = ["luau"] }
-# The document a page's edits are applied to, read back.
-blitz-dom = { workspace = true }
 architect-pages = { path = ".", features = ["codegen", "js", "ui"] }
 futures = "0.3"
 tempfile = "3"

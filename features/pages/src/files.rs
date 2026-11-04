@@ -286,6 +286,40 @@ pub fn fingerprint(page: &PageFile) -> u64 {
     h.finish()
 }
 
+/// A fingerprint of which overrides `app_dir` has (their names, not
+/// what is in them: a page's own thread follows its edits).
+#[must_use]
+pub fn overrides_print(app_dir: &Path) -> u64 {
+    let mut h = DefaultHasher::new();
+    let mut names = Vec::new();
+    names_in(&app_dir.join(PAGES), 0, &mut names);
+    names.sort();
+    names.hash(&mut h);
+    h.finish()
+}
+
+fn names_in(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
+    if depth > 2 {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with('.') || name.ends_with(".error") {
+            continue;
+        }
+        let path = entry.path();
+        if path.is_dir() {
+            names_in(&path, depth.saturating_add(1), out);
+        } else {
+            out.push(path);
+        }
+    }
+}
+
 fn walk(dir: &Path, depth: usize, out: &mut Vec<(PathBuf, u64, u128)>) {
     if depth > 4 {
         return;
