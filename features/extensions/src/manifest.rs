@@ -280,6 +280,31 @@ pub struct OverlayDecl {
     pub script: String,
 }
 
+/// A worker: heavy work in an instance of its own, off every view's
+/// thread, spoken to by messages only.
+///
+/// A view spawns it by id and reads its progress; it is cancelled when
+/// the view or the extension goes
+/// (`docs/content/architecture/extensions.md`, "Responsive by design:
+/// views and workers").
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct WorkerDecl {
+    /// What a view spawns it by (`worker.spawn('primes')`). Unique among
+    /// its workers.
+    pub id: String,
+    #[serde(default)]
+    pub title: String,
+    /// A Luau script in the package (`luau` and `process` packages: a
+    /// process's Luau windows spawn it too): run in a Luau state of its
+    /// own on the host's pool (`architect_scripting::worker`).
+    #[serde(default)]
+    pub script: Option<String>,
+    /// What its program calls it (`process`, `wasm`): the name a process
+    /// spawns it under (`guest::spawn_work`), a component's export.
+    #[serde(default)]
+    pub entry: Option<String>,
+}
+
 fn dioxus() -> String {
     architect_workspace::DIOXUS.to_owned()
 }
@@ -421,6 +446,9 @@ pub struct Manifest {
     pub views: Vec<ViewDecl>,
     #[serde(default)]
     pub overlays: Vec<OverlayDecl>,
+    /// Its `[[workers]]`: its heavy work, off its views' threads.
+    #[serde(default)]
+    pub workers: Vec<WorkerDecl>,
     #[serde(default)]
     pub data: Vec<DataDecl>,
     #[serde(default)]
@@ -476,6 +504,9 @@ pub enum ManifestError {
     BadSetting { key: String, why: String },
     /// Two of its contributions share an id.
     Duplicate(String),
+    /// A worker that names no script and no entry, both, or one its kind
+    /// does not run.
+    BadWorker { worker: String, why: String },
     /// An overlay on a plane that is not `under`, `over` or `top`.
     BadPlane { overlay: String, plane: String },
     /// A theme token outside its namespace, not a token name, or whose
@@ -507,6 +538,7 @@ impl std::fmt::Display for ManifestError {
             Self::BadSetting { key, why } => write!(f, "setting {key}: {why}"),
             Self::Duplicate(id) => write!(f, "{id} is declared twice"),
             Self::BadToken { token, why } => write!(f, "theme token {token}: {why}"),
+            Self::BadWorker { worker, why } => write!(f, "worker {worker}: {why}"),
             Self::Contribution(r) => r.fmt(f),
             Self::BadCapability(why) => write!(f, "capabilities: {why}"),
             Self::BadPlane { overlay, plane } => {
@@ -522,6 +554,39 @@ impl std::fmt::Display for ManifestError {
 impl std::error::Error for ManifestError {}
 
 impl Manifest {
+    /// Each worker: a unique id, and one way to run that its kind has.
+    fn check_workers(&self) -> Result<(), ManifestError> {
+        let mut seen = std::collections::BTreeSet::new();
+        for w in &self.workers {
+            let bad = |why: &str| ManifestError::BadWorker {
+                worker: w.id.clone(),
+                why: why.to_owned(),
+            };
+            if w.id.is_empty() {
+                return Err(bad("it has no id"));
+            }
+            if !seen.insert(w.id.as_str()) {
+                return Err(ManifestError::Duplicate(w.id.clone()));
+            }
+            match (&w.script, &w.entry) {
+                (Some(_), Some(_)) => return Err(bad("it names a script and an entry")),
+                (None, None) => return Err(bad("it names no script and no entry")),
+                (Some(path), None) => {
+                    if !matches!(self.kind, Kind::Luau | Kind::Process) {
+                        return Err(bad("a script worker needs a luau or process package"));
+                    }
+                    inside(path)?;
+                }
+                (None, Some(_)) => {
+                    if !matches!(self.kind, Kind::Process | Kind::Wasm) {
+                        return Err(bad("an entry worker needs a process or wasm package"));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Reads and checks `extension.toml`'s text.
     ///
     /// # Errors
@@ -621,6 +686,7 @@ impl Manifest {
             }
             inside(&overlay.script)?;
         }
+        self.check_workers()?;
         for theme in &self.themes {
             inside(&theme.path)?;
             if !std::path::Path::new(&theme.path)
@@ -940,6 +1006,31 @@ choices = [{ value = "wood", label = "Woodblock" }, { value = "beep", label = "B
         assert!(
             matches!(volume.control, Control::Slider { max, .. } if (max - 100.0).abs() < f64::EPSILON)
         );
+    }
+
+    #[test]
+    fn a_worker_has_one_way_to_run_that_its_kind_has() {
+        let with = |worker: &str| Manifest::parse(&format!("{METRONOME}\n[[workers]]\n{worker}"));
+        let m = with("id = \"primes\"\nscript = \"workers/primes.luau\"").unwrap();
+        assert_eq!(m.workers[0].script.as_deref(), Some("workers/primes.luau"));
+        for (bad, why) in [
+            ("id = \"p\"", "no script"),
+            (
+                "id = \"p\"\nscript = \"a.luau\"\nentry = \"p\"",
+                "and an entry",
+            ),
+            ("id = \"p\"\nentry = \"p\"", "process or wasm"),
+        ] {
+            let e = with(bad).unwrap_err();
+            assert!(e.to_string().contains(why), "{bad}: {e}");
+        }
+        assert!(matches!(
+            with("id = \"p\"\nscript = \"../p.luau\""),
+            Err(ManifestError::BadPath(_))
+        ));
+        let twice =
+            with("id = \"p\"\nscript = \"a.luau\"\n[[workers]]\nid = \"p\"\nscript = \"b.luau\"");
+        assert!(matches!(twice, Err(ManifestError::Duplicate(_))));
     }
 
     #[test]

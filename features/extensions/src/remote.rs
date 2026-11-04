@@ -12,6 +12,14 @@
 //! (the supervisor restarts it, or a reload loads a new one) the view
 //! mounts again by itself.
 //!
+//! Each frame is timed from the event that asked for it (a process at
+//! wire 5 answers every event, [`crate::wire::ANSWERED_WIRE`]) into the
+//! view's `architect_workspace::ViewMeter` (`<extension>/<view>` in the
+//! `Meters` in context; `EXT_VIEWS` reads it). While an event goes
+//! unanswered past the budget ([`REMOTE_BUDGET`]) — the process's view
+//! thread is busy with a long handler — the pane keeps its last frame
+//! with a busy mark (`architect_shell::BusyBadge`); the app runs on.
+//!
 //! The applier trusts nothing: an edit naming a node it does not have, a
 //! child that is not there, a move that would make a cycle, or a frame
 //! too large fails the view (the placeholder says so) instead of the app.
@@ -23,8 +31,12 @@
 #![allow(clippy::future_not_send)]
 
 use std::any::Any;
-use std::collections::HashMap;
-use std::time::Duration;
+use std::cell::RefCell;
+use std::collections::{HashMap, VecDeque};
+use std::rc::Rc;
+use std::time::{Duration, Instant};
+
+use architect_workspace::{Meters, ViewMeter};
 
 use blitz_dom::{
     BaseDocument, DocGuard, DocGuardMut, Document, DocumentConfig, EventDriver, EventHandler,
@@ -40,7 +52,13 @@ use futures::channel::mpsc;
 use futures::{FutureExt as _, StreamExt as _};
 
 use crate::process::{Process, Processes, State};
-use crate::wire::{Edit, EventData, Frame, KeyData, Mods, Pointer, Value, ViewEvent};
+use crate::wire::{
+    ANSWERED_WIRE, Edit, EventData, Frame, KeyData, Mods, Pointer, Value, ViewEvent,
+};
+
+/// A process view's frame budget, from the event to its frame: two
+/// frames at 60 Hz, the round trip over the socket included.
+pub const REMOTE_BUDGET: Duration = Duration::from_millis(33);
 
 /// At most this many edits in one frame.
 const MAX_EDITS: usize = 200_000;
@@ -611,8 +629,17 @@ async fn something_changes(
     }
 }
 
+/// How a pane times its view's frames: its meter, and whether it is
+/// busy now (shown).
+#[derive(Clone)]
+struct Timing {
+    meter: ViewMeter,
+    busy: Signal<bool>,
+}
+
 /// Mounts `view` and follows it: the frames into the document, until it
 /// stops; then why, until it can be mounted again.
+#[allow(clippy::too_many_arguments)]
 async fn follow(
     node: NodeHandle,
     processes: Processes,
@@ -621,6 +648,7 @@ async fn follow(
     mut shown: Signal<Shown>,
     mut retry: mpsc::UnboundedReceiver<()>,
     theme: Option<Signal<String>>,
+    mut timing: Timing,
 ) {
     loop {
         let Some(process) = processes.get(&extension) else {
@@ -662,7 +690,24 @@ async fn follow(
                 continue;
             }
         };
-        let events = session.events.clone();
+        // The pane's events go through here, each one's time kept until
+        // the frame that answers it.
+        let answered = process.hello().is_some_and(|h| h.wire >= ANSWERED_WIRE);
+        let asked: Rc<RefCell<VecDeque<Instant>>> = Rc::default();
+        let (events, mut proxied) = mpsc::unbounded::<ViewEvent>();
+        let forwarding = {
+            let (to, asked) = (session.events.clone(), Rc::clone(&asked));
+            spawn(async move {
+                while let Some(event) = proxied.next().await {
+                    if answered {
+                        asked.borrow_mut().push_back(Instant::now());
+                    }
+                    if to.unbounded_send(event).is_err() {
+                        return;
+                    }
+                }
+            })
+        };
         with_doc(&node, |doc, at| {
             let mut remote = RemoteDocument::new(events);
             if let Some(css) = theme {
@@ -672,7 +717,9 @@ async fn follow(
         })
         .await;
         let mut failed = None;
-        while let Some(frame) = session.frames.next().await {
+        while let Some(frame) = next_frame(&mut session.frames, &asked, &mut timing).await {
+            let from = asked.borrow_mut().pop_front();
+            let applying = Instant::now();
             let applied = with_doc(&node, |doc, at| {
                 remote(doc, at).map_or_else(
                     || Err("the view was unmounted".to_owned()),
@@ -680,6 +727,19 @@ async fn follow(
                 )
             })
             .await;
+            // From the event that asked; an older process's, its apply.
+            match (answered, from) {
+                (true, Some(asked_at)) => {
+                    timing.meter.record(asked_at.elapsed());
+                }
+                (false, _) => {
+                    timing.meter.record(applying.elapsed());
+                }
+                (true, None) => timing.meter.set_busy(false),
+            }
+            if *timing.busy.peek() {
+                timing.busy.set(false);
+            }
             match applied {
                 Ok(()) if *shown.peek() != Shown::Live => shown.set(Shown::Live),
                 Ok(()) => {}
@@ -689,7 +749,12 @@ async fn follow(
                 }
             }
         }
+        forwarding.cancel();
         drop(session);
+        if *timing.busy.peek() {
+            timing.busy.set(false);
+        }
+        timing.meter.set_busy(false);
         with_doc(&node, BaseDocument::remove_sub_document).await;
         // The frames end a moment before the supervisor sees the exit.
         if matches!(process.state(), State::Running { generation: g, .. } if g == generation) {
@@ -723,11 +788,53 @@ async fn follow(
     }
 }
 
+/// The next frame; meanwhile, once the oldest unanswered event is past
+/// the budget, the view is busy.
+async fn next_frame(
+    frames: &mut mpsc::UnboundedReceiver<Frame>,
+    asked: &Rc<RefCell<VecDeque<Instant>>>,
+    timing: &mut Timing,
+) -> Option<Frame> {
+    loop {
+        let oldest = asked.borrow().front().copied();
+        let budget = timing.meter.budget();
+        let overdue = async {
+            match oldest {
+                Some(at) if !*timing.busy.peek() => {
+                    futures_timer::Delay::new(budget.saturating_sub(at.elapsed())).await;
+                }
+                _ => std::future::pending().await,
+            }
+        };
+        futures::select! {
+            frame = frames.next() => return frame,
+            () = Box::pin(overdue).fuse() => {
+                timing.meter.set_busy(true);
+                timing.busy.set(true);
+            }
+        }
+    }
+}
+
 /// A process extension's view `view`, filling its parent; a placeholder
 /// saying why when it is not running.
+///
+/// Its frames are timed into `<extension>/<view>`'s meter in the
+/// `architect_workspace::Meters` in context (when there are); while one
+/// runs past [`REMOTE_BUDGET`] the pane keeps its last frame, marked
+/// busy.
 #[component]
 pub fn RemoteView(processes: Processes, extension: String, view: String) -> Element {
     let shown = use_signal(|| Shown::Waiting("Starting…".to_owned()));
+    let busy = use_signal(|| false);
+    let meters = try_use_context::<Meters>();
+    let meter = use_hook(|| {
+        let name = format!("{extension}/{view}");
+        meters.map_or_else(
+            || ViewMeter::new(&name, REMOTE_BUDGET),
+            |m| m.meter(&name, REMOTE_BUDGET),
+        )
+    });
     let (retry_to, retry) = use_hook(|| {
         let (to, from) = mpsc::unbounded::<()>();
         (to, std::rc::Rc::new(std::cell::RefCell::new(Some(from))))
@@ -764,6 +871,10 @@ pub fn RemoteView(processes: Processes, extension: String, view: String) -> Elem
                     shown,
                     retry,
                     theme,
+                    Timing {
+                        meter: meter.clone(),
+                        busy,
+                    },
                 ));
             }
         }
@@ -800,6 +911,9 @@ pub fn RemoteView(processes: Processes, extension: String, view: String) -> Elem
                         follow_with(node.clone());
                     }
                 },
+            }
+            if busy() && placeholder.is_none() {
+                architect_shell::BusyBadge {}
             }
             if let Some((why, stopped)) = placeholder {
                 div {

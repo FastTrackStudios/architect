@@ -26,6 +26,14 @@
 //! signal, so a process that paints itself or works out its own colours
 //! (`theme.color("clicker.face")`) follows the app's theme.
 //!
+//! A view's thread renders one event at a time: a handler that computes
+//! for a second freezes its pane for that second (its host marks it
+//! busy). Heavy work goes to [`spawn_work`] ([`use_work`] in a view): a
+//! thread of its own, its progress and results back to the view as they
+//! come, cancelled when the view closes (`crate::work`). Every event is
+//! answered with a frame, empty when nothing changed (wire 5), so the
+//! host times each one.
+//!
 //! What it adds to the app's interface at run time — tabs, status items,
 //! openers, menu entries, hooks, slots ([`Contribution`]) — and its
 //! runtime state (a status item's text) go to the host as they change:
@@ -63,6 +71,9 @@ use crate::proto::{ProcessError, ProcessExtension, ProcessExtensionStreamSource,
 use crate::wire::{
     Edit, EventData, Frame, Hello, KeyData, Mods, Open, Pointer, ThemeData, Update, Value,
     ViewEvent, WIRE,
+};
+pub use crate::work::{
+    Progress, UseWork, Work, WorkHandle, WorkState, WorkStatus, spawn_work, use_work,
 };
 
 type ActionFuture = Pin<Box<dyn Future<Output = Result<Json, String>> + Send>>;
@@ -242,6 +253,16 @@ impl Guest {
     #[must_use]
     pub fn theme() -> Option<Resolved> {
         theme_cell().borrow().clone()
+    }
+
+    /// Runs `work` on a thread of its own, off every view's thread
+    /// ([`spawn_work`]): its progress and results go to its
+    /// [`WorkHandle`]; dropping that cancels it.
+    pub fn spawn_work<F>(work: F) -> WorkHandle
+    where
+        F: FnOnce(&Work) -> Result<Json, String> + Send + 'static,
+    {
+        spawn_work(work)
     }
 
     /// Serves the host that started this process, until it goes.
@@ -517,11 +538,14 @@ fn render(
                 },
                 () = vdom.wait_for_work() => None,
             };
+            // An event is always answered (wire 5): its host times the
+            // frame from it, empty or not.
+            let answers = event.is_some();
             if let Some(event) = event {
                 dispatch(&vdom, event);
             }
             vdom.render_immediate(&mut writer);
-            if !writer.is_empty() && sink.send(writer.take()).await.is_err() {
+            if (answers || !writer.is_empty()) && sink.send(writer.take()).await.is_err() {
                 return;
             }
         }

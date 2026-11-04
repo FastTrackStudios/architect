@@ -17,11 +17,13 @@
 
 use facet::Facet;
 
-/// The wire's version. 3 added the theme as data ([`ThemeData`],
-/// `ProcessExtension::theme`); 4 an action's invocation
-/// (`ProcessExtension::run_in`) and what a process adds at run time
-/// ([`Update`], `ProcessExtension::updates`).
-pub const WIRE: u32 = 4;
+/// The wire's version.
+///
+/// 3 added the theme as data ([`ThemeData`], `ProcessExtension::theme`);
+/// 4 an action's invocation (`ProcessExtension::run_in`) and what a
+/// process adds at run time ([`Update`], `ProcessExtension::updates`); 5
+/// a frame for every event ([`ANSWERED_WIRE`]).
+pub const WIRE: u32 = 5;
 
 /// The oldest wire a host still speaks: a process at 2 runs as before,
 /// its views themed through CSS only (it is never sent [`ThemeData`]).
@@ -34,6 +36,14 @@ pub const THEMED_WIRE: u32 = 3;
 /// The first wire a process is sent its actions' invocations on, and
 /// asked for its [`Update`]s.
 pub const CONTRIB_WIRE: u32 = 4;
+
+/// The first wire a process answers every event with a frame.
+///
+/// The frame is empty when the event changed nothing; its host times each
+/// frame from the event that asked for it, and marks the view busy while
+/// one runs past its budget. An older process's view is timed by its
+/// frames alone (never busy).
+pub const ANSWERED_WIRE: u32 = 5;
 
 /// What a process adds or changes at run time, as it happens (wire 4 on):
 /// its contributions, in place of the ones it sent before, or its runtime
