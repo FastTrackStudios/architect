@@ -256,10 +256,18 @@ impl Extensions {
 /// The toolbar and item an edit is about: its arguments' `id` and `at`
 /// (`at_field` names it), or what its context menu was opened on
 /// (`toolbar-item`, `<key>#<at>`; `toolbar`, `<key>`).
-fn about(caller: &ActionCaller, args: &Value, at_field: &str) -> Result<(String, Option<At>), String> {
+fn about(
+    caller: &ActionCaller,
+    args: &Value,
+    at_field: &str,
+) -> Result<(String, Option<At>), String> {
     let text = |k: &str| args.get(k).and_then(Value::as_str).map(str::to_owned);
     let menu = caller.invocation().and_then(|i| match i.target.as_deref() {
-        Some("toolbar-item") => i.id.as_deref().and_then(|id| id.split_once('#')).map(|(k, at)| (k.to_owned(), Some(at.to_owned()))),
+        Some("toolbar-item") => {
+            i.id.as_deref()
+                .and_then(|id| id.split_once('#'))
+                .map(|(k, at)| (k.to_owned(), Some(at.to_owned())))
+        }
         Some("toolbar") => i.id.clone().map(|k| (k, None)),
         _ => None,
     });
@@ -316,7 +324,8 @@ fn edit_action(
                 id: id.to_owned(),
                 message,
             })?;
-            let out: ActionFuture = Box::pin(futures::future::ready(Ok(out.to_string().into_bytes())));
+            let out: ActionFuture =
+                Box::pin(futures::future::ready(Ok(out.to_string().into_bytes())));
             Ok(out)
         }),
     )
@@ -376,7 +385,9 @@ fn install_edits(list: &ActionList, host: &Host) -> Result<(), ActionError> {
              `pane`, `view:<kind>`, `hidden`). Answers its key.",
         ),
         Effect::Mutating,
-        &object(json!({ "title": text("its name"), "where": text("where it goes"), "id": text("its id") })),
+        &object(
+            json!({ "title": text("its name"), "where": text("where it goes"), "id": text("its id") }),
+        ),
         move |_, a| {
             let s = |k: &str| a.get(k).and_then(Value::as_str);
             let key = h.toolbars().create(
@@ -391,7 +402,11 @@ fn install_edits(list: &ActionList, host: &Host) -> Result<(), ActionError> {
     let h = host.clone();
     edit_action(
         list,
-        ("TOOLBAR_RENAME", "Toolbar: rename", "Gives toolbar `id` the title `title`."),
+        (
+            "TOOLBAR_RENAME",
+            "Toolbar: rename",
+            "Gives toolbar `id` the title `title`.",
+        ),
         Effect::Mutating,
         &json!({ "type": "object", "required": ["title"], "properties": { "id": text(KEY), "title": text("its new name") } }),
         move |caller, a| {
@@ -420,11 +435,15 @@ fn install_edits(list: &ActionList, host: &Host) -> Result<(), ActionError> {
              `to` its id), hidden until TOOLBAR_SHOW shows it. Answers its key.",
         ),
         Effect::Mutating,
-        &object(json!({ "id": text(KEY), "to": text("the copy's id"), "title": text("the copy's name") })),
+        &object(
+            json!({ "id": text(KEY), "to": text("the copy's id"), "title": text("the copy's name") }),
+        ),
         move |caller, a| {
             let (key, _) = about(caller, a, "at")?;
             let s = |k: &str| a.get(k).and_then(Value::as_str);
-            let copy = h.toolbars().duplicate(h.contributions(), &key, s("to"), s("title"))?;
+            let copy = h
+                .toolbars()
+                .duplicate(h.contributions(), &key, s("to"), s("title"))?;
             Ok(json!({ "key": copy }))
         },
     )?;
@@ -498,7 +517,11 @@ fn install_edits(list: &ActionList, host: &Host) -> Result<(), ActionError> {
     let h = host.clone();
     edit_action(
         list,
-        ("TOOLBAR_REMOVE", "Toolbar: remove item", "Takes away toolbar `id`'s item `at` (a group left empty goes too)."),
+        (
+            "TOOLBAR_REMOVE",
+            "Toolbar: remove item",
+            "Takes away toolbar `id`'s item `at` (a group left empty goes too).",
+        ),
         Effect::Mutating,
         &object(json!({ "id": text(KEY), "at": text(AT) })),
         move |caller, a| {
@@ -525,7 +548,11 @@ fn install_edits(list: &ActionList, host: &Host) -> Result<(), ActionError> {
             let (key, from) = about(caller, a, "from")?;
             let from = needs(from, "from")?;
             let to = At::parse(a.get("to").and_then(Value::as_str).ok_or("`to`")?)?;
-            let into = a.get("into").and_then(Value::as_str).unwrap_or(&key).to_owned();
+            let into = a
+                .get("into")
+                .and_then(Value::as_str)
+                .unwrap_or(&key)
+                .to_owned();
             let bars = h.toolbars();
             let at = bars.move_between(h.contributions(), &key, from, &into, to)?;
             bars.flush()?;
@@ -567,7 +594,9 @@ fn install_edits(list: &ActionList, host: &Host) -> Result<(), ActionError> {
              labelled `label`.",
         ),
         Effect::Mutating,
-        &object(json!({ "id": text(KEY), "at": text(AT), "count": { "type": "integer", "minimum": 1 }, "label": text("its label") })),
+        &object(
+            json!({ "id": text(KEY), "at": text(AT), "count": { "type": "integer", "minimum": 1 }, "label": text("its label") }),
+        ),
         move |caller, a| {
             let (key, at) = about(caller, a, "at")?;
             let at = needs(at, "at")?;
@@ -576,7 +605,11 @@ fn install_edits(list: &ActionList, host: &Host) -> Result<(), ActionError> {
                 .and_then(Value::as_u64)
                 .and_then(|n| usize::try_from(n).ok())
                 .unwrap_or(2);
-            let label = a.get("label").and_then(Value::as_str).unwrap_or_default().to_owned();
+            let label = a
+                .get("label")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
             let at = commit(&h, &key, |t| edit::group(t, at, count, &label))?;
             Ok(json!({ "at": at.to_string() }))
         },
@@ -584,7 +617,11 @@ fn install_edits(list: &ActionList, host: &Host) -> Result<(), ActionError> {
     let h = host.clone();
     edit_action(
         list,
-        ("TOOLBAR_UNGROUP", "Toolbar: ungroup", "The group at `at` of toolbar `id` back into its buttons."),
+        (
+            "TOOLBAR_UNGROUP",
+            "Toolbar: ungroup",
+            "The group at `at` of toolbar `id` back into its buttons.",
+        ),
         Effect::Mutating,
         &object(json!({ "id": text(KEY), "at": text(AT) })),
         move |caller, a| {

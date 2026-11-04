@@ -66,10 +66,19 @@ fn a_badge_stays_in_view_and_the_name_keeps_some_letters() {
     let (bx, _, bw, _) = rect(&doc, "[data-badge=\"p3\"]");
     let (_, _, name_w, _) = rect(&doc, "[data-tab-name=\"p3\"]");
     let (_, _, plain_w, _) = rect(&doc, "[data-tab=\"p5\"]");
-    assert!(plain_w < 100.0, "the bar is narrow: an unbadged tab is {plain_w} wide");
-    assert!(bw > 0.0 && bx + bw <= tx + tw + 0.5, "the badge ({bx}+{bw}) inside its tab ({tx}+{tw})");
+    assert!(
+        plain_w < 100.0,
+        "the bar is narrow: an unbadged tab is {plain_w} wide"
+    );
+    assert!(
+        bw > 0.0 && bx + bw <= tx + tw + 0.5,
+        "the badge ({bx}+{bw}) inside its tab ({tx}+{tw})"
+    );
     assert!(name_w >= 19.5, "the name keeps some letters: {name_w}");
     // Its close button too (the tab in front has one).
     let (cx, _, cw, _) = rect(&doc, "[data-tab=\"p3\"] [aria-label^=\"Close\"]");
-    assert!(cx + cw <= tx + tw + 0.5, "its close button ({cx}+{cw}) inside it ({tx}+{tw})");
+    assert!(
+        cx + cw <= tx + tw + 0.5,
+        "its close button ({cx}+{cw}) inside it ({tx}+{tw})"
+    );
 }

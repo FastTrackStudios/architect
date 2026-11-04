@@ -65,7 +65,10 @@ pub const RIGHT_CLICKS: [&str; 3] = ["menu", "arm", "none"];
 /// a toolbar's empty space (`toolbar`, its key the id) and an item while
 /// editing (`toolbar-item`, `<key>#<place>` the id: `user/mine#2.1`).
 pub const CONTEXT_TARGETS: [(&str, &str); 2] = [
-    ("toolbar", "a toolbar's empty space; its id the toolbar's key"),
+    (
+        "toolbar",
+        "a toolbar's empty space; its id the toolbar's key",
+    ),
     (
         "toolbar-item",
         "an item of a toolbar being edited; its id `<key>#<place>` (`user/mine#2.1`)",
@@ -87,10 +90,25 @@ pub fn preset(name: &str) -> ToolColors {
         ..ToolColors::default()
     };
     match name {
-        "accent" => c("primary", "primary-foreground", "accent", "accent-foreground"),
-        "soft" => c("secondary", "secondary-foreground", "primary", "primary-foreground"),
+        "accent" => c(
+            "primary",
+            "primary-foreground",
+            "accent",
+            "accent-foreground",
+        ),
+        "soft" => c(
+            "secondary",
+            "secondary-foreground",
+            "primary",
+            "primary-foreground",
+        ),
         "contrast" => c("foreground", "background", "primary", "primary-foreground"),
-        "danger" => c("destructive", "destructive-foreground", "foreground", "background"),
+        "danger" => c(
+            "destructive",
+            "destructive-foreground",
+            "foreground",
+            "background",
+        ),
         _ => ToolColors::default(),
     }
 }
@@ -735,7 +753,10 @@ newline = true
         assert!(t.check(ok, ok).is_ok());
         assert_eq!(image_type(&t.items[0].image), Some("image/svg+xml"));
         let drawn = t.items[0].colors.over(&preset(&t.style.preset));
-        assert_eq!((drawn.fill.as_str(), drawn.ink.as_str()), ("#e11d48", "primary-foreground"));
+        assert_eq!(
+            (drawn.fill.as_str(), drawn.ink.as_str()),
+            ("#e11d48", "primary-foreground")
+        );
         assert!(preset("theme").is_empty());
         // Scoped to a context: its kind, or one of it.
         assert!(t.applies_to("view:note"));

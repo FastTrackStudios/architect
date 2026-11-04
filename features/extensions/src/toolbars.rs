@@ -560,7 +560,10 @@ impl Toolbars {
         let mut written = Vec::new();
         let mut failed = None;
         for (decl, path) in todo {
-            match decl.to_toml().and_then(|text| write_kept(&dir, &path, &text)) {
+            match decl
+                .to_toml()
+                .and_then(|text| write_kept(&dir, &path, &text))
+            {
                 Ok(()) => written.push(path),
                 Err(why) => failed = Some(why),
             }
@@ -595,8 +598,15 @@ impl Toolbars {
         title: &str,
         at: &str,
     ) -> Result<String, String> {
-        let title = if title.trim().is_empty() { "Toolbar" } else { title.trim() };
-        let id = self.free_id(contributions, id.map_or_else(|| crate::toolbar_edit::slug(title), str::to_owned));
+        let title = if title.trim().is_empty() {
+            "Toolbar"
+        } else {
+            title.trim()
+        };
+        let id = self.free_id(
+            contributions,
+            id.map_or_else(|| crate::toolbar_edit::slug(title), str::to_owned),
+        );
         let key = format!("{PERSON}/{id}");
         let decl = ToolbarDecl {
             id,
@@ -641,7 +651,10 @@ impl Toolbars {
             .get(contributions, key)
             .ok_or_else(|| format!("no toolbar {key:?} (TOOLBAR_LIST lists them)"))?;
         let title = title.map_or_else(|| format!("{} copy", from.decl.title), str::to_owned);
-        let id = self.free_id(contributions, id.map_or_else(|| crate::toolbar_edit::slug(&title), str::to_owned));
+        let id = self.free_id(
+            contributions,
+            id.map_or_else(|| crate::toolbar_edit::slug(&title), str::to_owned),
+        );
         let mut decl = from.decl;
         // Its widgets name their views whole, as a person's file does.
         qualify_views(&mut decl, &from.owner);
@@ -658,7 +671,12 @@ impl Toolbars {
     /// # Errors
     ///
     /// No toolbar under `key`; a place there is not; as [`Self::edit`].
-    pub fn show(&self, contributions: &Contributions, key: &str, at: &str) -> Result<Vec<String>, String> {
+    pub fn show(
+        &self,
+        contributions: &Contributions,
+        key: &str,
+        at: &str,
+    ) -> Result<Vec<String>, String> {
         let probe = ToolbarDecl {
             at: at.to_owned(),
             ..ToolbarDecl::default()
@@ -788,7 +806,10 @@ impl Toolbars {
         let path = if path.is_absolute() {
             path.to_path_buf()
         } else {
-            beside.map(Path::to_path_buf).or_else(|| self.dir())?.join(path)
+            beside
+                .map(Path::to_path_buf)
+                .or_else(|| self.dir())?
+                .join(path)
         };
         let stamp = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
         if let Some((at, uri)) = self.lock().images.get(&path)
@@ -911,22 +932,46 @@ mod tests {
         bars.set_dir(tmp.path());
         let key = bars.create(&reg, None, "My tools", "dock:right").unwrap();
         assert_eq!(key, "user/my-tools");
-        assert_eq!(bars.create(&reg, None, "My tools", "float").unwrap(), "user/my-tools-2");
+        assert_eq!(
+            bars.create(&reg, None, "My tools", "float").unwrap(),
+            "user/my-tools-2"
+        );
         let file = tmp.path().join("user-my-tools.toml");
         assert!(file.exists());
         // Two edits: shown at once, not written until the last one's pause.
         let (_, first) = bars
-            .edit(&reg, &key, |t| edit::insert(t, None, ToolItem { action: "A".into(), ..ToolItem::default() }))
+            .edit(&reg, &key, |t| {
+                edit::insert(
+                    t,
+                    None,
+                    ToolItem {
+                        action: "A".into(),
+                        ..ToolItem::default()
+                    },
+                )
+            })
             .unwrap();
         let (_, second) = bars
-            .edit(&reg, &key, |t| edit::insert(t, Some(At::top(0)), ToolItem { action: "B".into(), ..ToolItem::default() }))
+            .edit(&reg, &key, |t| {
+                edit::insert(
+                    t,
+                    Some(At::top(0)),
+                    ToolItem {
+                        action: "B".into(),
+                        ..ToolItem::default()
+                    },
+                )
+            })
             .unwrap();
         assert_eq!(bars.get(&reg, &key).unwrap().decl.items.len(), 2);
         assert!(bars.pending());
         // A poll meanwhile keeps them.
         let _ = bars.poll();
         assert_eq!(bars.get(&reg, &key).unwrap().decl.items.len(), 2);
-        assert!(bars.flush_if(first).unwrap().is_empty(), "a later edit waits its own");
+        assert!(
+            bars.flush_if(first).unwrap().is_empty(),
+            "a later edit waits its own"
+        );
         assert!(!std::fs::read_to_string(&file).unwrap().contains("\"B\""));
         assert_eq!(bars.flush_if(second).unwrap(), vec![file.clone()]);
         assert!(!bars.pending());
@@ -935,11 +980,21 @@ mod tests {
         let again = Toolbars::new();
         again.set_dir(tmp.path());
         let read = again.get(&reg, &key).unwrap().decl;
-        assert_eq!(read.items.iter().map(|i| i.action.as_str()).collect::<Vec<_>>(), ["B", "A"]);
+        assert_eq!(
+            read.items
+                .iter()
+                .map(|i| i.action.as_str())
+                .collect::<Vec<_>>(),
+            ["B", "A"]
+        );
         // The write kept what it replaced: the empty one.
         let kept = bars.backups(&key);
         assert_eq!(kept.len(), 1);
-        assert!(!std::fs::read_to_string(&kept[0]).unwrap().contains("items = [{"));
+        assert!(
+            !std::fs::read_to_string(&kept[0])
+                .unwrap()
+                .contains("items = [{")
+        );
         // Each write keeps one more, the oldest past BACKUPS going.
         for n in 0..(BACKUPS + 3) {
             bars.edit(&reg, &key, |t| {
@@ -952,13 +1007,20 @@ mod tests {
         let kept = bars.backups(&key);
         assert_eq!(kept.len(), BACKUPS);
         let newest = std::fs::read_to_string(&kept[0]).unwrap();
-        assert!(newest.contains(&format!("Take {}", BACKUPS + 1)), "{newest}");
+        assert!(
+            newest.contains(&format!("Take {}", BACKUPS + 1)),
+            "{newest}"
+        );
         let oldest = std::fs::read_to_string(&kept[BACKUPS - 1]).unwrap();
         assert!(oldest.contains("Take 2"), "{oldest}");
         // Deleting keeps it too.
         assert!(bars.reset(&key).unwrap());
         assert!(bars.get(&reg, &key).is_none());
-        assert!(std::fs::read_to_string(&bars.backups(&key)[0]).unwrap().contains(&format!("Take {}", BACKUPS + 2)));
+        assert!(
+            std::fs::read_to_string(&bars.backups(&key)[0])
+                .unwrap()
+                .contains(&format!("Take {}", BACKUPS + 2))
+        );
     }
 
     #[test]
@@ -983,18 +1045,37 @@ mod tests {
         let copy = bars.duplicate(&reg, "lab.x/t", None, None).unwrap();
         assert_eq!(copy, "user/t-copy");
         let c = bars.get(&reg, &copy).unwrap();
-        assert_eq!((c.decl.at.as_str(), c.decl.title.as_str()), ("hidden", "T copy"));
-        assert_eq!(c.decl.items[1].view, "lab.x/meter", "its widget named whole");
+        assert_eq!(
+            (c.decl.at.as_str(), c.decl.title.as_str()),
+            ("hidden", "T copy")
+        );
+        assert_eq!(
+            c.decl.items[1].view, "lab.x/meter",
+            "its widget named whole"
+        );
         // Shown in the dock: the extension's goes hidden (the person's copy of it).
         assert_eq!(bars.show(&reg, &copy, "dock:right").unwrap(), ["lab.x/t"]);
         bars.flush().unwrap();
         let all = bars.all(&reg);
         let at = |k: &str| all.iter().find(|t| t.key == k).unwrap().decl.at.clone();
-        assert_eq!((at("lab.x/t"), at(&copy)), ("hidden".to_owned(), "dock:right".to_owned()));
+        assert_eq!(
+            (at("lab.x/t"), at(&copy)),
+            ("hidden".to_owned(), "dock:right".to_owned())
+        );
         assert!(bars.show(&reg, &copy, "dock:top").is_err());
         // Its item, between toolbars.
-        bars.move_between(&reg, &copy, crate::toolbar_edit::At::top(1), "lab.x/t", crate::toolbar_edit::At::top(0)).unwrap();
-        assert_eq!(bars.get(&reg, "lab.x/t").unwrap().decl.items[0].view, "lab.x/meter");
+        bars.move_between(
+            &reg,
+            &copy,
+            crate::toolbar_edit::At::top(1),
+            "lab.x/t",
+            crate::toolbar_edit::At::top(0),
+        )
+        .unwrap();
+        assert_eq!(
+            bars.get(&reg, "lab.x/t").unwrap().decl.items[0].view,
+            "lab.x/meter"
+        );
         assert_eq!(bars.get(&reg, &copy).unwrap().decl.items.len(), 1);
     }
 

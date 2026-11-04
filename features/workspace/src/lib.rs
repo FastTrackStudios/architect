@@ -71,7 +71,10 @@ pub use guide::{ArrangedGroup, ArrangedSplit, ArrangedWindow, Arrangement, targe
 pub const CONTEXT_TARGETS: [(&str, &str); 3] = [
     ("pane", "every pane's tab; its id the pane's"),
     ("tab", "a tab, past its view kind's rows; its id the pane's"),
-    ("view", "the tabs of one view kind's panes: `view:<kind>`; its id the pane's"),
+    (
+        "view",
+        "the tabs of one view kind's panes: `view:<kind>`; its id the pane's",
+    ),
 ];
 #[cfg(feature = "ui")]
 pub use host::{

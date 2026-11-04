@@ -45,10 +45,7 @@ impl At {
     pub fn parse(text: &str) -> Result<Self, String> {
         let bad = || format!("{text:?} is not a place (`3`, or `2.1` inside a group)");
         let mut parts = text.trim().split('.');
-        let index = parts
-            .next()
-            .and_then(|p| p.parse().ok())
-            .ok_or_else(bad)?;
+        let index = parts.next().and_then(|p| p.parse().ok()).ok_or_else(bad)?;
         let inner = match parts.next() {
             None => None,
             Some(p) => Some(p.parse().map_err(|_| bad())?),
@@ -123,7 +120,10 @@ pub fn insert(t: &mut ToolbarDecl, at: Option<At>, item: ToolItem) -> Result<At,
                 .filter(|g| g.kind == ToolKind::Group)
                 .ok_or_else(|| format!("no group at {}", at.index))?;
             if i > group.items.len() {
-                return Err(format!("{at} is past the group's end ({})", group.items.len()));
+                return Err(format!(
+                    "{at} is past the group's end ({})",
+                    group.items.len()
+                ));
             }
             group.items.insert(i, item);
         }
@@ -181,7 +181,8 @@ pub fn move_item(t: &mut ToolbarDecl, from: At, to: At) -> Result<At, String> {
         return Ok(from);
     }
     // Its group goes with it when it is the last in it.
-    let group_goes = from.inner.is_some() && t.items.get(from.index).is_some_and(|g| g.items.len() == 1);
+    let group_goes =
+        from.inner.is_some() && t.items.get(from.index).is_some_and(|g| g.items.len() == 1);
     remove(t, from)?;
     let mut to = to;
     match from.inner {
@@ -222,7 +223,9 @@ pub fn set(t: &mut ToolbarDecl, at: At, patch: &Value) -> Result<(), String> {
 pub fn configure(t: &mut ToolbarDecl, patch: &Value) -> Result<(), String> {
     let fields = patch.as_object().ok_or("a patch is an object of fields")?;
     if fields.contains_key("id") || fields.contains_key("items") {
-        return Err("its id and items are not set this way (TOOLBAR_RENAME, TOOLBAR_INSERT…)".into());
+        return Err(
+            "its id and items are not set this way (TOOLBAR_RENAME, TOOLBAR_INSERT…)".into(),
+        );
     }
     let items = std::mem::take(&mut t.items);
     let mut next: ToolbarDecl = patched(&*t, patch)?;
@@ -323,7 +326,11 @@ pub fn slug(title: &str) -> String {
         }
     }
     let out = out.trim_end_matches('-').to_owned();
-    if out.is_empty() { "toolbar".to_owned() } else { out }
+    if out.is_empty() {
+        "toolbar".to_owned()
+    } else {
+        out
+    }
 }
 
 #[cfg(test)]
@@ -347,7 +354,11 @@ mod tests {
             .map(|i| match i.kind {
                 ToolKind::Group => format!(
                     "[{}]",
-                    i.items.iter().map(|b| b.action.as_str()).collect::<Vec<_>>().join(" ")
+                    i.items
+                        .iter()
+                        .map(|b| b.action.as_str())
+                        .collect::<Vec<_>>()
+                        .join(" ")
                 ),
                 ToolKind::Separator => "|".to_owned(),
                 _ => i.action.clone(),
@@ -377,7 +388,15 @@ mod tests {
     fn items_go_in_come_out_and_move_by_place() {
         let mut t = bar(&["A", "B", "C"]);
         insert(&mut t, None, button("D")).unwrap();
-        insert(&mut t, Some(At::top(0)), ToolItem { kind: ToolKind::Separator, ..ToolItem::default() }).unwrap();
+        insert(
+            &mut t,
+            Some(At::top(0)),
+            ToolItem {
+                kind: ToolKind::Separator,
+                ..ToolItem::default()
+            },
+        )
+        .unwrap();
         assert_eq!(shape(&t), "| A B C D");
         assert!(insert(&mut t, Some(At::top(9)), button("X")).is_err());
         // Forward and back along the top level.
@@ -388,7 +407,10 @@ mod tests {
         // Beside itself: nothing moves.
         move_item(&mut t, At::top(2), At::top(3)).unwrap();
         assert_eq!(shape(&t), "A | B C D");
-        assert_eq!(remove(&mut t, At::top(1)).unwrap().kind, ToolKind::Separator);
+        assert_eq!(
+            remove(&mut t, At::top(1)).unwrap().kind,
+            ToolKind::Separator
+        );
         assert!(remove(&mut t, At::top(9)).is_err());
     }
 
@@ -425,18 +447,33 @@ mod tests {
     fn a_patch_sets_and_clears_fields() {
         let mut t = bar(&["A"]);
         t.title = "T".into();
-        set(&mut t, At::top(0), &json!({"label": "Play", "colors": {"fill": "primary"}, "icon": "play"})).unwrap();
+        set(
+            &mut t,
+            At::top(0),
+            &json!({"label": "Play", "colors": {"fill": "primary"}, "icon": "play"}),
+        )
+        .unwrap();
         assert_eq!(t.items[0].label, "Play");
         assert_eq!(t.items[0].colors.fill, "primary");
         set(&mut t, At::top(0), &json!({"icon": null})).unwrap();
         assert!(t.items[0].icon.is_empty());
         assert!(set(&mut t, At::top(0), &json!({"kind": "nope"})).is_err());
         assert!(set(&mut t, At::top(0), &json!("label")).is_err());
-        configure(&mut t, &json!({"title": "Mine", "style": {"rounding": 12}, "hide_labels": true})).unwrap();
-        assert_eq!((t.title.as_str(), t.style.rounding, t.hide_labels), ("Mine", Some(12), true));
+        configure(
+            &mut t,
+            &json!({"title": "Mine", "style": {"rounding": 12}, "hide_labels": true}),
+        )
+        .unwrap();
+        assert_eq!(
+            (t.title.as_str(), t.style.rounding, t.hide_labels),
+            ("Mine", Some(12), true)
+        );
         assert_eq!(t.items.len(), 1, "its items stay");
         assert!(configure(&mut t, &json!({"items": []})).is_err());
-        assert_eq!(item_from(&json!({"kind": "separator"})).unwrap().kind, ToolKind::Separator);
+        assert_eq!(
+            item_from(&json!({"kind": "separator"})).unwrap().kind,
+            ToolKind::Separator
+        );
         assert_eq!(slug(" My  tools! "), "my-tools");
         assert_eq!(slug("…"), "toolbar");
     }

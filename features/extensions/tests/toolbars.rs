@@ -403,35 +403,53 @@ fn a_toolbar_is_built_from_empty_through_its_actions_and_survives_a_restart() {
 
     assert_eq!(run("TOOLBAR_EDIT", json!({}))["editing"], true);
     assert_eq!(checked(&list, "TOOLBAR_EDIT"), Some(true));
-    let key = run("TOOLBAR_NEW", json!({ "title": "My tools", "where": "float" }))["key"]
+    let key = run(
+        "TOOLBAR_NEW",
+        json!({ "title": "My tools", "where": "float" }),
+    )["key"]
         .as_str()
         .unwrap()
         .to_owned();
     assert_eq!(key, "user/my-tools");
     let id = |more: Value| {
         let mut v = json!({ "id": key });
-        v.as_object_mut().unwrap().extend(more.as_object().unwrap().clone());
+        v.as_object_mut()
+            .unwrap()
+            .extend(more.as_object().unwrap().clone());
         v
     };
     // An action, a dropdown, a widget, another action.
-    run("TOOLBAR_INSERT", id(json!({ "item": { "action": "LAB_TOOLS_LOOP" } })));
     run(
         "TOOLBAR_INSERT",
-        id(json!({ "item": { "label": "More", "menu": [{ "kind": "heading", "label": "Here" }] } })),
+        id(json!({ "item": { "action": "LAB_TOOLS_LOOP" } })),
+    );
+    run(
+        "TOOLBAR_INSERT",
+        id(
+            json!({ "item": { "label": "More", "menu": [{ "kind": "heading", "label": "Here" }] } }),
+        ),
     );
     run(
         "TOOLBAR_INSERT",
         id(json!({ "item": { "kind": "widget", "view": "lab.tools/meter", "width": 90 } })),
     );
-    let at = run("TOOLBAR_INSERT", id(json!({ "at": "0", "item": { "action": "LAB_TOOLS_WHERE" } })));
+    let at = run(
+        "TOOLBAR_INSERT",
+        id(json!({ "at": "0", "item": { "action": "LAB_TOOLS_WHERE" } })),
+    );
     assert_eq!(at["at"], "0");
     // A row in the dropdown; the two buttons as one group, the dropdown
     // dragged into it.
     run(
         "TOOLBAR_SET",
-        id(json!({ "at": "2", "set": { "menu": [{ "kind": "heading", "label": "Here" }, { "action": "LAB_TOOLS_WHERE" }] } })),
+        id(
+            json!({ "at": "2", "set": { "menu": [{ "kind": "heading", "label": "Here" }, { "action": "LAB_TOOLS_WHERE" }] } }),
+        ),
     );
-    run("TOOLBAR_GROUP", id(json!({ "at": "0", "count": 2, "label": "Both" })));
+    run(
+        "TOOLBAR_GROUP",
+        id(json!({ "at": "0", "count": 2, "label": "Both" })),
+    );
     let moved = run("TOOLBAR_MOVE", id(json!({ "from": "1", "to": "0.2" })));
     assert_eq!(moved["at"], "0.2");
     // Restyled: a button's label and colour, the toolbar's corners and preset.
@@ -441,20 +459,32 @@ fn a_toolbar_is_built_from_empty_through_its_actions_and_survives_a_restart() {
     );
     run(
         "TOOLBAR_SET",
-        id(json!({ "set": { "style": { "rounding": 10, "preset": "soft" }, "hide_labels": true } })),
+        id(
+            json!({ "set": { "style": { "rounding": 10, "preset": "soft" }, "hide_labels": true } }),
+        ),
     );
     run("TOOLBAR_RENAME", id(json!({ "title": "Mine" })));
     // What a refused edit says, and that it changed nothing.
-    let bad = refused("TOOLBAR_SET", id(json!({ "set": { "style": { "size": 500 } } })));
+    let bad = refused(
+        "TOOLBAR_SET",
+        id(json!({ "set": { "style": { "size": 500 } } })),
+    );
     assert!(bad.to_string().contains("style.size"), "{bad}");
-    assert!(refused("TOOLBAR_MOVE", id(json!({ "from": "0", "to": "0.1" }))).to_string().contains("group"));
+    assert!(
+        refused("TOOLBAR_MOVE", id(json!({ "from": "0", "to": "0.1" })))
+            .to_string()
+            .contains("group")
+    );
 
     let want = |t: &Value| {
         assert_eq!(t["title"], "Mine");
         assert_eq!(t["style"]["preset"], "soft");
         assert_eq!(t["items"][0]["kind"], "group");
         assert_eq!(t["items"][0]["items"][1]["label"], "Loop it");
-        assert_eq!(t["items"][0]["items"][2]["menu"][1]["action"], "LAB_TOOLS_WHERE");
+        assert_eq!(
+            t["items"][0]["items"][2]["menu"][1]["action"],
+            "LAB_TOOLS_WHERE"
+        );
         assert_eq!(t["items"][1]["view"], "lab.tools/meter");
     };
     want(&run("TOOLBAR_GET", id(json!({})))["toolbar"]);
@@ -469,7 +499,10 @@ fn a_toolbar_is_built_from_empty_through_its_actions_and_survives_a_restart() {
         Some((key.clone(), Some("1".to_owned())))
     );
     // Every write kept the one it replaced.
-    let kept = run("TOOLBAR_BACKUPS", id(json!({})))["backups"].as_array().unwrap().len();
+    let kept = run("TOOLBAR_BACKUPS", id(json!({})))["backups"]
+        .as_array()
+        .unwrap()
+        .len();
     assert!(kept >= 8, "{kept} backups");
 
     // A restart: the same folder, read again.
@@ -477,19 +510,35 @@ fn a_toolbar_is_built_from_empty_through_its_actions_and_survives_a_restart() {
     ext2.install_contribution_actions().unwrap();
     ext2.host().toolbars().set_dir(&folder);
     let _ = ext2.dev(&dir);
-    let out = block_on(list2.run_json_async("TOOLBAR_GET", id(json!({})).to_string().as_bytes())).unwrap();
+    let out = block_on(list2.run_json_async("TOOLBAR_GET", id(json!({})).to_string().as_bytes()))
+        .unwrap();
     let again: Value = serde_json::from_slice(&out).unwrap();
     want(&again["toolbar"]);
 
     // Duplicated and shown in its place; the original deleted.
-    let copy = run("TOOLBAR_DUPLICATE", id(json!({ "title": "Second" })))["key"].as_str().unwrap().to_owned();
+    let copy = run("TOOLBAR_DUPLICATE", id(json!({ "title": "Second" })))["key"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     let shown = run("TOOLBAR_SHOW", json!({ "id": copy, "where": "float" }));
     assert_eq!(shown["hidden"], json!([key]));
     run("TOOLBAR_DELETE", id(json!({})));
     let all = run("TOOLBAR_LIST", json!({}));
-    let keys: Vec<&str> = all["toolbars"].as_array().unwrap().iter().filter_map(|t| t["key"].as_str()).collect();
-    assert!(keys.contains(&copy.as_str()) && !keys.contains(&key.as_str()), "{keys:?}");
-    assert!(refused("TOOLBAR_DELETE", json!({ "id": "lab.tools/transport" })).to_string().contains("extension"));
+    let keys: Vec<&str> = all["toolbars"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|t| t["key"].as_str())
+        .collect();
+    assert!(
+        keys.contains(&copy.as_str()) && !keys.contains(&key.as_str()),
+        "{keys:?}"
+    );
+    assert!(
+        refused("TOOLBAR_DELETE", json!({ "id": "lab.tools/transport" }))
+            .to_string()
+            .contains("extension")
+    );
     run("TOOLBAR_EDIT", json!({ "on": false }));
     assert_eq!(checked(&list, "TOOLBAR_EDIT"), Some(false));
 }
@@ -507,7 +556,13 @@ fn context_targets_are_points_their_features_declare() {
     let host = ext.host();
     let _ = ext.dev(&dir);
     let points = host.points();
-    for p in ["context.tab", "context.pane", "context.view", "context.toolbar", "context.toolbar-item"] {
+    for p in [
+        "context.tab",
+        "context.pane",
+        "context.view",
+        "context.toolbar",
+        "context.toolbar-item",
+    ] {
         assert!(points.declared(p).is_some(), "{p}");
     }
     let tab = points.items("context.tab");

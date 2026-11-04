@@ -1488,7 +1488,10 @@ impl Host {
         let mut items = manifest.point_items();
         for row in &declared.context {
             if let Ok(v) = serde_json::to_value(row) {
-                items.entry(contrib::context_point(&row.target)).or_default().push(v);
+                items
+                    .entry(contrib::context_point(&row.target))
+                    .or_default()
+                    .push(v);
             }
         }
         self.inner.contributions.put(&manifest.id, declared);

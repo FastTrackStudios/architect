@@ -203,7 +203,9 @@ pub(crate) fn context_rows(host: &Host, target: &str, id: &str) -> Vec<ContextEn
             let mut out = vec![row("Settings…", "TOOLBAR_SELECT")];
             match (item.map(|i| i.kind), at.inner) {
                 (Some(ToolKind::Group), _) => out.push(row("Ungroup", "TOOLBAR_UNGROUP")),
-                (Some(ToolKind::Button), None) => out.push(row("Group with the next", "TOOLBAR_GROUP")),
+                (Some(ToolKind::Button), None) => {
+                    out.push(row("Group with the next", "TOOLBAR_GROUP"))
+                }
                 _ => {}
             }
             out.push(row("Remove", "TOOLBAR_REMOVE"));
@@ -389,9 +391,7 @@ pub fn ToolbarStrip(
     let t = crate::window_ui::shell_theme();
     let host = ui.host();
     let editor = try_use_context::<Editor>();
-    let handle = use_pane_of(PaneId(
-        pane.clone().unwrap_or_else(|| pane_kind(&toolbar)),
-    ));
+    let handle = use_pane_of(PaneId(pane.clone().unwrap_or_else(|| pane_kind(&toolbar))));
     let Some(bar) = host.toolbars().get(host.contributions(), &toolbar) else {
         return rsx! {};
     };
@@ -420,9 +420,9 @@ pub fn ToolbarStrip(
         size: style.size.unwrap_or(if header { 24 } else { 28 }),
         rounding: style.rounding.unwrap_or(6),
         gap: style.spacing.unwrap_or(4),
-        glyph: style
-            .size
-            .map_or(16, |s| usize::try_from(s.saturating_mul(4) / 7).unwrap_or(16)),
+        glyph: style.size.map_or(16, |s| {
+            usize::try_from(s.saturating_mul(4) / 7).unwrap_or(16)
+        }),
         preset: preset(&style.preset),
         images,
         editing,
@@ -576,8 +576,16 @@ fn EditableItem(
         .toolbars()
         .selected()
         .is_some_and(|(k, a)| k == cx.key && a.as_deref() == Some(path.as_str()));
-    let ring = if selected { t.accent.to_string() } else { t.rule.to_string() };
-    let mount_at = if group { format!("g{path}") } else { path.clone() };
+    let ring = if selected {
+        t.accent.to_string()
+    } else {
+        t.rule.to_string()
+    };
+    let mount_at = if group {
+        format!("g{path}")
+    } else {
+        path.clone()
+    };
     // Measured while it is here: forgotten as it goes.
     let mut mounted_as = use_hook(|| CopyValue::new((cx.key.clone(), mount_at.clone())));
     mounted_as.set((cx.key.clone(), mount_at.clone()));

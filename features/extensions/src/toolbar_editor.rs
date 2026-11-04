@@ -106,11 +106,13 @@ pub fn drop_slot(strips: &[Strip], x: f32, y: f32, moving_group: bool) -> Option
         let lx = if right { r.x + r.w + 1.0 } else { r.x - 2.0 };
         Rect::new(lx, r.y, 2.0, r.h)
     };
-    let mut tops: Vec<&Placed> = strip.items.iter().filter(|p| p.at.inner.is_none()).collect();
+    let mut tops: Vec<&Placed> = strip
+        .items
+        .iter()
+        .filter(|p| p.at.inner.is_none())
+        .collect();
     tops.sort_by_key(|p| p.at.index);
-    if !moving_group
-        && let Some(g) = tops.iter().find(|p| p.group && p.rect.contains(x, y, 0.0))
-    {
+    if !moving_group && let Some(g) = tops.iter().find(|p| p.group && p.rect.contains(x, y, 0.0)) {
         let mut inside: Vec<&Placed> = strip
             .items
             .iter()
@@ -133,7 +135,9 @@ pub fn drop_slot(strips: &[Strip], x: f32, y: f32, moving_group: bool) -> Option
     let mut row: Vec<&Placed> = tops.iter().copied().filter(in_row).collect();
     if row.is_empty()
         && let Some(near) = tops.iter().min_by(|a, b| {
-            (a.rect.mid_y() - y).abs().total_cmp(&(b.rect.mid_y() - y).abs())
+            (a.rect.mid_y() - y)
+                .abs()
+                .total_cmp(&(b.rect.mid_y() - y).abs())
         })
     {
         let ny = near.rect.mid_y();
@@ -152,7 +156,12 @@ pub fn drop_slot(strips: &[Strip], x: f32, y: f32, moving_group: bool) -> Option
         });
     };
     let (at, line) = row.iter().find(|p| p.rect.mid_x() > x).map_or_else(
-        || (At::top(last.at.index.saturating_add(1)), line_at(&last.rect, true)),
+        || {
+            (
+                At::top(last.at.index.saturating_add(1)),
+                line_at(&last.rect, true),
+            )
+        },
         |p| (At::top(p.at.index), line_at(&p.rect, false)),
     );
     Some(Slot {
@@ -375,10 +384,7 @@ async fn measure_strips(mounts: &BTreeMap<(String, String), Rc<MountedData>>) ->
             });
         }
     }
-    strips
-        .into_values()
-        .filter(|s| s.rect.w > 0.0)
-        .collect()
+    strips.into_values().filter(|s| s.rect.w > 0.0).collect()
 }
 
 /// Writes the host's edits [`DEBOUNCE`] after edit `n`, unless another
@@ -725,7 +731,11 @@ impl Kept {
         (self.shift > 0.0 || self.up).then(|| {
             format!(
                 "{}{}",
-                if self.shift > 0.0 { format!("left {}", self.shift.round()) } else { String::new() },
+                if self.shift > 0.0 {
+                    format!("left {}", self.shift.round())
+                } else {
+                    String::new()
+                },
                 if self.up { " up" } else { "" }
             )
             .trim()
@@ -856,7 +866,9 @@ fn choose_action(editor: Editor, host: &Host, purpose: &For, id: &str) {
             });
         }
         For::RightClick { key, at } => {
-            let _ = editor.apply(host, key, |d| edit::set(d, *at, &json!({ "right_click": id })));
+            let _ = editor.apply(host, key, |d| {
+                edit::set(d, *at, &json!({ "right_click": id }))
+            });
         }
     }
 }
@@ -872,7 +884,11 @@ fn commands(host: &Host) -> Vec<Command> {
     host.list()
         .infos()
         .into_iter()
-        .map(|i| Command::new(i.id, i.display_name).group(i.group).detail(i.description))
+        .map(|i| {
+            Command::new(i.id, i.display_name)
+                .group(i.group)
+                .detail(i.description)
+        })
         .collect()
 }
 
@@ -978,8 +994,16 @@ fn WidgetPicker(ui: ExtensionUi, purpose: For) -> Element {
         format!(
             "padding:0 10px; height:26px; border:none; border-radius:6px; font-size:12px; cursor:pointer; text-align:left; \
              background:{}; color:{};",
-            if on { t.accent_soft.as_ref() } else { "transparent" },
-            if on { t.accent.as_ref() } else { t.ink.as_ref() }
+            if on {
+                t.accent_soft.as_ref()
+            } else {
+                "transparent"
+            },
+            if on {
+                t.accent.as_ref()
+            } else {
+                t.ink.as_ref()
+            }
         )
     };
     let insert_host = host.clone();
@@ -1117,7 +1141,12 @@ fn Field(label: String, children: Element) -> Element {
 
 /// Choices side by side, the one on lit.
 #[component]
-fn Choices(choices: Vec<(String, String)>, on: String, test: String, pick: EventHandler<String>) -> Element {
+fn Choices(
+    choices: Vec<(String, String)>,
+    on: String,
+    test: String,
+    pick: EventHandler<String>,
+) -> Element {
     let t = crate::window_ui::shell_theme();
     rsx! {
         div { role: "radiogroup", "data-testid": "{test}", style: "display:flex; flex-wrap:wrap; gap:4px;",
@@ -1143,7 +1172,15 @@ fn Choices(choices: Vec<(String, String)>, on: String, test: String, pick: Event
 
 /// A number, one step down or up at a time, in `range`; `-` unset.
 #[component]
-fn Stepper(value: Option<u32>, fallback: u32, low: u32, high: u32, step: u32, test: String, set: EventHandler<u32>) -> Element {
+fn Stepper(
+    value: Option<u32>,
+    fallback: u32,
+    low: u32,
+    high: u32,
+    step: u32,
+    test: String,
+    set: EventHandler<u32>,
+) -> Element {
     let t = crate::window_ui::shell_theme();
     let now = value.unwrap_or(fallback);
     let b = format!(
@@ -1161,7 +1198,12 @@ fn Stepper(value: Option<u32>, fallback: u32, low: u32, high: u32, step: u32, te
 
 /// A colour: a theme token's swatch, or none (the theme's own).
 #[component]
-fn ColorRow(label: String, value: String, test: String, set: EventHandler<Option<String>>) -> Element {
+fn ColorRow(
+    label: String,
+    value: String,
+    test: String,
+    set: EventHandler<Option<String>>,
+) -> Element {
     let t = crate::window_ui::shell_theme();
     rsx! {
         Field { label,
@@ -1362,7 +1404,9 @@ fn MenuRows(ui: ExtensionUi, toolbar: String, at: String, rows: Vec<MenuItem>) -
     let put = {
         let (host, key) = (host.clone(), toolbar.clone());
         Rc::new(move |rows: Vec<MenuItem>| {
-            let _ = editor.apply(&host, &key, |d| edit::set(d, place, &json!({ "menu": rows })));
+            let _ = editor.apply(&host, &key, |d| {
+                edit::set(d, place, &json!({ "menu": rows }))
+            });
         })
     };
     let small = format!(
@@ -1454,7 +1498,12 @@ fn ToolbarSettings(ui: ExtensionUi, toolbar: String) -> Element {
     };
     let host = ui.host();
     let found = host.toolbars().get(host.contributions(), &toolbar);
-    let mut when_draft = use_signal(|| found.as_ref().map(|b| b.decl.when.clone()).unwrap_or_default());
+    let mut when_draft = use_signal(|| {
+        found
+            .as_ref()
+            .map(|b| b.decl.when.clone())
+            .unwrap_or_default()
+    });
     let Some(bar) = found else {
         return rsx! {};
     };
@@ -1475,7 +1524,12 @@ fn ToolbarSettings(ui: ExtensionUi, toolbar: String) -> Element {
             c(json!({ "style": s }));
         }
     };
-    let (sp1, sp2, sp3, sp4) = (style_patch.clone(), style_patch.clone(), style_patch.clone(), style_patch);
+    let (sp1, sp2, sp3, sp4) = (
+        style_patch.clone(),
+        style_patch.clone(),
+        style_patch.clone(),
+        style_patch,
+    );
     let (c1, c2, c3, c4) = (
         Rc::clone(&configure),
         Rc::clone(&configure),
@@ -1655,7 +1709,10 @@ mod tests {
     #[test]
     fn a_menu_past_the_windows_edge_is_kept_in_it() {
         let view = Rect::new(0.0, 0.0, 1440.0, 860.0);
-        assert_eq!(Kept::of(Rect::new(100.0, 80.0, 180.0, 120.0), view), Kept::default());
+        assert_eq!(
+            Kept::of(Rect::new(100.0, 80.0, 180.0, 120.0), view),
+            Kept::default()
+        );
         // Past the right edge: left by as much.
         let k = Kept::of(Rect::new(1350.0, 80.0, 180.0, 120.0), view);
         assert!((k.shift - 94.0).abs() < 0.01 && !k.up, "{k:?}");
@@ -1668,18 +1725,25 @@ mod tests {
     #[test]
     fn a_drop_lands_between_items_into_groups_and_other_toolbars() {
         let s = strips();
-        let at = |x: f32, y: f32, g: bool| drop_slot(&s, x, y, g).map(|d| (d.key, d.at.to_string()));
+        let at =
+            |x: f32, y: f32, g: bool| drop_slot(&s, x, y, g).map(|d| (d.key, d.at.to_string()));
         assert_eq!(at(10.0, 20.0, false), Some(("user/a".into(), "0".into())));
         assert_eq!(at(30.0, 20.0, false), Some(("user/a".into(), "1".into())));
         assert_eq!(at(5.0, 20.0, false), Some(("user/a".into(), "0".into())));
         // Over the group: into it, between its buttons.
         assert_eq!(at(70.0, 20.0, false), Some(("user/a".into(), "1.0".into())));
-        assert_eq!(at(130.0, 20.0, false), Some(("user/a".into(), "1.2".into())));
+        assert_eq!(
+            at(130.0, 20.0, false),
+            Some(("user/a".into(), "1.2".into()))
+        );
         // A group itself goes beside it.
         assert_eq!(at(130.0, 20.0, true), Some(("user/a".into(), "2".into())));
         assert_eq!(at(390.0, 20.0, false), Some(("user/a".into(), "3".into())));
         // An empty toolbar: its start.
-        assert_eq!(at(200.0, 120.0, false), Some(("user/empty".into(), "0".into())));
+        assert_eq!(
+            at(200.0, 120.0, false),
+            Some(("user/empty".into(), "0".into()))
+        );
         // Off every toolbar: nowhere.
         assert_eq!(at(200.0, 80.0, false), None);
     }

@@ -685,7 +685,8 @@ pub fn use_tab_badges(host: &Host) {
             // Read in the tab's render: it draws again as they change.
             let _ = revision();
             let (by_kind, by_pane) = (Target::tab(kind), Target::tab(pane));
-            if host.decorations_of(&by_kind).is_empty() && host.decorations_of(&by_pane).is_empty() {
+            if host.decorations_of(&by_kind).is_empty() && host.decorations_of(&by_pane).is_empty()
+            {
                 return None;
             }
             Some(rsx! {

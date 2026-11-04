@@ -177,7 +177,9 @@ fn build() -> String {
     // The whole group, by its grip, past the widget.
     s.push_str(&format!(
         "    {{id regroup, target {}, do @drag{{to {}, edge right}}, {}}}\n",
-        css(&format!("[data-edit-item=\"{KEY}#0\"] [data-group-grip=\"0\"]")),
+        css(&format!(
+            "[data-edit-item=\"{KEY}#0\"] [data-group-grip=\"0\"]"
+        )),
         item("1"),
         holds("{items ({kind widget} {kind group})}")
     ));
@@ -271,7 +273,8 @@ fn play(name: &str, folder: &Path, steps: &str) -> String {
         "id toolbar-editor-{name}\ntitle \"{name}\"\nview {{width 1440, height 860}}\n\
          capture {{fps 10, width 960}}\nsteps (\n{steps}    {{\n        id end\n        hold 0.5\n    }}\n)\n"
     );
-    let scenario = architect_guide::load(&source).unwrap_or_else(|e| panic!("{name}: {e}\n{source}"));
+    let scenario =
+        architect_guide::load(&source).unwrap_or_else(|e| panic!("{name}: {e}\n{source}"));
     // SAFETY: the only test in this binary sets it, between runs, before
     // the lab (and its threads) start.
     unsafe { std::env::set_var("ARCHITECT_LAB_CONFIG_DIR", folder) };
@@ -314,10 +317,21 @@ fn a_toolbar_built_from_empty_in_the_editor_survives_a_restart() {
     // Written: the file, and a backup of each write before it.
     let file = folder.path().join("toolbars/user-toolbar.toml");
     let text = std::fs::read_to_string(&file).unwrap();
-    assert!(text.contains("lab.board/tempo") && text.contains("icons/star.svg"), "{text}");
-    assert!(folder.path().join("toolbars/.backups/user-toolbar.1.toml").exists());
+    assert!(
+        text.contains("lab.board/tempo") && text.contains("icons/star.svg"),
+        "{text}"
+    );
+    assert!(
+        folder
+            .path()
+            .join("toolbars/.backups/user-toolbar.1.toml")
+            .exists()
+    );
     // Drawn as built: the widget, then the group (its pin's image, its fill).
-    assert!(built.contains(r#"data-widget="lab.board/tempo""#), "{built}");
+    assert!(
+        built.contains(r#"data-widget="lab.board/tempo""#),
+        "{built}"
+    );
     assert!(built.contains("data:image/svg+xml;base64,"), "{built}");
     assert!(built.contains("var(--primary"), "{built}");
     assert!(!built.contains("data-insert-at"), "not editing: {built}");
@@ -335,6 +349,10 @@ fn a_toolbar_built_from_empty_in_the_editor_survives_a_restart() {
 
     let editing = play("editing", folder.path(), &editing());
     assert!(editing.contains(r#"data-editing="true""#), "{editing}");
-    assert_eq!(editing.matches("data-insert-at=").count(), 3, "a chip before each item and one at the end: {editing}");
+    assert_eq!(
+        editing.matches("data-insert-at=").count(),
+        3,
+        "a chip before each item and one at the end: {editing}"
+    );
     matches_golden("editing", &editing);
 }

@@ -773,7 +773,10 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         // The Vault's file tree has a context menu of its own: a file's.
         host.declare_context_targets(
             "lab.vault",
-            &[("file", "a file-tree row; its id the file's path, `file:<ext>` one extension's")],
+            &[(
+                "file",
+                "a file-tree row; its id the file's path, `file:<ext>` one extension's",
+            )],
         );
         // The host service: consent kept on this device (an installed
         // extension runs with what the person granted), each one's data

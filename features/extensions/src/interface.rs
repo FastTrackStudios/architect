@@ -445,21 +445,19 @@ pub fn use_extension_ui(host: Host, app: Arc<ActionList>) -> ExtensionUi {
         ContextEntries::new(move |target, id| {
             // The toolbars' own rows first (`toolbar`, `toolbar-item`).
             let mut rows = crate::toolbar_ui::context_rows(&bars_host, target, id);
-            rows.extend(reg.context(target, id)
-                .into_iter()
-                .filter_map(|by| {
-                    let info = list.info(&by.item.action)?;
-                    let label = if by.item.title.is_empty() {
-                        info.display_name
-                    } else {
-                        by.item.title.clone()
-                    };
-                    Some(ContextEntry {
-                        label,
-                        command: by.item.action,
-                        checked: info.checked,
-                    })
-                }));
+            rows.extend(reg.context(target, id).into_iter().filter_map(|by| {
+                let info = list.info(&by.item.action)?;
+                let label = if by.item.title.is_empty() {
+                    info.display_name
+                } else {
+                    by.item.title.clone()
+                };
+                Some(ContextEntry {
+                    label,
+                    command: by.item.action,
+                    checked: info.checked,
+                })
+            }));
             rows
         })
     });
