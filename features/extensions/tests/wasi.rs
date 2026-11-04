@@ -222,6 +222,9 @@ params = '{"type":"object","properties":{"id":{"type":"integer"},"n":{"type":"in
 id = "TEST_HAZARDS_STALL"
 name = "Keep busy"
 params = '{"type":"object","properties":{"ms":{"type":"integer"}}}'
+[[actions]]
+id = "TEST_HAZARDS_ASK"
+name = "Use the app's interface"
 [[workers]]
 id = "forever"
 entry = "forever"
@@ -569,6 +572,47 @@ fn hazards(runner: WasiRunner, tmp: &Path) -> App {
         &package(tmp, "hazards", HAZARDS_MANIFEST, HAZARDS_WASM),
     );
     app
+}
+
+/// The app's interface (#306), through the world's typed imports: a
+/// notification, the clipboard there and back, a picker's, a prompt's
+/// and a menu's answers, a badge; refused without `capabilities.ui`.
+#[test]
+fn a_component_notifies_copies_asks_and_gets_the_answers_back() {
+    if guests().is_none() {
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let ui = architect_extensions::hostui::FakeUi::new()
+        .answer(json!("/tmp/picked.csv"))
+        .answer(json!("Ada"));
+    let app = app(Limits::default(), &tmp.path().join("cache"));
+    app.host.set_ui(std::sync::Arc::new(ui.clone()));
+    let manifest = HAZARDS_MANIFEST.replace(
+        "[wasm]",
+        "[capabilities]\nui = [\"notify\", \"clipboard\", \"pickers\", \"prompts\", \"menus\", \"badges\"]\n[wasm]",
+    );
+    load(&app, &package(tmp.path(), "hazards", &manifest, HAZARDS_WASM));
+    let out = run(&app, "TEST_HAZARDS_ASK", &Value::Null).unwrap();
+    assert_eq!(
+        out,
+        json!({ "clip": "copied by WASI", "path": "/tmp/picked.csv", "name": "Ada", "chosen": "go" })
+    );
+    assert_eq!(ui.notices()[0].text, "hello from WASI");
+    assert_eq!(ui.notices()[0].kind, "success");
+    assert_eq!(ui.clipboard().as_deref(), Some("copied by WASI"));
+    let badge = app.host.decorations_of(&architect_extensions::hostcall::Target::file("notes/a.md"));
+    assert_eq!(badge[0].decoration.badge.as_deref(), Some("W"));
+
+    // Without `capabilities.ui`: refused, at the first call.
+    let bare = tmp.path().join("bare");
+    let app = app_with(WasiRunner::new(), &bare.join("cache"));
+    let ui = architect_extensions::hostui::FakeUi::new();
+    app.host.set_ui(std::sync::Arc::new(ui.clone()));
+    load(&app, &package(&bare, "hazards", HAZARDS_MANIFEST, HAZARDS_WASM));
+    let why = failed(run(&app, "TEST_HAZARDS_ASK", &Value::Null).unwrap_err());
+    assert!(why.contains("refused") && why.contains("notify"), "{why}");
+    assert!(ui.notices().is_empty());
 }
 
 #[test]

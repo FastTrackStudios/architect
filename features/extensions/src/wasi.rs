@@ -10,7 +10,9 @@
 //! `architect:extension` world (`features/extensions/wit/extension.wit`):
 //!
 //! - **imports**: the host service (`run-action`, `setting`,
-//!   `set-setting`, `theme`, `log`, `call-service`, and `call` for every
+//!   `set-setting`, `theme`, `log`, `call-service`, the interface's
+//!   `notify`, `clipboard-read`, `clipboard-write`, `pick`, `prompt`,
+//!   `menu` and `decorate`, and `call` for every
 //!   `hostcall::HostRequest`), each call answered by the extension's own
 //!   [`ExtensionApi`] — so checked against its capabilities as a person
 //!   granted them, as a process's, a script's and a linked extension's
@@ -416,6 +418,36 @@ impl State {
     }
 }
 
+impl State {
+    /// `request`, refused in a worker: its answer, or the error as JSON.
+    async fn ask(&mut self, request: HostRequest) -> Result<Json, String> {
+        if let Some(no) = self.worker_refusal() {
+            return Err(no);
+        }
+        self.host(request).await.map_err(|e| error_json(&e))
+    }
+
+    /// Request `op` from its fields as JSON text: its answer as JSON text.
+    async fn ask_json(&mut self, op: &str, fields: &str) -> Result<String, String> {
+        let mut v = json_arg(fields);
+        if v.is_null() {
+            v = Json::Object(serde_json::Map::new());
+        }
+        let request = if let Json::Object(map) = &mut v {
+            map.insert("op".to_owned(), Json::String(op.to_owned()));
+            serde_json::from_value::<HostRequest>(v).map_err(|e| e.to_string())
+        } else {
+            Err("its fields are a JSON object".to_owned())
+        };
+        let request = request.map_err(|message| {
+            error_json(&HostError::Failed {
+                message: format!("not a {op} request: {message}"),
+            })
+        })?;
+        self.ask(request).await.map(|v| v.to_string())
+    }
+}
+
 fn json_arg(text: &str) -> Json {
     if text.trim().is_empty() {
         return Json::Null;
@@ -513,6 +545,62 @@ impl wit_host::Host for State {
         .await
         .map(|v| v.to_string())
         .map_err(|e| error_json(&e))
+    }
+
+    async fn notify(&mut self, text: String, kind: String) -> Result<(), String> {
+        self.ask(HostRequest::Notify {
+            text,
+            kind: (!kind.is_empty()).then_some(kind),
+            title: None,
+        })
+        .await
+        .map(|_| ())
+    }
+
+    async fn clipboard_read(&mut self) -> Result<Option<String>, String> {
+        self.ask(HostRequest::ClipboardRead)
+            .await
+            .map(|v| v.as_str().map(str::to_owned))
+    }
+
+    async fn clipboard_write(&mut self, text: String) -> Result<(), String> {
+        self.ask(HostRequest::ClipboardWrite { text })
+            .await
+            .map(|_| ())
+    }
+
+    async fn pick(&mut self, request: String) -> Result<String, String> {
+        self.ask_json("pick", &request).await
+    }
+
+    async fn prompt(&mut self, request: String) -> Result<String, String> {
+        self.ask_json("prompt", &request).await
+    }
+
+    async fn menu(&mut self, request: String) -> Result<String, String> {
+        self.ask_json("menu", &request).await
+    }
+
+    async fn decorate(
+        &mut self,
+        kind: String,
+        id: String,
+        decoration: Option<String>,
+    ) -> Result<(), String> {
+        let decoration = match decoration.map(|d| serde_json::from_str(&d)).transpose() {
+            Ok(d) => d,
+            Err(e) => {
+                return Err(error_json(&HostError::Failed {
+                    message: format!("not a decoration: {e}"),
+                }));
+            }
+        };
+        self.ask(HostRequest::Decorate {
+            target: crate::hostcall::Target { kind, id },
+            decoration,
+        })
+        .await
+        .map(|_| ())
     }
 
     async fn call(&mut self, request: String) -> String {

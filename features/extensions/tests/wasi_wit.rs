@@ -194,6 +194,19 @@ fn the_host_interface_is_the_host_service() {
             "call-service",
             Some(op(r#"{"op":"service","service":"a.b","method":"m"}"#)),
         ),
+        ("notify", Some(op(r#"{"op":"notify","text":"t"}"#))),
+        ("clipboard-read", Some(op(r#"{"op":"clipboard_read"}"#))),
+        (
+            "clipboard-write",
+            Some(op(r#"{"op":"clipboard_write","text":"t"}"#)),
+        ),
+        ("pick", Some(op(r#"{"op":"pick"}"#))),
+        ("prompt", Some(op(r#"{"op":"prompt"}"#))),
+        ("menu", Some(op(r#"{"op":"menu"}"#))),
+        (
+            "decorate",
+            Some(op(r#"{"op":"decorate","target":{"kind":"file","id":"a"}}"#)),
+        ),
         // The theme is the host's to send, no request (a process is sent it).
         ("theme", None),
         // Any request at all.
@@ -206,7 +219,20 @@ fn the_host_interface_is_the_host_service() {
     assert_eq!(got, expected, "the host interface's functions");
     assert_eq!(
         typed.iter().filter_map(|(_, op)| *op).collect::<Vec<_>>(),
-        ["run", "setting", "set_setting", "log", "service"]
+        [
+            "run",
+            "setting",
+            "set_setting",
+            "log",
+            "service",
+            "notify",
+            "clipboard_read",
+            "clipboard_write",
+            "pick",
+            "prompt",
+            "menu",
+            "decorate"
+        ]
     );
 }
 

@@ -434,7 +434,7 @@ pub mod host {
 
     /// Why the host did not do what it was asked: `hostcall::HostError`
     /// (`refused`, `confirmation_required`, `not_loaded`, `not_found`,
-    /// `failed`), as JSON.
+    /// `failed`, `unsupported`), as JSON.
     #[derive(Clone, Debug, PartialEq, Eq)]
     pub struct HostError(pub Json);
 
@@ -575,6 +575,86 @@ pub mod host {
         wit_host::call_service(service, method, &args.to_string())
             .map(|t| json(&t))
             .map_err(|e| HostError::from_text(&e))
+    }
+
+    // ── The app's interface (`capabilities.ui`) ─────────────────────
+
+    /// A notification: `kind` is `info`, `success`, `warning` or `error`.
+    ///
+    /// # Errors
+    ///
+    /// Refused (`ui = ["notify"]`).
+    pub fn notify(text: &str, kind: &str) -> Result<(), HostError> {
+        wit_host::notify(text, kind).map_err(|e| HostError::from_text(&e))
+    }
+
+    /// The clipboard's text; none when it holds none.
+    ///
+    /// # Errors
+    ///
+    /// Refused (`ui = ["clipboard"]`), or the app has no clipboard.
+    pub fn clipboard_read() -> Result<Option<String>, HostError> {
+        wit_host::clipboard_read().map_err(|e| HostError::from_text(&e))
+    }
+
+    /// Puts `text` on the clipboard.
+    ///
+    /// # Errors
+    ///
+    /// Refused (`ui = ["clipboard"]`), or the app has no clipboard.
+    pub fn clipboard_write(text: &str) -> Result<(), HostError> {
+        wit_host::clipboard_write(text).map_err(|e| HostError::from_text(&e))
+    }
+
+    /// A file or folder picker, or a save dialog (`request`: `{kind,
+    /// title?, filters?, folder?, name?}`): the path picked (`open_many`:
+    /// a list), `null` when the person cancelled. It waits for them.
+    ///
+    /// # Errors
+    ///
+    /// Refused (`ui = ["pickers"]`), or the app has no pickers.
+    pub fn pick(request: &Json) -> Result<Json, HostError> {
+        wit_host::pick(&request.to_string())
+            .map(|t| json(&t))
+            .map_err(|e| HostError::from_text(&e))
+    }
+
+    /// A question (`request`: `{kind: text | confirm | pick_one, title,
+    /// message?, default?, placeholder?, choices?}`): the answer, `null`
+    /// when cancelled. It waits for the person.
+    ///
+    /// # Errors
+    ///
+    /// Refused (`ui = ["prompts"]`), or the app cannot ask.
+    pub fn prompt(request: &Json) -> Result<Json, HostError> {
+        wit_host::prompt(&request.to_string())
+            .map(|t| json(&t))
+            .map_err(|e| HostError::from_text(&e))
+    }
+
+    /// A context menu of its own items at a point (`request`: `{items:
+    /// [{id, label, icon?, shortcut?, disabled?, separator?}], x?, y?}`):
+    /// the id chosen, `null` when dismissed.
+    ///
+    /// # Errors
+    ///
+    /// Refused (`ui = ["menus"]`), or the app has no menus.
+    pub fn menu(request: &Json) -> Result<Json, HostError> {
+        wit_host::menu(&request.to_string())
+            .map(|t| json(&t))
+            .map_err(|e| HostError::from_text(&e))
+    }
+
+    /// An icon or badge (`decoration`: `{icon?, badge?, color?,
+    /// tooltip?}`) on a file-tree row (`kind` `file`, `id` its path) or a
+    /// tab (`tab`); `None` takes it off.
+    ///
+    /// # Errors
+    ///
+    /// Refused (`ui = ["badges"]`).
+    pub fn decorate(kind: &str, id: &str, decoration: Option<&Json>) -> Result<(), HostError> {
+        let decoration = decoration.map(Json::to_string);
+        wit_host::decorate(kind, id, decoration.as_deref()).map_err(|e| HostError::from_text(&e))
     }
 
     /// Any host-service call (`hostcall::HostRequest`: `{"op": "selection"}`,

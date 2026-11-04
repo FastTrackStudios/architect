@@ -4,7 +4,8 @@
 //! Two `#[architect::rpc]` services over facet types:
 //!
 //! - [`PageHost`]: the host service's subset a page has today — the
-//!   Action List, settings, the theme, shared state, notifications —
+//!   Action List, settings, the theme, shared state, notifications, and
+//!   every other host-service call as its extension (`host_call`) —
 //!   with `#[subscribe]` streams for theme changes, live data and worker
 //!   messages.
 //! - [`PageView`]: a page's view — the element tree it renders
@@ -205,6 +206,12 @@ pub mod host {
         async fn set_shared(&self, key: String, value: String) -> Result<(), PageError>;
         /// Shows a notification.
         async fn notify(&self, notice: Notice) -> Result<(), PageError>;
+        /// Any host-service call, as the page's extension: `request` is
+        /// `architect_extensions::hostcall::HostRequest` as JSON (`{"op":
+        /// "clipboard_read"}`, `{"op": "prompt", "kind": "confirm", …}`):
+        /// the clipboard, pickers, prompts, menus, badges. Its answer, as
+        /// JSON (`null` for a cancel); refused outside its capabilities.
+        async fn host_call(&self, request: String) -> Result<String, PageError>;
         /// The theme, on every change.
         #[subscribe]
         fn theme_changes(&self) -> ThemeSnapshot;

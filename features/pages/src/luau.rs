@@ -19,8 +19,11 @@
 //! the action on the app's runtime), `state.get/set` (shared state),
 //! `embed()` (an inline embed's input: `{claim, source, props}`, or nil
 //! in a pane; it renders again when that changes),
-//! `theme.value(name)`, `theme.scheme`, `theme.revision`, `notify(text)`
-//! and `print`. Luau's sandbox holds; each call into the page has
+//! `theme.value(name)`, `theme.scheme`, `theme.revision`, `notify(text)`,
+//! the app's interface as the page's extension (`ui.pick`, `ui.prompt`,
+//! `ui.menu(items, at?)`, `ui.decorate(target, decoration?)`, `ui.call`,
+//! `clipboard.read()`, `clipboard.write(text)`: each waits for its answer;
+//! a cancel is nil) and `print`. Luau's sandbox holds; each call into the page has
 //! [`crate::runner::PageLimits::frame`] before its interrupt stops it.
 //!
 //! **Timers**: `set_timeout(fn, ms)`, `set_interval(fn, ms)`,
@@ -274,6 +277,81 @@ impl LuauEngine {
                 Ok(())
             })?,
         )?;
+        // The app's interface, as the page's extension (capabilities.ui):
+        // each call waits for its answer on the page's thread; a cancel is
+        // nil.
+        let ui = lua.create_table()?;
+        let clipboard = lua.create_table()?;
+        let ask = |op: &'static str, fields: fn(&Lua, mlua::MultiValue) -> mlua::Result<Value>| {
+            let h = Arc::clone(&services.host);
+            lua.create_function(move |lua, args: mlua::MultiValue| {
+                let mut request = fields(lua, args)?;
+                if let Value::Object(map) = &mut request {
+                    map.insert("op".to_owned(), Value::String(op.to_owned()));
+                }
+                let out = futures::executor::block_on(h.host_call(request.to_string()))
+                    .map_err(|e| mlua::Error::runtime(e.to_string()))?;
+                match serde_json::from_str::<Value>(&out).unwrap_or(Value::Null) {
+                    Value::Null => Ok(LuaValue::Nil),
+                    v => lua.to_value(&v),
+                }
+            })
+        };
+        let table = |lua: &Lua, args: mlua::MultiValue| -> mlua::Result<Value> {
+            match args.into_iter().next() {
+                None | Some(LuaValue::Nil) => Ok(Value::Object(serde_json::Map::new())),
+                Some(v) => lua.from_value(v),
+            }
+        };
+        ui.set("pick", ask("pick", table)?)?;
+        ui.set("prompt", ask("prompt", table)?)?;
+        ui.set(
+            "menu",
+            ask("menu", |lua, args| {
+                let mut it = args.into_iter();
+                let items: Value = it.next().map_or(Ok(Value::Null), |v| lua.from_value(v))?;
+                let mut out = it
+                    .next()
+                    .map_or(Ok(Value::Object(serde_json::Map::new())), |v| lua.from_value(v))?;
+                if let Value::Object(map) = &mut out {
+                    map.insert("items".to_owned(), items);
+                }
+                Ok(out)
+            })?,
+        )?;
+        ui.set(
+            "decorate",
+            ask("decorate", |lua, args| {
+                let mut it = args.into_iter();
+                let target: Value = it.next().map_or(Ok(Value::Null), |v| lua.from_value(v))?;
+                let decoration: Value = it.next().map_or(Ok(Value::Null), |v| lua.from_value(v))?;
+                Ok(serde_json::json!({ "target": target, "decoration": decoration }))
+            })?,
+        )?;
+        ui.set(
+            "call",
+            ask("", |lua, args| {
+                args.into_iter()
+                    .next()
+                    .map_or(Ok(Value::Null), |v| lua.from_value(v))
+            })?,
+        )?;
+        clipboard.set(
+            "read",
+            ask("clipboard_read", |_, _| Ok(Value::Object(serde_json::Map::new())))?,
+        )?;
+        clipboard.set(
+            "write",
+            ask("clipboard_write", |lua, args| {
+                let text: String = args
+                    .into_iter()
+                    .next()
+                    .map_or(Ok(String::new()), |v| lua.from_value(v))?;
+                Ok(serde_json::json!({ "text": text }))
+            })?,
+        )?;
+        api.set("ui", ui)?;
+        api.set("clipboard", clipboard)?;
         let (log, ext) = (services.log.clone(), services.extension.clone());
         api.set(
             "print",

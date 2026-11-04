@@ -11,7 +11,17 @@
 //! local bpm = host.service("lab.tempo", "get")    -- a service it [requires], its provider's action
 //! local items = host.point("lab.notes.cards")     -- one of its own points' items
 //! host.window("prefs", true, { tab = "audio" })   -- opens one of its own windows
+//! -- The app's interface (capabilities.ui):
+//! host.notify("Imported 12 notes", "success")     -- ui = ["notify"]
+//! host.clipboard_write("hello"); local t = host.clipboard_read()   -- "clipboard"
+//! local path = host.pick({ kind = "open", filters = {{ name = "CSV", extensions = {"csv"} }} })
+//! local name = host.prompt({ kind = "text", title = "Name?", default = "untitled" })
+//! local ok = host.prompt({ kind = "confirm", title = "Replace it?" })
+//! local id = host.menu({ x = 120, y = 80, items = {{ id = "copy", label = "Copy" }} })
+//! host.decorate({ kind = "file", id = "notes/a.md" }, { icon = "star", badge = "3" })
 //! ```
+//!
+//! `pick`, `prompt` and `menu` wait for the person; a cancel is `nil`.
 //!
 //! Each function but `call` raises the host's refusal as the script's
 //! error (`refused (actions): …`), which `pcall` catches.
@@ -42,6 +52,19 @@ fn json_of(lua: &Lua, value: LuaValue) -> mlua::Result<Value> {
     }
 }
 
+/// Request `op` from a table of its fields (`nil`: the defaults).
+fn request_of(lua: &Lua, op: &str, fields: Option<LuaValue>) -> mlua::Result<HostRequest> {
+    let mut v = fields.map_or(Ok(Value::Null), |f| json_of(lua, f))?;
+    if v.is_null() {
+        v = json!({});
+    }
+    let Value::Object(map) = &mut v else {
+        return Err(mlua::Error::runtime(format!("{op}: a table of its fields")));
+    };
+    map.insert("op".to_owned(), Value::String(op.to_owned()));
+    serde_json::from_value(v).map_err(|e| mlua::Error::runtime(format!("{op}: {e}")))
+}
+
 impl Module for HostModule {
     fn global(&self) -> &'static str {
         "host"
@@ -66,6 +89,8 @@ impl Module for HostModule {
                         async move {
                             let request = request?;
                             match api.call(request).await {
+                                // `null` (nothing set, a cancel) is `nil`.
+                                Ok(Value::Null) => Ok(LuaValue::Nil),
                                 Ok(v) => $lua.to_value(&v),
                                 Err(e) => Err(raise(&$lua, e.to_string())),
                             }
@@ -143,6 +168,36 @@ impl Module for HostModule {
                     })
             }
         );
+        op!("notify", (String, Option<String>, Option<String>), |lua, a| Ok(
+            HostRequest::Notify {
+                text: a.0,
+                kind: a.1,
+                title: a.2
+            }
+        ));
+        op!("clipboard_read", (), |lua, _a| Ok(HostRequest::ClipboardRead));
+        op!("clipboard_write", String, |lua, a| Ok(
+            HostRequest::ClipboardWrite { text: a }
+        ));
+        op!("pick", Option<LuaValue>, |lua, a| request_of(
+            &lua, "pick", a
+        ));
+        op!("prompt", LuaValue, |lua, a| request_of(
+            &lua,
+            "prompt",
+            Some(a)
+        ));
+        op!("menu", LuaValue, |lua, a| request_of(&lua, "menu", Some(a)));
+        op!("decorate", (LuaValue, Option<LuaValue>), |lua, a| {
+            let (target, decoration) = a;
+            json_of(&lua, target).and_then(|target| {
+                let decoration = decoration.map_or(Ok(Value::Null), |d| json_of(&lua, d))?;
+                serde_json::from_value(
+                    json!({ "op": "decorate", "target": target, "decoration": decoration }),
+                )
+                .map_err(|e| mlua::Error::runtime(format!("decorate: {e}")))
+            })
+        });
         // The answer as a table, never raised.
         let api = self.api.clone();
         t.set(

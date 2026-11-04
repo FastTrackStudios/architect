@@ -21,10 +21,27 @@ pub const SELECTION: &str = "selection";
 /// The app's documents: open them, read them.
 pub const DOCUMENTS: &str = "documents";
 
+/// What of the app's interface an extension may use
+/// ([`Capabilities::ui`]).
+pub const UI: [&str; 6] = [NOTIFY, CLIPBOARD, PICKERS, PROMPTS, MENUS, BADGES];
+/// Notifications (toasts).
+pub const NOTIFY: &str = "notify";
+/// The clipboard: read it and write it.
+pub const CLIPBOARD: &str = "clipboard";
+/// File and folder pickers, and save dialogs: a file a person picks is
+/// one it may then read (or, saved to, write) for the run.
+pub const PICKERS: &str = "pickers";
+/// Prompts: ask for text, a yes or no, one of a list.
+pub const PROMPTS: &str = "prompts";
+/// A context menu of its own, at a point.
+pub const MENUS: &str = "menus";
+/// Icons and badges on file-tree rows and tabs.
+pub const BADGES: &str = "badges";
+
 /// One thing an extension asks for, in a person's words.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Ask {
-    /// `actions`, `effect`, `hosts`, `folders` or `reads`.
+    /// `actions`, `effect`, `hosts`, `folders`, `reads` or `ui`.
     pub kind: &'static str,
     /// What exactly (`TRANSPORT_`, `api.github.com`, `selection`).
     pub what: String,
@@ -65,6 +82,18 @@ const fn reach_words(r: Reach) -> &'static str {
     }
 }
 
+fn ui_words(u: &str) -> String {
+    match u {
+        NOTIFY => "Show you notifications".to_owned(),
+        CLIPBOARD => "Read and change what you copied".to_owned(),
+        PICKERS => "Ask you to pick files and folders, and where to save".to_owned(),
+        PROMPTS => "Ask you questions".to_owned(),
+        MENUS => "Show menus of its own".to_owned(),
+        BADGES => "Mark files and tabs with icons and badges".to_owned(),
+        other => format!("Use {other}"),
+    }
+}
+
 fn read_words(r: &str) -> String {
     match r {
         ORG => "See which organization you are working in".to_owned(),
@@ -83,6 +112,7 @@ impl Capabilities {
             && self.hosts.is_empty()
             && self.folders.is_empty()
             && self.reads.is_empty()
+            && self.ui.is_empty()
     }
 
     /// Everything it asks for, one line a thing, in the order a prompt
@@ -124,6 +154,13 @@ impl Capabilities {
                 kind: "reads",
                 what: r.clone(),
                 says: read_words(r),
+            });
+        }
+        for u in self.ui.iter().filter(|u| !granted.ui.contains(u)) {
+            out.push(Ask {
+                kind: "ui",
+                what: u.clone(),
+                says: ui_words(u),
             });
         }
         for f in self
@@ -199,6 +236,12 @@ impl Capabilities {
                 .filter(|r| granted.reads.contains(r))
                 .cloned()
                 .collect(),
+            ui: self
+                .ui
+                .iter()
+                .filter(|u| granted.ui.contains(u))
+                .cloned()
+                .collect(),
         }
     }
 
@@ -242,6 +285,12 @@ impl Capabilities {
     #[must_use]
     pub fn may_read(&self, what: &str) -> bool {
         self.reads.iter().any(|r| r == what)
+    }
+
+    /// Whether it may use `what` of the app's interface ([`UI`]).
+    #[must_use]
+    pub fn may_use(&self, what: &str) -> bool {
+        self.ui.iter().any(|u| u == what)
     }
 
     /// Whether it may reach `folder` (an absolute path, `~` already
@@ -320,5 +369,31 @@ mod tests {
             asks.within(&Capabilities::default()).asks_nothing(),
             "nothing granted"
         );
+    }
+
+    #[test]
+    fn the_interface_it_uses_is_asked_for_and_granted_one_by_one() {
+        let asks = Capabilities {
+            ui: vec!["notify".to_owned(), "clipboard".to_owned()],
+            ..Capabilities::default()
+        };
+        assert!(!asks.asks_nothing());
+        let said: Vec<(&str, String)> = asks
+            .asks()
+            .into_iter()
+            .map(|a| (a.kind, a.what))
+            .collect();
+        assert_eq!(
+            said,
+            vec![("ui", "notify".to_owned()), ("ui", "clipboard".to_owned())]
+        );
+        let granted = Capabilities {
+            ui: vec!["notify".to_owned()],
+            ..Capabilities::default()
+        };
+        let may = asks.within(&granted);
+        assert!(may.may_use("notify"));
+        assert!(!may.may_use("clipboard"), "not granted");
+        assert_eq!(asks.grows_from(&granted).len(), 1);
     }
 }

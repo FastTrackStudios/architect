@@ -79,6 +79,8 @@ pub mod host_proto;
 #[cfg(feature = "host")]
 pub mod hostapi;
 #[cfg(feature = "host")]
+pub mod hostui;
+#[cfg(feature = "host")]
 pub mod install;
 #[cfg(feature = "ui")]
 pub mod interface;

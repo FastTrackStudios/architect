@@ -60,7 +60,7 @@ const WORKER_PRELUDE: &str = include_str!("worker.js");
 /// `import … from "architect"`.
 const ARCHITECT: &str = "const a = globalThis.__architect.api;\n\
 export const { h, Fragment, useState, useRef, useEffect, useData, useShared, useEmbed, useTheme, invalidate, \
-theme, actions, settings, state, notify, worker, Overlay, host } = a;\nexport default a;\n";
+theme, actions, settings, state, notify, ui, clipboard, worker, Overlay, host } = a;\nexport default a;\n";
 /// `import … from "architect/worker"`.
 const ARCHITECT_WORKER: &str = "const w = globalThis.__worker.api;\n\
 export const { args, post, onMessage } = w;\nexport default w;\n";
@@ -707,6 +707,7 @@ fn start_call(services: &Services, id: u32, kind: String, a: String, b: String) 
                     .and_then(|v| serde_json::to_string(&v).map_err(|e| failed(&e))),
                 "setting" => host.setting(a).await,
                 "set_setting" => host.set_setting(a, b).await.map(|()| String::new()),
+                "host" => host.host_call(a).await,
                 other => Err(crate::api::PageError::Unknown(format!(
                     "no host call {other}"
                 ))),
