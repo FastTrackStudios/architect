@@ -132,6 +132,11 @@ its tabs back to the main one.
 - `features/workspace/tests/windows.rs`: one document's signal redraws
   another; a pop-out opens and gives its tabs back; a kept layout comes back
   on mount; a pane's status items.
+- `features/workspace/tests/popout_theme.rs`: a pop-out follows every theme
+  change after it opens: its chrome (the host's `ShellTheme`, a signal it
+  shares with the main window) and the theme's CSS variables (the main
+  window's `:root` sheet, `architect_theme::RootCss`, set on the pop-out's
+  root element).
 - `features/workspace/tests/inner_html.rs`: a window's document
   (`native::document_config`, the main window's and every pop-out's) parses
   `dangerous_inner_html` into nodes.

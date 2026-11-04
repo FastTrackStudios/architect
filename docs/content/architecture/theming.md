@@ -311,6 +311,12 @@ next turn. Below it:
 
 - `AppShell` with no `theme` prop follows the store
   (`ShellTheme::from_resolved`). `WorkspaceView` takes the shell's.
+- A pop-out window (`features/workspace/src/host/windows.rs`
+  `PopoutView`) is a document of its own: it shares the main window's
+  `ShellTheme` signal, gets the store's `ThemeHandle` and the `:root`
+  sheet (`RootCss`) through its `Bridge`, and sets that sheet's variables
+  on its root element, so every change reaches it, not only the theme it
+  opened with (`features/workspace/tests/popout_theme.rs`).
 - `ThemeStoreProvider` is architect-ui's `ThemeProvider` whose CSS
   variables are the store's (`ThemeState::from_resolved`).
 - `PaintPane` gives its view the whole resolved theme as `ThemeTokens`

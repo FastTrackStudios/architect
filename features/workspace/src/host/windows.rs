@@ -208,7 +208,8 @@ pub(super) struct PopoutProps {
     window: WindowId,
     workspace: Signal<Workspace>,
     views: Views,
-    theme: ShellTheme,
+    /// The main window's colours, live: a theme change reaches the pop-out.
+    theme: Signal<ShellTheme>,
     sizes: Sizes,
     status: Signal<Vec<(PaneId, u64, Vec<StatusItem>)>>,
     status_serial: CopyValue<u64>,
@@ -234,11 +235,15 @@ impl PartialEq for PopoutProps {
 #[component]
 pub(super) fn PopoutSync(bridge: Bridge) -> Element {
     let host = use_host();
-    // The contexts every view may read, and the app's own.
+    // The contexts every view may read, and the app's own. The theme's
+    // are signals: a pop-out follows every change, not the theme it
+    // opened with.
     let carried = use_hook(|| {
         Bridge::new()
             .context::<Signal<architect_shell::Shell>>()
             .context::<architect_commands::Commands>()
+            .context::<architect_theme::ThemeHandle>()
+            .context::<architect_theme::RootCss>()
             .and(&bridge)
     });
     let opened = use_hook(|| Rc::new(RefCell::new(HashMap::<WindowId, String>::new())));
@@ -276,7 +281,7 @@ pub(super) fn PopoutSync(bridge: Bridge) -> Element {
                 window: id,
                 workspace: host.workspace,
                 views: host.views.peek().clone(),
-                theme: host.theme.peek().clone(),
+                theme: host.theme,
                 sizes: *host.sizes.peek(),
                 status: host.status,
                 status_serial: host.status_serial,
@@ -345,7 +350,7 @@ fn PopoutView(props: PopoutProps) -> Element {
         views: CopyValue::new(props.views.clone()),
         commands: CopyValue::new(props.commands.clone()),
         on_command: CopyValue::new(None),
-        theme: Signal::new(props.theme.clone()),
+        theme: props.theme,
         sizes: Signal::new(props.sizes),
         phone: Signal::new(false),
         title_row: Signal::new(None),
@@ -392,7 +397,13 @@ fn PopoutView(props: PopoutProps) -> Element {
     });
     use_release_outside(host);
     let mut host = host;
-    let t = props.theme;
+    let t = host.theme.read().clone();
+    // The theme's CSS variables, which the main window's sheet sets on its
+    // `:root`: this document has its own root, so they go on its element,
+    // where every view in the window inherits them.
+    let vars = architect_theme::try_use_root_css()
+        .map(|css| root_declarations(&css.read()).to_owned())
+        .unwrap_or_default();
     let w = host.workspace.read();
     let index = host.window_index(&w);
     let window = index.and_then(|i| w.windows.get(i));
@@ -423,7 +434,7 @@ fn PopoutView(props: PopoutProps) -> Element {
         div {
             style: "position:relative; width:100vw; height:100vh; min-width:0; min-height:0; \
                     display:flex; overflow:hidden; background:{t.desk}; color:{t.ink}; \
-                    font-family:{t.font}; font-size:13px;",
+                    font-family:{t.font}; font-size:13px; {vars}",
             tabindex: "0",
             onmounted: move |e| {
                 host.mount(Mount::Host, e.data());
@@ -462,6 +473,17 @@ fn PopoutView(props: PopoutProps) -> Element {
             MenuLayer {}
         }
     }
+}
+
+/// The declarations of a `:root { … }` sheet ([`architect_theme::RootCss`]),
+/// for an element's own `style`; empty when it is not one.
+fn root_declarations(css: &str) -> &str {
+    css.trim()
+        .strip_prefix(":root")
+        .map(str::trim_start)
+        .and_then(|rest| rest.strip_prefix('{'))
+        .and_then(|rest| rest.trim_end().strip_suffix('}'))
+        .map_or("", str::trim)
 }
 
 /// How a dock filling a window lays out its ribbon and its groups.

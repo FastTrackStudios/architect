@@ -136,6 +136,10 @@ required-features = ["native"]
 name = "inner_html"
 required-features = ["native"]
 
+[[test]]
+name = "popout_theme"
+required-features = ["native"]
+
 [lints]
 workspace = true
 
