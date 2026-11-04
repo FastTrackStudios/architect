@@ -1,11 +1,13 @@
 //! The lab's extensions: the metronome, a real one
-//! (`apps/lab/extensions/metronome`), installed from the lab's registry
+//! (`apps/lab/extensions/metronome`), run from the lab's registry
 //! (`apps/lab/extensions`, found above the working directory, or at
-//! `ARCHITECT_LAB_EXTENSIONS`) when the Workspace page's switch turns it
-//! on, and turned off when it goes off. Loaded, its section is on the
-//! settings page and its action in ⌘K; a save to its files reloads it.
-//! With no registry to be found (a phone), the copy linked into the build
-//! runs.
+//! `ARCHITECT_LAB_EXTENSIONS`) as a development copy when the Workspace
+//! page's switch turns it on, and turned off when it goes off. A
+//! development copy runs with what it asks, so there is no prompt (an
+//! installed one would wait for the person's yes). Loaded, its section is
+//! on the settings page and its action in ⌘K; a save to its files reloads
+//! it. With no registry to be found (a phone), the copy linked into the
+//! build runs.
 //!
 //! The clicker (`apps/lab/clicker`) is a process extension: when its
 //! program was built beside the lab's, it runs as a development copy and
@@ -40,6 +42,7 @@ use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 use std::time::Duration;
 
 use architect::action::{ActionList, ActionMeta, Effect};
+use architect_extensions::Package;
 use architect_extensions::browse::Browse;
 use architect_extensions::consent::Grants;
 use architect_extensions::extensions::Extensions;
@@ -51,11 +54,13 @@ use architect_extensions::manager::extension::ManagerExtension;
 use architect_extensions::manager::{Manager, kinds};
 use architect_extensions::process::{ProcessRunner, Processes};
 use architect_extensions::ui::use_extension_sections;
-use architect_extensions::{Package, VersionReq};
 use dioxus::prelude::*;
 use facet::Facet;
 
 const METRONOME: &str = "fts.metronome";
+
+/// The metronome's folder in the lab's registry.
+const METRONOME_DIR: &str = "metronome";
 
 /// The clicker's id, as the Vault's pane names it.
 pub const CLICKER: &str = "lab.clicker";
@@ -641,7 +646,7 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
     let meters = use_context_provider(|| {
         architect_workspace::Meters::new().with_report(Arc::new(LogSlowViews))
     });
-    let (extensions, from_registry) = use_hook(|| {
+    let extensions = use_hook(|| {
         // The kinds its views may be: Frame's surface besides Dioxus.
         let mut host =
             Host::new((*list).clone(), sections.clone()).with_view_kinds(crate::embedded::kinds());
@@ -708,22 +713,28 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         Extensions::confirm_on(&lab);
         // Off until the switch says otherwise.
         let _ = extensions.disable(METRONOME);
-        for dir in clicker.into_iter().chain(frame).chain(board_dev(&root)) {
+        // The metronome from the registry is a development copy: it runs
+        // with what it asks, where an installed one waits for a yes.
+        let metronome_dir = found
+            .as_ref()
+            .map(|dir| dir.join(METRONOME_DIR))
+            .filter(|dir| dir.join("extension.toml").is_file());
+        for dir in clicker
+            .into_iter()
+            .chain(frame)
+            .chain(board_dev(&root))
+            .chain(metronome_dir)
+        {
             let _ = extensions.dev(dir);
         }
         let _ = extensions.sync();
         // After the first load: the linked manager's MANAGER_* exist now.
         forward(&lab, &list, &FORWARDED);
-        (extensions, found.is_some())
+        extensions
     });
     let follow = extensions.clone();
     use_effect(use_reactive!(|metronome| {
         if metronome {
-            // Installed only with the person's yes: one that asks for
-            // more waits on the extensions page.
-            if from_registry && follow.installs().get(METRONOME).is_none() {
-                let _ = follow.install_with(METRONOME, &VersionReq::STAR, None, "person", false);
-            }
             let _ = follow.enable(METRONOME);
         } else {
             let _ = follow.disable(METRONOME);
