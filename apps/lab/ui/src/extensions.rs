@@ -758,6 +758,11 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         manager.confirm_on(&lab);
     });
     architect_extensions::page::use_manager_page(manager, browse);
+    // Pages: a view drawn from a file — the Board's tab (its
+    // pages/board.tsx, a read-only built-in under the lab's folder), or
+    // an override saved as <lab dir>/pages/<extension>/<view>.tsx.
+    let pages = use_hook(|| lab_pages(&list, &lab, themes.as_ref()));
+    let _ = architect_pages::ui::use_view_pages(pages);
     use_extension_ui(extensions.host().clone(), Arc::clone(&lab))
 }
 
@@ -878,6 +883,44 @@ fn use_settings_bridge(values: &LabValues) {
             }
         }
     });
+}
+
+/// The lab's pages: TSX/JS on `QuickJS` over the extensions' Action List
+/// and the lab's theme, overrides in the lab's folder, the Board's page
+/// as a built-in, the page types written for an editor, `PAGES_*` on the
+/// lab's list.
+fn lab_pages(
+    list: &ActionList,
+    lab: &ActionList,
+    themes: Option<&architect_theme::ThemeStore>,
+) -> architect_pages::runner::Pages {
+    use architect_pages::files::{Origin, PageFile, write_builtin};
+    let root = architect::settings::app_dir("architect-lab")
+        .unwrap_or_else(|_| std::env::temp_dir().join("architect-lab"));
+    let mut host = architect_pages::host::AppHost::new(list.clone());
+    if let Some(store) = themes {
+        host = host.with_theme(Arc::new(store.clone()));
+    }
+    let pages = architect_pages::runner::Pages::new(host)
+        .with_app_dir(&root)
+        .with_js()
+        .with_luau();
+    // The page API's types, for an editor: the seam the generated guide
+    // (#270) will call on every start.
+    if let Err(e) = architect_pages::codegen::write_types(&root) {
+        tracing::warn!(error = %e, "the page types were not written");
+    }
+    let id = architect_lab_board::ID;
+    match write_builtin(&root, id, architect_lab_board::PAGES) {
+        Ok(dir) => {
+            if let Some(page) = PageFile::new(dir.join("board.tsx"), Origin::Builtin) {
+                pages.declare(id, "board", page);
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "the Board's page was not written"),
+    }
+    let _ = architect_pages::actions::install(lab, &pages);
+    pages
 }
 
 /// Tells the log when an extension view turns slow or busy, and when it

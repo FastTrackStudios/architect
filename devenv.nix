@@ -45,6 +45,8 @@ in
     gifski
     # `just ui-css` / `just auth-ui-css`: the committed utility sheets.
     tailwindcss_4
+    # `just test` and main CI's test job (.github/workflows/checks.yml).
+    cargo-nextest
   ]);
 
   # Point the loader at the libraries the linker found, so a desktop test

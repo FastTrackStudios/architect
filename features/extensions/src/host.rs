@@ -347,6 +347,9 @@ impl Runner for LuauRunner {
         if let Some(t) = &self.transactions {
             runtime = runtime.with_transactions(Arc::clone(t));
         }
+        // Its scripts' action calls run on the runtime it was loaded on,
+        // even when a hook fires from a thread with none (the UI's).
+        runtime = runtime.with_dispatch(architect_scripting::vm::Dispatch::here());
         Ok(Box::new(Luau {
             runtime,
             workers: group,

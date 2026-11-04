@@ -19,6 +19,9 @@
 //! of its linked-in copy, or its process's remote view (feature
 //! `remote`), or — once it is unloaded — a placeholder saying so (a view
 //! whose manifest says `on_unload = "close"` has its panes closed).
+//! An app that runs pages provides [`ViewPages`]: a view with a page file
+//! (its manifest's `page`, or an override in the app's folder) is drawn
+//! from that file instead (`architect-pages`).
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -534,6 +537,39 @@ pub fn ExtensionOverlays(ui: ExtensionUi) -> Element {
     }
 }
 
+/// A view's page, as [`ViewPages`] is asked for it.
+#[derive(Clone)]
+pub struct PageAsk {
+    pub extension: String,
+    pub view: String,
+    /// Whether it fills its pane (false: a slot, sized to its content).
+    pub fill: bool,
+    /// Its manifest's `page`, inside `dir`.
+    pub page: Option<String>,
+    /// The extension's folder, when it has one (a linked built-in has none).
+    pub dir: Option<std::path::PathBuf>,
+    /// What its runs may reach: the extension's capabilities.
+    pub gate: architect_scripting::luau::Gate,
+}
+
+impl std::fmt::Debug for PageAsk {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PageAsk")
+            .field("extension", &self.extension)
+            .field("view", &self.view)
+            .field("page", &self.page)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Draws an extension's view from a page file when there is one for it.
+///
+/// `architect-pages` provides it; `None` leaves the view as it is.
+/// Reading a signal inside it re-renders the view when that moves (an
+/// override saved or deleted).
+#[derive(Clone)]
+pub struct ViewPages(pub Rc<dyn Fn(&PageAsk) -> Option<Element>>);
+
 /// Extension `extension`'s view `view`: its linked-in component, its
 /// process's remote view, or — when it is not loaded — a placeholder.
 /// It fills its parent (a pane); `fill: false` sizes it to its content
@@ -552,7 +588,7 @@ pub fn ExtensionView(
     };
     let _ = (ui.revision)();
     let host = ui.host();
-    if host.get(&extension).is_none() {
+    let Some(loaded) = host.get(&extension) else {
         let name = extension;
         return rsx! {
             div { style: "{size} display: flex; align-items: center; justify-content: center; padding: 24px; \
@@ -560,6 +596,33 @@ pub fn ExtensionView(
                 "{name} is not loaded: its view comes back when it does."
             }
         };
+    };
+    if let Some(pages) = try_consume_context::<ViewPages>() {
+        let ask = PageAsk {
+            page: loaded
+                .manifest
+                .views
+                .iter()
+                .find(|v| v.id == view)
+                .and_then(|v| v.page.clone()),
+            dir: loaded.dir.clone(),
+            gate: crate::host::gate(&loaded.manifest),
+            extension: extension.clone(),
+            view: view.clone(),
+            fill,
+        };
+        if let Some(page) = (pages.0)(&ask) {
+            // A page is a sub-document, sized by its box: a slot's is a
+            // bar's height, as a process view's.
+            let boxed = if fill {
+                "flex: 1; min-height: 0; display: flex; flex-direction: column;"
+            } else {
+                "flex-shrink: 0; height: 26px; display: flex; flex-direction: column;"
+            };
+            return rsx! {
+                div { style: "{boxed}", {page} }
+            };
+        }
     }
     if let Some(root) = host.linked_view(&extension, &view) {
         return rsx! {

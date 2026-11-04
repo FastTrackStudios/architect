@@ -235,6 +235,13 @@ pub struct ViewDecl {
     /// A frame document in the package that draws it, for a data view.
     #[serde(default)]
     pub document: Option<String>,
+    /// A page file in the package that draws it (`page = "pages/board.tsx"`:
+    /// TSX/JS on `QuickJS`, `.luau` elements or `.a2ui.json`;
+    /// `docs/content/architecture/pages.md`), re-rendered live when it is
+    /// saved. An app that runs pages (`architect-pages`) draws it; one
+    /// that does not draws the extension's own view.
+    #[serde(default)]
+    pub page: Option<String>,
     /// Where it lives: the main area or a dock (`left`, `right`,
     /// `bottom`).
     #[serde(default)]
@@ -671,6 +678,9 @@ impl Manifest {
         for view in &self.views {
             if let Some(doc) = &view.document {
                 inside(doc)?;
+            }
+            if let Some(page) = &view.page {
+                inside(page)?;
             }
         }
         for overlay in &self.overlays {

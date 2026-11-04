@@ -57,10 +57,13 @@ description = "Its link opener: pins the GitHub issue that was clicked."
 group = "Board"
 effect = "mutating"
 
+# The tab is a page file: an app that runs pages (architect-pages) draws
+# pages/board.tsx, live on save; one that does not draws BoardView.
 [[views]]
 id = "board"
 title = "Board"
 icon = "layout-dashboard"
+page = "pages/board.tsx"
 
 [[views]]
 id = "chart"

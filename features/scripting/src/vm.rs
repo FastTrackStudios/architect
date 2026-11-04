@@ -101,6 +101,7 @@ impl Cancel {
         self.0.store(true, Ordering::Relaxed);
     }
 
+    #[must_use]
     pub fn is_set(&self) -> bool {
         self.0.load(Ordering::Relaxed)
     }
@@ -145,6 +146,66 @@ where
     Task { rx, cancel }
 }
 
+/// Where a script's calls into the app run: the app's Tokio runtime.
+///
+/// A script runs on a VM thread with no runtime of its own (`run`, a
+/// live script's thread), so an action that needs one — a timer, a
+/// socket, `tokio::spawn` — would fail there. Its calls go to the
+/// runtime its run was started from (or the one an app named), and the
+/// script awaits the answer over a channel. With no runtime in reach
+/// (a test's `block_on`), a call runs where the script is.
+#[derive(Clone, Debug, Default)]
+pub struct Dispatch(Option<tokio::runtime::Handle>);
+
+impl Dispatch {
+    /// The runtime of the calling thread, if it is in one.
+    #[must_use]
+    pub fn here() -> Self {
+        Self(tokio::runtime::Handle::try_current().ok())
+    }
+
+    /// Calls go to `handle`.
+    #[must_use]
+    pub const fn to(handle: tokio::runtime::Handle) -> Self {
+        Self(Some(handle))
+    }
+
+    /// Whether calls leave the script's thread.
+    #[must_use]
+    pub const fn has_runtime(&self) -> bool {
+        self.0.is_some()
+    }
+
+    /// `call`, on the app's runtime when there is one; its answer comes
+    /// back over a channel. Dropping the future aborts the call.
+    ///
+    /// # Errors
+    ///
+    /// The call panicked or its runtime shut down before it answered.
+    pub async fn call<T, F>(&self, call: F) -> Result<T, String>
+    where
+        T: Send + 'static,
+        F: Future<Output = T> + Send + 'static,
+    {
+        struct Abort(tokio::task::AbortHandle);
+        impl Drop for Abort {
+            fn drop(&mut self) {
+                self.0.abort();
+            }
+        }
+        let Some(handle) = &self.0 else {
+            return Ok(call.await);
+        };
+        let (tx, rx) = oneshot::channel();
+        let task = handle.spawn(async move {
+            let _ = tx.send(call.await);
+        });
+        let _abort = Abort(task.abort_handle());
+        rx.await
+            .map_err(|_| "the app's runtime dropped the call before it answered".to_owned())
+    }
+}
+
 /// A process-wide origin for deadlines kept as atomics.
 fn epoch() -> Instant {
     static EPOCH: OnceLock<Instant> = OnceLock::new();
@@ -179,6 +240,7 @@ pub struct Guard {
 }
 
 impl Guard {
+    #[must_use]
     pub const fn new(limit: u64, cancel: Vec<Cancel>) -> Self {
         Self {
             steps: AtomicU64::new(0),
