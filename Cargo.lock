@@ -5997,7 +5997,7 @@ dependencies = [
 [[package]]
 name = "editor-state"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/editor?rev=554b713a613d24b6deb69168c6e6a80d9da3f11c#554b713a613d24b6deb69168c6e6a80d9da3f11c"
+source = "git+https://www.github.com/FastTrackStudios/editor?rev=9b6ac937836095a9223b523e35dd4646dcdfe97b#9b6ac937836095a9223b523e35dd4646dcdfe97b"
 dependencies = [
  "editor-syntax",
  "ropey",
@@ -6010,7 +6010,7 @@ dependencies = [
 [[package]]
 name = "editor-syntax"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/editor?rev=554b713a613d24b6deb69168c6e6a80d9da3f11c#554b713a613d24b6deb69168c6e6a80d9da3f11c"
+source = "git+https://www.github.com/FastTrackStudios/editor?rev=9b6ac937836095a9223b523e35dd4646dcdfe97b#9b6ac937836095a9223b523e35dd4646dcdfe97b"
 dependencies = [
  "arborium",
  "arborium-theme",
@@ -6020,7 +6020,7 @@ dependencies = [
 [[package]]
 name = "editor-view"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/editor?rev=554b713a613d24b6deb69168c6e6a80d9da3f11c#554b713a613d24b6deb69168c6e6a80d9da3f11c"
+source = "git+https://www.github.com/FastTrackStudios/editor?rev=9b6ac937836095a9223b523e35dd4646dcdfe97b#9b6ac937836095a9223b523e35dd4646dcdfe97b"
 dependencies = [
  "dioxus",
  "editor-state",
@@ -6038,7 +6038,7 @@ dependencies = [
 [[package]]
 name = "editor-vim"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/editor?rev=554b713a613d24b6deb69168c6e6a80d9da3f11c#554b713a613d24b6deb69168c6e6a80d9da3f11c"
+source = "git+https://www.github.com/FastTrackStudios/editor?rev=9b6ac937836095a9223b523e35dd4646dcdfe97b#9b6ac937836095a9223b523e35dd4646dcdfe97b"
 dependencies = [
  "editor-state",
  "tracing",

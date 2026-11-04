@@ -418,6 +418,17 @@ dioxus-native = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.
 dioxus-native-dom = { git = "https://www.github.com/FastTrackStudios/vendor", rev = "25bf4bcdfd0b6acb268ca91a93bc8ff8da683a96" }
 dioxus-vdom = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1" }
 
+# The editor, through Keyflow (the lab's Keyflow chart and source editor,
+# `keyflow-lab`), at FastTrackStudios/editor#25: a click past the end of a
+# line puts the caret at its end on Blitz. Keyflow pins the editor at
+# 554b713; `www.` is the same repository under another source, as a patch
+# needs. Drop this once Keyflow pins a merged editor that has it.
+[patch."https://github.com/FastTrackStudios/editor"]
+editor-state = { git = "https://www.github.com/FastTrackStudios/editor", rev = "9b6ac937836095a9223b523e35dd4646dcdfe97b" }
+editor-syntax = { git = "https://www.github.com/FastTrackStudios/editor", rev = "9b6ac937836095a9223b523e35dd4646dcdfe97b" }
+editor-view = { git = "https://www.github.com/FastTrackStudios/editor", rev = "9b6ac937836095a9223b523e35dd4646dcdfe97b" }
+editor-vim = { git = "https://www.github.com/FastTrackStudios/editor", rev = "9b6ac937836095a9223b523e35dd4646dcdfe97b" }
+
 # ── Lints ─────────────────────────────────────────────────────────────
 [workspace.lints.rust]
 dead_code = "warn"
