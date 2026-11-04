@@ -105,3 +105,4 @@ export type Builder = {
 --   invalidate(): asks for a frame
 --   actions.run(id, args?), state.query(id, args?): as every script
 --   theme.value(name), theme.scheme, theme.revision: the app's theme
+--   embed(): an inline embed's input ({ claim, source, props }), nil in a pane

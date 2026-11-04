@@ -198,10 +198,19 @@ declare module "architect" {
   };
   /** A shared-state key every page of the app sees; setting it renders each that reads it. */
   export function useShared<T>(key: string, initial: T): [T, (value: T) => void];
+  /** An inline embed's input — the claim (`fence:kf`), the block's text, the host's properties — or undefined in a pane; the page renders again when the block changes. */
+  export function useEmbed(): Embed | undefined;
   /** The theme now; the page renders again when it changes. */
   export function useTheme(): Theme;
   /** Asks for a render (after work a handler did not await). */
   export function invalidate(): void;
+
+  /** What a host gives an inline embed. */
+  export interface Embed {
+    readonly claim: string;
+    readonly source: string;
+    readonly props: unknown;
+  }
 
   /** The theme showing: a snapshot, made again only when `revision` moves. */
   export interface Theme {
