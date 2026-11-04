@@ -45,6 +45,14 @@ pub const CONTRIB_WIRE: u32 = 4;
 /// frames alone (never busy).
 pub const ANSWERED_WIRE: u32 = 5;
 
+/// The event a host sends a view's root (element 0) when it draws it as
+/// an inline embed, and again when the block changes.
+///
+/// Its data is a form value, the `contrib::EmbedInput` as JSON. A guest keeps it for
+/// `linked::use_embed` instead of dispatching it; an older guest has no
+/// handler on the root and ignores it, answering with an empty frame.
+pub const EMBED_EVENT: &str = "architect-embed";
+
 /// What a process adds or changes at run time, as it happens (wire 4 on):
 /// its contributions, in place of the ones it sent before, or its runtime
 /// state.

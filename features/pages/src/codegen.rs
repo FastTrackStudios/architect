@@ -210,10 +210,19 @@ export function useData<T = unknown>(id: string, args?: unknown, options?: { eve
 };
 /** A shared-state key every page of the app sees; setting it renders each that reads it. */
 export function useShared<T>(key: string, initial: T): [T, (value: T) => void];
+/** An inline embed's input — the claim (`fence:kf`), the block's text, the host's properties — or undefined in a pane; the page renders again when the block changes. */
+export function useEmbed(): Embed | undefined;
 /** The theme now; the page renders again when it changes. */
 export function useTheme(): Theme;
 /** Asks for a render (after work a handler did not await). */
 export function invalidate(): void;
+
+/** What a host gives an inline embed. */
+export interface Embed {
+  readonly claim: string;
+  readonly source: string;
+  readonly props: unknown;
+}
 
 /** The theme showing: a snapshot, made again only when `revision` moves. */
 export interface Theme {
@@ -335,4 +344,5 @@ export type Builder = {
 --   invalidate(): asks for a frame
 --   actions.run(id, args?), state.query(id, args?): as every script
 --   theme.value(name), theme.scheme, theme.revision: the app's theme
+--   embed(): an inline embed's input ({ claim, source, props }), nil in a pane
 ";

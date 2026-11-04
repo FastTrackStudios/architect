@@ -3,8 +3,10 @@
 //!
 //! openers for files, document kinds and links, document kinds, tabs,
 //! status items, menu and context-menu entries, a phone's action-bar
-//! buttons, hooks, and the shell's slots it fills
-//! (`docs/content/architecture/extensions.md`, "Contributions").
+//! buttons, hooks, the shell's slots it fills, and inline embeds that
+//! draw a claimed block inside a document ([`EmbedDecl`])
+//! (`docs/content/architecture/extensions.md`, "Contributions" and
+//! "Inline embeds").
 //!
 //! A [`Contribution`] is the same data whichever way it arrives: a
 //! manifest's tables (`[[tabs]]`, `[[status]]`, …, read into
@@ -272,6 +274,172 @@ pub struct SlotDecl {
     pub view: String,
 }
 
+/// What an inline embed claims: a fenced block's language, a note's
+/// `type:`, an embed target's type. Matched without regard to case.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct EmbedClaims {
+    /// Fence languages: the first word of a fenced block's info string
+    /// (`kf` for ```` ```kf ````).
+    pub fence: Vec<String>,
+    /// A note's frontmatter `type:` (`song`): the embed draws at the
+    /// note's head.
+    pub note_type: Vec<String>,
+    /// The type of what an embed (`![[…]]`) points at (`setlist`).
+    pub embed_type: Vec<String>,
+}
+
+impl EmbedClaims {
+    /// Whether it claims nothing.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.fence.is_empty() && self.note_type.is_empty() && self.embed_type.is_empty()
+    }
+
+    /// Every claim it makes.
+    #[must_use]
+    pub fn all(&self) -> Vec<Claim> {
+        self.fence
+            .iter()
+            .map(|f| Claim::Fence(f.clone()))
+            .chain(self.note_type.iter().map(|t| Claim::NoteType(t.clone())))
+            .chain(self.embed_type.iter().map(|t| Claim::EmbedType(t.clone())))
+            .collect()
+    }
+}
+
+/// A block of a document an embed may claim
+/// (`docs/content/architecture/extensions.md`, "Inline embeds").
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
+#[serde(tag = "kind", content = "name", rename_all = "snake_case")]
+pub enum Claim {
+    /// A fenced block, by its language (`kf`).
+    Fence(String),
+    /// A note, by its frontmatter `type:` (`song`).
+    NoteType(String),
+    /// An embed's target, by its type (`setlist`).
+    EmbedType(String),
+}
+
+impl Claim {
+    /// Its kind's word: `fence`, `note_type`, `embed_type`.
+    #[must_use]
+    pub const fn kind(&self) -> &'static str {
+        match self {
+            Self::Fence(_) => "fence",
+            Self::NoteType(_) => "note_type",
+            Self::EmbedType(_) => "embed_type",
+        }
+    }
+
+    /// What it names (`kf`, `song`).
+    #[must_use]
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Fence(n) | Self::NoteType(n) | Self::EmbedType(n) => n,
+        }
+    }
+
+    /// A fenced block's claim from its info string (```` ```kf title ````):
+    /// its first word. `None` for a fence with no language.
+    #[must_use]
+    pub fn fence(info: &str) -> Option<Self> {
+        info.split_whitespace()
+            .next()
+            .map(|lang| Self::Fence(lang.to_owned()))
+    }
+
+    /// Reads `fence:kf`, `note_type:song`, `embed_type:setlist`.
+    #[must_use]
+    pub fn parse(text: &str) -> Option<Self> {
+        let (kind, name) = text.split_once(':')?;
+        let name = name.trim();
+        if name.is_empty() {
+            return None;
+        }
+        match kind.trim() {
+            "fence" => Some(Self::Fence(name.to_owned())),
+            "note_type" | "type" => Some(Self::NoteType(name.to_owned())),
+            "embed_type" | "embed" => Some(Self::EmbedType(name.to_owned())),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for Claim {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.kind(), self.name())
+    }
+}
+
+/// An inline embed: one of its views, or a page file, drawn inside a
+/// host's document where a block it claims is, sized to its content.
+///
+/// ```toml
+/// [[embeds]]
+/// id = "kf"
+/// title = "Keyflow chart"
+/// page = "pages/kf.tsx"             # or view = "chart" (one of its [[views]])
+/// claims = { fence = ["kf"], note_type = ["song"] }
+/// max_height = 480                  # past it, the embed scrolls
+/// ```
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct EmbedDecl {
+    /// Unique among its embeds.
+    pub id: String,
+    pub title: String,
+    /// One of its views that draws it (a linked view mounts in the host's
+    /// document; a process's or a page's as a sub-document).
+    pub view: Option<String>,
+    /// A page file in its package that draws it (TSX/JS, `.luau`), as a
+    /// sub-document.
+    pub page: Option<String>,
+    pub claims: EmbedClaims,
+    /// The most it grows to, points; past it the embed scrolls.
+    pub max_height: Option<u32>,
+}
+
+impl EmbedDecl {
+    /// Whether it claims `claim` (any case).
+    #[must_use]
+    pub fn claims(&self, claim: &Claim) -> bool {
+        let list = match claim {
+            Claim::Fence(_) => &self.claims.fence,
+            Claim::NoteType(_) => &self.claims.note_type,
+            Claim::EmbedType(_) => &self.claims.embed_type,
+        };
+        list.iter().any(|n| n.eq_ignore_ascii_case(claim.name()))
+    }
+
+    /// The view name its page and meter go by: its `view`, else
+    /// `embed.<id>`.
+    #[must_use]
+    pub fn view_name(&self) -> String {
+        self.view
+            .clone()
+            .unwrap_or_else(|| format!("embed.{}", self.id))
+    }
+}
+
+/// What a host gives an embed: the claim it drew, the block's text, and
+/// the host's own properties (a note's frontmatter, a fence's info
+/// string), as JSON.
+///
+/// A linked view reads it with
+/// `linked::use_embed`, a process view the same, a page with
+/// `useEmbed()` (Luau: `embed()`).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct EmbedInput {
+    /// The claim, as text (`fence:kf`).
+    pub claim: String,
+    /// The block's text: a fence's body, a note's.
+    pub source: String,
+    /// The host's properties for it (`null` when none).
+    pub props: serde_json::Value,
+}
+
 /// Everything an extension adds to the interface past actions, settings,
 /// views and themes: a manifest's tables, or the same sent at run time.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
@@ -286,6 +454,7 @@ pub struct Contribution {
     pub bar: Vec<BarDecl>,
     pub hooks: Vec<HookDecl>,
     pub slots: Vec<SlotDecl>,
+    pub embeds: Vec<EmbedDecl>,
 }
 
 /// What a contribution is checked against: its owner's namespace and
@@ -351,6 +520,7 @@ impl Contribution {
             bar: join(&self.bar, &other.bar, |b| b.action.clone()),
             hooks: join(&self.hooks, &other.hooks, hook_key),
             slots: join(&self.slots, &other.slots, |s| s.slot.clone()),
+            embeds: join(&self.embeds, &other.embeds, |e| e.id.clone()),
         }
     }
 
@@ -376,6 +546,7 @@ impl Contribution {
         out.extend(self.bar.iter().map(|b| format!("bar:{}", b.action)));
         out.extend(self.hooks.iter().map(|h| format!("hook:{}", hook_key(h))));
         out.extend(self.slots.iter().map(|s| format!("slot:{}", s.slot)));
+        out.extend(self.embeds.iter().map(|e| format!("embed:{}", e.id)));
         out
     }
 
@@ -430,6 +601,7 @@ impl Contribution {
             self.bar.len(),
             self.hooks.len(),
             self.slots.len(),
+            self.embeds.len(),
         ]
         .into_iter()
         .fold(0_usize, usize::saturating_add);
@@ -547,6 +719,33 @@ impl Contribution {
                 return refuse(what, format!("not a slot ({})", SLOTS.join(", ")));
             }
             view(&what, &s.view)?;
+        }
+        for e in &self.embeds {
+            let what = format!("embed {}", e.id);
+            if e.id.is_empty() {
+                return refuse(what, "it needs an id".to_owned());
+            }
+            match (&e.view, &e.page) {
+                (Some(v), None) => view(&what, v)?,
+                (None, Some(page)) => {
+                    if !inside(page) {
+                        return refuse(what, format!("{page} is outside the package"));
+                    }
+                }
+                _ => return refuse(what, "it is drawn by one view or one page".to_owned()),
+            }
+            if e.claims.is_empty() {
+                return refuse(
+                    what,
+                    "it claims nothing (claims = { fence, note_type, embed_type })".to_owned(),
+                );
+            }
+            if e.claims.all().iter().any(|c| c.name().trim().is_empty()) {
+                return refuse(what, "an empty claim".to_owned());
+            }
+            if e.max_height == Some(0) {
+                return refuse(what, "its max_height is 0".to_owned());
+            }
         }
         Ok(())
     }
@@ -1047,6 +1246,18 @@ impl Contributions {
             .collect()
     }
 
+    /// Every inline embed, in the order its owner came.
+    #[must_use]
+    pub fn embeds(&self) -> Vec<By<EmbedDecl>> {
+        self.all(|c| c.embeds.clone())
+    }
+
+    /// The embed that draws `claim`: the first loaded that claims it.
+    #[must_use]
+    pub fn embed_for(&self, claim: &Claim) -> Option<By<EmbedDecl>> {
+        self.embeds().into_iter().find(|e| e.item.claims(claim))
+    }
+
     /// Who fills each slot (an extension's claim, the latest that came
     /// winning): slot → (owner, view).
     #[must_use]
@@ -1433,5 +1644,80 @@ mod tests {
         assert!(!on("tab").on("view:note", "x"));
         assert!(known_target("doc:keyflow.chart"));
         assert!(!known_target("view:"));
+    }
+
+    fn embed(id: &str, view: Option<&str>, page: Option<&str>, fence: &[&str]) -> EmbedDecl {
+        EmbedDecl {
+            id: id.into(),
+            view: view.map(Into::into),
+            page: page.map(Into::into),
+            claims: EmbedClaims {
+                fence: fence.iter().map(|f| (*f).to_owned()).collect(),
+                ..EmbedClaims::default()
+            },
+            ..EmbedDecl::default()
+        }
+    }
+
+    #[test]
+    fn an_embed_is_drawn_by_one_of_its_views_or_a_page_and_claims_something() {
+        let views = vec!["chart".to_owned()];
+        let check = |e: EmbedDecl| {
+            Contribution {
+                embeds: vec![e],
+                ..Contribution::default()
+            }
+            .check(&rules(&views, &[]))
+        };
+        assert!(check(embed("kf", Some("chart"), None, &["kf"])).is_ok());
+        assert!(check(embed("kf", None, Some("pages/kf.tsx"), &["kf"])).is_ok());
+        let why = |e| check(e).unwrap_err().why;
+        assert!(why(embed("kf", Some("nope"), None, &["kf"])).contains("no view"));
+        assert!(why(embed("kf", None, Some("../x.tsx"), &["kf"])).contains("outside"));
+        assert!(why(embed("kf", Some("chart"), Some("p.tsx"), &["kf"])).contains("one view"));
+        assert!(why(embed("kf", Some("chart"), None, &[])).contains("claims nothing"));
+        assert!(why(embed("kf", Some("chart"), None, &[" "])).contains("empty claim"));
+        let mut tall = embed("kf", Some("chart"), None, &["kf"]);
+        tall.max_height = Some(0);
+        assert!(why(tall).contains("max_height"));
+    }
+
+    #[test]
+    fn a_claim_resolves_to_the_first_loaded_embed_and_goes_with_it() {
+        let reg = Contributions::new();
+        let claim = Claim::fence("KF chorus").unwrap();
+        assert_eq!(claim, Claim::Fence("KF".into()));
+        assert_eq!(
+            Claim::parse("note_type:song"),
+            Some(Claim::NoteType("song".into()))
+        );
+        assert_eq!(Claim::parse("fence:"), None);
+        assert_eq!(Claim::NoteType("song".into()).to_string(), "note_type:song");
+        assert!(reg.embed_for(&claim).is_none());
+        reg.put(
+            "a",
+            Contribution {
+                embeds: vec![embed("kf", Some("chart"), None, &["kf"])],
+                ..Contribution::default()
+            },
+        );
+        reg.put(
+            "b",
+            Contribution {
+                embeds: vec![embed("other", Some("x"), None, &["kf", "abc"])],
+                ..Contribution::default()
+            },
+        );
+        assert_eq!(reg.embed_for(&claim).unwrap().owner, "a");
+        assert_eq!(
+            reg.embed_for(&Claim::Fence("abc".into())).unwrap().owner,
+            "b"
+        );
+        assert!(reg.embed_for(&Claim::NoteType("kf".into())).is_none());
+        let gone = reg.withdraw("a");
+        assert_eq!(gone.removed, vec!["embed:kf".to_owned()]);
+        assert_eq!(reg.embed_for(&claim).unwrap().owner, "b");
+        reg.withdraw("b");
+        assert!(reg.embed_for(&claim).is_none());
     }
 }

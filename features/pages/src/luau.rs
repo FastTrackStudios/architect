@@ -17,6 +17,8 @@
 //! `li`, `h1`…`h3`, `el(tag)`, `text(s)`), `render(fn)`, `invalidate()`,
 //! `actions.run(id, args?)` (it waits for the answer on the page's thread,
 //! the action on the app's runtime), `state.get/set` (shared state),
+//! `embed()` (an inline embed's input: `{claim, source, props}`, or nil
+//! in a pane; it renders again when that changes),
 //! `theme.value(name)`, `theme.scheme`, `theme.revision`, `notify(text)`
 //! and `print`. Luau's sandbox holds; each call into the page has
 //! [`crate::runner::PageLimits::frame`] before its interrupt stops it.
@@ -165,6 +167,16 @@ impl LuauEngine {
             })?,
         )?;
         api.set("state", state)?;
+        let embed = services.embed.clone();
+        api.set(
+            "embed",
+            lua.create_function(move |lua, ()| {
+                embed.as_ref().map_or(Ok(LuaValue::Nil), |cell| {
+                    let now = cell.lock().unwrap_or_else(PoisonError::into_inner).clone();
+                    lua.to_value(&now)
+                })
+            })?,
+        )?;
         let h = Arc::clone(&services.host);
         api.set(
             "notify",
@@ -255,8 +267,16 @@ impl Engine for LuauEngine {
         Ok(())
     }
 
-    fn shared(&mut self, _event: &DataEvent) -> Result<(), String> {
-        Ok(())
+    fn shared(&mut self, event: &DataEvent) -> Result<(), String> {
+        if event.topic != crate::runner::EMBED_TOPIC {
+            return Ok(());
+        }
+        // A new input is a new frame.
+        self.lua
+            .globals()
+            .get::<mlua::Function>("invalidate")
+            .and_then(|f| f.call::<()>(()))
+            .map_err(|e| err(&e))
     }
 
     fn worker(&mut self, _message: &WorkerMessage) -> Result<(), String> {

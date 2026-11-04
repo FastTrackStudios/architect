@@ -29,7 +29,7 @@ use architect_extensions::guest::Guest;
 use architect_extensions::host::{Host, LoadError, SharedSections};
 use architect_extensions::process::{ProcessRunner, Processes, Restart, State};
 use architect_extensions::proto::SOCKET;
-use architect_extensions::remote::{RemoteDocument, RemoteView, mounted_views};
+use architect_extensions::remote::{RemoteDocument, RemoteEmbed, RemoteView, mounted_views};
 use architect_extensions::wire::{Edit, Frame, Value};
 use architect_extensions::{Origin, Package};
 use blitz_dom::{BaseDocument, Document, DocumentConfig};
@@ -77,6 +77,21 @@ fn Counter() -> Element {
     }
 }
 
+/// A view drawn as an inline embed: a row 20 points tall for each line
+/// of the block it was given.
+#[component]
+fn Lines() -> Element {
+    let input = architect_extensions::linked::use_embed();
+    let source = input.map(|i| i.source).unwrap_or_default();
+    rsx! {
+        div { id: "lines",
+            for (i, line) in source.lines().enumerate() {
+                div { key: "{i}", class: "line", style: "height: 20px;", "{line}" }
+            }
+        }
+    }
+}
+
 /// Not a test of its own: the extension, when a test starts this binary
 /// as one.
 #[test]
@@ -86,6 +101,7 @@ fn guest() {
     }
     Guest::new()
         .view("counter", Counter)
+        .view("lines", Lines)
         .action(CLICKS, |_| async {
             Ok(json!(CLICKED.load(Ordering::Relaxed)))
         })
@@ -469,4 +485,69 @@ fn a_view_that_sends_nonsense_fails_and_never_takes_the_app_down() {
     for (what, frame) in nonsense {
         assert!(fresh().apply(frame).is_err(), "{what} was applied");
     }
+}
+
+/// The block an embed is given, as the host's note has it.
+static LINES: GlobalSignal<String> = Signal::global(|| "a\nb\nc".to_owned());
+
+/// The app: a note with the process's view inline, as an embed.
+#[allow(non_snake_case)]
+fn Note(props: PaneProps) -> Element {
+    let mut input = use_signal(architect_extensions::EmbedInput::default);
+    use_effect(move || {
+        input.set(architect_extensions::EmbedInput {
+            claim: "fence:lines".to_owned(),
+            source: LINES(),
+            props: serde_json::Value::Null,
+        });
+    });
+    rsx! {
+        div { style: "width: 400px; display: flex; flex-direction: column;",
+            div { id: "embed",
+                RemoteEmbed { processes: props.processes, extension: ID, view: "lines", input, max_height: 120 }
+            }
+        }
+    }
+}
+
+fn embed_height(doc: &BaseDocument) -> f32 {
+    let node = doc.query_selector("#embed").unwrap().unwrap();
+    doc.get_node(node).unwrap().final_layout().size.height
+}
+
+fn lines(doc: &BaseDocument) -> usize {
+    let Some(at) = mounted_views(doc).first().copied() else {
+        return 0;
+    };
+    let view = doc.subdoc(at).unwrap().inner();
+    view.query_selector_all(".line").map_or(0, |l| l.len())
+}
+
+#[test]
+fn a_process_view_inline_as_an_embed_is_given_its_block_and_sized_to_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let (host, processes) = host(dir.path());
+    host.load(&package(dir.path(), &["lines"]), Origin::Installed)
+        .unwrap();
+    let vdom = VirtualDom::new_with_props(Note, PaneProps { processes });
+    let mut doc = DioxusDocument::new(
+        vdom,
+        DocumentConfig {
+            viewport: Some(Viewport::new(800, 600, 1.0, ColorScheme::Dark)),
+            ..Default::default()
+        },
+    );
+    doc.initial_build();
+    pump(&mut doc, "three lines, 60 points tall", |d| {
+        lines(d) == 3 && (embed_height(d) - 60.0).abs() < 0.5
+    });
+    doc.vdom
+        .in_runtime(|| *LINES.write() = "a\nb\nc\nd\ne".to_owned());
+    pump(&mut doc, "five lines, 100 points tall", |d| {
+        lines(d) == 5 && (embed_height(d) - 100.0).abs() < 0.5
+    });
+    doc.vdom.in_runtime(|| *LINES.write() = "x\n".repeat(12));
+    pump(&mut doc, "twelve lines, at most 120 points tall", |d| {
+        lines(d) == 12 && (embed_height(d) - 120.0).abs() < 0.5
+    });
 }

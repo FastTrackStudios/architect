@@ -23,6 +23,15 @@
 //! The applier trusts nothing: an edit naming a node it does not have, a
 //! child that is not there, a move that would make a cycle, or a frame
 //! too large fails the view (the placeholder says so) instead of the app.
+//! [`RemoteEmbed`] mounts the same view inline in a host's document, as
+//! an embed (`crate::embeds`): its sub-document is laid out at the
+//! host's width with its own height left to its content
+//! ([`RemoteDocument::fit_content`]); the host measures that height
+//! ([`RemoteDocument::content_height`], every [`MEASURE_EVERY`]) and sizes
+//! the embed's box to it, up to its `max_height`, past which the
+//! sub-document scrolls. The embed's input reaches the view as
+//! [`crate::wire::EMBED_EVENT`], again whenever it changes.
+//!
 //! Not yet: pointer, touch, wheel and scroll events (Blitz scrolls the
 //! sub-document itself), IME, `mounted` measurements, the shell's
 //! components as named elements, the allowlist of elements and CSS.
@@ -63,6 +72,14 @@ pub const REMOTE_BUDGET: Duration = Duration::from_millis(33);
 /// At most this many edits in one frame.
 const MAX_EDITS: usize = 200_000;
 
+/// How often an embed's content height is looked at.
+pub const MEASURE_EVERY: Duration = Duration::from_millis(50);
+
+/// What an embed's sub-document is styled with: its page as tall as its
+/// content (not the viewport), margins kept inside it, so the host can
+/// measure it.
+const FIT_CSS: &str = "html, body { margin: 0 !important; height: auto !important; }                        main { min-height: 0 !important; height: auto !important; display: flow-root !important; }";
+
 /// The attribute that names a node's Dioxus element id, as Dioxus's own
 /// renderer marks it.
 const DIOXUS_ID: &str = "data-dioxus-id";
@@ -84,6 +101,8 @@ pub struct RemoteDocument {
     events: mpsc::UnboundedSender<ViewEvent>,
     /// The host's theme, as a `<style>` in the head: its text node.
     theme: NodeId,
+    /// Whether it is sized to its content ([`Self::fit_content`]).
+    fitted: bool,
 }
 
 impl std::fmt::Debug for RemoteDocument {
@@ -135,7 +154,40 @@ impl RemoteDocument {
             listeners: HashMap::new(),
             events,
             theme,
+            fitted: false,
         }
+    }
+
+    /// Sizes it to its content, as an inline embed: the page as tall as
+    /// what is in it rather than the viewport, so
+    /// [`Self::content_height`] says how tall to make its box. Once is
+    /// enough.
+    pub fn fit_content(&mut self) {
+        if self.fitted {
+            return;
+        }
+        let head = self
+            .doc
+            .get_node(self.theme)
+            .and_then(|text| text.parent)
+            .and_then(|style| self.doc.get_node(style))
+            .and_then(|style| style.parent);
+        let Some(head) = head else { return };
+        let mut m = self.doc.mutate();
+        let style = m.create_element(qual("style", None), Vec::new());
+        let text = m.create_text_node(FIT_CSS);
+        m.append_children(style, &[text]);
+        m.append_children(head, &[style]);
+        drop(m);
+        self.fitted = true;
+    }
+
+    /// How tall its content is as last laid out, points: its page's
+    /// height. Sized to its content ([`Self::fit_content`]), that is the
+    /// height to give its box.
+    #[must_use]
+    pub fn content_height(&self) -> f32 {
+        self.doc.root_element().final_layout().size.height
     }
 
     /// Sets the host's theme for the view: CSS (the host's `:root`
@@ -649,6 +701,7 @@ async fn follow(
     mut retry: mpsc::UnboundedReceiver<()>,
     theme: Option<Signal<String>>,
     mut timing: Timing,
+    fit: Option<Fit>,
 ) {
     loop {
         let Some(process) = processes.get(&extension) else {
@@ -713,14 +766,23 @@ async fn follow(
                 }
             })
         };
+        let to_view = events.clone();
         with_doc(&node, |doc, at| {
             let mut remote = RemoteDocument::new(events);
             if let Some(css) = theme {
                 remote.set_theme_css(&css.peek());
             }
+            if fit.is_some() {
+                remote.fit_content();
+            }
             doc.set_sub_document(at, Box::new(remote));
         })
         .await;
+        // An embed's input: now, and whenever it changes.
+        if let Some(fit) = &fit {
+            let _ = to_view.unbounded_send(embed_event(&fit.latest.borrow()));
+            *fit.live.borrow_mut() = Some(to_view);
+        }
         let mut failed = None;
         while let Some(frame) =
             next_frame(&mut session.frames, &asked, &mut was_asked, &mut timing).await
@@ -761,6 +823,9 @@ async fn follow(
             }
         }
         forwarding.cancel();
+        if let Some(fit) = &fit {
+            fit.live.borrow_mut().take();
+        }
         drop(session);
         if *timing.busy.peek() {
             timing.busy.set(false);
@@ -851,6 +916,79 @@ async fn next_frame(
 /// busy.
 #[component]
 pub fn RemoteView(processes: Processes, extension: String, view: String) -> Element {
+    rsx! {
+        Mount { processes, extension, view, input: None, max_height: None }
+    }
+}
+
+/// A process extension's view `view` inline in a host's document, as an
+/// embed (`crate::embeds::EmbedView` mounts it): as wide as its parent,
+/// as tall as its content up to `max_height` points (then it scrolls),
+/// given `input` (its `linked::use_embed`) now and on every change.
+#[component]
+pub fn RemoteEmbed(
+    processes: Processes,
+    extension: String,
+    view: String,
+    input: Signal<crate::contrib::EmbedInput>,
+    #[props(default = crate::embeds::DEFAULT_MAX_HEIGHT)] max_height: u32,
+) -> Element {
+    rsx! {
+        Mount { processes, extension, view, input: Some(input), max_height: Some(max_height) }
+    }
+}
+
+/// An embed's input, shared between its component and its view's
+/// session: the latest, and where to send it while a session is open.
+#[derive(Clone)]
+struct Fit {
+    latest: Rc<RefCell<crate::contrib::EmbedInput>>,
+    live: Rc<RefCell<Option<mpsc::UnboundedSender<ViewEvent>>>>,
+}
+
+/// The [`crate::wire::EMBED_EVENT`] that carries `input`.
+fn embed_event(input: &crate::contrib::EmbedInput) -> ViewEvent {
+    ViewEvent {
+        element: 0,
+        name: crate::wire::EMBED_EVENT.to_owned(),
+        bubbles: false,
+        data: EventData::Form(serde_json::to_string(input).unwrap_or_default()),
+    }
+}
+
+/// The height an embed's box shows: its content's, at least
+/// [`crate::embeds::MIN_HEIGHT`], at most `max`.
+#[must_use]
+pub fn embed_height(content: f32, max: u32) -> f32 {
+    let min = crate::embeds::MIN_HEIGHT;
+    let max = f32::from(u16::try_from(max).unwrap_or(u16::MAX));
+    content.clamp(min, max.max(min))
+}
+
+/// Looks at the content height of the sub-document in `node` every
+/// [`MEASURE_EVERY`], into `height` when it moves.
+async fn measure(node: NodeHandle, mut height: Signal<f32>) {
+    loop {
+        let now = with_doc(&node, |doc, at| remote(doc, at).map(|r| r.content_height())).await;
+        if let Some(h) = now
+            && (h - *height.peek()).abs() > 0.5
+        {
+            height.set(h);
+        }
+        futures_timer::Delay::new(MEASURE_EVERY).await;
+    }
+}
+
+/// A process view in a pane (filling it) or, given an input, inline as
+/// an embed (content-sized).
+#[component]
+fn Mount(
+    processes: Processes,
+    extension: String,
+    view: String,
+    input: Option<Signal<crate::contrib::EmbedInput>>,
+    max_height: Option<u32>,
+) -> Element {
     let shown = use_signal(|| Shown::Waiting("Starting…".to_owned()));
     let busy = use_signal(|| false);
     let meters = try_use_context::<Meters>();
@@ -871,6 +1009,31 @@ pub fn RemoteView(processes: Processes, extension: String, view: String) -> Elem
         (to, std::rc::Rc::new(std::cell::RefCell::new(Some(from))))
     });
     let mut mounted = use_signal(|| false);
+    // An embed's input, to its session as it changes; its height, as
+    // measured.
+    let fit = use_hook(|| {
+        input.map(|i| Fit {
+            latest: Rc::new(RefCell::new(i.peek().clone())),
+            live: Rc::default(),
+        })
+    });
+    {
+        let fit = fit.clone();
+        use_effect(move || {
+            let (Some(fit), Some(input)) = (fit.as_ref(), input) else {
+                return;
+            };
+            let now = input();
+            if *fit.latest.borrow() == now {
+                return;
+            }
+            if let Some(to) = fit.live.borrow().as_ref() {
+                let _ = to.unbounded_send(embed_event(&now));
+            }
+            *fit.latest.borrow_mut() = now;
+        });
+    }
+    let height = use_signal(|| 0.0_f32);
     // The app's theme, into the view's document now and on every change.
     let theme = architect_theme::try_use_root_css();
     let mut node_at = use_signal(|| None::<NodeHandle>);
@@ -895,7 +1058,7 @@ pub fn RemoteView(processes: Processes, extension: String, view: String) -> Elem
         move |node: NodeHandle| {
             if let Some(retry) = retry.borrow_mut().take() {
                 spawn(follow(
-                    node,
+                    node.clone(),
                     processes.clone(),
                     extension.clone(),
                     view.clone(),
@@ -906,7 +1069,11 @@ pub fn RemoteView(processes: Processes, extension: String, view: String) -> Elem
                         meter: meter.clone(),
                         busy,
                     },
+                    fit.clone(),
                 ));
+                if fit.is_some() {
+                    spawn(measure(node, height));
+                }
             }
         }
     };
@@ -931,8 +1098,15 @@ pub fn RemoteView(processes: Processes, extension: String, view: String) -> Elem
         Shown::Waiting(why) => Some((why, false)),
         Shown::Stopped(why) => Some((why, true)),
     };
+    // A pane fills its parent; an embed is as tall as its content (a
+    // placeholder's line while it has none).
+    let tall = match (max_height, &placeholder) {
+        (None, _) => "100%".to_owned(),
+        (Some(_), Some(_)) => "72px".to_owned(),
+        (Some(max), None) => format!("{}px", embed_height(height(), max)),
+    };
     rsx! {
-        div { style: "position: relative; width: 100%; height: 100%; overflow: hidden;",
+        div { style: "position: relative; width: 100%; height: {tall}; overflow: hidden;",
             div {
                 style: "position: absolute; top: 0; left: 0; right: 0; bottom: 0;",
                 onmounted: move |e: MountedEvent| {

@@ -64,6 +64,8 @@ pub mod contrib_actions;
 #[cfg(feature = "crdt")]
 pub mod doc;
 #[cfg(feature = "host")]
+pub mod embeds;
+#[cfg(feature = "host")]
 pub mod extensions;
 #[cfg(feature = "host")]
 mod forward;
@@ -113,7 +115,7 @@ pub mod wire;
 pub mod work;
 
 pub use catalog::{Candidate, Chosen, Origin, choose};
-pub use contrib::{Contribution, Contributions};
+pub use contrib::{Claim, Contribution, Contributions, EmbedDecl, EmbedInput};
 pub use index::{Hit, Index, Listing, Location};
 pub use manifest::{API, Kind, MANIFEST, Manifest, ManifestError, Reach, SourceDecl};
 pub use package::{Files, Package, PackageError};

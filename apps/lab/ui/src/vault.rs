@@ -173,13 +173,65 @@ fn views(extra: Vec<View>) -> Views {
 }
 
 /// The vault's notes (the lab has no files yet).
-const NOTES: [(&str, &str); 5] = [
+const NOTES: [(&str, &str); 7] = [
     ("note-welcome", "Welcome"),
     ("note-shell", "The app shell"),
     ("note-workspace", "The workspace"),
     ("note-actions", "Actions everywhere"),
     ("note-extensions", "Extensions"),
+    ("note-chart", "A chart in a note"),
+    ("note-song", "Amazing Grace"),
 ];
+
+/// The notes written in Markdown (the rest say [`WELCOME`]): a ```` ```kf ````
+/// fence and a `type: song` note, which the Board extension draws inline
+/// (`crate::note`).
+const MARKDOWN: [(&str, &str); 2] = [
+    (
+        "note-chart",
+        "The fence below is Keyflow. The Board extension claims its language (kf), so it is drawn as a chart, \
+inline, as tall as it needs to be. Edit the note and the chart follows; turn the Board off and the fence is \
+plain text again.
+
+```kf
+[Intro]
+| C | G | Am | F |
+[Verse]
+| C | C | G | G |
+| Am | Am | F | F |
+```
+
+A fence no extension claims stays as it is written:
+
+```rust
+fn main() { println!(\"plain\"); }
+```",
+    ),
+    (
+        "note-song",
+        "---
+type: song
+title: Amazing Grace
+artist: John Newton
+key: G
+tempo: 72
+---
+Amazing grace, how sweet the sound
+That saved a wretch like me
+I once was lost, but now am found
+Was blind, but now I see
+
+```kf
+[Verse]
+| G | G7 | C | G |
+| G | Em | D | D7 |
+```",
+    ),
+];
+
+/// Each Markdown note's text as edited, by its id.
+#[derive(Clone, Copy)]
+struct NoteTexts(Signal<std::collections::BTreeMap<String, String>>);
 
 fn note(id: &str, title: &str) -> Pane {
     Pane::new(id, "note", title)
@@ -499,11 +551,33 @@ fn NoteView() -> Element {
     let t = use_shell().theme;
     let edits: u32 = pane.state().parse().unwrap_or(0);
     let title = pane.title();
+    let texts = use_root_context(|| {
+        NoteTexts(Signal::new_in_scope(
+            MARKDOWN
+                .iter()
+                .map(|(id, text)| ((*id).to_owned(), (*text).to_owned()))
+                .collect(),
+            ScopeId::ROOT,
+        ))
+    })
+    .0;
+    let id = pane.id.0.clone();
+    let markdown = texts.read().get(&id).cloned();
     // The note's own fact on the status line, while it is the one on show.
-    let words = WELCOME.split_whitespace().count();
+    let words = markdown
+        .as_deref()
+        .unwrap_or(WELCOME)
+        .split_whitespace()
+        .count();
     use_pane_status(vec![
         StatusItem::new("words", crate::count(words, "word")).left(),
     ]);
+    if let Some(text) = markdown {
+        // Keyed by the note: a note's editor and its embeds are its own.
+        return rsx! {
+            MarkdownNote { key: "{id}", id, title, text, texts }
+        };
+    }
     rsx! {
         div { style: "flex: 1; display: flex; flex-direction: column; gap: 12px; padding: 28px 36px; overflow-y: scroll;",
             div { style: "font-size: 26px; font-weight: 750; color: {t.ink};", "{title}" }
@@ -536,6 +610,52 @@ fn NoteView() -> Element {
                     n => format!("Edited {n} times"),
                 }
             }
+        }
+    }
+}
+
+/// A note written in Markdown: its title, an editor for its source
+/// ("Edit"), and the note drawn (`crate::note::NoteBody`), claimed blocks
+/// by the extensions that claim them.
+#[component]
+fn MarkdownNote(
+    id: String,
+    title: String,
+    text: String,
+    texts: Signal<std::collections::BTreeMap<String, String>>,
+) -> Element {
+    let t = use_shell().theme;
+    let mut editing = use_signal(|| false);
+    rsx! {
+        div { style: "flex: 1; display: flex; flex-direction: column; gap: 12px; padding: 28px 36px; overflow-y: scroll;",
+            div { style: "display: flex; align-items: center; gap: 12px;",
+                div { style: "font-size: 26px; font-weight: 750; color: {t.ink};", "{title}" }
+                button {
+                    id: "note-edit",
+                    class: "lp",
+                    style: "min-height: 28px; padding: 0 12px; border-radius: 8px; border: 1px solid {t.rule}; \
+                            background: {t.pill}; color: {t.ink}; cursor: pointer;",
+                    onclick: move |_| editing.toggle(),
+                    if editing() { "Done" } else { "Edit" }
+                }
+            }
+            if editing() {
+                textarea {
+                    id: "note-source",
+                    style: "min-height: 220px; max-width: 640px; box-sizing: border-box; padding: 10px 12px; \
+                            border-radius: 8px; border: 1px solid {t.rule}; background: {t.pill}; color: {t.ink}; \
+                            font-family: ui-monospace, Menlo, monospace; font-size: 13px; line-height: 1.5;",
+                    oninput: move |e: FormEvent| {
+                        let mut texts = texts;
+                        texts.write().insert(id.clone(), e.value());
+                    },
+                    // Blitz takes a textarea's text from its content
+                    // once, as its editor is made; what is typed is the
+                    // editor's from then on.
+                    "{text}"
+                }
+            }
+            crate::note::NoteBody { text }
         }
     }
 }

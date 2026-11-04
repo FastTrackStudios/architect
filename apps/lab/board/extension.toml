@@ -85,6 +85,12 @@ id = "status-bar"
 title = "Board status bar"
 on_unload = "close"
 
+# A `type: song` note's card, drawn at the note's head (its embed below).
+[[views]]
+id = "song"
+title = "Song card"
+icon = "music"
+
 [[openers]]
 id = "kf"
 title = "Keyflow chart"
@@ -143,3 +149,20 @@ action = "LAB_BOARD_OPENED"
 [[slots]]
 slot = "status"
 view = "status-bar"
+
+# Inline embeds: a ```kf fence in a note is a chart drawn by a page (a
+# sub-document sized to its content, re-drawn as the fence is edited); a
+# `type: song` note gets the song card at its head, in the note's own
+# document. Unloaded, the plain fence and the plain note come back.
+[[embeds]]
+id = "kf"
+title = "Keyflow chart"
+page = "pages/kf.tsx"
+claims = { fence = ["kf"] }
+max_height = 420
+
+[[embeds]]
+id = "song"
+title = "Song"
+view = "song"
+claims = { note_type = ["song"] }

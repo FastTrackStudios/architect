@@ -527,6 +527,12 @@ fn render(
         // serialised kind; this process renders nothing else.
         set_event_converter(Box::new(SerializedHtmlEventConverter));
         let mut vdom = VirtualDom::new(root);
+        // An inline embed's input (`linked::use_embed`): empty in a pane,
+        // filled by the host's `EMBED_EVENT` when it mounts one.
+        let embed = vdom.in_scope(dioxus::prelude::ScopeId::ROOT, || {
+            dioxus::prelude::Signal::new(crate::contrib::EmbedInput::default())
+        });
+        vdom.provide_root_context(crate::linked::EmbedContext(embed));
         let mut writer = WireWriter::default();
         vdom.rebuild(&mut writer);
         if sink.send(writer.take()).await.is_err() {
@@ -544,7 +550,13 @@ fn render(
             // frame from it, empty or not.
             let answers = event.is_some();
             if let Some(event) = event {
-                dispatch(&vdom, event);
+                if let Some(input) = embed_input(&event) {
+                    use dioxus::prelude::WritableExt as _;
+                    let mut embed = embed;
+                    vdom.in_runtime(|| embed.set(input));
+                } else {
+                    dispatch(&vdom, event);
+                }
             }
             vdom.render_immediate(&mut writer);
             if (answers || !writer.is_empty()) && sink.send(writer.take()).await.is_err() {
@@ -552,6 +564,18 @@ fn render(
             }
         }
     });
+}
+
+/// The host's input for an inline embed, when `event` is one
+/// ([`crate::wire::EMBED_EVENT`] on the root).
+fn embed_input(event: &ViewEvent) -> Option<crate::contrib::EmbedInput> {
+    if event.element != 0 || event.name != crate::wire::EMBED_EVENT {
+        return None;
+    }
+    match &event.data {
+        EventData::Form(json) => serde_json::from_str(json).ok(),
+        _ => None,
+    }
 }
 
 /// Hands `event` to its element's handlers.

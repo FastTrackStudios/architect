@@ -15,6 +15,7 @@
 //! | `EXT_STATE_CLEAR` | clears `{source, key?}`'s state |
 //! | `EXT_EMIT` | raises app event `{event, detail?}`: the hooks on it run |
 //! | `EXT_ENABLE` / `EXT_DISABLE` | turns `{id}` on or off: loaded or unloaded at once, everything it adds with it |
+//! | `EXT_EMBEDS` | every inline embed and what it claims, or `{claim}`'s (`fence:kf`): which extension draws it, and how |
 
 use architect::action::{
     ActionCaller, ActionError, ActionMeta, Effect, Invocation, InvocationSource, RawJson,
@@ -84,6 +85,14 @@ static EMIT: ActionMeta = meta(
      selection.changed, changed:<topic>) with `detail`: every loaded extension's hooks on it \
      run. Answers how many started.",
 );
+static EMBEDS: ActionMeta = meta(
+    "EXT_EMBEDS",
+    "Inline embeds",
+    "Every loaded extension's inline embeds and what each claims (fence languages, note types, \
+     embed target types); with `claim` (`fence:kf`, `note_type:song`, `embed_type:setlist`), the \
+     one that draws it: its extension, view or page, and how tall it may grow. None claiming it \
+     answers `null`.",
+);
 static ENABLE: ActionMeta = meta(
     "EXT_ENABLE",
     "Turn an extension on",
@@ -142,6 +151,13 @@ pub struct ClearArgs {
 pub struct EmitArgs {
     pub event: String,
     pub detail: Option<String>,
+}
+
+/// `EXT_EMBEDS`' arguments.
+#[derive(Debug, Default, Facet)]
+pub struct EmbedsArgs {
+    /// `fence:kf`, `note_type:song`, `embed_type:setlist`.
+    pub claim: Option<String>,
 }
 
 /// `EXT_ENABLE` / `EXT_DISABLE`'s arguments.
@@ -316,6 +332,32 @@ impl Extensions {
                 Ok::<_, String>(RawJson::from(json!({ "started": started }).to_string()))
             },
         )?;
+        let me = self.clone();
+        list.register_with(
+            &EMBEDS,
+            Effect::ReadOnly,
+            move |_: &ActionCaller, a: EmbedsArgs| {
+                let embeds = me.host().embeds();
+                let Some(text) = a.claim else {
+                    return Ok::<_, String>(RawJson::from(embeds_json(&me).to_string()));
+                };
+                let claim = crate::contrib::Claim::parse(&text).ok_or_else(|| {
+                    format!("{text:?} is not a claim (fence:<lang>, note_type:<type>, embed_type:<type>)")
+                })?;
+                let answer = embeds.resolve(&claim).map_or(Value::Null, |spec| {
+                    json!({
+                        "claim": claim.to_string(),
+                        "extension": spec.extension,
+                        "embed": spec.embed.id,
+                        "view": spec.embed.view,
+                        "page": spec.page,
+                        "kind": format!("{:?}", spec.kind).to_lowercase(),
+                        "max_height": spec.max_height,
+                    })
+                });
+                Ok(RawJson::from(answer.to_string()))
+            },
+        )?;
         for (meta, on) in [(&ENABLE, true), (&DISABLE, false)] {
             let me = self.clone();
             list.register_with(
@@ -366,7 +408,26 @@ impl Extensions {
             "revision": reg.revision(),
             "extensions": owners,
             "slots": slots,
+            "embeds": embeds_json(self),
             "state": reg.state(now_ms()),
         })
     }
+}
+
+/// Every inline embed, with its owner and claims.
+fn embeds_json(extensions: &Extensions) -> Value {
+    let embeds: Vec<Value> = extensions
+        .host()
+        .contributions()
+        .embeds()
+        .into_iter()
+        .map(|by| {
+            json!({
+                "extension": by.owner,
+                "id": by.item.id,
+                "claims": by.item.claims.all().iter().map(ToString::to_string).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    Value::Array(embeds)
 }

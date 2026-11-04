@@ -1,0 +1,288 @@
+//! Inline embeds: an extension's view drawn inside a host's document,
+//! sized to its content.
+//!
+//! An embed draws a block it claims — a fenced block by its language, a
+//! note by its `type:`, an embed's target by its type —
+//! (`docs/content/architecture/extensions.md`, "Inline embeds").
+//!
+//! An extension declares `[[embeds]]` (`contrib::EmbedDecl`) in its
+//! manifest, or contributes them at run time; they go with it when it
+//! unloads. An app asks [`Embeds::resolve`] whether a block is claimed,
+//! and mounts [`EmbedView`] (feature `ui`) where it is:
+//!
+//! ```ignore
+//! let claim = Claim::fence("kf").unwrap();
+//! rsx! {
+//!     EmbedView { claim, source: body, props: json!({ "info": info }),
+//!         fallback: rsx! { pre { "{body}" } } }
+//! }
+//! ```
+//!
+//! How it is drawn follows the view: a linked-in view is a component in
+//! the host's own document (content-sized by layout, its events the
+//! document's); a page (TSX/JS on `QuickJS`, Luau) and a process's view
+//! are a Blitz sub-document, a `remote::RemoteDocument`, whose content
+//! height the host measures and lays out, up to the embed's
+//! `max_height` ([`DEFAULT_MAX_HEIGHT`]), past which it scrolls. Either
+//! way the view is given an `EmbedInput` (the claim, the block's text,
+//! the host's properties) and is drawn again when it changes.
+
+use std::path::PathBuf;
+
+use crate::catalog::Origin;
+use crate::contrib::{Claim, EmbedDecl};
+use crate::host::Host;
+use crate::manifest::Kind;
+
+/// How tall an embed grows when it says no `max_height`, points.
+pub const DEFAULT_MAX_HEIGHT: u32 = 480;
+
+/// How short a sub-document embed is before its first frame has a size,
+/// points.
+pub const MIN_HEIGHT: f32 = 24.0;
+
+/// A claimed block's embed: whose it is, what draws it, how tall it may
+/// grow.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EmbedSpec {
+    /// The extension.
+    pub extension: String,
+    /// Its declaration.
+    pub embed: EmbedDecl,
+    /// What was asked.
+    pub claim: Claim,
+    /// The view name it is drawn and metered as (`<view>`, or
+    /// `embed.<id>` for a page of its own).
+    pub view: String,
+    /// The page file that draws it, in its package: the embed's `page`,
+    /// or its view's.
+    pub page: Option<String>,
+    /// The extension's folder (a linked built-in has none).
+    pub dir: Option<PathBuf>,
+    pub origin: Origin,
+    pub kind: Kind,
+    /// The most it grows to, points.
+    pub max_height: u32,
+}
+
+/// The app's inline embeds, from its host's contributions. Cheap to
+/// clone.
+#[derive(Clone, Debug)]
+pub struct Embeds {
+    host: Host,
+}
+
+impl Embeds {
+    #[must_use]
+    pub const fn new(host: Host) -> Self {
+        Self { host }
+    }
+
+    /// The embed that draws `claim`, when a loaded extension claims it
+    /// (the first loaded that does).
+    #[must_use]
+    pub fn resolve(&self, claim: &Claim) -> Option<EmbedSpec> {
+        let by = self.host.contributions().embed_for(claim)?;
+        let loaded = self.host.get(&by.owner)?;
+        let embed = by.item;
+        let page = embed.page.clone().or_else(|| {
+            let view = embed.view.as_deref()?;
+            loaded
+                .manifest
+                .views
+                .iter()
+                .find(|v| v.id == view)
+                .and_then(|v| v.page.clone())
+        });
+        Some(EmbedSpec {
+            extension: by.owner,
+            view: embed.view_name(),
+            page,
+            dir: loaded.dir.clone(),
+            origin: loaded.origin,
+            kind: loaded.manifest.kind,
+            max_height: embed.max_height.unwrap_or(DEFAULT_MAX_HEIGHT),
+            claim: claim.clone(),
+            embed,
+        })
+    }
+
+    /// Every claim a loaded extension makes, with its owner and embed:
+    /// what an editor's fence registry is filled from.
+    #[must_use]
+    pub fn claims(&self) -> Vec<(Claim, String, String)> {
+        self.host
+            .contributions()
+            .embeds()
+            .into_iter()
+            .flat_map(|by| {
+                let (owner, id) = (by.owner, by.item.id.clone());
+                by.item
+                    .claims
+                    .all()
+                    .into_iter()
+                    .map(move |c| (c, owner.clone(), id.clone()))
+            })
+            .collect()
+    }
+
+    /// The fence languages claimed now, lower case, each once.
+    #[must_use]
+    pub fn fences(&self) -> Vec<String> {
+        let mut out: Vec<String> = self
+            .claims()
+            .into_iter()
+            .filter_map(|(c, _, _)| match c {
+                Claim::Fence(lang) => Some(lang.to_ascii_lowercase()),
+                Claim::NoteType(_) | Claim::EmbedType(_) => None,
+            })
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    }
+}
+
+impl Host {
+    /// Its inline embeds.
+    #[must_use]
+    pub fn embeds(&self) -> Embeds {
+        Embeds::new(self.clone())
+    }
+}
+
+#[cfg(feature = "ui")]
+pub use view::{EmbedAsk, EmbedPages, EmbedView};
+
+#[cfg(feature = "ui")]
+mod view {
+    use std::rc::Rc;
+
+    use dioxus::prelude::*;
+    use serde_json::Value;
+
+    use super::{EmbedSpec, Embeds};
+    use crate::contrib::{Claim, EmbedInput};
+    use crate::interface::ExtensionUi;
+    use crate::linked::EmbedContext;
+
+    /// A page embed, as [`EmbedPages`] is asked for it.
+    #[derive(Clone)]
+    pub struct EmbedAsk {
+        pub spec: EmbedSpec,
+        /// What its runs may reach: the extension's capabilities.
+        pub gate: architect_scripting::luau::Gate,
+        /// What it is given, live.
+        pub input: Signal<EmbedInput>,
+    }
+
+    impl std::fmt::Debug for EmbedAsk {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("EmbedAsk")
+                .field("spec", &self.spec)
+                .finish_non_exhaustive()
+        }
+    }
+
+    /// Draws a page embed: `architect-pages` provides it
+    /// (`architect_pages::ui::use_embed_pages`), a sub-document sized to
+    /// its content. `None` leaves it to the extension's own view.
+    #[derive(Clone)]
+    pub struct EmbedPages(pub Rc<dyn Fn(&EmbedAsk) -> Option<Element>>);
+
+    /// The block `claim` claims, drawn by the extension that claims it,
+    /// inline and content-sized; `fallback` (the plain block) when none
+    /// does, or once it unloads.
+    ///
+    /// `source` is the block's text (a fence's body, a note's), `props`
+    /// the host's properties for it (a note's frontmatter, a fence's info
+    /// string); the view is drawn again when either changes. The
+    /// `ExtensionUi` in context says what is loaded.
+    #[component]
+    pub fn EmbedView(
+        claim: Claim,
+        source: String,
+        #[props(default)] props: Value,
+        #[props(default)] fallback: Option<Element>,
+    ) -> Element {
+        let now = EmbedInput {
+            claim: claim.to_string(),
+            source,
+            props,
+        };
+        let mut input = use_signal(|| now.clone());
+        use_effect(use_reactive!(|now| {
+            if *input.peek() != now {
+                input.set(now);
+            }
+        }));
+        let plain = move || fallback.clone().unwrap_or_else(|| rsx! {});
+        let Some(ui) = try_use_context::<ExtensionUi>() else {
+            return plain();
+        };
+        let _ = ui.revision();
+        let host = ui.host();
+        let Some(spec) = Embeds::new(host.clone()).resolve(&claim) else {
+            return plain();
+        };
+        let Some(loaded) = host.get(&spec.extension) else {
+            return plain();
+        };
+        let key = format!("{}/{}", spec.extension, spec.embed.id);
+        let max = spec.max_height;
+        if spec.page.is_some()
+            && let Some(pages) = try_consume_context::<EmbedPages>()
+        {
+            let ask = EmbedAsk {
+                gate: crate::host::gate(&loaded.manifest),
+                input,
+                spec: spec.clone(),
+            };
+            if let Some(page) = (pages.0)(&ask) {
+                return rsx! {
+                    div { class: "embed", "data-embed": "{key}", style: "{BOX}", {page} }
+                };
+            }
+        }
+        if let Some(view) = spec.embed.view.as_deref()
+            && let Some(root) = host.linked_view(&spec.extension, view)
+        {
+            // In the host's own document: laid out by it, its events its.
+            return rsx! {
+                div { class: "embed", "data-embed": "{key}",
+                    style: "{BOX} max-height: {max}px; overflow-y: auto;",
+                    LinkedEmbed { key: "{key}", root, input }
+                }
+            };
+        }
+        #[cfg(all(feature = "remote", unix))]
+        if let Some(view) = spec.embed.view.clone()
+            && let Some(processes) = try_use_context::<crate::process::Processes>()
+        {
+            return rsx! {
+                div { class: "embed", "data-embed": "{key}", style: "{BOX}",
+                    crate::remote::RemoteEmbed {
+                        key: "{key}",
+                        processes,
+                        extension: spec.extension,
+                        view,
+                        input,
+                        max_height: max,
+                    }
+                }
+            };
+        }
+        plain()
+    }
+
+    /// An embed's box in the host's flow: as wide as the text, as tall as
+    /// what is in it.
+    const BOX: &str = "display: flex; flex-direction: column; width: 100%; flex-shrink: 0;";
+
+    /// A linked-in view, given its input.
+    #[component]
+    fn LinkedEmbed(root: fn() -> Element, input: Signal<EmbedInput>) -> Element {
+        use_context_provider(|| EmbedContext(input));
+        root()
+    }
+}
