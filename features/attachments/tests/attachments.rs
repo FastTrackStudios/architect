@@ -27,8 +27,8 @@ use architect_attachments::{
     AttachFault, AttachmentsRemote, AttachmentsService as _, ClientError, Parent, attach_local,
     attachment_of, doc, hash_of, web,
 };
-use architect_files::RenditionKind;
 use architect_files::server::FilesServer;
+use architect_files::{RenditionKind, RenditionState};
 use architect_spaces::{NewSpace, SpacesService as _, Subject, VIEWER};
 use common::{Fake, attachments, blobs_dir, connect, hp, user, world};
 use crdt::{DocKind, DocKinds};
@@ -459,10 +459,27 @@ async fn a_browser_previews_an_attachment_by_range_with_a_ticket() {
     .await
     .unwrap();
     assert_eq!(made, format!("poster:{}", video.hash));
-    let set = alice
-        .service
-        .renditions(parent, video.hash.clone())
-        .await
-        .unwrap();
-    assert!(set.settled());
+    // The rest of its ladder (peaks come after the poster) settles in its
+    // own time: each rendition is a blob put, an fsync, slow on macOS.
+    let set = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let set = alice
+                .service
+                .renditions(parent.clone(), video.hash.clone())
+                .await
+                .unwrap();
+            if set.settled() {
+                return set;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(
+        set.kinds
+            .iter()
+            .all(|k| matches!(k.state, RenditionState::Ready { .. })),
+        "{set:?}"
+    );
 }
