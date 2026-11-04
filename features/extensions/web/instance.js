@@ -210,6 +210,18 @@ function jsonArg(text) {
 
 function world() {
   const worker = role !== 'owner';
+  // A call answered with nothing (`result<_, string>`).
+  const unit = async (request) => {
+    if (worker) return err(WORKER_REFUSAL);
+    const r = await service(request);
+    return r.tag === 'ok' ? ok(undefined) : r;
+  };
+  // A call from its fields as JSON text, answered as JSON text.
+  const fields = (op, text) => {
+    if (worker) return err(WORKER_REFUSAL);
+    const f = jsonArg(text);
+    return service(Object.assign({}, f && typeof f === 'object' ? f : {}, { op }));
+  };
   return {
     'architect:extension/types': {},
     'architect:extension/host': {
@@ -233,6 +245,20 @@ function world() {
       },
       callService: (name, method, args) =>
         worker ? err(WORKER_REFUSAL) : service({ op: 'service', service: name, method, args: jsonArg(args) }),
+      // The app's interface (`hostcall`'s notify … decorate): the browser's
+      // host answers them (`WebHost`: not in the browser yet).
+      notify: (text, kind) => unit({ op: 'notify', text, kind: kind || null }),
+      clipboardRead: async () => {
+        if (worker) return err(WORKER_REFUSAL);
+        const r = await service({ op: 'clipboard_read' });
+        return r.tag === 'ok' ? ok(JSON.parse(r.val) ?? undefined) : r;
+      },
+      clipboardWrite: (text) => unit({ op: 'clipboard_write', text }),
+      pick: (request) => fields('pick', request),
+      prompt: (request) => fields('prompt', request),
+      menu: (request) => fields('menu', request),
+      decorate: (kind, id, decoration) =>
+        unit({ op: 'decorate', target: { kind, id }, decoration: decoration == null ? null : jsonArg(decoration) }),
     },
     'architect:extension/worker': {
       spawn: async (name, args) => {

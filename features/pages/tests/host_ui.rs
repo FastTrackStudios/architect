@@ -1,7 +1,7 @@
 //! A page's way to the app's interface (#306): a TSX page on `QuickJS`
 //! and a Luau page, each its extension's, notify, write and read the
 //! clipboard, open a picker, a prompt and a menu and get the answers back,
-//! and badge a file-tree row, through `ui` and `clipboard` (`EXT_HOST_CALL`,
+//! and badge a file-tree row, through `ui` and `clipboard` (`EXT_PAGE_CALL`,
 //! as the extension); a call outside its capabilities is refused. The
 //! host's interface is a `FakeUi`, which answers at once.
 

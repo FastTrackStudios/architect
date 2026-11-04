@@ -572,7 +572,7 @@ pub const SERVICE_CALL: &str = "EXT_SERVICE_CALL";
 /// The action a page makes any host-service call with
 /// (`crate::interop_actions`): let through every extension's gate, as the
 /// host service checks the call itself.
-pub const HOST_CALL: &str = "EXT_HOST_CALL";
+pub const PAGE_CALL: &str = "EXT_PAGE_CALL";
 
 /// What an extension may reach: its own actions, the namespaces it named,
 /// up to the effect it named.
@@ -584,7 +584,7 @@ pub fn gate(manifest: &Manifest) -> Gate {
     Arc::new(move |info: &ActionInfo| {
         // A service call and a host call check themselves: its
         // [requires], its effect, its capabilities.
-        if info.id.starts_with(&own) || info.id == SERVICE_CALL || info.id == HOST_CALL {
+        if info.id.starts_with(&own) || info.id == SERVICE_CALL || info.id == PAGE_CALL {
             return Ok(());
         }
         if !named

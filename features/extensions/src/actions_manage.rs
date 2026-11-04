@@ -202,7 +202,7 @@ struct HostCallArgs {
 }
 
 /// `EXT_HOST_CALL`'s params schema.
-const HOST_CALL_SCHEMA: &str = r#"{"type":"object","properties":{"id":{"type":"string","description":"The extension."},"request":{"type":"object","description":"A host request: {\"op\": \"run\", \"action\": …, \"args\"?}, {\"op\": \"org\"}, {\"op\": \"selection\"}, {\"op\": \"open\", \"path\"}, {\"op\": \"read_document\", \"path\"}, {\"op\": \"read_file\", \"path\"}, {\"op\": \"write_file\", \"path\", \"text\"}, {\"op\": \"setting\", \"key\"}, {\"op\": \"set_setting\", \"key\", \"value\"}, {\"op\": \"data\", \"key\"}, {\"op\": \"set_data\", \"key\", \"value\"?}, {\"op\": \"log\", \"text\"}."}},"required":["id","request"]}"#;
+const HOST_CALL_SCHEMA: &str = r#"{"type":"object","properties":{"id":{"type":"string","description":"The extension."},"request":{"type":"object","description":"A host request: {\"op\": \"run\", \"action\": …, \"args\"?}, {\"op\": \"org\"}, {\"op\": \"selection\"}, {\"op\": \"open\", \"path\"}, {\"op\": \"read_document\", \"path\"}, {\"op\": \"read_file\", \"path\"}, {\"op\": \"write_file\", \"path\", \"text\"}, {\"op\": \"setting\", \"key\"}, {\"op\": \"set_setting\", \"key\", \"value\"}, {\"op\": \"data\", \"key\"}, {\"op\": \"set_data\", \"key\", \"value\"?}, {\"op\": \"log\", \"text\"}; the app's interface (capabilities.ui): {\"op\": \"notify\", \"text\", \"kind\"?}, {\"op\": \"clipboard_read\"}, {\"op\": \"clipboard_write\", \"text\"}, {\"op\": \"pick\", \"kind\"}, {\"op\": \"prompt\", \"kind\", \"title\"}, {\"op\": \"menu\", \"items\"}, {\"op\": \"decorate\", \"target\", \"decoration\"?}."}},"required":["id","request"]}"#;
 
 fn raw(v: &Value) -> RawJson {
     RawJson::from(v.to_string())

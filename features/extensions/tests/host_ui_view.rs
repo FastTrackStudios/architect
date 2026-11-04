@@ -187,10 +187,10 @@ fn the_window_shows_a_prompt_and_a_menu_and_the_answer_is_the_calls() {
 
 #[test]
 fn the_overlays_lend_the_window_interface_unless_the_app_gave_one() {
-    let host = host();
-    let ui = WindowUi::lend(&host);
-    assert_eq!(WindowUi::lend(&host), ui, "one a host");
-    assert!(!host.offer_ui(Arc::new(WindowUi::new())), "the first stays");
+    let one = host();
+    let ui = WindowUi::lend(&one);
+    assert_eq!(WindowUi::lend(&one), ui, "one a host");
+    assert!(!one.offer_ui(Arc::new(WindowUi::new())), "the first stays");
     // An app's own interface stays its extensions'.
     let other = host();
     let fake = architect_extensions::hostui::FakeUi::new();

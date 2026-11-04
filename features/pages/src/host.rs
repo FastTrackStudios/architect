@@ -148,8 +148,8 @@ pub type Notify = Arc<dyn Fn(&Notice) + Send + Sync>;
 const SERVICE_CALL: &str = "EXT_SERVICE_CALL";
 
 /// The action a page makes any host-service call with, as its extension
-/// (the extensions host's: `architect_extensions::host::HOST_CALL`).
-const HOST_CALL: &str = "EXT_HOST_CALL";
+/// (the extensions host's: `architect_extensions::host::PAGE_CALL`).
+const PAGE_CALL: &str = "EXT_PAGE_CALL";
 
 /// The page host in process: one per page (its caller and gate are the
 /// page's), the app's parts shared.
@@ -324,7 +324,7 @@ impl AppHost {
         } else if let Some(ext) = self
             .extension
             .clone()
-            .filter(|_| self.list.info(HOST_CALL).is_some())
+            .filter(|_| self.list.info(PAGE_CALL).is_some())
         {
             // An extension's page: the app's interface shows it (its
             // `capabilities.ui` holding), off the page's thread.
@@ -335,7 +335,7 @@ impl AppHost {
                 .to_string();
             architect_scripting::vm::spawn(move || {
                 let _ = futures::executor::block_on(dispatch.call(async move {
-                    list.run_json_async_with(&caller, HOST_CALL, body.as_bytes())
+                    list.run_json_async_with(&caller, PAGE_CALL, body.as_bytes())
                         .await
                 }));
             });
@@ -370,7 +370,7 @@ impl PageHost for AppHost {
         }
         let (list, mut caller) = (self.list.clone(), self.caller.clone());
         // A service call and a host call are the page's extension's own.
-        if (id == SERVICE_CALL || id == HOST_CALL)
+        if (id == SERVICE_CALL || id == PAGE_CALL)
             && let Some(ext) = &self.extension
         {
             caller = ActionCaller::new(architect::action::Principal::extension(ext.clone(), None));
@@ -453,6 +453,6 @@ impl PageHost for AppHost {
                 "only an extension's page makes host-service calls".to_owned(),
             ));
         }
-        self.run(HOST_CALL.to_owned(), request).await
+        self.run(PAGE_CALL.to_owned(), request).await
     }
 }

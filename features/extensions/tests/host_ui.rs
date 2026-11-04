@@ -2,7 +2,7 @@
 //! clipboard, pickers, prompts, a context menu and badges, on a host whose
 //! interface is a `FakeUi` (it answers at once). A Luau extension makes
 //! each call through `host` and gets the answers back; a page's way, the
-//! `EXT_HOST_CALL` action, does the same as its extension; a file picked
+//! `EXT_PAGE_CALL` action, does the same as its extension; a file picked
 //! is one it may then read; a decoration is on its row until it unloads;
 //! and every call is refused outside `capabilities.ui`.
 
@@ -202,7 +202,7 @@ fn a_page_asks_through_ext_host_call_as_its_extension() {
     run(
         &list,
         &as_ask,
-        "EXT_HOST_CALL",
+        "EXT_PAGE_CALL",
         &json!({ "op": "notify", "text": "a page's" }),
     )
     .unwrap();
@@ -210,7 +210,7 @@ fn a_page_asks_through_ext_host_call_as_its_extension() {
     let answer = run(
         &list,
         &as_ask,
-        "EXT_HOST_CALL",
+        "EXT_PAGE_CALL",
         &json!({ "op": "prompt", "kind": "text", "title": "?" }),
     )
     .unwrap();
@@ -219,7 +219,7 @@ fn a_page_asks_through_ext_host_call_as_its_extension() {
     let why = run(
         &list,
         &ActionCaller::app(),
-        "EXT_HOST_CALL",
+        "EXT_PAGE_CALL",
         &json!({ "op": "clipboard_read" }),
     )
     .unwrap_err();

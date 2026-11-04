@@ -7,7 +7,7 @@
 //! | `EXT_POINTS` | every point, its owner and items, and the items left out and why |
 //! | `EXT_WINDOWS` | every extension window, and which are open with what state |
 //! | `EXT_WINDOW_CLOSE` | closes `{extension, id}` |
-//! | `EXT_HOST_CALL` | a host-service call (`hostcall::HostRequest` as JSON) as the extension that runs it: a page's way to notify, the clipboard, pickers, prompts, menus and badges |
+//! | `EXT_PAGE_CALL` | a host-service call (`hostcall::HostRequest` as JSON) as the extension that runs it: a page's way to notify, the clipboard, pickers, prompts, menus and badges |
 //! | `EXT_DECORATIONS` | the icons and badges on rows and tabs (`{target?}`: one target's), and who set each |
 
 use std::sync::Arc;
@@ -179,7 +179,7 @@ impl Extensions {
         )?;
         let host = self.host().clone();
         let call: CallerAsyncHandler = Arc::new(move |caller: &ActionCaller, args: &[u8]| {
-            const ID: &str = crate::host::HOST_CALL;
+            const ID: &str = crate::host::PAGE_CALL;
             let Some(Principal::Extension { id, on_behalf_of }) = caller.principal().cloned()
             else {
                 return Err(ActionError::Denied {
@@ -207,7 +207,7 @@ impl Extensions {
         });
         list.register_forwarded_with(
             &info(
-                crate::host::HOST_CALL,
+                crate::host::PAGE_CALL,
                 "Ask the app, as an extension",
                 Effect::Mutating,
                 "One host-service call (a HostRequest as JSON: {op, …}) as the extension running it \

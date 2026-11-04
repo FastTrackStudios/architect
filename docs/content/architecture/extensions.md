@@ -1715,7 +1715,8 @@ An extension's manifest names what it needs in `[capabilities]`: the
 action namespaces it may run past its own (`actions`) and the most they
 may change (`effect`: read-only, mutating, destructive), what of the
 app's state it may read (`reads`: `org`, `selection`, `documents`), the
-folders past its own and the network hosts
+app's interface it may use (`ui`: below), the folders past its own and
+the network hosts
 (`features/extensions/src/manifest.rs` `Capabilities`;
 `features/extensions/src/capabilities.rs` turns them into the lines a
 person reads, `Capabilities::grows_from`, and into what may run,
@@ -1772,7 +1773,97 @@ waiting (`Extensions::confirm_on`).
 | `EXT_GRANT` / `EXT_REVOKE` / `EXT_GRANTS` | a person's yes, taking it back, and what each may reach now |
 | `EXT_LOGS` | `{id, since?, limit?}`: a process's stdout and stderr, Luau prints and errors, failed hooks, refused calls |
 | `EXT_HOST_CALL` | one host-service call as an extension, for the caller |
+| `EXT_PAGE_CALL` | one host-service call as the extension running it (a page's way to the interface below) |
+| `EXT_DECORATIONS` | the icons and badges on rows and tabs, and who set each |
 | `EXT_INFO` | which copy runs, versions, pin, grants, what it may reach |
+
+## The app's interface: notifications, the clipboard, pickers, prompts, menus, badges
+
+What Templater, QuickAdd, Importer, Iconize and js_ReaScriptAPI need of
+the app's interface, as host-service calls
+(`features/extensions/src/hostcall.rs` `HostRequest`), each refused
+unless the manifest asks for it in `capabilities.ui` and a person
+granted it (`features/extensions/src/capabilities.rs` `UI`; the consent
+prompt says each in words):
+
+```toml
+[capabilities]
+ui = ["notify", "clipboard", "pickers", "prompts", "menus", "badges"]
+```
+
+| call | what it does | answer | needs |
+|---|---|---|---|
+| `notify {text, kind?, title?}` | a toast (`info`, `success`, `warning`, `error`), and a line in its log | `null` | `notify` |
+| `clipboard_read` / `clipboard_write {text}` | the clipboard's text | the text, or `null` | `clipboard` |
+| `pick {kind, title?, filters?, folder?, name?}` | a picker (`open`, `open_many`, `folder`) or a save dialog (`save`) | a path, a list (`open_many`), `null` when cancelled | `pickers` |
+| `prompt {kind, title, message?, default?, placeholder?, choices?}` | asks for text (`text`), a yes or no (`confirm`), one of a list (`pick_one`) | the text, `true`/`false`, the choice's id; `null` when cancelled | `prompts` |
+| `menu {items, x?, y?}` | a context menu of its own items (`{id, label, icon?, shortcut?, disabled?, separator?}`) at a point in the window (none: its middle) | the id chosen, `null` when dismissed | `menus` |
+| `decorate {target, decoration?}` | an icon or badge (`{icon?, badge?, color?, tooltip?}`) on a file-tree row (`{kind: "file", id: <path>}`) or a tab (`{kind: "tab", id: <view kind or pane id>}`); none takes it off | `null` | `badges` |
+
+`pick`, `prompt` and `menu` wait for the person: the call answers when
+they do. A path picked is one the extension may then read for the run (a
+save, or inside a folder picked: write), past `capabilities.folders`.
+Every runtime makes the same calls: Luau's `host.notify`,
+`host.clipboard_read`, `host.pick`, `host.prompt`, `host.menu`,
+`host.decorate` (`features/extensions/src/luau_host.rs`; a cancel is
+`nil`); the WIT world's typed imports `notify`, `clipboard-read`,
+`clipboard-write`, `pick`, `prompt`, `menu`, `decorate`
+(`features/extensions/wit/extension.wit`; the Rust guest's
+`features/extensions/wasi-guest/src/lib.rs` `host::notify` and the
+rest); a process's `guest::host` and a linked extension's
+`linked::Handle::host` with the requests themselves; and a page's
+`ui` and `clipboard` (`ui.notify`, `ui.pick`, `ui.input`, `ui.confirm`,
+`ui.pickOne`, `ui.menu(items, at?)`, `ui.decorate`, `ui.call`,
+`clipboard.read()`, `clipboard.write(text)` in TSX; the same names in a
+Luau page), through `PageHost::host_call` (`features/pages/src/api.rs`),
+which runs `EXT_PAGE_CALL` as the page's extension. A page's `notify`
+reaches the same toasts when it is an extension's page.
+
+**The app answers** through its `HostUi`
+(`features/extensions/src/hostui.rs`; `Host::set_ui`):
+
+- `hostui::NoUi`, the default: a notification is a log line, the rest
+  `HostError::Unsupported` (a headless host has no one to ask);
+- `hostui::FakeUi`, for tests and headless runs: it keeps the
+  notifications and a clipboard of its own and answers at once — the
+  answers it was given (`FakeUi::answer`), or a text prompt's default, a
+  confirm's yes, a list's first choice, a menu's first item that may be
+  chosen, a picker cancelled;
+- the window's, `features/extensions/src/host_ui_view.rs` `WindowUi`:
+  `HostUiLayer` (mounted by `ExtensionOverlays`) draws toasts at the
+  window's corner, a prompt as a dialog, a menu at its point, and lends
+  the host its `WindowUi` unless the app gave a `HostUi` of its own
+  (`WindowUi::lend`). The clipboard is the system's
+  (`hostui::system_clipboard_read`: `wl-paste`, `xclip`, `pbpaste`); the
+  pickers are rfd's (feature `pickers`, on in the lab), the same the
+  shell's file inputs use — the portal on Linux, the system's panels on
+  macOS and Windows. Without the feature, on a phone, or in a browser
+  (`features/extensions/src/web.rs` `WebHost`), a pick is
+  `HostError::Unsupported`.
+
+**Icons and badges** are a contribution point other features consult:
+`app.decorations` (`hostui::DECORATIONS_POINT`), which a manifest
+contributes to statically (`[[contribute."app.decorations"]] target = {
+kind = "file", id = "README.md" }, icon = "star"`), and what extensions
+set at run time with `decorate` (`Host::decorations`,
+`hostui::Decorations`: one decoration an extension a target, gone when
+it unloads). `Host::decorations_of(target)` is both, in order; a file
+tree draws them after a row's name with `host_ui_view::Decorations
+{host, target}` (`features/extensions/tests/host_ui_view.rs`, its golden
+`badged-file-row.html`), and the workspace's tabs through
+`architect_workspace::TabBadges`, which `use_extension_ui` provides.
+`EXT_DECORATIONS` lists them all, with who set each.
+
+A context menu here is imperative: an extension shows one when it
+decides to (after its own action ran, say), with items it makes then.
+The rows an extension adds to the app's own context menus are
+declarative (`[[context]]`, "Contributions").
+
+Tests: `features/extensions/tests/host_ui.rs` (Luau, refusals, a picked
+file, `EXT_PAGE_CALL`, a headless host), `features/extensions/tests/wasi.rs`
+(`a_component_notifies_copies_asks_and_gets_the_answers_back`),
+`features/pages/tests/host_ui.rs` (a TSX page on `QuickJS` and a Luau
+page).
 
 ## The extensions manager
 

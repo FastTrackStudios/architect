@@ -375,7 +375,7 @@ impl Host {
             let Some(host) = host.upgrade() else {
                 return Err("the app is closing".to_owned());
             };
-            if info.id == crate::host::SERVICE_CALL || info.id == crate::host::HOST_CALL {
+            if info.id == crate::host::SERVICE_CALL || info.id == crate::host::PAGE_CALL {
                 return Ok(());
             }
             host.capabilities_of(&manifest, origin)
