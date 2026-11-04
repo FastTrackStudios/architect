@@ -18,6 +18,12 @@
 //! | `selection` | what is selected and focused | `reads = ["selection"]` |
 //! | `open {path}` | opens a document or file in the app | `reads = ["documents"]` |
 //! | `read_document {path}` | a document's text | `reads = ["documents"]` |
+//! | `list_documents {under?}` | the app's documents (`DocInfo`s), all or under a folder | `reads = ["documents"]` |
+//! | `create_document {path, text?}` | a new document: its `DocInfo` | `writes = ["documents"]` |
+//! | `edit_document {path, edits, name?}` | edits as one CRDT transaction, one undo step (`DocEdit`s): its text after | `writes = ["documents"]` |
+//! | `rename_document {path, to}` / `move_document {path, folder}` | a new path (or folder) for it, its history kept: its `DocInfo` | `writes = ["documents"]` |
+//! | `delete_document {path}` | deletes it | `writes = ["documents"]` |
+//! | `watch_documents {action \| script, function?}` | its action (script) on every `doc.created/saved/renamed/deleted`: the hooks' keys | `reads = ["documents"]` |
 //! | `read_file {path}` / `write_file {path, text}` | a file: relative paths are in its own data folder | its own folder, or `capabilities.folders` |
 //! | `setting {key}` / `set_setting {key, value}` | one of its own settings (`<id>.…`) | nothing |
 //! | `data {key}` / `set_data {key, value?}` | its own data, kept for it | nothing |
@@ -45,6 +51,7 @@ use serde_json::Value;
 use crate::capabilities::{
     BADGES, CLIPBOARD, DOCUMENTS, MENUS, NOTIFY, ORG, PICKERS, PROMPTS, SELECTION,
 };
+pub use crate::documents::{DocEdit, DocInfo};
 use crate::manifest::{Capabilities, Manifest, Reach};
 
 /// One call an extension makes to its host.
@@ -67,6 +74,51 @@ pub enum HostRequest {
     },
     ReadDocument {
         path: String,
+    },
+    /// The app's documents (`crate::documents::Documents`), every one or
+    /// those under folder `under`: `[DocInfo]`.
+    ListDocuments {
+        #[serde(default)]
+        under: Option<String>,
+    },
+    /// A new document at `path` holding `text`: its [`DocInfo`].
+    CreateDocument {
+        path: String,
+        #[serde(default)]
+        text: String,
+    },
+    /// `edits`, in order, as one transaction: one step of the document's
+    /// undo, named `name`, made as the extension. Its text after.
+    EditDocument {
+        path: String,
+        edits: Vec<DocEdit>,
+        #[serde(default)]
+        name: Option<String>,
+    },
+    /// Document `path` at `to`, its history kept: its [`DocInfo`].
+    RenameDocument {
+        path: String,
+        to: String,
+    },
+    /// Document `path` into folder `folder` (`""`: the top), its name
+    /// kept: its [`DocInfo`].
+    MoveDocument {
+        path: String,
+        folder: String,
+    },
+    DeleteDocument {
+        path: String,
+    },
+    /// Its action (a Luau script) on every document event —
+    /// `doc.created`, `doc.saved`, `doc.renamed`, `doc.deleted` — as
+    /// hooks made at run time: their keys.
+    WatchDocuments {
+        #[serde(default)]
+        action: Option<String>,
+        #[serde(default)]
+        script: Option<String>,
+        #[serde(default)]
+        function: Option<String>,
     },
     ReadFile {
         path: String,
@@ -325,6 +377,13 @@ impl HostRequest {
             Self::Selection => "selection",
             Self::Open { .. } => "open",
             Self::ReadDocument { .. } => "read_document",
+            Self::ListDocuments { .. } => "list_documents",
+            Self::CreateDocument { .. } => "create_document",
+            Self::EditDocument { .. } => "edit_document",
+            Self::RenameDocument { .. } => "rename_document",
+            Self::MoveDocument { .. } => "move_document",
+            Self::DeleteDocument { .. } => "delete_document",
+            Self::WatchDocuments { .. } => "watch_documents",
             Self::ReadFile { .. } => "read_file",
             Self::WriteFile { .. } => "write_file",
             Self::Setting { .. } => "setting",
@@ -489,7 +548,27 @@ pub fn check(
         ),
         HostRequest::Org => ("reads", reads(ORG)),
         HostRequest::Selection => ("reads", reads(SELECTION)),
-        HostRequest::Open { .. } | HostRequest::ReadDocument { .. } => ("reads", reads(DOCUMENTS)),
+        HostRequest::Open { .. }
+        | HostRequest::ReadDocument { .. }
+        | HostRequest::ListDocuments { .. }
+        | HostRequest::WatchDocuments { .. } => ("reads", reads(DOCUMENTS)),
+        HostRequest::CreateDocument { .. }
+        | HostRequest::EditDocument { .. }
+        | HostRequest::RenameDocument { .. }
+        | HostRequest::MoveDocument { .. }
+        | HostRequest::DeleteDocument { .. } => (
+            "writes",
+            if may.may_write(DOCUMENTS) {
+                Ok(())
+            } else {
+                Err((
+                    format!("writes.{DOCUMENTS}"),
+                    format!(
+                        "this extension may not change the app's {DOCUMENTS} (capabilities.writes)"
+                    ),
+                ))
+            },
+        ),
         HostRequest::Setting { key } | HostRequest::SetSetting { key, .. } => {
             let check = if key.starts_with(&format!("{}.", manifest.id)) {
                 Ok(())
@@ -585,6 +664,14 @@ mod tests {
             panic!("{r:?}")
         };
         assert_eq!((hook.every.as_deref(), r.op()), (Some("5m"), "subscribe"));
+        let r: HostRequest = serde_json::from_str(
+            r#"{"op":"edit_document","path":"notes/a.md","edits":[{"insert":{"at":0,"text":"- "}},{"delete":{"at":5,"len":2}}]}"#,
+        )
+        .unwrap();
+        let HostRequest::EditDocument { edits, .. } = &r else {
+            panic!("{r:?}")
+        };
+        assert_eq!((edits.len(), r.op()), (2, "edit_document"));
         let r: HostRequest = serde_json::from_str(r#"{"op":"clipboard_read"}"#).unwrap();
         assert_eq!(r, HostRequest::ClipboardRead);
         let r: HostRequest = serde_json::from_str(

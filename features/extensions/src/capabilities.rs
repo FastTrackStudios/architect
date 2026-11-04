@@ -18,8 +18,13 @@ pub const READS: [&str; 3] = [ORG, SELECTION, DOCUMENTS];
 pub const ORG: &str = "org";
 /// What is selected and focused.
 pub const SELECTION: &str = "selection";
-/// The app's documents: open them, read them.
+/// The app's documents: open them, read them (`reads`), and list and
+/// watch them; change them (`writes`).
 pub const DOCUMENTS: &str = "documents";
+
+/// What of the app's state an extension may change
+/// ([`Capabilities::writes`]).
+pub const WRITES: [&str; 1] = [DOCUMENTS];
 
 /// What of the app's interface an extension may use
 /// ([`Capabilities::ui`]).
@@ -41,7 +46,8 @@ pub const BADGES: &str = "badges";
 /// One thing an extension asks for, in a person's words.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Ask {
-    /// `actions`, `effect`, `hosts`, `folders`, `reads`, `ui` or `events`.
+    /// `actions`, `effect`, `hosts`, `folders`, `reads`, `writes`, `ui`
+    /// or `events`.
     pub kind: &'static str,
     /// What exactly (`TRANSPORT_`, `api.github.com`, `selection`).
     pub what: String,
@@ -98,8 +104,15 @@ fn read_words(r: &str) -> String {
     match r {
         ORG => "See which organization you are working in".to_owned(),
         SELECTION => "See what you have selected and focused".to_owned(),
-        DOCUMENTS => "Open and read your documents".to_owned(),
+        DOCUMENTS => "Open, read, list and watch your documents".to_owned(),
         other => format!("Read {other}"),
+    }
+}
+
+fn write_words(w: &str) -> String {
+    match w {
+        DOCUMENTS => "Create, edit, rename, move and delete your documents".to_owned(),
+        other => format!("Change {other}"),
     }
 }
 
@@ -112,6 +125,7 @@ impl Capabilities {
             && self.hosts.is_empty()
             && self.folders.is_empty()
             && self.reads.is_empty()
+            && self.writes.is_empty()
             && self.ui.is_empty()
             && self.events.is_empty()
     }
@@ -155,6 +169,13 @@ impl Capabilities {
                 kind: "reads",
                 what: r.clone(),
                 says: read_words(r),
+            });
+        }
+        for w in self.writes.iter().filter(|w| !granted.writes.contains(w)) {
+            out.push(Ask {
+                kind: "writes",
+                what: w.clone(),
+                says: write_words(w),
             });
         }
         for u in self.ui.iter().filter(|u| !granted.ui.contains(u)) {
@@ -248,6 +269,12 @@ impl Capabilities {
                 .filter(|r| granted.reads.contains(r))
                 .cloned()
                 .collect(),
+            writes: self
+                .writes
+                .iter()
+                .filter(|w| granted.writes.contains(w))
+                .cloned()
+                .collect(),
             ui: self
                 .ui
                 .iter()
@@ -303,6 +330,12 @@ impl Capabilities {
     #[must_use]
     pub fn may_read(&self, what: &str) -> bool {
         self.reads.iter().any(|r| r == what)
+    }
+
+    /// Whether it may change `what` ([`WRITES`]).
+    #[must_use]
+    pub fn may_write(&self, what: &str) -> bool {
+        self.writes.iter().any(|w| w == what)
     }
 
     /// Whether it may use `what` of the app's interface ([`UI`]).

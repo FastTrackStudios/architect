@@ -1835,7 +1835,8 @@ The engine, the timeline, transport and DSP stay core.
 An extension's manifest names what it needs in `[capabilities]`: the
 action namespaces it may run past its own (`actions`) and the most they
 may change (`effect`: read-only, mutating, destructive), what of the
-app's state it may read (`reads`: `org`, `selection`, `documents`), the
+app's state it may read (`reads`: `org`, `selection`, `documents`) and
+change (`writes`: `documents`, below), the
 app's interface it may use (`ui`: below), the folders past its own and
 the network hosts
 (`features/extensions/src/manifest.rs` `Capabilities`;
@@ -1846,8 +1847,8 @@ person reads, `Capabilities::grows_from`, and into what may run,
 **The host service** is what an extension asks the app for, the same
 over every way it runs (`features/extensions/src/hostcall.rs`
 `HostRequest`, `HostAnswer`, JSON): run an app action, read the current
-organization or the selection, open and read documents, read and write
-files (its own folder, or `capabilities.folders`), read and write its
+organization or the selection, open, read and change documents (below),
+read and write files (its own folder, or `capabilities.folders`), read and write its
 own settings and data, log a line. `Host::api` gives one extension's
 session (`features/extensions/src/hostapi.rs` `ExtensionApi::call`),
 checked against what it may reach now. A process calls it over its own
@@ -2124,6 +2125,87 @@ its refusals; a background extension started by a hook, kept by an
 action, stopped idle, started again), `features/extensions/tests/wasi.rs`
 (`a_views_interval_runs_on_the_hosts_clock_and_a_hook_it_made_runs`),
 `features/pages/tests/events.rs` (a TSX and a Luau page subscribing).
+
+## Documents: list, create, edit, rename, move, delete, watch
+
+What Templater, Dataview, Tasks, Kanban, QuickAdd, Linter and an importer
+need (#309): the app's documents, not raw files. The model is
+`features/extensions/src/documents.rs`; the calls are the host
+service's, so every way an extension runs has them: a Luau script's
+`host`, a page's `documents`, a component's typed imports, a process
+over vox, `EXT_HOST_CALL`.
+
+| call | Luau `host.` / a page's `documents.` | answer | needs |
+|---|---|---|---|
+| `list_documents {under?}` | `list_documents(under?)` / `list(under?)` | `[{path, name, space}]` | `reads = ["documents"]` |
+| `read_document {path}` | `read_document(path)` / `read(path)` | its text | `reads` |
+| `create_document {path, text?}` | `create_document(path, text?)` / `create` | its info | `writes = ["documents"]` |
+| `edit_document {path, edits, name?}` | `edit_document(path, edits, name?)` / `edit` | its text after | `writes` |
+| `rename_document {path, to}` | `rename_document(path, to)` / `rename` | its info | `writes` |
+| `move_document {path, folder}` | `move_document(path, folder)` / `move` | its info | `writes` |
+| `delete_document {path}` | `delete_document(path)` / `delete` | nothing | `writes` |
+| `watch_documents {action \| script, function?}` | `watch_documents(hook)` / `watch(hook)` | the hooks' keys | `reads` |
+
+A path is relative and `/`-separated (`notes/Inbox.md`), never `..`; its
+first folder is the space the app keeps it in. **An edit is a
+transaction**: `edits` (`documents::DocEdit`: `{insert: {at, text}}`,
+`{delete: {at, len}}`, `{append: {text}}`, `{replace: {text}}`, positions
+in characters) apply in order as one CRDT commit and one undo step named
+`name` (`<extension>: edit` unless given); one that falls outside the
+text changes nothing. It is made as the extension's
+`Principal::Extension` (the commit's message, so a peer tells it from
+the person's), and it merges with the person's concurrent typing
+character by character. A `replace` is diffed into edits, so a
+concurrent edit elsewhere in the text survives it.
+
+```lua
+host.create_document("notes/Inbox.md", "# Inbox\n")
+host.edit_document("notes/Inbox.md", {
+    { insert = { at = 0, text = "---\ntidy: true\n---\n" } },
+    { append = { text = "- [ ] call Sam\n" } },
+}, "Add a task")                                -- one undo step
+host.move_document("notes/Inbox.md", "archive")  -- archive/Inbox.md, its history kept
+host.watch_documents({ action = "ACME_REINDEX" })
+```
+
+**Watching** is the document events (#308): the host raises
+`doc.created`, `doc.saved`, `doc.renamed` (a rename or a move, `{from,
+to}`) and `doc.deleted` for each call that changed something
+(`Host::raise_doc`), and the app raises its own for the person's
+changes, as it always did (`DocEvent::raise_on`). `watch_documents`
+hooks one of its actions on all four (`Host::subscribe`); a manifest's
+`[[hooks]] on = "doc.saved"` hears them too. A hook that edits the
+document it heard is heard again: it checks what it already did.
+
+**The app's side** (`features/extensions/src/documents.rs` `Documents`):
+what an app implements to give extensions its documents, set with
+`Host::with_documents` (or `Host::set_documents`): `list`, `read`,
+`create`, `edit` (the transaction, its step's name, who made it),
+`rename`, `delete`. The host has checked the capability and the path
+before it calls, and raises the events after; a move is a rename. An app
+whose documents are `crdt` documents uses
+`documents::CrdtDocuments`: each document a `CrdtDoc` with its own
+`History`, in named spaces (`with_space`), its text the root text
+`CrdtDocuments::TEXT`, its document there for the app's editor and sync
+(`CrdtDocuments::doc`), its undo (`undo`, `redo`, `steps`) and who
+changed it (`authors`). Task's vault implements `Documents` over its
+notes; the lab gives its spaces, `notes` and `archive`
+(`apps/lab/ui/src/extensions.rs` `documents`). With no documents given,
+the calls answer `unsupported`; `read_document` falls back to
+`AppContext::document`. In a browser they are not there yet.
+
+The lab's `lab.tidy` (`apps/lab/extensions/tidy`, in its registry) makes,
+tidies, renames, files away and watches notes: `LAB_TIDY_NEW`,
+`LAB_TIDY_TIDY` (one transaction), `LAB_TIDY_RENAME`, `LAB_TIDY_FILE`,
+`LAB_TIDY_WATCH`, `LAB_TIDY_LIST`.
+
+Tests: `features/extensions/tests/documents.rs` (`lab.tidy` in the
+lab's spaces: creates, tidies as one undo step, renames, files and
+hears each; the person's concurrent typing merges with its transaction;
+refused without `reads` / `writes`), `features/pages/tests/documents.rs`
+(a TSX and a Luau page on an app's own `Documents`),
+`features/extensions/tests/wasi_wit.rs` (the typed imports are the
+calls).
 
 ## The extensions manager
 

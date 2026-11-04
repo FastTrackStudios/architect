@@ -330,6 +330,32 @@ export const events: {
   list(): Promise<{ events: string[]; app: { name: string; title: string }[]; subscribed: string[] }>;
 };
 
+/** One of the app's documents: its path (`notes/Inbox.md`), name and space. */
+export type DocInfo = { path: string; name: string; space?: string };
+/** One edit of a document's text; positions count characters. */
+export type DocEdit =
+  | { insert: { at: number; text: string } }
+  | { delete: { at: number; len: number } }
+  | { append: { text: string } }
+  | { replace: { text: string } };
+/**
+ * The app's documents, as the page's extension: `capabilities.reads =
+ * ["documents"]` lists, reads and watches them, `capabilities.writes =
+ * ["documents"]` changes them. An edit is one transaction, one undo step.
+ */
+export const documents: {
+  list(under?: string): Promise<DocInfo[]>;
+  read(path: string): Promise<string>;
+  create(path: string, text?: string): Promise<DocInfo>;
+  /** `edits` in order, one undo step named `name`: the text after. */
+  edit(path: string, edits: DocEdit[], name?: string): Promise<string>;
+  rename(path: string, to: string): Promise<DocInfo>;
+  move(path: string, folder: string): Promise<DocInfo>;
+  delete(path: string): Promise<void>;
+  /** One of its actions on every `doc.created/saved/renamed/deleted`: the hooks' keys. */
+  watch(hook: { action: string }): Promise<string[]>;
+};
+
 /** A worker: a script of the page's folder in a runtime of its own, spoken to by messages. */
 export interface Worker {
   readonly id: number;
@@ -428,6 +454,11 @@ export type Builder = {
 --   page's extension (capabilities.ui); each waits for its answer, a cancel is nil
 --   events.subscribe({ on | every | at, action }): a hook made at run time, its key;
 --   events.unsubscribe(key), events.list(): the events it can hear
+--   documents.list(under?), documents.read(path), documents.create(path, text?),
+--   documents.edit(path, edits, name?) (one transaction, one undo step: the text after),
+--   documents.rename(path, to), documents.move(path, folder), documents.delete(path),
+--   documents.watch({ action }): the app's documents, as the page's extension
+--   (capabilities.reads / capabilities.writes "documents")
 
 -- How far a worker said it is.
 export type WorkerProgress = { done: number, total: number?, fraction: number?, note: string? }

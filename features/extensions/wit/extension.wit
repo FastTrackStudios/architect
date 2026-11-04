@@ -200,6 +200,33 @@ interface host {
     /// Takes the hook it made with key `key` off (`unsubscribe`): whether
     /// it had it.
     unsubscribe: func(key: string) -> result<bool, string>;
+
+    // The app's documents (features/extensions/src/documents.rs):
+    // `reads = ["documents"]` lists, reads and watches them,
+    // `writes = ["documents"]` changes them.
+
+    /// The documents under folder `under` (`""`: every one;
+    /// `list_documents`): `[documents::DocInfo]` as JSON.
+    list-documents: func(under: string) -> result<string, string>;
+    /// Document `path`'s text (`read_document`).
+    read-document: func(path: string) -> result<string, string>;
+    /// A new document at `path` holding `text` (`create_document`): its
+    /// `DocInfo` as JSON.
+    create-document: func(path: string, text: string) -> result<string, string>;
+    /// `edits` (`[documents::DocEdit]` as JSON) as one transaction, one
+    /// undo step named `name` (`edit_document`): its text after.
+    edit-document: func(path: string, edits: string, name: option<string>) -> result<string, string>;
+    /// Document `path` at `to`, its history kept (`rename_document`): its
+    /// `DocInfo` as JSON.
+    rename-document: func(path: string, to: string) -> result<string, string>;
+    /// Document `path` into folder `folder` (`move_document`): its
+    /// `DocInfo` as JSON.
+    move-document: func(path: string, folder: string) -> result<string, string>;
+    /// Deletes document `path` (`delete_document`).
+    delete-document: func(path: string) -> result<_, string>;
+    /// One of its actions on every document event (`watch_documents`:
+    /// `{"action": …}` as JSON): the hooks' keys as JSON.
+    watch-documents: func(hook: string) -> result<string, string>;
 }
 
 /// What a component does for its host.

@@ -1,0 +1,7 @@
+---
+"architect-extensions" = "minor"
+"architect-extension-wasi" = "minor"
+"architect-pages" = "minor"
+---
+
+Added a document API for extensions (#309). Through the host service an extension lists, reads, creates, edits, renames, moves, deletes and watches the app's documents (`list_documents`, `create_document`, `edit_document`, `rename_document`, `move_document`, `delete_document`, `watch_documents`), from Luau (`host.create_document`, …), pages (`documents.create`, `documents.edit`, …), the WIT world's typed imports and the wasi guest's `host::create_document`, …. An edit is a list of `documents::DocEdit`s applied as one CRDT transaction and one undo step, made as the extension's `Principal::Extension` and merging with the person's concurrent typing. Listing, reading and watching need `reads = ["documents"]`; changing needs the new `writes = ["documents"]`. An app supplies its documents by implementing `documents::Documents` and passing it to `Host::with_documents`; `documents::CrdtDocuments` is one over `crdt` documents in named spaces, which the lab uses for its `notes` and `archive` spaces. The host raises `doc.created`, `doc.saved`, `doc.renamed` and `doc.deleted` for each change an extension makes. The lab's registry has a `lab.tidy` extension that uses the API. API breaks: `Capabilities` has a `writes` field, `HostRequest` has seven new variants, and the WIT host interface has eight new imports.

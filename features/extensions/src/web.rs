@@ -411,6 +411,13 @@ impl WebHost {
             HostRequest::Selection => Ok(context("selection")),
             HostRequest::Open { .. }
             | HostRequest::ReadDocument { .. }
+            | HostRequest::ListDocuments { .. }
+            | HostRequest::CreateDocument { .. }
+            | HostRequest::EditDocument { .. }
+            | HostRequest::RenameDocument { .. }
+            | HostRequest::MoveDocument { .. }
+            | HostRequest::DeleteDocument { .. }
+            | HostRequest::WatchDocuments { .. }
             | HostRequest::ReadFile { .. }
             | HostRequest::WriteFile { .. } => Err(HostError::Failed {
                 message: "a browser host has no documents or files to reach".to_owned(),

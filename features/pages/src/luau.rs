@@ -24,7 +24,9 @@
 //! `ui.menu(items, at?)`, `ui.decorate(target, decoration?)`, `ui.call`,
 //! `clipboard.read()`, `clipboard.write(text)`: each waits for its answer;
 //! a cancel is nil), hooks made at run time (`events.subscribe(hook)`,
-//! `events.unsubscribe(key)`, `events.list()`) and `print`. Luau's sandbox holds; each call into the page has
+//! `events.unsubscribe(key)`, `events.list()`), the app's documents
+//! (`documents.list`, `read`, `create`, `edit`, `rename`, `move`,
+//! `delete`, `watch`) and `print`. Luau's sandbox holds; each call into the page has
 //! [`crate::runner::PageLimits::frame`] before its interrupt stops it.
 //!
 //! **Timers**: `set_timeout(fn, ms)`, `set_interval(fn, ms)`,
@@ -372,6 +374,77 @@ impl LuauEngine {
             "list",
             ask("events", |_, _| Ok(Value::Object(serde_json::Map::new())))?,
         )?;
+        // The app's documents, as the page's extension.
+        let documents = lua.create_table()?;
+        documents.set(
+            "list",
+            ask("list_documents", |lua, args| {
+                let under: Option<String> = args
+                    .into_iter()
+                    .next()
+                    .map_or(Ok(None), |v| lua.from_value(v))?;
+                Ok(serde_json::json!({ "under": under }))
+            })?,
+        )?;
+        documents.set(
+            "read",
+            ask("read_document", |lua, args| {
+                let path: String = args
+                    .into_iter()
+                    .next()
+                    .map_or(Ok(String::new()), |v| lua.from_value(v))?;
+                Ok(serde_json::json!({ "path": path }))
+            })?,
+        )?;
+        documents.set(
+            "create",
+            ask("create_document", |lua, args| {
+                let mut it = args.into_iter();
+                let path: String = it.next().map_or(Ok(String::new()), |v| lua.from_value(v))?;
+                let text: Option<String> = it.next().map_or(Ok(None), |v| lua.from_value(v))?;
+                Ok(serde_json::json!({ "path": path, "text": text.unwrap_or_default() }))
+            })?,
+        )?;
+        documents.set(
+            "edit",
+            ask("edit_document", |lua, args| {
+                let mut it = args.into_iter();
+                let path: String = it.next().map_or(Ok(String::new()), |v| lua.from_value(v))?;
+                let edits: Value = it.next().map_or(Ok(Value::Null), |v| lua.from_value(v))?;
+                let name: Option<String> = it.next().map_or(Ok(None), |v| lua.from_value(v))?;
+                Ok(serde_json::json!({ "path": path, "edits": edits, "name": name }))
+            })?,
+        )?;
+        documents.set(
+            "rename",
+            ask("rename_document", |lua, args| {
+                let mut it = args.into_iter();
+                let path: String = it.next().map_or(Ok(String::new()), |v| lua.from_value(v))?;
+                let to: String = it.next().map_or(Ok(String::new()), |v| lua.from_value(v))?;
+                Ok(serde_json::json!({ "path": path, "to": to }))
+            })?,
+        )?;
+        documents.set(
+            "move",
+            ask("move_document", |lua, args| {
+                let mut it = args.into_iter();
+                let path: String = it.next().map_or(Ok(String::new()), |v| lua.from_value(v))?;
+                let folder: String = it.next().map_or(Ok(String::new()), |v| lua.from_value(v))?;
+                Ok(serde_json::json!({ "path": path, "folder": folder }))
+            })?,
+        )?;
+        documents.set(
+            "delete",
+            ask("delete_document", |lua, args| {
+                let path: String = args
+                    .into_iter()
+                    .next()
+                    .map_or(Ok(String::new()), |v| lua.from_value(v))?;
+                Ok(serde_json::json!({ "path": path }))
+            })?,
+        )?;
+        documents.set("watch", ask("watch_documents", table)?)?;
+        api.set("documents", documents)?;
         api.set("ui", ui)?;
         api.set("clipboard", clipboard)?;
         api.set("events", events)?;

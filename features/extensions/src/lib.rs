@@ -40,6 +40,7 @@
 pub mod capabilities;
 pub mod catalog;
 pub mod contrib;
+pub mod documents;
 pub mod events;
 pub mod hostcall;
 pub mod index;

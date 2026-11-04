@@ -51,6 +51,7 @@ use architect::action::{ActionList, ActionMeta, Effect};
 use architect_extensions::Package;
 use architect_extensions::browse::Browse;
 use architect_extensions::consent::Grants;
+use architect_extensions::documents::{CrdtDocuments, Documents as _};
 use architect_extensions::extensions::Extensions;
 use architect_extensions::host::Host;
 use architect_extensions::hostapi::{AppContext, SettingValues};
@@ -805,6 +806,9 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
             .with_app_context(LabContext {
                 list: Arc::clone(&lab),
             })
+            // The lab's spaces, as documents extensions list, change and
+            // watch (`lab.tidy`).
+            .with_documents(documents())
             .with_setting_values(values.clone());
         let clicker = clicker(&root);
         let frame = frame_dev(&root);
@@ -948,6 +952,31 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
     let _ = architect_pages::ui::use_embed_pages(pages);
     use_extension_ui(extensions.host().clone(), Arc::clone(&lab))
 }
+
+/// The lab's spaces: `notes` and `archive`, each document a `crdt`
+/// document with its own undo, as extensions reach them (`lab.tidy`).
+/// One for the run.
+pub fn documents() -> CrdtDocuments {
+    static DOCS: LazyLock<CrdtDocuments> = LazyLock::new(|| {
+        let docs = CrdtDocuments::new()
+            .with_space(NOTES)
+            .with_space(ARCHIVE);
+        let lab = architect::action::Principal::Service {
+            name: "architect-lab".to_owned(),
+        };
+        let _ = docs.create(
+            &format!("{NOTES}/Welcome.md"),
+            "# Welcome\n\nThe lab's notes: an extension with `writes = [\"documents\"]` makes, edits and files them.\n",
+            &lab,
+        );
+        docs
+    });
+    DOCS.clone()
+}
+
+/// The lab's spaces.
+pub const NOTES: &str = "notes";
+pub const ARCHIVE: &str = "archive";
 
 /// What the lab tells an extension that may know it: the workspace's
 /// focus (`APP_STATUS`'s `workspace`), no organization.
