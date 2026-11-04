@@ -11,7 +11,12 @@
 //!   that eats memory stops at its memory limit — the host runs on and the
 //!   component is started again;
 //! - unloading it ends its thread and frees its store;
-//! - a component is compiled once: the next start reads the cache.
+//! - a component is compiled once: the next start reads the cache;
+//! - its workers: a job in one keeps its view within its frame budget,
+//!   is cancelled when it unloads, traps alone past its limits, and its
+//!   queues hold back-pressure; the pool's threads start lazily and stop
+//!   when idle;
+//! - its actions run through the app's own list (`forward_actions_to`).
 //!
 //! The components are built with `cargo build --target wasm32-wasip2`:
 //! by this toolchain when it has the target, else in `devenv --profile
@@ -35,7 +40,9 @@ use architect::action::{ActionCaller, ActionError, ActionList, ActionMeta, Effec
 use architect_extensions::host::{Host, SharedSections};
 use architect_extensions::process::Processes;
 use architect_extensions::remote::RemoteDocument;
-use architect_extensions::wasi::{Limits, WasiRunner};
+use architect_extensions::remote::REMOTE_BUDGET;
+use architect_extensions::wasi::{Limits, Pool, QUEUE, WasiRunner, WorkerStatus};
+use architect_workspace::ViewMeter;
 use architect_extensions::wire::{Edit, EventData, Frame, Pointer, ViewEvent};
 use architect_extensions::{Origin, Package};
 use architect_settings::Registry;
@@ -140,6 +147,11 @@ struct App {
 
 /// An app with `THEME_LIST` (three themes) and a WASI runner.
 fn app(limits: Limits, cache: &Path) -> App {
+    app_with(WasiRunner::new().with_limits(limits), cache)
+}
+
+/// The same, with `runner` (its worker limits, its pool).
+fn app_with(runner: WasiRunner, cache: &Path) -> App {
     let list = ActionList::new();
     list.register_with(&THEME_LIST, Effect::ReadOnly, |_: &ActionCaller, (): ()| {
         Ok::<_, String>(vec![
@@ -150,10 +162,7 @@ fn app(limits: Limits, cache: &Path) -> App {
     })
     .unwrap();
     let processes = Processes::default();
-    let runner = WasiRunner::new()
-        .with_limits(limits)
-        .with_cache(cache)
-        .with_processes(processes.clone());
+    let runner = runner.with_cache(cache).with_processes(processes.clone());
     let components = runner.components();
     let host = Host::new(list.clone(), SharedSections::new(Registry::new())).with_runner(runner);
     App {
@@ -197,6 +206,37 @@ name = "Hoard"
 id = "TEST_HAZARDS_ECHO"
 name = "Echo"
 params = '{"type":"object","properties":{"say":{"type":"integer"}}}'
+[[actions]]
+id = "TEST_HAZARDS_WORK"
+name = "Start a worker"
+params = '{"type":"object","properties":{"worker":{"type":"string"},"args":{}}}'
+[[actions]]
+id = "TEST_HAZARDS_WORKER"
+name = "A worker's state"
+params = '{"type":"object","properties":{"id":{"type":"integer"}}}'
+[[actions]]
+id = "TEST_HAZARDS_FLOOD"
+name = "Post a worker many messages"
+params = '{"type":"object","properties":{"id":{"type":"integer"},"n":{"type":"integer"}}}'
+[[actions]]
+id = "TEST_HAZARDS_STALL"
+name = "Keep busy"
+params = '{"type":"object","properties":{"ms":{"type":"integer"}}}'
+[[workers]]
+id = "forever"
+entry = "forever"
+[[workers]]
+id = "hoard"
+entry = "hoard"
+[[workers]]
+id = "chatty"
+entry = "chatty"
+[[workers]]
+id = "deaf"
+entry = "deaf"
+[[workers]]
+id = "echo"
+entry = "echo"
 "#;
 
 fn load(app: &App, dir: &Path) {
@@ -226,6 +266,19 @@ fn logs(app: &App, id: &str) -> Vec<String> {
         .into_iter()
         .map(|l| format!("{} {}", l.source, l.text))
         .collect()
+}
+
+/// The next frame, looked for every 200 µs: what a frame's time is
+/// measured with.
+fn next_now(frames: &mut futures::channel::mpsc::UnboundedReceiver<Frame>) -> Frame {
+    let started = Instant::now();
+    loop {
+        if let Ok(frame) = frames.try_recv() {
+            return frame;
+        }
+        assert!(started.elapsed() < Duration::from_secs(10), "no frame came");
+        std::thread::sleep(Duration::from_micros(200));
+    }
 }
 
 /// The next frame, within a few seconds.
@@ -300,7 +353,7 @@ fn the_counter_loads_its_view_renders_and_its_actions_run() {
     doc.apply(first).unwrap();
     assert!(text(&doc).contains("A WASI component"), "{}", text(&doc));
     assert!(text(&doc).contains('2'), "{}", text(&doc));
-    assert_eq!(buttons.len(), 2, "add and ask");
+    assert_eq!(buttons.len(), 3, "add, ask, and count primes");
 
     // A click goes to its handler; the view changes.
     session.events.unbounded_send(click(buttons[0])).unwrap();
@@ -482,4 +535,277 @@ fn a_component_is_compiled_once() {
     );
     let cached: Vec<_> = std::fs::read_dir(&cache).unwrap().collect();
     assert_eq!(cached.len(), 1, "one compiled component");
+}
+
+/// Worker `id`'s state, as the hazards component heard it.
+fn worker_state(app: &App, id: &Value) -> Value {
+    run(app, "TEST_HAZARDS_WORKER", &json!({ "id": id })).unwrap()
+}
+
+/// Waits (10 s at most) until `done` says so of what `poll` gives.
+fn wait_for<T: std::fmt::Debug>(what: &str, mut poll: impl FnMut() -> T, done: impl Fn(&T) -> bool) -> T {
+    let started = Instant::now();
+    loop {
+        let now = poll();
+        if done(&now) {
+            return now;
+        }
+        assert!(started.elapsed() < Duration::from_secs(10), "{what}: {now:?}");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn hazards(runner: WasiRunner, tmp: &Path) -> App {
+    let app = app_with(runner, &tmp.join("cache"));
+    load(&app, &package(tmp, "hazards", HAZARDS_MANIFEST, HAZARDS_WASM));
+    app
+}
+
+#[test]
+fn a_worker_job_keeps_the_view_within_its_frame_budget() {
+    if guests().is_none() {
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(Limits::default(), &tmp.path().join("cache"));
+    load(
+        &app,
+        &package(tmp.path(), "counter", &counter_manifest(), COUNTER_WASM),
+    );
+    let process = app.processes.get(COUNTER).unwrap();
+    let mut session = process.open("counter").unwrap();
+    let (events, _) = futures::channel::mpsc::unbounded();
+    let mut doc = RemoteDocument::new(events);
+    let first = next(&mut session.frames);
+    let add = clickable(&first)[0];
+    doc.apply(first).unwrap();
+
+    // The job, in a worker: long enough to click through.
+    let started = run(&app, "LAB_WASI_COUNTER_PRIMES", &json!({ "n": 2_000_000 })).unwrap();
+    assert!(started["worker"].as_u64().is_some(), "{started}");
+
+    // Clicks while it runs, each timed from the event to the frame that
+    // shows its count (the job's progress frames in between applied too).
+    let meter = ViewMeter::new("lab.wasi-counter/counter", REMOTE_BUDGET);
+    let mut seen = std::collections::BTreeSet::new();
+    let mut count = 0;
+    let began = Instant::now();
+    let mut clicks_during_job = 0;
+    loop {
+        let job = run(&app, "LAB_WASI_COUNTER_JOB", &Value::Null).unwrap();
+        if job["status"] != "running" {
+            assert_eq!(job["status"], "done", "{job}");
+            break;
+        }
+        assert!(began.elapsed() < Duration::from_secs(60), "the job ran on: {job}");
+        count += 1;
+        let asked = Instant::now();
+        session.events.unbounded_send(click(add)).unwrap();
+        loop {
+            doc.apply(next_now(&mut session.frames)).unwrap();
+            let shown = text(&doc);
+            if let Some(p) = shown.split("Counting primes: ").nth(1) {
+                seen.insert(p.split('%').next().unwrap_or("").to_owned());
+            }
+            if shown.contains(&format!("component{count}")) {
+                break;
+            }
+        }
+        meter.record(asked.elapsed());
+        clicks_during_job += 1;
+        std::thread::sleep(Duration::from_millis(16));
+    }
+    let s = meter.summary();
+    eprintln!(
+        "the WASI counter's view with a primes job in a worker: {} clicks, p50 {:?} p99 {:?} max {:?}, {} past {:?}; progress seen {:?}",
+        s.frames, s.p50, s.p99, s.max, s.slow, REMOTE_BUDGET, seen
+    );
+    assert!(clicks_during_job >= 20, "the job ended too soon to measure: {clicks_during_job}");
+    assert_eq!(s.slow, 0, "{s:?}");
+    assert!(seen.len() >= 3, "its progress bar moved: {seen:?}");
+    // Its result, into the view.
+    let done = wait_for("the result in the view", || {
+        if let Ok(frame) = session.frames.try_recv() {
+            doc.apply(frame).unwrap();
+        }
+        text(&doc)
+    }, |t| t.contains("primes below 2000000"));
+    assert!(done.contains("148933 primes below 2000000"), "{done}");
+    let stats = app.components.get(COUNTER).unwrap();
+    assert_eq!(stats.traps(), 0);
+}
+
+#[test]
+fn unloading_it_cancels_its_workers() {
+    if guests().is_none() {
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let app = hazards(WasiRunner::new(), tmp.path());
+    // A worker that never ends and never looks whether it should.
+    let id = run(&app, "TEST_HAZARDS_WORK", &json!({ "worker": "forever" })).unwrap();
+    let stats = app.components.get(HAZARDS).unwrap();
+    wait_for("it runs", || stats.workers(), |w| w.iter().any(|w| w.status == WorkerStatus::Running));
+    assert_eq!(worker_state(&app, &id)["status"], "running");
+    assert_eq!(stats.workers_alive(), 1);
+    let unloaded = Instant::now();
+    assert!(app.host.unload(HAZARDS));
+    wait_for("its instance is freed", || stats.workers_alive(), |n| *n == 0);
+    let took = unloaded.elapsed();
+    eprintln!("a spinning worker was stopped {took:?} after its owner unloaded");
+    assert!(took < Duration::from_secs(2), "{took:?}");
+}
+
+#[test]
+fn a_worker_past_its_limits_traps_and_its_owner_runs_on() {
+    if guests().is_none() {
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let runner = WasiRunner::new().with_worker_limits(Limits {
+        memory: 32 << 20,
+        call: Duration::from_millis(300),
+    });
+    let app = hazards(runner, tmp.path());
+    let stats = app.components.get(HAZARDS).unwrap();
+
+    let spin = run(&app, "TEST_HAZARDS_WORK", &json!({ "worker": "forever" })).unwrap();
+    let hoard = run(&app, "TEST_HAZARDS_WORK", &json!({ "worker": "hoard" })).unwrap();
+    // Its owner answers while they run.
+    assert_eq!(
+        run(&app, "TEST_HAZARDS_ECHO", &json!({ "say": 1 })).unwrap(),
+        json!({ "echo": { "say": 1 } })
+    );
+    let stopped = wait_for("the spinner stops", || worker_state(&app, &spin), |s| s["status"] != "running");
+    assert_eq!(stopped["status"], "failed", "{stopped}");
+    assert!(stopped["error"].as_str().unwrap().starts_with("interrupted"), "{stopped}");
+    let hoarded = wait_for("the hoarder stops", || worker_state(&app, &hoard), |s| s["status"] != "running");
+    assert_eq!(hoarded["status"], "failed", "{hoarded}");
+    let why = hoarded["error"].as_str().unwrap();
+    assert!(why.starts_with("out of memory") && why.contains("32 MiB"), "{why}");
+    // Its owner never trapped, and answers still.
+    assert_eq!(stats.traps(), 0);
+    assert_eq!(
+        run(&app, "TEST_HAZARDS_ECHO", &json!({ "say": 2 })).unwrap(),
+        json!({ "echo": { "say": 2 } })
+    );
+    wait_for("their instances are freed", || stats.workers_alive(), |n| *n == 0);
+    assert!(
+        logs(&app, HAZARDS).iter().any(|l| l.starts_with("worker worker forever failed: interrupted")),
+        "{:?}",
+        logs(&app, HAZARDS)
+    );
+}
+
+#[test]
+fn back_pressure_holds_both_ways() {
+    if guests().is_none() {
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let app = hazards(WasiRunner::new(), tmp.path());
+    let stats = app.components.get(HAZARDS).unwrap();
+
+    // Its owner to a worker that never reads: the queue fills, and the
+    // owner (a view: it never waits) is told.
+    let deaf = run(&app, "TEST_HAZARDS_WORK", &json!({ "worker": "deaf" })).unwrap();
+    let flood = run(&app, "TEST_HAZARDS_FLOOD", &json!({ "id": deaf, "n": 1000 })).unwrap();
+    assert_eq!(flood["accepted"], json!(QUEUE), "{flood}");
+    assert!(flood["error"].as_str().unwrap().contains("full"), "{flood}");
+    assert!(stats.workers().iter().all(|w| w.to_worker <= QUEUE));
+
+    // A worker that floods its owner while it is busy: the worker waits
+    // at a full queue; once its owner hears, all of it comes, in order.
+    let chatty = run(&app, "TEST_HAZARDS_WORK", &json!({ "worker": "chatty", "args": { "n": 1000 } })).unwrap();
+    let busy = std::thread::spawn({
+        let list = app.list.clone();
+        move || {
+            block_on(list.run_json_async_with(&ActionCaller::app(), "TEST_HAZARDS_STALL", br#"{"ms": 600}"#)).unwrap();
+        }
+    });
+    let mut peak = 0;
+    let began = Instant::now();
+    while began.elapsed() < Duration::from_millis(500) {
+        for w in stats.workers() {
+            assert!(w.to_owner <= QUEUE, "{w:?}");
+            if w.name == "chatty" {
+                peak = peak.max(w.to_owner);
+            }
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    busy.join().unwrap();
+    assert_eq!(peak, QUEUE, "the worker waited at a full queue");
+    let heard = wait_for("all of it came", || worker_state(&app, &chatty), |s| s["status"] == "done");
+    let messages: Vec<u64> = heard["messages"].as_array().unwrap().iter().map(|m| m.as_u64().unwrap()).collect();
+    assert_eq!(messages, (0..1000).collect::<Vec<_>>());
+    assert_eq!(heard["result"], json!(1000));
+    // Their progress, coalesced: the last.
+    assert_eq!(heard["progress"]["done"], json!(1000.0));
+
+    // Messages both ways: a worker answers what it is sent.
+    let echo = run(&app, "TEST_HAZARDS_WORK", &json!({ "worker": "echo" })).unwrap();
+    run(&app, "TEST_HAZARDS_FLOOD", &json!({ "id": echo, "n": 3 })).unwrap();
+    let echoed = wait_for("it answered", || worker_state(&app, &echo), |s| s["messages"].as_array().is_some_and(|m| m.len() == 3));
+    assert_eq!(echoed["messages"], json!([{ "echo": 0 }, { "echo": 1 }, { "echo": 2 }]));
+
+    // As many workers as it may, and no more.
+    let mut more = Vec::new();
+    let refused = loop {
+        match run(&app, "TEST_HAZARDS_WORK", &json!({ "worker": "deaf" })) {
+            Ok(id) => more.push(id),
+            Err(e) => break failed(e),
+        }
+        assert!(more.len() <= architect_extensions::wasi::MAX_WORKERS, "no limit");
+    };
+    assert!(refused.contains("workers running already"), "{refused}");
+}
+
+#[test]
+fn the_pool_starts_its_threads_lazily_and_stops_them_when_idle() {
+    if guests().is_none() {
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let runner = WasiRunner::new().with_pool(Pool::new(2, Duration::from_millis(300)));
+    let pool = runner.pool();
+    let app = hazards(runner, tmp.path());
+    assert_eq!(pool.threads(), 0, "none before a worker");
+    let ids: Vec<Value> = (0..3)
+        .map(|_| run(&app, "TEST_HAZARDS_WORK", &json!({ "worker": "chatty", "args": { "n": 3 } })).unwrap())
+        .collect();
+    assert!(pool.threads() >= 1 && pool.threads() <= 2, "{pool:?}");
+    for id in &ids {
+        wait_for("it ran", || worker_state(&app, id), |s| s["status"] == "done");
+    }
+    wait_for("its threads stop when idle", || pool.threads(), |n| *n == 0);
+}
+
+#[test]
+fn its_actions_run_through_the_apps_own_list() {
+    if guests().is_none() {
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(Limits::default(), &tmp.path().join("cache"));
+    // The app's own list (what its control socket serves), beside the
+    // extensions' list the host puts actions on.
+    let own = ActionList::new();
+    app.host.forward_actions_to(&own);
+    load(
+        &app,
+        &package(tmp.path(), "counter", &counter_manifest(), COUNTER_WASM),
+    );
+    let on_own = |id: &str, args: &Value| {
+        block_on(own.run_json_async_with(&ActionCaller::app(), id, args.to_string().as_bytes()))
+            .map(|out| serde_json::from_slice::<Value>(&out).unwrap())
+    };
+    assert_eq!(on_own("LAB_WASI_COUNTER_ADD", &json!({ "by": 5 })).unwrap(), 5);
+    assert_eq!(
+        on_own("LAB_WASI_COUNTER_ASK", &Value::Null).unwrap(),
+        json!(["light", "dark", "neon"])
+    );
+    assert!(own.info("LAB_WASI_COUNTER_PRIMES").is_some());
+    assert!(app.host.unload(COUNTER));
+    assert!(own.info("LAB_WASI_COUNTER_ADD").is_none());
 }
