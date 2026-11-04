@@ -70,7 +70,8 @@ pub fn known_target(target: &str) -> bool {
             .any(|p| target.strip_prefix(p).is_some_and(|rest| !rest.is_empty()))
 }
 
-/// An opener: ⌘O's (`kind`, `prefix` and `action`: a query in, items out).
+/// An opener: ⌘O's (`kind`, `prefix` and `action`: a query in, items out;
+/// `open`: an item picked).
 ///
 /// Or one that claims files by extension, document kinds or links by
 /// pattern (`files`, `doc_kinds`, `urls`) and opens what it claims in one of
@@ -87,7 +88,14 @@ pub struct OpenerDecl {
     /// ⌘O: what a query starts with to ask only this opener (`click:`).
     pub prefix: String,
     /// What runs it: ⌘O's query action, or a claim's open action.
+    ///
+    /// ⌘O's is given `{query}` and answers `{items: [{id, title,
+    /// detail?}]}`, best first.
     pub action: String,
+    /// ⌘O: the action that opens an item picked, given `{id, in}` (`in`:
+    /// `here`, `tab` or `split`). Unset, `action` is, given `{open: id,
+    /// in}`.
+    pub open: String,
     /// The file extensions it claims, without the dot (`kf`, `tar.gz`).
     pub files: Vec<String>,
     /// The document kinds it claims (`keyflow.chart`).
@@ -642,6 +650,9 @@ impl Contribution {
                     );
                 }
                 action(&what, &o.action)?;
+                if !o.open.is_empty() {
+                    action(&what, &o.open)?;
+                }
             }
         }
         for d in &self.doc_kinds {
@@ -1200,6 +1211,16 @@ impl Contributions {
         })
     }
 
+    /// ⌘O's openers (not the claims), each answering queries with its
+    /// `action`: what the palette asks.
+    #[must_use]
+    pub fn quick_open(&self) -> Vec<By<OpenerDecl>> {
+        self.openers()
+            .into_iter()
+            .filter(|o| !o.item.claims())
+            .collect()
+    }
+
     /// Every opener (⌘O's and the claims).
     #[must_use]
     pub fn openers(&self) -> Vec<By<OpenerDecl>> {
@@ -1359,6 +1380,30 @@ impl Contributions {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_quick_open_opener_queries_and_opens_with_its_own_actions() {
+        let views: Vec<String> = Vec::new();
+        let ok = Contribution {
+            openers: vec![OpenerDecl {
+                kind: "theme".into(),
+                title: "Themes".into(),
+                action: "LAB_CONTRIB_FIND".into(),
+                open: "LAB_CONTRIB_PICK".into(),
+                ..OpenerDecl::default()
+            }],
+            ..Contribution::default()
+        };
+        assert_eq!(ok.check(&rules(&views, &[])), Ok(()));
+        let reg = Contributions::new();
+        reg.put("lab.contrib", ok.clone());
+        assert_eq!(reg.quick_open().len(), 1);
+        let mut foreign = ok;
+        foreign.openers[0].open = "THEME_SET".into();
+        let refused = foreign.check(&rules(&views, &[])).unwrap_err();
+        assert!(refused.why.contains("THEME_SET"), "{refused}");
+        assert_eq!(foreign.check(&rules(&views, &["THEME_".into()])), Ok(()));
+    }
 
     fn rules<'a>(views: &'a [String], reach: &'a [String]) -> Rules<'a> {
         Rules {

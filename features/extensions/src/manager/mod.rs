@@ -192,6 +192,8 @@ pub trait ItemKind: Send + Sync {
 #[derive(Clone, Default)]
 pub struct Manager {
     kinds: Arc<RwLock<Vec<Arc<dyn ItemKind>>>>,
+    /// Where [`Manager::show`] goes: the page's, while it is up.
+    page: Arc<std::sync::Mutex<Option<futures::channel::mpsc::UnboundedSender<(String, String)>>>>,
 }
 
 impl PartialEq for Manager {
@@ -227,6 +229,25 @@ impl Manager {
     pub fn with(self, kind: impl ItemKind + 'static) -> Self {
         self.register(kind);
         self
+    }
+
+    /// Opens the page at item `id` of `kind` (`MANAGER_SHOW`, ⌘O's `ext:`):
+    /// false when no page is up to show it.
+    #[must_use = "false when there is no page"]
+    pub fn show(&self, kind: &str, id: &str) -> bool {
+        self.page
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .is_some_and(|tx| tx.unbounded_send((kind.to_owned(), id.to_owned())).is_ok())
+    }
+
+    /// What [`Self::show`] asks for, from now on: the page's.
+    #[must_use = "the page reads what it is asked to show from it"]
+    pub fn shown(&self) -> futures::channel::mpsc::UnboundedReceiver<(String, String)> {
+        let (tx, rx) = futures::channel::mpsc::unbounded();
+        *self.page.lock().unwrap_or_else(PoisonError::into_inner) = Some(tx);
+        rx
     }
 
     /// The kinds, in the order registered.

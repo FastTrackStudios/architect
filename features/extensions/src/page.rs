@@ -13,10 +13,11 @@
 //! - [`ManagerPage`]: the extensions manager's page (`crate::manager`):
 //!   every kind it manages, searched together, each item's page and ops;
 //!   an extension's page is the one above.
-//! - [`use_manager_page`]: the manager as a section of the settings page
-//!   (`architect_settings::use_section_page`) and ⌘O's `ext:` opener; an
+//! - [`use_manager_page`]: what the manager's views read. The `manager`
+//!   extension's manifest makes it a section of the settings page
+//!   ([`ManagerSection`], its `section` view) and ⌘O's `ext:` opener; an
 //!   app with a workspace puts [`ManagerView`] in a view kind of its own
-//!   as well (it is the `manager` extension's view too).
+//!   as well (it is the `manager` extension's `manager` view too).
 //!
 //! Every colour is the theme's (`var(--…)`, architect-ui's classes over
 //! the store's CSS variables); nothing here names one.
@@ -87,11 +88,14 @@ fn say(s: State, ok: bool, text: impl Into<String>) {
     note.set(Some((ok, text.into())));
 }
 
-/// The manager in context: a settings section ("Extensions") and ⌘O's
-/// `ext:` over every kind.
+/// What the manager's views read, in context: the manager, `browse` (the
+/// extensions' catalog, for the extension kind's own page) and the page's
+/// state; and the page opened at an item when `MANAGER_SHOW` (⌘O's
+/// `ext:`) asks.
 ///
-/// Call it under the settings provider and the commands provider. `browse`
-/// is the extensions' catalog, for the extension kind's own page.
+/// Its settings section and ⌘O's `ext:` are the `manager` extension's
+/// (`manager.toml`'s `[[sections]]` and `[[openers]]`): call it under the
+/// settings provider, above the view the section is drawn by.
 pub fn use_manager_page(manager: Manager, browse: Browse) {
     use_context_provider(|| browse.clone());
     use_context_provider(|| manager.clone());
@@ -103,41 +107,21 @@ pub fn use_manager_page(manager: Manager, browse: Browse) {
         asking: Signal::new(None),
         note: Signal::new(None),
     });
-    architect_settings::use_section_page(
-        || architect_settings::Section::new(SECTION, "Extensions").icon("puzzle"),
-        ManagerSection,
-    );
     let settings = architect_settings::try_use_settings();
-    let items = manager.clone();
-    architect_commands::use_opener(move || {
-        architect_commands::Opener::new(
-            "ext",
-            "Extensions",
-            move |query| {
-                items
-                    .list(None, query)
-                    .into_iter()
-                    .take(40)
-                    .map(|i| {
-                        architect_commands::OpenItem::new(
-                            "ext",
-                            format!("{}\u{1f}{}", i.kind, i.id),
-                            i.name.clone(),
-                        )
-                        .detail(format!("{} · {}", i.kind, i.source))
-                    })
-                    .collect()
-            },
-            move |item, _| {
-                if let Some((kind, id)) = item.id.split_once('\u{1f}') {
-                    let mut selected = s.selected;
-                    selected.set(Some((kind.to_owned(), id.to_owned())));
-                }
+    let shown = use_hook(|| std::rc::Rc::new(std::cell::RefCell::new(Some(manager.shown()))));
+    use_future(move || {
+        let shown = shown.borrow_mut().take();
+        async move {
+            use futures::StreamExt as _;
+            let Some(mut shown) = shown else { return };
+            while let Some((kind, id)) = shown.next().await {
+                let mut selected = s.selected;
+                selected.set(Some((kind, id)));
                 if let Some(h) = settings {
                     h.show(Some(SECTION));
                 }
-            },
-        )
+            }
+        }
     });
 }
 

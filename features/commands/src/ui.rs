@@ -88,6 +88,8 @@ pub struct Commands {
     /// The one group the palette lists, and its field's prompt
     /// ([`Commands::show_group`]).
     pub(crate) only: Signal<Option<(String, String)>>,
+    /// What ⌘O's field is set to next ([`Commands::show_quick_open`]).
+    pub(crate) seed: Signal<Option<String>>,
     /// A binding being recorded in the action list window.
     pub(crate) recording: Signal<Option<Recording>>,
     /// The `@` (this page's targets) and `#` (settings) finders.
@@ -122,6 +124,7 @@ pub fn use_commands_provider() -> Commands {
         query: Signal::new(String::new()),
         asking: Signal::new(None),
         only: Signal::new(None),
+        seed: Signal::new(None),
         recording: Signal::new(None),
         targets: CopyValue::new(Rc::new(RefCell::new(Openers::new()))),
         settings: CopyValue::new(Rc::new(RefCell::new(Openers::new()))),
@@ -528,6 +531,27 @@ impl Commands {
             only.set(None);
         }
         o.set(Some(overlay));
+    }
+
+    /// ⌘O, its field set to `query` (`theme:` asks only the theme
+    /// opener).
+    pub fn show_quick_open(&self, query: &str) {
+        let mut seed = self.seed;
+        seed.set(Some(query.to_owned()));
+        self.show(Overlay::QuickOpen);
+    }
+
+    /// ⌘O's `opener`, from now on (in place of one of its kind); what
+    /// [`use_opener`] does for a component's life.
+    pub fn register_opener(&self, opener: Opener) {
+        self.openers.read().borrow_mut().register(opener);
+        self.bump();
+    }
+
+    /// ⌘O's opener of `kind`, gone.
+    pub fn remove_opener(&self, kind: &str) {
+        self.openers.read().borrow_mut().remove(kind);
+        self.bump();
     }
 
     /// The palette on `group`'s commands only (those that can run now),
@@ -946,8 +970,18 @@ pub fn QuickOpen() -> Element {
         return rsx! {};
     };
     let t = theme();
-    let query = use_signal(String::new);
+    let mut query = use_signal(String::new);
     let mut selected = use_signal(|| 0usize);
+    // A field set from outside (`COMMANDS_SHOW`, an extension's picker).
+    use_effect(move || {
+        let mut seed = commands.seed;
+        if let Some(q) = seed() {
+            seed.set(None);
+            query.set(q);
+        }
+    });
+    // An opener that answers later (an extension's) bumps the version.
+    let _ = (commands.version)();
     let found: Vec<Found> = commands.openers.read().borrow().search(&query.read());
     let count = found.len();
     use_effect(move || {

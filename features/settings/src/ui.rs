@@ -686,6 +686,18 @@ fn RestoreDefaults(id: String) -> Element {
     }
 }
 
+/// Draws a section's [`Section::view`]: what the app puts in context for
+/// the settings page (an extension host's, which draws its extensions'
+/// views). `None` when it cannot.
+#[derive(Clone)]
+pub struct SectionViews(pub std::rc::Rc<dyn Fn(&str) -> Option<Element>>);
+
+impl std::fmt::Debug for SectionViews {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("SectionViews")
+    }
+}
+
 /// A section's blocks: each a heading and a card of rows.
 #[component]
 fn SectionBody(section: Section) -> Element {
@@ -694,6 +706,17 @@ fn SectionBody(section: Section) -> Element {
     if let Some(page) = page {
         return rsx! {
             div { style: "display: flex; flex-direction: column; min-height: 100%;", {page()} }
+        };
+    }
+    // An extension's section drawn by one of its views (`[[sections]]
+    // view`), the same way.
+    let drawn = section
+        .view
+        .as_deref()
+        .and_then(|view| try_consume_context::<SectionViews>().and_then(|v| (v.0)(view)));
+    if let Some(drawn) = drawn {
+        return rsx! {
+            div { style: "display: flex; flex-direction: column; min-height: 100%;", {drawn} }
         };
     }
     rsx! {

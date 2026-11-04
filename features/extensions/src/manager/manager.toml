@@ -42,7 +42,45 @@ group = "Extensions"
 effect = "mutating"
 params = '{"type":"object","properties":{"kind":{"type":"string"},"id":{"type":"string"},"op":{"type":"string"},"args":{"type":"object"}},"required":["kind","id","op"]}'
 
+[[actions]]
+id = "MANAGER_FIND"
+name = "Manager: find"
+description = "⌘O's `ext:`: the items whose name, id, kind or source has `query`'s words (40 at most), each `{id: \"<kind>\\u001f<id>\", title, detail}`."
+group = "Extensions"
+effect = "read_only"
+params = '{"type":"object","properties":{"query":{"type":"string"}}}'
+
+[[actions]]
+id = "MANAGER_SHOW"
+name = "Manager: show an item"
+description = "Opens the settings page's Extensions section at item `id` (`<kind>\\u001f<id>`, as MANAGER_FIND gives it), or at `kind` and `id`."
+group = "Extensions"
+effect = "mutating"
+params = '{"type":"object","properties":{"id":{"type":"string"},"kind":{"type":"string"}},"required":["id"]}'
+
 [[views]]
 id = "manager"
 title = "Extensions"
 icon = "puzzle"
+
+# The manager on the settings page: a section of its own, in the first,
+# untitled group, drawn by its view.
+[[views]]
+id = "section"
+title = "Extensions"
+icon = "puzzle"
+
+[[sections]]
+id = "extensions"
+title = "Extensions"
+icon = "puzzle"
+group = ""
+view = "section"
+
+# ⌘O's `ext:`: everything the manager manages.
+[[openers]]
+kind = "ext"
+title = "Extensions"
+prefix = "ext"
+action = "MANAGER_FIND"
+open = "MANAGER_SHOW"

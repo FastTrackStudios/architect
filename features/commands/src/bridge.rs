@@ -28,7 +28,7 @@ use facet::Facet;
 use futures_util::StreamExt as _;
 
 use crate::ui::{Overlay, try_use_commands};
-use crate::{LIST_ACTION, RUN_ACTION, STATE_ACTION};
+use crate::{LIST_ACTION, RUN_ACTION, SHOW_ACTION, STATE_ACTION};
 
 /// What [`RUN_ACTION`] takes: a command's id, and its arguments as JSON
 /// (for one from an Action List that takes any).
@@ -40,6 +40,15 @@ pub struct RunCommand {
     /// Its arguments as JSON, for an Action List action that takes any.
     #[facet(default)]
     pub args: Option<String>,
+}
+
+/// What [`SHOW_ACTION`] takes: the overlay, and what its field says.
+#[derive(Debug, Clone, Facet)]
+pub struct ShowCommands {
+    /// `palette` or `quick-open`.
+    pub overlay: String,
+    #[facet(default)]
+    pub query: Option<String>,
 }
 
 /// What [`RUN_ACTION`] answers: whether it ran.
@@ -82,6 +91,19 @@ static RUN_META: ActionMeta = ActionMeta {
     method_name: "",
     display_name: "Run a command",
     description: "Runs any command by its id — a view's own too — as its key would; `args` is JSON for one that takes any. Each command has its own effect (COMMANDS_LIST): a destructive one waits for a person's yes.",
+    category: "Commands",
+    group: "Commands",
+    shortcut: "",
+    toggleable: false,
+    undo: false,
+};
+
+static SHOW_META: ActionMeta = ActionMeta {
+    id: SHOW_ACTION,
+    trait_name: "",
+    method_name: "",
+    display_name: "Show the palette",
+    description: "Opens the command palette (`overlay: palette`) or ⌘O (`quick-open`), its field set to `query` when given: `theme:` asks only ⌘O's theme opener.",
     category: "Commands",
     group: "Commands",
     shortcut: "",
@@ -137,6 +159,25 @@ pub fn use_command_actions(list: Arc<ActionList>) {
             let _ = answer.send(ran);
         }
     });
+    // The window's thread opens what the list was asked to show.
+    let shower = use_coroutine(
+        move |mut asks: UnboundedReceiver<ShowCommands>| async move {
+            while let Some(ask) = asks.next().await {
+                let Some(c) = commands else { continue };
+                match (ask.overlay.as_str(), ask.query) {
+                    ("quick-open", Some(q)) => c.show_quick_open(&q),
+                    ("quick-open", None) => c.show(Overlay::QuickOpen),
+                    (_, q) => {
+                        c.show(Overlay::Palette);
+                        if let Some(q) = q {
+                            let mut query = c.query;
+                            query.set(q);
+                        }
+                    }
+                }
+            }
+        },
+    );
     let registered = use_hook({
         let list = list.clone();
         let state = state.clone();
@@ -179,7 +220,20 @@ pub fn use_command_actions(list: Arc<ActionList>) {
             let read = list.register(&STATE_META, Effect::ReadOnly, move |(): ()| {
                 Ok(state.lock().unwrap_or_else(PoisonError::into_inner).clone())
             });
-            ran.is_ok() && read.is_ok() && all.is_ok()
+            let show_tx = shower.tx();
+            let show = list.register(&SHOW_META, Effect::Mutating, move |ask: ShowCommands| {
+                if !matches!(ask.overlay.as_str(), "palette" | "quick-open") {
+                    return Err(format!(
+                        "overlay {:?}: it is `palette` or `quick-open`",
+                        ask.overlay
+                    ));
+                }
+                show_tx
+                    .unbounded_send(ask)
+                    .map_err(|_| "the window is gone".to_owned())?;
+                Ok(Ran { ran: true })
+            });
+            ran.is_ok() && read.is_ok() && all.is_ok() && show.is_ok()
         }
     });
     // Every command as it is now (a view's come and go).
@@ -230,6 +284,7 @@ pub fn use_command_actions(list: Arc<ActionList>) {
             list.unregister(RUN_ACTION);
             list.unregister(STATE_ACTION);
             list.unregister(LIST_ACTION);
+            list.unregister(SHOW_ACTION);
             // The check holds the list: let it go.
             list.set_confirm(RUN_ACTION, |_| false);
         }

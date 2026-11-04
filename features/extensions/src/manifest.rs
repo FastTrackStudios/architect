@@ -371,11 +371,17 @@ pub struct SectionDecl {
     pub title: String,
     #[serde(default)]
     pub icon: String,
-    /// The heading it sits under (`Extensions` when none is given).
+    /// The heading it sits under (`Extensions` when none is given; `""`
+    /// for the first, untitled group, as a built-in's).
     #[serde(default)]
     pub group: Option<String>,
     #[serde(default)]
     pub settings: Vec<SettingDecl>,
+    /// One of its `[[views]]` that draws the section in place of
+    /// settings: a page of its own on the settings page (the extensions
+    /// manager's).
+    #[serde(default)]
+    pub view: Option<String>,
 }
 
 /// One setting, as an author writes it.
@@ -802,6 +808,14 @@ impl Manifest {
             if !seen.insert(section.id.as_str()) {
                 return Err(ManifestError::Duplicate(section.id.clone()));
             }
+            if let Some(view) = &section.view
+                && !self.views.iter().any(|v| v.id == *view)
+            {
+                return Err(ManifestError::Contribution(Refused {
+                    what: format!("section {}", section.id),
+                    why: format!("it has no view {view:?} ([[views]])"),
+                }));
+            }
             for s in &section.settings {
                 if !s.key.starts_with(&keys) {
                     return Err(ManifestError::SettingNamespace(s.key.clone()));
@@ -855,9 +869,14 @@ impl Manifest {
         self.sections
             .iter()
             .map(|decl| {
-                let mut section = Section::new(&decl.id, &decl.title)
-                    .group(decl.group.as_deref().unwrap_or("Extensions"))
-                    .owned_by(&self.id);
+                let mut section = Section::new(&decl.id, &decl.title).owned_by(&self.id);
+                section = match decl.group.as_deref().unwrap_or("Extensions") {
+                    "" => section.ungrouped(),
+                    group => section.group(group),
+                };
+                if let Some(view) = &decl.view {
+                    section = section.view(format!("{}/{view}", self.id));
+                }
                 if !decl.icon.is_empty() {
                     section = section.icon(&decl.icon);
                 }
@@ -1087,6 +1106,35 @@ choices = [{ value = "wood", label = "Woodblock" }, { value = "beep", label = "B
         assert!(
             matches!(volume.control, Control::Slider { max, .. } if (max - 100.0).abs() < f64::EPSILON)
         );
+    }
+
+    #[test]
+    fn a_section_drawn_by_one_of_its_views() {
+        const PAGE: &str = r#"
+id = "manager"
+name = "Extensions"
+version = "0.1.0"
+kind = "process"
+
+[[views]]
+id = "section"
+title = "Extensions"
+
+[[sections]]
+id = "extensions"
+title = "Extensions"
+icon = "puzzle"
+group = ""
+view = "section"
+"#;
+        let m = Manifest::parse(PAGE).unwrap();
+        let s = &m.sections()[0];
+        assert_eq!(s.view.as_deref(), Some("manager/section"));
+        assert_eq!(s.group, None, "an empty group: the first, untitled one");
+        assert!(s.blocks.is_empty());
+        let e =
+            Manifest::parse(&PAGE.replace("view = \"section\"", "view = \"gone\"")).unwrap_err();
+        assert!(e.to_string().contains("no view \"gone\""), "{e}");
     }
 
     #[test]
