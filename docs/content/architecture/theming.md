@@ -195,13 +195,17 @@ it is the same truth `THEME_*` reach. From the top:
   device (`Device`). "Reset to organization default" empties both.
 - **Mode:** System, Light, Dark, live. Each card is drawn in the theme
   it would show.
-- **Light theme / Dark theme:** a card per theme, drawn in its own
-  colours (each one's `Resolved` through `ThemeStore::resolve_with`, the
-  person's overrides included). A card sets its half of the choice.
+- **Theme:** the `appearance.theme` row, with a card per theme under it
+  (light, then dark), drawn in its own colours (each one's `Resolved`
+  through `ThemeStore::resolve_with`, the person's overrides included). A
+  card sets its half of the choice.
 - **Text and spacing:** text size (80 % to 140 %, `text-scale`),
   density (compact, default, roomy: `density`), corners (`radius`),
   contrast (`contrast`), font (Inter, system, serif, monospace: `font`
   and `font-sans`).
+
+Every row is a setting, so search finds it and a hit scrolls to its row
+and pulses it, as on the standard page (`setting-<key>` is the row's id).
 
 Each row says who sets its value now (your organization, you on every
 device, this device, the theme), and has a reset that takes the chosen

@@ -20,7 +20,8 @@ use dioxus::prelude::*;
 use futures_util::StreamExt;
 use lucide_dioxus::{Minus, Plus, RotateCcw};
 
-use crate::appearance::{self, CORNERS, DENSITIES, FONTS, tokens};
+use crate::appearance::{self, CORNERS, DENSITIES, FONTS, token_key, tokens};
+use crate::ui::{Pulse, setting_row_id, use_setting_focus};
 
 /// Registers the Appearance section, drawn by [`AppearancePage`], while
 /// the calling component is mounted. Under a theme store
@@ -159,8 +160,9 @@ pub fn AppearancePage() -> Element {
                 }
             }
             Group { title: "Mode",
-                Row { title: "Mode", detail: "Follow the system, or always light or dark.", by: mode_by, kind, first: true, pad,
-                    locked: locked.contains(appearance::MODE), clear: clear_mode(&store, kind),
+                Row { setting: appearance::MODE.to_owned(), title: "Mode", detail: "Follow the system, or always light or dark.",
+                    by: mode_by, kind, first: true, pad, locked: locked.contains(appearance::MODE), stacked: false,
+                    clear: clear_mode(&store, kind),
                     div { style: "display: flex; gap: 8px;",
                         for (a, label, sample) in [
                             (Appearance::System, "System", None),
@@ -178,23 +180,25 @@ pub fn AppearancePage() -> Element {
                     }
                 }
             }
-            for (scheme, title) in [(Scheme::Light, "Light theme"), (Scheme::Dark, "Dark theme")] {
-                Group { key: "{title}", title: title.to_owned(),
-                    div { style: "display: flex; flex-direction: column; gap: 10px; padding: {pad}px 16px;",
-                        div { style: "display: flex; align-items: center; gap: 8px; color: {t.ink_3}; font-size: {ctx.text(12.0)}px;",
-                            span { "{said_by(choice_by)}" }
-                            if choice_by == Some(kind) {
-                                ResetButton { label: "Reset the theme".to_owned(), onpress: clear_choice(&store, kind) }
-                            }
-                        }
-                        div { style: "display: flex; flex-wrap: wrap; gap: 10px;",
-                            for card in cards.iter().filter(|c| c.scheme == scheme).cloned() {
-                                ThemeCard { key: "{card.id}", card: card.clone(), disabled: locked.contains(appearance::THEME),
-                                    onpick: {
-                                        let store = store.clone();
-                                        let id = card.id;
-                                        move |()| { let _ = store.pick_in(kind, &id); }
-                                    },
+            Group { title: "Theme",
+                // The light theme's and the dark one's cards, under the row's words.
+                Row { setting: appearance::THEME.to_owned(), title: "Theme", detail: "The theme light shows, and the one dark shows.",
+                    by: choice_by, kind, first: true, pad, locked: locked.contains(appearance::THEME), stacked: true,
+                    clear: clear_choice(&store, kind),
+                    div { style: "display: flex; flex-direction: column; gap: 14px;",
+                        for (scheme, label) in [(Scheme::Light, "Light"), (Scheme::Dark, "Dark")] {
+                            div { key: "{label}", style: "display: flex; flex-direction: column; gap: 8px;",
+                                span { style: "color: {t.ink_3}; font-size: {ctx.text(12.0)}px;", "{label}" }
+                                div { style: "display: flex; flex-wrap: wrap; gap: 10px;",
+                                    for card in cards.iter().filter(|c| c.scheme == scheme).cloned() {
+                                        ThemeCard { key: "{card.id}", card: card.clone(), disabled: locked.contains(appearance::THEME),
+                                            onpick: {
+                                                let store = store.clone();
+                                                let id = card.id;
+                                                move |()| { let _ = store.pick_in(kind, &id); }
+                                            },
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -365,8 +369,12 @@ fn Group(title: String, children: Element) -> Element {
     }
 }
 
+/// One setting's row: its words, who sets it, and its control. A search hit
+/// on `setting` scrolls to it and pulses it, as on the standard page. `stacked`
+/// puts the control under the words, full width (the theme's cards).
 #[component]
 fn Row(
+    setting: String,
     title: String,
     detail: String,
     by: Option<LayerKind>,
@@ -374,10 +382,13 @@ fn Row(
     first: bool,
     pad: f32,
     locked: bool,
+    stacked: bool,
     clear: EventHandler<()>,
     children: Element,
 ) -> Element {
     let t = theme();
+    let focus = use_setting_focus(&setting);
+    let row_id = setting_row_id(&setting);
     let rule = if first { "transparent" } else { &*t.rule };
     let (fade, reach) = if locked {
         ("0.5", "none")
@@ -389,9 +400,20 @@ fn Row(
     } else {
         said_by(by)
     };
+    let (dir, align) = if stacked {
+        ("column", "stretch")
+    } else {
+        ("row", "center")
+    };
     rsx! {
-        div { style: "display: flex; align-items: center; gap: 14px; padding: {pad}px 16px; border-top: 1px solid {rule};",
-            div { style: "flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px;",
+        div {
+            id: "{row_id}",
+            style: "position: relative; display: flex; flex-direction: {dir}; align-items: {align}; gap: 14px; padding: {pad}px 16px; border-top: 1px solid {rule};",
+            onmounted: move |e| focus.arrived(e.data()),
+            if let Some(n) = focus.pulse {
+                Pulse { key: "{n}" }
+            }
+            div { style: "position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px;",
                 div { style: "display: flex; align-items: center; gap: 8px;",
                     span { style: "font-weight: 550; color: {t.ink};", "{title}" }
                     if by == Some(kind) && !locked {
@@ -402,7 +424,7 @@ fn Row(
                 span { style: "font-size: 12px; line-height: 1.5; color: {t.ink_3};", "{detail}" }
                 span { style: "font-size: 11px; color: {t.ink_3};", "{said}" }
             }
-            div { style: "flex-shrink: 0; opacity: {fade}; pointer-events: {reach};", {children} }
+            div { style: "position: relative; flex-shrink: 0; opacity: {fade}; pointer-events: {reach};", {children} }
         }
     }
 }
@@ -422,7 +444,7 @@ fn TokenRow(
 ) -> Element {
     let kind = ctx.kind;
     rsx! {
-        Row { title, detail, by: said.0, kind, first, pad: ctx.px(14.0), locked,
+        Row { setting: token_key(name), title, detail, by: said.0, kind, first, pad: ctx.px(14.0), locked, stacked: false,
             clear: move |()| {
                 let _ = store.update(kind, |l| {
                     l.overrides.remove(name);

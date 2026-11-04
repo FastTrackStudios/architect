@@ -140,6 +140,66 @@ fn focused(h: SettingsHandle) -> Option<(String, u32)> {
     (h.focus)()
 }
 
+/// A settings row's focus: when a search hit goes to its setting, the row
+/// scrolls to view and [`Pulse`]s. Any settings page's rows take one
+/// ([`use_setting_focus`]): the standard page's and the architect's
+/// Appearance page's.
+#[derive(Clone, Copy)]
+pub struct SettingFocus {
+    mounted: Signal<Option<std::rc::Rc<MountedData>>>,
+    /// The hit's count while the hit is the one on show; `None` otherwise.
+    pub pulse: Option<u32>,
+}
+
+impl SettingFocus {
+    /// The row's element, once mounted (the row's `onmounted`).
+    pub(crate) fn arrived(self, el: std::rc::Rc<MountedData>) {
+        let mut mounted = self.mounted;
+        mounted.set(Some(el));
+    }
+}
+
+/// The element id of setting `key`'s row (a search hit is scrolled to it).
+pub fn setting_row_id(key: &str) -> String {
+    format!("setting-{key}")
+}
+
+/// The focus of the row for setting `key` (see [`SettingFocus`]). Under no
+/// settings provider nothing is focused.
+pub fn use_setting_focus(key: &str) -> SettingFocus {
+    let h = try_use_settings();
+    let mounted = use_signal(|| None::<std::rc::Rc<MountedData>>);
+    let pulse = h
+        .and_then(focused)
+        .filter(|(k, _)| k.as_str() == key)
+        .map(|(_, n)| n);
+    let this = key.to_owned();
+    use_effect(move || {
+        let on = h.and_then(focused).is_some_and(|(k, _)| k == this);
+        if let (true, Some(m)) = (on, mounted()) {
+            spawn(async move {
+                let _ = m.scroll_to(ScrollBehavior::Smooth).await;
+            });
+        }
+    });
+    SettingFocus { mounted, pulse }
+}
+
+/// The highlight a search hit's row shows: a wash that fades, twice. The
+/// caller keys it by the hit's count, so another hit on the row pulses it
+/// again.
+#[component]
+pub(crate) fn Pulse() -> Element {
+    let t = theme();
+    rsx! {
+        div {
+            style: "position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; \
+                    background: {t.accent_soft}; animation: architect-settings-pulse 900ms ease-out 2 forwards;",
+        }
+        style { "@keyframes architect-settings-pulse {{ 0% {{ opacity: 1; }} 100% {{ opacity: 0; }} }}" }
+    }
+}
+
 /// Registers `section` (no settings needed) drawn by `page` in place of
 /// its settings, while the calling component is mounted.
 ///
@@ -667,17 +727,7 @@ fn Row(setting: Setting, first: bool) -> Element {
         return rsx! {};
     };
     let t = theme();
-    let mut mounted = use_signal(|| None::<std::rc::Rc<MountedData>>);
-    let this = setting.key.clone();
-    let pulse = focused(h).filter(|(k, _)| *k == this).map(|(_, n)| n);
-    use_effect(move || {
-        let on = focused(h).is_some_and(|(k, _)| k == this);
-        if let (true, Some(m)) = (on, mounted()) {
-            spawn(async move {
-                let _ = m.scroll_to(ScrollBehavior::Smooth).await;
-            });
-        }
-    });
+    let focus = use_setting_focus(&setting.key);
     let (value, changed, locked) = {
         let registry = h.registry.read();
         let values = h.values.read();
@@ -700,21 +750,15 @@ fn Row(setting: Setting, first: bool) -> Element {
     } else {
         ("1", "auto")
     };
-    let row_id = format!("setting-{}", setting.key);
+    let row_id = setting_row_id(&setting.key);
     rsx! {
         div {
             id: "{row_id}",
             style: "position: relative; display: flex; flex-direction: {dir}; align-items: {align}; gap: 14px; padding: 14px 16px; \
                     border-top: 1px solid {rule};",
-            onmounted: move |e| mounted.set(Some(e.data())),
-            if let Some(n) = pulse {
-                // Keyed by the hit's count, so another hit on it pulses again.
-                div {
-                    key: "{n}",
-                    style: "position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; \
-                            background: {t.accent_soft}; animation: architect-settings-pulse 900ms ease-out 2 forwards;",
-                }
-                style { "@keyframes architect-settings-pulse {{ 0% {{ opacity: 1; }} 100% {{ opacity: 0; }} }}" }
+            onmounted: move |e| focus.arrived(e.data()),
+            if let Some(n) = focus.pulse {
+                Pulse { key: "{n}" }
             }
             div { style: "position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px;",
                 div { style: "display: flex; align-items: center; gap: 8px;",
