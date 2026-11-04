@@ -40,7 +40,7 @@
 //!
 //! What it adds to the interface — openers for files, document kinds and
 //! links, document kinds, tabs, status items, menu and context-menu
-//! entries, action-bar buttons, hooks and slots — are the tables of a
+//! entries, action-bar buttons, toolbars, hooks and slots — are the tables of a
 //! [`Contribution`] (`crate::contrib`), read into
 //! [`Manifest::contributes`].
 
@@ -50,7 +50,7 @@ use serde::{Deserialize, Serialize};
 
 pub use crate::contrib::{
     BarDecl, ContextDecl, Contribution, DocKindDecl, HookDecl, MenuDecl, OpenerDecl, Refused,
-    Rules, SlotDecl, StatusDecl, TabDecl,
+    Rules, SlotDecl, StatusDecl, TabDecl, ToolItem, ToolbarDecl, ToolbarPlace,
 };
 
 /// The extension API this build speaks: a manifest naming a newer one
@@ -173,6 +173,12 @@ pub struct ActionDecl {
     /// kind (a data extension's only code-free action).
     #[serde(default)]
     pub preset: Option<Preset>,
+    /// A toggle: it says whether it is on, by writing runtime state of
+    /// kind `checked` keyed by its id (`ext.state{kind = "checked", key
+    /// = "…", text = "on"}`, a guest's `set_state`), off until it does.
+    /// Its tick in a menu and ⌘K, and its toolbar buttons, follow it.
+    #[serde(default)]
+    pub toggle: bool,
 }
 
 /// An action run with fixed arguments.
@@ -559,7 +565,7 @@ pub struct Manifest {
     pub reserved: Vec<String>,
     /// What it adds to the interface: its `[[openers]]`, `[[doc_kinds]]`,
     /// `[[tabs]]`, `[[status]]`, `[[menus]]`, `[[context]]`, `[[bar]]`,
-    /// `[[hooks]]`, `[[slots]]` and `[[embeds]]`.
+    /// `[[toolbars]]`, `[[hooks]]`, `[[slots]]` and `[[embeds]]`.
     #[serde(flatten)]
     pub contributes: Contribution,
 }

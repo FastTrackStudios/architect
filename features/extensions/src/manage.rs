@@ -189,6 +189,7 @@ fn adds(m: &Manifest) -> Vec<String> {
         ("menus", "menu entry"),
         ("context", "context-menu entry"),
         ("bar", "bar button"),
+        ("toolbars", "toolbar"),
         ("openers", "opener"),
         ("doc_kinds", "document kind"),
         ("slots", "chrome slot"),

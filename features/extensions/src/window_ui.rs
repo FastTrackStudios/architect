@@ -65,7 +65,7 @@ pub(crate) fn use_open_windows(host: &Host) -> Signal<Vec<OpenWindow>> {
     open
 }
 
-fn shell_theme() -> ShellTheme {
+pub(crate) fn shell_theme() -> ShellTheme {
     try_use_shell().map_or_else(
         || ShellTheme::from_resolved(&architect_theme::use_resolved()),
         |s| s.theme,

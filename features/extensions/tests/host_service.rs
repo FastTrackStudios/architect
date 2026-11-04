@@ -376,6 +376,10 @@ fn the_page_finds_extensions_by_name_kind_and_what_they_add() {
                 include_str!("../../../apps/lab/extensions/metronome/count_in.luau"),
             ),
             (
+                "click.luau",
+                include_str!("../../../apps/lab/extensions/metronome/click.luau"),
+            ),
+            (
                 "status.luau",
                 include_str!("../../../apps/lab/extensions/metronome/status.luau"),
             ),
@@ -401,7 +405,7 @@ fn the_page_finds_extensions_by_name_kind_and_what_they_add() {
     for query in ["metro", "kind:luau", "adds:status", "count in", "built in"] {
         assert_eq!(browse.rows(query).len(), 1, "{query}");
     }
-    for query in ["kind:process", "adds:tab", "saturation"] {
+    for query in ["kind:process", "adds:opener", "saturation"] {
         assert!(browse.rows(query).is_empty(), "{query}");
     }
 
