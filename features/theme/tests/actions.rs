@@ -217,3 +217,60 @@ fn inspect_and_tokens_in_any_layer() {
         );
     }
 }
+
+/// `THEME_SET` writes the person's layer (what is kept) unless it is told
+/// another: `device` for this device only, `pick` for this run.
+#[test]
+fn theme_set_writes_the_layer_it_is_given() {
+    let (list, store) = listed();
+    let _ = json(&list, ids::SET, r#"{"dark":"dracula-dark"}"#);
+    assert_eq!(
+        store.layer(LayerKind::Person).choice,
+        Some(architect_theme::ThemeChoice::pair(
+            "fasttrackstudio-light",
+            "dracula-dark"
+        ))
+    );
+    assert!(store.layer(LayerKind::Pick).is_empty());
+
+    let _ = json(
+        &list,
+        ids::SET,
+        r#"{"appearance":"light","layer":"device"}"#,
+    );
+    assert_eq!(
+        store.layer(LayerKind::Device).appearance,
+        Some(architect_theme::Appearance::Light)
+    );
+    assert_eq!(store.layer(LayerKind::Person).appearance, None);
+    assert!(list
+        .run_json(ids::SET, br#"{"appearance":"dark","layer":"builtin"}"#)
+        .is_err());
+}
+
+/// A layer listener hears a change to the layers even when nothing that
+/// shows moved (the person's choice, under the device's).
+#[test]
+fn layer_listeners_hear_changes_that_do_not_show() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let store = ThemeStore::default();
+    let looks = Arc::new(AtomicUsize::new(0));
+    let layers = Arc::new(AtomicUsize::new(0));
+    let (l, y) = (looks.clone(), layers.clone());
+    let _a = store.subscribe(move |_| {
+        l.fetch_add(1, Ordering::SeqCst);
+    });
+    let _b = store.subscribe_layers(move |_| {
+        y.fetch_add(1, Ordering::SeqCst);
+    });
+    let _ = store.pick_in(LayerKind::Device, "nord-dark");
+    let _ = store.pick_in(LayerKind::Person, "dracula-dark");
+    assert_eq!(store.current().id(), "nord-dark");
+    assert_eq!(looks.load(Ordering::SeqCst), 1);
+    assert_eq!(layers.load(Ordering::SeqCst), 2);
+    // Nothing changed at all: neither hears.
+    let _ = store.pick_in(LayerKind::Person, "dracula-dark");
+    assert_eq!(layers.load(Ordering::SeqCst), 2);
+}

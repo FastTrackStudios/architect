@@ -5,7 +5,7 @@
 //! |---|---|---|
 //! | `THEME_LIST` | read-only | every theme: id, label, appearance, source (`extension:<id>` for an extension's), problems |
 //! | `THEME_GET` | read-only | the choice, the appearance, the theme showing, the revision, and its tokens (all, or the names and `prefix-*`es asked for) |
-//! | `THEME_SET` | mutating | the pick: `one`, or `light` / `dark` halves, and/or `appearance` |
+//! | `THEME_SET` | mutating | the choice: `one`, or `light` / `dark` halves, and/or `appearance`, in a `layer` (the person's by default, so it is kept) |
 //! | `THEME_PREVIEW` | mutating | shows a theme over everything until `THEME_PREVIEW_END` |
 //! | `THEME_PREVIEW_END` | mutating | ends the preview |
 //! | `THEME_TOKEN_SET` | mutating | a token overridden (a literal or an expression) in a layer, the person's by default |
@@ -75,7 +75,7 @@ macro_rules! metas {
 metas! {
     LIST = LIST, "Themes", "Every theme the app knows: its id, label, appearance (light or dark), source (builtin, file, memory, or extension:<id> for one a loaded extension contributes) and problems.";
     GET = GET, "Current theme", "The choice (one theme, or a light and a dark), the appearance (system, light, dark), the theme showing, the revision, and its resolved tokens: all, or only the `tokens` named (a `prefix-*` matches every name starting `prefix-`).";
-    SET = SET, "Set the theme", "Picks the theme: `one` always shows it; `light` / `dark` set that half of the pair (the other half stays). `appearance` is system, light or dark. Answers whether anything changed and the revision.";
+    SET = SET, "Set the theme", "Picks the theme: `one` always shows it; `light` / `dark` set that half of the pair (the other half stays). `appearance` is system, light or dark. `layer` is where it goes: person (kept, on every device; the default), device (this device only), workspace, pick (this run only), org, app. Answers whether anything changed and the revision.";
     PREVIEW = PREVIEW, "Preview a theme", "Shows theme `id` over every other choice until THEME_PREVIEW_END; nothing is kept.";
     PREVIEW_END = PREVIEW_END, "End the theme preview", "Ends THEME_PREVIEW: the chosen theme shows again.";
     TOKEN_SET = TOKEN_SET, "Set a theme token", "Overrides token `name` (as THEME_GET names it: `primary`, `ink-3`, `radius`, an app's `arrange.item.edge`) with `value` in `layer` (app, org, person, device, workspace, pick, preview; person when left out), over every theme. A value is any CSS value, or an expression over other tokens: `$border`, `mix($border, $foreground, 0.2)`, `alpha($ink, 0.3)`.";
@@ -153,6 +153,10 @@ pub struct SetArgs {
     pub dark: Option<String>,
     #[facet(default)]
     pub appearance: Option<Appearance>,
+    /// The layer (`person` when left out: kept, on every device;
+    /// `device` for this device only; `pick` for this run only).
+    #[facet(default)]
+    pub layer: Option<String>,
 }
 
 #[derive(Debug, Clone, Facet)]
@@ -309,8 +313,8 @@ pub fn inspect(store: &ThemeStore, prefix: Option<&str>) -> InspectOut {
     }
 }
 
-/// A token action's `layer`: the person's when left out; never the
-/// built-in one (architect's own).
+/// A write's `layer`: the person's when left out; never the built-in
+/// one (architect's own).
 fn layer_arg(layer: Option<&str>) -> Result<LayerKind, String> {
     let Some(name) = layer else {
         return Ok(LayerKind::Person);
@@ -360,7 +364,8 @@ pub fn set(store: &ThemeStore, args: &SetArgs) -> Result<Changed, String> {
             return Err(format!("no theme {id:?} (THEME_LIST has them)"));
         }
     }
-    let now = store.composed().choice;
+    let layer = layer_arg(args.layer.as_deref())?;
+    let now = store.composed_through(layer).choice;
     let choice = match (&args.one, &args.light, &args.dark) {
         (Some(one), _, _) => Some(ThemeChoice::One(one.clone())),
         (None, None, None) => None,
@@ -372,7 +377,7 @@ pub fn set(store: &ThemeStore, args: &SetArgs) -> Result<Changed, String> {
                 .unwrap_or_else(|| now.pick(crate::Scheme::Dark).to_owned()),
         )),
     };
-    let did = store.update(LayerKind::Pick, |layer| {
+    let did = store.update(layer, |layer| {
         if let Some(choice) = choice {
             layer.choice = Some(choice);
         }

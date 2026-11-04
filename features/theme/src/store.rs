@@ -140,6 +140,19 @@ impl Layers {
         }
     }
 
+    /// Only the layers up to `kind` (itself included): what shows when
+    /// nothing above it says anything.
+    #[must_use]
+    pub fn through(&self, kind: LayerKind) -> Self {
+        Self(
+            self.0
+                .iter()
+                .filter(|(k, _)| **k <= kind)
+                .map(|(k, l)| (*k, l.clone()))
+                .collect(),
+        )
+    }
+
     /// The layers composed, with the system's scheme `system`.
     #[must_use]
     pub fn compose(&self, system: Scheme) -> Composed {
@@ -208,7 +221,12 @@ pub struct ThemeInfo {
 /// theme whose file broke is kept as it was: last good).
 pub type Reloader = Arc<dyn Fn(&Registry) -> Registry + Send + Sync>;
 
-type Listener = Arc<dyn Fn(&Resolved) + Send + Sync>;
+/// A subscriber: to the theme showing, or to the layers.
+#[derive(Clone)]
+enum Listener {
+    Look(Arc<dyn Fn(&Resolved) + Send + Sync>),
+    Layers(Arc<dyn Fn(&Layers) + Send + Sync>),
+}
 
 /// What one owner other than the app (an extension, by its id) adds to
 /// the themes while it is there ([`ThemeStore::contribute`]): themes,
@@ -405,6 +423,14 @@ impl ThemeStore {
         self.lock().composed.clone()
     }
 
+    /// The layers up to `kind` composed: what `kind` and those under it
+    /// choose ([`Layers::through`]).
+    #[must_use]
+    pub fn composed_through(&self, kind: LayerKind) -> Composed {
+        let s = self.lock();
+        s.layers.through(kind).compose(s.system)
+    }
+
     #[must_use]
     pub fn layer(&self, kind: LayerKind) -> Layer {
         self.lock().layers.get(kind)
@@ -460,9 +486,11 @@ impl ThemeStore {
     /// (and the revision bumped, every listener told once) only when what
     /// shows changed.
     fn apply(&self, f: impl FnOnce(&mut State)) -> bool {
-        let (changed, current) = {
+        let (changed, current, layers) = {
             let mut s = self.lock();
+            let before = s.layers.clone();
             f(&mut s);
+            let moved = (s.layers != before).then(|| s.layers.clone());
             let layers = s.merge();
             let (composed, resolved, missing) = evaluate(&s.full, &layers, s.system);
             s.missing = missing;
@@ -473,19 +501,29 @@ impl ThemeStore {
                 s.current = resolved.at_revision(revision);
                 self.inner.revision.store(revision, Ordering::Release);
             }
-            (changed, s.current.clone())
+            (changed, s.current.clone(), moved)
         };
-        if changed {
+        if changed || layers.is_some() {
             let listeners: Vec<Listener> = lock(&self.inner.listeners)
                 .1
                 .iter()
                 .map(|(_, l)| l.clone())
                 .collect();
             for listener in listeners {
-                listener(&current);
+                match (listener, &layers) {
+                    (Listener::Look(l), _) if changed => l(&current),
+                    (Listener::Layers(l), Some(layers)) => l(layers),
+                    _ => {}
+                }
             }
         }
         changed
+    }
+
+    /// Every layer as it is now (the built-in one included).
+    #[must_use]
+    pub fn layers(&self) -> Layers {
+        self.lock().layers.clone()
     }
 
     /// The theme as it would show with `layer` at `kind` — the store
@@ -516,13 +554,20 @@ impl ThemeStore {
     /// Picks theme `id` (the [`LayerKind::Pick`] layer): it replaces the
     /// half of the choice showing now that matches its own lightness.
     pub fn pick(&self, id: &str) -> Result<bool, String> {
+        self.pick_in(LayerKind::Pick, id)
+    }
+
+    /// Picks theme `id` in layer `kind` (the person's, kept; this
+    /// device's): it replaces the half of the choice showing now that
+    /// matches its own lightness, as [`Self::pick`] does.
+    pub fn pick_in(&self, kind: LayerKind, id: &str) -> Result<bool, String> {
         let scheme = self
             .lock()
             .full
             .scheme_of(id)
             .ok_or_else(|| format!("no theme {id:?}"))?;
-        let choice = self.composed().choice.with_pick(id, scheme);
-        Ok(self.update(LayerKind::Pick, |l| l.choice = Some(choice)))
+        let choice = self.composed_through(kind).choice.with_pick(id, scheme);
+        Ok(self.update(kind, |l| l.choice = Some(choice)))
     }
 
     /// Shows `id` until [`Self::end_preview`], over every other layer.
@@ -654,11 +699,29 @@ impl ThemeStore {
     /// change.
     #[must_use]
     pub fn subscribe(&self, listener: impl Fn(&Resolved) + Send + Sync + 'static) -> Subscription {
+        self.listen(Listener::Look(Arc::new(listener)))
+    }
+
+    /// Calls `listener` with every layer after each change to the layers,
+    /// whether or not what shows changed (a device's choice set to what
+    /// the person's already shows), until the [`Subscription`] is
+    /// dropped: what keeps the layers ([`LayerKind::Person`],
+    /// [`LayerKind::Device`]) listens here. It runs on the thread that
+    /// made the change.
+    #[must_use]
+    pub fn subscribe_layers(
+        &self,
+        listener: impl Fn(&Layers) + Send + Sync + 'static,
+    ) -> Subscription {
+        self.listen(Listener::Layers(Arc::new(listener)))
+    }
+
+    fn listen(&self, listener: Listener) -> Subscription {
         let id = {
             let mut l = lock(&self.inner.listeners);
             let id = l.0;
             l.0 = l.0.saturating_add(1);
-            l.1.push((id, Arc::new(listener)));
+            l.1.push((id, listener));
             id
         };
         Subscription {
