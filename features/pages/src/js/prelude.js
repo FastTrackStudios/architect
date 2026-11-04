@@ -236,6 +236,14 @@
     useEffect(() => state.watch(key, () => (dirty = true)), [key]);
     return [got === undefined ? initial : got, (v) => state.set(key, v)];
   }
+  // An inline embed's input ({claim, source, props}), or undefined in a
+  // pane: the page renders again when the host's block changes.
+  function useEmbed() {
+    useEffect(() => state.watch("$embed", () => (dirty = true)), []);
+    const v = host.sync("embed", "", "");
+    const out = v == null ? null : JSON.parse(v);
+    return out === null ? undefined : out;
+  }
   function useTheme() {
     return theme;
   }
@@ -426,7 +434,7 @@
   }
 
   const api = Object.freeze({
-    h, Fragment, useState, useRef, useEffect, useData, useShared, useTheme, invalidate,
+    h, Fragment, useState, useRef, useEffect, useData, useShared, useEmbed, useTheme, invalidate,
     theme, actions, settings, state, notify, worker, Overlay, host: raw,
   });
   globalThis.__architect = Object.freeze({

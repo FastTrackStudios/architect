@@ -25,6 +25,7 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
+use architect_extensions::contrib::EmbedInput;
 use architect_extensions::wire::{Edit, EventData, Frame, Value as WireValue, ViewEvent};
 use architect_scripting::luau::Gate;
 use architect_scripting::vm::Cancel;
@@ -156,7 +157,17 @@ pub struct Services {
     pub limits: PageLimits,
     /// The extension it is a page of (its log's name).
     pub extension: String,
+    /// What its host gave it as an inline embed (`useEmbed()`, Luau's
+    /// `embed()`); `None` in a pane.
+    pub embed: Option<EmbedCell>,
 }
+
+/// An inline embed page's input, shared by its session and its thread.
+pub type EmbedCell = Arc<Mutex<EmbedInput>>;
+
+/// The topic an embed's new input reaches its page as
+/// ([`Inbox::Shared`]): never a shared-state key (those have no `$`).
+pub const EMBED_TOPIC: &str = "$embed";
 
 impl std::fmt::Debug for Services {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -255,6 +266,7 @@ pub struct PageSession {
     inbox: mpsc::Sender<Inbox>,
     stop: Cancel,
     status: Arc<PageStatus>,
+    embed: Option<EmbedCell>,
 }
 
 impl std::fmt::Debug for PageSession {
@@ -280,6 +292,53 @@ impl PageSession {
     #[must_use]
     pub const fn status(&self) -> &Arc<PageStatus> {
         &self.status
+    }
+
+    /// Gives an embed page ([`Pages::open_embed`]) its new input: it
+    /// draws again with it. Nothing for a page in a pane.
+    pub fn set_input(&self, input: EmbedInput) {
+        if let Some(to) = self.embed_input() {
+            to.set(input);
+        }
+    }
+
+    /// A way to give an embed page its next input from elsewhere (the
+    /// host's block, as it is edited); `None` for a page in a pane.
+    #[must_use]
+    pub fn embed_input(&self) -> Option<EmbedSender> {
+        self.embed.as_ref().map(|cell| EmbedSender {
+            cell: Arc::clone(cell),
+            inbox: self.inbox.clone(),
+        })
+    }
+}
+
+/// Gives an embed page its input ([`PageSession::embed_input`]).
+#[derive(Clone)]
+pub struct EmbedSender {
+    cell: EmbedCell,
+    inbox: mpsc::Sender<Inbox>,
+}
+
+impl std::fmt::Debug for EmbedSender {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EmbedSender").finish_non_exhaustive()
+    }
+}
+
+impl EmbedSender {
+    /// Its new input: it draws again with it. False once the page has
+    /// stopped.
+    #[allow(clippy::must_use_candidate)]
+    pub fn set(&self, input: EmbedInput) -> bool {
+        let value = serde_json::to_string(&input).unwrap_or_default();
+        *self.cell.lock().unwrap_or_else(PoisonError::into_inner) = input;
+        self.inbox
+            .send(Inbox::Shared(DataEvent {
+                topic: EMBED_TOPIC.to_owned(),
+                value,
+            }))
+            .is_ok()
     }
 }
 
@@ -499,6 +558,40 @@ impl Pages {
         view: &str,
         gate: Option<Gate>,
     ) -> Result<PageSession, String> {
+        self.open_as(page, extension, view, gate, None)
+    }
+
+    /// Opens `page` as `extension`'s inline embed `view`, given `input`
+    /// (its `useEmbed()`); [`PageSession::set_input`] gives it the next.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::open`].
+    pub fn open_embed(
+        &self,
+        page: &PageFile,
+        extension: &str,
+        view: &str,
+        gate: Option<Gate>,
+        input: EmbedInput,
+    ) -> Result<PageSession, String> {
+        self.open_as(
+            page,
+            extension,
+            view,
+            gate,
+            Some(Arc::new(Mutex::new(input))),
+        )
+    }
+
+    fn open_as(
+        &self,
+        page: &PageFile,
+        extension: &str,
+        view: &str,
+        gate: Option<Gate>,
+        embed: Option<EmbedCell>,
+    ) -> Result<PageSession, String> {
         let load = self
             .0
             .loaders
@@ -535,6 +628,7 @@ impl Pages {
             stop: stop.clone(),
             limits: self.0.limits,
             extension: extension.to_owned(),
+            embed: embed.clone(),
         };
         let theirs = Arc::clone(&status);
         std::thread::Builder::new()
@@ -546,6 +640,7 @@ impl Pages {
             inbox,
             stop,
             status,
+            embed,
         })
     }
 
@@ -596,6 +691,7 @@ impl Pages {
             stop: Cancel::default(),
             limits: self.0.limits,
             extension: "check".to_owned(),
+            embed: None,
         };
         let page = page.clone();
         std::thread::Builder::new()

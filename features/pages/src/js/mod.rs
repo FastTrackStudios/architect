@@ -55,7 +55,7 @@ const PRELUDE: &str = include_str!("prelude.js");
 const WORKER_PRELUDE: &str = include_str!("worker.js");
 /// `import … from "architect"`.
 const ARCHITECT: &str = "const a = globalThis.__architect.api;\n\
-export const { h, Fragment, useState, useRef, useEffect, useData, useShared, useTheme, invalidate, \
+export const { h, Fragment, useState, useRef, useEffect, useData, useShared, useEmbed, useTheme, invalidate, \
 theme, actions, settings, state, notify, worker, Overlay, host } = a;\nexport default a;\n";
 /// `import … from "architect/worker"`.
 const ARCHITECT_WORKER: &str = "const w = globalThis.__worker.api;\n\
@@ -572,6 +572,13 @@ fn bind<'js>(
                     let h = &services.host;
                     match kind.as_str() {
                         "shared" => Ok(Some(h.shared_json(&a))),
+                        "embed" => Ok(Some(services.embed.as_ref().map_or_else(
+                            || "null".to_owned(),
+                            |cell| {
+                                let now = cell.lock().unwrap_or_else(PoisonError::into_inner);
+                                serde_json::to_string(&*now).unwrap_or_else(|_| "null".to_owned())
+                            },
+                        ))),
                         "set_shared" => h
                             .set_shared_json(&a, &b)
                             .map(|()| None)

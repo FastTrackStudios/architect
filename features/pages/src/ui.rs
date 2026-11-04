@@ -17,6 +17,13 @@
 //! its manifest's `page`, a built-in's page file — is drawn by a
 //! [`PageView`], and one whose override is saved or deleted switches
 //! within a moment (the folder is looked at every [`OVERRIDES_EVERY`]).
+//!
+//! [`use_embed_pages`] provides `architect_extensions::embeds::EmbedPages`
+//! the same way: an inline embed drawn by a page is a [`PageEmbed`] — the
+//! same sub-document, sized to its content (measured every
+//! `architect_extensions::remote::MEASURE_EVERY`, up to the embed's
+//! `max_height`, past which it scrolls), its input the page's
+//! `useEmbed()` (Luau: `embed()`), given again as the block changes.
 
 // Dioxus is single-threaded: its tasks are not `Send`.
 #![allow(clippy::future_not_send)]
@@ -27,8 +34,10 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use architect_extensions::contrib::EmbedInput;
+use architect_extensions::embeds::{EmbedAsk, EmbedPages};
 use architect_extensions::interface::{PageAsk, ViewPages};
-use architect_extensions::remote::RemoteDocument;
+use architect_extensions::remote::{MEASURE_EVERY, RemoteDocument, embed_height};
 use architect_extensions::wire::{Frame, ViewEvent};
 use architect_scripting::luau::Gate;
 use architect_workspace::{FRAME_BUDGET, Meters, ViewMeter};
@@ -119,6 +128,36 @@ pub fn use_view_pages(pages: Pages) -> ViewPages {
     provided
 }
 
+/// Provides `EmbedPages` for `pages`: inline embeds drawn by a page file
+/// (their `page`, or their view's) are [`PageEmbed`]s. Call it once, near
+/// the app's root, beside [`use_view_pages`].
+#[must_use]
+pub fn use_embed_pages(pages: Pages) -> EmbedPages {
+    let provided = use_hook(move || {
+        EmbedPages(Rc::new(move |ask: &EmbedAsk| {
+            let own = ask
+                .spec
+                .page
+                .as_ref()
+                .zip(ask.spec.dir.as_ref())
+                .and_then(|(page, dir)| PageFile::new(dir.join(page), Origin::Extension));
+            let page = pages.resolve(&ask.spec.extension, &ask.spec.view, own)?;
+            let mount = Mount {
+                pages: pages.clone(),
+                page,
+                extension: ask.spec.extension.clone(),
+                view: ask.spec.view.clone(),
+                gate: Some(Arc::clone(&ask.gate)),
+            };
+            let key = mount.page.path.display().to_string();
+            let (input, max_height) = (ask.input, ask.spec.max_height);
+            Some(rsx! { PageEmbed { key: "{key}", mount, input, max_height } })
+        }))
+    });
+    use_context_provider(|| provided.clone());
+    provided
+}
+
 /// Runs `f` on the host's document, when it is free.
 async fn with_doc<R>(node: &NodeHandle, f: impl FnOnce(&mut BaseDocument, NodeId) -> R) -> R {
     loop {
@@ -139,6 +178,27 @@ fn remote(doc: &mut BaseDocument, node: NodeId) -> Option<&mut RemoteDocument> {
 /// own, its pane's events back to its handlers.
 #[component]
 pub fn PageView(mount: Mount) -> Element {
+    rsx! {
+        Mounted { mount, input: None, max_height: None }
+    }
+}
+
+/// A page as an inline embed: as wide as its parent, as tall as its
+/// content up to `max_height` points (then it scrolls), given `input`
+/// (its `useEmbed()`) now and whenever it changes.
+#[component]
+pub fn PageEmbed(mount: Mount, input: Signal<EmbedInput>, max_height: u32) -> Element {
+    rsx! {
+        Mounted { mount, input: Some(input), max_height: Some(max_height) }
+    }
+}
+
+/// An embed's way in: its input as it changes, to its open page.
+type Inputs = Rc<RefCell<Option<mpsc::UnboundedReceiver<EmbedInput>>>>;
+
+/// A page in a pane, or inline as an embed.
+#[component]
+fn Mounted(mount: Mount, input: Option<Signal<EmbedInput>>, max_height: Option<u32>) -> Element {
     let busy = use_signal(|| false);
     let why = use_signal(|| None::<String>);
     let meters = try_use_context::<Meters>();
@@ -172,16 +232,41 @@ pub fn PageView(mount: Mount) -> Element {
         });
     });
     let mut started = use_signal(|| false);
+    // An embed's input as it changes, and its content's height.
+    let (inputs_to, inputs): (mpsc::UnboundedSender<EmbedInput>, Inputs) = use_hook(|| {
+        let (to, from) = mpsc::unbounded();
+        (to, Rc::new(RefCell::new(Some(from))))
+    });
+    use_effect(move || {
+        if let Some(input) = input {
+            let _ = inputs_to.unbounded_send(input());
+        }
+    });
+    let height = use_signal(|| 0.0_f32);
     let shown = why();
+    let tall = match (max_height, &shown) {
+        (None, _) => "100%".to_owned(),
+        (Some(_), Some(_)) => "72px".to_owned(),
+        (Some(max), None) => format!("{}px", embed_height(height(), max)),
+    };
+    let overflow = if max_height.is_some() {
+        "hidden"
+    } else {
+        "auto"
+    };
     rsx! {
-        div { class: "page-view", style: "position: relative; width: 100%; height: 100%; overflow: auto;",
+        div { class: "page-view", style: "position: relative; width: 100%; height: {tall}; overflow: {overflow};",
             div {
                 style: "position: absolute; top: 0; left: 0; right: 0; bottom: 0;",
                 onmounted: move |e: MountedEvent| {
                     if !started() && let Some(node) = e.data().downcast::<NodeHandle>() {
                         started.set(true);
                         node_at.set(Some(node.clone()));
-                        spawn(follow(node.clone(), mount.clone(), theme, meter.clone(), busy, why));
+                        let embed = input.map(|i| (i.peek().clone(), inputs.borrow_mut().take()));
+                        if embed.is_some() {
+                            spawn(measure(node.clone(), height));
+                        }
+                        spawn(follow(node.clone(), mount.clone(), theme, meter.clone(), busy, why, embed));
                     }
                 },
             }
@@ -209,24 +294,55 @@ async fn follow(
     meter: ViewMeter,
     mut busy: Signal<bool>,
     mut why: Signal<Option<String>>,
+    embed: Option<(EmbedInput, Option<mpsc::UnboundedReceiver<EmbedInput>>)>,
 ) {
-    let mut session = match mount.pages.open(
-        &mount.page,
-        &mount.extension,
-        &mount.view,
-        mount.gate.clone(),
-    ) {
+    let fit = embed.is_some();
+    let (opened, inputs) = match embed {
+        Some((input, inputs)) => (
+            mount.pages.open_embed(
+                &mount.page,
+                &mount.extension,
+                &mount.view,
+                mount.gate.clone(),
+                input,
+            ),
+            inputs,
+        ),
+        None => (
+            mount.pages.open(
+                &mount.page,
+                &mount.extension,
+                &mount.view,
+                mount.gate.clone(),
+            ),
+            None,
+        ),
+    };
+    let mut session = match opened {
         Ok(s) => s,
         Err(e) => {
             why.set(Some(e));
             return;
         }
     };
+    // The host's block, as it changes, to the page.
+    let giving = session.embed_input().zip(inputs).map(|(to, mut inputs)| {
+        spawn(async move {
+            while let Some(input) = inputs.next().await {
+                if !to.set(input) {
+                    return;
+                }
+            }
+        })
+    });
     let (events, mut from_doc) = mpsc::unbounded::<ViewEvent>();
     with_doc(&node, |doc, at| {
         let mut r = RemoteDocument::new(events);
         if let Some(css) = theme {
             r.set_theme_css(&css.peek());
+        }
+        if fit {
+            r.fit_content();
         }
         doc.set_sub_document(at, Box::new(r));
     })
@@ -273,9 +389,26 @@ async fn follow(
         }
     }
     forwarding.cancel();
+    if let Some(giving) = giving {
+        giving.cancel();
+    }
     meter.set_busy(false);
     drop(session);
     with_doc(&node, BaseDocument::remove_sub_document).await;
+}
+
+/// Looks at the content height of the sub-document in `node` every
+/// `MEASURE_EVERY`, into `height` when it moves.
+async fn measure(node: NodeHandle, mut height: Signal<f32>) {
+    loop {
+        let now = with_doc(&node, |doc, at| remote(doc, at).map(|r| r.content_height())).await;
+        if let Some(h) = now
+            && (h - *height.peek()).abs() > 0.5
+        {
+            height.set(h);
+        }
+        futures_timer::Delay::new(MEASURE_EVERY).await;
+    }
 }
 
 /// The next frame; meanwhile, once the oldest unanswered event is past
