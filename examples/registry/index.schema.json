@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/FastTrackStudios/architect/blob/main/examples/registry/index.schema.json",
+  "title": "An architect extension registry's index.toml",
+  "description": "What a registry offers, one [[extensions]] entry per version. Read by architect-extensions (features/extensions/src/index.rs) and checked by `cargo xtask ext-index` (features/extensions/archive/src/registry.rs), which applies the same rules plus each archive's hash and signature.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "name": { "type": "string", "description": "What people call the registry." },
+    "extensions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/entry" }
+    }
+  },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "kind"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9_-]+(\\.[a-z0-9_-]+)+$",
+          "description": "Lower-case reverse-DNS (`org.name`); the manifest's id."
+        },
+        "name": { "type": "string" },
+        "version": {
+          "type": "string",
+          "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$",
+          "description": "Semver; the manifest's version."
+        },
+        "kind": { "enum": ["data", "luau", "wasm", "process"] },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "path": { "type": "string", "description": "A folder of this repository (a package as files)." },
+        "git": { "type": "string", "description": "A git repository of its own; with `rev`." },
+        "rev": { "type": "string", "description": "The tag or commit of `git`." },
+        "archive": {
+          "type": "string",
+          "description": "A signed .archext: a path in this repository or a URL (a release asset)."
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "The archive's SHA-256, lower-case hex."
+        },
+        "platforms": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "The target triples a process extension has builds for (its archive's bin/<triple>/)."
+        },
+        "changelog": { "type": "string", "description": "What this version changed, one line: what an update shows." }
+      },
+      "oneOf": [
+        { "required": ["path"], "not": { "anyOf": [{ "required": ["git"] }, { "required": ["archive"] }] } },
+        { "required": ["git", "rev"], "not": { "anyOf": [{ "required": ["path"] }, { "required": ["archive"] }] } },
+        { "required": ["archive", "sha256"], "not": { "anyOf": [{ "required": ["path"] }, { "required": ["git"] }] } }
+      ]
+    }
+  }
+}

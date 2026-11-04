@@ -1,0 +1,33 @@
+# The registry's CI: every push and pull request checks index.toml with
+# architect's `cargo xtask ext-index` (the schema, each archive's pinned
+# sha256, its signature against the org release key, and that the archive
+# is what its entry says). The PRs `extension-release.yml` opens land here.
+name: Check the index
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: registry
+      - uses: actions/checkout@v4
+        with:
+          repository: FastTrackStudios/architect
+          # Pin to the architect release whose ext-index this registry follows.
+          ref: main
+          path: architect
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check index.toml
+        working-directory: architect
+        # Trusts the org release key; a registry that also lists
+        # throwaway-signed examples adds `--key ../registry/keys/<name>.pub`.
+        run: cargo run -q -p xtask -- ext-index ../registry
