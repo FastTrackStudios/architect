@@ -1175,6 +1175,8 @@ dependencies = [
  "architect-shell",
  "architect-workspace-hack",
  "dioxus",
+ "facet",
+ "futures-util",
  "tempfile",
 ]
 

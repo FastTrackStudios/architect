@@ -47,11 +47,13 @@ fn themes_dir() -> Option<std::path::PathBuf> {
         .map(|dir| dir.join("themes"))
 }
 
-/// The store, given to everything below; in a window, read from the
-/// themes folder and watched, and its person and device layers kept
-/// ([`persist`]). Its actions go on `list`.
+/// The store, given to everything below; with `files` (a window, or a
+/// film's run on a folder of its own), read from the themes folder and
+/// watched; in a window, its person and device layers kept ([`persist`]).
+/// Its actions go on `list`.
 pub fn use_lab_theme(
     windowed: bool,
+    files: bool,
     list: &architect::action::ActionList,
 ) -> (ThemeHandle, LabAppearance) {
     let handle = architect_theme::use_theme_store(ThemeStore::default);
@@ -61,7 +63,7 @@ pub fn use_lab_theme(
     let kept: (Rc<Option<ThemeWatch>>, LabAppearance) = use_hook(|| {
         let _ = architect_theme::actions::register(list, &store);
         let _ = store.set(architect_theme::LayerKind::App, app_layer());
-        let watch = windowed.then(|| watch_folder(&store)).flatten();
+        let watch = files.then(|| watch_folder(&store)).flatten();
         let persist = windowed.then(|| persist(&store)).flatten();
         (Rc::new(watch), LabAppearance(Rc::new(persist)))
     });
