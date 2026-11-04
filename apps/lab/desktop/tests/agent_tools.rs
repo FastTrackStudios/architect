@@ -2,7 +2,8 @@
 //! action the lab has; every action refuses an argument name it does not
 //! take, listing the ones it does; an agent's destructive call is a
 //! structured `confirmation_required`, never a wait; `APP_STATUS` lists a
-//! broken theme file and a broken extension manifest with file and field.
+//! broken theme file, a broken extension manifest with file and field,
+//! and a broken layout file and `keys.json`.
 
 #![allow(
     clippy::unwrap_used,
@@ -76,6 +77,20 @@ fn the_guide_names_every_action_of_the_lab() {
         "WORKSPACES_RESTORE_BUILTINS",
         "THEME_SET",
         "THEME_PROBLEMS",
+        // The contributions' (#271), forwarded from the extensions' list.
+        "EXT_CONTRIBUTIONS",
+        "EXT_OPEN",
+        "EXT_VIEW_OPEN",
+        "EXT_STATE_SET",
+        "EXT_STATE_CLEAR",
+        "EXT_EMIT",
+        "EXT_ENABLE",
+        "EXT_DISABLE",
+        // The interface as files.
+        "HOME_LAYOUTS",
+        "HOME_LAYOUT_USE",
+        "HOME_SLOT_SET",
+        "HOME_PROBLEMS",
     ] {
         assert!(
             ids.iter().any(|i| i == wanted),
@@ -173,10 +188,11 @@ fn write(path: &Path, text: &str) {
 }
 
 /// `APP_STATUS` from the parts as the lab wires them: a theme file that
-/// does not read and an extension in development whose manifest is
-/// broken are both there, each with its file and field.
+/// does not read, an extension in development whose manifest is broken,
+/// a layout file and a `keys.json` that do not read are all there, each
+/// with its file (and field, when it has one).
 #[test]
-fn app_status_lists_a_broken_theme_and_a_broken_extension() {
+fn app_status_lists_a_broken_theme_extension_layout_and_keymap() {
     let tmp = tempfile::tempdir().unwrap();
     let list = ActionList::new();
     architect::action::app_status::register(&list).unwrap();
@@ -206,6 +222,15 @@ fn app_status_lists_a_broken_theme_and_a_broken_extension() {
     );
     let _ = extensions.dev(&dev);
     extensions.report_problems(list.problems());
+
+    let home = architect_workspace::home::Home::open(tmp.path().join("home"), &[]);
+    architect_workspace::home::actions::register(&list, &home).unwrap();
+    write(
+        &tmp.path().join("home/layouts/broken.json"),
+        "{ \"chrome\": ",
+    );
+    write(&tmp.path().join("home/keys.json"), "[1, 2");
+    let _ = home.poll();
 
     let status: Value = serde_json::from_slice(&list.run_json(APP_STATUS, b"").unwrap()).unwrap();
     assert!(status["theme"]["revision"].is_u64(), "{status}");
@@ -239,6 +264,25 @@ fn app_status_lists_a_broken_theme_and_a_broken_extension() {
     assert!(
         ext["message"].as_str().unwrap().contains("sometimes"),
         "{ext}"
+    );
+    let layout = problems
+        .iter()
+        .find(|p| p["source"] == "layout")
+        .unwrap_or_else(|| panic!("no layout problem: {status}"));
+    assert!(
+        layout["file"]
+            .as_str()
+            .unwrap()
+            .ends_with("layouts/broken.json"),
+        "{layout}"
+    );
+    let keymap = problems
+        .iter()
+        .find(|p| p["source"] == "keymap")
+        .unwrap_or_else(|| panic!("no keymap problem: {status}"));
+    assert!(
+        keymap["file"].as_str().unwrap().ends_with("keys.json"),
+        "{keymap}"
     );
     assert_eq!(status["confirmations"], json!([]));
 }

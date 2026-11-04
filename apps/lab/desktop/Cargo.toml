@@ -47,6 +47,7 @@ serde_json.workspace = true
 # The agent tools against the lab and the parts it wires (tests/agent_tools.rs).
 architect-theme = { workspace = true, features = ["fs", "actions"] }
 architect-settings = { workspace = true }
+architect-workspace = { workspace = true, features = ["home"] }
 futures = "0.3"
 tempfile = "3"
 

@@ -91,8 +91,12 @@ A layout:
 
 `Home::poll` reads what changed (the lab every 400 ms). A file that does
 not read keeps its last good version and gets `<name>.error` beside it;
-each such error is a `home::Problem` (`HOME_PROBLEMS`, until `APP_STATUS`
-reports every problem in one place). The app's own layouts (`Home::open`'s
+each such error is a `home::Problem`. `home::actions::register` makes the
+files a source of the list's problems, so `APP_STATUS` lists a broken
+layout (source `layout`) or `keys.json` (source `keymap`) with the file's
+full path beside every other problem the app has; `HOME_PROBLEMS` answers
+the same entries for the files alone (`features/workspace/src/home.rs`
+`Home::app_problems`). The app's own layouts (`Home::open`'s
 built-ins; the lab's `main` is the shell as it is) are written read-only
 on every start: an edit to one is a problem saying to clone it, and an
 edited copy found at start is kept as `<name>-edited.json`.
@@ -106,13 +110,13 @@ beats it (that slot's hand change is dropped).
 | `HOME_LAYOUTS` | every layout (name, built in, shown), the folder, the problems |
 | `HOME_LAYOUT_USE` | shows `{name}` |
 | `HOME_SLOT_SET` | `{slot, view?, hidden?, tokens?}` or `{slot, clear: true}`, into `.state/` |
-| `HOME_PROBLEMS` | what is wrong with the files |
+| `HOME_PROBLEMS` | what is wrong with the files (the same as `APP_STATUS`'s `layout` and `keymap` problems) |
 
 ## An agent changing the window
 
 1. `HOME_LAYOUTS` for the folder and what shows.
 2. Write `layouts/<mine>.json` (never a built-in), then `HOME_LAYOUT_USE`.
-3. Read `HOME_PROBLEMS` (or the `.error` beside the file) after each
-   save: a broken file changes nothing.
+3. Read `APP_STATUS` (or `HOME_PROBLEMS`, or the `.error` beside the
+   file) after each save: a broken file changes nothing.
 4. `EXT_CONTRIBUTIONS` for which views extensions offer to put in a
    slot.

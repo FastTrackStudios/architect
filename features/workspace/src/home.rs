@@ -476,6 +476,26 @@ impl Home {
         self.lock().keys.clone()
     }
 
+    /// What is wrong with the files now, as `APP_STATUS` lists them
+    /// (`architect::action::Problem`): source `layout` or `keymap`, the
+    /// file's full path, the `.error`'s text.
+    #[must_use]
+    pub fn app_problems(&self) -> Vec<architect::action::Problem> {
+        let dir = self.dir();
+        self.problems()
+            .into_iter()
+            .map(|p| {
+                let source = if p.file == "keys.json" {
+                    "keymap"
+                } else {
+                    "layout"
+                };
+                architect::action::Problem::new(source, p.message)
+                    .file(dir.join(&p.file).display().to_string())
+            })
+            .collect()
+    }
+
     /// What is wrong with the files now.
     #[must_use]
     pub fn problems(&self) -> Vec<Problem> {
@@ -497,7 +517,11 @@ impl Home {
 /// | `HOME_LAYOUTS` | every layout (name, built in, the one shown), the folder, and the files' problems |
 /// | `HOME_LAYOUT_USE` | shows layout `{name}` |
 /// | `HOME_SLOT_SET` | a slot of the layout shown, changed by hand: `{slot, view?, hidden?, tokens?}`, or `{slot, clear: true}` |
-/// | `HOME_PROBLEMS` | what is wrong with the files: each one's path and why (its `.error`'s text) |
+/// | `HOME_PROBLEMS` | what is wrong with the files: each one's path and why (its `.error`'s text); the same as `APP_STATUS`'s `layout` and `keymap` problems |
+///
+/// [`register`] also makes the files a source of the list's problems
+/// (`ActionList::problems`, key `interface`), so `APP_STATUS` lists a
+/// broken layout or `keys.json` with everything else that is wrong.
 pub mod actions {
     use std::collections::BTreeMap;
 
@@ -544,7 +568,8 @@ pub mod actions {
         "HOME_PROBLEMS",
         "Interface file problems",
         "What is wrong with the interface files (layouts, keys.json): each file and why, the text \
-         of the .error beside it. A broken file keeps its last good version.",
+         of the .error beside it. A broken file keeps its last good version. The same problems \
+         are in APP_STATUS (sources layout and keymap).",
     );
 
     /// `HOME_LAYOUT_USE`'s arguments.
@@ -573,6 +598,9 @@ pub mod actions {
     ///
     /// An id is taken.
     pub fn register(list: &ActionList, home: &Home) -> Result<(), ActionError> {
+        let h = home.clone();
+        list.problems()
+            .source("interface", move || h.app_problems());
         let h = home.clone();
         list.register_with(
             &LAYOUTS,
@@ -635,11 +663,16 @@ pub mod actions {
         Ok(())
     }
 
+    /// The files' problems as `APP_STATUS` gives them.
     fn problems(h: &Home) -> serde_json::Value {
         serde_json::Value::Array(
-            h.problems()
+            h.app_problems()
                 .into_iter()
-                .map(|p| serde_json::json!({ "file": p.file, "message": p.message }))
+                .map(|p| {
+                    serde_json::json!({
+                        "source": p.source, "file": p.file, "field": p.field, "message": p.message,
+                    })
+                })
                 .collect(),
         )
     }
@@ -941,7 +974,19 @@ mod tests {
         write(&home, "layouts/bad.json", "{");
         let _ = home.poll();
         let problems = run("HOME_PROBLEMS", "").unwrap();
-        assert_eq!(problems["problems"][0]["file"], "layouts/bad.json");
+        let bad = tmp.path().join("layouts/bad.json").display().to_string();
+        assert_eq!(problems["problems"][0]["file"], bad.as_str());
+        assert_eq!(problems["problems"][0]["source"], "layout");
+        // The same problem in APP_STATUS, with the rest of what is wrong.
+        let all = list.problems().all();
+        assert!(
+            all.iter()
+                .any(|p| p.source == "layout" && p.file.as_deref() == Some(bad.as_str())),
+            "{all:?}"
+        );
+        write(&home, "keys.json", "{ not json");
+        let _ = home.poll();
+        assert!(list.problems().all().iter().any(|p| p.source == "keymap"));
         list.validate().unwrap();
     }
 
