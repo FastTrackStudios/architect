@@ -201,7 +201,8 @@ pub enum Missing {
     NoVersion { range: String },
     /// The organization does not allow it.
     NotApproved(String),
-    /// It cannot run here (a process on a phone).
+    /// It cannot run here: its kind (a process on a phone), or a process
+    /// with builds, none for this platform (`process: no build for …`).
     CannotRun(String),
 }
 
@@ -277,6 +278,14 @@ pub fn plan(
                 .push((r.clone(), Missing::CannotRun(newest.kind.clone())));
             continue;
         }
+        // A process with builds, none for this platform.
+        if let Some(why) = newest.no_build_for(crate::index::host_targets()) {
+            out.missing.push((
+                r.clone(),
+                Missing::CannotRun(format!("{}: {why}", newest.kind)),
+            ));
+            continue;
+        }
         let allowed = versions
             .iter()
             .find(|l| policy.is_none_or(|p| p.allows(&l.id, &l.version).is_ok()));
@@ -310,6 +319,8 @@ mod tests {
             description: String::new(),
             category: String::new(),
             location: Location::Path(id.into()),
+            platforms: Vec::new(),
+            changelog: String::new(),
         }
     }
 

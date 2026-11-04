@@ -87,6 +87,8 @@ pub fn parse_for(xml: &str, os: &str, arch: &str) -> Result<Index, ReaPackError>
                     description: description.to_owned(),
                     category: category_name.to_owned(),
                     location: Location::Files(files),
+                    platforms: Vec::new(),
+                    changelog: String::new(),
                 });
             }
         }

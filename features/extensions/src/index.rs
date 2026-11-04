@@ -20,6 +20,16 @@
 //! kind = "wasm"
 //! git = "https://github.com/acme/lyrics-lane"
 //! rev = "v1.4.0"                # its own repository, at a tag or commit
+//!
+//! [[extensions]]
+//! id = "fts.studio"
+//! name = "Studio"
+//! version = "1.2.0"
+//! kind = "process"
+//! archive = "https://github.com/FastTrackStudios/studio/releases/download/ext-v1.2.0/fts.studio-1.2.0.archext"
+//! sha256 = "…"                  # the archive's: a signed `.archext`
+//! platforms = ["aarch64-apple-darwin", "x86_64-unknown-linux-gnu"]
+//! changelog = "The mixer view."  # what an update shows
 //! ```
 //!
 //! A `ReaPack` repository's `index.xml` reads into the same entries
@@ -39,6 +49,10 @@ pub enum Location {
     /// Files to fetch (a `ReaPack` package): each its URL and where it goes
     /// in the package.
     Files(Vec<(String, String)>),
+    /// A signed `.archext` archive: a path in the registry or a URL, and
+    /// the archive's SHA-256 when the index pins it. Installed only once
+    /// its signature is by a trusted key (`architect-extension-archive`).
+    Archive { url: String, sha256: Option<String> },
 }
 
 /// One package at one version, as a registry lists it.
@@ -54,6 +68,44 @@ pub struct Listing {
     /// What it is filed under (`ReaPack`'s category).
     pub category: String,
     pub location: Location,
+    /// The target triples it has builds for (a process extension's
+    /// `bin/<triple>/`); empty for one that runs anywhere.
+    pub platforms: Vec<String>,
+    /// What this version changed, a line: what "update available" shows.
+    pub changelog: String,
+}
+
+/// The target triples this platform runs, best first: what a listing's
+/// [`Listing::platforms`] are matched against (the same table as
+/// `architect_extension_archive::host_targets`).
+#[must_use]
+pub fn host_targets() -> &'static [&'static str] {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => &["x86_64-unknown-linux-gnu", "x86_64-unknown-linux-musl"],
+        ("linux", "aarch64") => &["aarch64-unknown-linux-gnu", "aarch64-unknown-linux-musl"],
+        ("macos", "aarch64") => &["aarch64-apple-darwin"],
+        ("macos", "x86_64") => &["x86_64-apple-darwin"],
+        ("windows", "x86_64") => &["x86_64-pc-windows-msvc", "x86_64-pc-windows-gnu"],
+        ("windows", "aarch64") => &["aarch64-pc-windows-msvc"],
+        _ => &[],
+    }
+}
+
+impl Listing {
+    /// Why it cannot run on a platform running `targets` (best first):
+    /// it has builds, and none for this platform. `None` when it can.
+    #[must_use]
+    pub fn no_build_for(&self, targets: &[&str]) -> Option<String> {
+        if self.platforms.is_empty() || self.platforms.iter().any(|p| targets.contains(&p.as_str()))
+        {
+            return None;
+        }
+        Some(format!(
+            "no build for this platform ({}); it has builds for {}",
+            targets.first().copied().unwrap_or("unknown"),
+            self.platforms.join(", ")
+        ))
+    }
 }
 
 /// A registry's index.
@@ -88,6 +140,14 @@ struct ListingFile {
     git: Option<String>,
     #[serde(default)]
     rev: Option<String>,
+    #[serde(default)]
+    archive: Option<String>,
+    #[serde(default)]
+    sha256: Option<String>,
+    #[serde(default)]
+    platforms: Vec<String>,
+    #[serde(default)]
+    changelog: String,
 }
 
 /// Why an index could not be read.
@@ -115,7 +175,7 @@ impl Index {
     /// # Errors
     ///
     /// It is not TOML, a version is not semver, or a listing says
-    /// neither `path` nor `git` + `rev`.
+    /// none of `path`, `git` + `rev`, `archive`.
     pub fn parse(text: &str) -> Result<Self, IndexError> {
         let file: IndexFile = toml::from_str(text).map_err(|e| IndexError(e.to_string()))?;
         let listings = file
@@ -124,12 +184,16 @@ impl Index {
             .map(|l| {
                 let version = Version::parse(&l.version)
                     .map_err(|e| IndexError(format!("{} {}: {e}", l.id, l.version)))?;
-                let location = match (l.path, l.git, l.rev) {
-                    (Some(path), None, _) => Location::Path(path),
-                    (None, Some(url), Some(rev)) => Location::Git { url, rev },
+                let location = match (l.path, l.git, l.rev, l.archive) {
+                    (Some(path), None, _, None) => Location::Path(path),
+                    (None, Some(url), Some(rev), None) => Location::Git { url, rev },
+                    (None, None, _, Some(url)) => Location::Archive {
+                        url,
+                        sha256: l.sha256,
+                    },
                     _ => {
                         return Err(IndexError(format!(
-                            "{} {}: give `path`, or `git` and `rev`",
+                            "{} {}: give `path`, `git` and `rev`, or `archive`",
                             l.id, l.version
                         )));
                     }
@@ -146,6 +210,8 @@ impl Index {
                     description: l.description,
                     category: l.category,
                     location,
+                    platforms: l.platforms,
+                    changelog: l.changelog,
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -273,6 +339,33 @@ rev = "v1.4.0"
         );
         assert_eq!(hits[0].listing.version.to_string(), "0.2.0");
         assert_eq!(index.search("wasm").len(), 1);
+    }
+
+    #[test]
+    fn an_archive_listing_says_its_hash_platforms_and_changelog() {
+        let text = format!(
+            "{INDEX}\n[[extensions]]\nid = \"fts.studio\"\nversion = \"1.2.0\"\nkind = \"process\"\n\
+             archive = \"archives/fts.studio-1.2.0.archext\"\nsha256 = \"ab\"\n\
+             platforms = [\"aarch64-apple-darwin\"]\nchangelog = \"The mixer view.\"\n"
+        );
+        let index = Index::parse(&text).unwrap();
+        let l = index.newest("fts.studio", &VersionReq::STAR).unwrap();
+        assert_eq!(
+            l.location,
+            Location::Archive {
+                url: "archives/fts.studio-1.2.0.archext".into(),
+                sha256: Some("ab".into())
+            }
+        );
+        assert_eq!(l.changelog, "The mixer view.");
+        assert_eq!(l.no_build_for(&["aarch64-apple-darwin"]), None);
+        assert_eq!(
+            l.no_build_for(&["x86_64-unknown-linux-gnu"]).as_deref(),
+            Some(
+                "no build for this platform (x86_64-unknown-linux-gnu); it has builds for \
+                 aarch64-apple-darwin"
+            )
+        );
     }
 
     #[test]

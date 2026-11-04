@@ -90,6 +90,7 @@ futures-io = { version = "0.3.34" }
 futures-sink = { version = "0.3.34" }
 futures-task = { version = "0.3.34", default-features = false, features = ["std"] }
 futures-util = { version = "0.3.34", features = ["channel", "io", "sink"] }
+getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4.3", default-features = false, features = ["std", "sys_rng"] }
 guillotiere = { version = "0.7.0", default-features = false, features = ["std"] }
 half = { version = "2.7.1" }
@@ -211,6 +212,7 @@ phf = { version = "0.14.0" }
 phf_shared = { version = "0.14.0" }
 proc-macro2 = { version = "1.0.107", features = ["span-locations"] }
 proc-macro2-diagnostics = { version = "0.10.1" }
+quote = { version = "1.0.47" }
 regex = { version = "1.13.1", default-features = false, features = ["std"] }
 regex-automata = { version = "0.4.18" }
 regex-syntax = { version = "0.8.11" }
@@ -239,7 +241,6 @@ bumpalo = { version = "3.20.3", features = ["collections"] }
 crossbeam-epoch = { version = "0.9.21" }
 event-listener-strategy = { version = "0.5.4" }
 futures-lite = { version = "2.6.1" }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.17", default-features = false, features = ["std"] }
 h2 = { version = "0.4.19", default-features = false, features = ["stream"] }
 half = { version = "2.7.1", default-features = false, features = ["num-traits"] }
@@ -285,7 +286,6 @@ either = { version = "1.18.0" }
 libc = { version = "0.2.189" }
 naga = { version = "30.0.1", default-features = false, features = ["glsl-out", "wgsl-in", "wgsl-out"] }
 nom = { version = "7.1.3", default-features = false, features = ["std"] }
-quote = { version = "1.0.47" }
 regex = { version = "1.13.1", default-features = false, features = ["unicode-perl"] }
 rustc-hash = { version = "1.1.0" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109" }
@@ -301,7 +301,6 @@ bumpalo = { version = "3.20.3", features = ["collections"] }
 crossbeam-epoch = { version = "0.9.21" }
 dispatch2 = { version = "0.3.1" }
 errno = { version = "0.3.14" }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.17", default-features = false, features = ["std"] }
 h2 = { version = "0.4.19", default-features = false, features = ["stream"] }
 half = { version = "2.7.1", default-features = false, features = ["num-traits"] }
@@ -363,7 +362,6 @@ bumpalo = { version = "3.20.3", features = ["collections"] }
 crossbeam-epoch = { version = "0.9.21" }
 dispatch2 = { version = "0.3.1" }
 errno = { version = "0.3.14" }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.17", default-features = false, features = ["std"] }
 h2 = { version = "0.4.19", default-features = false, features = ["stream"] }
 half = { version = "2.7.1", default-features = false, features = ["num-traits"] }
@@ -424,7 +422,6 @@ bumpalo = { version = "3.20.3", features = ["collections"] }
 crossbeam-epoch = { version = "0.9.21" }
 dispatch2 = { version = "0.3.1" }
 errno = { version = "0.3.14" }
-getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std"] }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.17", default-features = false, features = ["std"] }
 h2 = { version = "0.4.19", default-features = false, features = ["stream"] }
 half = { version = "2.7.1", default-features = false, features = ["num-traits"] }

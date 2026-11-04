@@ -1,0 +1,21 @@
+#:schema ./index.schema.json
+# The FTS extension registry's index (a skeleton: see README.md). One
+# `[[extensions]]` entry per version. An entry here is a signed `.archext`
+# archive: `archive` (a path in this repository, or a release asset's URL)
+# and its `sha256`. `cargo xtask ext-index` (architect) checks every entry:
+# the schema, the hash, the signature against the trusted keys, and that
+# the archive is what the entry says.
+name = "FastTrackStudios (example)"
+
+[[extensions]]
+id = "example.hello"
+name = "Hello"
+version = "0.1.0"
+kind = "luau"
+description = "Greets you, has two settings, and draws a ruler over the timeline with a tool window."
+category = "Examples"
+# Signed with keys/throwaway.pub, a throwaway key whose secret half was
+# discarded: the real registry's entries are signed with the org key.
+archive = "archives/example.hello-0.1.0.archext"
+sha256 = "6e63e776f0d68235e20f6355d5c9da949e3fec468dcdb64190be9ca576a761f4"
+changelog = "First release."

@@ -54,6 +54,7 @@ members = [
     "features/scripting",
     "features/extensions",
     "features/extensions/wasi-guest",
+    "features/extensions/archive",
     "features/extensions/tests/wasi-hazards",
     "features/canvas",
     "features/a2ui",
@@ -249,6 +250,7 @@ architect-orgs = { path = "features/orgs" }
 architect-scripting = { path = "features/scripting" }
 architect-extensions = { path = "features/extensions" }
 architect-extension-wasi = { path = "features/extensions/wasi-guest" }
+architect-extension-archive = { path = "features/extensions/archive" }
 architect-canvas = { path = "features/canvas" }
 architect-a2ui = { path = "features/a2ui" }
 architect-pages = { path = "features/pages" }

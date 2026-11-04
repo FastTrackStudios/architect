@@ -6,7 +6,8 @@
 //! |---|---|
 //! | `EXT_PREVIEW` | what `{id, version?}` would be and do, read before installing: kind, runner, capabilities (and which need a yes), contributions, hooks, network and files, its ref |
 //! | `EXT_INFO` | everything about `{id}`: which copy runs (`built in, overridden by …`), versions, pin, grants, what it may reach now, what it adds |
-//! | `EXT_UPDATE` | updates `{id?}` (every installed one) to the newest its pin allows; unchanged ones skipped, grown capabilities wait for a yes |
+//! | `EXT_UPDATE` | updates `{id?}` (every installed one) to the newest its pin allows; unchanged ones skipped, grown capabilities wait for a yes; `{check: true}` only says what is available: the newer version, its changelog line, a newer one past the pin, and what it asks past the grant |
+//! | `EXT_INSTALL_FILE` | installs a signed `.archext` from `{path}` (a file, or what a peer sent): refused unless signed by a trusted key and unchanged since; consent as `EXT_INSTALL` |
 //! | `EXT_PIN` | keeps `{id}` at `version` (a range; its version now when none), or `unpin` |
 //! | `EXT_GRANT` | grants `{id}` what it asks, on the `device` or in an `org`: a person's yes (an agent gets a ticket) |
 //! | `EXT_REVOKE` | takes `{id}`'s grant back (`scope`, or every one): at once |
@@ -67,7 +68,19 @@ static UPDATE: ActionMeta = meta(
     "Update extensions",
     "Updates installed extension `id` (every installed one when none) to the newest version its \
      pin allows. Unchanged ones are skipped; one whose capabilities grow is not updated until a \
-     person grants them (listed under needs_consent).",
+     person grants them (listed under needs_consent). With `check` true nothing is installed: the \
+     answer lists each update available — the newer version, its changelog line, a newer one \
+     past the pin, what it asks past what was granted (asks_more), and cannot_run when there is \
+     no build for this platform.",
+);
+static INSTALL_FILE: ActionMeta = meta(
+    "EXT_INSTALL_FILE",
+    "Install an extension archive",
+    "Installs the signed .archext archive at `path` (a file, or one a peer sent) and loads it. It \
+     is refused, with the reason, unless it is signed by a key this app trusts (the org release \
+     key, and the registries' own) and unchanged since signing, and has a build for this \
+     platform. Consent as EXT_INSTALL: needs_consent with what it asks, `grant` (device, org) to \
+     grant it, which a caller from outside needs a person's yes for.",
 );
 static PIN: ActionMeta = meta(
     "EXT_PIN",
@@ -127,6 +140,17 @@ pub struct InfoArgs {
 #[derive(Debug, Facet)]
 pub struct UpdateArgs {
     pub id: Option<String>,
+    /// Only say what updates are available; install nothing.
+    pub check: Option<bool>,
+}
+
+/// `EXT_INSTALL_FILE`'s arguments.
+#[derive(Debug, Facet)]
+pub struct InstallFileArgs {
+    /// The `.archext` file.
+    pub path: String,
+    /// Where a person grants what it asks: `device`, `org`, `org:<id>`.
+    pub grant: Option<String>,
 }
 
 /// `EXT_PIN`'s arguments.
@@ -245,6 +269,8 @@ impl Extensions {
                 description: m.description.clone(),
                 category: String::new(),
                 location: crate::index::Location::Path(String::new()),
+                platforms: Vec::new(),
+                changelog: String::new(),
             };
             self.preview_of(m, &listing, "")
         });
@@ -272,12 +298,14 @@ impl Extensions {
     /// are offered on (the app's).
     pub fn confirm_on(list: &ActionList) {
         list.set_confirm("EXT_GRANT", |_| true);
-        list.set_confirm("EXT_INSTALL", |args| {
+        let grants = |args: &[u8]| {
             serde_json::from_slice::<Value>(args)
                 .ok()
                 .and_then(|v| v.get("grant").cloned())
                 .is_some_and(|g| !g.is_null())
-        });
+        };
+        list.set_confirm("EXT_INSTALL", grants);
+        list.set_confirm("EXT_INSTALL_FILE", grants);
     }
 
     /// Puts the management actions on the host's list.
@@ -306,8 +334,30 @@ impl Extensions {
             &UPDATE,
             Effect::Mutating,
             move |_: &ActionCaller, a: UpdateArgs| {
+                if a.check == Some(true) {
+                    let available = me.updates(a.id.as_deref());
+                    return Ok::<_, String>(raw(&json!({ "available": available })));
+                }
                 let updated = me.update(a.id.as_deref());
                 Ok::<_, String>(raw(&serde_json::to_value(&updated).unwrap_or(Value::Null)))
+            },
+        )?;
+        let me = self.clone();
+        list.register_with(
+            &INSTALL_FILE,
+            Effect::Mutating,
+            move |caller: &ActionCaller, a: InstallFileArgs| {
+                let org = me.host().grants().and_then(|g| g.org());
+                let grant = a
+                    .grant
+                    .as_deref()
+                    .map(|g| Scope::parse(g, org.as_deref()))
+                    .transpose()?;
+                let bytes = std::fs::read(&a.path).map_err(|e| format!("{}: {e}", a.path))?;
+                let installed = me
+                    .install_archive(bytes, &a.path, grant, &by(caller))
+                    .map_err(|e| e.to_string())?;
+                Ok::<_, String>(raw(&Self::installed_json(&installed)))
             },
         )?;
         let me = self.clone();

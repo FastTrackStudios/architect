@@ -472,6 +472,17 @@ layer = "L1"
 note = "WASI component extensions: Wasmtime and Cranelift, a store per instance, epoch and memory limits; desktop and Android"
 
 [[row]]
+package = "architect-extension-archive"
+layer = "L1"
+note = "the .archext archive: a gzipped tar, a content index of SHA-256s, a minisign signature over it; packed, opened, checked against trusted keys; pure Rust, no host"
+
+[[row]]
+package = "architect-extension-archive"
+features = ["sign"]
+layer = "L1"
+note = "signing .archext archives with a minisign secret key: xtask ext-sign and tests, never an app"
+
+[[row]]
 package = "architect-extension-wasi"
 layer = "L1"
 note = "a WASI component extension's own side, built for wasm32-wasip2: its Dioxus views as the world's edits, the host service through wit-bindgen"
