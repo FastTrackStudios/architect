@@ -405,6 +405,7 @@ const PRIMARY: &str = "padding: 6px 14px; border-radius: 6px; border: 1px solid 
 #[component]
 fn PromptDialog(ui: WindowUi, id: u64, from: String, prompt: Prompt) -> Element {
     let mut text = use_signal(|| prompt.default.clone().unwrap_or_default());
+    let hidden = prompt.kind == PromptKind::Secret;
     let (yes, no) = (ui.clone(), ui.clone());
     let submit = move || {
         let answer = match prompt.kind {
@@ -449,14 +450,26 @@ fn PromptDialog(ui: WindowUi, id: u64, from: String, prompt: Prompt) -> Element 
                     div { style: "font-size: 13px; color: var(--muted-foreground);", "{message}" }
                 }
                 if matches!(prompt.kind, PromptKind::Text | PromptKind::Secret) {
-                    input {
-                        r#type: if prompt.kind == PromptKind::Secret { "password" } else { "text" },
-                        style: "padding: 7px 10px; border-radius: 6px; border: 1px solid var(--input); \
-                                background: var(--background); color: var(--foreground); font-size: 13px;",
-                        value: "{text}",
-                        placeholder: prompt.placeholder.clone().unwrap_or_default(),
-                        autofocus: true,
-                        oninput: move |e| text.set(e.value()),
+                    div { style: "position: relative; display: flex; flex-direction: column;",
+                        input {
+                            r#type: if hidden { "password" } else { "text" },
+                            // A secret's text is not drawn (Blitz draws a
+                            // password field's text): dots over it say how
+                            // much was typed.
+                            style: if hidden { SECRET_FIELD } else { FIELD },
+                            value: "{text}",
+                            placeholder: prompt.placeholder.clone().unwrap_or_default(),
+                            autofocus: true,
+                            oninput: move |e| text.set(e.value()),
+                        }
+                        if hidden {
+                            div {
+                                style: "position: absolute; left: 11px; top: 0; bottom: 0; display: flex; \
+                                        align-items: center; pointer-events: none; font-size: 13px; \
+                                        letter-spacing: 1px; color: var(--foreground);",
+                                {MASK.to_string().repeat(text.read().chars().count())}
+                            }
+                        }
                     }
                 }
                 if prompt.kind == PromptKind::PickOne {
@@ -476,6 +489,17 @@ fn PromptDialog(ui: WindowUi, id: u64, from: String, prompt: Prompt) -> Element 
         }
     }
 }
+
+/// What a secret's field shows for each character.
+const MASK: char = '•';
+
+/// A prompt's text field.
+const FIELD: &str = "padding: 7px 10px; border-radius: 6px; border: 1px solid var(--input); \
+                     background: var(--background); color: var(--foreground); font-size: 13px;";
+/// A secret's: its text not drawn.
+const SECRET_FIELD: &str = "padding: 7px 10px; border-radius: 6px; border: 1px solid var(--input); \
+                            background: var(--background); color: transparent; \
+                            caret-color: var(--foreground); font-size: 13px;";
 
 const fn prompt_kind(kind: PromptKind) -> &'static str {
     match kind {
@@ -699,3 +723,4 @@ pub fn use_tab_badges(host: &Host) {
         })
     });
 }
+

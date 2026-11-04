@@ -1000,9 +1000,9 @@ impl ExtensionApi {
         let prompt = crate::hostcall::Prompt {
             kind: crate::hostcall::PromptKind::Secret,
             title: if decl.title.is_empty() {
-                format!("{}: {name}", manifest.name)
+                name.to_owned()
             } else {
-                format!("{}: {}", manifest.name, decl.title)
+                decl.title.clone()
             },
             message: Some(message),
             ..crate::hostcall::Prompt::default()
