@@ -1453,7 +1453,9 @@ fn ToolbarSettings(ui: ExtensionUi, toolbar: String) -> Element {
         return rsx! {};
     };
     let host = ui.host();
-    let Some(bar) = host.toolbars().get(host.contributions(), &toolbar) else {
+    let found = host.toolbars().get(host.contributions(), &toolbar);
+    let mut when_draft = use_signal(|| found.as_ref().map(|b| b.decl.when.clone()).unwrap_or_default());
+    let Some(bar) = found else {
         return rsx! {};
     };
     let input = input_style(&t);
@@ -1474,7 +1476,12 @@ fn ToolbarSettings(ui: ExtensionUi, toolbar: String) -> Element {
         }
     };
     let (sp1, sp2, sp3, sp4) = (style_patch.clone(), style_patch.clone(), style_patch.clone(), style_patch);
-    let (c1, c2, c3) = (Rc::clone(&configure), Rc::clone(&configure), Rc::clone(&configure));
+    let (c1, c2, c3, c4) = (
+        Rc::clone(&configure),
+        Rc::clone(&configure),
+        Rc::clone(&configure),
+        Rc::clone(&configure),
+    );
     let others: Vec<(String, String)> = host
         .toolbars()
         .all(host.contributions())
@@ -1516,6 +1523,15 @@ fn ToolbarSettings(ui: ExtensionUi, toolbar: String) -> Element {
                 choices: PLACES.iter().map(|(v, l)| ((*v).to_owned(), (*l).to_owned())).collect::<Vec<_>>(),
                 on: here.clone(),
                 pick: move |v: String| c2(json!({ "where": v })),
+            }
+        }
+        Field { label: "Only for (a context: view:note, editor:markdown; empty, every one)",
+            input { "data-testid": "toolbar-when", style: "{input}", value: "{when_draft}", placeholder: "every context",
+                oninput: move |e| {
+                    let v = e.value();
+                    when_draft.set(v.clone());
+                    c4(json!({ "when": if v.trim().is_empty() { Value::Null } else { Value::String(v.trim().to_owned()) } }));
+                },
             }
         }
         Field { label: "Button size",

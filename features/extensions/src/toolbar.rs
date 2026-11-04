@@ -160,6 +160,12 @@ pub struct ToolbarDecl {
     /// Every button's label hidden (an icon alone where it has one).
     #[serde(skip_serializing_if = "is_false")]
     pub hide_labels: bool,
+    /// The context it is for: a view kind (`view:note`), an editor's
+    /// context (`editor:markdown`); empty, every one ([`Self::applies_to`]).
+    /// A place that follows what has the focus shows the toolbars whose
+    /// context it is in.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub when: String,
     /// How it is drawn: sizes, spacing, rounding, a colour preset.
     #[serde(skip_serializing_if = "ToolbarStyle::is_empty")]
     pub style: ToolbarStyle,
@@ -420,6 +426,18 @@ impl ToolbarDecl {
             .map(|kind| ToolbarPlace::View(kind.to_owned()))
     }
 
+    /// Whether it is for context `context` (`view:note`, `editor:markdown`):
+    /// its `when` is empty, or that context, or the kind of it (`editor`
+    /// for `editor:markdown`).
+    #[must_use]
+    pub fn applies_to(&self, context: &str) -> bool {
+        self.when.is_empty()
+            || self.when == context
+            || context
+                .split_once(':')
+                .is_some_and(|(kind, _)| kind == self.when)
+    }
+
     /// Whether it is in the header of a pane of view kind `kind`.
     #[must_use]
     pub fn in_header_of(&self, kind: &str) -> bool {
@@ -500,11 +518,28 @@ impl ToolbarDecl {
             ));
         }
         self.style.check()?;
+        if !self.when.is_empty() && !good_context(&self.when) {
+            return Err(format!(
+                "when {:?} is not a context (`view:note`, `editor:markdown`, `editor`)",
+                self.when
+            ));
+        }
         for (n, item) in self.items.iter().enumerate() {
             check_item(item, false, &action, &view).map_err(|why| format!("item {n}: {why}"))?;
         }
         Ok(())
     }
+}
+
+/// A context's name: a kind (lower case words joined by `-`), or
+/// `<kind>:<which>`.
+fn good_context(c: &str) -> bool {
+    let (kind, which) = c.split_once(':').map_or((c, None), |(k, w)| (k, Some(w)));
+    !kind.is_empty()
+        && kind
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
+        && which.is_none_or(|w| !w.is_empty())
 }
 
 fn check_item(
@@ -702,6 +737,16 @@ newline = true
         let drawn = t.items[0].colors.over(&preset(&t.style.preset));
         assert_eq!((drawn.fill.as_str(), drawn.ink.as_str()), ("#e11d48", "primary-foreground"));
         assert!(preset("theme").is_empty());
+        // Scoped to a context: its kind, or one of it.
+        assert!(t.applies_to("view:note"));
+        t.when = "editor".into();
+        assert!(t.applies_to("editor:markdown") && !t.applies_to("view:note"));
+        t.when = "editor:markdown".into();
+        assert!(t.applies_to("editor:markdown") && !t.applies_to("editor:code"));
+        assert!(t.check(ok, ok).is_ok());
+        t.when = "Editor:".into();
+        assert!(t.check(ok, ok).unwrap_err().contains("not a context"));
+        t.when = "editor:markdown".into();
         let again = ToolbarDecl::parse(&t.to_toml().unwrap()).unwrap();
         assert_eq!(again, t);
     }
