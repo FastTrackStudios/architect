@@ -251,7 +251,8 @@ impl Extensions {
         json!({
             "id": id,
             "known": chosen.is_some() || !versions.is_empty(),
-            "runs": chosen.as_ref().map(crate::catalog::Chosen::describe),
+            "runs": chosen.as_ref().map(|c| self.describe(c)),
+            "build": self.build_of(id),
             "origin": chosen.as_ref().map(|c| c.runs.origin.name()),
             "overrides": chosen.as_ref().map(|c| c.shadows.iter().map(|(o, v)| json!({ "origin": o.name(), "version": v.to_string() })).collect::<Vec<_>>()),
             "loaded": loaded.is_some(),

@@ -43,8 +43,15 @@ impl Watch {
 /// A folder's fingerprint: its files' paths and contents.
 #[must_use]
 pub fn fingerprint(dir: &Path) -> u64 {
+    fingerprint_except(dir, &|_| false)
+}
+
+/// [`fingerprint`] of what `skip` (given each path relative to `dir`)
+/// does not leave out: a crate's sources, not its build output.
+#[must_use]
+pub fn fingerprint_except(dir: &Path, skip: &dyn Fn(&Path) -> bool) -> u64 {
     let mut files = Vec::new();
-    walk(dir, dir, &mut files);
+    walk(dir, dir, skip, &mut files);
     files.sort();
     let mut hasher = DefaultHasher::new();
     for (path, bytes) in files {
@@ -54,7 +61,7 @@ pub fn fingerprint(dir: &Path) -> u64 {
     hasher.finish()
 }
 
-fn walk(root: &Path, dir: &Path, out: &mut Vec<(PathBuf, Vec<u8>)>) {
+fn walk(root: &Path, dir: &Path, skip: &dyn Fn(&Path) -> bool, out: &mut Vec<(PathBuf, Vec<u8>)>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -63,11 +70,14 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<(PathBuf, Vec<u8>)>) {
             continue;
         }
         let path = entry.path();
+        let rel = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
+        if skip(&rel) {
+            continue;
+        }
         match entry.file_type() {
-            Ok(t) if t.is_dir() => walk(root, &path, out),
+            Ok(t) if t.is_dir() => walk(root, &path, skip, out),
             Ok(_) => {
                 let bytes = std::fs::read(&path).unwrap_or_default();
-                let rel = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
                 out.push((rel, bytes));
             }
             Err(_) => {}

@@ -95,6 +95,8 @@ pub mod process;
 pub mod proto;
 #[cfg(all(feature = "remote", unix))]
 pub mod remote;
+#[cfg(feature = "host")]
+pub mod source;
 #[cfg(feature = "ui")]
 pub mod ui;
 #[cfg(feature = "host")]
@@ -111,7 +113,7 @@ pub mod work;
 pub use catalog::{Candidate, Chosen, Origin, choose};
 pub use contrib::{Contribution, Contributions};
 pub use index::{Hit, Index, Listing, Location};
-pub use manifest::{API, Kind, MANIFEST, Manifest, ManifestError, Reach};
+pub use manifest::{API, Kind, MANIFEST, Manifest, ManifestError, Reach, SourceDecl};
 pub use package::{Files, Package, PackageError};
 pub use project::{Missing, Plan, Policies, Policy, Requirement, Requirements, plan};
 pub use semver::{Version, VersionReq};

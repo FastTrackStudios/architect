@@ -41,6 +41,8 @@ struct Inner {
     /// The last load that failed of each extension, until it loads or
     /// goes: what [`Extensions::problems`] reports.
     failed: Arc<Mutex<std::collections::BTreeMap<String, LoadError>>>,
+    /// Development copies built from source (`crate::source`).
+    builds: crate::source::Builds,
 }
 
 /// The app's extensions. Cheap to clone.
@@ -102,6 +104,7 @@ impl Extensions {
                 watch: Mutex::new(Watch::new()),
                 dev_root: Mutex::new(None),
                 failed,
+                builds: crate::source::Builds::default(),
             }),
         }
     }
@@ -297,10 +300,12 @@ impl Extensions {
         self.sync()
     }
 
-    /// Ends the development copy in `dir`.
+    /// Ends the development copy in `dir` (and its builds, when it is
+    /// built from source; its folder stays).
     #[must_use = "what happened"]
     pub fn end_dev(&self, dir: &Path) -> Vec<Event> {
         lock(&self.inner.dev).retain(|d| d != dir);
+        self.inner.builds.forget(dir);
         self.sync()
     }
 
@@ -328,6 +333,12 @@ impl Extensions {
     /// Every copy there is of every extension, and why the ones that
     /// cannot be read cannot.
     fn candidates(&self) -> (Vec<Candidate<Package>>, Vec<Event>) {
+        self.candidates_with(true)
+    }
+
+    /// [`Self::candidates`]; with `unbuilt`, also a development copy built
+    /// from source whose first build is not good yet (shown, not run).
+    fn candidates_with(&self, unbuilt: bool) -> (Vec<Candidate<Package>>, Vec<Event>) {
         let mut out = Vec::new();
         let mut failed = Vec::new();
         let mut add = |package: Package, origin: Origin| {
@@ -357,6 +368,9 @@ impl Extensions {
             }
         }
         for dir in lock(&self.inner.dev).iter() {
+            if !unbuilt && self.inner.builds.pending(dir) {
+                continue;
+            }
             match Package::read(dir) {
                 Ok(p) => add(p, Origin::Dev),
                 Err(e) => failed.push(Event::Failed {
@@ -366,6 +380,11 @@ impl Extensions {
             }
         }
         (out, failed)
+    }
+
+    /// Development copies built from source (`crate::source`).
+    pub(crate) fn builds(&self) -> &crate::source::Builds {
+        &self.inner.builds
     }
 
     /// Where copies go (`crate::clone`).
@@ -398,7 +417,7 @@ impl Extensions {
     #[must_use = "what happened"]
     pub fn sync(&self) -> Vec<Event> {
         let host = &self.inner.host;
-        let (candidates, mut events) = self.candidates();
+        let (candidates, mut events) = self.candidates_with(false);
         let disabled = lock(&self.inner.disabled).clone();
         let chosen: Vec<_> = choose(candidates)
             .into_iter()
@@ -441,16 +460,20 @@ impl Extensions {
             .loaded()
             .into_iter()
             .filter_map(|l| l.dir)
+            // A crate built from source reloads when it builds.
+            .filter(|d| !self.inner.builds.has(d))
             .collect()
     }
 
     /// Reloads every loaded extension whose files changed since the last
-    /// poll: what happened. One that fails keeps its last good copy.
+    /// poll, rebuilds each development copy built from source whose
+    /// sources changed and swaps in what built (`crate::source`): what
+    /// happened. One that fails keeps its last good copy.
     #[must_use = "what happened"]
     pub fn reload_changed(&self) -> Vec<Event> {
         let changed = lock(&self.inner.watch).changed(self.dirs());
         let host = &self.inner.host;
-        let mut events = Vec::new();
+        let mut events = self.rebuild_changed();
         for dir in changed {
             let Some(loaded) = host
                 .loaded()
