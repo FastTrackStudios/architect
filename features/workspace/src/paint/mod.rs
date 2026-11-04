@@ -1,8 +1,9 @@
 //! The `paint` kind (feature `paint`;
 //! `docs/content/architecture/embedded-views.md`, "Paint views"): a view
 //! that records a scene each frame, drawn in-process by the host's own
-//! renderer in the pane's place. A GPU view, a Frame surface or a chart
-//! draws through it.
+//! renderer in the pane's place.
+//!
+//! A GPU view, a Frame surface or a chart draws through it.
 //!
 //! A [`PaintView`] is given the pane's [`ViewCtx`] — its size, its input
 //! (IME too), the frame clock, the theme's tokens, the host's typed data
@@ -97,12 +98,12 @@ impl Marks {
     }
 
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.0.len()
     }
 
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
@@ -150,7 +151,7 @@ impl ThemeTokens {
         let value = self.get(name)?;
         peniko::color::parse_color(value)
             .ok()
-            .map(|c| c.to_alpha_color())
+            .map(peniko::color::DynamicColor::to_alpha_color)
     }
 }
 
@@ -283,7 +284,7 @@ impl Painter {
 
     /// Request a frame after view data changes outside the input queue.
     /// The host must also wake its renderer if it is sleeping.
-    pub fn invalidate(&mut self) {
+    pub const fn invalidate(&mut self) {
         self.dirty = true;
     }
 

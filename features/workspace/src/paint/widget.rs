@@ -53,7 +53,7 @@ impl PaintWidget {
         }
     }
 
-    fn with_wake(painter: Painter, wake: PaintWake) -> Self {
+    const fn with_wake(painter: Painter, wake: PaintWake) -> Self {
         Self { painter, wake }
     }
 
@@ -215,18 +215,14 @@ fn view_input(event: &UiEvent) -> Option<ViewInput> {
             preedit: text.clone(),
             commit: None,
         },
-        UiEvent::Ime(BlitzImeEvent::Commit(text)) => ViewInput::Ime {
+        // Pasted text is committed text.
+        UiEvent::Ime(BlitzImeEvent::Commit(text)) | UiEvent::Paste(text) => ViewInput::Ime {
             preedit: String::new(),
             commit: Some(text.clone()),
         },
         UiEvent::Ime(BlitzImeEvent::Disabled) => ViewInput::Ime {
             preedit: String::new(),
             commit: None,
-        },
-        // Pasted text is committed text.
-        UiEvent::Paste(text) => ViewInput::Ime {
-            preedit: String::new(),
-            commit: Some(text.clone()),
         },
         UiEvent::Ime(BlitzImeEvent::Enabled | BlitzImeEvent::DeleteSurrounding { .. })
         | UiEvent::AppleStandardKeybinding(_) => return None,
@@ -612,7 +608,7 @@ mod tests {
             width: 1000.0,
             height: 800.0,
             touch: false,
-            insets: Default::default(),
+            insets: architect_shell::Insets::default(),
         };
         rsx! {
             architect_shell::AppShell { screen, theme: theme(), tabs: vec![], current: None,
@@ -633,7 +629,7 @@ mod tests {
             THEME.with(|slot| {
                 let mut theme = slot.borrow().unwrap();
                 theme.write().accent = "#123456".into();
-            })
+            });
         });
         dom.render_immediate(&mut NoOpMutations);
         let current = MOUNT_WAKE.with(|slot| slot.borrow().clone().unwrap());

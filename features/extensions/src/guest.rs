@@ -108,8 +108,10 @@ fn post(update: Update) {
 
 /// Puts what this process adds to the app's interface now (its tabs,
 /// status items, openers, menu and context entries, hooks, slots), in
-/// place of what it put before: checked by the host against its
-/// manifest, as the manifest's own tables are.
+/// place of what it put before.
+///
+/// Checked by the host against its manifest, as the manifest's own
+/// tables are.
 pub fn contribute(contribution: &Contribution) {
     let json = serde_json::to_string(contribution).unwrap_or_default();
     *outbox().last.lock().unwrap_or_else(PoisonError::into_inner) = Some(json.clone());

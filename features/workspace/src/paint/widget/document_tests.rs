@@ -112,7 +112,7 @@ fn paint(doc: &DioxusDocument, scale: u32) -> Vec<u8> {
                 300 * scale,
                 0,
                 0,
-            )
+            );
         },
         400 * scale,
         300 * scale,
@@ -121,8 +121,10 @@ fn paint(doc: &DioxusDocument, scale: u32) -> Vec<u8> {
 
 fn has_solid_color(pixels: &[u8], color: [u8; 4]) -> bool {
     pixels
-        .chunks_exact(4)
-        .filter(|pixel| *pixel == color)
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|pixel| **pixel == color)
         .count()
         > 1_000
 }
@@ -172,8 +174,10 @@ fn wake_at_scale(scale: u32) -> usize {
     assert!(has_solid_color(&after, [0, 0, 255, 255]));
     assert!(!doc.inner.borrow().widgets_need_redraw());
     before
-        .chunks_exact(4)
-        .filter(|pixel| *pixel == [255, 0, 0, 255])
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .filter(|pixel| **pixel == [255, 0, 0, 255])
         .count()
 }
 
@@ -234,7 +238,7 @@ fn themed_app() -> Element {
         width: 1000.0,
         height: 800.0,
         touch: false,
-        insets: Default::default(),
+        insets: architect_shell::Insets::default(),
     };
     rsx! {
         div { style: "width: 400px; height: 300px; position: relative;",
@@ -268,7 +272,7 @@ fn shell_theme_change_repaints_a_blitz_document() {
         THEME.with(|slot| {
             let mut theme = slot.borrow().unwrap();
             theme.write().accent = "#0000ff".into();
-        })
+        });
     });
     for _ in 0..16 {
         if !doc.poll(None) {
