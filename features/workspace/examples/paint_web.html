@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Paint view</title></head>
+<body>
+  <h1>Paint view</h1>
+  <p>Press the canvas to change its colour.</p>
+  <canvas id="paint" style="width:160px;height:100px;" aria-label="Paint view"></canvas>
+  <p id="status" role="status">Loading…</p>
+  <script type="module">
+    import init, { mount, draw, press } from './paint_web.js';
+    const canvas = document.querySelector('#paint');
+    const status = document.querySelector('#status');
+    try {
+      await init();
+      mount(canvas);
+      draw();
+      status.textContent = 'Ready';
+      canvas.addEventListener('pointerdown', event => {
+        const box = canvas.getBoundingClientRect();
+        press(event.clientX - box.left, event.clientY - box.top);
+        requestAnimationFrame(() => {
+          try { draw(); } catch (error) { status.textContent = String(error); }
+        });
+      });
+    } catch (error) {
+      status.textContent = String(error);
+    }
+  </script>
+</body>
+</html>

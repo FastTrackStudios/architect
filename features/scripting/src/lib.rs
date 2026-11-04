@@ -39,6 +39,12 @@ pub mod history;
 pub mod luau;
 #[cfg(feature = "settings")]
 pub mod settings;
+#[cfg(feature = "luau")]
+pub mod theme;
+#[cfg(feature = "luau")]
+pub mod vm;
+#[cfg(feature = "luau")]
+pub mod worker;
 
 /// Whose a saved script is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Facet)]

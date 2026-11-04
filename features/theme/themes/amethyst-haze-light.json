@@ -1,0 +1,39 @@
+{
+  "label": "Amethyst Haze Light",
+  "appearance": "light",
+  "palette": {
+    "background": "#f8f7fa",
+    "foreground": "#3d3c4f",
+    "accent": "#8a79ab",
+    "surface": "#ffffff",
+    "border": "#cec9d9",
+    "danger": "#d95c5c",
+    "chart": ["#8a79ab", "#e6a5b8", "#77b8a1", "#f0c88d", "#a0bbe3"]
+  },
+  "overrides": {
+    "accent": "#e6a5b8",
+    "accent-foreground": "#4b2e36",
+    "destructive-foreground": "#f8f7fa",
+    "font-mono": "\"Fira Code\", \"Courier New\", monospace",
+    "font-sans": "Geist, sans-serif",
+    "font-serif": "\"Lora\", Georgia, serif",
+    "input": "#eae7f0",
+    "letter-spacing": "0em",
+    "muted": "#dcd9e3",
+    "muted-foreground": "#6b6880",
+    "primary-foreground": "#f8f7fa",
+    "radius": "0.5rem",
+    "secondary": "#dfd9ec",
+    "shadow-blur": "5px",
+    "shadow-offset-x": "1px",
+    "shadow-offset-y": "2px",
+    "shadow-opacity": "0.06",
+    "shadow-spread": "1px",
+    "sidebar": "#f1eff5",
+    "sidebar-accent": "#e6a5b8",
+    "sidebar-accent-foreground": "#4b2e36",
+    "sidebar-border": "#d7d2e0",
+    "sidebar-primary-foreground": "#f8f7fa",
+    "signal-danger": "oklch(0.60 0.22 28)"
+  }
+}

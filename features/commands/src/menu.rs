@@ -52,6 +52,9 @@ pub enum Entry {
     Section(Section),
 }
 
+/// The name of the live section [`MenuBar::contributed`] adds.
+pub const CONTRIBUTED: &str = "contributed";
+
 /// One row of a live section: a command, run with its own arguments.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Live {
@@ -284,6 +287,24 @@ impl MenuBar {
                 .position(|m| m.title == "Window" || m.title == "Help")
                 .unwrap_or(self.menus.len());
             self.menus.insert(at, f(Menu::new(title)));
+        }
+        self
+    }
+
+    /// Every menu with a live section of what others add to it (an
+    /// extension's `[[menus]]` rows): `rows` is asked for each menu's by
+    /// its title each time the bar is resolved, so rows come and go with
+    /// whoever adds them. A menu with none shows as it did.
+    #[must_use]
+    pub fn contributed(mut self, rows: impl Fn(&str) -> Vec<Live> + 'static) -> Self {
+        let rows: Rc<dyn Fn(&str) -> Vec<Live>> = Rc::new(rows);
+        for menu in &mut self.menus {
+            let (title, rows) = (menu.title.clone(), Rc::clone(&rows));
+            menu.entries.push(Entry::Separator);
+            menu.entries.push(Entry::Section(Section {
+                name: CONTRIBUTED.to_owned(),
+                rows: Rc::new(move || rows(&title)),
+            }));
         }
         self
     }

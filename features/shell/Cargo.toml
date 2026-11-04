@@ -26,9 +26,13 @@ ui = [
     "dep:tracing",
     "dep:objc2-foundation",
     "dep:raw-window-handle",
+    "architect-theme/dioxus",
 ]
 
 [dependencies]
+# The shell's colours from a theme (`ShellTheme::from_resolved`); its
+# model is wasm-clean, `ui` follows the store live.
+architect-theme = { workspace = true }
 dioxus = { workspace = true, optional = true }
 lucide-dioxus = { workspace = true, optional = true }
 # The drawers ease in a frame at a time (src/shell/motion.rs).
@@ -92,6 +96,10 @@ tracing = { workspace = true, optional = true }
 # A timer needs the browser's clock on wasm.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 futures-timer = { workspace = true, optional = true, features = ["wasm-bindgen"] }
+
+[dev-dependencies]
+# The theme test drives a VirtualDom's futures (src/shell/mod.rs tests).
+futures = "0.3"
 
 [lib]
 doctest = false

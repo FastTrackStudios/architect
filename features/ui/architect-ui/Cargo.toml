@@ -15,6 +15,9 @@ tracing = { workspace = true }
 tw_merge = { workspace = true }
 nucleo-matcher = { workspace = true }
 palette = { workspace = true }
+# Runtime themes: the presets are its built-in theme files, and
+# `ThemeStoreProvider` follows its store.
+architect-theme = { workspace = true, features = ["dioxus"] }
 
 # Story registration. Always on — every component declares its stories
 # inline next to its implementation, and the `#[story]` macro auto-
@@ -29,6 +32,8 @@ default = []
 router = ["dioxus/router", "dioxus-primitives/router"]
 
 [dev-dependencies]
+# tests/theme_store.rs drives a VirtualDom's futures.
+futures = "0.3"
 # Always available to tests/ — heavy (pulls Blitz CPU rasteriser) but
 # `cargo build` never compiles dev-deps so the lib build stays light.
 architect-story-snapshots = { workspace = true }

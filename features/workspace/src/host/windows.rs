@@ -276,7 +276,7 @@ pub(super) fn PopoutSync(bridge: Bridge) -> Element {
                 window: id,
                 workspace: host.workspace,
                 views: host.views.peek().clone(),
-                theme: *host.theme.peek(),
+                theme: host.theme.peek().clone(),
                 sizes: *host.sizes.peek(),
                 status: host.status,
                 status_serial: host.status_serial,
@@ -345,7 +345,7 @@ fn PopoutView(props: PopoutProps) -> Element {
         views: CopyValue::new(props.views.clone()),
         commands: CopyValue::new(props.commands.clone()),
         on_command: CopyValue::new(None),
-        theme: CopyValue::new(props.theme),
+        theme: Signal::new(props.theme.clone()),
         sizes: Signal::new(props.sizes),
         phone: Signal::new(false),
         title_row: Signal::new(None),
@@ -387,6 +387,8 @@ fn PopoutView(props: PopoutProps) -> Element {
         measured: CopyValue::new(crate::tree::Measured::default()),
         sets_noun: Signal::new("Workspace".to_owned()),
         managing: Signal::new(false),
+        // A pop-out writes nothing back to the shipped sets.
+        shipped: CopyValue::new(Vec::new()),
     });
     use_release_outside(host);
     let mut host = host;

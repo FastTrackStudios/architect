@@ -1,0 +1,136 @@
+# The lab's example extension (apps/lab/board/src/lib.rs). One Rust value
+# (`Board`, a linked::Extension) runs it two ways: the lab links it in as
+# a built-in, and its program (src/main.rs) serves the same value as a
+# process — this manifest's [entry] — when a development copy is run.
+# Turn it off (EXT_DISABLE {"id":"lab.board"}) and everything below goes,
+# live; on again and it comes back.
+id = "lab.board"
+name = "Board"
+version = "0.1.0"
+kind = "process"
+api = "0.1"
+description = "A pin board: a tab, a status item, a context-menu entry on notes, a .kf opener, a GitHub-issue link opener, a startup hook, and its own status bar."
+authors = ["FastTrackStudio"]
+
+[entry]
+path = "architect-lab-board"
+
+[[actions]]
+id = "LAB_BOARD_PIN"
+name = "Pin to the board"
+description = "Pins what it was invoked on (a note's pane from its context menu, or `title`) to the board."
+group = "Board"
+effect = "mutating"
+params = '{"type":"object","properties":{"title":{"type":"string"}}}'
+
+[[actions]]
+id = "LAB_BOARD_CLEAR"
+name = "Clear the board"
+group = "Board"
+effect = "mutating"
+
+[[actions]]
+id = "LAB_BOARD_STATE"
+name = "The board"
+description = "What is pinned, the chart last opened, the issues opened, and how it was last invoked."
+group = "Board"
+effect = "read_only"
+
+[[actions]]
+id = "LAB_BOARD_HELLO"
+name = "Board: started"
+description = "Its startup hook: says it is ready on its status item."
+group = "Board"
+effect = "mutating"
+
+[[actions]]
+id = "LAB_BOARD_OPENED"
+name = "Board: a document opened"
+description = "Its doc.opened hook: remembers the chart."
+group = "Board"
+effect = "mutating"
+
+[[actions]]
+id = "LAB_BOARD_ISSUE"
+name = "Board: open an issue"
+description = "Its link opener: pins the GitHub issue that was clicked."
+group = "Board"
+effect = "mutating"
+
+# The tab is a page file: an app that runs pages (architect-pages) draws
+# pages/board.tsx, live on save; one that does not draws BoardView.
+[[views]]
+id = "board"
+title = "Board"
+icon = "layout-dashboard"
+page = "pages/board.tsx"
+
+[[views]]
+id = "chart"
+title = "Keyflow chart"
+icon = "music"
+placement = "split"
+
+[[views]]
+id = "status-bar"
+title = "Board status bar"
+on_unload = "close"
+
+[[openers]]
+id = "kf"
+title = "Keyflow chart"
+files = ["kf"]
+view = "chart"
+
+[[openers]]
+id = "issue"
+title = "GitHub issue"
+urls = ['^https://github\.com/[^/]+/[^/]+/issues/\d+$']
+action = "LAB_BOARD_ISSUE"
+
+[[doc_kinds]]
+id = "keyflow.chart"
+name = "Keyflow chart"
+files = ["kf"]
+icon = "music"
+view = "chart"
+
+[[tabs]]
+id = "board"
+title = "Board"
+icon = "layout-dashboard"
+view = "board"
+
+[[status]]
+id = "pins"
+text = "Board starting…"
+icon = "pin"
+hint = "What is on the board"
+side = "left"
+
+[[menus]]
+menu = "View"
+action = "LAB_BOARD_CLEAR"
+
+[[context]]
+target = "view:note"
+action = "LAB_BOARD_PIN"
+title = "Pin to the board"
+
+[[bar]]
+action = "LAB_BOARD_PIN"
+title = "Pin"
+icon = "pin"
+
+[[hooks]]
+on = "startup"
+action = "LAB_BOARD_HELLO"
+
+[[hooks]]
+on = "doc.opened"
+action = "LAB_BOARD_OPENED"
+
+# Its own status bar fills the shell's status slot while it is loaded.
+[[slots]]
+slot = "status"
+view = "status-bar"

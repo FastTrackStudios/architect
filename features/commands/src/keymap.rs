@@ -27,6 +27,28 @@ const NORMAL: &str = "normal";
 /// The action string that removes a binding.
 const UNBIND: &str = "unbind";
 
+/// The escape hatch, as the guide names it.
+///
+/// Ctrl+Alt+Shift+Escape, or Cmd+Alt+Shift+Escape on macOS. It always
+/// works and nobody can rebind it ([`is_escape_hatch`]): it drops the
+/// person's key changes and runs [`ESCAPE_HATCH_ACTION`]
+/// (`Commands::escape_hatch`).
+pub const ESCAPE_HATCH: &str = "Ctrl+Alt+Shift+Escape (Cmd+Alt+Shift+Escape on macOS)";
+
+/// What the escape hatch runs besides resetting the keys: every built-in
+/// workspace layout back as shipped (`architect-workspace`).
+pub const ESCAPE_HATCH_ACTION: &str = "WORKSPACES_RESTORE_BUILTINS";
+
+/// Whether `chord` (one chord, in glyphs or keymap notation) is the
+/// escape hatch: Escape with Alt, Shift and Ctrl or Cmd.
+#[must_use]
+pub fn is_escape_hatch(chord: &str) -> bool {
+    parse_token(chord.trim()).is_ok_and(|c| {
+        let m = c.modifiers;
+        matches!(c.key, KeyCode::Escape) && m.alt && m.shift && (m.ctrl || m.meta)
+    })
+}
+
 /// One change a person made: `keys` in `context` runs `action`, or, when
 /// `action` is `unbind`, no longer runs what the app bound there.
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]
@@ -323,6 +345,11 @@ impl Keymap {
     /// `keys` is not a key sequence.
     pub fn bind(&mut self, action: &str, context: &str, keys: &str) -> Result<(), ConfigError> {
         let keys = normalize_keys(keys)?;
+        if keys.split_whitespace().any(is_escape_hatch) {
+            return Err(ConfigError::InvalidKeySequence(format!(
+                "{keys} is the escape hatch ({ESCAPE_HATCH}): it cannot be rebound"
+            )));
+        }
         self.drop_rebinds(context, &keys);
         self.person.rebinds.push(Rebind {
             context: context.to_owned(),
@@ -604,5 +631,31 @@ mod tests {
             assert_eq!(display_keys(&keys), shown, "{keys}");
         }
         assert_eq!(parse_shortcut("⌘"), None);
+    }
+
+    /// The escape hatch is heard in either notation, on either platform's
+    /// modifier, and cannot be bound to anything (herdr's
+    /// `ctrl-alt-shift-escape`).
+    #[test]
+    fn the_escape_hatch_cannot_be_rebound() {
+        for chord in [
+            "⌃⌥⇧Esc",
+            "⌥⇧⌘Esc",
+            "Ctrl+Alt+Shift+Escape",
+            "Alt+Shift+Meta+Escape",
+        ] {
+            assert!(is_escape_hatch(chord), "{chord}");
+        }
+        for chord in ["⌃⇧Esc", "⌃⌥Esc", "Esc", "⌃⌥⇧K", "nonsense"] {
+            assert!(!is_escape_hatch(chord), "{chord}");
+        }
+        let mut keymap = Keymap::new(KeymapConfig::default());
+        let refused = keymap.bind("APP_QUIT", EVERYWHERE, "⌃⌥⇧Esc");
+        assert!(
+            refused.is_err_and(|e| e.to_string().contains("escape hatch")),
+            "the escape hatch was bound"
+        );
+        assert!(keymap.person().rebinds.is_empty());
+        assert!(keymap.bind("APP_QUIT", EVERYWHERE, "⌃⌥⇧K").is_ok());
     }
 }

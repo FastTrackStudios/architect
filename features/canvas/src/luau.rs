@@ -35,7 +35,13 @@
 //! | `PushID(ctx, id)`, `PopID(ctx)` | — |
 //! | `IsItemHovered(ctx)`, `IsItemActive(ctx)` | the last item's |
 //! | `SetNextWindowSize(ctx, w, h, cond?)`, `SetNextWindowPos(ctx, x, y, cond?)` | — |
-//! | `WindowFlags_*`, `Cond_*` | Dear `ImGui`'s values |
+//! | `PushStyleColor(ctx, idx, rgba)`, `PopStyleColor(ctx, count?)` | — (a colour of the style, over the theme's, until popped) |
+//! | `WindowFlags_*`, `Cond_*`, `Col_*` | Dear `ImGui`'s values |
+//!
+//! The windows' style follows the app's theme ([`Session::set_theme`],
+//! `Style::from_theme`), and a script reads the theme itself through
+//! `theme` (`architect_scripting::theme`): `theme.color('brand')` is a
+//! colour `TextColored` and `PushStyleColor` take.
 //!
 //! `Canvas` draws over a view, in its coordinates:
 //!
@@ -56,14 +62,18 @@
 //! shows changes (the view's spaces, the pointer over a region).
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::Duration;
 
 use architect::action::ActionCaller;
 use architect_scripting::luau::mlua::{self, Lua, UserData, UserDataRef, Value as LuaValue};
 use architect_scripting::luau::{Live, Module, Report, Runtime, raise};
+use architect_scripting::theme::{ThemeCell, ThemeModule};
+use architect_theme::Resolved;
+use architect_workspace::ViewMeter;
 use serde_json::Value;
 
 use crate::geometry::{Color, Point, Rect, Size};
-use crate::imgui::{Input, Style, Ui, UiError, cond, window_flags};
+use crate::imgui::{Col, Input, Style, Ui, UiError, cond, window_flags};
 use crate::layer::{LayerId, Overlays, Plane, ViewPointer};
 use crate::space::Spaces;
 use crate::{Output, Shape};
@@ -283,6 +293,24 @@ impl Module for ImGuiModule {
                 Ok(())
             },
         )?;
+        self.widget(
+            lua,
+            &t,
+            "PushStyleColor",
+            |ui, _, (idx, rgba): (u32, u32)| {
+                // An index this UI does not draw is taken and left alone.
+                if let Some(col) = Col::from_index(idx) {
+                    ui.push_style_color(col, Color(rgba));
+                }
+                Ok(())
+            },
+        )?;
+        self.widget(lua, &t, "PopStyleColor", |ui, _, count: Option<usize>| {
+            ui.pop_style_color(count.unwrap_or(1))
+        })?;
+        for col in Col::ALL {
+            t.set(format!("Col_{}", col.name()), col.index())?;
+        }
         for (name, value) in [
             ("WindowFlags_None", window_flags::NONE),
             ("WindowFlags_NoTitleBar", window_flags::NO_TITLE_BAR),
@@ -515,12 +543,20 @@ fn spaces_table(lua: &Lua, s: &Spaces) -> mlua::Result<mlua::Table> {
 /// The host publishes what its views show ([`Self::publish`]) and the
 /// pointer over them ([`Self::pointer`]), and asks for a frame when
 /// something changed — a pointer press or release, a view scrolled, a
-/// pane resized ([`Self::frame`]) — not on a timer.
+/// pane resized ([`Self::frame`]), a worker's news ([`Self::woken`]),
+/// an animation's next step ([`Self::wake_after`]) — not on a timer.
+///
+/// Its script runs on a thread of its own (`architect_scripting::luau`):
+/// a frame is awaited, never run on the host's thread, so a script that
+/// runs long keeps the host's last good frame on screen and the app
+/// answering ([`Self::frame_metered`]).
 pub struct Session {
     live: Live,
     windows: Arc<Mutex<Windows>>,
     overlays: Arc<Mutex<Overlays>>,
     output: Output,
+    /// The theme its script reads (`theme`) and its windows are styled by.
+    theme: ThemeCell,
 }
 
 impl std::fmt::Debug for Session {
@@ -543,8 +579,37 @@ impl Session {
         args: Value,
         step: &str,
     ) -> (Report, Option<Self>) {
+        Self::launch(runtime, caller, source, args, step, None).await
+    }
+
+    /// [`Self::start`], its windows styled by `theme` and its script
+    /// reading it (`theme`) from the first frame on; then
+    /// [`Self::set_theme`] on every change.
+    pub async fn start_themed(
+        runtime: &Runtime,
+        caller: &ActionCaller,
+        source: &str,
+        args: Value,
+        step: &str,
+        theme: &Resolved,
+    ) -> (Report, Option<Self>) {
+        Self::launch(runtime, caller, source, args, step, Some(theme)).await
+    }
+
+    async fn launch(
+        runtime: &Runtime,
+        caller: &ActionCaller,
+        source: &str,
+        args: Value,
+        step: &str,
+        theme: Option<&Resolved>,
+    ) -> (Report, Option<Self>) {
         let windows = Arc::new(Mutex::new(Windows::default()));
         let overlays = Arc::new(Mutex::new(Overlays::new()));
+        let cell = ThemeCell::new(theme.cloned().unwrap_or_default());
+        if let Some(theme) = theme {
+            lock(&windows).ui.set_style(Style::from_theme(theme));
+        }
         let runtime = runtime
             .clone()
             .with_module(Arc::new(ImGuiModule {
@@ -552,7 +617,8 @@ impl Session {
             }))
             .with_module(Arc::new(CanvasModule {
                 overlays: Arc::clone(&overlays),
-            }));
+            }))
+            .with_module(Arc::new(ThemeModule::new(cell.clone())));
         begin(&windows, &overlays, Input::default());
         let (report, live) = runtime.start(caller, source, args, step).await;
         let output = end(&windows, &overlays);
@@ -561,6 +627,7 @@ impl Session {
             windows,
             overlays,
             output,
+            theme: cell,
         });
         (report, session)
     }
@@ -579,6 +646,48 @@ impl Session {
     #[must_use]
     pub const fn output(&self) -> &Output {
         &self.output
+    }
+
+    /// [`Self::frame`], measured by `meter`: once the frame has run past
+    /// the meter's budget, `busy` is called and the meter is busy until
+    /// it ends (its host keeps showing the last good frame, marked busy).
+    /// The frame runs on the script's thread; this only waits. What the
+    /// meter records is the frame's time on that thread
+    /// ([`Live::last_frame_time`]), not the host's wait to hear of it.
+    pub async fn frame_metered(
+        &mut self,
+        input: Input,
+        meter: &ViewMeter,
+        busy: impl FnOnce(),
+    ) -> Report {
+        use futures::future::{Either, select};
+        let budget = meter.budget();
+        let report = {
+            let frame = std::pin::pin!(self.frame(input));
+            match select(frame, futures_timer::Delay::new(budget)).await {
+                Either::Left((report, _)) => report,
+                Either::Right(((), frame)) => {
+                    meter.set_busy(true);
+                    busy();
+                    frame.await
+                }
+            }
+        };
+        meter.record(self.live.last_frame_time());
+        report
+    }
+
+    /// Resolves when its script asks for a frame with no input: one of
+    /// its workers posted news ([`Live::woken`]).
+    pub async fn woken(&self) {
+        self.live.woken().await;
+    }
+
+    /// The frame its script asked for with no input (`wake_after(ms)`,
+    /// an animation's next step): how soon, taking the ask.
+    #[must_use]
+    pub fn wake_after(&self) -> Option<Duration> {
+        self.live.wake_after()
     }
 
     /// Whether it has a next frame: false once it stops deferring.
@@ -602,9 +711,22 @@ impl Session {
         lock(&self.overlays).pointer(view, pointer);
     }
 
-    /// Its windows' look (the shell's theme).
+    /// Its windows' look, as given (what the script pushed is dropped).
     pub fn set_style(&self, style: Style) {
         lock(&self.windows).ui.set_style(style);
+    }
+
+    /// The app's theme changed: its windows restyled
+    /// ([`Style::from_theme`]) and its script's `theme` moved on, from the
+    /// next frame (the host asks for one). False when it is the theme it
+    /// had.
+    #[allow(clippy::must_use_candidate)] // A courtesy most callers ignore.
+    pub fn set_theme(&self, theme: &Resolved) -> bool {
+        if !self.theme.set(theme) {
+            return false;
+        }
+        self.set_style(Style::from_theme(theme));
+        true
     }
 }
 

@@ -4,7 +4,8 @@
 //! at the bottom from "Open a view"). Drag a tab anywhere — out of the
 //! window for a window of its own, on a desk — hold W to grab a pane
 //! without tabs, right-click (or ⋯, or hold a finger on) a tab for the
-//! rest. ⌘1 recalls the "Write" screenset, ⌘2 "Mix" (the notes stacked).
+//! rest. ⌘1 recalls the "Write" screenset, ⌘2 "Mix" (the notes stacked),
+//! ⌘3 "Embedded views" (a pane of each kind of view: `crate::embedded`).
 //! The arrangement tab has a script's marker lane over it, and the
 //! script's tool window floats.
 
@@ -15,13 +16,19 @@ use architect_workspace::{
 };
 use dioxus::prelude::*;
 use lucide_dioxus::{
-    AudioLines, Bot, CalendarCheck, FileText, Files, Layers, Link, ListTree, MousePointerClick,
-    Network, Search, SlidersHorizontal, SquarePen, SquareTerminal, Terminal,
+    AudioLines, Bot, CalendarCheck, Cpu, FileText, Files, Hourglass, Layers, Link, ListTree,
+    MousePointerClick, Network, Puzzle, Search, SlidersHorizontal, SquarePen, SquareTerminal,
+    Terminal,
 };
 
-/// The lab's views.
-fn views() -> Views {
-    Views::new()
+/// The lab's views, and the kinds that draw them, with the views loaded
+/// extensions add (`extra`).
+fn views(extra: Vec<View>) -> Views {
+    let views = Views::new().with_kinds(crate::embedded::kinds());
+    crate::embedded::views()
+        .into_iter()
+        .chain(extra)
+        .fold(views, Views::view)
         .view(
             View::new("files", "Files", |_| rsx! { FilesView {} })
                 .icon(icon!(Files))
@@ -68,6 +75,14 @@ fn views() -> Views {
             .icon(icon!(Network))
             .home(Target::Split(Side::Right)),
         )
+        // The extensions page, in a pane (it is a settings section too).
+        .view(
+            View::new("extensions", "Extensions", |_| {
+                rsx! { architect_extensions::page::ManagerView {} }
+            })
+            .icon(icon!(Puzzle))
+            .home(Target::Split(Side::Right)),
+        )
         .view(
             View::new("actions", "Action list", |_| {
                 rsx! { architect_commands::ActionListView {} }
@@ -107,6 +122,35 @@ fn views() -> Views {
                 }
             })
             .icon(icon!(MousePointerClick))
+            .home(Target::Split(Side::Right))
+            .still(),
+        )
+        // The clicker's heavy job: primes counted in a worker, the
+        // window animating all the while; and a naughty window that
+        // spins on its own thread, marked busy.
+        .view(
+            View::new("clicker.heavy", "Heavy job", |_| {
+                rsx! { crate::extensions::HeavyWindow {} }
+            })
+            .icon(icon!(Cpu))
+            .home(Target::Split(Side::Right))
+            .still(),
+        )
+        .view(
+            View::new("clicker.naughty", "Naughty view", |_| {
+                rsx! { crate::extensions::NaughtyWindow {} }
+            })
+            .icon(icon!(Hourglass))
+            .home(Target::Split(Side::Right))
+            .still(),
+        )
+        // The clicker's ImGui window: a Luau script from its package,
+        // in the app's theme (`theme`, the clicker's own tokens).
+        .view(
+            View::new("clicker.window", "Clicker window", |_| {
+                rsx! { crate::extensions::ClickerWindow {} }
+            })
+            .icon(icon!(SlidersHorizontal))
             .home(Target::Split(Side::Right))
             .still(),
         )
@@ -153,6 +197,18 @@ fn first_workspace() -> Workspace {
             Target::Dock(Side::Right),
         ),
         (Pane::new("clicker", "clicker", "Clicker"), Target::Tab),
+        (
+            Pane::new("clicker-window", "clicker.window", "Clicker window"),
+            Target::Tab,
+        ),
+        (
+            Pane::new("clicker-heavy", "clicker.heavy", "Heavy job"),
+            Target::Tab,
+        ),
+        (
+            Pane::new("clicker-naughty", "clicker.naughty", "Naughty view"),
+            Target::Tab,
+        ),
     ];
     for (pane, target) in opens {
         let _ = w.open(pane, target);
@@ -185,16 +241,32 @@ fn mix_workspace() -> Workspace {
     w
 }
 
-/// The vault's screensets: "Write" (where it starts) and "Mix".
+/// The vault's screensets: "Write" (where it starts), "Mix" and
+/// "Embedded views".
 fn screensets() -> Screensets {
-    Screensets::default().with_builtins([
+    let builtins = vec![
         Screenset::new("Write")
             .slot(1)
             .layout(FormClass::Desk, first_workspace()),
         Screenset::new("Mix")
             .slot(2)
             .layout(FormClass::Desk, mix_workspace()),
-    ])
+        Screenset::new("Embedded views")
+            .slot(3)
+            .layout(FormClass::Desk, crate::embedded::workspace()),
+    ];
+    // "New Chart" (⌘K): the source editor beside its preview.
+    #[cfg(feature = "keyflow-lab")]
+    let builtins = {
+        let mut builtins = builtins;
+        builtins.push(
+            Screenset::new("Chart")
+                .slot(4)
+                .layout(FormClass::Desk, crate::keyflow::chart_workspace()),
+        );
+        builtins
+    };
+    Screensets::default().with_builtins(builtins)
 }
 
 /// Where the lab keeps its workspace: in memory, for the run (a page
@@ -210,7 +282,10 @@ pub fn VaultPage() -> Element {
     let sets = use_signal(screensets);
     let store = use_root_context(|| VaultStore(WorkspaceStore::new(MemoryStore::new()))).0;
     let pane_status = use_signal(Vec::new);
-    let views = use_hook(views);
+    // The lab's views, and every view a loaded extension adds (made again
+    // when one loads or unloads).
+    let ui = try_use_context::<architect_extensions::interface::ExtensionUi>();
+    let views = use_memo(move || views(ui.map(|u| u.views()).unwrap_or_default()))();
     // The workspace on the lab's Action List: every operation, run by the
     // host below; a scenario's checks read the arrangement, each change
     // is heard.
@@ -283,7 +358,7 @@ pub fn VaultPage() -> Element {
     // screenset is the vault's.
     let mut items = pane_status();
     if let Some(set) = set {
-        items.push(StatusItem::new("screenset", set).hint("⌘1 Write, ⌘2 Mix"));
+        items.push(StatusItem::new("screenset", set).hint("⌘1 Write, ⌘2 Mix, ⌘3 Embedded views"));
     }
     architect_shell::use_status(items);
     // On a desk the workspace's tabs are the title row (Obsidian's): no page
@@ -380,6 +455,23 @@ fn FilesView() -> Element {
                     "{title}"
                 }
             }
+            // A file of a kind the lab has no view for: an extension's
+            // opener claims it (the Board's, for `.kf`).
+            for file in ["Songs/Intro.kf"] {
+                button {
+                    key: "{file}",
+                    class: "lp",
+                    style: "display: flex; align-items: center; justify-content: flex-start; min-height: 30px; padding: 0 10px; border: none; \
+                            border-radius: 6px; background: transparent; color: {t.ink_2}; \
+                            font-size: 13px; text-align: left; cursor: pointer;",
+                    onclick: move |_| {
+                        if let Some(ui) = try_consume_context::<architect_extensions::interface::ExtensionUi>() {
+                            let _ = ui.open_path(file);
+                        }
+                    },
+                    "{file}"
+                }
+            }
         }
     }
 }
@@ -389,6 +481,9 @@ fn screen_class(screen: &Screen) -> FormClass {
     let (w, h) = (narrow(screen.width), narrow(screen.height));
     FormClass::of(w, h, screen.form() != FormFactor::Desk)
 }
+
+/// The issue a note links to.
+const ISSUE: &str = "https://github.com/FastTrackStudios/architect/issues/179";
 
 /// A note's body (the lab's notes are all this one).
 const WELCOME: &str = "Notes open as tabs. Drag a tab to a pane's edge to split it, or to the window's edge to dock it; \
@@ -409,6 +504,23 @@ fn NoteView() -> Element {
         div { style: "flex: 1; display: flex; flex-direction: column; gap: 12px; padding: 28px 36px; overflow-y: scroll;",
             div { style: "font-size: 26px; font-weight: 750; color: {t.ink};", "{title}" }
             div { style: "max-width: 560px; font-size: 14px; line-height: 1.6; color: {t.ink_2};", "{WELCOME}" }
+            // A link: Ctrl- or Cmd-click opens it with the extension that
+            // claims its pattern (the Board's, for a GitHub issue).
+            div { style: "font-size: 13px; color: {t.ink_3};",
+                "Tracked in "
+                a {
+                    style: "color: {t.accent}; text-decoration: underline; cursor: pointer;",
+                    onclick: move |e: MouseEvent| {
+                        if architect_extensions::interface::link_press(&e)
+                            && let Some(ui) = try_consume_context::<architect_extensions::interface::ExtensionUi>()
+                        {
+                            let _ = ui.open_link(ISSUE);
+                        }
+                    },
+                    "{ISSUE}"
+                }
+                " (Ctrl- or Cmd-click)"
+            }
             button {
                 class: "lp",
                 style: "align-self: flex-start; min-height: 32px; padding: 0 14px; border-radius: 8px; \
@@ -449,6 +561,6 @@ const fn narrow(v: f64) -> f32 {
 }
 
 /// A file row's fill: the accent, faint, behind the note on show.
-const fn lit(on: bool, t: &architect_shell::ShellTheme) -> &'static str {
-    if on { t.accent_soft } else { "transparent" }
+fn lit(on: bool, t: &architect_shell::ShellTheme) -> &str {
+    if on { &t.accent_soft } else { "transparent" }
 }

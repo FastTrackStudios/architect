@@ -1,0 +1,27 @@
+{
+  "label": "Everforest Dark",
+  "appearance": "dark",
+  "palette": {
+    "background": "#2d353b",
+    "foreground": "#d3c6aa",
+    "accent": "#a7c080",
+    "surface": "#343f44",
+    "border": "#475258",
+    "danger": "#e67e80",
+    "chart": ["#a7c080", "#7fbbb3", "#83c092", "#dbbc7f", "#d699b6"]
+  },
+  "overrides": {
+    "accent": "#3d484d",
+    "destructive-foreground": "#2d353b",
+    "input": "#3d484d",
+    "muted": "#3d484d",
+    "muted-foreground": "#859289",
+    "primary-foreground": "#2d353b",
+    "radius": "0.5rem",
+    "secondary": "#3d484d",
+    "sidebar": "#343f44",
+    "sidebar-accent": "#3d484d",
+    "sidebar-primary-foreground": "#2d353b",
+    "signal-danger": "oklch(0.60 0.22 28)"
+  }
+}

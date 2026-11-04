@@ -22,9 +22,12 @@
 //! - `client` (feature `client`): `client::Client`, blocking.
 //! - `cli` (feature `cli`): the `actions` command an app embeds
 //!   (`cli::Cli`), its headless mode (`cli::Headless`), and the generic
-//!   client `architect-actions`.
+//!   client `architect-actions`. `actions shot [file]` runs `APP_SHOT`.
+//! - [`guide`]: the app's generated `AGENTS.md` and `actions.schema.json`,
+//!   written into its folder from the live list ([`guide::Guide`]).
 
 pub mod endpoint;
+pub mod guide;
 pub mod protocol;
 mod surface;
 

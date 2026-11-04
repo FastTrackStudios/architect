@@ -754,7 +754,7 @@ fn BindingChip(binding: Binding) -> Element {
     let t = theme();
     let shown = display_keys(&binding.keys);
     let mine = binding.layer == Layer::Person;
-    let border = if mine { t.accent } else { t.rule };
+    let border = if mine { &*t.accent } else { &*t.rule };
     let context = binding.context.clone();
     let keys = binding.keys.clone();
     rsx! {

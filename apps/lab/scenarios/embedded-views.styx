@@ -1,0 +1,90 @@
+// Embedded views: ⌘3 (WORKSPACES_LOAD "Embedded views") recalls one pane of
+// each kind the lab shows, each naming its kind; each is used once.
+id embedded-views
+title "Embedded views"
+view {width 1440, height 860}
+capture {fps 20, width 960}
+steps (
+    {
+        id vault
+        do @run{id LAB_GO_VAULT}
+        done {on (@changed"lab"), check ({id LAB_STATE, has {tab vault}})}
+        hide true
+    }
+    {
+        id load
+        text "Embedded views: Dioxus, Luau ImGui, a Frame surface and A2UI, one pane each."
+        do @run{id WORKSPACES_LOAD, args {name "Embedded views"}}
+        done {
+            on (@changed"workspace")
+            check (
+                {id WORKSPACE_PANE_GET, args {pane embed-dioxus}, has {view embed.dioxus, showing true}}
+                {id WORKSPACE_PANE_GET, args {pane embed-luau}, has {view embed.luau, showing true}}
+                {id WORKSPACE_PANE_GET, args {pane embed-frame}, has {view embed.frame, showing true}}
+                {id WORKSPACE_PANE_GET, args {pane embed-a2ui}, has {view embed.a2ui, showing true}}
+            )
+        }
+        hold 1.2
+    }
+    {
+        id dioxus
+        text "Dioxus: a component in the lab's own document; the swatch it picks is the pane's state."
+        target @text"Teal"
+        do @click{}
+        done {check ({id WORKSPACE_PANE_GET, args {pane embed-dioxus}, has {state teal}})}
+        hold 1
+    }
+    {
+        id luau
+        text "Luau ImGui: a script's window, redrawn every frame; its button counts the presses."
+        target @at{x 396, y 651}
+        do @click{}
+        hold 1
+    }
+    {
+        id frame
+        text "A Frame surface from a Frame document: its knob is bound to the lab's drive, and its meter follows."
+        do @run{id LAB_FRAME_SET, args {drive 0.9}}
+        done {
+            on (@changed"frame")
+            check ({id LAB_FRAME_STATE, has {drive 0.9, level -0.6}})
+        }
+        hold 1.4
+    }
+    {
+        id a2ui-render
+        text "A2UI: an agent's surface from the catalog, with a form, a list of tasks, and a button."
+        do @run{id LAB_A2UI_DEMO}
+        done {check ({id LAB_A2UI_DATA, args {surfaceId release}, has {shipped {summary "Not shipped yet."}}})}
+        hold 1
+    }
+    {
+        id a2ui-patch
+        text "An agent patches it live over MCP (A2UI_PATCH) and adds a task."
+        do @run{
+            id A2UI_PATCH
+            args {messages ({updateDataModel {
+                surfaceId release
+                path "/tasks/2"
+                value {title "Notarize the build", done false}
+            }})}
+        }
+        done {check ({id LAB_A2UI_DATA, args {surfaceId release}, has {release {version "0.11.0"}, tasks ({} {} {title "Notarize the build"})}})}
+        hold 1.2
+    }
+    {
+        id a2ui-ship
+        text "Shipping changes something, so the agent's button asks first."
+        target @text"Ship it"
+        do @click{}
+        hold 1
+    }
+    {
+        id a2ui-confirm
+        text "Allow it once, and the answer is written back into the surface."
+        target @css"[data-confirm-answer=\"allow\"]"
+        do @click{}
+        done {check ({id LAB_A2UI_DATA, args {surfaceId release}, has {shipped {summary "v0.11.0 shipped to beta; 2 tasks still open."}}})}
+        hold 1.6
+    }
+)

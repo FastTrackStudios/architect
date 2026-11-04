@@ -1,0 +1,31 @@
+[
+  { "createSurface": { "surfaceId": "release", "catalogId": "https://architect.fasttrackstudio.dev/a2ui/catalog/v1",
+    "dataModel": {
+      "release": { "version": "0.11.0", "channel": ["beta"] },
+      "tasks": [
+        { "title": "Tag the release", "done": true },
+        { "title": "Write the changelog", "done": false }
+      ],
+      "shipped": { "summary": "Not shipped yet." }
+    },
+    "components": [
+      { "id": "root", "component": "Column", "children": ["title", "form", "tasks_title", "tasks", "ship", "summary"] },
+      { "id": "title", "component": "Text", "variant": "h3", "text": "Ship a release" },
+      { "id": "form", "component": "Card", "child": "fields" },
+      { "id": "fields", "component": "Column", "children": ["version", "channel"] },
+      { "id": "version", "component": "TextField", "label": "Version", "value": { "path": "/release/version" } },
+      { "id": "channel", "component": "ChoicePicker", "label": "Channel",
+        "options": [ { "label": "Beta", "value": "beta" }, { "label": "Stable", "value": "stable" } ],
+        "value": { "path": "/release/channel" } },
+      { "id": "tasks_title", "component": "Text", "variant": "h5", "text": "Before it ships" },
+      { "id": "tasks", "component": "List", "children": { "componentId": "task", "path": "/tasks" } },
+      { "id": "task", "component": "CheckBox", "label": { "path": "title" }, "value": { "path": "done" } },
+      { "id": "ship", "component": "Button", "variant": "primary", "child": "ship_label",
+        "action": { "event": { "name": "LAB_RELEASE_SHIP",
+          "context": { "version": { "path": "/release/version" }, "channel": { "path": "/release/channel" },
+                       "tasks": { "path": "/tasks" } },
+          "wantResponse": true, "responsePath": "/shipped" } } },
+      { "id": "ship_label", "component": "Text", "text": "Ship it" },
+      { "id": "summary", "component": "Text", "text": { "path": "/shipped/summary" } }
+    ] } }
+]

@@ -1,0 +1,33 @@
+{
+  "label": "Neo Brutalism Light",
+  "appearance": "light",
+  "palette": {
+    "background": "#ffffff",
+    "foreground": "#000000",
+    "accent": "#ff3333",
+    "surface": "#ffffff",
+    "border": "#000000",
+    "danger": "#000000",
+    "chart": ["#ff3333", "#ffff00", "#0066ff", "#00cc00", "#cc00cc"]
+  },
+  "overrides": {
+    "accent": "#0066ff",
+    "accent-foreground": "#ffffff",
+    "font-mono": "Space Mono, monospace",
+    "font-sans": "DM Sans, sans-serif",
+    "muted": "#f0f0f0",
+    "muted-foreground": "#333333",
+    "primary-foreground": "#ffffff",
+    "radius": "0px",
+    "secondary": "#ffff00",
+    "shadow-blur": "0px",
+    "shadow-offset-x": "4px",
+    "shadow-offset-y": "4px",
+    "shadow-opacity": "1",
+    "sidebar": "#f0f0f0",
+    "sidebar-accent": "#0066ff",
+    "sidebar-accent-foreground": "#ffffff",
+    "sidebar-primary-foreground": "#ffffff",
+    "signal-danger": "oklch(0.60 0.22 28)"
+  }
+}

@@ -1,0 +1,20 @@
+<Document id="e775e76b-e0f6-4207-8bfd-2bf91be090bc">
+  <Page name="Surface" id="5ba66fef-f308-4f15-9223-63e5829c8941">
+    <Frame name="Knob and meter" id="56774ded-97c8-4fc0-8c57-99906ac63657" w=106 h=113 radius=12 fill="#17191e" layout="row" gap=24 padding=16 hug=true>
+      <Frame name="Drive" id="65928fb3-0dd7-4357-9036-d2768b6cb0b3" w=40 h=81 control={{"binding":{"curve":"Linear","max":1.0,"min":0.0,"source":{"Param":{"addr":"surface/drive"}}},"kind":{"Knob":{"sweep_degrees":270.0}},"slots":[{"node":"dba30bd9-f9db-454b-b63e-ec138cb43c35","role":"Label"},{"node":"fdaecba5-18f1-4b0a-b404-550702271519","role":"ValueArc"},{"node":"0d737d22-8894-4734-9c31-e9c5bc346729","role":"Needle"},{"node":"8486875b-1eee-4e46-884c-cc6ad39aba3f","role":"Value"}]}}>
+        <Text name="label" id="dba30bd9-f9db-454b-b63e-ec138cb43c35" w=40 h=16 fill="#9aa0ab" size=11 text-align="center" />
+        <Frame name="dial" id="84655013-d15b-49f5-b90b-e6d716656e49" y=20 w=40 h=40>
+          <Vector name="track" id="3fb97b93-2d46-46c8-b543-69ecf0047bba" w=40 h=40 fill="#0a0b0d" geometry="M 5.858 34.142 A 20.000 20.000 0 1 1 34.142 34.142 L 30.182 30.182 A 14.400 14.400 0 1 0 9.818 30.182 Z" />
+          <Ellipse name="value-arc" id="fdaecba5-18f1-4b0a-b404-550702271519" w=40 h=40 fill="#ff7a1a" />
+          <Ellipse name="cap" id="45eae3b4-cf92-467f-b5a6-37f8e8cef1df" x=7.6 y=7.6 w=24.8 h=24.8 fill="#262930" stroke="#0a0b0d" />
+          <Rectangle name="pointer" id="0d737d22-8894-4734-9c31-e9c5bc346729" x=18.8 y=9.2 w=2.4 h=8.432 radius=1.2 fill="#f2f2f2" />
+        </Frame>
+        <Text name="value" id="8486875b-1eee-4e46-884c-cc6ad39aba3f" y=64 w=40 h=17 fill="#f2f2f2" size=12 text-align="center" />
+      </Frame>
+      <Frame name="Level" id="11cb52bb-8604-4cdc-86c9-14cb9f7873ef" w=10 h=81 radius=2 clip=true fill="#0a0b0d" control={{"binding":{"curve":"Linear","max":1.0,"min":0.0,"source":{"Stream":{"channel":0,"id":"level"}}},"kind":{"Meter":{"orientation":"Vertical"}},"slots":[{"node":"ef414fc7-59fa-405a-826d-2ca633dd30a4","role":"Fill"},{"node":"dd543932-2d06-4bcf-a9af-2e0090e04ca2","role":"PeakHold"}]}}>
+        <Rectangle name="fill" id="ef414fc7-59fa-405a-826d-2ca633dd30a4" w=10 h=81 fill="#3dd67a" />
+        <Rectangle name="peak" id="dd543932-2d06-4bcf-a9af-2e0090e04ca2" w=10 h=2 fill="#f5c42c" />
+      </Frame>
+    </Frame>
+  </Page>
+</Document>

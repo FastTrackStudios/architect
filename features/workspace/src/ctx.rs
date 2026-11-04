@@ -13,7 +13,8 @@
 
 use std::any::{Any, TypeId};
 use std::collections::{BTreeMap, VecDeque};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, PoisonError, RwLock};
 use std::time::Duration;
 
 use architect::action::{ActionCaller, ActionList};
@@ -55,6 +56,20 @@ impl std::fmt::Debug for DocRef {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ThemeTokens(pub BTreeMap<String, String>);
 
+/// A resolved theme's every token (`architect_theme`): what a paint
+/// view reads its colours from, live (`PaintPane` follows the store).
+impl From<&architect_theme::Resolved> for ThemeTokens {
+    fn from(resolved: &architect_theme::Resolved) -> Self {
+        Self(resolved.tokens().clone())
+    }
+}
+
+impl architect_theme::FromResolved for ThemeTokens {
+    fn from_resolved(resolved: &architect_theme::Resolved) -> Self {
+        Self::from(resolved)
+    }
+}
+
 impl ThemeTokens {
     #[must_use]
     pub fn with(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
@@ -95,10 +110,16 @@ pub enum ViewInput {
         y: f32,
         button: Button,
     },
-    /// Scrolled by `dx, dy` logical pixels.
+    /// Scrolled by `dx, dy` logical pixels. `x, y` are the pointer's
+    /// position in the view's logical pixels (the same space as
+    /// [`PointerMove`](Self::PointerMove)); `mods` are the held modifier
+    /// names as [`Key`](Self::Key) gives them (`"Mod"`, `"Shift"`, `"Alt"`).
     Wheel {
         dx: f32,
         dy: f32,
+        x: f32,
+        y: f32,
+        mods: Vec<&'static str>,
     },
     /// A finger, by its id: `phase` is `"start"`, `"move"`, `"end"` or
     /// `"cancel"`.
@@ -151,6 +172,15 @@ impl InputSink {
             .unwrap_or_else(PoisonError::into_inner)
             .drain(..)
             .collect()
+    }
+
+    /// Nothing waiting.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_empty()
     }
 }
 
@@ -253,6 +283,108 @@ impl Extras {
     pub fn get<T: Any + Send + Sync>(&self) -> Option<&T> {
         self.0.get(&TypeId::of::<T>())?.downcast_ref()
     }
+
+    /// With `data` shared: the view finds it by its type,
+    /// [`ViewCtx::data`].
+    #[must_use]
+    pub fn with_data<T: Any + Send + Sync>(self, data: HostData<T>) -> Self {
+        self.with(data)
+    }
+}
+
+/// A value the host and its views share, typed: the host writes, a view
+/// reads (and redraws when [`version`](Self::version) moves).
+///
+/// Cheap to clone; every clone is the same value. A `T` with a [`facet::Facet`]
+/// shape is schema-typed besides: its [`shape`](Self::shape) and JSON
+/// are what an agent, a remote view or a saved pane reads it by.
+pub struct HostData<T>(Arc<Shared<T>>);
+
+struct Shared<T> {
+    value: RwLock<T>,
+    version: AtomicU64,
+}
+
+impl<T> Clone for HostData<T> {
+    fn clone(&self) -> Self {
+        Self(Arc::clone(&self.0))
+    }
+}
+
+impl<T> PartialEq for HostData<T> {
+    /// The same value, not an equal one.
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl<T> std::fmt::Debug for HostData<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HostData")
+            .field("type", &std::any::type_name::<T>())
+            .field("version", &self.version())
+            .finish()
+    }
+}
+
+impl<T> HostData<T> {
+    pub fn new(value: T) -> Self {
+        Self(Arc::new(Shared {
+            value: RwLock::new(value),
+            version: AtomicU64::new(0),
+        }))
+    }
+
+    /// `f` of the value now.
+    pub fn read<R>(&self, f: impl FnOnce(&T) -> R) -> R {
+        f(&self.0.value.read().unwrap_or_else(PoisonError::into_inner))
+    }
+
+    /// Changes the value: one more [`version`](Self::version).
+    pub fn update<R>(&self, f: impl FnOnce(&mut T) -> R) -> R {
+        let out = f(&mut self.0.value.write().unwrap_or_else(PoisonError::into_inner));
+        self.0.version.fetch_add(1, Ordering::Release);
+        out
+    }
+
+    pub fn set(&self, value: T) {
+        self.update(|v| *v = value);
+    }
+
+    /// How many times it has changed: a view that drew version `n` is
+    /// current while this is still `n`.
+    #[must_use]
+    pub fn version(&self) -> u64 {
+        self.0.version.load(Ordering::Acquire)
+    }
+}
+
+impl<T: Clone> HostData<T> {
+    #[must_use]
+    pub fn get(&self) -> T {
+        self.read(T::clone)
+    }
+}
+
+impl<T: for<'a> facet::Facet<'a>> HostData<T> {
+    /// Its schema.
+    #[must_use]
+    pub const fn shape() -> &'static facet::Shape {
+        T::SHAPE
+    }
+
+    /// The value as JSON.
+    #[must_use]
+    pub fn to_json(&self) -> String {
+        self.read(|v| facet_json::to_string(v).unwrap_or_default())
+    }
+
+    /// The value from JSON: refused, unchanged, when it is not a `T`.
+    pub fn set_json(&self, json: &str) -> Result<(), String> {
+        let value: T = facet_json::from_str(json).map_err(|e| e.to_string())?;
+        self.set(value);
+        Ok(())
+    }
 }
 
 /// What every view kind is given when it mounts.
@@ -330,6 +462,12 @@ impl ViewCtx {
         self.extras = extras;
         self
     }
+
+    /// The host's shared `T`, if it gave one ([`Extras::with_data`]).
+    #[must_use]
+    pub fn data<T: Any + Send + Sync>(&self) -> Option<HostData<T>> {
+        self.extras.get::<HostData<T>>().cloned()
+    }
 }
 
 #[cfg(test)]
@@ -357,7 +495,13 @@ mod tests {
     fn input_drains_in_order() {
         let sink = InputSink::new();
         sink.push(ViewInput::Focus(true));
-        sink.push(ViewInput::Wheel { dx: 0.0, dy: 3.0 });
+        sink.push(ViewInput::Wheel {
+            dx: 0.0,
+            dy: 3.0,
+            x: 0.0,
+            y: 0.0,
+            mods: Vec::new(),
+        });
         assert_eq!(sink.drain().len(), 2);
         assert!(sink.drain().is_empty());
     }
@@ -379,5 +523,43 @@ mod tests {
         assert_eq!(ctx.theme.get("accent"), Some("#4f7cff"));
         assert!(ctx.doc.is_none());
         assert!(ctx.actions.infos().is_empty());
+    }
+
+    #[test]
+    fn host_data_is_typed_shared_and_versioned() {
+        #[derive(Debug, Clone, PartialEq, facet::Facet)]
+        struct Meter {
+            level: f32,
+            label: String,
+        }
+        let meter = HostData::new(Meter {
+            level: 0.5,
+            label: "in".into(),
+        });
+        let ctx = ViewCtx::new(
+            PaneId::new("p1"),
+            KindId::paint(),
+            (ViewHost::Blitz, Placement::Pane),
+            (ActionList::new(), ActionCaller::app()),
+            FrameClock::new(Duration::from_millis(8), || Duration::ZERO),
+        )
+        .with_extras(Extras::default().with_data(meter.clone()));
+        let seen = ctx.data::<Meter>().expect("the host's meter");
+        assert_eq!(seen, meter);
+        assert!(ctx.data::<u32>().is_none());
+
+        let drawn = seen.version();
+        meter.update(|m| m.level = 0.75);
+        assert_eq!(seen.version(), drawn.saturating_add(1));
+        assert_eq!(seen.read(|m| m.level), 0.75);
+
+        assert_eq!(HostData::<Meter>::shape().type_identifier, "Meter");
+        let json = seen.to_json();
+        assert!(json.contains("\"label\":\"in\""), "{json}");
+        assert!(seen.set_json("{\"level\":\"loud\"}").is_err());
+        assert_eq!(meter.get().level, 0.75);
+        seen.set_json(r#"{"level":1.0,"label":"out"}"#)
+            .expect("a Meter");
+        assert_eq!(meter.get().label, "out");
     }
 }

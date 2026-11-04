@@ -645,6 +645,10 @@ fn principal_to_json(who: &Principal) -> Value {
         Principal::Service { name } => serde_json::json!({ "service": name }),
         Principal::Guest { link_id, .. } => serde_json::json!({ "guest": link_id }),
         Principal::Host { endpoint } => serde_json::json!({ "host": endpoint }),
+        Principal::Extension { id, on_behalf_of } => serde_json::json!({
+            "extension": id,
+            "for": on_behalf_of.as_deref().map(principal_to_json),
+        }),
         Principal::Anonymous => serde_json::json!({ "anonymous": true }),
     }
 }
@@ -661,6 +665,12 @@ fn principal_from_json(value: &Value) -> Option<Principal> {
             })
         })
         .or_else(|| text("host").map(|endpoint| Principal::Host { endpoint }))
+        .or_else(|| {
+            text("extension").map(|id| Principal::Extension {
+                id,
+                on_behalf_of: value.get("for").and_then(principal_from_json).map(Box::new),
+            })
+        })
         .or_else(|| {
             (value.get("anonymous") == Some(&Value::Bool(true))).then_some(Principal::Anonymous)
         })

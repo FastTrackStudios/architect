@@ -1,0 +1,26 @@
+{
+  "label": "Nord Dark",
+  "appearance": "dark",
+  "palette": {
+    "background": "#2e3440",
+    "foreground": "#eceff4",
+    "accent": "#88c0d0",
+    "surface": "#3b4252",
+    "border": "#434c5e",
+    "danger": "#bf616a",
+    "chart": ["#88c0d0", "#81a1c1", "#a3be8c", "#ebcb8b", "#b48ead"]
+  },
+  "overrides": {
+    "accent": "#434c5e",
+    "destructive-foreground": "#eceff4",
+    "muted": "#3b4252",
+    "muted-foreground": "#94a3b8",
+    "primary-foreground": "#2e3440",
+    "radius": "0.5rem",
+    "secondary": "#434c5e",
+    "sidebar": "#3b4252",
+    "sidebar-accent": "#434c5e",
+    "sidebar-primary-foreground": "#2e3440",
+    "signal-danger": "oklch(0.60 0.22 28)"
+  }
+}

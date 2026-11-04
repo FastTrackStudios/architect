@@ -27,6 +27,7 @@ workspace = true
 ### BEGIN HAKARI SECTION
 [dependencies]
 aead = { version = "0.5.2", default-features = false, features = ["alloc", "getrandom"] }
+allocator-api2 = { version = "0.2.21" }
 anstyle = { version = "1.0.14" }
 arrayvec = { version = "0.7.8" }
 base16ct = { version = "1.0.0", default-features = false, features = ["alloc"] }
@@ -36,9 +37,9 @@ bit-vec = { version = "0.8.0" }
 bitflags = { version = "2.13.2", default-features = false, features = ["serde"] }
 blake2 = { version = "0.10.6" }
 blake3 = { version = "1.8.7" }
-blitz-dom = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11", features = ["autofocus"] }
-blitz-paint = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11", features = ["apple-font-embolden", "custom-widget"] }
-blitz-shell = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11", features = ["data-uri"] }
+blitz-dom = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101", features = ["autofocus"] }
+blitz-paint = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101", features = ["apple-font-embolden", "custom-widget"] }
+blitz-shell = { git = "https://www.github.com/FastTrackStudios/blitz", rev = "db5b7ef11e4df19ef317c23f77152ec5e1887101", features = ["data-uri"] }
 bytemuck = { version = "1.25.2", default-features = false, features = ["aarch64_simd", "derive", "extern_crate_alloc", "min_const_generics", "wasm_simd"] }
 byteorder = { version = "1.5.0" }
 bytes = { version = "1.12.1", features = ["serde"] }
@@ -60,9 +61,11 @@ deranged = { version = "0.5.8", features = ["serde"] }
 derive_more = { version = "2.1.1", features = ["add", "add_assign", "debug", "deref", "deref_mut", "display", "from", "from_str", "into_iterator", "try_into"] }
 digest-93f6ce9d446188ac = { package = "digest", version = "0.10.7", features = ["mac", "std"] }
 digest-a6292c17cd707f01 = { package = "digest", version = "0.11.3", features = ["alloc", "mac", "oid", "rand_core"] }
-dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["desktop", "router"] }
-dioxus-asset-resolver = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["native"] }
+dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["desktop", "router", "web"] }
+dioxus-asset-resolver = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["native", "web"] }
+dioxus-cli-config = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["web"] }
 dioxus-html = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["serialize"] }
+dioxus-interpreter-js = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["binary-protocol", "minimal_bindings", "serialize", "webonly"] }
 dioxus-native = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1", features = ["autofocus", "data-uri", "prelude", "vello"] }
 dioxus-primitives = { git = "https://github.com/FastTrackStudios/dioxus-components", tag = "fts-upstream-2026-11", default-features = false, features = ["router"] }
 dioxus-vdom = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1", default-features = false, features = ["serialize"] }
@@ -70,7 +73,7 @@ dioxus-vdom-template = { git = "https://github.com/DioxusLabs/dioxus", rev = "43
 ed25519 = { version = "3.0.0", default-features = false, features = ["pem", "serde"] }
 ed25519-dalek = { version = "3.0.0", features = ["pem", "rand_core", "serde"] }
 either = { version = "1.18.0", features = ["serde", "use_std"] }
-euclid = { version = "0.22.14", features = ["serde"] }
+euclid = { version = "0.22.14", features = ["libm", "serde"] }
 event-listener = { version = "5.4.2" }
 facet = { version = "0.50.0-rc.7", features = ["camino", "chrono", "reflect", "uuid"] }
 facet-core = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.4.0", features = ["camino", "chrono", "uuid"] }
@@ -90,6 +93,7 @@ futures-util = { version = "0.3.34", features = ["channel", "io", "sink"] }
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4.3", default-features = false, features = ["std", "sys_rng"] }
 guillotiere = { version = "0.7.0", default-features = false, features = ["std"] }
 half = { version = "2.7.1" }
+hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14.5" }
 hashbrown-9067fe90e8c1f593 = { package = "hashbrown", version = "0.17.1" }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hybrid-array = { version = "0.4.14", default-features = false, features = ["alloc", "subtle", "zeroize"] }
@@ -111,7 +115,7 @@ num-bigint = { version = "0.4.8" }
 num-complex = { version = "0.4.6", features = ["bytemuck"] }
 num-integer = { version = "0.1.47", features = ["i128"] }
 num-rational = { version = "0.4.2", features = ["num-bigint-std"] }
-num-traits = { version = "0.2.19", features = ["i128"] }
+num-traits = { version = "0.2.19", features = ["i128", "libm"] }
 once_cell = { version = "1.21.4" }
 opentelemetry = { version = "0.30.0", features = ["testing"] }
 opentelemetry_sdk = { version = "0.30.0", features = ["testing"] }
@@ -120,6 +124,8 @@ parlance = { version = "0.1.1", default-features = false, features = ["bytemuck"
 parley = { version = "0.12.0", default-features = false, features = ["bytemuck", "system"] }
 parley_engine = { version = "0.12.0", default-features = false, features = ["bytemuck", "std"] }
 peniko = { version = "0.6.1", features = ["bytemuck"] }
+phf = { version = "0.14.0", features = ["macros"] }
+phf_shared = { version = "0.14.0" }
 pkcs8 = { version = "0.11.0", default-features = false, features = ["pem", "std"] }
 postcard = { version = "1.1.3", features = ["experimental-derive", "use-std"] }
 potential_utf = { version = "0.1.6", default-features = false, features = ["alloc", "zerovec"] }
@@ -147,7 +153,9 @@ signature = { version = "3.0.0", default-features = false, features = ["alloc", 
 simd-adler32 = { version = "0.3.10" }
 skrifa = { version = "0.44.0", default-features = false, features = ["autohint_shaping", "std"] }
 slab = { version = "0.4.12" }
-smallvec = { version = "1.16.4", default-features = false, features = ["const_new", "serde"] }
+sledgehammer_bindgen = { version = "0.6.0", default-features = false, features = ["web"] }
+slotmap = { version = "1.1.1", features = ["serde"] }
+smallvec = { version = "1.16.4", default-features = false, features = ["const_new", "serde", "union"] }
 spki = { version = "0.8.0", default-features = false, features = ["pem", "std"] }
 stable_deref_trait = { version = "1.2.1" }
 strum-1f5adca70f036a62 = { package = "strum", version = "0.28.0", features = ["derive"] }
@@ -160,7 +168,6 @@ tokio = { version = "1.53.1", features = ["full", "test-util"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["logging", "ring", "tls12"] }
 tokio-stream = { version = "0.1.19", features = ["fs", "sync"] }
 tokio-util = { version = "0.7.19", features = ["codec", "io-util", "rt"] }
-toml_datetime-3b31131e45eafb45 = { package = "toml_datetime", version = "0.6.3", default-features = false, features = ["serde"] }
 tower-http = { version = "0.6.11", features = ["cors", "fs", "set-header", "trace"] }
 tracing = { version = "0.1.44", features = ["log"] }
 tracing-core = { version = "0.1.36" }
@@ -189,7 +196,7 @@ data-encoding = { version = "2.11.1", default-features = false, features = ["all
 derive_more = { version = "2.1.1", features = ["as_ref", "constructor", "deref", "deref_mut", "display", "from", "is_variant", "try_unwrap", "unwrap"] }
 derive_more-impl = { version = "2.1.1", features = ["add", "add_assign", "as_ref", "constructor", "debug", "deref", "deref_mut", "display", "from", "from_str", "into_iterator", "is_variant", "try_into", "try_unwrap", "unwrap"] }
 digest-93f6ce9d446188ac = { package = "digest", version = "0.10.7", features = ["std"] }
-dioxus-config-macro = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["desktop"] }
+dioxus-config-macro = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["desktop", "web"] }
 displaydoc = { version = "0.2.7" }
 either = { version = "1.18.0", default-features = false, features = ["use_std"] }
 half = { version = "2.7.1", features = ["num-traits"] }
@@ -200,6 +207,8 @@ memchr = { version = "2.8.3" }
 num-traits = { version = "0.2.19", features = ["libm"] }
 once_cell = { version = "1.21.4" }
 parking_lot = { version = "0.12.5" }
+phf = { version = "0.14.0" }
+phf_shared = { version = "0.14.0" }
 proc-macro2 = { version = "1.0.107", features = ["span-locations"] }
 proc-macro2-diagnostics = { version = "0.10.1" }
 regex = { version = "1.13.1", default-features = false, features = ["std"] }
@@ -209,20 +218,24 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_core = { version = "1.0.229", default-features = false, features = ["alloc", "result", "std"] }
 sha2 = { version = "0.10.9" }
 slab = { version = "0.4.12" }
+sledgehammer_bindgen_macro = { version = "0.6.5", features = ["web"] }
 syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3.0.6", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
-syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109" }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.119", features = ["extra-traits", "full", "visit", "visit-mut"] }
 thiserror = { version = "2.0.20" }
 time-macros = { version = "0.2.32", default-features = false, features = ["formatting", "parsing", "serde"] }
-toml_datetime-dff4ba8e3ae991db = { package = "toml_datetime", version = "1.1.1", features = ["serde"] }
+toml_datetime = { version = "1.1.1", features = ["serde"] }
+toml_parser = { version = "1.1.3" }
 twox-hash = { version = "2.1.4", default-features = false, features = ["xxhash64"] }
+winnow = { version = "1.0.4" }
 xxhash-rust = { version = "0.8.18", default-features = false, features = ["const_xxh64"] }
 zerocopy = { version = "0.8.57", default-features = false, features = ["derive", "simd"] }
 
 [target.x86_64-unknown-linux-gnu.dependencies]
 aes-gcm = { version = "0.10.3" }
+ahash = { version = "0.8.12" }
 bigdecimal = { version = "0.4.11", features = ["serde"] }
 bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
+bumpalo = { version = "3.20.3", features = ["collections"] }
 crossbeam-epoch = { version = "0.9.21" }
 event-listener-strategy = { version = "0.5.4" }
 futures-lite = { version = "2.6.1" }
@@ -241,19 +254,19 @@ itertools = { version = "0.12.1" }
 libc = { version = "0.2.189" }
 linux-raw-sys = { version = "0.12.1", default-features = false, features = ["auxvec", "elf", "errno", "general", "if_ether", "io_uring", "ioctl", "net", "netlink", "no_std", "prctl", "system", "xdp"] }
 miniz_oxide = { version = "0.8.9", features = ["simd"] }
+mio = { version = "1.2.3", features = ["net", "os-ext"] }
 naga = { version = "30.0.1", features = ["glsl-out", "hlsl-out", "spv-out", "wgsl-in"] }
 native-tls = { version = "0.2.18", features = ["alpn"] }
 nom = { version = "7.1.3" }
-num-traits = { version = "0.2.19", default-features = false, features = ["libm"] }
 once_cell = { version = "1.21.4", default-features = false, features = ["critical-section"] }
 parking_lot = { version = "0.12.5", default-features = false, features = ["send_guard"] }
 portable-atomic = { version = "1.15.0", features = ["serde"] }
 quote = { version = "1.0.47" }
+rand-93f6ce9d446188ac = { package = "rand", version = "0.10.2" }
 reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", default-features = false, features = ["blocking"] }
 ring = { version = "0.17.14", features = ["std"] }
 rustix = { version = "1.1.5", features = ["io_uring", "pipe", "process", "shm", "system", "time"] }
 simdutf8 = { version = "0.1.5", features = ["aarch64_neon"] }
-smallvec = { version = "1.16.4", default-features = false, features = ["union"] }
 strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
 syn-7b89eefb6aaa9bf3 = { package = "syn", version = "3.0.6", features = ["extra-traits", "full"] }
 tokio = { version = "1.53.1", default-features = false, features = ["tracing"] }
@@ -263,9 +276,11 @@ tower = { version = "0.5.3", default-features = false, features = ["log", "make"
 tower-http = { version = "0.6.11", default-features = false, features = ["follow-redirect"] }
 tungstenite = { version = "0.29.0", features = ["native-tls"] }
 twox-hash = { version = "2.1.4" }
+winnow = { version = "1.0.4" }
 
 [target.x86_64-unknown-linux-gnu.build-dependencies]
 bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
+bumpalo = { version = "3.20.3" }
 either = { version = "1.18.0" }
 libc = { version = "0.2.189" }
 naga = { version = "30.0.1", default-features = false, features = ["glsl-out", "wgsl-in", "wgsl-out"] }
@@ -273,14 +288,16 @@ nom = { version = "7.1.3", default-features = false, features = ["std"] }
 quote = { version = "1.0.47" }
 regex = { version = "1.13.1", default-features = false, features = ["unicode-perl"] }
 rustc-hash = { version = "1.1.0" }
+syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109" }
 toml = { version = "0.8.2", default-features = false, features = ["parse"] }
-toml_datetime-3b31131e45eafb45 = { package = "toml_datetime", version = "0.6.3", default-features = false, features = ["serde"] }
 
 [target.aarch64-apple-darwin.dependencies]
 aes-gcm = { version = "0.10.3" }
+ahash = { version = "0.8.12" }
 bigdecimal = { version = "0.4.11", features = ["serde"] }
 bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
 block2 = { version = "0.6.2" }
+bumpalo = { version = "3.20.3", features = ["collections"] }
 crossbeam-epoch = { version = "0.9.21" }
 dispatch2 = { version = "0.3.1" }
 errno = { version = "0.3.14" }
@@ -301,20 +318,20 @@ miniz_oxide = { version = "0.8.9", features = ["simd"] }
 naga = { version = "30.0.1", features = ["msl-out", "wgsl-in"] }
 native-tls = { version = "0.2.18", features = ["alpn"] }
 nom = { version = "7.1.3" }
-num-traits = { version = "0.2.19", default-features = false, features = ["libm"] }
 objc2 = { version = "0.6.5", features = ["disable-encoding-assertions", "exception", "relax-sign-encoding"] }
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSAccessibility", "NSAccessibilityProtocols", "NSAlert", "NSAnimation", "NSAppearance", "NSApplication", "NSAttributedString", "NSBezierPath", "NSBitmapImageRep", "NSButton", "NSCell", "NSColor", "NSControl", "NSCursor", "NSDockTile", "NSDragging", "NSDraggingItem", "NSDraggingSession", "NSEvent", "NSGraphics", "NSGraphicsContext", "NSImage", "NSImageRep", "NSImageView", "NSMenu", "NSMenuItem", "NSOpenGLView", "NSOpenPanel", "NSPanel", "NSPasteboard", "NSPasteboardItem", "NSPopover", "NSPrintInfo", "NSPrintOperation", "NSProgressIndicator", "NSResponder", "NSRunningApplication", "NSSavePanel", "NSScreen", "NSStatusBar", "NSStatusBarButton", "NSStatusItem", "NSTextFinder", "NSTextInputClient", "NSTextInputContext", "NSTextView", "NSToolbar", "NSTrackingArea", "NSUserActivity", "NSUserInterfaceItemIdentification", "NSUserInterfaceValidation", "NSView", "NSVisualEffectView", "NSWindow", "NSWindowScripting", "NSWindowTabGroup", "NSWorkspace", "block2", "objc2-core-foundation", "std"] }
 objc2-core-foundation = { version = "0.3.2", features = ["CFBase"] }
 objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["CGColor", "CGColorSpace", "CGContext", "CGDirectDisplay", "CGDisplayConfiguration", "CGDisplayFade", "CGError", "CGPath", "CGRemoteOperation", "CGWindowLevel", "libc", "objc2", "std"] }
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSAffineTransform", "NSAppleEventDescriptor", "NSArray", "NSAttributedString", "NSAutoreleasePool", "NSBundle", "NSCoder", "NSData", "NSDate", "NSDictionary", "NSDistributedNotificationCenter", "NSEnumerator", "NSError", "NSException", "NSFileManager", "NSFileWrapper", "NSFormatter", "NSGeometry", "NSHTTPCookie", "NSItemProvider", "NSJSONSerialization", "NSKeyValueCoding", "NSKeyValueObserving", "NSLocale", "NSNotification", "NSNull", "NSObjCRuntime", "NSObject", "NSOperation", "NSOrthography", "NSPathUtilities", "NSProcessInfo", "NSProgress", "NSRange", "NSRunLoop", "NSScriptCommand", "NSScriptStandardSuiteCommands", "NSSet", "NSStream", "NSString", "NSTextCheckingResult", "NSThread", "NSURL", "NSURLAuthenticationChallenge", "NSURLCredential", "NSURLRequest", "NSURLResponse", "NSURLSession", "NSUUID", "NSUndoManager", "NSUserActivity", "NSValue", "NSZone", "block2", "objc2-core-foundation", "std"] }
+objc2-foundation-468e82937335b1c9 = { package = "objc2-foundation", version = "0.3.2", default-features = false, features = ["NSAffineTransform", "NSAppleEventDescriptor", "NSArray", "NSAttributedString", "NSAutoreleasePool", "NSBundle", "NSCoder", "NSData", "NSDate", "NSDictionary", "NSDistributedNotificationCenter", "NSEnumerator", "NSError", "NSException", "NSFileManager", "NSFileWrapper", "NSFormatter", "NSGeometry", "NSHTTPCookie", "NSItemProvider", "NSJSONSerialization", "NSKeyValueCoding", "NSKeyValueObserving", "NSLocale", "NSNotification", "NSNull", "NSObjCRuntime", "NSObject", "NSOperation", "NSOrthography", "NSPathUtilities", "NSProcessInfo", "NSProgress", "NSRange", "NSRunLoop", "NSScriptCommand", "NSScriptStandardSuiteCommands", "NSSet", "NSStream", "NSString", "NSTextCheckingResult", "NSThread", "NSURL", "NSURLAuthenticationChallenge", "NSURLCredential", "NSURLRequest", "NSURLResponse", "NSURLSession", "NSUUID", "NSUndoManager", "NSUserActivity", "NSValue", "NSZone", "block2", "objc2-core-foundation", "std"] }
+objc2-foundation-6f8ce4dd05d13bba = { package = "objc2-foundation", version = "0.2.2", features = ["NSArray", "NSAttributedString", "NSBundle", "NSCoder", "NSData", "NSDate", "NSDictionary", "NSEnumerator", "NSError", "NSGeometry", "NSNotification", "NSObjCRuntime", "NSObject", "NSPathUtilities", "NSRange", "NSString", "NSThread", "NSURL", "NSUndoManager", "NSValue"] }
 once_cell = { version = "1.21.4", default-features = false, features = ["critical-section"] }
 parking_lot = { version = "0.12.5", default-features = false, features = ["send_guard"] }
 portable-atomic = { version = "1.15.0", features = ["serde"] }
+rand-93f6ce9d446188ac = { package = "rand", version = "0.10.2" }
 reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", default-features = false, features = ["blocking"] }
 ring = { version = "0.17.14", features = ["std"] }
 rustix = { version = "1.1.5", features = ["io_uring", "pipe", "process", "time"] }
 simdutf8 = { version = "0.1.5", features = ["aarch64_neon"] }
-smallvec = { version = "1.16.4", default-features = false, features = ["union"] }
 strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["early-data"] }
 tower = { version = "0.5.3", default-features = false, features = ["log", "make", "retry", "timeout"] }
@@ -324,6 +341,7 @@ twox-hash = { version = "2.1.4" }
 
 [target.aarch64-apple-darwin.build-dependencies]
 bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
+bumpalo = { version = "3.20.3" }
 either = { version = "1.18.0" }
 errno = { version = "0.3.14", default-features = false, features = ["std"] }
 indexmap = { version = "2.14.2" }
@@ -331,15 +349,17 @@ libc = { version = "0.2.189", features = ["extra_traits"] }
 naga = { version = "30.0.1", default-features = false, features = ["glsl-out", "wgsl-in", "wgsl-out"] }
 nom = { version = "7.1.3", default-features = false, features = ["std"] }
 objc2 = { version = "0.6.5", default-features = false, features = ["std"] }
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSProcessInfo", "std"] }
+objc2-foundation-468e82937335b1c9 = { package = "objc2-foundation", version = "0.3.2", default-features = false, features = ["NSProcessInfo", "std"] }
 regex = { version = "1.13.1", default-features = false, features = ["unicode-perl"] }
 rustc-hash = { version = "1.1.0" }
 
 [target.x86_64-apple-darwin.dependencies]
 aes-gcm = { version = "0.10.3" }
+ahash = { version = "0.8.12" }
 bigdecimal = { version = "0.4.11", features = ["serde"] }
 bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
 block2 = { version = "0.6.2" }
+bumpalo = { version = "3.20.3", features = ["collections"] }
 crossbeam-epoch = { version = "0.9.21" }
 dispatch2 = { version = "0.3.1" }
 errno = { version = "0.3.14" }
@@ -360,20 +380,20 @@ miniz_oxide = { version = "0.8.9", features = ["simd"] }
 naga = { version = "30.0.1", features = ["msl-out", "wgsl-in"] }
 native-tls = { version = "0.2.18", features = ["alpn"] }
 nom = { version = "7.1.3" }
-num-traits = { version = "0.2.19", default-features = false, features = ["libm"] }
 objc2 = { version = "0.6.5", features = ["disable-encoding-assertions", "exception", "relax-sign-encoding"] }
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSAccessibility", "NSAccessibilityProtocols", "NSAlert", "NSAnimation", "NSAppearance", "NSApplication", "NSAttributedString", "NSBezierPath", "NSBitmapImageRep", "NSButton", "NSCell", "NSColor", "NSControl", "NSCursor", "NSDockTile", "NSDragging", "NSDraggingItem", "NSDraggingSession", "NSEvent", "NSGraphics", "NSGraphicsContext", "NSImage", "NSImageRep", "NSImageView", "NSMenu", "NSMenuItem", "NSOpenGLView", "NSOpenPanel", "NSPanel", "NSPasteboard", "NSPasteboardItem", "NSPopover", "NSPrintInfo", "NSPrintOperation", "NSProgressIndicator", "NSResponder", "NSRunningApplication", "NSSavePanel", "NSScreen", "NSStatusBar", "NSStatusBarButton", "NSStatusItem", "NSTextFinder", "NSTextInputClient", "NSTextInputContext", "NSTextView", "NSToolbar", "NSTrackingArea", "NSUserActivity", "NSUserInterfaceItemIdentification", "NSUserInterfaceValidation", "NSView", "NSVisualEffectView", "NSWindow", "NSWindowScripting", "NSWindowTabGroup", "NSWorkspace", "block2", "objc2-core-foundation", "std"] }
 objc2-core-foundation = { version = "0.3.2", features = ["CFBase"] }
 objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["CGColor", "CGColorSpace", "CGContext", "CGDirectDisplay", "CGDisplayConfiguration", "CGDisplayFade", "CGError", "CGPath", "CGRemoteOperation", "CGWindowLevel", "libc", "objc2", "std"] }
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSAffineTransform", "NSAppleEventDescriptor", "NSArray", "NSAttributedString", "NSAutoreleasePool", "NSBundle", "NSCoder", "NSData", "NSDate", "NSDictionary", "NSDistributedNotificationCenter", "NSEnumerator", "NSError", "NSException", "NSFileManager", "NSFileWrapper", "NSFormatter", "NSGeometry", "NSHTTPCookie", "NSItemProvider", "NSJSONSerialization", "NSKeyValueCoding", "NSKeyValueObserving", "NSLocale", "NSNotification", "NSNull", "NSObjCRuntime", "NSObject", "NSOperation", "NSOrthography", "NSPathUtilities", "NSProcessInfo", "NSProgress", "NSRange", "NSRunLoop", "NSScriptCommand", "NSScriptStandardSuiteCommands", "NSSet", "NSStream", "NSString", "NSTextCheckingResult", "NSThread", "NSURL", "NSURLAuthenticationChallenge", "NSURLCredential", "NSURLRequest", "NSURLResponse", "NSURLSession", "NSUUID", "NSUndoManager", "NSUserActivity", "NSValue", "NSZone", "block2", "objc2-core-foundation", "std"] }
+objc2-foundation-468e82937335b1c9 = { package = "objc2-foundation", version = "0.3.2", default-features = false, features = ["NSAffineTransform", "NSAppleEventDescriptor", "NSArray", "NSAttributedString", "NSAutoreleasePool", "NSBundle", "NSCoder", "NSData", "NSDate", "NSDictionary", "NSDistributedNotificationCenter", "NSEnumerator", "NSError", "NSException", "NSFileManager", "NSFileWrapper", "NSFormatter", "NSGeometry", "NSHTTPCookie", "NSItemProvider", "NSJSONSerialization", "NSKeyValueCoding", "NSKeyValueObserving", "NSLocale", "NSNotification", "NSNull", "NSObjCRuntime", "NSObject", "NSOperation", "NSOrthography", "NSPathUtilities", "NSProcessInfo", "NSProgress", "NSRange", "NSRunLoop", "NSScriptCommand", "NSScriptStandardSuiteCommands", "NSSet", "NSStream", "NSString", "NSTextCheckingResult", "NSThread", "NSURL", "NSURLAuthenticationChallenge", "NSURLCredential", "NSURLRequest", "NSURLResponse", "NSURLSession", "NSUUID", "NSUndoManager", "NSUserActivity", "NSValue", "NSZone", "block2", "objc2-core-foundation", "std"] }
+objc2-foundation-6f8ce4dd05d13bba = { package = "objc2-foundation", version = "0.2.2", features = ["NSArray", "NSAttributedString", "NSBundle", "NSCoder", "NSData", "NSDate", "NSDictionary", "NSEnumerator", "NSError", "NSGeometry", "NSNotification", "NSObjCRuntime", "NSObject", "NSPathUtilities", "NSRange", "NSString", "NSThread", "NSURL", "NSUndoManager", "NSValue"] }
 once_cell = { version = "1.21.4", default-features = false, features = ["critical-section"] }
 parking_lot = { version = "0.12.5", default-features = false, features = ["send_guard"] }
 portable-atomic = { version = "1.15.0", features = ["serde"] }
+rand-93f6ce9d446188ac = { package = "rand", version = "0.10.2" }
 reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", default-features = false, features = ["blocking"] }
 ring = { version = "0.17.14", features = ["std"] }
 rustix = { version = "1.1.5", features = ["io_uring", "pipe", "process", "time"] }
 simdutf8 = { version = "0.1.5", features = ["aarch64_neon"] }
-smallvec = { version = "1.16.4", default-features = false, features = ["union"] }
 strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["early-data"] }
 tower = { version = "0.5.3", default-features = false, features = ["log", "make", "retry", "timeout"] }
@@ -383,6 +403,7 @@ twox-hash = { version = "2.1.4" }
 
 [target.x86_64-apple-darwin.build-dependencies]
 bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
+bumpalo = { version = "3.20.3" }
 either = { version = "1.18.0" }
 errno = { version = "0.3.14", default-features = false, features = ["std"] }
 indexmap = { version = "2.14.2" }
@@ -390,14 +411,16 @@ libc = { version = "0.2.189", features = ["extra_traits"] }
 naga = { version = "30.0.1", default-features = false, features = ["glsl-out", "wgsl-in", "wgsl-out"] }
 nom = { version = "7.1.3", default-features = false, features = ["std"] }
 objc2 = { version = "0.6.5", default-features = false, features = ["std"] }
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSProcessInfo", "std"] }
+objc2-foundation-468e82937335b1c9 = { package = "objc2-foundation", version = "0.3.2", default-features = false, features = ["NSProcessInfo", "std"] }
 regex = { version = "1.13.1", default-features = false, features = ["unicode-perl"] }
 rustc-hash = { version = "1.1.0" }
 
 [target.aarch64-apple-ios.dependencies]
 aes-gcm = { version = "0.10.3" }
+ahash = { version = "0.8.12" }
 bigdecimal = { version = "0.4.11", features = ["serde"] }
 bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
+bumpalo = { version = "3.20.3", features = ["collections"] }
 crossbeam-epoch = { version = "0.9.21" }
 dispatch2 = { version = "0.3.1" }
 errno = { version = "0.3.14" }
@@ -415,25 +438,25 @@ ipnet = { version = "2.12.2", features = ["serde"] }
 itertools = { version = "0.12.1" }
 libc = { version = "0.2.189" }
 miniz_oxide = { version = "0.8.9", features = ["simd"] }
+mio = { version = "1.2.3", features = ["net", "os-ext"] }
 naga = { version = "30.0.1", features = ["msl-out", "wgsl-in"] }
 native-tls = { version = "0.2.18", features = ["alpn"] }
 nom = { version = "7.1.3" }
-num-traits = { version = "0.2.19", default-features = false, features = ["libm"] }
 objc2 = { version = "0.6.5", features = ["disable-encoding-assertions", "exception", "relax-sign-encoding"] }
 objc2-core-foundation = { version = "0.3.2", features = ["CFBase"] }
 objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["CGColor", "CGColorSpace", "CGContext", "CGFont", "CGImage", "CGPath", "objc2", "std"] }
 objc2-core-text = { version = "0.3.2", default-features = false, features = ["CTFont", "CTFontCollection", "CTFontDescriptor", "objc2"] }
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSArray", "NSAttributedString", "NSBundle", "NSCalendar", "NSCharacterSet", "NSCoder", "NSData", "NSDate", "NSDateInterval", "NSDictionary", "NSEnumerator", "NSError", "NSExtensionContext", "NSExtensionRequestHandling", "NSFilePresenter", "NSFileWrapper", "NSGeometry", "NSHTTPCookie", "NSIndexPath", "NSIndexSet", "NSItemProvider", "NSJSONSerialization", "NSKeyValueCoding", "NSKeyValueObserving", "NSLocale", "NSLock", "NSNotification", "NSNull", "NSObjCRuntime", "NSObject", "NSOperation", "NSOrderedCollectionDifference", "NSOrderedSet", "NSPathUtilities", "NSPersonNameComponents", "NSPredicate", "NSProcessInfo", "NSProgress", "NSRange", "NSRunLoop", "NSSet", "NSStream", "NSString", "NSThread", "NSTimeZone", "NSURL", "NSURLAuthenticationChallenge", "NSURLCredential", "NSURLRequest", "NSURLResponse", "NSURLSession", "NSUUID", "NSUndoManager", "NSUserActivity", "NSValue", "block2", "objc2-core-foundation", "std"] }
+objc2-foundation-468e82937335b1c9 = { package = "objc2-foundation", version = "0.3.2", default-features = false, features = ["NSArray", "NSAttributedString", "NSBundle", "NSCalendar", "NSCharacterSet", "NSCoder", "NSData", "NSDate", "NSDateInterval", "NSDictionary", "NSEnumerator", "NSError", "NSExtensionContext", "NSExtensionRequestHandling", "NSFilePresenter", "NSFileWrapper", "NSGeometry", "NSHTTPCookie", "NSIndexPath", "NSIndexSet", "NSItemProvider", "NSJSONSerialization", "NSKeyValueCoding", "NSKeyValueObserving", "NSLocale", "NSLock", "NSNotification", "NSNull", "NSObjCRuntime", "NSObject", "NSOperation", "NSOrderedCollectionDifference", "NSOrderedSet", "NSPathUtilities", "NSPersonNameComponents", "NSPredicate", "NSProcessInfo", "NSProgress", "NSRange", "NSRunLoop", "NSSet", "NSStream", "NSString", "NSThread", "NSTimeZone", "NSURL", "NSURLAuthenticationChallenge", "NSURLCredential", "NSURLRequest", "NSURLResponse", "NSURLSession", "NSUUID", "NSUndoManager", "NSUserActivity", "NSValue", "block2", "objc2-core-foundation", "std"] }
 objc2-quartz-core = { version = "0.3.2", default-features = false, features = ["CADisplayLink", "CAFrameRateRange", "CALayer", "CAMediaTiming", "CAMetalLayer", "CATransform3D", "objc2-core-foundation", "objc2-core-graphics", "objc2-metal", "std"] }
 objc2-ui-kit = { version = "0.3.2" }
 once_cell = { version = "1.21.4", default-features = false, features = ["critical-section"] }
 parking_lot = { version = "0.12.5", default-features = false, features = ["send_guard"] }
 portable-atomic = { version = "1.15.0", features = ["serde"] }
+rand-93f6ce9d446188ac = { package = "rand", version = "0.10.2" }
 reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", default-features = false, features = ["blocking"] }
 ring = { version = "0.17.14", features = ["std"] }
 rustix = { version = "1.1.5", features = ["io_uring", "pipe", "process", "time"] }
 simdutf8 = { version = "0.1.5", features = ["aarch64_neon"] }
-smallvec = { version = "1.16.4", default-features = false, features = ["union"] }
 strum-2f80eeee3b1b6c7e = { package = "strum", version = "0.26.3", features = ["derive"] }
 tokio-rustls = { version = "0.26.4", default-features = false, features = ["early-data"] }
 tower = { version = "0.5.3", default-features = false, features = ["log", "make", "retry", "timeout"] }
@@ -443,6 +466,7 @@ twox-hash = { version = "2.1.4" }
 
 [target.aarch64-apple-ios.build-dependencies]
 bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
+bumpalo = { version = "3.20.3" }
 either = { version = "1.18.0" }
 errno = { version = "0.3.14", default-features = false, features = ["std"] }
 indexmap = { version = "2.14.2" }
@@ -450,7 +474,7 @@ libc = { version = "0.2.189", features = ["extra_traits"] }
 naga = { version = "30.0.1", default-features = false, features = ["glsl-out", "wgsl-in", "wgsl-out"] }
 nom = { version = "7.1.3", default-features = false, features = ["std"] }
 objc2 = { version = "0.6.5", default-features = false, features = ["std"] }
-objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSProcessInfo", "std"] }
+objc2-foundation-468e82937335b1c9 = { package = "objc2-foundation", version = "0.3.2", default-features = false, features = ["NSProcessInfo", "std"] }
 regex = { version = "1.13.1", default-features = false, features = ["unicode-perl"] }
 rustc-hash = { version = "1.1.0" }
 
@@ -460,27 +484,23 @@ rustc-hash = { version = "1.1.0" }
 # The fleet's feature union (`cargo xtask fleet-deps`, `xtask/src/fleet_deps.rs`):
 # every crate architect builds that a consumer builds too, with the features
 # of every repo that builds it. Regenerate it; do not edit it by hand.
-# From: task@6d746576f7, studio@82ba469539, keyflow@fd88851259, frame@665c675567.
+# From: task@a0d6cfc330, studio@30a07fdad9, keyflow@d7cd9b7c89, frame@1f6311abc5.
 
 [target.'cfg(all(target_arch = "aarch64", target_os = "macos"))'.dependencies]
 ahash = { version = "0.8.12", features = ["getrandom", "runtime-rng", "serde", "std"] }
 aho-corasick = { version = "1.1.5", features = ["perf-literal", "std"] }
 alloc-stdlib = { version = "0.2.4", default-features = false }
+allocator-api2 = { version = "0.2.21", features = ["alloc", "std"] }
 anyrender_vello_hybrid = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1", default-features = false, features = ["webgl"] }
 approx = { version = "0.5.1", features = ["std"] }
-async-compression = { version = "0.4.43", default-features = false, features = ["gzip", "tokio"] }
-async-lock = { version = "3.4.2", features = ["std"] }
+arrayvec = { version = "0.7.8", features = ["serde", "std"] }
 async-once-cell = { version = "0.5.4", default-features = false, features = ["std"] }
-aws-lc-rs = { version = "1.18.0", default-features = false, features = ["aws-lc-sys", "prebuilt-nasm"] }
-aws-lc-sys = { version = "0.44.0", default-features = false, features = ["prebuilt-nasm"] }
 axum = { version = "0.8.9", features = ["form", "http1", "http2", "json", "macros", "matched-path", "multipart", "original-uri", "query", "tokio", "tower-log", "tracing", "ws"] }
 axum-extra = { version = "0.12.6", features = ["tracing", "typed-header"] }
 base16ct = { version = "1.0.0", default-features = false, features = ["alloc"] }
 bit-set = { version = "0.8.0", features = ["std"] }
 bit-vec = { version = "0.8.0", features = ["std"] }
-blitz-dom = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11", features = ["accessibility", "accesskit", "autofocus", "custom-widget", "file-input", "svg", "system-fonts", "text-transform-icu", "woff"] }
-blitz-paint = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11", features = ["apple-font-embolden", "custom-widget", "svg"] }
-blitz-shell = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11", features = ["accessibility", "custom-widget", "data-uri", "file-dialog"] }
+bitflags = { version = "2.13.2", default-features = false, features = ["serde", "serde_core", "std"] }
 block-buffer = { version = "0.12.1", default-features = false, features = ["zeroize"] }
 block-padding = { version = "0.3.3", default-features = false }
 block2-0_5 = { package = "block2", version = "0.5.1", features = ["alloc", "std"] }
@@ -500,14 +520,13 @@ cipher = { version = "0.4.4", default-features = false, features = ["block-paddi
 clap = { version = "4.6.7", features = ["color", "derive", "env", "error-context", "help", "std", "suggestions", "usage"] }
 clap_builder = { version = "4.6.7", default-features = false, features = ["color", "env", "error-context", "help", "std", "suggestions", "usage"] }
 color = { version = "0.3.3", features = ["bytemuck", "std"] }
-compression-codecs = { version = "0.4.38", default-features = false, features = ["flate2", "gzip", "memchr"] }
-compression-core = { version = "0.4.32", default-features = false }
 concurrent-queue = { version = "2.5.0", features = ["std"] }
 const-str = { version = "0.7.1" }
 constant_time_eq = { version = "0.4.2", features = ["std"] }
 content_disposition = { version = "0.4.0", default-features = false }
 cookie = { version = "0.18.2", default-features = false, features = ["percent-encode", "percent-encoding"] }
 coolor = { version = "1.1.0" }
+core-graphics = { version = "0.25.0", features = ["link"] }
 crossbeam-epoch = { version = "0.9.21", features = ["alloc", "std"] }
 crossterm = { version = "0.29.0", features = ["bracketed-paste", "derive-more", "events", "windows"] }
 crypto-common-c65f7effa3be6d31 = { package = "crypto-common", version = "0.1.7", default-features = false, features = ["getrandom", "rand_core", "std"] }
@@ -531,14 +550,17 @@ dioxus-interpreter-js = { git = "https://github.com/DioxusLabs/dioxus", rev = "4
 dioxus-primitives = { git = "https://github.com/FastTrackStudios/dioxus-components", tag = "fts-upstream-2026-11", features = ["router"] }
 dioxus-router = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["html", "wasm-split"] }
 dioxus-server = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["document", "router"] }
+dioxus-vdom = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1", default-features = false, features = ["serialize"] }
+dioxus-vdom-template = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["serialize"] }
 dioxus-web = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["devtools", "document", "hydrate", "mounted"] }
 dispatch = { version = "0.2.0", default-features = false }
 either = { version = "1.18.0", features = ["serde", "std", "use_std"] }
 env_filter = { version = "2.0.0", default-features = false, features = ["regex", "std"] }
 env_logger = { version = "0.11.11", features = ["auto-color", "color", "humantime", "regex"] }
-euclid = { version = "0.22.14", features = ["serde", "std"] }
+euclid = { version = "0.22.14", features = ["libm", "serde", "std"] }
 event-listener = { version = "5.4.2", features = ["parking", "std"] }
 event-listener-strategy = { version = "0.5.4", features = ["std"] }
+exr = { version = "1.74.2", features = ["rayon"] }
 facet = { version = "0.50.0-rc.7", features = ["alloc", "camino", "chrono", "doc", "helpful-derive", "indexmap", "reflect", "std", "uuid"] }
 facet-error = { version = "0.50.0-rc.7", default-features = false }
 facet-pretty = { version = "0.50.0-rc.7", features = ["detect-terminal-theme"] }
@@ -555,11 +577,10 @@ genawaiter-macro = { version = "0.99.1", default-features = false, features = ["
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std", "wasm_js"] }
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4.3", default-features = false, features = ["std", "sys_rng"] }
 gloo-net = { version = "0.7.0", features = ["eventsource", "futures-channel", "futures-core", "futures-sink", "http", "json", "pin-project", "serde", "serde_json", "websocket"] }
-gloo-timers = { version = "0.4.0", features = ["futures", "futures-channel", "futures-core"] }
 gloo-utils = { version = "0.3.0", default-features = false, features = ["serde"] }
 h2 = { version = "0.4.19", default-features = false, features = ["stream"] }
 half = { version = "2.7.1", features = ["alloc", "bytemuck", "num-traits", "rand_distr", "std", "use-intrinsics"] }
-hashbrown = { version = "0.14.5", features = ["ahash", "allocator-api2", "inline-more", "raw"] }
+hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14.5", features = ["ahash", "allocator-api2", "inline-more", "raw"] }
 hashbrown-986da7b5efc2b80e = { package = "hashbrown", version = "0.16.1", features = ["allocator-api2", "default-hasher", "equivalent", "inline-more", "raw-entry", "serde"] }
 headers = { version = "0.4.1", default-features = false }
 headers-core = { version = "0.3.0", default-features = false }
@@ -570,24 +591,30 @@ hyper = { version = "1.11.1", features = ["client", "full", "http1", "http2", "s
 hyper-rustls = { version = "0.27.9", default-features = false, features = ["aws-lc-rs", "http1", "http2", "log", "logging", "native-tokio", "ring", "rustls-native-certs", "tls12", "webpki-roots", "webpki-tokio"] }
 hyper-tls = { version = "0.6.0", default-features = false, features = ["alpn"] }
 hyper-util = { version = "0.1.20", features = ["client", "client-legacy", "client-pool", "client-proxy", "client-proxy-system", "full", "http1", "http2", "server", "server-auto", "server-graceful", "service", "tokio", "tracing"] }
+icu_collections = { version = "2.4.0", default-features = false, features = ["alloc"] }
+icu_locid = { version = "1.5.0", default-features = false, features = ["zerovec"] }
 icu_normalizer = { version = "2.4.0", default-features = false, features = ["compiled_data", "utf16_iter", "utf8_iter"] }
 icu_segmenter = { version = "2.4.0", default-features = false, features = ["auto", "compiled_data", "lstm"] }
 idna = { version = "1.1.0", features = ["alloc", "compiled_data", "std"] }
 image = { version = "0.25.6", features = ["avif", "bmp", "dds", "default-formats", "exr", "ff", "gif", "hdr", "ico", "jpeg", "png", "pnm", "qoi", "rayon", "tga", "tiff", "webp"] }
+indexmap = { version = "2.14.2", features = ["serde", "std"] }
 inout = { version = "0.1.4", default-features = false, features = ["block-padding"] }
 inventory = { version = "0.3.24", default-features = false }
 ipnet = { version = "2.12.2", features = ["serde", "std"] }
+iroh-base = { version = "1.1.0", features = ["key", "relay"] }
 iroh-metrics = { version = "1.0.1", features = ["metrics"] }
-jiff = { version = "0.2.37", features = ["alloc", "perf-inline", "std", "tz-fat", "tz-system", "tzdb-bundle-platform", "tzdb-concatenated", "tzdb-zoneinfo"] }
-jiff-core = { version = "0.1.1", default-features = false, features = ["alloc", "std", "tz-fat"] }
-js-sys = { version = "0.3.104", features = ["std", "unsafe-eval"] }
+keyboard-types = { version = "0.8.3", features = ["serde", "std"] }
+kurbo = { version = "0.11.3", features = ["std"] }
+kurbo-0_13 = { package = "kurbo", version = "0.13.1", features = ["serde", "std"] }
 libc = { version = "0.2.189", features = ["extra_traits", "std"] }
 libsqlite3-sys = { version = "0.30.1", features = ["bundled", "bundled_bindings", "cc", "min_sqlite_version_3_14_0", "pkg-config", "unlock_notify", "vcpkg"] }
-libz-sys = { version = "1.1.29", default-features = false }
 linebender_resource_handle = { version = "0.1.1", features = ["std"] }
-litemap = { version = "0.8.3", default-features = false, features = ["alloc"] }
+litemap-0_7 = { package = "litemap", version = "0.7.5", default-features = false, features = ["alloc", "serde"] }
 lock_api = { version = "0.4.14", features = ["arc_lock", "atomic_usize"] }
 log = { version = "0.4.34", default-features = false, features = ["alloc", "kv", "kv_unstable", "std", "value-bag"] }
+loro = { version = "1.16.0", features = ["counter"] }
+loro-common = { version = "1.16.0", default-features = false, features = ["counter", "serde_json"] }
+loro-internal = { version = "1.16.0", default-features = false, features = ["counter"] }
 md-5 = { version = "0.10.6", features = ["std"] }
 memchr = { version = "2.8.3", features = ["alloc", "std", "use_std"] }
 memmap2 = { version = "0.9.11", default-features = false, features = ["stable_deref_trait"] }
@@ -602,7 +629,9 @@ num-bigint = { version = "0.4.8", features = ["std"] }
 num-complex = { version = "0.4.6", features = ["bytemuck", "std"] }
 num-integer = { version = "0.1.47", features = ["i128", "std"] }
 num-rational = { version = "0.4.2", features = ["num-bigint", "num-bigint-std", "std"] }
+num_enum = { version = "0.5.11", features = ["std"] }
 objc2-0_5 = { package = "objc2", version = "0.5.2", features = ["alloc", "relax-sign-encoding", "std"] }
+objc2 = { version = "0.6.5", features = ["alloc", "disable-encoding-assertions", "exception", "relax-sign-encoding", "std"] }
 objc2-app-kit-0_2 = { package = "objc2-app-kit", version = "0.2.2", features = ["NSAccessibility", "NSAccessibilityConstants", "NSAccessibilityElement", "NSAccessibilityProtocols", "NSAppearance", "NSApplication", "NSBitmapImageRep", "NSButton", "NSColor", "NSControl", "NSCursor", "NSDragging", "NSEvent", "NSGraphics", "NSGraphicsContext", "NSImage", "NSImageRep", "NSMenu", "NSMenuItem", "NSOpenGLView", "NSPasteboard", "NSResponder", "NSRunningApplication", "NSScreen", "NSText", "NSTextInputClient", "NSTextInputContext", "NSView", "NSWindow", "NSWindowScripting", "NSWindowTabGroup", "alloc", "bitflags", "std"] }
 objc2-app-kit = { version = "0.3.2", features = ["AppKitDefines", "AppKitErrors", "NSATSTypesetter", "NSAccessibility", "NSAccessibilityColor", "NSAccessibilityConstants", "NSAccessibilityCustomAction", "NSAccessibilityCustomRotor", "NSAccessibilityElement", "NSAccessibilityProtocols", "NSActionCell", "NSAdaptiveImageGlyph", "NSAffineTransform", "NSAlert", "NSAlignmentFeedbackFilter", "NSAnimation", "NSAnimationContext", "NSAppearance", "NSAppleScriptExtensions", "NSApplication", "NSApplicationScripting", "NSArrayController", "NSAttributedString", "NSBackgroundExtensionView", "NSBezierPath", "NSBitmapImageRep", "NSBox", "NSBrowser", "NSBrowserCell", "NSButton", "NSButtonCell", "NSButtonTouchBarItem", "NSCIImageRep", "NSCachedImageRep", "NSCandidateListTouchBarItem", "NSCell", "NSClickGestureRecognizer", "NSClipView", "NSCollectionView", "NSCollectionViewCompositionalLayout", "NSCollectionViewFlowLayout", "NSCollectionViewGridLayout", "NSCollectionViewLayout", "NSCollectionViewTransitionLayout", "NSColor", "NSColorList", "NSColorPanel", "NSColorPicker", "NSColorPickerTouchBarItem", "NSColorPicking", "NSColorSampler", "NSColorSpace", "NSColorWell", "NSComboBox", "NSComboBoxCell", "NSComboButton", "NSControl", "NSController", "NSCursor", "NSCustomImageRep", "NSCustomTouchBarItem", "NSDataAsset", "NSDatePicker", "NSDatePickerCell", "NSDictionaryController", "NSDiffableDataSource", "NSDirection", "NSDockTile", "NSDocument", "NSDocumentController", "NSDocumentScripting", "NSDragging", "NSDraggingItem", "NSDraggingSession", "NSDrawer", "NSEPSImageRep", "NSErrors", "NSEvent", "NSFilePromiseProvider", "NSFilePromiseReceiver", "NSFileWrapperExtensions", "NSFont", "NSFontAssetRequest", "NSFontCollection", "NSFontDescriptor", "NSFontManager", "NSFontPanel", "NSForm", "NSFormCell", "NSGestureRecognizer", "NSGlassEffectView", "NSGlyphGenerator", "NSGlyphInfo", "NSGradient", "NSGraphics", "NSGraphicsContext", "NSGridView", "NSGroupTouchBarItem", "NSHapticFeedback", "NSHelpManager", "NSImage", "NSImageCell", "NSImageRep", "NSImageView", "NSInputManager", "NSInputServer", "NSInterfaceStyle", "NSItemBadge", "NSItemProvider", "NSKeyValueBinding", "NSLayoutAnchor", "NSLayoutConstraint", "NSLayoutGuide", "NSLayoutManager", "NSLevelIndicator", "NSLevelIndicatorCell", "NSMagnificationGestureRecognizer", "NSMatrix", "NSMediaLibraryBrowserController", "NSMenu", "NSMenuItem", "NSMenuItemBadge", "NSMenuItemCell", "NSMenuToolbarItem", "NSMovie", "NSNib", "NSNibConnector", "NSNibControlConnector", "NSNibDeclarations", "NSNibLoading", "NSNibOutletConnector", "NSObjectController", "NSOpenGL", "NSOpenGLLayer", "NSOpenGLView", "NSOpenPanel", "NSOutlineView", "NSPDFImageRep", "NSPDFInfo", "NSPDFPanel", "NSPICTImageRep", "NSPageController", "NSPageLayout", "NSPanGestureRecognizer", "NSPanel", "NSParagraphStyle", "NSPasteboard", "NSPasteboardItem", "NSPathCell", "NSPathComponentCell", "NSPathControl", "NSPathControlItem", "NSPersistentDocument", "NSPickerTouchBarItem", "NSPopUpButton", "NSPopUpButtonCell", "NSPopover", "NSPopoverTouchBarItem", "NSPredicateEditor", "NSPredicateEditorRowTemplate", "NSPressGestureRecognizer", "NSPressureConfiguration", "NSPreviewRepresentingActivityItem", "NSPrintInfo", "NSPrintOperation", "NSPrintPanel", "NSPrinter", "NSProgressIndicator", "NSResponder", "NSRotationGestureRecognizer", "NSRuleEditor", "NSRulerMarker", "NSRulerView", "NSRunningApplication", "NSSavePanel", "NSScreen", "NSScrollView", "NSScroller", "NSScrubber", "NSScrubberItemView", "NSScrubberLayout", "NSSearchField", "NSSearchFieldCell", "NSSearchToolbarItem", "NSSecureTextField", "NSSegmentedCell", "NSSegmentedControl", "NSShadow", "NSSharingCollaborationModeRestriction", "NSSharingService", "NSSharingServicePickerToolbarItem", "NSSharingServicePickerTouchBarItem", "NSSlider", "NSSliderAccessory", "NSSliderCell", "NSSliderTouchBarItem", "NSSound", "NSSpeechRecognizer", "NSSpeechSynthesizer", "NSSpellChecker", "NSSpellProtocol", "NSSplitView", "NSSplitViewController", "NSSplitViewItem", "NSSplitViewItemAccessoryViewController", "NSStackView", "NSStatusBar", "NSStatusBarButton", "NSStatusItem", "NSStepper", "NSStepperCell", "NSStepperTouchBarItem", "NSStoryboard", "NSStoryboardSegue", "NSStringDrawing", "NSSwitch", "NSTabView", "NSTabViewController", "NSTabViewItem", "NSTableCellView", "NSTableColumn", "NSTableHeaderCell", "NSTableHeaderView", "NSTableRowView", "NSTableView", "NSTableViewDiffableDataSource", "NSTableViewRowAction", "NSText", "NSTextAlternatives", "NSTextAttachment", "NSTextAttachmentCell", "NSTextCheckingClient", "NSTextCheckingController", "NSTextContainer", "NSTextContent", "NSTextContentManager", "NSTextElement", "NSTextField", "NSTextFieldCell", "NSTextFinder", "NSTextInputClient", "NSTextInputContext", "NSTextInsertionIndicator", "NSTextLayoutFragment", "NSTextLayoutManager", "NSTextLineFragment", "NSTextList", "NSTextListElement", "NSTextRange", "NSTextSelection", "NSTextSelectionNavigation", "NSTextStorage", "NSTextStorageScripting", "NSTextTable", "NSTextView", "NSTextViewportLayoutController", "NSTintConfiguration", "NSTintProminence", "NSTitlebarAccessoryViewController", "NSTokenField", "NSTokenFieldCell", "NSToolbar", "NSToolbarItem", "NSToolbarItemGroup", "NSTouch", "NSTouchBar", "NSTouchBarItem", "NSTrackingArea", "NSTrackingSeparatorToolbarItem", "NSTreeController", "NSTreeNode", "NSTypesetter", "NSUserActivity", "NSUserDefaultsController", "NSUserInterfaceCompression", "NSUserInterfaceItemIdentification", "NSUserInterfaceItemSearching", "NSUserInterfaceLayout", "NSUserInterfaceValidation", "NSView", "NSViewController", "NSViewLayoutRegion", "NSVisualEffectView", "NSWindow", "NSWindowController", "NSWindowRestoration", "NSWindowScripting", "NSWindowTab", "NSWindowTabGroup", "NSWorkspace", "NSWritingToolsCoordinator", "NSWritingToolsCoordinatorAnimationParameters", "NSWritingToolsCoordinatorContext", "alloc", "bitflags", "block2", "libc", "objc2-cloud-kit", "objc2-core-data", "objc2-core-foundation", "objc2-core-graphics", "objc2-core-image", "objc2-core-text", "objc2-core-video", "objc2-quartz-core", "std"] }
 objc2-cloud-kit = { version = "0.3.2", default-features = false, features = ["CKContainer", "CKRecord", "CKShare", "CKShareMetadata", "bitflags"] }
@@ -612,8 +641,8 @@ objc2-core-graphics = { version = "0.3.2", features = ["CGAffineTransform", "CGB
 objc2-core-image = { version = "0.3.2", default-features = false, features = ["CIColor", "CIContext", "CIFilter", "CIImage"] }
 objc2-core-text = { version = "0.3.2", default-features = false, features = ["CTFont", "CTFontCollection", "CTFontDescriptor", "CTGlyphInfo", "bitflags", "objc2"] }
 objc2-core-video = { version = "0.3.2", default-features = false, features = ["CVBase", "CVDisplayLink", "CVReturn", "alloc", "bitflags", "objc2", "objc2-core-graphics", "std"] }
-objc2-foundation-0_2 = { package = "objc2-foundation", version = "0.2.2", features = ["NSArray", "NSAttributedString", "NSBundle", "NSCoder", "NSData", "NSDate", "NSDictionary", "NSDistributedNotificationCenter", "NSEnumerator", "NSError", "NSException", "NSFileWrapper", "NSFormatter", "NSGeometry", "NSItemProvider", "NSKeyValueObserving", "NSLocale", "NSNotification", "NSObjCRuntime", "NSObject", "NSPathUtilities", "NSProcessInfo", "NSRange", "NSRunLoop", "NSScriptCommand", "NSScriptStandardSuiteCommands", "NSSet", "NSString", "NSThread", "NSURL", "NSUndoManager", "NSUserActivity", "NSValue", "NSZone", "alloc", "bitflags", "block2", "dispatch", "std"] }
-objc2-foundation = { version = "0.3.2", features = ["FoundationErrors", "FoundationLegacySwiftCompatibility", "NSAffineTransform", "NSAppleEventDescriptor", "NSAppleEventManager", "NSAppleScript", "NSArchiver", "NSArray", "NSAttributedString", "NSAutoreleasePool", "NSBackgroundActivityScheduler", "NSBundle", "NSByteCountFormatter", "NSByteOrder", "NSCache", "NSCalendar", "NSCalendarDate", "NSCharacterSet", "NSClassDescription", "NSCoder", "NSComparisonPredicate", "NSCompoundPredicate", "NSConnection", "NSData", "NSDate", "NSDateComponentsFormatter", "NSDateFormatter", "NSDateInterval", "NSDateIntervalFormatter", "NSDebug", "NSDecimal", "NSDecimalNumber", "NSDictionary", "NSDistantObject", "NSDistributedLock", "NSDistributedNotificationCenter", "NSEnergyFormatter", "NSEnumerator", "NSError", "NSException", "NSExpression", "NSExtensionContext", "NSExtensionItem", "NSExtensionRequestHandling", "NSFileCoordinator", "NSFileHandle", "NSFileManager", "NSFilePresenter", "NSFileVersion", "NSFileWrapper", "NSFormatter", "NSGarbageCollector", "NSGeometry", "NSHFSFileTypes", "NSHTTPCookie", "NSHTTPCookieStorage", "NSHashTable", "NSHost", "NSISO8601DateFormatter", "NSIndexPath", "NSIndexSet", "NSInflectionRule", "NSInvocation", "NSItemProvider", "NSJSONSerialization", "NSKeyValueCoding", "NSKeyValueObserving", "NSKeyValueSharedObservers", "NSKeyedArchiver", "NSLengthFormatter", "NSLinguisticTagger", "NSListFormatter", "NSLocale", "NSLocalizedNumberFormatRule", "NSLock", "NSMapTable", "NSMassFormatter", "NSMeasurement", "NSMeasurementFormatter", "NSMetadata", "NSMetadataAttributes", "NSMethodSignature", "NSMorphology", "NSNetServices", "NSNotification", "NSNotificationQueue", "NSNull", "NSNumberFormatter", "NSObjCRuntime", "NSObject", "NSObjectScripting", "NSOperation", "NSOrderedCollectionChange", "NSOrderedCollectionDifference", "NSOrderedSet", "NSOrthography", "NSPathUtilities", "NSPersonNameComponents", "NSPersonNameComponentsFormatter", "NSPointerArray", "NSPointerFunctions", "NSPort", "NSPortCoder", "NSPortMessage", "NSPortNameServer", "NSPredicate", "NSProcessInfo", "NSProgress", "NSPropertyList", "NSProtocolChecker", "NSProxy", "NSRange", "NSRegularExpression", "NSRelativeDateTimeFormatter", "NSRunLoop", "NSScanner", "NSScriptClassDescription", "NSScriptCoercionHandler", "NSScriptCommand", "NSScriptCommandDescription", "NSScriptExecutionContext", "NSScriptKeyValueCoding", "NSScriptObjectSpecifiers", "NSScriptStandardSuiteCommands", "NSScriptSuiteRegistry", "NSScriptWhoseTests", "NSSet", "NSSortDescriptor", "NSSpellServer", "NSStream", "NSString", "NSTask", "NSTermOfAddress", "NSTextCheckingResult", "NSThread", "NSTimeZone", "NSTimer", "NSURL", "NSURLAuthenticationChallenge", "NSURLCache", "NSURLConnection", "NSURLCredential", "NSURLCredentialStorage", "NSURLDownload", "NSURLError", "NSURLHandle", "NSURLProtectionSpace", "NSURLProtocol", "NSURLRequest", "NSURLResponse", "NSURLSession", "NSUUID", "NSUbiquitousKeyValueStore", "NSUndoManager", "NSUnit", "NSUserActivity", "NSUserDefaults", "NSUserNotification", "NSUserScriptTask", "NSValue", "NSValueTransformer", "NSXMLDTD", "NSXMLDTDNode", "NSXMLDocument", "NSXMLElement", "NSXMLNode", "NSXMLNodeOptions", "NSXMLParser", "NSXPCConnection", "NSZone", "alloc", "bitflags", "block2", "libc", "objc2-core-foundation", "std"] }
+objc2-foundation-6f8ce4dd05d13bba = { package = "objc2-foundation", version = "0.2.2", features = ["NSArray", "NSAttributedString", "NSBundle", "NSCoder", "NSData", "NSDate", "NSDictionary", "NSDistributedNotificationCenter", "NSEnumerator", "NSError", "NSException", "NSFileWrapper", "NSFormatter", "NSGeometry", "NSItemProvider", "NSKeyValueObserving", "NSLocale", "NSNotification", "NSObjCRuntime", "NSObject", "NSPathUtilities", "NSProcessInfo", "NSRange", "NSRunLoop", "NSScriptCommand", "NSScriptStandardSuiteCommands", "NSSet", "NSString", "NSThread", "NSURL", "NSUndoManager", "NSUserActivity", "NSValue", "NSZone", "alloc", "bitflags", "block2", "dispatch", "std"] }
+objc2-foundation-468e82937335b1c9 = { package = "objc2-foundation", version = "0.3.2", features = ["FoundationErrors", "FoundationLegacySwiftCompatibility", "NSAffineTransform", "NSAppleEventDescriptor", "NSAppleEventManager", "NSAppleScript", "NSArchiver", "NSArray", "NSAttributedString", "NSAutoreleasePool", "NSBackgroundActivityScheduler", "NSBundle", "NSByteCountFormatter", "NSByteOrder", "NSCache", "NSCalendar", "NSCalendarDate", "NSCharacterSet", "NSClassDescription", "NSCoder", "NSComparisonPredicate", "NSCompoundPredicate", "NSConnection", "NSData", "NSDate", "NSDateComponentsFormatter", "NSDateFormatter", "NSDateInterval", "NSDateIntervalFormatter", "NSDebug", "NSDecimal", "NSDecimalNumber", "NSDictionary", "NSDistantObject", "NSDistributedLock", "NSDistributedNotificationCenter", "NSEnergyFormatter", "NSEnumerator", "NSError", "NSException", "NSExpression", "NSExtensionContext", "NSExtensionItem", "NSExtensionRequestHandling", "NSFileCoordinator", "NSFileHandle", "NSFileManager", "NSFilePresenter", "NSFileVersion", "NSFileWrapper", "NSFormatter", "NSGarbageCollector", "NSGeometry", "NSHFSFileTypes", "NSHTTPCookie", "NSHTTPCookieStorage", "NSHashTable", "NSHost", "NSISO8601DateFormatter", "NSIndexPath", "NSIndexSet", "NSInflectionRule", "NSInvocation", "NSItemProvider", "NSJSONSerialization", "NSKeyValueCoding", "NSKeyValueObserving", "NSKeyValueSharedObservers", "NSKeyedArchiver", "NSLengthFormatter", "NSLinguisticTagger", "NSListFormatter", "NSLocale", "NSLocalizedNumberFormatRule", "NSLock", "NSMapTable", "NSMassFormatter", "NSMeasurement", "NSMeasurementFormatter", "NSMetadata", "NSMetadataAttributes", "NSMethodSignature", "NSMorphology", "NSNetServices", "NSNotification", "NSNotificationQueue", "NSNull", "NSNumberFormatter", "NSObjCRuntime", "NSObject", "NSObjectScripting", "NSOperation", "NSOrderedCollectionChange", "NSOrderedCollectionDifference", "NSOrderedSet", "NSOrthography", "NSPathUtilities", "NSPersonNameComponents", "NSPersonNameComponentsFormatter", "NSPointerArray", "NSPointerFunctions", "NSPort", "NSPortCoder", "NSPortMessage", "NSPortNameServer", "NSPredicate", "NSProcessInfo", "NSProgress", "NSPropertyList", "NSProtocolChecker", "NSProxy", "NSRange", "NSRegularExpression", "NSRelativeDateTimeFormatter", "NSRunLoop", "NSScanner", "NSScriptClassDescription", "NSScriptCoercionHandler", "NSScriptCommand", "NSScriptCommandDescription", "NSScriptExecutionContext", "NSScriptKeyValueCoding", "NSScriptObjectSpecifiers", "NSScriptStandardSuiteCommands", "NSScriptSuiteRegistry", "NSScriptWhoseTests", "NSSet", "NSSortDescriptor", "NSSpellServer", "NSStream", "NSString", "NSTask", "NSTermOfAddress", "NSTextCheckingResult", "NSThread", "NSTimeZone", "NSTimer", "NSURL", "NSURLAuthenticationChallenge", "NSURLCache", "NSURLConnection", "NSURLCredential", "NSURLCredentialStorage", "NSURLDownload", "NSURLError", "NSURLHandle", "NSURLProtectionSpace", "NSURLProtocol", "NSURLRequest", "NSURLResponse", "NSURLSession", "NSUUID", "NSUbiquitousKeyValueStore", "NSUndoManager", "NSUnit", "NSUserActivity", "NSUserDefaults", "NSUserNotification", "NSUserScriptTask", "NSValue", "NSValueTransformer", "NSXMLDTD", "NSXMLDTDNode", "NSXMLDocument", "NSXMLElement", "NSXMLNode", "NSXMLNodeOptions", "NSXMLParser", "NSXPCConnection", "NSZone", "alloc", "bitflags", "block2", "libc", "objc2-core-foundation", "std"] }
 objc2-quartz-core = { version = "0.3.2", default-features = false, features = ["CADisplayLink", "CALayer", "CAMediaTiming", "CAMediaTimingFunction", "CAMetalLayer", "CAOpenGLLayer", "alloc", "bitflags", "objc2-core-foundation", "objc2-core-graphics", "objc2-metal", "std"] }
 objc2-security = { version = "0.3.2", default-features = false, features = ["Authorization", "SecBase", "bitflags", "objc2"] }
 once_cell = { version = "1.21.4", features = ["alloc", "critical-section", "portable-atomic", "race", "std"] }
@@ -624,15 +653,16 @@ opentelemetry_sdk = { version = "0.30.0", features = ["experimental_async_runtim
 palette = { version = "0.7.7", features = ["alloc", "approx", "libm", "named", "named_from_str", "phf", "std"] }
 palette_math = { version = "0.7.7", default-features = false, features = ["alloc", "libm", "std"] }
 parking_lot = { version = "0.12.5", features = ["arc_lock", "send_guard"] }
+parlance = { version = "0.1.1", default-features = false, features = ["bytemuck", "std"] }
 parley = { version = "0.12.0", features = ["bytemuck", "std", "system"] }
 pathdiff = { version = "0.2.3", default-features = false, features = ["camino"] }
 peniko = { version = "0.6.1", features = ["bytemuck", "std"] }
 petgraph = { version = "0.8.3", features = ["graphmap", "matrix_graph", "stable_graph", "std"] }
-phf = { version = "0.13.1", features = ["macros", "phf_macros", "std"] }
-phf_shared = { version = "0.13.1", features = ["std"] }
+phf-0_13 = { package = "phf", version = "0.13.1", features = ["macros", "phf_macros", "std"] }
+phf_shared-0_13 = { package = "phf_shared", version = "0.13.1", features = ["std"] }
 pkcs8 = { version = "0.11.0", default-features = false, features = ["alloc", "pem", "std"] }
+polycool = { version = "0.4.0", features = ["std"] }
 postcard = { version = "1.1.3", features = ["alloc", "experimental-derive", "heapless", "heapless-cas", "postcard-derive", "use-std"] }
-potential_utf = { version = "0.1.6", default-features = false, features = ["alloc", "writeable", "zerovec"] }
 profiling = { version = "1.0.18", features = ["procmacros", "profiling-procmacros"] }
 psl-types = { version = "2.0.11", default-features = false }
 publicsuffix = { version = "2.3.0", features = ["idna", "punycode"] }
@@ -649,20 +679,17 @@ reqwest-594e8ee84c453af0 = { package = "reqwest", version = "0.13.5", default-fe
 rfd = { version = "0.17.2", features = ["pollster", "wayland", "wayland-backend", "wayland-client", "wayland-protocols", "xdg-portal"] }
 ring = { version = "0.17.14", features = ["alloc", "dev_urandom_fallback", "std"] }
 rust_decimal = { version = "1.43.0", features = ["maths", "serde", "std"] }
-rustix = { version = "1.1.5", features = ["alloc", "event", "fs", "io_uring", "net", "pipe", "process", "std", "thread", "time"] }
+rustix = { version = "1.1.5", features = ["alloc", "event", "fs", "io_uring", "net", "pipe", "process", "std", "system", "thread", "time"] }
 rustls = { version = "0.23.46", features = ["aws-lc-rs", "aws_lc_rs", "log", "logging", "prefer-post-quantum", "ring", "std", "tls12"] }
 rustls-native-certs = { version = "0.8.4", default-features = false }
 rustls-pemfile = { version = "2.2.0", features = ["std"] }
-same-file = { version = "1.0.6", default-features = false }
+rustls-webpki = { version = "0.103.15", default-features = false, features = ["alloc", "aws-lc-rs", "ring", "std"] }
 scopeguard = { version = "1.2.0", features = ["use_std"] }
 sea-orm = { version = "1.1.20", features = ["bigdecimal", "chrono", "macros", "postgres-array", "runtime-tokio", "runtime-tokio-rustls", "rust_decimal", "sea-query-binder", "serde_json", "sqlx", "sqlx-dep", "sqlx-postgres", "sqlx-sqlite", "time", "uuid", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
 sea-query = { version = "0.32.7", default-features = false, features = ["backend-mysql", "backend-postgres", "backend-sqlite", "bigdecimal", "chrono", "derive", "hashable-value", "ordered-float", "postgres-array", "rust_decimal", "sea-query-derive", "serde_json", "thread-safe", "time", "uuid", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
 sea-query-binder = { version = "0.7.0", default-features = false, features = ["bigdecimal", "chrono", "postgres-array", "runtime-tokio-rustls", "rust_decimal", "serde_json", "sqlx", "sqlx-postgres", "sqlx-sqlite", "time", "uuid", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
-seize = { version = "0.5.1", features = ["fast-barrier", "libc", "windows-sys"] }
 semver = { version = "1.0.28", features = ["serde", "std"] }
-send_wrapper = { version = "0.6.0", default-features = false, features = ["futures", "futures-core"] }
 serde = { version = "1.0.229", features = ["alloc", "derive", "rc", "serde_derive", "std"] }
-serde-wasm-bindgen = { version = "0.6.5", default-features = false }
 serde_core = { version = "1.0.229", features = ["alloc", "rc", "result", "std"] }
 serde_json = { version = "1.0.151", features = ["alloc", "float_roundtrip", "raw_value", "std", "unbounded_depth"] }
 serde_qs = { version = "0.15.0" }
@@ -672,7 +699,6 @@ signal-hook-mio = { version = "0.2.5", default-features = false, features = ["mi
 signature = { version = "3.0.0", default-features = false, features = ["alloc", "digest", "rand_core"] }
 skrifa = { version = "0.44.0", features = ["autohint_shaping", "std"] }
 sledgehammer_bindgen = { version = "0.6.0", default-features = false, features = ["wasm-bindgen", "web"] }
-slotmap = { version = "1.1.1", features = ["serde", "std"] }
 smallvec = { version = "1.16.4", default-features = false, features = ["const_generics", "const_new", "serde", "union", "write"] }
 spin = { version = "0.10.1", features = ["barrier", "lazy", "lock_api", "mutex", "once", "rwlock", "spin_mutex"] }
 spin-0_9 = { package = "spin", version = "0.9.9", features = ["barrier", "lazy", "lock_api", "lock_api_crate", "mutex", "once", "rwlock", "spin_mutex", "std"] }
@@ -683,6 +709,7 @@ strip-ansi-escapes = { version = "0.2.1", default-features = false }
 strum-1f5adca70f036a62 = { package = "strum", version = "0.28.0", features = ["derive", "std", "strum_macros"] }
 terminal-light = { version = "1.9.1", default-features = false }
 time = { version = "0.3.55", features = ["alloc", "formatting", "local-offset", "macros", "parsing", "serde", "serde-human-readable", "serde-well-known", "std"] }
+tinystr-0_7 = { package = "tinystr", version = "0.7.6", default-features = false, features = ["alloc", "serde", "zerovec"] }
 tinystr = { version = "0.8.5", features = ["alloc", "zerovec"] }
 tinyvec = { version = "1.13.3", features = ["alloc", "rustc_1_57", "std"] }
 tokio = { version = "1.53.1", features = ["bytes", "fs", "full", "io-std", "io-util", "libc", "macros", "mio", "net", "parking_lot", "process", "rt", "rt-multi-thread", "signal", "signal-hook-registry", "socket2", "sync", "test-util", "time", "tokio-macros", "tracing"] }
@@ -703,50 +730,42 @@ typenum = { version = "1.20.1", default-features = false, features = ["const-gen
 ucd-trie = { version = "0.1.7", features = ["std"] }
 unicode-properties = { version = "0.1.4", features = ["emoji", "general-category"] }
 url = { version = "2.5.8", features = ["serde", "std"] }
-usvg = { version = "0.48.1", features = ["base64", "flate2", "fontdb", "harfrust", "memmap-fonts", "skrifa", "svgz", "system-fonts", "text", "unicode-bidi", "unicode-script", "unicode-vo", "writer", "xmlwriter"] }
 uuid = { version = "1.26.1", features = ["atomic", "js", "md5", "rng", "serde", "sha1", "std", "v1", "v3", "v4", "v5", "v6", "v7", "v8"] }
 value-bag = { version = "1.14.1", default-features = false, features = ["inline-i128"] }
 vello_gpu = { version = "0.3.0", features = ["text", "webgl", "wgpu", "wgpu_default"] }
 vello_gpu_shaders = { version = "0.3.0", default-features = false, features = ["glsl"] }
 vox = { version = "0.10.0-rc.7", default-features = false, features = ["runtime", "transport-local", "transport-websocket", "transport-websocket-tls"] }
 vte = { version = "0.14.1", default-features = false }
-walkdir = { version = "2.5.0", default-features = false }
 wasm-bindgen = { version = "0.2.127", features = ["std"] }
-wasm-bindgen-futures = { version = "0.4.77", features = ["std"] }
-wasm-bindgen-shared = { version = "0.2.127", default-features = false }
 wasm-splitter = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false }
-wasm-streams = { version = "0.5.0", default-features = false }
 web-sys = { version = "0.3.104", features = ["AbortController", "AbortSignal", "AddEventListenerOptions", "AnalyserNode", "AnimationEvent", "AudioContext", "AudioContextOptions", "AudioContextState", "AudioDestinationNode", "AudioNode", "AudioWorklet", "AudioWorkletNode", "AudioWorkletNodeOptions", "BaseAudioContext", "BinaryType", "Blob", "BlobPropertyBag", "Cache", "CacheStorage", "CharacterData", "Clipboard", "ClipboardEvent", "CloseEvent", "CloseEventInit", "Comment", "CompositionEvent", "Crypto", "CssStyleDeclaration", "CustomEvent", "DataTransfer", "DataTransferItem", "DataTransferItemList", "Document", "DomRect", "DomRectReadOnly", "DomTokenList", "DragEvent", "Element", "ErrorEvent", "Event", "EventSource", "EventSourceInit", "EventTarget", "File", "FileList", "FileReader", "FocusEvent", "FormData", "Headers", "History", "HtmlAudioElement", "HtmlCanvasElement", "HtmlElement", "HtmlFormElement", "HtmlHeadElement", "HtmlInputElement", "HtmlMediaElement", "HtmlSelectElement", "HtmlTextAreaElement", "InputEvent", "IntersectionObserverEntry", "KeyboardEvent", "Location", "MediaElementAudioSourceNode", "MediaQueryList", "MessageEvent", "MessagePort", "MouseEvent", "Navigator", "Node", "NodeList", "ObserverCallback", "Performance", "PointerEvent", "ProgressEvent", "QueuingStrategy", "ReadableByteStreamController", "ReadableStream", "ReadableStreamByobReader", "ReadableStreamByobRequest", "ReadableStreamDefaultController", "ReadableStreamDefaultReader", "ReadableStreamGetReaderOptions", "ReadableStreamReadResult", "ReadableStreamReaderMode", "ReadableStreamType", "ReadableWritablePair", "ReferrerPolicy", "Request", "RequestCache", "RequestCredentials", "RequestInit", "RequestMode", "RequestRedirect", "ResizeObserverEntry", "ResizeObserverSize", "Response", "ResponseInit", "ResponseType", "ScrollBehavior", "ScrollIntoViewOptions", "ScrollLogicalPosition", "ScrollRestoration", "ScrollToOptions", "Selection", "Storage", "StreamPipeOptions", "Text", "Touch", "TouchEvent", "TouchList", "TransformStream", "TransformStreamDefaultController", "Transformer", "TransitionEvent", "UiEvent", "UnderlyingSink", "UnderlyingSource", "Url", "UrlSearchParams", "WebGl2RenderingContext", "WebGlBuffer", "WebGlContextAttributes", "WebGlFramebuffer", "WebGlProgram", "WebGlRenderbuffer", "WebGlShader", "WebGlSync", "WebGlTexture", "WebGlUniformLocation", "WebGlVertexArrayObject", "WebSocket", "WheelEvent", "Window", "Worklet", "WorkletOptions", "WritableStream", "WritableStreamDefaultController", "WritableStreamDefaultWriter", "console", "std"] }
 web-time = { version = "1.1.0", default-features = false, features = ["serde"] }
-writeable = { version = "0.6.4", default-features = false, features = ["alloc"] }
 xterm-query = { version = "0.6.1", default-features = false }
 xxhash-rust = { version = "0.8.18", default-features = false, features = ["const_xxh64", "xxh3", "xxh32"] }
+yoke-0_7 = { package = "yoke", version = "0.7.5", features = ["alloc", "derive", "serde", "zerofrom"] }
 yoke = { version = "0.8.4", features = ["alloc", "derive", "zerofrom"] }
-zerofrom = { version = "0.1.8", default-features = false, features = ["alloc", "derive"] }
 zeroize = { version = "1.9.0", features = ["alloc", "derive", "zeroize_derive"] }
-zerotrie = { version = "0.2.5", default-features = false, features = ["alloc", "yoke", "zerofrom"] }
+zerovec-0_10 = { package = "zerovec", version = "0.10.4", default-features = false, features = ["derive", "serde", "yoke"] }
+zlib-rs = { version = "0.6.8", features = ["c-allocator", "rust-allocator", "std"] }
 
 [target.'cfg(all(target_arch = "aarch64", target_os = "ios"))'.dependencies]
 ahash = { version = "0.8.12", features = ["getrandom", "runtime-rng", "serde", "std"] }
 aho-corasick = { version = "1.1.5", features = ["perf-literal", "std"] }
 alloc-stdlib = { version = "0.2.4", default-features = false }
+allocator-api2 = { version = "0.2.21", features = ["alloc", "std"] }
 anyrender_vello_hybrid = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1", default-features = false, features = ["webgl"] }
 approx = { version = "0.5.1", features = ["std"] }
-async-compression = { version = "0.4.43", default-features = false, features = ["gzip", "tokio"] }
-async-lock = { version = "3.4.2", features = ["std"] }
+arrayvec = { version = "0.7.8", features = ["serde", "std"] }
 async-once-cell = { version = "0.5.4", default-features = false, features = ["std"] }
-aws-lc-rs = { version = "1.18.0", default-features = false, features = ["aws-lc-sys", "prebuilt-nasm"] }
-aws-lc-sys = { version = "0.44.0", default-features = false, features = ["prebuilt-nasm"] }
 axum = { version = "0.8.9", features = ["form", "http1", "http2", "json", "macros", "matched-path", "multipart", "original-uri", "query", "tokio", "tower-log", "tracing", "ws"] }
 axum-extra = { version = "0.12.6", features = ["tracing", "typed-header"] }
 base16ct = { version = "1.0.0", default-features = false, features = ["alloc"] }
 bit-set = { version = "0.8.0", features = ["std"] }
 bit-vec = { version = "0.8.0", features = ["std"] }
-blitz-dom = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11", features = ["accessibility", "accesskit", "autofocus", "custom-widget", "file-input", "svg", "system-fonts", "text-transform-icu", "woff"] }
-blitz-paint = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11", features = ["apple-font-embolden", "custom-widget", "svg"] }
-blitz-shell = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11", features = ["accessibility", "custom-widget", "data-uri", "file-dialog"] }
+bitflags = { version = "2.13.2", default-features = false, features = ["serde", "serde_core", "std"] }
 block-buffer = { version = "0.12.1", default-features = false, features = ["zeroize"] }
 block-padding = { version = "0.3.3", default-features = false }
+block2-0_5 = { package = "block2", version = "0.5.1", features = ["alloc", "std"] }
 brotli-decompressor = { version = "5.0.3", features = ["alloc-stdlib", "std"] }
 bstr = { version = "1.13.1", features = ["alloc", "serde", "std", "unicode"] }
 bumpalo = { version = "3.20.3", features = ["boxed", "collections"] }
@@ -763,8 +782,6 @@ cipher = { version = "0.4.4", default-features = false, features = ["block-paddi
 clap = { version = "4.6.7", features = ["color", "derive", "env", "error-context", "help", "std", "suggestions", "usage"] }
 clap_builder = { version = "4.6.7", default-features = false, features = ["color", "env", "error-context", "help", "std", "suggestions", "usage"] }
 color = { version = "0.3.3", features = ["bytemuck", "std"] }
-compression-codecs = { version = "0.4.38", default-features = false, features = ["flate2", "gzip", "memchr"] }
-compression-core = { version = "0.4.32", default-features = false }
 concurrent-queue = { version = "2.5.0", features = ["std"] }
 const-str = { version = "0.7.1" }
 constant_time_eq = { version = "0.4.2", features = ["std"] }
@@ -794,14 +811,18 @@ dioxus-interpreter-js = { git = "https://github.com/DioxusLabs/dioxus", rev = "4
 dioxus-primitives = { git = "https://github.com/FastTrackStudios/dioxus-components", tag = "fts-upstream-2026-11", features = ["router"] }
 dioxus-router = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["html", "wasm-split"] }
 dioxus-server = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["document", "router"] }
+dioxus-vdom = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1", default-features = false, features = ["serialize"] }
+dioxus-vdom-template = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["serialize"] }
 dioxus-web = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["devtools", "document", "hydrate", "mounted"] }
+dispatch = { version = "0.2.0", default-features = false }
 dispatch2 = { version = "0.3.1", features = ["alloc", "block2", "libc", "objc2", "std"] }
 either = { version = "1.18.0", features = ["serde", "std", "use_std"] }
 env_filter = { version = "2.0.0", default-features = false, features = ["regex", "std"] }
 env_logger = { version = "0.11.11", features = ["auto-color", "color", "humantime", "regex"] }
-euclid = { version = "0.22.14", features = ["serde", "std"] }
+euclid = { version = "0.22.14", features = ["libm", "serde", "std"] }
 event-listener = { version = "5.4.2", features = ["parking", "std"] }
 event-listener-strategy = { version = "0.5.4", features = ["std"] }
+exr = { version = "1.74.2", features = ["rayon"] }
 facet = { version = "0.50.0-rc.7", features = ["alloc", "camino", "chrono", "doc", "helpful-derive", "indexmap", "reflect", "std", "uuid"] }
 facet-error = { version = "0.50.0-rc.7", default-features = false }
 facet-pretty = { version = "0.50.0-rc.7", features = ["detect-terminal-theme"] }
@@ -818,11 +839,10 @@ genawaiter-macro = { version = "0.99.1", default-features = false, features = ["
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std", "wasm_js"] }
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4.3", default-features = false, features = ["std", "sys_rng"] }
 gloo-net = { version = "0.7.0", features = ["eventsource", "futures-channel", "futures-core", "futures-sink", "http", "json", "pin-project", "serde", "serde_json", "websocket"] }
-gloo-timers = { version = "0.4.0", features = ["futures", "futures-channel", "futures-core"] }
 gloo-utils = { version = "0.3.0", default-features = false, features = ["serde"] }
 h2 = { version = "0.4.19", default-features = false, features = ["stream"] }
 half = { version = "2.7.1", features = ["alloc", "bytemuck", "num-traits", "rand_distr", "std", "use-intrinsics"] }
-hashbrown = { version = "0.14.5", features = ["ahash", "allocator-api2", "inline-more", "raw"] }
+hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14.5", features = ["ahash", "allocator-api2", "inline-more", "raw"] }
 hashbrown-986da7b5efc2b80e = { package = "hashbrown", version = "0.16.1", features = ["allocator-api2", "default-hasher", "equivalent", "inline-more", "raw-entry", "serde"] }
 headers = { version = "0.4.1", default-features = false }
 headers-core = { version = "0.3.0", default-features = false }
@@ -833,24 +853,30 @@ hyper = { version = "1.11.1", features = ["client", "full", "http1", "http2", "s
 hyper-rustls = { version = "0.27.9", default-features = false, features = ["aws-lc-rs", "http1", "http2", "log", "logging", "native-tokio", "ring", "rustls-native-certs", "tls12", "webpki-roots", "webpki-tokio"] }
 hyper-tls = { version = "0.6.0", default-features = false, features = ["alpn"] }
 hyper-util = { version = "0.1.20", features = ["client", "client-legacy", "client-pool", "client-proxy", "client-proxy-system", "full", "http1", "http2", "server", "server-auto", "server-graceful", "service", "tokio", "tracing"] }
+icu_collections = { version = "2.4.0", default-features = false, features = ["alloc"] }
+icu_locid = { version = "1.5.0", default-features = false, features = ["zerovec"] }
 icu_normalizer = { version = "2.4.0", default-features = false, features = ["compiled_data", "utf16_iter", "utf8_iter"] }
 icu_segmenter = { version = "2.4.0", default-features = false, features = ["auto", "compiled_data", "lstm"] }
 idna = { version = "1.1.0", features = ["alloc", "compiled_data", "std"] }
 image = { version = "0.25.6", features = ["avif", "bmp", "dds", "default-formats", "exr", "ff", "gif", "hdr", "ico", "jpeg", "png", "pnm", "qoi", "rayon", "tga", "tiff", "webp"] }
+indexmap = { version = "2.14.2", features = ["serde", "std"] }
 inout = { version = "0.1.4", default-features = false, features = ["block-padding"] }
 inventory = { version = "0.3.24", default-features = false }
 ipnet = { version = "2.12.2", features = ["serde", "std"] }
+iroh-base = { version = "1.1.0", features = ["key", "relay"] }
 iroh-metrics = { version = "1.0.1", features = ["metrics"] }
-jiff = { version = "0.2.37", features = ["alloc", "perf-inline", "std", "tz-fat", "tz-system", "tzdb-bundle-platform", "tzdb-concatenated", "tzdb-zoneinfo"] }
-jiff-core = { version = "0.1.1", default-features = false, features = ["alloc", "std", "tz-fat"] }
-js-sys = { version = "0.3.104", features = ["std", "unsafe-eval"] }
+keyboard-types = { version = "0.8.3", features = ["serde", "std"] }
+kurbo = { version = "0.11.3", features = ["std"] }
+kurbo-0_13 = { package = "kurbo", version = "0.13.1", features = ["serde", "std"] }
 libc = { version = "0.2.189", features = ["extra_traits", "std"] }
 libsqlite3-sys = { version = "0.30.1", features = ["bundled", "bundled_bindings", "cc", "min_sqlite_version_3_14_0", "pkg-config", "unlock_notify", "vcpkg"] }
-libz-sys = { version = "1.1.29", default-features = false }
 linebender_resource_handle = { version = "0.1.1", features = ["std"] }
-litemap = { version = "0.8.3", default-features = false, features = ["alloc"] }
+litemap-0_7 = { package = "litemap", version = "0.7.5", default-features = false, features = ["alloc", "serde"] }
 lock_api = { version = "0.4.14", features = ["arc_lock", "atomic_usize"] }
 log = { version = "0.4.34", default-features = false, features = ["alloc", "kv", "kv_unstable", "std", "value-bag"] }
+loro = { version = "1.16.0", features = ["counter"] }
+loro-common = { version = "1.16.0", default-features = false, features = ["counter", "serde_json"] }
+loro-internal = { version = "1.16.0", default-features = false, features = ["counter"] }
 md-5 = { version = "0.10.6", features = ["std"] }
 memchr = { version = "2.8.3", features = ["alloc", "std", "use_std"] }
 memmap2 = { version = "0.9.11", default-features = false, features = ["stable_deref_trait"] }
@@ -865,9 +891,14 @@ num-bigint = { version = "0.4.8", features = ["std"] }
 num-complex = { version = "0.4.6", features = ["bytemuck", "std"] }
 num-integer = { version = "0.1.47", features = ["i128", "std"] }
 num-rational = { version = "0.4.2", features = ["num-bigint", "num-bigint-std", "std"] }
+num_enum = { version = "0.5.11", features = ["std"] }
+objc2-0_5 = { package = "objc2", version = "0.5.2", features = ["alloc", "relax-sign-encoding", "std"] }
+objc2 = { version = "0.6.5", features = ["alloc", "disable-encoding-assertions", "exception", "relax-sign-encoding", "std"] }
 objc2-core-foundation = { version = "0.3.2", features = ["CFArray", "CFAttributedString", "CFAvailability", "CFBag", "CFBase", "CFBinaryHeap", "CFBitVector", "CFBundle", "CFByteOrder", "CFCGTypes", "CFCalendar", "CFCharacterSet", "CFData", "CFDate", "CFDateFormatter", "CFDictionary", "CFError", "CFFileDescriptor", "CFFileSecurity", "CFLocale", "CFMachPort", "CFMessagePort", "CFNotificationCenter", "CFNumber", "CFNumberFormatter", "CFPlugIn", "CFPlugInCOM", "CFPreferences", "CFPropertyList", "CFRunLoop", "CFSet", "CFSocket", "CFStream", "CFString", "CFStringEncodingExt", "CFStringTokenizer", "CFTimeZone", "CFTree", "CFURL", "CFURLAccess", "CFURLEnumerator", "CFUUID", "CFUserNotification", "CFUtilities", "CFXMLNode", "CFXMLParser", "alloc", "bitflags", "block2", "dispatch2", "libc", "objc2", "std"] }
 objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["CGColor", "CGColorSpace", "CGContext", "CGFont", "CGImage", "CGPath", "alloc", "bitflags", "objc2", "std"] }
-objc2-foundation = { version = "0.3.2", features = ["FoundationErrors", "FoundationLegacySwiftCompatibility", "NSAffineTransform", "NSAppleEventDescriptor", "NSAppleEventManager", "NSAppleScript", "NSArchiver", "NSArray", "NSAttributedString", "NSAutoreleasePool", "NSBackgroundActivityScheduler", "NSBundle", "NSByteCountFormatter", "NSByteOrder", "NSCache", "NSCalendar", "NSCalendarDate", "NSCharacterSet", "NSClassDescription", "NSCoder", "NSComparisonPredicate", "NSCompoundPredicate", "NSConnection", "NSData", "NSDate", "NSDateComponentsFormatter", "NSDateFormatter", "NSDateInterval", "NSDateIntervalFormatter", "NSDebug", "NSDecimal", "NSDecimalNumber", "NSDictionary", "NSDistantObject", "NSDistributedLock", "NSDistributedNotificationCenter", "NSEnergyFormatter", "NSEnumerator", "NSError", "NSException", "NSExpression", "NSExtensionContext", "NSExtensionItem", "NSExtensionRequestHandling", "NSFileCoordinator", "NSFileHandle", "NSFileManager", "NSFilePresenter", "NSFileVersion", "NSFileWrapper", "NSFormatter", "NSGarbageCollector", "NSGeometry", "NSHFSFileTypes", "NSHTTPCookie", "NSHTTPCookieStorage", "NSHashTable", "NSHost", "NSISO8601DateFormatter", "NSIndexPath", "NSIndexSet", "NSInflectionRule", "NSInvocation", "NSItemProvider", "NSJSONSerialization", "NSKeyValueCoding", "NSKeyValueObserving", "NSKeyValueSharedObservers", "NSKeyedArchiver", "NSLengthFormatter", "NSLinguisticTagger", "NSListFormatter", "NSLocale", "NSLocalizedNumberFormatRule", "NSLock", "NSMapTable", "NSMassFormatter", "NSMeasurement", "NSMeasurementFormatter", "NSMetadata", "NSMetadataAttributes", "NSMethodSignature", "NSMorphology", "NSNetServices", "NSNotification", "NSNotificationQueue", "NSNull", "NSNumberFormatter", "NSObjCRuntime", "NSObject", "NSObjectScripting", "NSOperation", "NSOrderedCollectionChange", "NSOrderedCollectionDifference", "NSOrderedSet", "NSOrthography", "NSPathUtilities", "NSPersonNameComponents", "NSPersonNameComponentsFormatter", "NSPointerArray", "NSPointerFunctions", "NSPort", "NSPortCoder", "NSPortMessage", "NSPortNameServer", "NSPredicate", "NSProcessInfo", "NSProgress", "NSPropertyList", "NSProtocolChecker", "NSProxy", "NSRange", "NSRegularExpression", "NSRelativeDateTimeFormatter", "NSRunLoop", "NSScanner", "NSScriptClassDescription", "NSScriptCoercionHandler", "NSScriptCommand", "NSScriptCommandDescription", "NSScriptExecutionContext", "NSScriptKeyValueCoding", "NSScriptObjectSpecifiers", "NSScriptStandardSuiteCommands", "NSScriptSuiteRegistry", "NSScriptWhoseTests", "NSSet", "NSSortDescriptor", "NSSpellServer", "NSStream", "NSString", "NSTask", "NSTermOfAddress", "NSTextCheckingResult", "NSThread", "NSTimeZone", "NSTimer", "NSURL", "NSURLAuthenticationChallenge", "NSURLCache", "NSURLConnection", "NSURLCredential", "NSURLCredentialStorage", "NSURLDownload", "NSURLError", "NSURLHandle", "NSURLProtectionSpace", "NSURLProtocol", "NSURLRequest", "NSURLResponse", "NSURLSession", "NSUUID", "NSUbiquitousKeyValueStore", "NSUndoManager", "NSUnit", "NSUserActivity", "NSUserDefaults", "NSUserNotification", "NSUserScriptTask", "NSValue", "NSValueTransformer", "NSXMLDTD", "NSXMLDTDNode", "NSXMLDocument", "NSXMLElement", "NSXMLNode", "NSXMLNodeOptions", "NSXMLParser", "NSXPCConnection", "NSZone", "alloc", "bitflags", "block2", "libc", "objc2-core-foundation", "std"] }
+objc2-core-text = { version = "0.3.2", default-features = false, features = ["CTFont", "CTFontCollection", "CTFontDescriptor", "bitflags", "objc2"] }
+objc2-foundation-6f8ce4dd05d13bba = { package = "objc2-foundation", version = "0.2.2", features = ["NSArray", "NSAttributedString", "NSBundle", "NSCoder", "NSData", "NSDate", "NSDictionary", "NSEnumerator", "NSError", "NSExtensionContext", "NSExtensionRequestHandling", "NSGeometry", "NSNotification", "NSObjCRuntime", "NSObject", "NSOperation", "NSPathUtilities", "NSProcessInfo", "NSRange", "NSSet", "NSString", "NSThread", "NSURL", "NSUUID", "NSUndoManager", "NSUserActivity", "NSValue", "alloc", "bitflags", "block2", "dispatch", "std"] }
+objc2-foundation-468e82937335b1c9 = { package = "objc2-foundation", version = "0.3.2", features = ["FoundationErrors", "FoundationLegacySwiftCompatibility", "NSAffineTransform", "NSAppleEventDescriptor", "NSAppleEventManager", "NSAppleScript", "NSArchiver", "NSArray", "NSAttributedString", "NSAutoreleasePool", "NSBackgroundActivityScheduler", "NSBundle", "NSByteCountFormatter", "NSByteOrder", "NSCache", "NSCalendar", "NSCalendarDate", "NSCharacterSet", "NSClassDescription", "NSCoder", "NSComparisonPredicate", "NSCompoundPredicate", "NSConnection", "NSData", "NSDate", "NSDateComponentsFormatter", "NSDateFormatter", "NSDateInterval", "NSDateIntervalFormatter", "NSDebug", "NSDecimal", "NSDecimalNumber", "NSDictionary", "NSDistantObject", "NSDistributedLock", "NSDistributedNotificationCenter", "NSEnergyFormatter", "NSEnumerator", "NSError", "NSException", "NSExpression", "NSExtensionContext", "NSExtensionItem", "NSExtensionRequestHandling", "NSFileCoordinator", "NSFileHandle", "NSFileManager", "NSFilePresenter", "NSFileVersion", "NSFileWrapper", "NSFormatter", "NSGarbageCollector", "NSGeometry", "NSHFSFileTypes", "NSHTTPCookie", "NSHTTPCookieStorage", "NSHashTable", "NSHost", "NSISO8601DateFormatter", "NSIndexPath", "NSIndexSet", "NSInflectionRule", "NSInvocation", "NSItemProvider", "NSJSONSerialization", "NSKeyValueCoding", "NSKeyValueObserving", "NSKeyValueSharedObservers", "NSKeyedArchiver", "NSLengthFormatter", "NSLinguisticTagger", "NSListFormatter", "NSLocale", "NSLocalizedNumberFormatRule", "NSLock", "NSMapTable", "NSMassFormatter", "NSMeasurement", "NSMeasurementFormatter", "NSMetadata", "NSMetadataAttributes", "NSMethodSignature", "NSMorphology", "NSNetServices", "NSNotification", "NSNotificationQueue", "NSNull", "NSNumberFormatter", "NSObjCRuntime", "NSObject", "NSObjectScripting", "NSOperation", "NSOrderedCollectionChange", "NSOrderedCollectionDifference", "NSOrderedSet", "NSOrthography", "NSPathUtilities", "NSPersonNameComponents", "NSPersonNameComponentsFormatter", "NSPointerArray", "NSPointerFunctions", "NSPort", "NSPortCoder", "NSPortMessage", "NSPortNameServer", "NSPredicate", "NSProcessInfo", "NSProgress", "NSPropertyList", "NSProtocolChecker", "NSProxy", "NSRange", "NSRegularExpression", "NSRelativeDateTimeFormatter", "NSRunLoop", "NSScanner", "NSScriptClassDescription", "NSScriptCoercionHandler", "NSScriptCommand", "NSScriptCommandDescription", "NSScriptExecutionContext", "NSScriptKeyValueCoding", "NSScriptObjectSpecifiers", "NSScriptStandardSuiteCommands", "NSScriptSuiteRegistry", "NSScriptWhoseTests", "NSSet", "NSSortDescriptor", "NSSpellServer", "NSStream", "NSString", "NSTask", "NSTermOfAddress", "NSTextCheckingResult", "NSThread", "NSTimeZone", "NSTimer", "NSURL", "NSURLAuthenticationChallenge", "NSURLCache", "NSURLConnection", "NSURLCredential", "NSURLCredentialStorage", "NSURLDownload", "NSURLError", "NSURLHandle", "NSURLProtectionSpace", "NSURLProtocol", "NSURLRequest", "NSURLResponse", "NSURLSession", "NSUUID", "NSUbiquitousKeyValueStore", "NSUndoManager", "NSUnit", "NSUserActivity", "NSUserDefaults", "NSUserNotification", "NSUserScriptTask", "NSValue", "NSValueTransformer", "NSXMLDTD", "NSXMLDTDNode", "NSXMLDocument", "NSXMLElement", "NSXMLNode", "NSXMLNodeOptions", "NSXMLParser", "NSXPCConnection", "NSZone", "alloc", "bitflags", "block2", "libc", "objc2-core-foundation", "std"] }
 objc2-quartz-core = { version = "0.3.2", default-features = false, features = ["CADisplayLink", "CAFrameRateRange", "CALayer", "CAMediaTiming", "CAMetalLayer", "CATransform3D", "alloc", "bitflags", "objc2-core-foundation", "objc2-core-graphics", "objc2-metal", "std"] }
 objc2-security = { version = "0.3.2", default-features = false, features = ["Authorization", "SecBase", "bitflags", "objc2"] }
 once_cell = { version = "1.21.4", features = ["alloc", "critical-section", "portable-atomic", "race", "std"] }
@@ -879,15 +910,16 @@ opentelemetry_sdk = { version = "0.30.0", features = ["experimental_async_runtim
 palette = { version = "0.7.7", features = ["alloc", "approx", "libm", "named", "named_from_str", "phf", "std"] }
 palette_math = { version = "0.7.7", default-features = false, features = ["alloc", "libm", "std"] }
 parking_lot = { version = "0.12.5", features = ["arc_lock", "send_guard"] }
+parlance = { version = "0.1.1", default-features = false, features = ["bytemuck", "std"] }
 parley = { version = "0.12.0", features = ["bytemuck", "std", "system"] }
 pathdiff = { version = "0.2.3", default-features = false, features = ["camino"] }
 peniko = { version = "0.6.1", features = ["bytemuck", "std"] }
 petgraph = { version = "0.8.3", features = ["graphmap", "matrix_graph", "stable_graph", "std"] }
-phf = { version = "0.13.1", features = ["macros", "phf_macros", "std"] }
-phf_shared = { version = "0.13.1", features = ["std"] }
+phf-0_13 = { package = "phf", version = "0.13.1", features = ["macros", "phf_macros", "std"] }
+phf_shared-0_13 = { package = "phf_shared", version = "0.13.1", features = ["std"] }
 pkcs8 = { version = "0.11.0", default-features = false, features = ["alloc", "pem", "std"] }
+polycool = { version = "0.4.0", features = ["std"] }
 postcard = { version = "1.1.3", features = ["alloc", "experimental-derive", "heapless", "heapless-cas", "postcard-derive", "use-std"] }
-potential_utf = { version = "0.1.6", default-features = false, features = ["alloc", "writeable", "zerovec"] }
 profiling = { version = "1.0.18", features = ["procmacros", "profiling-procmacros"] }
 psl-types = { version = "2.0.11", default-features = false }
 publicsuffix = { version = "2.3.0", features = ["idna", "punycode"] }
@@ -903,20 +935,18 @@ reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", features 
 reqwest-594e8ee84c453af0 = { package = "reqwest", version = "0.13.5", default-features = false, features = ["__native-tls", "__native-tls-alpn", "__rustls", "__rustls-aws-lc-rs", "__tls", "charset", "cookies", "form", "http2", "json", "multipart", "native-tls", "rustls", "rustls-no-provider", "stream"] }
 ring = { version = "0.17.14", features = ["alloc", "dev_urandom_fallback", "std"] }
 rust_decimal = { version = "1.43.0", features = ["maths", "serde", "std"] }
+rustix = { version = "1.1.5", features = ["alloc", "event", "fs", "io_uring", "net", "pipe", "process", "std", "system", "thread", "time"] }
 rustls = { version = "0.23.46", features = ["aws-lc-rs", "aws_lc_rs", "log", "logging", "prefer-post-quantum", "ring", "std", "tls12"] }
 rustls-native-certs = { version = "0.8.4", default-features = false }
 rustls-pemfile = { version = "2.2.0", features = ["std"] }
-same-file = { version = "1.0.6", default-features = false }
+rustls-webpki = { version = "0.103.15", default-features = false, features = ["alloc", "aws-lc-rs", "ring", "std"] }
 scopeguard = { version = "1.2.0", features = ["use_std"] }
 sea-orm = { version = "1.1.20", features = ["bigdecimal", "chrono", "macros", "postgres-array", "runtime-tokio", "runtime-tokio-rustls", "rust_decimal", "sea-query-binder", "serde_json", "sqlx", "sqlx-dep", "sqlx-postgres", "sqlx-sqlite", "time", "uuid", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
 sea-query = { version = "0.32.7", default-features = false, features = ["backend-mysql", "backend-postgres", "backend-sqlite", "bigdecimal", "chrono", "derive", "hashable-value", "ordered-float", "postgres-array", "rust_decimal", "sea-query-derive", "serde_json", "thread-safe", "time", "uuid", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
 sea-query-binder = { version = "0.7.0", default-features = false, features = ["bigdecimal", "chrono", "postgres-array", "runtime-tokio-rustls", "rust_decimal", "serde_json", "sqlx", "sqlx-postgres", "sqlx-sqlite", "time", "uuid", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
 security-framework-sys = { version = "2.17.0", features = ["OSX_10_10", "OSX_10_11", "OSX_10_12", "OSX_10_13", "OSX_10_9"] }
-seize = { version = "0.5.1", features = ["fast-barrier", "libc", "windows-sys"] }
 semver = { version = "1.0.28", features = ["serde", "std"] }
-send_wrapper = { version = "0.6.0", default-features = false, features = ["futures", "futures-core"] }
 serde = { version = "1.0.229", features = ["alloc", "derive", "rc", "serde_derive", "std"] }
-serde-wasm-bindgen = { version = "0.6.5", default-features = false }
 serde_core = { version = "1.0.229", features = ["alloc", "rc", "result", "std"] }
 serde_json = { version = "1.0.151", features = ["alloc", "float_roundtrip", "raw_value", "std", "unbounded_depth"] }
 serde_qs = { version = "0.15.0" }
@@ -926,7 +956,6 @@ signal-hook-mio = { version = "0.2.5", default-features = false, features = ["mi
 signature = { version = "3.0.0", default-features = false, features = ["alloc", "digest", "rand_core"] }
 skrifa = { version = "0.44.0", features = ["autohint_shaping", "std"] }
 sledgehammer_bindgen = { version = "0.6.0", default-features = false, features = ["wasm-bindgen", "web"] }
-slotmap = { version = "1.1.1", features = ["serde", "std"] }
 smallvec = { version = "1.16.4", default-features = false, features = ["const_generics", "const_new", "serde", "union", "write"] }
 spin = { version = "0.10.1", features = ["barrier", "lazy", "lock_api", "mutex", "once", "rwlock", "spin_mutex"] }
 spin-0_9 = { package = "spin", version = "0.9.9", features = ["barrier", "lazy", "lock_api", "lock_api_crate", "mutex", "once", "rwlock", "spin_mutex", "std"] }
@@ -937,6 +966,7 @@ strip-ansi-escapes = { version = "0.2.1", default-features = false }
 strum-1f5adca70f036a62 = { package = "strum", version = "0.28.0", features = ["derive", "std", "strum_macros"] }
 terminal-light = { version = "1.9.1", default-features = false }
 time = { version = "0.3.55", features = ["alloc", "formatting", "local-offset", "macros", "parsing", "serde", "serde-human-readable", "serde-well-known", "std"] }
+tinystr-0_7 = { package = "tinystr", version = "0.7.6", default-features = false, features = ["alloc", "serde", "zerovec"] }
 tinystr = { version = "0.8.5", features = ["alloc", "zerovec"] }
 tinyvec = { version = "1.13.3", features = ["alloc", "rustc_1_57", "std"] }
 tokio = { version = "1.53.1", features = ["bytes", "fs", "full", "io-std", "io-util", "libc", "macros", "mio", "net", "parking_lot", "process", "rt", "rt-multi-thread", "signal", "signal-hook-registry", "socket2", "sync", "test-util", "time", "tokio-macros", "tracing"] }
@@ -957,48 +987,39 @@ typenum = { version = "1.20.1", default-features = false, features = ["const-gen
 ucd-trie = { version = "0.1.7", features = ["std"] }
 unicode-properties = { version = "0.1.4", features = ["emoji", "general-category"] }
 url = { version = "2.5.8", features = ["serde", "std"] }
-usvg = { version = "0.48.1", features = ["base64", "flate2", "fontdb", "harfrust", "memmap-fonts", "skrifa", "svgz", "system-fonts", "text", "unicode-bidi", "unicode-script", "unicode-vo", "writer", "xmlwriter"] }
 uuid = { version = "1.26.1", features = ["atomic", "js", "md5", "rng", "serde", "sha1", "std", "v1", "v3", "v4", "v5", "v6", "v7", "v8"] }
 value-bag = { version = "1.14.1", default-features = false, features = ["inline-i128"] }
 vello_gpu = { version = "0.3.0", features = ["text", "webgl", "wgpu", "wgpu_default"] }
 vello_gpu_shaders = { version = "0.3.0", default-features = false, features = ["glsl"] }
 vox = { version = "0.10.0-rc.7", default-features = false, features = ["runtime", "transport-local", "transport-websocket", "transport-websocket-tls"] }
 vte = { version = "0.14.1", default-features = false }
-walkdir = { version = "2.5.0", default-features = false }
 wasm-bindgen = { version = "0.2.127", features = ["std"] }
-wasm-bindgen-futures = { version = "0.4.77", features = ["std"] }
-wasm-bindgen-shared = { version = "0.2.127", default-features = false }
 wasm-splitter = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false }
-wasm-streams = { version = "0.5.0", default-features = false }
 web-sys = { version = "0.3.104", features = ["AbortController", "AbortSignal", "AddEventListenerOptions", "AnalyserNode", "AnimationEvent", "AudioContext", "AudioContextOptions", "AudioContextState", "AudioDestinationNode", "AudioNode", "AudioWorklet", "AudioWorkletNode", "AudioWorkletNodeOptions", "BaseAudioContext", "BinaryType", "Blob", "BlobPropertyBag", "Cache", "CacheStorage", "CharacterData", "Clipboard", "ClipboardEvent", "CloseEvent", "CloseEventInit", "Comment", "CompositionEvent", "Crypto", "CssStyleDeclaration", "CustomEvent", "DataTransfer", "DataTransferItem", "DataTransferItemList", "Document", "DomRect", "DomRectReadOnly", "DomTokenList", "DragEvent", "Element", "ErrorEvent", "Event", "EventSource", "EventSourceInit", "EventTarget", "File", "FileList", "FileReader", "FocusEvent", "FormData", "Headers", "History", "HtmlAudioElement", "HtmlCanvasElement", "HtmlElement", "HtmlFormElement", "HtmlHeadElement", "HtmlInputElement", "HtmlMediaElement", "HtmlSelectElement", "HtmlTextAreaElement", "InputEvent", "IntersectionObserverEntry", "KeyboardEvent", "Location", "MediaElementAudioSourceNode", "MediaQueryList", "MessageEvent", "MessagePort", "MouseEvent", "Navigator", "Node", "NodeList", "ObserverCallback", "Performance", "PointerEvent", "ProgressEvent", "QueuingStrategy", "ReadableByteStreamController", "ReadableStream", "ReadableStreamByobReader", "ReadableStreamByobRequest", "ReadableStreamDefaultController", "ReadableStreamDefaultReader", "ReadableStreamGetReaderOptions", "ReadableStreamReadResult", "ReadableStreamReaderMode", "ReadableStreamType", "ReadableWritablePair", "ReferrerPolicy", "Request", "RequestCache", "RequestCredentials", "RequestInit", "RequestMode", "RequestRedirect", "ResizeObserverEntry", "ResizeObserverSize", "Response", "ResponseInit", "ResponseType", "ScrollBehavior", "ScrollIntoViewOptions", "ScrollLogicalPosition", "ScrollRestoration", "ScrollToOptions", "Selection", "Storage", "StreamPipeOptions", "Text", "Touch", "TouchEvent", "TouchList", "TransformStream", "TransformStreamDefaultController", "Transformer", "TransitionEvent", "UiEvent", "UnderlyingSink", "UnderlyingSource", "Url", "UrlSearchParams", "WebGl2RenderingContext", "WebGlBuffer", "WebGlContextAttributes", "WebGlFramebuffer", "WebGlProgram", "WebGlRenderbuffer", "WebGlShader", "WebGlSync", "WebGlTexture", "WebGlUniformLocation", "WebGlVertexArrayObject", "WebSocket", "WheelEvent", "Window", "Worklet", "WorkletOptions", "WritableStream", "WritableStreamDefaultController", "WritableStreamDefaultWriter", "console", "std"] }
 web-time = { version = "1.1.0", default-features = false, features = ["serde"] }
-writeable = { version = "0.6.4", default-features = false, features = ["alloc"] }
 xterm-query = { version = "0.6.1", default-features = false }
 xxhash-rust = { version = "0.8.18", default-features = false, features = ["const_xxh64", "xxh3", "xxh32"] }
+yoke-0_7 = { package = "yoke", version = "0.7.5", features = ["alloc", "derive", "serde", "zerofrom"] }
 yoke = { version = "0.8.4", features = ["alloc", "derive", "zerofrom"] }
-zerofrom = { version = "0.1.8", default-features = false, features = ["alloc", "derive"] }
 zeroize = { version = "1.9.0", features = ["alloc", "derive", "zeroize_derive"] }
-zerotrie = { version = "0.2.5", default-features = false, features = ["alloc", "yoke", "zerofrom"] }
+zerovec-0_10 = { package = "zerovec", version = "0.10.4", default-features = false, features = ["derive", "serde", "yoke"] }
+zlib-rs = { version = "0.6.8", features = ["c-allocator", "rust-allocator", "std"] }
 
 [target.'cfg(all(target_arch = "x86_64", target_os = "macos"))'.dependencies]
 ahash = { version = "0.8.12", features = ["getrandom", "runtime-rng", "serde", "std"] }
 aho-corasick = { version = "1.1.5", features = ["perf-literal", "std"] }
 alloc-stdlib = { version = "0.2.4", default-features = false }
+allocator-api2 = { version = "0.2.21", features = ["alloc", "std"] }
 anyrender_vello_hybrid = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1", default-features = false, features = ["webgl"] }
 approx = { version = "0.5.1", features = ["std"] }
-async-compression = { version = "0.4.43", default-features = false, features = ["gzip", "tokio"] }
-async-lock = { version = "3.4.2", features = ["std"] }
+arrayvec = { version = "0.7.8", features = ["serde", "std"] }
 async-once-cell = { version = "0.5.4", default-features = false, features = ["std"] }
-aws-lc-rs = { version = "1.18.0", default-features = false, features = ["aws-lc-sys", "prebuilt-nasm"] }
-aws-lc-sys = { version = "0.44.0", default-features = false, features = ["prebuilt-nasm"] }
 axum = { version = "0.8.9", features = ["form", "http1", "http2", "json", "macros", "matched-path", "multipart", "original-uri", "query", "tokio", "tower-log", "tracing", "ws"] }
 axum-extra = { version = "0.12.6", features = ["tracing", "typed-header"] }
 base16ct = { version = "1.0.0", default-features = false, features = ["alloc"] }
 bit-set = { version = "0.8.0", features = ["std"] }
 bit-vec = { version = "0.8.0", features = ["std"] }
-blitz-dom = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11", features = ["accessibility", "accesskit", "autofocus", "custom-widget", "file-input", "svg", "system-fonts", "text-transform-icu", "woff"] }
-blitz-paint = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11", features = ["apple-font-embolden", "custom-widget", "svg"] }
-blitz-shell = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11", features = ["accessibility", "custom-widget", "data-uri", "file-dialog"] }
+bitflags = { version = "2.13.2", default-features = false, features = ["serde", "serde_core", "std"] }
 block-buffer = { version = "0.12.1", default-features = false, features = ["zeroize"] }
 block-padding = { version = "0.3.3", default-features = false }
 block2-0_5 = { package = "block2", version = "0.5.1", features = ["alloc", "std"] }
@@ -1018,14 +1039,13 @@ cipher = { version = "0.4.4", default-features = false, features = ["block-paddi
 clap = { version = "4.6.7", features = ["color", "derive", "env", "error-context", "help", "std", "suggestions", "usage"] }
 clap_builder = { version = "4.6.7", default-features = false, features = ["color", "env", "error-context", "help", "std", "suggestions", "usage"] }
 color = { version = "0.3.3", features = ["bytemuck", "std"] }
-compression-codecs = { version = "0.4.38", default-features = false, features = ["flate2", "gzip", "memchr"] }
-compression-core = { version = "0.4.32", default-features = false }
 concurrent-queue = { version = "2.5.0", features = ["std"] }
 const-str = { version = "0.7.1" }
 constant_time_eq = { version = "0.4.2", features = ["std"] }
 content_disposition = { version = "0.4.0", default-features = false }
 cookie = { version = "0.18.2", default-features = false, features = ["percent-encode", "percent-encoding"] }
 coolor = { version = "1.1.0" }
+core-graphics = { version = "0.25.0", features = ["link"] }
 crossbeam-epoch = { version = "0.9.21", features = ["alloc", "std"] }
 crossterm = { version = "0.29.0", features = ["bracketed-paste", "derive-more", "events", "windows"] }
 crypto-common-c65f7effa3be6d31 = { package = "crypto-common", version = "0.1.7", default-features = false, features = ["getrandom", "rand_core", "std"] }
@@ -1049,14 +1069,17 @@ dioxus-interpreter-js = { git = "https://github.com/DioxusLabs/dioxus", rev = "4
 dioxus-primitives = { git = "https://github.com/FastTrackStudios/dioxus-components", tag = "fts-upstream-2026-11", features = ["router"] }
 dioxus-router = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["html", "wasm-split"] }
 dioxus-server = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["document", "router"] }
+dioxus-vdom = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1", default-features = false, features = ["serialize"] }
+dioxus-vdom-template = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["serialize"] }
 dioxus-web = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["devtools", "document", "hydrate", "mounted"] }
 dispatch = { version = "0.2.0", default-features = false }
 either = { version = "1.18.0", features = ["serde", "std", "use_std"] }
 env_filter = { version = "2.0.0", default-features = false, features = ["regex", "std"] }
 env_logger = { version = "0.11.11", features = ["auto-color", "color", "humantime", "regex"] }
-euclid = { version = "0.22.14", features = ["serde", "std"] }
+euclid = { version = "0.22.14", features = ["libm", "serde", "std"] }
 event-listener = { version = "5.4.2", features = ["parking", "std"] }
 event-listener-strategy = { version = "0.5.4", features = ["std"] }
+exr = { version = "1.74.2", features = ["rayon"] }
 facet = { version = "0.50.0-rc.7", features = ["alloc", "camino", "chrono", "doc", "helpful-derive", "indexmap", "reflect", "std", "uuid"] }
 facet-error = { version = "0.50.0-rc.7", default-features = false }
 facet-pretty = { version = "0.50.0-rc.7", features = ["detect-terminal-theme"] }
@@ -1073,11 +1096,10 @@ genawaiter-macro = { version = "0.99.1", default-features = false, features = ["
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std", "wasm_js"] }
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4.3", default-features = false, features = ["std", "sys_rng"] }
 gloo-net = { version = "0.7.0", features = ["eventsource", "futures-channel", "futures-core", "futures-sink", "http", "json", "pin-project", "serde", "serde_json", "websocket"] }
-gloo-timers = { version = "0.4.0", features = ["futures", "futures-channel", "futures-core"] }
 gloo-utils = { version = "0.3.0", default-features = false, features = ["serde"] }
 h2 = { version = "0.4.19", default-features = false, features = ["stream"] }
 half = { version = "2.7.1", features = ["alloc", "bytemuck", "num-traits", "rand_distr", "std", "use-intrinsics"] }
-hashbrown = { version = "0.14.5", features = ["ahash", "allocator-api2", "inline-more", "raw"] }
+hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14.5", features = ["ahash", "allocator-api2", "inline-more", "raw"] }
 hashbrown-986da7b5efc2b80e = { package = "hashbrown", version = "0.16.1", features = ["allocator-api2", "default-hasher", "equivalent", "inline-more", "raw-entry", "serde"] }
 headers = { version = "0.4.1", default-features = false }
 headers-core = { version = "0.3.0", default-features = false }
@@ -1088,24 +1110,30 @@ hyper = { version = "1.11.1", features = ["client", "full", "http1", "http2", "s
 hyper-rustls = { version = "0.27.9", default-features = false, features = ["aws-lc-rs", "http1", "http2", "log", "logging", "native-tokio", "ring", "rustls-native-certs", "tls12", "webpki-roots", "webpki-tokio"] }
 hyper-tls = { version = "0.6.0", default-features = false, features = ["alpn"] }
 hyper-util = { version = "0.1.20", features = ["client", "client-legacy", "client-pool", "client-proxy", "client-proxy-system", "full", "http1", "http2", "server", "server-auto", "server-graceful", "service", "tokio", "tracing"] }
+icu_collections = { version = "2.4.0", default-features = false, features = ["alloc"] }
+icu_locid = { version = "1.5.0", default-features = false, features = ["zerovec"] }
 icu_normalizer = { version = "2.4.0", default-features = false, features = ["compiled_data", "utf16_iter", "utf8_iter"] }
 icu_segmenter = { version = "2.4.0", default-features = false, features = ["auto", "compiled_data", "lstm"] }
 idna = { version = "1.1.0", features = ["alloc", "compiled_data", "std"] }
 image = { version = "0.25.6", features = ["avif", "bmp", "dds", "default-formats", "exr", "ff", "gif", "hdr", "ico", "jpeg", "png", "pnm", "qoi", "rayon", "tga", "tiff", "webp"] }
+indexmap = { version = "2.14.2", features = ["serde", "std"] }
 inout = { version = "0.1.4", default-features = false, features = ["block-padding"] }
 inventory = { version = "0.3.24", default-features = false }
 ipnet = { version = "2.12.2", features = ["serde", "std"] }
+iroh-base = { version = "1.1.0", features = ["key", "relay"] }
 iroh-metrics = { version = "1.0.1", features = ["metrics"] }
-jiff = { version = "0.2.37", features = ["alloc", "perf-inline", "std", "tz-fat", "tz-system", "tzdb-bundle-platform", "tzdb-concatenated", "tzdb-zoneinfo"] }
-jiff-core = { version = "0.1.1", default-features = false, features = ["alloc", "std", "tz-fat"] }
-js-sys = { version = "0.3.104", features = ["std", "unsafe-eval"] }
+keyboard-types = { version = "0.8.3", features = ["serde", "std"] }
+kurbo = { version = "0.11.3", features = ["std"] }
+kurbo-0_13 = { package = "kurbo", version = "0.13.1", features = ["serde", "std"] }
 libc = { version = "0.2.189", features = ["extra_traits", "std"] }
 libsqlite3-sys = { version = "0.30.1", features = ["bundled", "bundled_bindings", "cc", "min_sqlite_version_3_14_0", "pkg-config", "unlock_notify", "vcpkg"] }
-libz-sys = { version = "1.1.29", default-features = false }
 linebender_resource_handle = { version = "0.1.1", features = ["std"] }
-litemap = { version = "0.8.3", default-features = false, features = ["alloc"] }
+litemap-0_7 = { package = "litemap", version = "0.7.5", default-features = false, features = ["alloc", "serde"] }
 lock_api = { version = "0.4.14", features = ["arc_lock", "atomic_usize"] }
 log = { version = "0.4.34", default-features = false, features = ["alloc", "kv", "kv_unstable", "std", "value-bag"] }
+loro = { version = "1.16.0", features = ["counter"] }
+loro-common = { version = "1.16.0", default-features = false, features = ["counter", "serde_json"] }
+loro-internal = { version = "1.16.0", default-features = false, features = ["counter"] }
 md-5 = { version = "0.10.6", features = ["std"] }
 memchr = { version = "2.8.3", features = ["alloc", "std", "use_std"] }
 memmap2 = { version = "0.9.11", default-features = false, features = ["stable_deref_trait"] }
@@ -1120,7 +1148,9 @@ num-bigint = { version = "0.4.8", features = ["std"] }
 num-complex = { version = "0.4.6", features = ["bytemuck", "std"] }
 num-integer = { version = "0.1.47", features = ["i128", "std"] }
 num-rational = { version = "0.4.2", features = ["num-bigint", "num-bigint-std", "std"] }
+num_enum = { version = "0.5.11", features = ["std"] }
 objc2-0_5 = { package = "objc2", version = "0.5.2", features = ["alloc", "relax-sign-encoding", "std"] }
+objc2 = { version = "0.6.5", features = ["alloc", "disable-encoding-assertions", "exception", "relax-sign-encoding", "std"] }
 objc2-app-kit-0_2 = { package = "objc2-app-kit", version = "0.2.2", features = ["NSAccessibility", "NSAccessibilityConstants", "NSAccessibilityElement", "NSAccessibilityProtocols", "NSAppearance", "NSApplication", "NSBitmapImageRep", "NSButton", "NSColor", "NSControl", "NSCursor", "NSDragging", "NSEvent", "NSGraphics", "NSGraphicsContext", "NSImage", "NSImageRep", "NSMenu", "NSMenuItem", "NSOpenGLView", "NSPasteboard", "NSResponder", "NSRunningApplication", "NSScreen", "NSText", "NSTextInputClient", "NSTextInputContext", "NSView", "NSWindow", "NSWindowScripting", "NSWindowTabGroup", "alloc", "bitflags", "std"] }
 objc2-app-kit = { version = "0.3.2", features = ["AppKitDefines", "AppKitErrors", "NSATSTypesetter", "NSAccessibility", "NSAccessibilityColor", "NSAccessibilityConstants", "NSAccessibilityCustomAction", "NSAccessibilityCustomRotor", "NSAccessibilityElement", "NSAccessibilityProtocols", "NSActionCell", "NSAdaptiveImageGlyph", "NSAffineTransform", "NSAlert", "NSAlignmentFeedbackFilter", "NSAnimation", "NSAnimationContext", "NSAppearance", "NSAppleScriptExtensions", "NSApplication", "NSApplicationScripting", "NSArrayController", "NSAttributedString", "NSBackgroundExtensionView", "NSBezierPath", "NSBitmapImageRep", "NSBox", "NSBrowser", "NSBrowserCell", "NSButton", "NSButtonCell", "NSButtonTouchBarItem", "NSCIImageRep", "NSCachedImageRep", "NSCandidateListTouchBarItem", "NSCell", "NSClickGestureRecognizer", "NSClipView", "NSCollectionView", "NSCollectionViewCompositionalLayout", "NSCollectionViewFlowLayout", "NSCollectionViewGridLayout", "NSCollectionViewLayout", "NSCollectionViewTransitionLayout", "NSColor", "NSColorList", "NSColorPanel", "NSColorPicker", "NSColorPickerTouchBarItem", "NSColorPicking", "NSColorSampler", "NSColorSpace", "NSColorWell", "NSComboBox", "NSComboBoxCell", "NSComboButton", "NSControl", "NSController", "NSCursor", "NSCustomImageRep", "NSCustomTouchBarItem", "NSDataAsset", "NSDatePicker", "NSDatePickerCell", "NSDictionaryController", "NSDiffableDataSource", "NSDirection", "NSDockTile", "NSDocument", "NSDocumentController", "NSDocumentScripting", "NSDragging", "NSDraggingItem", "NSDraggingSession", "NSDrawer", "NSEPSImageRep", "NSErrors", "NSEvent", "NSFilePromiseProvider", "NSFilePromiseReceiver", "NSFileWrapperExtensions", "NSFont", "NSFontAssetRequest", "NSFontCollection", "NSFontDescriptor", "NSFontManager", "NSFontPanel", "NSForm", "NSFormCell", "NSGestureRecognizer", "NSGlassEffectView", "NSGlyphGenerator", "NSGlyphInfo", "NSGradient", "NSGraphics", "NSGraphicsContext", "NSGridView", "NSGroupTouchBarItem", "NSHapticFeedback", "NSHelpManager", "NSImage", "NSImageCell", "NSImageRep", "NSImageView", "NSInputManager", "NSInputServer", "NSInterfaceStyle", "NSItemBadge", "NSItemProvider", "NSKeyValueBinding", "NSLayoutAnchor", "NSLayoutConstraint", "NSLayoutGuide", "NSLayoutManager", "NSLevelIndicator", "NSLevelIndicatorCell", "NSMagnificationGestureRecognizer", "NSMatrix", "NSMediaLibraryBrowserController", "NSMenu", "NSMenuItem", "NSMenuItemBadge", "NSMenuItemCell", "NSMenuToolbarItem", "NSMovie", "NSNib", "NSNibConnector", "NSNibControlConnector", "NSNibDeclarations", "NSNibLoading", "NSNibOutletConnector", "NSObjectController", "NSOpenGL", "NSOpenGLLayer", "NSOpenGLView", "NSOpenPanel", "NSOutlineView", "NSPDFImageRep", "NSPDFInfo", "NSPDFPanel", "NSPICTImageRep", "NSPageController", "NSPageLayout", "NSPanGestureRecognizer", "NSPanel", "NSParagraphStyle", "NSPasteboard", "NSPasteboardItem", "NSPathCell", "NSPathComponentCell", "NSPathControl", "NSPathControlItem", "NSPersistentDocument", "NSPickerTouchBarItem", "NSPopUpButton", "NSPopUpButtonCell", "NSPopover", "NSPopoverTouchBarItem", "NSPredicateEditor", "NSPredicateEditorRowTemplate", "NSPressGestureRecognizer", "NSPressureConfiguration", "NSPreviewRepresentingActivityItem", "NSPrintInfo", "NSPrintOperation", "NSPrintPanel", "NSPrinter", "NSProgressIndicator", "NSResponder", "NSRotationGestureRecognizer", "NSRuleEditor", "NSRulerMarker", "NSRulerView", "NSRunningApplication", "NSSavePanel", "NSScreen", "NSScrollView", "NSScroller", "NSScrubber", "NSScrubberItemView", "NSScrubberLayout", "NSSearchField", "NSSearchFieldCell", "NSSearchToolbarItem", "NSSecureTextField", "NSSegmentedCell", "NSSegmentedControl", "NSShadow", "NSSharingCollaborationModeRestriction", "NSSharingService", "NSSharingServicePickerToolbarItem", "NSSharingServicePickerTouchBarItem", "NSSlider", "NSSliderAccessory", "NSSliderCell", "NSSliderTouchBarItem", "NSSound", "NSSpeechRecognizer", "NSSpeechSynthesizer", "NSSpellChecker", "NSSpellProtocol", "NSSplitView", "NSSplitViewController", "NSSplitViewItem", "NSSplitViewItemAccessoryViewController", "NSStackView", "NSStatusBar", "NSStatusBarButton", "NSStatusItem", "NSStepper", "NSStepperCell", "NSStepperTouchBarItem", "NSStoryboard", "NSStoryboardSegue", "NSStringDrawing", "NSSwitch", "NSTabView", "NSTabViewController", "NSTabViewItem", "NSTableCellView", "NSTableColumn", "NSTableHeaderCell", "NSTableHeaderView", "NSTableRowView", "NSTableView", "NSTableViewDiffableDataSource", "NSTableViewRowAction", "NSText", "NSTextAlternatives", "NSTextAttachment", "NSTextAttachmentCell", "NSTextCheckingClient", "NSTextCheckingController", "NSTextContainer", "NSTextContent", "NSTextContentManager", "NSTextElement", "NSTextField", "NSTextFieldCell", "NSTextFinder", "NSTextInputClient", "NSTextInputContext", "NSTextInsertionIndicator", "NSTextLayoutFragment", "NSTextLayoutManager", "NSTextLineFragment", "NSTextList", "NSTextListElement", "NSTextRange", "NSTextSelection", "NSTextSelectionNavigation", "NSTextStorage", "NSTextStorageScripting", "NSTextTable", "NSTextView", "NSTextViewportLayoutController", "NSTintConfiguration", "NSTintProminence", "NSTitlebarAccessoryViewController", "NSTokenField", "NSTokenFieldCell", "NSToolbar", "NSToolbarItem", "NSToolbarItemGroup", "NSTouch", "NSTouchBar", "NSTouchBarItem", "NSTrackingArea", "NSTrackingSeparatorToolbarItem", "NSTreeController", "NSTreeNode", "NSTypesetter", "NSUserActivity", "NSUserDefaultsController", "NSUserInterfaceCompression", "NSUserInterfaceItemIdentification", "NSUserInterfaceItemSearching", "NSUserInterfaceLayout", "NSUserInterfaceValidation", "NSView", "NSViewController", "NSViewLayoutRegion", "NSVisualEffectView", "NSWindow", "NSWindowController", "NSWindowRestoration", "NSWindowScripting", "NSWindowTab", "NSWindowTabGroup", "NSWorkspace", "NSWritingToolsCoordinator", "NSWritingToolsCoordinatorAnimationParameters", "NSWritingToolsCoordinatorContext", "alloc", "bitflags", "block2", "libc", "objc2-cloud-kit", "objc2-core-data", "objc2-core-foundation", "objc2-core-graphics", "objc2-core-image", "objc2-core-text", "objc2-core-video", "objc2-quartz-core", "std"] }
 objc2-cloud-kit = { version = "0.3.2", default-features = false, features = ["CKContainer", "CKRecord", "CKShare", "CKShareMetadata", "bitflags"] }
@@ -1130,8 +1160,8 @@ objc2-core-graphics = { version = "0.3.2", features = ["CGAffineTransform", "CGB
 objc2-core-image = { version = "0.3.2", default-features = false, features = ["CIColor", "CIContext", "CIFilter", "CIImage"] }
 objc2-core-text = { version = "0.3.2", default-features = false, features = ["CTFont", "CTFontCollection", "CTFontDescriptor", "CTGlyphInfo", "bitflags", "objc2"] }
 objc2-core-video = { version = "0.3.2", default-features = false, features = ["CVBase", "CVDisplayLink", "CVReturn", "alloc", "bitflags", "objc2", "objc2-core-graphics", "std"] }
-objc2-foundation-0_2 = { package = "objc2-foundation", version = "0.2.2", features = ["NSArray", "NSAttributedString", "NSBundle", "NSCoder", "NSData", "NSDate", "NSDictionary", "NSDistributedNotificationCenter", "NSEnumerator", "NSError", "NSException", "NSFileWrapper", "NSFormatter", "NSGeometry", "NSItemProvider", "NSKeyValueObserving", "NSLocale", "NSNotification", "NSObjCRuntime", "NSObject", "NSPathUtilities", "NSProcessInfo", "NSRange", "NSRunLoop", "NSScriptCommand", "NSScriptStandardSuiteCommands", "NSSet", "NSString", "NSThread", "NSURL", "NSUndoManager", "NSUserActivity", "NSValue", "NSZone", "alloc", "bitflags", "block2", "dispatch", "std"] }
-objc2-foundation = { version = "0.3.2", features = ["FoundationErrors", "FoundationLegacySwiftCompatibility", "NSAffineTransform", "NSAppleEventDescriptor", "NSAppleEventManager", "NSAppleScript", "NSArchiver", "NSArray", "NSAttributedString", "NSAutoreleasePool", "NSBackgroundActivityScheduler", "NSBundle", "NSByteCountFormatter", "NSByteOrder", "NSCache", "NSCalendar", "NSCalendarDate", "NSCharacterSet", "NSClassDescription", "NSCoder", "NSComparisonPredicate", "NSCompoundPredicate", "NSConnection", "NSData", "NSDate", "NSDateComponentsFormatter", "NSDateFormatter", "NSDateInterval", "NSDateIntervalFormatter", "NSDebug", "NSDecimal", "NSDecimalNumber", "NSDictionary", "NSDistantObject", "NSDistributedLock", "NSDistributedNotificationCenter", "NSEnergyFormatter", "NSEnumerator", "NSError", "NSException", "NSExpression", "NSExtensionContext", "NSExtensionItem", "NSExtensionRequestHandling", "NSFileCoordinator", "NSFileHandle", "NSFileManager", "NSFilePresenter", "NSFileVersion", "NSFileWrapper", "NSFormatter", "NSGarbageCollector", "NSGeometry", "NSHFSFileTypes", "NSHTTPCookie", "NSHTTPCookieStorage", "NSHashTable", "NSHost", "NSISO8601DateFormatter", "NSIndexPath", "NSIndexSet", "NSInflectionRule", "NSInvocation", "NSItemProvider", "NSJSONSerialization", "NSKeyValueCoding", "NSKeyValueObserving", "NSKeyValueSharedObservers", "NSKeyedArchiver", "NSLengthFormatter", "NSLinguisticTagger", "NSListFormatter", "NSLocale", "NSLocalizedNumberFormatRule", "NSLock", "NSMapTable", "NSMassFormatter", "NSMeasurement", "NSMeasurementFormatter", "NSMetadata", "NSMetadataAttributes", "NSMethodSignature", "NSMorphology", "NSNetServices", "NSNotification", "NSNotificationQueue", "NSNull", "NSNumberFormatter", "NSObjCRuntime", "NSObject", "NSObjectScripting", "NSOperation", "NSOrderedCollectionChange", "NSOrderedCollectionDifference", "NSOrderedSet", "NSOrthography", "NSPathUtilities", "NSPersonNameComponents", "NSPersonNameComponentsFormatter", "NSPointerArray", "NSPointerFunctions", "NSPort", "NSPortCoder", "NSPortMessage", "NSPortNameServer", "NSPredicate", "NSProcessInfo", "NSProgress", "NSPropertyList", "NSProtocolChecker", "NSProxy", "NSRange", "NSRegularExpression", "NSRelativeDateTimeFormatter", "NSRunLoop", "NSScanner", "NSScriptClassDescription", "NSScriptCoercionHandler", "NSScriptCommand", "NSScriptCommandDescription", "NSScriptExecutionContext", "NSScriptKeyValueCoding", "NSScriptObjectSpecifiers", "NSScriptStandardSuiteCommands", "NSScriptSuiteRegistry", "NSScriptWhoseTests", "NSSet", "NSSortDescriptor", "NSSpellServer", "NSStream", "NSString", "NSTask", "NSTermOfAddress", "NSTextCheckingResult", "NSThread", "NSTimeZone", "NSTimer", "NSURL", "NSURLAuthenticationChallenge", "NSURLCache", "NSURLConnection", "NSURLCredential", "NSURLCredentialStorage", "NSURLDownload", "NSURLError", "NSURLHandle", "NSURLProtectionSpace", "NSURLProtocol", "NSURLRequest", "NSURLResponse", "NSURLSession", "NSUUID", "NSUbiquitousKeyValueStore", "NSUndoManager", "NSUnit", "NSUserActivity", "NSUserDefaults", "NSUserNotification", "NSUserScriptTask", "NSValue", "NSValueTransformer", "NSXMLDTD", "NSXMLDTDNode", "NSXMLDocument", "NSXMLElement", "NSXMLNode", "NSXMLNodeOptions", "NSXMLParser", "NSXPCConnection", "NSZone", "alloc", "bitflags", "block2", "libc", "objc2-core-foundation", "std"] }
+objc2-foundation-6f8ce4dd05d13bba = { package = "objc2-foundation", version = "0.2.2", features = ["NSArray", "NSAttributedString", "NSBundle", "NSCoder", "NSData", "NSDate", "NSDictionary", "NSDistributedNotificationCenter", "NSEnumerator", "NSError", "NSException", "NSFileWrapper", "NSFormatter", "NSGeometry", "NSItemProvider", "NSKeyValueObserving", "NSLocale", "NSNotification", "NSObjCRuntime", "NSObject", "NSPathUtilities", "NSProcessInfo", "NSRange", "NSRunLoop", "NSScriptCommand", "NSScriptStandardSuiteCommands", "NSSet", "NSString", "NSThread", "NSURL", "NSUndoManager", "NSUserActivity", "NSValue", "NSZone", "alloc", "bitflags", "block2", "dispatch", "std"] }
+objc2-foundation-468e82937335b1c9 = { package = "objc2-foundation", version = "0.3.2", features = ["FoundationErrors", "FoundationLegacySwiftCompatibility", "NSAffineTransform", "NSAppleEventDescriptor", "NSAppleEventManager", "NSAppleScript", "NSArchiver", "NSArray", "NSAttributedString", "NSAutoreleasePool", "NSBackgroundActivityScheduler", "NSBundle", "NSByteCountFormatter", "NSByteOrder", "NSCache", "NSCalendar", "NSCalendarDate", "NSCharacterSet", "NSClassDescription", "NSCoder", "NSComparisonPredicate", "NSCompoundPredicate", "NSConnection", "NSData", "NSDate", "NSDateComponentsFormatter", "NSDateFormatter", "NSDateInterval", "NSDateIntervalFormatter", "NSDebug", "NSDecimal", "NSDecimalNumber", "NSDictionary", "NSDistantObject", "NSDistributedLock", "NSDistributedNotificationCenter", "NSEnergyFormatter", "NSEnumerator", "NSError", "NSException", "NSExpression", "NSExtensionContext", "NSExtensionItem", "NSExtensionRequestHandling", "NSFileCoordinator", "NSFileHandle", "NSFileManager", "NSFilePresenter", "NSFileVersion", "NSFileWrapper", "NSFormatter", "NSGarbageCollector", "NSGeometry", "NSHFSFileTypes", "NSHTTPCookie", "NSHTTPCookieStorage", "NSHashTable", "NSHost", "NSISO8601DateFormatter", "NSIndexPath", "NSIndexSet", "NSInflectionRule", "NSInvocation", "NSItemProvider", "NSJSONSerialization", "NSKeyValueCoding", "NSKeyValueObserving", "NSKeyValueSharedObservers", "NSKeyedArchiver", "NSLengthFormatter", "NSLinguisticTagger", "NSListFormatter", "NSLocale", "NSLocalizedNumberFormatRule", "NSLock", "NSMapTable", "NSMassFormatter", "NSMeasurement", "NSMeasurementFormatter", "NSMetadata", "NSMetadataAttributes", "NSMethodSignature", "NSMorphology", "NSNetServices", "NSNotification", "NSNotificationQueue", "NSNull", "NSNumberFormatter", "NSObjCRuntime", "NSObject", "NSObjectScripting", "NSOperation", "NSOrderedCollectionChange", "NSOrderedCollectionDifference", "NSOrderedSet", "NSOrthography", "NSPathUtilities", "NSPersonNameComponents", "NSPersonNameComponentsFormatter", "NSPointerArray", "NSPointerFunctions", "NSPort", "NSPortCoder", "NSPortMessage", "NSPortNameServer", "NSPredicate", "NSProcessInfo", "NSProgress", "NSPropertyList", "NSProtocolChecker", "NSProxy", "NSRange", "NSRegularExpression", "NSRelativeDateTimeFormatter", "NSRunLoop", "NSScanner", "NSScriptClassDescription", "NSScriptCoercionHandler", "NSScriptCommand", "NSScriptCommandDescription", "NSScriptExecutionContext", "NSScriptKeyValueCoding", "NSScriptObjectSpecifiers", "NSScriptStandardSuiteCommands", "NSScriptSuiteRegistry", "NSScriptWhoseTests", "NSSet", "NSSortDescriptor", "NSSpellServer", "NSStream", "NSString", "NSTask", "NSTermOfAddress", "NSTextCheckingResult", "NSThread", "NSTimeZone", "NSTimer", "NSURL", "NSURLAuthenticationChallenge", "NSURLCache", "NSURLConnection", "NSURLCredential", "NSURLCredentialStorage", "NSURLDownload", "NSURLError", "NSURLHandle", "NSURLProtectionSpace", "NSURLProtocol", "NSURLRequest", "NSURLResponse", "NSURLSession", "NSUUID", "NSUbiquitousKeyValueStore", "NSUndoManager", "NSUnit", "NSUserActivity", "NSUserDefaults", "NSUserNotification", "NSUserScriptTask", "NSValue", "NSValueTransformer", "NSXMLDTD", "NSXMLDTDNode", "NSXMLDocument", "NSXMLElement", "NSXMLNode", "NSXMLNodeOptions", "NSXMLParser", "NSXPCConnection", "NSZone", "alloc", "bitflags", "block2", "libc", "objc2-core-foundation", "std"] }
 objc2-quartz-core = { version = "0.3.2", default-features = false, features = ["CADisplayLink", "CALayer", "CAMediaTiming", "CAMediaTimingFunction", "CAMetalLayer", "CAOpenGLLayer", "alloc", "bitflags", "objc2-core-foundation", "objc2-core-graphics", "objc2-metal", "std"] }
 objc2-security = { version = "0.3.2", default-features = false, features = ["Authorization", "SecBase", "bitflags", "objc2"] }
 once_cell = { version = "1.21.4", features = ["alloc", "critical-section", "portable-atomic", "race", "std"] }
@@ -1142,15 +1172,16 @@ opentelemetry_sdk = { version = "0.30.0", features = ["experimental_async_runtim
 palette = { version = "0.7.7", features = ["alloc", "approx", "libm", "named", "named_from_str", "phf", "std"] }
 palette_math = { version = "0.7.7", default-features = false, features = ["alloc", "libm", "std"] }
 parking_lot = { version = "0.12.5", features = ["arc_lock", "send_guard"] }
+parlance = { version = "0.1.1", default-features = false, features = ["bytemuck", "std"] }
 parley = { version = "0.12.0", features = ["bytemuck", "std", "system"] }
 pathdiff = { version = "0.2.3", default-features = false, features = ["camino"] }
 peniko = { version = "0.6.1", features = ["bytemuck", "std"] }
 petgraph = { version = "0.8.3", features = ["graphmap", "matrix_graph", "stable_graph", "std"] }
-phf = { version = "0.13.1", features = ["macros", "phf_macros", "std"] }
-phf_shared = { version = "0.13.1", features = ["std"] }
+phf-0_13 = { package = "phf", version = "0.13.1", features = ["macros", "phf_macros", "std"] }
+phf_shared-0_13 = { package = "phf_shared", version = "0.13.1", features = ["std"] }
 pkcs8 = { version = "0.11.0", default-features = false, features = ["alloc", "pem", "std"] }
+polycool = { version = "0.4.0", features = ["std"] }
 postcard = { version = "1.1.3", features = ["alloc", "experimental-derive", "heapless", "heapless-cas", "postcard-derive", "use-std"] }
-potential_utf = { version = "0.1.6", default-features = false, features = ["alloc", "writeable", "zerovec"] }
 profiling = { version = "1.0.18", features = ["procmacros", "profiling-procmacros"] }
 psl-types = { version = "2.0.11", default-features = false }
 publicsuffix = { version = "2.3.0", features = ["idna", "punycode"] }
@@ -1167,20 +1198,17 @@ reqwest-594e8ee84c453af0 = { package = "reqwest", version = "0.13.5", default-fe
 rfd = { version = "0.17.2", features = ["pollster", "wayland", "wayland-backend", "wayland-client", "wayland-protocols", "xdg-portal"] }
 ring = { version = "0.17.14", features = ["alloc", "dev_urandom_fallback", "std"] }
 rust_decimal = { version = "1.43.0", features = ["maths", "serde", "std"] }
-rustix = { version = "1.1.5", features = ["alloc", "event", "fs", "io_uring", "net", "pipe", "process", "std", "thread", "time"] }
+rustix = { version = "1.1.5", features = ["alloc", "event", "fs", "io_uring", "net", "pipe", "process", "std", "system", "thread", "time"] }
 rustls = { version = "0.23.46", features = ["aws-lc-rs", "aws_lc_rs", "log", "logging", "prefer-post-quantum", "ring", "std", "tls12"] }
 rustls-native-certs = { version = "0.8.4", default-features = false }
 rustls-pemfile = { version = "2.2.0", features = ["std"] }
-same-file = { version = "1.0.6", default-features = false }
+rustls-webpki = { version = "0.103.15", default-features = false, features = ["alloc", "aws-lc-rs", "ring", "std"] }
 scopeguard = { version = "1.2.0", features = ["use_std"] }
 sea-orm = { version = "1.1.20", features = ["bigdecimal", "chrono", "macros", "postgres-array", "runtime-tokio", "runtime-tokio-rustls", "rust_decimal", "sea-query-binder", "serde_json", "sqlx", "sqlx-dep", "sqlx-postgres", "sqlx-sqlite", "time", "uuid", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
 sea-query = { version = "0.32.7", default-features = false, features = ["backend-mysql", "backend-postgres", "backend-sqlite", "bigdecimal", "chrono", "derive", "hashable-value", "ordered-float", "postgres-array", "rust_decimal", "sea-query-derive", "serde_json", "thread-safe", "time", "uuid", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
 sea-query-binder = { version = "0.7.0", default-features = false, features = ["bigdecimal", "chrono", "postgres-array", "runtime-tokio-rustls", "rust_decimal", "serde_json", "sqlx", "sqlx-postgres", "sqlx-sqlite", "time", "uuid", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
-seize = { version = "0.5.1", features = ["fast-barrier", "libc", "windows-sys"] }
 semver = { version = "1.0.28", features = ["serde", "std"] }
-send_wrapper = { version = "0.6.0", default-features = false, features = ["futures", "futures-core"] }
 serde = { version = "1.0.229", features = ["alloc", "derive", "rc", "serde_derive", "std"] }
-serde-wasm-bindgen = { version = "0.6.5", default-features = false }
 serde_core = { version = "1.0.229", features = ["alloc", "rc", "result", "std"] }
 serde_json = { version = "1.0.151", features = ["alloc", "float_roundtrip", "raw_value", "std", "unbounded_depth"] }
 serde_qs = { version = "0.15.0" }
@@ -1190,7 +1218,6 @@ signal-hook-mio = { version = "0.2.5", default-features = false, features = ["mi
 signature = { version = "3.0.0", default-features = false, features = ["alloc", "digest", "rand_core"] }
 skrifa = { version = "0.44.0", features = ["autohint_shaping", "std"] }
 sledgehammer_bindgen = { version = "0.6.0", default-features = false, features = ["wasm-bindgen", "web"] }
-slotmap = { version = "1.1.1", features = ["serde", "std"] }
 smallvec = { version = "1.16.4", default-features = false, features = ["const_generics", "const_new", "serde", "union", "write"] }
 spin = { version = "0.10.1", features = ["barrier", "lazy", "lock_api", "mutex", "once", "rwlock", "spin_mutex"] }
 spin-0_9 = { package = "spin", version = "0.9.9", features = ["barrier", "lazy", "lock_api", "lock_api_crate", "mutex", "once", "rwlock", "spin_mutex", "std"] }
@@ -1201,6 +1228,7 @@ strip-ansi-escapes = { version = "0.2.1", default-features = false }
 strum-1f5adca70f036a62 = { package = "strum", version = "0.28.0", features = ["derive", "std", "strum_macros"] }
 terminal-light = { version = "1.9.1", default-features = false }
 time = { version = "0.3.55", features = ["alloc", "formatting", "local-offset", "macros", "parsing", "serde", "serde-human-readable", "serde-well-known", "std"] }
+tinystr-0_7 = { package = "tinystr", version = "0.7.6", default-features = false, features = ["alloc", "serde", "zerovec"] }
 tinystr = { version = "0.8.5", features = ["alloc", "zerovec"] }
 tinyvec = { version = "1.13.3", features = ["alloc", "rustc_1_57", "std"] }
 tokio = { version = "1.53.1", features = ["bytes", "fs", "full", "io-std", "io-util", "libc", "macros", "mio", "net", "parking_lot", "process", "rt", "rt-multi-thread", "signal", "signal-hook-registry", "socket2", "sync", "test-util", "time", "tokio-macros", "tracing"] }
@@ -1221,48 +1249,39 @@ typenum = { version = "1.20.1", default-features = false, features = ["const-gen
 ucd-trie = { version = "0.1.7", features = ["std"] }
 unicode-properties = { version = "0.1.4", features = ["emoji", "general-category"] }
 url = { version = "2.5.8", features = ["serde", "std"] }
-usvg = { version = "0.48.1", features = ["base64", "flate2", "fontdb", "harfrust", "memmap-fonts", "skrifa", "svgz", "system-fonts", "text", "unicode-bidi", "unicode-script", "unicode-vo", "writer", "xmlwriter"] }
 uuid = { version = "1.26.1", features = ["atomic", "js", "md5", "rng", "serde", "sha1", "std", "v1", "v3", "v4", "v5", "v6", "v7", "v8"] }
 value-bag = { version = "1.14.1", default-features = false, features = ["inline-i128"] }
 vello_gpu = { version = "0.3.0", features = ["text", "webgl", "wgpu", "wgpu_default"] }
 vello_gpu_shaders = { version = "0.3.0", default-features = false, features = ["glsl"] }
 vox = { version = "0.10.0-rc.7", default-features = false, features = ["runtime", "transport-local", "transport-websocket", "transport-websocket-tls"] }
 vte = { version = "0.14.1", default-features = false }
-walkdir = { version = "2.5.0", default-features = false }
 wasm-bindgen = { version = "0.2.127", features = ["std"] }
-wasm-bindgen-futures = { version = "0.4.77", features = ["std"] }
-wasm-bindgen-shared = { version = "0.2.127", default-features = false }
 wasm-splitter = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false }
-wasm-streams = { version = "0.5.0", default-features = false }
 web-sys = { version = "0.3.104", features = ["AbortController", "AbortSignal", "AddEventListenerOptions", "AnalyserNode", "AnimationEvent", "AudioContext", "AudioContextOptions", "AudioContextState", "AudioDestinationNode", "AudioNode", "AudioWorklet", "AudioWorkletNode", "AudioWorkletNodeOptions", "BaseAudioContext", "BinaryType", "Blob", "BlobPropertyBag", "Cache", "CacheStorage", "CharacterData", "Clipboard", "ClipboardEvent", "CloseEvent", "CloseEventInit", "Comment", "CompositionEvent", "Crypto", "CssStyleDeclaration", "CustomEvent", "DataTransfer", "DataTransferItem", "DataTransferItemList", "Document", "DomRect", "DomRectReadOnly", "DomTokenList", "DragEvent", "Element", "ErrorEvent", "Event", "EventSource", "EventSourceInit", "EventTarget", "File", "FileList", "FileReader", "FocusEvent", "FormData", "Headers", "History", "HtmlAudioElement", "HtmlCanvasElement", "HtmlElement", "HtmlFormElement", "HtmlHeadElement", "HtmlInputElement", "HtmlMediaElement", "HtmlSelectElement", "HtmlTextAreaElement", "InputEvent", "IntersectionObserverEntry", "KeyboardEvent", "Location", "MediaElementAudioSourceNode", "MediaQueryList", "MessageEvent", "MessagePort", "MouseEvent", "Navigator", "Node", "NodeList", "ObserverCallback", "Performance", "PointerEvent", "ProgressEvent", "QueuingStrategy", "ReadableByteStreamController", "ReadableStream", "ReadableStreamByobReader", "ReadableStreamByobRequest", "ReadableStreamDefaultController", "ReadableStreamDefaultReader", "ReadableStreamGetReaderOptions", "ReadableStreamReadResult", "ReadableStreamReaderMode", "ReadableStreamType", "ReadableWritablePair", "ReferrerPolicy", "Request", "RequestCache", "RequestCredentials", "RequestInit", "RequestMode", "RequestRedirect", "ResizeObserverEntry", "ResizeObserverSize", "Response", "ResponseInit", "ResponseType", "ScrollBehavior", "ScrollIntoViewOptions", "ScrollLogicalPosition", "ScrollRestoration", "ScrollToOptions", "Selection", "Storage", "StreamPipeOptions", "Text", "Touch", "TouchEvent", "TouchList", "TransformStream", "TransformStreamDefaultController", "Transformer", "TransitionEvent", "UiEvent", "UnderlyingSink", "UnderlyingSource", "Url", "UrlSearchParams", "WebGl2RenderingContext", "WebGlBuffer", "WebGlContextAttributes", "WebGlFramebuffer", "WebGlProgram", "WebGlRenderbuffer", "WebGlShader", "WebGlSync", "WebGlTexture", "WebGlUniformLocation", "WebGlVertexArrayObject", "WebSocket", "WheelEvent", "Window", "Worklet", "WorkletOptions", "WritableStream", "WritableStreamDefaultController", "WritableStreamDefaultWriter", "console", "std"] }
 web-time = { version = "1.1.0", default-features = false, features = ["serde"] }
-writeable = { version = "0.6.4", default-features = false, features = ["alloc"] }
 xterm-query = { version = "0.6.1", default-features = false }
 xxhash-rust = { version = "0.8.18", default-features = false, features = ["const_xxh64", "xxh3", "xxh32"] }
+yoke-0_7 = { package = "yoke", version = "0.7.5", features = ["alloc", "derive", "serde", "zerofrom"] }
 yoke = { version = "0.8.4", features = ["alloc", "derive", "zerofrom"] }
-zerofrom = { version = "0.1.8", default-features = false, features = ["alloc", "derive"] }
 zeroize = { version = "1.9.0", features = ["alloc", "derive", "zeroize_derive"] }
-zerotrie = { version = "0.2.5", default-features = false, features = ["alloc", "yoke", "zerofrom"] }
+zerovec-0_10 = { package = "zerovec", version = "0.10.4", default-features = false, features = ["derive", "serde", "yoke"] }
+zlib-rs = { version = "0.6.8", features = ["c-allocator", "rust-allocator", "std"] }
 
 [target.'cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"))'.dependencies]
 ahash = { version = "0.8.12", features = ["getrandom", "no-rng", "runtime-rng", "serde", "std"] }
 aho-corasick = { version = "1.1.5", features = ["perf-literal", "std"] }
 alloc-stdlib = { version = "0.2.4", default-features = false }
+allocator-api2 = { version = "0.2.21", features = ["alloc", "std"] }
 anyrender_vello_hybrid = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1", default-features = false, features = ["webgl"] }
 approx = { version = "0.5.1", features = ["std"] }
-async-compression = { version = "0.4.43", default-features = false, features = ["gzip", "tokio"] }
-async-lock = { version = "3.4.2", features = ["std"] }
+arrayvec = { version = "0.7.8", features = ["serde", "std"] }
 async-once-cell = { version = "0.5.4", default-features = false, features = ["std"] }
-aws-lc-rs = { version = "1.18.0", default-features = false, features = ["aws-lc-sys", "prebuilt-nasm"] }
-aws-lc-sys = { version = "0.44.0", default-features = false, features = ["prebuilt-nasm"] }
 axum = { version = "0.8.9", features = ["form", "http1", "http2", "json", "macros", "matched-path", "multipart", "original-uri", "query", "tokio", "tower-log", "tracing", "ws"] }
 axum-extra = { version = "0.12.6", features = ["tracing", "typed-header"] }
 base16ct = { version = "1.0.0", default-features = false, features = ["alloc"] }
 bit-set = { version = "0.8.0", features = ["std"] }
 bit-vec = { version = "0.8.0", features = ["std"] }
-blitz-dom = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11", features = ["accessibility", "accesskit", "autofocus", "custom-widget", "file-input", "svg", "system-fonts", "text-transform-icu", "woff"] }
-blitz-paint = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11", features = ["apple-font-embolden", "custom-widget", "svg"] }
-blitz-shell = { git = "https://github.com/FastTrackStudios/blitz", tag = "fts-upstream-2026-11", features = ["accessibility", "custom-widget", "data-uri", "file-dialog"] }
+bitflags = { version = "2.13.2", default-features = false, features = ["serde", "serde_core", "std"] }
 block-buffer = { version = "0.12.1", default-features = false, features = ["zeroize"] }
 block-padding = { version = "0.3.3", default-features = false }
 brotli-decompressor = { version = "5.0.3", features = ["alloc-stdlib", "std"] }
@@ -1281,8 +1300,6 @@ cipher = { version = "0.4.4", default-features = false, features = ["block-paddi
 clap = { version = "4.6.7", features = ["color", "derive", "env", "error-context", "help", "std", "suggestions", "usage"] }
 clap_builder = { version = "4.6.7", default-features = false, features = ["color", "env", "error-context", "help", "std", "suggestions", "usage"] }
 color = { version = "0.3.3", features = ["bytemuck", "std"] }
-compression-codecs = { version = "0.4.38", default-features = false, features = ["flate2", "gzip", "memchr"] }
-compression-core = { version = "0.4.32", default-features = false }
 concurrent-queue = { version = "2.5.0", features = ["std"] }
 const-str = { version = "0.7.1" }
 constant_time_eq = { version = "0.4.2", features = ["std"] }
@@ -1312,14 +1329,17 @@ dioxus-interpreter-js = { git = "https://github.com/DioxusLabs/dioxus", rev = "4
 dioxus-primitives = { git = "https://github.com/FastTrackStudios/dioxus-components", tag = "fts-upstream-2026-11", features = ["router"] }
 dioxus-router = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["html", "wasm-split"] }
 dioxus-server = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["document", "router"] }
+dioxus-vdom = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1", default-features = false, features = ["serialize"] }
+dioxus-vdom-template = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["serialize"] }
 dioxus-web = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["devtools", "document", "hydrate", "mounted"] }
 downcast-rs = { version = "1.2.1", features = ["std"] }
 either = { version = "1.18.0", features = ["serde", "std", "use_std"] }
 env_filter = { version = "2.0.0", default-features = false, features = ["regex", "std"] }
 env_logger = { version = "0.11.11", features = ["auto-color", "color", "humantime", "regex"] }
-euclid = { version = "0.22.14", features = ["serde", "std"] }
+euclid = { version = "0.22.14", features = ["libm", "serde", "std"] }
 event-listener = { version = "5.4.2", features = ["parking", "std"] }
 event-listener-strategy = { version = "0.5.4", features = ["std"] }
+exr = { version = "1.74.2", features = ["rayon"] }
 facet = { version = "0.50.0-rc.7", features = ["alloc", "camino", "chrono", "doc", "helpful-derive", "indexmap", "reflect", "std", "uuid"] }
 facet-error = { version = "0.50.0-rc.7", default-features = false }
 facet-pretty = { version = "0.50.0-rc.7", features = ["detect-terminal-theme"] }
@@ -1328,6 +1348,7 @@ figue = { version = "5.0.0-rc.6", features = ["rich-diagnostics"] }
 figue-attrs = { version = "5.0.0-rc.6", default-features = false }
 flate2 = { version = "1.1.10", features = ["any_c_zlib", "any_impl", "any_zlib", "libz-sys", "miniz_oxide", "runtime_detection", "rust_backend", "zlib", "zlib-rs"] }
 foldhash = { version = "0.2.0", features = ["std"] }
+fontique = { version = "0.12.0", features = ["bytemuck", "fontconfig-dlopen", "std", "system"] }
 futures = { version = "0.3.34", features = ["alloc", "async-await", "executor", "futures-executor", "std", "thread-pool"] }
 futures-executor = { version = "0.3.34", features = ["std", "thread-pool"] }
 futures-io = { version = "0.3.34", features = ["std"] }
@@ -1336,11 +1357,10 @@ genawaiter-macro = { version = "0.99.1", default-features = false, features = ["
 getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false, features = ["std", "wasm_js"] }
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4.3", default-features = false, features = ["std", "sys_rng"] }
 gloo-net = { version = "0.7.0", features = ["eventsource", "futures-channel", "futures-core", "futures-sink", "http", "json", "pin-project", "serde", "serde_json", "websocket"] }
-gloo-timers = { version = "0.4.0", features = ["futures", "futures-channel", "futures-core"] }
 gloo-utils = { version = "0.3.0", default-features = false, features = ["serde"] }
 h2 = { version = "0.4.19", default-features = false, features = ["stream"] }
 half = { version = "2.7.1", features = ["alloc", "bytemuck", "num-traits", "rand_distr", "std", "use-intrinsics"] }
-hashbrown = { version = "0.14.5", features = ["ahash", "allocator-api2", "inline-more", "raw"] }
+hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14.5", features = ["ahash", "allocator-api2", "inline-more", "raw"] }
 hashbrown-986da7b5efc2b80e = { package = "hashbrown", version = "0.16.1", features = ["allocator-api2", "default-hasher", "equivalent", "inline-more", "raw-entry", "serde"] }
 headers = { version = "0.4.1", default-features = false }
 headers-core = { version = "0.3.0", default-features = false }
@@ -1351,25 +1371,31 @@ hyper = { version = "1.11.1", features = ["client", "full", "http1", "http2", "s
 hyper-rustls = { version = "0.27.9", default-features = false, features = ["aws-lc-rs", "http1", "http2", "log", "logging", "native-tokio", "ring", "rustls-native-certs", "tls12", "webpki-roots", "webpki-tokio"] }
 hyper-tls = { version = "0.6.0", default-features = false, features = ["alpn"] }
 hyper-util = { version = "0.1.20", features = ["client", "client-legacy", "client-pool", "client-proxy", "client-proxy-system", "full", "http1", "http2", "server", "server-auto", "server-graceful", "service", "tokio", "tracing"] }
+icu_collections = { version = "2.4.0", default-features = false, features = ["alloc"] }
+icu_locid = { version = "1.5.0", default-features = false, features = ["zerovec"] }
 icu_normalizer = { version = "2.4.0", default-features = false, features = ["compiled_data", "utf16_iter", "utf8_iter"] }
 icu_segmenter = { version = "2.4.0", default-features = false, features = ["auto", "compiled_data", "lstm"] }
 idna = { version = "1.1.0", features = ["alloc", "compiled_data", "std"] }
 image = { version = "0.25.6", features = ["avif", "bmp", "dds", "default-formats", "exr", "ff", "gif", "hdr", "ico", "jpeg", "png", "pnm", "qoi", "rayon", "tga", "tiff", "webp"] }
+indexmap = { version = "2.14.2", features = ["serde", "std"] }
 inout = { version = "0.1.4", default-features = false, features = ["block-padding"] }
 inventory = { version = "0.3.24", default-features = false }
 ipnet = { version = "2.12.2", features = ["serde", "std"] }
+iroh-base = { version = "1.1.0", features = ["key", "relay"] }
 iroh-metrics = { version = "1.0.1", features = ["metrics"] }
-jiff = { version = "0.2.37", features = ["alloc", "perf-inline", "std", "tz-fat", "tz-system", "tzdb-bundle-platform", "tzdb-concatenated", "tzdb-zoneinfo"] }
-jiff-core = { version = "0.1.1", default-features = false, features = ["alloc", "std", "tz-fat"] }
-js-sys = { version = "0.3.104", features = ["std", "unsafe-eval"] }
+keyboard-types = { version = "0.8.3", features = ["serde", "std"] }
+kurbo = { version = "0.11.3", features = ["std"] }
+kurbo-0_13 = { package = "kurbo", version = "0.13.1", features = ["serde", "std"] }
 libc = { version = "0.2.189", features = ["extra_traits", "std"] }
 libsqlite3-sys = { version = "0.30.1", features = ["bundled", "bundled_bindings", "cc", "min_sqlite_version_3_14_0", "pkg-config", "unlock_notify", "vcpkg"] }
-libz-sys = { version = "1.1.29", default-features = false }
 linebender_resource_handle = { version = "0.1.1", features = ["std"] }
 linux-raw-sys = { version = "0.12.1", default-features = false, features = ["auxvec", "elf", "errno", "general", "if_ether", "io_uring", "ioctl", "net", "netlink", "no_std", "prctl", "system", "xdp"] }
-litemap = { version = "0.8.3", default-features = false, features = ["alloc"] }
+litemap-0_7 = { package = "litemap", version = "0.7.5", default-features = false, features = ["alloc", "serde"] }
 lock_api = { version = "0.4.14", features = ["arc_lock", "atomic_usize"] }
 log = { version = "0.4.34", default-features = false, features = ["alloc", "kv", "kv_unstable", "std", "value-bag"] }
+loro = { version = "1.16.0", features = ["counter"] }
+loro-common = { version = "1.16.0", default-features = false, features = ["counter", "serde_json"] }
+loro-internal = { version = "1.16.0", default-features = false, features = ["counter"] }
 md-5 = { version = "0.10.6", features = ["std"] }
 memchr = { version = "2.8.3", features = ["alloc", "std", "use_std"] }
 memmap2 = { version = "0.9.11", default-features = false, features = ["stable_deref_trait"] }
@@ -1384,21 +1410,23 @@ num-bigint = { version = "0.4.8", features = ["std"] }
 num-complex = { version = "0.4.6", features = ["bytemuck", "std"] }
 num-integer = { version = "0.1.47", features = ["i128", "std"] }
 num-rational = { version = "0.4.2", features = ["num-bigint", "num-bigint-std", "std"] }
+num_enum = { version = "0.5.11", features = ["std"] }
 once_cell = { version = "1.21.4", features = ["alloc", "critical-section", "portable-atomic", "race", "std"] }
 opentelemetry = { version = "0.30.0", features = ["futures", "futures-core", "futures-sink", "internal-logs", "logs", "metrics", "pin-project-lite", "testing", "thiserror", "trace", "tracing"] }
 opentelemetry_sdk = { version = "0.30.0", features = ["experimental_async_runtime", "internal-logs", "logs", "metrics", "percent-encoding", "rand", "rt-tokio", "rt-tokio-current-thread", "serde_json", "testing", "tokio", "tokio-stream", "trace"] }
 palette = { version = "0.7.7", features = ["alloc", "approx", "libm", "named", "named_from_str", "phf", "std"] }
 palette_math = { version = "0.7.7", default-features = false, features = ["alloc", "libm", "std"] }
 parking_lot = { version = "0.12.5", features = ["arc_lock", "send_guard"] }
+parlance = { version = "0.1.1", default-features = false, features = ["bytemuck", "std"] }
 parley = { version = "0.12.0", features = ["bytemuck", "std", "system"] }
 pathdiff = { version = "0.2.3", default-features = false, features = ["camino"] }
 peniko = { version = "0.6.1", features = ["bytemuck", "std"] }
 petgraph = { version = "0.8.3", features = ["graphmap", "matrix_graph", "stable_graph", "std"] }
-phf = { version = "0.13.1", features = ["macros", "phf_macros", "std"] }
-phf_shared = { version = "0.13.1", features = ["std"] }
+phf-0_13 = { package = "phf", version = "0.13.1", features = ["macros", "phf_macros", "std"] }
+phf_shared-0_13 = { package = "phf_shared", version = "0.13.1", features = ["std"] }
 pkcs8 = { version = "0.11.0", default-features = false, features = ["alloc", "pem", "std"] }
+polycool = { version = "0.4.0", features = ["std"] }
 postcard = { version = "1.1.3", features = ["alloc", "experimental-derive", "heapless", "heapless-cas", "postcard-derive", "use-std"] }
-potential_utf = { version = "0.1.6", default-features = false, features = ["alloc", "writeable", "zerovec"] }
 profiling = { version = "1.0.18", features = ["procmacros", "profiling-procmacros"] }
 psl-types = { version = "2.0.11", default-features = false }
 publicsuffix = { version = "2.3.0", features = ["idna", "punycode"] }
@@ -1417,16 +1445,13 @@ rust_decimal = { version = "1.43.0", features = ["maths", "serde", "std"] }
 rustix = { version = "1.1.5", features = ["alloc", "event", "fs", "io_uring", "net", "pipe", "process", "shm", "std", "system", "thread", "time"] }
 rustls = { version = "0.23.46", features = ["aws-lc-rs", "aws_lc_rs", "log", "logging", "prefer-post-quantum", "ring", "std", "tls12"] }
 rustls-pemfile = { version = "2.2.0", features = ["std"] }
-same-file = { version = "1.0.6", default-features = false }
+rustls-webpki = { version = "0.103.15", default-features = false, features = ["alloc", "aws-lc-rs", "ring", "std"] }
 scopeguard = { version = "1.2.0", features = ["use_std"] }
 sea-orm = { version = "1.1.20", features = ["bigdecimal", "chrono", "macros", "postgres-array", "runtime-tokio", "runtime-tokio-rustls", "rust_decimal", "sea-query-binder", "serde_json", "sqlx", "sqlx-dep", "sqlx-postgres", "sqlx-sqlite", "time", "uuid", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
 sea-query = { version = "0.32.7", default-features = false, features = ["backend-mysql", "backend-postgres", "backend-sqlite", "bigdecimal", "chrono", "derive", "hashable-value", "ordered-float", "postgres-array", "rust_decimal", "sea-query-derive", "serde_json", "thread-safe", "time", "uuid", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
 sea-query-binder = { version = "0.7.0", default-features = false, features = ["bigdecimal", "chrono", "postgres-array", "runtime-tokio-rustls", "rust_decimal", "serde_json", "sqlx", "sqlx-postgres", "sqlx-sqlite", "time", "uuid", "with-bigdecimal", "with-chrono", "with-json", "with-rust_decimal", "with-time", "with-uuid"] }
-seize = { version = "0.5.1", features = ["fast-barrier", "libc", "windows-sys"] }
 semver = { version = "1.0.28", features = ["serde", "std"] }
-send_wrapper = { version = "0.6.0", default-features = false, features = ["futures", "futures-core"] }
 serde = { version = "1.0.229", features = ["alloc", "derive", "rc", "serde_derive", "std"] }
-serde-wasm-bindgen = { version = "0.6.5", default-features = false }
 serde_core = { version = "1.0.229", features = ["alloc", "rc", "result", "std"] }
 serde_json = { version = "1.0.151", features = ["alloc", "float_roundtrip", "raw_value", "std", "unbounded_depth"] }
 serde_qs = { version = "0.15.0" }
@@ -1436,7 +1461,6 @@ signal-hook-mio = { version = "0.2.5", default-features = false, features = ["mi
 signature = { version = "3.0.0", default-features = false, features = ["alloc", "digest", "rand_core"] }
 skrifa = { version = "0.44.0", features = ["autohint_shaping", "std"] }
 sledgehammer_bindgen = { version = "0.6.0", default-features = false, features = ["wasm-bindgen", "web"] }
-slotmap = { version = "1.1.1", features = ["serde", "std"] }
 smallvec = { version = "1.16.4", default-features = false, features = ["const_generics", "const_new", "serde", "union", "write"] }
 spin = { version = "0.10.1", features = ["barrier", "lazy", "lock_api", "mutex", "once", "rwlock", "spin_mutex"] }
 spin-0_9 = { package = "spin", version = "0.9.9", features = ["barrier", "lazy", "lock_api", "lock_api_crate", "mutex", "once", "rwlock", "spin_mutex", "std"] }
@@ -1447,6 +1471,8 @@ strip-ansi-escapes = { version = "0.2.1", default-features = false }
 strum-1f5adca70f036a62 = { package = "strum", version = "0.28.0", features = ["derive", "std", "strum_macros"] }
 terminal-light = { version = "1.9.1", default-features = false }
 time = { version = "0.3.55", features = ["alloc", "formatting", "local-offset", "macros", "parsing", "serde", "serde-human-readable", "serde-well-known", "std"] }
+tiny-skia = { version = "0.12.0", features = ["png-format", "simd", "std"] }
+tinystr-0_7 = { package = "tinystr", version = "0.7.6", default-features = false, features = ["alloc", "serde", "zerovec"] }
 tinystr = { version = "0.8.5", features = ["alloc", "zerovec"] }
 tinyvec = { version = "1.13.3", features = ["alloc", "rustc_1_57", "std"] }
 tokio = { version = "1.53.1", features = ["bytes", "fs", "full", "io-std", "io-util", "libc", "macros", "mio", "net", "parking_lot", "process", "rt", "rt-multi-thread", "signal", "signal-hook-registry", "socket2", "sync", "test-util", "time", "tokio-macros", "tracing"] }
@@ -1468,31 +1494,27 @@ typenum = { version = "1.20.1", default-features = false, features = ["const-gen
 ucd-trie = { version = "0.1.7", features = ["std"] }
 unicode-properties = { version = "0.1.4", features = ["emoji", "general-category"] }
 url = { version = "2.5.8", features = ["serde", "std"] }
-usvg = { version = "0.48.1", features = ["base64", "flate2", "fontdb", "harfrust", "memmap-fonts", "skrifa", "svgz", "system-fonts", "text", "unicode-bidi", "unicode-script", "unicode-vo", "writer", "xmlwriter"] }
 uuid = { version = "1.26.1", features = ["atomic", "js", "md5", "rng", "serde", "sha1", "std", "v1", "v3", "v4", "v5", "v6", "v7", "v8"] }
 value-bag = { version = "1.14.1", default-features = false, features = ["inline-i128"] }
 vello_gpu = { version = "0.3.0", features = ["text", "webgl", "wgpu", "wgpu_default"] }
 vello_gpu_shaders = { version = "0.3.0", default-features = false, features = ["glsl"] }
 vox = { version = "0.10.0-rc.7", default-features = false, features = ["runtime", "transport-local", "transport-websocket", "transport-websocket-tls"] }
 vte = { version = "0.14.1", default-features = false }
-walkdir = { version = "2.5.0", default-features = false }
 wasm-bindgen = { version = "0.2.127", features = ["std"] }
-wasm-bindgen-futures = { version = "0.4.77", features = ["std"] }
-wasm-bindgen-shared = { version = "0.2.127", default-features = false }
 wasm-splitter = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false }
-wasm-streams = { version = "0.5.0", default-features = false }
 web-sys = { version = "0.3.104", features = ["AbortController", "AbortSignal", "AddEventListenerOptions", "AnalyserNode", "AnimationEvent", "AudioContext", "AudioContextOptions", "AudioContextState", "AudioDestinationNode", "AudioNode", "AudioWorklet", "AudioWorkletNode", "AudioWorkletNodeOptions", "BaseAudioContext", "BinaryType", "Blob", "BlobPropertyBag", "Cache", "CacheStorage", "CharacterData", "Clipboard", "ClipboardEvent", "CloseEvent", "CloseEventInit", "Comment", "CompositionEvent", "Crypto", "CssStyleDeclaration", "CustomEvent", "DataTransfer", "DataTransferItem", "DataTransferItemList", "Document", "DomRect", "DomRectReadOnly", "DomTokenList", "DragEvent", "Element", "ErrorEvent", "Event", "EventSource", "EventSourceInit", "EventTarget", "File", "FileList", "FileReader", "FocusEvent", "FormData", "Headers", "History", "HtmlAudioElement", "HtmlCanvasElement", "HtmlElement", "HtmlFormElement", "HtmlHeadElement", "HtmlInputElement", "HtmlMediaElement", "HtmlSelectElement", "HtmlTextAreaElement", "InputEvent", "IntersectionObserverEntry", "KeyboardEvent", "Location", "MediaElementAudioSourceNode", "MediaQueryList", "MessageEvent", "MessagePort", "MouseEvent", "Navigator", "Node", "NodeList", "ObserverCallback", "Performance", "PointerEvent", "ProgressEvent", "QueuingStrategy", "ReadableByteStreamController", "ReadableStream", "ReadableStreamByobReader", "ReadableStreamByobRequest", "ReadableStreamDefaultController", "ReadableStreamDefaultReader", "ReadableStreamGetReaderOptions", "ReadableStreamReadResult", "ReadableStreamReaderMode", "ReadableStreamType", "ReadableWritablePair", "ReferrerPolicy", "Request", "RequestCache", "RequestCredentials", "RequestInit", "RequestMode", "RequestRedirect", "ResizeObserverEntry", "ResizeObserverSize", "Response", "ResponseInit", "ResponseType", "ScrollBehavior", "ScrollIntoViewOptions", "ScrollLogicalPosition", "ScrollRestoration", "ScrollToOptions", "Selection", "Storage", "StreamPipeOptions", "Text", "Touch", "TouchEvent", "TouchList", "TransformStream", "TransformStreamDefaultController", "Transformer", "TransitionEvent", "UiEvent", "UnderlyingSink", "UnderlyingSource", "Url", "UrlSearchParams", "WebGl2RenderingContext", "WebGlBuffer", "WebGlContextAttributes", "WebGlFramebuffer", "WebGlProgram", "WebGlRenderbuffer", "WebGlShader", "WebGlSync", "WebGlTexture", "WebGlUniformLocation", "WebGlVertexArrayObject", "WebSocket", "WheelEvent", "Window", "Worklet", "WorkletOptions", "WritableStream", "WritableStreamDefaultController", "WritableStreamDefaultWriter", "console", "std"] }
 web-time = { version = "1.1.0", default-features = false, features = ["serde"] }
-writeable = { version = "0.6.4", default-features = false, features = ["alloc"] }
 x11rb = { version = "0.13.2", default-features = false, features = ["allow-unsafe-code", "as-raw-xcb-connection", "cursor", "dl-libxcb", "libc", "libloading", "once_cell", "randr", "render", "resource_manager", "shape", "xcursor", "xfixes", "xinput", "xkb"] }
 x11rb-protocol = { version = "0.13.2", default-features = false, features = ["randr", "render", "resource_manager", "shape", "std", "xfixes", "xinput", "xkb"] }
 xterm-query = { version = "0.6.1", default-features = false }
 xxhash-rust = { version = "0.8.18", default-features = false, features = ["const_xxh64", "xxh3", "xxh32"] }
+yeslogic-fontconfig-sys = { version = "6.0.1", default-features = false, features = ["dlopen"] }
+yoke-0_7 = { package = "yoke", version = "0.7.5", features = ["alloc", "derive", "serde", "zerofrom"] }
 yoke = { version = "0.8.4", features = ["alloc", "derive", "zerofrom"] }
 zbus = { version = "5.19.0", default-features = false, features = ["p2p", "tokio"] }
-zerofrom = { version = "0.1.8", default-features = false, features = ["alloc", "derive"] }
 zeroize = { version = "1.9.0", features = ["alloc", "derive", "zeroize_derive"] }
-zerotrie = { version = "0.2.5", default-features = false, features = ["alloc", "yoke", "zerofrom"] }
+zerovec-0_10 = { package = "zerovec", version = "0.10.4", default-features = false, features = ["derive", "serde", "yoke"] }
+zlib-rs = { version = "0.6.8", features = ["c-allocator", "rust-allocator", "std"] }
 
 [target.'cfg(all(target_arch = "aarch64", target_os = "macos"))'.build-dependencies]
 anstyle = { version = "1.0.14", features = ["std"] }
@@ -1500,10 +1522,9 @@ axum-macros = { version = "0.5.1" }
 base64-0_23 = { package = "base64", version = "0.23.1", default-features = false, features = ["alloc", "std"] }
 base64ct = { version = "1.8.3", default-features = false, features = ["alloc"] }
 bitflags-1 = { package = "bitflags", version = "1.3.2" }
-bumpalo = { version = "3.20.3" }
+bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
 byteorder = { version = "1.5.0", features = ["std"] }
 bytes = { version = "1.12.1", features = ["std"] }
-cc = { version = "1.8.0", default-features = false, features = ["parallel"] }
 clang-sys = { version = "1.9.1", default-features = false, features = ["clang_10_0", "clang_11_0", "clang_3_5", "clang_3_6", "clang_3_7", "clang_3_8", "clang_3_9", "clang_4_0", "clang_5_0", "clang_6_0", "clang_7_0", "clang_8_0", "clang_9_0", "libloading", "runtime"] }
 cmake = { version = "0.1.58", default-features = false }
 const_format = { version = "0.2.36" }
@@ -1527,7 +1548,7 @@ fs_extra = { version = "1.3.0", default-features = false }
 genawaiter-proc-macro = { version = "0.99.1", default-features = false }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.17", default-features = false, features = ["std"] }
 half = { version = "2.7.1", features = ["alloc", "num-traits", "std"] }
-hashbrown-0_15 = { package = "hashbrown", version = "0.15.5", default-features = false, features = ["default-hasher", "inline-more"] }
+hashbrown = { version = "0.15.5", default-features = false, features = ["default-hasher", "inline-more"] }
 hashbrown-9067fe90e8c1f593 = { package = "hashbrown", version = "0.17.1", features = ["allocator-api2", "default-hasher", "equivalent", "inline-more", "raw-entry"] }
 http = { version = "1.5.0", default-features = false, features = ["std"] }
 httparse = { version = "1.10.1", default-features = false }
@@ -1537,11 +1558,11 @@ libc = { version = "0.2.189", features = ["extra_traits", "std"] }
 log = { version = "0.4.34", default-features = false, features = ["alloc", "std"] }
 manganis-core = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["dioxus"] }
 memchr = { version = "2.8.3", features = ["alloc", "std"] }
-miniz_oxide = { version = "0.8.9", default-features = false, features = ["simd", "simd-adler32", "with-alloc"] }
 naga = { version = "30.0.1", default-features = false, features = ["glsl-out", "wgsl-in", "wgsl-out"] }
 native-tls = { version = "0.2.18", default-features = false }
 num-traits = { version = "0.2.19", features = ["libm", "std"] }
 num_cpus = { version = "1.17.0", default-features = false }
+num_enum_derive = { version = "0.5.11", default-features = false, features = ["proc-macro-crate", "std"] }
 objc2 = { version = "0.6.5", features = ["alloc", "exception", "std"] }
 once_cell = { version = "1.21.4", features = ["alloc", "race", "std"] }
 openssl-src = { version = "300.6.1", features = ["legacy"] }
@@ -1549,14 +1570,15 @@ pem-rfc7468 = { version = "1.0.0", default-features = false, features = ["alloc"
 percent-encoding = { version = "2.3.2", features = ["alloc", "std"] }
 phf_generator = { version = "0.13.1", default-features = false }
 phf_macros = { version = "0.13.1", default-features = false }
-phf_shared = { version = "0.13.1", features = ["std"] }
+phf_shared-0_13 = { package = "phf_shared", version = "0.13.1", features = ["std"] }
 powerfmt = { version = "0.2.0", default-features = false }
 ppv-lite86 = { version = "0.2.21", default-features = false, features = ["simd", "std"] }
+proc-macro-crate = { version = "1.3.1", default-features = false }
 proc-macro-error = { version = "0.4.12", default-features = false }
 proc-macro-error-attr = { version = "0.4.12", default-features = false }
 proc-macro-hack = { version = "0.5.20", default-features = false }
 proc-macro2-diagnostics = { version = "0.10.1", features = ["colors", "yansi"] }
-rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.8", default-features = false, features = ["small_rng"] }
+rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.8", features = ["alloc", "getrandom", "libc", "rand_chacha", "small_rng", "std", "std_rng"] }
 rand_chacha-0_3 = { package = "rand_chacha", version = "0.3.1", default-features = false, features = ["std"] }
 rand_core = { version = "0.6.4", default-features = false, features = ["alloc", "getrandom", "std"] }
 rayon = { version = "1.12.0", default-features = false }
@@ -1581,15 +1603,16 @@ syn-mid = { version = "0.5.4", default-features = false }
 tempfile = { version = "3.27.0", features = ["getrandom"] }
 thiserror = { version = "2.0.20", features = ["std"] }
 time = { version = "0.3.55", features = ["alloc", "formatting", "macros", "parsing", "std"] }
-toml_datetime-3b31131e45eafb45 = { package = "toml_datetime", version = "0.6.3", default-features = false, features = ["serde"] }
-toml_edit = { version = "0.20.2", features = ["serde"] }
+toml_datetime-0_6 = { package = "toml_datetime", version = "0.6.3", default-features = false, features = ["serde"] }
+toml_edit = { version = "0.19.15" }
+toml_edit-0_20 = { package = "toml_edit", version = "0.20.2", features = ["serde"] }
 typenum = { version = "1.20.1", default-features = false, features = ["const-generics"] }
 unicode-normalization = { version = "0.1.25", features = ["std"] }
-wasm-bindgen-macro = { version = "0.2.127", default-features = false }
-wasm-bindgen-macro-support = { version = "0.2.127", default-features = false }
-wasm-bindgen-shared = { version = "0.2.127", default-features = false }
 wasm-split-macro = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false }
+winnow-0_5 = { package = "winnow", version = "0.5.40", features = ["alloc", "std"] }
+yoke-derive = { version = "0.7.5", default-features = false }
 zeroize = { version = "1.9.0", features = ["alloc"] }
+zerovec-derive = { version = "0.10.4", default-features = false }
 
 [target.'cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"))'.build-dependencies]
 anstyle = { version = "1.0.14", features = ["std"] }
@@ -1597,10 +1620,9 @@ axum-macros = { version = "0.5.1" }
 base64-0_23 = { package = "base64", version = "0.23.1", default-features = false, features = ["alloc", "std"] }
 base64ct = { version = "1.8.3", default-features = false, features = ["alloc"] }
 bitflags-1 = { package = "bitflags", version = "1.3.2" }
-bumpalo = { version = "3.20.3" }
+bitflags = { version = "2.13.2", default-features = false, features = ["std"] }
 byteorder = { version = "1.5.0", features = ["std"] }
 bytes = { version = "1.12.1", features = ["std"] }
-cc = { version = "1.8.0", default-features = false, features = ["parallel"] }
 clang-sys = { version = "1.9.1", default-features = false, features = ["clang_10_0", "clang_11_0", "clang_3_5", "clang_3_6", "clang_3_7", "clang_3_8", "clang_3_9", "clang_4_0", "clang_5_0", "clang_6_0", "clang_7_0", "clang_8_0", "clang_9_0", "libloading", "runtime"] }
 cmake = { version = "0.1.58", default-features = false }
 const_format = { version = "0.2.36" }
@@ -1625,22 +1647,22 @@ foreign-types-shared = { version = "0.1.1", default-features = false }
 fs_extra = { version = "1.3.0", default-features = false }
 genawaiter-proc-macro = { version = "0.99.1", default-features = false }
 getrandom-6f8ce4dd05d13bba = { package = "getrandom", version = "0.2.17", default-features = false, features = ["std"] }
+getrandom-468e82937335b1c9 = { package = "getrandom", version = "0.3.4", default-features = false }
 half = { version = "2.7.1", features = ["alloc", "num-traits", "std"] }
-hashbrown-0_15 = { package = "hashbrown", version = "0.15.5", default-features = false, features = ["default-hasher", "inline-more"] }
+hashbrown = { version = "0.15.5", default-features = false, features = ["default-hasher", "inline-more"] }
 hashbrown-9067fe90e8c1f593 = { package = "hashbrown", version = "0.17.1", features = ["allocator-api2", "default-hasher", "equivalent", "inline-more", "raw-entry"] }
 http = { version = "1.5.0", default-features = false, features = ["std"] }
 httparse = { version = "1.10.1", default-features = false }
-itertools = { version = "0.12.1", default-features = false, features = ["use_alloc"] }
 konst = { version = "0.2.20", default-features = false, features = ["rust_1_51", "rust_1_55", "rust_1_56", "rust_1_57", "rust_1_61", "rust_1_64"] }
 konst_macro_rules = { version = "0.2.19", default-features = false, features = ["rust_1_51", "rust_1_55", "rust_1_56", "rust_1_57", "rust_1_61"] }
 linux-raw-sys = { version = "0.12.1", default-features = false, features = ["auxvec", "elf", "errno", "general", "ioctl", "no_std"] }
 log = { version = "0.4.34", default-features = false, features = ["alloc", "std"] }
 manganis-core = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false, features = ["dioxus"] }
-miniz_oxide = { version = "0.8.9", default-features = false, features = ["simd", "simd-adler32", "with-alloc"] }
 naga = { version = "30.0.1", default-features = false, features = ["glsl-out", "wgsl-in", "wgsl-out"] }
 native-tls = { version = "0.2.18", default-features = false }
 num-traits = { version = "0.2.19", features = ["libm", "std"] }
 num_cpus = { version = "1.17.0", default-features = false }
+num_enum_derive = { version = "0.5.11", default-features = false, features = ["proc-macro-crate", "std"] }
 openssl = { version = "0.10.81" }
 openssl-probe = { version = "0.2.1", default-features = false }
 openssl-sys = { version = "0.9.117", default-features = false }
@@ -1648,14 +1670,14 @@ pem-rfc7468 = { version = "1.0.0", default-features = false, features = ["alloc"
 percent-encoding = { version = "2.3.2", features = ["alloc", "std"] }
 phf_generator = { version = "0.13.1", default-features = false }
 phf_macros = { version = "0.13.1", default-features = false }
-phf_shared = { version = "0.13.1", features = ["std"] }
+phf_shared-0_13 = { package = "phf_shared", version = "0.13.1", features = ["std"] }
 powerfmt = { version = "0.2.0", default-features = false }
 ppv-lite86 = { version = "0.2.21", default-features = false, features = ["simd", "std"] }
 proc-macro-error = { version = "0.4.12", default-features = false }
 proc-macro-error-attr = { version = "0.4.12", default-features = false }
 proc-macro-hack = { version = "0.5.20", default-features = false }
 proc-macro2-diagnostics = { version = "0.10.1", features = ["colors", "yansi"] }
-rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.8", default-features = false, features = ["small_rng"] }
+rand-c38e5c1d305a1b54 = { package = "rand", version = "0.8.8", features = ["alloc", "getrandom", "libc", "rand_chacha", "small_rng", "std", "std_rng"] }
 rand_chacha-0_3 = { package = "rand_chacha", version = "0.3.1", default-features = false, features = ["std"] }
 rand_core = { version = "0.6.4", default-features = false, features = ["alloc", "getrandom", "std"] }
 rayon = { version = "1.12.0", default-features = false }
@@ -1663,7 +1685,7 @@ rayon-core = { version = "1.13.0", default-features = false }
 regex = { version = "1.13.1", features = ["perf", "perf-backtrack", "perf-cache", "perf-dfa", "perf-inline", "perf-literal", "perf-onepass", "std", "unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }
 regex-automata = { version = "0.4.18", features = ["alloc", "dfa", "dfa-build", "dfa-onepass", "dfa-search", "hybrid", "meta", "nfa", "nfa-backtrack", "nfa-pikevm", "nfa-thompson", "perf", "perf-inline", "perf-literal", "perf-literal-multisubstring", "perf-literal-substring", "std", "syntax", "unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment", "unicode-word-boundary"] }
 rustc-hash = { version = "1.1.0", features = ["std"] }
-rustix = { version = "1.1.5", default-features = false, features = ["alloc", "fs", "std"] }
+rustix = { version = "1.1.5", features = ["alloc", "fs", "std"] }
 rustls-pki-types = { version = "1.15.1", default-features = false, features = ["alloc", "std"] }
 sea-orm-macros = { version = "1.1.20", default-features = false, features = ["bae", "derive", "postgres-array", "strum"] }
 serde = { version = "1.0.229", features = ["alloc", "derive", "serde_derive", "std"] }
@@ -1679,9 +1701,8 @@ time = { version = "0.3.55", features = ["alloc", "formatting", "macros", "parsi
 toml = { version = "0.8.2", features = ["display", "parse"] }
 typenum = { version = "1.20.1", default-features = false, features = ["const-generics"] }
 unicode-normalization = { version = "0.1.25", features = ["std"] }
-wasm-bindgen-macro = { version = "0.2.127", default-features = false }
-wasm-bindgen-macro-support = { version = "0.2.127", default-features = false }
-wasm-bindgen-shared = { version = "0.2.127", default-features = false }
 wasm-split-macro = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", default-features = false }
+yoke-derive = { version = "0.7.5", default-features = false }
 zeroize = { version = "1.9.0", features = ["alloc"] }
+zerovec-derive = { version = "0.10.4", default-features = false }
 ### END FLEET SECTION
