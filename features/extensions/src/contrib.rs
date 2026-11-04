@@ -50,9 +50,46 @@ pub const EVENTS: [&str; 7] = [
 /// title row's tab, the status bar, the title row.
 pub const SLOTS: [&str; 6] = ["ribbon", "left", "right", "tabs", "status", "title"];
 
-/// The targets a context-menu entry can be on, past `view:<kind>`,
-/// `file:<extension>` and `doc:<kind>`.
-pub const TARGETS: [&str; 6] = ["pane", "tab", "file", "doc", "link", "selection"];
+/// What a context-menu target's point is called: `context.<target>`, its
+/// kind alone (`file:md` is `context.file`'s). The feature that owns a
+/// target declares its point ([`context_target_point`];
+/// `Host::declare_context_targets`): the workspace's `pane`, `tab` and
+/// `view`, the toolbars' `toolbar` and `toolbar-item`, a file tree's
+/// `file`. Each `[[context]]` row is an item of its target's point, so
+/// `EXT_POINTS` lists them by target, and rows for a target nobody
+/// declared wait there, as any point's items do.
+pub const CONTEXT_POINT: &str = "context.";
+
+/// The point context-menu target `target`'s rows are items of.
+#[must_use]
+pub fn context_point(target: &str) -> String {
+    let kind = target.split_once(':').map_or(target, |(k, _)| k);
+    format!("{CONTEXT_POINT}{kind}")
+}
+
+/// The point a feature declares for its context-menu target `kind`
+/// (`file`; rows for `file:<ext>` are its too): `description` says what
+/// it is and what a row's invocation id is.
+#[must_use]
+pub fn context_target_point(kind: &str, description: &str) -> crate::interop::PointDecl {
+    let text = |what: &str| serde_json::json!({ "type": "string", "description": what });
+    let schema = serde_json::json!({
+        "type": "object",
+        "required": ["target", "action"],
+        "properties": {
+            "target": text("the target, or `<kind>:<which>`"),
+            "action": text("the action the row runs, told the target"),
+            "title": text("the row's label; the action's name when unset"),
+        },
+    });
+    crate::interop::PointDecl {
+        id: context_point(kind),
+        title: format!("Context menu: {kind}"),
+        description: description.to_owned(),
+        schema: Some(toml::Value::String(schema.to_string())),
+        deliver: None,
+    }
+}
 
 /// Whether `on` is an event a hook can be on.
 #[must_use]
@@ -63,13 +100,20 @@ pub fn known_event(on: &str) -> bool {
             .is_some_and(|topic| !topic.is_empty())
 }
 
-/// Whether `target` is one a context-menu entry can be on.
+/// Whether `target` is a context-menu target's name: a kind (`tab`,
+/// `toolbar-item`: lower case words joined by `-`), or `<kind>:<which>`
+/// (`file:md`, `view:note`). Whether a feature owns it is its point's
+/// ([`context_point`]).
 #[must_use]
 pub fn known_target(target: &str) -> bool {
-    TARGETS.contains(&target)
-        || ["view:", "file:", "doc:"]
-            .iter()
-            .any(|p| target.strip_prefix(p).is_some_and(|rest| !rest.is_empty()))
+    let (kind, which) = target
+        .split_once(':')
+        .map_or((target, None), |(k, w)| (k, Some(w)));
+    !kind.is_empty()
+        && kind
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        && which.is_none_or(|w| !w.is_empty())
 }
 
 /// An opener: ⌘O's (`kind`, `prefix` and `action`: a query in, items out;
@@ -702,10 +746,8 @@ impl Contribution {
             if !known_target(&c.target) {
                 return refuse(
                     what,
-                    format!(
-                        "not a target ({}, view:<kind>, file:<ext>, doc:<kind>)",
-                        TARGETS.join(", ")
-                    ),
+                    "not a target's name (`tab`, `<kind>:<which>`: `view:note`, `file:md`)"
+                        .to_owned(),
                 );
             }
             action(&what, &c.action)?;
@@ -1777,7 +1819,11 @@ mod tests {
         assert!(!on("file:kf").on("file", "a/b.rpp"));
         assert!(!on("tab").on("view:note", "x"));
         assert!(known_target("doc:keyflow.chart"));
+        assert!(known_target("toolbar-item"));
         assert!(!known_target("view:"));
+        assert!(!known_target("Tab"));
+        assert_eq!(context_point("file:md"), "context.file");
+        assert_eq!(context_target_point("tab", "").id, "context.tab");
     }
 
     fn embed(id: &str, view: Option<&str>, page: Option<&str>, fence: &[&str]) -> EmbedDecl {

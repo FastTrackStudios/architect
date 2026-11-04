@@ -14,19 +14,37 @@
 //! It keeps which action is armed, too ([`Toolbars::arm`]): a button whose
 //! right-click arms its action shows it armed until it is disarmed; what
 //! an armed action does next (to what is clicked) is the app's.
+//!
+//! And the editor's state (#313): whether the toolbars are being edited
+//! ([`Toolbars::set_editing`]), whose settings show ([`Toolbars::select`]),
+//! and edits by item ([`Toolbars::edit`], `crate::toolbar_edit`): an edit
+//! shows at once and is written [`DEBOUNCE`] after the last one
+//! ([`Toolbars::flush_if`]; the `TOOLBAR_*` actions write at once). Every
+//! write keeps the file it replaces: the last [`BACKUPS`] of each, in
+//! `.backups/` beside them ([`Toolbars::backups`]).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use architect::action::Problem;
 
 use crate::contrib::{By, Contributions};
-use crate::toolbar::ToolbarDecl;
+use crate::toolbar::{ToolbarDecl, ToolbarPlace};
 
 /// Who a person's own toolbars are owned by (`user/<id>`).
 pub const PERSON: &str = "user";
+
+/// How long after the last edit in the editor it is written.
+pub const DEBOUNCE: Duration = Duration::from_millis(400);
+
+/// How many earlier copies of each file are kept (`.backups/<file>.<n>.toml`,
+/// 1 the newest).
+pub const BACKUPS: usize = 10;
+
+/// The folder the backups are in, inside the toolbars' folder.
+pub const BACKUP_DIR: &str = ".backups";
 
 /// Where a toolbar in force comes from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
@@ -62,6 +80,17 @@ struct State {
     /// What was read: each file and when it last changed.
     seen: Vec<(PathBuf, Option<SystemTime>)>,
     armed: Option<String>,
+    /// The editor is on.
+    editing: bool,
+    /// Whose settings show: a toolbar's key, and an item's place (none:
+    /// the toolbar's own).
+    selected: Option<(String, Option<String>)>,
+    /// Edited, not yet written: by key.
+    pending: BTreeSet<String>,
+    /// Moves with every edit ([`Toolbars::flush_if`]).
+    edits: u64,
+    /// Image files read, as `data:` URIs, by path and when they changed.
+    images: BTreeMap<PathBuf, (Option<SystemTime>, Option<String>)>,
     revision: u64,
     next_listener: u64,
     listeners: Vec<(u64, Arc<dyn Fn(u64) + Send + Sync>)>,
@@ -118,10 +147,66 @@ fn file_name(key: &str) -> String {
     format!("{safe}.toml")
 }
 
+/// Backup `n` (1 the newest) of the file at `path`.
+fn backup_path(dir: &Path, path: &Path, n: usize) -> PathBuf {
+    let stem = path
+        .file_stem()
+        .map_or_else(|| "toolbar".into(), |s| s.to_string_lossy().into_owned());
+    dir.join(BACKUP_DIR).join(format!("{stem}.{n}.toml"))
+}
+
+/// Keeps the file at `path` as its newest backup, the older ones moving
+/// down one and the oldest past [`BACKUPS`] going.
+fn back_up(dir: &Path, path: &Path) -> Result<(), String> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let shown = |p: &Path, e: std::io::Error| format!("{}: {e}", p.display());
+    std::fs::create_dir_all(dir.join(BACKUP_DIR)).map_err(|e| shown(dir, e))?;
+    let oldest = backup_path(dir, path, BACKUPS);
+    if oldest.exists() {
+        std::fs::remove_file(&oldest).map_err(|e| shown(&oldest, e))?;
+    }
+    for n in (1..BACKUPS).rev() {
+        let from = backup_path(dir, path, n);
+        if from.exists() {
+            let to = backup_path(dir, path, n.saturating_add(1));
+            std::fs::rename(&from, &to).map_err(|e| shown(&from, e))?;
+        }
+    }
+    let newest = backup_path(dir, path, 1);
+    std::fs::copy(path, &newest).map_err(|e| shown(&newest, e))?;
+    Ok(())
+}
+
+/// Writes `text` at `path`, the file it replaces kept as a backup (none
+/// when it says the same).
+fn write_kept(dir: &Path, path: &Path, text: &str) -> Result<(), String> {
+    if std::fs::read_to_string(path).is_ok_and(|was| was == text) {
+        return Ok(());
+    }
+    back_up(dir, path)?;
+    std::fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Each widget of `owner`'s toolbar that names its view alone, named
+/// whole (`meter` → `<owner>/meter`), as a person's file names them.
+fn qualify_views(t: &mut ToolbarDecl, owner: &str) {
+    fn walk(items: &mut [crate::toolbar::ToolItem], owner: &str) {
+        for i in items {
+            if !i.view.is_empty() && !i.view.contains('/') {
+                i.view = format!("{owner}/{}", i.view);
+            }
+            walk(&mut i.items, owner);
+        }
+    }
+    walk(&mut t.items, owner);
+}
+
 /// What a person's file checks against: any action (theirs to run), a
-/// widget's view named whole (`<extension>/<view>`).
+/// widget's view named whole (`<extension>/<view>`); it may be empty.
 fn check_file(t: &ToolbarDecl) -> Result<(), String> {
-    t.check(
+    t.check_draft(
         |_| Ok(()),
         |view| {
             if view
@@ -256,6 +341,17 @@ impl Toolbars {
             }
         }
         let mut s = self.lock();
+        // What is edited and not yet written stays as it is.
+        for key in s.pending.clone() {
+            match s.files.get(&key).cloned() {
+                Some(mine) => {
+                    files.insert(key, mine);
+                }
+                None => {
+                    files.remove(&key);
+                }
+            }
+        }
         s.files = files;
         s.problems = problems;
         s.seen = seen;
@@ -358,25 +454,356 @@ impl Toolbars {
             .files
             .get(&key)
             .map_or_else(|| dir.join(file_name(&key)), |(_, p)| p.clone());
-        std::fs::write(&path, decl.to_toml()?).map_err(|e| format!("{}: {e}", path.display()))?;
+        write_kept(&dir, &path, &decl.to_toml()?)?;
+        self.lock().pending.remove(&key);
         self.reload();
         Ok(path)
     }
 
     /// Takes away the person's file under `key` (their copy: the
-    /// extension's comes back): whether there was one.
+    /// extension's comes back; their own: it goes), kept as a backup:
+    /// whether there was one.
     ///
     /// # Errors
     ///
     /// The file cannot be removed.
     pub fn reset(&self, key: &str) -> Result<bool, String> {
-        let path = self.lock().files.get(key).map(|(_, p)| p.clone());
+        let (path, dir) = {
+            let mut s = self.lock();
+            s.pending.remove(key);
+            (s.files.get(key).map(|(_, p)| p.clone()), s.dir.clone())
+        };
         let Some(path) = path else {
             return Ok(false);
         };
-        std::fs::remove_file(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        // Only edited, never written: the edit goes.
+        if path.exists() {
+            if let Some(dir) = dir {
+                back_up(&dir, &path)?;
+            }
+            std::fs::remove_file(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        }
         self.reload();
         Ok(true)
+    }
+
+    /// Edits the toolbar in force under `key` with `edit`: the person's
+    /// copy of an extension's, or their own. Shown at once, checked first
+    /// (a person's may be empty); written by [`Self::flush`] or
+    /// [`Self::flush_if`]. What `edit` answered, and the edit's number.
+    ///
+    /// # Errors
+    ///
+    /// No folder; no toolbar under `key`; what `edit` refuses; a toolbar
+    /// that does not check after it.
+    pub fn edit<T>(
+        &self,
+        contributions: &Contributions,
+        key: &str,
+        edit: impl FnOnce(&mut ToolbarDecl) -> Result<T, String>,
+    ) -> Result<(T, u64), String> {
+        let dir = self
+            .dir()
+            .ok_or("no folder for toolbars (Toolbars::set_dir)")?;
+        let now = self
+            .get(contributions, key)
+            .ok_or_else(|| format!("no toolbar {key:?} (TOOLBAR_LIST lists them)"))?;
+        let mut decl = now.decl.clone();
+        // A person's file names its widgets' views whole.
+        qualify_views(&mut decl, &now.owner);
+        let answer = edit(&mut decl)?;
+        decl.id = key
+            .strip_prefix(&format!("{PERSON}/"))
+            .map_or_else(|| key.to_owned(), str::to_owned);
+        check_file(&decl)?;
+        let mut s = self.lock();
+        let path = now.file.unwrap_or_else(|| dir.join(file_name(key)));
+        s.files.insert(key.to_owned(), (decl, path));
+        s.pending.insert(key.to_owned());
+        s.edits = s.edits.wrapping_add(1);
+        let n = s.edits;
+        Self::changed(s);
+        Ok((answer, n))
+    }
+
+    /// The last edit's number ([`Self::edit`], [`Self::flush_if`]).
+    #[must_use]
+    pub fn last_edit(&self) -> u64 {
+        self.lock().edits
+    }
+
+    /// Whether an edit is not yet written.
+    #[must_use]
+    pub fn pending(&self) -> bool {
+        !self.lock().pending.is_empty()
+    }
+
+    /// Writes every edit not yet written (each file it replaces kept as
+    /// a backup): the files.
+    ///
+    /// # Errors
+    ///
+    /// No folder; a file that cannot be written (the rest are).
+    pub fn flush(&self) -> Result<Vec<PathBuf>, String> {
+        let (dir, todo) = {
+            let mut s = self.lock();
+            let todo: Vec<(ToolbarDecl, PathBuf)> = std::mem::take(&mut s.pending)
+                .into_iter()
+                .filter_map(|k| s.files.get(&k).cloned())
+                .collect();
+            (s.dir.clone(), todo)
+        };
+        if todo.is_empty() {
+            return Ok(Vec::new());
+        }
+        let dir = dir.ok_or("no folder for toolbars (Toolbars::set_dir)")?;
+        let mut written = Vec::new();
+        let mut failed = None;
+        for (decl, path) in todo {
+            match decl.to_toml().and_then(|text| write_kept(&dir, &path, &text)) {
+                Ok(()) => written.push(path),
+                Err(why) => failed = Some(why),
+            }
+        }
+        self.reload();
+        failed.map_or(Ok(written), Err)
+    }
+
+    /// [`Self::flush`], when edit `n` ([`Self::edit`]) is still the last:
+    /// what a pause after an edit writes (a later edit waits its own).
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::flush`].
+    pub fn flush_if(&self, n: u64) -> Result<Vec<PathBuf>, String> {
+        if self.lock().edits != n {
+            return Ok(Vec::new());
+        }
+        self.flush()
+    }
+
+    /// A new toolbar of the person's own, empty: `user/<id>` (`id` from
+    /// `title` when none, made unique), written at once.
+    ///
+    /// # Errors
+    ///
+    /// No folder; a place there is not; the file cannot be written.
+    pub fn create(
+        &self,
+        contributions: &Contributions,
+        id: Option<&str>,
+        title: &str,
+        at: &str,
+    ) -> Result<String, String> {
+        let title = if title.trim().is_empty() { "Toolbar" } else { title.trim() };
+        let id = self.free_id(contributions, id.map_or_else(|| crate::toolbar_edit::slug(title), str::to_owned));
+        let key = format!("{PERSON}/{id}");
+        let decl = ToolbarDecl {
+            id,
+            title: title.to_owned(),
+            at: at.to_owned(),
+            ..ToolbarDecl::default()
+        };
+        self.save(&key, &decl)?;
+        Ok(key)
+    }
+
+    /// `base`, or `base-2`, `base-3`… : one no toolbar of the person's has.
+    fn free_id(&self, contributions: &Contributions, base: String) -> String {
+        let taken: BTreeSet<String> = self
+            .all(contributions)
+            .into_iter()
+            .filter_map(|t| t.key.strip_prefix(&format!("{PERSON}/")).map(str::to_owned))
+            .collect();
+        if !taken.contains(&base) {
+            return base;
+        }
+        (2_u32..)
+            .map(|n| format!("{base}-{n}"))
+            .find(|id| !taken.contains(id))
+            .unwrap_or(base)
+    }
+
+    /// A copy of the toolbar under `key` as a toolbar of the person's own
+    /// (`title` or "<its title> copy", hidden until it is shown): its key.
+    ///
+    /// # Errors
+    ///
+    /// No toolbar under `key`; as [`Self::save`].
+    pub fn duplicate(
+        &self,
+        contributions: &Contributions,
+        key: &str,
+        id: Option<&str>,
+        title: Option<&str>,
+    ) -> Result<String, String> {
+        let from = self
+            .get(contributions, key)
+            .ok_or_else(|| format!("no toolbar {key:?} (TOOLBAR_LIST lists them)"))?;
+        let title = title.map_or_else(|| format!("{} copy", from.decl.title), str::to_owned);
+        let id = self.free_id(contributions, id.map_or_else(|| crate::toolbar_edit::slug(&title), str::to_owned));
+        let mut decl = from.decl;
+        // Its widgets name their views whole, as a person's file does.
+        qualify_views(&mut decl, &from.owner);
+        decl.title = title;
+        decl.at = "hidden".to_owned();
+        let key = format!("{PERSON}/{id}");
+        self.save(&key, &decl)?;
+        Ok(key)
+    }
+
+    /// Shows the toolbar under `key` at `at` in place of whichever showed
+    /// there (each now `hidden`): switches which toolbar a place shows.
+    ///
+    /// # Errors
+    ///
+    /// No toolbar under `key`; a place there is not; as [`Self::edit`].
+    pub fn show(&self, contributions: &Contributions, key: &str, at: &str) -> Result<Vec<String>, String> {
+        let probe = ToolbarDecl {
+            at: at.to_owned(),
+            ..ToolbarDecl::default()
+        };
+        if probe.place().is_none() {
+            return Err(format!("{at:?} is not a place"));
+        }
+        let mut hidden = Vec::new();
+        if probe.place() != Some(ToolbarPlace::Hidden) {
+            for other in self.all(contributions) {
+                if other.key != key && other.decl.at == at {
+                    self.edit(contributions, &other.key, |t| {
+                        "hidden".clone_into(&mut t.at);
+                        Ok(())
+                    })?;
+                    hidden.push(other.key);
+                }
+            }
+        }
+        self.edit(contributions, key, |t| {
+            at.clone_into(&mut t.at);
+            Ok(())
+        })?;
+        Ok(hidden)
+    }
+
+    /// Moves item `from` of toolbar `key` to place `to` of toolbar `into`
+    /// (another open toolbar): its new place.
+    ///
+    /// # Errors
+    ///
+    /// As [`crate::toolbar_edit::move_item`] and [`Self::edit`].
+    pub fn move_between(
+        &self,
+        contributions: &Contributions,
+        key: &str,
+        from: crate::toolbar_edit::At,
+        into: &str,
+        to: crate::toolbar_edit::At,
+    ) -> Result<crate::toolbar_edit::At, String> {
+        use crate::toolbar_edit as edit;
+        if key == into {
+            return self
+                .edit(contributions, key, |t| edit::move_item(t, from, to))
+                .map(|(at, _)| at);
+        }
+        let from_bar = self
+            .get(contributions, key)
+            .ok_or_else(|| format!("no toolbar {key:?}"))?;
+        let mut item = edit::get(&from_bar.decl, from)
+            .cloned()
+            .ok_or_else(|| format!("no item at {from}"))?;
+        // A widget of its own extension names it whole where it goes.
+        let mut one = ToolbarDecl {
+            items: vec![item],
+            ..ToolbarDecl::default()
+        };
+        qualify_views(&mut one, &from_bar.owner);
+        item = one.items.remove(0);
+        // Into the other first: a refusal there leaves both as they were.
+        let (at, _) = self.edit(contributions, into, |t| edit::insert(t, Some(to), item))?;
+        self.edit(contributions, key, |t| edit::remove(t, from).map(|_| ()))?;
+        Ok(at)
+    }
+
+    /// The backups of the person's file for `key`, the newest first.
+    #[must_use]
+    pub fn backups(&self, key: &str) -> Vec<PathBuf> {
+        let (dir, path) = {
+            let s = self.lock();
+            (s.dir.clone(), s.files.get(key).map(|(_, p)| p.clone()))
+        };
+        let Some(dir) = dir else {
+            return Vec::new();
+        };
+        let path = path.unwrap_or_else(|| dir.join(file_name(key)));
+        (1..=BACKUPS)
+            .map(|n| backup_path(&dir, &path, n))
+            .take_while(|p| p.exists())
+            .collect()
+    }
+
+    /// Turns the editor on or off (off: whose settings showed, too).
+    pub fn set_editing(&self, on: bool) {
+        let mut s = self.lock();
+        if s.editing == on {
+            return;
+        }
+        s.editing = on;
+        if !on {
+            s.selected = None;
+        }
+        Self::changed(s);
+    }
+
+    /// Whether the editor is on.
+    #[must_use]
+    pub fn editing(&self) -> bool {
+        self.lock().editing
+    }
+
+    /// Shows the settings of toolbar `key`'s item at `at` (none: the
+    /// toolbar's own), or of nothing.
+    pub fn select(&self, selected: Option<(String, Option<String>)>) {
+        let mut s = self.lock();
+        if s.selected == selected {
+            return;
+        }
+        s.selected = selected;
+        Self::changed(s);
+    }
+
+    /// Whose settings show.
+    #[must_use]
+    pub fn selected(&self) -> Option<(String, Option<String>)> {
+        self.lock().selected.clone()
+    }
+
+    /// Image file `image` as a `data:` URI (read once, again when it
+    /// changes): `image` absolute, or in `beside` (the person's folder
+    /// when none). None when it is not there or not an image.
+    #[must_use]
+    pub fn image(&self, image: &str, beside: Option<&Path>) -> Option<String> {
+        use base64::Engine as _;
+        let mime = crate::toolbar::image_type(image)?;
+        let path = Path::new(image);
+        let path = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            beside.map(Path::to_path_buf).or_else(|| self.dir())?.join(path)
+        };
+        let stamp = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+        if let Some((at, uri)) = self.lock().images.get(&path)
+            && *at == stamp
+        {
+            return uri.clone();
+        }
+        let uri = std::fs::read(&path).ok().map(|bytes| {
+            format!(
+                "data:{mime};base64,{}",
+                base64::engine::general_purpose::STANDARD.encode(bytes)
+            )
+        });
+        self.lock().images.insert(path, (stamp, uri.clone()));
+        uri
     }
 
     /// Arms `action` (one at a time): its buttons show it armed.
@@ -473,6 +900,115 @@ mod tests {
         assert!(bars.reset("lab.x/t").unwrap());
         assert_eq!(bars.all(&reg)[0].source, Source::Extension);
         assert!(!bars.reset("lab.x/t").unwrap());
+    }
+
+    #[test]
+    fn an_edit_shows_at_once_is_written_after_the_last_and_backups_rotate() {
+        use crate::toolbar_edit::{self as edit, At};
+        let tmp = tempfile::tempdir().unwrap();
+        let reg = Contributions::new();
+        let bars = Toolbars::new();
+        bars.set_dir(tmp.path());
+        let key = bars.create(&reg, None, "My tools", "dock:right").unwrap();
+        assert_eq!(key, "user/my-tools");
+        assert_eq!(bars.create(&reg, None, "My tools", "float").unwrap(), "user/my-tools-2");
+        let file = tmp.path().join("user-my-tools.toml");
+        assert!(file.exists());
+        // Two edits: shown at once, not written until the last one's pause.
+        let (_, first) = bars
+            .edit(&reg, &key, |t| edit::insert(t, None, ToolItem { action: "A".into(), ..ToolItem::default() }))
+            .unwrap();
+        let (_, second) = bars
+            .edit(&reg, &key, |t| edit::insert(t, Some(At::top(0)), ToolItem { action: "B".into(), ..ToolItem::default() }))
+            .unwrap();
+        assert_eq!(bars.get(&reg, &key).unwrap().decl.items.len(), 2);
+        assert!(bars.pending());
+        // A poll meanwhile keeps them.
+        let _ = bars.poll();
+        assert_eq!(bars.get(&reg, &key).unwrap().decl.items.len(), 2);
+        assert!(bars.flush_if(first).unwrap().is_empty(), "a later edit waits its own");
+        assert!(!std::fs::read_to_string(&file).unwrap().contains("\"B\""));
+        assert_eq!(bars.flush_if(second).unwrap(), vec![file.clone()]);
+        assert!(!bars.pending());
+        assert!(std::fs::read_to_string(&file).unwrap().contains("\"B\""));
+        // A new folder (a restart) reads what was written.
+        let again = Toolbars::new();
+        again.set_dir(tmp.path());
+        let read = again.get(&reg, &key).unwrap().decl;
+        assert_eq!(read.items.iter().map(|i| i.action.as_str()).collect::<Vec<_>>(), ["B", "A"]);
+        // The write kept what it replaced: the empty one.
+        let kept = bars.backups(&key);
+        assert_eq!(kept.len(), 1);
+        assert!(!std::fs::read_to_string(&kept[0]).unwrap().contains("items = [{"));
+        // Each write keeps one more, the oldest past BACKUPS going.
+        for n in 0..(BACKUPS + 3) {
+            bars.edit(&reg, &key, |t| {
+                t.title = format!("Take {n}");
+                Ok(())
+            })
+            .unwrap();
+            bars.flush().unwrap();
+        }
+        let kept = bars.backups(&key);
+        assert_eq!(kept.len(), BACKUPS);
+        let newest = std::fs::read_to_string(&kept[0]).unwrap();
+        assert!(newest.contains(&format!("Take {}", BACKUPS + 1)), "{newest}");
+        let oldest = std::fs::read_to_string(&kept[BACKUPS - 1]).unwrap();
+        assert!(oldest.contains("Take 2"), "{oldest}");
+        // Deleting keeps it too.
+        assert!(bars.reset(&key).unwrap());
+        assert!(bars.get(&reg, &key).is_none());
+        assert!(std::fs::read_to_string(&bars.backups(&key)[0]).unwrap().contains(&format!("Take {}", BACKUPS + 2)));
+    }
+
+    #[test]
+    fn a_place_shows_one_toolbar_and_a_copy_is_the_persons_own() {
+        let tmp = tempfile::tempdir().unwrap();
+        let reg = Contributions::new();
+        let mut ext = bar("t", "LAB_X_A");
+        ext.items.push(ToolItem {
+            kind: crate::toolbar::ToolKind::Widget,
+            view: "meter".into(),
+            ..ToolItem::default()
+        });
+        reg.put(
+            "lab.x",
+            Contribution {
+                toolbars: vec![ext],
+                ..Contribution::default()
+            },
+        );
+        let bars = Toolbars::new();
+        bars.set_dir(tmp.path());
+        let copy = bars.duplicate(&reg, "lab.x/t", None, None).unwrap();
+        assert_eq!(copy, "user/t-copy");
+        let c = bars.get(&reg, &copy).unwrap();
+        assert_eq!((c.decl.at.as_str(), c.decl.title.as_str()), ("hidden", "T copy"));
+        assert_eq!(c.decl.items[1].view, "lab.x/meter", "its widget named whole");
+        // Shown in the dock: the extension's goes hidden (the person's copy of it).
+        assert_eq!(bars.show(&reg, &copy, "dock:right").unwrap(), ["lab.x/t"]);
+        bars.flush().unwrap();
+        let all = bars.all(&reg);
+        let at = |k: &str| all.iter().find(|t| t.key == k).unwrap().decl.at.clone();
+        assert_eq!((at("lab.x/t"), at(&copy)), ("hidden".to_owned(), "dock:right".to_owned()));
+        assert!(bars.show(&reg, &copy, "dock:top").is_err());
+        // Its item, between toolbars.
+        bars.move_between(&reg, &copy, crate::toolbar_edit::At::top(1), "lab.x/t", crate::toolbar_edit::At::top(0)).unwrap();
+        assert_eq!(bars.get(&reg, "lab.x/t").unwrap().decl.items[0].view, "lab.x/meter");
+        assert_eq!(bars.get(&reg, &copy).unwrap().decl.items.len(), 1);
+    }
+
+    #[test]
+    fn an_image_is_a_data_uri_read_again_when_it_changes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bars = Toolbars::new();
+        bars.set_dir(tmp.path());
+        std::fs::create_dir_all(tmp.path().join("icons")).unwrap();
+        std::fs::write(tmp.path().join("icons/a.svg"), "<svg/>").unwrap();
+        let uri = bars.image("icons/a.svg", None).unwrap();
+        assert_eq!(uri, "data:image/svg+xml;base64,PHN2Zy8+");
+        assert_eq!(bars.image("icons/none.svg", None), None);
+        assert_eq!(bars.image("icons/a.txt", None), None);
     }
 
     #[test]

@@ -50,7 +50,7 @@ use semver::Version;
 use serde_json::Value;
 
 use crate::catalog::Origin;
-use crate::contrib::{Contributions, HookDecl};
+use crate::contrib::{self, Contributions, HookDecl};
 use crate::manifest::{ActionDecl, Kind, Manifest, Reach};
 use crate::package::{Package, PackageError};
 
@@ -891,11 +891,29 @@ impl Host {
             .inner
             .points
             .declare(crate::interop::APP, &[crate::hostui::decorations_point()]);
+        // The context-menu targets of the features here: the workspace's
+        // (a pane, a tab) and the toolbars'.
+        host.declare_context_targets("workspace", &architect_workspace::CONTEXT_TARGETS);
+        host.declare_context_targets("toolbars", &crate::toolbar::CONTEXT_TARGETS);
         host
     }
 
     pub(crate) fn services(&self) -> &crate::hostapi::Services {
         &self.inner.services
+    }
+
+    /// Declares feature `owner`'s context-menu targets, each `(kind,
+    /// what it is)` (`("file", "a file-tree row; its id the path")`), in
+    /// place of the ones it declared: points `context.<kind>`
+    /// ([`contrib::context_point`]) whose items are the `[[context]]` rows
+    /// for them. A feature that shows a context menu of its own targets
+    /// (`PaneHandle::context_menu`) declares them.
+    pub fn declare_context_targets(&self, owner: &str, targets: &[(&str, &str)]) {
+        let points: Vec<_> = targets
+            .iter()
+            .map(|(kind, what)| contrib::context_target_point(kind, what))
+            .collect();
+        let _ = self.inner.points.declare(owner, &points);
     }
 
     pub(crate) fn downgrade(&self) -> WeakHost {
@@ -1466,11 +1484,18 @@ impl Host {
             || manifest.contributes.clone(),
             |code| manifest.contributes.merged(&code),
         );
+        // Its context-menu rows are items of their targets' points.
+        let mut items = manifest.point_items();
+        for row in &declared.context {
+            if let Ok(v) = serde_json::to_value(row) {
+                items.entry(contrib::context_point(&row.target)).or_default().push(v);
+            }
+        }
         self.inner.contributions.put(&manifest.id, declared);
         // Its points and its items for others', as a diff; each point
         // whose set changed is told to its owner.
         let mut points = self.inner.points.declare(&manifest.id, &manifest.points);
-        points.extend(self.inner.points.put(&manifest.id, manifest.point_items()));
+        points.extend(self.inner.points.put(&manifest.id, items));
         // Its windows that went with a reload close.
         for open in self.inner.windows.open_now() {
             if open.extension == manifest.id

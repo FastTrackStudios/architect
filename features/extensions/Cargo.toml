@@ -32,6 +32,8 @@ host = [
     "dep:futures",
     # Signed `.archext` archives: checked on install, whichever way they came.
     "archive",
+    # A toolbar button's image file, as a `data:` URI.
+    "dep:base64",
 ]
 # The `.archext` archive (`architect-extension-archive`): open, verify,
 # extract per platform. On with `host`.
@@ -161,6 +163,7 @@ architect-telemetry = { workspace = true, optional = true }
 crdt = { workspace = true, optional = true }
 dioxus = { workspace = true, optional = true }
 futures = { version = "0.3", optional = true }
+base64 = { workspace = true, optional = true }
 vox = { workspace = true, optional = true }
 vox-core = { workspace = true, optional = true }
 vox-stream = { version = "0.10.0-rc.7", optional = true }

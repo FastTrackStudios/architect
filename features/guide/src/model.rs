@@ -219,6 +219,8 @@ pub enum Do {
     /// (its middle, or near its `edge`), else where it started, moved by
     /// `dx`/`dy` points: `@drag{to @group"files", edge right}` drops a tab
     /// on a group's right side; `@drag{dx 120}` pulls a divider along.
+    /// With `key`, that key is pressed at the end, still holding, before
+    /// letting go: `@drag{to …, key Escape}` cancels the drag.
     Drag {
         #[facet(default)]
         to: Option<Target>,
@@ -230,6 +232,8 @@ pub enum Do {
         dy: f32,
         #[facet(default = 0.8)]
         seconds: f32,
+        #[facet(default)]
+        key: Option<String>,
     },
     /// Turns the wheel over the step's target by `dx`/`dy` points, over
     /// `seconds`, as a trackpad's flick does (quick, then coasting to a

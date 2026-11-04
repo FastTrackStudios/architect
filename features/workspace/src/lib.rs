@@ -64,12 +64,21 @@ pub use ctx::{
     ViewCtx, ViewInput,
 };
 pub use guide::{ArrangedGroup, ArrangedSplit, ArrangedWindow, Arrangement, target_selector};
+
+/// The context-menu targets the workspace owns, `(kind, what it is)`:
+/// what an app's extension host declares for it
+/// (`architect_extensions`' `Host::declare_context_targets`).
+pub const CONTEXT_TARGETS: [(&str, &str); 3] = [
+    ("pane", "every pane's tab; its id the pane's"),
+    ("tab", "a tab, past its view kind's rows; its id the pane's"),
+    ("view", "the tabs of one view kind's panes: `view:<kind>`; its id the pane's"),
+];
 #[cfg(feature = "ui")]
 pub use host::{
     Bridge, Command, ContextEntries, ContextEntry, HeaderTools, Host, Opened, PaneHandle, Popout,
     PresenceLayer, PresenceOverlay, TabBadges, TitleRow, View, Views, WindowSystem, Windows,
     WorkspaceActions, WorkspaceStore, WorkspaceView, context_invocation, use_host, use_pane,
-    use_pane_status, use_presence_overlay,
+    use_pane_of, use_pane_status, use_presence_overlay,
 };
 pub use kinds::{
     Capabilities, Capability, DIOXUS, Hosts, KindError, KindId, KindSpec, PAINT, Part, Placement,

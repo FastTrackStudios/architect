@@ -537,6 +537,17 @@ pub fn use_pane() -> PaneHandle {
     }
 }
 
+/// Pane `id`'s handle, from anywhere in the workspace (its header, a
+/// toolbar in it): what [`use_pane`] gives inside its view.
+#[must_use]
+pub fn use_pane_of(id: PaneId) -> PaneHandle {
+    PaneHandle {
+        id,
+        host: use_host(),
+        preview: false,
+    }
+}
+
 /// A pane, from inside it.
 #[derive(Clone)]
 pub struct PaneHandle {

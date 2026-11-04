@@ -434,9 +434,12 @@ pub fn use_extension_ui(host: Host, app: Arc<ActionList>) -> ExtensionUi {
     // a toggle's ticked when on.
     let reg = host.contributions().clone();
     let list = host.list().clone();
+    let bars_host = host.clone();
     use_context_provider(move || {
         ContextEntries::new(move |target, id| {
-            reg.context(target, id)
+            // The toolbars' own rows first (`toolbar`, `toolbar-item`).
+            let mut rows = crate::toolbar_ui::context_rows(&bars_host, target, id);
+            rows.extend(reg.context(target, id)
                 .into_iter()
                 .filter_map(|by| {
                     let info = list.info(&by.item.action)?;
@@ -450,10 +453,12 @@ pub fn use_extension_ui(host: Host, app: Arc<ActionList>) -> ExtensionUi {
                         command: by.item.action,
                         checked: info.checked,
                     })
-                })
-                .collect()
+                }));
+            rows
         })
     });
+    // The toolbar editor's state, shared by the window's toolbars.
+    let _ = crate::toolbar_editor::provide_editor();
     // A pane's header: the toolbars on every pane, and on its view's.
     crate::toolbar_ui::provide_header_tools(ui);
     // A toolbar that is a pane of its own (a dock's, a float, a window)
@@ -717,6 +722,7 @@ pub fn ExtensionOverlays(ui: ExtensionUi) -> Element {
     let layers = (ui.layers)();
     rsx! {
         crate::window_ui::ExtensionWindows { ui }
+        crate::toolbar_editor::ToolbarEditorLayer { ui }
         crate::host_ui_view::HostUiLayer { host: ui.host() }
         for layer in layers {
             {
