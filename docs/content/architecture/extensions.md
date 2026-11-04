@@ -782,16 +782,96 @@ Good first-party extensions are auxiliary and not realtime: chart and
 lyric views, importers and exporters, publishing, overlays, analytics.
 The engine, the timeline, transport and DSP stay core.
 
-## Capabilities
+## Capabilities, the host service and consent
 
-An extension's manifest names what it needs: the network hosts, the
-folders, the action namespaces it may run, whether it may change or
-destroy (an action's effect: read-only, mutating, destructive). The
-person grants them when installing, and can revoke them. Every call
-across the boundary is checked, and the span records `ext.id` and the
-`perm.*` outcome ([logging](@/architecture/diagnostics.md)). Each
-extension runs in its own Wasmtime store with fuel and memory limits,
-off the audio thread and off the engine's thread.
+An extension's manifest names what it needs in `[capabilities]`: the
+action namespaces it may run past its own (`actions`) and the most they
+may change (`effect`: read-only, mutating, destructive), what of the
+app's state it may read (`reads`: `org`, `selection`, `documents`), the
+folders past its own and the network hosts
+(`features/extensions/src/manifest.rs` `Capabilities`;
+`features/extensions/src/capabilities.rs` turns them into the lines a
+person reads, `Capabilities::grows_from`, and into what may run,
+`Capabilities::within`).
+
+**The host service** is what an extension asks the app for, the same
+over every way it runs (`features/extensions/src/hostcall.rs`
+`HostRequest`, `HostAnswer`, JSON): run an app action, read the current
+organization or the selection, open and read documents, read and write
+files (its own folder, or `capabilities.folders`), read and write its
+own settings and data, log a line. `Host::api` gives one extension's
+session (`features/extensions/src/hostapi.rs` `ExtensionApi::call`),
+checked against what it may reach now. A process calls it over its own
+connection (the host serves `features/extensions/src/host_proto.rs`
+`ExtensionHost`; the guest calls `guest::host`), a Luau script through
+its `host` global (`features/extensions/src/luau_host.rs`), an
+in-process extension through `linked::Handle::host`; the WASM runner
+maps one JSON-in, JSON-out import onto the same call. What the app knows
+comes from its `hostapi::AppContext` (organization, selection,
+documents) and `SettingValues`; data and files live under
+`Host::with_data_root`; `Host::set_app_list` names the app's list when
+extensions have one of their own.
+
+An action an extension runs is run as `Principal::Extension { id,
+on_behalf_of }` (`features/permissions/src/lib.rs`): the person or agent
+whose run it is part of, or `None` for the app itself. A list's
+authorizer or a server's gate tells it apart from the person's;
+`RoleEngine` gives it at most the rules of `on_behalf_of`. Acting for
+the app itself it is not asked to confirm (the person granted it on
+install); acting for an agent it asks as the agent would. Each call is
+a span, `ext.host_call`, with `perm.capability`, `perm.decision`,
+`perm.reason` and `perm.principal` (set with
+`architect_telemetry::wide::set` too); a refusal is `HostError::Refused
+{capability, why}` and a line in the extension's log.
+
+**Consent** (`features/extensions/src/consent.rs` `Grants`): an
+installed extension runs with what it asks *and* a person granted, kept
+per device or per organization (only while it is the current one) in a
+file the app names (`Host::with_grants`), revocable at once
+(`Grants::revoke`): the next call, hook or script is refused what it
+lost. A built-in or a development copy runs with what it asks. Install
+shows the capabilities (`EXT_PREVIEW`, the consent prompt); an update
+whose capabilities grow waits for a yes (`EXT_UPDATE`'s
+`needs_consent`). An agent asking to install with a grant, or to grant,
+is answered `confirmation_required` with a ticket at once, never left
+waiting (`Extensions::confirm_on`).
+
+| action | what it does |
+|---|---|
+| `EXT_PREVIEW` | what a version would be and do, before it is installed: kind, runner, capabilities and which need a yes, contributions, hooks, network and files, its git ref |
+| `EXT_INSTALL` | `{id, version?, grant?, pin?}`; without a grant one that asks for more answers `needs_consent` |
+| `EXT_UPDATE` | to the newest each pin allows; unchanged ones skipped |
+| `EXT_PIN` | keeps an install at a version range, or `unpin` |
+| `EXT_GRANT` / `EXT_REVOKE` / `EXT_GRANTS` | a person's yes, taking it back, and what each may reach now |
+| `EXT_LOGS` | `{id, since?, limit?}`: a process's stdout and stderr, Luau prints and errors, failed hooks, refused calls |
+| `EXT_HOST_CALL` | one host-service call as an extension, for the caller |
+| `EXT_INFO` | which copy runs, versions, pin, grants, what it may reach |
+
+## The extensions manager
+
+One place in every app for everything that customizes it
+(`features/extensions/src/manager/mod.rs` `Manager`, feature `manager`):
+a registry of kinds (`ItemKind`: list, get, run an op). It comes with
+extensions (any runner, which copy runs and the way back to the
+built-in), Luau scripts and their hooks, workers (process extensions'
+processes), themes and the interface files (layouts and `keys.json`)
+(`features/extensions/src/manager/kinds.rs`). An app adds a kind of its
+own — audio plugins, a page kind, WASI components — by implementing
+`ItemKind` and calling `Manager::register`. Agents get every operation
+as `MANAGER_KINDS`, `MANAGER_LIST {kind?, query?}`, `MANAGER_GET {kind,
+id}` and `MANAGER_RUN {kind, id, op, args?}`; a destructive op from
+outside asks the person first (`Manager::confirm_on`).
+
+The manager is itself a linked-in extension
+(`features/extensions/src/manager/extension.rs` `ManagerExtension`,
+id `manager`), overridable by a development copy. Its page
+(`features/extensions/src/page.rs` `ManagerPage`, feature `page`, in
+architect-ui's components and the theme's variables) is a settings
+section and a workspace view (`use_manager_page`, `ManagerView`), with
+⌘O's `ext:`; an extension's page there shows what it adds, what it asks
+for (granted or not, each grant revocable), versions and pin, where it
+runs and its log, and installs through the consent prompt. A project's
+missing extensions use the same components (`MissingExtensions`).
 
 ## Packaging
 

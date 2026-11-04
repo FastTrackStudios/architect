@@ -162,7 +162,10 @@ impl Browse {
             || "the app's own build".to_owned(),
             |dir| dir.display().to_string(),
         );
+        #[cfg(feature = "linked")]
         let linked = ext.host().linked().iter().any(|(l, _)| l == id);
+        #[cfg(not(feature = "linked"))]
+        let linked = false;
         if linked && c.runs.origin == Origin::Builtin {
             "linked into the app: runs in its process, its views in its window"
                 .clone_into(&mut p.runner);

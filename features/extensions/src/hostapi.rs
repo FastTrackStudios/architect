@@ -107,6 +107,16 @@ impl SettingValues for MemoryValues {
     }
 }
 
+/// One `perm.*` field on the wide event (`architect_telemetry::wide::set`,
+/// feature `wide-events`); the span's own fields carry it regardless.
+#[cfg(feature = "wide-events")]
+fn wide(key: &'static str, value: impl Into<String>) {
+    architect_telemetry::wide::set(key, value.into());
+}
+
+#[cfg(not(feature = "wide-events"))]
+fn wide(_key: &'static str, _value: impl Into<String>) {}
+
 /// The host's side of the service: what it was given.
 pub(crate) struct Services {
     grants: Mutex<Option<Grants>>,
@@ -344,7 +354,7 @@ impl ExtensionApi {
             Err(_) => "failed",
         };
         span.record("ext.outcome", outcome);
-        architect_telemetry::wide::set("ext.outcome", outcome);
+        wide("ext.outcome", outcome);
         if let (Err(e), Some(host)) = (&answer, self.host.upgrade()) {
             let level = if matches!(e, HostError::Refused { .. }) {
                 Level::Warn
@@ -372,20 +382,20 @@ impl ExtensionApi {
     fn decide(capability: &str, check: Check) -> Result<(), HostError> {
         let span = tracing::Span::current();
         span.record("perm.capability", capability);
-        architect_telemetry::wide::set("perm.capability", capability.to_owned());
+        wide("perm.capability", capability.to_owned());
         match check {
             Ok(()) => {
                 span.record("perm.decision", "allow");
-                architect_telemetry::wide::set("perm.decision", "allow");
+                wide("perm.decision", "allow");
                 Ok(())
             }
             Err((capability, why)) => {
                 span.record("perm.capability", capability.as_str());
                 span.record("perm.decision", "deny");
                 span.record("perm.reason", why.as_str());
-                architect_telemetry::wide::set("perm.capability", capability.clone());
-                architect_telemetry::wide::set("perm.decision", "deny");
-                architect_telemetry::wide::set("perm.reason", why.clone());
+                wide("perm.capability", capability.clone());
+                wide("perm.decision", "deny");
+                wide("perm.reason", why.clone());
                 Err(HostError::Refused { capability, why })
             }
         }

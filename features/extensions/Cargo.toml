@@ -30,9 +30,12 @@ host = [
     "dep:tracing",
     # `EXT_CHECK` answers from a thread of its own.
     "dep:futures",
-    # The host service's calls carry `perm.*` on their span (wide events).
-    "dep:architect-telemetry",
 ]
+# `perm.*` of each host-service call also through
+# `architect_telemetry::wide::set` (the span's fields carry them either
+# way); off by default, as telemetry reaches tower-http, which a UI build
+# must not.
+wide-events = ["host", "dep:architect-telemetry"]
 crdt = ["dep:crdt"]
 # In-process extensions (`linked`): one trait a crate implements, run
 # linked into the app as a built-in (its views Dioxus components in the
