@@ -726,10 +726,14 @@ async fn follow(
             let from = asked.borrow_mut().pop_front();
             let applying = Instant::now();
             let applied = with_doc(&node, |doc, at| {
-                remote(doc, at).map_or_else(
+                let applied = remote(doc, at).map_or_else(
                     || Err("the view was unmounted".to_owned()),
                     |r| r.apply(frame),
-                )
+                );
+                // A frame no input asked for (a save, live data, a worker's
+                // news) still shows: the window is asked to draw again.
+                doc.shell_provider.request_redraw();
+                applied
             })
             .await;
             // From the event that asked; an older process's, its apply.

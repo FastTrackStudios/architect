@@ -261,10 +261,14 @@ async fn follow(
             busy.set(false);
         }
         let applied = with_doc(&node, |doc, at| {
-            remote(doc, at).map_or_else(
+            let applied = remote(doc, at).map_or_else(
                 || Err("the page was unmounted".to_owned()),
                 |r| r.apply(frame),
-            )
+            );
+            // A frame no input asked for (a save, live data, a worker's
+            // news) still shows: the window is asked to draw again.
+            doc.shell_provider.request_redraw();
+            applied
         })
         .await;
         if let Err(e) = applied {

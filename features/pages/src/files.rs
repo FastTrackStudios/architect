@@ -222,6 +222,18 @@ pub fn clone_to_edit(
         }
         std::fs::write(&to, std::fs::read(&page.path)?)?;
         set_read_only(&to, false)?;
+        // What it imports and spawns comes along (none overwritten).
+        if let (Some(from), Some(into)) = (page.path.parent(), to.parent())
+            && let Ok(entries) = std::fs::read_dir(from)
+        {
+            for entry in entries.flatten() {
+                let (path, there) = (entry.path(), into.join(entry.file_name()));
+                if path.is_file() && path != page.path && !there.exists() {
+                    std::fs::write(&there, std::fs::read(&path)?)?;
+                    set_read_only(&there, false)?;
+                }
+            }
+        }
     }
     Ok(PageFile {
         path: to,
@@ -385,6 +397,9 @@ mod tests {
         assert!(find_override(app.path(), "lab.board", "board").is_none());
         let edit = clone_to_edit(&builtin, app.path(), "lab.board", "board").unwrap();
         assert!(edit.editable());
+        // Its worker came along, editable.
+        let job = app.path().join(PAGES).join("lab.board").join("job.js");
+        assert!(!std::fs::metadata(&job).unwrap().permissions().readonly());
         assert_eq!(
             find_override(app.path(), "lab.board", "board"),
             Some(edit.clone())

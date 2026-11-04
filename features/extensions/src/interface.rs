@@ -612,8 +612,15 @@ pub fn ExtensionView(
             fill,
         };
         if let Some(page) = (pages.0)(&ask) {
+            // A page is a sub-document, sized by its box: a slot's is a
+            // bar's height, as a process view's.
+            let boxed = if fill {
+                "flex: 1; min-height: 0; display: flex; flex-direction: column;"
+            } else {
+                "flex-shrink: 0; height: 26px; display: flex; flex-direction: column;"
+            };
             return rsx! {
-                div { style: "{size} display: flex; flex-direction: column;", {page} }
+                div { style: "{boxed}", {page} }
             };
         }
     }
