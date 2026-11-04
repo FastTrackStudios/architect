@@ -33,6 +33,9 @@ pub const PAGES: &[(&str, &str)] = &[
     ("board.tsx", include_str!("../pages/board.tsx")),
     ("kf.tsx", include_str!("../pages/kf.tsx")),
     ("primes.js", include_str!("../pages/primes.js")),
+    ("summary.a2ui.json", include_str!("../pages/summary.a2ui.json")),
+    ("primes.luau", include_str!("../pages/primes.luau")),
+    ("count.luau", include_str!("../pages/count.luau")),
 ];
 
 /// Its status item's id.
@@ -127,6 +130,8 @@ impl Extension for Board {
             .view("chart", ChartView)
             .view("status-bar", BoardStatusBar)
             .view("song", SongCard)
+            .view("summary", PagesOnly)
+            .view("primes", PagesOnly)
             .action_in(
                 "LAB_BOARD_PIN",
                 |args, cx| async move { Ok(pin(&args, cx)) },
@@ -220,6 +225,17 @@ fn BoardView() -> Element {
 }
 
 /// The `.kf` opener's view.
+/// What `summary` and `primes` show in an app that does not run their
+/// page files (`pages/summary.a2ui.json`, `pages/primes.luau`).
+#[component]
+fn PagesOnly() -> Element {
+    rsx! {
+        div { style: "padding: 24px; font-size: 13px; color: var(--muted-foreground);",
+            "This view is a page file: an app that runs pages (architect-pages) draws it."
+        }
+    }
+}
+
 #[component]
 fn ChartView() -> Element {
     let _ = use_board();

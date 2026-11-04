@@ -46,7 +46,8 @@ pub fn extension_checker() -> architect_extensions::check::Checker {
         architect::action::ActionList::new(),
     ))
     .with_js()
-    .with_luau();
+    .with_luau()
+    .with_a2ui();
     architect_extensions::check::Checker::new()
         .with_view_kinds(embedded::kinds())
         .with_page_checker(pages.page_checker())

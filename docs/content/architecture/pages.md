@@ -1,14 +1,15 @@
 +++
 title = "Pages as files"
-description = "A view written as a file — TSX or JS on QuickJS, Luau elements — re-rendered live on save, on a thread of its own, drawn as the same edit stream a process view sends; one API defined once in Rust, its TypeScript and Luau types generated from it."
+description = "A view written as a file — TSX or JS on QuickJS, Luau elements, A2UI JSON — re-rendered live on save, on a thread of its own, drawn as the same edit stream a process view sends; one API defined once in Rust, its TypeScript and Luau types generated from it."
 weight = 68
 +++
 
 > **Status: landed (2026-11, #273)** in `architect-pages`
 > (`features/pages`): the API, the QuickJS and Luau runners, TSX by
-> oxc, reload on save with the last good page kept, overrides in the
-> app's folder, and the lab's Board tab as a file. Not yet: A2UI JSON
-> pages (`PageKind::A2ui` is named but not run), the web build's Web
+> oxc with source maps, A2UI JSON pages, workers and timers in both
+> script runners, reload on save with the last good page kept,
+> overrides in the app's folder, and the lab's Board tab as a file (with
+> an A2UI page and a Luau page beside it). Not yet: the web build's Web
 > Worker runner, and phase two (a worker-side DOM for Preact/Solid).
 
 ## The model
@@ -20,7 +21,7 @@ extension's compiled view when there is one for it, in this order
 (`features/pages/src/runner.rs` `Pages::resolve`):
 
 1. an **override** in the app's folder, `<app dir>/pages/<extension>/<view>.tsx`
-   (or `.ts`, `.jsx`, `.js`, `.luau`; `pages/<view>.tsx` for short) —
+   (or `.ts`, `.jsx`, `.js`, `.luau`, `.a2ui.json`; `pages/<view>.tsx` for short) —
    it replaces the view live, and deleting it brings the built-in back;
 2. the extension's **own page**, `[[views]] page = "pages/board.tsx"` in
    its manifest (`features/extensions/src/manifest.rs` `ViewDecl`);
@@ -95,6 +96,25 @@ render(function()
 end)
 ```
 
+And an A2UI page declares it, bound to its extension's data and actions
+(`apps/lab/board/pages/summary.a2ui.json` is the Board's, in full):
+
+```json
+{
+  "components": [
+    { "id": "root", "component": "Column", "children": ["draft", "pin", "pins"] },
+    { "id": "draft", "component": "TextField", "label": "Title", "value": { "path": "/draft" } },
+    { "id": "pin", "component": "Button", "child": "pin-label",
+      "action": { "event": { "name": "LAB_BOARD_PIN", "context": { "title": { "path": "/draft" } } } } },
+    { "id": "pin-label", "component": "Text", "text": "Pin" },
+    { "id": "pins", "component": "List", "children": { "componentId": "pin-row", "path": "/board/pins" } },
+    { "id": "pin-row", "component": "Text", "text": { "path": "" } }
+  ],
+  "data": { "draft": "" },
+  "bind": { "/board": { "action": "LAB_BOARD_STATE", "every": 1000 } }
+}
+```
+
 ## The runners
 
 **One thread per page** (`features/pages/src/runner.rs` `Pages::open`,
@@ -128,8 +148,49 @@ only through actions the extension's capabilities reach (its gate,
 module loads — about a millisecond for a page — and a mistake is a
 `SourceError` with its file, line and column.
 
+**Source maps.** oxc prints each module with its map
+(`transpile_mapped`, `SourceMap`: the printed module's places back to
+the file's), and the page's runtime keeps them by module. What a page
+throws as it runs — a render, a handler, a timer, a promise job,
+`console.error(e)`, a worker — is remapped through them (`remap`)
+before it is written anywhere: its stack says `board.tsx:13:3`, not the
+transpiled module's line, its first line leads with that place, and the
+page's folder's paths are relative. `<file>.error`, `APP_STATUS`'s
+problem, the banner and `EXT_CHECK` all say it so
+(`features/pages/tests/js.rs`
+`a_tsx_pages_runtime_error_says_its_own_line_and_column`).
+
 **Luau** (`features/pages/src/luau.rs` `LuauEngine`): the element
 builder on the same edit path, Luau's sandbox, the theme read through.
+Its timers are a TSX page's: `set_timeout(fn, ms)`,
+`set_interval(fn, ms)`, `clear_timeout(id)`, each run on the page's
+thread with a frame after. `worker.spawn("count.luau", args)` runs a
+`.luau` file of the page's folder as a Luau view's worker does
+(`architect_scripting::worker`, on its pool, `Workers::install_owner`):
+its handle has `w:post`, `w:cancel`, `w:status`, `w:progress`,
+`w:result`, and callbacks `w:on_message`, `w:on_progress`, `w:on_done`,
+which run as the worker's news wakes the page's thread (`deliver`), a
+frame after (`features/pages/tests/luau.rs`; the lab's
+`apps/lab/board/pages/primes.luau` with its worker `count.luau`).
+
+**A2UI** (`features/pages/src/a2ui.rs` `A2uiEngine`, feature `a2ui`,
+`Pages::with_a2ui`): a `.a2ui.json` page is A2UI v1.0 — the page form
+above (`components`, one of them `root`; `data`; `bind`), or the
+messages an agent sends (`createSurface`, `updateComponents`,
+`updateDataModel`, as `A2UI_RENDER` takes them). It is drawn through
+architect's catalog (`features/a2ui/src/catalog.rs` `CATALOG`, the
+security boundary: a component outside it is a labelled placeholder,
+only its props are read) onto the same `Element` tree, values read
+through `a2ui-base`'s data context (paths, templates, its functions).
+Each `bind` path holds what its action answers, read as the page loads,
+every `every` ms, and after each of its buttons' actions; a Button's
+`action` runs its Action List action with its context read through the
+data model (the page's capabilities its reach, as a TSX page's
+`actions.run`), `wantResponse` / `responsePath` writing the answer
+back; a TextField, CheckBox, Slider, ChoicePicker or Tabs bound to a
+path writes it as the person changes it. A mistake in the file is said
+with its line and column (`summary.a2ui.json:4:5: trailing comma`), and
+a page with no `root` says so (`features/pages/tests/a2ui.rs`).
 
 **Reload.** The page's thread looks at its folder every 200 ms
 (`WATCH_EVERY`); a save loads the page in a fresh runtime and swaps it
@@ -152,7 +213,10 @@ rendering the page is 2–3 ms.
 - **Workers**: `worker.spawn("job.js", args)` runs a script of the
   page's folder in a QuickJS runtime of its own on its own thread
   (`worker_memory`, `worker_time`), spoken to by JSON messages; it ends
-  with its page.
+  with its page (or `w.cancel()`). A Luau page's `worker.spawn("job.luau")`
+  runs one in a Luau state on the scripting pool, under the same limits.
+  Their names are the other runners' (`extensions.md`, "Responsive by
+  design").
 - **Actions** a page runs go to the app's Tokio runtime, never the
   page's thread (`features/scripting/src/vm.rs` `Dispatch`, as Luau
   scripts' do).
