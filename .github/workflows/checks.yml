@@ -143,6 +143,10 @@ jobs:
           # The keymap engine's Dioxus hook runs in browser shells.
           cargo check --target wasm32-unknown-unknown \
             -p architect-input --features dioxus
+          # Agents' generated UI: the model, and the renderer a web host
+          # draws (architect-ui, dioxus-primitives, Loro).
+          cargo check --target wasm32-unknown-unknown -p architect-a2ui
+          cargo check --target wasm32-unknown-unknown -p architect-a2ui --features ui
 
   # The one status main's branch protection requires (context `check`).
   # It passes only when every job above succeeded; a skipped or cancelled
