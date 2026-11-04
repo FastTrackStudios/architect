@@ -636,6 +636,7 @@ const FORWARDED: [&str; 30] = [
     "EXT_GRANTS",
     "EXT_LOGS",
     "EXT_HOST_CALL",
+    "EXT_INSTALL_FILE",
     "MANAGER_KINDS",
     "MANAGER_LIST",
     "MANAGER_GET",

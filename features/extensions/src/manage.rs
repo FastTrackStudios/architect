@@ -15,6 +15,13 @@
 //!   the newest version its pin allows, skipping what is unchanged, and
 //!   stops at one whose capabilities grow.
 //! - [`Extensions::pin`] keeps an install at the versions a range allows.
+//! - [`Extensions::updates`] says which installs have a newer version
+//!   their pin allows, with its changelog line and what it asks past what
+//!   was granted, without installing anything (`EXT_UPDATE {check:
+//!   true}`, the manager's "update available").
+//! - [`Extensions::install_archive`] installs a signed `.archext` that came
+//!   as a file or from a peer: the same signature check and consent as a
+//!   registry's.
 
 use semver::VersionReq;
 use serde::Serialize;
@@ -65,6 +72,39 @@ pub struct Preview {
     /// The version installed now, and its pin.
     pub installed: Option<String>,
     pub pinned: Option<String>,
+    /// The target triples it has builds for (a process extension's
+    /// archive); empty when it runs anywhere.
+    pub platforms: Vec<String>,
+    /// Why it cannot run here when it cannot: no build for this platform
+    /// (`runs_here` is false then).
+    pub cannot_run: Option<String>,
+    /// The key its archive is signed by, when it is one.
+    pub signed_by: Option<String>,
+    /// What this version changed, as its registry says.
+    pub changelog: String,
+}
+
+/// An installed extension with a newer version its pin allows.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Available {
+    pub id: String,
+    pub name: String,
+    /// The version installed, and the one an update would take.
+    pub installed: String,
+    pub newest: String,
+    /// The newer version's changelog line (its registry's `changelog`).
+    pub changelog: String,
+    pub pin: Option<String>,
+    /// A newer version past the pin, when there is one: not taken.
+    pub past_pin: Option<String>,
+    /// What the newer version asks that was not granted (or, when the app
+    /// keeps no consent, that the installed one did not ask): applying it
+    /// waits for a person's yes.
+    pub asks_more: Vec<Ask>,
+    /// Why it cannot run here, when the newer version cannot.
+    pub cannot_run: Option<String>,
+    /// It could not be read (fetched, verified): why.
+    pub error: Option<String>,
 }
 
 /// What an install did.
@@ -100,6 +140,7 @@ fn location(l: &Location) -> (String, Option<String>) {
         Location::Path(p) => (format!("registry folder {p}"), None),
         Location::Git { url, rev } => (format!("{url}@{rev}"), Some(rev.clone())),
         Location::Files(files) => (format!("{} file(s) fetched", files.len()), None),
+        Location::Archive { url, .. } => (format!("signed archive {url}"), None),
     }
 }
 
@@ -196,10 +237,21 @@ impl Extensions {
         let staging = root.join(format!(".preview-{}", crate::install::slug(id)));
         let _ = std::fs::remove_dir_all(&staging);
         let fetched = source.fetch(&listing, &staging);
+        let mut signed_by = None;
         let read = fetched.and_then(|f| {
             let dir = match f {
                 crate::install::Fetched::Copied => staging.clone(),
                 crate::install::Fetched::Linked(dir) => dir,
+                // Opened (its signature checked) but not written: its
+                // manifest is read from the archive.
+                crate::install::Fetched::Archive(bytes) => {
+                    let v = self.installs().open_archive(&bytes, source.as_ref())?;
+                    signed_by = Some(v.signer.clone());
+                    let text = v.manifest().ok_or_else(|| {
+                        InstallError::Mismatch(format!("the archive has no {MANIFEST}"))
+                    })?;
+                    return Manifest::parse(text).map_err(|e| InstallError::Mismatch(e.to_string()));
+                }
             };
             let path = dir.join(MANIFEST);
             let text = std::fs::read_to_string(&path)
@@ -208,7 +260,9 @@ impl Extensions {
         });
         let _ = std::fs::remove_dir_all(&staging);
         let manifest = read?;
-        Ok(self.preview_of(&manifest, &listing, &source.name()))
+        let mut preview = self.preview_of(&manifest, &listing, &source.name());
+        preview.signed_by = signed_by;
+        Ok(preview)
     }
 
     /// The preview of `manifest`, listed as `listing` in `source`.
@@ -222,6 +276,7 @@ impl Extensions {
             .grants()
             .map_or_else(Vec::new, |g| g.needs(&m.id, &caps));
         let installed = self.installs().get(&m.id);
+        let cannot_run = listing.no_build_for(crate::index::host_targets());
         Preview {
             id: m.id.clone(),
             name: m.name.clone(),
@@ -229,7 +284,7 @@ impl Extensions {
             description: m.description.clone(),
             kind: m.kind.name().to_owned(),
             runner: runner_words(m),
-            runs_here: self.host().runs(m.kind),
+            runs_here: self.host().runs(m.kind) && cannot_run.is_none(),
             source: source.to_owned(),
             location,
             git_ref,
@@ -267,6 +322,10 @@ impl Extensions {
             capabilities: caps,
             installed: installed.as_ref().map(|i| i.version.to_string()),
             pinned: installed.and_then(|i| i.pin),
+            platforms: listing.platforms.clone(),
+            cannot_run,
+            signed_by: None,
+            changelog: listing.changelog.clone(),
         }
     }
 
@@ -290,6 +349,9 @@ impl Extensions {
         let mut granted = None;
         if let Some(grants) = self.host().grants() {
             let preview = self.preview(id, req)?;
+            if let Some(why) = preview.cannot_run {
+                return Err(InstallError::NotFound(format!("{id} {}: {why}", preview.version)));
+            }
             if !preview.needs_consent.is_empty() || grant.is_some() {
                 match grant {
                     None => {
@@ -381,6 +443,144 @@ impl Extensions {
             }
         }
         out
+    }
+
+    /// Which installs (`only`, or every one) have a newer version their
+    /// pin allows: its changelog line, a newer one past the pin, and what
+    /// it asks past what was granted. Nothing is installed; each newer
+    /// version is fetched and read (an archive's signature checked) for
+    /// what it asks.
+    #[must_use]
+    pub fn updates(&self, only: Option<&str>) -> Vec<Available> {
+        let mut out = Vec::new();
+        for install in self
+            .installs()
+            .list()
+            .into_iter()
+            .filter(crate::install::Install::is_extension)
+            .filter(|i| only.is_none_or(|o| o == i.id))
+        {
+            let req = install
+                .pin
+                .as_deref()
+                .and_then(|p| VersionReq::parse(p).ok())
+                .unwrap_or(VersionReq::STAR);
+            let Ok((_, newest)) = self.pick(&install.id, &req) else {
+                continue;
+            };
+            let past_pin = self
+                .pick(&install.id, &VersionReq::STAR)
+                .ok()
+                .map(|(_, l)| l.version)
+                .filter(|v| *v > newest.version && install.pin.is_some())
+                .map(|v| v.to_string());
+            if newest.version <= install.version {
+                if let Some(past) = past_pin {
+                    out.push(Available {
+                        id: install.id.clone(),
+                        name: newest.name.clone(),
+                        installed: install.version.to_string(),
+                        newest: install.version.to_string(),
+                        changelog: String::new(),
+                        pin: install.pin.clone(),
+                        past_pin: Some(past),
+                        asks_more: Vec::new(),
+                        cannot_run: None,
+                        error: None,
+                    });
+                }
+                continue;
+            }
+            let exact =
+                VersionReq::parse(&format!("={}", newest.version)).unwrap_or(VersionReq::STAR);
+            let (asks_more, cannot_run, error) = match self.preview(&install.id, &exact) {
+                Ok(p) => {
+                    let more = if self.host().grants().is_some() {
+                        p.needs_consent
+                    } else {
+                        let before = self
+                            .host()
+                            .get(&install.id)
+                            .map(|l| l.manifest.capabilities.asks())
+                            .unwrap_or_default();
+                        p.asks.into_iter().filter(|a| !before.contains(a)).collect()
+                    };
+                    (more, p.cannot_run, None)
+                }
+                Err(e) => (Vec::new(), None, Some(e.to_string())),
+            };
+            out.push(Available {
+                id: install.id.clone(),
+                name: newest.name.clone(),
+                installed: install.version.to_string(),
+                newest: newest.version.to_string(),
+                changelog: newest.changelog.clone(),
+                pin: install.pin.clone(),
+                past_pin,
+                asks_more,
+                cannot_run,
+                error,
+            });
+        }
+        out
+    }
+
+    /// Installs a signed `.archext` that came as a file or from a peer
+    /// (`from` says which), as [`Self::install_with`] does a registry's:
+    /// its signature checked against the trusted keys, then consent for
+    /// what it asks past its grant (unless `grant` says where the person
+    /// granted it), then loaded.
+    ///
+    /// # Errors
+    ///
+    /// The archive is refused (unsigned, untrusted key, tampered, no build
+    /// for this platform), or it cannot be written.
+    pub fn install_archive(
+        &self,
+        bytes: Vec<u8>,
+        from: &str,
+        grant: Option<Scope>,
+        by: &str,
+    ) -> Result<Installed, InstallError> {
+        let (v, manifest, listing) = self.installs().read_archive(&bytes, from)?;
+        let mut preview = self.preview_of(&manifest, &listing, from);
+        preview.signed_by = Some(v.signer.clone());
+        if let Some(why) = preview.cannot_run {
+            return Err(InstallError::NotFound(format!(
+                "{} {}: {why}",
+                preview.id, preview.version
+            )));
+        }
+        let mut granted = None;
+        if let Some(grants) = self.host().grants() {
+            if !preview.needs_consent.is_empty() || grant.is_some() {
+                match grant {
+                    None => {
+                        return Ok(Installed::NeedsConsent {
+                            preview: Box::new(preview),
+                        });
+                    }
+                    Some(scope) => {
+                        granted = Some(scope.describe());
+                        grants.grant(
+                            &preview.id,
+                            &preview.version,
+                            preview.capabilities.clone(),
+                            scope,
+                            by,
+                        );
+                    }
+                }
+            }
+        }
+        let install = self.installs().install_archive(bytes, from)?;
+        let _ = self.sync();
+        Ok(Installed::Done {
+            loaded: self.host().get(&install.id).is_some(),
+            id: install.id,
+            version: install.version.to_string(),
+            granted,
+        })
     }
 
     /// Keeps installed `id` at `versions` (a semver range; its version

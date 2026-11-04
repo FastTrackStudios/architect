@@ -10,6 +10,14 @@
 //! [`Installs`] keeps what is installed, one folder an id under its root:
 //! the package copied in, or — from a folder registry — a link to the
 //! package where it is, so an author's edit there is what loads.
+//!
+//! A listing whose location is a signed `.archext` archive
+//! ([`Location::Archive`]) is fetched as bytes ([`Fetched::Archive`]) and
+//! opened by [`Installs`], never by the source: its signature must be by a
+//! key [`Installs::trust`] or the source's [`Source::trust`] holds (the
+//! org release key by default), its files must be the ones it signed, and
+//! it must have a build for this platform. An archive from a file or a
+//! peer goes through the same check ([`Installs::install_archive`]).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -17,6 +25,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use semver::Version;
 use serde::{Deserialize, Serialize};
+
+pub use architect_extension_archive::{ArchiveError, Trust, Verified};
 
 use crate::index::{Index, Listing, Location};
 use crate::manifest::{MANIFEST, Manifest};
@@ -37,6 +47,15 @@ pub enum InstallError {
     NotFound(String),
     /// The organization does not allow it.
     NotAllowed(String),
+    /// Its archive was refused: unsigned, signed by a key not trusted
+    /// here, changed after signing, or with no build for this platform.
+    Archive(ArchiveError),
+}
+
+impl From<ArchiveError> for InstallError {
+    fn from(e: ArchiveError) -> Self {
+        Self::Archive(e)
+    }
 }
 
 impl std::fmt::Display for InstallError {
@@ -47,6 +66,7 @@ impl std::fmt::Display for InstallError {
             Self::Io(e) | Self::NotAllowed(e) => f.write_str(e),
             Self::Mismatch(e) => write!(f, "not what the registry listed: {e}"),
             Self::NotFound(e) => write!(f, "no registry has {e}"),
+            Self::Archive(e) => write!(f, "the archive is refused: {e}"),
         }
     }
 }
@@ -64,6 +84,9 @@ pub enum Fetched {
     Copied,
     /// It is used where it is (a folder registry's package).
     Linked(PathBuf),
+    /// A signed archive's bytes, not yet opened: [`Installs`] checks its
+    /// signature and writes its files.
+    Archive(Vec<u8>),
 }
 
 /// Where packages come from.
@@ -92,6 +115,12 @@ pub trait Source: Send + Sync {
     ///
     /// They cannot be fetched.
     fn fetch(&self, listing: &Listing, into: &Path) -> Result<Fetched, InstallError>;
+
+    /// The keys its archives may be signed by, past the ones the app
+    /// trusts everywhere ([`Installs::trust`]): none unless it is told.
+    fn trust(&self) -> Trust {
+        Trust::none()
+    }
 }
 
 /// Fetches a URL's bytes: what a `ReaPack` source downloads with.
@@ -118,16 +147,69 @@ impl Fetch for LocalFetch {
     }
 }
 
+/// The fetch a registry downloads `http(s)` archives with.
+#[derive(Clone)]
+struct Http(Option<Arc<dyn Fetch>>);
+
+impl std::fmt::Debug for Http {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(if self.0.is_some() { "Http(given)" } else { "Http(none)" })
+    }
+}
+
 /// A registry in a folder: `index.toml` and the packages it lists by path.
 /// Packages are linked, not copied: what is in the folder is what loads.
 #[derive(Clone, Debug)]
 pub struct FolderRegistry {
     root: PathBuf,
+    trust: Trust,
+    http: Http,
 }
 
 impl FolderRegistry {
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self {
+            root: root.into(),
+            trust: Trust::none(),
+            http: Http(None),
+        }
+    }
+
+    /// Also trusts archives it lists signed by `key` (the base64 line of a
+    /// minisign `.pub`), called `name`.
+    #[must_use]
+    pub fn trusting(mut self, name: impl Into<String>, key: impl Into<String>) -> Self {
+        self.trust = self.trust.with(name, key);
+        self
+    }
+
+    /// Fetches its `http(s)` archives with `fetch` (the app's HTTP
+    /// client); without one only archives in the folder and `file://`
+    /// ones are fetched.
+    #[must_use]
+    pub fn with_fetch(mut self, fetch: impl Fetch + 'static) -> Self {
+        self.http = Http(Some(Arc::new(fetch)));
+        self
+    }
+
+    /// An archive's bytes: a path in the registry, `file://`, or a URL
+    /// through its fetch; its listed sha256 checked.
+    fn archive(&self, url: &str, sha256: Option<&str>) -> Result<Fetched, InstallError> {
+        let bytes = if url.contains("://") {
+            match (&self.http.0, url.starts_with("file://")) {
+                (_, true) => LocalFetch.get(url),
+                (Some(fetch), false) => fetch.get(url),
+                (None, false) => Err(format!(
+                    "{url}: this registry has no HTTP fetch (`with_fetch`)"
+                )),
+            }
+            .map_err(InstallError::Source)?
+        } else {
+            let path = self.package_dir(url)?;
+            std::fs::read(&path).map_err(io(&path))?
+        };
+        check_sha256(url, &bytes, sha256)?;
+        Ok(Fetched::Archive(bytes))
     }
 
     #[must_use]
@@ -178,7 +260,26 @@ impl Source for FolderRegistry {
             Location::Path(path) => Ok(Fetched::Linked(self.package_dir(path)?)),
             Location::Git { url, rev } => clone_at(url, rev, into).map(|()| Fetched::Copied),
             Location::Files(files) => fetch_files(&LocalFetch, files, into),
+            Location::Archive { url, sha256 } => self.archive(url, sha256.as_deref()),
         }
+    }
+
+    fn trust(&self) -> Trust {
+        self.trust.clone()
+    }
+}
+
+/// Checks `bytes` are what the index pinned, when it pinned a hash.
+fn check_sha256(url: &str, bytes: &[u8], want: Option<&str>) -> Result<(), InstallError> {
+    use sha2::Digest as _;
+    let Some(want) = want else { return Ok(()) };
+    let got = hex::encode(sha2::Sha256::digest(bytes));
+    if got.eq_ignore_ascii_case(want.trim()) {
+        Ok(())
+    } else {
+        Err(InstallError::Mismatch(format!(
+            "{url}'s sha256 is {got}, the index says {want}"
+        )))
     }
 }
 
@@ -197,6 +298,21 @@ impl GitRegistry {
             url: url.into(),
             checkout: FolderRegistry::new(checkout),
         }
+    }
+
+    /// Also trusts archives it lists signed by `key` (the base64 line of a
+    /// minisign `.pub`), called `name`.
+    #[must_use]
+    pub fn trusting(mut self, name: impl Into<String>, key: impl Into<String>) -> Self {
+        self.checkout = self.checkout.trusting(name, key);
+        self
+    }
+
+    /// Fetches its `http(s)` archives (release assets) with `fetch`.
+    #[must_use]
+    pub fn with_fetch(mut self, fetch: impl Fetch + 'static) -> Self {
+        self.checkout = self.checkout.with_fetch(fetch);
+        self
     }
 }
 
@@ -236,7 +352,12 @@ impl Source for GitRegistry {
             }
             Location::Git { url, rev } => clone_at(url, rev, into).map(|()| Fetched::Copied),
             Location::Files(files) => fetch_files(&LocalFetch, files, into),
+            Location::Archive { url, sha256 } => self.checkout.archive(url, sha256.as_deref()),
         }
+    }
+
+    fn trust(&self) -> Trust {
+        self.checkout.trust()
     }
 }
 
@@ -306,6 +427,11 @@ impl Source for ReaPackSource {
     fn fetch(&self, listing: &Listing, into: &Path) -> Result<Fetched, InstallError> {
         match &listing.location {
             Location::Files(files) => fetch_files(self.fetch.as_ref(), files, into),
+            Location::Archive { url, sha256 } => {
+                let bytes = self.fetch.get(url).map_err(InstallError::Source)?;
+                check_sha256(url, &bytes, sha256.as_deref())?;
+                Ok(Fetched::Archive(bytes))
+            }
             other => Err(InstallError::Mismatch(format!(
                 "a ReaPack package lists files, not {other:?}"
             ))),
@@ -433,11 +559,130 @@ impl Install {
 #[derive(Clone, Debug)]
 pub struct Installs {
     root: PathBuf,
+    trust: Trust,
+}
+
+/// One archive, offered as a source: how a file's or a peer's archive is
+/// installed through the same path as a registry's.
+struct OneArchive {
+    from: String,
+    bytes: Vec<u8>,
+}
+
+impl Source for OneArchive {
+    fn name(&self) -> String {
+        self.from.clone()
+    }
+
+    fn refresh(&self) -> Result<(), InstallError> {
+        Ok(())
+    }
+
+    fn index(&self) -> Result<Index, InstallError> {
+        Ok(Index::default())
+    }
+
+    fn fetch(&self, _: &Listing, _: &Path) -> Result<Fetched, InstallError> {
+        Ok(Fetched::Archive(self.bytes.clone()))
+    }
+}
+
+/// The listing an opened archive is: its index's id, version, kind and
+/// platforms.
+fn listing_of(v: &Verified, manifest: &Manifest, from: &str) -> Listing {
+    Listing {
+        id: v.index.id.clone(),
+        name: manifest.name.clone(),
+        version: manifest.version.clone(),
+        kind: v.index.kind.clone(),
+        description: manifest.description.clone(),
+        category: String::new(),
+        location: Location::Archive {
+            url: from.to_owned(),
+            sha256: None,
+        },
+        platforms: v.index.platforms.clone(),
+        changelog: String::new(),
+    }
 }
 
 impl Installs {
+    /// Installs under `root`, trusting archives signed by the org release
+    /// key ([`Trust::org`]).
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self {
+            root: root.into(),
+            trust: Trust::org(),
+        }
+    }
+
+    /// Trusts `trust` (in place of the org key alone) for every archive,
+    /// whichever source it comes from.
+    #[must_use]
+    pub fn with_trust(mut self, trust: Trust) -> Self {
+        self.trust = trust;
+        self
+    }
+
+    /// The keys an archive may be signed by, from any source.
+    #[must_use]
+    pub fn trust(&self) -> &Trust {
+        &self.trust
+    }
+
+    /// Opens `bytes` as an archive from `source` (its own keys trusted
+    /// too): signed by a trusted key, its files the ones signed.
+    ///
+    /// # Errors
+    ///
+    /// [`InstallError::Archive`] with why it was refused.
+    pub fn open_archive(&self, bytes: &[u8], source: &dyn Source) -> Result<Verified, InstallError> {
+        Ok(architect_extension_archive::open(
+            bytes,
+            &self.trust.and(&source.trust()),
+        )?)
+    }
+
+    /// Opens an archive that came as a file or from a peer, and the
+    /// listing it is: what [`Self::install_archive`] would install.
+    ///
+    /// # Errors
+    ///
+    /// It is refused ([`InstallError::Archive`]), or its manifest is.
+    pub fn read_archive(
+        &self,
+        bytes: &[u8],
+        from: &str,
+    ) -> Result<(Verified, Manifest, Listing), InstallError> {
+        let v = self.open_archive(bytes, &OneArchive {
+            from: from.to_owned(),
+            bytes: Vec::new(),
+        })?;
+        let text = v
+            .manifest()
+            .ok_or_else(|| InstallError::Mismatch(format!("the archive has no {MANIFEST}")))?;
+        let manifest = Manifest::parse(text).map_err(|e| InstallError::Mismatch(e.to_string()))?;
+        let listing = listing_of(&v, &manifest, from);
+        Ok((v, manifest, listing))
+    }
+
+    /// Installs an archive that came as a file or from a peer (`from`
+    /// says which), checked as a registry's is: signed by a key
+    /// [`Self::trust`] holds.
+    ///
+    /// # Errors
+    ///
+    /// It is refused, has no build for this platform, or cannot be
+    /// written.
+    pub fn install_archive(&self, bytes: Vec<u8>, from: &str) -> Result<Install, InstallError> {
+        let (_, _, listing) = self.read_archive(&bytes, from)?;
+        self.install(
+            &OneArchive {
+                from: from.to_owned(),
+                bytes,
+            },
+            &listing,
+        )
     }
 
     #[must_use]
@@ -489,7 +734,7 @@ impl Installs {
         if incoming.exists() {
             std::fs::remove_dir_all(&incoming).map_err(io(&incoming))?;
         }
-        let result = Self::receive(source, listing, &incoming, &slot);
+        let result = self.receive(source, listing, &incoming, &slot);
         if incoming.exists() {
             let _ = std::fs::remove_dir_all(&incoming);
         }
@@ -497,6 +742,7 @@ impl Installs {
     }
 
     fn receive(
+        &self,
         source: &dyn Source,
         listing: &Listing,
         incoming: &Path,
@@ -506,6 +752,17 @@ impl Installs {
         let link = match fetched {
             Fetched::Copied => None,
             Fetched::Linked(dir) => Some(dir),
+            Fetched::Archive(bytes) => {
+                let v = self.open_archive(&bytes, source)?;
+                if v.index.id != listing.id || v.index.version != listing.version.to_string() {
+                    return Err(InstallError::Mismatch(format!(
+                        "listed {} {}, its archive is {} {}",
+                        listing.id, listing.version, v.index.id, v.index.version
+                    )));
+                }
+                v.extract(incoming)?;
+                None
+            }
         };
         let files = link.clone().unwrap_or_else(|| incoming.to_path_buf());
         let is_extension = matches!(listing.kind.as_str(), "data" | "luau" | "wasm" | "process");

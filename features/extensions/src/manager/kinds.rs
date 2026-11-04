@@ -67,6 +67,13 @@ impl ItemKind for ExtensionKind {
                 };
                 i.enabled = (r.at != Where::Available).then_some(!r.disabled);
                 i.summary = format!("{} · {}", r.kind, r.description);
+                // "Update available", with what it changes, within its pin.
+                if let Some(newer) = &r.newer {
+                    i.summary = match &r.changelog {
+                        Some(c) => format!("{} · update available: {newer} — {c}", i.summary),
+                        None => format!("{} · update available: {newer}", i.summary),
+                    };
+                }
                 i.problems = problems
                     .iter()
                     .filter(|p| p.message.starts_with(&format!("{}:", r.id)))

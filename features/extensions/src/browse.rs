@@ -58,8 +58,10 @@ pub struct Row {
     pub overrides_builtin: bool,
     pub loaded: bool,
     pub disabled: bool,
-    /// A newer version a registry lists.
+    /// A newer version a registry lists (within an install's pin).
     pub newer: Option<String>,
+    /// That newer version's changelog line, when its registry gives one.
+    pub changelog: Option<String>,
     /// What it adds, a line a kind.
     pub adds: Vec<String>,
     /// The registry that lists it, when one does.
@@ -156,6 +158,8 @@ impl Browse {
             description: m.description.clone(),
             category: String::new(),
             location: crate::index::Location::Path(String::new()),
+            platforms: Vec::new(),
+            changelog: String::new(),
         };
         let mut p = ext.preview_of(m, &listing, "");
         p.location = c.runs.package.dir().map_or_else(
@@ -204,11 +208,25 @@ impl Browse {
                     description: m.description.clone(),
                     category: String::new(),
                     location: crate::index::Location::Path(String::new()),
+                    platforms: Vec::new(),
+                    changelog: String::new(),
                 };
                 let preview = ext.preview_of(m, &listing, "");
-                let newer = newest(&m.id)
-                    .filter(|l| l.version > m.version)
-                    .map(|l| l.version.to_string());
+                // An install's pin bounds what counts as an update.
+                let pin = ext
+                    .installs()
+                    .get(&m.id)
+                    .and_then(|i| i.pin)
+                    .and_then(|p| semver::VersionReq::parse(&p).ok());
+                let update = offers
+                    .iter()
+                    .filter(|l| l.id == m.id && l.version > m.version)
+                    .filter(|l| pin.as_ref().is_none_or(|p| p.matches(&l.version)))
+                    .max_by(|a, b| a.version.cmp(&b.version));
+                let newer = update.map(|l| l.version.to_string());
+                let changelog = update
+                    .map(|l| l.changelog.clone())
+                    .filter(|c| !c.is_empty());
                 Row {
                     id: m.id.clone(),
                     name: m.name.clone(),
@@ -226,6 +244,7 @@ impl Browse {
                     loaded: ext.host().get(&m.id).is_some(),
                     disabled: ext.is_disabled(&m.id),
                     newer,
+                    changelog,
                     adds: preview.adds,
                     registry: sources.get(&m.id).cloned(),
                 }
@@ -253,6 +272,7 @@ impl Browse {
                 loaded: false,
                 disabled: false,
                 newer: None,
+                changelog: None,
                 adds,
                 registry: sources.get(&l.id).cloned(),
             });
