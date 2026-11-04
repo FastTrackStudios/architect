@@ -22,7 +22,7 @@ use crate::host::Host;
 use crate::interface::{ExtensionUi, ExtensionView};
 use crate::toolbar::{MenuItem, MenuKind, ToolColors, ToolItem, ToolKind, ToolbarPlace, preset};
 use crate::toolbar_edit::At;
-use crate::toolbar_editor::{Editor, InsertMenu, Press, item_name, measure};
+use crate::toolbar_editor::{Editor, InsertMenu, Kept, Press, item_name, keep_in};
 use crate::toolbars::Toolbar;
 
 /// A pane toolbar's workspace kind (and its pane's id): `toolbar:<key>`.
@@ -111,6 +111,15 @@ pub(crate) fn use_pane_toolbars(ui: ExtensionUi, app: Arc<ActionList>) {
             .into_iter()
             .map(|(t, place)| (pane_kind(&t.key), (t.decl.title, place)))
             .collect();
+        // The app's views follow the set (a new toolbar of the person's).
+        let listed: Vec<(String, String, String)> = now
+            .iter()
+            .map(|(k, (title, place))| (k.clone(), title.clone(), format!("{place:?}")))
+            .collect();
+        let mut panes = ui.toolbar_panes;
+        if *panes.peek() != listed {
+            panes.set(listed);
+        }
         let gone: Vec<String> = placed
             .borrow()
             .iter()
@@ -487,7 +496,7 @@ pub fn ToolbarStrip(
                     }
                     for (n, item) in row {
                         if editing {
-                            EditableItem { key: "{n}", cx: cx.clone(), item, path: n.to_string(), chip: true }
+                            EditableItem { key: "{n}-{item.kind:?}", cx: cx.clone(), item, path: n.to_string(), chip: true }
                         } else {
                             ToolItemView { key: "{n}", cx: cx.clone(), item, path: n.to_string() }
                         }
@@ -569,6 +578,16 @@ fn EditableItem(
         .is_some_and(|(k, a)| k == cx.key && a.as_deref() == Some(path.as_str()));
     let ring = if selected { t.accent.to_string() } else { t.rule.to_string() };
     let mount_at = if group { format!("g{path}") } else { path.clone() };
+    // Measured while it is here: forgotten as it goes.
+    let mut mounted_as = use_hook(|| CopyValue::new((cx.key.clone(), mount_at.clone())));
+    mounted_as.set((cx.key.clone(), mount_at.clone()));
+    use_drop(move || {
+        let (key, at) = mounted_as.cloned();
+        let mut mounts = editor.mounts;
+        if let Ok(mut m) = mounts.try_write() {
+            m.remove(&(key, at));
+        }
+    });
     let (mk, pk, ck) = (cx.key.clone(), cx.key.clone(), cx.key.clone());
     let menu_id = format!("{ck}#{path}");
     let up_host = host;
@@ -583,7 +602,10 @@ fn EditableItem(
                         EditableItem { key: "{n}", cx: cx.clone(), item: b, path: format!("{path}.{n}") }
                     }
                 }
-                span { style: "font-size:10px; color:{t.ink_3};", if label.is_empty() { "Group" } else { "{label}" } }
+                // Its grip: pressed here, the whole group moves.
+                span { "data-group-grip": "{path}", style: "font-size:10px; color:{t.ink_3}; padding:0 6px; cursor:grab;",
+                    if label.is_empty() { "Group" } else { "{label}" }
+                }
             }
         }
     } else {
@@ -604,6 +626,10 @@ fn EditableItem(
                     outline:1px dashed {ring}; outline-offset:1px; touch-action:none;",
             onmounted: move |e| editor.mount(&mk, &mount_at, e.data()),
             onpointerdown: move |e: PointerEvent| {
+                // A right-press is its context menu's.
+                if e.data().trigger_button().is_some_and(|b| b != dioxus::html::input_data::MouseButton::Primary) {
+                    return;
+                }
                 e.stop_propagation();
                 let p = e.data().client_coordinates();
                 editor.pressed(Press { key: pk.clone(), at, x: narrow(p.x), y: narrow(p.y), label: label.clone(), group });
@@ -670,7 +696,7 @@ fn ToolButton(cx: Ctx, item: ToolItem, path: String, joined: bool) -> Element {
     let (_, _) = (cx.ui.revision(), cx.ui.ticks());
     let t: ShellTheme = crate::window_ui::shell_theme();
     let viewport = try_use_context::<Editor>().map(|e| e.viewport);
-    let mut flip = use_signal(|| (false, false));
+    let kept = use_signal(Kept::default);
     let host = cx.ui.host();
     let info = (!item.action.is_empty())
         .then(|| host.list().info(&item.action))
@@ -729,20 +755,8 @@ fn ToolButton(cx: Ctx, item: ToolItem, path: String, joined: bool) -> Element {
     let (action, rc, here) = (item.action.clone(), item.right_click.clone(), path.clone());
     let has_menu = !item.menu.is_empty();
     let editing = cx.editing;
-    let (to_right, upward) = flip();
-    let side = if to_right { "right:0;" } else { "left:0;" };
-    let edge = if upward {
-        "bottom:calc(100% + 4px);"
-    } else {
-        "top:calc(100% + 4px);"
-    };
-    let flipped = (to_right || upward).then(|| {
-        format!(
-            "{}{}",
-            if to_right { "x" } else { "" },
-            if upward { "y" } else { "" }
-        )
-    });
+    let place = kept().css();
+    let mark = kept().mark();
     rsx! {
         div { style: "position:relative; flex:0 0 auto; display:flex;",
             button {
@@ -807,26 +821,14 @@ fn ToolButton(cx: Ctx, item: ToolItem, path: String, joined: bool) -> Element {
                 div {
                     role: "menu",
                     "data-menu": "{path}",
-                    "data-flip": flipped,
-                    style: "position:absolute; {edge} {side} z-index:60; min-width:180px; \
+                    "data-kept": mark,
+                    style: "position:absolute; {place} z-index:60; min-width:180px; \
                             display:flex; flex-direction:column; padding:4px; border-radius:8px; \
                             background:{t.pill}; border:1px solid {t.rule}; box-shadow:{t.shadow_float};",
                     // Kept in the window: past its right edge (a toolbar in
-                    // the right dock) it ends at its button's right; past
-                    // its bottom it opens upward.
-                    onmounted: move |e| {
-                        let m = e.data();
-                        spawn(async move {
-                            let (Some(r), Some(view)) = (measure(&m).await, viewport.and_then(|v| *v.peek())) else {
-                                return;
-                            };
-                            let right = r.x + r.w > view.x + view.w - 2.0;
-                            let up = r.y + r.h > view.y + view.h - 2.0 && r.y - r.h > view.y + 40.0;
-                            if right || up {
-                                flip.set((right, up));
-                            }
-                        });
-                    },
+                    // the right dock) it moves left; past its bottom it
+                    // opens upward.
+                    onmounted: move |e| keep_in(e.data(), viewport, kept),
                     ToolMenu { cx, rows: item.menu, depth: 0 }
                 }
             }

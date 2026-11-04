@@ -485,6 +485,8 @@ pub fn ToolbarEditorLayer(ui: ExtensionUi) -> Element {
 
 #[component]
 fn EditBar(ui: ExtensionUi) -> Element {
+    // The toolbars move under it: read again with every change.
+    let (_, _) = (ui.revision(), ui.ticks());
     let t = crate::window_ui::shell_theme();
     let Some(editor) = try_use_context::<Editor>() else {
         return rsx! {};
@@ -560,6 +562,11 @@ fn DragCover(ui: ExtensionUi, drag: Drag) -> Element {
     let mut d = editor.drag;
     let mut press = editor.press;
     let line = drag.over.as_ref().map(|s| s.line);
+    let over = drag
+        .over
+        .as_ref()
+        .map(|s| format!("{}#{}", s.key, s.at))
+        .unwrap_or_default();
     let (gx, gy) = (drag.x + 12.0, drag.y + 12.0);
     rsx! {
         div {
@@ -608,6 +615,7 @@ fn DragCover(ui: ExtensionUi, drag: Drag) -> Element {
             if let Some(l) = line {
                 div {
                     "data-testid": "toolbar-drop-line",
+                    "data-over": "{over}",
                     style: "position:absolute; left:{l.x}px; top:{l.y}px; width:{l.w}px; height:{l.h}px; \
                             border-radius:1px; background:{t.accent};",
                 }
@@ -684,41 +692,89 @@ pub(crate) fn InsertMenu(ui: ExtensionUi, toolbar: String, at: String) -> Elemen
     }
 }
 
-/// A menu under the element it opens from, kept in the window: shifted
-/// to end at its right edge when it would run past the window's right
-/// (a toolbar in the right dock), opened upward when past its bottom.
+/// Where a menu under its button goes to stay in the window: `shift`
+/// points left (past the window's right edge: a toolbar in the right
+/// dock), and upward (past its bottom, with room above).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Kept {
+    pub shift: f32,
+    pub up: bool,
+}
+
+impl Kept {
+    /// For a menu at `menu` in a window at `view`.
+    #[must_use]
+    pub fn of(menu: Rect, view: Rect) -> Self {
+        let over = menu.x + menu.w - (view.x + view.w - 4.0);
+        let shift = if over > 0.0 {
+            over.min((menu.x - view.x).max(0.0))
+        } else {
+            0.0
+        };
+        let up = menu.y + menu.h > view.y + view.h - 4.0 && menu.y - menu.h > view.y + 40.0;
+        Self { shift, up }
+    }
+
+    /// Its CSS: where it is against its button.
+    #[must_use]
+    pub fn css(self) -> String {
+        let edge = if self.up {
+            "bottom:calc(100% + 4px);"
+        } else {
+            "top:calc(100% + 4px);"
+        };
+        format!("{edge} left:{}px;", -self.shift.round())
+    }
+
+    /// What `data-kept` says of it (none when it is where it opened).
+    #[must_use]
+    pub fn mark(self) -> Option<String> {
+        (self.shift > 0.0 || self.up).then(|| {
+            format!(
+                "{}{}",
+                if self.shift > 0.0 { format!("left {}", self.shift.round()) } else { String::new() },
+                if self.up { " up" } else { "" }
+            )
+            .trim()
+            .to_owned()
+        })
+    }
+}
+
+/// Keeps the menu `m` in the window `viewport`: measured once it is laid
+/// out, `kept` set to where it goes.
+pub(crate) fn keep_in(m: Rc<MountedData>, viewport: Option<Signal<Option<Rect>>>, mut kept: Signal<Kept>) {
+    spawn(async move {
+        // Once laid out where it opened.
+        futures_timer::Delay::new(std::time::Duration::from_millis(16)).await;
+        let (Some(r), Some(view)) = (measure(&m).await, viewport.and_then(|v| *v.peek())) else {
+            return;
+        };
+        if r.w <= 0.0 {
+            return;
+        }
+        let now = Kept::of(r, view);
+        if now != *kept.peek() {
+            kept.set(now);
+        }
+    });
+}
+
+/// A menu under the element it opens from, kept in the window ([`Kept`]).
 #[component]
 pub(crate) fn Popover(ui: ExtensionUi, test: String, children: Element) -> Element {
     let t = crate::window_ui::shell_theme();
     let viewport = try_use_context::<Editor>().map(|e| e.viewport);
-    let mut flip = use_signal(|| (false, false));
-    let (right, up) = flip();
-    let side = if right { "right:0;" } else { "left:0;" };
-    let edge = if up {
-        "bottom:calc(100% + 4px);"
-    } else {
-        "top:calc(100% + 4px);"
-    };
+    let kept = use_signal(Kept::default);
+    let place = kept().css();
     rsx! {
         div {
             role: "menu",
             "data-testid": "{test}",
-            "data-flip": if right || up { Some(format!("{}{}", if right { "x" } else { "" }, if up { "y" } else { "" })) } else { None },
-            style: "position:absolute; {edge} {side} z-index:60; min-width:180px; display:flex; flex-direction:column; \
+            "data-kept": kept().mark(),
+            style: "position:absolute; {place} z-index:60; min-width:180px; display:flex; flex-direction:column; \
                     padding:4px; border-radius:8px; background:{t.pill}; border:1px solid {t.rule}; box-shadow:{t.shadow_float};",
-            onmounted: move |e| {
-                let m = e.data();
-                spawn(async move {
-                    let (Some(r), Some(view)) = (measure(&m).await, viewport.and_then(|v| *v.peek())) else {
-                        return;
-                    };
-                    let right = r.x + r.w > view.x + view.w - 2.0;
-                    let up = r.y + r.h > view.y + view.h - 2.0 && r.y - r.h > view.y + 40.0;
-                    if right || up {
-                        flip.set((right, up));
-                    }
-                });
-            },
+            onmounted: move |e| keep_in(e.data(), viewport, kept),
             {children}
         }
     }
@@ -992,6 +1048,8 @@ fn WidgetPicker(ui: ExtensionUi, purpose: For) -> Element {
 /// The settings of a toolbar (`at` none) or of one of its items.
 #[component]
 fn SettingsSheet(ui: ExtensionUi, toolbar: String, at: Option<String>) -> Element {
+    // The toolbars move under it: read again with every change.
+    let (_, _) = (ui.revision(), ui.ticks());
     let t = crate::window_ui::shell_theme();
     let host = ui.host();
     let Some(bar) = host.toolbars().get(host.contributions(), &toolbar) else {
@@ -1011,7 +1069,7 @@ fn SettingsSheet(ui: ExtensionUi, toolbar: String, at: Option<String>) -> Elemen
             "aria-label": "{what} settings",
             "data-testid": "toolbar-settings",
             "data-settings-of": "{toolbar}#{at.clone().unwrap_or_default()}",
-            style: "position:absolute; top:56px; right:12px; bottom:12px; width:300px; pointer-events:auto; z-index:3; \
+            style: "position:absolute; top:56px; left:56px; bottom:12px; width:300px; pointer-events:auto; z-index:3; \
                     display:flex; flex-direction:column; gap:10px; padding:12px; overflow-y:auto; border-radius:12px; \
                     background:{t.pill}; border:1px solid {t.rule}; box-shadow:{t.shadow_float}; color:{t.ink}; \
                     font-family:{t.font}; font-size:12px;",
@@ -1130,6 +1188,8 @@ fn ColorRow(label: String, value: String, test: String, set: EventHandler<Option
 #[allow(clippy::too_many_lines)]
 #[component]
 fn ItemSettings(ui: ExtensionUi, toolbar: String, at: String, item: ToolItem) -> Element {
+    // The toolbars move under it: read again with every change.
+    let (_, _) = (ui.revision(), ui.ticks());
     let t = crate::window_ui::shell_theme();
     let Some(editor) = try_use_context::<Editor>() else {
         return rsx! {};
@@ -1148,6 +1208,7 @@ fn ItemSettings(ui: ExtensionUi, toolbar: String, at: String, item: ToolItem) ->
     };
     let button_like = item.kind == ToolKind::Button;
     let dropdown = button_like && item.action.is_empty();
+    let mut image_draft = use_signal(|| item.image.clone());
     let colors = item.colors.clone();
     let (s1, s2, s3, s4, s5, s6, s7, s8, s9) = (
         set.clone(),
@@ -1192,8 +1253,18 @@ fn ItemSettings(ui: ExtensionUi, toolbar: String, at: String, item: ToolItem) ->
                 }
             }
             Field { label: "Image file (in place of the icon)",
-                input { "data-testid": "toolbar-item-image", style: "{input}", value: "{item.image}", placeholder: "icons/star.svg",
-                    oninput: move |e| s3(json!({ "image": e.value() })),
+                // Set once it names an image file (or nothing): what is typed
+                // on the way there is kept here.
+                input { "data-testid": "toolbar-item-image", style: "{input}", value: "{image_draft}", placeholder: "icons/star.svg",
+                    oninput: move |e| {
+                        let v = e.value();
+                        image_draft.set(v.clone());
+                        if v.is_empty() {
+                            s3(json!({ "image": null }));
+                        } else if crate::toolbar::image_type(&v).is_some() {
+                            s3(json!({ "image": v }));
+                        }
+                    },
                 }
             }
             Field { label: "Its label",
@@ -1362,6 +1433,8 @@ fn MenuRows(ui: ExtensionUi, toolbar: String, at: String, rows: Vec<MenuItem>) -
 #[allow(clippy::too_many_lines)]
 #[component]
 fn ToolbarSettings(ui: ExtensionUi, toolbar: String) -> Element {
+    // The toolbars move under it: read again with every change.
+    let (_, _) = (ui.revision(), ui.ticks());
     let t = crate::window_ui::shell_theme();
     let Some(editor) = try_use_context::<Editor>() else {
         return rsx! {};
@@ -1548,6 +1621,19 @@ mod tests {
                 items: Vec::new(),
             },
         ]
+    }
+
+    #[test]
+    fn a_menu_past_the_windows_edge_is_kept_in_it() {
+        let view = Rect::new(0.0, 0.0, 1440.0, 860.0);
+        assert_eq!(Kept::of(Rect::new(100.0, 80.0, 180.0, 120.0), view), Kept::default());
+        // Past the right edge: left by as much.
+        let k = Kept::of(Rect::new(1350.0, 80.0, 180.0, 120.0), view);
+        assert!((k.shift - 94.0).abs() < 0.01 && !k.up, "{k:?}");
+        assert_eq!(k.css(), "top:calc(100% + 4px); left:-94px;");
+        assert_eq!(k.mark().as_deref(), Some("left 94"));
+        // Past the bottom with room above: upward.
+        assert!(Kept::of(Rect::new(100.0, 800.0, 180.0, 120.0), view).up);
     }
 
     #[test]

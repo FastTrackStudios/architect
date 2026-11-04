@@ -104,6 +104,9 @@ pub struct ExtensionUi {
     /// Moves when anything happens on the host's Action List (an action
     /// ran, the app's state changed): what a toggle's button re-reads.
     ticks: Signal<u64>,
+    /// The toolbars that are panes of their own, by kind, with their
+    /// title and place: what the views follow (a person's new toolbar).
+    pub(crate) toolbar_panes: Signal<Vec<(String, String, String)>>,
 }
 
 impl ExtensionUi {
@@ -240,6 +243,7 @@ impl ExtensionUi {
     #[must_use]
     pub fn views(&self) -> Vec<View> {
         let _ = (self.revision)();
+        let _ = (self.toolbar_panes)();
         let me = *self;
         let mut all = self.seen.peek().clone();
         all.extend(declared(&self.host()));
@@ -397,6 +401,7 @@ pub fn use_extension_ui(host: Host, app: Arc<ActionList>) -> ExtensionUi {
     let held = use_signal(|| host.clone());
     let windows = crate::window_ui::use_open_windows(&host);
     let ticks = crate::toolbar_ui::use_ticks(&host);
+    let toolbar_panes = use_signal(Vec::new);
     let ui = ExtensionUi {
         host: held,
         revision,
@@ -404,6 +409,7 @@ pub fn use_extension_ui(host: Host, app: Arc<ActionList>) -> ExtensionUi {
         seen,
         windows,
         ticks,
+        toolbar_panes,
     };
     // The settings page is the settings extension's window: the app's
     // sections and values to it, `SettingsHandle::show` opening it.
