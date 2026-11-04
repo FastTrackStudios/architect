@@ -10,10 +10,10 @@ publish = false
 keyflow-lab = ["dep:keyflow", "dep:keyflow-ui", "dep:editor-keyflow"]
 
 [dependencies]
-keyflow = { git = "https://github.com/FastTrackStudios/keyflow", rev = "6eed23f37657f68fc0e634ddd7bf6b487101f5eb", features = ["text", "paint"], default-features = false, optional = true }
-keyflow-ui = { git = "https://github.com/FastTrackStudios/keyflow", rev = "6eed23f37657f68fc0e634ddd7bf6b487101f5eb", features = ["native-chart-editor"], default-features = false, optional = true }
+keyflow = { git = "https://github.com/FastTrackStudios/keyflow", rev = "337842d994b8025aadd810c49281cc9cc8a10985", features = ["text", "paint"], default-features = false, optional = true }
+keyflow-ui = { git = "https://github.com/FastTrackStudios/keyflow", rev = "337842d994b8025aadd810c49281cc9cc8a10985", features = ["native-chart-editor"], default-features = false, optional = true }
 # The source editor on its own, for the Editor tab (src/keyflow.rs).
-editor-keyflow = { git = "https://github.com/FastTrackStudios/keyflow", rev = "6eed23f37657f68fc0e634ddd7bf6b487101f5eb", features = ["native"], optional = true }
+editor-keyflow = { git = "https://github.com/FastTrackStudios/keyflow", rev = "337842d994b8025aadd810c49281cc9cc8a10985", features = ["native"], optional = true }
 architect-shell = { workspace = true, features = ["ui"] }
 # Runtime themes: the store, its files and watcher, THEME_* (src/theme.rs).
 architect-theme = { workspace = true, features = ["fs", "actions", "dioxus"] }
