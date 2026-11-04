@@ -39,14 +39,14 @@ mod synced;
 mod ui;
 mod values;
 
+#[cfg(all(feature = "appearance", feature = "ui"))]
+pub use appearance_ui::{AppearancePage, use_appearance_section};
 pub use model::{Block, Choice, Control, Owner, Scope, Section, Setting, Value};
 pub use registry::{Hit, Registry, RegistryError};
 #[cfg(feature = "store")]
 pub use store::{DeviceValues, ProjectValues};
 #[cfg(feature = "synced")]
 pub use synced::{DocValues, ROOT as SYNCED_ROOT, synced_doc_id};
-#[cfg(all(feature = "appearance", feature = "ui"))]
-pub use appearance_ui::{AppearancePage, use_appearance_section};
 #[cfg(feature = "ui")]
 pub use ui::{
     SettingsChange, SettingsHandle, SettingsPage, UseSettings, try_use_settings, use_section,

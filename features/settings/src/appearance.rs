@@ -190,7 +190,12 @@ pub fn section() -> Section {
                 Setting::new(
                     token_key(tokens::FONT),
                     "Font",
-                    Control::Select(FONTS.iter().map(|f| Choice::text(f.stack, f.label)).collect()),
+                    Control::Select(
+                        FONTS
+                            .iter()
+                            .map(|f| Choice::text(f.stack, f.label))
+                            .collect(),
+                    ),
                     Value::Text(architect_theme::resolve::SHELL_FONT.into()),
                 )
                 .describe("The face everything is set in.")

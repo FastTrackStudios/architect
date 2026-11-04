@@ -23,7 +23,9 @@ synced = ["dep:loro", "dep:uuid"]
 # Appearance section (with `ui`, its page).
 appearance = ["dep:architect-theme"]
 ui = [
-    "architect-theme?/dioxus",
+    # Outside an AppShell (a sheet over it), the page follows the store.
+    "dep:architect-theme",
+    "architect-theme/dioxus",
     "dep:futures-channel",
     "dep:futures-util",
     "dep:dioxus",

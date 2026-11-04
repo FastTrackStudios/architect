@@ -24,6 +24,20 @@ impl DeviceValues {
         })
     }
 
+    /// A store of the app's own beside it (`<app>/<name>.json`): values
+    /// something else keeps whole, such as the Appearance layer's
+    /// (`appearance::Persist`), so a save of the page's never writes over
+    /// them.
+    ///
+    /// # Errors
+    ///
+    /// The settings directory cannot be found.
+    pub fn open_named(app: &str, name: &str) -> Result<Self, SettingsError> {
+        Ok(Self {
+            store: Store::open(app, name)?,
+        })
+    }
+
     /// What was kept; nothing set when there is none yet.
     #[must_use]
     pub fn load(&self) -> Values {

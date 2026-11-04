@@ -20,7 +20,9 @@ impl Kept {
     fn save(&self) -> impl FnMut(&Saved) + Send + 'static {
         let kept = self.0.clone();
         move |saved: &Saved| {
-            kept.lock().unwrap().replace(saved.scope, saved.values.clone());
+            kept.lock()
+                .unwrap()
+                .replace(saved.scope, saved.values.clone());
         }
     }
 
@@ -39,11 +41,18 @@ fn store() -> ThemeStore {
 fn a_restarted_store_shows_what_was_set() {
     let kept = Kept::default();
     let first = store();
-    let persist = Persist::start(&first, &kept.values(), Duration::from_millis(20), kept.save());
+    let persist = Persist::start(
+        &first,
+        &kept.values(),
+        Duration::from_millis(20),
+        kept.save(),
+    );
     let _ = first.pick_in(LayerKind::Person, "nord-dark").unwrap();
     let _ = first.set_token(LayerKind::Person, tokens::DENSITY, "0.85");
     let _ = first.set_token(LayerKind::Person, "brand", "#ff6600");
-    let _ = first.update(LayerKind::Device, |l| l.appearance = Some(Appearance::Light));
+    let _ = first.update(LayerKind::Device, |l| {
+        l.appearance = Some(Appearance::Light);
+    });
     persist.flush();
     drop(persist);
 
@@ -53,7 +62,10 @@ fn a_restarted_store_shows_what_was_set() {
         Some(&Value::Text("fasttrackstudio-light,nord-dark".into()))
     );
     assert_eq!(
-        values.synced.set.get(&appearance::token_key(tokens::DENSITY)),
+        values
+            .synced
+            .set
+            .get(&appearance::token_key(tokens::DENSITY)),
         Some(&Value::Float(0.85))
     );
     assert_eq!(
@@ -75,8 +87,14 @@ fn a_restarted_store_shows_what_was_set() {
 fn org_under_person_under_device() {
     let mut values = ScopedValues::new();
     values.org = OrgSettings::new()
-        .default_to(appearance::THEME, Value::Text("nord-light,nord-dark".into()))
-        .default_to(appearance::token_key(tokens::RADIUS), Value::Text("0rem".into()));
+        .default_to(
+            appearance::THEME,
+            Value::Text("nord-light,nord-dark".into()),
+        )
+        .default_to(
+            appearance::token_key(tokens::RADIUS),
+            Value::Text("0rem".into()),
+        );
     let s = store();
     let _ = appearance::load(&s, &values);
     assert_eq!(s.current().id(), "nord-dark");
@@ -92,14 +110,14 @@ fn org_under_person_under_device() {
     assert_eq!(s.current().value("radius"), "0rem");
 
     // The device's over the person's.
-    values
-        .device
-        .set
-        .insert(appearance::THEME.into(), Value::Text("catppuccin-dark".into()));
-    values
-        .device
-        .set
-        .insert(appearance::token_key(tokens::RADIUS), Value::Text("1rem".into()));
+    values.device.set.insert(
+        appearance::THEME.into(),
+        Value::Text("catppuccin-dark".into()),
+    );
+    values.device.set.insert(
+        appearance::token_key(tokens::RADIUS),
+        Value::Text("1rem".into()),
+    );
     let _ = appearance::load(&s, &values);
     assert_eq!(s.current().id(), "catppuccin-dark");
     assert_eq!(s.current().value("radius"), "1rem");
@@ -120,10 +138,10 @@ fn an_org_lock_beats_the_person_and_the_device() {
         .synced
         .set
         .insert(appearance::THEME.into(), Value::Text("dracula-dark".into()));
-    values
-        .device
-        .set
-        .insert(appearance::THEME.into(), Value::Text("catppuccin-dark".into()));
+    values.device.set.insert(
+        appearance::THEME.into(),
+        Value::Text("catppuccin-dark".into()),
+    );
     let s = store();
     let _ = appearance::load(&s, &values);
     assert_eq!(s.current().id(), "nord-dark");

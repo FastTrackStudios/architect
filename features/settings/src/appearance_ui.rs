@@ -33,8 +33,13 @@ fn page() -> Element {
     rsx! { AppearancePage {} }
 }
 
+/// The shell's colours; over the shell (a sheet mounted beside
+/// `AppShell`), the theme store's, so the page follows it too.
 fn theme() -> ShellTheme {
-    try_use_shell().map(|s| s.theme).unwrap_or_default()
+    try_use_shell().map_or_else(
+        || ShellTheme::from_resolved(&architect_theme::use_resolved()),
+        |s| s.theme,
+    )
 }
 
 /// Who says a value now: a layer's name for a person.
@@ -112,7 +117,8 @@ pub fn AppearancePage() -> Element {
         density,
         scale,
     };
-    let own = !layers.get(LayerKind::Person).is_empty() || !layers.get(LayerKind::Device).is_empty();
+    let own =
+        !layers.get(LayerKind::Person).is_empty() || !layers.get(LayerKind::Device).is_empty();
     let reset_store = store.clone();
 
     // Mode.
@@ -264,35 +270,40 @@ impl Ctx {
     }
 }
 
-fn set_token(store: &ThemeStore, kind: LayerKind, name: &'static str) -> EventHandler<String> {
+// Closures, made into the child's handlers by its props.
+fn set_token(
+    store: &ThemeStore,
+    kind: LayerKind,
+    name: &'static str,
+) -> impl FnMut(String) + 'static {
     let store = store.clone();
-    EventHandler::new(move |v: String| {
+    move |v: String| {
         let _ = store.set_token(kind, name, &v);
-    })
+    }
 }
 
-fn set_font(store: &ThemeStore, kind: LayerKind) -> EventHandler<String> {
+fn set_font(store: &ThemeStore, kind: LayerKind) -> impl FnMut(String) + 'static {
     let store = store.clone();
-    EventHandler::new(move |v: String| {
+    move |v: String| {
         let _ = store.update(kind, |l| {
             l.overrides.insert(tokens::FONT.to_owned(), v.clone());
             l.overrides.insert(tokens::FONT_SANS.to_owned(), v);
         });
-    })
+    }
 }
 
-fn clear_mode(store: &ThemeStore, kind: LayerKind) -> EventHandler<()> {
+fn clear_mode(store: &ThemeStore, kind: LayerKind) -> impl FnMut(()) + 'static {
     let store = store.clone();
-    EventHandler::new(move |()| {
+    move |()| {
         let _ = store.update(kind, |l| l.appearance = None);
-    })
+    }
 }
 
-fn clear_choice(store: &ThemeStore, kind: LayerKind) -> EventHandler<()> {
+fn clear_choice(store: &ThemeStore, kind: LayerKind) -> impl FnMut(()) + 'static {
     let store = store.clone();
-    EventHandler::new(move |()| {
+    move |()| {
         let _ = store.update(kind, |l| l.choice = None);
-    })
+    }
 }
 
 /// One theme as a card shows it: its colours, from its own resolve.
@@ -368,7 +379,11 @@ fn Row(
 ) -> Element {
     let t = theme();
     let rule = if first { "transparent" } else { &*t.rule };
-    let (fade, reach) = if locked { ("0.5", "none") } else { ("1", "auto") };
+    let (fade, reach) = if locked {
+        ("0.5", "none")
+    } else {
+        ("1", "auto")
+    };
     let said = if locked {
         "Set by your organization"
     } else {
@@ -406,16 +421,18 @@ fn TokenRow(
     children: Element,
 ) -> Element {
     let kind = ctx.kind;
-    let clear = EventHandler::new(move |()| {
-        let _ = store.update(kind, |l| {
-            l.overrides.remove(name);
-            if name == tokens::FONT {
-                l.overrides.remove(tokens::FONT_SANS);
-            }
-        });
-    });
     rsx! {
-        Row { title, detail, by: said.0, kind, first, pad: ctx.px(14.0), locked, clear, {children} }
+        Row { title, detail, by: said.0, kind, first, pad: ctx.px(14.0), locked,
+            clear: move |()| {
+                let _ = store.update(kind, |l| {
+                    l.overrides.remove(name);
+                    if name == tokens::FONT {
+                        l.overrides.remove(tokens::FONT_SANS);
+                    }
+                });
+            },
+            {children}
+        }
     }
 }
 
@@ -506,7 +523,11 @@ fn TextScale(now: f32, onpick: EventHandler<String>) -> Element {
 fn ModeCard(label: String, on: bool, swatch: Resolved, onpick: EventHandler<()>) -> Element {
     let t = theme();
     let edge = if on { &*t.accent } else { &*t.rule };
-    let (desk, ink, brand) = (swatch.value("desk"), swatch.value("ink-3"), swatch.value("brand"));
+    let (desk, ink, brand) = (
+        swatch.value("desk"),
+        swatch.value("ink-3"),
+        swatch.value("brand"),
+    );
     rsx! {
         button {
             style: "width: 104px; display: flex; flex-direction: column; gap: 6px; padding: 6px; border-radius: 10px; \

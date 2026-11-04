@@ -243,9 +243,10 @@ fn theme_set_writes_the_layer_it_is_given() {
         Some(architect_theme::Appearance::Light)
     );
     assert_eq!(store.layer(LayerKind::Person).appearance, None);
-    assert!(list
-        .run_json(ids::SET, br#"{"appearance":"dark","layer":"builtin"}"#)
-        .is_err());
+    assert!(
+        list.run_json(ids::SET, br#"{"appearance":"dark","layer":"builtin"}"#)
+            .is_err()
+    );
 }
 
 /// A layer listener hears a change to the layers even when nothing that
