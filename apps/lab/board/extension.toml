@@ -75,7 +75,9 @@ icon = "layout-dashboard"
 page = "pages/board.tsx"
 
 # Two more pages, opened with EXT_VIEW_OPEN: an A2UI JSON page bound to
-# LAB_BOARD_STATE, and a Luau page whose worker counts primes.
+# LAB_BOARD_STATE, and a Luau page whose worker counts primes. (A view's
+# id names its override, `pages/lab.board/<view>.<ext>`: no file of this
+# folder may share it, or a clone's copy of that file would win.)
 [[views]]
 id = "summary"
 title = "Board summary"
@@ -83,10 +85,10 @@ icon = "list"
 page = "pages/summary.a2ui.json"
 
 [[views]]
-id = "primes"
+id = "luau-primes"
 title = "Primes (Luau)"
 icon = "cpu"
-page = "pages/primes.luau"
+page = "pages/luau-primes.luau"
 
 [[views]]
 id = "chart"

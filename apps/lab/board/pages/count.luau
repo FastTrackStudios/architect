@@ -1,4 +1,4 @@
--- The Luau page's worker (primes.luau spawns it): counts the primes below
+-- The Luau page's worker (luau-primes.luau spawns it): counts the primes below
 -- `args.below` in a Luau state of its own, saying how far it is.
 local below = args.below or 100000
 local found = 0

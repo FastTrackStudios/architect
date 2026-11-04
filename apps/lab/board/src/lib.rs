@@ -34,7 +34,7 @@ pub const PAGES: &[(&str, &str)] = &[
     ("kf.tsx", include_str!("../pages/kf.tsx")),
     ("primes.js", include_str!("../pages/primes.js")),
     ("summary.a2ui.json", include_str!("../pages/summary.a2ui.json")),
-    ("primes.luau", include_str!("../pages/primes.luau")),
+    ("luau-primes.luau", include_str!("../pages/luau-primes.luau")),
     ("count.luau", include_str!("../pages/count.luau")),
 ];
 
@@ -131,7 +131,7 @@ impl Extension for Board {
             .view("status-bar", BoardStatusBar)
             .view("song", SongCard)
             .view("summary", PagesOnly)
-            .view("primes", PagesOnly)
+            .view("luau-primes", PagesOnly)
             .action_in(
                 "LAB_BOARD_PIN",
                 |args, cx| async move { Ok(pin(&args, cx)) },
@@ -225,8 +225,8 @@ fn BoardView() -> Element {
 }
 
 /// The `.kf` opener's view.
-/// What `summary` and `primes` show in an app that does not run their
-/// page files (`pages/summary.a2ui.json`, `pages/primes.luau`).
+/// What `summary` and `luau-primes` show in an app that does not run their
+/// page files (`pages/summary.a2ui.json`, `pages/luau-primes.luau`).
 #[component]
 fn PagesOnly() -> Element {
     rsx! {

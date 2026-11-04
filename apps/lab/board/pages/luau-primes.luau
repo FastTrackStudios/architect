@@ -38,7 +38,7 @@ render(function()
 		:child(h2():style({ margin = 0 }):child("Primes, as a Luau page"))
 		:child(
 			p():style({ margin = 0, color = "$muted-foreground", font_size = 12 })
-				:child("pages/primes.luau: a worker counts while this page keeps answering. Ticks: " .. ticks)
+				:child("pages/luau-primes.luau: a worker counts while this page keeps answering. Ticks: " .. ticks)
 		)
 		:child(
 			div()

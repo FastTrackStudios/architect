@@ -171,7 +171,7 @@ its handle has `w:post`, `w:cancel`, `w:status`, `w:progress`,
 `w:result`, and callbacks `w:on_message`, `w:on_progress`, `w:on_done`,
 which run as the worker's news wakes the page's thread (`deliver`), a
 frame after (`features/pages/tests/luau.rs`; the lab's
-`apps/lab/board/pages/primes.luau` with its worker `count.luau`).
+`apps/lab/board/pages/luau-primes.luau` with its worker `count.luau`).
 
 **A2UI** (`features/pages/src/a2ui.rs` `A2uiEngine`, feature `a2ui`,
 `Pages::with_a2ui`): a `.a2ui.json` page is A2UI v1.0 — the page form
