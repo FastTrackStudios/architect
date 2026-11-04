@@ -43,6 +43,7 @@ Paperclip projects: **Architect** and **fts-auth**. Wiki: `architect` (Task org 
 | Scripting an app: actions driven from Luau as one undo step, scripts saved as actions, MCP | `docs/content/getting-started/scripting.md` | `cargo test -p example-scripting` (`examples/scripting`) |
 | Writing an extension: manifest, Luau overlay, process extension with a remote view, registry, hot reload | `docs/content/getting-started/extension.md` | `cargo test -p example-extension-host` (`examples/extension`) |
 | Guide media: GIFs, tests and in-app tours from one scenario (`architect-guide`, `features/guide`), the lab's scenarios in `apps/lab/scenarios`, a story's own | `references/guide-media.md`, `docs/content/architecture/guide-media.md` | `just media-test` |
+| A live check on a Mac: launch the built app (`FTS_CONTROL=1`, its own config folder and socket), `act`, `shot` (APP_SHOT), cua-driver input in its window only, an iOS Simulator of its own, `stop` | `docs/content/guide/live-check-mac.md` | `scripts/mac-live-check.sh launch target/debug/architect-desktop` |
 
 Writing or reviewing the README itself: the fleet `readme` skill (facts list with proofs, one pitch sentence everywhere, the first command inside 80 lines, every path in a code span so `cargo xtask docs` checks it).
 
