@@ -60,11 +60,25 @@ pub fn use_lab_theme(
     // writes what waits.
     let kept: (Rc<Option<ThemeWatch>>, LabAppearance) = use_hook(|| {
         let _ = architect_theme::actions::register(list, &store);
+        let _ = store.set(architect_theme::LayerKind::App, app_layer());
         let watch = windowed.then(|| watch_folder(&store)).flatten();
         let persist = windowed.then(|| persist(&store)).flatten();
         (Rc::new(watch), LabAppearance(Rc::new(persist)))
     });
     (handle, kept.1)
+}
+
+/// The lab's own tokens, as its `App` layer: the defaults of its views'
+/// roles (the Keyflow editor's `editor.*`), expressions over the palette so
+/// they follow the theme showing.
+#[must_use]
+pub fn app_layer() -> architect_theme::Layer {
+    let layer = architect_theme::Layer::default();
+    #[cfg(feature = "keyflow-lab")]
+    let layer = crate::keyflow::EDITOR_TOKENS
+        .iter()
+        .fold(layer, |layer, (name, value)| layer.token(*name, *value));
+    layer
 }
 
 /// What keeps the lab's look, when it is kept (in a window).
