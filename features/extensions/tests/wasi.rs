@@ -908,3 +908,81 @@ fn its_actions_run_through_the_apps_own_list() {
     assert!(app.host.unload(COUNTER));
     assert!(own.info("LAB_WASI_COUNTER_ADD").is_none());
 }
+
+/// The engine's name in its compile log line.
+const fn engine_name() -> &'static str {
+    if architect_extensions::wasi::PULLEY {
+        "Pulley, interpreted"
+    } else {
+        "Cranelift, native"
+    }
+}
+
+#[test]
+fn the_engine_is_the_platforms() {
+    // Pulley on iOS (no JIT) and with the `pulley` feature, which runs
+    // every test here on it; Cranelift's native code elsewhere.
+    assert_eq!(
+        architect_extensions::wasi::PULLEY,
+        cfg!(any(target_os = "ios", feature = "pulley"))
+    );
+    if guests().is_none() {
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(Limits::default(), &tmp.path().join("cache"));
+    load(
+        &app,
+        &package(tmp.path(), "counter", &counter_manifest(), COUNTER_WASM),
+    );
+    assert!(
+        logs(&app, COUNTER)
+            .iter()
+            .any(|l| l.starts_with("wasi compiled") && l.contains(engine_name())),
+        "{:?}",
+        logs(&app, COUNTER)
+    );
+}
+
+/// An action call's latency, through the app's list into the component and
+/// back: `cargo test -p architect-extensions --features wasi --test wasi
+/// -- --ignored --nocapture an_action_call` (add `--features pulley` for
+/// the interpreter).
+#[test]
+#[ignore = "a measurement: run it with --ignored --nocapture"]
+fn an_action_calls_latency() {
+    const CALLS: usize = 2000;
+    if guests().is_none() {
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(Limits::default(), &tmp.path().join("cache"));
+    let started = Instant::now();
+    load(
+        &app,
+        &package(tmp.path(), "counter", &counter_manifest(), COUNTER_WASM),
+    );
+    let load_time = started.elapsed();
+    for _ in 0..100 {
+        run(&app, "LAB_WASI_COUNTER_ADD", &json!({ "by": 1 })).unwrap();
+    }
+    let mut times: Vec<Duration> = (0..CALLS)
+        .map(|_| {
+            let t = Instant::now();
+            run(&app, "LAB_WASI_COUNTER_ADD", &json!({ "by": 1 })).unwrap();
+            t.elapsed()
+        })
+        .collect();
+    times.sort();
+    // The `percent`th percentile.
+    let at = |percent: usize| times[(times.len() * percent / 100).min(times.len() - 1)];
+    let mean = times.iter().sum::<Duration>() / u32::try_from(CALLS).unwrap();
+    println!(
+        "{}: compile + load {load_time:?}; LAB_WASI_COUNTER_ADD x{CALLS}: \
+         p50 {:?}, p90 {:?}, p99 {:?}, mean {mean:?}",
+        engine_name(),
+        at(50),
+        at(90),
+        at(99),
+    );
+}

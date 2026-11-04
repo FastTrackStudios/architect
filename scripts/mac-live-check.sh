@@ -32,6 +32,11 @@
 #                                       boot a Simulator of its own, install and launch
 #                                       (FTS_CONTROL=1), wait, screenshot; a scheme is
 #                                       built with xcodebuild first
+#   scripts/mac-live-check.sh ios-act <ACTION> [--arg k=v…]
+#                                       its Action List, over the control socket it serves
+#                                       in a folder on the Mac (FTS_CONTROL_DIR; MLC_CLI:
+#                                       an architect app's `actions` CLI)
+#   scripts/mac-live-check.sh ios-tap <x> <y>            a tap, in points (idb)
 #   scripts/mac-live-check.sh ios-shot <out.png>         the Simulator's screen again
 #   scripts/mac-live-check.sh status                     what this session runs
 #   scripts/mac-live-check.sh stop                       quit the app, shut down and delete
@@ -285,25 +290,25 @@ cmd_input() {
 
 sim() { xcrun simctl "$@"; }
 
+# The session's Simulator, created and booted when it has none: the
+# newest iOS runtime's newest iPhone (the runtime lists it first), or
+# MLC_IOS_DEVICE (a device type's name or identifier).
 ios_boot() {
-    local udid
+    local udid runtime device
     udid="$(get sim)"
-    if [[ -n "$udid" ]] && sim list devices | grep -q "$udid"; then
-        sim bootstatus "$udid" -b >/dev/null 2>&1 || true
-        printf '%s' "$udid"
-        return
+    if [[ -z "$udid" ]] || ! sim list devices | grep -q "$udid"; then
+        runtime="$(sim list runtimes -j |
+            jq -r '[.runtimes[] | select(.platform == "iOS" and .isAvailable)] | last | .identifier // empty')"
+        [[ -n "$runtime" ]] || die "no iOS Simulator runtime installed (Xcode › Settings › Components)"
+        device="${MLC_IOS_DEVICE:-$(sim list runtimes -j | jq -r --arg r "$runtime" \
+            '.runtimes[] | select(.identifier == $r) | [.supportedDeviceTypes[] | select(.name | startswith("iPhone"))] | first | .identifier')}"
+        mkdir -p "$STATE"
+        udid="$(sim create "mac-live-check-$SESSION" "$device" "$runtime")" || die "could not create a $device Simulator"
+        put sim "$udid"
+        say "simulator $udid ($device, $runtime)"
     fi
-    local runtime device
-    runtime="$(sim list runtimes -j | jq -r '[.runtimes[] | select(.platform == "iOS" and .isAvailable)] | last | .identifier // empty')"
-    [[ -n "$runtime" ]] || die "no iOS Simulator runtime installed (Xcode › Settings › Components)"
-    device="${MLC_IOS_DEVICE:-$(sim list devicetypes -j | jq -r '[.devicetypes[] | select(.productFamily == "iPhone")] | last | .identifier')}"
-    mkdir -p "$STATE"
-    udid="$(sim create "mac-live-check-$SESSION" "$device" "$runtime")"
-    put sim "$udid"
-    say "simulator $udid ($device, $runtime)"
-    sim boot "$udid"
-    sim bootstatus "$udid" -b >/dev/null
-    printf '%s' "$udid"
+    sim boot "$udid" 2>/dev/null || true
+    sim bootstatus "$udid" -b >/dev/null || die "simulator $udid did not boot"
 }
 
 # A scheme of the Xcode project or workspace here, built for the Simulator.
@@ -325,7 +330,8 @@ cmd_ios() {
     [[ $# -ge 1 ]] || die "ios <App.app | bundle-id | scheme> [args…]"
     local what="$1" udid bid app=""
     shift
-    udid="$(ios_boot)"
+    ios_boot
+    udid="$(get sim)"
     if [[ -d "$what" && "$what" == *.app ]]; then
         app="$(abspath "$what")"
     elif sim get_app_container "$udid" "$what" >/dev/null 2>&1; then
@@ -339,10 +345,43 @@ cmd_ios() {
         say "installed $bid"
     fi
     put bundle "$bid"
-    SIMCTL_CHILD_FTS_CONTROL=1 sim launch --terminate-running-process "$udid" "$bid" "$@" >/dev/null
+    # Its control socket in a short folder on the Mac (a Simulator app's
+    # files are the Mac's; its own temporary folder is too deep for a
+    # socket's path): FTS_CONTROL_DIR, for `ios-act`.
+    local iotmp
+    iotmp="$(get iostmp)"
+    [[ -n "$iotmp" ]] || { iotmp="$(mktemp -d /tmp/mlc-ios.XXXXXX)"; put iostmp "$iotmp"; }
+    SIMCTL_CHILD_FTS_CONTROL=1 SIMCTL_CHILD_FTS_CONTROL_DIR="$iotmp" \
+        sim launch --terminate-running-process "$udid" "$bid" "$@" >/dev/null
     say "launched $bid; waiting ${MLC_IOS_SETTLE:-8}s"
     sleep "${MLC_IOS_SETTLE:-8}"
     cmd_ios_shot "${MLC_IOS_SHOT:-/tmp/mlc-$SESSION-ios.png}"
+}
+
+# A tap on the Simulator's screen, in points (a screenshot's pixels over
+# its scale, 3 on an iPhone): idb (`idb ui tap`; MLC_IDB names it).
+cmd_ios_tap() {
+    [[ $# -ge 2 ]] || die "ios-tap <x> <y> (points)"
+    local idb udid
+    idb="${MLC_IDB:-$(command -v idb || true)}"
+    [[ -n "$idb" ]] || die "ios-tap needs idb (pip install fb-idb, and idb_companion; MLC_IDB=<path>)"
+    udid="$(get sim)"
+    [[ -n "$udid" ]] || die "no Simulator in session '$SESSION' (ios first)"
+    local companion=()
+    command -v idb_companion >/dev/null && companion=(--companion-path "$(command -v idb_companion)")
+    "$idb" ${companion[@]+"${companion[@]}"} ui tap --udid "$udid" "$1" "$2"
+}
+
+# `actions --app <its socket> run …` against the Simulator's app, with an
+# architect app's `actions` CLI (MLC_CLI, else the session's launched one).
+cmd_ios_act() {
+    [[ $# -ge 1 ]] || die "ios-act <ACTION> [--arg k=v…]"
+    local cli sock
+    cli="${MLC_CLI:-$(get bin)}"
+    [[ -x "$cli" ]] || die "ios-act needs an architect CLI: MLC_CLI=target/debug/architect-desktop"
+    sock="$(ls "$(get iostmp)"/*.sock 2>/dev/null | head -1 || true)"
+    [[ -n "$sock" ]] || die "the Simulator's app serves no control socket (a debug build, FTS_CONTROL=1)"
+    "$cli" actions --app "$sock" run "$@"
 }
 
 cmd_ios_shot() {
@@ -379,6 +418,8 @@ cmd_stop() {
     fi
     udid="$(get sim)"
     if [[ -n "$udid" ]]; then
+        # idb's companion for it, if `ios-tap` started one.
+        pkill -f "idb_companion --udid $udid" 2>/dev/null || true
         sim shutdown "$udid" 2>/dev/null || true
         sim delete "$udid" 2>/dev/null || true
         say "shut down and deleted simulator $udid"
@@ -387,7 +428,7 @@ cmd_stop() {
         say "kept $(get config) and $STATE"
         return
     fi
-    for d in "$(get tmp)" "$(get config)"; do [[ "$d" == /tmp/mlc* ]] && rm -rf "$d"; done
+    for d in "$(get tmp)" "$(get config)" "$(get iostmp)"; do [[ "$d" == /tmp/mlc* ]] && rm -rf "$d"; done
     rm -rf "$STATE"
 }
 
@@ -402,8 +443,10 @@ shot) cmd_shot "$@" ;;
 input) cmd_input "$@" ;;
 ios) cmd_ios "$@" ;;
 ios-shot) cmd_ios_shot "$@" ;;
+ios-act) cmd_ios_act "$@" ;;
+ios-tap) cmd_ios_tap "$@" ;;
 status) cmd_status ;;
 stop) cmd_stop ;;
 -h | --help | help) sed -n '2,/^set -euo/p' "$0" | sed '$d; s/^# \{0,1\}//' ;;
-*) die "unknown command '$command' (launch, act, cli, shot, input, ios, ios-shot, status, stop)" ;;
+*) die "unknown command '$command' (launch, act, cli, shot, input, ios, ios-act, ios-tap, ios-shot, status, stop)" ;;
 esac

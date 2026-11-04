@@ -103,6 +103,11 @@ tokio = { workspace = true }
 [lib]
 doctest = false
 
+# rquickjs ships its C bindings for the Mac, Linux, Windows and wasm, not
+# for iOS: there they are generated at build time (bindgen, libclang).
+[target.'cfg(target_os = "ios")'.dependencies]
+rquickjs = { version = "0.14", optional = true, features = ["loader", "bindgen"] }
+
 [lints]
 workspace = true
 

@@ -73,3 +73,13 @@ env -u DEVELOPER_DIR -u SDKROOT \
 With no Simulator.app at hand (a headless Mac), watch and drive the
 simulator with `xcrun simctl io <udid> screenshot --mask=black` and `idb ui
 tap` / `idb ui swipe`.
+
+Without dx, `apps/lab/mobile/ios/build-app.sh [--features wasi]` (in
+`devenv shell`) builds the app with cargo and bundles it with this
+plist, signed ad hoc; with `wasi` the WASI Counter's component goes in
+the bundle and runs on Wasmtime's Pulley interpreter (iOS allows no
+JIT). It works around the dev shell's Mac-only C toolchain (Xcode's
+clang and xcrun for the phone's C code; rquickjs's bindings generated
+with Xcode's libclang). `scripts/mac-live-check.sh ios <the .app>` runs
+it on a Simulator of its own, and `ios-act` drives its Action List over
+its control socket (docs/content/guide/live-check-mac.md).

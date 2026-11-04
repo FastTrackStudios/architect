@@ -39,10 +39,20 @@ pub const fn dev_default() -> bool {
     cfg!(debug_assertions)
 }
 
-/// The directory app sockets are in: the user's runtime directory, else
-/// the temporary one, then `fts`.
+/// `FTS_CONTROL_DIR=<dir>` puts app sockets in `<dir>` instead.
+///
+/// An app in the iOS Simulator, whose own temporary folder is too deep
+/// for a socket's path (104 bytes at most on macOS), serves in a short
+/// folder on the Mac (`scripts/mac-live-check.sh ios`).
+pub const DIR_ENV: &str = "FTS_CONTROL_DIR";
+
+/// The directory app sockets are in: [`DIR_ENV`] when set, else the
+/// user's runtime directory, else the temporary one, then `fts`.
 #[must_use]
 pub fn socket_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os(DIR_ENV).filter(|d| !d.is_empty()) {
+        return PathBuf::from(dir);
+    }
     dirs::runtime_dir()
         .unwrap_or_else(std::env::temp_dir)
         .join("fts")

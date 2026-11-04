@@ -69,6 +69,10 @@ let serving = Control::new("task", surface)?.serve_if_wanted()?; // keep it aliv
   the socket `0600`; a connection from another user is closed unanswered.
   On Windows a named pipe, `\\.\pipe\fts-<user>-<app>`, that refuses
   remote clients (`features/control/src/endpoint.rs`).
+  `FTS_CONTROL_DIR=<dir>` puts the sockets in `<dir>` instead: an app in
+  the iOS Simulator, whose own temporary folder is too deep for a
+  socket's 104-byte path, serves in a short folder on the Mac
+  ([A live check on a Mac](@/guide/live-check-mac.md)).
 - When: `serve_if_wanted` serves in a debug build and not in a release
   one; `FTS_CONTROL=0` turns it off and `FTS_CONTROL=1` on. `serve`
   always serves. A socket left by an app that died is replaced at the

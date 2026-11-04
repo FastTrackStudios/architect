@@ -67,6 +67,8 @@ window id and the config folder. `status` prints them again.
 | `input state [query] [--png out.png]` | its accessibility tree, narrowed by `query`, and a screenshot |
 | `input call <tool> [json]` | any cua-driver tool, with `pid` and `window_id` overwritten by its own |
 | `ios <App.app \| bundle id \| scheme> [args…]` | a Simulator of its own, installed, launched with `FTS_CONTROL=1`, a screenshot after `MLC_IOS_SETTLE` seconds (8) to `MLC_IOS_SHOT` |
+| `ios-act <ACTION> [--arg k=v…]` | its Action List, over the control socket it serves on the Mac |
+| `ios-tap <x> <y>` | a tap, in points (idb) |
 | `ios-shot <out.png>` | that Simulator's screen again |
 | `status`, `stop` | |
 
@@ -106,13 +108,39 @@ window id and the config folder. `status` prints them again.
 
 `ios` takes a built `.app` (installed, then launched), a bundle id
 already installed, or an Xcode scheme in the current folder (built with
-`xcodebuild` for the session's Simulator first). The lab's iOS app is
-built by dx, not Xcode: `apps/lab/mobile`'s README builds it, then
+`xcodebuild` for the session's Simulator first). The Simulator is made
+for the session (the newest runtime's newest iPhone, or
+`MLC_IOS_DEVICE`), headless: no Simulator.app window is needed. The lab's
+iOS app is built without dx by `apps/lab/mobile/ios/build-app.sh`, which
+also puts the WASI Counter's component in its bundle:
 
 ```bash
-scripts/mac-live-check.sh ios target/dx/architect-mobile/debug/ios/ArchitectMobile.app
+S=scripts/mac-live-check.sh
+export MLC_SESSION=ios MLC_CLI=target/debug/architect-desktop
+$S ios "$(apps/lab/mobile/ios/build-app.sh --features wasi)"   # → /tmp/mlc-ios-ios.png
+$S ios-act LAB_GO --arg tab=vault
+$S ios-act WORKSPACE_OPEN --json '{"view":"wasi.counter","at":{"replace":{"pane":"note-welcome"}},"focus":true}'
+$S ios-tap 149 249                                             # "Add one", in points
+$S ios-shot /tmp/ios-counter.png
+$S stop
 ```
 
-The Simulator is headless (no Simulator.app window needed);
-`ios-shot` takes `xcrun simctl io <udid> screenshot`. `stop` shuts it
-down and deletes it.
+- **`ios-act`** runs the app's actions over its control socket. The
+  app is launched with `FTS_CONTROL=1` and `FTS_CONTROL_DIR` (a short
+  folder under `/tmp`): a Simulator app's files are the Mac's, but its
+  own temporary folder is too deep for a socket's path (104 bytes at
+  most), so `architect-control` serves in the folder it is given
+  (`features/control/src/endpoint.rs` `DIR_ENV`). Any architect app's
+  `actions` CLI talks to it (`MLC_CLI`).
+- **`ios-tap <x> <y>`** taps in points, a screenshot's pixels over its
+  scale (3 on an iPhone), through idb (`idb ui tap`; `pip install
+  fb-idb` and its `idb_companion`, or `MLC_IDB=<path>`). Use it for what
+  the Action List does not reach: an extension's own buttons, gestures.
+- **`ios-shot`** is `xcrun simctl io <udid> screenshot`.
+- **`stop`** ends idb's companion for the Simulator, shuts the
+  Simulator down and deletes it.
+
+A test binary runs in the Simulator as it is, with no app around it:
+build it with `cargo test --target aarch64-apple-ios-sim --no-run` and
+run it with `xcrun simctl spawn <udid> <binary>`; environment variables
+go in as `SIMCTL_CHILD_<NAME>`.

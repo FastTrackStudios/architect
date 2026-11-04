@@ -1,8 +1,10 @@
-//! WASI component extensions (feature `wasi`, desktop and Android;
+//! WASI component extensions (feature `wasi`: desktop, Android and iOS;
 //! `docs/content/architecture/extensions.md`, "WASI components").
 //!
 //! [`WasiRunner`] is the [`Runner`] for `kind = "wasm"`: it compiles the
-//! package's component (`[wasm] component`) with Cranelift, once — the
+//! package's component (`[wasm] component`) with Cranelift — to native
+//! code, or on iOS (no JIT) to bytecode Wasmtime's Pulley interpreter
+//! runs ([`PULLEY`]) — once — the
 //! compiled code is kept on disk by the component's hash
 //! ([`WasiRunner::with_cache`]) — and instantiates it against the
 //! `architect:extension` world (`features/extensions/wit/extension.wit`):
@@ -43,8 +45,7 @@
 //! own, spoken to by messages only — parallelism from more instances, not
 //! threads in one.
 //!
-//! Not yet (#167, part 3): WASI 0.3's async, iOS (Pulley, no JIT) and the
-//! web (jco).
+//! Not yet (#167, part 3): WASI 0.3's async and the web (jco).
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::Write as _;
@@ -120,14 +121,44 @@ impl Limits {
     }
 }
 
-/// The one engine: the component model, epoch interruption, its ticker.
+/// Whether components are interpreted by Pulley, Wasmtime's portable
+/// interpreter, rather than compiled to native code by Cranelift: on iOS,
+/// which allows no JIT, and wherever the `pulley` feature is on.
+pub const PULLEY: bool = cfg!(any(target_os = "ios", feature = "pulley"));
+
+/// Each linear memory's address space under [`PULLEY`]: the default
+/// [`Limits::memory`].
+///
+/// Cranelift's native code reserves 4 GiB and a guard so its loads need
+/// no bounds check. An iOS app has a few GiB of address space in all;
+/// Pulley checks each access's bounds itself, and a memory that grows
+/// past this moves.
+pub const PULLEY_RESERVATION: u64 = 64 << 20;
+
+/// The engine's settings: the component model and epoch interruption;
+/// under [`PULLEY`], Cranelift compiling to Pulley bytecode (`pulley64`),
+/// traps found by the interpreter rather than by signals, and a small
+/// memory reservation with no guard.
+fn config() -> Result<Config, String> {
+    let mut config = Config::new();
+    config.wasm_component_model(true).epoch_interruption(true);
+    if PULLEY {
+        config.target("pulley64").map_err(|e| e.to_string())?;
+        config
+            .signals_based_traps(false)
+            .memory_reservation(PULLEY_RESERVATION)
+            .memory_guard_size(0)
+            .memory_reservation_for_growth(0);
+    }
+    Ok(config)
+}
+
+/// The one engine ([`config`]) and its epoch's ticker.
 fn engine() -> Result<&'static Engine, String> {
     static ENGINE: OnceLock<Result<Engine, String>> = OnceLock::new();
     ENGINE
         .get_or_init(|| {
-            let mut config = Config::new();
-            config.wasm_component_model(true).epoch_interruption(true);
-            let engine = Engine::new(&config).map_err(|e| e.to_string())?;
+            let engine = Engine::new(&config()?).map_err(|e| e.to_string())?;
             let weak = engine.weak();
             std::thread::Builder::new()
                 .name("ext-wasi-epoch".to_owned())
@@ -1493,12 +1524,17 @@ impl Runner for WasiRunner {
             Level::Info,
             "wasi",
             format!(
-                "{} in {} ms",
+                "{} in {} ms ({})",
                 match compiled {
                     Compiled::Fresh => "compiled",
                     Compiled::Cached => "loaded from the compile cache",
                 },
-                started.elapsed().as_millis()
+                started.elapsed().as_millis(),
+                if PULLEY {
+                    "Pulley, interpreted"
+                } else {
+                    "Cranelift, native"
+                }
             ),
         );
         let linker = self.linker(engine)?;
