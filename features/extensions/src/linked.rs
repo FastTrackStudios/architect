@@ -301,6 +301,24 @@ impl Builder {
     }
 }
 
+/// An inline embed's input in context: the host provides it around a
+/// linked view it mounts as an embed (`embeds::EmbedView`), the guest
+/// around every process view (filled when the host opens it as one).
+#[derive(Clone, Copy)]
+pub struct EmbedContext(pub dioxus::prelude::Signal<crate::contrib::EmbedInput>);
+
+/// What the host gave this view as an inline embed — the claim, the
+/// block's text, the host's properties — when it is drawn as one: read
+/// in a view, it draws again when the block changes. `None` in a pane.
+#[must_use]
+pub fn use_embed() -> Option<crate::contrib::EmbedInput> {
+    use dioxus::prelude::{ReadableExt as _, try_use_context};
+    let input = try_use_context::<EmbedContext>()?.0;
+    let now = input.read().clone();
+    // A process view's context is there in a pane too, empty.
+    (!now.claim.is_empty()).then_some(now)
+}
+
 #[cfg(feature = "guest")]
 impl crate::guest::Guest {
     /// `extension` served as a process: its views, its actions (told

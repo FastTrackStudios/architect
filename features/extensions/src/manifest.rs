@@ -520,7 +520,7 @@ pub struct Manifest {
     pub tokens: std::collections::BTreeMap<String, String>,
     /// What it adds to the interface: its `[[openers]]`, `[[doc_kinds]]`,
     /// `[[tabs]]`, `[[status]]`, `[[menus]]`, `[[context]]`, `[[bar]]`,
-    /// `[[hooks]]` and `[[slots]]`.
+    /// `[[hooks]]`, `[[slots]]` and `[[embeds]]`.
     #[serde(flatten)]
     pub contributes: Contribution,
 }
@@ -1276,6 +1276,13 @@ action = "WORKSPACE_LAYOUT"
 [[slots]]
 slot = "status"
 view = "bar"
+
+[[embeds]]
+id = "kf"
+title = "Keyflow chart"
+view = "chart"
+claims = { fence = ["kf"], note_type = ["song"] }
+max_height = 320
 "#;
 
     #[test]
@@ -1291,6 +1298,9 @@ view = "bar"
             (1, 1, 1, 1)
         );
         assert_eq!((c.bar.len(), c.hooks.len(), c.slots.len()), (1, 2, 1));
+        assert_eq!(c.embeds[0].claims.fence, ["kf"]);
+        assert_eq!(c.embeds[0].claims.note_type, ["song"]);
+        assert_eq!(c.embeds[0].max_height, Some(320));
         assert_eq!(m.views[0].placement, ViewPlacement::Split);
         assert_eq!(m.views[0].on_unload, OnUnload::Close);
         assert_eq!(m.views[1].home, Home::Right);
