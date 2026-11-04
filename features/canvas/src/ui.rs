@@ -650,20 +650,36 @@ mod script {
         output.set(session.output().clone());
         let mut input = Input::default();
         let meter = start.meter;
+        // Whether it has drawn a frame: until something asks for one (its
+        // view's spaces, a pointer, its own wake), it has not, and a
+        // theme alone only restyles what its first frame will draw.
+        let mut drawn = false;
         loop {
             let Some(first) = next_turn(&session, &mut rx).await else {
                 return;
             };
+            // Its own ask (no message) is a frame.
+            let mut frame = first.is_none();
             // Moves coalesce; a press or a release is a frame of its own.
             let mut next = first;
             let mut pressed = false;
             while let Some(msg) = next.take() {
-                if apply(&session, &mut input, msg) {
-                    pressed = true;
-                    break;
+                match apply(&session, &mut input, msg) {
+                    Turn::Press => {
+                        pressed = true;
+                        frame = true;
+                        break;
+                    }
+                    Turn::Frame => frame = true,
+                    Turn::Restyled => frame |= drawn,
+                    Turn::Quiet => {}
                 }
                 next = rx.try_recv().ok();
             }
+            if !frame {
+                continue;
+            }
+            drawn = true;
             let report = metered(&mut session, &input, &meter, status).await;
             input.closed.clear();
             note(&mut status, &report, session.running());
@@ -720,35 +736,50 @@ mod script {
         report
     }
 
-    /// Takes `msg` in; whether it pressed or let go.
-    fn apply(session: &Session, input: &mut Input, msg: Msg) -> bool {
+    /// What a message calls for.
+    enum Turn {
+        /// A frame of its own: a press or a release.
+        Press,
+        /// A frame, coalesced with what follows.
+        Frame,
+        /// A frame if it has drawn one: its theme changed.
+        Restyled,
+        /// None: its theme, unchanged.
+        Quiet,
+    }
+
+    /// Takes `msg` in; what it calls for.
+    fn apply(session: &Session, input: &mut Input, msg: Msg) -> Turn {
         match msg {
             Msg::Spaces(view, spaces) => {
                 session.publish(&view, spaces);
-                false
+                Turn::Frame
             }
             Msg::View(view, pointer) => {
                 session.pointer(&view, pointer);
-                true
+                Turn::Press
             }
             Msg::Window(id, WindowEvent::Size(size)) => {
                 input.sizes.insert(id, size);
-                false
+                Turn::Frame
             }
             Msg::Window(id, WindowEvent::Pointer { at, down }) => {
                 let pressed = down != input.down;
                 input.down = down;
                 input.pointer = at.map(|at| WindowPointer { window: id, at });
-                pressed
+                if pressed { Turn::Press } else { Turn::Frame }
             }
             Msg::Closed(id) => {
                 input.sizes.remove(&id);
                 input.closed.insert(id);
-                false
+                Turn::Frame
             }
             Msg::Theme(theme) => {
-                session.set_theme(&theme);
-                false
+                if session.set_theme(&theme) {
+                    Turn::Restyled
+                } else {
+                    Turn::Quiet
+                }
             }
         }
     }

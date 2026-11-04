@@ -197,18 +197,6 @@ fn first_workspace() -> Workspace {
             Target::Dock(Side::Right),
         ),
         (Pane::new("clicker", "clicker", "Clicker"), Target::Tab),
-        (
-            Pane::new("clicker-window", "clicker.window", "Clicker window"),
-            Target::Tab,
-        ),
-        (
-            Pane::new("clicker-heavy", "clicker.heavy", "Heavy job"),
-            Target::Tab,
-        ),
-        (
-            Pane::new("clicker-naughty", "clicker.naughty", "Naughty view"),
-            Target::Tab,
-        ),
     ];
     for (pane, target) in opens {
         let _ = w.open(pane, target);
