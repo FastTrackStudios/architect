@@ -188,12 +188,23 @@ os_shot() {
     fi
 }
 
+# The session's cua-driver session, started or revived (cua-driver ends
+# one left idle, and refuses its label until it is started again), once
+# per run of this script.
+CUA_STARTED=0
+cua_session() {
+    [[ "$CUA_STARTED" == 1 ]] && return
+    cua-driver call start_session "{\"session\":\"mlc-$SESSION\"}" >/dev/null 2>&1 || true
+    CUA_STARTED=1
+}
+
 # One cua-driver call with the app's pid and window forced into `json`.
 cua() {
     local tool="$1" json="${2:-}" png="${3:-}"
     [[ -n "$json" ]] || json='{}'
     need_app
     need_cua
+    cua_session
     # One cua-driver session per live-check session: a pixel click is
     # refused unless the same session read the window first.
     json="$(jq -c --argjson pid "$(get pid)" --argjson w "$(window)" --arg s "mlc-$SESSION" \
