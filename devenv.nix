@@ -68,4 +68,13 @@ in
     after = [ "devenv:processes:mock-oauth" ];
     start.enable = false;
   };
+
+  # `devenv --profile wasi shell`: the fleet toolchain plus `wasm32-wasip2`,
+  # what a WASI extension (`features/extensions/wasi-guest`, the lab's
+  # `apps/lab/wasi-counter`) builds for. A profile, not the default shell:
+  # an extra target changes the rustc store path, so kache shares nothing
+  # with the other repos' builds in it (devenv-fleet `fleet.rust.extraTargets`).
+  profiles.wasi.module = {
+    fleet.rust.extraTargets = [ "wasm32-wasip2" ];
+  };
 }

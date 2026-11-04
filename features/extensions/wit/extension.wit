@@ -1,0 +1,191 @@
+// The `architect:extension` world: what a WASI component extension imports
+// from its host and exports to it (features/extensions/src/wasi.rs, the
+// host; features/extensions/wasi-guest, the Rust guest;
+// docs/content/architecture/extensions.md, "WASI components").
+//
+// Hand-written, beside two sources it must match, checked by
+// features/extensions/tests/wasi_wit.rs:
+// - the `types` interface mirrors the remote-view wire
+//   (features/extensions/src/wire.rs: `Edit`, `Value`, `ViewEvent`,
+//   `EventData`, `Pointer`, `KeyData`, `Mods`, `ThemeData`, `Token`), case
+//   for case and field for field, so a component's view is applied by the
+//   same `RemoteDocument` a process's is;
+// - the `host` interface is the host service (features/extensions/src/hostcall.rs
+//   `HostRequest`): typed functions for the common calls, `call` for every
+//   one, the same JSON a process, a Luau script and a linked extension send.
+//   Each is checked against what the extension may reach, as a person
+//   granted it, when it is made.
+package architect:extension@0.1.0;
+
+interface types {
+    /// An attribute's value (`wire::Value`).
+    variant value {
+        none,
+        text(string),
+        float(f64),
+        int(s64),
+        %bool(bool),
+    }
+
+    record create-element {
+        tag: string,
+        namespace: option<string>,
+    }
+
+    record set-attribute {
+        name: string,
+        namespace: option<string>,
+        value: value,
+    }
+
+    /// One of Dioxus's `WriteMutations`, as data (`wire::Edit`): a stack
+    /// machine over the host's nodes. Ids are Dioxus's element ids; a count
+    /// is how many nodes on the stack, the top the last one pushed.
+    variant edit {
+        push-id(u64),
+        set-id(u64),
+        child(u32),
+        pop,
+        create-element(create-element),
+        create-text(string),
+        clone,
+        append-children(u32),
+        replace-with(u32),
+        insert-after(u32),
+        insert-before(u32),
+        set-attribute(set-attribute),
+        set-text(string),
+        listen(string),
+        unlisten(string),
+        remove,
+    }
+
+    /// The modifier keys held (`wire::Mods`).
+    record mods {
+        alt: bool,
+        ctrl: bool,
+        meta: bool,
+        shift: bool,
+    }
+
+    /// Where a pointer was, in CSS pixels, and its buttons (`wire::Pointer`).
+    record pointer {
+        client-x: f64,
+        client-y: f64,
+        page-x: f64,
+        page-y: f64,
+        screen-x: f64,
+        screen-y: f64,
+        element-x: f64,
+        element-y: f64,
+        button: s16,
+        buttons: u16,
+        mods: mods,
+    }
+
+    /// A key, as the web names it (`wire::KeyData`).
+    record key-data {
+        key: string,
+        code: string,
+        location: u8,
+        repeat: bool,
+        composing: bool,
+        mods: mods,
+    }
+
+    /// What an event carries (`wire::EventData`).
+    variant event-data {
+        mouse(pointer),
+        key(key-data),
+        form(string),
+        focus,
+    }
+
+    /// An event on one of a view's elements (`wire::ViewEvent`).
+    record view-event {
+        element: u64,
+        name: string,
+        bubbles: bool,
+        data: event-data,
+    }
+
+    /// One resolved theme token (`wire::Token`).
+    record token {
+        name: string,
+        value: string,
+    }
+
+    /// The app's theme, as data (`wire::ThemeData`).
+    record theme-data {
+        id: string,
+        scheme: string,
+        revision: u64,
+        tokens: list<token>,
+    }
+
+    /// The edits one open view made since it last sent any.
+    record pane-edits {
+        pane: u64,
+        edits: list<edit>,
+    }
+}
+
+/// The host service (`hostcall::HostRequest`): every call checked against
+/// the extension's capabilities and a person's grants. An error is
+/// `hostcall::HostError` as JSON (`{"kind": "refused", "capability": …,
+/// "why": …}`).
+interface host {
+    use types.{theme-data};
+
+    enum level {
+        debug,
+        info,
+        warn,
+        error,
+    }
+
+    /// Runs app action `action` with JSON `args`, as this extension acting
+    /// for whoever ran it (`run`): its answer as JSON.
+    run-action: func(action: string, args: string) -> result<string, string>;
+    /// One of its own settings' values, as JSON (`setting`).
+    setting: func(key: string) -> result<string, string>;
+    /// Sets one of its own settings to JSON `value` (`set-setting`).
+    set-setting: func(key: string, value: string) -> result<_, string>;
+    /// The app's theme now.
+    theme: func() -> theme-data;
+    /// A line in its log (`EXT_LOGS`).
+    log: func(level: level, text: string);
+    /// Any host-service call (`hostcall::HostRequest` as JSON); its answer
+    /// as JSON (`hostcall::HostAnswer`: `{"ok": …}` or `{"error": …}`).
+    call: func(request: string) -> string;
+}
+
+/// What a component does for its host.
+interface guest {
+    use types.{edit, view-event, pane-edits};
+
+    /// Starts it, with the state the copy it replaces saved.
+    init: func(state: option<list<u8>>) -> result<_, string>;
+    /// The actions it runs, by id: each its manifest declares.
+    actions: func() -> list<string>;
+    /// The views it renders, by id.
+    views: func() -> list<string>;
+    /// Runs action `action` with JSON `args`, invoked from `invocation`
+    /// (JSON: the palette, a menu and its target, a hook and its event).
+    invoke: func(action: string, args: string, invocation: string) -> result<string, string>;
+    /// Mounts view `view` as `pane`: its first render.
+    render: func(pane: u64, view: string) -> result<list<edit>, string>;
+    /// An event in `pane`'s view, for its handlers: what they changed.
+    on-event: func(pane: u64, event: view-event) -> result<list<edit>, string>;
+    /// What its open views changed by themselves (after an action ran).
+    pending: func() -> list<pane-edits>;
+    /// Unmounts `pane`'s view.
+    close: func(pane: u64);
+    /// Its state, for the copy that replaces it on a reload.
+    save-state: func() -> option<list<u8>>;
+}
+
+world extension {
+    import host;
+    export guest;
+}

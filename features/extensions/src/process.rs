@@ -167,7 +167,7 @@ impl Processes {
         }
     }
 
-    fn put(&self, process: Process) {
+    pub(crate) fn put(&self, process: Process) {
         self.by_id
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -176,7 +176,7 @@ impl Processes {
     }
 
     /// Takes `process` out, unless another has taken its place (a reload).
-    fn take(&self, process: &Process) {
+    pub(crate) fn take(&self, process: &Process) {
         let mut by_id = self.by_id.lock().unwrap_or_else(PoisonError::into_inner);
         if by_id
             .get(process.id())
@@ -198,11 +198,43 @@ struct Link {
     _connection: vox_core::ConnectionHandle,
 }
 
+/// Something in the app's own process that serves an extension's actions
+/// and views as a program would (a WASI component, `crate::wasi`): what
+/// lets the same [`Process`], `RemoteView` and `EXT_CHECK` show it.
+pub(crate) trait Local: Send + Sync {
+    /// Runs its action `action` with JSON `args`, from `context` (an
+    /// invocation as JSON).
+    fn run(
+        &self,
+        action: String,
+        args: String,
+        context: Option<String>,
+    ) -> futures::future::BoxFuture<'static, Result<String, String>>;
+
+    /// Mounts its view `view` as `pane`: its frames go to `frames`; the
+    /// pane's events to what it gives back.
+    ///
+    /// # Errors
+    ///
+    /// It has no such view, or is not running.
+    fn open(
+        &self,
+        view: &str,
+        pane: u64,
+        frames: mpsc::UnboundedSender<Frame>,
+    ) -> Result<mpsc::UnboundedSender<ViewEvent>, String>;
+
+    /// Unmounts `pane`.
+    fn close(&self, pane: u64);
+}
+
 struct Inner {
     id: String,
     name: String,
     rt: tokio::runtime::Handle,
     state: watch::Sender<State>,
+    /// What serves it in the app's own process, when no program does.
+    local: Option<Arc<dyn Local>>,
     link: Mutex<Option<Link>>,
     hello: Mutex<Option<Hello>>,
     pid: Mutex<Option<u32>>,
@@ -235,6 +267,54 @@ impl PartialEq for Process {
 static PANES: AtomicU64 = AtomicU64::new(1);
 
 impl Process {
+    /// One served in the app's own process by `local`, running.
+    pub(crate) fn local(
+        id: &str,
+        name: &str,
+        rt: tokio::runtime::Handle,
+        local: Arc<dyn Local>,
+    ) -> Self {
+        Self {
+            inner: Arc::new(Inner {
+                id: id.to_owned(),
+                name: name.to_owned(),
+                rt,
+                state: watch::Sender::new(State::Running {
+                    generation: 1,
+                    pid: std::process::id(),
+                }),
+                local: Some(local),
+                link: Mutex::new(None),
+                hello: Mutex::new(None),
+                pid: Mutex::new(None),
+                stop: watch::Sender::new(false),
+                restart: Notify::new(),
+            }),
+        }
+    }
+
+    /// Whether it runs in the app's own process (a WASI component), not
+    /// as a program of its own.
+    #[must_use]
+    pub fn is_local(&self) -> bool {
+        self.inner.local.is_some()
+    }
+
+    /// Says it is in `state` now (a local one, which supervises itself).
+    pub(crate) fn set_state(&self, state: State) {
+        self.inner.state.send_replace(state);
+    }
+
+    /// Resolves when [`Self::restart`] is asked for.
+    pub(crate) async fn restart_asked(&self) {
+        self.inner.restart.notified().await;
+    }
+
+    /// Whether [`Self::stop`] was asked for.
+    pub(crate) fn stop_asked(&self) -> bool {
+        *self.inner.stop.borrow()
+    }
+
     /// Its extension's id.
     #[must_use]
     pub fn id(&self) -> &str {
@@ -322,6 +402,9 @@ impl Process {
         args: String,
         context: Option<String>,
     ) -> Result<String, String> {
+        if let Some(local) = &self.inner.local {
+            return local.run(action.to_owned(), args, context).await;
+        }
         let link = self.link()?;
         let action = action.to_owned();
         let knows = self.hello().is_some_and(|h| h.wire >= CONTRIB_WIRE);
@@ -347,6 +430,18 @@ impl Process {
     ///
     /// It is not running.
     pub fn open(&self, view: &str) -> Result<ViewSession, String> {
+        if let Some(local) = &self.inner.local {
+            let pane = PANES.fetch_add(1, Ordering::Relaxed);
+            let (frames_to, frames) = mpsc::unbounded();
+            let events = local.open(view, pane, frames_to)?;
+            return Ok(ViewSession {
+                pane,
+                frames,
+                events,
+                tasks: Vec::new(),
+                close: Some(Closer::Local(Arc::clone(local))),
+            });
+        }
         let link = self.link()?;
         let pane = PANES.fetch_add(1, Ordering::Relaxed);
         let (frames_to, frames) = mpsc::unbounded();
@@ -390,7 +485,7 @@ impl Process {
             frames,
             events,
             tasks: vec![streaming.abort_handle(), forwarding.abort_handle()],
-            close: Some((self.inner.rt.clone(), link.client)),
+            close: Some(Closer::Link(self.inner.rt.clone(), link.client)),
         })
     }
 }
@@ -404,7 +499,13 @@ pub struct ViewSession {
     /// The pane's events, for its handlers.
     pub events: mpsc::UnboundedSender<ViewEvent>,
     tasks: Vec<tokio::task::AbortHandle>,
-    close: Option<(tokio::runtime::Handle, ProcessExtensionClient)>,
+    close: Option<Closer>,
+}
+
+/// How a view is unmounted.
+enum Closer {
+    Link(tokio::runtime::Handle, ProcessExtensionClient),
+    Local(Arc<dyn Local>),
 }
 
 impl std::fmt::Debug for ViewSession {
@@ -420,11 +521,15 @@ impl Drop for ViewSession {
         for task in &self.tasks {
             task.abort();
         }
-        if let Some((rt, client)) = self.close.take() {
-            let pane = self.pane;
-            rt.spawn(async move {
-                let _ = client.close(pane).await;
-            });
+        let pane = self.pane;
+        match self.close.take() {
+            Some(Closer::Link(rt, client)) => {
+                rt.spawn(async move {
+                    let _ = client.close(pane).await;
+                });
+            }
+            Some(Closer::Local(local)) => local.close(pane),
+            None => {}
         }
     }
 }
@@ -1021,6 +1126,7 @@ impl Runner for ProcessRunner {
                 name: manifest.name.clone(),
                 rt: rt.handle().clone(),
                 state: watch::Sender::new(State::Starting),
+                local: None,
                 link: Mutex::new(None),
                 hello: Mutex::new(None),
                 pid: Mutex::new(None),
