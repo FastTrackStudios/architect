@@ -678,7 +678,9 @@ async fn follow(
             }
             State::Stopped => {
                 shown.set(Shown::Waiting(format!("{} was unloaded", process.name())));
-                something_changes(None, &processes, &mut retry).await;
+                if !replaced(&processes, &extension, &process) {
+                    something_changes(None, &processes, &mut retry).await;
+                }
                 continue;
             }
         };
@@ -791,10 +793,17 @@ async fn follow(
         // wait for the button.
         if matches!(process.state(), State::Running { generation: g, .. } if g == generation) {
             let _ = retry.next().await;
-        } else {
+        } else if !replaced(&processes, &extension, &process) {
             something_changes(Some(&process), &processes, &mut retry).await;
         }
     }
+}
+
+/// Whether another process of `extension` has taken `process`'s place (a
+/// reload starts the new one before the old one stops): follow it now,
+/// as the change it made was before anything here listened.
+fn replaced(processes: &Processes, extension: &str, process: &Process) -> bool {
+    processes.get(extension).is_some_and(|p| p != *process)
 }
 
 /// The next frame; meanwhile, once the oldest unanswered event is past
