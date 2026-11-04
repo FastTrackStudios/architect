@@ -65,14 +65,14 @@ pub mod contrib_actions;
 pub mod doc;
 #[cfg(feature = "host")]
 pub mod extensions;
+#[cfg(feature = "host")]
+mod forward;
 #[cfg(all(feature = "guest", unix))]
 pub mod guest;
 #[cfg(feature = "host")]
 pub mod host;
 #[cfg(feature = "vox")]
 pub mod host_proto;
-#[cfg(feature = "host")]
-mod forward;
 #[cfg(feature = "host")]
 pub mod hostapi;
 #[cfg(feature = "host")]

@@ -694,10 +694,7 @@ impl<S: Setup> bindings::exports::architect::extension::work::Guest for Componen
         heard(worker, |s| s.messages.push(message));
     }
 
-    fn on_progress(
-        worker: u64,
-        progress: bindings::architect::extension::worker::ProgressReport,
-    ) {
+    fn on_progress(worker: u64, progress: bindings::architect::extension::worker::ProgressReport) {
         heard(worker, |s| {
             s.progress = Some(Progress {
                 done: progress.done,

@@ -254,7 +254,9 @@ impl Link {
 
     /// The next message from its owner, waiting at most `wait`.
     pub(super) fn receive(&self, wait: Duration) -> Option<String> {
-        let until = Instant::now().checked_add(wait).unwrap_or_else(Instant::now);
+        let until = Instant::now()
+            .checked_add(wait)
+            .unwrap_or_else(Instant::now);
         let mut mail = lock(&self.mail);
         loop {
             if let Some(m) = mail.to_worker.pop_front() {
@@ -428,7 +430,11 @@ impl Crew {
                 "it has {MAX_WORKERS} workers running already: one must end first"
             ));
         }
-        let id = self.inner.next.fetch_add(1, Ordering::Relaxed).saturating_add(1);
+        let id = self
+            .inner
+            .next
+            .fetch_add(1, Ordering::Relaxed)
+            .saturating_add(1);
         let link = Arc::new(Link {
             id,
             name: name.to_owned(),

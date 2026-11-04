@@ -39,13 +39,13 @@ use std::time::{Duration, Instant};
 use architect::action::{ActionCaller, ActionError, ActionList, ActionMeta, Effect};
 use architect_extensions::host::{Host, SharedSections};
 use architect_extensions::process::Processes;
-use architect_extensions::remote::RemoteDocument;
 use architect_extensions::remote::REMOTE_BUDGET;
+use architect_extensions::remote::RemoteDocument;
 use architect_extensions::wasi::{Limits, Pool, QUEUE, WasiRunner, WorkerStatus};
-use architect_workspace::ViewMeter;
 use architect_extensions::wire::{Edit, EventData, Frame, Pointer, ViewEvent};
 use architect_extensions::{Origin, Package};
 use architect_settings::Registry;
+use architect_workspace::ViewMeter;
 use futures::executor::block_on;
 use serde_json::{Value, json};
 
@@ -543,21 +543,31 @@ fn worker_state(app: &App, id: &Value) -> Value {
 }
 
 /// Waits (10 s at most) until `done` says so of what `poll` gives.
-fn wait_for<T: std::fmt::Debug>(what: &str, mut poll: impl FnMut() -> T, done: impl Fn(&T) -> bool) -> T {
+fn wait_for<T: std::fmt::Debug>(
+    what: &str,
+    mut poll: impl FnMut() -> T,
+    done: impl Fn(&T) -> bool,
+) -> T {
     let started = Instant::now();
     loop {
         let now = poll();
         if done(&now) {
             return now;
         }
-        assert!(started.elapsed() < Duration::from_secs(10), "{what}: {now:?}");
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "{what}: {now:?}"
+        );
         std::thread::sleep(Duration::from_millis(10));
     }
 }
 
 fn hazards(runner: WasiRunner, tmp: &Path) -> App {
     let app = app_with(runner, &tmp.join("cache"));
-    load(&app, &package(tmp, "hazards", HAZARDS_MANIFEST, HAZARDS_WASM));
+    load(
+        &app,
+        &package(tmp, "hazards", HAZARDS_MANIFEST, HAZARDS_WASM),
+    );
     app
 }
 
@@ -597,7 +607,10 @@ fn a_worker_job_keeps_the_view_within_its_frame_budget() {
             assert_eq!(job["status"], "done", "{job}");
             break;
         }
-        assert!(began.elapsed() < Duration::from_secs(60), "the job ran on: {job}");
+        assert!(
+            began.elapsed() < Duration::from_secs(60),
+            "the job ran on: {job}"
+        );
         count += 1;
         let asked = Instant::now();
         session.events.unbounded_send(click(add)).unwrap();
@@ -620,16 +633,23 @@ fn a_worker_job_keeps_the_view_within_its_frame_budget() {
         "the WASI counter's view with a primes job in a worker: {} clicks, p50 {:?} p99 {:?} max {:?}, {} past {:?}; progress seen {:?}",
         s.frames, s.p50, s.p99, s.max, s.slow, REMOTE_BUDGET, seen
     );
-    assert!(clicks_during_job >= 20, "the job ended too soon to measure: {clicks_during_job}");
+    assert!(
+        clicks_during_job >= 20,
+        "the job ended too soon to measure: {clicks_during_job}"
+    );
     assert_eq!(s.slow, 0, "{s:?}");
     assert!(seen.len() >= 3, "its progress bar moved: {seen:?}");
     // Its result, into the view.
-    let done = wait_for("the result in the view", || {
-        if let Ok(frame) = session.frames.try_recv() {
-            doc.apply(frame).unwrap();
-        }
-        text(&doc)
-    }, |t| t.contains("primes below 2000000"));
+    let done = wait_for(
+        "the result in the view",
+        || {
+            if let Ok(frame) = session.frames.try_recv() {
+                doc.apply(frame).unwrap();
+            }
+            text(&doc)
+        },
+        |t| t.contains("primes below 2000000"),
+    );
     assert!(done.contains("148933 primes below 2000000"), "{done}");
     let stats = app.components.get(COUNTER).unwrap();
     assert_eq!(stats.traps(), 0);
@@ -645,12 +665,20 @@ fn unloading_it_cancels_its_workers() {
     // A worker that never ends and never looks whether it should.
     let id = run(&app, "TEST_HAZARDS_WORK", &json!({ "worker": "forever" })).unwrap();
     let stats = app.components.get(HAZARDS).unwrap();
-    wait_for("it runs", || stats.workers(), |w| w.iter().any(|w| w.status == WorkerStatus::Running));
+    wait_for(
+        "it runs",
+        || stats.workers(),
+        |w| w.iter().any(|w| w.status == WorkerStatus::Running),
+    );
     assert_eq!(worker_state(&app, &id)["status"], "running");
     assert_eq!(stats.workers_alive(), 1);
     let unloaded = Instant::now();
     assert!(app.host.unload(HAZARDS));
-    wait_for("its instance is freed", || stats.workers_alive(), |n| *n == 0);
+    wait_for(
+        "its instance is freed",
+        || stats.workers_alive(),
+        |n| *n == 0,
+    );
     let took = unloaded.elapsed();
     eprintln!("a spinning worker was stopped {took:?} after its owner unloaded");
     assert!(took < Duration::from_secs(2), "{took:?}");
@@ -676,22 +704,45 @@ fn a_worker_past_its_limits_traps_and_its_owner_runs_on() {
         run(&app, "TEST_HAZARDS_ECHO", &json!({ "say": 1 })).unwrap(),
         json!({ "echo": { "say": 1 } })
     );
-    let stopped = wait_for("the spinner stops", || worker_state(&app, &spin), |s| s["status"] != "running");
+    let stopped = wait_for(
+        "the spinner stops",
+        || worker_state(&app, &spin),
+        |s| s["status"] != "running",
+    );
     assert_eq!(stopped["status"], "failed", "{stopped}");
-    assert!(stopped["error"].as_str().unwrap().starts_with("interrupted"), "{stopped}");
-    let hoarded = wait_for("the hoarder stops", || worker_state(&app, &hoard), |s| s["status"] != "running");
+    assert!(
+        stopped["error"]
+            .as_str()
+            .unwrap()
+            .starts_with("interrupted"),
+        "{stopped}"
+    );
+    let hoarded = wait_for(
+        "the hoarder stops",
+        || worker_state(&app, &hoard),
+        |s| s["status"] != "running",
+    );
     assert_eq!(hoarded["status"], "failed", "{hoarded}");
     let why = hoarded["error"].as_str().unwrap();
-    assert!(why.starts_with("out of memory") && why.contains("32 MiB"), "{why}");
+    assert!(
+        why.starts_with("out of memory") && why.contains("32 MiB"),
+        "{why}"
+    );
     // Its owner never trapped, and answers still.
     assert_eq!(stats.traps(), 0);
     assert_eq!(
         run(&app, "TEST_HAZARDS_ECHO", &json!({ "say": 2 })).unwrap(),
         json!({ "echo": { "say": 2 } })
     );
-    wait_for("their instances are freed", || stats.workers_alive(), |n| *n == 0);
+    wait_for(
+        "their instances are freed",
+        || stats.workers_alive(),
+        |n| *n == 0,
+    );
     assert!(
-        logs(&app, HAZARDS).iter().any(|l| l.starts_with("worker worker forever failed: interrupted")),
+        logs(&app, HAZARDS)
+            .iter()
+            .any(|l| l.starts_with("worker worker forever failed: interrupted")),
         "{:?}",
         logs(&app, HAZARDS)
     );
@@ -709,18 +760,33 @@ fn back_pressure_holds_both_ways() {
     // Its owner to a worker that never reads: the queue fills, and the
     // owner (a view: it never waits) is told.
     let deaf = run(&app, "TEST_HAZARDS_WORK", &json!({ "worker": "deaf" })).unwrap();
-    let flood = run(&app, "TEST_HAZARDS_FLOOD", &json!({ "id": deaf, "n": 1000 })).unwrap();
+    let flood = run(
+        &app,
+        "TEST_HAZARDS_FLOOD",
+        &json!({ "id": deaf, "n": 1000 }),
+    )
+    .unwrap();
     assert_eq!(flood["accepted"], json!(QUEUE), "{flood}");
     assert!(flood["error"].as_str().unwrap().contains("full"), "{flood}");
     assert!(stats.workers().iter().all(|w| w.to_worker <= QUEUE));
 
     // A worker that floods its owner while it is busy: the worker waits
     // at a full queue; once its owner hears, all of it comes, in order.
-    let chatty = run(&app, "TEST_HAZARDS_WORK", &json!({ "worker": "chatty", "args": { "n": 1000 } })).unwrap();
+    let chatty = run(
+        &app,
+        "TEST_HAZARDS_WORK",
+        &json!({ "worker": "chatty", "args": { "n": 1000 } }),
+    )
+    .unwrap();
     let busy = std::thread::spawn({
         let list = app.list.clone();
         move || {
-            block_on(list.run_json_async_with(&ActionCaller::app(), "TEST_HAZARDS_STALL", br#"{"ms": 600}"#)).unwrap();
+            block_on(list.run_json_async_with(
+                &ActionCaller::app(),
+                "TEST_HAZARDS_STALL",
+                br#"{"ms": 600}"#,
+            ))
+            .unwrap();
         }
     });
     let mut peak = 0;
@@ -736,8 +802,17 @@ fn back_pressure_holds_both_ways() {
     }
     busy.join().unwrap();
     assert_eq!(peak, QUEUE, "the worker waited at a full queue");
-    let heard = wait_for("all of it came", || worker_state(&app, &chatty), |s| s["status"] == "done");
-    let messages: Vec<u64> = heard["messages"].as_array().unwrap().iter().map(|m| m.as_u64().unwrap()).collect();
+    let heard = wait_for(
+        "all of it came",
+        || worker_state(&app, &chatty),
+        |s| s["status"] == "done",
+    );
+    let messages: Vec<u64> = heard["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m.as_u64().unwrap())
+        .collect();
     assert_eq!(messages, (0..1000).collect::<Vec<_>>());
     assert_eq!(heard["result"], json!(1000));
     // Their progress, coalesced: the last.
@@ -746,8 +821,15 @@ fn back_pressure_holds_both_ways() {
     // Messages both ways: a worker answers what it is sent.
     let echo = run(&app, "TEST_HAZARDS_WORK", &json!({ "worker": "echo" })).unwrap();
     run(&app, "TEST_HAZARDS_FLOOD", &json!({ "id": echo, "n": 3 })).unwrap();
-    let echoed = wait_for("it answered", || worker_state(&app, &echo), |s| s["messages"].as_array().is_some_and(|m| m.len() == 3));
-    assert_eq!(echoed["messages"], json!([{ "echo": 0 }, { "echo": 1 }, { "echo": 2 }]));
+    let echoed = wait_for(
+        "it answered",
+        || worker_state(&app, &echo),
+        |s| s["messages"].as_array().is_some_and(|m| m.len() == 3),
+    );
+    assert_eq!(
+        echoed["messages"],
+        json!([{ "echo": 0 }, { "echo": 1 }, { "echo": 2 }])
+    );
 
     // As many workers as it may, and no more.
     let mut more = Vec::new();
@@ -756,7 +838,10 @@ fn back_pressure_holds_both_ways() {
             Ok(id) => more.push(id),
             Err(e) => break failed(e),
         }
-        assert!(more.len() <= architect_extensions::wasi::MAX_WORKERS, "no limit");
+        assert!(
+            more.len() <= architect_extensions::wasi::MAX_WORKERS,
+            "no limit"
+        );
     };
     assert!(refused.contains("workers running already"), "{refused}");
 }
@@ -772,11 +857,22 @@ fn the_pool_starts_its_threads_lazily_and_stops_them_when_idle() {
     let app = hazards(runner, tmp.path());
     assert_eq!(pool.threads(), 0, "none before a worker");
     let ids: Vec<Value> = (0..3)
-        .map(|_| run(&app, "TEST_HAZARDS_WORK", &json!({ "worker": "chatty", "args": { "n": 3 } })).unwrap())
+        .map(|_| {
+            run(
+                &app,
+                "TEST_HAZARDS_WORK",
+                &json!({ "worker": "chatty", "args": { "n": 3 } }),
+            )
+            .unwrap()
+        })
         .collect();
     assert!(pool.threads() >= 1 && pool.threads() <= 2, "{pool:?}");
     for id in &ids {
-        wait_for("it ran", || worker_state(&app, id), |s| s["status"] == "done");
+        wait_for(
+            "it ran",
+            || worker_state(&app, id),
+            |s| s["status"] == "done",
+        );
     }
     wait_for("its threads stop when idle", || pool.threads(), |n| *n == 0);
 }
@@ -800,7 +896,10 @@ fn its_actions_run_through_the_apps_own_list() {
         block_on(own.run_json_async_with(&ActionCaller::app(), id, args.to_string().as_bytes()))
             .map(|out| serde_json::from_slice::<Value>(&out).unwrap())
     };
-    assert_eq!(on_own("LAB_WASI_COUNTER_ADD", &json!({ "by": 5 })).unwrap(), 5);
+    assert_eq!(
+        on_own("LAB_WASI_COUNTER_ADD", &json!({ "by": 5 })).unwrap(),
+        5
+    );
     assert_eq!(
         on_own("LAB_WASI_COUNTER_ASK", &Value::Null).unwrap(),
         json!(["light", "dark", "neon"])

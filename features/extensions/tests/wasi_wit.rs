@@ -256,7 +256,14 @@ fn the_worker_interfaces_are_the_other_runners() {
     worker.sort();
     assert_eq!(
         worker,
-        ["cancel", "cancelled", "post", "progress", "receive", "spawn"],
+        [
+            "cancel",
+            "cancelled",
+            "post",
+            "progress",
+            "receive",
+            "spawn"
+        ],
         "the worker import's functions"
     );
     let mut work = functions(&w, "work");

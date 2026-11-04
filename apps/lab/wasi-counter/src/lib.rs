@@ -153,17 +153,23 @@ fn Counter() -> Element {
 #[component]
 fn Primes() -> Element {
     let state = PRIMES.with(|p| p.borrow().as_ref().map(Worker::state));
-    let running = state.as_ref().is_some_and(|s| s.status == WorkStatus::Running);
+    let running = state
+        .as_ref()
+        .is_some_and(|s| s.status == WorkStatus::Running);
     let percent = state.as_ref().map_or(0.0, |s| s.fraction() * 100.0);
-    let said = state.as_ref().map_or_else(String::new, |s| match (&s.status, &s.result) {
-        (WorkStatus::Done, Some(Ok(r))) => format!(
-            "{} primes below {}",
-            r.get("found").unwrap_or(&Value::Null),
-            r.get("below").unwrap_or(&Value::Null)
-        ),
-        (WorkStatus::Failed | WorkStatus::Cancelled, Some(Err(why))) => format!("Stopped: {why}"),
-        _ => format!("Counting primes: {percent:.0}%"),
-    });
+    let said = state
+        .as_ref()
+        .map_or_else(String::new, |s| match (&s.status, &s.result) {
+            (WorkStatus::Done, Some(Ok(r))) => format!(
+                "{} primes below {}",
+                r.get("found").unwrap_or(&Value::Null),
+                r.get("below").unwrap_or(&Value::Null)
+            ),
+            (WorkStatus::Failed | WorkStatus::Cancelled, Some(Err(why))) => {
+                format!("Stopped: {why}")
+            }
+            _ => format!("Counting primes: {percent:.0}%"),
+        });
     rsx! {
         div { style: "display: flex; flex-direction: column; align-items: center; gap: 8px; width: 260px;",
             div { style: "display: flex; gap: 8px;",
@@ -213,14 +219,20 @@ fn build() -> Extension {
         })
         .action("LAB_WASI_COUNTER_ASK", |_| ask())
         .action("LAB_WASI_COUNTER_PRIMES", |args: Value| {
-            let n = args.get("n").and_then(Value::as_u64).unwrap_or(PRIMES_BELOW);
+            let n = args
+                .get("n")
+                .and_then(Value::as_u64)
+                .unwrap_or(PRIMES_BELOW);
             start_primes(n).map(|id| json!({ "worker": id }))
         })
         .action("LAB_WASI_COUNTER_JOB", |_| Ok(primes_state()))
         // The worker: another instance of this component, on the host's
         // pool; it shares nothing with the view's but messages.
         .worker("count-primes", |work, args: Value| {
-            let n = args.get("n").and_then(Value::as_u64).unwrap_or(PRIMES_BELOW);
+            let n = args
+                .get("n")
+                .and_then(Value::as_u64)
+                .unwrap_or(PRIMES_BELOW);
             count_primes(work, n).map(|found| json!({ "found": found, "below": n }))
         })
         .state(

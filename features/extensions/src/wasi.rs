@@ -569,7 +569,10 @@ impl Stats {
     /// Its workers that have not ended, or whose end it has not heard.
     #[must_use]
     pub fn workers(&self) -> Vec<WorkerInfo> {
-        self.crew.as_ref().map(workers::Crew::infos).unwrap_or_default()
+        self.crew
+            .as_ref()
+            .map(workers::Crew::infos)
+            .unwrap_or_default()
     }
 
     /// Its workers' instances held now (running, or waiting for the

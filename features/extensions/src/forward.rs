@@ -71,9 +71,7 @@ impl Host {
         {
             let (forwarded, by_extension) = (forwarded.clone(), Arc::clone(&by_extension));
             self.on_event(move |event| {
-                let mut by = by_extension
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner);
+                let mut by = by_extension.lock().unwrap_or_else(PoisonError::into_inner);
                 match event {
                     Event::Loaded(change) => {
                         for id in &change.removed {
@@ -96,9 +94,7 @@ impl Host {
             });
         }
         // What is loaded already.
-        let mut by = by_extension
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut by = by_extension.lock().unwrap_or_else(PoisonError::into_inner);
         for loaded in self.loaded() {
             for id in &loaded.actions {
                 forwarded.put(id);
@@ -134,7 +130,11 @@ params = '{"type":"object","properties":{"n":{"type":"integer"}}}'
 script = "add.luau"
 "#;
 
-    fn run(list: &ActionList, id: &str, args: &str) -> Result<Vec<u8>, architect::action::ActionError> {
+    fn run(
+        list: &ActionList,
+        id: &str,
+        args: &str,
+    ) -> Result<Vec<u8>, architect::action::ActionError> {
         block_on(list.run_json_async_with(&ActionCaller::app(), id, args.as_bytes()))
     }
 
@@ -142,9 +142,8 @@ script = "add.luau"
     fn an_extensions_actions_run_on_the_apps_list_while_it_is_loaded() {
         let app = ActionList::new();
         let host = Host::new(ActionList::new(), SharedSections::default());
-        let package = |body: &'static str| {
-            Package::embedded(MANIFEST, &[("add.luau", body)]).unwrap()
-        };
+        let package =
+            |body: &'static str| Package::embedded(MANIFEST, &[("add.luau", body)]).unwrap();
         // Loaded before the forwarding, and after.
         host.load(&package("return args.n + 1"), Origin::Builtin)
             .unwrap();
@@ -153,7 +152,10 @@ script = "add.luau"
         // A reload keeps it there, running the new copy.
         host.load(&package("return args.n + 10"), Origin::Builtin)
             .unwrap();
-        assert_eq!(run(&app, "TEST_FORWARDED_ADD", r#"{"n":1}"#).unwrap(), b"11");
+        assert_eq!(
+            run(&app, "TEST_FORWARDED_ADD", r#"{"n":1}"#).unwrap(),
+            b"11"
+        );
         // Unloaded, it is gone from both.
         assert!(host.unload("test.forwarded"));
         assert!(app.info("TEST_FORWARDED_ADD").is_none());
@@ -193,7 +195,10 @@ script = "add.luau"
             Origin::Builtin,
         )
         .unwrap();
-        assert_eq!(run(&app, "TEST_FORWARDED_ADD", "null").unwrap(), b"\"the app's\"");
+        assert_eq!(
+            run(&app, "TEST_FORWARDED_ADD", "null").unwrap(),
+            b"\"the app's\""
+        );
         assert!(host.unload("test.forwarded"));
         assert!(app.info("TEST_FORWARDED_ADD").is_some(), "still the app's");
     }
