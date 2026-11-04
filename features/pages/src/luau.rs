@@ -22,19 +22,38 @@
 //! `theme.value(name)`, `theme.scheme`, `theme.revision`, `notify(text)`
 //! and `print`. Luau's sandbox holds; each call into the page has
 //! [`crate::runner::PageLimits::frame`] before its interrupt stops it.
+//!
+//! **Timers**: `set_timeout(fn, ms)`, `set_interval(fn, ms)`,
+//! `clear_timeout(id)` / `clear_interval(id)`, as a TSX page's; each runs
+//! on the page's thread and renders after.
+//!
+//! **Workers**: `worker.spawn("primes.luau", args)` runs a `.luau` file of
+//! the page's folder in a Luau state of its own on the scripting pool
+//! (`architect_scripting::worker`, the same workers a Luau view has),
+//! with the page's [`crate::runner::PageLimits::worker_memory`] and
+//! `worker_time`. The handle `w` has `w:post(msg)`, `w:cancel()`,
+//! `w:status()`, `w:progress()`, `w:result()`, and the callbacks
+//! `w:on_message(fn)`, `w:on_progress(fn)`, `w:on_done(fn)` (or
+//! `worker.on_message(w, fn)`…), run on the page's thread as its news
+//! comes, a frame after each. The worker's own side is a Luau view's
+//! worker's: `args`, `worker.post`, `worker.progress`, `worker.receive`,
+//! `worker.on_message`, `worker.cancelled`. It stops with its page.
 
-use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, PoisonError, mpsc};
+use std::task::{Context, Waker};
+use std::time::{Duration, Instant};
 
+use architect_scripting::luau::Limits;
 use architect_scripting::luau::mlua::{self, Lua, LuaSerdeExt as _, Value as LuaValue};
-use architect_scripting::vm::{Guard, Stop};
+use architect_scripting::vm::{Guard, Stop, Wake};
+use architect_scripting::worker::{self, Workers};
 use serde_json::Value;
 
 use crate::api::{
     DataEvent, Element, Notice, PageEvent, PageHost as _, ThemeSnapshot, WorkerMessage,
 };
 use crate::files::PageFile;
-use crate::runner::{Engine, Load, Services};
+use crate::runner::{Engine, Inbox, Load, Services};
 
 const PRELUDE: &str = include_str!("luau_prelude.luau");
 
@@ -54,6 +73,26 @@ pub struct LuauEngine {
     page: mlua::Table,
     services: Services,
     theme: Arc<Mutex<ThemeSnapshot>>,
+    /// Its workers' news: set when any came, and how it is noticed.
+    news: Wake,
+    waker: Waker,
+}
+
+/// Wakes a page's thread: its workers' news came.
+struct InboxWaker(Mutex<mpsc::Sender<Inbox>>);
+
+impl std::task::Wake for InboxWaker {
+    fn wake(self: Arc<Self>) {
+        self.wake_by_ref();
+    }
+
+    fn wake_by_ref(self: &Arc<Self>) {
+        let _ = self
+            .0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .send(Inbox::Wake);
+    }
 }
 
 impl std::fmt::Debug for LuauEngine {
@@ -96,7 +135,9 @@ impl LuauEngine {
             .file_name()
             .map_or_else(|| "page".to_owned(), |n| n.to_string_lossy().into_owned());
         let theme = Arc::new(Mutex::new(services.host.theme_snapshot()));
-        let (api, table) = Self::install(&lua, services, &theme).map_err(|e| err(&e))?;
+        let news = Wake::default();
+        let (api, table) =
+            Self::install(&lua, page, services, &theme, &news).map_err(|e| err(&e))?;
         let globals = lua.globals();
         for pair in api.pairs::<String, LuaValue>() {
             let (k, v) = pair.map_err(|e| err(&e))?;
@@ -114,22 +155,61 @@ impl LuauEngine {
             .map_err(|e| err(&e));
         guard.deadline(None);
         loaded?;
+        let waker = Waker::from(Arc::new(InboxWaker(Mutex::new(services.inbox.clone()))));
         Ok(Self {
             lua,
             guard,
             page: table,
             services: services.clone(),
             theme,
+            news,
+            waker,
         })
+    }
+
+    /// The `.luau` files of the page's folder, the page's own left out:
+    /// the workers it may spawn, each by its file name.
+    fn workers(page: &PageFile, services: &Services) -> Workers {
+        let limits = Limits {
+            memory: services.limits.worker_memory,
+            time: Some(services.limits.worker_time),
+            ..Limits::worker()
+        };
+        let mut workers = Workers::new().with_limits(limits);
+        let Ok(entries) = std::fs::read_dir(page.root()) else {
+            return workers;
+        };
+        let mut found: Vec<_> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| *p != page.path && p.extension().is_some_and(|e| e == "luau"))
+            .collect();
+        found.sort();
+        for path in found {
+            if let (Some(name), Ok(source)) = (
+                path.file_name().and_then(|n| n.to_str()),
+                std::fs::read_to_string(&path),
+            ) {
+                workers = workers.with_source(name, source);
+            }
+        }
+        workers
     }
 
     /// The host's globals and the builder: what the prelude returns.
     fn install(
         lua: &Lua,
+        file: &PageFile,
         services: &Services,
         theme: &Arc<Mutex<ThemeSnapshot>>,
+        news: &Wake,
     ) -> mlua::Result<(mlua::Table, mlua::Table)> {
         let host = lua.create_table()?;
+        let started = Instant::now();
+        host.set(
+            "now",
+            lua.create_function(move |_, ()| Ok(started.elapsed().as_secs_f64() * 1000.0))?,
+        )?;
         lua.globals().set("__host", host)?;
         let (api, page): (mlua::Table, mlua::Table) =
             lua.load(PRELUDE).set_name("=architect").eval()?;
@@ -167,6 +247,12 @@ impl LuauEngine {
             })?,
         )?;
         api.set("state", state)?;
+        let workers = Self::workers(file, services).install_owner(
+            lua,
+            Some(news.clone()),
+            vec![services.stop.clone()],
+        )?;
+        api.set("worker", workers)?;
         let embed = services.embed.clone();
         api.set(
             "embed",
@@ -280,6 +366,7 @@ impl Engine for LuauEngine {
     }
 
     fn worker(&mut self, _message: &WorkerMessage) -> Result<(), String> {
+        // A Luau page's workers tell it through its wake (`tick`).
         Ok(())
     }
 
@@ -294,7 +381,23 @@ impl Engine for LuauEngine {
     }
 
     fn tick(&mut self) -> Result<Option<Duration>, String> {
-        Ok(None)
+        // Its workers' news first: their callbacks, then a frame.
+        let mut cx = Context::from_waker(&self.waker);
+        let came = std::pin::pin!(self.news.woken()).poll(&mut cx).is_ready();
+        if came {
+            self.guard.reset();
+            self.guard.deadline(Some(self.services.limits.frame));
+            let delivered = worker::deliver(&self.lua).map_err(|e| err(&e));
+            self.guard.deadline(None);
+            delivered?;
+            self.lua
+                .globals()
+                .get::<mlua::Function>("invalidate")
+                .and_then(|f| f.call::<()>(()))
+                .map_err(|e| err(&e))?;
+        }
+        let ms: f64 = self.call("tick", ())?;
+        Ok((ms >= 0.0).then(|| Duration::from_secs_f64(ms / 1000.0)))
     }
 
     fn dirty(&self) -> bool {

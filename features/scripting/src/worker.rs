@@ -25,7 +25,7 @@
 //! | `result(w)`, `w:result()` | what it returned (`nil` until done), and why it failed |
 //! | `messages(w)`, `w:messages()` | what it posted since the last call |
 //! | `log(w)`, `w:log()` | what it printed (its last hundred lines) |
-//! | `on_message(w, fn)`, `on_progress(w, fn)`, `on_done(w, fn)` | a live script's callbacks, at the start of its next frame |
+//! | `on_message(w, fn)`, `on_progress(w, fn)`, `on_done(w, fn)`, `w:on_message(fn)`… | a live script's callbacks, at the start of its next frame |
 //! | `join(w, ms?)`, `next(w, ms?)` | a one-off run's: waits for it to end, or for its next news (never in a view) |
 //!
 //! Its news wakes a live owner: its host runs a frame
@@ -45,6 +45,11 @@
 //! | `id`, `name` | its handle's number, its name |
 //!
 //! What its script returns is its result; `args` is what `spawn` gave.
+//!
+//! An owner that is not a [`Runtime`]'s script — a Luau page
+//! (`architect-pages`), on a thread of its own — installs `worker` with
+//! [`Workers::install_owner`] and runs its callbacks with [`deliver`] when
+//! its wake says news came.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -122,6 +127,81 @@ impl Workers {
         }
         Ok(())
     }
+}
+
+impl Workers {
+    /// `worker` for an owner outside a [`Runtime`] (a Luau page): its
+    /// value, for the owner to make its global. Its workers' news wakes
+    /// `wake`, and they stop when any of `cancel` is set or `lua` goes;
+    /// the owner runs their callbacks with [`deliver`].
+    ///
+    /// # Errors
+    ///
+    /// When Luau does (out of memory).
+    pub fn install_owner(
+        self,
+        lua: &Lua,
+        wake: Option<Wake>,
+        cancel: Vec<Cancel>,
+    ) -> mlua::Result<LuaValue> {
+        lua.set_app_data(Owner { wake, cancel });
+        WorkerModule(Arc::new(self)).install(lua)
+    }
+}
+
+/// Runs an owner's worker callbacks (`on_message`, `on_progress`,
+/// `on_done`) with what its workers sent since the last call: what a live
+/// script's frame does first, for an owner of [`Workers::install_owner`].
+///
+/// # Errors
+///
+/// A callback threw.
+pub fn deliver(lua: &Lua) -> mlua::Result<()> {
+    let links: Vec<Arc<Link>> = match lua.app_data_ref::<Owned>() {
+        Some(owned) => lock(&owned.0).clone(),
+        None => return Ok(()),
+    };
+    let all: mlua::Table = lua.named_registry_value(CALLBACKS)?;
+    for link in links {
+        let Some(cbs) = all.raw_get::<Option<mlua::Table>>(link.id)? else {
+            continue;
+        };
+        let on_message: Option<mlua::Function> = cbs.get("message")?;
+        let on_progress: Option<mlua::Function> = cbs.get("progress")?;
+        let on_done: Option<mlua::Function> = cbs.get("done")?;
+        if let Some(f) = &on_message {
+            let drained: Vec<Value> = lock(&link.out).messages.drain(..).collect();
+            for m in drained {
+                f.call::<()>(to_lua(lua, &m)?)?;
+            }
+        }
+        if let Some(f) = &on_progress {
+            let fresh = {
+                let mut out = lock(&link.out);
+                std::mem::take(&mut out.progress_new)
+                    .then(|| out.progress.clone())
+                    .flatten()
+            };
+            if let Some(p) = fresh {
+                f.call::<()>(progress_table(lua, &p)?)?;
+            }
+        }
+        if let Some(f) = &on_done {
+            let ended = {
+                let mut out = lock(&link.out);
+                let ended = out.status != WorkerStatus::Running && !out.done_told;
+                if ended {
+                    out.done_told = true;
+                }
+                ended
+            };
+            if ended {
+                let (value, error) = result_of(lua, &link)?;
+                f.call::<()>((value, error))?;
+            }
+        }
+    }
+    Ok(())
 }
 
 impl Runtime {
@@ -498,6 +578,14 @@ impl UserData for Handle {
         });
         methods.add_method("join", |lua, h, ms: Option<f64>| join(lua, &h.0, ms));
         methods.add_method("next", |lua, h, ms: Option<f64>| next(lua, &h.0, ms));
+        // `w:on_message(fn)`: `worker.on_message(w, fn)`, as a page's
+        // handle says it (`w.onMessage(fn)` in TypeScript).
+        for which in ["message", "progress", "done"] {
+            methods.add_method(
+                format!("on_{which}"),
+                move |lua, h, f: mlua::Function| set_callback(lua, &h.0, which, f),
+            );
+        }
     }
 }
 
@@ -623,51 +711,7 @@ impl Module for WorkerModule {
 
     /// A live owner's callbacks, with what its workers sent since.
     fn frame(&self, lua: &Lua) -> mlua::Result<()> {
-        let links: Vec<Arc<Link>> = match lua.app_data_ref::<Owned>() {
-            Some(owned) => lock(&owned.0).clone(),
-            None => return Ok(()),
-        };
-        let all: mlua::Table = lua.named_registry_value(CALLBACKS)?;
-        for link in links {
-            let Some(cbs) = all.raw_get::<Option<mlua::Table>>(link.id)? else {
-                continue;
-            };
-            let on_message: Option<mlua::Function> = cbs.get("message")?;
-            let on_progress: Option<mlua::Function> = cbs.get("progress")?;
-            let on_done: Option<mlua::Function> = cbs.get("done")?;
-            if let Some(f) = &on_message {
-                let drained: Vec<Value> = lock(&link.out).messages.drain(..).collect();
-                for m in drained {
-                    f.call::<()>(to_lua(lua, &m)?)?;
-                }
-            }
-            if let Some(f) = &on_progress {
-                let fresh = {
-                    let mut out = lock(&link.out);
-                    std::mem::take(&mut out.progress_new)
-                        .then(|| out.progress.clone())
-                        .flatten()
-                };
-                if let Some(p) = fresh {
-                    f.call::<()>(progress_table(lua, &p)?)?;
-                }
-            }
-            if let Some(f) = &on_done {
-                let ended = {
-                    let mut out = lock(&link.out);
-                    let ended = out.status != WorkerStatus::Running && !out.done_told;
-                    if ended {
-                        out.done_told = true;
-                    }
-                    ended
-                };
-                if ended {
-                    let (value, error) = result_of(lua, &link)?;
-                    f.call::<()>((value, error))?;
-                }
-            }
-        }
-        Ok(())
+        deliver(lua)
     }
 }
 

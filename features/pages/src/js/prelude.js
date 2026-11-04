@@ -375,6 +375,7 @@
         post: (m) => host.post(id, json(m)),
         onMessage: (fn) => void w.messages.push(fn),
         onDone: (fn) => void w.done.push(fn),
+        cancel: () => host.terminate(id),
         terminate: () => host.terminate(id),
       });
     },
