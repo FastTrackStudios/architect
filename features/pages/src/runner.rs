@@ -420,10 +420,18 @@ impl Pages {
         &self.0.host
     }
 
-    /// Whether it runs pages of `kind`.
+    /// Whether it runs pages of `kind` (an `.a2ui.json` page is drawn
+    /// by feature `a2ui`, on the window's thread: it is data, not code).
     #[must_use]
     pub fn runs(&self, kind: PageKind) -> bool {
-        kind == PageKind::A2ui || self.0.loaders.contains_key(kind.extension())
+        (kind == PageKind::A2ui && cfg!(feature = "a2ui"))
+            || self.0.loaders.contains_key(kind.extension())
+    }
+
+    /// Whether `other` is this one (a clone of it).
+    #[must_use]
+    pub fn same(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
     }
 
     /// `extension`'s view `view` has its own page, `page` (its manifest's
@@ -451,6 +459,25 @@ impl Pages {
                     .get(&(extension.to_owned(), view.to_owned()))
                     .cloned()
             })
+    }
+
+    /// The page `extension`'s view `view` shows, given its own (`own`,
+    /// its manifest's `page` in its folder): an override in the app's
+    /// folder first, then its own, then one declared for it (a built-in's,
+    /// [`Self::declare`]). None: its compiled view.
+    #[must_use]
+    pub fn resolve(&self, extension: &str, view: &str, own: Option<PageFile>) -> Option<PageFile> {
+        self.0
+            .app_dir
+            .as_deref()
+            .and_then(|dir| files::find_override(dir, extension, view))
+            .or_else(|| own.filter(|p| p.path.is_file()))
+            .or_else(|| {
+                lock(&self.0.declared)
+                    .get(&(extension.to_owned(), view.to_owned()))
+                    .cloned()
+            })
+            .filter(|p| self.runs(p.kind))
     }
 
     /// Opens `page` as `extension`'s view `view`: its thread starts, its
