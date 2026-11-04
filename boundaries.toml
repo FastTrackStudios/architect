@@ -88,6 +88,12 @@ package = "architect-workspace"
 layer = "L0"
 
 [[row]]
+package = "architect-workspace"
+features = ["paint"]
+layer = "L0"
+note = "the paint kind's model: anyrender and peniko, no Dioxus or Blitz"
+
+[[row]]
 package = "architect-shell"
 layer = "L0"
 
@@ -123,6 +129,21 @@ layer = "L0"
 [[row]]
 package = "architect-canvas"
 layer = "L0"
+
+[[row]]
+package = "architect-pages"
+layer = "L0"
+
+[[row]]
+package = "architect-theme"
+layer = "L0"
+note = "the palette, resolver, cascade and store: pure data"
+
+[[row]]
+package = "architect-theme"
+features = ["actions"]
+layer = "L0"
+note = "THEME_* on an Action List"
 
 [[row]]
 package = "architect-a2ui"
@@ -199,6 +220,23 @@ features = ["ui"]
 layer = "L4"
 
 [[row]]
+package = "architect-workspace"
+features = ["paint-ui"]
+layer = "L4"
+
+[[row]]
+package = "architect-workspace"
+features = ["paint-web"]
+layer = "L4"
+note = "host-driven WebGL2 canvas on wasm"
+
+[[row]]
+package = "architect-workspace"
+features = ["paint-web-ui"]
+layer = "L4"
+note = "Dioxus browser paint pane"
+
+[[row]]
 package = "architect-commands"
 features = ["ui"]
 layer = "L4"
@@ -234,8 +272,18 @@ features = ["ui"]
 layer = "L4"
 
 [[row]]
+package = "architect-pages"
+features = ["ui"]
+layer = "L4"
+
+[[row]]
 package = "architect-a2ui"
 features = ["ui"]
+layer = "L4"
+
+[[row]]
+package = "architect-theme"
+features = ["dioxus"]
 layer = "L4"
 
 [[row]]

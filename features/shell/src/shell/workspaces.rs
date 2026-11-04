@@ -170,7 +170,7 @@ fn Mark(name: String, color: &'static str, all: bool, size: f64) -> Element {
         return rsx! {
             span { style: "width: {size}px; height: {size}px; flex-shrink: 0; border-radius: {radius}px; \
                            background: {t.active}; display: flex; align-items: center; justify-content: center;",
-                LayoutGrid { size: icon_size(size * 0.55), color: t.ink }
+                LayoutGrid { size: icon_size(size * 0.55), color: t.ink.to_string() }
             }
         };
     }
@@ -220,7 +220,7 @@ pub(super) fn Switcher(workspaces: Workspaces, place: Place) -> Element {
                                    font-weight: 700; letter-spacing: -0.01em; color: {t.ink};",
                         "{label}"
                     }
-                    ChevronsUpDown { size: 15, color: t.ink_3 }
+                    ChevronsUpDown { size: 15, color: t.ink_3.to_string() }
                 }
             },
             if place == Place::Foot {
@@ -286,7 +286,7 @@ pub(super) fn Switcher(workspaces: Workspaces, place: Place) -> Element {
                                         font-family: {t.font}; font-size: 14px; text-align: left;",
                                 onclick: move |_| { open.set(false); a.on_select.call(()); },
                                 span { style: "width: 28px; display: flex; justify-content: center;",
-                                    {(a.icon)(Icon { size: 17, color: t.ink_3 })}
+                                    {(a.icon)(Icon { size: 17, color: t.ink_3.clone() })}
                                 }
                                 span { "{a.label}" }
                             }
@@ -308,7 +308,7 @@ fn Choice(
     on_pick: EventHandler<()>,
 ) -> Element {
     let t = use_shell().theme;
-    let bg = if on { t.active } else { "transparent" };
+    let bg = if on { &*t.active } else { "transparent" };
     rsx! {
         button {
             class: "lp",
@@ -322,7 +322,7 @@ fn Choice(
                     span { style: "font-size: 12px; color: {t.ink_3};", "{d}" }
                 }
             }
-            if on { Check { size: 16, color: t.ink } }
+            if on { Check { size: 16, color: t.ink.to_string() } }
         }
     }
 }

@@ -1,0 +1,26 @@
+{
+  "label": "Dracula Dark",
+  "appearance": "dark",
+  "palette": {
+    "background": "#282a36",
+    "foreground": "#f8f8f2",
+    "accent": "#bd93f9",
+    "surface": "#21222c",
+    "border": "#44475a",
+    "danger": "#ff5555",
+    "chart": ["#bd93f9", "#8be9fd", "#50fa7b", "#ffb86c", "#ff79c6"]
+  },
+  "overrides": {
+    "accent": "#44475a",
+    "destructive-foreground": "#282a36",
+    "muted": "#44475a",
+    "muted-foreground": "#6272a4",
+    "primary-foreground": "#282a36",
+    "radius": "0.5rem",
+    "secondary": "#44475a",
+    "sidebar": "#21222c",
+    "sidebar-accent": "#44475a",
+    "sidebar-primary-foreground": "#282a36",
+    "signal-danger": "oklch(0.60 0.22 28)"
+  }
+}

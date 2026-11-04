@@ -1,0 +1,15 @@
+// The lab's own dark theme: FastTrackStudio's, with an amber accent.
+// It ships with the lab and is written into its themes folder; edit it
+// there and the lab redraws (an edited copy is never overwritten).
+{
+  "label": "Lab Amber",
+  "extends": "fasttrackstudio-dark",
+  "palette": {
+    "accent": "#f59e0b"
+  },
+  "overrides": {
+    "primary": "#f59e0b",
+    "ring": "#f59e0b",
+    "brand-ink": "#1f1300"
+  }
+}

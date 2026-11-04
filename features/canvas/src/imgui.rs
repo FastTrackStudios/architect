@@ -124,6 +124,236 @@ impl Style {
     pub const fn frame_height(&self) -> f32 {
         self.frame_padding.h.mul_add(2.0, self.font_size)
     }
+
+    /// The style a theme gives: each colour of [`Col::ALL`] is the
+    /// theme's token [`Col::token`] (`imgui.button`) when it has one, else
+    /// [`Col::derived`] from its shell tokens (`mix($pill, $brand,
+    /// 0.18)`); the metrics are the default's. A host applies it again on
+    /// every theme change, so the windows follow a switch.
+    #[must_use]
+    pub fn from_theme(theme: &architect_theme::Resolved) -> Self {
+        let mut style = Self::default();
+        for col in Col::ALL {
+            style.set_color(col, col.resolve(theme));
+        }
+        style
+    }
+
+    /// Its colour `col`.
+    #[must_use]
+    pub const fn color(&self, col: Col) -> Color {
+        match col {
+            Col::Text => self.text,
+            Col::TextDisabled => self.text_disabled,
+            Col::WindowBg => self.window_bg,
+            Col::FrameBg => self.frame_bg,
+            Col::FrameBgHovered => self.frame_hovered,
+            Col::FrameBgActive => self.frame_active,
+            Col::CheckMark => self.check_mark,
+            Col::SliderGrab => self.slider_grab,
+            Col::SliderGrabActive => self.slider_grab_active,
+            Col::Button => self.button,
+            Col::ButtonHovered => self.button_hovered,
+            Col::ButtonActive => self.button_active,
+            Col::Separator => self.separator,
+            Col::PlotHistogram => self.plot,
+        }
+    }
+
+    /// Sets its colour `col`.
+    pub const fn set_color(&mut self, col: Col, color: Color) {
+        let slot = match col {
+            Col::Text => &mut self.text,
+            Col::TextDisabled => &mut self.text_disabled,
+            Col::WindowBg => &mut self.window_bg,
+            Col::FrameBg => &mut self.frame_bg,
+            Col::FrameBgHovered => &mut self.frame_hovered,
+            Col::FrameBgActive => &mut self.frame_active,
+            Col::CheckMark => &mut self.check_mark,
+            Col::SliderGrab => &mut self.slider_grab,
+            Col::SliderGrabActive => &mut self.slider_grab_active,
+            Col::Button => &mut self.button,
+            Col::ButtonHovered => &mut self.button_hovered,
+            Col::ButtonActive => &mut self.button_active,
+            Col::Separator => &mut self.separator,
+            Col::PlotHistogram => &mut self.plot,
+        };
+        *slot = color;
+    }
+}
+
+/// The style colours (`ImGui.Col_*`, Dear `ImGui`'s `ImGuiCol_` values),
+/// and the theme token each follows.
+///
+/// | `ImGui.Col_` | theme token | when the theme has none |
+/// |---|---|---|
+/// | `Text` | `imgui.text` | `$ink` |
+/// | `TextDisabled` | `imgui.text-disabled` | `$ink-3` |
+/// | `WindowBg` | `imgui.window-bg` | `$sheet` |
+/// | `FrameBg` | `imgui.frame-bg` | `$pill` |
+/// | `FrameBgHovered` | `imgui.frame-bg-hovered` | `mix($pill, $ink, 0.08)` |
+/// | `FrameBgActive` | `imgui.frame-bg-active` | `mix($pill, $ink, 0.16)` |
+/// | `Button` | `imgui.button` | `mix($pill, $brand, 0.18)` |
+/// | `ButtonHovered` | `imgui.button-hovered` | `mix($pill, $brand, 0.32)` |
+/// | `ButtonActive` | `imgui.button-active` | `mix($pill, $brand, 0.5)` |
+/// | `SliderGrab` | `imgui.slider-grab` | `$brand` |
+/// | `SliderGrabActive` | `imgui.slider-grab-active` | `mix($brand, $ink, 0.3)` |
+/// | `CheckMark` | `imgui.check-mark` | `$brand` |
+/// | `Separator` | `imgui.separator` | `$rule` |
+/// | `PlotHistogram` (a progress bar's fill) | `imgui.plot-histogram` | `$chart-1` |
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Col {
+    Text,
+    TextDisabled,
+    WindowBg,
+    FrameBg,
+    FrameBgHovered,
+    FrameBgActive,
+    CheckMark,
+    SliderGrab,
+    SliderGrabActive,
+    Button,
+    ButtonHovered,
+    ButtonActive,
+    Separator,
+    PlotHistogram,
+}
+
+impl Col {
+    pub const ALL: [Self; 14] = [
+        Self::Text,
+        Self::TextDisabled,
+        Self::WindowBg,
+        Self::FrameBg,
+        Self::FrameBgHovered,
+        Self::FrameBgActive,
+        Self::CheckMark,
+        Self::SliderGrab,
+        Self::SliderGrabActive,
+        Self::Button,
+        Self::ButtonHovered,
+        Self::ButtonActive,
+        Self::Separator,
+        Self::PlotHistogram,
+    ];
+
+    /// Its index, Dear `ImGui`'s `ImGuiCol_` value (`ImGui.Col_Button`
+    /// is 21).
+    #[must_use]
+    pub const fn index(self) -> u32 {
+        match self {
+            Self::Text => 0,
+            Self::TextDisabled => 1,
+            Self::WindowBg => 2,
+            Self::FrameBg => 7,
+            Self::FrameBgHovered => 8,
+            Self::FrameBgActive => 9,
+            Self::CheckMark => 18,
+            Self::SliderGrab => 19,
+            Self::SliderGrabActive => 20,
+            Self::Button => 21,
+            Self::ButtonHovered => 22,
+            Self::ButtonActive => 23,
+            Self::Separator => 27,
+            Self::PlotHistogram => 40,
+        }
+    }
+
+    /// The colour of Dear `ImGui`'s index `index` (`ImGui.Col_Button`).
+    #[must_use]
+    pub fn from_index(index: u32) -> Option<Self> {
+        Self::ALL.into_iter().find(|c| c.index() == index)
+    }
+
+    /// Its name after `Col_` (`Button`).
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Text => "Text",
+            Self::TextDisabled => "TextDisabled",
+            Self::WindowBg => "WindowBg",
+            Self::FrameBg => "FrameBg",
+            Self::FrameBgHovered => "FrameBgHovered",
+            Self::FrameBgActive => "FrameBgActive",
+            Self::CheckMark => "CheckMark",
+            Self::SliderGrab => "SliderGrab",
+            Self::SliderGrabActive => "SliderGrabActive",
+            Self::Button => "Button",
+            Self::ButtonHovered => "ButtonHovered",
+            Self::ButtonActive => "ButtonActive",
+            Self::Separator => "Separator",
+            Self::PlotHistogram => "PlotHistogram",
+        }
+    }
+
+    /// The theme token that sets it (`imgui.button`).
+    #[must_use]
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::Text => "imgui.text",
+            Self::TextDisabled => "imgui.text-disabled",
+            Self::WindowBg => "imgui.window-bg",
+            Self::FrameBg => "imgui.frame-bg",
+            Self::FrameBgHovered => "imgui.frame-bg-hovered",
+            Self::FrameBgActive => "imgui.frame-bg-active",
+            Self::CheckMark => "imgui.check-mark",
+            Self::SliderGrab => "imgui.slider-grab",
+            Self::SliderGrabActive => "imgui.slider-grab-active",
+            Self::Button => "imgui.button",
+            Self::ButtonHovered => "imgui.button-hovered",
+            Self::ButtonActive => "imgui.button-active",
+            Self::Separator => "imgui.separator",
+            Self::PlotHistogram => "imgui.plot-histogram",
+        }
+    }
+
+    /// What it is when the theme has no [`Self::token`], as a theme
+    /// expression (the table on [`Col`]).
+    #[must_use]
+    pub const fn derived(self) -> &'static str {
+        match self {
+            Self::Text => "$ink",
+            Self::TextDisabled => "$ink-3",
+            Self::WindowBg => "$sheet",
+            Self::FrameBg => "$pill",
+            Self::FrameBgHovered => "mix($pill, $ink, 0.08)",
+            Self::FrameBgActive => "mix($pill, $ink, 0.16)",
+            Self::CheckMark | Self::SliderGrab => "$brand",
+            Self::SliderGrabActive => "mix($brand, $ink, 0.3)",
+            Self::Button => "mix($pill, $brand, 0.18)",
+            Self::ButtonHovered => "mix($pill, $brand, 0.32)",
+            Self::ButtonActive => "mix($pill, $brand, 0.5)",
+            Self::Separator => "$rule",
+            Self::PlotHistogram => "$chart-1",
+        }
+    }
+
+    /// Its colour in `theme`: [`Self::token`], else [`Self::derived`].
+    #[must_use]
+    pub fn resolve(self, theme: &architect_theme::Resolved) -> Color {
+        let own = theme
+            .get(self.token())
+            .and_then(architect_theme::Rgba::parse);
+        let rgba = own.unwrap_or_else(|| {
+            let mix = |a: &str, b: &str, t: f32| theme.color(a).mix(theme.color(b), t);
+            match self {
+                Self::Text => theme.color("ink"),
+                Self::TextDisabled => theme.color("ink-3"),
+                Self::WindowBg => theme.color("sheet"),
+                Self::FrameBg => theme.color("pill"),
+                Self::FrameBgHovered => mix("pill", "ink", 0.08),
+                Self::FrameBgActive => mix("pill", "ink", 0.16),
+                Self::CheckMark | Self::SliderGrab => theme.color("brand"),
+                Self::SliderGrabActive => mix("brand", "ink", 0.3),
+                Self::Button => mix("pill", "brand", 0.18),
+                Self::ButtonHovered => mix("pill", "brand", 0.32),
+                Self::ButtonActive => mix("pill", "brand", 0.5),
+                Self::Separator => theme.color("rule"),
+                Self::PlotHistogram => theme.color("chart-1"),
+            }
+        });
+        Color(rgba.packed())
+    }
 }
 
 /// The pointer over one window.
@@ -175,6 +405,8 @@ pub enum UiError {
     NoWindow(&'static str),
     /// `PopID` with nothing pushed.
     IdStack,
+    /// `PopStyleColor` with nothing pushed.
+    StyleStack,
 }
 
 impl std::fmt::Display for UiError {
@@ -182,6 +414,7 @@ impl std::fmt::Display for UiError {
         match self {
             Self::NoWindow(what) => write!(f, "{what} outside a window: call Begin first"),
             Self::IdStack => f.write_str("PopID without a PushID"),
+            Self::StyleStack => f.write_str("PopStyleColor without a PushStyleColor"),
         }
     }
 }
@@ -251,6 +484,8 @@ pub struct Ui {
     /// Sizes and places asked for once, kept.
     kept_size: BTreeMap<String, Size>,
     kept_pos: BTreeMap<String, Point>,
+    /// What each `PushStyleColor` replaced, the last pushed last.
+    pushed: Vec<(Col, Color)>,
 }
 
 impl Ui {
@@ -264,12 +499,39 @@ impl Ui {
         &self.style
     }
 
-    pub const fn set_style(&mut self, style: Style) {
+    /// Its look from now on (a theme's, [`Style::from_theme`]); what a
+    /// script pushed is dropped.
+    pub fn set_style(&mut self, style: Style) {
+        self.pushed.clear();
         self.style = style;
+    }
+
+    /// `PushStyleColor`: `col` is `color` until the matching
+    /// [`Self::pop_style_color`] (or the frame's end).
+    pub fn push_style_color(&mut self, col: Col, color: Color) {
+        self.pushed.push((col, self.style.color(col)));
+        self.style.set_color(col, color);
+    }
+
+    /// `PopStyleColor`: the last `count` pushes undone.
+    ///
+    /// # Errors
+    ///
+    /// Fewer than `count` were pushed (those there are are undone).
+    pub fn pop_style_color(&mut self, count: usize) -> Result<(), UiError> {
+        for _ in 0..count {
+            let (col, was) = self.pushed.pop().ok_or(UiError::StyleStack)?;
+            self.style.set_color(col, was);
+        }
+        Ok(())
     }
 
     /// Starts a frame with what the host gives it.
     pub fn begin_frame(&mut self, input: Input) {
+        // A push the last frame left is undone, as Dear ImGui's frames
+        // never carry one over.
+        let left = self.pushed.len();
+        let _ = self.pop_style_color(left);
         self.input = input;
         self.stack.clear();
         self.done.clear();

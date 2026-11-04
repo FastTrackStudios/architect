@@ -14,7 +14,10 @@
 //!   follows the same action;
 //! - **A2UI**: the agents' surfaces (`A2UI_RENDER`, `A2UI_PATCH`), the
 //!   release demo first (`LAB_A2UI_DEMO`, `release.a2ui.json`): a form, a
-//!   list of tasks, and a button whose write waits for the person's yes.
+//!   list of tasks, and a button whose write waits for the person's yes;
+//! - **Paint**: the built-in `paint` kind, 10 000 rectangles drawn
+//!   in-process by Blitz each frame, under the Frame surface
+//!   ([`crate::paint`]).
 //!
 //! The lab never links Frame: it declares the `frame.surface` kind itself
 //! ([`kinds`]), as `frame_view::spec()` does, and shows the extension's
@@ -29,7 +32,7 @@ use architect_canvas::ui::{
 use architect_scripting::luau::Runtime;
 use architect_shell::use_shell;
 use architect_workspace::{
-    Capability, KindSpec, Node, Pane, Placement, Side, Target, View, ViewHost, ViewKinds,
+    Capability, KindSpec, Node, PAINT, Pane, Placement, Side, Target, View, ViewHost, ViewKinds,
     Workspace, use_pane,
 };
 use dioxus::prelude::*;
@@ -38,8 +41,9 @@ use facet::Facet;
 /// The Frame surface's kind (Frame's `frame_view::KIND`).
 pub const FRAME_SURFACE: &str = "frame.surface";
 
-/// The kinds the lab draws with: the built-in `dioxus`, and Frame's
-/// surface, shown through its extension's process.
+/// The kinds the lab draws with: the built-in `dioxus`, `paint` (in
+/// process, on the window's renderer), and Frame's surface, shown through
+/// its extension's process.
 #[must_use]
 pub fn kinds() -> ViewKinds {
     let mut kinds = ViewKinds::new();
@@ -52,30 +56,53 @@ pub fn kinds() -> ViewKinds {
             .capability(Capability::Input)
             .capability(Capability::Actions),
     );
+    let _ = kinds.register(KindSpec::paint());
     kinds
 }
 
-/// The four panes' ids.
+/// The panes' ids.
 pub const DIOXUS_PANE: &str = "embed-dioxus";
 pub const LUAU_PANE: &str = "embed-luau";
 pub const FRAME_PANE: &str = "embed-frame";
 pub const A2UI_PANE: &str = "embed-a2ui";
+pub const PAINT_PANE: &str = "embed-paint";
 
-/// The views of the four.
+/// The views of the five.
 #[must_use]
-pub fn views() -> [View; 4] {
-    [
+pub fn views() -> Vec<View> {
+    vec![
         View::new("embed.dioxus", "Dioxus", |_| rsx! { DioxusPane {} }),
         View::new("embed.luau", "Luau ImGui", |_| rsx! { LuauPane {} }).still(),
         View::new("embed.frame", "Frame surface", |_| rsx! { FramePane {} })
             .drawn_by(FRAME_SURFACE)
             .still(),
         View::new("embed.a2ui", "A2UI", |_| rsx! { A2uiPane {} }),
+        #[cfg(feature = "keyflow-lab")]
+        View::new(
+            "embed.keyflow-editor",
+            "Keyflow editor",
+            |_| rsx! { crate::keyflow::KeyflowEditorPane {} },
+        )
+        .headless(),
+        #[cfg(feature = "keyflow-lab")]
+        View::new(
+            "embed.keyflow-chart",
+            "Keyflow chart",
+            |_| rsx! { crate::keyflow::KeyflowChartPane {} },
+        )
+        .headless()
+        .drawn_by(PAINT),
+        View::new(
+            "embed.paint",
+            "Paint",
+            |_| rsx! { crate::paint::PaintLabPane {} },
+        )
+        .drawn_by(PAINT),
     ]
 }
 
 /// The screenset's layout: three columns, Dioxus over Luau `ImGui` on the
-/// left, the Frame surface in the middle, A2UI on the right.
+/// left, the Frame surface over Paint in the middle, A2UI on the right.
 #[must_use]
 pub fn workspace() -> Workspace {
     let mut w = Workspace::new();
@@ -99,6 +126,21 @@ pub fn workspace() -> Workspace {
     if let Some(columns) = columns {
         let _ = w.set_shares(columns, &[0.34, 0.29, 0.37]);
     }
+    let _ = w.activate(&architect_workspace::PaneId::new(FRAME_PANE));
+    let _ = w.open(
+        Pane::new(PAINT_PANE, "embed.paint", "Paint"),
+        Target::Split(Side::Bottom),
+    );
+    #[cfg(feature = "keyflow-lab")]
+    let _ = w.open(
+        Pane::new("embed-keyflow-editor", "embed.keyflow-editor", "Editor"),
+        Target::Tab,
+    );
+    #[cfg(feature = "keyflow-lab")]
+    let _ = w.open(
+        Pane::new("embed-keyflow-chart", "embed.keyflow-chart", "Chart"),
+        Target::Tab,
+    );
     let _ = w.activate(&architect_workspace::PaneId::new(DIOXUS_PANE));
     let _ = w.open(
         Pane::new(LUAU_PANE, "embed.luau", "Luau ImGui"),
@@ -110,7 +152,7 @@ pub fn workspace() -> Workspace {
 
 /// A pane's head: its kind's name, and the kind's id as the lab knows it.
 #[component]
-fn KindHead(name: &'static str, kind: &'static str, about: &'static str) -> Element {
+pub(crate) fn KindHead(name: &'static str, kind: &'static str, about: &'static str) -> Element {
     let t = use_shell().theme;
     rsx! {
         div { style: "display: flex; flex-direction: column; gap: 4px; padding: 16px 20px 8px;",
@@ -140,7 +182,7 @@ fn DioxusPane() -> Element {
     let color = SWATCHES
         .iter()
         .find(|(name, _)| name.eq_ignore_ascii_case(&picked))
-        .map_or(t.pill, |(_, c)| *c);
+        .map_or(&*t.pill, |(_, c)| *c);
     rsx! {
         div { style: "flex: 1; display: flex; flex-direction: column; min-height: 0; overflow-y: scroll;",
             KindHead {
@@ -399,8 +441,12 @@ fn shipped(args: &serde_json::Value) -> Result<serde_json::Value, String> {
 
 /// Puts on `list` `LAB_A2UI_DATA`, a surface's data model, which its
 /// components write as they are used; `LAB_A2UI_DEMO`, which renders the
-/// release surface; and `LAB_RELEASE_SHIP`, its button's action.
+/// release surface; `LAB_RELEASE_SHIP`, its button's action; and
+/// `LAB_PAINT_STATE`, the paint pane's.
 pub fn register(list: &ActionList, surfaces: &architect_a2ui::Surfaces) {
+    crate::paint::register(list);
+    #[cfg(feature = "keyflow-lab")]
+    crate::keyflow::register(list);
     let failed = |id: &str, message: String| ActionError::Failed {
         id: id.to_owned(),
         message,

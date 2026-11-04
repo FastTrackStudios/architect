@@ -37,6 +37,9 @@ pub struct SettingsHandle {
     /// The setting a search hit went to, and how many times one has (so
     /// the same one pulses again).
     pub focus: Signal<Option<(String, u32)>>,
+    /// Sections drawn by a component of their own in place of their
+    /// settings (an extensions page): by section id ([`use_section_page`]).
+    pub pages: Signal<std::collections::BTreeMap<String, fn() -> Element>>,
     on_change: CopyValue<Option<Callback<SettingsChange>>>,
 }
 
@@ -137,6 +140,32 @@ fn focused(h: SettingsHandle) -> Option<(String, u32)> {
     (h.focus)()
 }
 
+/// Registers `section` (no settings needed) drawn by `page` in place of
+/// its settings, while the calling component is mounted.
+///
+/// It is a page of its own on the settings page (the extensions page),
+/// found in its list and opened with [`SettingsHandle::show`] like any
+/// section.
+pub fn use_section_page(make: impl FnOnce() -> Section, page: fn() -> Element) {
+    let handle = try_use_settings();
+    let owner = use_hook(move || {
+        let h = handle?;
+        let section = make();
+        let id = section.id.clone();
+        let (mut registry, mut pages) = (h.registry, h.pages);
+        let _ = registry.write().register(section);
+        pages.write().insert(id.clone(), page);
+        Some(id)
+    });
+    use_drop(move || {
+        if let (Some(h), Some(id)) = (handle, owner) {
+            let (mut registry, mut pages) = (h.registry, h.pages);
+            registry.write().remove(&id);
+            pages.write().remove(&id);
+        }
+    });
+}
+
 /// Registers `section` while the calling component is mounted (an
 /// extension's settings, there while it is loaded).
 pub fn use_section(make: impl FnOnce() -> Section) {
@@ -171,6 +200,7 @@ impl SettingsHandle {
             values: Signal::new(values),
             open: Signal::new(None),
             focus: Signal::new(None),
+            pages: Signal::new(std::collections::BTreeMap::new()),
             on_change: CopyValue::new(on_change),
         }
     }
@@ -306,7 +336,8 @@ fn phone() -> bool {
 }
 
 /// A section's icon, by its lucide name.
-fn icon(name: &str, size: usize, color: &'static str) -> Element {
+fn icon(name: &str, size: usize, color: &str) -> Element {
+    let color = color.to_owned();
     match name {
         "palette" => rsx! { Palette { size, color } },
         "keyboard" => rsx! { Keyboard { size, color } },
@@ -413,7 +444,7 @@ fn DeskSettings() -> Element {
                               border-right: 1px solid {t.rule}; padding: 14px 10px; gap: 2px; overflow-y: scroll;",
                     div { style: "display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; margin-bottom: 10px; \
                                   border-radius: 8px; background: {t.desk}; border: 1px solid {t.rule};",
-                        Search { size: 14, color: t.ink_3 }
+                        Search { size: 14, color: t.ink_3.to_string() }
                         // Blitz has no placeholder: the hint sits under an empty field.
                         if query.read().is_empty() {
                             span { style: "position: absolute; margin-left: 24px; color: {t.ink_3}; font-size: 13px; pointer-events: none;",
@@ -447,7 +478,7 @@ fn DeskSettings() -> Element {
                     div { style: "flex: 0 0 52px; display: flex; align-items: center; gap: 8px; padding: 0 16px 0 28px; \
                                   border-bottom: 1px solid {t.rule}; font-size: 13px;",
                         span { style: "color: {t.ink_3};", "Settings" }
-                        ChevronRight { size: 14, color: t.ink_3 }
+                        ChevronRight { size: 14, color: t.ink_3.to_string() }
                         span { style: "font-weight: 600;", "{section.as_ref().map(|s| s.title.clone()).unwrap_or_default()}" }
                         span { style: "flex: 1;" }
                         if let Some(s) = section.clone() {
@@ -458,7 +489,7 @@ fn DeskSettings() -> Element {
                                     display: flex; align-items: center; justify-content: center; cursor: pointer;",
                             "aria-label": "Close settings",
                             onclick: move |_| h.close(),
-                            X { size: 16, color: t.ink_2 }
+                            X { size: 16, color: t.ink_2.to_string() }
                         }
                     }
                     div { style: "flex: 1; min-height: 0; overflow-y: scroll; padding: 24px 28px 40px;",
@@ -479,11 +510,11 @@ fn SectionLink(on: bool, id: String, title: String, ic: String) -> Element {
     };
     let t = theme();
     let (fill, ink) = if on {
-        (t.accent_soft, t.ink)
+        (&*t.accent_soft, &*t.ink)
     } else {
-        ("transparent", t.ink_2)
+        ("transparent", &*t.ink_2)
     };
-    let icon_ink = if on { t.accent } else { t.ink_3 };
+    let icon_ink = if on { &*t.accent } else { &*t.ink_3 };
     rsx! {
         button {
             style: "height: 32px; display: flex; align-items: center; justify-content: flex-start; gap: 10px; padding: 0 10px; \
@@ -594,6 +625,12 @@ fn RestoreDefaults(id: String) -> Element {
 #[component]
 fn SectionBody(section: Section) -> Element {
     let t = theme();
+    let page = try_use_settings().and_then(|h| h.pages.read().get(&section.id).copied());
+    if let Some(page) = page {
+        return rsx! {
+            div { style: "display: flex; flex-direction: column; min-height: 100%;", {page()} }
+        };
+    }
     rsx! {
         div { style: "max-width: 760px; display: flex; flex-direction: column; gap: 26px;",
             if let Owner::Extension(ext) = &section.owner {
@@ -648,7 +685,7 @@ fn Row(setting: Setting, first: bool) -> Element {
     let Some(value) = value else {
         return rsx! {};
     };
-    let rule = if first { "transparent" } else { t.rule };
+    let rule = if first { "transparent" } else { &*t.rule };
     let key = setting.key.clone();
     let narrow = phone();
     let dir = if narrow { "column" } else { "row" };
@@ -685,7 +722,7 @@ fn Row(setting: Setting, first: bool) -> Element {
                             title: "Put back the default",
                             "aria-label": "Reset {setting.title}",
                             onclick: move |_| h.reset(&key),
-                            RotateCcw { size: 12, color: t.ink_3 }
+                            RotateCcw { size: 12, color: t.ink_3.to_string() }
                         }
                     }
                 }
@@ -714,9 +751,9 @@ fn ControlView(setting_key: String, control: Control, value: Value) -> Element {
         Control::Switch => {
             let on = value.as_bool().unwrap_or(false);
             let (track, knob) = if on {
-                (t.accent, "18px")
+                (&*t.accent, "18px")
             } else {
-                (t.rule, "2px")
+                (&*t.rule, "2px")
             };
             rsx! {
                 button {
@@ -789,7 +826,7 @@ fn ChoiceButton(on: bool, choice: Choice, onpick: EventHandler<Value>, kind: u8)
     let t = theme();
     let v = choice.value.clone();
     if kind == 1 {
-        let edge = if on { t.accent } else { t.rule };
+        let edge = if on { &*t.accent } else { &*t.rule };
         return rsx! {
             button {
                 style: "width: 96px; min-height: 64px; display: flex; flex-direction: column; align-items: flex-start; \
@@ -805,9 +842,9 @@ fn ChoiceButton(on: bool, choice: Choice, onpick: EventHandler<Value>, kind: u8)
         };
     }
     let (fill, ink) = if on {
-        (t.pill, t.ink)
+        (&*t.pill, &*t.ink)
     } else {
-        ("transparent", t.ink_3)
+        ("transparent", &*t.ink_3)
     };
     rsx! {
         button {
@@ -837,7 +874,7 @@ fn SelectView(choices: Vec<Choice>, value: Value, onpick: EventHandler<Value>) -
                         font-size: 13px; cursor: pointer;",
                 onclick: move |_| open.toggle(),
                 span { "{label}" }
-                ChevronDown { size: 14, color: t.ink_3 }
+                ChevronDown { size: 14, color: t.ink_3.to_string() }
             }
             if open() {
                 div { style: "position: absolute; right: 0; top: 34px; z-index: 5; min-width: 160px; padding: 4px; border-radius: 9px; \
@@ -864,14 +901,14 @@ fn SelectView(choices: Vec<Choice>, value: Value, onpick: EventHandler<Value>) -
     }
 }
 
-const fn pick_fill(on: bool, t: &ShellTheme) -> &'static str {
-    if on { t.accent_soft } else { "transparent" }
+fn pick_fill(on: bool, t: &ShellTheme) -> &str {
+    if on { &t.accent_soft } else { "transparent" }
 }
 
 #[component]
 fn StepButton(minus: bool, onpress: EventHandler<()>, enabled: bool) -> Element {
     let t = theme();
-    let ink = if enabled { t.ink_2 } else { t.rule };
+    let ink = if enabled { &*t.ink_2 } else { &*t.rule };
     rsx! {
         button {
             style: "width: 30px; height: 28px; border: none; background: transparent; display: flex; align-items: center; \
@@ -967,7 +1004,7 @@ fn TextView(value: String, placeholder: String, onpick: EventHandler<Value>) -> 
 fn ShortcutView(value: String, onpick: EventHandler<Value>) -> Element {
     let t = theme();
     let mut recording = use_signal(|| false);
-    let edge = if recording() { t.accent } else { t.rule };
+    let edge = if recording() { &*t.accent } else { &*t.rule };
     let label = if recording() {
         "Press a shortcut…".to_owned()
     } else if value.is_empty() {
@@ -1071,7 +1108,7 @@ fn PhoneSettings() -> Element {
                         style: "height: 44px; display: flex; align-items: center; gap: 2px; padding: 0 6px; border: none; \
                                 background: transparent; color: {t.accent}; font-size: 16px; cursor: pointer;",
                         onclick: move |_| in_section.set(false),
-                        ChevronLeft { size: 22, color: t.accent }
+                        ChevronLeft { size: 22, color: t.accent.to_string() }
                         "Settings"
                     }
                 }
@@ -1081,7 +1118,7 @@ fn PhoneSettings() -> Element {
                             justify-content: center; cursor: pointer;",
                     "aria-label": "Close settings",
                     onclick: move |_| h.close(),
-                    X { size: 20, color: t.ink_2 }
+                    X { size: 20, color: t.ink_2.to_string() }
                 }
             }
             div { style: "padding: 0 20px 10px; font-size: 30px; font-weight: 750; letter-spacing: -0.02em;", "{title}" }
@@ -1108,9 +1145,9 @@ fn PhoneSettings() -> Element {
                                             h.show(Some(&id));
                                             in_section.set(true);
                                         },
-                                        {icon(&ic, 20, t.ink_2)}
+                                        {icon(&ic, 20, &t.ink_2)}
                                         span { style: "flex: 1;", "{name}" }
-                                        ChevronRight { size: 18, color: t.ink_3 }
+                                        ChevronRight { size: 18, color: t.ink_3.to_string() }
                                     }
                                 }
                             }
@@ -1122,6 +1159,6 @@ fn PhoneSettings() -> Element {
     }
 }
 
-const fn row_rule(i: usize, t: &ShellTheme) -> &'static str {
-    if i == 0 { "transparent" } else { t.rule }
+fn row_rule(i: usize, t: &ShellTheme) -> &str {
+    if i == 0 { "transparent" } else { &t.rule }
 }

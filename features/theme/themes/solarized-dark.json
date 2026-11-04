@@ -1,0 +1,27 @@
+{
+  "label": "Solarized Dark",
+  "appearance": "dark",
+  "palette": {
+    "background": "#002b36",
+    "foreground": "#93a1a1",
+    "accent": "#268bd2",
+    "surface": "#073642",
+    "border": "#164752",
+    "danger": "#dc322f",
+    "chart": ["#268bd2", "#2aa198", "#859900", "#b58900", "#6c71c4"]
+  },
+  "overrides": {
+    "accent": "#073642",
+    "destructive-foreground": "#fdf6e3",
+    "input": "#073642",
+    "muted": "#073642",
+    "muted-foreground": "#657b83",
+    "primary-foreground": "#fdf6e3",
+    "radius": "0.5rem",
+    "secondary": "#073642",
+    "sidebar": "#073642",
+    "sidebar-accent": "#0d4250",
+    "sidebar-primary-foreground": "#fdf6e3",
+    "signal-danger": "oklch(0.60 0.22 28)"
+  }
+}

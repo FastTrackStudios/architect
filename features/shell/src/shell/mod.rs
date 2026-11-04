@@ -3,15 +3,20 @@
 
 mod bar;
 mod bars;
+mod busy;
+mod chrome;
 mod keyboard;
 #[cfg(target_os = "macos")]
 mod mac;
 mod page;
+#[cfg(test)]
+mod snapshot_tests;
 mod status;
 mod workspaces;
 
 use std::cell::Cell;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::motion::{Spring, use_motion};
 use dioxus::prelude::*;
@@ -23,6 +28,8 @@ pub use bar::{
 };
 use bar::{BarModel, PhoneFoot};
 use bars::{Rail, RoundButton, SideTab};
+pub use busy::BusyBadge;
+pub use chrome::{Chrome, Filler, Slot, intern, named_icon, use_chrome};
 pub use keyboard::{Keyboard, install_keyboard, keyboard, set_keyboard_height, set_typing};
 #[cfg(target_os = "macos")]
 pub use mac::fit_traffic_lights;
@@ -39,10 +46,11 @@ pub use dioxus::prelude::rsx as __rsx;
 
 /// How an icon is drawn where the shell puts it. Blitz takes an SVG's
 /// colour as an attribute, not from CSS, so the shell says it.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Icon {
     pub size: usize,
-    pub color: &'static str,
+    /// A CSS colour, usually a [`ShellTheme`] field (cheap to clone).
+    pub color: Arc<str>,
 }
 
 /// Draws an icon at the size and colour the shell asks for. Write one with
@@ -54,7 +62,7 @@ pub type IconFn = fn(Icon) -> Element;
 #[macro_export]
 macro_rules! icon {
     ($name:ident) => {
-        (|i: $crate::Icon| $crate::__rsx! { $name { size: i.size, color: i.color } })
+        (|i: $crate::Icon| $crate::__rsx! { $name { size: i.size, color: i.color.to_string() } })
             as $crate::IconFn
     };
 }
@@ -238,70 +246,110 @@ impl WindowChrome {
 }
 
 /// The shell's colours. The default is `FastTrackStudio`'s dark.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+///
+/// Owned, so a theme can change at run time: an app with a theme store
+/// (`architect_theme::use_theme_store`) gets it from there
+/// ([`ShellTheme::from_resolved`], live), and [`AppShell`] follows the
+/// store when it is given no `theme`. Clones are cheap (shared strings).
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ShellTheme {
     /// Under everything.
-    pub desk: &'static str,
+    pub desk: Arc<str>,
     /// The sidebars, the drawers, the menus.
-    pub sheet: &'static str,
+    pub sheet: Arc<str>,
     /// A desk's title bar, across the whole window over the sidebars: the
     /// window's buttons, the sidebar's head, the page's bar or its tabs.
-    pub title_bar: &'static str,
+    pub title_bar: Arc<str>,
     /// The pills.
-    pub pill: &'static str,
+    pub pill: Arc<str>,
     /// A pill's edge, a sidebar's edge.
-    pub rule: &'static str,
+    pub rule: Arc<str>,
     /// The current tab's fill, a pressed row's.
-    pub active: &'static str,
-    pub ink: &'static str,
-    pub ink_2: &'static str,
+    pub active: Arc<str>,
+    pub ink: Arc<str>,
+    pub ink_2: Arc<str>,
     /// The quietest text (a row's detail, a count): at least 4.5:1 on
     /// every fill it sits on, the pill and the accent's wash too.
-    pub ink_3: &'static str,
+    pub ink_3: Arc<str>,
     /// Badges.
-    pub accent: &'static str,
-    pub accent_ink: &'static str,
+    pub accent: Arc<str>,
+    pub accent_ink: Arc<str>,
     /// A destructive menu row.
-    pub danger: &'static str,
+    pub danger: Arc<str>,
     /// Over the page while a drawer or a menu is open.
-    pub scrim: &'static str,
+    pub scrim: Arc<str>,
     /// The accent, faint: the fill behind something current (the ribbon's
     /// section, a selected row).
-    pub accent_soft: &'static str,
+    pub accent_soft: Arc<str>,
     /// A pill or a button over the page.
-    pub shadow_lift: &'static str,
+    pub shadow_lift: Arc<str>,
     /// What floats over everything: a menu, a popover, a floating pane.
-    pub shadow_float: &'static str,
+    pub shadow_float: Arc<str>,
     /// The face, a CSS stack. Its first, Inter, is the app's to bundle
     /// (`architect_workspace::native::launch_with_fonts`, as the lab does);
     /// without it the system's sans is used.
-    pub font: &'static str,
+    pub font: Arc<str>,
 }
 
 impl Default for ShellTheme {
     fn default() -> Self {
         Self {
-            desk: "#09090b",
-            sheet: "#0e0e11",
-            title_bar: "#17171b",
-            pill: "#1a1a1f",
-            rule: "#2b2b31",
-            active: "rgba(255,255,255,0.10)",
-            ink: "#e4e4e7",
-            ink_2: "#a1a1aa",
-            ink_3: "#8f8f99",
+            desk: "#09090b".into(),
+            sheet: "#0e0e11".into(),
+            title_bar: "#17171b".into(),
+            pill: "#1a1a1f".into(),
+            rule: "#2b2b31".into(),
+            active: "rgba(255,255,255,0.10)".into(),
+            ink: "#e4e4e7".into(),
+            ink_2: "#a1a1aa".into(),
+            ink_3: "#8f8f99".into(),
             // Signal teal: a meter's green, FastTrackStudio's accent.
-            accent: "#2dd4bf",
-            accent_ink: "#04201c",
-            danger: "#f87171",
-            scrim: "rgba(0,0,0,0.55)",
-            accent_soft: "rgba(45,212,191,0.14)",
-            shadow_lift: "0 6px 20px rgba(0,0,0,0.35)",
-            shadow_float: "0 16px 44px rgba(0,0,0,0.55)",
+            accent: "#2dd4bf".into(),
+            accent_ink: "#04201c".into(),
+            danger: "#f87171".into(),
+            scrim: "rgba(0,0,0,0.55)".into(),
+            accent_soft: "rgba(45,212,191,0.14)".into(),
+            shadow_lift: "0 6px 20px rgba(0,0,0,0.35)".into(),
+            shadow_float: "0 16px 44px rgba(0,0,0,0.55)".into(),
             // FastTrackStudio's face where the app bundles it (the lab
             // does) or the system has it; the system's sans elsewhere.
-            font: "Inter, -apple-system, 'SF Pro Text', system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif",
+            font: "Inter, -apple-system, 'SF Pro Text', system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif".into(),
         }
+    }
+}
+
+/// The theme's tokens by the shell's names (`brand` for the accent: in a
+/// resolved theme `accent` is architect-ui's hover wash).
+impl architect_theme::FromResolved for ShellTheme {
+    fn from_resolved(r: &architect_theme::Resolved) -> Self {
+        let t = |name: &str| -> Arc<str> { r.value(name).into() };
+        Self {
+            desk: t("desk"),
+            sheet: t("sheet"),
+            title_bar: t("title-bar"),
+            pill: t("pill"),
+            rule: t("rule"),
+            active: t("active"),
+            ink: t("ink"),
+            ink_2: t("ink-2"),
+            ink_3: t("ink-3"),
+            accent: t("brand"),
+            accent_ink: t("brand-ink"),
+            danger: t("danger"),
+            scrim: t("scrim"),
+            accent_soft: t("brand-soft"),
+            shadow_lift: t("shadow-lift"),
+            shadow_float: t("shadow-float"),
+            font: t("font"),
+        }
+    }
+}
+
+impl ShellTheme {
+    /// The shell's colours from a resolved theme.
+    #[must_use]
+    pub fn from_resolved(r: &architect_theme::Resolved) -> Self {
+        <Self as architect_theme::FromResolved>::from_resolved(r)
     }
 }
 
@@ -343,6 +391,9 @@ pub struct Shell {
     /// What the page puts in the left sidebar instead of the app's `left`
     /// (a workspace's left dock): [`use_shell_slots`].
     page_left: Signal<Option<Element>>,
+    /// The page's tab on a desk, drawn in the title row beside the sidebar
+    /// (its desk bar sets it).
+    desk_tab: Signal<Option<String>>,
     /// What the page adds to a desk's ribbon, under the app's sections.
     rail_extra: Signal<Option<Element>>,
     /// What the page draws over the whole shell, its bars too:
@@ -705,7 +756,10 @@ struct Resize {
 pub fn AppShell(
     screen: Screen,
     #[props(default)] style: ShellStyle,
-    #[props(default)] theme: ShellTheme,
+    /// Its colours; left out, the app's theme store's
+    /// (`architect_theme::use_theme_store`), live, or the default.
+    #[props(default, into)]
+    theme: Option<ShellTheme>,
     /// The app's name, at the head of a docked sidebar.
     #[props(into)]
     title: Option<String>,
@@ -743,12 +797,35 @@ pub fn AppShell(
     actions: Vec<BarAction>,
     children: Element,
 ) -> Element {
+    let stored = architect_theme::use_themed::<ShellTheme>();
+    let theme = theme.unwrap_or_else(|| stored());
+    // What others add and how the slots are filled (`use_chrome`); with
+    // none above, the shell's own, as it always was.
+    let chrome = try_use_context::<Signal<Chrome>>()
+        .map(|c| c())
+        .unwrap_or_default();
+    let tabs: Vec<Tab> = if chrome.tabs.is_empty() {
+        tabs
+    } else {
+        tabs.into_iter()
+            .chain(chrome.tabs.iter().cloned())
+            .collect()
+    };
+    let status: Vec<StatusItem> = status
+        .into_iter()
+        .chain(chrome.status.iter().cloned())
+        .collect();
+    let actions: Vec<BarAction> = actions
+        .into_iter()
+        .chain(chrome.bar.iter().cloned())
+        .collect();
     let mut drawer = use_signal(|| None::<Side>);
     let fold = use_signal(|| None::<bool>);
     let right_away = use_signal(|| false);
     let left_w = use_signal(|| LEFT_WIDTH);
     let right_w = use_signal(|| RIGHT_WIDTH);
     let page_left = use_signal(|| None::<Element>);
+    let desk_tab = use_signal(|| None::<String>);
     let page_status = use_signal(Vec::<StatusItem>::new);
     // The page's items first (its own, at a bar's left), then the app's.
     let all_status: Vec<StatusItem> = page_status().into_iter().chain(status).collect();
@@ -760,12 +837,15 @@ pub fn AppShell(
     // way, so it stays put when such a page comes and goes.
     let page_side = page_left.read().is_some();
     let left = page_left().or(left);
+    // A slot's filler replaces its content; a hidden one has none.
+    let left = slot_content(&chrome, Slot::Left, left);
+    let right = slot_content(&chrome, Slot::Right, right);
     let has_left = left.is_some();
     let has_right = right.is_some();
     let shell = Shell {
         screen,
         style,
-        theme,
+        theme: theme.clone(),
         drawer,
         fold,
         right_away,
@@ -778,6 +858,7 @@ pub fn AppShell(
         brand,
         floats_separate: frame(screen, style) == Frame::Sidebar,
         page_left,
+        desk_tab,
         rail_extra,
         cover,
         page_status,
@@ -1006,16 +1087,33 @@ pub fn AppShell(
     let left_clip = (lw + screen.insets.left - rail_w).mul_add(left_amount, rail_w);
     let right_clip = (rw + screen.insets.right) * right_amount;
     let resizable = form == FormFactor::Desk;
-    // On a desk the title bar runs across the top of the sides too: their
-    // edges start under it, and their heads draw their part of it.
+    // On a desk the title bar runs across the whole top, over the sides and
+    // the ribbon: they all start under it.
     let desk = form == FormFactor::Desk;
+    let root_dir = if desk { "column" } else { "row" };
+    // The sidebar's title sits in the title bar while a sidebar is docked.
+    let bar_title = if docked_left && !page_side {
+        title.clone()
+    } else {
+        None
+    };
+    // The page's tab starts where the page's column does, past the docked
+    // sidebar; otherwise clear of the window's and the sidebar's buttons.
+    let tabs_left = if left_clip > 0.0 {
+        RIBBON + left_clip + 4.0
+    } else if has_left {
+        shell.content_left()
+    } else if shell.window_chrome().is_some() {
+        shell.controls_left()
+    } else {
+        RIBBON + 4.0
+    };
     // A corner badge sits under the floating button: lift it clear.
     let badge_room = if desk && status_style == StatusStyle::Badge && !all_status.is_empty() {
         STATUS_BADGE
     } else {
         0.0
     };
-    let bar_h = shell.title_row() + screen.insets.top;
     let (left_edge, left_pad_top) = if desk {
         (String::new(), 0.0)
     } else {
@@ -1036,19 +1134,27 @@ pub fn AppShell(
     rsx! {
         div {
             style: "position: relative; width: 100%; height: 100%; overflow: hidden; display: flex; \
-                    flex-direction: row; background: {t.desk}; color: {t.ink}; font-family: {t.font};",
+                    flex-direction: {root_dir}; background: {t.desk}; color: {t.ink}; font-family: {t.font};",
             onpointerdown,
             onpointermove,
             onpointerup,
             onpointercancel,
             document::Style { {shell_css(&t)} }
             crate::motion::MotionFrames {}
+            // A desk's title bar runs across the whole window, over the ribbon,
+            // the sidebar and the page; the middle row starts under it.
             if frame == Frame::Sidebar && desk {
-                DeskRibbon { tabs: tabs.clone(), current, on_tab: pick }
+                SlotView { slot: Slot::Title,
+                    DeskTitleRow { title: bar_title, tabs_left }
+                }
             }
-            // Everything right of the ribbon, over a desk's status bar.
-            div { style: "flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column;",
+            // The middle row: a desk's ribbon, then the sides and the page.
             div { style: "flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: {direction};",
+            if frame == Frame::Sidebar && desk {
+                SlotView { slot: Slot::Ribbon,
+                    DeskRibbon { tabs: tabs.clone(), current, on_tab: pick }
+                }
+            }
             match frame {
                 Frame::Rail => rsx! {
                     Rail { tabs: tabs.clone(), current, on_tab: pick, screen: side_screen }
@@ -1064,12 +1170,9 @@ pub fn AppShell(
                                 display: flex; flex-direction: column; \
                                 background: {t.sheet}; {left_edge} \
                                 padding-top: {left_pad_top}px; padding-left: {screen.insets.left}px;",
-                        if desk && page_side {
-                            div { style: "position: absolute; top: {bar_h}px; bottom: 0; right: 0; width: 1px; background: {t.rule};" }
-                        } else if desk {
-                            DeskSidebarHead { title: title }
-                            // The sidebar's edge, under the title bar (which runs over it).
-                            div { style: "position: absolute; top: {bar_h}px; bottom: 0; right: 0; width: 1px; background: {t.rule};" }
+                        if desk {
+                            // The sidebar's edge, in the middle row under the title bar.
+                            div { style: "position: absolute; top: 0; bottom: 0; right: 0; width: 1px; background: {t.rule};" }
                         } else {
                             SidebarHead { title: title }
                         }
@@ -1133,17 +1236,9 @@ pub fn AppShell(
                                 display: flex; flex-direction: column; \
                                 overflow-y: scroll; background: {t.sheet}; {right_edge} \
                                 padding-top: {right_pad_top}px; padding-right: {screen.insets.right}px;",
-                        // A desk's title row, under the side's fixed button:
-                        // the title bar, running on over the side.
+                        // A desk's edge, in the middle row under the title bar.
                         if form == FormFactor::Desk {
-                            div { style: "height: {bar_h}px; flex-shrink: 0; display: flex; box-sizing: border-box; \
-                                          padding-top: {screen.insets.top}px; background: {t.title_bar}; \
-                                          border-bottom: 1px solid {t.rule};",
-                                if let Some(w) = window {
-                                    DragStrip { chrome: w, width: None }
-                                }
-                            }
-                            div { style: "position: absolute; top: {bar_h}px; bottom: 0; left: 0; width: 1px; background: {t.rule};" }
+                            div { style: "position: absolute; top: 0; bottom: 0; left: 0; width: 1px; background: {t.rule};" }
                         }
                         {right}
                         if resizable {
@@ -1157,9 +1252,11 @@ pub fn AppShell(
                 PhoneFoot { tabs: tabs, current, on_tab: pick, separate: separate, screen }
             }
             }
-            if desk && status_style == StatusStyle::Bar && !all_status.is_empty() {
-                StatusBar { items: all_status.clone() }
-            }
+            // A desk's status bar runs across the whole window's foot.
+            if desk && status_style == StatusStyle::Bar && (chrome.filler(Slot::Status).is_some() || !all_status.is_empty()) {
+                SlotView { slot: Slot::Status,
+                    StatusBar { items: all_status.clone() }
+                }
             }
             if desk && status_style == StatusStyle::Badge {
                 StatusBadge { items: all_status }
@@ -1213,6 +1310,66 @@ pub fn AppShell(
     }
 }
 
+/// `content` for `slot` as the chrome has it: a filler's, none when it is
+/// hidden, else as given.
+fn slot_content(chrome: &Chrome, slot: Slot, content: Option<Element>) -> Option<Element> {
+    if chrome.is_hidden(slot) {
+        return None;
+    }
+    chrome.filler(slot).map_or_else(
+        || content.map(|c| slot_look(chrome, slot, c)),
+        |f| Some((f.render)()),
+    )
+}
+
+/// `own` in `slot`'s look, when the chrome gives it one.
+fn slot_look(chrome: &Chrome, slot: Slot, own: Element) -> Element {
+    if chrome.looks.contains_key(&slot) {
+        rsx! { SlotLook { slot, {own} } }
+    } else {
+        own
+    }
+}
+
+/// A slot of the shell: its filler, nothing when it is hidden, or the
+/// shell's own component (`children`, drawn as it always is — in the
+/// slot's own look when the chrome gives one).
+#[component]
+fn SlotView(slot: Slot, children: Element) -> Element {
+    let chrome = try_use_context::<Signal<Chrome>>()
+        .map(|c| c())
+        .unwrap_or_default();
+    if chrome.is_hidden(slot) {
+        return rsx! {};
+    }
+    chrome
+        .filler(slot)
+        .map_or_else(|| slot_look(&chrome, slot, children), |f| (f.render)())
+}
+
+/// The shell's own component in a slot's look: the shell below it reads
+/// the workspace's theme with the slot's overrides on top (the cascade's
+/// nearest node).
+#[component]
+fn SlotLook(slot: Slot, children: Element) -> Element {
+    let outer = use_context::<Signal<Shell>>();
+    let chrome = try_use_context::<Signal<Chrome>>()
+        .map(|c| c())
+        .unwrap_or_default();
+    let store = architect_theme::try_use_theme().map(|t| t.store());
+    let look = chrome.looks.get(&slot).cloned().unwrap_or_default();
+    let theme = chrome::slot_theme(store.as_ref(), &look);
+    let mut shell = outer();
+    if let Some(theme) = theme {
+        shell.theme = theme;
+    }
+    let mut inner = use_context_provider(|| Signal::new(shell.clone()));
+    if *inner.peek() != shell {
+        inner.set(shell);
+    }
+    rsx! { {children} }
+}
+
 /// A side open over the page: a sheet the full height of the screen, its
 /// edge shadowed, its content kept clear of the status bar and the home
 /// indicator.
@@ -1242,7 +1399,7 @@ fn Drawer(side: Side, x: f64, width: f64, screen: Screen, children: Element) -> 
 #[component]
 fn SidebarHead(title: Option<String>) -> Element {
     let shell = use_shell();
-    let t = shell.theme;
+    let t = shell.theme.clone();
     let folder = shell.clone();
     let fold = rsx! {
         button {
@@ -1251,7 +1408,7 @@ fn SidebarHead(title: Option<String>) -> Element {
             style: "width: 36px; height: 36px; flex-shrink: 0; border: none; border-radius: 10px; background: transparent; \
                     display: flex; align-items: center; justify-content: center;",
             onclick: move |_| folder.toggle(Side::Left),
-            PanelLeftClose { size: 18, color: t.ink_3 }
+            PanelLeftClose { size: 18, color: t.ink_3.to_string() }
         }
     };
     let name = rsx! {
@@ -1281,19 +1438,27 @@ fn SidebarHead(title: Option<String>) -> Element {
     }
 }
 
-/// A desk's sidebar head: the title row (the window's buttons and the
-/// sidebar's button over its start, then the app's name, the rest moving
-/// the window). The workspace switcher is at the sidebar's foot.
+/// A desk's title bar, across the window's top over the ribbon, the sides
+/// and the page: the docked sidebar's name after the sidebar's button (the
+/// window's buttons and the sidebar's button sit over its start), the rest
+/// moving the window. The page's tab sits in it from `tabs_left`, over the
+/// drag area (which runs on past it). The middle row starts under it.
 #[component]
-fn DeskSidebarHead(title: Option<String>) -> Element {
+fn DeskTitleRow(title: Option<String>, tabs_left: f64) -> Element {
     let shell = use_shell();
-    let t = shell.theme;
+    let t = shell.theme.clone();
     let row = shell.title_row();
     let top = shell.screen.insets.top;
-    let start = shell.sidebar_title_left();
+    // Past the window's buttons and the sidebar's button, where the name is.
+    let start = if title.is_some() {
+        shell.content_left()
+    } else {
+        0.0
+    };
     let chrome = shell.window;
+    let tab = (shell.desk_tab)();
     rsx! {
-        div { style: "height: {row + top}px; flex-shrink: 0; box-sizing: border-box; display: flex; align-items: center; \
+        div { style: "position: relative; height: {row + top}px; flex-shrink: 0; box-sizing: border-box; display: flex; align-items: center; \
                       padding: {top}px 10px 0 {start}px; background: {t.title_bar}; border-bottom: 1px solid {t.rule};",
             if let Some(title) = title {
                 span { style: "flex-shrink: 0; white-space: nowrap; font-size: 15px; font-weight: 700; \
@@ -1304,6 +1469,15 @@ fn DeskSidebarHead(title: Option<String>) -> Element {
             if let Some(c) = chrome {
                 DragStrip { chrome: c, width: None }
             }
+            // The page's tab: as tall as the row, its tab centred in it. Only
+            // as wide as the tab, so the drag area beside it still moves the window.
+            if let Some(tab) = tab {
+                div { style: "position: absolute; left: {tabs_left}px; top: {top}px; height: {row}px; display: flex; align-items: center;",
+                    SlotView { slot: Slot::Tabs,
+                        page::DeskTab { title: tab }
+                    }
+                }
+            }
         }
     }
 }
@@ -1312,7 +1486,7 @@ fn DeskSidebarHead(title: Option<String>) -> Element {
 #[component]
 fn TitleControl(side: Side) -> Element {
     let shell = use_shell();
-    let t = shell.theme;
+    let t = shell.theme.clone();
     let row = shell.title_row();
     let top = shell.screen.insets.top;
     let at = match side {
@@ -1332,8 +1506,8 @@ fn TitleControl(side: Side) -> Element {
                         display: flex; align-items: center; justify-content: center;",
                 onclick: move |_| shell.toggle(side),
                 match side {
-                    Side::Left => rsx! { PanelLeft { size: 17, color: t.ink_2 } },
-                    Side::Right => rsx! { PanelRight { size: 17, color: t.ink_2 } },
+                    Side::Left => rsx! { PanelLeft { size: 17, color: t.ink_2.to_string() } },
+                    Side::Right => rsx! { PanelRight { size: 17, color: t.ink_2.to_string() } },
                 }
             }
         }
@@ -1363,7 +1537,7 @@ pub(super) fn DragStrip(chrome: WindowChrome, width: Option<f64>) -> Element {
 #[component]
 fn RailSideButton() -> Element {
     let shell = use_shell();
-    let t = shell.theme;
+    let t = shell.theme.clone();
     if !shell.has_side(Side::Left) {
         return rsx! {};
     }
@@ -1375,7 +1549,7 @@ fn RailSideButton() -> Element {
             style: "height: 44px; border: none; border-radius: 12px; background: transparent; \
                     display: flex; align-items: center; justify-content: center;",
             onclick: move |_| if unfold { shell.unfold() } else { shell.open(Some(Side::Left)) },
-            PanelLeft { size: 20, color: t.ink_3 }
+            PanelLeft { size: 20, color: t.ink_3.to_string() }
         }
     }
 }
@@ -1390,7 +1564,7 @@ fn AccountRow(account: Account, bottom: f64) -> Element {
     let press = account.on_press;
     let menu = account.menu.clone();
     let has_menu = menu.is_some();
-    let fill = if open() { t.active } else { "transparent" };
+    let fill = if open() { &*t.active } else { "transparent" };
     rsx! {
         div { style: "position: relative; flex-shrink: 0; padding: 6px 8px {6.0 + bottom}px; border-top: 1px solid {t.rule};",
             button {
@@ -1416,7 +1590,7 @@ fn AccountRow(account: Account, bottom: f64) -> Element {
                     }
                 }
                 if has_menu {
-                    ChevronsUpDown { size: 15, color: t.ink_3 }
+                    ChevronsUpDown { size: 15, color: t.ink_3.to_string() }
                 }
             }
             if let (true, Some(menu)) = (open(), menu) {
@@ -1520,6 +1694,69 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_default_theme_is_the_default_shell_theme() {
+        assert_eq!(
+            ShellTheme::from_resolved(&architect_theme::Resolved::default()),
+            ShellTheme::default()
+        );
+    }
+
+    thread_local! {
+        static STORE: std::cell::RefCell<Option<architect_theme::ThemeStore>> =
+            const { std::cell::RefCell::new(None) };
+        static SEEN: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+
+    fn themed_app() -> Element {
+        architect_theme::use_theme_store(|| STORE.with(|s| s.borrow().clone().unwrap()));
+        let screen = Screen {
+            width: 1000.0,
+            height: 800.0,
+            touch: false,
+            insets: Insets::default(),
+        };
+        rsx! {
+            AppShell { screen, tabs: vec![], current: None, on_tab: |_| (),
+                Probe {}
+            }
+        }
+    }
+
+    #[component]
+    fn Probe() -> Element {
+        let t = use_shell().theme;
+        SEEN.with(|s| s.borrow_mut().push(format!("{} {}", t.desk, t.accent)));
+        rsx! {}
+    }
+
+    #[test]
+    fn app_shell_follows_the_theme_store() {
+        use architect_theme::{Layer, LayerKind, ThemeChoice, ThemeStore};
+
+        let store = ThemeStore::default();
+        STORE.with(|s| *s.borrow_mut() = Some(store.clone()));
+        let mut dom = VirtualDom::new(themed_app);
+        dom.rebuild_in_place();
+        assert_eq!(
+            SEEN.with(|s| s.borrow().last().cloned()).unwrap(),
+            "#09090b #2dd4bf"
+        );
+
+        store.set(
+            LayerKind::Pick,
+            Layer::default().choice(ThemeChoice::One("nord-light".into())),
+        );
+        futures::executor::block_on(dom.wait_for_work());
+        dom.render_immediate(&mut dioxus::core::NoOpMutations);
+        let want = ShellTheme::from_resolved(&store.current());
+        assert_eq!(
+            SEEN.with(|s| s.borrow().last().cloned()).unwrap(),
+            format!("{} {}", want.desk, want.accent)
+        );
+        assert_ne!(&*want.desk, "#09090b");
+    }
+
+    #[test]
     fn form_factors() {
         assert_eq!(FormFactor::of(402.0, 874.0, true), FormFactor::Phone);
         assert_eq!(FormFactor::of(874.0, 402.0, true), FormFactor::Phone);
@@ -1558,9 +1795,9 @@ mod tests {
     }
 }
 
-/// A desk's ribbon: the window's left edge under the title bar, the app's
-/// sections as icons, then what the page adds (a workspace's views and
-/// pinned commands). Its head is its part of the title bar.
+/// A desk's ribbon: the window's left edge in the middle row, under the
+/// title bar, the app's sections as icons, then what the page adds (a
+/// workspace's views and pinned commands).
 #[component]
 fn DeskRibbon(
     tabs: Vec<Tab>,
@@ -1568,20 +1805,11 @@ fn DeskRibbon(
     on_tab: EventHandler<&'static str>,
 ) -> Element {
     let shell = use_shell();
-    let t = shell.theme;
-    let bar_h = shell.title_row() + shell.screen.insets.top;
+    let t = shell.theme.clone();
     let extra = (shell.rail_extra)();
-    let chrome = shell.window;
     rsx! {
         div {
             style: "width: {RIBBON}px; flex-shrink: 0; display: flex; flex-direction: column; background: {t.desk};",
-            div {
-                style: "height: {bar_h}px; flex-shrink: 0; box-sizing: border-box; display: flex; \
-                        background: {t.title_bar}; border-bottom: 1px solid {t.rule};",
-                if let Some(c) = chrome {
-                    DragStrip { chrome: c, width: None }
-                }
-            }
             div {
                 style: "flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; \
                         gap: 4px; padding: 8px 0; border-right: 1px solid {t.rule};",
@@ -1603,9 +1831,9 @@ fn RibbonTab(tab: Tab, on: bool, on_tab: EventHandler<&'static str>) -> Element 
     let t = use_shell().theme;
     // The current section: the accent, faint behind it and full in it.
     let (fill, colour) = if on {
-        (t.accent_soft, t.accent)
+        (&*t.accent_soft, &*t.accent)
     } else {
-        ("transparent", t.ink_3)
+        ("transparent", &*t.ink_3)
     };
     let id = tab.id;
     rsx! {
@@ -1615,7 +1843,7 @@ fn RibbonTab(tab: Tab, on: bool, on_tab: EventHandler<&'static str>) -> Element 
             style: "position: relative; width: 32px; height: 32px; flex-shrink: 0; border: none; border-radius: 7px; \
                     background: {fill}; display: flex; align-items: center; justify-content: center;",
             onclick: move |_| on_tab.call(id),
-            {(tab.icon)(Icon { size: 18, color: colour })}
+            {(tab.icon)(Icon { size: 18, color: colour.into() })}
             span { class: "tip", style: "left: 40px; top: 5px;", "{tab.label}" }
             if tab.badge.is_some() {
                 span { style: "position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 3px; \

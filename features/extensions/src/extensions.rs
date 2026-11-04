@@ -36,12 +36,23 @@ struct Inner {
     disabled: Mutex<BTreeSet<String>>,
     policy: Mutex<Option<Policy>>,
     watch: Mutex<Watch>,
+    /// Where `EXT_CLONE` puts copies (`crate::clone`).
+    dev_root: Mutex<Option<PathBuf>>,
+    /// The last load that failed of each extension, until it loads or
+    /// goes: what [`Extensions::problems`] reports.
+    failed: Arc<Mutex<std::collections::BTreeMap<String, LoadError>>>,
 }
 
 /// The app's extensions. Cheap to clone.
 #[derive(Clone)]
 pub struct Extensions {
     inner: Arc<Inner>,
+}
+
+impl PartialEq for Extensions {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+    }
 }
 
 impl std::fmt::Debug for Extensions {
@@ -61,6 +72,24 @@ impl Extensions {
     /// Extensions loaded by `host`, installed under `installs`.
     #[must_use]
     pub fn new(host: Host, installs: Installs) -> Self {
+        let failed = Arc::new(Mutex::new(std::collections::BTreeMap::new()));
+        {
+            let failed = Arc::clone(&failed);
+            host.on_event(move |event| {
+                let mut failed = lock(&failed);
+                match event {
+                    Event::Failed { id, error } => {
+                        failed.insert(id.clone(), error.clone());
+                    }
+                    Event::Loaded(change) => {
+                        failed.remove(&change.id);
+                    }
+                    Event::Unloaded { id } => {
+                        failed.remove(id);
+                    }
+                }
+            });
+        }
         Self {
             inner: Arc::new(Inner {
                 host,
@@ -71,6 +100,8 @@ impl Extensions {
                 disabled: Mutex::new(BTreeSet::new()),
                 policy: Mutex::new(None),
                 watch: Mutex::new(Watch::new()),
+                dev_root: Mutex::new(None),
+                failed,
             }),
         }
     }
@@ -92,6 +123,27 @@ impl Extensions {
     pub fn with_builtin(self, package: Package) -> Self {
         lock(&self.inner.builtins).push(package);
         self
+    }
+
+    /// An in-process extension linked into the build (`crate::linked`):
+    /// its manifest a built-in package, its code run here while that copy
+    /// is the one that runs. An installed or development copy of its id
+    /// overrides it (and runs as its kind says: a process, its program
+    /// built from the same crate).
+    ///
+    /// # Errors
+    ///
+    /// Its manifest is refused.
+    #[cfg(feature = "linked")]
+    pub fn with_linked(
+        self,
+        extension: &dyn crate::linked::Extension,
+    ) -> Result<Self, crate::ManifestError> {
+        let package = Package::embedded(extension.manifest(), extension.files())?;
+        self.inner
+            .host
+            .link(&package.manifest, crate::linked::Builder::of(extension));
+        Ok(self.with_builtin(package))
     }
 
     /// Installs only what `policy` allows (the organization's), from now.
@@ -147,6 +199,31 @@ impl Extensions {
             .iter()
             .filter_map(|s| s.index().ok())
             .flat_map(|i| i.listings)
+            .collect()
+    }
+
+    /// The listing `req` picks for `id` (the policy's say included), and
+    /// its source.
+    pub(crate) fn find_listed(
+        &self,
+        id: &str,
+        req: &VersionReq,
+    ) -> Result<(Arc<dyn Source>, Listing), InstallError> {
+        self.find(id, req)
+    }
+
+    /// Every listing of `id`, each with its source's name.
+    pub(crate) fn listed(&self, id: &str) -> Vec<(String, Listing)> {
+        self.sources()
+            .iter()
+            .filter_map(|s| s.index().ok().map(|i| (s.name(), i)))
+            .flat_map(|(source, index)| {
+                index
+                    .listings
+                    .into_iter()
+                    .filter(|l| l.id == id)
+                    .map(move |l| (source.clone(), l))
+            })
             .collect()
     }
 
@@ -289,6 +366,24 @@ impl Extensions {
             }
         }
         (out, failed)
+    }
+
+    /// Where copies go (`crate::clone`).
+    pub(crate) fn dev_root_slot(&self) -> std::sync::MutexGuard<'_, Option<PathBuf>> {
+        lock(&self.inner.dev_root)
+    }
+
+    /// The copies there are that cannot be read, as failed loads.
+    pub(crate) fn unreadable(&self) -> Vec<Event> {
+        self.candidates().1
+    }
+
+    /// Each extension's last load that failed, until it loads or goes.
+    pub(crate) fn failed_loads(&self) -> Vec<(String, LoadError)> {
+        lock(&self.inner.failed)
+            .iter()
+            .map(|(id, e)| (id.clone(), e.clone()))
+            .collect()
     }
 
     /// Which copy of each extension runs, and what it shadows: the

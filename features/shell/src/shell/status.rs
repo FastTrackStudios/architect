@@ -170,9 +170,9 @@ pub(super) fn StatusBadge(items: Vec<StatusItem>) -> Element {
 fn StatusEntry(item: StatusItem) -> Element {
     let t = use_shell().theme;
     let (fill, ink, pad, weight) = if item.chip {
-        (t.active, t.ink, "0 6px", 650)
+        (&*t.active, &*t.ink, "0 6px", 650)
     } else {
-        ("transparent", t.ink_3, "0 2px", 500)
+        ("transparent", &*t.ink_3, "0 2px", 500)
     };
     let hint = item.hint.clone().unwrap_or_default();
     let press = item.on_press;
@@ -196,7 +196,7 @@ fn StatusEntry(item: StatusItem) -> Element {
                 span { style: "width: 6px; height: 6px; border-radius: 3px; background: {dot};" }
             }
             if let Some(icon) = item.icon {
-                {icon(Icon { size: 13, color: ink })}
+                {icon(Icon { size: 13, color: ink.into() })}
             }
             if !item.text.is_empty() {
                 span { "{item.text}" }
