@@ -776,6 +776,7 @@ pub mod ui {
     }
 
     /// Applies what the layout shown asks of the window but its chrome:
+    ///
     /// its look (into `store`'s workspace layer), `keys.json` (the
     /// person's keymap layer, live), and its arrangement
     /// (`WORKSPACE_APPLY` on `list`, when the workspace is there).
@@ -857,7 +858,9 @@ mod tests {
         std::fs::write(&path, text).unwrap();
         // A second write within one mtime tick: make the length differ
         // or bump the time so the poll sees it.
-        let later = SystemTime::now() + std::time::Duration::from_secs(1);
+        let later = SystemTime::now()
+            .checked_add(std::time::Duration::from_secs(1))
+            .unwrap();
         let f = std::fs::File::options().write(true).open(&path).unwrap();
         f.set_modified(later).unwrap();
     }

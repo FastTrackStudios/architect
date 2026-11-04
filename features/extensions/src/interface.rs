@@ -1,8 +1,9 @@
-//! What loaded extensions add, in the app's window (feature `ui`): the
-//! shell's chrome (tabs, status items, a phone's bar buttons, the slots
-//! they fill), a pane's context menu, the menu bar, their views as
-//! workspace views, where those open (tab, split, dock, float, zoomed,
-//! popup, overlay), and a link's Ctrl- or Cmd-click
+//! What loaded extensions add, in the app's window (feature `ui`):
+//!
+//! the shell's chrome (tabs, status items, a phone's bar buttons, the slots
+//! they fill), a pane's context menu, the menu bar, their views as workspace
+//! views, where those open (tab, split, dock, float, zoomed, popup, overlay),
+//! and a link's Ctrl- or Cmd-click
 //! (`docs/content/architecture/extensions.md`, "Contributions").
 //!
 //! ```ignore

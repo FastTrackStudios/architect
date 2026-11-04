@@ -47,8 +47,10 @@ pub const ANSWERED_WIRE: u32 = 5;
 
 /// What a process adds or changes at run time, as it happens (wire 4 on):
 /// its contributions, in place of the ones it sent before, or its runtime
-/// state. JSON in the manifest's own shapes (`crate::contrib`), checked by
-/// the host against its manifest as a manifest's tables are.
+/// state.
+///
+/// JSON in the manifest's own shapes (`crate::contrib`), checked by the host
+/// against its manifest as a manifest's tables are.
 #[derive(Clone, Debug, PartialEq, Eq, Facet)]
 #[repr(u8)]
 pub enum Update {

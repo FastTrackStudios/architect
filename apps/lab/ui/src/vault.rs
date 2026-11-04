@@ -243,7 +243,7 @@ fn mix_workspace() -> Workspace {
 /// The vault's screensets: "Write" (where it starts), "Mix" and
 /// "Embedded views".
 fn screensets() -> Screensets {
-    let mut builtins = vec![
+    let builtins = vec![
         Screenset::new("Write")
             .slot(1)
             .layout(FormClass::Desk, first_workspace()),
@@ -256,11 +256,15 @@ fn screensets() -> Screensets {
     ];
     // "New Chart" (⌘K): the source editor beside its preview.
     #[cfg(feature = "keyflow-lab")]
-    builtins.push(
-        Screenset::new("Chart")
-            .slot(4)
-            .layout(FormClass::Desk, crate::keyflow::chart_workspace()),
-    );
+    let builtins = {
+        let mut builtins = builtins;
+        builtins.push(
+            Screenset::new("Chart")
+                .slot(4)
+                .layout(FormClass::Desk, crate::keyflow::chart_workspace()),
+        );
+        builtins
+    };
     Screensets::default().with_builtins(builtins)
 }
 

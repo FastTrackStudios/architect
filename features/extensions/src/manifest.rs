@@ -189,10 +189,11 @@ pub enum Home {
     Bottom,
 }
 
-/// How a view opens (herdr's pane placements, on the workspace's own):
-/// a tab, a split beside the active group, over the window (`overlay`:
-/// a layer, `popup`: a modal one, sized), alone in its window
-/// (`zoomed`), or floating.
+/// How a view opens (herdr's pane placements, on the workspace's own).
+///
+/// A tab, a split beside the active group, over the window (`overlay`: a
+/// layer, `popup`: a modal one, sized), alone in its window (`zoomed`), or
+/// floating.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ViewPlacement {
@@ -314,10 +315,11 @@ fn over() -> String {
 }
 
 /// A theme it contributes: a theme file (`architect_theme`'s format) in
-/// the package, its id the file's name. A host with the app's theme store
-/// (`host::Host::with_themes`) puts it there while the extension is
-/// loaded; a file that does not read is a theme problem, not a failed
-/// load.
+/// the package, its id the file's name.
+///
+/// A host with the app's theme store (`host::Host::with_themes`) puts it
+/// there while the extension is loaded; a file that does not read is a
+/// theme problem, not a failed load.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ThemeDecl {

@@ -71,9 +71,10 @@ pub trait Sink: Send + Sync {
 }
 
 /// An extension's way to add to the interface at run time, the same
-/// linked in or as a process ([`Builder::handle`]): keep a clone (a
-/// `OnceLock` of the crate's) and call it from its actions and views.
-/// Before the extension runs, it does nothing.
+/// linked in or as a process ([`Builder::handle`]).
+///
+/// Keep a clone (a `OnceLock` of the crate's) and call it from its actions
+/// and views. Before the extension runs, it does nothing.
 #[derive(Clone, Default)]
 pub struct Handle(Arc<std::sync::Mutex<Option<Arc<dyn Sink>>>>);
 
