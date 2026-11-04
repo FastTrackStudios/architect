@@ -255,3 +255,16 @@ fn the_section_is_searchable() {
         Some(appearance::token_key(tokens::DENSITY).as_str())
     );
 }
+
+#[test]
+fn the_theme_row_is_found_by_dark_mode_and_by_its_palette_alias() {
+    let mut registry = architect_settings::Registry::new();
+    registry.register(appearance::section()).unwrap();
+    for query in ["dark mode", "palette"] {
+        let found = registry
+            .search(query)
+            .iter()
+            .any(|h| h.key == appearance::THEME);
+        assert!(found, "{query:?} finds the Theme row");
+    }
+}

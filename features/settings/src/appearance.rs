@@ -131,7 +131,13 @@ pub fn section() -> Section {
                     Value::Text(String::new()),
                 )
                 .describe("The theme light shows, and the one dark shows.")
-                .aliases(["colours", "colors", "palette"]),
+                .aliases([
+                    "dark mode",
+                    "light mode",
+                    "colours",
+                    "colors",
+                    "palette",
+                ]),
             ),
             synced(
                 Setting::new(
