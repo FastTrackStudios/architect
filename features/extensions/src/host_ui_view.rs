@@ -320,8 +320,9 @@ fn use_window_ui(host: &Host) -> (WindowUi, Signal<u64>) {
     (ui, revision)
 }
 
-/// How high extensions' toasts, prompts and menus are stacked: over
-/// everything, a tour's layer too (`architect_guide::tour::TourLayer`, 200),
+/// How high extensions' toasts, prompts and menus are stacked.
+///
+/// Over everything, a tour's layer too (`architect_guide::tour::TourLayer`, 200),
 /// so a prompt a step brings up is answered, not hidden under its card.
 pub const PROMPT_LAYER: u32 = 300;
 

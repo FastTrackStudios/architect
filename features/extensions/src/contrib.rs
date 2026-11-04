@@ -50,8 +50,9 @@ pub const EVENTS: [&str; 7] = [
 /// title row's tab, the status bar, the title row.
 pub const SLOTS: [&str; 6] = ["ribbon", "left", "right", "tabs", "status", "title"];
 
-/// What a context-menu target's point is called: `context.<target>`, its
-/// kind alone (`file:md` is `context.file`'s). The feature that owns a
+/// What a context-menu target's point is called: `context.<kind>`.
+///
+/// Its kind alone (`file:md` is `context.file`'s). The feature that owns a
 /// target declares its point ([`context_target_point`];
 /// `Host::declare_context_targets`): the workspace's `pane`, `tab` and
 /// `view`, the toolbars' `toolbar` and `toolbar-item`, a file tree's
@@ -100,8 +101,9 @@ pub fn known_event(on: &str) -> bool {
             .is_some_and(|topic| !topic.is_empty())
 }
 
-/// Whether `target` is a context-menu target's name: a kind (`tab`,
-/// `toolbar-item`: lower case words joined by `-`), or `<kind>:<which>`
+/// Whether `target` is a context-menu target's name.
+///
+/// A kind (`tab`, `toolbar-item`: lower case words joined by `-`), or `<kind>:<which>`
 /// (`file:md`, `view:note`). Whether a feature owns it is its point's
 /// ([`context_point`]).
 #[must_use]

@@ -204,7 +204,7 @@ pub(crate) fn context_rows(host: &Host, target: &str, id: &str) -> Vec<ContextEn
             match (item.map(|i| i.kind), at.inner) {
                 (Some(ToolKind::Group), _) => out.push(row("Ungroup", "TOOLBAR_UNGROUP")),
                 (Some(ToolKind::Button), None) => {
-                    out.push(row("Group with the next", "TOOLBAR_GROUP"))
+                    out.push(row("Group with the next", "TOOLBAR_GROUP"));
                 }
                 _ => {}
             }
@@ -453,7 +453,7 @@ pub fn ToolbarStrip(
     let (mount_key, menu_key) = (key.clone(), key.clone());
     let empty = count == 0 && !editing && !header;
     let title = bar.decl.title.clone();
-    let settings_host = host.clone();
+    let settings_host = host;
     let settings_key = key.clone();
     rsx! {
         div {
@@ -601,7 +601,7 @@ fn EditableItem(
     let up_host = host;
     let inner = if group {
         let label = item.label.clone();
-        let buttons = item.items.clone();
+        let buttons = item.items;
         rsx! {
             div { role: "group", "aria-label": "{label}", "data-group": "{label}",
                 style: "flex:0 0 auto; display:flex; flex-direction:column; align-items:center; gap:2px; padding:2px;",
@@ -625,7 +625,7 @@ fn EditableItem(
     };
     rsx! {
         if chip {
-            InsertChip { cx: cx.clone(), at: path.clone() }
+            InsertChip { cx: cx, at: path }
         }
         div {
             "data-edit-item": "{menu_id}",
@@ -685,7 +685,7 @@ fn ToolItemView(cx: Ctx, item: ToolItem, path: String) -> Element {
                 |(e, v)| (e.to_owned(), v.to_owned()),
             );
             let w = item.width.unwrap_or(120);
-            let h = item.height.unwrap_or(cx.size.saturating_add(4));
+            let h = item.height.unwrap_or_else(|| cx.size.saturating_add(4));
             let name = format!("{extension}/{view}");
             rsx! {
                 div { "data-widget": "{name}",
@@ -791,7 +791,7 @@ fn ToolButton(cx: Ctx, item: ToolItem, path: String, joined: bool) -> Element {
                     }
                 },
                 oncontextmenu: {
-                    let (action, here) = (item.action.clone(), path);
+                    let (action, here) = (item.action, path);
                     move |e: MouseEvent| {
                         if editing {
                             return;

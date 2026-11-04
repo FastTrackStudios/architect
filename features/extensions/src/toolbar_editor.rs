@@ -54,11 +54,11 @@ impl Rect {
             && y <= self.y + self.h + slack
     }
 
-    fn mid_x(&self) -> f32 {
+    const fn mid_x(&self) -> f32 {
         self.w.mul_add(0.5, self.x)
     }
 
-    fn mid_y(&self) -> f32 {
+    const fn mid_y(&self) -> f32 {
         self.h.mul_add(0.5, self.y)
     }
 }
@@ -95,8 +95,9 @@ pub const DROP_SLACK: f32 = 8.0;
 /// How far a press moves before it is a drag, points.
 pub const DRAG_AFTER: f32 = 4.0;
 
-/// Where an item dragged to `(x, y)` goes among `strips`: into a group
-/// under the pointer (unless it is a group itself), before the item of
+/// Where an item dragged to `(x, y)` goes among `strips`.
+///
+/// Into a group under the pointer (unless it is a group itself), before the item of
 /// the row under the pointer whose middle is past it, or after the row's
 /// last. None off every toolbar (the drag is let go of where it was).
 #[must_use]
@@ -213,7 +214,7 @@ pub(crate) enum Picking {
 
 /// What the toolbars in a window share while they are edited. Cheap to
 /// copy; provided by `use_extension_ui`.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Editor {
     /// Each toolbar's and item's element, to measure: by key and place
     /// (`""` the toolbar itself).
@@ -252,6 +253,8 @@ const fn narrow(v: f64) -> f32 {
 
 /// Measures `m`, in window points (asked again a few times: Blitz's
 /// document is busy while events stream in).
+// A UI thread's future: its element is the window's.
+#[allow(clippy::future_not_send)]
 pub(crate) async fn measure(m: &Rc<MountedData>) -> Option<Rect> {
     for _ in 0..8 {
         if let Ok(r) = m.get_client_rect().await {
@@ -351,6 +354,7 @@ impl Editor {
     }
 }
 
+#[allow(clippy::future_not_send)]
 async fn measure_strips(mounts: &BTreeMap<(String, String), Rc<MountedData>>) -> Vec<Strip> {
     let mut strips: BTreeMap<String, Strip> = BTreeMap::new();
     for ((key, at), m) in mounts {
@@ -902,12 +906,11 @@ fn ActionPicker(ui: ExtensionUi, purpose: For) -> Element {
     let mut query = use_signal(String::new);
     let host = ui.host();
     let all = commands(&host);
-    let found: Vec<Command> = rank(&all, &query(), &Recents::default())
+    let found = rank(&all, &query(), &Recents::default())
         .into_iter()
         .filter(|r| r.command.enabled)
         .take(40)
-        .map(|r| r.command)
-        .collect();
+        .map(|r| r.command);
     let input = input_style(&t);
     rsx! {
         div { role: "dialog", "aria-label": "Pick an action", "data-testid": "toolbar-action-picker",
@@ -964,7 +967,7 @@ fn widgets(host: &Host) -> Vec<(String, String, Vec<(String, String)>)> {
                 .iter()
                 .map(|v| (v.id.clone(), v.title.clone()))
                 .collect();
-            (l.manifest.id.clone(), l.manifest.name.clone(), views)
+            (l.manifest.id.clone(), l.manifest.name, views)
         })
         .collect();
     out.sort_by(|a, b| a.1.cmp(&b.1));
@@ -1006,7 +1009,7 @@ fn WidgetPicker(ui: ExtensionUi, purpose: For) -> Element {
             }
         )
     };
-    let insert_host = host.clone();
+    let insert_host = host;
     let mut picking = editor.picking;
     rsx! {
         div { role: "dialog", "aria-label": "Pick a widget", "data-testid": "toolbar-widget-picker",
@@ -1014,7 +1017,7 @@ fn WidgetPicker(ui: ExtensionUi, purpose: For) -> Element {
             span { style: "font-size:13px; font-weight:600;", "Pick a widget" }
             div { style: "display:flex; gap:10px; min-height:220px;",
                 div { role: "tablist", style: "flex:0 0 150px; display:flex; flex-direction:column; gap:2px;",
-                    for (id, name, _) in all.clone() {
+                    for (id, name, _) in all {
                         button { key: "{id}", role: "tab", "data-category": "{id}",
                             "aria-selected": "{current.as_deref() == Some(id.as_str())}",
                             style: "{tab(current.as_deref() == Some(id.as_str()))}",
@@ -1046,8 +1049,8 @@ fn WidgetPicker(ui: ExtensionUi, purpose: For) -> Element {
             if let Some(name) = picked {
                 {
                     let (extension, view) = name.split_once('/').map(|(e, v)| (e.to_owned(), v.to_owned())).unwrap_or_default();
-                    let purpose = purpose.clone();
-                    let host = insert_host.clone();
+                    let purpose = purpose;
+                    let host = insert_host;
                     rsx! {
                         div { style: "display:flex; align-items:center; gap:10px; padding-top:6px; border-top:1px solid {t.rule};",
                             span { style: "font-size:11px; color:{t.ink_3};", "Preview" }
@@ -1097,7 +1100,7 @@ fn SettingsSheet(ui: ExtensionUi, toolbar: String, at: Option<String>) -> Elemen
     let item = place.and_then(|p| edit::get(&bar.decl, p).cloned());
     let title = match (&item, place) {
         (Some(i), Some(_)) => item_name(&host, i),
-        _ => bar.decl.title.clone(),
+        _ => bar.decl.title,
     };
     let what = if item.is_some() { "Item" } else { "Toolbar" };
     rsx! {
@@ -1290,8 +1293,8 @@ fn ItemSettings(ui: ExtensionUi, toolbar: String, at: String, item: ToolItem) ->
     };
     let mut picking = editor.picking;
     let (rc_key, menu_key) = (toolbar.clone(), toolbar.clone());
-    let remove_host = host.clone();
-    let remove_key = toolbar.clone();
+    let remove_host = host;
+    let remove_key = toolbar;
     rsx! {
         if button_like || item.kind == ToolKind::Group {
             Field { label: "Label",
@@ -1332,7 +1335,7 @@ fn ItemSettings(ui: ExtensionUi, toolbar: String, at: String, item: ToolItem) ->
             }
             ColorRow { label: "Fill", value: colors.fill.clone(), test: "toolbar-item-fill", set: colour("fill", Box::new(s5)) }
             ColorRow { label: "Ink", value: colors.ink.clone(), test: "toolbar-item-ink", set: colour("ink", Box::new(s6)) }
-            ColorRow { label: "Fill while on", value: colors.on_fill.clone(), test: "toolbar-item-on-fill", set: colour("on_fill", Box::new(s7)) }
+            ColorRow { label: "Fill while on", value: colors.on_fill, test: "toolbar-item-on-fill", set: colour("on_fill", Box::new(s7)) }
             Field { label: "Right-click",
                 Choices {
                     test: "toolbar-item-right-click",
@@ -1355,7 +1358,7 @@ fn ItemSettings(ui: ExtensionUi, toolbar: String, at: String, item: ToolItem) ->
             }
         }
         if dropdown || !item.menu.is_empty() {
-            MenuRows { ui, toolbar: menu_key, at: at.clone(), rows: item.menu.clone() }
+            MenuRows { ui, toolbar: menu_key, at: at, rows: item.menu.clone() }
         }
         if item.kind == ToolKind::Widget {
             Field { label: "Width",
@@ -1546,7 +1549,7 @@ fn ToolbarSettings(ui: ExtensionUi, toolbar: String) -> Element {
     let here = bar.decl.at.clone();
     let shown_here = here != "hidden";
     let (dup_host, del_host, show_host) = (host.clone(), host.clone(), host);
-    let (dup_key, del_key) = (toolbar.clone(), toolbar.clone());
+    let (dup_key, del_key) = (toolbar.clone(), toolbar);
     let mut problem = editor.problem;
     let deletes = if bar.source == crate::toolbars::Source::Extension {
         None
@@ -1612,7 +1615,7 @@ fn ToolbarSettings(ui: ExtensionUi, toolbar: String) -> Element {
             Choices {
                 test: "toolbar-preset",
                 choices: PRESETS.iter().map(|p| ((*p).to_owned(), (*p).to_owned())).collect::<Vec<_>>(),
-                on: if style.preset.is_empty() { "theme".to_owned() } else { style.preset.clone() },
+                on: if style.preset.is_empty() { "theme".to_owned() } else { style.preset },
                 pick: move |v: String| sp4(&|s| s.preset = if v == "theme" { String::new() } else { v.clone() }),
             }
         }

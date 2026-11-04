@@ -1,7 +1,8 @@
-//! Editing a toolbar by item: what the visual editor (`crate::toolbar_ui`)
-//! and the `TOOLBAR_*` actions both do to a [`ToolbarDecl`], so a person,
-//! a script or a model edits it the same way, one item at a time
-//! (`docs/content/architecture/toolbars.md`).
+//! Editing a toolbar by item (`docs/content/architecture/toolbars.md`).
+//!
+//! What the visual editor (`crate::toolbar_ui`) and the `TOOLBAR_*`
+//! actions both do to a [`ToolbarDecl`], so a person, a script or a model
+//! edits it the same way, one item at a time.
 //!
 //! An item is named by its place ([`At`]): `3` is the fourth item, `2.1`
 //! the second button of the group that is the third. A place to put one
@@ -78,10 +79,7 @@ impl std::str::FromStr for At {
 #[must_use]
 pub fn get(t: &ToolbarDecl, at: At) -> Option<&ToolItem> {
     let top = t.items.get(at.index)?;
-    match at.inner {
-        None => Some(top),
-        Some(i) => top.items.get(i),
-    }
+    at.inner.map_or(Some(top), |i| top.items.get(i))
 }
 
 fn get_mut(t: &mut ToolbarDecl, at: At) -> Option<&mut ToolItem> {
@@ -102,7 +100,7 @@ fn no_item(at: At) -> String {
 ///
 /// No such place; a group's place for anything but a button.
 pub fn insert(t: &mut ToolbarDecl, at: Option<At>, item: ToolItem) -> Result<At, String> {
-    let at = at.unwrap_or(At::top(t.items.len()));
+    let at = at.unwrap_or_else(|| At::top(t.items.len()));
     match at.inner {
         None => {
             if at.index > t.items.len() {

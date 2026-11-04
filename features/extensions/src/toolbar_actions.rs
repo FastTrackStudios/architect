@@ -239,7 +239,7 @@ impl Extensions {
             Effect::Mutating,
             move |_: &ActionCaller, a: EditArgs| {
                 let bars = me.host().toolbars().clone();
-                let on = a.on.unwrap_or(!bars.editing());
+                let on = a.on.unwrap_or_else(|| !bars.editing());
                 bars.set_editing(on);
                 if !on {
                     bars.flush()?;
@@ -331,7 +331,7 @@ fn edit_action(
     )
 }
 
-fn object(props: Value) -> Value {
+fn object(props: &Value) -> Value {
     json!({ "type": "object", "properties": props })
 }
 
@@ -358,7 +358,7 @@ fn install_edits(list: &ActionList, host: &Host) -> Result<(), ActionError> {
              rounding, labels, colour preset); `close` true closes them.",
         ),
         Effect::Mutating,
-        &object(json!({ "id": text(KEY), "at": text(AT), "close": { "type": "boolean" } })),
+        &object(&json!({ "id": text(KEY), "at": text(AT), "close": { "type": "boolean" } })),
         move |caller, a| {
             let bars = h.toolbars();
             if a.get("close").and_then(Value::as_bool) == Some(true) {
@@ -386,7 +386,7 @@ fn install_edits(list: &ActionList, host: &Host) -> Result<(), ActionError> {
         ),
         Effect::Mutating,
         &object(
-            json!({ "title": text("its name"), "where": text("where it goes"), "id": text("its id") }),
+            &json!({ "title": text("its name"), "where": text("where it goes"), "id": text("its id") }),
         ),
         move |_, a| {
             let s = |k: &str| a.get(k).and_then(Value::as_str);
@@ -436,7 +436,7 @@ fn install_edits(list: &ActionList, host: &Host) -> Result<(), ActionError> {
         ),
         Effect::Mutating,
         &object(
-            json!({ "id": text(KEY), "to": text("the copy's id"), "title": text("the copy's name") }),
+            &json!({ "id": text(KEY), "to": text("the copy's id"), "title": text("the copy's name") }),
         ),
         move |caller, a| {
             let (key, _) = about(caller, a, "at")?;
@@ -458,7 +458,7 @@ fn install_edits(list: &ActionList, host: &Host) -> Result<(), ActionError> {
              deleted: TOOLBAR_SHOW another in its place.",
         ),
         Effect::Destructive,
-        &object(json!({ "id": text(KEY) })),
+        &object(&json!({ "id": text(KEY) })),
         move |caller, a| {
             let (key, _) = about(caller, a, "at")?;
             let bars = h.toolbars();
@@ -523,7 +523,7 @@ fn install_edits(list: &ActionList, host: &Host) -> Result<(), ActionError> {
             "Takes away toolbar `id`'s item `at` (a group left empty goes too).",
         ),
         Effect::Mutating,
-        &object(json!({ "id": text(KEY), "at": text(AT) })),
+        &object(&json!({ "id": text(KEY), "at": text(AT) })),
         move |caller, a| {
             let (key, at) = about(caller, a, "at")?;
             let at = needs(at, "at")?;
@@ -595,7 +595,7 @@ fn install_edits(list: &ActionList, host: &Host) -> Result<(), ActionError> {
         ),
         Effect::Mutating,
         &object(
-            json!({ "id": text(KEY), "at": text(AT), "count": { "type": "integer", "minimum": 1 }, "label": text("its label") }),
+            &json!({ "id": text(KEY), "at": text(AT), "count": { "type": "integer", "minimum": 1 }, "label": text("its label") }),
         ),
         move |caller, a| {
             let (key, at) = about(caller, a, "at")?;
@@ -623,7 +623,7 @@ fn install_edits(list: &ActionList, host: &Host) -> Result<(), ActionError> {
             "The group at `at` of toolbar `id` back into its buttons.",
         ),
         Effect::Mutating,
-        &object(json!({ "id": text(KEY), "at": text(AT) })),
+        &object(&json!({ "id": text(KEY), "at": text(AT) })),
         move |caller, a| {
             let (key, at) = about(caller, a, "at")?;
             let at = needs(at, "at")?;
@@ -641,7 +641,7 @@ fn install_edits(list: &ActionList, host: &Host) -> Result<(), ActionError> {
              replaces, the last ten.",
         ),
         Effect::ReadOnly,
-        &object(json!({ "id": text(KEY) })),
+        &object(&json!({ "id": text(KEY) })),
         move |caller, a| {
             let (key, _) = about(caller, a, "at")?;
             let all: Vec<String> = h

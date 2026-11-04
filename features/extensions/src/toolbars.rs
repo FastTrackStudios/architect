@@ -496,6 +496,8 @@ impl Toolbars {
     ///
     /// No folder; no toolbar under `key`; what `edit` refuses; a toolbar
     /// that does not check after it.
+    // The lock is handed to `changed`, which lets it go before it tells.
+    #[allow(clippy::significant_drop_tightening)]
     pub fn edit<T>(
         &self,
         contributions: &Contributions,
@@ -516,8 +518,8 @@ impl Toolbars {
             .strip_prefix(&format!("{PERSON}/"))
             .map_or_else(|| key.to_owned(), str::to_owned);
         check_file(&decl)?;
-        let mut s = self.lock();
         let path = now.file.unwrap_or_else(|| dir.join(file_name(key)));
+        let mut s = self.lock();
         s.files.insert(key.to_owned(), (decl, path));
         s.pending.insert(key.to_owned());
         s.edits = s.edits.wrapping_add(1);
@@ -628,7 +630,7 @@ impl Toolbars {
         if !taken.contains(&base) {
             return base;
         }
-        (2_u32..)
+        (2_u32..10_000)
             .map(|n| format!("{base}-{n}"))
             .find(|id| !taken.contains(id))
             .unwrap_or(base)
@@ -659,7 +661,7 @@ impl Toolbars {
         // Its widgets name their views whole, as a person's file does.
         qualify_views(&mut decl, &from.owner);
         decl.title = title;
-        decl.at = "hidden".to_owned();
+        "hidden".clone_into(&mut decl.at);
         let key = format!("{PERSON}/{id}");
         self.save(&key, &decl)?;
         Ok(key)
