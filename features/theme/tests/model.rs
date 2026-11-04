@@ -323,3 +323,30 @@ fn a_region_resolves_its_own_look_over_the_workspace_layer() {
     );
     assert_eq!(node.id(), "nord-light");
 }
+
+/// The Appearance numbers are tokens with defaults, and `contrast` moves
+/// the quieter inks and the edges toward the text; one a layer set stays.
+#[test]
+fn appearance_numbers_and_contrast() {
+    let store = ThemeStore::default();
+    let before = store.current();
+    assert!((before.number("text-scale") - 1.0).abs() < f32::EPSILON);
+    assert!((before.number("density") - 1.0).abs() < f32::EPSILON);
+    assert!(before.number("contrast").abs() < f32::EPSILON);
+
+    let _ = store.set(
+        LayerKind::Person,
+        Layer::default()
+            .token("contrast", "1")
+            .token("rule", "#123456"),
+    );
+    let after = store.current();
+    let ink = after.color("ink");
+    let gap = |r: &architect_theme::Resolved| {
+        let c = r.color("ink-3");
+        (c.r - ink.r).abs() + (c.g - ink.g).abs() + (c.b - ink.b).abs()
+    };
+    assert!(gap(&after) < gap(&before), "ink-3 moved toward the ink");
+    assert_ne!(after.value("border"), before.value("border"));
+    assert_eq!(after.value("rule"), "#123456");
+}

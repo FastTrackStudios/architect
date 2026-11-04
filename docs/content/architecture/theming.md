@@ -14,8 +14,10 @@ weight = 69
 > namespaced tokens, expressions over other tokens, numbers, provenance
 > and `THEME_INSPECT` landed with it (below). Extensions' themes and
 > tokens, the theme for Luau scripts, `ImGui` windows and process
-> extensions landed after ("Extensions and themes"). Not yet: the
-> Appearance settings page (#185) and persisting the layers.
+> extensions landed after ("Extensions and themes"). Persisting the
+> org, person and device layers and the Appearance page (#185) landed
+> with `architect-settings`' `appearance` feature ("Persistence and
+> Appearance").
 
 An app built on architect is themeable at run time, all of it: the shell,
 architect-ui's components, a GPU paint view, an extension's view. One
@@ -80,6 +82,12 @@ The token names (`features/theme/src/resolve.rs` `names`):
   here, because `accent` is architect-ui's hover wash.
 - the rest: `font-sans`, `font-serif`, `font-mono`, `radius`, `spacing`,
   `letter-spacing`, `shadow-*`.
+- the Appearance numbers: `text-scale` and `density` (factors of the
+  designed size, `1` by default) and `contrast` (`0`; at `1` the
+  quieter inks move half way to the text and the edges a quarter of the
+  way, before anything is evaluated, unless a layer set them itself:
+  `features/theme/src/resolve.rs` `more_contrast`). Read them with
+  `Resolved::number`.
 
 An override may name any token, these or a new one, and its value may
 name other tokens (`mix($border, $foreground, 0.2)`). That is how an app
@@ -112,9 +120,10 @@ Picking a theme (`ThemeStore::pick`) replaces only the half of the pair
 that matches its own lightness: picking a dark theme keeps the light one.
 
 A person's choices live in layers, never in theme files: the files are
-authored, the picks are settings. The store does not persist layers. The
-app saves the ones it owns (`ThemeStore::layer`) and sets them again at
-start.
+authored, the picks are settings. The org's, the person's and the
+device's layers are kept through `architect-settings` (below,
+"Persistence and Appearance"); the others are the app's own (`App`,
+`Workspace`) or last only while it runs (`Pick`, `Preview`).
 
 ## The store
 
@@ -136,6 +145,75 @@ its own part changes (herdr's `Vt::set_theme`): implement `FromResolved`
 and hold a `Projected<T>`. Its `update` returns true only when `T`
 differs, and its `revision` says which theme it was cut from (a recorded
 scene stamps it).
+
+## Persistence and Appearance
+
+Three layers are settings (`architect-settings`, feature `appearance`;
+`features/settings/src/appearance.rs`), kept as the
+[settings page](@/architecture/settings-page.md)'s scopes are:
+
+| Layer | Kept in | Where |
+|---|---|---|
+| `Org` | the org's `OrgSettings` defaults (and locks) | the org's settings, from its server |
+| `Person` | the `Synced` scope | the person's synced settings document (`DocValues`, every device) |
+| `Device` | the `Device` scope | a device file of its own (`DeviceValues::open_named(app, "appearance")`) |
+
+A layer is three kinds of key: `appearance.theme` (one theme's id, or
+`light,dark`), `appearance.mode` (`system`, `light`, `dark`), and
+`appearance.token.<name>` for each token it overrides
+(`appearance.token.density`). `values_of` and `layer_of` turn one into the
+other. A key the org locked is read from the org in every layer.
+
+`Persist::start(store, values, delay, save)` puts the three layers in the
+store at start, then listens to the store's layers
+(`ThemeStore::subscribe_layers`, which hears a change that shows nothing
+too). Once they have been still for `delay`, it hands each scope that
+changed to `save` as a `Saved`: the scope, its appearance values, the
+keys that changed. It runs on a thread of its own, and dropping it writes
+what is waiting. Whoever changed a layer, `save` sees it: the page,
+`THEME_SET`, `THEME_TOKEN_SET`, ⌘K. `Persist::replace(scope, values)`
+takes another device's change (the synced document's
+`on_remote_change`), and `Persist::set_org` the org's when the window's
+org changes. The order is the cascade's: the org's default sits under
+the person's choice, and the device's sits over it.
+
+```rust,ignore
+let persist = Persist::start(&store, &values, Duration::from_millis(250), move |s: &Saved| match s.scope {
+    Scope::Device => { let _ = device.save(&s.values); }
+    Scope::Synced => { let _ = person.save_keys(&s.values, &s.keys); }
+    Scope::Project => {}
+});
+```
+
+**The Appearance page.** `use_appearance_section()` (features
+`appearance` and `ui`; `features/settings/src/appearance_ui.rs`
+`AppearancePage`) registers the Appearance section, under the app's
+theme store and settings provider. It reads and writes the store, so
+it is the same truth `THEME_*` reach. From the top:
+
+- **Changes apply to:** all my devices (the `Person` layer) or this
+  device (`Device`). "Reset to organization default" empties both.
+- **Mode:** System, Light, Dark, live. Each card is drawn in the theme
+  it would show.
+- **Light theme / Dark theme:** a card per theme, drawn in its own
+  colours (each one's `Resolved` through `ThemeStore::resolve_with`, the
+  person's overrides included). A card sets its half of the choice.
+- **Text and spacing:** text size (80 % to 140 %, `text-scale`),
+  density (compact, default, roomy: `density`), corners (`radius`),
+  contrast (`contrast`), font (Inter, system, serif, monospace: `font`
+  and `font-sans`).
+
+Each row says who sets its value now (your organization, you on every
+device, this device, the theme), and has a reset that takes the chosen
+layer's value away, so the one under it shows. A key the org locked is
+dimmed, saying so. The page sizes its own rows by `density` and
+`text-scale`. The shell's own chrome does not read them yet.
+
+The lab keeps the device's layer in `<app dir>/appearance.json` and the
+person's in a synced settings document saved as `<app dir>/person.loro`
+(it has no account to sync it with). Its made-up orgs have defaults:
+Harbor & Pine's is Nord with small corners (`apps/lab/ui/src/theme.rs`
+`persist`, `org_settings`).
 
 ## Theme files (feature `fs`)
 
@@ -202,7 +280,7 @@ command line:
 |---|---|---|
 | `THEME_LIST` | read-only | every theme: id, label, appearance, source (`builtin`, `file`, `memory`, `extension:<id>`), problems |
 | `THEME_GET` | read-only | the choice, appearance, system scheme, the theme showing, revision, tokens (all, or `tokens: ["brand", "ink-*"]`) |
-| `THEME_SET` | mutating | the `Pick` layer: `one`, or `light` / `dark`, and/or `appearance` |
+| `THEME_SET` | mutating | the choice: `one`, or `light` / `dark`, and/or `appearance`, in a `layer`: the `Person` one (kept) when left out, `device` for this device only, `pick` for this run |
 | `THEME_PREVIEW` / `THEME_PREVIEW_END` | mutating | the `Preview` layer |
 | `THEME_TOKEN_SET` / `THEME_TOKEN_RESET` | mutating | an override (a literal or an expression) in a `layer`, the `Person` one when left out |
 | `THEME_RELOAD` | mutating | the files read again |

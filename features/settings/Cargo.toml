@@ -12,13 +12,22 @@ description = "Settings declared once — by the app or by an extension at run t
 # data, wasm-clean — and `#[derive(Settings)]` (a facet struct as a
 # section). `store` keeps the device's and a project's values on disk
 # (architect::settings::Store); `synced` keeps the person's in a CRDT
-# document (loro) every device syncs; `ui` draws the page.
+# document (loro) every device syncs; `appearance` keeps a theme store's
+# org, person and device layers as settings; `ui` draws the page.
 
 [features]
 default = []
 store = ["dep:architect", "architect/settings"]
 synced = ["dep:loro", "dep:uuid"]
+# A theme store's org, person and device layers kept as settings, and the
+# Appearance section (with `ui`, its page).
+appearance = ["dep:architect-theme"]
 ui = [
+    # Outside an AppShell (a sheet over it), the page follows the store.
+    "dep:architect-theme",
+    "architect-theme/dioxus",
+    "dep:futures-channel",
+    "dep:futures-util",
     "dep:dioxus",
     "dep:architect-shell",
     "architect-shell/ui",
@@ -32,6 +41,10 @@ facet = { workspace = true }
 facet-json = { version = "0.50.0-rc.5" }
 facet-value = { version = "0.50.0-rc.7" }
 architect-settings-derive = { workspace = true }
+architect-theme = { workspace = true, optional = true }
+# The Appearance page: the store's layer changes, from any thread, to its signal.
+futures-channel = { version = "0.3", optional = true }
+futures-util = { version = "0.3", default-features = false, optional = true }
 loro = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
 architect = { workspace = true, optional = true }
@@ -44,7 +57,7 @@ doctest = false
 
 [dev-dependencies]
 # The tests see every role: the derive, the scopes, the synced document.
-architect-settings = { path = ".", features = ["store", "synced"] }
+architect-settings = { path = ".", features = ["store", "synced", "appearance"] }
 # Two devices' documents, exchanging updates.
 loro = { workspace = true }
 

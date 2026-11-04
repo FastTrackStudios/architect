@@ -97,6 +97,9 @@ pub mod names {
         "shadow-spread",
         "shadow-offset-x",
         "shadow-offset-y",
+        "text-scale",
+        "density",
+        "contrast",
     ];
 
     /// Every derived name, once.
@@ -230,6 +233,7 @@ pub(crate) fn resolve_in(
         by.insert(name.clone(), By::Layer(layer_of(name)));
     }
 
+    more_contrast(&mut raw, &by);
     let mut eval = Eval::new(&raw);
     let mut tokens = BTreeMap::new();
     let mut sources = BTreeMap::new();
@@ -268,6 +272,46 @@ pub(crate) fn resolve_in(
         );
     }
     Resolved::build(&theme.id, scheme, tokens, sources, problems)
+}
+
+/// The `contrast` token applied: at 1, the quieter inks are moved half
+/// way to the text and the edges a quarter of the way (a fraction of
+/// that below 1). Before anything is evaluated, so a reference sees the
+/// moved colour; a token a layer set itself, or an expression, is left
+/// as it was.
+fn more_contrast(tokens: &mut BTreeMap<String, String>, by: &BTreeMap<String, By<'_>>) {
+    let amount = tokens
+        .get("contrast")
+        .and_then(|v| v.trim().parse::<f32>().ok())
+        .filter(|c| c.is_finite() && *c > 0.0)
+        .map(|c| c.min(1.0));
+    let Some(amount) = amount else { return };
+    let colour = |tokens: &BTreeMap<String, String>, name: &str| {
+        tokens.get(name).and_then(|v| Rgba::parse(v))
+    };
+    let mut moved = Vec::new();
+    for (names, toward, t) in [
+        (&["ink-2", "ink-3"][..], "ink", 0.5),
+        (&["muted-foreground"][..], "foreground", 0.5),
+        (
+            &["border", "input", "rule", "sidebar-border"][..],
+            "foreground",
+            0.25,
+        ),
+    ] {
+        let Some(to) = colour(tokens, toward) else {
+            continue;
+        };
+        for name in names {
+            if matches!(by.get(*name), Some(By::Layer(_))) {
+                continue;
+            }
+            if let Some(from) = colour(tokens, name) {
+                moved.push(((*name).to_owned(), from.mix(to, t * amount).to_css()));
+            }
+        }
+    }
+    tokens.extend(moved);
 }
 
 /// A token whose expression does not resolve, said for a person.
@@ -536,6 +580,13 @@ pub fn derive(palette: &Palette, scheme: Scheme) -> BTreeMap<String, String> {
         ("radius", "0.625rem"),
         ("spacing", "0.25rem"),
         ("letter-spacing", "0"),
+        // The person's Appearance: numbers (`Resolved::number`). Text
+        // size and density as factors of the designed size, 1 as drawn;
+        // contrast 0 as derived, 1 the quieter inks and the edges moved
+        // toward the text (`more_contrast`).
+        ("text-scale", "1"),
+        ("density", "1"),
+        ("contrast", "0"),
         ("shadow-color", "oklch(0 0 0)"),
         ("shadow-opacity", "0.1"),
         ("shadow-blur", "3px"),

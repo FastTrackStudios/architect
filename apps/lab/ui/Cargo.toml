@@ -22,7 +22,10 @@ architect-ui = { workspace = true }
 # The Embedded views' paint pane (src/paint.rs): the paint kind on Blitz.
 architect-workspace = { workspace = true, features = ["ui", "paint-ui", "home"] }
 architect-commands = { workspace = true, features = ["native"] }
-architect-settings = { workspace = true, features = ["ui", "store"] }
+# The settings page; the Appearance section, its layers kept (the
+# person's in a synced document, here a file).
+architect-settings = { workspace = true, features = ["ui", "store", "synced", "appearance"] }
+loro = { workspace = true }
 architect-orgs = { workspace = true, features = ["ui"] }
 architect-extensions = { workspace = true, features = ["ui", "remote", "page"] }
 # The lab's example extension, linked in (apps/lab/board).

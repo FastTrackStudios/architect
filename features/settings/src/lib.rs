@@ -16,10 +16,18 @@
 //! the controls, `Default` the defaults; `T::read` and `entries` are
 //! the typed value.
 //!
+//! Feature `appearance` keeps a theme store's org, person and device
+//! layers as settings, and declares the Appearance section (`appearance`;
+//! with `ui`, its page: `use_appearance_section`).
+//!
 //! Feature `store` keeps the device's and a project's values on disk;
 //! `synced` keeps the person's in a CRDT document every device syncs;
 //! `ui` draws the page and gives `use_settings::<T>()`.
 
+#[cfg(feature = "appearance")]
+pub mod appearance;
+#[cfg(all(feature = "appearance", feature = "ui"))]
+mod appearance_ui;
 pub mod derive;
 mod model;
 mod registry;
@@ -31,6 +39,8 @@ mod synced;
 mod ui;
 mod values;
 
+#[cfg(all(feature = "appearance", feature = "ui"))]
+pub use appearance_ui::{AppearancePage, use_appearance_section};
 pub use model::{Block, Choice, Control, Owner, Scope, Section, Setting, Value};
 pub use registry::{Hit, Registry, RegistryError};
 #[cfg(feature = "store")]

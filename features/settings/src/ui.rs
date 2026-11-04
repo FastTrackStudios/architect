@@ -327,8 +327,13 @@ impl SettingsHandle {
     }
 }
 
+/// The shell's colours; over the shell (a sheet mounted beside
+/// `AppShell`), the theme store's, so the page follows it too.
 fn theme() -> ShellTheme {
-    try_use_shell().map(|s| s.theme).unwrap_or_default()
+    try_use_shell().map_or_else(
+        || ShellTheme::from_resolved(&architect_theme::use_resolved()),
+        |s| s.theme,
+    )
 }
 
 fn phone() -> bool {

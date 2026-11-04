@@ -12,7 +12,12 @@ working set.
   `ctx.theme.color("brand")`). A colour the app needs and architect does
   not name is a token of the app's own (below), not a literal.
 - A person's choices are layers (`Layer`, `LayerKind`), never edits to
-  theme files. Files are authored. The app persists the layers it owns.
+  theme files. Files are authored. The org's, the person's and the
+  device's layers are settings: keep them with
+  `architect_settings::appearance::Persist` (feature `appearance`), never
+  a store of your own.
+- The Appearance page is architect's (`use_appearance_section`, features
+  `appearance` + `ui`). Don't write an app's own theme picker page.
 - Writes return whether anything changed. Don't redraw or persist on
   `false`.
 - An unknown token is magenta on purpose (`number` is `NaN`). Fix the
@@ -123,6 +128,28 @@ entry, never a failed load.
   `Col`). Scripts override with `ImGui.PushStyleColor(ctx,
   ImGui.Col_Button, theme.color('x'))`.
 
+**Keep the look (person synced, device local, org default).**
+
+```rust,ignore
+use architect_settings::appearance::{Persist, Saved};
+use architect_settings::{DeviceValues, DocValues, Scope, ScopedValues};
+let device = DeviceValues::open_named("my-app", "appearance")?; // its own file
+let person = DocValues::new(synced_doc.loro());                  // the person's synced doc
+let values = ScopedValues { device: device.load(), synced: person.load(), org, ..Default::default() };
+let persist = Persist::start(&store, &values, Duration::from_millis(250), move |s: &Saved| match s.scope {
+    Scope::Device => { let _ = device.save(&s.values); }
+    Scope::Synced => { let _ = person.save_keys(&s.values, &s.keys); }
+    Scope::Project => {}
+});
+// another device's edit: persist.replace(Scope::Synced, &person.load());
+// the org switched: persist.set_org(org_settings);
+architect_settings::use_appearance_section(); // under use_theme_store + use_settings_provider
+```
+
+Keys: `appearance.theme` (`id` or `light,dark`), `appearance.mode`,
+`appearance.token.<name>` (`features/settings/src/appearance.rs`). The
+lab does it in `apps/lab/ui/src/theme.rs` `persist`.
+
 ## Pitfalls
 
 - `ShellTheme` is no longer `Copy`: its fields are `Arc<str>`. Clone it
@@ -131,8 +158,16 @@ entry, never a failed load.
 - In a resolved theme the shell's accent is `brand` / `brand-ink` /
   `brand-soft`. `accent` is architect-ui's hover wash. Paint views read
   `brand`.
-- `THEME_SET` writes the `Pick` layer and `THEME_TOKEN_SET` the `Person`
-  layer unless given `layer` (never `builtin` or `extension`).
+- `THEME_SET` and `THEME_TOKEN_SET` write the `Person` layer (kept) unless
+  given `layer` (`device`, `pick` for this run only; never `builtin` or
+  `extension`). A `Device` choice hides the person's: setting the
+  person's then changes nothing that shows.
+- Keep the device's appearance values in a file of their own
+  (`DeviceValues::open_named`): the settings page saves its device
+  values whole, over anything else in its file.
+- `subscribe` hears only what shows; something that keeps layers listens
+  with `subscribe_layers` (a choice under another layer's moves nothing
+  that shows).
 - The `Extension` layer sits under the theme's own overrides (a theme
   file restyles an extension's tokens); every other layer sits over them.
 - In Luau a module whose fields move must say `live_fields()`: Luau
