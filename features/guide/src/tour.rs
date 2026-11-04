@@ -755,26 +755,22 @@ fn moved_of(
         let sc = set.scenarios.get(p.scenario)?;
         Some((sc.id.clone(), sc.steps.get(p.step)?))
     };
-    match to {
-        Some(p) => {
-            let (scenario, step) = step_of(p)?;
-            (!step.hide).then(|| Moved::At {
-                scenario,
-                step: step.id.clone(),
-            })
-        }
-        None => {
-            let (scenario, step) = step_of(from?)?;
-            Some(if finished {
-                Moved::Finished { scenario }
-            } else {
-                Moved::Left {
-                    scenario,
-                    step: step.id.clone(),
-                }
-            })
-        }
+    if let Some(p) = to {
+        let (scenario, step) = step_of(p)?;
+        return (!step.hide).then(|| Moved::At {
+            scenario,
+            step: step.id.clone(),
+        });
     }
+    let (scenario, step) = step_of(from?)?;
+    Some(if finished {
+        Moved::Finished { scenario }
+    } else {
+        Moved::Left {
+            scenario,
+            step: step.id.clone(),
+        }
+    })
 }
 
 /// Where a tour going to `step` starts: the first of the setup steps right

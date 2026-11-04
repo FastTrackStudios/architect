@@ -52,6 +52,10 @@ fn looks_the_same(name: &str, steps: &str) {
     let mut last = Last::default();
     architect_guide::run::run(&architect_lab_media::app(), &scenario, Some(&mut last))
         .unwrap_or_else(|e| panic!("{name}: {e}"));
+    // The folder is a fresh one each run: its path is not how it looks.
+    last.0 = last
+        .0
+        .replace(&folder.path().display().to_string(), "<lab folder>");
     let path = golden(name);
     if std::env::var("ARCHITECT_GOLDEN").as_deref() == Ok("record") {
         std::fs::write(&path, &last.0).unwrap();

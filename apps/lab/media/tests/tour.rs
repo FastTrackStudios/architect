@@ -4,6 +4,8 @@
 //! Then Back runs a chapter's setup again, and a start at a step (where
 //! "Take the tour" resumes) begins at that chapter.
 
+#![allow(clippy::expect_used, clippy::panic)]
+
 use std::fmt::Write as _;
 
 const TOUR: &str = include_str!("../../scenarios/architect-tour.styx");

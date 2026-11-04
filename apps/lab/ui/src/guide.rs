@@ -181,11 +181,27 @@ pub fn tours(remember: bool) -> architect_guide::tour::TourSet {
     })
 }
 
-/// Where the person left the Architect tour: `None` if they never started
-/// it, `Some(None)` if they finished it, else the step's id.
+/// Where the person left the Architect tour, as kept in the lab's folder.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TourPlace {
+    /// They never started it.
+    Never,
+    /// They played it to its end.
+    Finished,
+    /// At this step, by id.
+    At(String),
+}
+
+/// Where the person left the Architect tour.
 #[must_use]
-pub fn tour_place() -> Option<Option<String>> {
-    let kept = std::fs::read_to_string(crate::app_dir()?.join(TOUR_PLACE)).ok()?;
-    let kept = kept.trim();
-    Some((kept != "done" && !kept.is_empty()).then(|| kept.to_owned()))
+pub fn tour_place() -> TourPlace {
+    let Some(kept) =
+        crate::app_dir().and_then(|d| std::fs::read_to_string(d.join(TOUR_PLACE)).ok())
+    else {
+        return TourPlace::Never;
+    };
+    match kept.trim() {
+        "" | "done" => TourPlace::Finished,
+        step => TourPlace::At(step.to_owned()),
+    }
 }

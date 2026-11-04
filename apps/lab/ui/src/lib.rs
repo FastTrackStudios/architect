@@ -891,10 +891,9 @@ pub fn LabApp() -> Element {
     // "Take the tour" goes on where the person left it, from the start
     // once they finished it; a window's lab offers it on its first start.
     let take_tour = move || {
-        let at = if windowed {
-            guide::tour_place().flatten()
-        } else {
-            None
+        let at = match windowed.then(guide::tour_place) {
+            Some(guide::TourPlace::At(step)) => Some(step),
+            _ => None,
         };
         let _ = tours.start_at(guide::ARCHITECT_TOUR, at.as_deref());
     };
@@ -903,7 +902,7 @@ pub fn LabApp() -> Element {
         take_tour,
     );
     use_hook(move || {
-        if windowed && guide::tour_place().is_none() {
+        if windowed && guide::tour_place() == guide::TourPlace::Never {
             take_tour();
         }
     });

@@ -49,10 +49,10 @@ pub fn app() -> App {
 /// started with one (a test that sets its own).
 fn fresh_folder() {
     static GIVEN: OnceLock<bool> = OnceLock::new();
+    static RUN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     if *GIVEN.get_or_init(|| std::env::var_os(FOLDER_VAR).is_some_and(|v| !v.is_empty())) {
         return;
     }
-    static RUN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let n = RUN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let at = |n: u32| {
         std::env::temp_dir().join(format!("architect-lab-film-{}-{n}", std::process::id()))
