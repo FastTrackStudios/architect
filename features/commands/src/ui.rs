@@ -985,23 +985,20 @@ pub fn QuickOpen() -> Element {
             .strip_suffix(':')
             .map(str::trim)
             .filter(|k| commands.openers.peek().borrow().title(k).is_some());
-        match kind {
-            Some(k) => {
-                only.set(Some(k.to_owned()));
-                query.set(String::new());
-            }
-            None => {
-                only.set(None);
-                query.set(q);
-            }
+        if let Some(k) = kind {
+            only.set(Some(k.to_owned()));
+            query.set(String::new());
+        } else {
+            only.set(None);
+            query.set(q);
         }
     });
     // An opener that answers later (an extension's) bumps the version.
     let _ = (commands.version)();
-    let asked = match only() {
-        Some(kind) => format!("{kind}:{}", query.read()),
-        None => query.read().clone(),
-    };
+    let asked = only().map_or_else(
+        || query.read().clone(),
+        |kind| format!("{kind}:{}", query.read()),
+    );
     let found: Vec<Found> = commands.openers.read().borrow().search(&asked);
     let placeholder = only()
         .and_then(|k| {

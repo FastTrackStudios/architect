@@ -77,11 +77,11 @@ pub fn pick(id: &str, appearance: &str, scheme: &str) -> Value {
     } else {
         "dark"
     };
-    let mut set = json!({ half: id });
-    if half != scheme {
-        set["appearance"] = json!(half);
+    if half == scheme {
+        json!({ half: id })
+    } else {
+        json!({ half: id, "appearance": half })
     }
-    set
 }
 
 impl Extension for ThemePicker {

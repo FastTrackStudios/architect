@@ -88,10 +88,11 @@ fn say(s: State, ok: bool, text: impl Into<String>) {
     note.set(Some((ok, text.into())));
 }
 
-/// What the manager's views read, in context: the manager, `browse` (the
-/// extensions' catalog, for the extension kind's own page) and the page's
-/// state; and the page opened at an item when `MANAGER_SHOW` (⌘O's
-/// `ext:`) asks.
+/// What the manager's views read, in context, and the page opened at an
+/// item when `MANAGER_SHOW` (⌘O's `ext:`) asks.
+///
+/// The manager, `browse` (the extensions' catalog, for the extension
+/// kind's own page) and the page's state.
 ///
 /// Its settings section and ⌘O's `ext:` are the `manager` extension's
 /// (`manager.toml`'s `[[sections]]` and `[[openers]]`): call it under the

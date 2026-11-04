@@ -537,7 +537,7 @@ fn use_quick_open(host: Host, revision: Signal<u64>) {
         for by in now {
             commands.register_opener(quick_opener(
                 host.list().clone(),
-                commands,
+                &commands,
                 opens.tx(),
                 &by.item,
             ));
@@ -563,13 +563,14 @@ use architect_commands::{OpenIn, OpenItem, Opener};
 /// again (`Commands::refresh`), the last answer shown meanwhile.
 fn quick_opener(
     list: ActionList,
-    commands: architect_commands::Commands,
+    commands: &architect_commands::Commands,
     opens: mpsc::UnboundedSender<(ActionList, String, String)>,
     decl: &contrib::OpenerDecl,
 ) -> Opener {
+    let commands = *commands;
     let answers: Answers = Rc::default();
-    let asking: Rc<std::cell::RefCell<std::collections::BTreeSet<String>>> = Rc::default();
-    let last: Rc<std::cell::RefCell<Vec<OpenItem>>> = Rc::default();
+    let pending: Rc<std::cell::RefCell<std::collections::BTreeSet<String>>> = Rc::default();
+    let shown_last: Rc<std::cell::RefCell<Vec<OpenItem>>> = Rc::default();
     let (kind, action) = (decl.kind.clone(), decl.action.clone());
     let (ask_list, ask_kind) = (list.clone(), kind.clone());
     let items = move |query: &str| -> Vec<OpenItem> {
@@ -578,8 +579,8 @@ fn quick_opener(
         {
             return items.clone();
         }
-        if asking.borrow().contains(query) {
-            return last.borrow().clone();
+        if pending.borrow().contains(query) {
+            return shown_last.borrow().clone();
         }
         let (list, action, args) = (
             ask_list.clone(),
@@ -595,26 +596,26 @@ fn quick_opener(
         let mut cx = std::task::Context::from_waker(futures::task::noop_waker_ref());
         if let std::task::Poll::Ready(out) = run.as_mut().poll(&mut cx) {
             let items = open_items(&ask_kind, out.ok());
-            *last.borrow_mut() = items.clone();
+            shown_last.borrow_mut().clone_from(&items);
             return items;
         }
-        asking.borrow_mut().insert(query.to_owned());
+        pending.borrow_mut().insert(query.to_owned());
         let (kept, asked, shown, kind, query) = (
             Rc::clone(&answers),
-            Rc::clone(&asking),
-            Rc::clone(&last),
+            Rc::clone(&pending),
+            Rc::clone(&shown_last),
             ask_kind.clone(),
             query.to_owned(),
         );
         spawn(async move {
             let items = open_items(&kind, run.await.ok());
             asked.borrow_mut().remove(&query);
-            *shown.borrow_mut() = items.clone();
+            shown.borrow_mut().clone_from(&items);
             kept.borrow_mut()
                 .insert(query, (std::time::Instant::now(), items));
             commands.refresh();
         });
-        last.borrow().clone()
+        shown_last.borrow().clone()
     };
     let (open, by_id) = if decl.open.is_empty() {
         (decl.action.clone(), false)
@@ -628,16 +629,17 @@ fn quick_opener(
             OpenIn::Split => "split",
         };
         let key = if by_id { "id" } else { "open" };
-        let mut args = json!({ key: item.id });
+        let mut args = serde_json::Map::new();
+        args.insert(key.to_owned(), json!(item.id));
         // Where it goes, to an action that takes it (`in` in its params).
         let takes_in = list
             .info(&open)
             .and_then(|i| i.params_schema)
             .is_some_and(|p| p.contains("\"in\""));
         if takes_in {
-            args["in"] = json!(place);
+            args.insert("in".to_owned(), json!(place));
         }
-        let args = args.to_string();
+        let args = Value::Object(args).to_string();
         let _ = opens.unbounded_send((list.clone(), open.clone(), args));
     };
     Opener::new(kind, decl.title.clone(), items, opened)

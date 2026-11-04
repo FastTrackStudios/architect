@@ -9,7 +9,9 @@
 //!
 //! Each runs on a lab folder of its own, empty (`ARCHITECT_LAB_CONFIG_DIR`):
 //! nothing of the person's (their themes, layouts, extensions) is in it.
-//! One test plays them in turn, as the folder is the process's.
+//! One test plays them in turn, as the folder is the process's. They are
+//! the lab's default features: `architect-lab-ui/wasi` adds the manager's
+//! Components kind to the extensions page.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -67,7 +69,7 @@ fn looks_the_same(name: &str, steps: &str) {
             .unwrap_or_else(|| want.lines().count().min(last.0.lines().count()));
         panic!(
             "{name} does not look the same: first difference at line {} (diff {} {})",
-            first + 1,
+            first.saturating_add(1),
             path.display(),
             got.display()
         );
