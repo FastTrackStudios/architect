@@ -41,6 +41,10 @@ pub mod luau;
 pub mod settings;
 #[cfg(feature = "luau")]
 pub mod theme;
+#[cfg(feature = "luau")]
+mod vm;
+#[cfg(feature = "luau")]
+pub mod worker;
 
 /// Whose a saved script is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Facet)]
