@@ -48,7 +48,7 @@ weight = 67
 > (`features/extensions/src/watch.rs` `Watch`), a project's requirements
 > and an organization's approved list (`features/extensions/src/project.rs`
 > `plan`), and the `EXT_*` actions. The lab's metronome is one
-> (`apps/lab/extensions`). Not yet: WASM runners, overlays, signed
+> (`apps/lab/extensions`). Not yet: overlays, signed
 > archives, `architect ext dev` as a command.
 >
 > **Processes and remote views landed (2026-11-01)** in the same crate:
@@ -279,6 +279,134 @@ rendered by the app.
    app's actions; an epoch budget per tick and a memory cap (Zed's
    `embedded_gpui` spike is the precedent).
 4. **Across a process** (vox): the same wire, the same `tick`.
+
+## WASI components
+
+> **Landed (2026-11-03, #167 part 1)** behind the `wasi` feature of
+> `architect-extensions`, desktop and Android: Wasmtime with the
+> component model and Cranelift. Workers (part 2) and iOS / the web
+> (part 3) are next.
+
+A `kind = "wasm"` extension is a WebAssembly component against the
+`architect:extension` world (`features/extensions/wit/extension.wit`),
+run by `features/extensions/src/wasi.rs` `WasiRunner`. Its manifest
+names the component:
+
+```toml
+kind = "wasm"
+[wasm]
+component = "my_extension.wasm"
+```
+
+**The world.** It imports `host` and exports `guest`:
+
+| | | |
+|---|---|---|
+| import | `run-action`, `setting`, `set-setting`, `log` | the host service's `run`, `setting`, `set_setting`, `log` |
+| import | `call` | any `HostRequest` as JSON, its `HostAnswer` back (`org`, `selection`, files, data) |
+| import | `theme` | the app's theme as data (`wire::ThemeData`) |
+| export | `init`, `actions`, `views` | starts it (with what the copy it replaces saved); what it runs and renders, checked against its manifest |
+| export | `invoke` | runs an action: JSON args, the invocation as JSON |
+| export | `render`, `on-event`, `pending`, `close` | a view: its first edits, its handlers' edits, what changed after an action, unmount |
+| export | `save-state` | its state for a reload |
+
+A view's edits are the remote-view wire's (`wire::Edit`, the world's
+`edit`), so the same `RemoteDocument` applies them: the runner puts each
+component among the app's processes as a local one
+(`WasiRunner::with_processes`, `process::Process::is_local`), and
+`RemoteView`, `ExtensionView` and the panes that show a process's view
+show a component's unchanged.
+
+The WIT is written by hand, not generated from the vox descriptors: the
+host service is one vox method carrying JSON (`host_proto::ExtensionHost`
+`call`), so its descriptor says nothing a WIT could be made from, and the
+calls themselves (`hostcall::HostRequest`) are serde types, not facet
+ones. `features/extensions/tests/wasi_wit.rs` keeps it from drifting: the
+world's types are the wire's (each case and field, from their facet
+shapes), its typed imports are host-service ops, and every method of the
+process protocol's descriptor (`proto::ProcessExtension`) has its place
+in the world or is named as not yet a component's (`updates`).
+
+**Capabilities.** Every import goes through the extension's own
+`hostapi::ExtensionApi`, acting for whoever ran the action, so a
+component is checked exactly as a process, a Luau script and a linked
+extension are: its manifest's capabilities, narrowed by what a person
+granted (`consent`), at the moment it asks. A refused call answers
+`HostError::Refused` as JSON and is a line in its log. WASI 0.2 is
+linked with nothing to reach: no preopened folders, no environment, no
+network; its stdout and stderr are lines in its log (`EXT_LOGS`). A
+component that imports `wasi:sockets` or `wasi:http` is refused before
+it is linked: no capability grants the network. An extension's own
+actions are refused through `run-action` (the call would wait for
+itself).
+
+**Limits** (`wasi::Limits`, per runner):
+
+- **memory** (64 MiB by default): a `ResourceLimiter` refuses growth
+  past it and the call traps, `out of memory: it asked for N MiB, past
+  its limit of M MiB`;
+- **time** (5 s a call by default): one engine ticks its epoch every
+  10 ms; at each tick a running call yields to its thread's executor,
+  and one past its limit of its own time (waiting for the host does not
+  count) traps, `interrupted: it ran for N ms`.
+
+There are no threads in a component: each instance is a `Store` on a
+thread of its own, an actor its calls queue for, so an action, an event
+and a render never meet. A trap ends the instance (a component is not
+entered again after one): the call fails saying why, its views say it
+stopped and mount again, and it is started again fresh; `Stats::traps`
+and `last_trap` say so, the manager's `component` kind lists them.
+Unloading it ends its thread and frees its store.
+
+**The compile cache.** `WasiRunner::with_cache(dir)` keeps each compiled
+component as `<sha256>.cwasm`, keyed by the component's bytes and the
+engine's settings; the next start deserializes it instead of compiling.
+The extension's log says which (`compiled in N ms`, `loaded from the
+compile cache`).
+
+**A Rust guest.** `architect-extension-wasi`
+(`features/extensions/wasi-guest`) is the guest side, the shape of a
+process's `Guest`: views are Dioxus components (a `VirtualDom` per open
+view, its mutations the world's edits), actions take and give JSON, and
+`host::{run, setting, set_setting, theme, log, call}` reach the app. An
+action that changes what a view shows calls `refresh`. Actions are
+synchronous (no async in a component before WASI 0.3).
+
+```rust
+fn build() -> architect_extension_wasi::Extension {
+    architect_extension_wasi::Extension::new()
+        .view("counter", Counter)
+        .action("ACME_COUNTER_ASK", |_| {
+            architect_extension_wasi::host::run("THEME_LIST", &serde_json::Value::Null)
+                .map_err(|e| e.to_string())
+        })
+}
+
+architect_extension_wasi::export!(build);
+```
+
+The crate is a `cdylib` built with
+`cargo build --target wasm32-wasip2` in `devenv --profile wasi shell`
+(the fleet toolchain plus that target: a profile, as an extra target
+changes the rustc path kache shares). The lab's WASI Counter
+(`apps/lab/wasi-counter`) is one: a counter view and an action that asks
+the app for its themes. With the lab's `wasi` feature
+(`cargo run -p architect-desktop --features wasi`) and the component
+built into `target/wasi-guest`, it runs as a development copy and its
+view is the Vault's "WASI Counter" pane.
+`features/extensions/tests/wasi.rs` builds it and a component that
+misbehaves on purpose (`features/extensions/tests/wasi-hazards`) and
+checks the view, a refused call, both limits, unload and the cache.
+
+**Size.** Wasmtime and Cranelift add about 19 MB to a stripped
+`architect-desktop` built with the dev profile (opt-level 1): behind the
+feature, off by default.
+
+**Next.** Part 2: workers — parallelism from more instances, never
+threads in one. Part 3: iOS, where there is no JIT (Wasmtime's Pulley
+interpreter, a smaller memory reservation), and the web (components
+transpiled with jco). Then WASI 0.3's async (`component-model-async`),
+what a component adds at run time (`updates`), and timers in its views.
 
 ## Processes over vox
 
@@ -855,7 +983,10 @@ time, the same linked in or not.
   that program. A development copy of the same id runs it out of
   process, its views drawn remotely, and the app cannot tell the
   difference in what it adds.
-- **As WASM**, when the WASM runner lands, against the same trait.
+- **As WASM**: not yet against the same trait. A WASI component has a
+  guest crate of its own of the same shape (`architect-extension-wasi`,
+  "WASI components" below); a `linked::Extension` built to
+  `wasm32-wasip2` is a later step.
 
 `apps/lab/board/tests/both_ways.rs` runs the lab's Board both ways and
 checks they add the same things, run the same hook and read the same

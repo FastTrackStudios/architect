@@ -307,15 +307,22 @@ fn the_counter_loads_its_view_renders_and_its_actions_run() {
     doc.apply(next(&mut session.frames)).unwrap();
     assert!(text(&doc).contains('3'), "{}", text(&doc));
 
-    // Its action asks the app through the host service; the view shows it.
-    let themes = run(&app, "LAB_WASI_COUNTER_ASK", &Value::Null).unwrap();
-    assert_eq!(themes, json!(["light", "dark", "neon"]));
+    // Its button asks the app through the host service, from a handler.
+    session.events.unbounded_send(click(buttons[1])).unwrap();
     doc.apply(next(&mut session.frames)).unwrap();
     assert!(
         text(&doc).contains("The app has 3 themes"),
         "{}",
         text(&doc)
     );
+
+    // Its action asks the same and answers what the app said; an action
+    // that changes what the view shows sends the view's edits.
+    let themes = run(&app, "LAB_WASI_COUNTER_ASK", &Value::Null).unwrap();
+    assert_eq!(themes, json!(["light", "dark", "neon"]));
+    run(&app, "LAB_WASI_COUNTER_ADD", &json!({ "by": 10 })).unwrap();
+    doc.apply(next(&mut session.frames)).unwrap();
+    assert!(text(&doc).contains("13"), "{}", text(&doc));
     assert!(
         logs(&app, COUNTER)
             .iter()
@@ -331,7 +338,7 @@ fn the_counter_loads_its_view_renders_and_its_actions_run() {
     );
     assert_eq!(
         run(&app, "LAB_WASI_COUNTER_ADD", &json!({ "by": 1 })).unwrap(),
-        4
+        14
     );
 }
 

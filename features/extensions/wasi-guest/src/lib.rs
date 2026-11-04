@@ -46,6 +46,8 @@ use dioxus::prelude::Element;
 use serde_json::Value as Json;
 
 #[doc(hidden)]
+// Generated: its unsafe ABI glue is wit-bindgen's, not ours to restyle.
+#[allow(clippy::all, clippy::pedantic, clippy::nursery, clippy::restriction)]
 pub mod bindings {
     wit_bindgen::generate!({
         path: "../wit",
@@ -378,22 +380,19 @@ impl<S: Setup> bindings::exports::architect::extension::guest::Guest for Compone
     }
 
     fn pending() -> Vec<wit::PaneEdits> {
-        let all = REFRESH.with(|r| r.replace(false));
         let panes: Vec<u64> = PANES.with(|p| p.borrow().keys().copied().collect());
         let mut out = Vec::new();
         for pane in panes {
             let Some(mut vdom) = PANES.with(|p| p.borrow_mut().remove(&pane)) else {
                 continue;
             };
-            if all {
-                vdom.mark_all_dirty();
-            }
             let edits = settle(&mut vdom);
             PANES.with(|p| p.borrow_mut().insert(pane, vdom));
             if !edits.is_empty() {
                 out.push(wit::PaneEdits { pane, edits });
             }
         }
+        REFRESH.with(|r| r.set(false));
         out
     }
 
@@ -409,6 +408,11 @@ impl<S: Setup> bindings::exports::architect::extension::guest::Guest for Compone
 /// Its queued work done and rendered: the edits.
 fn settle(vdom: &mut VirtualDom) -> Vec<wit::Edit> {
     vdom.process_events();
+    // An action or a handler said every view shows something new; the
+    // flag is cleared once every view has rendered (`pending`).
+    if REFRESH.with(Cell::get) {
+        vdom.mark_all_dirty();
+    }
     let mut writer = Writer::default();
     vdom.render_immediate(&mut writer);
     writer.edits

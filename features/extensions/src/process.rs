@@ -268,6 +268,7 @@ static PANES: AtomicU64 = AtomicU64::new(1);
 
 impl Process {
     /// One served in the app's own process by `local`, running.
+    #[cfg(feature = "wasi")]
     pub(crate) fn local(
         id: &str,
         name: &str,
@@ -301,16 +302,19 @@ impl Process {
     }
 
     /// Says it is in `state` now (a local one, which supervises itself).
+    #[cfg(feature = "wasi")]
     pub(crate) fn set_state(&self, state: State) {
         self.inner.state.send_replace(state);
     }
 
     /// Resolves when [`Self::restart`] is asked for.
+    #[cfg(feature = "wasi")]
     pub(crate) async fn restart_asked(&self) {
         self.inner.restart.notified().await;
     }
 
     /// Whether [`Self::stop`] was asked for.
+    #[cfg(feature = "wasi")]
     pub(crate) fn stop_asked(&self) -> bool {
         *self.inner.stop.borrow()
     }
