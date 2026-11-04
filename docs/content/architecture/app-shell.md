@@ -251,10 +251,12 @@ app on the shell gets it:
   or a workspace's tab bars. A page whose top edge is its tabs claims
   the row (`features/shell/src/shell/mod.rs` `use_title_row`;
   `features/workspace/src/host/mod.rs` `WorkspaceView` does when given a
-  `TitleRow`): the page, and a left sidebar it fills, start at the
-  window's top, over the shell's row, so the panes' tab bars along the
-  top edge are the title row, one row and never two; the shell's row
-  stays under the ribbon and the app's sidebar beside them. The leftmost
+  `TitleRow`): the page, and a left sidebar it fills, are laid out from
+  the window's top, so the panes' tab bars along the top edge are the
+  title row, one row and never two; the shell then draws only its
+  pieces of the row over the ribbon, the app's sidebar and the right
+  side beside them (not one row under the page: Blitz finds a press only
+  inside its element's parents' boxes). The leftmost
   bar keeps clear of the traffic lights and the sidebar's button
   (`Shell::title_clearance`). The tab on show is the page's colour and
   runs on into it. The breadcrumb and the page's toolbar sit in the

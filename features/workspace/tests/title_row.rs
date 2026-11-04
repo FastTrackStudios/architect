@@ -170,6 +170,14 @@ fn the_panes_tab_bars_are_the_title_row_one_row() {
         hits_inside(&doc, x + w / 2.0, y + h / 2.0, "[data-tab=\"editor\"]"),
         "the tab is on top"
     );
+    // Every pane's: the right one's too (a press finds an element only
+    // inside its parents' boxes, so the page is laid out at the top, not
+    // lifted over the shell's row).
+    let (x, y, w, h) = rects(&doc, "[data-tab=\"chart\"]")[0];
+    assert!(
+        hits_inside(&doc, x + w / 2.0, y + h / 2.0, "[data-tab=\"chart\"]"),
+        "the right pane's tab is on top"
+    );
     // The panes (each its own header, then its view) start under the one row.
     let notes = rects(&doc, "[data-pane]");
     assert!(!notes.is_empty());

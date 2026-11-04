@@ -37,6 +37,14 @@ steps (
         done {check ({id WORKSPACE_LAYOUT, has {active note-welcome}})}
         hide true
     }
+    // The Vault opens with its sidebar folded (`SidebarDefault::Collapsed`):
+    // show it, as a person would, for the left dock's views.
+    {
+        id sidebar
+        target @css"[aria-label=\"Toggle the sidebar\"]"
+        do @click{}
+        hide true
+    }
     {
         id command
         text "A command pinned to the ribbon runs from it: a new note."
