@@ -179,6 +179,8 @@ pub use view::PageView;
 /// The host service's subset (`#[architect::rpc]` emits a module's worth
 /// of items per trait, so each has a module of its own).
 pub mod host {
+    // The streams' types are used by vox's half (`#[subscribe]`).
+    #[cfg_attr(not(feature = "vox"), allow(unused_imports))]
     use super::{ActionSummary, DataEvent, Notice, PageError, ThemeSnapshot, WorkerMessage};
 
     /// What a page may reach of the app: the host service's subset that
@@ -217,6 +219,7 @@ pub mod host {
 
 /// A page's view.
 pub mod view {
+    #[cfg_attr(not(feature = "vox"), allow(unused_imports))]
     use super::{Element, Overlay, PageError, PageEvent};
 
     /// A page's view: what it renders, and the events that come back.

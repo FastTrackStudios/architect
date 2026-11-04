@@ -12,7 +12,7 @@
 //! 3. **The compiled view**, when there is no file at all.
 //!
 //! A built-in's page file is read-only: it is written under
-//! `<app dir>/pages/.builtin/` for reading ([`write_builtin`]), and
+//! `<app dir>/pages/.builtin/<extension>/` for reading ([`write_builtin`]), and
 //! edited by cloning it to the override's place ([`clone_to_edit`]).
 //!
 //! A page that fails to load or render keeps the last good one on screen
@@ -170,39 +170,36 @@ pub fn override_path(app_dir: &Path, extension: &str, view: &str, kind: PageKind
         .join(format!("{view}.{}", kind.extension()))
 }
 
-/// Writes a built-in's page `source` under `<app dir>/pages/.builtin/`,
-/// read-only, for a person or an agent to read (and clone): its path.
+/// Writes a built-in's page files, read-only: the folder they are in.
+///
+/// Each is `(name, source)` — its pages, what they import, its workers'
+/// scripts — under `<app dir>/pages/.builtin/<extension>/`, for a person
+/// or an agent to read and clone.
 ///
 /// # Errors
 ///
-/// The file could not be written.
+/// A file could not be written.
 pub fn write_builtin(
     app_dir: &Path,
     extension: &str,
-    view: &str,
-    kind: PageKind,
-    source: &str,
-) -> std::io::Result<PageFile> {
-    let path = app_dir
-        .join(PAGES)
-        .join(BUILTIN)
-        .join(extension)
-        .join(format!("{view}.{}", kind.extension()));
-    if std::fs::read_to_string(&path).ok().as_deref() != Some(source) {
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
+    files: &[(&str, &str)],
+) -> std::io::Result<PathBuf> {
+    let dir = app_dir.join(PAGES).join(BUILTIN).join(extension);
+    std::fs::create_dir_all(&dir)?;
+    for (name, source) in files {
+        let path = dir.join(name);
+        if std::fs::read_to_string(&path).ok().as_deref() != Some(*source) {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            if path.exists() {
+                set_read_only(&path, false)?;
+            }
+            std::fs::write(&path, source)?;
         }
-        if path.exists() {
-            set_read_only(&path, false)?;
-        }
-        std::fs::write(&path, source)?;
+        set_read_only(&path, true)?;
     }
-    set_read_only(&path, true)?;
-    Ok(PageFile {
-        path,
-        kind,
-        origin: Origin::Builtin,
-    })
+    Ok(dir)
 }
 
 /// Copies `page` (a built-in's, read-only) to the override's place for
@@ -370,7 +367,13 @@ mod tests {
     fn an_override_wins_and_its_removal_restores_the_builtin() {
         let app = tempfile::tempdir().unwrap();
         assert!(find_override(app.path(), "lab.board", "board").is_none());
-        let builtin = write_builtin(app.path(), "lab.board", "board", PageKind::Tsx, "x").unwrap();
+        let dir = write_builtin(
+            app.path(),
+            "lab.board",
+            &[("board.tsx", "x"), ("job.js", "y")],
+        )
+        .unwrap();
+        let builtin = PageFile::new(dir.join("board.tsx"), Origin::Builtin).unwrap();
         assert!(!builtin.editable());
         assert!(
             std::fs::metadata(&builtin.path)
