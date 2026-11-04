@@ -1404,10 +1404,148 @@ missing extensions use the same components (`MissingExtensions`).
 
 ## Packaging
 
-A signed archive: `extension.toml` (id, version, `api` version,
-capabilities, contributions), the `.wasm`, assets. Installed from a
-registry (a git repository of manifests reviewed by PR, as Zed's, to
-start), or from a file. Hot reload re-instantiates the component.
+A signed `.archext` archive: `extension.toml` (id, version, `api`
+version, capabilities, contributions), the `.wasm` or a program per
+platform, Luau, pages, assets. Installed from a registry (a git
+repository of an index, reviewed by pull request, as Zed's), from a
+file, or from a peer, and checked the same way each time: see
+[Distribution](#distribution). Hot reload re-instantiates the component.
+
+## Distribution
+
+How an extension gets from the repository that builds it to a person's
+app (#182).
+
+### The archive
+
+An `.archext` is a gzipped tar (`tar tzf x.archext` lists it):
+
+| entry | what it is |
+|---|---|
+| `archext.json` | the content index: format `1`, the extension's id, version and kind, the target triples it has builds for, and every other file with its size and SHA-256 |
+| `archext.json.minisig` | a detached minisign signature over the index's bytes, trusted comment `archext <id> <version>` |
+| `extension.toml`, Luau, the `.wasm`, pages, assets | the package's files, as in its folder |
+| `bin/<target-triple>/<program>` | a process extension's program, once per platform |
+
+Packing is deterministic (sorted, dated 0, owned by no one): the same
+files make the same bytes. The format is
+`features/extensions/archive/src/lib.rs` (`architect-extension-archive`:
+`pack`, `open`, `Verified::extract`, `ContentIndex`, `ArchiveError`);
+signing is its `sign` feature (`features/extensions/archive/src/sign.rs`
+`SecretKey`, `sign_archive`), which apps never turn on.
+
+### Signing and trust
+
+The signature is minisign's (Ed25519 over the BLAKE2b-512 of the index),
+so `minisign -V -p key.pub -m archext.json -x archext.json.minisig` checks
+an unpacked one too. Release archives are signed with the **org release
+key**, the same key that signs every FTS release's `SHA256SUMS`
+([release](@/architecture/release.md)); its secret half lives only in the
+repositories' tag-only `release-signing` environments.
+
+An app trusts the org key by default: `Installs::new` holds `Trust::org`
+(`ORG_KEY`, the public half, compiled in); `Installs::with_trust` replaces
+it. A registry's own keys are trusted for that registry's archives only,
+when the app says so (`FolderRegistry::trusting`,
+`GitRegistry::trusting`; `Source::trust`). Whichever way an archive came
+— a registry (`Location::Archive` in its index, fetched as
+`Fetched::Archive`), a file (`EXT_INSTALL_FILE`), a peer
+(`Extensions::install_archive`) — `Installs` opens it, never the source,
+and refuses it before writing anything when:
+
+| it is | `ArchiveError` |
+|---|---|
+| unsigned | `Unsigned` |
+| signed by a key not trusted here (the error names the key id and the keys trusted) | `UntrustedKey` |
+| signed, but its index changed since | `IndexTampered` |
+| a file's bytes are not what the signed index says | `FileTampered` (with the path) |
+| holding a file the index does not list, or missing one it does | `Unlisted`, `Missing` |
+| not a gzipped tar, or a path leaving the package, a link | `NotAnArchive`, `Unsafe` |
+
+The index's `sha256` for the archive is checked first
+(`InstallError::Mismatch`): integrity of what the registry pinned. The
+signature is what makes it authentic: whoever can write a release's
+assets can swap both the archive and a hash, not the key.
+`features/extensions/archive/tests/archive.rs` and
+`features/extensions/tests/distribution.rs` are the refusals, each
+asserted by its error.
+
+### Per platform
+
+A process extension ships `bin/<target-triple>/<program>` for each of
+macOS arm64 and x86_64 (`aarch64-apple-darwin`, `x86_64-apple-darwin`) and
+Linux x86_64 and aarch64 (`x86_64-unknown-linux-gnu`,
+`aarch64-unknown-linux-gnu`; Windows later); its manifest names the
+program once, `[entry] path = "bin/<program>"`. Installing extracts this
+platform's build to `bin/<program>` (executable) and leaves the others
+out, so the runner needs nothing new. A WASI component, Luau and data are
+platform-neutral: no `bin/`.
+
+The registry's entry lists the platforms (`platforms`), so the answer
+comes before a download: a preview says `runs_here: false` and
+`cannot_run: "no build for this platform (…); it has builds for …"`
+(`Preview::cannot_run`, `Listing::no_build_for`), a project's plan says
+`Missing::CannotRun("process: no build for …")`, and an install is
+refused with `ArchiveError::NoBuild`.
+
+### Updates
+
+`EXT_UPDATE {check: true}` (`Extensions::updates`) installs nothing: for
+each install with a newer version its pin allows, the version, the
+registry's `changelog` line, a newer one past the pin (`past_pin`), and
+`asks_more`, what it asks past what was granted (the newer archive is
+fetched and verified to read it). Applying is `EXT_UPDATE` as before: one
+whose capabilities grow waits in `needs_consent` for a person's yes. The
+manager's rows say "update available: 1.3.0 — <changelog>" within the pin
+(`browse::Row::changelog`).
+
+### Releasing one: the reusable workflow
+
+An extension's repository calls `.github/workflows/extension-release.yml`
+on its release tag:
+
+```yaml
+jobs:
+  extension:
+    uses: FastTrackStudios/architect/.github/workflows/extension-release.yml@<architect tag>
+    with:
+      package: extension                 # the folder with extension.toml
+      build: cargo build --release --locked --target "$TARGET" -p studio-extension
+      binary: target/$TARGET/release/studio-extension
+      architect-ref: <architect tag>
+    secrets:
+      EXT_SIGNING_KEY: ${{ secrets.TASK_RELEASE_MINISIGN_KEY }}
+      REGISTRY_TOKEN: ${{ secrets.FTS_REGISTRY_TOKEN }}
+```
+
+`plan` reads the manifest; `build` (a process extension only) builds the
+program once per platform on a runner of that platform (`platforms`,
+`runners`); `pack` stages the package and the builds and runs
+`cargo xtask ext-pack` (and the caller's `prepare`, for a WASI component),
+holding no secret; `sign` runs in the caller's `release-signing`
+environment, signs with `cargo xtask ext-sign --expect <org key>` (a key
+that is not the org key's is refused), verifies, and uploads the archive
+to the release; `index` opens a pull request on the registry adding the
+version's entry. The secrets are passed by name: a called job sees an
+environment's secrets only through what its caller passes.
+
+People use the same commands: `cargo xtask ext-pack <dir>`,
+`cargo xtask ext-sign <archive> --key <file>`, `cargo xtask ext-verify`,
+and `cargo xtask ext-keygen` for a throwaway key to try it with (never a
+release's).
+
+### The registry
+
+`index.toml` in the registry's repository, one `[[extensions]]` entry a
+version: `archive` (a release asset's URL, or a path in the repository)
+and its `sha256`, `platforms`, `changelog`, beside the older `path` and
+`git` + `rev` locations. `examples/registry/` is the skeleton
+(`examples/registry/index.schema.json` the schema,
+`examples/registry/README.md`), with a sample signed by a throwaway key;
+`cargo xtask ext-index <dir>` checks an index — the schema, each archive's
+hash and signature, and that the archive is what its entry says
+(`features/extensions/archive/src/registry.rs` `check`) — and is the
+registry's CI.
 
 ## Compared with REAPER
 
@@ -1468,7 +1606,8 @@ person has (by name, what it adds, its kind — scripts, views, JSFX,
 themes); each extension's page says what it adds, the permissions it
 asks for, its versions, and where it runs (a process extension says
 "desk only"); install, update, pin a version, disable, remove. ⌘O finds
-extensions too (`ext:`). Updates arrive as the registry changes, and
+extensions too (`ext:`). Updates arrive as the registry changes — "update
+available", with the registry's changelog line, within the pin — and
 apply by hot reload.
 
 ## What a project needs
@@ -1524,12 +1663,12 @@ person's own scripts are not.
 
 ## The registry
 
-A git repository of manifests, reviewed by pull request (Zed's
-`extensions` repository): each extension is a manifest naming its source
-repository and a commit or tag; a CI job builds the `.wasm` (or checks the
-data), signs the archive and publishes it as a release asset. The app
-reads the registry's index (a file the CI keeps), installs by id and
-version, and checks the signature. A second registry (an org's own, a
+A git repository of an index, reviewed by pull request (Zed's
+`extensions` repository): each version an entry naming its signed
+archive, which the extension's own release workflow built, signed and
+published as a release asset ([Distribution](#distribution)). The app
+reads the registry's index, installs by id and version, and checks the
+signature. A second registry (an org's own, a
 local folder) is one more git URL in the settings, and a **ReaPack
 repository** (`index.xml`) is a source too: its packages install as the
 app's package kinds (Studio's JSFX, scripts, presets).
