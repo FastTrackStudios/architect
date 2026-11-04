@@ -21,6 +21,10 @@ architect-theme = { workspace = true, features = ["actions"] }
 architect-canvas = { workspace = true, features = ["luau"] }
 architect-scripting = { workspace = true, features = ["luau"] }
 futures = "0.3"
+# tests/host.rs: the host service over the clicker's connection.
+architect-permissions = { workspace = true }
+architect-settings = { workspace = true }
+tempfile = "3"
 
 [lints]
 workspace = true

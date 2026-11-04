@@ -11,7 +11,8 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use architect_extensions::guest::{Guest, GuestError, use_theme};
+use architect_extensions::guest::{Guest, GuestError, host, use_theme};
+use architect_extensions::hostcall::HostRequest;
 use dioxus::prelude::*;
 
 static CLICKS: AtomicU64 = AtomicU64::new(0);
@@ -79,11 +80,34 @@ fn Counter() -> Element {
     }
 }
 
+/// `LAB_CLICKER_PROBE`: its setting and the app's status, asked of the
+/// host over its own connection (`guest::host`), checked there against
+/// its capabilities. What it says on stderr is in its log (`EXT_LOGS`).
+async fn probe() -> Result<serde_json::Value, String> {
+    let step = host(HostRequest::Setting {
+        key: "lab.clicker.step".to_owned(),
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let status = host(HostRequest::Run {
+        action: "APP_STATUS".to_owned(),
+        args: serde_json::Value::Null,
+        ticket: None,
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let problems = status["problems"].as_array().map_or(0, Vec::len);
+    // Its stderr is its log.
+    eprintln!("probe: step {step}, {problems} problem(s)");
+    Ok(serde_json::json!({ "step": step, "problems": problems, "pid": std::process::id() }))
+}
+
 fn main() -> Result<(), GuestError> {
     Guest::new()
         .view("counter", Counter)
         .action("LAB_CLICKER_CLICKS", |_| async {
             Ok(serde_json::json!(CLICKS.load(Ordering::Relaxed)))
         })
+        .action("LAB_CLICKER_PROBE", |_| probe())
         .serve()
 }
