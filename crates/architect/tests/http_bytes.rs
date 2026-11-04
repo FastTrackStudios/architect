@@ -263,33 +263,67 @@ async fn an_upload_streams_past_the_default_cap_and_downloads_by_range() {
     assert_eq!(client.list("acme".into()).await.unwrap(), vec![id]);
 }
 
+/// A `PUT` written by hand: the head, then exactly `body`, then the reply
+/// read to its end (the request says `Connection: close`).
+///
+/// Not reqwest, for a refused body: it keeps writing the body after the
+/// server has answered `413` without reading it, and a server that closes
+/// a socket with unread bytes in it resets the connection, so the write
+/// fails with `ECONNRESET` before the client reads the reply. On Linux's
+/// loopback the 3 MiB usually fits in the socket buffers first; on macOS
+/// it mostly does not. Sending only what the server reads makes its close
+/// a plain end of stream on both.
+async fn raw_put(base: &str, path: &str, headers: &str, body: &[u8]) -> (u16, String) {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    let addr = base.trim_start_matches("http://");
+    let mut socket = tokio::net::TcpStream::connect(addr).await.unwrap();
+    let head = format!("PUT {path} HTTP/1.1\r\nhost: {addr}\r\nconnection: close\r\n{headers}\r\n");
+    socket.write_all(head.as_bytes()).await.unwrap();
+    socket.write_all(body).await.unwrap();
+    let mut reply = Vec::new();
+    socket.read_to_end(&mut reply).await.unwrap();
+    let reply = String::from_utf8(reply).unwrap();
+    let status = reply.split(' ').nth(1).unwrap().parse().unwrap();
+    (status, reply)
+}
+
 #[tokio::test]
 async fn a_body_over_the_route_cap_is_refused() {
     let base = serve(media::http::router(media::Backend::default())).await;
     let http = reqwest::Client::new();
+    let cap = 2 << 20;
 
-    // A declared length over 2 MiB: 413 before the method runs.
-    let response = http
-        .put(format!("{base}/org/acme/notes/upload"))
-        .body(payload())
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), 413);
+    // A declared length over 2 MiB: 413 from the head alone, before the
+    // method runs; none of the body is sent.
+    let (status, _) = raw_put(
+        &base,
+        "/org/acme/notes/upload",
+        &format!("content-length: {}\r\n", payload().len()),
+        b"",
+    )
+    .await;
+    assert_eq!(status, 413);
 
-    // Chunked, no length: the stream fails at the cap and the method says so.
-    let chunks = payload()
-        .chunks(64 << 10)
-        .map(|c| Ok::<_, std::io::Error>(c.to_vec()))
-        .collect::<Vec<_>>();
-    let response = http
-        .put(format!("{base}/org/acme/notes/upload"))
-        .body(reqwest::Body::wrap_stream(futures::stream::iter(chunks)))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), 413);
-    assert!(response.text().await.unwrap().contains("too_large"));
+    // Chunked, no length: the stream fails at the cap and the method says
+    // so. 2 MiB in 64 KiB chunks, then a chunk of one byte past the cap,
+    // and nothing after it: the server reads all of it.
+    let mut chunked = Vec::new();
+    for chunk in payload()[..cap].chunks(64 << 10) {
+        chunked.extend_from_slice(format!("{:x}\r\n", chunk.len()).as_bytes());
+        chunked.extend_from_slice(chunk);
+        chunked.extend_from_slice(b"\r\n");
+    }
+    chunked.extend_from_slice(b"1\r\n\x07");
+    let (status, reply) = raw_put(
+        &base,
+        "/org/acme/notes/upload",
+        "transfer-encoding: chunked\r\n",
+        &chunked,
+    )
+    .await;
+    assert_eq!(status, 413);
+    assert!(reply.contains("too_large"), "{reply}");
 
     // Under the cap it goes through.
     let response = http
