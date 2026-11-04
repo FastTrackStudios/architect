@@ -1075,8 +1075,10 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "architect-extensions",
+ "architect-pages",
  "architect-settings",
  "architect-workspace-hack",
+ "blitz-dom",
  "dioxus",
  "futures",
  "futures-timer",
@@ -1126,6 +1128,7 @@ dependencies = [
  "architect-guide",
  "architect-lab-board",
  "architect-orgs",
+ "architect-pages",
  "architect-presence",
  "architect-scripting",
  "architect-settings",

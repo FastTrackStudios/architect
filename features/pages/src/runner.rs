@@ -440,6 +440,14 @@ impl Pages {
         lock(&self.0.declared).insert((extension.to_owned(), view.to_owned()), page);
     }
 
+    /// The page declared for `extension`'s view `view` ([`Self::declare`]).
+    #[must_use]
+    pub fn declared(&self, extension: &str, view: &str) -> Option<PageFile> {
+        lock(&self.0.declared)
+            .get(&(extension.to_owned(), view.to_owned()))
+            .cloned()
+    }
+
     /// Forgets `extension`'s pages (it unloaded).
     pub fn forget(&self, extension: &str) {
         lock(&self.0.declared).retain(|(e, _), _| e != extension);

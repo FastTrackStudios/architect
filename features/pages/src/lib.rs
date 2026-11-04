@@ -29,6 +29,8 @@ pub mod api;
 pub mod diff;
 pub mod files;
 
+#[cfg(feature = "runner")]
+pub mod actions;
 #[cfg(feature = "codegen")]
 pub mod codegen;
 #[cfg(feature = "runner")]
