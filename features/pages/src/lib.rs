@@ -23,7 +23,8 @@
 //! Features: `codegen` writes `architect.d.ts` and `architect.d.luau`
 //! from the services' descriptors; `js` runs TSX/JS pages on `QuickJS`
 //! (oxc transpiles TypeScript and JSX in Rust); `luau` runs Luau element
-//! pages; `ui` mounts a page in a pane. (`.a2ui.json` pages are named,
+//! pages; `ui` mounts a page in a pane; `manager` makes them a kind of
+//! the extensions manager and `EXT_CHECK`'s page half. (`.a2ui.json` pages are named,
 //! [`PageKind::A2ui`], but no runner draws them yet.)
 
 pub mod api;
@@ -40,6 +41,8 @@ pub mod host;
 pub mod js;
 #[cfg(feature = "luau")]
 pub mod luau;
+#[cfg(feature = "manager")]
+pub mod manage;
 #[cfg(feature = "runner")]
 pub mod runner;
 #[cfg(feature = "js")]

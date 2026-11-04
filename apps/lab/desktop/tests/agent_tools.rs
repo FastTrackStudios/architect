@@ -115,6 +115,19 @@ fn the_guide_names_every_action_of_the_lab() {
     assert!(text.contains("## Inspect before acting"));
     assert!(text.contains("Ctrl+Alt+Shift+Escape"));
     assert!(text.contains("EXT_CHECK"));
+    // The page API's types are written beside it, and named in it.
+    for types in ["architect.d.ts", "architect.d.luau"] {
+        assert!(dir.join(types).is_file(), "{types} was not written");
+        assert!(
+            text.contains(&format!("{}`", dir.join(types).display())),
+            "the guide does not name {types}"
+        );
+    }
+    assert!(
+        std::fs::read_to_string(dir.join("architect.d.ts"))
+            .unwrap()
+            .contains("declare module \"architect\""),
+    );
     let missing: Vec<&String> = ids
         .iter()
         .filter(|id| !text.contains(&format!("`{id}`")))

@@ -781,6 +781,7 @@ struct Inner {
     runners: Mutex<Vec<Arc<dyn Runner>>>,
     /// The view kinds the app provides: what its views may name.
     kinds: Mutex<ViewKinds>,
+    page_checker: Mutex<Option<crate::check::PageChecker>>,
     loaded: Mutex<BTreeMap<String, Running>>,
     listeners: Mutex<Vec<Listener>>,
     /// The app's themes, when it gave them: what extensions' themes and
@@ -849,6 +850,7 @@ impl Host {
                 sections: Arc::new(sections),
                 runners: Mutex::new(vec![Arc::new(DataRunner), Arc::new(LuauRunner::new())]),
                 kinds: Mutex::new(ViewKinds::new()),
+                page_checker: Mutex::new(None),
                 loaded: Mutex::new(BTreeMap::new()),
                 listeners: Mutex::new(Vec::new()),
                 themes: Mutex::new(None),
@@ -1131,9 +1133,33 @@ impl Host {
     /// kinds, and whether it runs process extensions.
     #[must_use]
     pub fn checker(&self) -> crate::check::Checker {
-        crate::check::Checker::new()
+        let checker = crate::check::Checker::new()
             .with_view_kinds(self.view_kinds())
-            .with_processes(self.runs(Kind::Process))
+            .with_processes(self.runs(Kind::Process));
+        match self.page_checker() {
+            Some(pages) => checker.with_page_checker(pages),
+            None => checker,
+        }
+    }
+
+    /// `EXT_CHECK` checks a view's page file with `pages` (the app's page
+    /// runner: `architect_pages`' `Pages::check_file`).
+    pub fn set_page_checker(&self, pages: crate::check::PageChecker) {
+        *self
+            .inner
+            .page_checker
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(pages);
+    }
+
+    /// What checks a view's page file, when the app gave one.
+    #[must_use]
+    pub fn page_checker(&self) -> Option<crate::check::PageChecker> {
+        self.inner
+            .page_checker
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     /// Takes views of `kinds` (the app's [`ViewKinds`], the ones its

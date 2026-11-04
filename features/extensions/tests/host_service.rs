@@ -553,3 +553,45 @@ fn the_manager_lists_and_acts_on_every_kind() {
         "{got}"
     );
 }
+
+/// An extension's page in the manager has its views' frame health — p50,
+/// p99 and slow count — from the app's meters (`EXT_VIEWS`'s), in its
+/// parts and its data.
+#[test]
+fn the_manager_shows_an_extensions_frame_health() {
+    use architect_extensions::browse::Browse;
+    use architect_extensions::manager::extension::ManagerExtension;
+    use architect_extensions::manager::{Manager, kinds};
+    let tmp = tempfile::tempdir().unwrap();
+    let (_, _, host) = app(tmp.path());
+    let manager = Manager::new();
+    let ext = Extensions::new(host, Installs::new(tmp.path().join("installs")))
+        .with_linked(&ManagerExtension::new(manager.clone()))
+        .unwrap();
+    let _ = ext.sync();
+    let meters = architect_workspace::Meters::new();
+    manager.register(kinds::ExtensionKind::new(Browse::new(ext)).with_meters(meters.clone()));
+    let before = manager.get("extension", "manager").unwrap();
+    let health = before
+        .parts
+        .iter()
+        .find(|p| p.title == "Frame health")
+        .unwrap();
+    assert_eq!(health.lines, ["No view of it measured yet"]);
+
+    let meter = meters.meter("manager/manager", Duration::from_millis(16));
+    for ms in [4, 6, 30] {
+        meter.record(Duration::from_millis(ms));
+    }
+    let after = manager.get("extension", "manager").unwrap();
+    let health = after
+        .parts
+        .iter()
+        .find(|p| p.title == "Frame health")
+        .unwrap();
+    assert_eq!(
+        health.lines,
+        ["manager: p50 6 ms · p99 30 ms · 1 slow of 3 frames (budget 16 ms)"]
+    );
+    assert_eq!(after.data["views"][0]["slow"], 1, "{}", after.data);
+}

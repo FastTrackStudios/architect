@@ -40,6 +40,9 @@ runner = [
     "dep:tokio",
     "dep:tracing",
 ]
+# The extensions manager's `pages` kind and `EXT_CHECK`'s page half
+# (`manage`).
+manager = ["runner", "architect-extensions/manager"]
 ui = [
     "runner",
     "dep:dioxus",
@@ -88,11 +91,11 @@ dioxus-native-dom = { workspace = true, optional = true }
 
 [dev-dependencies]
 # A window to mount pages in, headless (`tests/pane.rs`).
-architect-extensions = { workspace = true, features = ["host", "linked", "ui", "remote"] }
+architect-extensions = { workspace = true, features = ["host", "linked", "ui", "remote", "manager", "page"] }
 architect-settings = { workspace = true }
 blitz-traits = { workspace = true }
 architect-scripting = { workspace = true, features = ["luau"] }
-architect-pages = { path = ".", features = ["codegen", "js", "luau", "ui"] }
+architect-pages = { path = ".", features = ["codegen", "js", "luau", "ui", "manager"] }
 futures = "0.3"
 tempfile = "3"
 tokio = { workspace = true }

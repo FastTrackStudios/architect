@@ -640,11 +640,13 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
     // The extensions manager: its kinds are added below, once what they
     // manage exists (the layouts' in the lab's root).
     let manager = use_hook(Manager::new);
-    // Every extension view's frame times, for the views below and
-    // EXT_VIEWS; a slow or busy view, to the log (an app wires its
-    // status board here: `Meters::with_report`).
+    // Every extension view's frame times, for the views below, EXT_VIEWS
+    // and the manager's "Frame health"; a slow or busy view, to the log
+    // and to `APP_STATUS`'s problems until it keeps up again.
     let meters = use_context_provider(|| {
-        architect_workspace::Meters::new().with_report(Arc::new(LogSlowViews))
+        architect_workspace::Meters::new().with_report(Arc::new(LabViewReport {
+            problems: architect_extensions::views::ViewProblems::new(lab.problems().clone()),
+        }))
     });
     let extensions = use_hook(|| {
         // The kinds its views may be: Frame's surface besides Dioxus.
@@ -760,7 +762,7 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
     // "Extensions" view.
     let browse = use_hook(|| Browse::new(extensions.clone()));
     use_hook(|| {
-        manager.register(kinds::ExtensionKind::new(browse.clone()));
+        manager.register(kinds::ExtensionKind::new(browse.clone()).with_meters(meters.clone()));
         manager.register(kinds::ScriptKind::new(extensions.clone()));
         manager.register(kinds::WorkerKind::new(processes()));
         if let Some(store) = &themes {
@@ -768,11 +770,20 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         }
         manager.confirm_on(&lab);
     });
-    architect_extensions::page::use_manager_page(manager, browse);
+    architect_extensions::page::use_manager_page(manager.clone(), browse);
     // Pages: a view drawn from a file — the Board's tab (its
     // pages/board.tsx, a read-only built-in under the lab's folder), or
     // an override saved as <lab dir>/pages/<extension>/<view>.tsx.
     let pages = use_hook(|| lab_pages(&list, &lab, themes.as_ref()));
+    // Their problems in `APP_STATUS`, `EXT_CHECK` renders an extension's
+    // page files with them, and the manager lists them.
+    use_hook(|| {
+        pages.report_problems(lab.problems());
+        extensions.host().set_page_checker(pages.page_checker());
+        manager.register(
+            architect_pages::manage::PagesKind::new(pages.clone()).with_meters(meters.clone()),
+        );
+    });
     let _ = architect_pages::ui::use_view_pages(pages);
     use_extension_ui(extensions.host().clone(), Arc::clone(&lab))
 }
@@ -898,8 +909,8 @@ fn use_settings_bridge(values: &LabValues) {
 
 /// The lab's pages: TSX/JS on `QuickJS` over the extensions' Action List
 /// and the lab's theme, overrides in the lab's folder, the Board's page
-/// as a built-in, the page types written for an editor, `PAGES_*` on the
-/// lab's list.
+/// as a built-in, `PAGES_*` on the lab's list. (The page types for an
+/// editor are written with the agents' guide: [`crate::page_types`].)
 fn lab_pages(
     list: &ActionList,
     lab: &ActionList,
@@ -916,11 +927,6 @@ fn lab_pages(
         .with_app_dir(&root)
         .with_js()
         .with_luau();
-    // The page API's types, for an editor: the seam the generated guide
-    // (#270) will call on every start.
-    if let Err(e) = architect_pages::codegen::write_types(&root) {
-        tracing::warn!(error = %e, "the page types were not written");
-    }
     let id = architect_lab_board::ID;
     match write_builtin(&root, id, architect_lab_board::PAGES) {
         Ok(dir) => {
@@ -934,11 +940,13 @@ fn lab_pages(
     pages
 }
 
-/// Tells the log when an extension view turns slow or busy, and when it
-/// comes back.
-struct LogSlowViews;
+/// Tells `APP_STATUS` and the log when an extension view turns slow or
+/// busy, and when it comes back.
+struct LabViewReport {
+    problems: architect_extensions::views::ViewProblems,
+}
 
-impl architect_workspace::ViewReport for LogSlowViews {
+impl architect_workspace::ViewReport for LabViewReport {
     fn report(
         &self,
         view: &str,
@@ -946,6 +954,7 @@ impl architect_workspace::ViewReport for LogSlowViews {
         summary: &architect_workspace::ViewSummary,
     ) {
         use architect_workspace::ViewHealth;
+        self.problems.report(view, health, summary);
         let p99_ms = summary.p99.as_secs_f64() * 1000.0;
         match health {
             ViewHealth::Busy => tracing::warn!(view, p99_ms, "an extension view is busy"),

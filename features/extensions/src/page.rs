@@ -41,9 +41,6 @@ use crate::manage::{Installed, Preview};
 use crate::manager::{Item, Manager};
 use crate::project::Plan;
 
-/// How many rows the list shows at once.
-const SHOWN: usize = 12;
-
 /// The settings section the page is.
 pub const SECTION: &str = "extensions";
 
@@ -144,36 +141,85 @@ pub fn use_manager_page(manager: Manager, browse: Browse) {
     });
 }
 
-/// The manager as the settings page's section.
+/// The manager as the settings page's section: in the page's own scroll.
 #[component]
 pub fn ManagerSection() -> Element {
     let manager = use_context::<Manager>();
     rsx! { ManagerPage { manager } }
 }
 
-/// The manager in a workspace pane (and the `manager` extension's view).
+/// What stays above the list's scrolled-out rows: Blitz clips what a
+/// scroller draws, not what it hit-tests, so a row scrolled up under the
+/// search field would take its clicks (`skills/architect/references/blitz-quirks.md`).
+const LIFT: &str = "position: relative; z-index: 1; background: var(--background);";
+
+/// Below this width (CSS px) the manager in a pane shows the list or one
+/// item's page, not both.
+pub const NARROW: f64 = 620.0;
+
+/// The manager in a workspace pane (and the `manager` extension's view):
+/// it fills the pane, the list and the item's page each scroll on their
+/// own, side by side — or, in a pane narrower than [`NARROW`], the list
+/// and then the item picked, with the way back.
 #[component]
 pub fn ManagerView() -> Element {
     let manager = use_context::<Manager>();
+    let mut width = use_signal(|| None::<f64>);
+    let mut mounted = use_signal(|| None::<std::rc::Rc<MountedData>>);
+    // Its width, measured as the pane is resized (Blitz has no `onresize`):
+    // `peek`s, so the loop is not restarted by what it sets.
+    use_future(move || async move {
+        loop {
+            let at = mounted.peek().clone();
+            if let Some(at) = at
+                && let Ok(r) = at.get_client_rect().await
+            {
+                let w = r.size.width;
+                if w > 0.0 && width.peek().is_none_or(|was| (was - w).abs() > 0.5) {
+                    width.set(Some(w));
+                }
+            }
+            futures_timer::Delay::new(std::time::Duration::from_millis(200)).await;
+        }
+    });
+    let narrow = width().is_some_and(|w| w < NARROW);
     rsx! {
-        div { style: "height: 100%; overflow-y: scroll; padding: 20px 24px; background: var(--background); color: var(--foreground);",
-            ManagerPage { manager }
+        div {
+            style: "height: 100%; width: 100%; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; padding: 12px 14px; background: var(--background); color: var(--foreground);",
+            onmounted: move |e| mounted.set(Some(e.data())),
+            ManagerPage { manager, fill: true, narrow }
         }
     }
 }
 
 /// The manager's page: kinds, search across them, the list, and the
 /// page of the item picked.
+///
+/// `fill`: it fills its parent (a flex column of a set height, as
+/// [`ManagerView`]'s), the list and the item's page each scrolling on
+/// their own; otherwise it is as tall as it is, in its parent's scroll
+/// (the settings page). `narrow`, with `fill`: the list, or the item
+/// picked with the way back.
 #[component]
-pub fn ManagerPage(manager: Manager) -> Element {
+pub fn ManagerPage(
+    manager: Manager,
+    #[props(default)] fill: bool,
+    #[props(default)] narrow: bool,
+) -> Element {
     let s = state();
     let _ = (s.rev)();
     let query = (s.query)();
     let kind = (s.kind)();
     let items = manager.list(kind.as_deref(), &query);
-    let selected = (s.selected)()
-        .filter(|(k, i)| items.iter().any(|x| &x.kind == k && &x.id == i))
-        .or_else(|| items.first().map(|i| (i.kind.clone(), i.id.clone())));
+    let picked = (s.selected)().filter(|(k, i)| items.iter().any(|x| &x.kind == k && &x.id == i));
+    let master_detail = fill && narrow;
+    let selected = if master_detail {
+        picked.clone()
+    } else {
+        picked
+            .clone()
+            .or_else(|| items.first().map(|i| (i.kind.clone(), i.id.clone())))
+    };
     let mut kinds = vec![(String::new(), "All".to_owned())];
     kinds.extend(
         manager
@@ -186,69 +232,121 @@ pub fn ManagerPage(manager: Manager) -> Element {
         .as_ref()
         .and_then(|b| b.extensions().host().grants())
         .and_then(|g| g.org());
+    let (root, body, list_col, list_box, page_col) = match (fill, narrow) {
+        (true, false) => (
+            "flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px;",
+            "flex: 1; min-height: 0; display: flex; gap: 16px;",
+            "flex: 0 0 300px; min-height: 0; display: flex; flex-direction: column; gap: 8px;",
+            "flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 10px;",
+            "flex: 1; min-width: 0; min-height: 0; overflow-y: auto;",
+        ),
+        (true, true) => (
+            "flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px;",
+            "flex: 1; min-height: 0; display: flex; flex-direction: column;",
+            "flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px;",
+            "flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 10px;",
+            "flex: 1; min-width: 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px;",
+        ),
+        // In the parent's scroll: no scroller of its own (a scroller inside
+        // the page's scroller loses its clicks in Blitz). Side by side when
+        // there is room; the page under the list when not.
+        (false, _) => (
+            "display: flex; flex-direction: column; gap: 14px;",
+            "display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start;",
+            "flex: 1 1 260px; max-width: 360px; display: flex; flex-direction: column; gap: 8px;",
+            "display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 10px;",
+            "flex: 999 1 380px; min-width: 0;",
+        ),
+    };
+    let show_list = !master_detail || picked.is_none();
+    let show_page = !master_detail || picked.is_some();
     rsx! {
         style { {architect_ui::UTILITIES_CSS} }
-        div { style: "display: flex; flex-direction: column; gap: 14px; font-family: inherit; color: var(--foreground);",
+        div { style: "{root} font-family: inherit; color: var(--foreground);",
             if let (Some(asking), Some(browse)) = ((s.asking)(), browse.clone()) {
-                ConsentPrompt {
-                    previews: asking.previews.clone(),
-                    org,
-                    action: match asking.purpose { For::Install { .. } => "Install", For::Update => "Update", For::Grant => "Grant" }.to_owned(),
-                    on_answer: move |scope: Option<Scope>| answer(&browse, s, &asking, scope),
+                div { style: "{LIFT} flex: none;",
+                    ConsentPrompt {
+                        previews: asking.previews.clone(),
+                        org,
+                        action: match asking.purpose { For::Install { .. } => "Install", For::Update => "Update", For::Grant => "Grant" }.to_owned(),
+                        on_answer: move |scope: Option<Scope>| answer(&browse, s, &asking, scope),
+                    }
                 }
             }
             if let Some((ok, text)) = (s.note)() {
-                Alert { variant: if ok { AlertVariant::Default } else { AlertVariant::Destructive },
-                    AlertDescription { "{text}" }
-                }
-            }
-            SegmentedControl {
-                value: kind.clone().unwrap_or_default(),
-                options: kinds,
-                on_change: move |v: String| {
-                    let mut k = s.kind;
-                    k.set((!v.is_empty()).then_some(v));
-                },
-            }
-            // Side by side when there is room; the page under the list in
-            // a narrow pane.
-            div { style: "display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start;",
-                div { style: "flex: 1 1 260px; max-width: 360px; display: flex; flex-direction: column; gap: 8px;",
-                    Input { value: s.query, placeholder: "Search every kind".to_owned() }
-                    div { style: "font-size: 12px; color: var(--muted-foreground);",
-                        "{items.len()} item(s) · by name, kind, source"
-                    }
-                    // No overflow of its own: a scroller inside the pane's
-                    // scroller loses its clicks (Blitz). The first rows, and
-                    // the search to narrow them.
-                    div { style: "display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 10px;",
-                        if items.is_empty() {
-                            EmptyState { message: "Nothing matches".to_owned() }
-                        }
-                        for i in items.iter().take(SHOWN).cloned() {
-                            ItemRow {
-                                key: "{i.kind}/{i.id}",
-                                on: selected.as_ref().is_some_and(|(k, id)| k == &i.kind && id == &i.id),
-                                item: i,
-                            }
-                        }
-                    }
-                    if items.len() > SHOWN {
-                        Muted { text: format!("{} more: search or pick a kind to narrow them", items.len() - SHOWN) }
+                div { style: "{LIFT} flex: none;",
+                    Alert { variant: if ok { AlertVariant::Default } else { AlertVariant::Destructive },
+                        AlertDescription { "{text}" }
                     }
                 }
-                div { style: "flex: 999 1 380px; min-width: 0;",
-                    match (selected, browse) {
-                        (Some((k, id)), Some(browse)) if k == "extension" => {
-                            let row = browse.rows("").into_iter().find(|r| r.id == id);
-                            rsx! {
-                                if let Some(row) = row {
-                                    Detail { key: "{row.id}", browse, row }
+            }
+            div { style: "{LIFT} flex: none; max-width: 100%; overflow-x: auto;",
+                SegmentedControl {
+                    value: kind.clone().unwrap_or_default(),
+                    options: kinds,
+                    on_change: move |v: String| {
+                        let mut k = s.kind;
+                        k.set((!v.is_empty()).then_some(v));
+                    },
+                }
+            }
+            div { style: "{body}",
+                if show_list {
+                    div { style: "{list_col}",
+                        div { style: "{LIFT} flex: none;",
+                            Input { value: s.query, placeholder: "Search every kind".to_owned() }
+                        }
+                        div { style: "{LIFT} flex: none; font-size: 12px; color: var(--muted-foreground);",
+                            "{items.len()} item(s) · by name, kind, source"
+                        }
+                        // A new list (a scroller at its top) for each search
+                        // and kind: Blitz keeps a scroller's offset when what
+                        // it holds shrinks, and would show the rows below none.
+                        for shown in std::iter::once(format!("{}\u{1f}{query}", kind.clone().unwrap_or_default())) {
+                            div { key: "{shown}", class: "manager-list", style: "{list_box}",
+                                if items.is_empty() {
+                                    EmptyState { message: "Nothing matches".to_owned() }
+                                }
+                                for i in items.iter().cloned() {
+                                    ItemRow {
+                                        key: "{i.kind}/{i.id}",
+                                        on: !master_detail && selected.as_ref().is_some_and(|(k, id)| k == &i.kind && id == &i.id),
+                                        item: i,
+                                    }
                                 }
                             }
                         }
-                        (Some((k, id)), _) => rsx! { ItemPage { key: "{k}/{id}", manager: manager.clone(), kind: k, id } },
-                        (None, _) => rsx! { EmptyState { message: "Pick an item".to_owned() } },
+                    }
+                }
+                if show_page && master_detail {
+                    div { style: "{LIFT} flex: none; padding-bottom: 6px;",
+                        Button {
+                            variant: ButtonVariant::Ghost,
+                            on_click: move |_| {
+                                let mut selected = s.selected;
+                                selected.set(None);
+                            },
+                            "← Every item"
+                        }
+                    }
+                }
+                if show_page {
+                    // A new scroller (at its top) for each item picked.
+                    for shown in std::iter::once(selected.clone().map(|(k, id)| format!("{k}\u{1f}{id}")).unwrap_or_default()) {
+                        div { key: "{shown}", class: "manager-item", style: "{page_col}",
+                            match (selected.clone(), browse.clone()) {
+                                (Some((k, id)), Some(browse)) if k == "extension" => {
+                                    let row = browse.rows("").into_iter().find(|r| r.id == id);
+                                    rsx! {
+                                        if let Some(row) = row {
+                                            Detail { key: "{row.id}", browse, row }
+                                        }
+                                    }
+                                }
+                                (Some((k, id)), _) => rsx! { ItemPage { key: "{k}/{id}", manager: manager.clone(), kind: k, id } },
+                                (None, _) => rsx! { EmptyState { message: "Pick an item".to_owned() } },
+                            }
+                        }
                     }
                 }
             }
@@ -294,6 +392,17 @@ fn ItemRow(on: bool, item: Item) -> Element {
 fn ItemPage(manager: Manager, kind: String, id: String) -> Element {
     let s = state();
     let _ = (s.rev)();
+    // Read again each second while it is open: what it shows changes on
+    // its own (a page's status, a worker's).
+    let mut tick = use_signal(|| 0_u64);
+    use_future(move || async move {
+        loop {
+            futures_timer::Delay::new(std::time::Duration::from_secs(1)).await;
+            let next = tick.peek().wrapping_add(1);
+            tick.set(next);
+        }
+    });
+    let _ = tick();
     let Some(d) = manager.get(&kind, &id) else {
         return rsx! { EmptyState { message: "It is gone".to_owned() } };
     };
@@ -456,6 +565,21 @@ fn Detail(browse: Browse, row: Row) -> Element {
         serde_json::from_value(info["grants"].clone()).unwrap_or_default();
     let logs = ext.host().logs().since(&row.id, None, 6);
     let id = row.id.clone();
+    // Its views' frame times (`EXT_VIEWS`'s meters), read again each
+    // second while its page is open.
+    let meters = try_use_context::<architect_workspace::Meters>();
+    let mut tick = use_signal(|| 0_u64);
+    use_future(move || async move {
+        loop {
+            futures_timer::Delay::new(std::time::Duration::from_secs(1)).await;
+            let next = tick.peek().wrapping_add(1);
+            tick.set(next);
+        }
+    });
+    let _ = tick();
+    let health = meters
+        .as_ref()
+        .map(|m| crate::views::health_lines(m, &row.id));
     rsx! {
         div { style: "display: flex; flex-direction: column; gap: 14px;",
             Card {
@@ -540,6 +664,14 @@ fn Detail(browse: Browse, row: Row) -> Element {
                     }
                     if installed.is_some() {
                         PinPicker { ext: ext.clone(), id: id.clone(), versions: versions.clone(), pin: pin.clone() }
+                    }
+                }
+            }
+            if let Some(health) = health {
+                Section { title: "Frame health",
+                    if health.is_empty() { Muted { text: "No view of it measured yet.".to_owned() } }
+                    for (i, line) in health.iter().enumerate() {
+                        div { key: "{i}", style: "font-size: 12px; font-family: ui-monospace, monospace;", "{line}" }
                     }
                 }
             }

@@ -673,6 +673,12 @@ context, `<extension>/<view>` or the script's step name), read by
 `EXT_VIEWS` (`features/extensions/src/views.rs` `install_view_actions`).
 `Meters::with_report` takes a `ViewReport`, told when a view turns slow
 or busy and when it recovers: the seam an app wires to its status board.
+`features/extensions/src/views.rs` `ViewProblems` is that report for
+`APP_STATUS`: a slow or busy view is a problem (source `view`, its
+timings) until it draws within its budget again. The manager's page of
+an extension has its views' p50, p99 and slow count ("Frame health",
+`health_lines`; `ExtensionKind::with_meters`). Linked extensions' views
+are Dioxus components in the app's own document and are not metered.
 
 The lab shows all of it with the clicker (`apps/lab/clicker`): its
 "Heavy job" pane counts primes in a worker with a live progress bar and
@@ -960,7 +966,8 @@ a registry of kinds (`ItemKind`: list, get, run an op). It comes with
 extensions (any runner, which copy runs and the way back to the
 built-in), Luau scripts and their hooks, workers (process extensions'
 processes), themes and the interface files (layouts and `keys.json`)
-(`features/extensions/src/manager/kinds.rs`). An app adds a kind of its
+(`features/extensions/src/manager/kinds.rs`), and pages, from
+`architect-pages` (`features/pages/src/manage.rs` `PagesKind`). An app adds a kind of its
 own — audio plugins, a page kind, WASI components — by implementing
 `ItemKind` and calling `Manager::register`. Agents get every operation
 as `MANAGER_KINDS`, `MANAGER_LIST {kind?, query?}`, `MANAGER_GET {kind,
@@ -972,7 +979,10 @@ The manager is itself a linked-in extension
 id `manager`), overridable by a development copy. Its page
 (`features/extensions/src/page.rs` `ManagerPage`, feature `page`, in
 architect-ui's components and the theme's variables) is a settings
-section and a workspace view (`use_manager_page`, `ManagerView`), with
+section and a workspace view (`use_manager_page`, `ManagerView`: it
+fills its pane, the list and the item's page each scrolling on their
+own; a pane narrower than `NARROW` shows the list, then the item picked
+with the way back), with
 ⌘O's `ext:`; an extension's page there shows what it adds, what it asks
 for (granted or not, each grant revocable), versions and pin, where it
 runs and its log, and installs through the consent prompt. A project's

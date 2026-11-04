@@ -43,8 +43,9 @@ change is done.
 - **Arguments are checked.** A name an action does not take is refused
   with the names it does take. Read `describe` rather than guessing.
 - **Last good.** A file that does not read (a theme, a manifest) keeps
-  the last version that did, and the problem is in `APP_STATUS`. The app
-  does not write `<name>.error` files yet.
+  the last version that did, and the problem is in `APP_STATUS`. A page
+  file (a view drawn from TSX, JS or Luau) also writes `<file>.error`
+  beside it until a good save.
 - **Clone to edit.** What the app ships is read-only to you: copy it
   first and edit the copy. `WORKSPACES_CLONE {name, as?}` copies a
   built-in workspace layout (saving over a built-in one from outside the

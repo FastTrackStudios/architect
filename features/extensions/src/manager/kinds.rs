@@ -16,12 +16,24 @@ fn arg<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
 /// Every extension, here or offered (`extension`).
 pub struct ExtensionKind {
     browse: Browse,
+    meters: Option<architect_workspace::Meters>,
 }
 
 impl ExtensionKind {
     #[must_use]
     pub const fn new(browse: Browse) -> Self {
-        Self { browse }
+        Self {
+            browse,
+            meters: None,
+        }
+    }
+
+    /// Its views' frame times from `meters` (the app's, `EXT_VIEWS`'s):
+    /// each extension's page gets a "Frame health" part.
+    #[must_use]
+    pub fn with_meters(mut self, meters: architect_workspace::Meters) -> Self {
+        self.meters = Some(meters);
+        self
     }
 
     const fn ext(&self) -> &Extensions {
@@ -112,12 +124,25 @@ impl ItemKind for ExtensionKind {
                 .map(|l| format!("{} {}: {}", l.level.name(), l.source, l.text))
                 .collect(),
         ));
-        // Frame health (#274's view meter) lands as a part here.
-        Some(Details {
-            item,
-            parts,
-            data: info,
-        })
+        let mut data = info;
+        if let Some(meters) = &self.meters {
+            let lines = crate::views::health_lines(meters, id);
+            parts.push(Part::new(
+                "Frame health",
+                if lines.is_empty() {
+                    vec!["No view of it measured yet".to_owned()]
+                } else {
+                    lines
+                },
+            ));
+            if let Value::Object(map) = &mut data {
+                map.insert(
+                    "views".to_owned(),
+                    Value::Array(crate::views::health_json(meters, id)),
+                );
+            }
+        }
+        Some(Details { item, parts, data })
     }
 
     fn run(&self, id: &str, op: &str, args: &Value) -> Result<Value, String> {
