@@ -591,8 +591,10 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
             }
             host = host.with_runner(runner.with_processes(processes()));
         }
-        // Hooks hear the lab's own events (workspace.changed, …).
+        // Hooks hear the lab's own events (workspace.changed, …); the host
+        // service runs the lab's actions on its list.
         host.watch(&lab);
+        host.set_app_list((*lab).clone());
         let root = architect::settings::app_dir("architect-lab")
             .unwrap_or_else(|_| std::env::temp_dir().join("architect-lab"));
         // The host service: consent kept on this device (an installed

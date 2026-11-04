@@ -114,6 +114,8 @@ pub(crate) struct Services {
     app: Mutex<Option<Arc<dyn AppContext>>>,
     values: Mutex<Arc<dyn SettingValues>>,
     data_root: Mutex<Option<PathBuf>>,
+    /// The app's own list, when its actions are not on the host's.
+    app_list: Mutex<Option<architect::action::ActionList>>,
     /// Data kept in memory, when there is no data root.
     data: Mutex<BTreeMap<String, BTreeMap<String, Value>>>,
 }
@@ -126,6 +128,7 @@ impl Default for Services {
             app: Mutex::new(None),
             values: Mutex::new(Arc::new(MemoryValues::default())),
             data_root: Mutex::new(None),
+            app_list: Mutex::new(None),
             data: Mutex::new(BTreeMap::new()),
         }
     }
@@ -192,6 +195,23 @@ impl Host {
     /// [`Self::with_setting_values`] on a host already shared.
     pub fn set_setting_values(&self, values: Arc<dyn SettingValues>) {
         *lock(&self.services().values) = values;
+    }
+
+    /// The app's Action List, when it is not the host's (an app that gives
+    /// extensions a list of their own): what `run` runs the app's actions
+    /// on. An extension's own actions run where they are.
+    pub fn set_app_list(&self, list: architect::action::ActionList) {
+        *lock(&self.services().app_list) = Some(list);
+    }
+
+    /// The list action `id` is on: the host's, or the app's.
+    fn list_of(&self, id: &str) -> architect::action::ActionList {
+        if self.list().info(id).is_some() {
+            return self.list().clone();
+        }
+        lock(&self.services().app_list)
+            .clone()
+            .unwrap_or_else(|| self.list().clone())
     }
 
     /// Keeps each extension's data and files under `<root>/<id>/`.
@@ -521,7 +541,7 @@ impl ExtensionApi {
         ticket: Option<String>,
     ) -> Result<Value, HostError> {
         let info = host
-            .list()
+            .list_of(action)
             .info(action)
             .ok_or_else(|| HostError::NotFound {
                 what: format!("action {action}"),
@@ -541,7 +561,7 @@ impl ExtensionApi {
             args.to_string().into_bytes()
         };
         match host
-            .list()
+            .list_of(action)
             .run_json_async_with(&caller, action, &bytes)
             .await
         {

@@ -41,6 +41,9 @@ use crate::manage::{Installed, Preview};
 use crate::manager::{Item, Manager};
 use crate::project::Plan;
 
+/// How many rows the list shows at once.
+const SHOWN: usize = 12;
+
 /// The settings section the page is.
 pub const SECTION: &str = "extensions";
 
@@ -214,17 +217,23 @@ pub fn ManagerPage(manager: Manager) -> Element {
                     div { style: "font-size: 12px; color: var(--muted-foreground);",
                         "{items.len()} item(s) · by name, kind, source"
                     }
-                    div { style: "display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 10px; overflow: hidden;",
+                    // No overflow of its own: a scroller inside the pane's
+                    // scroller loses its clicks (Blitz). The first rows, and
+                    // the search to narrow them.
+                    div { style: "display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 10px;",
                         if items.is_empty() {
                             EmptyState { message: "Nothing matches".to_owned() }
                         }
-                        for i in items.iter().cloned() {
+                        for i in items.iter().take(SHOWN).cloned() {
                             ItemRow {
                                 key: "{i.kind}/{i.id}",
                                 on: selected.as_ref().is_some_and(|(k, id)| k == &i.kind && id == &i.id),
                                 item: i,
                             }
                         }
+                    }
+                    if items.len() > SHOWN {
+                        Muted { text: format!("{} more: search or pick a kind to narrow them", items.len() - SHOWN) }
                     }
                 }
                 div { style: "flex: 999 1 380px; min-width: 0;",
@@ -249,28 +258,30 @@ pub fn ManagerPage(manager: Manager) -> Element {
 #[component]
 fn ItemRow(on: bool, item: Item) -> Element {
     let s = state();
-    let ground = if on { "var(--accent)" } else { "transparent" };
     let key = (item.kind.clone(), item.id.clone());
+    let mut detail = item
+        .version
+        .clone()
+        .map(|v| format!("{v} · "))
+        .unwrap_or_default();
+    detail.push_str(&item.source);
+    if item.enabled == Some(false) {
+        detail.push_str(" · off");
+    }
+    if !item.problems.is_empty() {
+        detail.push_str(&format!(" · {} problem(s)", item.problems.len()));
+    }
+    let ground = if on { "background: var(--accent);" } else { "" };
     rsx! {
-        button {
-            style: "display: flex; flex-direction: column; align-items: stretch; gap: 4px; padding: 10px 12px; border: none; \
-                    border-bottom: 1px solid var(--border); background: {ground}; color: var(--foreground); text-align: left; cursor: pointer;",
-            onclick: move |_| {
-                let mut selected = s.selected;
-                selected.set(Some(key.clone()));
-            },
-            div { style: "display: flex; align-items: center; gap: 6px;",
-                span { style: "font-size: 13px; font-weight: 600; flex: 1;", "{item.name}" }
-                Badge { variant: BadgeVariant::Outline, "{item.kind}" }
-                if !item.problems.is_empty() {
-                    Badge { variant: BadgeVariant::Destructive, "{item.problems.len()} problem(s)" }
-                }
-            }
-            div { style: "display: flex; gap: 6px; font-size: 11px; color: var(--muted-foreground);",
-                if let Some(v) = &item.version { span { "{v}" } }
-                span { "{item.source}" }
-                if item.enabled == Some(false) { span { "· off" } }
-                if item.enabled == Some(true) && item.kind != "extension" { span { "· on" } }
+        div { style: "{ground} border-bottom: 1px solid var(--border);",
+            ListRow {
+                label: item.name.clone(),
+                detail,
+                tag: item.kind.clone(),
+                on_click: move |()| {
+                    let mut selected = s.selected;
+                    selected.set(Some(key.clone()));
+                },
             }
         }
     }

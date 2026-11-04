@@ -46,13 +46,13 @@ impl ItemKind for ExtensionKind {
             .map(|r| {
                 let mut i = Item::new("extension", &r.id, &r.name);
                 i.version = Some(r.version.clone());
-                i.source = r.runs.clone().unwrap_or_else(|| {
-                    format!(
-                        "{} in {}",
-                        r.at.label(),
-                        r.registry.clone().unwrap_or_default()
-                    )
-                });
+                i.source = match (&r.runs, r.at) {
+                    (Some(runs), _) if r.overrides_builtin => runs.clone(),
+                    (_, Where::Available) => {
+                        format!("Available in {}", r.registry.clone().unwrap_or_default())
+                    }
+                    (_, at) => at.label().to_owned(),
+                };
                 i.enabled = (r.at != Where::Available).then_some(!r.disabled);
                 i.summary = format!("{} · {}", r.kind, r.description);
                 i.problems = problems
