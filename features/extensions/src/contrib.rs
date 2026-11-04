@@ -424,7 +424,9 @@ impl EmbedDecl {
 
 /// What a host gives an embed: the claim it drew, the block's text, and
 /// the host's own properties (a note's frontmatter, a fence's info
-/// string), as JSON. A linked view reads it with
+/// string), as JSON.
+///
+/// A linked view reads it with
 /// `linked::use_embed`, a process view the same, a page with
 /// `useEmbed()` (Luau: `embed()`).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]

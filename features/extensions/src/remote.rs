@@ -960,8 +960,8 @@ fn embed_event(input: &crate::contrib::EmbedInput) -> ViewEvent {
 /// [`crate::embeds::MIN_HEIGHT`], at most `max`.
 #[must_use]
 pub fn embed_height(content: f32, max: u32) -> f32 {
-    #[allow(clippy::cast_precision_loss)]
-    let (min, max) = (crate::embeds::MIN_HEIGHT as f32, max as f32);
+    let min = crate::embeds::MIN_HEIGHT;
+    let max = f32::from(u16::try_from(max).unwrap_or(u16::MAX));
     content.clamp(min, max.max(min))
 }
 

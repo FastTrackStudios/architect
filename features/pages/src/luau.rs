@@ -170,12 +170,11 @@ impl LuauEngine {
         let embed = services.embed.clone();
         api.set(
             "embed",
-            lua.create_function(move |lua, ()| match &embed {
-                Some(cell) => {
+            lua.create_function(move |lua, ()| {
+                embed.as_ref().map_or(Ok(LuaValue::Nil), |cell| {
                     let now = cell.lock().unwrap_or_else(PoisonError::into_inner).clone();
                     lua.to_value(&now)
-                }
-                None => Ok(LuaValue::Nil),
+                })
             })?,
         )?;
         let h = Arc::clone(&services.host);

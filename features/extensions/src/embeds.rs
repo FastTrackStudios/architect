@@ -1,6 +1,8 @@
-//! Inline embeds: an extension's view drawn inside a host's document where
-//! a block it claims is — a fenced block by its language, a note by its
-//! `type:`, an embed's target by its type — sized to its content
+//! Inline embeds: an extension's view drawn inside a host's document,
+//! sized to its content.
+//!
+//! An embed draws a block it claims — a fenced block by its language, a
+//! note by its `type:`, an embed's target by its type —
 //! (`docs/content/architecture/extensions.md`, "Inline embeds").
 //!
 //! An extension declares `[[embeds]]` (`contrib::EmbedDecl`) in its
@@ -37,7 +39,7 @@ pub const DEFAULT_MAX_HEIGHT: u32 = 480;
 
 /// How short a sub-document embed is before its first frame has a size,
 /// points.
-pub const MIN_HEIGHT: u32 = 24;
+pub const MIN_HEIGHT: f32 = 24.0;
 
 /// A claimed block's embed: whose it is, what draws it, how tall it may
 /// grow.
@@ -262,7 +264,7 @@ mod view {
                     crate::remote::RemoteEmbed {
                         key: "{key}",
                         processes,
-                        extension: spec.extension.clone(),
+                        extension: spec.extension,
                         view,
                         input,
                         max_height: max,

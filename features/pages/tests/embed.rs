@@ -207,7 +207,7 @@ fn pump(doc: &mut DioxusDocument, what: &str, until: impl Fn(&BaseDocument) -> b
 }
 
 fn set_source(doc: &DioxusDocument, text: &str) {
-    doc.vdom.in_runtime(|| *SOURCE.write() = text.to_owned());
+    doc.vdom.in_runtime(|| text.clone_into(&mut SOURCE.write()));
 }
 
 #[test]
