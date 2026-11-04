@@ -141,7 +141,7 @@ fn process(tmp: &Path) {
     let _ = ext.dev(&dev);
     assert_eq!(ext.host().get(ID).unwrap().origin, Origin::Dev);
     let start = Instant::now();
-    let mut running = loop {
+    let running = loop {
         if let Some(p) = processes.get(ID) {
             if matches!(p.state(), State::Running { .. }) {
                 break p;
@@ -156,27 +156,11 @@ fn process(tmp: &Path) {
         time(2000, || action(&list, "LAB_BOARD_STATE")),
     );
     // A view's frame from its process: opened, its first frame sent over
-    // the socket and applied to a document here. A process serves 64
-    // view opens per connection today (closed ones are not given back),
-    // so it is started again, untimed, every 50.
+    // the socket and applied to a document here, and closed (a closed
+    // view's place is given back: `wire::VIEWS_WIRE`). The first five
+    // warm it up, untimed.
     let mut samples = Vec::new();
     for i in 0..250 {
-        if i % 50 == 0 && i > 0 {
-            let was = running.pid();
-            let _ = ext.end_dev(&dev);
-            let _ = ext.dev(&dev);
-            let t = Instant::now();
-            loop {
-                if let Some(p) = processes.get(ID) {
-                    if matches!(p.state(), State::Running { .. }) && p.pid() != was {
-                        running = p;
-                        break;
-                    }
-                }
-                assert!(t.elapsed() < Duration::from_secs(20), "its restart");
-                std::thread::sleep(Duration::from_millis(10));
-            }
-        }
         let t = Instant::now();
         let mut session = running.open("board").unwrap();
         let frame = loop {
@@ -193,7 +177,7 @@ fn process(tmp: &Path) {
         let (events, _) = futures::channel::mpsc::unbounded();
         let mut doc = RemoteDocument::new(events);
         doc.apply(frame).unwrap();
-        if i % 50 >= 5 {
+        if i >= 5 {
             samples.push(t.elapsed());
         }
     }

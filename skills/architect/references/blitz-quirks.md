@@ -30,6 +30,7 @@ They belong in that skill too; until Studio takes them, they are kept here.
 
 | What happens | Write instead | Where architect does |
 |---|---|---|
+| A document made with `DioxusDocument::new` and a default `DocumentConfig` has no HTML parser: `dangerous_inner_html` makes no nodes, silently (an editor's painted caret, a widget's markup, an icon's SVG string vanish; the element itself is there, empty). `dioxus_native::launch` sets one; a launcher of its own does not. | Make window documents with `architect_workspace::native::document_config(net, fonts)` (Blitz's `HtmlProvider` in it), as `native::launch` does for the main window and pop-outs. | `features/workspace/src/native.rs` `document_config`; `features/workspace/tests/inner_html.rs` |
 | An `@font-face` whose `src` is a `data:` URI is never fetched (an `http:` one is), with or without `format()`, at any size, and with no error. The text falls back to the next family. | Register the font file in the document's `FontContext` before launch: `architect_workspace::native::launch_with_fonts(app, window, fonts)` for a desk app (every window, pop-outs too), `dioxus_native::Config::with_font_ctx` otherwise. Name the family as the file does (Inter: `Inter`). | `features/workspace/src/native.rs` `launch_with_fonts`; `apps/lab/ui/src/lib.rs` `FONTS`, `font_context` |
 
 To check a face really loaded, put a different generic last in the stack for one run (`Inter, serif`): serif text means the face did not resolve.

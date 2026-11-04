@@ -22,8 +22,9 @@ use facet::Facet;
 /// 3 added the theme as data ([`ThemeData`], `ProcessExtension::theme`);
 /// 4 an action's invocation (`ProcessExtension::run_in`) and what a
 /// process adds at run time ([`Update`], `ProcessExtension::updates`); 5
-/// a frame for every event ([`ANSWERED_WIRE`]).
-pub const WIRE: u32 = 5;
+/// a frame for every event ([`ANSWERED_WIRE`]); 6 a closed view's place
+/// given back ([`VIEWS_WIRE`]).
+pub const WIRE: u32 = 6;
 
 /// The oldest wire a host still speaks: a process at 2 runs as before,
 /// its views themed through CSS only (it is never sent [`ThemeData`]).
@@ -44,6 +45,22 @@ pub const CONTRIB_WIRE: u32 = 4;
 /// one runs past its budget. An older process's view is timed by its
 /// frames alone (never busy).
 pub const ANSWERED_WIRE: u32 = 5;
+
+/// The first wire a process gives a closed view's place back.
+///
+/// Each open view is a request in flight on the process's stream lane
+/// (`ProcessExtension::view`, held open while the view lives), and vox
+/// caps those per lane; the host opens the lane with room for
+/// [`MAX_VIEWS`]. A process at this wire ends a view's request when the
+/// view closes. An older one holds it for as long as it runs: its host
+/// opens at most [`MAX_VIEWS`] of its views over its connection's life,
+/// closed ones counted.
+pub const VIEWS_WIRE: u32 = 6;
+
+/// The most views one process extension shows at once (each is a thread
+/// in the process). One more is refused with an error that says so;
+/// closing one makes room.
+pub const MAX_VIEWS: usize = 256;
 
 /// The event a host sends a view's root (element 0) when it draws it as
 /// an inline embed, and again when the block changes.

@@ -173,7 +173,11 @@ lab does it in `apps/lab/ui/src/theme.rs` `persist`.
 - In Luau a module whose fields move must say `live_fields()`: Luau
   folds `Global.field` once when a sandboxed chunk loads.
 - A process built for wire 3 is refused by a host before it (exact
-  check); a host now takes wire 2 and 3 (`WIRE_MIN`).
+  check); a host takes wire 2 to 6 (`WIRE_MIN`..`WIRE`).
+- A pop-out window is a document of its own: what reaches it is what its
+  `Bridge` carries. It follows the theme because `PopoutSync` carries the
+  `ThemeHandle` and `RootCss` and shares the host's `ShellTheme` signal; a
+  copy taken at open (`peek().clone()`) stays the theme it opened with.
 - An override of `border` that reads `$border` is a cycle, not "the value
   below": a reference always sees the final value. A `Preview` covers both until `THEME_PREVIEW_END`.
 - A store change made off the UI thread (an action, the watcher) reaches

@@ -2316,9 +2316,22 @@ fn emit_stream_block(
                 });
             quote! {
                 async fn #name(&self, #(#inputs,)* sink: ::architect::vox::Tx<#ev>) {
-                    self.inner.#attach_fn(#(#call_args,)* sink.into());
-                    // Hold the request open — see the parameterless variant.
-                    ::core::future::pending::<()>().await;
+                    // Held open while the subscription lives (see the
+                    // parameterless variant), and no longer: the backend
+                    // gets a local sink, relayed onto the channel, and when
+                    // it drops it (a view closed, a filtered stream ended)
+                    // the request ends and the connection gets its slot
+                    // back. vox caps the requests in flight on a
+                    // connection, and a dropped call sends no cancel: held
+                    // forever, every subscription that ended would keep one.
+                    let (local, events) =
+                        ::architect::EventSink::local(::architect::SUBSCRIPTION_RELAY);
+                    self.inner.#attach_fn(#(#call_args,)* local);
+                    while let ::core::result::Result::Ok(event) = events.recv().await {
+                        if sink.send(event).await.is_err() {
+                            break;
+                        }
+                    }
                 }
             }
         }
