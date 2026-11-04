@@ -7,7 +7,9 @@
 //! folder ([`Extensions::with_dev_root`]) under a new id — its manifest
 //! rewritten to that id, its action ids and setting keys moved to the new
 //! namespace — and runs it as a development copy, which shadows nothing
-//! (a new id) and reloads when its files change.
+//! (a new id) and reloads when its files change. A linked built-in that
+//! says where its crate is (`[source]`) is cloned from source instead,
+//! under its own id (`crate::source`).
 //!
 //! [`Extensions::problems`] is what is wrong with them now, for
 //! `APP_STATUS`: a folder whose manifest does not read (its loaded copy,
@@ -56,11 +58,17 @@ impl Extensions {
     /// in development) into the development folder as `as_id`
     /// (`<id>-copy` unless given) and runs the copy.
     ///
+    /// A built-in whose manifest says where its crate is (`[source]`) and
+    /// no `as_id` is cloned from source instead (`crate::source`): its
+    /// crate written to `<dev root>/<id>` and built as a process, which
+    /// keeps its id and overrides it live, rebuilt on save.
+    ///
     /// # Errors
     ///
     /// No development folder, no such extension, a process extension with
-    /// actions (its program answers them by their old ids), the new id
-    /// taken or not an id, or a file that could not be copied.
+    /// actions and no `[source]` (its program answers them by their old
+    /// ids), the new id taken or not an id, or a file that could not be
+    /// copied.
     pub fn clone_to_dev(&self, id: &str, as_id: Option<&str>) -> Result<Cloned, String> {
         let root = self
             .dev_root()
@@ -70,6 +78,14 @@ impl Extensions {
             .iter()
             .find(|c| c.runs.id == id)
             .ok_or_else(|| format!("no extension {id} (EXT_LIST lists them)"))?;
+        if as_id.is_none() && from.runs.package.manifest.source.is_some() {
+            if from.runs.origin == crate::Origin::Dev {
+                return Err(format!(
+                    "{id} runs from the development folder already: edit it there"
+                ));
+            }
+            return self.clone_source(&from.runs.package.manifest);
+        }
         if from.runs.package.manifest.kind == crate::manifest::Kind::Process
             && !from.runs.package.manifest.actions.is_empty()
         {
@@ -141,6 +157,7 @@ impl Extensions {
         for (id, error) in self.failed_loads() {
             out.push(problem(&id, &error));
         }
+        out.extend(self.build_problems());
         out
     }
 }

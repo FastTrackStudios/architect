@@ -435,6 +435,31 @@ pub struct WasmDecl {
     pub component: String,
 }
 
+/// Where an extension's crate is (`[source]`): what `EXT_CLONE` of a
+/// linked built-in writes to the development folder and builds as its
+/// process (`crate::source`).
+///
+/// ```toml
+/// [source]
+/// git = "https://github.com/FastTrackStudios/architect"
+/// rev = "main"
+/// path = "apps/lab/board"
+/// ```
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SourceDecl {
+    /// The repository it is in. An app that has that repository's sources
+    /// (`Extensions::with_vendored`) copies from them; any other clones it.
+    pub git: String,
+    /// The commit, tag or branch (`main` when empty).
+    pub rev: String,
+    /// The crate's folder in the repository (`apps/lab/board`).
+    pub path: String,
+    /// The binary that serves it as a process (`Guest::extension(..).serve()`):
+    /// its `[entry] path`'s file name when empty.
+    pub bin: String,
+}
+
 /// `extension.toml`, read.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct Manifest {
@@ -460,6 +485,11 @@ pub struct Manifest {
     /// still names one).
     #[serde(default)]
     pub wasm: WasmDecl,
+
+    /// Where its crate is, for a development copy built from source
+    /// (`[source]`).
+    #[serde(default)]
+    pub source: Option<SourceDecl>,
     #[serde(default)]
     pub actions: Vec<ActionDecl>,
     #[serde(default)]
@@ -725,6 +755,9 @@ impl Manifest {
             inside(&overlay.script)?;
         }
         self.check_workers()?;
+        if let Some(source) = &self.source {
+            inside(&source.path)?;
+        }
         for theme in &self.themes {
             inside(&theme.path)?;
             if !std::path::Path::new(&theme.path)

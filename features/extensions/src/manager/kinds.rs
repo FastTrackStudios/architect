@@ -199,7 +199,7 @@ impl ItemKind for ExtensionKind {
                     crate::catalog::Origin::Builtin => {}
                 }
                 Ok(
-                    json!({ "runs": ext.chosen().into_iter().find(|c| c.runs.id == id).map(|c| c.describe()) }),
+                    json!({ "runs": ext.chosen().into_iter().find(|c| c.runs.id == id).map(|c| ext.describe(&c)) }),
                 )
             }
             other => Err(format!("an extension has no op {other}")),

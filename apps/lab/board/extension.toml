@@ -15,6 +15,15 @@ authors = ["FastTrackStudio"]
 [entry]
 path = "architect-lab-board"
 
+# Where its crate is: EXT_CLONE of the linked Board writes it to the
+# development folder and builds this program from it (the lab, built from
+# a checkout, copies from that checkout), which then overrides the linked
+# one under the same id, rebuilt on save.
+[source]
+git = "https://github.com/FastTrackStudios/architect"
+rev = "main"
+path = "apps/lab/board"
+
 [[actions]]
 id = "LAB_BOARD_PIN"
 name = "Pin to the board"

@@ -990,7 +990,93 @@ time, the same linked in or not.
 
 `apps/lab/board/tests/both_ways.rs` runs the lab's Board both ways and
 checks they add the same things, run the same hook and read the same
-context menu's target.
+context menu's target. `cargo xtask builtins` (CI) builds every built-in
+extension crate (an `extension.toml` with a `[source]` beside a
+`Cargo.toml`) both ways: its `--lib`, linked in, and its `--bin`, the
+process; WASI joins as the third way when its runner lands.
+
+### A built-in's development copy, from its source
+
+Every user-facing feature is a linked extension (#272), and any of them
+can be swapped for a development copy in a running app, and back. A
+built-in says where its crate is:
+
+```toml
+[source]
+git = "https://github.com/FastTrackStudios/architect"
+rev = "main"
+path = "apps/lab/board"
+# bin = "architect-lab-board"   # its [entry] path's file name unless given
+```
+
+`EXT_CLONE {"id": "lab.board"}` (no `as`) then does what
+`features/extensions/src/source.rs` describes:
+
+1. **Writes its crate** to `<dev folder>/<id>`: from the app's own copy
+   of the repository when it has one (`Extensions::with_vendored`: the
+   lab, built from a checkout, names that checkout), else a clone of
+   `git` at `rev` under `<dev folder>/.sources`. Its `Cargo.toml` becomes
+   a workspace of its own: what it inherits from its workspace resolved,
+   every path dependency absolute, the workspace's `[patch]`, `[profile]`,
+   `Cargo.lock` and `.cargo/config.toml` with it, so it builds against the
+   same crates the app was built with.
+2. **Builds its process** (`cargo build --bin …`, in one target folder for
+   all copies, `Extensions::with_build_target`, `<dev folder>/.target`
+   unless given) on a thread of its own. The program goes to its
+   `[entry] path`, swapped whole. It is the app's `cargo` (`$CARGO`, else
+   the one on its `PATH`): run the app from the repository's dev shell, so
+   it is the toolchain the crate was written for.
+3. **Overrides the built-in live**, under the built-in's own id: it
+   replaces it, so its program answers the ids the built-in had (a
+   renamed copy of a process extension is still refused). Until the first
+   build is good the built-in runs; the extensions page says "built in
+   (0.1.0), overridden by 0.1.0 (in development): building… (the built-in
+   runs until it builds)", with **Use the built-in** (`end_dev`).
+4. **Rebuilds on save.** Every poll (`Extensions::reload_changed`)
+   fingerprints the crate's sources (not `target/`, its program or its
+   lockfile); a change rebuilds it, and a good build restarts its process
+   on the new program. A build that fails keeps the last good program
+   running and says why: a problem in `APP_STATUS` (`lab.board: its build
+   failed: src/lib.rs:12:5: error[E0425]: … (the last good build runs)`,
+   its file), its error lines in `EXT_LOGS` (source `build`), and
+   "failed: …" on the page. `EXT_INFO` and `EXT_CLONE` answer the build
+   (`build`: `building`, `built` with `took_ms`, `failed` with `error`).
+
+`apps/lab/board/tests/dev_loop.rs` (ignored: it builds the crate) runs
+the whole loop: clone, first build, an edit swapped in, a break kept on
+the last good build, back to the built-in.
+
+### What each runner costs
+
+The Board's `LAB_BOARD_STATE` action and its `board` view's frame, and
+the nearest equivalents on the scripted runners
+(`apps/lab/board/tests/bench.rs`, ignored: run it with `--ignored
+--nocapture`):
+
+| runner | what | n | p50 | p99 |
+|---|---|---:|---:|---:|
+| linked | action | 5000 | 2.1 µs | 2.9 µs |
+| linked | view frame | 2000 | 13.9 µs | 17.1 µs |
+| process | action | 2000 | 29.5 µs | 105.5 µs |
+| process | view frame (open to first frame) | 225 | 24.9 ms | 33.2 ms |
+| Luau | action (the same JSON) | 5000 | 252.7 µs | 547.1 µs |
+| `QuickJS` | view frame (the Board's TSX page, open to first frame) | 30 | 25.1 ms | 26.1 ms |
+
+Measured 2026-11-03 on THEBATTLESHIP (the dev profile, which is
+optimized). Luau has no equivalent of the Board's view, and a page calls
+the Board's own action (the linked row).
+
+A linked view's frame is its component rendered in the app's own
+document; a process's is the same component rendered in its process,
+sent over the socket and applied here; the `QuickJS` row is the Board's
+tab as its TSX page, opened and run until its first frame. The process
+boundary costs tens of microseconds per action call: fine for anything a
+person does, wrong per frame or per sample, which is why hot paths stay
+native inside the linked extension. Opening a remote view costs about
+25 ms to its first frame, a mount, not a redraw (both remote rows land on
+it, which says it is the mount's fixed cost, not the view's work). A
+process serves 64 view opens per connection today: closed ones are not
+given back, so the benchmark starts it again every 50.
 
 ## First-party extensions: the API, linked in
 

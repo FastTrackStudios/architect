@@ -220,7 +220,7 @@ impl Browse {
                         Origin::Installed => Where::Installed,
                         Origin::Dev => Where::Dev,
                     },
-                    runs: Some(c.describe()),
+                    runs: Some(ext.describe(&c)),
                     overrides_builtin: c.runs.origin != Origin::Builtin
                         && c.shadows.iter().any(|(o, _)| *o == Origin::Builtin),
                     loaded: ext.host().get(&m.id).is_some(),

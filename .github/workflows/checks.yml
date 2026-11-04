@@ -85,6 +85,12 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo run -q -p xtask -- surfaces
 
+      # One trait, three ways (#272): every built-in extension crate builds
+      # linked in and as a process (WASI once its runner lands).
+      - name: builtins
+        if: ${{ !cancelled() }}
+        run: cargo run -q -p xtask -- builtins
+
       # The fleet feature union (workspace-hack/Cargo.toml, FLEET section):
       # every member's hack line is gated off on wasm, and every entry is
       # still a crate this workspace builds. Refreshing it from the
