@@ -82,10 +82,10 @@ pub mod hostapi;
 pub mod install;
 #[cfg(feature = "ui")]
 pub mod interface;
-#[cfg(any(feature = "host", feature = "web"))]
-mod invocation;
 #[cfg(feature = "host")]
 pub mod interop_actions;
+#[cfg(any(feature = "host", feature = "web"))]
+mod invocation;
 #[cfg(any(feature = "linked", all(feature = "guest", unix)))]
 pub mod linked;
 #[cfg(feature = "host")]
