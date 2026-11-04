@@ -38,9 +38,13 @@
 //! again, fresh, as a process that died is. Unloading it ends its thread
 //! and frees its store.
 //!
-//! Not yet (#167, parts 2 and 3): workers (parallelism comes from more
-//! instances, not threads in one), WASI 0.3's async, iOS (Pulley, no JIT)
-//! and the web (jco).
+//! Its heavy work goes to workers ([`workers`]): more instances of the
+//! component, each on a thread of the runner's pool with limits of its
+//! own, spoken to by messages only — parallelism from more instances, not
+//! threads in one.
+//!
+//! Not yet (#167, part 3): WASI 0.3's async, iOS (Pulley, no JIT) and the
+//! web (jco).
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::Write as _;
@@ -65,6 +69,10 @@ use crate::logs::{Level, Logs};
 use crate::manifest::{ActionDecl, Kind, Manifest};
 use crate::package::Package;
 use crate::wire;
+
+mod workers;
+
+pub use workers::{MAX_WORKERS, NEWS_EVERY, Pool, QUEUE, WorkerInfo, WorkerStatus};
 
 mod bindings {
     wasmtime::component::bindgen!({
@@ -97,6 +105,17 @@ impl Default for Limits {
         Self {
             memory: 64 << 20,
             call: Duration::from_secs(5),
+        }
+    }
+}
+
+impl Limits {
+    /// A worker's: 64 MiB, and 60 s of its own time for its whole run.
+    #[must_use]
+    pub const fn worker() -> Self {
+        Self {
+            memory: 64 << 20,
+            call: Duration::from_secs(60),
         }
     }
 }
@@ -281,6 +300,14 @@ struct State {
     /// would wait for the one making it).
     own: BTreeSet<String>,
     theme: Option<architect_theme::ThemeStore>,
+    /// An owner, with its workers (when it declares any), or a worker.
+    side: Side,
+}
+
+/// Which side of the `worker` interface an instance is.
+enum Side {
+    Owner(Option<workers::Crew>),
+    Worker(Arc<workers::Link>),
 }
 
 impl WasiView for State {
@@ -293,6 +320,61 @@ impl WasiView for State {
 }
 
 impl State {
+    /// A fresh store's data: WASI with nothing to reach (its stdout and
+    /// stderr into its log), within `limits`.
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        id: &str,
+        logs: &Logs,
+        limits: Limits,
+        memory: Arc<AtomicUsize>,
+        api: ExtensionApi,
+        own: BTreeSet<String>,
+        theme: Option<architect_theme::ThemeStore>,
+        side: Side,
+    ) -> Self {
+        let worker = matches!(side, Side::Worker(_));
+        let pipe = |source: &'static str, level| LogPipe {
+            id: id.to_owned(),
+            logs: logs.clone(),
+            source: if worker { "worker" } else { source },
+            level,
+            partial: Arc::default(),
+        };
+        let wasi = WasiCtxBuilder::new()
+            .stdout(pipe("stdout", Level::Info))
+            .stderr(pipe("stderr", Level::Warn))
+            .allow_ip_name_lookup(false)
+            .build();
+        memory.store(0, Ordering::Relaxed);
+        Self {
+            wasi,
+            table: ResourceTable::new(),
+            limiter: Limiter {
+                max: limits.memory,
+                now: memory,
+                hit: None,
+            },
+            clock: Clock {
+                budget: limits.call,
+                ..Clock::default()
+            },
+            api,
+            own,
+            theme,
+            side,
+        }
+    }
+
+    /// A worker reaches its owner only, by messages: never the app.
+    fn worker_refusal(&self) -> Option<String> {
+        matches!(self.side, Side::Worker(_)).then(|| {
+            error_json(&HostError::Failed {
+                message: "a worker reaches its owner only, by messages, not the app".to_owned(),
+            })
+        })
+    }
+
     async fn host(&mut self, request: HostRequest) -> Result<Json, HostError> {
         let started = Instant::now();
         let api = self.api.clone();
@@ -315,6 +397,9 @@ fn error_json(e: &HostError) -> String {
 
 impl wit_host::Host for State {
     async fn run_action(&mut self, action: String, args: String) -> Result<String, String> {
+        if let Some(no) = self.worker_refusal() {
+            return Err(no);
+        }
         if self.own.contains(&action) {
             return Err(error_json(&HostError::Failed {
                 message: format!("{action} is its own: it runs it itself, not through the host"),
@@ -332,6 +417,9 @@ impl wit_host::Host for State {
     }
 
     async fn setting(&mut self, key: String) -> Result<String, String> {
+        if let Some(no) = self.worker_refusal() {
+            return Err(no);
+        }
         self.host(HostRequest::Setting { key })
             .await
             .map(|v| v.to_string())
@@ -339,6 +427,9 @@ impl wit_host::Host for State {
     }
 
     async fn set_setting(&mut self, key: String, value: String) -> Result<(), String> {
+        if let Some(no) = self.worker_refusal() {
+            return Err(no);
+        }
         let value = json_arg(&value);
         self.host(HostRequest::SetSetting { key, value })
             .await
@@ -374,6 +465,9 @@ impl wit_host::Host for State {
     }
 
     async fn call(&mut self, request: String) -> String {
+        if let Some(no) = self.worker_refusal() {
+            return format!("{{\"error\": {no}}}");
+        }
         let started = Instant::now();
         let api = self.api.clone();
         let answer = api.call_json(&request).await;
@@ -468,9 +562,23 @@ pub struct Stats {
     alive: AtomicBool,
     last_trap: Mutex<Option<String>>,
     restart: Mutex<Option<mpsc::UnboundedSender<Job>>>,
+    crew: Option<workers::Crew>,
 }
 
 impl Stats {
+    /// Its workers that have not ended, or whose end it has not heard.
+    #[must_use]
+    pub fn workers(&self) -> Vec<WorkerInfo> {
+        self.crew.as_ref().map(workers::Crew::infos).unwrap_or_default()
+    }
+
+    /// Its workers' instances held now (running, or waiting for the
+    /// pool): 0 once they are all gone.
+    #[must_use]
+    pub fn workers_alive(&self) -> usize {
+        self.crew.as_ref().map_or(0, workers::Crew::alive)
+    }
+
     /// Its linear memory now, in bytes.
     #[must_use]
     pub fn memory(&self) -> usize {
@@ -592,6 +700,31 @@ struct Recipe {
     logs: Logs,
     theme: Option<architect_theme::ThemeStore>,
     memory: Arc<AtomicUsize>,
+    /// Its workers, when its manifest declares any.
+    crew: Option<workers::Crew>,
+}
+
+/// A store for `data`: its memory limit, and its epoch deadline — each
+/// tick it yields; past its call's budget, or (a worker) once cancelled,
+/// it traps.
+fn store(data: State) -> Result<Store<State>, String> {
+    let engine = engine()?;
+    let mut store = Store::new(engine, data);
+    store.limiter(|s| &mut s.limiter);
+    store.set_epoch_deadline(1);
+    store.epoch_deadline_callback(|mut cx| {
+        let data = cx.data_mut();
+        if matches!(&data.side, Side::Worker(link) if link.cancelled()) {
+            return Err(wasmtime::format_err!("cancelled"));
+        }
+        let clock = &mut data.clock;
+        if clock.started.is_some() && clock.own() > clock.budget {
+            clock.over = true;
+            return Err(wasmtime::format_err!("interrupted"));
+        }
+        Ok(UpdateDeadline::Yield(1))
+    });
+    Ok(store)
 }
 
 impl Recipe {
@@ -602,48 +735,17 @@ impl Recipe {
     /// A fresh instance, started with `state`, checked against its
     /// manifest.
     async fn instantiate(&self, state: Option<Vec<u8>>) -> Result<(Store<State>, World), String> {
-        let id = &self.manifest.id;
-        let pipe = |source, level| LogPipe {
-            id: id.clone(),
-            logs: self.logs.clone(),
-            source,
-            level,
-            partial: Arc::default(),
-        };
-        let wasi = WasiCtxBuilder::new()
-            .stdout(pipe("stdout", Level::Info))
-            .stderr(pipe("stderr", Level::Warn))
-            .allow_ip_name_lookup(false)
-            .build();
-        self.memory.store(0, Ordering::Relaxed);
-        let data = State {
-            wasi,
-            table: ResourceTable::new(),
-            limiter: Limiter {
-                max: self.limits.memory,
-                now: Arc::clone(&self.memory),
-                hit: None,
-            },
-            clock: Clock {
-                budget: self.limits.call,
-                ..Clock::default()
-            },
-            api: self.api.clone(),
-            own: self.manifest.actions.iter().map(|a| a.id.clone()).collect(),
-            theme: self.theme.clone(),
-        };
-        let engine = engine()?;
-        let mut store = Store::new(engine, data);
-        store.limiter(|s| &mut s.limiter);
-        store.set_epoch_deadline(1);
-        store.epoch_deadline_callback(|mut cx| {
-            let clock = &mut cx.data_mut().clock;
-            if clock.started.is_some() && clock.own() > clock.budget {
-                clock.over = true;
-                return Err(wasmtime::format_err!("interrupted"));
-            }
-            Ok(UpdateDeadline::Yield(1))
-        });
+        let data = State::new(
+            &self.manifest.id,
+            &self.logs,
+            self.limits,
+            Arc::clone(&self.memory),
+            self.api.clone(),
+            self.manifest.actions.iter().map(|a| a.id.clone()).collect(),
+            self.theme.clone(),
+            Side::Owner(self.crew.clone()),
+        );
+        let mut store = store(data)?;
         begin(&mut store);
         let made = World::instantiate_async(&mut store, &self.component, &self.linker).await;
         let world =
@@ -720,21 +822,64 @@ struct Actor {
     stats: Arc<Stats>,
     process: Option<crate_process::Handle>,
     generation: u32,
+    /// Its workers' news waits to be heard.
+    news_due: bool,
+    /// When it last heard their news.
+    heard_at: Instant,
+}
+
+/// What its actor does next.
+enum Step {
+    Job(Option<Job>),
+    Nudged,
+    Hear,
 }
 
 impl Drop for Actor {
     fn drop(&mut self) {
+        // Its workers go with it.
+        if let Some(crew) = &self.recipe.crew {
+            crew.cancel_all();
+        }
         self.live = None;
         self.stats.alive.store(false, Ordering::Release);
     }
 }
 
 impl Actor {
-    async fn run(mut self, mut jobs: mpsc::UnboundedReceiver<Job>) {
-        use futures::StreamExt as _;
-        while let Some(job) = jobs.next().await {
-            if !self.handle(job).await {
-                break;
+    async fn run(
+        mut self,
+        mut jobs: mpsc::UnboundedReceiver<Job>,
+        news: mpsc::UnboundedReceiver<()>,
+    ) {
+        use futures::{FutureExt as _, StreamExt as _};
+        let mut news = news.fuse();
+        loop {
+            // Its workers' news, at most once each NEWS_EVERY, between
+            // its calls.
+            let wait = self
+                .news_due
+                .then(|| NEWS_EVERY.saturating_sub(self.heard_at.elapsed()));
+            let timer = async move {
+                match wait {
+                    Some(d) => tokio::time::sleep(d).await,
+                    None => std::future::pending::<()>().await,
+                }
+            };
+            let step = futures::select_biased! {
+                job = jobs.next() => Step::Job(job),
+                () = news.select_next_some() => Step::Nudged,
+                () = Box::pin(timer).fuse() => Step::Hear,
+            };
+            match step {
+                Step::Job(None) => break,
+                Step::Job(Some(job)) => {
+                    if !self.handle(job).await {
+                        break;
+                    }
+                }
+                Step::Nudged => self.news_due = true,
+                Step::Hear => self.hear().await,
             }
         }
         if let Some(p) = &self.process {
@@ -798,6 +943,28 @@ impl Actor {
         }
         self.stats.calls.fetch_add(1, Ordering::Relaxed);
         true
+    }
+
+    /// Its workers' news, into it: what they posted, how far they are,
+    /// how they ended; then what its views changed.
+    async fn hear(&mut self) {
+        self.news_due = false;
+        self.heard_at = Instant::now();
+        let Some(crew) = self.recipe.crew.clone() else {
+            return;
+        };
+        let news = crew.news();
+        if news.is_empty() {
+            return;
+        }
+        let Some((store, world)) = &mut self.live else {
+            return;
+        };
+        if let Err(why) = workers::deliver(store, world, news).await {
+            self.trapped(why).await;
+            return;
+        }
+        self.flush().await;
     }
 
     fn not_running(&self) -> String {
@@ -939,6 +1106,15 @@ impl Actor {
 
     async fn restart(&mut self, why: String) {
         self.live = None;
+        // Its workers were the old instance's.
+        if let Some(line) = self
+            .recipe
+            .crew
+            .as_ref()
+            .and_then(|c| workers::cancelled_line(c.cancel_all(), "it is starting again"))
+        {
+            self.recipe.log(Level::Info, line);
+        }
         // Its views' streams end: their panes say why, and mount again
         // once it runs.
         self.panes.clear();
@@ -1113,6 +1289,8 @@ mod crate_process {
 /// Runs WASI component extensions (`kind = "wasm"`).
 pub struct WasiRunner {
     limits: Limits,
+    worker_limits: Limits,
+    pool: Pool,
     cache: Option<PathBuf>,
     theme: Option<architect_theme::ThemeStore>,
     components: Components,
@@ -1125,6 +1303,8 @@ impl std::fmt::Debug for WasiRunner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WasiRunner")
             .field("limits", &self.limits)
+            .field("worker_limits", &self.worker_limits)
+            .field("pool", &self.pool)
             .field("cache", &self.cache)
             .finish_non_exhaustive()
     }
@@ -1142,6 +1322,8 @@ impl WasiRunner {
     pub fn new() -> Self {
         Self {
             limits: Limits::default(),
+            worker_limits: Limits::worker(),
+            pool: Pool::default(),
             cache: None,
             theme: None,
             components: Components::default(),
@@ -1156,6 +1338,27 @@ impl WasiRunner {
     pub const fn with_limits(mut self, limits: Limits) -> Self {
         self.limits = limits;
         self
+    }
+
+    /// Each worker's limits ([`Limits::worker`] when not given): its
+    /// memory, and its whole run's own time.
+    #[must_use]
+    pub const fn with_worker_limits(mut self, limits: Limits) -> Self {
+        self.worker_limits = limits;
+        self
+    }
+
+    /// The threads its workers run on ([`Pool::default`] when not given).
+    #[must_use]
+    pub fn with_pool(mut self, pool: Pool) -> Self {
+        self.pool = pool;
+        self
+    }
+
+    /// The threads its workers run on.
+    #[must_use]
+    pub fn pool(&self) -> Pool {
+        self.pool.clone()
     }
 
     /// Keeps compiled components in `dir` (`<hash>.cwasm`), so one is
@@ -1295,16 +1498,20 @@ impl Runner for WasiRunner {
                 started.elapsed().as_millis()
             ),
         );
+        let linker = self.linker(engine)?;
+        let (nudge, news) = workers::Nudge::new();
+        let crew = self.crew(&manifest, dir, &component, &linker, &cx, nudge)?;
         let memory = Arc::new(AtomicUsize::new(0));
         let recipe = Recipe {
             manifest: manifest.clone(),
             component,
-            linker: self.linker(engine)?,
+            linker,
             limits: self.limits,
             api: cx.api.clone(),
             logs: cx.logs.clone(),
             theme: self.theme.clone(),
             memory: Arc::clone(&memory),
+            crew: crew.clone(),
         };
         let (jobs, queue) = mpsc::unbounded::<Job>();
         let stats = Arc::new(Stats {
@@ -1317,6 +1524,7 @@ impl Runner for WasiRunner {
             alive: AtomicBool::new(true),
             last_trap: Mutex::new(None),
             restart: Mutex::new(Some(jobs.clone())),
+            crew,
         });
         let (say_up, heard) = std::sync::mpsc::channel::<Result<tokio::runtime::Handle, String>>();
         let saved = cx.state;
@@ -1351,9 +1559,11 @@ impl Runner for WasiRunner {
                         stats: thread_stats,
                         process: None,
                         generation: 1,
+                        news_due: false,
+                        heard_at: Instant::now(),
                     };
                     let _ = say_up.send(Ok(tokio::runtime::Handle::current()));
-                    actor.run(queue).await;
+                    actor.run(queue, news).await;
                 });
             })
             .map_err(|e| e.to_string())?;
@@ -1385,6 +1595,64 @@ impl Runner for WasiRunner {
 }
 
 impl WasiRunner {
+    /// What its `[[workers]]` run, each compiled (a separate component
+    /// through the cache): `None` with none.
+    fn crew(
+        &self,
+        manifest: &Manifest,
+        dir: &Path,
+        component: &Component,
+        linker: &Arc<Linker<State>>,
+        cx: &Context<'_>,
+        nudge: workers::Nudge,
+    ) -> Result<Option<workers::Crew>, String> {
+        if manifest.workers.is_empty() {
+            return Ok(None);
+        }
+        let engine = engine()?;
+        let mut entries = BTreeMap::new();
+        for w in &manifest.workers {
+            let Some(entry) = &w.entry else {
+                continue;
+            };
+            let made = if Path::new(entry)
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("wasm"))
+            {
+                let bytes = std::fs::read(dir.join(entry))
+                    .map_err(|e| format!("worker {}: {entry}: {e}", w.id))?;
+                let (separate, _) = compile(engine, &bytes, self.cache.as_deref())
+                    .map_err(|e| format!("worker {}: {e}", w.id))?;
+                if let Some(import) = refused_import(engine, &separate) {
+                    return Err(format!(
+                        "worker {}: it imports {import}: a component reaches the app through the host service only",
+                        w.id
+                    ));
+                }
+                workers::Entry {
+                    component: separate,
+                    entry: w.id.clone(),
+                }
+            } else {
+                workers::Entry {
+                    component: component.clone(),
+                    entry: entry.clone(),
+                }
+            };
+            entries.insert(w.id.clone(), made);
+        }
+        let recipe = workers::WorkerRecipe {
+            id: manifest.id.clone(),
+            entries,
+            linker: Arc::clone(linker),
+            limits: self.worker_limits,
+            api: cx.api.clone(),
+            logs: cx.logs.clone(),
+            pool: self.pool.clone(),
+        };
+        Ok(Some(workers::Crew::new(recipe, nudge)))
+    }
+
     /// Puts a started component among the app's processes, when it has
     /// them.
     #[cfg(all(feature = "process", unix))]

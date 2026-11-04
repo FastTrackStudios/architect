@@ -245,3 +245,50 @@ fn every_process_method_has_its_place_in_the_world() {
     assert!(host.iter().any(|h| h == "theme"));
     assert!(guest.iter().any(|g| g == "save-state"));
 }
+
+/// A component's workers speak the API a Luau worker's and a process's
+/// work do (`architect_scripting::worker`, `architect_extensions::work`):
+/// each of their calls, and where a component makes it.
+#[test]
+fn the_worker_interfaces_are_the_other_runners() {
+    let w = world();
+    let mut worker = functions(&w, "worker");
+    worker.sort();
+    assert_eq!(
+        worker,
+        ["cancel", "cancelled", "post", "progress", "receive", "spawn"],
+        "the worker import's functions"
+    );
+    let mut work = functions(&w, "work");
+    work.sort();
+    assert_eq!(
+        work,
+        ["on-done", "on-message", "on-progress", "run"],
+        "the work export's functions"
+    );
+    // The other runners' calls, by the name a component has for each.
+    let same: [(&str, &str); 9] = [
+        // A Luau owner's `worker.spawn(name, args)`, a process's `spawn_work`.
+        ("spawn", "worker"),
+        // `w:post(msg)` / `worker.post(msg)`, `Work::post`.
+        ("post", "worker"),
+        // `w:cancel()`, `WorkHandle::cancel`.
+        ("cancel", "worker"),
+        // `worker.progress(done, total, note)`, `Work::progress`.
+        ("progress", "worker"),
+        // `worker.cancelled()`, `Work::cancelled`.
+        ("cancelled", "worker"),
+        // `worker.receive(ms)`.
+        ("receive", "worker"),
+        // `worker.on_message(w, fn)`, `on_progress`, `on_done`.
+        ("on-message", "work"),
+        ("on-progress", "work"),
+        ("on-done", "work"),
+    ];
+    for (f, interface) in same {
+        assert!(
+            functions(&w, interface).iter().any(|g| g == f),
+            "{interface} has no {f}"
+        );
+    }
+}

@@ -308,7 +308,10 @@ pub struct WorkerDecl {
     #[serde(default)]
     pub script: Option<String>,
     /// What its program calls it (`process`, `wasm`): the name a process
-    /// spawns it under (`guest::spawn_work`), a component's export.
+    /// spawns it under (`guest::spawn_work`); for a component, the entry
+    /// its `work.run` is given (`Extension::worker`), or a separate
+    /// component in the package (`*.wasm`) run as the worker
+    /// (`architect_extensions::wasi`'s workers).
     #[serde(default)]
     pub entry: Option<String>,
 }
@@ -629,9 +632,16 @@ impl Manifest {
                     }
                     inside(path)?;
                 }
-                (None, Some(_)) => {
+                (None, Some(entry)) => {
                     if !matches!(self.kind, Kind::Process | Kind::Wasm) {
                         return Err(bad("an entry worker needs a process or wasm package"));
+                    }
+                    // A separate component (`wasm`): a file in the package.
+                    if std::path::Path::new(entry)
+                        .extension()
+                        .is_some_and(|e| e.eq_ignore_ascii_case("wasm"))
+                    {
+                        inside(entry)?;
                     }
                 }
             }
