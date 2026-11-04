@@ -32,7 +32,7 @@ pub const BUILTIN: &str = ".builtin";
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PageKind {
     /// TypeScript with JSX: oxc strips its types and turns its JSX into
-    /// `h(...)` calls, then QuickJS runs it.
+    /// `h(...)` calls, then `QuickJS` runs it.
     Tsx,
     /// TypeScript.
     Ts,
@@ -87,7 +87,7 @@ impl PageKind {
         }
     }
 
-    /// Whether QuickJS runs it.
+    /// Whether `QuickJS` runs it.
     #[must_use]
     pub const fn is_js(self) -> bool {
         matches!(self, Self::Tsx | Self::Ts | Self::Jsx | Self::Js)

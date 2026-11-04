@@ -30,7 +30,7 @@ struct Node {
     text: Option<String>,
     attrs: Vec<Attr>,
     on: Vec<Listener>,
-    children: Vec<Node>,
+    children: Vec<Self>,
 }
 
 /// What a page drew last, to diff the next against. The root is the
@@ -104,7 +104,7 @@ impl Mirror {
         }
     }
 
-    fn id(&mut self) -> u64 {
+    const fn id(&mut self) -> u64 {
         let id = self.next;
         self.next = self.next.saturating_add(1);
         id
@@ -267,13 +267,16 @@ impl Mirror {
         let matched: Vec<Option<usize>> = new
             .iter()
             .enumerate()
-            .map(|(i, el)| match &el.key {
-                Some(k) => by_key.remove(k),
-                None => pool
-                    .get(i)
-                    .and_then(Option::as_ref)
-                    .filter(|n| n.key.is_none())
-                    .map(|_| i),
+            .map(|(i, el)| {
+                el.key.as_ref().map_or_else(
+                    || {
+                        pool.get(i)
+                            .and_then(Option::as_ref)
+                            .filter(|n| n.key.is_none())
+                            .map(|_| i)
+                    },
+                    |k| by_key.remove(k),
+                )
             })
             .collect();
         // What nothing matched goes.
@@ -291,38 +294,35 @@ impl Mirror {
         let mut order: Vec<u64> = pool.iter().flatten().map(|n| n.id).collect();
         let mut out = Vec::with_capacity(new.len());
         for (at, (el, found)) in new.iter().zip(&matched).enumerate() {
-            let node = match found.and_then(|i| pool.get_mut(i)?.take()) {
-                Some(mut node) => {
-                    let was = node.id;
-                    self.patch(parent, &mut node, el, edits);
-                    // Replaced by another kind of node: in its place.
-                    if let Some(slot) = order.iter_mut().find(|id| **id == was) {
-                        *slot = node.id;
-                    }
-                    if order.get(at) != Some(&node.id) {
-                        order.retain(|id| *id != node.id);
-                        let anchor = order.get(at).copied();
-                        edits.push(Edit::PushId {
-                            id: anchor.unwrap_or(parent),
-                        });
-                        edits.push(Edit::PushId { id: node.id });
-                        edits.push(into(anchor));
-                        edits.push(Edit::Pop);
-                        order.insert(at.min(order.len()), node.id);
-                    }
-                    node
+            let node = if let Some(mut node) = found.and_then(|i| pool.get_mut(i)?.take()) {
+                let was = node.id;
+                self.patch(parent, &mut node, el, edits);
+                // Replaced by another kind of node: in its place.
+                if let Some(slot) = order.iter_mut().find(|id| **id == was) {
+                    *slot = node.id;
                 }
-                None => {
+                if order.get(at) != Some(&node.id) {
+                    order.retain(|id| *id != node.id);
                     let anchor = order.get(at).copied();
                     edits.push(Edit::PushId {
                         id: anchor.unwrap_or(parent),
                     });
-                    let made = self.create(parent, el, edits);
+                    edits.push(Edit::PushId { id: node.id });
                     edits.push(into(anchor));
                     edits.push(Edit::Pop);
-                    order.insert(at.min(order.len()), made.id);
-                    made
+                    order.insert(at.min(order.len()), node.id);
                 }
+                node
+            } else {
+                let anchor = order.get(at).copied();
+                edits.push(Edit::PushId {
+                    id: anchor.unwrap_or(parent),
+                });
+                let made = self.create(parent, el, edits);
+                edits.push(into(anchor));
+                edits.push(Edit::Pop);
+                order.insert(at.min(order.len()), made.id);
+                made
             };
             out.push(node);
         }

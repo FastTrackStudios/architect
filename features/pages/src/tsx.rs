@@ -1,7 +1,8 @@
-//! TypeScript and JSX to JavaScript, in Rust (feature `js`): oxc parses
-//! a `.ts`/`.tsx`/`.jsx` file, strips its types, turns its JSX into
+//! TypeScript and JSX to JavaScript, in Rust (feature `js`).
+//!
+//! oxc parses a `.ts`/`.tsx`/`.jsx` file, strips its types, turns its JSX into
 //! `h(...)` calls (`Fragment` for `<>…</>`, both from `"architect"`), and
-//! prints an ES module QuickJS runs. A page of a few hundred lines takes
+//! prints an ES module `QuickJS` runs. A page of a few hundred lines takes
 //! a millisecond or two; a mistake is reported with its file, line and
 //! column ([`SourceError`]).
 //!

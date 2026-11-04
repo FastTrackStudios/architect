@@ -165,11 +165,11 @@ fn an_event_finds_its_handler_on_the_element_or_above() {
         handler: 7,
     });
     let edits = mirror.update(&[el("div", vec![button.clone()])]);
-    let listened: Vec<_> = edits
+    let listened = edits
         .iter()
         .filter(|e| matches!(e, Edit::Listen { .. }))
-        .collect();
-    assert_eq!(listened.len(), 1);
+        .count();
+    assert_eq!(listened, 1);
     // div 1, button 2, span 3, text 4: a click on the span is the button's.
     assert_eq!(mirror.handler(3, "click"), Some(7));
     assert_eq!(mirror.handler(2, "click"), Some(7));
