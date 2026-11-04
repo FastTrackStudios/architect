@@ -269,6 +269,12 @@
     run: (id, args) => call("run", id, json(args)),
     list: (filter) => call("actions", filter || ""),
   });
+  // Another extension's service (one its manifest [requires]): its
+  // provider's action answers, checked as the host service checks it.
+  const services = Object.freeze({
+    call: (service, method, args) =>
+      call("run", "EXT_SERVICE_CALL", json({ service, method, args: args === undefined ? null : args })),
+  });
   const settings = Object.freeze({
     get: (key) => call("setting", key),
     set: (key, value) => call("set_setting", key, json(value)),
@@ -435,7 +441,7 @@
 
   const api = Object.freeze({
     h, Fragment, useState, useRef, useEffect, useData, useShared, useEmbed, useTheme, invalidate,
-    theme, actions, settings, state, notify, worker, Overlay, host: raw,
+    theme, actions, services, settings, state, notify, worker, Overlay, host: raw,
   });
   globalThis.__architect = Object.freeze({
     api,

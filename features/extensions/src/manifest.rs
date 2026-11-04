@@ -363,8 +363,10 @@ pub struct KeyDecl {
     pub action: String,
 }
 
-/// A settings section it adds, there while it is loaded.
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+/// A settings section it adds, there while it is loaded: an item of the
+/// settings page's point (`settings.sections`), in the shape that point's
+/// items have.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct SectionDecl {
     /// Unique on the settings page.
     pub id: String,
@@ -375,17 +377,18 @@ pub struct SectionDecl {
     /// for the first, untitled group, as a built-in's).
     #[serde(default)]
     pub group: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub settings: Vec<SettingDecl>,
     /// One of its `[[views]]` that draws the section in place of
     /// settings: a page of its own on the settings page (the extensions
-    /// manager's).
-    #[serde(default)]
+    /// manager's). The app's own sections name a page of the app's
+    /// (`appearance`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub view: Option<String>,
 }
 
 /// One setting, as an author writes it.
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct SettingDecl {
     /// `<extension id>.<name>` (`fts.metronome.accent`).
     pub key: String,
@@ -413,10 +416,14 @@ pub struct SettingDecl {
     pub choices: Vec<ChoiceDecl>,
     #[serde(default)]
     pub aliases: Vec<String>,
+    /// Where its value lives: `device` (unset), `synced` (the person's,
+    /// on every device) or `project`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
 }
 
 /// One choice of a select, segmented control or cards.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ChoiceDecl {
     pub value: String,
     pub label: String,
@@ -524,6 +531,25 @@ pub struct Manifest {
     /// last word.
     #[serde(default)]
     pub tokens: std::collections::BTreeMap<String, String>,
+    /// The windows it owns (`[[windows]]`, `crate::interop`).
+    #[serde(default)]
+    pub windows: Vec<crate::interop::WindowDecl>,
+    /// The contribution points it declares (`[[points]]`).
+    #[serde(default)]
+    pub points: Vec<crate::interop::PointDecl>,
+    /// Its items for others' points (`[[contribute."<point>"]]`), by point.
+    #[serde(default)]
+    pub contribute: std::collections::BTreeMap<String, Vec<toml::Value>>,
+    /// The services it provides, each at a version (`[provides]`).
+    #[serde(default)]
+    pub provides: std::collections::BTreeMap<String, String>,
+    /// The services it needs, each a semver requirement (`[requires]`).
+    #[serde(default)]
+    pub requires: std::collections::BTreeMap<String, String>,
+    /// App action ids (`APP_…`) it owns, when the app allows it
+    /// (`Host::allow_reserved`): the settings sheet's `APP_SETTINGS`.
+    #[serde(default)]
+    pub reserved: Vec<String>,
     /// What it adds to the interface: its `[[openers]]`, `[[doc_kinds]]`,
     /// `[[tabs]]`, `[[status]]`, `[[menus]]`, `[[context]]`, `[[bar]]`,
     /// `[[hooks]]`, `[[slots]]` and `[[embeds]]`.
@@ -579,6 +605,9 @@ pub enum ManifestError {
     Contribution(Refused),
     /// A capability it asks for is not one there is.
     BadCapability(String),
+    /// A window, point, contribution to a point, service or reserved id
+    /// breaks a rule (`crate::interop::check`): the field, and why.
+    Interop { field: String, why: String },
 }
 
 impl std::fmt::Display for ManifestError {
@@ -602,6 +631,7 @@ impl std::fmt::Display for ManifestError {
             Self::BadWorker { worker, why } => write!(f, "worker {worker}: {why}"),
             Self::Contribution(r) => r.fmt(f),
             Self::BadCapability(why) => write!(f, "capabilities: {why}"),
+            Self::Interop { field, why } => write!(f, "{field}: {why}"),
             Self::BadPlane { overlay, plane } => {
                 write!(
                     f,
@@ -721,7 +751,7 @@ impl Manifest {
         let prefix = self.action_prefix();
         let mut seen = std::collections::BTreeSet::new();
         for a in &self.actions {
-            if !a.id.starts_with(&prefix) {
+            if !a.id.starts_with(&prefix) && !self.reserved.contains(&a.id) {
                 return Err(ManifestError::ActionNamespace {
                     action: a.id.clone(),
                     expected: prefix,
@@ -735,7 +765,10 @@ impl Manifest {
                     return Err(ManifestError::ScriptKind(a.id.clone()));
                 }
                 (Some(path), _) => inside(path)?,
-                (None, None) if matches!(self.kind, Kind::Data | Kind::Luau) => {
+                (None, None)
+                    if matches!(self.kind, Kind::Data | Kind::Luau)
+                        && self.window_opened_by(&a.id).is_none() =>
+                {
                     return Err(ManifestError::NoRun(a.id.clone()));
                 }
                 _ => {}
@@ -803,6 +836,22 @@ impl Manifest {
         self.contributes
             .check(&self.rules(&self.view_ids()))
             .map_err(ManifestError::Contribution)?;
+        let actions: Vec<String> = self.actions.iter().map(|a| a.id.clone()).collect();
+        crate::interop::check(&crate::interop::Decls {
+            id: &self.id,
+            actions: &actions,
+            views: &self.view_ids(),
+            windows: &self.windows,
+            points: &self.points,
+            contribute: &self.contribute,
+            provides: &self.provides,
+            requires: &self.requires,
+            reserved: &self.reserved,
+        })
+        .map_err(|b| ManifestError::Interop {
+            field: b.field,
+            why: b.why,
+        })?;
         let keys = format!("{}.", self.id);
         for section in &self.sections {
             if !seen.insert(section.id.as_str()) {
@@ -824,6 +873,19 @@ impl Manifest {
             }
         }
         Ok(())
+    }
+
+    /// The window action `action` opens, when it is one's `opens`.
+    #[must_use]
+    pub fn window_opened_by(&self, action: &str) -> Option<&crate::interop::WindowDecl> {
+        self.windows.iter().find(|w| w.opens == action)
+    }
+
+    /// Whether the host runs `action` itself, not its code: a preset, or
+    /// the action that opens one of its windows.
+    #[must_use]
+    pub fn host_runs(&self, action: &ActionDecl) -> bool {
+        action.preset.is_some() || self.window_opened_by(&action.id).is_some()
     }
 
     /// Its views' ids.
@@ -868,32 +930,187 @@ impl Manifest {
     pub fn sections(&self) -> Vec<Section> {
         self.sections
             .iter()
-            .map(|decl| {
-                let mut section = Section::new(&decl.id, &decl.title).owned_by(&self.id);
-                section = match decl.group.as_deref().unwrap_or("Extensions") {
-                    "" => section.ungrouped(),
-                    group => section.group(group),
-                };
-                if let Some(view) = &decl.view {
-                    section = section.view(format!("{}/{view}", self.id));
-                }
-                if !decl.icon.is_empty() {
-                    section = section.icon(&decl.icon);
-                }
-                for s in &decl.settings {
-                    let Ok(made) = setting(s) else { continue };
-                    let title = s.block.clone();
-                    match section.blocks.iter_mut().find(|b| b.title == title) {
-                        Some(block) => block.settings.push(made),
-                        None => section.blocks.push(Block {
-                            title,
-                            settings: vec![made],
-                        }),
-                    }
-                }
-                section
-            })
+            .map(|decl| section_of(&self.id, decl))
             .collect()
+    }
+
+    /// What it contributes to each point, as JSON items: its
+    /// `[[contribute."<point>"]]` tables, and its `[[sections]]` as items
+    /// of `settings.sections` (the sugar), first.
+    #[must_use]
+    pub fn point_items(&self) -> std::collections::BTreeMap<String, Vec<serde_json::Value>> {
+        let mut out: std::collections::BTreeMap<String, Vec<serde_json::Value>> = self
+            .contribute
+            .iter()
+            .map(|(point, items)| {
+                (
+                    point.clone(),
+                    items.iter().map(crate::interop::toml_json).collect(),
+                )
+            })
+            .collect();
+        if !self.sections.is_empty() {
+            let sugar = self
+                .sections
+                .iter()
+                .filter_map(|s| serde_json::to_value(s).ok());
+            let list = out
+                .entry(crate::interop::SETTINGS_SECTIONS.to_owned())
+                .or_default();
+            let rest = std::mem::take(list);
+            list.extend(sugar);
+            list.extend(rest);
+        }
+        out
+    }
+}
+
+/// A `settings.sections` item (`decl`) from `owner` as the settings page
+/// draws it.
+///
+/// `owner` is an extension's id, or `app`. Its view, when it names one, is
+/// `<owner>/<view>`; its group `Extensions` unless it says (`""` for the
+/// first, untitled group). A setting that cannot be drawn is left out.
+#[must_use]
+pub fn section_of(owner: &str, decl: &SectionDecl) -> Section {
+    let mut section = Section::new(&decl.id, &decl.title);
+    if owner != crate::interop::APP {
+        section = section.owned_by(owner);
+    }
+    let default_group = if owner == crate::interop::APP {
+        ""
+    } else {
+        "Extensions"
+    };
+    section = match decl.group.as_deref().unwrap_or(default_group) {
+        "" => section.ungrouped(),
+        group => section.group(group),
+    };
+    if let Some(view) = &decl.view {
+        section = section.view(format!("{owner}/{view}"));
+    }
+    if !decl.icon.is_empty() {
+        section = section.icon(&decl.icon);
+    }
+    for s in &decl.settings {
+        let Ok(made) = setting(s) else { continue };
+        let title = s.block.clone();
+        match section.blocks.iter_mut().find(|b| b.title == title) {
+            Some(block) => block.settings.push(made),
+            None => section.blocks.push(Block {
+                title,
+                settings: vec![made],
+            }),
+        }
+    }
+    section
+}
+
+/// A section as a `settings.sections` item: the app's own, contributed
+/// as `app`. Its `view` is `page` when the app draws it with a page of
+/// its own (`page`: true).
+#[must_use]
+pub fn decl_of(section: &Section, page: bool) -> SectionDecl {
+    let text = |v: &Value| -> toml::Value {
+        match v {
+            Value::Bool(b) => toml::Value::Boolean(*b),
+            Value::Int(i) => toml::Value::Integer(*i),
+            Value::Float(f) => toml::Value::Float(*f),
+            Value::Text(t) => toml::Value::String(t.clone()),
+        }
+    };
+    let choice_text = |v: &Value| match v {
+        Value::Text(t) => t.clone(),
+        Value::Bool(b) => b.to_string(),
+        Value::Int(i) => i.to_string(),
+        Value::Float(f) => f.to_string(),
+    };
+    let mut settings = Vec::new();
+    for block in &section.blocks {
+        for s in &block.settings {
+            let mut d = SettingDecl {
+                key: s.key.clone(),
+                title: s.title.clone(),
+                description: s.description.clone(),
+                block: block.title.clone(),
+                control: String::new(),
+                default: text(&s.default),
+                min: None,
+                max: None,
+                step: None,
+                unit: String::new(),
+                placeholder: String::new(),
+                choices: Vec::new(),
+                aliases: s.aliases.clone(),
+                scope: match s.scope {
+                    architect_settings::Scope::Device => None,
+                    architect_settings::Scope::Synced => Some("synced".to_owned()),
+                    architect_settings::Scope::Project => Some("project".to_owned()),
+                },
+            };
+            let choices = |c: &[Choice]| -> Vec<ChoiceDecl> {
+                c.iter()
+                    .map(|c| ChoiceDecl {
+                        value: choice_text(&c.value),
+                        label: c.label.clone(),
+                        detail: c.detail.clone(),
+                    })
+                    .collect()
+            };
+            match &s.control {
+                Control::Switch => "switch".clone_into(&mut d.control),
+                Control::Select(c) => {
+                    "select".clone_into(&mut d.control);
+                    d.choices = choices(c);
+                }
+                Control::Segmented(c) => {
+                    "segmented".clone_into(&mut d.control);
+                    d.choices = choices(c);
+                }
+                Control::Cards(c) => {
+                    "cards".clone_into(&mut d.control);
+                    d.choices = choices(c);
+                }
+                Control::Slider {
+                    min,
+                    max,
+                    step,
+                    unit,
+                } => {
+                    "slider".clone_into(&mut d.control);
+                    (d.min, d.max, d.step, d.unit) =
+                        (Some(*min), Some(*max), Some(*step), unit.clone());
+                }
+                Control::Stepper {
+                    min,
+                    max,
+                    step,
+                    unit,
+                } => {
+                    "stepper".clone_into(&mut d.control);
+                    #[allow(clippy::cast_precision_loss, clippy::as_conversions)]
+                    {
+                        (d.min, d.max, d.step) =
+                            (Some(*min as f64), Some(*max as f64), Some(*step as f64));
+                    }
+                    d.unit.clone_from(unit);
+                }
+                Control::Text { placeholder } => {
+                    "text".clone_into(&mut d.control);
+                    d.placeholder.clone_from(placeholder);
+                }
+                Control::Shortcut => "shortcut".clone_into(&mut d.control),
+            }
+            settings.push(d);
+        }
+    }
+    SectionDecl {
+        id: section.id.clone(),
+        title: section.title.clone(),
+        icon: section.icon.clone(),
+        group: Some(section.group.clone().unwrap_or_default()),
+        settings,
+        view: page.then(|| "page".to_owned()),
     }
 }
 
@@ -1023,9 +1240,16 @@ fn setting(s: &SettingDecl) -> Result<Setting, ManifestError> {
         ),
         other => return Err(bad(&format!("no control called “{other}”"))),
     };
+    let scope = match s.scope.as_deref() {
+        None | Some("device") => architect_settings::Scope::Device,
+        Some("synced") => architect_settings::Scope::Synced,
+        Some("project") => architect_settings::Scope::Project,
+        Some(other) => return Err(bad(&format!("no scope called “{other}”"))),
+    };
     Ok(Setting::new(&s.key, &s.title, control, default)
         .describe(&s.description)
-        .aliases(s.aliases.iter().cloned()))
+        .aliases(s.aliases.iter().cloned())
+        .scope(scope))
 }
 
 fn number(v: &toml::Value) -> Option<f64> {

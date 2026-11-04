@@ -565,6 +565,10 @@ fn json_args(id: &str, args: &[u8]) -> Result<Value, ActionError> {
     })
 }
 
+/// The action a page calls a service with (`crate::interop_actions`):
+/// let through every extension's gate, as it checks the call itself.
+pub const SERVICE_CALL: &str = "EXT_SERVICE_CALL";
+
 /// What an extension may reach: its own actions, the namespaces it named,
 /// up to the effect it named.
 #[must_use]
@@ -573,7 +577,8 @@ pub fn gate(manifest: &Manifest) -> Gate {
     let named = manifest.capabilities.actions.clone();
     let most = manifest.capabilities.effect;
     Arc::new(move |info: &ActionInfo| {
-        if info.id.starts_with(&own) {
+        // A service call checks itself: its [requires], its effect.
+        if info.id.starts_with(&own) || info.id == SERVICE_CALL {
             return Ok(());
         }
         if !named
@@ -630,6 +635,16 @@ pub enum LoadError {
         view: String,
         why: KindError,
     },
+    /// It owns an app id (`reserved`) the app did not allow it
+    /// (`Host::allow_reserved`), or an installed copy does.
+    Reserved(String),
+    /// A service it requires (`[requires]`) has no loaded provider whose
+    /// version meets it.
+    Requires {
+        service: String,
+        req: String,
+        why: String,
+    },
 }
 
 impl std::fmt::Display for LoadError {
@@ -642,6 +657,13 @@ impl std::fmt::Display for LoadError {
             Self::ActionTaken(id) => write!(f, "{id} is another's action"),
             Self::Sections(why) => write!(f, "its settings: {why}"),
             Self::ViewKind { view, why } => write!(f, "its view {view}: {why}"),
+            Self::Reserved(id) => write!(
+                f,
+                "{id} is the app's: this app does not let it own it (a built-in or its development copy may, when the app allows it)"
+            ),
+            Self::Requires { service, req, why } => {
+                write!(f, "it requires the service {service} {req}: {why}")
+            }
         }
     }
 }
@@ -780,6 +802,14 @@ struct Inner {
     linked: Mutex<BTreeMap<String, Arc<crate::linked::Builder>>>,
     /// The host service's side: consent, logs, the app's context, values.
     services: crate::hostapi::Services,
+    /// Contribution points and their items (`crate::points`).
+    points: crate::points::Points,
+    /// Extensions' windows open now (`crate::windows`).
+    windows: crate::windows::Windows,
+    /// The app's own ids (`APP_…`) an extension may own, by its id.
+    reserved: Mutex<BTreeMap<String, BTreeSet<String>>>,
+    /// Each point's deliveries so far: an owner keeps the newest.
+    delivered: std::sync::atomic::AtomicU64,
 }
 
 /// A [`Host`] held weakly: what an extension's session keeps, so an
@@ -841,6 +871,10 @@ impl Host {
                 #[cfg(feature = "linked")]
                 linked: Mutex::new(BTreeMap::new()),
                 services: crate::hostapi::Services::default(),
+                points: crate::points::Points::default(),
+                windows: crate::windows::Windows::default(),
+                reserved: Mutex::new(BTreeMap::new()),
+                delivered: std::sync::atomic::AtomicU64::new(0),
             }),
         }
     }
@@ -1322,6 +1356,7 @@ impl Host {
     ) -> Result<Change, LoadError> {
         let manifest = &package.manifest;
         manifest.check().map_err(|e| LoadError::Package(e.into()))?;
+        self.check_reserved(manifest, origin)?;
         let runner = match self.linked_runner(&manifest.id, origin) {
             Some(linked) => linked,
             None => self
@@ -1335,6 +1370,7 @@ impl Host {
             .loaded
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
+        check_requires(manifest, &loaded)?;
         let old = loaded.get(&manifest.id);
         let reloaded = old.is_some();
         // 1–2: start the new one with the old one's state, and build
@@ -1354,9 +1390,10 @@ impl Host {
             .map_err(LoadError::Start)?;
         let mut actions = Vec::with_capacity(manifest.actions.len());
         for decl in &manifest.actions {
-            let handler = match &decl.preset {
-                Some(_) => preset(list, self.live_gate(manifest, origin), decl),
-                None => instance.action(decl).map_err(|why| LoadError::Action {
+            let handler = match (&decl.preset, manifest.window_opened_by(&decl.id)) {
+                (Some(_), _) => preset(list, self.live_gate(manifest, origin), decl),
+                (None, Some(window)) => self.window_opener(&manifest.id, window),
+                (None, None) => instance.action(decl).map_err(|why| LoadError::Action {
                     id: decl.id.clone(),
                     why,
                 })?,
@@ -1399,6 +1436,18 @@ impl Host {
             |code| manifest.contributes.merged(&code),
         );
         self.inner.contributions.put(&manifest.id, declared);
+        // Its points and its items for others', as a diff; each point
+        // whose set changed is told to its owner.
+        let mut points = self.inner.points.declare(&manifest.id, &manifest.points);
+        points.extend(self.inner.points.put(&manifest.id, manifest.point_items()));
+        // Its windows that went with a reload close.
+        for open in self.inner.windows.open_now() {
+            if open.extension == manifest.id
+                && !manifest.windows.iter().any(|w| w.id == open.window.id)
+            {
+                self.inner.windows.close(&open.extension, &open.window.id);
+            }
+        }
         if let Some(old) = loaded.remove(&manifest.id) {
             old.instance.stop();
         }
@@ -1415,6 +1464,10 @@ impl Host {
             },
         );
         drop(loaded);
+        // Its own points are told now, whether or not they changed: it
+        // starts empty.
+        points.extend(manifest.points.iter().map(|p| p.id.clone()));
+        self.deliver(&points);
         Ok(Change {
             id: manifest.id.clone(),
             name: manifest.name.clone(),
@@ -1670,12 +1723,305 @@ impl Host {
             store.withdraw(id);
         }
         self.inner.contributions.withdraw(id);
+        self.inner.windows.close_all(id);
+        let points = self.inner.points.withdraw(id);
+        self.deliver(&points);
         running.instance.stop();
         tracing::info_span!("ext.unload", ext.id = %id).in_scope(|| {});
         self.tell(&Event::Unloaded { id: id.to_owned() });
         self.emit("extension.unloaded", id);
         true
     }
+}
+
+/// Windows, points and services (`crate::interop`).
+impl Host {
+    /// Lets extension `id` (its built-in, or a development copy of it) own
+    /// the app's `actions` (`APP_SETTINGS`) when its manifest lists them in
+    /// `reserved`. An installed copy never does.
+    pub fn allow_reserved(&self, id: &str, actions: &[&str]) {
+        self.inner
+            .reserved
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .entry(id.to_owned())
+            .or_default()
+            .extend(actions.iter().map(|a| (*a).to_owned()));
+    }
+
+    fn check_reserved(&self, manifest: &Manifest, origin: Origin) -> Result<(), LoadError> {
+        let allowed = self
+            .inner
+            .reserved
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&manifest.id)
+            .cloned()
+            .unwrap_or_default();
+        let owned = manifest
+            .actions
+            .iter()
+            .map(|a| &a.id)
+            .filter(|a| crate::interop::is_reserved(a));
+        for id in owned.chain(manifest.reserved.iter()) {
+            if origin == Origin::Installed || !allowed.contains(id) {
+                return Err(LoadError::Reserved(id.clone()));
+            }
+        }
+        Ok(())
+    }
+
+    /// The contribution points and their items.
+    #[must_use]
+    pub fn points(&self) -> &crate::points::Points {
+        &self.inner.points
+    }
+
+    /// Puts the app's own `items` for `point` (as `app`) in place of the
+    /// ones it gave; the point's owner is told.
+    pub fn contribute_app(&self, point: &str, items: Vec<Value>) {
+        let mut all = BTreeMap::new();
+        all.insert(point.to_owned(), items);
+        let changed = self.inner.points.put(crate::interop::APP, all);
+        self.deliver(&changed);
+    }
+
+    /// Tells each of `points`' owners its items: runs its `deliver` action
+    /// with `{point, revision, items}` (the items as they are when it runs;
+    /// an owner keeps the highest `revision` it is told).
+    fn deliver(&self, points: &[String]) {
+        for point in points {
+            let Some(declared) = self.inner.points.declared(point) else {
+                continue;
+            };
+            let Some(action) = declared.decl.deliver.clone() else {
+                continue;
+            };
+            let weak = self.downgrade();
+            let (point, owner) = (point.clone(), declared.owner.clone());
+            let work: ActionFuture = Box::pin(async move {
+                let Some(host) = weak.upgrade() else {
+                    return Ok(Vec::new());
+                };
+                let revision = host
+                    .inner
+                    .delivered
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                    .saturating_add(1);
+                let items = host.inner.points.items(&point);
+                let args = serde_json::json!({
+                    "point": point,
+                    "revision": revision,
+                    "items": items,
+                })
+                .to_string();
+                let list = host.inner.list.clone();
+                let answer = list.run_json_async(&action, args.as_bytes()).await;
+                // Not delivered: a line in its owner's log (EXT_LOGS).
+                if let Err(e) = &answer {
+                    host.logs().push(
+                        &owner,
+                        crate::logs::Level::Error,
+                        "point",
+                        format!("{point} was not delivered: {e}"),
+                    );
+                }
+                answer
+            });
+            let spawn = self
+                .inner
+                .spawn
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone();
+            spawn(work);
+        }
+    }
+
+    /// The handler of the action that opens `window`: the window opens
+    /// with the action's arguments as its state.
+    fn window_opener(
+        &self,
+        extension: &str,
+        window: &crate::interop::WindowDecl,
+    ) -> CallerAsyncHandler {
+        let weak = self.downgrade();
+        let (extension, window) = (extension.to_owned(), window.clone());
+        Arc::new(move |_caller: &ActionCaller, args: &[u8]| {
+            let state = if args.is_empty() {
+                Value::Null
+            } else {
+                serde_json::from_slice(args).unwrap_or(Value::Null)
+            };
+            if let Some(host) = weak.upgrade() {
+                host.inner.windows.open(&extension, &window, state);
+            }
+            let key = format!("{extension}/{}", window.id);
+            let out: ActionFuture =
+                Box::pin(
+                    async move { Ok(serde_json::json!({ "open": key }).to_string().into_bytes()) },
+                );
+            Ok(out)
+        })
+    }
+
+    /// Every loaded extension's `[[windows]]`, with its id.
+    #[must_use]
+    pub fn window_decls(&self) -> Vec<(String, crate::interop::WindowDecl)> {
+        self.loaded()
+            .into_iter()
+            .flat_map(|l| {
+                let id = l.manifest.id.clone();
+                l.manifest.windows.into_iter().map(move |w| (id.clone(), w))
+            })
+            .collect()
+    }
+
+    /// Opens extension `extension`'s window `id` with `state`.
+    ///
+    /// # Errors
+    ///
+    /// It is not loaded, or has no such window.
+    pub fn open_window(&self, extension: &str, id: &str, state: Value) -> Result<(), String> {
+        let loaded = self
+            .get(extension)
+            .ok_or_else(|| format!("{extension} is not loaded"))?;
+        let window = loaded
+            .manifest
+            .windows
+            .iter()
+            .find(|w| w.id == id)
+            .ok_or_else(|| format!("{extension} has no window {id}"))?;
+        self.inner.windows.open(extension, window, state);
+        Ok(())
+    }
+
+    /// Closes extension `extension`'s window `id`: whether it was open.
+    #[allow(clippy::must_use_candidate)] // Whether is for whoever wants it.
+    pub fn close_window(&self, extension: &str, id: &str) -> bool {
+        self.inner.windows.close(extension, id)
+    }
+
+    /// The windows open now.
+    #[must_use]
+    pub fn open_windows(&self) -> Vec<crate::windows::OpenWindow> {
+        self.inner.windows.open_now()
+    }
+
+    /// Calls `listener` whenever a window opens or closes (from any thread).
+    pub fn on_windows(&self, listener: impl Fn() + Send + Sync + 'static) {
+        self.inner.windows.listen(listener);
+    }
+
+    /// Unloads every loaded extension a service it requires no longer has
+    /// a provider for (the provider unloaded, or changed version): each
+    /// a failed load, saying which (`APP_STATUS`).
+    #[must_use = "what happened"]
+    pub fn drop_unprovided(&self) -> Vec<Event> {
+        let mut events = Vec::new();
+        loop {
+            let loaded = self.loaded();
+            let gone = loaded.iter().find_map(|l| {
+                l.manifest.requires.iter().find_map(|(service, req)| {
+                    let parsed = semver::VersionReq::parse(req).ok()?;
+                    let providers = providers_of(
+                        service,
+                        loaded
+                            .iter()
+                            .map(|o| &o.manifest)
+                            .filter(|m| m.id != l.manifest.id),
+                    );
+                    crate::interop::choose_provider(&providers, &parsed)
+                        .is_none()
+                        .then(|| {
+                            (
+                                l.manifest.id.clone(),
+                                LoadError::Requires {
+                                    service: service.clone(),
+                                    req: req.clone(),
+                                    why: "its provider is no longer loaded".to_owned(),
+                                },
+                            )
+                        })
+                })
+            });
+            let Some((id, error)) = gone else {
+                break;
+            };
+            self.unload(&id);
+            let failed = Event::Failed { id, error };
+            self.tell(&failed);
+            events.push(failed);
+        }
+        events
+    }
+
+    /// The loaded provider of `service` that meets `req`: the newest.
+    #[must_use]
+    pub fn provider(&self, service: &str, req: &semver::VersionReq) -> Option<(String, Version)> {
+        let providers = providers_of(service, self.loaded().iter().map(|l| &l.manifest));
+        crate::interop::choose_provider(&providers, req).cloned()
+    }
+}
+
+/// The loaded providers of `service` among `manifests`, with their versions.
+fn providers_of<'a>(
+    service: &str,
+    manifests: impl Iterator<Item = &'a Manifest>,
+) -> Vec<(String, Version)> {
+    manifests
+        .filter_map(|m| {
+            let v = Version::parse(m.provides.get(service)?).ok()?;
+            Some((m.id.clone(), v))
+        })
+        .collect()
+}
+
+/// Refuses `manifest` when a service it requires has no loaded provider
+/// meeting its requirement.
+fn check_requires(
+    manifest: &Manifest,
+    loaded: &BTreeMap<String, Running>,
+) -> Result<(), LoadError> {
+    for (service, req) in &manifest.requires {
+        let parsed = semver::VersionReq::parse(req).map_err(|e| LoadError::Requires {
+            service: service.clone(),
+            req: req.clone(),
+            why: e.to_string(),
+        })?;
+        let providers = providers_of(
+            service,
+            loaded
+                .values()
+                .map(|r| &r.loaded.manifest)
+                .filter(|m| m.id != manifest.id),
+        );
+        if crate::interop::choose_provider(&providers, &parsed).is_none() {
+            let why = if providers.is_empty() {
+                "no loaded extension provides it".to_owned()
+            } else {
+                format!(
+                    "the loaded {} {}",
+                    if providers.len() == 1 {
+                        "provider is"
+                    } else {
+                        "providers are"
+                    },
+                    providers
+                        .iter()
+                        .map(|(id, v)| format!("{id} {v}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            };
+            return Err(LoadError::Requires {
+                service: service.clone(),
+                req: req.clone(),
+                why,
+            });
+        }
+    }
+    Ok(())
 }
 
 /// What `package` adds to the app's themes: each `[[themes]]` file read
@@ -1711,6 +2057,13 @@ pub fn theme_contribution(package: &Package) -> Contribution {
 }
 
 /// How the list describes an extension's action.
+/// What the action that opens a window takes, unless its `params` say:
+/// anything, the window's state.
+const WINDOW_PARAMS: &str = r#"{"type":"object","additionalProperties":true}"#;
+
+/// What a point's `deliver` action takes, unless its `params` say.
+const DELIVERY_PARAMS: &str = r#"{"type":"object","properties":{"point":{"type":"string"},"revision":{"type":"integer"},"items":{"type":"array","items":{"type":"object","properties":{"from":{"type":"string"},"value":{}}}}}}"#;
+
 fn info(manifest: &Manifest, decl: &ActionDecl) -> ActionInfo {
     ActionInfo {
         id: decl.id.clone(),
@@ -1728,7 +2081,19 @@ fn info(manifest: &Manifest, decl: &ActionDecl) -> ActionInfo {
         },
         shortcut: decl.shortcut.clone(),
         effect: effect(decl.effect),
-        params_schema: decl.params.clone(),
+        // A point's delivery takes `{point, revision, items}` unless it
+        // says more.
+        params_schema: decl.params.clone().or_else(|| {
+            if manifest.window_opened_by(&decl.id).is_some() {
+                // A window's state: whatever it is opened with.
+                return Some(WINDOW_PARAMS.to_owned());
+            }
+            manifest
+                .points
+                .iter()
+                .any(|p| p.deliver.as_deref() == Some(decl.id.as_str()))
+                .then(|| DELIVERY_PARAMS.to_owned())
+        }),
         result_schema: None,
         enabled: true,
         disabled_reason: None,
@@ -1842,7 +2207,7 @@ mod linked {
                 ));
             }
             if let Some(a) = m.actions.iter().find(|a| {
-                a.preset.is_none() && a.script.is_none() && self.0.action_fn(&a.id).is_none()
+                !m.host_runs(a) && a.script.is_none() && self.0.action_fn(&a.id).is_none()
             }) {
                 return Err(format!("its code does not run its action {}", a.id));
             }

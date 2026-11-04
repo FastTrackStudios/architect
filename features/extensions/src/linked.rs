@@ -119,6 +119,27 @@ impl Handle {
         }
     }
 
+    /// Calls method `method` of service `service` (one its manifest
+    /// `[requires]`) with `args`: its provider's answer, the same linked in
+    /// or as a process (the host service's `service`).
+    pub fn service(&self, service: &str, method: &str, args: Json) -> HostFuture {
+        self.host(crate::hostcall::HostRequest::Service {
+            service: service.to_owned(),
+            method: method.to_owned(),
+            args,
+        })
+    }
+
+    /// Opens (`open`, with `state`) or closes one of its own windows
+    /// (`[[windows]]`).
+    pub fn window(&self, id: &str, open: bool, state: Json) -> HostFuture {
+        self.host(crate::hostcall::HostRequest::Window {
+            id: id.to_owned(),
+            open,
+            state,
+        })
+    }
+
     /// What it adds at run time now, in place of what it added before.
     pub fn contribute(&self, contribution: Contribution) {
         if let Some(s) = self.sink() {

@@ -484,6 +484,7 @@ pub(crate) fn manifest_fields(error: &ManifestError) -> (Option<String>, Option<
         // `opener kf`, `hook startup`: what the contribution was.
         ManifestError::Contribution(refused) => (Some(refused.what.clone()), None),
         ManifestError::BadCapability(_) => (Some("capabilities".to_owned()), None),
+        ManifestError::Interop { field, .. } => (Some(field.clone()), None),
     };
     let message = match error {
         // TOML's own text carries a drawing of the line; the message is
@@ -571,6 +572,8 @@ fn load_problem(error: &LoadError, report: &mut CheckReport) {
         LoadError::NoRunner(_) => Some("kind".to_owned()),
         LoadError::Start(_) => Some("entry".to_owned()),
         LoadError::Package(_) => None,
+        LoadError::Reserved(id) => Some(format!("reserved[{id}]")),
+        LoadError::Requires { service, .. } => Some(format!("requires.{service}")),
     };
     report.problem("load", error.to_string()).field = field;
 }

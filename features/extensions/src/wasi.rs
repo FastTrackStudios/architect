@@ -10,7 +10,7 @@
 //! `architect:extension` world (`features/extensions/wit/extension.wit`):
 //!
 //! - **imports**: the host service (`run-action`, `setting`,
-//!   `set-setting`, `theme`, `log`, and `call` for every
+//!   `set-setting`, `theme`, `log`, `call-service`, and `call` for every
 //!   `hostcall::HostRequest`), each call answered by the extension's own
 //!   [`ExtensionApi`] — so checked against its capabilities as a person
 //!   granted them, as a process's, a script's and a linked extension's
@@ -496,6 +496,25 @@ impl wit_host::Host for State {
             .await;
     }
 
+    async fn call_service(
+        &mut self,
+        service: String,
+        method: String,
+        args: String,
+    ) -> Result<String, String> {
+        if let Some(no) = self.worker_refusal() {
+            return Err(no);
+        }
+        self.host(HostRequest::Service {
+            service,
+            method,
+            args: json_arg(&args),
+        })
+        .await
+        .map(|v| v.to_string())
+        .map_err(|e| error_json(&e))
+    }
+
     async fn call(&mut self, request: String) -> String {
         if let Some(no) = self.worker_refusal() {
             return format!("{{\"error\": {no}}}");
@@ -799,7 +818,7 @@ impl Recipe {
         if let Some(missing) = m
             .actions
             .iter()
-            .find(|a| a.preset.is_none() && !actions.contains(&a.id))
+            .find(|a| !m.host_runs(a) && !actions.contains(&a.id))
         {
             return Err(format!(
                 "its manifest declares action {} it does not run",

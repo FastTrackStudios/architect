@@ -8,6 +8,9 @@
 //! host.set_data("last_run", os.time())
 //! host.log("counted in")
 //! local answer = host.call({ op = "org" })        -- {ok = …} or {error = {kind, …}}, never raises
+//! local bpm = host.service("lab.tempo", "get")    -- a service it [requires], its provider's action
+//! local items = host.point("lab.notes.cards")     -- one of its own points' items
+//! host.window("prefs", true, { tab = "audio" })   -- opens one of its own windows
 //! ```
 //!
 //! Each function but `call` raises the host's refusal as the script's
@@ -114,6 +117,32 @@ impl Module for HostModule {
                 level: a.1
             }
         ));
+        op!("service", (String, String, Option<LuaValue>), |lua, a| {
+            let (service, method, args) = a;
+            args.map_or(Ok(Value::Null), |v| json_of(&lua, v))
+                .map(|args| HostRequest::Service {
+                    service,
+                    method,
+                    args,
+                })
+        });
+        op!("point", String, |lua, a| Ok(HostRequest::Point {
+            point: a
+        }));
+        op!(
+            "window",
+            (String, Option<bool>, Option<LuaValue>),
+            |lua, a| {
+                let (id, open, state) = a;
+                state
+                    .map_or(Ok(Value::Null), |v| json_of(&lua, v))
+                    .map(|state| HostRequest::Window {
+                        id,
+                        open: open.unwrap_or(true),
+                        state,
+                    })
+            }
+        );
         // The answer as a table, never raised.
         let api = self.api.clone();
         t.set(

@@ -153,21 +153,59 @@ impl Bridge {
 
 /// A pop-out window, for a [`WindowSystem`] to open: its id, title and
 /// place, the document to draw in it, and what to tell the host.
+///
+/// A workspace's window (its panes and docks), or a page of its own
+/// ([`Popout::page`]: an extension's `[[windows]]` `kind = "window"`).
 #[derive(Clone)]
 pub struct Popout {
-    props: PopoutProps,
+    root: Root,
     title: String,
     bounds: Option<Rect>,
     on_closed: Rc<dyn Fn()>,
     on_moved: Rc<dyn Fn(Rect)>,
 }
 
+/// What a pop-out draws.
+#[derive(Clone)]
+enum Root {
+    Workspace(PopoutProps),
+    Page(PageProps),
+}
+
 impl Popout {
+    /// A window of its own drawing `draw` (called in its own dom, under
+    /// `bridge`'s contexts): an extension's window. `on_closed` runs when
+    /// the person closes it (inside its dom, as [`Self::closed`] says).
+    #[must_use]
+    pub fn page(
+        id: WindowId,
+        title: impl Into<String>,
+        bounds: Option<Rect>,
+        bridge: Bridge,
+        draw: Rc<dyn Fn() -> Element>,
+        on_closed: Rc<dyn Fn()>,
+    ) -> Self {
+        Self {
+            root: Root::Page(PageProps {
+                window: id,
+                bridge,
+                draw: PageDraw(draw),
+            }),
+            title: title.into(),
+            bounds,
+            on_closed,
+            on_moved: Rc::new(|_| {}),
+        }
+    }
+
     /// The window's id (carried to the platform: a window manager can
     /// place it by it).
     #[must_use]
     pub const fn id(&self) -> &WindowId {
-        &self.props.window
+        match &self.root {
+            Root::Workspace(p) => &p.window,
+            Root::Page(p) => &p.window,
+        }
     }
 
     #[must_use]
@@ -185,7 +223,10 @@ impl Popout {
     /// window's state.
     #[must_use]
     pub fn dom(&self) -> VirtualDom {
-        VirtualDom::new_with_props(PopoutView, self.props.clone())
+        match &self.root {
+            Root::Workspace(p) => VirtualDom::new_with_props(PopoutView, p.clone()),
+            Root::Page(p) => VirtualDom::new_with_props(PageView, p.clone()),
+        }
     }
 
     /// The person closed the window: its tabs go back to the main window.
@@ -200,6 +241,31 @@ impl Popout {
     pub fn moved(&self, bounds: Rect) {
         (self.on_moved)(bounds);
     }
+}
+
+/// What draws a page pop-out (compared by pointer).
+#[derive(Clone)]
+struct PageDraw(Rc<dyn Fn() -> Element>);
+
+impl PartialEq for PageDraw {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+/// What a page pop-out's root is given.
+#[derive(Props, Clone, PartialEq)]
+struct PageProps {
+    window: WindowId,
+    bridge: Bridge,
+    draw: PageDraw,
+}
+
+/// A page pop-out's root: the carried contexts, then what it draws.
+#[allow(non_snake_case, clippy::needless_pass_by_value)] // A component, its props.
+fn PageView(props: PageProps) -> Element {
+    use_hook(|| props.bridge.provide());
+    (props.draw.0)()
 }
 
 /// What a pop-out's root is given: the main window's state.
@@ -277,7 +343,7 @@ pub(super) fn PopoutSync(bridge: Bridge) -> Element {
         let moved_id = id.clone();
         let opened_too = opened.clone();
         let popout = Popout {
-            props: PopoutProps {
+            root: Root::Workspace(PopoutProps {
                 window: id,
                 workspace: host.workspace,
                 views: host.views.peek().clone(),
@@ -290,7 +356,7 @@ pub(super) fn PopoutSync(bridge: Bridge) -> Element {
                 bridge: carried.clone(),
                 commands: host.commands.peek().clone(),
                 pressed: host.pressed,
-            },
+            }),
             title,
             bounds,
             on_closed: Rc::new(move || {

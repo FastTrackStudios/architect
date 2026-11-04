@@ -5,10 +5,14 @@
 //! its own page. Every row: the title, what it does, the control; a dot
 //! and a reset arrow when it is not the default.
 //!
-//! "Settings…" (⌘,) is a command, so the palette, the menu bar and a
-//! model open it too. A search hit opens its section, scrolls to its row
-//! and pulses it. `use_settings::<T>()` is a derived section's typed
-//! value.
+//! The page's frame is the core's ([`SettingsSheet`]: what a window
+//! draws); the sheet itself, "Settings…" (`APP_SETTINGS`, ⌘,) and the
+//! sections it lists are the settings extension's
+//! (`features/settings/sheet`, the point `settings.sections`), so it can
+//! be turned off, cloned and swapped. [`SettingsPage`] is what stays in
+//! the core: the palette's `#`. A search hit opens its section, scrolls
+//! to its row and pulses it. `use_settings::<T>()` is a derived section's
+//! typed value.
 
 // The `rsx!` loops iterate rows collected so a signal's read is let go
 // before drawing.
@@ -329,6 +333,14 @@ impl SettingsHandle {
         }
     }
 
+    /// This handle with `registry` in place of its own: a sheet drawing
+    /// the sections it was given (`settings.sections`) over the app's
+    /// values, page and focus.
+    #[must_use]
+    pub const fn with_registry(self, registry: Signal<Registry>) -> Self {
+        Self { registry, ..self }
+    }
+
     /// Puts in `scope`'s values as its store has them now (another device
     /// changed them). Not a change to keep: `on_change` is not called.
     pub fn replace(&self, scope: Scope, values: Values) {
@@ -387,9 +399,18 @@ impl SettingsHandle {
     }
 }
 
+/// The colours a settings sheet draws in where there is no shell and no
+/// theme store (a sheet drawn in an extension's own process): the host's
+/// theme as it changes, put in context above [`SettingsSheet`].
+#[derive(Clone, Copy)]
+pub struct SheetTheme(pub Signal<ShellTheme>);
+
 /// The shell's colours; over the shell (a sheet mounted beside
 /// `AppShell`), the theme store's, so the page follows it too.
 fn theme() -> ShellTheme {
+    if let Some(SheetTheme(t)) = try_consume_context::<SheetTheme>() {
+        return t();
+    }
     try_use_shell().map_or_else(
         || ShellTheme::from_resolved(&architect_theme::use_resolved()),
         |s| s.theme,
@@ -419,20 +440,16 @@ fn icon(name: &str, size: usize, color: &str) -> Element {
     }
 }
 
-/// The page, over the window while a section is open. Mount it once,
-/// inside the app.
+/// The core's part of the settings page: the palette's `#` (a setting by
+/// name, opened at its row: [`SettingsHandle::show_setting`], which the
+/// settings window follows). Mount it once, inside the app. The page
+/// itself is a window the settings extension owns, drawing
+/// [`SettingsSheet`].
 #[component]
 pub fn SettingsPage() -> Element {
     let Some(h) = try_use_settings() else {
         return rsx! {};
     };
-    // "Settings…" (⌘,): in the palette and the menu bar.
-    architect_commands::use_command(
-        architect_commands::Command::new("APP_SETTINGS", "Settings…")
-            .group("App")
-            .shortcut("⌘,"),
-        move || h.show(None),
-    );
     // The palette's `#`: a setting by name, opened at its row.
     architect_commands::use_palette_opener(architect_commands::Scope::Settings, move || {
         architect_commands::Opener::new(
@@ -460,9 +477,16 @@ pub fn SettingsPage() -> Element {
             move |item, _| h.show_setting(&item.id),
         )
     });
-    if (h.open)().is_none() {
-        return rsx! {};
-    }
+    rsx! {}
+}
+
+/// The settings page's insides, for a window's frame (a sheet's card, an
+/// OS window, a phone's full screen) to hold: on a desk the sections and
+/// the open one side by side, on a phone the list and a section in turn.
+/// It draws the [`SettingsHandle`] in context: its registry's sections,
+/// its values, its open section (none: nothing open on the right).
+#[component]
+pub fn SettingsSheet() -> Element {
     if phone() {
         rsx! { PhoneSettings {} }
     } else {
@@ -495,73 +519,62 @@ fn DeskSettings() -> Element {
     let section = registry.section(&current).cloned();
     drop(registry);
     rsx! {
-        div {
-            style: "position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: {architect_shell::layer::POPOVER}; \
-                    background: {t.scrim}; display: flex; align-items: center; justify-content: center;",
-            onclick: move |_| h.close(),
-            div {
-                style: "width: 92%; max-width: 1100px; height: 86%; max-height: 760px; display: flex; overflow: hidden; \
-                        border-radius: 14px; background: {t.desk}; border: 1px solid {t.rule}; box-shadow: {t.shadow_float}; \
-                        font-family: {t.font}; color: {t.ink};",
-                onclick: move |e| e.stop_propagation(),
-                // The sections.
-                div { style: "flex: 0 0 248px; display: flex; flex-direction: column; background: {t.sheet}; \
-                              border-right: 1px solid {t.rule}; padding: 14px 10px; gap: 2px; overflow-y: scroll;",
-                    div { style: "display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; margin-bottom: 10px; \
-                                  border-radius: 8px; background: {t.desk}; border: 1px solid {t.rule};",
-                        Search { size: 14, color: t.ink_3.to_string() }
-                        // Blitz has no placeholder: the hint sits under an empty field.
-                        if query.read().is_empty() {
-                            span { style: "position: absolute; margin-left: 24px; color: {t.ink_3}; font-size: 13px; pointer-events: none;",
-                                "Search settings"
-                            }
-                        }
-                        input {
-                            r#type: "text",
-                            value: "{query}",
-                            "aria-label": "Search settings",
-                            style: "flex: 1; min-width: 0; border: none; outline: none; background: transparent; \
-                                    color: {t.ink}; font-size: 13px; font-family: {t.font};",
-                            oninput: move |e| query.set(e.value()),
-                        }
-                    }
-                    if query.read().trim().is_empty() {
-                        for (gi, (group, list)) in groups.into_iter().enumerate() {
-                            if let Some(g) = group {
-                                div { key: "g{gi}", style: "padding: 14px 10px 6px; color: {t.ink_3}; font-size: 11px; font-weight: 600;", "{g}" }
-                            }
-                            for (id, title, ic) in list {
-                                SectionLink { key: "{id}", on: id == current, id, title, ic }
-                            }
-                        }
-                    } else {
-                        SearchResults { hits }
+        // The sections.
+        div { style: "flex: 0 0 248px; display: flex; flex-direction: column; background: {t.sheet}; \
+                      border-right: 1px solid {t.rule}; padding: 14px 10px; gap: 2px; overflow-y: scroll;",
+            div { style: "display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; margin-bottom: 10px; \
+                          border-radius: 8px; background: {t.desk}; border: 1px solid {t.rule};",
+                Search { size: 14, color: t.ink_3.to_string() }
+                // Blitz has no placeholder: the hint sits under an empty field.
+                if query.read().is_empty() {
+                    span { style: "position: absolute; margin-left: 24px; color: {t.ink_3}; font-size: 13px; pointer-events: none;",
+                        "Search settings"
                     }
                 }
-                // The section.
-                div { style: "flex: 1; min-width: 0; display: flex; flex-direction: column;",
-                    div { style: "flex: 0 0 52px; display: flex; align-items: center; gap: 8px; padding: 0 16px 0 28px; \
-                                  border-bottom: 1px solid {t.rule}; font-size: 13px;",
-                        span { style: "color: {t.ink_3};", "Settings" }
-                        ChevronRight { size: 14, color: t.ink_3.to_string() }
-                        span { style: "font-weight: 600;", "{section.as_ref().map(|s| s.title.clone()).unwrap_or_default()}" }
-                        span { style: "flex: 1;" }
-                        if let Some(s) = section.clone() {
-                            RestoreDefaults { id: s.id }
-                        }
-                        button {
-                            style: "width: 28px; height: 28px; border: none; border-radius: 6px; background: transparent; \
-                                    display: flex; align-items: center; justify-content: center; cursor: pointer;",
-                            "aria-label": "Close settings",
-                            onclick: move |_| h.close(),
-                            X { size: 16, color: t.ink_2.to_string() }
-                        }
+                input {
+                    r#type: "text",
+                    value: "{query}",
+                    "aria-label": "Search settings",
+                    style: "flex: 1; min-width: 0; border: none; outline: none; background: transparent; \
+                            color: {t.ink}; font-size: 13px; font-family: {t.font};",
+                    oninput: move |e| query.set(e.value()),
+                }
+            }
+            if query.read().trim().is_empty() {
+                for (gi, (group, list)) in groups.into_iter().enumerate() {
+                    if let Some(g) = group {
+                        div { key: "g{gi}", style: "padding: 14px 10px 6px; color: {t.ink_3}; font-size: 11px; font-weight: 600;", "{g}" }
                     }
-                    div { style: "flex: 1; min-height: 0; overflow-y: scroll; padding: 24px 28px 40px;",
-                        if let Some(s) = section {
-                            SectionBody { section: s }
-                        }
+                    for (id, title, ic) in list {
+                        SectionLink { key: "{id}", on: id == current, id, title, ic }
                     }
+                }
+            } else {
+                SearchResults { hits }
+            }
+        }
+        // The section.
+        div { style: "flex: 1; min-width: 0; display: flex; flex-direction: column;",
+            div { style: "flex: 0 0 52px; display: flex; align-items: center; gap: 8px; padding: 0 16px 0 28px; \
+                          border-bottom: 1px solid {t.rule}; font-size: 13px;",
+                span { style: "color: {t.ink_3};", "Settings" }
+                ChevronRight { size: 14, color: t.ink_3.to_string() }
+                span { style: "font-weight: 600;", "{section.as_ref().map(|s| s.title.clone()).unwrap_or_default()}" }
+                span { style: "flex: 1;" }
+                if let Some(s) = section.clone() {
+                    RestoreDefaults { id: s.id }
+                }
+                button {
+                    style: "width: 28px; height: 28px; border: none; border-radius: 6px; background: transparent; \
+                            display: flex; align-items: center; justify-content: center; cursor: pointer;",
+                    "aria-label": "Close settings",
+                    onclick: move |_| h.close(),
+                    X { size: 16, color: t.ink_2.to_string() }
+                }
+            }
+            div { style: "flex: 1; min-height: 0; overflow-y: scroll; padding: 24px 28px 40px;",
+                if let Some(s) = section {
+                    SectionBody { section: s }
                 }
             }
         }
@@ -717,6 +730,14 @@ fn SectionBody(section: Section) -> Element {
     if let Some(drawn) = drawn {
         return rsx! {
             div { style: "display: flex; flex-direction: column; min-height: 100%;", {drawn} }
+        };
+    }
+    // A view this window cannot draw (a sheet drawn out of process).
+    if let (Some(view), true) = (&section.view, section.blocks.is_empty()) {
+        return rsx! {
+            div { style: "color: {t.ink_3}; font-size: 13px;",
+                "{section.title} is drawn by {view}, which this window cannot show."
+            }
         };
     }
     rsx! {
@@ -1171,56 +1192,52 @@ fn PhoneSettings() -> Element {
         "Settings".to_owned()
     };
     rsx! {
-        div {
-            style: "position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: {architect_shell::layer::POPOVER}; \
-                    display: flex; flex-direction: column; background: {t.desk}; font-family: {t.font}; color: {t.ink};",
-            div { style: "flex: 0 0 56px; display: flex; align-items: center; gap: 6px; padding: 0 8px; margin-top: 44px;",
-                if in_section() {
-                    button {
-                        style: "height: 44px; display: flex; align-items: center; gap: 2px; padding: 0 6px; border: none; \
-                                background: transparent; color: {t.accent}; font-size: 16px; cursor: pointer;",
-                        onclick: move |_| in_section.set(false),
-                        ChevronLeft { size: 22, color: t.accent.to_string() }
-                        "Settings"
-                    }
-                }
-                span { style: "flex: 1;" }
+        div { style: "flex: 0 0 56px; display: flex; align-items: center; gap: 6px; padding: 0 8px; margin-top: 44px;",
+            if in_section() {
                 button {
-                    style: "width: 44px; height: 44px; border: none; background: transparent; display: flex; align-items: center; \
-                            justify-content: center; cursor: pointer;",
-                    "aria-label": "Close settings",
-                    onclick: move |_| h.close(),
-                    X { size: 20, color: t.ink_2.to_string() }
+                    style: "height: 44px; display: flex; align-items: center; gap: 2px; padding: 0 6px; border: none; \
+                            background: transparent; color: {t.accent}; font-size: 16px; cursor: pointer;",
+                    onclick: move |_| in_section.set(false),
+                    ChevronLeft { size: 22, color: t.accent.to_string() }
+                    "Settings"
                 }
             }
-            div { style: "padding: 0 20px 10px; font-size: 30px; font-weight: 750; letter-spacing: -0.02em;", "{title}" }
-            div { style: "flex: 1; min-height: 0; overflow-y: scroll; padding: 0 16px 40px;",
-                if in_section() {
-                    if let Some(s) = section {
-                        SectionBody { section: s }
-                    }
-                } else {
-                    for (gi, (group, list)) in groups.into_iter().enumerate() {
-                        div { key: "{gi}", style: "margin-bottom: 22px;",
-                            if let Some(g) = group {
-                                div { style: "padding: 0 6px 8px; color: {t.ink_3}; font-size: 13px; font-weight: 600;", "{g}" }
-                            }
-                            div { style: "display: flex; flex-direction: column; border-radius: 24px; background: {t.sheet}; \
-                                          border: 1px solid {t.rule}; overflow: hidden;",
-                                for (i, (id, name, ic)) in list.into_iter().enumerate() {
-                                    button {
-                                        key: "{id}",
-                                        style: "height: 56px; display: flex; align-items: center; gap: 12px; padding: 0 16px; border: none; \
-                                                border-top: 1px solid {row_rule(i, &t)}; background: transparent; color: {t.ink}; \
-                                                font-size: 16px; text-align: left; cursor: pointer;",
-                                        onclick: move |_| {
-                                            h.show(Some(&id));
-                                            in_section.set(true);
-                                        },
-                                        {icon(&ic, 20, &t.ink_2)}
-                                        span { style: "flex: 1;", "{name}" }
-                                        ChevronRight { size: 18, color: t.ink_3.to_string() }
-                                    }
+            span { style: "flex: 1;" }
+            button {
+                style: "width: 44px; height: 44px; border: none; background: transparent; display: flex; align-items: center; \
+                        justify-content: center; cursor: pointer;",
+                "aria-label": "Close settings",
+                onclick: move |_| h.close(),
+                X { size: 20, color: t.ink_2.to_string() }
+            }
+        }
+        div { style: "padding: 0 20px 10px; font-size: 30px; font-weight: 750; letter-spacing: -0.02em;", "{title}" }
+        div { style: "flex: 1; min-height: 0; overflow-y: scroll; padding: 0 16px 40px;",
+            if in_section() {
+                if let Some(s) = section {
+                    SectionBody { section: s }
+                }
+            } else {
+                for (gi, (group, list)) in groups.into_iter().enumerate() {
+                    div { key: "{gi}", style: "margin-bottom: 22px;",
+                        if let Some(g) = group {
+                            div { style: "padding: 0 6px 8px; color: {t.ink_3}; font-size: 13px; font-weight: 600;", "{g}" }
+                        }
+                        div { style: "display: flex; flex-direction: column; border-radius: 24px; background: {t.sheet}; \
+                                      border: 1px solid {t.rule}; overflow: hidden;",
+                            for (i, (id, name, ic)) in list.into_iter().enumerate() {
+                                button {
+                                    key: "{id}",
+                                    style: "height: 56px; display: flex; align-items: center; gap: 12px; padding: 0 16px; border: none; \
+                                            border-top: 1px solid {row_rule(i, &t)}; background: transparent; color: {t.ink}; \
+                                            font-size: 16px; text-align: left; cursor: pointer;",
+                                    onclick: move |_| {
+                                        h.show(Some(&id));
+                                        in_section.set(true);
+                                    },
+                                    {icon(&ic, 20, &t.ink_2)}
+                                    span { style: "flex: 1;", "{name}" }
+                                    ChevronRight { size: 18, color: t.ink_3.to_string() }
                                 }
                             }
                         }

@@ -190,6 +190,10 @@ fn the_host_interface_is_the_host_service() {
             Some(op(r#"{"op":"set_setting","key":"k","value":1}"#)),
         ),
         ("log", Some(op(r#"{"op":"log","text":"t"}"#))),
+        (
+            "call-service",
+            Some(op(r#"{"op":"service","service":"a.b","method":"m"}"#)),
+        ),
         // The theme is the host's to send, no request (a process is sent it).
         ("theme", None),
         // Any request at all.
@@ -202,7 +206,7 @@ fn the_host_interface_is_the_host_service() {
     assert_eq!(got, expected, "the host interface's functions");
     assert_eq!(
         typed.iter().filter_map(|(_, op)| *op).collect::<Vec<_>>(),
-        ["run", "setting", "set_setting", "log"]
+        ["run", "setting", "set_setting", "log", "service"]
     );
 }
 

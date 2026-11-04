@@ -656,6 +656,9 @@ const FORWARDED: &[&str] = &[
     "EXT_EMIT",
     "EXT_ENABLE",
     "EXT_DISABLE",
+    "EXT_POINTS",
+    "EXT_WINDOWS",
+    "EXT_WINDOW_CLOSE",
 ];
 
 /// Puts `ids` of `from` on `to`, run on `from` as whoever ran them.
@@ -788,6 +791,17 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         if let Ok(with) = extensions
             .clone()
             .with_linked(&ManagerExtension::new(manager.clone()))
+        {
+            extensions = with;
+        }
+        // The settings page: its window, ⌘, (the app's APP_SETTINGS, which
+        // the lab lets it own) and its point, settings.sections.
+        extensions
+            .host()
+            .allow_reserved(architect_settings_sheet::ID, &["APP_SETTINGS"]);
+        if let Ok(with) = extensions
+            .clone()
+            .with_linked(&architect_settings_sheet::SettingsSheet)
         {
             extensions = with;
         }

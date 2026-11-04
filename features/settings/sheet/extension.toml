@@ -1,0 +1,102 @@
+# The settings page (features/settings/sheet/src/lib.rs): ⌘, opens it, a
+# sheet over the window; its sections are what the app and every extension
+# contribute to its point, `settings.sections` (an extension's
+# `[[sections]]` among them). One Rust value (`SettingsSheet`, a
+# linked::Extension): an app links it in as a built-in and allows it the
+# app's APP_SETTINGS (`Host::allow_reserved`); its program (src/main.rs)
+# serves the same value as a process when a development copy runs
+# (EXT_CLONE {"id":"settings"}).
+id = "settings"
+name = "Settings"
+version = "0.1.0"
+kind = "process"
+api = "0.1"
+description = "The settings page: ⌘, opens it over the window, with every section the app and its extensions contribute (settings.sections)."
+authors = ["FastTrackStudio"]
+# The app's own id it owns, when the app allows it.
+reserved = ["APP_SETTINGS"]
+
+[entry]
+path = "architect-settings-sheet"
+
+[source]
+git = "https://github.com/FastTrackStudios/architect"
+rev = "main"
+path = "features/settings/sheet"
+
+# The app's settings store, for a copy drawn out of process.
+[capabilities]
+actions = ["APP_SETTINGS_VALUES", "APP_SETTINGS_SET"]
+effect = "mutating"
+
+[[actions]]
+id = "APP_SETTINGS"
+name = "Settings…"
+description = "Opens the settings page over the window: at section `section`, or scrolled to setting `setting`'s row, or where it was."
+group = "App"
+shortcut = "⌘,"
+effect = "read_only"
+params = '{"type":"object","properties":{"section":{"type":"string"},"setting":{"type":"string"}}}'
+
+[[actions]]
+id = "SETTINGS_SECTIONS"
+name = "Settings: sections"
+description = "The point settings.sections, delivered by the host: every section the app and its extensions contribute, kept for the page."
+group = "Settings"
+effect = "read_only"
+
+[[actions]]
+id = "SETTINGS_LIST"
+name = "Settings: sections listed"
+description = "What the settings page lists: each section's id, title, group, who contributed it, its view (when one draws it) and how many settings it has."
+group = "Settings"
+effect = "read_only"
+
+[[views]]
+id = "sheet"
+title = "Settings"
+icon = "settings-2"
+
+[[windows]]
+id = "settings"
+view = "sheet"
+title = "Settings"
+kind = "sheet"
+opens = "APP_SETTINGS"
+
+# A section: the manifest's [[sections]] shape (an extension's
+# [[sections]] are items of this point as they are).
+[[points]]
+id = "settings.sections"
+title = "Settings sections"
+description = "A section of the settings page: its id, title, icon and group, and its settings (each a key in the contributor's namespace, a title, a control and a default), or a view of the contributor's that draws it."
+deliver = "SETTINGS_SECTIONS"
+schema = '''
+{
+  "type": "object",
+  "required": ["id", "title"],
+  "properties": {
+    "id": {"type": "string"},
+    "title": {"type": "string"},
+    "icon": {"type": "string"},
+    "group": {"type": ["string", "null"]},
+    "view": {"type": ["string", "null"]},
+    "settings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["key", "title", "control", "default"],
+        "properties": {
+          "key": {"type": "string"},
+          "title": {"type": "string"},
+          "description": {"type": "string"},
+          "block": {"type": ["string", "null"]},
+          "control": {"enum": ["switch", "select", "segmented", "cards", "slider", "stepper", "text", "shortcut"]},
+          "choices": {"type": "array", "items": {"type": "object", "required": ["value", "label"]}},
+          "scope": {"enum": ["device", "synced", "project"]}
+        }
+      }
+    }
+  }
+}
+'''

@@ -231,6 +231,8 @@ function world() {
         if (worker) return `{"error": ${WORKER_REFUSAL}}`;
         return ask({ op: 'call', request });
       },
+      callService: (name, method, args) =>
+        worker ? err(WORKER_REFUSAL) : service({ op: 'service', service: name, method, args: jsonArg(args) }),
     },
     'architect:extension/worker': {
       spawn: async (name, args) => {

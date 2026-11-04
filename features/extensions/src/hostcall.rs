@@ -22,6 +22,9 @@
 //! | `setting {key}` / `set_setting {key, value}` | one of its own settings (`<id>.…`) | nothing |
 //! | `data {key}` / `set_data {key, value?}` | its own data, kept for it | nothing |
 //! | `log {text, level?}` | a line in its log (`EXT_LOGS`) | nothing |
+//! | `service {service, method, args?}` | calls another extension's service: its provider's action `<PREFIX><METHOD>`, as this extension | `[requires] <service>`, and `capabilities.effect` |
+//! | `point {point}` | the items of one of its own points (`[[points]]`) | owning it |
+//! | `window {id, open, state?}` | opens or closes one of its own windows (`[[windows]]`) | nothing |
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -77,6 +80,30 @@ pub enum HostRequest {
         #[serde(default)]
         level: Option<String>,
     },
+    /// Calls method `method` of service `service` (one it `[requires]`),
+    /// answered by its provider's action `<PREFIX><METHOD>`.
+    Service {
+        service: String,
+        method: String,
+        #[serde(default)]
+        args: Value,
+    },
+    /// The items of point `point`, one it declares: `[{from, value}]`.
+    Point {
+        point: String,
+    },
+    /// Opens (`open`, with `state`) or closes one of its own windows.
+    Window {
+        id: String,
+        #[serde(default = "yes")]
+        open: bool,
+        #[serde(default)]
+        state: Value,
+    },
+}
+
+const fn yes() -> bool {
+    true
 }
 
 impl HostRequest {
@@ -96,6 +123,9 @@ impl HostRequest {
             Self::Data { .. } => "data",
             Self::SetData { .. } => "set_data",
             Self::Log { .. } => "log",
+            Self::Service { .. } => "service",
+            Self::Point { .. } => "point",
+            Self::Window { .. } => "window",
         }
     }
 }
@@ -244,6 +274,11 @@ pub fn check(
         HostRequest::Data { .. } | HostRequest::SetData { .. } => ("data", Ok(())),
         HostRequest::ReadFile { .. } | HostRequest::WriteFile { .. } => ("files", Ok(())),
         HostRequest::Log { .. } => ("log", Ok(())),
+        // Checked by the host that answers them: a service against its
+        // [requires] and the method's effect, a point and a window as its own.
+        HostRequest::Service { .. } => ("requires", Ok(())),
+        HostRequest::Point { .. } => ("points", Ok(())),
+        HostRequest::Window { .. } => ("windows", Ok(())),
     }
 }
 

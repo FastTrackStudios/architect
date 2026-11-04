@@ -158,6 +158,8 @@ impl Extensions {
             out.push(problem(&id, &error));
         }
         out.extend(self.build_problems());
+        // An item a point's schema refused: left out, the rest loaded.
+        out.extend(self.host().points().problems());
         out
     }
 }

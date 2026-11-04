@@ -42,6 +42,7 @@ pub mod catalog;
 pub mod contrib;
 pub mod hostcall;
 pub mod index;
+pub mod interop;
 pub mod manifest;
 pub mod package;
 pub mod project;
@@ -81,6 +82,8 @@ pub mod hostapi;
 pub mod install;
 #[cfg(feature = "ui")]
 pub mod interface;
+#[cfg(feature = "host")]
+pub mod interop_actions;
 #[cfg(any(feature = "host", feature = "web"))]
 mod invocation;
 #[cfg(any(feature = "linked", all(feature = "guest", unix)))]
@@ -95,6 +98,8 @@ pub mod manage;
 pub mod manager;
 #[cfg(feature = "page")]
 pub mod page;
+#[cfg(feature = "host")]
+pub mod points;
 #[cfg(all(feature = "process", unix))]
 pub mod process;
 #[cfg(feature = "vox")]
@@ -113,6 +118,10 @@ pub mod wasi;
 pub mod watch;
 #[cfg(all(feature = "web", target_arch = "wasm32"))]
 pub mod web;
+#[cfg(feature = "ui")]
+pub mod window_ui;
+#[cfg(feature = "host")]
+pub mod windows;
 #[cfg(feature = "vox")]
 pub mod wire;
 #[cfg(feature = "guest")]

@@ -158,6 +158,11 @@ interface host {
     /// Any host-service call (`hostcall::HostRequest` as JSON); its answer
     /// as JSON (`hostcall::HostAnswer`: `{"ok": …}` or `{"error": …}`).
     call: func(request: string) -> string;
+    /// Calls method `method` of service `service` (one its manifest
+    /// `[requires]`) with JSON `args` (`service`): the provider's answer,
+    /// as JSON. The provider's action `<PREFIX><METHOD>` answers it, run as
+    /// this extension within its capabilities.
+    call-service: func(service: string, method: string, args: string) -> result<string, string>;
 }
 
 /// What a component does for its host.

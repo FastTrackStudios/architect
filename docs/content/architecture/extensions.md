@@ -1167,7 +1167,9 @@ alone, under its title.
 puts one of its views on the settings page as a section of its own (the
 extensions manager's); `group = ""` puts it in the first, untitled group.
 The page draws it through `architect_settings::SectionViews`, which
-`use_extension_ui` provides (a linked view's component as it is).
+`use_extension_ui` provides (a linked view's component as it is). A
+`[[sections]]` table is an item of the settings page's point,
+`settings.sections` ("Windows, points and services" below).
 
 **Opening.** `Host::open` takes a file's path, a link or a document
 kind to the first opener that claims it: its view opens through the
@@ -1237,6 +1239,113 @@ an `ext:` source.
 | `EXT_EMBEDS` | every inline embed and its claims, or `{claim}`'s (`fence:kf`) |
 
 `Extensions::install_contribution_actions` puts them on the host's list.
+
+## Windows, points and services
+
+Extensions own whole windows, and work with each other through the
+host, declared in the manifest (`features/extensions/src/interop.rs`
+reads and checks each table) and kept by the host while they are loaded.
+
+```toml
+reserved = ["APP_SETTINGS"]          # app ids it owns, when the app allows it
+
+[[windows]]
+id = "settings"
+view = "sheet"                       # one of its [[views]]
+title = "Settings"
+kind = "sheet"                       # over the main window; "window": an OS window
+opens = "APP_SETTINGS"               # one of its [[actions]]; the host runs it
+# width = 720, height = 560          # points (unset: the sheet's own size)
+
+[[points]]
+id = "settings.sections"             # in its namespace: `<id>.…`
+deliver = "SETTINGS_SECTIONS"        # told {point, revision, items: [{from, value}]}
+schema = '{"type": "object", "required": ["id", "title"]}'   # or a TOML table
+
+[[contribute."settings.sections"]]   # an item for another's point
+id = "metronome"
+title = "Metronome"
+
+[provides]
+"lab.tempo" = "1.2.0"                # method `get` is its action LAB_TEMPO_GET
+
+[requires]
+"lab.tempo" = "^1"                   # loaded after a provider; refused without one
+```
+
+**Windows.** A `[[windows]]` is one of its views in a window of its own.
+The action it `opens` is the host's to run (its code has no handler for
+it): run, it opens the window with its arguments as the window's state
+(`features/extensions/src/windows.rs` `Windows`); the host service's
+`window {id, open, state?}` opens or closes one of its own, and an unload
+closes them. The core keeps only the machinery
+(`features/extensions/src/window_ui.rs` `ExtensionWindows`, mounted by
+`ExtensionOverlays`): a `sheet` is a scrim and a card over the main
+window (the whole screen on a phone), closed by a click outside or its
+own close; a `window` is an OS window of its own through the workspace's
+pop-out windows (`features/workspace/src/host/windows.rs`
+`Popout::page`, where the platform gives one, else a sheet), closed by
+the person or the host. Either way the view is drawn as every view is
+(`ExtensionView`: a linked component, a process's or a WASI component's
+remote document, a page) and follows the theme live: a sheet is in the
+app's document; an OS window carries the shell and the theme's `:root`
+sheet into its own. `EXT_WINDOWS` lists them and which are open,
+`EXT_WINDOW_CLOSE` closes one.
+
+**Reserved ids.** An app's own action ids (`APP_…`) are no extension's
+namespace. An extension owns one when its manifest lists it in
+`reserved` and the app allows that extension that id
+(`Host::allow_reserved`): its built-in or a development copy of it (an
+`EXT_CLONE`), never an installed copy (`LoadError::Reserved`). So
+`APP_SETTINGS` (⌘,) is the settings extension's, and a person's
+development copy of it still answers ⌘,.
+
+**Contribution points.** An extension declares a point and others add
+items to it; the app adds its own as `app`
+(`Host::contribute_app`). The host (`features/extensions/src/points.rs`
+`Points`) checks each item against the point's schema (a subset of JSON
+Schema: `type`, `properties`, `required`, `items`, `enum`,
+`additionalProperties`, `crate::interop::validate`): one that does not
+meet it is left out and is a problem in `APP_STATUS` (`lab.giver: its
+item 1 for lab.owner.cards was left out: title: is integer, not
+string`), never a failed load. Items for a point nobody declares wait for
+its owner. The owner is told the set through its `deliver` action as
+extensions load, reload and unload, the app's items first, then each
+contributor's in the order it came; it keeps the highest `revision`, and
+reads them any time with the host service's `point {point}`.
+`EXT_POINTS` shows every point, its items, the ones left out and why.
+`[[sections]]` is sugar: each is an item of `settings.sections`
+(`Manifest::point_items`), so every manifest that had one keeps working.
+
+**Services.** `[provides] <service> = "<version>"` offers a service; a
+method `m` of it is the provider's action `<PREFIX><M>`
+(`interop::method_action`: `lab.tempo`'s `get` is `LAB_TEMPO_GET`).
+`[requires] <service> = "<req>"` asks for one: `Extensions::sync` loads
+providers first, and one whose service has no loaded provider meeting
+the requirement is not loaded (`LoadError::Requires`, in `APP_STATUS`:
+`it requires the service lab.tempo ^2: the loaded provider is lab.tempo
+1.2.0`); when a provider goes, what requires it goes too, until it is
+back. A call is the host service's `service {service, method, args}`,
+the same from every runner: `linked::Handle::service` in Rust (linked or
+process), `host.service(name, method, args)` in Luau, `call-service` in
+the WIT world (`features/extensions/wit/extension.wit`; the WASI guest's
+`host::service`), and `services.call(service, method, args)` on a
+`QuickJS` page (`EXT_SERVICE_CALL`, run as the page's extension). It is
+checked as every host call is: the caller must require the service, the
+method's effect must be within its `capabilities.effect`, and it runs
+as `Principal::Extension` for whoever the caller acts for.
+
+| action | what it does |
+|---|---|
+| `EXT_WINDOWS` | every extension window: its view, kind and opening action, whether it is open, its state |
+| `EXT_WINDOW_CLOSE` | closes `{extension, id}` |
+| `EXT_POINTS` | every point: owner, schema, items (who gave each), the items left out and why, items waiting for an owner |
+| `EXT_SERVICE_CALL` | `{service, method, args?}` as the extension running it (a page's way to call a service) |
+
+`features/extensions/tests/interop.rs` checks the manifest, a point's
+items checked and delivered live on load and unload, a service across a
+linked and a Luau extension (a missing and a too-old provider), and a
+window opened as a sheet and as an OS window.
 
 ## Inline embeds
 
@@ -1493,10 +1602,13 @@ service (`linked::Handle::host`: the app's actions), not through Rust
 handles to the app's internals: then its process copy does the same.
 
 **The core** stays compiled in, not extensions: workspace and view kinds
-(the `paint` kind included), the shell's slots (`Chrome`), the theme
-store and its `THEME_*`, the Action List and the control socket, CRDT
-documents, settings storage and the settings page's frame, input, the
-extension host and its host service, native host kernels.
+(the `paint` kind included), the shell's slots (`Chrome`), the window
+machinery (sheets and OS windows, "Windows, points and services"), the
+theme store and its `THEME_*`, the Action List and the control socket,
+CRDT documents, settings storage, the settings page's frame
+(`architect_settings::SettingsSheet`) and the palette's `#`
+(`SettingsPage`), input, the extension host and its host service, native
+host kernels.
 
 **Built in now:**
 
@@ -1505,21 +1617,35 @@ extension host and its host service, native host kernels.
 | `theme.picker` | `features/theme/picker` | ⌘K's "Choose a theme…" and "Light or dark", ⌘O's `theme:` | `EXT_CLONE` (`features/theme/picker/tests/dev_loop.rs`); both ways in `features/theme/picker/tests/both_ways.rs` |
 | `manager` (the extensions page) | `features/extensions/src/manager` | `MANAGER_*`, its views, its settings section, ⌘O's `ext:` | none yet: its kinds are the app's Rust values (below) |
 | `lab.board` | `apps/lab/board` | the lab's example: a tab, a status slot, openers, hooks | `EXT_CLONE` (`apps/lab/board/tests/dev_loop.rs`) |
+| `settings` (the settings page) | `features/settings/sheet` | the window ⌘, opens (`APP_SETTINGS`, reserved), the point `settings.sections` | `EXT_CLONE` (`features/settings/sheet/tests/dev_loop.rs`); both ways in `features/settings/sheet/tests/both_ways.rs` |
 
 `apps/lab/media/tests/builtins.rs` checks that the default lab looks
 the same as before these moved: the main window's document at the end of
 four scenarios (the Inbox, settings on Appearance and on Extensions, ⌘O's
-`ext:`) against `apps/lab/media/tests/golden/`, recorded from the base.
-The only difference is the theme picker's own row in the extensions list.
+`ext:`) against `apps/lab/media/tests/golden/`, recorded from the base
+(each element's mount-order id, `data-dioxus-id`, aside). The only
+differences are the theme picker's and the settings page's own rows in
+the extensions list and in ⌘O's `ext:`.
+
+**The settings page** is the settings extension's window over the
+core's frame. Every section arrives as an item of `settings.sections`:
+the app's own (Workspace, Editor, Keyboard, and Appearance from the
+theme store, which the app draws with its own page) through
+`use_extension_ui` (`window_ui::use_settings_window`, which also opens
+the window on `SettingsHandle::show` and closes the page with it), and
+each extension's `[[sections]]` (the extensions manager's, a
+metronome's). Linked in, it draws them over the app's values and
+section pages; its development copy draws them in its own process over
+the values the host service gives it (`APP_SETTINGS_VALUES`,
+`APP_SETTINGS_SET`), a section drawn by another extension's view named,
+not drawn (a remote document cannot hold another view yet).
 
 **Not moved yet, each waiting on a decision:**
 
-- **The settings page itself** (the sheet, `APP_SETTINGS` / ⌘, and the
-  palette's `#`). A full-window sheet is neither a slot nor a popup view
-  (`ExtensionOverlays` draws its own frame), and `APP_SETTINGS` is in no
-  extension's namespace. Either the host gets a layer an extension's view
-  draws over the window in its own frame, or the sheet stays the core's
-  frame with sections (as now) the extensions' part.
+- **The settings page** moved (2026-11-04): extensions own windows
+  (`[[windows]]`), an app lets one own an `APP_…` id (`reserved`), and
+  its sections are a contribution point. The palette's `#` stays the
+  core's (it searches the app's settings registry).
 - **The manager's dev copy.** Its kinds (extensions, scripts, workers,
   themes, layouts, pages) are Rust values the app registers, so a process
   copy has nothing to list. Its `MANAGER_*` would move to the host (the
@@ -1532,9 +1658,10 @@ The only difference is the theme picker's own row in the extensions list.
   could not, so it needs that state to move into the extension (the lists
   as a document of its own, the route as the workspace's), which is the
   lab's rewrite, not a move.
-- **The Appearance section** stays with settings: its rows are the
-  theme store's layers kept as settings (`appearance.*`, in no
-  extension's namespace).
+- **The Appearance section** stays the app's: its rows are the theme
+  store's layers kept as settings (`appearance.*`, in no extension's
+  namespace), contributed to `settings.sections` as `app` and drawn by
+  the app's page.
 
 ## First-party extensions: the API, linked in
 
