@@ -48,7 +48,9 @@ use crate::platform::spawn;
 ///
 /// Each [`establish`](LocalServer::establish) opens a fresh in-memory link +
 /// acceptor task (one client per session, mirroring the remote per-service
-/// connection shape); the task is aborted when the [`Scope`] closes.
+/// connection shape); the task is aborted when the [`Scope`] closes, and
+/// that shuts its session down: the client's `Caller::closed()` resolves,
+/// as it would when a remote server dies.
 #[derive(Clone)]
 pub struct LocalServer {
     router: LayerRouter,
@@ -72,7 +74,8 @@ impl LocalServer {
 
         // Server side: accept on one end and serve the router for any
         // requested lane (it dispatches by method id). Hold the
-        // connection alive until the task is aborted on scope close.
+        // connection alive until the task is aborted on scope close,
+        // which shuts the session down.
         let server = async move {
             match vox_core::acceptor_on(server_link)
                 .on_lane(router.acceptor())
@@ -80,7 +83,7 @@ impl LocalServer {
                 .await
             {
                 Ok(connection) => {
-                    let _connection = connection;
+                    let _connection = ShutdownOnDrop(connection);
                     std::future::pending::<()>().await;
                 }
                 Err(e) => tracing::warn!(error = %e, "local vox acceptor failed"),
@@ -96,6 +99,20 @@ impl LocalServer {
             .establish::<C>()
             .await
             .map_err(|e| eyre::eyre!("local establish: {e:?}"))
+    }
+}
+
+/// The server side of one in-process session, held by its acceptor task.
+/// Dropping it (the task aborted on scope close) shuts the session down:
+/// dropping a [`vox_core::ConnectionHandle`] alone only closes its local
+/// request queues, so the session would outlive its server and the
+/// client would never see it close.
+struct ShutdownOnDrop(vox_core::ConnectionHandle);
+
+impl Drop for ShutdownOnDrop {
+    fn drop(&mut self) {
+        // `Err` only when the session is already gone.
+        let _ = self.0.shutdown();
     }
 }
 
@@ -160,7 +177,7 @@ impl LocalServer {
                 .await
             {
                 Ok(connection) => {
-                    let _connection = connection;
+                    let _connection = ShutdownOnDrop(connection);
                     std::future::pending::<()>().await;
                 }
                 Err(e) => tracing::warn!(error = %e, "local vox acceptor failed"),
