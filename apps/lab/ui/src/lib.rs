@@ -36,11 +36,40 @@ use lucide_dioxus::{
 
 pub use screen::{Device, use_window_chrome, use_window_screen};
 
-/// `EXT_CHECK` as the lab runs it — its view kinds, process extensions —
-/// for `architect-desktop extensions check <folder>` with no window.
+/// `EXT_CHECK` as the lab runs it — its view kinds, process extensions,
+/// page files — for `architect-desktop extensions check <folder>` with no
+/// window.
 #[must_use]
 pub fn extension_checker() -> architect_extensions::check::Checker {
-    architect_extensions::check::Checker::new().with_view_kinds(embedded::kinds())
+    let pages = architect_pages::runner::Pages::new(architect_pages::host::AppHost::new(
+        architect::action::ActionList::new(),
+    ))
+    .with_js()
+    .with_luau();
+    architect_extensions::check::Checker::new()
+        .with_view_kinds(embedded::kinds())
+        .with_page_checker(pages.page_checker())
+}
+
+/// The page API's types, written beside the agents' guide for an editor
+/// (`architect_control::guide::Guide::file`): `(name, what it is, text)`.
+#[must_use]
+pub fn page_types() -> [(&'static str, &'static str, String); 2] {
+    use architect_pages::codegen::{DTS, LUAU, luau, typescript};
+    [
+        (
+            DTS,
+            "the page API's TypeScript types, for a TSX/JS page under `pages/` \
+             (`import { h, useState, actions, theme } from \"architect\"`); point your \
+             editor or `tsc --noEmit` at it. `PAGES_CHECK {file}` renders a page once.",
+            typescript(),
+        ),
+        (
+            LUAU,
+            "the page API's Luau types, for a Luau element page under `pages/`.",
+            luau(),
+        ),
+    ]
 }
 
 /// The lab's folder: its settings, themes, extensions in development and

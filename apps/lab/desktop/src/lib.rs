@@ -60,12 +60,17 @@ pub const GUIDE_PREAMBLE: &str = include_str!("AGENTS.preamble.md");
 /// The lab's agents' guide, for `list`.
 #[must_use]
 pub fn guide() -> architect_control::guide::Guide {
-    architect_control::guide::Guide::new(APP).preamble(GUIDE_PREAMBLE)
+    architect_lab_ui::page_types().into_iter().fold(
+        architect_control::guide::Guide::new(APP).preamble(GUIDE_PREAMBLE),
+        |guide, (name, about, text)| guide.file(name, about, text),
+    )
 }
 
-/// Keeps `<app dir>/AGENTS.md` and `actions.schema.json` written from
-/// `list` while the window runs: once it has settled, and again whenever
-/// an action comes or goes. `None` with no app folder.
+/// Keeps the agents' guide written from `list` while the window runs.
+///
+/// `<app dir>/AGENTS.md`, `actions.schema.json` and the page types
+/// (`architect.d.ts`, `architect.d.luau`): once it has settled, and again
+/// whenever an action comes or goes. `None` with no app folder.
 #[must_use]
 pub fn keep_guide_written(list: &ActionList) -> Option<architect_control::guide::KeptWritten> {
     let dir = architect_lab_ui::app_dir()?;

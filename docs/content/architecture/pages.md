@@ -57,8 +57,10 @@ services, so a process or the web build speaks the same API.
 `architect.d.ts` — vox's TypeScript codegen over the services'
 descriptors (named types and caller interfaces), plus the runtime's
 surface — and `architect.d.luau` from the same shapes. The app writes
-both into its folder at start (`write_types`, the seam the generated
-guide of #268/#270 calls); the copies in `features/pages/types/` are
+both into its folder with its agents' guide, which names them
+(`features/control/src/guide.rs` `Guide::file`; the lab's
+`apps/lab/ui/src/lib.rs` `page_types`); `write_types` writes them on
+their own. The copies in `features/pages/types/` are
 checked by `features/pages/tests/types.rs`, which fails when they drift
 (`BLESS=1` writes them again).
 
@@ -164,9 +166,23 @@ rendering the page is 2–3 ms.
 saved (or why not), its render and reload times and its log;
 `PAGES_CHECK {file}` loads a page off the window and renders it once;
 `PAGES_CLONE {extension, view}` makes a built-in's page editable
-(`features/pages/src/actions.rs` `install`). Pages' problems are what
-`APP_STATUS` (#270) lists for them (`Pages::problems`), and
-`PAGES_CHECK` is `EXT_CHECK`'s page half (`Pages::check`).
+(`features/pages/src/actions.rs` `install`). Pages' problems are in
+`APP_STATUS`: each page that is not the page as saved — open in a pane,
+or its `<file>.error` from its last run — with its file and view
+(`features/pages/src/runner.rs` `Pages::status_problems`,
+`Pages::report_problems`). `EXT_CHECK` renders an extension's
+`[[views]] page` files once through the app's pages (feature `manager`:
+`features/pages/src/manage.rs` `Pages::page_checker`, given to
+`Host::set_page_checker`), a broken one a `page` problem with its file
+and field.
+
+In the extensions manager (feature `manager`) pages are a kind,
+`pages` (`features/pages/src/manage.rs` `PagesKind`, over
+`Pages::entries`): every view's page — a built-in's read-only copy, an
+extension's, an override — with whether an override wins, how it runs,
+its problems and its frame times, and the ops `check`, `clone` (a
+built-in's, to edit) and `restore` (the override removed: its own page
+shows again).
 
 ## Phase two
 
