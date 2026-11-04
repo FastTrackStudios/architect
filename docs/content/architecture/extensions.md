@@ -528,15 +528,17 @@ in the dev profile:
 
 | Engine | p50 | p90 | p99 | compile + load |
 |---|---|---|---|---|
-| Cranelift, native (macOS) | 11.5 µs | 12.8 µs | 15.4 µs | 130 ms |
-| Pulley, interpreted (macOS, `pulley`) | 28.7 µs | 33.0 µs | 39.2 µs | 139 ms |
-| Pulley, interpreted (iOS 27 Simulator, the test binary under `xcrun simctl spawn`) | 36.6 µs | 40.6 µs | 53.0 µs | 155 ms |
+| Cranelift, native (macOS) | 11.6 µs | 12.8 µs | 13.9 µs | 156 ms |
+| Pulley, interpreted (macOS, `pulley`) | 32.5 µs | 34.5 µs | 44.5 µs | 161 ms |
+| Pulley, interpreted (iOS 27 Simulator, the test binary under `xcrun simctl spawn`) | 36.8 µs | 39.8 µs | 44.7 µs | 168 ms |
 
-About two and a half times a native call (three on the Simulator), and still far inside a frame:
+About three times a native call, and still far inside a frame:
 an extension's action or a view's event is not where the time goes. A
 component doing real work in a loop pays more (an interpreter is
 typically several times slower on hot code); that is what workers are
-for, and they run on the same engine.
+for, and they run on the same engine: on the Simulator, the lab's
+"Count primes" worker counts the 148933 primes below two million in
+about 13 s while its view answers each click.
 
 The lab runs it on the Simulator: `architect-mobile --features wasi`
 (`apps/lab/mobile`, built and bundled by `apps/lab/mobile/ios/build-app.sh`) finds the WASI Counter's component beside its
