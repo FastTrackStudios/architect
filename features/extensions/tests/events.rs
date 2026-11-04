@@ -41,6 +41,8 @@ kind = "luau"
 
 [capabilities]
 events = ["transport.*"]
+# Its doc.saved hook: a document's events are reading the documents.
+reads = ["documents"]
 
 [[actions]]
 id = "LAB_PULSE_NOTE"
@@ -314,6 +316,9 @@ id = "lab.pulse"
 name = "Pulse"
 version = "0.1.0"
 kind = "luau"
+
+[capabilities]
+reads = ["documents"]
 
 [background]
 idle = "30s"

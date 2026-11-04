@@ -16,7 +16,10 @@
 //!   run time (`subscribe`, `unsubscribe`), the app's documents
 //!   (`list-documents`, `read-document`, `create-document`,
 //!   `edit-document`, `rename-document`, `move-document`,
-//!   `delete-document`, `watch-documents`), and `call` for every
+//!   `delete-document`, `watch-documents`), the network through the host
+//!   (`fetch`, `read-body`, `close-body`, `secret-set`, `ask-secret`:
+//!   `crate::net`, every host and redirect checked against
+//!   `capabilities.hosts`), and `call` for every
 //!   `hostcall::HostRequest`), each call answered by the extension's own
 //!   [`ExtensionApi`] — so checked against its capabilities as a person
 //!   granted them, as a process's, a script's and a linked extension's
@@ -682,6 +685,37 @@ impl wit_host::Host for State {
 
     async fn watch_documents(&mut self, hook: String) -> Result<String, String> {
         self.ask_json("watch_documents", &hook).await
+    }
+
+    async fn fetch(&mut self, request: String) -> Result<String, String> {
+        self.ask_json("fetch", &request).await
+    }
+
+    async fn read_body(&mut self, stream: String, max: u32) -> Result<String, String> {
+        self.ask(HostRequest::ReadBody {
+            stream,
+            max: (max > 0).then_some(u64::from(max)),
+        })
+        .await
+        .map(|v| v.to_string())
+    }
+
+    async fn close_body(&mut self, stream: String) -> bool {
+        self.ask(HostRequest::CloseBody { stream })
+            .await
+            .is_ok_and(|v| v.as_bool().unwrap_or(false))
+    }
+
+    async fn secret_set(&mut self, name: String) -> Result<bool, String> {
+        self.ask(HostRequest::Secret { name })
+            .await
+            .map(|v| v.get("set").and_then(Json::as_bool).unwrap_or(false))
+    }
+
+    async fn ask_secret(&mut self, name: String) -> Result<bool, String> {
+        self.ask(HostRequest::AskSecret { name })
+            .await
+            .map(|v| v.as_bool().unwrap_or(false))
     }
 
     async fn call(&mut self, request: String) -> String {

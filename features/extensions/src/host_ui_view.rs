@@ -408,7 +408,7 @@ fn PromptDialog(ui: WindowUi, id: u64, from: String, prompt: Prompt) -> Element 
     let (yes, no) = (ui.clone(), ui.clone());
     let submit = move || {
         let answer = match prompt.kind {
-            PromptKind::Text => Value::String(text.peek().clone()),
+            PromptKind::Text | PromptKind::Secret => Value::String(text.peek().clone()),
             PromptKind::Confirm => Value::Bool(true),
             PromptKind::PickOne => return,
         };
@@ -448,8 +448,9 @@ fn PromptDialog(ui: WindowUi, id: u64, from: String, prompt: Prompt) -> Element 
                 if let Some(message) = &prompt.message {
                     div { style: "font-size: 13px; color: var(--muted-foreground);", "{message}" }
                 }
-                if prompt.kind == PromptKind::Text {
+                if matches!(prompt.kind, PromptKind::Text | PromptKind::Secret) {
                     input {
+                        r#type: if prompt.kind == PromptKind::Secret { "password" } else { "text" },
                         style: "padding: 7px 10px; border-radius: 6px; border: 1px solid var(--input); \
                                 background: var(--background); color: var(--foreground); font-size: 13px;",
                         value: "{text}",
@@ -481,6 +482,7 @@ const fn prompt_kind(kind: PromptKind) -> &'static str {
         PromptKind::Text => "text",
         PromptKind::Confirm => "confirm",
         PromptKind::PickOne => "pick_one",
+        PromptKind::Secret => "secret",
     }
 }
 

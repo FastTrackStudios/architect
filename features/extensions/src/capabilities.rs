@@ -71,6 +71,18 @@ fn host_in(h: &str, of: &[String]) -> bool {
     })
 }
 
+/// Whether network host `host` (on `port`) is one of `of`: by name, by
+/// domain (`*.example.com`), as `host:port`, or `*`.
+#[must_use]
+pub fn reaches_host(of: &[String], host: &str, port: Option<u16>) -> bool {
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    if host.is_empty() {
+        return false;
+    }
+    let lower: Vec<String> = of.iter().map(|h| h.to_ascii_lowercase()).collect();
+    host_in(&host, &lower) || port.is_some_and(|p| lower.iter().any(|g| *g == format!("{host}:{p}")))
+}
+
 /// Whether folder `f` is one of `of` or inside one.
 fn folder_in(f: &str, of: &[String]) -> bool {
     let f = f.trim_end_matches('/');
@@ -349,6 +361,14 @@ impl Capabilities {
     #[must_use]
     pub fn may_hear(&self, name: &str) -> bool {
         self.events.iter().any(|p| crate::events::covers(p, name))
+    }
+
+    /// Whether it may reach network host `host` (`capabilities.hosts`):
+    /// an entry naming it (`api.example.com`), its domain
+    /// (`*.example.com`), it and `port` (`127.0.0.1:8080`), or `*`.
+    #[must_use]
+    pub fn may_reach_host(&self, host: &str, port: Option<u16>) -> bool {
+        reaches_host(&self.hosts, host, port)
     }
 
     /// Whether it may reach `folder` (an absolute path, `~` already

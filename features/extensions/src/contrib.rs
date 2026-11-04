@@ -572,6 +572,9 @@ pub struct Rules<'a> {
     pub luau: bool,
     /// The app-defined events it asks to hear (`capabilities.events`).
     pub events: &'a [String],
+    /// What of the app's state it asks to read (`capabilities.reads`): a
+    /// hook on a document's event needs `documents`.
+    pub reads: &'a [String],
 }
 
 /// Why a contribution was refused.
@@ -835,6 +838,15 @@ impl Contribution {
                 return refuse(
                     what,
                     format!("it does not ask to hear {name} (capabilities.events)"),
+                );
+            }
+            if crate::events::is_doc_event(&h.on)
+                && !rules.reads.iter().any(|r| r == crate::capabilities::DOCUMENTS)
+            {
+                return refuse(
+                    what,
+                    "a document's events need reads = [\"documents\"] (capabilities.reads)"
+                        .to_owned(),
                 );
             }
             match (&h.action, &h.script) {
@@ -1582,6 +1594,7 @@ mod tests {
             views,
             luau: false,
             events: &[],
+            reads: &[],
         }
     }
 

@@ -271,6 +271,38 @@ function world() {
         const r = await service({ op: 'unsubscribe', key });
         return r.tag === 'ok' ? ok(Boolean(JSON.parse(r.val))) : r;
       },
+      // The app's documents: the browser's host has none to reach.
+      listDocuments: (under) => fields('list_documents', JSON.stringify({ under: under || null })),
+      readDocument: async (path) => {
+        const r = await fields('read_document', JSON.stringify({ path }));
+        return r.tag === 'ok' ? ok(JSON.parse(r.val)) : r;
+      },
+      createDocument: (path, text) => fields('create_document', JSON.stringify({ path, text })),
+      editDocument: async (path, edits, name) => {
+        const r = await fields('edit_document', JSON.stringify({ path, edits: jsonArg(edits), name: name ?? null }));
+        return r.tag === 'ok' ? ok(JSON.parse(r.val)) : r;
+      },
+      renameDocument: (path, to) => fields('rename_document', JSON.stringify({ path, to })),
+      moveDocument: (path, folder) => fields('move_document', JSON.stringify({ path, folder })),
+      deleteDocument: (path) => unit({ op: 'delete_document', path }),
+      watchDocuments: (hook) => fields('watch_documents', hook),
+      // The network, through the browser host (`WebHost`): the browser's
+      // fetch, where CORS lets it.
+      fetch: (request) => fields('fetch', request),
+      readBody: (stream, max) => fields('read_body', JSON.stringify({ stream, max: max || null })),
+      closeBody: async (stream) => {
+        if (worker) return false;
+        const r = await service({ op: 'close_body', stream });
+        return r.tag === 'ok' && Boolean(JSON.parse(r.val));
+      },
+      secretSet: async (name) => {
+        const r = await fields('secret', JSON.stringify({ name }));
+        return r.tag === 'ok' ? ok(Boolean(JSON.parse(r.val).set)) : r;
+      },
+      askSecret: async (name) => {
+        const r = await fields('ask_secret', JSON.stringify({ name }));
+        return r.tag === 'ok' ? ok(Boolean(JSON.parse(r.val))) : r;
+      },
     },
     'architect:extension/worker': {
       spawn: async (name, args) => {

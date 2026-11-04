@@ -35,8 +35,11 @@
 //! given); data and files under [`Host::with_data_root`] (`<root>/<id>/`);
 //! the interface it may use (notifications, the clipboard, pickers,
 //! prompts, menus: `crate::hostui`) through its [`HostUi`]
-//! ([`Host::set_ui`]; [`crate::hostui::NoUi`] unless given), and the
-//! decorations extensions set on rows and tabs in [`Host::decorations`].
+//! ([`Host::set_ui`]; [`crate::hostui::NoUi`] unless given), the
+//! decorations extensions set on rows and tabs in [`Host::decorations`],
+//! and the network (`fetch`, `crate::net`) with the secrets the host keeps
+//! for extensions in its [`Secrets`] ([`Host::set_secrets`]; in memory
+//! unless given).
 
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
@@ -55,6 +58,7 @@ use crate::hostcall::{HostError, HostRequest, PickKind, Target};
 use crate::hostui::{Asker, Decorated, Decorations, HostUi, NoUi, Notification};
 use crate::logs::{Level, Logs};
 use crate::manifest::{Capabilities, Manifest, Reach};
+use crate::net::Secrets;
 use architect_scripting::luau::Gate;
 
 /// What the app knows that an extension may ask for (each only with the
@@ -148,6 +152,10 @@ pub(crate) struct Services {
     /// The paths a person picked for each extension, for the run: each
     /// with whether it may write it (a save) and whether it is a folder.
     picked: Mutex<BTreeMap<String, Vec<Picked>>>,
+    /// The secrets it keeps for extensions (`crate::net`).
+    secrets: Mutex<Secrets>,
+    /// The streamed responses extensions have open.
+    net: crate::net::Net,
 }
 
 /// A path a person picked for an extension.
@@ -163,6 +171,7 @@ impl Services {
     pub(crate) fn forget(&self, id: &str) {
         self.decorations.withdraw(id);
         lock(&self.picked).remove(id);
+        self.net.forget(id);
     }
 }
 
@@ -181,6 +190,8 @@ impl Default for Services {
             window: Mutex::new(None),
             decorations: Decorations::default(),
             picked: Mutex::new(BTreeMap::new()),
+            secrets: Mutex::new(Secrets::memory()),
+            net: crate::net::Net::default(),
         }
     }
 }
@@ -363,6 +374,27 @@ impl Host {
         out
     }
 
+    /// Keeps the secrets extensions' requests name in `secrets`
+    /// (`crate::net`): a private file of the app's, never an extension's
+    /// folder. Unless given, they are kept in memory for the run.
+    #[must_use]
+    pub fn with_secrets(self, secrets: Secrets) -> Self {
+        self.set_secrets(secrets);
+        self
+    }
+
+    /// [`Self::with_secrets`] on a host already shared.
+    pub fn set_secrets(&self, secrets: Secrets) {
+        *lock(&self.services().secrets) = secrets;
+    }
+
+    /// The secrets it keeps for extensions: which are set, never a value
+    /// to an extension.
+    #[must_use]
+    pub fn secrets(&self) -> Secrets {
+        lock(&self.services().secrets).clone()
+    }
+
     /// Keeps each extension's data and files under `<root>/<id>/`.
     #[must_use]
     pub fn with_data_root(self, root: impl Into<PathBuf>) -> Self {
@@ -485,6 +517,12 @@ impl ExtensionApi {
             perm.decision = tracing::field::Empty,
             perm.reason = tracing::field::Empty,
             ext.outcome = tracing::field::Empty,
+            http.request.method = tracing::field::Empty,
+            server.address = tracing::field::Empty,
+            http.response.status_code = tracing::field::Empty,
+            ext.redirects = tracing::field::Empty,
+            ext.bytes = tracing::field::Empty,
+            ext.secrets = tracing::field::Empty,
         );
         let op = request.op();
         let answer = self.answer(request).instrument(span.clone()).await;
@@ -820,6 +858,163 @@ impl ExtensionApi {
                 .map_err(|message| HostError::Failed { message }),
             HostRequest::Unsubscribe { key } => Ok(Value::Bool(host.unsubscribe(&self.id, &key))),
             HostRequest::Events => Ok(host.events_for(&self.id)),
+            HostRequest::Fetch(fetch) => self.fetch(&host, manifest, &may, fetch).await,
+            HostRequest::ReadBody { stream, max } => {
+                host.services().net.read(&self.id, &stream, max).await
+            }
+            HostRequest::CloseBody { stream } => {
+                Ok(Value::Bool(host.services().net.close(&self.id, &stream)))
+            }
+            HostRequest::Secret { name } => Ok(serde_json::json!({
+                "set": host.secrets().is_set(&self.id, &name),
+                "title": manifest.secret(&name).map(|s| s.title.clone()),
+            })),
+            HostRequest::AskSecret { name } => self
+                .ask_secret(&host, manifest, &name)
+                .await
+                .map(Value::Bool),
+        }
+    }
+
+    /// An HTTP request (`crate::net`), its URL already checked: the
+    /// secrets it names put in (asked for, the first time), sent, each
+    /// redirect checked; its answer, or its stream kept.
+    async fn fetch(
+        &self,
+        host: &Host,
+        manifest: &Manifest,
+        may: &Capabilities,
+        fetch: crate::hostcall::Fetch,
+    ) -> Result<Value, HostError> {
+        use crate::net::{Got, Plan};
+        let span = tracing::Span::current();
+        let url = crate::hostcall::may_reach_url(may, &fetch.url)
+            .map_err(|(capability, why)| HostError::Refused { capability, why })?;
+        let address = url.host_str().unwrap_or_default().to_owned();
+        let method = fetch.method.as_deref().unwrap_or("GET").to_ascii_uppercase();
+        span.record("server.address", address.as_str());
+        span.record("http.request.method", method.as_str());
+        wide("server.address", address);
+        wide("http.request.method", method);
+        let names: std::collections::BTreeSet<String> = fetch
+            .headers
+            .values()
+            .flat_map(|v| crate::hostcall::secret_refs(v))
+            .map(str::to_owned)
+            .collect();
+        if !names.is_empty() {
+            let named = names.iter().cloned().collect::<Vec<_>>().join(",");
+            span.record("ext.secrets", named.as_str());
+            wide("ext.secrets", named);
+        }
+        let secrets = host.secrets();
+        for name in &names {
+            if !secrets.is_set(&self.id, name) && !self.ask_secret(host, manifest, name).await? {
+                return Err(HostError::Failed {
+                    message: format!("secret {name} is not set: the person did not enter it"),
+                });
+            }
+        }
+        let reach = may.clone();
+        let owner = manifest.clone();
+        let plan = Plan::of(
+            &fetch,
+            url,
+            |name| {
+                secrets.get(&self.id, name).ok_or_else(|| HostError::Failed {
+                    message: format!("secret {name} is not set"),
+                })
+            },
+            Arc::new(move |u| crate::hostcall::may_reach_url(&reach, u.as_str()).map(|_| ())),
+            Arc::new(move |name, u| {
+                owner.secret(name).is_some_and(|d| {
+                    owner.secret_reaches(d, u.host_str().unwrap_or_default(), u.port_or_known_default())
+                })
+            }),
+        )?;
+        let (binary, cap, timeout) = (plan.binary, plan.max, plan.timeout);
+        let fetched = match crate::net::send(plan).await {
+            Ok(f) => f,
+            Err(HostError::Refused { capability, why }) => {
+                return Err(Self::decide(crate::net::REDIRECT, Err((capability, why)))
+                    .err()
+                    .unwrap_or(HostError::Failed {
+                        message: "refused".to_owned(),
+                    }));
+            }
+            Err(e) => return Err(e),
+        };
+        span.record("http.response.status_code", fetched.status);
+        span.record("ext.redirects", fetched.redirects);
+        wide("http.response.status_code", fetched.status.to_string());
+        wide("ext.redirects", fetched.redirects.to_string());
+        match &fetched.body {
+            Got::Whole(bytes) => {
+                span.record("ext.bytes", bytes.len());
+                wide("ext.bytes", bytes.len().to_string());
+                Ok(fetched.answer(Some(crate::net::whole(bytes, binary)), None))
+            }
+            Got::Stream(_) => {
+                let Got::Stream(response) = fetched.body else {
+                    unreachable!("matched as a stream")
+                };
+                let fetched = crate::net::Fetched {
+                    body: Got::Whole(Vec::new()),
+                    ..fetched
+                };
+                let id = host
+                    .services()
+                    .net
+                    .keep(&self.id, response, binary, cap, timeout)?;
+                Ok(fetched.answer(None, Some(&id)))
+            }
+        }
+    }
+
+    /// Asks the person for secret `name` of `manifest`'s (`[[secrets]]`),
+    /// through the app's prompt, and keeps what they enter: whether they
+    /// did. The extension sees only that.
+    async fn ask_secret(
+        &self,
+        host: &Host,
+        manifest: &Manifest,
+        name: &str,
+    ) -> Result<bool, HostError> {
+        let decl = manifest.secret(name).ok_or_else(|| HostError::NotFound {
+            what: format!("secret {name} in its manifest"),
+        })?;
+        let hosts = if decl.hosts.is_empty() {
+            &manifest.capabilities.hosts
+        } else {
+            &decl.hosts
+        };
+        let mut message = decl.description.clone().unwrap_or_default();
+        if !message.is_empty() {
+            message.push(' ');
+        }
+        message.push_str(&format!(
+            "The app keeps it and sends it only to {}; {} never sees it.",
+            hosts.join(", "),
+            manifest.name
+        ));
+        let prompt = crate::hostcall::Prompt {
+            kind: crate::hostcall::PromptKind::Secret,
+            title: if decl.title.is_empty() {
+                format!("{}: {name}", manifest.name)
+            } else {
+                format!("{}: {}", manifest.name, decl.title)
+            },
+            message: Some(message),
+            ..crate::hostcall::Prompt::default()
+        };
+        match host.ui().prompt(&Self::asker(manifest), prompt).await? {
+            Some(Value::String(v)) if !v.trim().is_empty() => {
+                host.secrets()
+                    .set(&self.id, name, v.trim())
+                    .map_err(|message| HostError::Failed { message })?;
+                Ok(true)
+            }
+            _ => Ok(false),
         }
     }
 
@@ -1079,6 +1274,9 @@ impl ExtensionApi {
             return Ok(own.join("files").join(raw));
         }
         let file = expand(path);
+        if host.secrets().file().is_some_and(|s| s == file) {
+            deny(format!("{path} is where the app keeps secrets"))?;
+        }
         let text = file.display().to_string();
         let in_own = own.as_ref().is_some_and(|o| file.starts_with(o));
         let in_package = !write && loaded.dir.as_ref().is_some_and(|d| file.starts_with(d));

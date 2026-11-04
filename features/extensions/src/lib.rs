@@ -109,6 +109,8 @@ pub mod manager;
 #[cfg(feature = "page")]
 pub mod page;
 #[cfg(feature = "host")]
+pub mod net;
+#[cfg(feature = "host")]
 pub mod points;
 #[cfg(all(feature = "process", unix))]
 pub mod process;

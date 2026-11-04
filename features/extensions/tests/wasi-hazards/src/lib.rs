@@ -128,6 +128,36 @@ fn build() -> Extension {
             host::decorate("file", "notes/a.md", Some(&json!({ "badge": "W" }))).map_err(e)?;
             Ok(json!({ "clip": clip, "path": path, "name": name, "chosen": chosen }))
         })
+        // The network through the host (#310): `args` as a fetch; a
+        // streamed body read to its end, its parts joined.
+        .action("TEST_HAZARDS_FETCH", |args: Value| {
+            let e = |e: host::HostError| e.to_string();
+            let mut out = host::fetch(&args).map_err(e)?;
+            if let Some(stream) = out.get("stream").and_then(Value::as_str).map(str::to_owned) {
+                let mut body = String::new();
+                loop {
+                    let part = host::read_body(&stream, 4096).map_err(e)?;
+                    body.push_str(part.get("chunk").and_then(Value::as_str).unwrap_or(""));
+                    if part.get("done").and_then(Value::as_bool).unwrap_or(true) {
+                        break;
+                    }
+                }
+                out["body"] = json!(body);
+            }
+            Ok(out)
+        })
+        // The app's documents through the world's typed imports (#309):
+        // makes `path`, edits it, lists and reads it back.
+        .action("TEST_HAZARDS_DOCS", |args: Value| {
+            let e = |e: host::HostError| e.to_string();
+            let path = args.get("path").and_then(Value::as_str).unwrap_or("notes/wasi.md");
+            let made = host::create_document(path, "one").map_err(e)?;
+            let text = host::edit_document(path, &json!([{ "append": { "text": " two" } }]), Some("WASI edit"))
+                .map_err(e)?;
+            let listed = host::list_documents("").map_err(e)?;
+            let read = host::read_document(path).map_err(e)?;
+            Ok(json!({ "made": made, "text": text, "listed": listed, "read": read }))
+        })
         // Never ends, never looks.
         .worker("forever", |_, _| spin())
         .worker("hoard", |_, _| {

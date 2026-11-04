@@ -40,10 +40,21 @@
 //! | `subscribe {on \| every \| at, action \| script, function?}` | a hook made at run time: one of its actions (a Luau script) on an event or a schedule, as a manifest's `[[hooks]]`; its key | `capabilities.events` for an `app:<name>` event |
 //! | `unsubscribe {key}` | takes a hook it made off: whether it had it | nothing |
 //! | `events` | the events it can hear: the app's (`{name, title?}`), the app-defined ones it may hear, the hooks it made | nothing |
+//! | `fetch {url, method?, headers?, body?, timeout_ms?, max_bytes?, stream?, binary?}` | an HTTP request ([`Fetch`]), redirects followed by the host: `{status, url, headers, body}` (`stream`: `{…, stream}`, its body read with `read_body`) | the URL's host, and every redirect's, in `capabilities.hosts` |
+//! | `read_body {stream, max?}` / `close_body {stream}` | the next part of a streamed response's body (`{chunk, done}`), or stops reading it | its own stream |
+//! | `secret {name}` / `ask_secret {name}` | whether the person has set one of its `[[secrets]]` (never its value), or asks them for it | declaring it |
+//!
+//! A request names a secret the host keeps (`crate::net::Secrets`) by
+//! reference, in a header's value: `"Authorization": "Bearer
+//! {{secret:api_key}}"`. The host puts the value in, only on a request to
+//! one of that secret's hosts (`[[secrets]] hosts`), asking the person
+//! for it the first time; the extension never reads it.
 //!
 //! `pick`, `prompt` and `menu` wait for the person: the call answers when
 //! they do. A host with no way to ask (a headless one, a platform without
 //! pickers) answers [`HostError::Unsupported`].
+
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -205,6 +216,157 @@ pub enum HostRequest {
     },
     /// The events it can hear, and the hooks it made.
     Events,
+    /// An HTTP request, to a host it may reach.
+    Fetch(Fetch),
+    /// The next part, at most `max` bytes, of the body of a response
+    /// fetched with `stream`: `{chunk, done}`.
+    ReadBody {
+        stream: String,
+        #[serde(default)]
+        max: Option<u64>,
+    },
+    /// Stops reading a streamed response: whether it was open.
+    CloseBody {
+        stream: String,
+    },
+    /// Whether the person has set its secret `name` (`[[secrets]]`):
+    /// `{set, title}`, never the value.
+    Secret {
+        name: String,
+    },
+    /// Asks the person for its secret `name` (again, when it is set):
+    /// whether they gave one.
+    AskSecret {
+        name: String,
+    },
+}
+
+/// An HTTP request an extension makes (`fetch`). The host follows its
+/// redirects itself, each checked against `capabilities.hosts`; it stops
+/// at a time limit and a size limit (`crate::net` has the defaults and
+/// the most either may be).
+///
+/// Its answer: `{status, url, headers, body}` — `url` where it ended
+/// after redirects, `headers` by lower-case name, `body` the text
+/// (`binary`: base64). With `stream`, `{status, url, headers, stream}`:
+/// the body is read a part at a time with `read_body`.
+///
+/// A header's value may name a secret, `{{secret:<name>}}`: the host puts
+/// it in.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Fetch {
+    pub url: String,
+    /// `GET` when none.
+    pub method: Option<String>,
+    pub headers: BTreeMap<String, String>,
+    /// What it sends, as text.
+    pub body: Option<String>,
+    /// The longest it waits for the response (and, `stream`, for each
+    /// part of its body).
+    pub timeout_ms: Option<u64>,
+    /// The most of a body it takes: past it, the call fails.
+    pub max_bytes: Option<u64>,
+    /// Its body read with `read_body`, a part at a time.
+    pub stream: bool,
+    /// Its body as base64, not text.
+    pub binary: bool,
+}
+
+/// The secrets a header's value names (`{{secret:<name>}}`), in order.
+#[must_use]
+pub fn secret_refs(value: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut rest = value;
+    while let Some(at) = rest.find(SECRET_OPEN) {
+        let after = &rest[at + SECRET_OPEN.len()..];
+        let Some(end) = after.find("}}") else { break };
+        out.push(after[..end].trim());
+        rest = &after[end + 2..];
+    }
+    out
+}
+
+/// What opens a secret's name in a header's value.
+pub const SECRET_OPEN: &str = "{{secret:";
+
+/// `value` with each secret it names replaced by `of(name)`.
+///
+/// # Errors
+///
+/// The first `of` refused.
+pub fn with_secrets(
+    value: &str,
+    mut of: impl FnMut(&str) -> Result<String, HostError>,
+) -> Result<String, HostError> {
+    let mut out = String::new();
+    let mut rest = value;
+    while let Some(at) = rest.find(SECRET_OPEN) {
+        let after = &rest[at + SECRET_OPEN.len()..];
+        let Some(end) = after.find("}}") else { break };
+        out.push_str(&rest[..at]);
+        out.push_str(&of(after[..end].trim())?);
+        rest = &after[end + 2..];
+    }
+    out.push_str(rest);
+    Ok(out)
+}
+
+/// Whether an extension that may reach `may` may send a request to `url`
+/// (an `http` or `https` URL whose host is in `capabilities.hosts`).
+///
+/// # Errors
+///
+/// The capability it lacks (`hosts`), and why.
+pub fn may_reach_url(may: &Capabilities, url: &str) -> Result<url::Url, (String, String)> {
+    let parsed = url::Url::parse(url)
+        .map_err(|e| ("hosts".to_owned(), format!("{url} is not a URL: {e}")))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err((
+            "hosts".to_owned(),
+            format!("{url}: only http and https are fetched"),
+        ));
+    }
+    let host = parsed.host_str().unwrap_or_default();
+    if may.may_reach_host(host, parsed.port_or_known_default()) {
+        Ok(parsed)
+    } else {
+        Err((
+            "hosts".to_owned(),
+            format!("this extension may not reach {host} (capabilities.hosts)"),
+        ))
+    }
+}
+
+/// Whether `fetch` is one an extension of `manifest` that may reach `may`
+/// may make: its URL's host one it may reach, and each secret it names
+/// one it declares, sent only to that secret's hosts, in a header.
+fn fetch_check(manifest: &Manifest, may: &Capabilities, fetch: &Fetch) -> Result<(), (String, String)> {
+    let url = may_reach_url(may, &fetch.url)?;
+    let host = url.host_str().unwrap_or_default();
+    if !secret_refs(&fetch.url).is_empty()
+        || fetch.body.as_deref().is_some_and(|b| !secret_refs(b).is_empty())
+    {
+        return Err((
+            "secrets".to_owned(),
+            "a secret goes in a header's value, not the URL or the body".to_owned(),
+        ));
+    }
+    for name in fetch.headers.values().flat_map(|v| secret_refs(v)) {
+        let Some(secret) = manifest.secret(name) else {
+            return Err((
+                "secrets".to_owned(),
+                format!("{name} is not one of its secrets ([[secrets]])"),
+            ));
+        };
+        if !manifest.secret_reaches(secret, host, url.port_or_known_default()) {
+            return Err((
+                "secrets".to_owned(),
+                format!("secret {name} is not sent to {host} (its [[secrets]] hosts)"),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// What a picker picks.
@@ -259,6 +421,9 @@ pub enum PromptKind {
     Confirm,
     /// One of `choices`: its `id`.
     PickOne,
+    /// Text the screen hides as it is typed (a key, a password): the
+    /// answer is a string. What the host asks for a secret it keeps.
+    Secret,
 }
 
 /// One of a `pick_one` prompt's choices, or a menu's items.
@@ -404,6 +569,11 @@ impl HostRequest {
             Self::Subscribe(_) => "subscribe",
             Self::Unsubscribe { .. } => "unsubscribe",
             Self::Events => "events",
+            Self::Fetch(_) => "fetch",
+            Self::ReadBody { .. } => "read_body",
+            Self::CloseBody { .. } => "close_body",
+            Self::Secret { .. } => "secret",
+            Self::AskSecret { .. } => "ask_secret",
         }
     }
 }
@@ -606,10 +776,27 @@ pub fn check(
                         "this extension may not hear the app's {name} events (capabilities.events)"
                     ),
                 )),
+                // A document's events say which document: reading them is
+                // reading the documents.
+                _ if crate::events::is_doc_event(&hook.on) => reads(DOCUMENTS),
                 _ => Ok(()),
             },
         ),
         HostRequest::Unsubscribe { .. } | HostRequest::Events => ("events", Ok(())),
+        HostRequest::Fetch(fetch) => ("hosts", fetch_check(manifest, may, fetch)),
+        // Its own streams: the host that keeps them checks whose they are.
+        HostRequest::ReadBody { .. } | HostRequest::CloseBody { .. } => ("hosts", Ok(())),
+        HostRequest::Secret { name } | HostRequest::AskSecret { name } => (
+            "secrets",
+            if manifest.secret(name).is_some() {
+                Ok(())
+            } else {
+                Err((
+                    "secrets".to_owned(),
+                    format!("{name} is not one of its secrets ([[secrets]])"),
+                ))
+            },
+        ),
     }
 }
 

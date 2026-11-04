@@ -32,8 +32,15 @@ host = [
     "dep:futures",
     # Signed `.archext` archives: checked on install, whichever way they came.
     "archive",
-    # A toolbar button's image file, as a `data:` URI.
+    # A toolbar button's image file, as a `data:` URI; a fetched body as
+    # base64 (`net`).
     "dep:base64",
+    # The network (`net`): extensions' HTTP fetches, on a runtime of its
+    # own, and the secrets the host keeps for them (`architect::settings`'
+    # private files).
+    "dep:reqwest",
+    "dep:tokio",
+    "architect/settings",
 ]
 # The `.archext` archive (`architect-extension-archive`): open, verify,
 # extract per platform. On with `host`.
@@ -116,6 +123,7 @@ pulley = ["wasi", "wasmtime/pulley"]
 # DOM (see docs/content/architecture/extensions.md, "On the web").
 web = [
     "vox",
+    "dep:base64",
     "dep:architect",
     "architect/action-list",
     "dep:futures",
@@ -152,6 +160,12 @@ semver = "1"
 roxmltree = "0.21"
 # URL openers' patterns (`[[openers]] urls`): wasm-clean.
 regex = "1"
+# A fetch's URL and its host, checked against `capabilities.hosts`
+# (`hostcall::may_reach_url`): wasm-clean.
+url = "2"
+# `fetch`'s HTTP client (`net`, feature `host`): no redirects of its own,
+# the host follows each one and checks it.
+reqwest = { version = "0.12", optional = true, default-features = false, features = ["rustls-tls", "stream"] }
 architect = { workspace = true, optional = true, features = ["action-list"] }
 architect-scripting = { workspace = true, optional = true }
 architect-extension-archive = { workspace = true, optional = true }

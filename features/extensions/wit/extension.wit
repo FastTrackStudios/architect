@@ -13,6 +13,7 @@
 // - the `host` interface is the host service (features/extensions/src/hostcall.rs
 //   `HostRequest`): typed functions for the common calls, `call` for every
 //   one, the same JSON a process, a Luau script and a linked extension send.
+//   Its network is `fetch` (through the host), not `wasi:http`.
 //   Each is checked against what the extension may reach, as a person
 //   granted it, when it is made.
 package architect:extension@0.1.0;
@@ -227,6 +228,29 @@ interface host {
     /// One of its actions on every document event (`watch_documents`:
     /// `{"action": …}` as JSON): the hooks' keys as JSON.
     watch-documents: func(hook: string) -> result<string, string>;
+
+    // The network (features/extensions/src/net.rs): through the host, to
+    // the hosts in `capabilities.hosts`, each redirect checked. The world
+    // has no `wasi:http` or `wasi:sockets`: this is its network.
+
+    /// An HTTP request (`fetch`: `hostcall::Fetch` as JSON, `{"url": …,
+    /// "method"?, "headers"?, "body"?, "timeout_ms"?, "max_bytes"?,
+    /// "stream"?, "binary"?}`): `{status, url, headers, body}` as JSON, or
+    /// with `stream` `{status, url, headers, stream}`. A header's value
+    /// may name a secret (`{{secret:api_key}}`): the host puts it in.
+    fetch: func(request: string) -> result<string, string>;
+    /// The next part of a streamed response's body, at most `max` bytes
+    /// (0: the host's default; `read_body`): `{chunk, done}` as JSON.
+    read-body: func(%stream: string, max: u32) -> result<string, string>;
+    /// Stops reading a streamed response (`close_body`): whether it was
+    /// open.
+    close-body: func(%stream: string) -> bool;
+    /// Whether the person has set its secret `name` (`secret`; one of its
+    /// `[[secrets]]`). Never its value.
+    secret-set: func(name: string) -> result<bool, string>;
+    /// Asks the person for its secret `name` (`ask_secret`): whether they
+    /// gave one.
+    ask-secret: func(name: string) -> result<bool, string>;
 }
 
 /// What a component does for its host.

@@ -1668,6 +1668,22 @@ impl Host {
             );
             return false;
         }
+        // A document's events say which document: only an extension that
+        // may read the documents hears them, as granted now.
+        if crate::events::is_doc_event(on)
+            && !self
+                .capabilities(owner)
+                .is_some_and(|c| c.may_read(crate::capabilities::DOCUMENTS))
+        {
+            tracing::warn!(ext.id = %owner, ext.hook = %on, perm.capability = "reads.documents", perm.decision = "deny", "a hook on a document event, without reading documents, was refused");
+            self.logs().push(
+                owner,
+                crate::logs::Level::Warn,
+                "hook",
+                format!("{on}: refused: it may not read documents (capabilities.reads)"),
+            );
+            return false;
+        }
         let key = format!("{owner}/{}", hook.key());
         let text = match detail {
             Value::String(s) => s.clone(),

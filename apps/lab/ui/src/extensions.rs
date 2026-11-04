@@ -807,6 +807,12 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         host = host
             .with_grants(Grants::open(root.join("extension-grants.json")))
             .with_data_root(root.join("extension-data"))
+            // What extensions' requests name by reference (an API key the
+            // person entered once): a private file beside the grants, not
+            // in any extension's folder.
+            .with_secrets(architect_extensions::net::Secrets::open(
+                root.join("extension-secrets.json"),
+            ))
             .with_app_context(LabContext {
                 list: Arc::clone(&lab),
             })

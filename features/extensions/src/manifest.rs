@@ -579,6 +579,29 @@ pub struct Manifest {
     /// (`crate::events::BackgroundDecl`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub background: Option<crate::events::BackgroundDecl>,
+    /// `[[secrets]]`: what the person enters once and the host keeps (an
+    /// API key), put into its requests by reference (`crate::net`).
+    #[serde(default)]
+    pub secrets: Vec<SecretDecl>,
+}
+
+/// One of an extension's `[[secrets]]`: an API key or a token the person
+/// enters once, kept by the host (`crate::net::Secrets`), never in the
+/// extension's folder and never handed to it. A request names it in a
+/// header's value (`"Bearer {{secret:api_key}}"`); the host puts it in on
+/// a request to one of its `hosts`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(default)]
+pub struct SecretDecl {
+    /// What a request names it by (`a-z 0-9 _ - .`).
+    pub id: String,
+    /// What the person is asked for (`OpenAI API key`).
+    pub title: String,
+    /// A line under it: where to find one.
+    pub description: Option<String>,
+    /// The hosts it is sent to, each within `capabilities.hosts`; none:
+    /// every one of those.
+    pub hosts: Vec<String>,
 }
 
 fn api() -> String {
@@ -802,6 +825,36 @@ impl Manifest {
                 "events {bad:?}: an app event's name, <prefix>.* or *"
             )));
         }
+        let mut secrets = std::collections::BTreeSet::new();
+        for secret in &self.secrets {
+            let bad = |why: String| {
+                Err(ManifestError::BadCapability(format!(
+                    "secret {:?}: {why}",
+                    secret.id
+                )))
+            };
+            if secret.id.is_empty()
+                || !secret
+                    .id
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "._-".contains(c))
+            {
+                return bad("an id of a-z, 0-9, . _ -".to_owned());
+            }
+            if !secrets.insert(secret.id.as_str()) {
+                return Err(ManifestError::Duplicate(format!("secret {}", secret.id)));
+            }
+            if self.capabilities.hosts.is_empty() {
+                return bad("it is sent to no host: capabilities.hosts names none".to_owned());
+            }
+            if let Some(h) = secret
+                .hosts
+                .iter()
+                .find(|h| !crate::capabilities::reaches_host(&self.capabilities.hosts, h, None))
+            {
+                return bad(format!("{h} is not one of capabilities.hosts"));
+            }
+        }
         if let Some(bg) = &self.background {
             if self.kind == Kind::Data {
                 return Err(ManifestError::BadCapability(
@@ -968,7 +1021,27 @@ impl Manifest {
             views,
             luau: self.kind == Kind::Luau,
             events: &self.capabilities.events,
+            reads: &self.capabilities.reads,
         }
+    }
+
+    /// Its secret `id` (`[[secrets]]`).
+    #[must_use]
+    pub fn secret(&self, id: &str) -> Option<&SecretDecl> {
+        self.secrets.iter().find(|s| s.id == id)
+    }
+
+    /// Whether `secret` is sent to `host` (on `port`): one of its hosts, or
+    /// of `capabilities.hosts` when it names none.
+    #[must_use]
+    pub fn secret_reaches(&self, secret: &SecretDecl, host: &str, port: Option<u16>) -> bool {
+        let hosts = if secret.hosts.is_empty() {
+            &self.capabilities.hosts
+        } else {
+            &secret.hosts
+        };
+        crate::capabilities::reaches_host(hosts, host, port)
+            && crate::capabilities::reaches_host(&self.capabilities.hosts, host, port)
     }
 
     /// The namespace of its theme tokens: the last part of its id, `_`
