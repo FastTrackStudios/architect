@@ -185,19 +185,23 @@ pub fn serve_headless() -> ExitCode {
     }
 }
 
-/// `architect-desktop mcp [--headless]`: MCP on stdio, over the running
-/// lab's socket or over a headless lab pumped here.
+/// `architect-desktop mcp [--headless | --app <socket>]`: MCP on stdio.
+///
+/// Over the running lab's socket, over another running lab's (`--app`:
+/// the iOS lab's, which has no stdio of its own;
+/// `scripts/mac-live-check.sh`), or over a headless lab pumped here.
 #[must_use]
-pub fn mcp(headless: bool) -> ExitCode {
+pub fn mcp(headless: bool, app: Option<PathBuf>) -> ExitCode {
     let failed = |e: &dyn std::fmt::Display| {
         let _ = writeln!(std::io::stderr(), "architect-desktop mcp: {e}");
         ExitCode::from(69)
     };
     if !headless {
-        let path: PathBuf = match architect_control::endpoint::socket_path(APP) {
-            Ok(path) => path,
-            Err(e) => return failed(&e),
-        };
+        let path: PathBuf =
+            match app.map_or_else(|| architect_control::endpoint::socket_path(APP), Ok) {
+                Ok(path) => path,
+                Err(e) => return failed(&e),
+            };
         return match architect_mcp::bridge::serve_stdio_via(&path) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => failed(&e),

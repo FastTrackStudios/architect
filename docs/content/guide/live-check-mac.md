@@ -131,7 +131,11 @@ $S stop
   own temporary folder is too deep for a socket's path (104 bytes at
   most), so `architect-control` serves in the folder it is given
   (`features/control/src/endpoint.rs` `DIR_ENV`). Any architect app's
-  `actions` CLI talks to it (`MLC_CLI`).
+  `actions` CLI talks to it (`MLC_CLI`), and MCP reaches it through the
+  desk lab's bridge: `architect-desktop mcp --app <dir>/architect-mobile.sock`
+  (an iOS app has no stdio of its own; `cargo xtask surfaces` accepts the
+  phone's `// surfaces: mcp via apps/lab/desktop` for that reason,
+  `xtask/src/surfaces.rs`).
 - **`ios-tap <x> <y>`** taps in points, a screenshot's pixels over its
   scale (3 on an iPhone), through idb (`idb ui tap`; `pip install
   fb-idb` and its `idb_companion`, or `MLC_IDB=<path>`). Use it for what

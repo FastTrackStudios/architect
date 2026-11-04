@@ -20,6 +20,11 @@
 //!    (`features/mcp/src/lib.rs` builds them from `Method::TOOLS`), not a
 //!    table of its own.
 //!
+//! An app with no stdio of its own (the iOS lab) may instead say, in its
+//! `src/`, `// surfaces: mcp via <member dir>`: its MCP face is that
+//! member's bridge onto its socket. That member must itself pass 1 and 2
+//! and serve the bridge (`serve_stdio_via`).
+//!
 //! The faces themselves (`features/mcp`, `features/control`) are not apps
 //! and are skipped. Task and studio run the same check in their own repos
 //! by having the same parity test.
@@ -38,6 +43,9 @@ const MCP_SERVES: &[&str] = &[
 
 /// What serving the CLI looks like: the `actions` command or the socket.
 const CLI_SERVES: &[&str] = &["Cli::new(", "Control::new(", "Control::at("];
+
+/// How an app names the member whose bridge is its MCP face.
+const MCP_VIA: &str = "// surfaces: mcp via ";
 
 /// The faces, not apps.
 const FACES: &[&str] = &["features/mcp", "features/control"];
@@ -66,6 +74,17 @@ impl Sources {
     fn serves_cli(&self) -> bool {
         self.deps.contains("architect-control") && CLI_SERVES.iter().any(|p| self.src.contains(p))
     }
+
+    /// The member it names as its MCP face (`// surfaces: mcp via <dir>`).
+    fn mcp_via(&self) -> Option<&str> {
+        let (_, rest) = self.src.split_once(MCP_VIA)?;
+        rest.lines().next().map(str::trim).filter(|d| !d.is_empty())
+    }
+
+    /// Whether it has a parity test.
+    fn has_parity(&self) -> bool {
+        self.src.contains("Parity::new(") || self.tests.contains("Parity::new(")
+    }
 }
 
 /// The rules over `crates`, and MCP's own source: each problem, one line.
@@ -78,6 +97,20 @@ pub fn problems(crates: &[Sources], mcp_lib: &str) -> Vec<String> {
         }
         let mcp = c.serves_mcp();
         let cli = c.serves_cli();
+        if cli
+            && !mcp
+            && let Some(via) = c.mcp_via()
+        {
+            let bridge = crates.iter().find(|o| o.dir == via);
+            match bridge {
+                Some(b) if b.serves_mcp() && b.serves_cli() && b.has_parity() && b.src.contains("serve_stdio_via(") => {}
+                _ => out.push(format!(
+                    "{}: its MCP face `{via}` must be a member serving both faces, a parity test and `serve_stdio_via`",
+                    c.dir
+                )),
+            }
+            continue;
+        }
         if mcp && !cli {
             out.push(format!(
                 "{}: serves MCP but not the CLI — mount `architect_control::cli::Cli` (and its control socket)",
@@ -90,8 +123,7 @@ pub fn problems(crates: &[Sources], mcp_lib: &str) -> Vec<String> {
                 c.dir
             ));
         }
-        let parity = c.src.contains("Parity::new(") || c.tests.contains("Parity::new(");
-        if (mcp || cli) && !parity {
+        if (mcp || cli) && !c.has_parity() {
             out.push(format!(
                 "{}: no parity test — `architect_mcp::parity::Parity::new(&server).check()` over its list",
                 c.dir
@@ -240,6 +272,40 @@ mod tests {
         let found = problems(&[untested], MCP_LIB);
         assert_eq!(found.len(), 1);
         assert!(found[0].contains("no parity test"), "{found:?}");
+    }
+
+    #[test]
+    fn an_app_whose_mcp_is_another_members_bridge_passes() {
+        let desk = Sources {
+            dir: "apps/desk".into(),
+            ..app(
+                "serve_stdio_via(&p); serve_stdio(&s); Control::new(\"d\")",
+                "Parity::new(&s)",
+            )
+        };
+        let phone = Sources {
+            dir: "apps/phone".into(),
+            ..app("Control::new(\"p\")\n// surfaces: mcp via apps/desk\n", "")
+        };
+        assert!(problems(&[desk, phone], MCP_LIB).is_empty());
+    }
+
+    #[test]
+    fn a_via_that_is_not_a_bridge_fails() {
+        let other = Sources {
+            dir: "apps/other".into(),
+            ..app("", "")
+        };
+        let phone = Sources {
+            dir: "apps/phone".into(),
+            ..app("Control::new(\"p\")\n// surfaces: mcp via apps/other\n", "")
+        };
+        assert_eq!(problems(&[other, phone], MCP_LIB).len(), 1);
+        let missing = Sources {
+            dir: "apps/phone".into(),
+            ..app("Control::new(\"p\")\n// surfaces: mcp via apps/none\n", "")
+        };
+        assert_eq!(problems(&[missing], MCP_LIB).len(), 1);
     }
 
     #[test]
