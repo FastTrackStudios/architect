@@ -140,6 +140,10 @@ required-features = ["native"]
 name = "popout_theme"
 required-features = ["native"]
 
+[[test]]
+name = "title_row"
+required-features = ["native"]
+
 [lints]
 workspace = true
 

@@ -338,6 +338,9 @@ pub fn VaultPage() -> Element {
     let sets = use_signal(screensets);
     let store = use_root_context(|| VaultStore(WorkspaceStore::new(MemoryStore::new()))).0;
     let pane_status = use_signal(Vec::new);
+    // The Vault's panes are its sidebar: a desk opens it folded, the
+    // switcher and the account on the ribbon.
+    architect_shell::use_sidebar_default(architect_shell::SidebarDefault::Collapsed);
     // The lab's views, and every view a loaded extension adds (made again
     // when one loads or unloads).
     let ui = try_use_context::<architect_extensions::interface::ExtensionUi>();

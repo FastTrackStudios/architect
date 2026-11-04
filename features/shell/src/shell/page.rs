@@ -588,8 +588,13 @@ pub fn Page(
     /// Anything else the app keeps at the bar's end.
     trailing: Option<Element>,
     #[props(default = true)] scroll: bool,
+    /// How the page wants a desk's left sidebar while nobody has toggled it
+    /// here ([`use_sidebar_default`](super::use_sidebar_default)); left
+    /// out, as the shell has it.
+    sidebar: Option<super::SidebarDefault>,
     children: Element,
 ) -> Element {
+    super::use_claim(|s| s.page_sidebar, sidebar);
     let shell = use_shell();
     let t = shell.theme.clone();
     let ins = shell.screen.insets;
@@ -869,6 +874,7 @@ pub(super) fn DeskTab(title: String) -> Element {
     let tab_h = (shell.title_row() - 6.0).max(24.0);
     rsx! {
         div {
+            "data-desk-tab": "{title}",
             style: "flex: 0 1 200px; max-width: 200px; min-width: 72px; height: {tab_h}px; box-sizing: border-box; \
                     display: flex; align-items: center; padding: 0 12px; border-radius: 8px; background: {t.desk}; \
                     color: {t.ink}; font-family: {t.font}; font-size: 13px; white-space: nowrap; overflow: hidden;",

@@ -3,6 +3,9 @@
 //! recorded. `default_chrome.golden` was recorded from the shell before
 //! its regions became slots (`git show 5528d33:features/shell`): with no
 //! chrome above it, and with an empty one, the shell writes exactly that.
+//! Recorded again when a page could draw the title row (`use_title_row`):
+//! every element, attribute, text and listener as before, the right
+//! sidebar's template now shared with the left's (two elements fewer).
 
 // `icon!` casts its closure to the fn pointer, as an app's does.
 #![allow(clippy::as_conversions)]
@@ -213,4 +216,127 @@ fn an_empty_chrome_changes_nothing_and_a_filled_slot_replaces_the_shells_own() {
     assert!(hidden.len() < GOLDEN.len());
     assert_eq!(intern("a/b"), intern(&String::from("a/b")));
     assert!(std::ptr::eq(intern("a/b"), intern("a/b")));
+}
+
+thread_local! {
+    static KIND: std::cell::RefCell<Option<Signal<&'static str>>> = const { std::cell::RefCell::new(None) };
+    static SEEN_SHELL: std::cell::RefCell<Option<Shell>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Keeps the shell around it for the test to read.
+#[component]
+fn Seen() -> Element {
+    let shell = use_shell();
+    SEEN_SHELL.with(|s| *s.borrow_mut() = Some(shell));
+    rsx! { div { "the page" } }
+}
+
+/// A page with no use for the sidebar.
+#[component]
+fn Folding() -> Element {
+    use_sidebar_default(SidebarDefault::Collapsed);
+    rsx! { Seen {} }
+}
+
+fn switching_shell() -> Element {
+    let kind = use_signal(|| "inbox");
+    KIND.with(|k| *k.borrow_mut() = Some(kind));
+    rsx! {
+        AppShell {
+            screen: DESK,
+            tabs: vec![
+                Tab::new("inbox", "Inbox", crate::icon!(Inbox)),
+                Tab::new("vault", "Vault", crate::icon!(Check)),
+            ],
+            current: Some(kind()),
+            on_tab: |_| (),
+            left: rsx! { div { "the left side" } },
+            if kind() == "vault" { Folding {} } else { Seen {} }
+        }
+    }
+}
+
+#[test]
+fn a_page_says_how_a_desk_sidebar_opens_and_the_toggle_is_kept_per_page_kind() {
+    let mut dom = VirtualDom::new(switching_shell);
+    dom.rebuild_in_place();
+    let folded = |dom: &mut VirtualDom| {
+        dom.render_immediate(&mut dioxus::core::NoOpMutations);
+        let shell = SEEN_SHELL.with(|s| s.borrow().clone()).unwrap();
+        dom.in_runtime(|| shell.folded())
+    };
+    let go = |dom: &mut VirtualDom, to: &'static str| {
+        let mut kind = KIND.with(|k| k.borrow().unwrap());
+        dom.in_runtime(|| kind.set(to));
+    };
+    let toggle = |dom: &mut VirtualDom| {
+        let shell = SEEN_SHELL.with(|s| s.borrow().clone()).unwrap();
+        dom.in_runtime(|| shell.toggle(Side::Left));
+    };
+    assert!(
+        !folded(&mut dom),
+        "the inbox has a sidebar, open on a wide desk"
+    );
+    go(&mut dom, "vault");
+    assert!(folded(&mut dom), "the vault asks for it folded");
+    toggle(&mut dom);
+    assert!(!folded(&mut dom), "the person's toggle wins");
+    go(&mut dom, "inbox");
+    assert!(!folded(&mut dom));
+    toggle(&mut dom);
+    assert!(folded(&mut dom), "folded on the inbox");
+    go(&mut dom, "vault");
+    assert!(!folded(&mut dom), "the vault kept its own: open");
+    go(&mut dom, "inbox");
+    assert!(folded(&mut dom), "the inbox kept its own: folded");
+}
+
+fn bare_desk() -> Element {
+    rsx! {
+        AppShell {
+            screen: DESK,
+            tabs: vec![Tab::new("inbox", "Inbox", crate::icon!(Inbox))],
+            current: Some("inbox"),
+            on_tab: |_| (),
+            account: Account::new("Cody Wright").menu(Menu::new().item("Settings", crate::icon!(Check), |()| ())),
+            workspaces: Workspaces::new("Workspace", |_| ())
+                .with(Workspace::new("personal", "Personal"))
+                .current(Some("personal")),
+            Seen {}
+        }
+    }
+}
+
+#[test]
+fn a_desk_page_with_nothing_for_the_sidebar_folds_it_into_the_ribbon() {
+    let mut dom = VirtualDom::new(bare_desk);
+    let mut out = Record::default();
+    dom.rebuild(&mut out);
+    let shell = SEEN_SHELL.with(|s| s.borrow().clone()).unwrap();
+    assert!(dom.in_runtime(|| shell.folded()), "nothing in it: folded");
+    let html = out.0;
+    // The switcher and the account as marks on the ribbon, not rows in a
+    // sidebar; the sidebar's button still there to open it.
+    assert!(
+        html.contains("\"Switch Workspace: Personal\""),
+        "the switcher's mark"
+    );
+    assert!(
+        html.contains("\"Account: Cody Wright\""),
+        "the account's mark"
+    );
+    assert!(
+        !html.contains("attr aria-label None \"Account\"\n"),
+        "no account row"
+    );
+    assert!(html.contains("\"Toggle the sidebar\""));
+
+    // Opened, they go back to the sidebar's foot.
+    dom.in_runtime(|| shell.toggle(Side::Left));
+    let mut out = Record::default();
+    dom.render_immediate(&mut out);
+    assert!(
+        out.0.contains("attr aria-label None \"Account\"\n"),
+        "the account row"
+    );
 }
