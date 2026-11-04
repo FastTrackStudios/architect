@@ -1,0 +1,30 @@
+// The extensions manager: everything that customises the app in one
+// place. The Board extension turned off from its page (its status bar and
+// tab go) and on again. Filmed for the README; played as a test.
+id extensions-manager
+title "The extensions manager"
+view {width 1440, height 860}
+capture {fps 12, width 960}
+steps (
+    {id open, do @run{id MANAGER_SHOW, args {kind extension, id lab.board}}, hide true}
+    {id list, target @css".manager-list", hold 0.2}
+    {
+        id caption
+        do @run{id FILM_CAPTION, args {text "Extensions, scripts, workers, themes, layouts, pages: one manager"}}
+        hold 1.6
+    }
+    {id off-seen, target @text"Turn off", done {timeout 15}}
+    {
+        id off
+        target @text"Turn off"
+        do @click{}
+        hold 1.8
+    }
+    {id on-seen, target @text"Turn on", done {timeout 15}}
+    {
+        id on
+        target @text"Turn on"
+        do @click{}
+        hold 1.8
+    }
+)

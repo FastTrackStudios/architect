@@ -1,0 +1,37 @@
+// The Architect tour's first chapters, played as a person would see them:
+// ⌘K "Take the tour", then Next through the shell's chapters, each
+// chapter's popover over the control it is about. Filmed for the README;
+// played as a test.
+id architect-tour-intro
+title "The Architect tour, in the lab"
+view {width 1200, height 760}
+capture {fps 10, width 960}
+steps (
+    {
+        id start
+        do @run{id LAB_TAKE_TOUR}
+        done {on (@changed"guide"), check ({id GUIDE_TOUR_STATE, has {scenario architect-tour, step welcome}})}
+        hold 2.4
+    }
+    {
+        id tabs
+        target @testid"guide-tour-next"
+        do @click{}
+        done {check ({id GUIDE_TOUR_STATE, has {step shell-tabs, found true}})}
+        hold 2.4
+    }
+    {
+        id rail
+        target @testid"guide-tour-next"
+        do @click{}
+        done {check ({id GUIDE_TOUR_STATE, has {step shell-rail, found true}})}
+        hold 2.4
+    }
+    {
+        id devices
+        target @testid"guide-tour-next"
+        do @click{}
+        done {check ({id GUIDE_TOUR_STATE, has {step shell-devices, found true}})}
+        hold 2.4
+    }
+)

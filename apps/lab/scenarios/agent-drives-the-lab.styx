@@ -1,0 +1,69 @@
+// An agent driving the lab over its control socket: each command is the
+// CLI line for the Action List action the film runs, the same list ⌘K,
+// the menus and MCP use. Filmed for the README; played as a test.
+id agent-drives-the-lab
+title "An agent drives the app over the CLI"
+view {width 1280, height 760}
+capture {fps 12, width 960, cursor false}
+steps (
+    {
+        id caption
+        do @run{id FILM_CAPTION, args {text "One Action List: the CLI, MCP and ⌘K run the same actions"}}
+        hold 0.6
+    }
+    {
+        id say-go
+        do @run{id FILM_TERMINAL, args {line "$ architect-desktop actions run LAB_GO --arg tab=vault"}}
+        hold 0.5
+    }
+    {
+        id go
+        do @run{id LAB_GO, args {tab vault}}
+        done {on (@changed"lab"), check ({id LAB_STATE, has {tab vault}})}
+    }
+    {
+        id said-go
+        do @run{id FILM_TERMINAL, args {line "{\"tab\": \"vault\", \"page\": \"list\"}"}}
+        hold 1.0
+    }
+    {
+        id say-open
+        do @run{id FILM_TERMINAL, args {line "$ … run WORKSPACE_OPEN --json \\"}}
+    }
+    {
+        id say-open-2
+        do @run{id FILM_TERMINAL, args {line "    '{\"view\":\"actions\",\"at\":{\"split\":{\"pane\":\"note-welcome\",\"side\":\"bottom\"}}}'"}}
+        hold 0.5
+    }
+    {
+        id open
+        do @run{id WORKSPACE_OPEN, args {view actions, at {split {pane note-welcome, side bottom}}}}
+        done {on (@changed"workspace")}
+        hold 1.0
+    }
+    {
+        id say-theme
+        do @run{id FILM_TERMINAL, args {line "$ … run THEME_SET --arg one=catppuccin-light"}}
+        hold 0.5
+    }
+    {
+        id theme
+        do @run{id THEME_SET, args {one catppuccin-light, layer pick}}
+        done {check ({id THEME_GET, has {theme catppuccin-light}})}
+        hold 1.0
+    }
+    {
+        id say-status
+        do @run{id FILM_TERMINAL, args {line "$ … run APP_STATUS            # what shows, what is wrong"}}
+        hold 0.4
+    }
+    {
+        id status
+        do @run{id APP_STATUS}
+    }
+    {
+        id said-status
+        do @run{id FILM_TERMINAL, args {line "  → what is on screen, and each problem with its file and field"}}
+        hold 1.8
+    }
+)

@@ -80,9 +80,10 @@ Rules:
 ## Tour it in the app (feature `ui`)
 
 Public API (pre-1.0, new): `features/guide/src/tour.rs` `use_tours`,
-`TourSet` (`new`, `from_sources`, `resolver`, `playground`), `Tours`
-(`start`, `next`, `back`, `stop`, `playing`, `offered`), `TourLayer`,
-`TourState`, `hint`, `place`; `features/guide/src/locate.rs` `find_live`,
+`TourSet` (`new`, `from_sources`, `resolver`, `playground`, `on_move`),
+`Moved`, `Tours` (`start`, `start_at`, `next`, `back`, `stop`, `playing`,
+`offered`), `StartTour` (`id`, `step`), `TourLayer`, `TourState`, `hint`,
+`place`; `features/guide/src/locate.rs` `find_live`,
 `find_in`, `Resolver`.
 
 1. `let tours = use_tours(list, TourSet::from_sources([include_str!(…)])?
@@ -97,6 +98,23 @@ Public API (pre-1.0, new): `features/guide/src/tour.rs` `use_tours`,
    `LabApp`, `apps/lab/ui/src/guide.rs` `tours`).
 4. Safety: a scenario without `safe true` starts only through
    `TourSet::playground` (set up sample data, or refuse with a reason).
+5. A tour of chapters (`apps/lab/scenarios/architect-tour.styx`): each
+   chapter is hidden `@run` setup steps then one shown step with `text`
+   and a `target`. Back and `GUIDE_TOUR_START {id, step}` rerun the setup
+   right before a step, so each chapter's setup must stand alone (go to
+   the page, load the layout, close what the last chapter opened:
+   `COMMANDS_SHOW {overlay none}`, `EXT_WINDOW_CLOSE`). Remember the
+   place with `TourSet::on_move` and resume with `Tours::start_at`
+   (`apps/lab/ui/src/guide.rs` `tours`). Test it live with a generated
+   walk (`apps/lab/media/tests/tour.rs`).
+6. Films: `FILM_CAPTION`, `FILM_TERMINAL` and `FILM_WRITE` (the lab's
+   media crate, `apps/lab/media/src/lib.rs`) caption a GIF, show CLI
+   lines, and save a file in the run's fresh lab folder (theme files,
+   pages, dev copies reload live headless: `LabFiles`). A page draws in
+   a document of its own, so `@text` cannot find its text: wait with
+   `@pause`, or check `PAGES_STATUS`. Async actions (`EXT_*`,
+   `SETTINGS_LIST`, `EXT_WINDOWS`) cannot be `check`ed; wait on a
+   target (a step with a `target`, no `do`, and `done {timeout …}`).
 
 | Action | What |
 |---|---|

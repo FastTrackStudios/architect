@@ -74,6 +74,12 @@ pub fn page_types() -> [(&'static str, &'static str, String); 2] {
     ]
 }
 
+/// In context above [`LabApp`] with no window (a film's run): read and
+/// watch the lab's folder ([`app_dir`]) as a window's lab does (its theme
+/// files), though nothing of the person's is kept.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LabFiles;
+
 /// The lab's folder: its settings, themes, extensions in development and
 /// the agents' guide (`AGENTS.md`). `$ARCHITECT_LAB_CONFIG_DIR` when set.
 #[must_use]
@@ -728,7 +734,8 @@ pub fn LabApp() -> Element {
         let _ = architect::action::app_status::register(&list);
     });
     // Themes: one store for the app, its THEME_* actions on the list.
-    let (theme, appearance) = theme::use_lab_theme(windowed, &list);
+    let files = use_hook(|| windowed || try_consume_context::<LabFiles>().is_some());
+    let (theme, appearance) = theme::use_lab_theme(windowed, files, &list);
     // An agent's Delete waits for the person's yes, in the sheet below.
     use_hook(|| confirm::require(&list));
     // An agent's UI (A2UI): its surfaces on a document of their own, the
@@ -877,10 +884,32 @@ pub fn LabApp() -> Element {
     // lab's list; the lab's own state beside them.
     architect_commands::use_command_actions(list.clone());
     guide::use_lab_actions(&list, &lab);
-    // Guided tours of two of the lab's scenarios, from ⌘K (Help) or the
-    // Action List (`GUIDE_TOUR_START`).
-    let tours = architect_guide::tour::use_tours(list, use_hook(guide::tours));
-    for (id, title) in use_hook(move || tours.offered()) {
+    // Guided tours, from ⌘K (Help) or the Action List (`GUIDE_TOUR_START`):
+    // the Architect tour (its place kept in a window's lab), and two of the
+    // lab's scenarios.
+    let tours = architect_guide::tour::use_tours(list, use_hook(|| guide::tours(windowed)));
+    // "Take the tour" goes on where the person left it, from the start
+    // once they finished it; a window's lab offers it on its first start.
+    let take_tour = move || {
+        let at = match windowed.then(guide::tour_place) {
+            Some(guide::TourPlace::At(step)) => Some(step),
+            _ => None,
+        };
+        let _ = tours.start_at(guide::ARCHITECT_TOUR, at.as_deref());
+    };
+    architect_commands::use_command(
+        architect_commands::Command::new("LAB_TAKE_TOUR", "Take the tour").group("Help"),
+        take_tour,
+    );
+    use_hook(move || {
+        if windowed && guide::tour_place() == guide::TourPlace::Never {
+            take_tour();
+        }
+    });
+    for (id, title) in use_hook(move || tours.offered())
+        .into_iter()
+        .filter(|(id, _)| id != guide::ARCHITECT_TOUR)
+    {
         architect_commands::use_command(
             architect_commands::Command::new(
                 format!("LAB_TOUR_{}", id.to_uppercase().replace('-', "_")),

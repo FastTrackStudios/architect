@@ -136,17 +136,72 @@ pub fn use_lab_actions(list: &Arc<ActionList>, lab: &Lab) {
     });
 }
 
-/// The lab's guided tours: two of its scenarios (`apps/lab/scenarios`),
-/// played live. The lab's data is all made up, so it is its own
-/// playground: every tour may play.
+/// The Architect tour's id (`apps/lab/scenarios/architect-tour.styx`):
+/// every system of the framework, a chapter each, over the live lab.
+pub const ARCHITECT_TOUR: &str = "architect-tour";
+
+/// Where the person left the Architect tour, kept in the lab's folder
+/// ([`crate::app_dir`]): a step's id, or `done`.
+const TOUR_PLACE: &str = "tour-place";
+
+/// The lab's guided tours: the Architect tour and two of its scenarios
+/// (`apps/lab/scenarios`), played live. The lab's data is all made up, so
+/// it is its own playground: every tour may play. `remember` keeps the
+/// Architect tour's place in the lab's folder (a window's lab; headless,
+/// nothing is kept).
 #[must_use]
-pub fn tours() -> architect_guide::tour::TourSet {
-    architect_guide::tour::TourSet::from_sources([
+pub fn tours(remember: bool) -> architect_guide::tour::TourSet {
+    let set = architect_guide::tour::TourSet::from_sources([
+        include_str!("../../scenarios/architect-tour.styx"),
         include_str!("../../scenarios/palette-run.styx"),
         include_str!("../../scenarios/stacked-tabs.styx"),
     ])
     .unwrap_or_default()
     .resolver(architect_workspace::target_selector)
     .resolver(architect_commands::target_selector)
-    .playground(|_| Ok(()))
+    .playground(|_| Ok(()));
+    if !remember {
+        return set;
+    }
+    set.on_move(|moved| {
+        use architect_guide::tour::Moved;
+        let place = match moved {
+            Moved::At { scenario, step } | Moved::Left { scenario, step }
+                if scenario == ARCHITECT_TOUR =>
+            {
+                step.as_str()
+            }
+            Moved::Finished { scenario } if scenario == ARCHITECT_TOUR => "done",
+            _ => return,
+        };
+        if let Some(dir) = crate::app_dir() {
+            let _ = std::fs::create_dir_all(&dir);
+            let _ = std::fs::write(dir.join(TOUR_PLACE), place);
+        }
+    })
+}
+
+/// Where the person left the Architect tour, as kept in the lab's folder.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TourPlace {
+    /// They never started it.
+    Never,
+    /// They played it to its end.
+    Finished,
+    /// At this step, by id.
+    At(String),
+}
+
+/// Where the person left the Architect tour.
+#[must_use]
+pub fn tour_place() -> TourPlace {
+    let Some(kept) =
+        crate::app_dir().and_then(|d| std::fs::read_to_string(d.join(TOUR_PLACE)).ok())
+    else {
+        return TourPlace::Never;
+    };
+    match kept.trim() {
+        "" | "done" => TourPlace::Finished,
+        step => TourPlace::At(step.to_owned()),
+    }
 }

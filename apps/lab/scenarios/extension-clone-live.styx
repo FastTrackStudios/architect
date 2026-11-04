@@ -1,0 +1,75 @@
+// EXT_CLONE: an extension copied into the lab's dev folder, edited there,
+// and reloaded as it is saved; disabled, the copy is gone and the original
+// stands. (A built-in with a [source] cloned under its own id overrides it
+// the same way, built as a process: a desk's lab, not a film.) Filmed for
+// the README; played as a test.
+id extension-clone-live
+title "Clone an extension, edit the copy, see it live"
+view {width 1440, height 860}
+capture {fps 12, width 960, cursor false}
+steps (
+    {id open, do @run{id APP_SETTINGS}, hide true}
+    {id workspace, target @text"Workspace", do @click{}, hide true}
+    {
+        id load
+        target @css"[id=\"setting-workspace.metronome\"] [role=\"switch\"]"
+        do @click{}
+        hold 1.0
+    }
+    {id section-seen, target @text"Metronome", done {timeout 20}}
+    {id section, target @text"Metronome", do @click{}, hold 0.4}
+    {
+        id caption
+        do @run{id FILM_CAPTION, args {text "EXT_CLONE: a copy of an extension, yours to edit"}}
+        hold 1.0
+    }
+    {
+        id say-clone
+        do @run{id FILM_TERMINAL, args {line "$ architect-desktop actions run EXT_CLONE --arg id=fts.metronome"}}
+        hold 0.6
+    }
+    {
+        id clone
+        do @run{id EXT_CLONE, args {id fts.metronome}}
+        done {on (@ran"EXT_CLONE")}
+    }
+    {
+        id said-clone
+        do @run{id FILM_TERMINAL, args {line "{\"id\": \"fts.metronome-copy\", \"folder\": \"dev/fts.metronome-copy\"}"}}
+        hold 1.4
+    }
+    {
+        id say-edit
+        do @run{id FILM_TERMINAL, args {line "$ $EDITOR dev/fts.metronome-copy/extension.toml        # saved"}}
+        hold 0.4
+    }
+    {
+        id edit
+        do @run{id FILM_WRITE, args {path "dev/fts.metronome-copy/extension.toml", text "id = \"fts.metronome-copy\"\nname = \"Metronome (copy)\"\nversion = \"0.1.0\"\nkind = \"luau\"\napi = \"0.1\"\ndescription = \"My metronome: a copy, edited.\"\n\n[[sections]]\nid = \"fts.metronome-copy.metronome\"\ntitle = \"My metronome\"\nicon = \"timer\"\n\n[[sections.settings]]\nkey = \"fts.metronome-copy.bars\"\ntitle = \"Count-in bars\"\ncontrol = \"slider\"\nmin = 1\nmax = 4\ndefault = 2\n\n[[sections.settings]]\nkey = \"fts.metronome-copy.flash\"\ntitle = \"Flash the screen on the downbeat\"\ncontrol = \"switch\"\ndefault = true\n"}}
+        done {on (@ran"FILM_WRITE")}
+    }
+    // The copy reloads on its own (its folder is looked at twice a second).
+    {id reload, target @text"My metronome", done {timeout 20}, hold 0.4}
+    {
+        id reloaded
+        target @text"My metronome"
+        do @click{}
+        hold 1.8
+    }
+    {
+        id say-back
+        do @run{id FILM_TERMINAL, args {line "$ architect-desktop actions run EXT_DISABLE --arg id=fts.metronome-copy"}}
+        hold 0.4
+    }
+    {
+        id back
+        do @run{id EXT_DISABLE, args {id fts.metronome-copy}}
+        done {on (@ran"EXT_DISABLE")}
+    }
+    {
+        id original
+        target @text"Metronome"
+        do @click{}
+        hold 1.6
+    }
+)

@@ -45,7 +45,7 @@ pub struct RunCommand {
 /// What [`SHOW_ACTION`] takes: the overlay, and what its field says.
 #[derive(Debug, Clone, Facet)]
 pub struct ShowCommands {
-    /// `palette` or `quick-open`.
+    /// `palette` or `quick-open`; `none` closes the one open.
     pub overlay: String,
     #[facet(default)]
     pub query: Option<String>,
@@ -103,7 +103,7 @@ static SHOW_META: ActionMeta = ActionMeta {
     trait_name: "",
     method_name: "",
     display_name: "Show the palette",
-    description: "Opens the command palette (`overlay: palette`) or ⌘O (`quick-open`), its field set to `query` when given: `theme:` asks only ⌘O's theme opener.",
+    description: "Opens the command palette (`overlay: palette`) or ⌘O (`quick-open`), its field set to `query` when given: `theme:` asks only ⌘O's theme opener. `none` closes whichever is open.",
     category: "Commands",
     group: "Commands",
     shortcut: "",
@@ -165,6 +165,7 @@ pub fn use_command_actions(list: Arc<ActionList>) {
             while let Some(ask) = asks.next().await {
                 let Some(c) = commands else { continue };
                 match (ask.overlay.as_str(), ask.query) {
+                    ("none", _) => c.close(),
                     ("quick-open", Some(q)) => c.show_quick_open(&q),
                     ("quick-open", None) => c.show(Overlay::QuickOpen),
                     (_, q) => {
@@ -222,9 +223,9 @@ pub fn use_command_actions(list: Arc<ActionList>) {
             });
             let show_tx = shower.tx();
             let show = list.register(&SHOW_META, Effect::Mutating, move |ask: ShowCommands| {
-                if !matches!(ask.overlay.as_str(), "palette" | "quick-open") {
+                if !matches!(ask.overlay.as_str(), "palette" | "quick-open" | "none") {
                     return Err(format!(
-                        "overlay {:?}: it is `palette` or `quick-open`",
+                        "overlay {:?}: it is `palette`, `quick-open` or `none`",
                         ask.overlay
                     ));
                 }

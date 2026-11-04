@@ -16,6 +16,8 @@ architect-lab-ui = { workspace = true }
 architect-shell = { workspace = true }
 architect = { workspace = true, features = ["action-list"] }
 dioxus = { workspace = true }
+facet = { workspace = true }
+futures-util = { version = "0.3", default-features = false }
 
 [dev-dependencies]
 tempfile = "3"

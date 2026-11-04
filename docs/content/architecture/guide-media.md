@@ -205,10 +205,30 @@ inserted over panes as they mount collapses them; see
   `GUIDE_TOUR_STATE` says where it is, and each move is a `guide` change
   event; `GUIDE_TOUR_NEXT`, `GUIDE_TOUR_BACK` and `GUIDE_TOUR_SKIP` move
   it from outside.
+- **Chapters**: Back to a step runs the setup steps right before it again
+  (`setup_of`), and `GUIDE_TOUR_START {id, step}` (`Tours::start_at`)
+  starts at a step from its setup, so a tour of chapters (setup, then a
+  step to read and try) puts the app where each chapter needs it. Write
+  each chapter's setup for the whole app it needs, not for where the
+  chapter before left it.
+- **Remembering the place**: `TourSet::on_move` hears every move
+  (`Moved::At`, `Left`, `Finished`); the lab keeps the Architect tour's
+  place in its folder and resumes it from ⌘K › Take the tour
+  (`apps/lab/ui/src/guide.rs` `tours`,
+  [The Architect tour](@/getting-started/tour.md)).
 - **Safety**: a scenario not marked `safe` never plays over the person's
   own data. `TourSet::playground` sets up the app's playground first (a
   sample document, a scratch session); an app with none cannot start
   it. The lab's data is all made up, so it is its own playground.
+
+A film can carry a caption and a terminal of its own, drawn over the lab
+by the media crate and never by the lab: `FILM_CAPTION {text}`,
+`FILM_TERMINAL {line, clear?, title?}`, and `FILM_WRITE {path, text}`, a
+file saved in the run's own lab folder as an editor would
+(`apps/lab/media/src/lib.rs`; each run gets a fresh, empty folder, read
+and watched as a window's lab reads it: `LabFiles`). The README's gallery
+is filmed that way: a theme file or a page saved live, the CLI commands an
+agent ran.
 
 `apps/lab/scenarios/tour-palette-run.styx` films the tour itself: it
 starts the `palette-run` tour from the Action List and follows it, each

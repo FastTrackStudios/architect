@@ -1,0 +1,48 @@
+// Workers and frame budgets: the Heavy job counts primes in a Luau worker
+// while its window keeps drawing; the Naughty view spends 300 ms a frame,
+// so the host keeps its last good frame and marks it busy, and the rest of
+// the app answers as ever. Filmed for the README; played as a test. (The
+// WASI counter does the same in a Wasmtime worker: a desk's lab built with
+// --features wasi.)
+id workers-stay-responsive
+title "Heavy work in a worker: the UI stays responsive"
+view {width 1280, height 760}
+capture {fps 12, width 960}
+steps (
+    {
+        id vault
+        do @run{id LAB_GO_VAULT}
+        done {on (@changed"lab"), check ({id LAB_STATE, has {tab vault}})}
+        hide true
+    }
+    {id write, do @run{id WORKSPACES_LOAD, args {name Write}}, hide true}
+    {id heavy, do @run{id WORKSPACE_OPEN, args {view clicker.heavy, id clicker.heavy, at {replace {pane graph}}}}, hide true}
+    {id naughty, do @run{id WORKSPACE_OPEN, args {view clicker.naughty, id clicker.naughty, at {split {pane clicker.heavy, side bottom}}}}, hide true}
+    {id shown, target @pane"clicker.naughty", hold 0.4}
+    {
+        id caption
+        do @run{id FILM_CAPTION, args {text "Primes in a worker; a slow view marked busy; the app answers"}}
+        hold 0.8
+    }
+    {
+        id find
+        target @at{x 580, y 161}
+        do @click{}
+        hold 1.4
+    }
+    {
+        id other-tab
+        target @tab"note-shell"
+        do @click{}
+        done {check ({id WORKSPACE_LAYOUT, has {active note-shell}})}
+        hold 1.2
+    }
+    {
+        id back-tab
+        target @tab"note-welcome"
+        do @click{}
+        done {check ({id WORKSPACE_LAYOUT, has {active note-welcome}})}
+        hold 1.2
+    }
+    {id run-on, do @pause{seconds 2.0}}
+)

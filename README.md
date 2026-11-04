@@ -89,16 +89,75 @@ scenario(&GreeterHttpClient::at("http://127.0.0.1:4040")).await; // HTTP
 | Shell and workspace | The app frame, tab groups in splits, docks, stacked tabs, pop-out windows, screensets; menus native on macOS, Linux and iPadOS, in the window elsewhere | `docs/content/features/workspace-and-shell.md`, `docs/content/features/menus.md` |
 | Telemetry | Each call as a wide event with stage timings, `rpc.server.duration`, one trace across a caller and its calls | `docs/content/features/telemetry.md` |
 
-## Showcase Layout
+## Tour
 
-![The lab's workspace: two notes opened as tabs, one dragged to a group's side to split it, another dragged down for a vertical split, two dividers pulled, a group switched to stacked tabs and filled, and the sidebar dragged out into its own window](https://raw.githubusercontent.com/FastTrackStudios/architect/media/showcase-layout.gif)
+The lab (`apps/lab`) carries a guided tour of every system: the shell,
+the workspace, runtime theming, the Action List and agents, extensions,
+pages, and the embedded views. Each chapter moves the live app to one
+system, rings the control to try and says what it is in a few lines;
+Next, Back and Skip move through it, and it remembers where you
+stopped. It starts on the lab's first launch and from ⌘K › Take the
+tour.
 
-Tabs opened, a split made by dragging a tab to a group's side and a
-vertical one by dragging a tab down, two dividers resized, a group of
-stacked tabs, and the sidebar detached into a window of its own. Nobody
-recorded it by hand: `architect-guide` films the scenario in
-`apps/lab/scenarios/showcase-layout.styx` against `apps/lab`
-headlessly, and `just media-test` plays the same scenario as a test.
+```sh
+devenv shell
+cargo run -p architect-desktop
+```
+
+![The Architect tour over the lab: a popover per chapter, ringing the title-row tabs, the sidebar toggle and the Lab menu](https://raw.githubusercontent.com/FastTrackStudios/architect/media/architect-tour-intro.gif)
+
+The tour is a guide scenario, `apps/lab/scenarios/architect-tour.styx`,
+played live by `architect-guide`; `apps/lab/media/tests/tour.rs` plays it
+chapter by chapter and checks each one's target is on screen.
+
+## Feature gallery
+
+Each one is a scenario in `apps/lab/scenarios`, filmed headlessly by
+`just media` and played as a test by `just media-test`.
+
+`THEME_SET` restyles every window at once, a pop-out included; a light/dark pair follows Appearance ([doc](docs/content/architecture/theming.md), `apps/lab/scenarios/theme-live-everywhere.styx`):
+
+![Five themes switched from the Action List; the main window and a popped-out note change together](https://raw.githubusercontent.com/FastTrackStudios/architect/media/theme-live-everywhere.gif)
+
+A theme file saved: the app follows; a `mix(…)` token, a `$ref`, and a broken one drawn magenta ([doc](docs/content/architecture/theming.md), `apps/lab/scenarios/theme-file-live.styx`):
+
+![A theme file edited three times: a new accent, a mixed one, a missing token drawn magenta, then fixed](https://raw.githubusercontent.com/FastTrackStudios/architect/media/theme-file-live.gif)
+
+`EXT_CLONE` copies an extension into `dev/`; its edited manifest reloads on save ([doc](docs/content/architecture/extensions.md), `apps/lab/scenarios/extension-clone-live.styx`):
+
+![The metronome cloned, its copy edited into a new settings section, then disabled](https://raw.githubusercontent.com/FastTrackStudios/architect/media/extension-clone-live.gif)
+
+A TSX page edited live; a broken save keeps the last good page and writes `board.tsx.error` ([doc](docs/content/architecture/pages.md), `apps/lab/scenarios/page-edit-live.styx`):
+
+![The Board tab rewritten as a page, saved with a syntax error (shown with its line), then fixed](https://raw.githubusercontent.com/FastTrackStudios/architect/media/page-edit-live.gif)
+
+Primes counted in a worker, a slow view marked busy, the rest of the app answering ([doc](docs/content/architecture/extensions.md), `apps/lab/scenarios/workers-stay-responsive.styx`):
+
+![A progress bar filling while tabs are switched and a busy badge on the slow pane](https://raw.githubusercontent.com/FastTrackStudios/architect/media/workers-stay-responsive.gif)
+
+Inline embeds: a ```` ```kf ```` fence drawn by an extension inside a note, plain again when it is off ([doc](docs/content/architecture/extensions.md), `apps/lab/scenarios/embeds-in-a-note.styx`):
+
+![A chord chart inside a note turning back into its plain fence and back](https://raw.githubusercontent.com/FastTrackStudios/architect/media/embeds-in-a-note.gif)
+
+The extensions manager: extensions, scripts, workers, themes, layouts and pages in one place ([doc](docs/content/architecture/extensions.md), `apps/lab/scenarios/extensions-manager.styx`):
+
+![The Board extension turned off and on from its page in the manager](https://raw.githubusercontent.com/FastTrackStudios/architect/media/extensions-manager.gif)
+
+Settings arriving from an extension: the metronome loaded, its section on the settings page ([doc](docs/content/architecture/settings-page.md), `apps/lab/scenarios/extension-metronome-load.styx`):
+
+![The metronome switched on and its settings section appearing](https://raw.githubusercontent.com/FastTrackStudios/architect/media/extension-metronome-load.gif)
+
+Tabs in the title row, and a sidebar each page starts open or folded to a rail ([doc](docs/content/architecture/app-shell.md), `apps/lab/scenarios/shell-title-tabs-rail.styx`):
+
+![The Inbox with its sidebar, the Vault folded to a rail with its tabs in the title row](https://raw.githubusercontent.com/FastTrackStudios/architect/media/shell-title-tabs-rail.gif)
+
+An agent drives the app over the CLI: the same Action List as ⌘K, the menus and MCP ([doc](docs/content/guide/cli-and-mcp.md), `apps/lab/scenarios/agent-drives-the-lab.styx`):
+
+![CLI commands in a terminal and the lab following them: the Vault, a new pane, a theme, APP_STATUS](https://raw.githubusercontent.com/FastTrackStudios/architect/media/agent-drives-the-lab.gif)
+
+The workspace: splits by dragging, stacked tabs, and a sidebar detached into its own window ([doc](docs/content/architecture/workspace.md), `apps/lab/scenarios/showcase-layout.styx`):
+
+![Two notes opened as tabs, splits made by dragging, dividers pulled, a stacked group and the sidebar dragged out into a window](https://raw.githubusercontent.com/FastTrackStudios/architect/media/showcase-layout.gif)
 
 ## Install
 

@@ -1,0 +1,70 @@
+// Runtime theming: THEME_SET from the Action List restyles everything at
+// once, the main window and a pop-out alike, and light/dark follow. Filmed
+// for the README; played as a test.
+id theme-live-everywhere
+title "One theme store: every window follows it, live"
+view {width 1120, height 700, x 30, y 50}
+capture {fps 12, width 960, cursor false, desktop {width 1640, height 780}}
+steps (
+    {
+        id vault
+        do @run{id LAB_GO_VAULT}
+        done {on (@changed"lab"), check ({id LAB_STATE, has {tab vault}})}
+        hide true
+    }
+    {
+        id pop-out
+        do @run{id WORKSPACE_OPEN, args {view note, id note-workspace, title "The workspace", at {window {bounds {x 1190, y 120, w 420, h 520}}}}}
+        done {
+            on (@changed"workspace")
+            check ({id WORKSPACE_LAYOUT, has {windows ({id main} {groups ({tabs (note-workspace)})})}})
+        }
+        hide true
+    }
+    {
+        id start
+        do @run{id THEME_SET, args {one default-dark, layer pick}}
+        done {check ({id THEME_GET, has {theme default-dark}})}
+        hide true
+    }
+    {
+        id caption
+        do @run{id FILM_CAPTION, args {text "THEME_SET: the whole app, pop-outs too"}}
+        hold 0.8
+    }
+    {
+        id nord
+        do @run{id THEME_SET, args {one nord-dark, layer pick}}
+        done {check ({id THEME_GET, has {theme nord-dark}})}
+        hold 1.2
+    }
+    {
+        id catppuccin
+        do @run{id THEME_SET, args {one catppuccin-light, layer pick}}
+        done {check ({id THEME_GET, has {theme catppuccin-light}})}
+        hold 1.2
+    }
+    {
+        id gruvbox
+        do @run{id THEME_SET, args {one gruvbox-dark, layer pick}}
+        done {check ({id THEME_GET, has {theme gruvbox-dark}})}
+        hold 1.2
+    }
+    {
+        id pair
+        do @run{id FILM_CAPTION, args {text "A light and dark pair: appearance flips it"}}
+        hold 0.2
+    }
+    {
+        id pair-set
+        do @run{id THEME_SET, args {light everforest-light, dark everforest-dark, appearance dark, layer pick}}
+        done {check ({id THEME_GET, has {theme everforest-dark}})}
+        hold 1.0
+    }
+    {
+        id light
+        do @run{id THEME_SET, args {appearance light, layer pick}}
+        done {check ({id THEME_GET, has {theme everforest-light}})}
+        hold 1.4
+    }
+)
