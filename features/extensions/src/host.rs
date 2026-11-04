@@ -859,8 +859,9 @@ impl Host {
 
     /// Opens `what` (a file's path, a link, a document kind) with the
     /// first opener that claims it: in its view, or with its action
-    /// (given `{path}` or `{url}`, and the invocation). A file or document
-    /// opened raises `doc.opened`. What opened it, and how.
+    /// (the invocation, and `{path}` or `{url}` to one that takes
+    /// arguments). A file or document opened raises `doc.opened`. What
+    /// opened it, and how.
     ///
     /// # Errors
     ///
@@ -904,7 +905,19 @@ impl Host {
             serde_json::json!({ "opened_by": by.owner, "opener": opener, "view": view, "opened": placed })
         } else {
             let caller = ActionCaller::app().with_invocation(invocation);
-            let args = serde_json::json!({ field: state }).to_string();
+            // The path or link is the invocation's (`ctx.path`, `ctx.url`);
+            // it goes in the arguments too only to an action that takes
+            // some — one that takes none refuses any name.
+            let takes = self
+                .inner
+                .list
+                .info(&by.item.action)
+                .is_some_and(|i| i.params_schema.is_some());
+            let args = if takes {
+                serde_json::json!({ field: state }).to_string()
+            } else {
+                String::new()
+            };
             let out = self
                 .inner
                 .list
@@ -1464,7 +1477,13 @@ impl Host {
             return None;
         }
         let caller = caller.clone();
-        let args = args.to_string().into_bytes();
+        // The event is the invocation's (`ctx.event`, `ctx.detail`); it
+        // goes in the arguments too only to an action that takes some.
+        let args = if info.params_schema.is_some() {
+            args.to_string().into_bytes()
+        } else {
+            Vec::new()
+        };
         Some(Box::pin(async move {
             list.run_json_async_with(&caller, &action, &args).await
         }))

@@ -59,7 +59,11 @@ fn the_clicker_checks_clean_and_a_broken_copy_names_the_field() {
     let p = &report.problems[0];
     assert_eq!(p.stage, "manifest", "{p:?}");
     assert_eq!(p.field.as_deref(), Some("effect"), "{p:?}");
-    assert_eq!(p.line, Some(20), "{p:?}");
+    let line = text
+        .lines()
+        .position(|l| l.trim() == "effect = \"read_only\"")
+        .and_then(|i| u32::try_from(i + 1).ok());
+    assert_eq!(p.line, line, "{p:?}");
     assert!(p.message.contains("readonly"), "{p:?}");
 
     // A program that is not there: the load says so, at `entry`.
