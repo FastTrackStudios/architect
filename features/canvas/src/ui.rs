@@ -568,6 +568,8 @@ mod script {
             if let Some(c) = canvases {
                 c.remove(canvas);
             }
+            // Gone mid-frame: no longer busy.
+            meter.peek().set_busy(false);
         });
         canvas
     }

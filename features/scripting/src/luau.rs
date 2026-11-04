@@ -664,6 +664,8 @@ struct LiveShared {
     /// The frame it asked for with no input (`wake_after`): ms + 1, 0
     /// for none.
     tick: AtomicU64,
+    /// How long its last frame ran on its thread, nanoseconds.
+    took: AtomicU64,
 }
 
 impl LiveShared {
@@ -747,6 +749,13 @@ impl Live {
     pub fn stop(&self) {
         self.shared.stop.set();
         self.shared.running.store(false, Ordering::Release);
+    }
+
+    /// How long its last frame ran on its own thread: the script's time
+    /// alone, not its host's wait to hear of it.
+    #[must_use]
+    pub fn last_frame_time(&self) -> Duration {
+        Duration::from_nanos(self.shared.took.load(Ordering::Acquire))
     }
 
     /// Resolves when it asks for a frame with no input to give it: one of
@@ -844,6 +853,7 @@ impl LiveVm {
             self.note_running();
             return report((Ok(Value::Null), None), &self.trace);
         }
+        let started = std::time::Instant::now();
         self.guard.reset();
         self.guard.deadline(Some(self.runtime.limits.frame));
         let result = self
@@ -860,6 +870,8 @@ impl LiveVm {
             })
             .await;
         self.guard.deadline(None);
+        let took = u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
+        self.shared.took.store(took, Ordering::Release);
         if result.0.is_err() {
             self.clear();
         }
