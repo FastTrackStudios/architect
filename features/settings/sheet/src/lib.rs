@@ -308,5 +308,17 @@ fn SheetView() -> Element {
         }
         was_open.set(open);
     });
+    if own {
+        // Its own document: the frame's box, font and colours, which the
+        // window's card gives a linked sheet.
+        let t = shell();
+        return rsx! {
+            div {
+                style: "position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; overflow: hidden; \
+                        background: {t.desk}; font-family: {t.font}; color: {t.ink};",
+                Sheet {}
+            }
+        };
+    }
     rsx! { Sheet {} }
 }

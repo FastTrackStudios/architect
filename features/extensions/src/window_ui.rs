@@ -144,11 +144,21 @@ fn Sheet(ui: ExtensionUi, open: OpenWindow) -> Element {
 #[component]
 fn OsWindow(ui: ExtensionUi, open: OpenWindow) -> Element {
     let os = try_consume_context::<architect_workspace::Windows>();
+    // What a view reads from the main window's context, carried into its
+    // own: the shell and the theme (it follows them live), how a process's
+    // or a page's view is drawn and measured, the app's settings.
     let carried = use_hook(|| {
-        architect_workspace::Bridge::new()
+        let bridge = architect_workspace::Bridge::new()
             .context::<Signal<architect_shell::Shell>>()
+            .context::<architect_theme::ThemeHandle>()
             .context::<architect_theme::RootCss>()
-            .context::<ExtensionUi>()
+            .context::<crate::interface::ViewPages>()
+            .context::<architect_workspace::Meters>()
+            .context::<architect_settings::SettingsHandle>()
+            .context::<architect_settings::SectionViews>();
+        #[cfg(all(feature = "remote", unix))]
+        let bridge = bridge.context::<crate::process::Processes>();
+        bridge
     });
     let id = architect_workspace::WindowId(format!("ext-{}", open.key().replace('/', "-")));
     {

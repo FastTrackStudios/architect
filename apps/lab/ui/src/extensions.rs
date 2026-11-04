@@ -656,6 +656,9 @@ const FORWARDED: &[&str] = &[
     "EXT_EMIT",
     "EXT_ENABLE",
     "EXT_DISABLE",
+    "EXT_POINTS",
+    "EXT_WINDOWS",
+    "EXT_WINDOW_CLOSE",
 ];
 
 /// Puts `ids` of `from` on `to`, run on `from` as whoever ran them.
