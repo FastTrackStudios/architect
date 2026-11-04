@@ -270,8 +270,9 @@ type CallerHandler =
 pub type CallerAsyncHandler =
     Arc<dyn Fn(&ActionCaller, &[u8]) -> Result<ActionFuture, ActionError> + Send + Sync>;
 
-/// Where a run came from: the palette, a menu, a target's context menu,
-/// a key, a hook, a link, an agent. What a door that runs an action for a
+/// Where a run came from: the palette, a menu, a context menu, a key.
+///
+/// A hook, a link, an agent too. What a door that runs an action for a
 /// person (or an event) says of it, so an action that takes no arguments
 /// still knows what it was run on ([`ActionCaller::with_invocation`]).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Facet)]
@@ -319,9 +320,10 @@ impl InvocationSource {
     }
 }
 
-/// What a run was invoked from and on: the source, and whatever it knew
-/// (the target a context menu was opened on, the window, pane and view,
-/// the selection, the link, the file, the event a hook heard). Every
+/// What a run was invoked from and on: the source, and what it knew.
+///
+/// The target a context menu was opened on, the window, pane and view,
+/// the selection, the link, the file, the event a hook heard. Every
 /// field but the source may be unset.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Facet)]
 pub struct Invocation {

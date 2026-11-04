@@ -44,7 +44,7 @@ use crate::control::PortableLayout;
 pub const SLOTS: [&str; 6] = ["ribbon", "left", "right", "tabs", "status", "title"];
 
 /// What fills one slot, as a layout says.
-#[derive(Debug, Clone, Default, PartialEq, Facet)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Facet)]
 #[facet(deny_unknown_fields)]
 pub struct SlotSpec {
     /// The view that fills it (`lab.board/status-bar`), or the shell's
@@ -74,7 +74,7 @@ impl SlotSpec {
 }
 
 /// The look over the whole window: the theme store's workspace layer.
-#[derive(Debug, Clone, Default, PartialEq, Facet)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Facet)]
 #[facet(deny_unknown_fields)]
 pub struct Look {
     /// A theme's id.
@@ -162,7 +162,7 @@ pub struct Changed {
 
 impl Changed {
     #[must_use]
-    pub fn any(&self) -> bool {
+    pub const fn any(&self) -> bool {
         !self.layouts.is_empty() || self.keys || self.problems
     }
 }
@@ -182,7 +182,7 @@ struct State {
     /// Each layout's last good version.
     layouts: BTreeMap<String, LayoutFile>,
     /// What the person changed by hand, per layout.
-    state: BTreeMap<String, LayoutFile>,
+    by_hand: BTreeMap<String, LayoutFile>,
     keys: Option<String>,
     stamps: BTreeMap<PathBuf, Stamp>,
     problems: BTreeMap<String, String>,
@@ -286,7 +286,7 @@ impl Home {
                     s.problems.remove(&file);
                     // A deliberate edit beats a click for the slots it names.
                     let mut kept = None;
-                    if let Some(state) = s.state.get_mut(&name) {
+                    if let Some(state) = s.by_hand.get_mut(&name) {
                         let before = state.chrome.len();
                         state
                             .chrome
@@ -339,10 +339,10 @@ impl Home {
                 .map(|t| LayoutFile::parse(&t))
             {
                 Some(Ok(state)) => {
-                    s.state.insert(name.clone(), state);
+                    s.by_hand.insert(name.clone(), state);
                 }
                 _ => {
-                    s.state.remove(&name);
+                    s.by_hand.remove(&name);
                 }
             }
             changed.layouts.push(name);
@@ -352,8 +352,8 @@ impl Home {
         let now = stamp(&keys);
         if s.stamps.get(&keys) != Some(&now) {
             s.stamps.insert(keys.clone(), now);
-            match std::fs::read_to_string(&keys) {
-                Ok(text) => match architect_commands::PersonKeymap::from_json(&text) {
+            if let Ok(text) = std::fs::read_to_string(&keys) {
+                match architect_commands::PersonKeymap::from_json(&text) {
                     Ok(_) => {
                         let _ = std::fs::remove_file(s.dir.join("keys.error"));
                         s.problems.remove("keys.json");
@@ -364,11 +364,10 @@ impl Home {
                         let _ = std::fs::write(s.dir.join("keys.error"), &why);
                         s.problems.insert("keys.json".to_owned(), why);
                     }
-                },
-                Err(_) => {
-                    changed.keys = s.keys.take().is_some();
-                    s.problems.remove("keys.json");
                 }
+            } else {
+                changed.keys = s.keys.take().is_some();
+                s.problems.remove("keys.json");
             }
         }
         changed.layouts.sort();
@@ -403,6 +402,8 @@ impl Home {
     /// # Errors
     ///
     /// There is no such layout.
+    // The files are written under the lock, so two writers never cross.
+    #[allow(clippy::significant_drop_tightening)]
     pub fn use_layout(&self, name: &str) -> Result<(), String> {
         let mut s = self.lock();
         if !s.layouts.contains_key(name) {
@@ -411,7 +412,7 @@ impl Home {
                 s.layouts.keys().cloned().collect::<Vec<_>>().join(", ")
             ));
         }
-        s.active = name.to_owned();
+        name.clone_into(&mut s.active);
         let _ = std::fs::write(s.dir.join("layouts/.state/active"), name);
         s.revision = s.revision.wrapping_add(1);
         Ok(())
@@ -423,10 +424,11 @@ impl Home {
     pub fn layout(&self, name: &str) -> Option<LayoutFile> {
         let s = self.lock();
         let file = s.layouts.get(name)?;
-        Some(match s.state.get(name) {
-            Some(state) => file.with_state(state),
-            None => file.clone(),
-        })
+        Some(
+            s.by_hand
+                .get(name)
+                .map_or_else(|| file.clone(), |state| file.with_state(state)),
+        )
     }
 
     /// The layout shown now, as it shows.
@@ -442,13 +444,15 @@ impl Home {
     /// # Errors
     ///
     /// No such slot.
+    // The files are written under the lock, so two writers never cross.
+    #[allow(clippy::significant_drop_tightening)]
     pub fn set_slot(&self, slot: &str, spec: Option<SlotSpec>) -> Result<(), String> {
         if !SLOTS.contains(&slot) {
             return Err(format!("{slot:?} is not a slot ({})", SLOTS.join(", ")));
         }
         let mut s = self.lock();
         let name = s.active.clone();
-        let state = s.state.entry(name.clone()).or_default();
+        let state = s.by_hand.entry(name.clone()).or_default();
         match spec {
             Some(spec) => {
                 state.chrome.insert(slot.to_owned(), spec);
@@ -659,6 +663,7 @@ pub mod ui {
     /// Watches `home` while mounted: its revision as a signal, moving with
     /// every change it applied (a file saved, a layout shown, a slot
     /// changed by hand).
+    #[must_use]
     pub fn use_home(home: Home) -> Signal<u64> {
         let mut revision = use_signal(|| home.revision());
         use_future(move || {

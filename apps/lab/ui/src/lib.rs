@@ -800,7 +800,7 @@ pub fn LabApp() -> Element {
     let mut chrome = shell::use_chrome();
     let contributed = use_memo(move || ext_ui.chrome());
     let laid_out = {
-        let home = home.clone();
+        let home = home;
         use_memo(move || {
             let _ = home_rev();
             let layout = home.current().unwrap_or_default();

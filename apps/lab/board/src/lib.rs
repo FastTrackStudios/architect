@@ -54,13 +54,11 @@ fn state() -> std::sync::MutexGuard<'static, State> {
 
 /// The board changed: the status item says so, the views look again.
 fn changed() {
-    let text = {
-        let s = state();
-        match s.pins.len() {
-            0 => "Board ready: nothing pinned".to_owned(),
-            1 => format!("1 pin: {}", s.pins[0]),
-            n => format!("{n} pins, last {}", s.pins[n - 1]),
-        }
+    let pins = state().pins.clone();
+    let text = match (pins.len(), pins.last()) {
+        (_, None) => "Board ready: nothing pinned".to_owned(),
+        (1, Some(only)) => format!("1 pin: {only}"),
+        (n, Some(last)) => format!("{n} pins, last {last}"),
     };
     let handle = HANDLE
         .lock()
@@ -73,6 +71,8 @@ fn changed() {
 }
 
 /// The board, as `LAB_BOARD_STATE` says it.
+// Read whole under the lock: one consistent board.
+#[allow(clippy::significant_drop_tightening)]
 fn snapshot() -> Value {
     let s = state();
     json!({

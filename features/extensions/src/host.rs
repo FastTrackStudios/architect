@@ -335,12 +335,14 @@ impl Instance for Luau {
         let path = decl.script.as_ref()?;
         let file = self.hooks.get(path)?;
         // The whole file, or one function of the table it returns.
-        let source: String = match &decl.function {
-            Some(f) => format!(
-                "local __hooks = (function(...) {file}\nend)(...)\nreturn __hooks[{f:?}](args)"
-            ),
-            None => file.to_string(),
-        };
+        let source: String = decl.function.as_ref().map_or_else(
+            || file.to_string(),
+            |f| {
+                format!(
+                    "local __hooks = (function(...) {file}\nend)(...)\nreturn __hooks[{f:?}](args)"
+                )
+            },
+        );
         let runtime = self
             .runtime
             .clone()
@@ -389,11 +391,11 @@ mod luau_ext {
     }
 
     impl Module for Ext {
-        fn global(&self) -> &str {
+        fn global(&self) -> &'static str {
             "ext"
         }
 
-        fn path(&self) -> &str {
+        fn path(&self) -> &'static str {
             "ext"
         }
 
@@ -450,11 +452,11 @@ mod luau_ext {
     }
 
     impl Module for Ctx {
-        fn global(&self) -> &str {
+        fn global(&self) -> &'static str {
             "ctx"
         }
 
-        fn path(&self) -> &str {
+        fn path(&self) -> &'static str {
             "ctx"
         }
 
@@ -892,14 +894,14 @@ impl Host {
         }
         let opener = by.item.key().to_owned();
         let answer = if let Some(view) = &by.item.view {
-            let opened = self.open_view(
+            let placed = self.open_view(
                 &by.owner,
                 view,
                 (!state.is_empty()).then(|| state.clone()),
                 None,
                 invocation,
             )?;
-            serde_json::json!({ "opened_by": by.owner, "opener": opener, "view": view, "opened": opened })
+            serde_json::json!({ "opened_by": by.owner, "opener": opener, "view": view, "opened": placed })
         } else {
             let caller = ActionCaller::app().with_invocation(invocation);
             let args = serde_json::json!({ field: state }).to_string();
@@ -1246,10 +1248,10 @@ impl Host {
         }
         // What it adds to the interface, as a diff (what it added at run
         // time stays until its new instance says otherwise).
-        let declared = match instance.declared() {
-            Some(code) => manifest.contributes.merged(&code),
-            None => manifest.contributes.clone(),
-        };
+        let declared = instance.declared().map_or_else(
+            || manifest.contributes.clone(),
+            |code| manifest.contributes.merged(&code),
+        );
         self.inner.contributions.put(&manifest.id, declared);
         if let Some(old) = loaded.remove(&manifest.id) {
             old.instance.stop();
@@ -1325,6 +1327,8 @@ impl Host {
     /// `{event, detail}` arguments, inside its extension's capabilities.
     /// A hook still running from before is not started again. How many
     /// started.
+    // How many is for whoever wants it.
+    #[allow(clippy::must_use_candidate)]
     pub fn emit(&self, on: &str, detail: &str) -> usize {
         self.emit_to(None, on, detail)
     }
@@ -1462,6 +1466,8 @@ impl Host {
     }
 
     /// Raises `changed:<topic>`, and the app event the topic names.
+    // How many is for whoever wants it.
+    #[allow(clippy::must_use_candidate)]
     pub fn emit_changed(&self, topic: &str, detail: &str) -> usize {
         let named = match topic {
             "workspace" => Some("workspace.changed"),

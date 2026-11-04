@@ -86,7 +86,7 @@ struct Layer {
 }
 
 /// What loaded extensions add, for the window. Cheap to copy.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct ExtensionUi {
     host: Signal<Host>,
     revision: Signal<u64>,
@@ -236,6 +236,7 @@ impl ExtensionUi {
 
     /// Opens `url` with the extension opener that claims it, as a link's
     /// Ctrl- or Cmd-click does: false when none does.
+    #[must_use = "false when nothing opens it"]
     pub fn open_link(&self, url: &str) -> bool {
         let host = self.host();
         if host.contributions().open_url(url).is_empty() {
@@ -252,6 +253,7 @@ impl ExtensionUi {
 
     /// Opens the file at `path` with the extension opener that claims it:
     /// false when none does.
+    #[must_use = "false when nothing opens it"]
     pub fn open_path(&self, path: &str) -> bool {
         let host = self.host();
         if host.contributions().open_path(path).is_empty() {
@@ -331,7 +333,11 @@ async fn open_in_workspace(list: &ActionList, open: &ViewOpen) -> Result<Value, 
         .await
         .map_err(|e| format!("no workspace to open it in: {e}"))?;
     let layout: Value = serde_json::from_slice(&layout).unwrap_or(Value::Null);
-    let active = layout["active"].as_str().unwrap_or_default().to_owned();
+    let active = layout
+        .get("active")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
     let args = json!({
         "view": open.kind,
         "id": open.kind,
@@ -484,7 +490,7 @@ pub fn ExtensionOverlays(ui: ExtensionUi) -> Element {
     rsx! {
         for layer in layers {
             {
-                let open = layer.open.clone();
+                let open = layer.open;
                 let kind = open.kind.clone();
                 let popup = open.placement == ViewPlacement::Popup;
                 let (w, h) = (open.width.unwrap_or(480.0), open.height.unwrap_or(360.0));
@@ -510,14 +516,14 @@ pub fn ExtensionOverlays(ui: ExtensionUi) -> Element {
                                     style: "border: none; background: transparent; color: var(--muted-foreground);",
                                     "aria-label": "Close",
                                     onclick: {
-                                        let k = kind.clone();
+                                        let k = kind;
                                         move |_| ui.close_layer(&k)
                                     },
                                     "✕"
                                 }
                             }
                             div { style: "flex: 1; min-height: 0; display: flex; flex-direction: column;",
-                                ExtensionView { ui, extension: open.extension.clone(), view: open.view.clone() }
+                                ExtensionView { ui, extension: open.extension, view: open.view }
                             }
                         }
                     }
@@ -546,7 +552,7 @@ pub fn ExtensionView(
     let _ = (ui.revision)();
     let host = ui.host();
     if host.get(&extension).is_none() {
-        let name = extension.clone();
+        let name = extension;
         return rsx! {
             div { style: "{size} display: flex; align-items: center; justify-content: center; padding: 24px; \
                           font-size: 13px; color: var(--muted-foreground); text-align: center;",

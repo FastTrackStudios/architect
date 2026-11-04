@@ -108,7 +108,7 @@ impl OpenerDecl {
     /// Whether it claims files, document kinds or links (rather than
     /// answering ⌘O).
     #[must_use]
-    pub fn claims(&self) -> bool {
+    pub const fn claims(&self) -> bool {
         !(self.files.is_empty() && self.doc_kinds.is_empty() && self.urls.is_empty())
     }
 
@@ -416,15 +416,19 @@ impl Contribution {
             }
         };
         let keys = self.keys();
-        let count = self.openers.len()
-            + self.doc_kinds.len()
-            + self.tabs.len()
-            + self.status.len()
-            + self.menus.len()
-            + self.context.len()
-            + self.bar.len()
-            + self.hooks.len()
-            + self.slots.len();
+        let count = [
+            self.openers.len(),
+            self.doc_kinds.len(),
+            self.tabs.len(),
+            self.status.len(),
+            self.menus.len(),
+            self.context.len(),
+            self.bar.len(),
+            self.hooks.len(),
+            self.slots.len(),
+        ]
+        .into_iter()
+        .fold(0_usize, usize::saturating_add);
         if keys.len() != count {
             return refuse(
                 "its contributions".to_owned(),
@@ -778,7 +782,7 @@ impl Contributions {
     }
 
     /// Bumps the revision and tells the listeners, outside the lock.
-    fn changed(&self, mut inner: std::sync::MutexGuard<'_, Inner>) {
+    fn changed(mut inner: std::sync::MutexGuard<'_, Inner>) {
         inner.revision = inner.revision.wrapping_add(1);
         let revision = inner.revision;
         let listeners: Vec<Listener> = inner.listeners.iter().map(|(_, l)| l.clone()).collect();
@@ -811,6 +815,8 @@ impl Contributions {
 
     /// Puts what `owner` declared, in place of what it declared before:
     /// what changed. Its runtime additions stay.
+    // What changed is for whoever wants it.
+    #[allow(clippy::must_use_candidate)]
     pub fn put(&self, owner: &str, declared: Contribution) -> Diff {
         let mut inner = self.lock();
         let order = inner.next_order;
@@ -834,25 +840,31 @@ impl Contributions {
             inner.next_order = order.wrapping_add(1);
         }
         let diff = Diff::between(&before, &after);
-        self.changed(inner);
+        Self::changed(inner);
         diff
     }
 
     /// Puts what `owner` adds at run time (a process guest's, a script's),
     /// in place of what it added before: what changed. `None` when it is
     /// not loaded (nothing is put).
+    // What changed is for whoever wants it.
+    #[allow(clippy::must_use_candidate)]
+    // The guard goes to `changed`, which tells the listeners after it.
+    #[allow(clippy::significant_drop_tightening)]
     pub fn put_runtime(&self, owner: &str, runtime: Contribution) -> Option<Diff> {
         let mut inner = self.lock();
         let entry = inner.owners.get_mut(owner)?;
         let before = entry.now().keys();
         entry.runtime = runtime;
         let diff = Diff::between(&before, &entry.now().keys());
-        self.changed(inner);
+        Self::changed(inner);
         Some(diff)
     }
 
     /// Takes everything of `owner` off, and its runtime state
     /// (`ext:<owner>`'s): what went.
+    // What changed is for whoever wants it.
+    #[allow(clippy::must_use_candidate)]
     pub fn withdraw(&self, owner: &str) -> Diff {
         let mut inner = self.lock();
         let before = inner
@@ -863,7 +875,7 @@ impl Contributions {
         let source = format!("ext:{owner}");
         inner.state.retain(|(s, _), _| *s != source);
         let diff = Diff::between(&before, &BTreeSet::new());
-        self.changed(inner);
+        Self::changed(inner);
         diff
     }
 
@@ -1048,6 +1060,8 @@ impl Contributions {
     /// # Errors
     ///
     /// It names no source or key, or its source is full.
+    // The guard goes to `changed`, which tells the listeners after it.
+    #[allow(clippy::significant_drop_tightening)]
     pub fn set_state(&self, write: StateWrite, now_ms: u64) -> Result<Applied, StateError> {
         if write.source.is_empty() || write.key.is_empty() {
             return Err(StateError::Unnamed);
@@ -1084,11 +1098,13 @@ impl Contributions {
             expires_ms: (write.ttl_ms > 0).then(|| now_ms.saturating_add(write.ttl_ms)),
         };
         inner.state.insert(id, entry);
-        self.changed(inner);
+        Self::changed(inner);
         Ok(Applied::Kept)
     }
 
     /// Clears `source`'s state: one key, or all of it. How many went.
+    // What changed is for whoever wants it.
+    #[allow(clippy::must_use_candidate)]
     pub fn clear_state(&self, source: &str, key: Option<&str>) -> usize {
         let mut inner = self.lock();
         let before = inner.state.len();
@@ -1097,7 +1113,7 @@ impl Contributions {
             .retain(|(s, k), _| !(s == source && key.is_none_or(|key| key == k)));
         let gone = before.saturating_sub(inner.state.len());
         if gone > 0 {
-            self.changed(inner);
+            Self::changed(inner);
         }
         gone
     }

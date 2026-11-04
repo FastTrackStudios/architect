@@ -70,6 +70,23 @@ weight = 67
 > and idle stop, state handed over on a reload, the host service an
 > extension calls back into, pointer, wheel and IME events, the
 > allowlist, Windows.
+> **Contributions, hooks and in-process extensions landed (2026-11-03)**
+> in the same crate. An extension adds to the interface past its actions,
+> settings and themes — openers for files, document kinds and links,
+> document kinds, tabs, status items, menu and context-menu entries, a
+> phone's bar buttons, hooks, and the shell's slots it fills
+> (`features/extensions/src/contrib.rs` `Contribution`, read into
+> `Manifest::contributes`); the host keeps them by owner
+> (`Contributions`), as a diff on a reload and withdrawn on unload, and
+> runs the hooks (`features/extensions/src/host.rs` `Host::emit`,
+> `Host::watch`). Actions are told where they were invoked from
+> (`crates/architect/src/action_list.rs` `Invocation`). One Rust value
+> runs linked in or as a process (`features/extensions/src/linked.rs`
+> `Extension`). The window side is `features/extensions/src/interface.rs`
+> `use_extension_ui`. The lab's Board is one (`apps/lab/board`). See
+> "Contributions" and "One trait, three ways to run it" below. Not yet:
+> WASM, a process view told its pane's state, hooks on a phone.
+>
 > The rest of this page is proposed (2026-10-31). Decided: one crate, `architect-extensions`, with four kinds — data,
 > WebAssembly components, Luau scripts, and processes over vox — and a
 > git-based registry. Proposed for UI: Dioxus views rendered remotely (the
@@ -561,6 +578,177 @@ Not everything should be one. Every extension pays for its boundary:
 
 dodeca split its own features into plugins to keep the core light, and
 took it back: the core got lighter, the product got harder.
+
+## Contributions: what an extension adds to the interface
+
+Past actions, settings, views and themes, an extension adds to the
+interface the way the app's own features do, declared in its manifest or
+sent at run time. The same tables are one type,
+`features/extensions/src/contrib.rs` `Contribution`, whichever way they
+arrive: a manifest's (`Manifest::contributes`), a process guest's
+(`features/extensions/src/guest.rs` `contribute`), a Luau script's
+(`ext.contribute{…}`), an in-process extension's builder
+(`features/extensions/src/linked.rs` `Builder::contribute`). Each is
+checked against its owner's namespace, capabilities and views
+(`Contribution::check`): an action it names is its own or one its
+`[capabilities] actions` reach, a view one of its `[[views]]`, an event,
+a target and a slot ones there are, a URL pattern one that compiles.
+
+```toml
+[[openers]]                 # a claim: files by extension, kinds, links
+id = "kf"
+title = "Keyflow chart"
+files = ["kf"]
+view = "chart"              # or action = "…": given ctx.path / ctx.url
+
+[[openers]]
+id = "issue"
+title = "GitHub issue"
+urls = ['^https://github\.com/[^/]+/[^/]+/issues/\d+$']
+action = "LAB_BOARD_ISSUE"
+
+[[doc_kinds]]               # a document kind, registered while loaded
+id = "keyflow.chart"
+name = "Keyflow chart"
+files = ["kf"]
+view = "chart"
+
+[[tabs]]                    # an app section showing one of its views
+id = "board"
+title = "Board"
+icon = "layout-dashboard"   # a lucide name
+view = "board"
+
+[[status]]                  # a status item; its text changes at run time
+id = "pins"
+text = "Nothing pinned"
+side = "left"
+
+[[menus]]                   # a row in a named menu of the menu bar
+menu = "View"
+action = "LAB_BOARD_CLEAR"
+
+[[context]]                 # a row in a target's context menu
+target = "view:note"        # pane, tab, view:<kind>, file, file:<ext>, doc:<kind>, link, selection
+action = "LAB_BOARD_PIN"
+title = "Pin to the board"
+
+[[bar]]                     # a button on a phone's action bar
+action = "LAB_BOARD_PIN"
+icon = "pin"
+
+[[hooks]]                   # on an app event: one action, or a Luau script
+on = "startup"              # workspace.changed, doc.opened, theme.changed, selection.changed, changed:<topic>
+action = "LAB_BOARD_HELLO"
+
+[[slots]]                   # a shell region it fills with one of its views
+slot = "status"             # ribbon, left, right, tabs, status, title
+view = "status-bar"
+```
+
+**The registry.** `features/extensions/src/host.rs` `Host::contributions`
+is the app's `Contributions`: a load puts the manifest's set (with an
+in-process builder's beside it), a reload puts it again as a diff (what
+was added at run time stays until the new instance says otherwise), an
+unload withdraws everything the extension added and its runtime state.
+`Contributions` answers the window's questions: `tabs`, `status`,
+`menus`, `context` on a target, `bar`, `slots` (the latest claim wins),
+`open_path` (by extension, then by document kind), `open_url` (by
+pattern), `open_doc_kind`, `doc_kind_of`.
+
+**Opening.** `Host::open` takes a file's path, a link or a document
+kind to the first opener that claims it: its view opens through the
+app's view opener (`Host::set_view_opener`), or its action runs with
+`ctx.path` / `ctx.url`. A file opened raises `doc.opened`. In the
+window, a link's Ctrl- or Cmd-click goes there
+(`features/extensions/src/interface.rs` `ExtensionUi::open_link`,
+`link_press`); `EXT_OPEN` does it from the Action List.
+
+### Hooks and the invocation
+
+A hook runs on an app event (`contrib::EVENTS`, or `changed:<topic>`
+for any Action List topic): its action through the list, inside the
+extension's gate, or a Luau script — the whole file, or `function` of
+the table it returns. `startup` runs once per extension as it first
+loads (not on a reload); `extension.loaded` and `extension.unloaded`
+for every load; `theme.changed` from the theme store; the app's list
+events through `Host::watch` (`workspace` → `workspace.changed`,
+`selection` → `selection.changed`, `doc` → `doc.opened`). One run of a
+hook at a time: an event while it runs does not start it again.
+`EXT_EMIT` raises one by hand.
+
+Every run carries where it came from
+(`crates/architect/src/action_list.rs` `Invocation`,
+`ActionCaller::with_invocation`): the source (palette, menu,
+context menu, key, hook, link, open, agent, script) and what it knew —
+the target and its id, window, pane, view, selection, url, path, event.
+A Luau action reads it as `ctx`; a process at wire 4 is sent it
+(`ProcessExtension::run_in`, `Guest::action_in`); an in-process action
+gets it as its second argument. So an action needs no arguments to act
+on what it was invoked on: "Pin to the board" on a note's tab pins that
+note.
+
+### Views: placement and ownership
+
+A `[[views]]` entry says where the view lives (`home`: `main`, `left`,
+`right`, `bottom`) and how it opens (`placement`: `tab`, `split`,
+`overlay`, `popup`, `zoomed`, `float`, with `width` and `height`). In
+the window each is a workspace view of kind `<extension>/<view>`
+(`ExtensionUi::views`); `EXT_VIEW_OPEN` and a view opener place it
+through `WORKSPACE_OPEN` and `WORKSPACE_ZOOM`, or as a layer over the
+window (`ExtensionOverlays`; a second popup answers `busy`). What its
+panes do when the extension unloads is its `on_unload`: `placeholder`
+(the pane says the extension is not loaded, and comes back with it) or
+`close`.
+
+### Owned runtime state
+
+Anything set at run time — a status item's text, a badge, metadata on a
+target — is owned by its source (`ext:<id>`, `agent:<name>`, `app`),
+sequenced (a `seq` at or below the last kept is dropped as stale),
+time-limited (`ttl_ms`), capped (64 keys a source, 80 characters of one
+line), and withdrawn with an extension when it unloads
+(`contrib::StateWrite`, `Contributions::set_state`). An extension writes
+its own through its guest (`guest::set_state`), `ext.state{…}` in Luau,
+or its `linked::Handle`; an agent through `EXT_STATE_SET`, which refuses
+an `ext:` source.
+
+| action | what it does |
+|---|---|
+| `EXT_CONTRIBUTIONS` | every extension's contributions (declared and at run time), the slots, the runtime state |
+| `EXT_OPEN` | `{path}`, `{url}` or `{doc_kind, path?}` to its opener |
+| `EXT_VIEW_OPEN` | `{extension, view, state?, placement?}` |
+| `EXT_STATE_SET` / `EXT_STATE_CLEAR` | runtime state, by source and key |
+| `EXT_EMIT` | raises `{event, detail?}` |
+| `EXT_ENABLE` / `EXT_DISABLE` | turns `{id}` on or off at once |
+
+`Extensions::install_contribution_actions` puts them on the host's list.
+
+## One trait, three ways to run it
+
+`features/extensions/src/linked.rs` `Extension` is a crate's extension
+in Rust: its manifest's text, and `build`, which gives a `Builder` its
+actions (`action`, `action_in` with the invocation), its views (Dioxus
+components), what it adds past its manifest (`contribute`), and its root
+context (`context`). Its `Builder::handle` is how its code adds at run
+time, the same linked in or not.
+
+- **Linked in.** `Extensions::with_linked` registers it as a built-in
+  (`Origin::Builtin`): when that copy runs, the host runs it in process
+  (`Host::linked_view` gives its views' components to
+  `ExtensionView`). It is turned off and on like any extension
+  (`EXT_DISABLE`, `EXT_ENABLE`), and an installed or development copy of
+  its id overrides it.
+- **As a process.** Its crate's `main` is
+  `Guest::extension(&Board).serve()`; its manifest's `[entry]` names
+  that program. A development copy of the same id runs it out of
+  process, its views drawn remotely, and the app cannot tell the
+  difference in what it adds.
+- **As WASM**, when the WASM runner lands, against the same trait.
+
+`apps/lab/board/tests/both_ways.rs` runs the lab's Board both ways and
+checks they add the same things, run the same hook and read the same
+context menu's target.
 
 ## First-party extensions: the API, linked in
 

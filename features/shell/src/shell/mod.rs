@@ -1314,10 +1314,10 @@ fn slot_content(chrome: &Chrome, slot: Slot, content: Option<Element>) -> Option
     if chrome.is_hidden(slot) {
         return None;
     }
-    match chrome.filler(slot) {
-        Some(f) => Some((f.render)()),
-        None => content.map(|c| slot_look(chrome, slot, c)),
-    }
+    chrome.filler(slot).map_or_else(
+        || content.map(|c| slot_look(chrome, slot, c)),
+        |f| Some((f.render)()),
+    )
 }
 
 /// `own` in `slot`'s look, when the chrome gives it one.
@@ -1340,10 +1340,9 @@ fn SlotView(slot: Slot, children: Element) -> Element {
     if chrome.is_hidden(slot) {
         return rsx! {};
     }
-    match chrome.filler(slot) {
-        Some(f) => (f.render)(),
-        None => slot_look(&chrome, slot, children),
-    }
+    chrome
+        .filler(slot)
+        .map_or_else(|| slot_look(&chrome, slot, children), |f| (f.render)())
 }
 
 /// The shell's own component in a slot's look: the shell below it reads

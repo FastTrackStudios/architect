@@ -4,7 +4,12 @@
 //! fills its status item at run time — in process through its handle, out
 //! of process over the wire.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
 use std::collections::BTreeSet;
 use std::path::Path;

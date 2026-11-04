@@ -513,10 +513,11 @@ fn forward(to: &ActionList, from: &ActionList, ids: &[&str]) {
                 move |caller: &architect::action::ActionCaller, args: &[u8]| {
                     let (list, caller, id, args) =
                         (list.clone(), caller.clone(), id.clone(), args.to_vec());
-                    Ok(
-                        Box::pin(async move { list.run_json_async_with(&caller, &id, &args).await })
-                            as architect::action::ActionFuture,
-                    )
+                    let run: architect::action::ActionFuture =
+                        Box::pin(
+                            async move { list.run_json_async_with(&caller, &id, &args).await },
+                        );
+                    Ok(run)
                 },
             ),
         );

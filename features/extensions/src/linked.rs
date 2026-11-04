@@ -162,6 +162,7 @@ impl std::fmt::Debug for Builder {
             .field("views", &self.views.keys().collect::<Vec<_>>())
             .field("contribution", &self.contribution)
             .field("context", &self.context.len())
+            .field("handle", &self.handle)
             .finish()
     }
 }
@@ -206,6 +207,8 @@ impl Builder {
 
     /// What it adds to the interface past its manifest's tables (an id in
     /// both is the builder's).
+    // By value, so a literal reads as `contribute(Contribution { … })`.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn contribute(&mut self, contribution: Contribution) -> &mut Self {
         self.contribution = self.contribution.merged(&contribution);
         self

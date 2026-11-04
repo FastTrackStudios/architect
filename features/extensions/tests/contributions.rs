@@ -102,9 +102,9 @@ ext.state{ key = "pins", text = "Pinned from " .. ctx.source .. " on " .. tostri
 return { source = ctx.source, target = ctx.target, id = ctx.id }
 "#;
 
-const ISSUE: &str = r#"
+const ISSUE: &str = "
 return { url = ctx.url, source = ctx.source }
-"#;
+";
 
 const HOOKS: &str = r#"
 return {

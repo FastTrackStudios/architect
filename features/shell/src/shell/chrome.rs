@@ -184,10 +184,8 @@ impl Chrome {
 /// (the app's root) to fill its slots and add to it.
 #[must_use]
 pub fn use_chrome() -> Signal<Chrome> {
-    match try_use_context::<Signal<Chrome>>() {
-        Some(chrome) => chrome,
-        None => use_context_provider(|| Signal::new(Chrome::default())),
-    }
+    try_use_context::<Signal<Chrome>>()
+        .unwrap_or_else(|| use_context_provider(|| Signal::new(Chrome::default())))
 }
 
 /// `id` kept for the app's life: a contributed tab's id, so it can be a
@@ -208,6 +206,8 @@ pub fn intern(id: &str) -> &'static str {
 /// data (a manifest, a layout file); a puzzle piece for a name it does
 /// not know.
 #[must_use]
+// `icon!` casts its closure to the fn pointer, as an app's does.
+#[allow(clippy::as_conversions)]
 pub fn named_icon(name: &str) -> IconFn {
     use lucide_dioxus::{
         AudioLines, Bell, Bookmark, Bug, Calendar, Check, Clock, Cloud, Code, File, FileText,

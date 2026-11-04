@@ -4,6 +4,9 @@
 //! its regions became slots (`git show 5528d33:features/shell`): with no
 //! chrome above it, and with an empty one, the shell writes exactly that.
 
+// `icon!` casts its closure to the fn pointer, as an app's does.
+#![allow(clippy::as_conversions)]
+
 use dioxus::core::{BorrowedAttributeValue, ElementId, VirtualDom, WriteMutations};
 
 use super::*;
