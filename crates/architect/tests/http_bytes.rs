@@ -278,8 +278,7 @@ async fn raw_put(base: &str, path: &str, headers: &str, body: &[u8]) -> (u16, St
 
     let addr = base.trim_start_matches("http://");
     let mut socket = tokio::net::TcpStream::connect(addr).await.unwrap();
-    let head =
-        format!("PUT {path} HTTP/1.1\r\nhost: {addr}\r\nconnection: close\r\n{headers}\r\n");
+    let head = format!("PUT {path} HTTP/1.1\r\nhost: {addr}\r\nconnection: close\r\n{headers}\r\n");
     socket.write_all(head.as_bytes()).await.unwrap();
     socket.write_all(body).await.unwrap();
     let mut reply = Vec::new();
