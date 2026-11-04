@@ -671,10 +671,12 @@ impl Pages {
                     .iter()
                     .find(|(e, v, _)| (e == &extension || e.is_empty()) && v == &view)
                     .map(|(_, _, p)| p.clone());
+                // A page still running from a file that is gone (an
+                // override just removed) is on its way out: not this one.
                 let status = running
                     .iter()
                     .rev()
-                    .find(|r| r.extension == extension && r.view == view)
+                    .find(|r| r.extension == extension && r.view == view && r.page.path.is_file())
                     .cloned();
                 let shown = over
                     .clone()

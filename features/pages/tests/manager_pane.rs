@@ -102,12 +102,12 @@ fn text(doc: &BaseDocument) -> String {
     };
     let list = doc
         .get_node(node)
-        .map(|n| n.text_content())
+        .map(blitz_dom::Node::text_content)
         .unwrap_or_default();
     let page = doc.query_selector(".manager-item").ok().flatten();
     let page = page
         .and_then(|n| doc.get_node(n))
-        .map(|n| n.text_content())
+        .map(blitz_dom::Node::text_content)
         .unwrap_or_default();
     format!("{list}\n{page}")
 }

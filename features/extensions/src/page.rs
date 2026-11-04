@@ -148,6 +148,11 @@ pub fn ManagerSection() -> Element {
     rsx! { ManagerPage { manager } }
 }
 
+/// What stays above the list's scrolled-out rows: Blitz clips what a
+/// scroller draws, not what it hit-tests, so a row scrolled up under the
+/// search field would take its clicks (`skills/architect/references/blitz-quirks.md`).
+const LIFT: &str = "position: relative; z-index: 1; background: var(--background);";
+
 /// Below this width (CSS px) the manager in a pane shows the list or one
 /// item's page, not both.
 pub const NARROW: f64 = 620.0;
@@ -259,7 +264,7 @@ pub fn ManagerPage(
         style { {architect_ui::UTILITIES_CSS} }
         div { style: "{root} font-family: inherit; color: var(--foreground);",
             if let (Some(asking), Some(browse)) = ((s.asking)(), browse.clone()) {
-                div { style: "flex: none;",
+                div { style: "{LIFT} flex: none;",
                     ConsentPrompt {
                         previews: asking.previews.clone(),
                         org,
@@ -269,13 +274,13 @@ pub fn ManagerPage(
                 }
             }
             if let Some((ok, text)) = (s.note)() {
-                div { style: "flex: none;",
+                div { style: "{LIFT} flex: none;",
                     Alert { variant: if ok { AlertVariant::Default } else { AlertVariant::Destructive },
                         AlertDescription { "{text}" }
                     }
                 }
             }
-            div { style: "flex: none; max-width: 100%; overflow-x: auto;",
+            div { style: "{LIFT} flex: none; max-width: 100%; overflow-x: auto;",
                 SegmentedControl {
                     value: kind.clone().unwrap_or_default(),
                     options: kinds,
@@ -288,51 +293,59 @@ pub fn ManagerPage(
             div { style: "{body}",
                 if show_list {
                     div { style: "{list_col}",
-                        div { style: "flex: none;",
+                        div { style: "{LIFT} flex: none;",
                             Input { value: s.query, placeholder: "Search every kind".to_owned() }
                         }
-                        div { style: "flex: none; font-size: 12px; color: var(--muted-foreground);",
+                        div { style: "{LIFT} flex: none; font-size: 12px; color: var(--muted-foreground);",
                             "{items.len()} item(s) · by name, kind, source"
                         }
-                        div { class: "manager-list", style: "{list_box}",
-                            if items.is_empty() {
-                                EmptyState { message: "Nothing matches".to_owned() }
-                            }
-                            for i in items.iter().cloned() {
-                                ItemRow {
-                                    key: "{i.kind}/{i.id}",
-                                    on: !master_detail && selected.as_ref().is_some_and(|(k, id)| k == &i.kind && id == &i.id),
-                                    item: i,
+                        // A new list (a scroller at its top) for each search
+                        // and kind: Blitz keeps a scroller's offset when what
+                        // it holds shrinks, and would show the rows below none.
+                        for shown in std::iter::once(format!("{}\u{1f}{query}", kind.clone().unwrap_or_default())) {
+                            div { key: "{shown}", class: "manager-list", style: "{list_box}",
+                                if items.is_empty() {
+                                    EmptyState { message: "Nothing matches".to_owned() }
+                                }
+                                for i in items.iter().cloned() {
+                                    ItemRow {
+                                        key: "{i.kind}/{i.id}",
+                                        on: !master_detail && selected.as_ref().is_some_and(|(k, id)| k == &i.kind && id == &i.id),
+                                        item: i,
+                                    }
                                 }
                             }
                         }
                     }
                 }
-                if show_page {
-                    div { class: "manager-item", style: "{page_col}",
-                        if master_detail {
-                            div { style: "flex: none;",
-                                Button {
-                                    variant: ButtonVariant::Ghost,
-                                    on_click: move |_| {
-                                        let mut selected = s.selected;
-                                        selected.set(None);
-                                    },
-                                    "← Every item"
-                                }
-                            }
+                if show_page && master_detail {
+                    div { style: "{LIFT} flex: none; padding-bottom: 6px;",
+                        Button {
+                            variant: ButtonVariant::Ghost,
+                            on_click: move |_| {
+                                let mut selected = s.selected;
+                                selected.set(None);
+                            },
+                            "← Every item"
                         }
-                        match (selected, browse) {
-                            (Some((k, id)), Some(browse)) if k == "extension" => {
-                                let row = browse.rows("").into_iter().find(|r| r.id == id);
-                                rsx! {
-                                    if let Some(row) = row {
-                                        Detail { key: "{row.id}", browse, row }
+                    }
+                }
+                if show_page {
+                    // A new scroller (at its top) for each item picked.
+                    for shown in std::iter::once(selected.clone().map(|(k, id)| format!("{k}\u{1f}{id}")).unwrap_or_default()) {
+                        div { key: "{shown}", class: "manager-item", style: "{page_col}",
+                            match (selected.clone(), browse.clone()) {
+                                (Some((k, id)), Some(browse)) if k == "extension" => {
+                                    let row = browse.rows("").into_iter().find(|r| r.id == id);
+                                    rsx! {
+                                        if let Some(row) = row {
+                                            Detail { key: "{row.id}", browse, row }
+                                        }
                                     }
                                 }
+                                (Some((k, id)), _) => rsx! { ItemPage { key: "{k}/{id}", manager: manager.clone(), kind: k, id } },
+                                (None, _) => rsx! { EmptyState { message: "Pick an item".to_owned() } },
                             }
-                            (Some((k, id)), _) => rsx! { ItemPage { key: "{k}/{id}", manager: manager.clone(), kind: k, id } },
-                            (None, _) => rsx! { EmptyState { message: "Pick an item".to_owned() } },
                         }
                     }
                 }
@@ -379,6 +392,17 @@ fn ItemRow(on: bool, item: Item) -> Element {
 fn ItemPage(manager: Manager, kind: String, id: String) -> Element {
     let s = state();
     let _ = (s.rev)();
+    // Read again each second while it is open: what it shows changes on
+    // its own (a page's status, a worker's).
+    let mut tick = use_signal(|| 0_u64);
+    use_future(move || async move {
+        loop {
+            futures_timer::Delay::new(std::time::Duration::from_secs(1)).await;
+            let next = tick.peek().wrapping_add(1);
+            tick.set(next);
+        }
+    });
+    let _ = tick();
     let Some(d) = manager.get(&kind, &id) else {
         return rsx! { EmptyState { message: "It is gone".to_owned() } };
     };
