@@ -292,9 +292,9 @@ impl Host {
         if let Some(kept) = slot.as_ref().and_then(|k| k.downcast_ref::<T>()) {
             return kept.clone();
         }
-        let made = make();
-        *slot = Some(Arc::new(made.clone()));
-        made
+        let fresh = make();
+        *slot = Some(Arc::new(fresh.clone()));
+        fresh
     }
 
     /// The interface extensions are lent.
