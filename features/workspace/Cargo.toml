@@ -144,6 +144,10 @@ required-features = ["native"]
 name = "title_row"
 required-features = ["native"]
 
+[[test]]
+name = "tab_badge"
+required-features = ["native"]
+
 [lints]
 workspace = true
 

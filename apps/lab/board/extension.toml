@@ -101,6 +101,14 @@ id = "status-bar"
 title = "Board status bar"
 on_unload = "close"
 
+# A small live control for a toolbar: the tempo, read and nudged
+# (`[[items]] kind = "widget", view = "lab.board/tempo"`; the toolbar
+# editor's widget picker offers it).
+[[views]]
+id = "tempo"
+title = "Tempo"
+icon = "gauge"
+
 # A `type: song` note's card, drawn at the note's head (its embed below).
 [[views]]
 id = "song"

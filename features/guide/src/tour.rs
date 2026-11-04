@@ -964,6 +964,11 @@ fn card_of(set: &TourSet, list: &ActionList, playing: Playing) -> Option<Card> {
     })
 }
 
+/// How high the tour's layer is stacked: over the app's own layers (the
+/// palette's 90), under an extension's prompts and dialogs (300), which a
+/// step may bring up and which must be answered.
+pub const TOUR_LAYER: u32 = 200;
+
 /// The tour over the window, under [`use_tours`].
 ///
 /// Mount it once, the last thing in the app's root (an absolute layer
@@ -1053,7 +1058,7 @@ pub fn TourLayer() -> Element {
         div {
             "data-testid": "guide-tour",
             style: "position: absolute; left: 0; top: 0; right: 0; bottom: 0; pointer-events: none; \
-                    z-index: 200; display: {layer_display}; opacity: {opacity}; \
+                    z-index: {TOUR_LAYER}; display: {layer_display}; opacity: {opacity}; \
                     font-family: Inter, system-ui, -apple-system, sans-serif;",
             onmounted: move |e| tours.layer.clone().set(Some(e.data())),
             // The dim, around the cutout: four pieces, so the target shows

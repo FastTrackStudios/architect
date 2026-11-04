@@ -54,6 +54,8 @@ struct State {
     chart: Option<String>,
     issues: Vec<String>,
     last: Value,
+    /// The tempo widget's, beats a minute.
+    tempo: u32,
 }
 
 static STATE: Mutex<State> = Mutex::new(State {
@@ -61,6 +63,7 @@ static STATE: Mutex<State> = Mutex::new(State {
     chart: None,
     issues: Vec::new(),
     last: Value::Null,
+    tempo: 120,
 });
 
 /// Moves on with every change, for the views.
@@ -100,6 +103,7 @@ fn snapshot() -> Value {
         "pins": s.pins,
         "chart": s.chart,
         "issues": s.issues,
+        "tempo": s.tempo,
         "last_invoked": s.last,
         "process": std::process::id(),
     })
@@ -136,6 +140,7 @@ impl Extension for Board {
             .view("chart", ChartView)
             .view("status-bar", BoardStatusBar)
             .view("song", SongCard)
+            .view("tempo", TempoWidget)
             .view("summary", PagesOnly)
             .view("luau-primes", PagesOnly)
             .action_in(
@@ -274,6 +279,35 @@ fn BoardStatusBar() -> Element {
             }
             span { style: "flex: 1;" }
             span { "lab.board fills the status slot" }
+        }
+    }
+}
+
+/// The tempo, as a toolbar widget: its beats a minute between a step
+/// down and a step up.
+#[component]
+fn TempoWidget() -> Element {
+    let _ = use_board();
+    let bpm = state().tempo;
+    let nudge = |by: i32| {
+        move |_| {
+            {
+                let mut s = state();
+                s.tempo = s.tempo.saturating_add_signed(by).clamp(20, 300);
+            }
+            changed();
+        }
+    };
+    let step = "width: 20px; height: 20px; border: none; border-radius: 5px; cursor: pointer; \
+                background: var(--secondary); color: var(--secondary-foreground); font-size: 12px;";
+    rsx! {
+        div {
+            "data-testid": "board-tempo",
+            style: "flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 0 6px; \
+                    font-size: 12px; color: var(--foreground); background: var(--muted); border-radius: 6px;",
+            button { style: "{step}", "aria-label": "Slower", onclick: nudge(-1), "−" }
+            span { style: "min-width: 52px; text-align: center; font-variant-numeric: tabular-nums;", "{bpm} BPM" }
+            button { style: "{step}", "aria-label": "Faster", onclick: nudge(1), "+" }
         }
     }
 }

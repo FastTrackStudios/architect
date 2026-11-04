@@ -320,8 +320,14 @@ fn use_window_ui(host: &Host) -> (WindowUi, Signal<u64>) {
     (ui, revision)
 }
 
+/// How high extensions' toasts, prompts and menus are stacked: over
+/// everything, a tour's layer too (`architect_guide::tour::TourLayer`, 200),
+/// so a prompt a step brings up is answered, not hidden under its card.
+pub const PROMPT_LAYER: u32 = 300;
+
 /// Extensions' toasts, prompts and menus, over the window: mount it once,
-/// last, at the root (`ExtensionOverlays` does).
+/// last, at the root (`ExtensionOverlays` does), over a tour's layer
+/// ([`PROMPT_LAYER`]).
 #[component]
 pub fn HostUiLayer(host: Host) -> Element {
     let (ui, revision) = use_window_ui(&host);
@@ -332,7 +338,7 @@ pub fn HostUiLayer(host: Host) -> Element {
     rsx! {
         if shown > 0 {
             div {
-                style: "position: absolute; right: 16px; bottom: 16px; z-index: 95; display: flex; \
+                style: "position: absolute; right: 16px; bottom: 16px; z-index: {PROMPT_LAYER}; display: flex; \
                         flex-direction: column; gap: 8px; max-width: 360px;",
                 "data-ext-toasts": "{shown}",
                 for toast in toasts {
@@ -420,7 +426,7 @@ fn PromptDialog(ui: WindowUi, id: u64, from: String, prompt: Prompt) -> Element 
     let choices = prompt.choices.clone();
     rsx! {
         div {
-            style: "position: absolute; inset: 0; z-index: 96; display: flex; align-items: center; \
+            style: "position: absolute; inset: 0; z-index: {PROMPT_LAYER + 1}; display: flex; align-items: center; \
                     justify-content: center; background: rgba(0,0,0,0.45);",
             onclick: move |_| on_backdrop(),
             div {
@@ -506,7 +512,7 @@ fn MenuAt(ui: WindowUi, id: u64, menu: Menu) -> Element {
     };
     rsx! {
         div {
-            style: "position: absolute; inset: 0; z-index: 96;",
+            style: "position: absolute; inset: 0; z-index: {PROMPT_LAYER + 1};",
             onclick: move |_| away.answer(id, None),
             oncontextmenu: {
                 let away = ui.clone();
@@ -673,12 +679,19 @@ fn Decorated(from: String, decoration: crate::hostcall::Decoration) -> Element {
 /// (`use_extension_ui` calls it).
 pub fn use_tab_badges(host: &Host) {
     let host = host.clone();
+    let revision = use_decorations(&host);
     use_context_provider(move || {
         architect_workspace::TabBadges::new(move |kind, pane| {
-            rsx! {
-                Decorations { host: host.clone(), target: Target::tab(kind) }
-                Decorations { host: host.clone(), target: Target::tab(pane) }
+            // Read in the tab's render: it draws again as they change.
+            let _ = revision();
+            let (by_kind, by_pane) = (Target::tab(kind), Target::tab(pane));
+            if host.decorations_of(&by_kind).is_empty() && host.decorations_of(&by_pane).is_empty() {
+                return None;
             }
+            Some(rsx! {
+                Decorations { host: host.clone(), target: by_kind }
+                Decorations { host: host.clone(), target: by_pane }
+            })
         })
     });
 }

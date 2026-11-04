@@ -156,6 +156,12 @@ fn the_window_shows_a_prompt_and_a_menu_and_the_answer_is_the_calls() {
     // Drawn over the window, the extension's name on it.
     let html = drawn(&host);
     assert!(html.contains(r#"data-ext-prompt="text""#), "{html}");
+    // Over a tour's card (its layer is 200).
+    let over = format!(
+        "z-index: {}",
+        architect_extensions::host_ui_view::PROMPT_LAYER + 1
+    );
+    assert!(html.contains(&over), "{html}");
     assert!(
         html.contains("Rename to?") && html.contains("Iconize"),
         "{html}"
