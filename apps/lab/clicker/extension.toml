@@ -18,16 +18,48 @@ authors = ["FastTrackStudio"]
 [entry]
 path = "architect-lab-clicker"
 
+# Through the host service it reads the app's status (and its own
+# setting, which needs nothing).
+[capabilities]
+actions = ["APP_STATUS"]
+effect = "read_only"
+
 [[actions]]
 id = "LAB_CLICKER_CLICKS"
 name = "Clicker: clicks"
 description = "How many times its button was pressed since it started."
 effect = "read_only"
 
+[[actions]]
+id = "LAB_CLICKER_PROBE"
+name = "Clicker: ask the host"
+description = "From its own process, through the host service: its step setting and the app's problem count."
+effect = "read_only"
+
+[[sections]]
+id = "clicker"
+title = "Clicker"
+icon = "mouse-pointer-click"
+
+[[sections.settings]]
+key = "lab.clicker.step"
+title = "Clicks per press"
+control = "stepper"
+min = 1
+max = 10
+default = 1
+
 [[views]]
 id = "counter"
 title = "Clicker"
 icon = "mouse-pointer-click"
+
+# Its heavy work, off every view's thread: the Luau windows spawn it
+# (heavy.luau), its process does its own (`guest::use_work`).
+[[workers]]
+id = "primes"
+title = "Count primes"
+script = "workers/primes.luau"
 
 [[themes]]
 path = "themes/clicker-neon.json"

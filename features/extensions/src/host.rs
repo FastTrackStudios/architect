@@ -42,6 +42,7 @@ use architect::action::{
 };
 use architect_scripting::Transactions;
 use architect_scripting::luau::{Gate, Limits, Runtime};
+use architect_scripting::worker::{WorkerGroup, Workers};
 use architect_settings::{Owner, Registry, Section};
 use architect_theme::{Contribution, Problem, Theme, ThemeStore};
 use architect_workspace::{KindError, ViewKinds};
@@ -134,6 +135,12 @@ pub struct Context<'a> {
     /// The app's contributions: where what it adds at run time goes (as
     /// the extension `owner`, checked against its manifest).
     pub contributions: &'a Contributions,
+    /// Its session with the host service (`crate::hostapi`): what its
+    /// code asks the app for, checked against what it may reach.
+    pub api: crate::hostapi::ExtensionApi,
+    /// Where its log lines go (`EXT_LOGS`): a process's output, a script's
+    /// prints and errors.
+    pub logs: crate::logs::Logs,
 }
 
 /// Runs one kind of extension.
@@ -248,12 +255,54 @@ impl LuauRunner {
 
 struct Luau {
     runtime: Runtime,
+    /// Its workers, cancelled when it stops (unloaded or replaced).
+    workers: WorkerGroup,
     /// Each script action's source.
     scripts: BTreeMap<String, Arc<str>>,
     /// Each hook script's source, by its path.
     hooks: BTreeMap<String, Arc<str>>,
     /// The undo step's prefix: the extension's name.
     name: String,
+    /// Its session with the host service: `host` in its scripts, and who
+    /// their actions run as.
+    api: crate::hostapi::ExtensionApi,
+    logs: crate::logs::Logs,
+}
+
+impl Luau {
+    /// The runtime for one run as `caller`: `ctx` says where it came from,
+    /// `host` acts for whoever ran it; and the caller it runs as — the
+    /// extension, for them ([`Principal::Extension`]).
+    fn for_run(&self, caller: &ActionCaller) -> (Runtime, ActionCaller) {
+        let api = self.api.clone().acting_for(caller.principal().cloned());
+        let caller = caller.clone().with_principal(api.principal());
+        let runtime = self
+            .runtime
+            .clone()
+            .with_module(Arc::new(luau_ext::Ctx::of(caller.invocation())))
+            .with_module(Arc::new(crate::luau_host::HostModule::new(api)));
+        (runtime, caller)
+    }
+}
+
+/// A script run's prints, and the error it stopped with, into its log.
+fn log_report(
+    logs: &crate::logs::Logs,
+    id: &str,
+    what: &str,
+    report: &architect_scripting::luau::Report,
+) {
+    for line in &report.log {
+        logs.push(id, crate::logs::Level::Info, "print", line.clone());
+    }
+    if let Err(e) = &report.result {
+        logs.push(
+            id,
+            crate::logs::Level::Error,
+            "script",
+            format!("{what}: {e}"),
+        );
+    }
 }
 
 impl Runner for LuauRunner {
@@ -276,9 +325,21 @@ impl Runner for LuauRunner {
             Runtime::check(&source).map_err(|e| format!("{path}: {e}"))?;
             hooks.insert(path.clone(), Arc::from(source));
         }
+        // Its `[[workers]]`, spawned by its scripts off their threads.
+        let group = WorkerGroup::new();
+        let mut workers = Workers::new().with_group(group.clone());
+        for decl in &package.manifest.workers {
+            let Some(path) = &decl.script else { continue };
+            let source = package.text(path).map_err(|e| e.to_string())?;
+            workers = workers.with_source(decl.id.clone(), source);
+        }
+        workers
+            .check()
+            .map_err(|(name, e)| format!("worker {name}: {e}"))?;
         let mut runtime = Runtime::new(cx.list.clone())
             .with_gate(cx.gate)
             .with_limits(self.limits)
+            .with_workers(workers)
             .with_module(Arc::new(luau_ext::Ext::new(
                 &package.manifest,
                 cx.contributions.clone(),
@@ -286,11 +347,17 @@ impl Runner for LuauRunner {
         if let Some(t) = &self.transactions {
             runtime = runtime.with_transactions(Arc::clone(t));
         }
+        // Its scripts' action calls run on the runtime it was loaded on,
+        // even when a hook fires from a thread with none (the UI's).
+        runtime = runtime.with_dispatch(architect_scripting::vm::Dispatch::here());
         Ok(Box::new(Luau {
             runtime,
+            workers: group,
             scripts,
             hooks,
             name: package.manifest.name.clone(),
+            api: cx.api,
+            logs: cx.logs,
         }))
     }
 }
@@ -302,23 +369,27 @@ impl Instance for Luau {
             .get(&decl.id)
             .cloned()
             .ok_or_else(|| format!("{} has no script", decl.id))?;
-        let runtime = self.runtime.clone();
+        let me = Self {
+            runtime: self.runtime.clone(),
+            workers: self.workers.clone(),
+            scripts: BTreeMap::new(),
+            hooks: BTreeMap::new(),
+            name: self.name.clone(),
+            api: self.api.clone(),
+            logs: self.logs.clone(),
+        };
         let id = decl.id.clone();
         let step = format!("{}: {}", self.name, decl.name);
         Ok(Arc::new(move |caller: &ActionCaller, args: &[u8]| {
             let args = json_args(&id, args)?;
-            // Where it was run from, as `ctx`.
-            let runtime = runtime
-                .clone()
-                .with_module(Arc::new(luau_ext::Ctx::of(caller.invocation())));
-            let (source, caller, id, step) = (
-                Arc::clone(&source),
-                caller.clone(),
-                id.clone(),
-                step.clone(),
-            );
+            // Where it was run from, as `ctx`; as the extension, for its
+            // caller.
+            let (runtime, caller) = me.for_run(caller);
+            let (source, id, step) = (Arc::clone(&source), id.clone(), step.clone());
+            let (logs, owner) = (me.logs.clone(), me.api.id().to_owned());
             let run: ActionFuture = Box::pin(async move {
                 let report = runtime.run(&caller, &source, args, &step).await;
+                log_report(&logs, &owner, &id, &report);
                 match report.result {
                     Ok(value) => Ok(value.to_string().into_bytes()),
                     Err(e) => Err(ActionError::Failed {
@@ -343,14 +414,13 @@ impl Instance for Luau {
                 )
             },
         );
-        let runtime = self
-            .runtime
-            .clone()
-            .with_module(Arc::new(luau_ext::Ctx::of(caller.invocation())));
-        let (caller, id) = (caller.clone(), format!("{} hook {}", self.name, decl.on));
+        let (runtime, caller) = self.for_run(caller);
+        let id = format!("{} hook {}", self.name, decl.on);
         let step = id.clone();
+        let (logs, owner) = (self.logs.clone(), self.api.id().to_owned());
         Some(Box::pin(async move {
             let report = runtime.run(&caller, &source, args, &step).await;
+            log_report(&logs, &owner, &step, &report);
             report
                 .result
                 .map(|v| v.to_string().into_bytes())
@@ -359,6 +429,13 @@ impl Instance for Luau {
                     message: e.to_string(),
                 })
         }))
+    }
+
+    fn stop(&self) {
+        let cancelled = self.workers.cancel_all();
+        if cancelled > 0 {
+            tracing::debug!(workers = cancelled, "an extension's workers were cancelled");
+        }
     }
 }
 
@@ -726,6 +803,19 @@ struct Inner {
     /// The in-process extensions linked into the app, built, by id.
     #[cfg(feature = "linked")]
     linked: Mutex<BTreeMap<String, Arc<crate::linked::Builder>>>,
+    /// The host service's side: consent, logs, the app's context, values.
+    services: crate::hostapi::Services,
+}
+
+/// A [`Host`] held weakly: what an extension's session keeps, so an
+/// extension does not keep the app's host alive.
+#[derive(Clone)]
+pub(crate) struct WeakHost(std::sync::Weak<Inner>);
+
+impl WeakHost {
+    pub(crate) fn upgrade(&self) -> Option<Host> {
+        self.0.upgrade().map(|inner| Host { inner })
+    }
 }
 
 /// Loads extensions onto one Action List and one settings registry.
@@ -774,8 +864,17 @@ impl Host {
                 view_opener: Mutex::new(None),
                 #[cfg(feature = "linked")]
                 linked: Mutex::new(BTreeMap::new()),
+                services: crate::hostapi::Services::default(),
             }),
         }
+    }
+
+    pub(crate) fn services(&self) -> &crate::hostapi::Services {
+        &self.inner.services
+    }
+
+    pub(crate) fn downgrade(&self) -> WeakHost {
+        WeakHost(Arc::downgrade(&self.inner))
     }
 
     /// Puts what extensions add to the interface in `contributions` (the
@@ -859,8 +958,9 @@ impl Host {
 
     /// Opens `what` (a file's path, a link, a document kind) with the
     /// first opener that claims it: in its view, or with its action
-    /// (given `{path}` or `{url}`, and the invocation). A file or document
-    /// opened raises `doc.opened`. What opened it, and how.
+    /// (the invocation, and `{path}` or `{url}` to one that takes
+    /// arguments). A file or document opened raises `doc.opened`. What
+    /// opened it, and how.
     ///
     /// # Errors
     ///
@@ -904,7 +1004,19 @@ impl Host {
             serde_json::json!({ "opened_by": by.owner, "opener": opener, "view": view, "opened": placed })
         } else {
             let caller = ActionCaller::app().with_invocation(invocation);
-            let args = serde_json::json!({ field: state }).to_string();
+            // The path or link is the invocation's (`ctx.path`, `ctx.url`);
+            // it goes in the arguments too only to an action that takes
+            // some — one that takes none refuses any name.
+            let takes = self
+                .inner
+                .list
+                .info(&by.item.action)
+                .is_some_and(|i| i.params_schema.is_some());
+            let args = if takes {
+                serde_json::json!({ field: state }).to_string()
+            } else {
+                String::new()
+            };
             let out = self
                 .inner
                 .list
@@ -927,6 +1039,7 @@ impl Host {
         built.handle().connect(Arc::new(linked::Sink {
             manifest: manifest.clone(),
             contributions: self.inner.contributions.clone(),
+            api: self.api(&manifest.id),
         }));
         let id = &manifest.id;
         self.inner
@@ -990,6 +1103,37 @@ impl Host {
             runners.push(Arc::new(runner));
         }
         self
+    }
+
+    /// Runs `runner`'s kind with it from now, in place of the one there
+    /// was ([`Self::with_runner`] on a host already shared).
+    pub fn add_runner(&self, runner: impl Runner + 'static) {
+        let mut runners = self
+            .inner
+            .runners
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        runners.retain(|r| r.kind() != runner.kind());
+        runners.push(Arc::new(runner));
+    }
+
+    /// The view kinds it takes.
+    #[must_use]
+    pub fn view_kinds(&self) -> ViewKinds {
+        self.inner
+            .kinds
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// An `EXT_CHECK` checker that knows what this host knows: its view
+    /// kinds, and whether it runs process extensions.
+    #[must_use]
+    pub fn checker(&self) -> crate::check::Checker {
+        crate::check::Checker::new()
+            .with_view_kinds(self.view_kinds())
+            .with_processes(self.runs(Kind::Process))
     }
 
     /// Takes views of `kinds` (the app's [`ViewKinds`], the ones its
@@ -1200,16 +1344,18 @@ impl Host {
                 package,
                 Context {
                     list,
-                    gate: gate(manifest),
+                    gate: self.live_gate(manifest, origin),
                     state: old.and_then(|o| o.instance.save_state()),
                     contributions: &self.inner.contributions,
+                    api: self.api(&manifest.id),
+                    logs: self.logs().clone(),
                 },
             )
             .map_err(LoadError::Start)?;
         let mut actions = Vec::with_capacity(manifest.actions.len());
         for decl in &manifest.actions {
             let handler = match &decl.preset {
-                Some(_) => preset(list, manifest, decl),
+                Some(_) => preset(list, self.live_gate(manifest, origin), decl),
                 None => instance.action(decl).map_err(|why| LoadError::Action {
                     id: decl.id.clone(),
                     why,
@@ -1384,8 +1530,17 @@ impl Host {
             }
             let running = Arc::clone(&self.inner.running);
             let (owner, hook) = (by.owner.clone(), on.to_owned());
+            let logs = self.logs().clone();
             spawn(Box::pin(async move {
                 let out = work.await;
+                if let Err(e) = &out {
+                    logs.push(
+                        &owner,
+                        crate::logs::Level::Error,
+                        "hook",
+                        format!("{hook}: {e}"),
+                    );
+                }
                 let _span = tracing::info_span!(
                     "ext.hook",
                     ext.id = %owner,
@@ -1424,16 +1579,28 @@ impl Host {
             return running.instance.hook(decl, caller, args);
         }
         let action = decl.action.clone()?;
-        let gate = gate(&running.loaded.manifest);
+        let gate = self.live_gate(&running.loaded.manifest, running.loaded.origin);
         drop(loaded);
         let list = self.inner.list.clone();
         let info = list.info(&action)?;
         if let Err(why) = gate(&info) {
             tracing::warn!(ext.id = %owner, ext.hook_action = %action, ext.why = %why, "a hook was refused");
+            self.logs().push(
+                owner,
+                crate::logs::Level::Warn,
+                "hook",
+                format!("{} ran {action}: refused: {why}", decl.on),
+            );
             return None;
         }
         let caller = caller.clone();
-        let args = args.to_string().into_bytes();
+        // The event is the invocation's (`ctx.event`, `ctx.detail`); it
+        // goes in the arguments too only to an action that takes some.
+        let args = if info.params_schema.is_some() {
+            args.to_string().into_bytes()
+        } else {
+            Vec::new()
+        };
         Some(Box::pin(async move {
             list.run_json_async_with(&caller, &action, &args).await
         }))
@@ -1571,8 +1738,8 @@ fn info(manifest: &Manifest, decl: &ActionDecl) -> ActionInfo {
 
 /// A preset: the action it names, with its fixed arguments (or the ones
 /// it is given), inside the extension's capabilities.
-fn preset(list: &ActionList, manifest: &Manifest, decl: &ActionDecl) -> CallerAsyncHandler {
-    let (list, gate) = (list.clone(), gate(manifest));
+fn preset(list: &ActionList, gate: Gate, decl: &ActionDecl) -> CallerAsyncHandler {
+    let list = list.clone();
     let (id, target, fixed) = (
         decl.id.clone(),
         decl.preset
@@ -1618,6 +1785,7 @@ mod linked {
     pub(super) struct Sink {
         pub(super) manifest: Manifest,
         pub(super) contributions: Contributions,
+        pub(super) api: crate::hostapi::ExtensionApi,
     }
 
     impl crate::linked::Sink for Sink {
@@ -1644,6 +1812,11 @@ mod linked {
         fn clear_state(&self, key: Option<&str>) {
             self.contributions
                 .clear_state(&format!("ext:{}", self.manifest.id), key);
+        }
+
+        fn host(&self, request: crate::hostcall::HostRequest) -> crate::linked::HostFuture {
+            let api = self.api.clone();
+            Box::pin(async move { api.call(request).await })
         }
     }
 

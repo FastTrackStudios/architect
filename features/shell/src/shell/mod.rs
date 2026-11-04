@@ -3,6 +3,7 @@
 
 mod bar;
 mod bars;
+mod busy;
 mod chrome;
 mod keyboard;
 #[cfg(target_os = "macos")]
@@ -27,6 +28,7 @@ pub use bar::{
 };
 use bar::{BarModel, PhoneFoot};
 use bars::{Rail, RoundButton, SideTab};
+pub use busy::BusyBadge;
 pub use chrome::{Chrome, Filler, Slot, intern, named_icon, use_chrome};
 pub use keyboard::{Keyboard, install_keyboard, keyboard, set_keyboard_height, set_typing};
 #[cfg(target_os = "macos")]

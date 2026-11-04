@@ -1,7 +1,9 @@
 //! What an extension adds to the app's interface, past its actions,
-//! settings and themes: openers for files, document kinds and links,
-//! document kinds, tabs, status items, menu and context-menu entries, a
-//! phone's action-bar buttons, hooks, and the shell's slots it fills
+//! settings and themes:
+//!
+//! openers for files, document kinds and links, document kinds, tabs,
+//! status items, menu and context-menu entries, a phone's action-bar
+//! buttons, hooks, and the shell's slots it fills
 //! (`docs/content/architecture/extensions.md`, "Contributions").
 //!
 //! A [`Contribution`] is the same data whichever way it arrives: a
@@ -66,11 +68,12 @@ pub fn known_target(target: &str) -> bool {
             .any(|p| target.strip_prefix(p).is_some_and(|rest| !rest.is_empty()))
 }
 
-/// An opener: ⌘O's (`kind`, `prefix` and `action`: a query in, items
-/// out), or one that claims files by extension, document kinds or links
-/// by pattern (`files`, `doc_kinds`, `urls`) and opens what it claims in
-/// one of its views (`view`) or with one of its actions (`action`, given
-/// `{path}` or `{url}` and the invocation).
+/// An opener: ⌘O's (`kind`, `prefix` and `action`: a query in, items out).
+///
+/// Or one that claims files by extension, document kinds or links by
+/// pattern (`files`, `doc_kinds`, `urls`) and opens what it claims in one of
+/// its views (`view`) or with one of its actions (`action`, given `{path}` or
+/// `{url}` and the invocation).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct OpenerDecl {
@@ -246,10 +249,11 @@ pub struct BarDecl {
 }
 
 /// A hook: on an app event (`startup`, `workspace.changed`, `doc.opened`,
-/// `theme.changed`, `selection.changed`, `changed:<topic>`), it runs one
-/// of its actions, or a Luau script of its package (the whole file, or
-/// `function` of the table it returns), with the event in its invocation
-/// and as `args`.
+/// `theme.changed`, `selection.changed`, `changed:<topic>`).
+///
+/// It runs one of its actions, or a Luau script of its package (the whole
+/// file, or `function` of the table it returns), with the event in its
+/// invocation and as `args`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct HookDecl {

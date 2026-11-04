@@ -40,7 +40,7 @@ pub use synced::{DocValues, ROOT as SYNCED_ROOT, synced_doc_id};
 #[cfg(feature = "ui")]
 pub use ui::{
     SettingsChange, SettingsHandle, SettingsPage, UseSettings, try_use_settings, use_section,
-    use_setting, use_settings, use_settings_provider,
+    use_section_page, use_setting, use_settings, use_settings_provider,
 };
 pub use values::{OrgSettings, ScopedValues, ValueError, Values};
 

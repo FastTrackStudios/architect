@@ -125,3 +125,51 @@ fn its_imgui_window_draws_in_the_theme_and_follows_a_switch() {
     assert_eq!(count, packed(&neon, "info"));
     assert!(has(packed(&neon, "clicker.face")));
 }
+
+/// Its windows' scripts with its declared workers, as the lab runs them.
+fn with_workers(package: &Package) -> Runtime {
+    let workers = package.manifest.workers.iter().fold(
+        architect_scripting::worker::Workers::new(),
+        |w, decl| {
+            let path = decl.script.as_deref().expect("a script worker");
+            w.with_source(decl.id.clone(), package.text(path).unwrap())
+        },
+    );
+    Runtime::new(ActionList::new()).with_workers(workers)
+}
+
+#[test]
+fn its_heavy_window_hands_its_job_to_its_worker_and_its_naughty_one_runs_long() {
+    let package = clicker();
+    assert_eq!(package.manifest.workers[0].id, "primes");
+    let runtime = with_workers(&package);
+    // The worker, on its own: the primes below 10 000.
+    let primes = block_on(runtime.run(
+        &ActionCaller::app(),
+        "return worker.spawn('primes', { n = 10000 }):join()",
+        Value::Null,
+        "primes",
+    ));
+    assert_eq!(primes.result, Ok(serde_json::json!(1229)));
+    for (script, slow) in [("heavy.luau", false), ("naughty.luau", true)] {
+        let source = package.text(script).unwrap();
+        let (report, session) = block_on(Session::start(
+            &runtime,
+            &ActionCaller::app(),
+            &source,
+            Value::Null,
+            script,
+        ));
+        assert!(report.result.is_ok(), "{script}: {:?}", report.result);
+        let mut session = session.expect("it runs");
+        let t = std::time::Instant::now();
+        assert!(block_on(session.frame(Input::default())).result.is_ok());
+        assert_eq!(
+            t.elapsed() >= std::time::Duration::from_millis(300),
+            slow,
+            "{script}: {:?}",
+            t.elapsed()
+        );
+        assert!(session.wake_after().is_some(), "{script} animates");
+    }
+}

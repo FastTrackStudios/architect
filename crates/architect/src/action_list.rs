@@ -97,6 +97,10 @@ use crate::action::{ActionBackend, ActionMeta};
 // `ConfirmationRequired` error and one `confirmed` call per run path.
 pub mod confirm;
 
+// `APP_STATUS` and the registries it reads (#268): what is on screen and
+// what is wrong, from whichever parts of the app report it.
+pub mod app;
+
 /// What running an action does to the app — what a caller (a model,
 /// above all) has to know before it runs one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Facet)]
@@ -687,6 +691,10 @@ struct Inner {
     arrived: Condvar,
     /// Confirmation tickets (`confirm`).
     confirm: Mutex<confirm::Gate>,
+    /// What is wrong with the app, by source (`app`).
+    problems: app::Problems,
+    /// `APP_STATUS`'s sections (`app`).
+    status: app::StatusBoard,
 }
 
 /// The registry. Cheap to clone: every clone is the same list.
@@ -724,6 +732,8 @@ impl ActionList {
                 }),
                 arrived: Condvar::new(),
                 confirm: Mutex::new(confirm::Gate::default()),
+                problems: app::Problems::default(),
+                status: app::StatusBoard::default(),
             }),
         }
     }
@@ -1289,19 +1299,23 @@ impl ActionList {
         let Run::Async(handler) = &entry.run else {
             return self.run_checked(caller, id, args);
         };
+        let sent = args;
         let args = normalized(&entry, args);
         let span = tracing::info_span!("action", action.id = id, action.ok = tracing::field::Empty);
-        let started = span.in_scope(|| match enabled_state(entry.enabled.as_ref()) {
-            Ok(()) => self.confirmed(caller, &entry, args).and_then(|()| {
-                guarded_start(id, || {
-                    admit_args(&entry, args)?;
-                    handler(caller, args)
-                })
-            }),
-            Err(reason) => Err(ActionError::Disabled {
-                id: id.to_owned(),
-                reason,
-            }),
+        let started = span.in_scope(|| {
+            known_names(&entry, sent)?;
+            match enabled_state(entry.enabled.as_ref()) {
+                Ok(()) => self.confirmed(caller, &entry, args).and_then(|()| {
+                    guarded_start(id, || {
+                        admit_args(&entry, args)?;
+                        handler(caller, args)
+                    })
+                }),
+                Err(reason) => Err(ActionError::Disabled {
+                    id: id.to_owned(),
+                    reason,
+                }),
+            }
         });
         let out = match started {
             Ok(work) => std::panic::AssertUnwindSafe(work)
@@ -1327,20 +1341,24 @@ impl ActionList {
         args: &[u8],
     ) -> Result<Vec<u8>, ActionError> {
         let entry = self.admitted(caller, id)?;
+        let sent = args;
         let args = normalized(&entry, args);
         // One span per action run: the action's wide event. What it does
         // marks its stages on it (`architect_telemetry::timing`), so where
         // an action's time went is one record, whoever ran it — a key, a
         // menu, a model.
         let span = tracing::info_span!("action", action.id = id, action.ok = tracing::field::Empty);
-        let out = span.in_scope(|| match enabled_state(entry.enabled.as_ref()) {
-            Ok(()) => self
-                .confirmed(caller, &entry, args)
-                .and_then(|()| guarded(id, || call(&entry, caller, args))),
-            Err(reason) => Err(ActionError::Disabled {
-                id: id.to_owned(),
-                reason,
-            }),
+        let out = span.in_scope(|| {
+            known_names(&entry, sent)?;
+            match enabled_state(entry.enabled.as_ref()) {
+                Ok(()) => self
+                    .confirmed(caller, &entry, args)
+                    .and_then(|()| guarded(id, || call(&entry, caller, args))),
+                Err(reason) => Err(ActionError::Disabled {
+                    id: id.to_owned(),
+                    reason,
+                }),
+            }
         });
         span.record("action.ok", out.is_ok());
         drop(span);
@@ -1515,6 +1533,20 @@ impl ActionList {
         (out, next)
     }
 
+    /// What is wrong with the app, from every source that reports here:
+    /// what `APP_STATUS` lists ([`app`]). Clone it to hand to a part of
+    /// the app with a list of its own.
+    #[must_use]
+    pub fn problems(&self) -> &app::Problems {
+        &self.inner.problems
+    }
+
+    /// The sections `APP_STATUS` is made of ([`app`]).
+    #[must_use]
+    pub fn status(&self) -> &app::StatusBoard {
+        &self.inner.status
+    }
+
     /// The latest event's sequence number: where a new watcher starts.
     #[must_use]
     pub fn latest(&self) -> u64 {
@@ -1606,6 +1638,75 @@ fn normalized<'a>(entry: &Entry, args: &'a [u8]) -> &'a [u8] {
     } else {
         args
     }
+}
+
+/// Refuses arguments named nothing the action takes, before anything
+/// runs — a misspelt name is a mistake to say, not a default to fall
+/// back on (herdr's `validate_args`): `{"pane": …}` sent to an action
+/// that takes `id` would otherwise act on whatever the default is.
+///
+/// Only the top level of an object is checked, against the `properties`
+/// of the action's params schema; a schema that is not an object of
+/// properties, or says `additionalProperties` (a map), leaves them open.
+/// An action that takes nothing takes no names at all. Anything that is
+/// not an object is left to the decoder.
+fn known_names(entry: &Entry, args: &[u8]) -> Result<(), ActionError> {
+    if args.iter().all(u8::is_ascii_whitespace) {
+        return Ok(());
+    }
+    let Ok(sent) = facet_json::from_slice::<facet_value::Value>(args) else {
+        return Ok(());
+    };
+    let Some(sent) = sent.as_object().filter(|o| !o.is_empty()) else {
+        return Ok(());
+    };
+    let Some(valid) = arg_names(entry) else {
+        return Ok(());
+    };
+    let unknown: Vec<&str> = sent
+        .keys()
+        .map(facet_value::VString::as_str)
+        .filter(|k| !valid.iter().any(|v| v == k))
+        .collect();
+    if unknown.is_empty() {
+        return Ok(());
+    }
+    Err(ActionError::BadArgs {
+        id: entry.meta.id.to_owned(),
+        message: unknown_message(&unknown, &valid),
+        expected: entry.params_schema(),
+    })
+}
+
+/// `unknown argument(s): typo; valid arguments: id, name` (or `none`).
+fn unknown_message(unknown: &[&str], valid: &[String]) -> String {
+    let valid = if valid.is_empty() {
+        "none".to_owned()
+    } else {
+        valid.join(", ")
+    };
+    format!(
+        "unknown argument(s): {}; valid arguments: {valid}",
+        unknown.join(", ")
+    )
+}
+
+/// The argument names an action takes, from its params schema: `None`
+/// when they are open (its schema is not an object of properties).
+fn arg_names(entry: &Entry) -> Option<Vec<String>> {
+    if !entry.takes() {
+        return Some(Vec::new());
+    }
+    let schema = facet_json::from_str::<facet_value::Value>(&entry.params_schema()?).ok()?;
+    let schema = schema.as_object()?;
+    if schema
+        .get("additionalProperties")
+        .is_some_and(|open| open.as_bool() != Some(false))
+    {
+        return None;
+    }
+    let properties = schema.get("properties")?.as_object()?;
+    Some(properties.keys().map(|k| k.as_str().to_owned()).collect())
 }
 
 /// Decode an action's arguments into `A`: `null` when it takes none.
@@ -2701,5 +2802,87 @@ mod tests {
             list.register_forwarded(&described, forwarded),
             Err(ActionError::Duplicate(_))
         ));
+    }
+
+    static NAMED: ActionMeta = meta("DRUMS_NAMED");
+    static BARE: ActionMeta = meta("DRUMS_BARE");
+
+    /// A name the action does not take is refused before it runs, the
+    /// answer listing the names it does take (herdr's
+    /// `unknown_arguments_are_rejected_for_every_command`); an action that
+    /// takes nothing takes no names; a forwarded action's schema says its
+    /// names; one with open properties (a map) takes any.
+    #[test]
+    fn unknown_argument_names_are_refused_with_the_valid_ones() {
+        let list = ActionList::new();
+        let ran = Arc::new(AtomicBool::new(false));
+        let seen = Arc::clone(&ran);
+        list.register(&NAMED, Effect::Mutating, move |q: Query| {
+            seen.store(true, Ordering::SeqCst);
+            Ok::<_, String>(q.track)
+        })
+        .unwrap();
+        list.register(&BARE, Effect::ReadOnly, |(): ()| Ok::<_, String>(()))
+            .unwrap();
+        let refused = list.run_json("DRUMS_NAMED", br#"{"track":"a","lmit":3}"#);
+        match refused {
+            Err(ActionError::BadArgs {
+                message, expected, ..
+            }) => {
+                assert_eq!(
+                    message,
+                    "unknown argument(s): lmit; valid arguments: track, limit"
+                );
+                assert!(expected.is_some());
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(!ran.load(Ordering::SeqCst), "it ran with a misspelt name");
+        assert!(
+            list.run_json("DRUMS_NAMED", br#"{"track":"a","limit":3}"#)
+                .is_ok()
+        );
+        assert!(list.run_json("DRUMS_NAMED", br#"{"track":"a"}"#).is_ok());
+        assert!(matches!(
+            list.run_json("DRUMS_BARE", br#"{"x":1}"#),
+            Err(ActionError::BadArgs { message, .. })
+                if message == "unknown argument(s): x; valid arguments: none"
+        ));
+        assert!(list.run_json("DRUMS_BARE", b"{}").is_ok());
+        assert!(list.run_json("DRUMS_BARE", b"").is_ok());
+        // Async doors refuse the same.
+        assert!(matches!(
+            futures::executor::block_on(list.run_json_async("DRUMS_NAMED", br#"{"trak":"a"}"#)),
+            Err(ActionError::BadArgs { .. })
+        ));
+        let forwarded = |schema: &str| super::ActionInfo {
+            id: format!("WINDOW_{}", schema.len()),
+            display_name: String::new(),
+            description: String::new(),
+            category: String::new(),
+            group: String::new(),
+            shortcut: String::new(),
+            effect: Effect::Mutating,
+            params_schema: Some(schema.to_owned()),
+            result_schema: None,
+            enabled: true,
+            disabled_reason: None,
+            checked: None,
+        };
+        let echo: super::AsyncHandler = Arc::new(|_: &[u8]| {
+            let reply: super::ActionFuture = Box::pin(async { Ok(b"null".to_vec()) });
+            Ok(reply)
+        });
+        let closed = forwarded(r#"{"type":"object","properties":{"by":{"type":"number"}}}"#);
+        let open = forwarded(r#"{"type":"object","additionalProperties":{"type":"number"}}"#);
+        list.register_forwarded(&closed, Arc::clone(&echo)).unwrap();
+        list.register_forwarded(&open, echo).unwrap();
+        assert!(matches!(
+            futures::executor::block_on(list.run_json_async(&closed.id, br#"{"bye":2}"#)),
+            Err(ActionError::BadArgs { message, .. }) if message.ends_with("valid arguments: by")
+        ));
+        assert!(
+            futures::executor::block_on(list.run_json_async(&open.id, br#"{"any":2}"#)).is_ok()
+        );
     }
 }

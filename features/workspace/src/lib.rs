@@ -39,6 +39,7 @@ pub mod home;
 mod host;
 mod kinds;
 mod layout;
+pub mod meter;
 mod model;
 mod ops;
 #[cfg(feature = "paint")]
@@ -55,6 +56,8 @@ pub use bar::{TABS_COMMAND, use_tabs_button};
 pub use drop::{Bar, Drop, bar_drop, contains, drop_at, drop_in, float_rect, snap_at};
 #[cfg(feature = "native")]
 pub mod native;
+#[cfg(feature = "native")]
+pub mod shot;
 #[cfg(feature = "ctx")]
 pub use ctx::{
     Button, DocRef, Extras, Frame, FrameClock, Geometry, HostData, InputSink, Now, ThemeTokens,
@@ -72,6 +75,7 @@ pub use kinds::{
     Placements, ViewHost, ViewKinds,
 };
 pub use layout::{Direction, Placed, Slide, area_rects, neighbour, scroll_to, slides};
+pub use meter::{FRAME_BUDGET, Meters, ViewHealth, ViewMeter, ViewReport, ViewSummary};
 pub use model::{
     Above, Aliases, Area, Axis, Child, Chrome, ClosedPane, Corner, Dock, Docks, Float, Group,
     GroupAlias, GroupId, History, LinkId, Location, Node, Pane, PaneId, Pin, Rect, Ribbon, Shown,

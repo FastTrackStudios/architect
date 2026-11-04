@@ -398,6 +398,9 @@ struct Record {
     /// The package's folder, when it is linked rather than copied.
     #[serde(default)]
     link: Option<PathBuf>,
+    /// The versions an update may take (a semver range), when pinned.
+    #[serde(default)]
+    pin: Option<String>,
 }
 
 const RECORD: &str = "installed.toml";
@@ -412,6 +415,9 @@ pub struct Install {
     /// Where its files are: its own folder, or the folder it links to.
     pub dir: PathBuf,
     pub linked: bool,
+    /// The versions an update may take (`=1.2.0`, `~1.2`), when pinned:
+    /// `EXT_UPDATE` takes none past it.
+    pub pin: Option<String>,
 }
 
 impl Install {
@@ -441,17 +447,7 @@ impl Installs {
 
     /// The folder of `id`'s install.
     fn slot(&self, id: &str) -> PathBuf {
-        let slug: String = id
-            .chars()
-            .map(|c| {
-                if c.is_ascii_alphanumeric() || ".-_".contains(c) {
-                    c
-                } else {
-                    '_'
-                }
-            })
-            .collect();
-        self.root.join(slug)
+        self.root.join(slug(id))
     }
 
     /// Everything installed, by id.
@@ -526,12 +522,15 @@ impl Installs {
             }
         }
         std::fs::create_dir_all(incoming).map_err(io(incoming))?;
+        // A pin outlives the version it was made on.
+        let pin = read_record(slot).and_then(|i| i.pin);
         let record = Record {
             id: listing.id.clone(),
             version: listing.version.to_string(),
             kind: listing.kind.clone(),
             source: source.name(),
             link,
+            pin,
         };
         let text = toml::to_string(&record).map_err(|e| InstallError::Io(e.to_string()))?;
         let at = incoming.join(RECORD);
@@ -542,6 +541,29 @@ impl Installs {
         std::fs::rename(incoming, slot).map_err(io(slot))?;
         read_record(slot)
             .ok_or_else(|| InstallError::Io(format!("{} was not kept", slot.display())))
+    }
+
+    /// Pins `id`'s install to `versions` (a semver range), or unpins it.
+    ///
+    /// # Errors
+    ///
+    /// It is not installed, `versions` is not a range, or the record could
+    /// not be written.
+    pub fn set_pin(&self, id: &str, versions: Option<&str>) -> Result<Install, InstallError> {
+        let slot = self.slot(id);
+        let at = slot.join(RECORD);
+        let text = std::fs::read_to_string(&at)
+            .map_err(|_| InstallError::NotFound(format!("{id} is not installed")))?;
+        let mut record: Record =
+            toml::from_str(&text).map_err(|e| InstallError::Io(e.to_string()))?;
+        if let Some(v) = versions {
+            semver::VersionReq::parse(v)
+                .map_err(|e| InstallError::NotFound(format!("version {v}: {e}")))?;
+        }
+        record.pin = versions.map(str::to_owned);
+        let text = toml::to_string(&record).map_err(|e| InstallError::Io(e.to_string()))?;
+        std::fs::write(&at, text).map_err(io(&at))?;
+        read_record(&slot).ok_or_else(|| InstallError::Io(format!("{} was not kept", at.display())))
     }
 
     /// Removes `id`'s install: false when there was none. A linked one's
@@ -560,6 +582,20 @@ impl Installs {
     }
 }
 
+/// `id` as a folder's name: what is not a letter, digit, `.`, `-` or `_`
+/// is `_`.
+pub(crate) fn slug(id: &str) -> String {
+    id.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || ".-_".contains(c) {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
 fn read_record(slot: &Path) -> Option<Install> {
     let text = std::fs::read_to_string(slot.join(RECORD)).ok()?;
     let record: Record = toml::from_str(&text).ok()?;
@@ -570,5 +606,6 @@ fn read_record(slot: &Path) -> Option<Install> {
         id: record.id,
         kind: record.kind,
         source: record.source,
+        pin: record.pin,
     })
 }

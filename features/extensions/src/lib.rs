@@ -37,8 +37,10 @@
 // stale compare only redraws.
 #![cfg_attr(feature = "ui", allow(unpredictable_function_pointer_comparisons))]
 
+pub mod capabilities;
 pub mod catalog;
 pub mod contrib;
+pub mod hostcall;
 pub mod index;
 pub mod manifest;
 pub mod package;
@@ -47,6 +49,16 @@ pub mod reapack;
 
 #[cfg(feature = "host")]
 pub mod actions;
+#[cfg(feature = "host")]
+pub mod actions_manage;
+#[cfg(feature = "host")]
+pub mod browse;
+#[cfg(feature = "host")]
+pub mod check;
+#[cfg(feature = "host")]
+pub mod clone;
+#[cfg(feature = "host")]
+pub mod consent;
 #[cfg(feature = "host")]
 pub mod contrib_actions;
 #[cfg(feature = "crdt")]
@@ -57,12 +69,26 @@ pub mod extensions;
 pub mod guest;
 #[cfg(feature = "host")]
 pub mod host;
+#[cfg(feature = "vox")]
+pub mod host_proto;
+#[cfg(feature = "host")]
+pub mod hostapi;
 #[cfg(feature = "host")]
 pub mod install;
 #[cfg(feature = "ui")]
 pub mod interface;
 #[cfg(any(feature = "linked", all(feature = "guest", unix)))]
 pub mod linked;
+#[cfg(feature = "host")]
+pub mod logs;
+#[cfg(feature = "host")]
+mod luau_host;
+#[cfg(feature = "host")]
+pub mod manage;
+#[cfg(feature = "manager")]
+pub mod manager;
+#[cfg(feature = "page")]
+pub mod page;
 #[cfg(all(feature = "process", unix))]
 pub mod process;
 #[cfg(feature = "vox")]
@@ -72,9 +98,13 @@ pub mod remote;
 #[cfg(feature = "ui")]
 pub mod ui;
 #[cfg(feature = "host")]
+pub mod views;
+#[cfg(feature = "host")]
 pub mod watch;
 #[cfg(feature = "vox")]
 pub mod wire;
+#[cfg(feature = "guest")]
+pub mod work;
 
 pub use catalog::{Candidate, Chosen, Origin, choose};
 pub use contrib::{Contribution, Contributions};

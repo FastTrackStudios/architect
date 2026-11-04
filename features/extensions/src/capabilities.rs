@@ -1,0 +1,324 @@
+//! What an extension asks to reach, as a person reads it and as the host
+//! checks it (#178).
+//!
+//! A manifest's [`Capabilities`] are what it asks for; a grant
+//! (`crate::consent`) is what a person said yes to. What it may do is
+//! the two together ([`Capabilities::within`]): an update that asks for
+//! more than was granted runs with what was granted until the person says
+//! yes to the rest ([`Capabilities::grows_from`] is what to ask them).
+
+use serde::Serialize;
+
+use crate::manifest::{Capabilities, Reach};
+
+/// What of the app's state an extension may read
+/// ([`Capabilities::reads`]).
+pub const READS: [&str; 3] = [ORG, SELECTION, DOCUMENTS];
+/// The current organization.
+pub const ORG: &str = "org";
+/// What is selected and focused.
+pub const SELECTION: &str = "selection";
+/// The app's documents: open them, read them.
+pub const DOCUMENTS: &str = "documents";
+
+/// One thing an extension asks for, in a person's words.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Ask {
+    /// `actions`, `effect`, `hosts`, `folders` or `reads`.
+    pub kind: &'static str,
+    /// What exactly (`TRANSPORT_`, `api.github.com`, `selection`).
+    pub what: String,
+    /// The sentence a consent prompt shows.
+    pub says: String,
+}
+
+/// Whether prefix `p` is inside one of `of` (`*` is every action).
+fn prefix_in(p: &str, of: &[String]) -> bool {
+    of.iter().any(|g| g == "*" || p.starts_with(g.as_str()))
+}
+
+/// Whether host `h` is one of `of` (`*` any; `*.example.com` its
+/// subdomains).
+fn host_in(h: &str, of: &[String]) -> bool {
+    of.iter().any(|g| {
+        g == "*"
+            || g == h
+            || g.strip_prefix("*.")
+                .is_some_and(|d| h.ends_with(&format!(".{d}")) || h == d)
+    })
+}
+
+/// Whether folder `f` is one of `of` or inside one.
+fn folder_in(f: &str, of: &[String]) -> bool {
+    let f = f.trim_end_matches('/');
+    of.iter().any(|g| {
+        let g = g.trim_end_matches('/');
+        f == g || f.starts_with(&format!("{g}/"))
+    })
+}
+
+const fn reach_words(r: Reach) -> &'static str {
+    match r {
+        Reach::ReadOnly => "only read",
+        Reach::Mutating => "change things",
+        Reach::Destructive => "delete or replace things",
+    }
+}
+
+fn read_words(r: &str) -> String {
+    match r {
+        ORG => "See which organization you are working in".to_owned(),
+        SELECTION => "See what you have selected and focused".to_owned(),
+        DOCUMENTS => "Open and read your documents".to_owned(),
+        other => format!("Read {other}"),
+    }
+}
+
+impl Capabilities {
+    /// It asks for nothing past its own actions, settings and data: no
+    /// consent to ask.
+    #[must_use]
+    pub const fn asks_nothing(&self) -> bool {
+        self.actions.is_empty()
+            && self.hosts.is_empty()
+            && self.folders.is_empty()
+            && self.reads.is_empty()
+    }
+
+    /// Everything it asks for, one line a thing, in the order a prompt
+    /// shows them.
+    #[must_use]
+    pub fn asks(&self) -> Vec<Ask> {
+        self.grows_from(&Self::default())
+    }
+
+    /// What it asks for past `granted`: empty when `granted` covers it.
+    #[must_use]
+    pub fn grows_from(&self, granted: &Self) -> Vec<Ask> {
+        let mut out = Vec::new();
+        for p in self
+            .actions
+            .iter()
+            .filter(|p| !prefix_in(p, &granted.actions))
+        {
+            out.push(Ask {
+                kind: "actions",
+                what: p.clone(),
+                says: if p == "*" {
+                    "Run any of the app's actions".to_owned()
+                } else {
+                    format!("Run the app's {p}… actions")
+                },
+            });
+        }
+        let runs_any = !self.actions.is_empty();
+        if runs_any && (self.effect > granted.effect || granted.actions.is_empty()) {
+            out.push(Ask {
+                kind: "effect",
+                what: self.effect.name().to_owned(),
+                says: format!("Through them, {}", reach_words(self.effect)),
+            });
+        }
+        for r in self.reads.iter().filter(|r| !granted.reads.contains(r)) {
+            out.push(Ask {
+                kind: "reads",
+                what: r.clone(),
+                says: read_words(r),
+            });
+        }
+        for f in self
+            .folders
+            .iter()
+            .filter(|f| !folder_in(f, &granted.folders))
+        {
+            out.push(Ask {
+                kind: "folders",
+                what: f.clone(),
+                says: format!("Read and write files in {f}"),
+            });
+        }
+        for h in self.hosts.iter().filter(|h| !host_in(h, &granted.hosts)) {
+            out.push(Ask {
+                kind: "hosts",
+                what: h.clone(),
+                says: if h == "*" {
+                    "Reach any server on the network".to_owned()
+                } else {
+                    format!("Reach {h} on the network")
+                },
+            });
+        }
+        out
+    }
+
+    /// What it may do when `granted` is what a person said yes to: each
+    /// part the narrower of the two.
+    #[must_use]
+    pub fn within(&self, granted: &Self) -> Self {
+        let mut actions: Vec<String> = self
+            .actions
+            .iter()
+            .filter(|p| prefix_in(p, &granted.actions))
+            .cloned()
+            .collect();
+        for g in &granted.actions {
+            if g != "*" && prefix_in(g, &self.actions) && !prefix_in(g, &actions) {
+                actions.push(g.clone());
+            }
+        }
+        let mut hosts: Vec<String> = self
+            .hosts
+            .iter()
+            .filter(|h| host_in(h, &granted.hosts))
+            .cloned()
+            .collect();
+        for g in &granted.hosts {
+            if g != "*" && host_in(g, &self.hosts) && !host_in(g, &hosts) {
+                hosts.push(g.clone());
+            }
+        }
+        let mut folders: Vec<String> = self
+            .folders
+            .iter()
+            .filter(|f| folder_in(f, &granted.folders))
+            .cloned()
+            .collect();
+        for g in &granted.folders {
+            if folder_in(g, &self.folders) && !folder_in(g, &folders) {
+                folders.push(g.clone());
+            }
+        }
+        Self {
+            actions,
+            effect: self.effect.min(granted.effect),
+            hosts,
+            folders,
+            reads: self
+                .reads
+                .iter()
+                .filter(|r| granted.reads.contains(r))
+                .cloned()
+                .collect(),
+        }
+    }
+
+    /// Whether it may run action `id` of `effect` (past its own
+    /// namespace, `own`): the capability it lacks and why, when it may
+    /// not.
+    ///
+    /// # Errors
+    ///
+    /// `actions`: not a namespace it may run; `effect`: more than it may
+    /// change.
+    pub fn may_run(
+        &self,
+        own: &str,
+        id: &str,
+        effect: Reach,
+    ) -> Result<(), (&'static str, String)> {
+        if id.starts_with(own) {
+            return Ok(());
+        }
+        if !prefix_in(id, &self.actions) {
+            return Err((
+                "actions",
+                format!("{id} is not in a namespace this extension may run"),
+            ));
+        }
+        if effect > self.effect {
+            return Err((
+                "effect",
+                format!(
+                    "{id} is {}: this extension may run {} actions at most",
+                    effect.name(),
+                    self.effect.name()
+                ),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Whether it may read `what` ([`READS`]).
+    #[must_use]
+    pub fn may_read(&self, what: &str) -> bool {
+        self.reads.iter().any(|r| r == what)
+    }
+
+    /// Whether it may reach `folder` (an absolute path, `~` already
+    /// expanded in both).
+    #[must_use]
+    pub fn may_reach_folder(&self, path: &str) -> bool {
+        folder_in(path, &self.folders)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::manifest::{Capabilities, Reach};
+
+    fn caps(actions: &[&str], effect: Reach, reads: &[&str]) -> Capabilities {
+        Capabilities {
+            actions: actions.iter().map(|s| (*s).to_owned()).collect(),
+            effect,
+            reads: reads.iter().map(|s| (*s).to_owned()).collect(),
+            ..Capabilities::default()
+        }
+    }
+
+    #[test]
+    fn an_update_that_asks_for_more_says_only_the_more() {
+        let was = caps(&["TRANSPORT_"], Reach::ReadOnly, &["selection"]);
+        let now = caps(
+            &["TRANSPORT_", "WORKSPACE_"],
+            Reach::Mutating,
+            &["selection", "org"],
+        );
+        let grown: Vec<(&str, String)> = now
+            .grows_from(&was)
+            .into_iter()
+            .map(|a| (a.kind, a.what))
+            .collect();
+        assert_eq!(
+            grown,
+            vec![
+                ("actions", "WORKSPACE_".to_owned()),
+                ("effect", "mutating".to_owned()),
+                ("reads", "org".to_owned()),
+            ]
+        );
+        assert!(was.grows_from(&now).is_empty(), "less is covered");
+        assert!(Capabilities::default().asks_nothing());
+        assert!(!was.asks_nothing());
+    }
+
+    #[test]
+    fn what_it_may_do_is_the_narrower_of_ask_and_grant() {
+        let asks = caps(&["*"], Reach::Destructive, &["org", "selection"]);
+        let granted = caps(&["TRANSPORT_"], Reach::Mutating, &["selection"]);
+        let may = asks.within(&granted);
+        assert_eq!(may.actions, vec!["TRANSPORT_".to_owned()]);
+        assert_eq!(may.effect, Reach::Mutating);
+        assert_eq!(may.reads, vec!["selection".to_owned()]);
+        assert!(
+            may.may_run("FTS_M_", "FTS_M_GO", Reach::Destructive)
+                .is_ok(),
+            "its own"
+        );
+        assert!(
+            may.may_run("FTS_M_", "TRANSPORT_PLAY", Reach::Mutating)
+                .is_ok()
+        );
+        assert!(
+            may.may_run("FTS_M_", "WORKSPACE_CLOSE", Reach::ReadOnly)
+                .is_err()
+        );
+        assert!(
+            may.may_run("FTS_M_", "TRANSPORT_WIPE", Reach::Destructive)
+                .is_err()
+        );
+        assert!(
+            asks.within(&Capabilities::default()).asks_nothing(),
+            "nothing granted"
+        );
+    }
+}

@@ -1,7 +1,9 @@
 //! What extensions add to the interface, on the Action List (feature
-//! `host`): read it, open files and links with it, write runtime state,
-//! raise an event, open a view, turn an extension on and off — from ⌘K,
-//! a key, a script or a model over MCP. Put on the list with
+//! `host`):
+//!
+//! read it, open files and links with it, write runtime state, raise an
+//! event, open a view, turn an extension on and off — from ⌘K, a key, a
+//! script or a model over MCP. Put on the list with
 //! [`Extensions::install_contribution_actions`].
 //!
 //! | action | what it does |

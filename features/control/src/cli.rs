@@ -138,6 +138,19 @@ pub enum ActionsCommand {
         #[arg(long)]
         json: bool,
     },
+    /// The running app's window (or one pane) as a PNG, drawn by the app
+    /// itself (`APP_SHOT`): prints the file's absolute path.
+    Shot {
+        /// Where to write it (`app-shot.png` here unless given); must end
+        /// in `.png`.
+        path: Option<PathBuf>,
+        /// Only this pane (a workspace pane id).
+        #[arg(long)]
+        pane: Option<String>,
+        /// Print the whole answer (path, size) as JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// The apps answering on a control socket here.
     Apps {
         /// Print the answer as JSON.
@@ -401,6 +414,17 @@ impl Cli {
                 max,
                 json,
             } => events(&mut target, out, *since, *follow, *max, *json)?,
+            ActionsCommand::Shot { path, pane, json } => {
+                let request = shot_request(path.as_deref(), pane.as_deref())?;
+                let value = settled(&target.call(&request)?, out, *json)?;
+                if !*json {
+                    let path = value
+                        .get("path")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| Failure::new(Code::Failed, "the app answered no path"))?;
+                    writeln!(out, "{path}").map_err(written)?;
+                }
+            }
             ActionsCommand::Apps { .. } => {}
         }
         Ok(())
@@ -428,6 +452,33 @@ impl Cli {
         };
         Client::connect(&path).map(Target::Socket)
     }
+}
+
+/// The id `actions shot` runs.
+pub const SHOT_ACTION: &str = "APP_SHOT";
+
+/// `actions shot [path] [--pane id]` as the run it is: the path made
+/// absolute here (the app's working folder is not the caller's).
+fn shot_request(path: Option<&std::path::Path>, pane: Option<&str>) -> Result<Request, Failure> {
+    let path = path.unwrap_or_else(|| std::path::Path::new("app-shot.png"));
+    if !path
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("png"))
+    {
+        return Err(Failure::new(Code::BadRequest, "a shot's path ends in .png"));
+    }
+    let path = std::path::absolute(path)
+        .map_err(|e| Failure::new(Code::BadRequest, format!("{}: {e}", path.display())))?;
+    let mut args = serde_json::Map::new();
+    args.insert("path".to_owned(), Value::String(path.display().to_string()));
+    if let Some(pane) = pane {
+        args.insert("pane".to_owned(), Value::String(pane.to_owned()));
+    }
+    Ok(Request::Run {
+        id: SHOT_ACTION.to_owned(),
+        args: Some(Value::Object(args)),
+        ticket: None,
+    })
 }
 
 /// The one app serving a socket here, for a command that names none.

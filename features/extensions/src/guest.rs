@@ -26,6 +26,14 @@
 //! signal, so a process that paints itself or works out its own colours
 //! (`theme.color("clicker.face")`) follows the app's theme.
 //!
+//! A view's thread renders one event at a time: a handler that computes
+//! for a second freezes its pane for that second (its host marks it
+//! busy). Heavy work goes to [`spawn_work`] ([`use_work`] in a view): a
+//! thread of its own, its progress and results back to the view as they
+//! come, cancelled when the view closes (`crate::work`). Every event is
+//! answered with a frame, empty when nothing changed (wire 5), so the
+//! host times each one.
+//!
 //! What it adds to the app's interface at run time — tabs, status items,
 //! openers, menu entries, hooks, slots ([`Contribution`]) — and its
 //! runtime state (a status item's text) go to the host as they change:
@@ -64,6 +72,9 @@ use crate::wire::{
     Edit, EventData, Frame, Hello, KeyData, Mods, Open, Pointer, ThemeData, Update, Value,
     ViewEvent, WIRE,
 };
+pub use crate::work::{
+    Progress, UseWork, Work, WorkHandle, WorkState, WorkStatus, spawn_work, use_work,
+};
 
 type ActionFuture = Pin<Box<dyn Future<Output = Result<Json, String>> + Send>>;
 type Action = Arc<dyn Fn(Json, Json) -> ActionFuture + Send + Sync>;
@@ -97,8 +108,10 @@ fn post(update: Update) {
 
 /// Puts what this process adds to the app's interface now (its tabs,
 /// status items, openers, menu and context entries, hooks, slots), in
-/// place of what it put before: checked by the host against its
-/// manifest, as the manifest's own tables are.
+/// place of what it put before.
+///
+/// Checked by the host against its manifest, as the manifest's own
+/// tables are.
 pub fn contribute(contribution: &Contribution) {
     let json = serde_json::to_string(contribution).unwrap_or_default();
     *outbox().last.lock().unwrap_or_else(PoisonError::into_inner) = Some(json.clone());
@@ -244,6 +257,16 @@ impl Guest {
         theme_cell().borrow().clone()
     }
 
+    /// Runs `work` on a thread of its own, off every view's thread
+    /// ([`spawn_work`]): its progress and results go to its
+    /// [`WorkHandle`]; dropping that cancels it.
+    pub fn spawn_work<F>(work: F) -> WorkHandle
+    where
+        F: FnOnce(&Work) -> Result<Json, String> + Send + 'static,
+    {
+        spawn_work(work)
+    }
+
     /// Serves the host that started this process, until it goes.
     ///
     /// # Errors
@@ -275,9 +298,59 @@ impl Guest {
             .establish_connection()
             .await
             .map_err(|e| GuestError::Connect(format!("{e:?}")))?;
+        // The host service, the other way (a host from before it serves
+        // none: `host` says so).
+        if let Ok(client) = connection
+            .open_lane::<crate::host_proto::ExtensionHostClient>()
+            .await
+        {
+            *host_slot().lock().unwrap_or_else(PoisonError::into_inner) = Some(client);
+        }
         connection.closed().await;
+        host_slot()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
         Ok(())
     }
+}
+
+fn host_slot() -> &'static Mutex<Option<crate::host_proto::ExtensionHostClient>> {
+    static HOST: OnceLock<Mutex<Option<crate::host_proto::ExtensionHostClient>>> = OnceLock::new();
+    HOST.get_or_init(|| Mutex::new(None))
+}
+
+/// Asks the host service (`crate::hostcall`), from anywhere in the
+/// process once it is connected.
+///
+/// It runs an app action, reads the selection or a setting, keeps data —
+/// checked by the host against what this extension may reach.
+///
+/// # Errors
+///
+/// The host refused or failed, or there is no host to ask (not connected
+/// yet, or a host that serves no host service).
+pub async fn host(
+    request: crate::hostcall::HostRequest,
+) -> Result<Json, crate::hostcall::HostError> {
+    let client = host_slot()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()
+        .ok_or_else(|| crate::hostcall::HostError::Failed {
+            message: "no host service: not connected, or the host serves none".to_owned(),
+        })?;
+    let text = serde_json::to_string(&request).map_err(|e| crate::hostcall::HostError::Failed {
+        message: e.to_string(),
+    })?;
+    let answer = client
+        .call(text)
+        .await
+        .map_err(architect::vox_into_app::<ProcessError>)
+        .map_err(|e| crate::hostcall::HostError::Failed {
+            message: format!("the host service: {e}"),
+        })?;
+    crate::hostcall::HostAnswer::from_json(&answer).into_result()
 }
 
 /// The views open now, by pane: where their events go.
@@ -467,11 +540,14 @@ fn render(
                 },
                 () = vdom.wait_for_work() => None,
             };
+            // An event is always answered (wire 5): its host times the
+            // frame from it, empty or not.
+            let answers = event.is_some();
             if let Some(event) = event {
                 dispatch(&vdom, event);
             }
             vdom.render_immediate(&mut writer);
-            if !writer.is_empty() && sink.send(writer.take()).await.is_err() {
+            if (answers || !writer.is_empty()) && sink.send(writer.take()).await.is_err() {
                 return;
             }
         }

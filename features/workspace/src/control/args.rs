@@ -721,8 +721,26 @@ guarded!(
     SlotArgs,
     OptionsArgs,
     DeleteArgs,
+    CloneArgs,
     RevisionArgs
 );
+
+/// `WORKSPACES_CLONE`: a copy of a saved layout (a built-in one, above
+/// all) to change.
+#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+pub struct CloneArgs {
+    /// Run only if the layout is still at this revision (what
+    /// `WORKSPACE_LAYOUT` said): otherwise nothing changes and the answer
+    /// is `stale`, with the layout as it is now.
+    #[facet(default)]
+    pub if_revision: Option<u64>,
+    /// The set to copy: its name (case aside) or its id.
+    pub name: String,
+    /// The copy's name; `<name> copy` unless given. A name another set
+    /// has is refused.
+    #[facet(default, rename = "as")]
+    pub as_name: Option<String>,
+}
 
 /// `WORKSPACES_DELETE`.
 #[derive(Debug, Clone, PartialEq, Eq, Facet)]

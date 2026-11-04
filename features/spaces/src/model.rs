@@ -52,7 +52,10 @@ impl Subject {
         match who {
             Principal::User { user_id } => Some(Self::User(user_id.clone())),
             Principal::Guest { link_id, .. } => Some(Self::Guest(link_id.clone())),
-            Principal::Service { .. } | Principal::Host { .. } | Principal::Anonymous => None,
+            Principal::Service { .. }
+            | Principal::Host { .. }
+            | Principal::Extension { .. }
+            | Principal::Anonymous => None,
         }
     }
 
