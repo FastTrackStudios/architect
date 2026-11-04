@@ -131,6 +131,10 @@ package = "architect-canvas"
 layer = "L0"
 
 [[row]]
+package = "architect-pages"
+layer = "L0"
+
+[[row]]
 package = "architect-theme"
 layer = "L0"
 note = "the palette, resolver, cascade and store: pure data"
@@ -264,6 +268,11 @@ layer = "L4"
 
 [[row]]
 package = "architect-canvas"
+features = ["ui"]
+layer = "L4"
+
+[[row]]
+package = "architect-pages"
 features = ["ui"]
 layer = "L4"
 

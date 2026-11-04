@@ -36,7 +36,10 @@
 //! No script runs on its caller's thread (`crate::vm`): a run takes a
 //! thread of a small pool, a live script has a thread of its own, and
 //! the caller awaits the result — an app's UI thread never waits on a
-//! script, however long it runs. Dropping a run's future stops it.
+//! script, however long it runs. Dropping a run's future stops it. The
+//! actions a script calls run back on the app's Tokio runtime (the one
+//! its run was started from, or [`Runtime::with_runtime`]'s), the script
+//! awaiting the answer over a channel ([`crate::vm::Dispatch`]).
 //! Heavy work goes to a worker ([`crate::worker`]), a Luau state of its
 //! own on the pool, so a live script's frames keep within their budget
 //! ([`Limits::frame`]).
@@ -49,7 +52,7 @@ use architect::action::{ActionCaller, ActionInfo, ActionList, Effect};
 use mlua::{Lua, LuaSerdeExt, MultiValue, Value as LuaValue};
 use serde_json::{Value, json};
 
-use crate::vm::{self, Cancel, Guard, Stop, Wake};
+use crate::vm::{self, Cancel, Dispatch, Guard, Stop, Wake};
 use crate::{ErrorKind, ScriptError, Transactions};
 
 /// The Luau binding a [`Module`] is written against: this one, so its
@@ -225,6 +228,9 @@ pub struct Runtime {
     limits: Limits,
     gate: Option<Gate>,
     modules: Vec<Arc<dyn Module>>,
+    /// Where its scripts' action calls run; `None`: the runtime each run
+    /// is started from ([`Dispatch::here`]).
+    dispatch: Option<Dispatch>,
 }
 
 impl std::fmt::Debug for Runtime {
@@ -234,6 +240,7 @@ impl std::fmt::Debug for Runtime {
             .field("transactions", &self.transactions.is_some())
             .field("limits", &self.limits)
             .field("gate", &self.gate.is_some())
+            .field("dispatch", &self.dispatch)
             .field(
                 "modules",
                 &self.modules.iter().map(|m| m.path()).collect::<Vec<_>>(),
@@ -253,7 +260,34 @@ impl Runtime {
             limits: Limits::default(),
             gate: None,
             modules: Vec::new(),
+            dispatch: None,
         }
+    }
+
+    /// Its scripts' action calls run on `handle`, whatever runtime a run
+    /// is started from. By default they run on the runtime of the thread
+    /// that started the run ([`Dispatch::here`]): a script's own thread
+    /// has none, and an action that needs one (a timer, a socket) fails
+    /// there.
+    #[must_use]
+    pub fn with_runtime(mut self, handle: tokio::runtime::Handle) -> Self {
+        self.dispatch = Some(Dispatch::to(handle));
+        self
+    }
+
+    /// Its scripts' action calls go where `dispatch` sends them (an
+    /// extension host passes the runtime it was loaded on).
+    #[must_use]
+    pub fn with_dispatch(mut self, dispatch: Dispatch) -> Self {
+        if dispatch.has_runtime() {
+            self.dispatch = Some(dispatch);
+        }
+        self
+    }
+
+    /// Where a run started now sends its action calls.
+    fn dispatch(&self) -> Dispatch {
+        self.dispatch.clone().unwrap_or_else(Dispatch::here)
     }
 
     /// Its scripts reach `module` too.
@@ -318,12 +352,13 @@ impl Runtime {
         args: Value,
         step: &str,
     ) -> Report {
-        let (runtime, caller, source, step) = (
+        let (mut runtime, caller, source, step) = (
             self.clone(),
             caller.clone(),
             source.to_owned(),
             step.to_owned(),
         );
+        runtime.dispatch = Some(self.dispatch());
         let task = vm::run(move |cancel| async move {
             runtime
                 .run_here(&caller, &source, args, &step, cancel)
@@ -375,12 +410,13 @@ impl Runtime {
         let (ready, started) = futures::channel::oneshot::channel::<Report>();
         let (frames, asked) = std::sync::mpsc::channel::<Ask>();
         let shared = Arc::new(LiveShared::default());
-        let (runtime, caller, source, name) = (
+        let (mut runtime, caller, source, name) = (
             self.clone(),
             caller.clone(),
             source.to_owned(),
             step.to_owned(),
         );
+        runtime.dispatch = Some(self.dispatch());
         let theirs = Arc::clone(&shared);
         let spawned = std::thread::Builder::new()
             .name(format!("luau live: {step}"))
@@ -572,6 +608,7 @@ impl Runtime {
     ) -> mlua::Result<mlua::Function> {
         let (list, who, trace) = (self.list.clone(), caller.clone(), Arc::clone(trace));
         let gate = self.gate.clone();
+        let dispatch = self.dispatch();
         lua.create_async_function(move |lua, (id, args): (String, Option<LuaValue>)| {
             // Where the script is, taken now: once the future runs, the
             // script is no longer on that line's frame.
@@ -579,6 +616,7 @@ impl Runtime {
             let refused = refusal(&list, &id, read_only, gate.as_ref());
             let args = args.map(|a| lua.from_value::<Value>(a));
             let (list, who, trace) = (list.clone(), who.clone(), Arc::clone(&trace));
+            let dispatch = dispatch.clone();
             async move {
                 if let Some(message) = refused {
                     return Err(fault_at(line, ErrorKind::Action, message));
@@ -596,9 +634,16 @@ impl Runtime {
                     .ran
                     .push(id.clone());
                 let bytes = args.map(|a| a.to_string().into_bytes()).unwrap_or_default();
-                let out = list
-                    .run_json_async_with(&who, &id, &bytes)
+                // On the app's runtime, not this thread: an action that
+                // needs one (a timer, a socket) has it.
+                let call = {
+                    let id = id.clone();
+                    async move { list.run_json_async_with(&who, &id, &bytes).await }
+                };
+                let out = dispatch
+                    .call(call)
                     .await
+                    .map_err(|e| fault_at(line, ErrorKind::Action, format!("{id}: {e}")))?
                     .map_err(|e| fault_at(line, ErrorKind::Action, e.to_string()))?;
                 let value: Value = serde_json::from_slice(&out).unwrap_or(Value::Null);
                 to_lua(&lua, &value)

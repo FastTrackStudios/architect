@@ -181,7 +181,10 @@ async fn probe() -> Result<serde_json::Value, String> {
     })
     .await
     .map_err(|e| e.to_string())?;
-    let problems = status["problems"].as_array().map_or(0, Vec::len);
+    let problems = status
+        .get("problems")
+        .and_then(serde_json::Value::as_array)
+        .map_or(0, Vec::len);
     // Its stderr is its log.
     eprintln!("probe: step {step}, {problems} problem(s)");
     Ok(serde_json::json!({ "step": step, "problems": problems, "pid": std::process::id() }))

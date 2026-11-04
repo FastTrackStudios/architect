@@ -141,9 +141,11 @@ fn focused(h: SettingsHandle) -> Option<(String, u32)> {
 }
 
 /// Registers `section` (no settings needed) drawn by `page` in place of
-/// its settings, while the calling component is mounted: a page of its
-/// own on the settings page (the extensions page), found in its list and
-/// opened with [`SettingsHandle::show`] like any section.
+/// its settings, while the calling component is mounted.
+///
+/// It is a page of its own on the settings page (the extensions page),
+/// found in its list and opened with [`SettingsHandle::show`] like any
+/// section.
 pub fn use_section_page(make: impl FnOnce() -> Section, page: fn() -> Element) {
     let handle = try_use_settings();
     let owner = use_hook(move || {

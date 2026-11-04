@@ -42,7 +42,7 @@ pub mod settings;
 #[cfg(feature = "luau")]
 pub mod theme;
 #[cfg(feature = "luau")]
-mod vm;
+pub mod vm;
 #[cfg(feature = "luau")]
 pub mod worker;
 

@@ -88,6 +88,10 @@ fn the_guide_names_every_action_of_the_lab() {
         "EXT_EMIT",
         "EXT_ENABLE",
         "EXT_DISABLE",
+        // The pages as files (#275): the Board's tab and its overrides.
+        "PAGES_STATUS",
+        "PAGES_CHECK",
+        "PAGES_CLONE",
         // The interface as files.
         "HOME_LAYOUTS",
         "HOME_LAYOUT_USE",

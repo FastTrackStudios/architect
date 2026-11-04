@@ -55,6 +55,7 @@ members = [
     "features/extensions",
     "features/canvas",
     "features/a2ui",
+    "features/pages",
     "features/files",
     "features/attachments",
     "features/spaces",
@@ -246,6 +247,7 @@ architect-scripting = { path = "features/scripting" }
 architect-extensions = { path = "features/extensions" }
 architect-canvas = { path = "features/canvas" }
 architect-a2ui = { path = "features/a2ui" }
+architect-pages = { path = "features/pages" }
 architect-files = { path = "features/files" }
 architect-attachments = { path = "features/attachments" }
 architect-devices = { path = "features/devices" }

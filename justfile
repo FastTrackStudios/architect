@@ -45,8 +45,10 @@ auth-ui-css-check: auth-ui-css
 check:
     cargo check --workspace --all-targets
 
+# nextest runs every test; it does not run doctests, so those follow.
 test:
-    cargo test --workspace
+    cargo nextest run --workspace
+    cargo test --workspace --doc
 
 lint:
     cargo fmt --all -- --check

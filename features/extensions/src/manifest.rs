@@ -189,10 +189,11 @@ pub enum Home {
     Bottom,
 }
 
-/// How a view opens (herdr's pane placements, on the workspace's own):
-/// a tab, a split beside the active group, over the window (`overlay`:
-/// a layer, `popup`: a modal one, sized), alone in its window
-/// (`zoomed`), or floating.
+/// How a view opens (herdr's pane placements, on the workspace's own).
+///
+/// A tab, a split beside the active group, over the window (`overlay`: a
+/// layer, `popup`: a modal one, sized), alone in its window (`zoomed`), or
+/// floating.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ViewPlacement {
@@ -234,6 +235,13 @@ pub struct ViewDecl {
     /// A frame document in the package that draws it, for a data view.
     #[serde(default)]
     pub document: Option<String>,
+    /// A page file in the package that draws it (`page = "pages/board.tsx"`:
+    /// TSX/JS on `QuickJS`, `.luau` elements or `.a2ui.json`;
+    /// `docs/content/architecture/pages.md`), re-rendered live when it is
+    /// saved. An app that runs pages (`architect-pages`) draws it; one
+    /// that does not draws the extension's own view.
+    #[serde(default)]
+    pub page: Option<String>,
     /// Where it lives: the main area or a dock (`left`, `right`,
     /// `bottom`).
     #[serde(default)]
@@ -314,10 +322,11 @@ fn over() -> String {
 }
 
 /// A theme it contributes: a theme file (`architect_theme`'s format) in
-/// the package, its id the file's name. A host with the app's theme store
-/// (`host::Host::with_themes`) puts it there while the extension is
-/// loaded; a file that does not read is a theme problem, not a failed
-/// load.
+/// the package, its id the file's name.
+///
+/// A host with the app's theme store (`host::Host::with_themes`) puts it
+/// there while the extension is loaded; a file that does not read is a
+/// theme problem, not a failed load.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ThemeDecl {
@@ -669,6 +678,9 @@ impl Manifest {
         for view in &self.views {
             if let Some(doc) = &view.document {
                 inside(doc)?;
+            }
+            if let Some(page) = &view.page {
+                inside(page)?;
             }
         }
         for overlay in &self.overlays {
