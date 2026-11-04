@@ -591,7 +591,7 @@ pub(super) fn WorkspaceCommands() -> Element {
     rsx! {
         super::screens::ScreensetCommands {}
         for (kind, title) in views {
-            OpenViewCommand { key: "{kind}", kind: kind.clone(), title }
+            OpenViewCommand { key: "{kind}", kind, title }
         }
     }
 }
