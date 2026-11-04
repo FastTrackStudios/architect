@@ -352,8 +352,8 @@ impl Home {
                 .ok()
                 .map(|t| LayoutFile::parse(&t))
             {
-                Some(Ok(state)) => {
-                    s.by_hand.insert(name.clone(), state);
+                Some(Ok(saved)) => {
+                    s.by_hand.insert(name.clone(), saved);
                 }
                 _ => {
                     s.by_hand.remove(&name);

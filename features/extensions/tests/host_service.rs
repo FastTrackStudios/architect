@@ -263,7 +263,7 @@ fn installed_it_runs_with_what_a_person_granted() {
     let registry = tmp.path().join("registry");
     copy(&lab_registry(), &registry);
     let ext = Extensions::new(
-        host.with_grants(grants.clone()),
+        host.with_grants(grants),
         Installs::new(tmp.path().join("installs")),
     )
     .with_source(FolderRegistry::new(&registry));

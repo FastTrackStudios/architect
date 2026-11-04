@@ -757,7 +757,7 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         }
         manager.confirm_on(&lab);
     });
-    architect_extensions::page::use_manager_page(manager.clone(), browse);
+    architect_extensions::page::use_manager_page(manager, browse);
     use_extension_ui(extensions.host().clone(), Arc::clone(&lab))
 }
 

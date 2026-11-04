@@ -17,7 +17,8 @@ use architect_workspace::{
 use dioxus::prelude::*;
 use lucide_dioxus::{
     AudioLines, Bot, CalendarCheck, Cpu, FileText, Files, Hourglass, Layers, Link, ListTree,
-    MousePointerClick, Network, Puzzle, Search, SlidersHorizontal, SquarePen, SquareTerminal, Terminal,
+    MousePointerClick, Network, Puzzle, Search, SlidersHorizontal, SquarePen, SquareTerminal,
+    Terminal,
 };
 
 /// The lab's views, and the kinds that draw them, with the views loaded
