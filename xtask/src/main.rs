@@ -7,6 +7,7 @@
 mod boundaries;
 mod builtins;
 mod docs;
+mod ext;
 mod fleet;
 mod fleet_deps;
 mod git;
@@ -69,6 +70,63 @@ enum Command {
         /// Replace every address with `user-<id>@local.invalid`.
         #[arg(long)]
         redact_emails: bool,
+    },
+    /// Pack an extension's folder into an unsigned `.archext` archive:
+    /// its files, `bin/<target-triple>/` builds and a content index of
+    /// their SHA-256 (`docs/content/architecture/extensions.md`,
+    /// "Distribution").
+    ExtPack {
+        /// The package folder (its `extension.toml` at the top).
+        dir: PathBuf,
+        /// Where to write it; `<id>-<version>.archext` here by default.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    /// Sign an `.archext` archive's content index with a minisign secret
+    /// key (unencrypted, as `minisign -G -W` writes): `--key <file>`, or
+    /// the key's text in `EXT_SIGNING_KEY`. Never prints the key.
+    ExtSign {
+        archive: PathBuf,
+        #[arg(long)]
+        key: Option<PathBuf>,
+        /// Refuse to sign unless the key's public half is this one (a
+        /// `.pub` file or its base64 line).
+        #[arg(long)]
+        expect: Option<String>,
+        /// Write the signed archive here instead of in place.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    /// Open an `.archext` archive as an app would: signature, hashes, and
+    /// this platform's build. Trusts the org release key and each `--key`.
+    ExtVerify {
+        archive: PathBuf,
+        /// Also trust this key (a `.pub` file or its base64 line).
+        #[arg(long)]
+        key: Vec<String>,
+        /// Do not trust the org release key.
+        #[arg(long)]
+        no_org: bool,
+    },
+    /// Make a throwaway minisign key pair (`<name>.key`, `<name>.pub`) for
+    /// trials and tests. Never a release key.
+    ExtKeygen {
+        dir: PathBuf,
+        #[arg(long, default_value = "throwaway")]
+        name: String,
+    },
+    /// Check an extension registry's `index.toml`: its schema, and each
+    /// archive's pinned sha256, signature and contents.
+    ExtIndex {
+        /// The registry's folder (its `index.toml` at the top).
+        #[arg(default_value = ".")]
+        dir: PathBuf,
+        /// Also trust this key (a `.pub` file or its base64 line).
+        #[arg(long)]
+        key: Vec<String>,
+        /// Do not trust the org release key.
+        #[arg(long)]
+        no_org: bool,
     },
     /// Check the crate-layout boundaries in `boundaries.toml`.
     ///
@@ -163,6 +221,20 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
         Command::Tags { verbose } => tags::run(verbose),
+        Command::ExtPack { dir, out } => ext::pack_cli(&dir, out.as_deref()),
+        Command::ExtSign {
+            archive,
+            key,
+            expect,
+            out,
+        } => ext::sign_cli(&archive, key.as_deref(), expect.as_deref(), out.as_deref()),
+        Command::ExtVerify {
+            archive,
+            key,
+            no_org,
+        } => ext::verify_cli(&archive, &key, no_org),
+        Command::ExtKeygen { dir, name } => ext::keygen_cli(&dir, &name),
+        Command::ExtIndex { dir, key, no_org } => ext::index_cli(&dir, &key, no_org),
         Command::Boundaries { config, verbose } => {
             let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
             boundaries::run_cli(&root, &config, verbose)

@@ -962,6 +962,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-extension-archive"
+version = "0.1.0"
+dependencies = [
+ "architect-extension-archive",
+ "architect-workspace-hack",
+ "base64 0.22.1",
+ "blake2",
+ "ed25519-dalek",
+ "flate2",
+ "getrandom 0.3.4",
+ "hex",
+ "minisign-verify",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tar",
+ "tempfile",
+ "toml 0.8.2",
+]
+
+[[package]]
 name = "architect-extension-wasi"
 version = "0.1.0"
 dependencies = [
@@ -986,6 +1008,7 @@ version = "0.1.0"
 dependencies = [
  "architect",
  "architect-commands",
+ "architect-extension-archive",
  "architect-extensions",
  "architect-orgs",
  "architect-permissions",
@@ -1005,6 +1028,7 @@ dependencies = [
  "facet",
  "futures",
  "futures-timer",
+ "hex",
  "regex",
  "roxmltree 0.21.2",
  "semver",
@@ -6713,6 +6737,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8abaae62355b1223346bb0df83239e1697a42d238b8d2f2fa261414e25708f0e"
 dependencies = [
  "facet",
+]
+
+[[package]]
+name = "filetime"
+version = "0.2.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c287a33c7f0a620c38e641e7f60827713987b3c0f26e8ddc9462cc69cf75759"
+dependencies = [
+ "cfg-if",
+ "libc",
 ]
 
 [[package]]
@@ -16373,6 +16407,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 
 [[package]]
+name = "tar"
+version = "0.4.46"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f6221d9a6003c78398e3b239969f352578258df48c8eb051caadae0015bc840"
+dependencies = [
+ "filetime",
+ "libc",
+]
+
+[[package]]
 name = "target-lexicon"
 version = "0.12.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -20531,6 +20575,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 name = "xtask"
 version = "0.1.0"
 dependencies = [
+ "architect-extension-archive",
  "clap",
  "guppy",
  "serde",
