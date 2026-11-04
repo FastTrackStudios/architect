@@ -23,7 +23,8 @@
 //! the app's interface as the page's extension (`ui.pick`, `ui.prompt`,
 //! `ui.menu(items, at?)`, `ui.decorate(target, decoration?)`, `ui.call`,
 //! `clipboard.read()`, `clipboard.write(text)`: each waits for its answer;
-//! a cancel is nil) and `print`. Luau's sandbox holds; each call into the page has
+//! a cancel is nil), hooks made at run time (`events.subscribe(hook)`,
+//! `events.unsubscribe(key)`, `events.list()`) and `print`. Luau's sandbox holds; each call into the page has
 //! [`crate::runner::PageLimits::frame`] before its interrupt stops it.
 //!
 //! **Timers**: `set_timeout(fn, ms)`, `set_interval(fn, ms)`,
@@ -354,8 +355,26 @@ impl LuauEngine {
                 Ok(serde_json::json!({ "text": text }))
             })?,
         )?;
+        // Hooks made at run time, as the page's extension.
+        let events = lua.create_table()?;
+        events.set("subscribe", ask("subscribe", table)?)?;
+        events.set(
+            "unsubscribe",
+            ask("unsubscribe", |lua, args| {
+                let key: String = args
+                    .into_iter()
+                    .next()
+                    .map_or(Ok(String::new()), |v| lua.from_value(v))?;
+                Ok(serde_json::json!({ "key": key }))
+            })?,
+        )?;
+        events.set(
+            "list",
+            ask("events", |_, _| Ok(Value::Object(serde_json::Map::new())))?,
+        )?;
         api.set("ui", ui)?;
         api.set("clipboard", clipboard)?;
+        api.set("events", events)?;
         let (log, ext) = (services.log.clone(), services.extension.clone());
         api.set(
             "print",

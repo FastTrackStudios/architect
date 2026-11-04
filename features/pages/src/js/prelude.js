@@ -294,6 +294,13 @@
     read: () => ask("clipboard_read"),
     write: (text) => ask("clipboard_write", { text: String(text) }),
   });
+  // Hooks made at run time, as the page's extension: one of its actions on
+  // an app event or a schedule (`{ on }`, `{ every }`, `{ at }`).
+  const events = Object.freeze({
+    subscribe: (hook) => ask("subscribe", hook),
+    unsubscribe: (key) => ask("unsubscribe", { key: String(key) }),
+    list: () => ask("events"),
+  });
   const settings = Object.freeze({
     get: (key) => call("setting", key),
     set: (key, value) => call("set_setting", key, json(value)),
@@ -462,7 +469,7 @@
 
   const api = Object.freeze({
     h, Fragment, useState, useRef, useEffect, useData, useShared, useEmbed, useTheme, invalidate,
-    theme, actions, services, settings, state, notify, ui, clipboard, worker, Overlay, host: raw,
+    theme, actions, services, settings, state, notify, ui, clipboard, events, worker, Overlay, host: raw,
   });
   globalThis.__architect = Object.freeze({
     api,
