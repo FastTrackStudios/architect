@@ -69,8 +69,8 @@ fn main() -> ExitCode {
             let args: Vec<String> = std::env::args().skip(2).collect();
             let app = args
                 .iter()
-                .position(|a| a == "--app")
-                .and_then(|i| args.get(i + 1))
+                .skip_while(|a| *a != "--app")
+                .nth(1)
                 .map(std::path::PathBuf::from);
             return architect_desktop::mcp(args.iter().any(|a| a == "--headless"), app);
         }
