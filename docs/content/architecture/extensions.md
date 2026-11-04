@@ -488,7 +488,7 @@ list forwards them there with `Host::forward_actions_to`
 (`features/extensions/src/forward.rs`), as extensions load, reload and
 unload; each runs on the host's list as whoever ran it. The lab does,
 so `architect-desktop actions run LAB_WASI_COUNTER_ADD` reaches the
-counter (as `LAB_CLICKER_CLICKS` reaches the clicker).
+counter.
 
 **Size.** Wasmtime and Cranelift add about 19 MB to a stripped
 `architect-desktop` built with the dev profile (opt-level 1): behind the
