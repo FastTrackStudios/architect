@@ -247,11 +247,30 @@ app on the shell gets it:
   (`WindowChrome::MAC_ROW`), in its own colour (`ShellTheme::title_bar`)
   over one rule. The traffic lights are placed in it
   (`fit_traffic_lights`, after each resize), then the sidebar's button.
-  What fills the rest is **tabs**: a page's own tab, or a workspace's tab
-  bars (`architect-workspace`'s `TitleRow`). The tab on show is the
-  page's colour and runs on into it. The breadcrumb and the page's
-  toolbar sit in the page's header under it, where Obsidian shows a
-  note's path. A press on the bar's empty part moves the window.
+  What fills the rest is **tabs**: a page's own tab (a `Page`'s title),
+  or a workspace's tab bars. A page whose top edge is its tabs claims
+  the row (`features/shell/src/shell/mod.rs` `use_title_row`;
+  `features/workspace/src/host/mod.rs` `WorkspaceView` does when given a
+  `TitleRow`): the page, and a left sidebar it fills, start at the
+  window's top, over the shell's row, so the panes' tab bars along the
+  top edge are the title row, one row and never two; the shell's row
+  stays under the ribbon and the app's sidebar beside them. The leftmost
+  bar keeps clear of the traffic lights and the sidebar's button
+  (`Shell::title_clearance`). The tab on show is the page's colour and
+  runs on into it. The breadcrumb and the page's toolbar sit in the
+  page's header under it, where Obsidian shows a note's path. A press on
+  the bar's empty part moves the window (the tab bars' own empty part
+  calls `WindowChrome::on_drag`). Linux and Windows draw the same in-app
+  row (52pt without a `WindowChrome`); on a Mac the traffic lights are
+  AppKit's, put in the row by `features/shell/src/shell/mac.rs`
+  `fit_traffic_lights`, which the lab calls from
+  `apps/lab/ui/src/screen.rs` `use_window_chrome` after each resize.
+  A pane popped out to a window of its own gets the same row: on a Mac
+  its launcher makes the title bar transparent, puts the traffic lights
+  in it and hands the pop-out a `TitleRow`
+  (`features/workspace/src/native.rs` `popout_title_row`), so its tab
+  bar is the title row, clear of the lights, its empty part moving the
+  window.
 - **The ribbon** (`RIBBON`, 44pt) is the window's left edge under the
   bar, the full height: the app's sections as icons, then what the page
   adds (a workspace's views and pinned commands). Folding the sidebar
@@ -260,6 +279,15 @@ app on the shell gets it:
   with `use_shell_slots` (a workspace's left dock, its tabs in the title
   row). The workspace switcher sits at its foot, over the account, with
   either, so it does not move when a page claims the sidebar.
+  A page says how the sidebar opens (`SidebarDefault`:
+  `use_sidebar_default`, or `Page`'s `sidebar`); a page that says
+  nothing gets it open when there is something in it and the window is
+  1000pt wide, folded otherwise. The person's own toggle wins and is
+  kept per page kind (the current tab), so the Vault can open folded
+  while the Inbox keeps its list. Folded, the switcher and the account
+  fold into the ribbon's foot as their marks (the workspace's initial,
+  the person's avatar), each opening the same menu as in the sidebar.
+  Phones and tablets keep their own drawers and rails.
 - **The status line**: `StatusItem`s (a fact or a switch: text, icon, a
   dot, a chip, a press), the app's on `AppShell` and the page's from
   `use_status`. It is drawn as a `StatusStyle::Bar` along the foot,

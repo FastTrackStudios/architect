@@ -15,8 +15,10 @@ mod status;
 mod workspaces;
 
 use std::cell::Cell;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::motion::{Spring, use_motion};
 use dioxus::prelude::*;
@@ -391,6 +393,20 @@ pub struct Shell {
     /// What the page puts in the left sidebar instead of the app's `left`
     /// (a workspace's left dock): [`use_shell_slots`].
     page_left: Signal<Option<Element>>,
+    /// Whether there is anything to show in the left sidebar: the page's or
+    /// the app's `left` (a desk folds a sidebar with nothing in it).
+    has_content: bool,
+    /// The current tab: the page kind a desk's sidebar toggle is kept for.
+    current: Option<&'static str>,
+    /// A desk's sidebar folded or open by the person's own toggle, per page
+    /// kind (the current tab's id; `""` under none).
+    desk_folds: Signal<BTreeMap<&'static str, bool>>,
+    /// How the page wants a desk's sidebar when nobody has toggled it:
+    /// [`use_sidebar_default`].
+    page_sidebar: Claim<SidebarDefault>,
+    /// The page draws a desk's title row itself, its top edge in it:
+    /// [`use_title_row`].
+    page_title: Claim<()>,
     /// The page's tab on a desk, drawn in the title row beside the sidebar
     /// (its desk bar sets it).
     desk_tab: Signal<Option<String>>,
@@ -438,6 +454,75 @@ pub fn use_shell_slots(left: Option<Element>, rail: Option<Element>) {
             r.set(None);
         }
     });
+}
+
+/// How a page wants a desk's left sidebar while nobody has toggled it on
+/// this page kind.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SidebarDefault {
+    /// Open beside the page (a wide enough window).
+    Open,
+    /// Folded to the ribbon: the workspace switcher and the account move to
+    /// the ribbon's foot.
+    Collapsed,
+}
+
+/// A page's hold on a part of the shell: the hook's own number and what it
+/// asks, so a page going away never takes back the next page's.
+type Claim<T> = Signal<Option<(u64, T)>>;
+
+/// Holds `value` in the shell's `pick` claim while the page is mounted
+/// (`None` lets go), set only when it changes.
+fn use_claim<T: Clone + PartialEq + 'static>(pick: fn(&Shell) -> Claim<T>, value: Option<T>) {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    let shell = try_use_context::<Signal<Shell>>();
+    let me = use_hook(|| NEXT.fetch_add(1, Ordering::Relaxed));
+    if let Some(shell) = shell {
+        let mut slot = pick(&shell.peek());
+        let now = slot.peek().clone();
+        match value {
+            Some(v) if now.as_ref() != Some(&(me, v.clone())) => slot.set(Some((me, v))),
+            None if now.as_ref().is_some_and(|(id, _)| *id == me) => slot.set(None),
+            _ => {}
+        }
+    }
+    use_drop(move || {
+        if let Some(shell) = shell
+            && let Ok(s) = shell.try_peek()
+        {
+            let mut slot = pick(&s);
+            if slot
+                .try_peek()
+                .is_ok_and(|c| c.as_ref().is_some_and(|(id, _)| *id == me))
+            {
+                slot.set(None);
+            }
+        }
+    });
+}
+
+/// How the page wants a desk's left sidebar: open, or folded to the ribbon
+/// (a page with no use for a sidebar).
+///
+/// The person's own toggle wins, and is
+/// kept per page kind (the current tab). A page that says nothing gets an
+/// open sidebar when it has something in it and the window is wide enough
+/// (1000pt), else a folded one. Phones and tablets keep their own.
+pub fn use_sidebar_default(default: SidebarDefault) {
+    use_claim(|s| s.page_sidebar, Some(default));
+}
+
+/// The page's top edge is a desk's title row (a workspace's top tab bars,
+/// Obsidian's).
+///
+/// While `claim` holds, the page (and a left sidebar it fills,
+/// [`use_shell_slots`]) starts at the window's top, over the shell's title
+/// row, which stays under it beside them (the ribbon's corner, the app's
+/// sidebar). One row, not two. The page keeps its own content clear of the
+/// window's buttons and the sidebar's ([`Shell::title_clearance`]) and moves
+/// the window from its empty part ([`WindowChrome::on_drag`]).
+pub fn use_title_row(claim: bool) {
+    use_claim(|s| s.page_title, claim.then_some(()));
 }
 
 /// Puts the page's own layer over the whole shell (the page's bar, the
@@ -503,10 +588,45 @@ impl Shell {
         }
     }
 
-    /// Whether the docked left sidebar is folded to a rail.
+    /// Whether the docked left sidebar is folded to a rail (on a desk, to
+    /// the ribbon): on a desk as the person last left it on this page kind,
+    /// else as the page asks ([`use_sidebar_default`]), else open when it
+    /// has something in it and the window is wide enough.
     #[must_use]
     pub fn folded(&self) -> bool {
+        if self.desk() {
+            if let Some(folded) = self.desk_folds.read().get(self.page_kind()) {
+                return *folded;
+            }
+            if let Some((_, default)) = *self.page_sidebar.read() {
+                return default == SidebarDefault::Collapsed;
+            }
+            return !self.has_content || self.screen.width < FOLD_BELOW;
+        }
         (self.fold)().unwrap_or(self.screen.width < FOLD_BELOW)
+    }
+
+    /// The page kind a desk's sidebar toggle is kept for: the current tab.
+    fn page_kind(&self) -> &'static str {
+        self.current.unwrap_or("")
+    }
+
+    /// Fold the docked left sidebar (`true`) or open it: on a desk, kept for
+    /// this page kind.
+    fn set_folded(&self, folded: bool) {
+        if self.desk() {
+            let mut folds = self.desk_folds;
+            folds.write().insert(self.page_kind(), folded);
+        } else {
+            let mut fold = self.fold;
+            fold.set(Some(folded));
+        }
+    }
+
+    /// Whether the page draws a desk's title row itself ([`use_title_row`]).
+    #[must_use]
+    pub fn page_draws_title_row(&self) -> bool {
+        self.desk() && (self.page_title)().is_some()
     }
 
     /// The side's button: a docked side folds away or comes back; one that
@@ -518,10 +638,7 @@ impl Shell {
             return;
         }
         match (side, frame(self.screen, self.style)) {
-            (Side::Left, Frame::Sidebar) => {
-                let mut fold = self.fold;
-                fold.set(Some(!self.folded()));
-            }
+            (Side::Left, Frame::Sidebar) => self.set_folded(!self.folded()),
             (Side::Right, Frame::Sidebar) if self.docked(Side::Right) => {
                 let mut away = self.right_away;
                 away.toggle();
@@ -613,8 +730,7 @@ impl Shell {
 
     /// Unfold the docked left sidebar from its rail.
     pub fn unfold(&self) {
-        let mut fold = self.fold;
-        fold.set(Some(false));
+        self.set_folded(false);
     }
 }
 
@@ -825,6 +941,9 @@ pub fn AppShell(
     let left_w = use_signal(|| LEFT_WIDTH);
     let right_w = use_signal(|| RIGHT_WIDTH);
     let page_left = use_signal(|| None::<Element>);
+    let desk_folds = use_signal(BTreeMap::<&'static str, bool>::new);
+    let page_sidebar = use_signal(|| None::<(u64, SidebarDefault)>);
+    let page_title = use_signal(|| None::<(u64, ())>);
     let desk_tab = use_signal(|| None::<String>);
     let page_status = use_signal(Vec::<StatusItem>::new);
     // The page's items first (its own, at a bar's left), then the app's.
@@ -840,7 +959,11 @@ pub fn AppShell(
     // A slot's filler replaces its content; a hidden one has none.
     let left = slot_content(&chrome, Slot::Left, left);
     let right = slot_content(&chrome, Slot::Right, right);
-    let has_left = left.is_some();
+    let has_content = left.is_some();
+    // A desk's sidebar also holds the switcher and the account, so it has
+    // its button with them alone.
+    let has_left = has_content
+        || (screen.form() == FormFactor::Desk && (account.is_some() || workspaces.is_some()));
     let has_right = right.is_some();
     let shell = Shell {
         screen,
@@ -858,6 +981,11 @@ pub fn AppShell(
         brand,
         floats_separate: frame(screen, style) == Frame::Sidebar,
         page_left,
+        has_content,
+        current,
+        desk_folds,
+        page_sidebar,
+        page_title,
         desk_tab,
         rail_extra,
         cover,
@@ -1108,6 +1236,19 @@ pub fn AppShell(
     } else {
         RIBBON + 4.0
     };
+    // A page that draws the title row itself starts at the window's top,
+    // over the shell's row (one row): the page, and a sidebar it fills.
+    let page_title = frame == Frame::Sidebar && shell.page_draws_title_row();
+    let lift = if page_title {
+        // Drawn over the shell's row (under its fixed buttons).
+        format!(
+            " margin-top: -{}px; z-index: 1;",
+            shell.title_row() + screen.insets.top
+        )
+    } else {
+        String::new()
+    };
+    let side_lift = if page_side { lift.as_str() } else { "" };
     // A corner badge sits under the floating button: lift it clear.
     let badge_room = if desk && status_style == StatusStyle::Badge && !all_status.is_empty() {
         STATUS_BADGE
@@ -1152,7 +1293,7 @@ pub fn AppShell(
             div { style: "flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: {direction};",
             if frame == Frame::Sidebar && desk {
                 SlotView { slot: Slot::Ribbon,
-                    DeskRibbon { tabs: tabs.clone(), current, on_tab: pick }
+                    DeskRibbon { tabs: tabs.clone(), current, on_tab: pick, folded: !docked_now.0 }
                 }
             }
             match frame {
@@ -1164,7 +1305,7 @@ pub fn AppShell(
                     Rail { tabs: tabs.clone(), current, on_tab: pick, screen: side_screen }
                 },
                 Frame::Sidebar => rsx! {
-                    div { style: "position: relative; width: {left_clip}px; flex-shrink: 0; overflow: hidden;",
+                    div { style: "position: relative; width: {left_clip}px; flex-shrink: 0; overflow: hidden;{side_lift}",
                     div {
                         style: "position: absolute; top: 0; bottom: 0; left: 0; width: {lw}px; \
                                 display: flex; flex-direction: column; \
@@ -1215,7 +1356,7 @@ pub fn AppShell(
             // The page. It gives way by `left`, not `translateX`, which
             // Blitz moves by device pixels (a third as far on a 3x phone).
             div {
-                style: "position: relative; left: {page_shift}px; flex: 1; min-width: 0; min-height: 0; \
+                style: "position: relative; left: {page_shift}px;{lift} flex: 1; min-width: 0; min-height: 0; \
                         display: flex; flex-direction: column;",
                 {children}
                 if float_separate {
@@ -1594,31 +1735,76 @@ fn AccountRow(account: Account, bottom: f64) -> Element {
                 }
             }
             if let (true, Some(menu)) = (open(), menu) {
-                // Far past every edge: Blitz has no `position: fixed`.
-                div {
-                    style: "position: absolute; top: -4000px; left: -4000px; width: 8000px; height: 8000px; z-index: {layer::MENU};",
-                    onclick: move |_| open.set(false),
-                }
-                div {
-                    style: "position: absolute; left: 8px; right: 8px; bottom: {58.0 + bottom}px; z-index: {layer::MENU}; \
-                            display: flex; flex-direction: column; padding: 6px 0; border-radius: 12px; \
-                            background: {t.pill}; border: 1px solid {t.rule}; box-shadow: {t.shadow_float};",
-                    div { style: "display: flex; align-items: center; gap: 10px; padding: 6px 12px 10px; \
-                                  border-bottom: 1px solid {t.rule}; margin-bottom: 6px; font-family: {t.font};",
-                        Avatar { account: account.clone(), size: 32.0 }
-                        div { style: "flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px;",
-                            span { style: "font-size: 13px; font-weight: 600; color: {t.ink}; white-space: nowrap; overflow: hidden;",
-                                "{account.name}"
-                            }
-                            if let Some(d) = account.detail {
-                                span { style: "font-size: 12px; color: {t.ink_3}; white-space: nowrap; overflow: hidden;", "{d}" }
-                            }
-                        }
+                AccountMenu { account, menu, open, at: format!("left: 8px; right: 8px; bottom: {}px;", 58.0 + bottom) }
+            }
+        }
+    }
+}
+
+/// The account's menu while `open`, placed by `at` against its trigger's
+/// box, headed by who this is.
+#[component]
+fn AccountMenu(account: Account, menu: Menu, open: Signal<bool>, at: String) -> Element {
+    let t = use_shell().theme;
+    rsx! {
+        // Far past every edge: Blitz has no `position: fixed`.
+        div {
+            style: "position: absolute; top: -4000px; left: -4000px; width: 8000px; height: 8000px; z-index: {layer::MENU};",
+            onclick: move |_| open.set(false),
+        }
+        div {
+            style: "position: absolute; {at} z-index: {layer::MENU}; \
+                    display: flex; flex-direction: column; padding: 6px 0; border-radius: 12px; \
+                    background: {t.pill}; border: 1px solid {t.rule}; box-shadow: {t.shadow_float};",
+            div { style: "display: flex; align-items: center; gap: 10px; padding: 6px 12px 10px; \
+                          border-bottom: 1px solid {t.rule}; margin-bottom: 6px; font-family: {t.font};",
+                Avatar { account: account.clone(), size: 32.0 }
+                div { style: "flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px;",
+                    span { style: "font-size: 13px; font-weight: 600; color: {t.ink}; white-space: nowrap; overflow: hidden;",
+                        "{account.name}"
                     }
-                    for (i, entry) in menu.entries.iter().cloned().enumerate() {
-                        page::MenuRow { key: "{i}", entry, open }
+                    if let Some(d) = account.detail {
+                        span { style: "font-size: 12px; color: {t.ink_3}; white-space: nowrap; overflow: hidden;", "{d}" }
                     }
                 }
+            }
+            for (i, entry) in menu.entries.iter().cloned().enumerate() {
+                page::MenuRow { key: "{i}", entry, open }
+            }
+        }
+    }
+}
+
+/// The account as its avatar alone, at the foot of a desk's ribbon while
+/// the sidebar is folded: the same menu as the sidebar's row, opening up
+/// to its right.
+#[component]
+fn AccountMark(account: Account) -> Element {
+    let t = use_shell().theme;
+    let mut open = use_signal(|| false);
+    let press = account.on_press;
+    let menu = account.menu.clone();
+    let has_menu = menu.is_some();
+    let fill = if open() { &*t.active } else { "transparent" };
+    rsx! {
+        div { style: "position: relative; display: flex; flex-shrink: 0;",
+            button {
+                class: "lp tip-host",
+                "aria-label": "Account: {account.name}",
+                style: "position: relative; width: 36px; height: 36px; border: none; border-radius: 8px; background: {fill}; \
+                        display: flex; align-items: center; justify-content: center;",
+                onclick: move |_| {
+                    if has_menu {
+                        open.toggle();
+                    } else if let Some(p) = press {
+                        p.call(());
+                    }
+                },
+                Avatar { account: account.clone(), size: 28.0 }
+                span { class: "tip", style: "left: 44px; top: 8px;", "{account.name}" }
+            }
+            if let (true, Some(menu)) = (open(), menu) {
+                AccountMenu { account: account.clone(), menu, open, at: "left: 44px; bottom: 0px; width: 260px;".to_owned() }
             }
         }
     }
@@ -1797,16 +1983,23 @@ mod tests {
 
 /// A desk's ribbon: the window's left edge in the middle row, under the
 /// title bar, the app's sections as icons, then what the page adds (a
-/// workspace's views and pinned commands).
+/// workspace's views and pinned commands). While the sidebar is folded the
+/// workspace switcher and the account fold into its foot, as marks.
 #[component]
 fn DeskRibbon(
     tabs: Vec<Tab>,
     current: Option<&'static str>,
     on_tab: EventHandler<&'static str>,
+    folded: bool,
 ) -> Element {
     let shell = use_shell();
     let t = shell.theme.clone();
     let extra = (shell.rail_extra)();
+    let (workspaces, account) = if folded {
+        (shell.workspaces, shell.account)
+    } else {
+        (None, None)
+    };
     rsx! {
         div {
             style: "width: {RIBBON}px; flex-shrink: 0; display: flex; flex-direction: column; background: {t.desk};",
@@ -1819,6 +2012,17 @@ fn DeskRibbon(
                 if let Some(extra) = extra {
                     div { style: "width: 60%; height: 1px; background: {t.rule}; margin: 4px 0;" }
                     {extra}
+                }
+                if workspaces.is_some() || account.is_some() {
+                    span { style: "flex: 1;" }
+                    if let Some(workspaces) = workspaces {
+                        div { style: "display: flex; width: 36px;",
+                            Switcher { workspaces, place: Place::Ribbon }
+                        }
+                    }
+                    if let Some(account) = account {
+                        AccountMark { account }
+                    }
                 }
             }
         }

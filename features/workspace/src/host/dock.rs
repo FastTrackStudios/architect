@@ -566,8 +566,32 @@ pub(super) fn ShellLeftDock() -> Element {
         right: false,
         covered,
     };
-    root.map_or_else(
+    // An empty dock under the title row: the row runs on over it, as the
+    // shell's would.
+    let empty = (host.title_row)().map_or_else(
         || rsx! {},
+        |r| {
+            let (on_drag, on_zoom) = (r.on_drag, r.on_zoom);
+            rsx! {
+                div {
+                    style: "flex:0 0 {r.height}px; height:{r.height}px; box-sizing:border-box; \
+                            background:{t.title_bar}; border-bottom:1px solid {t.rule};",
+                    onpointerdown: move |_| {
+                        if let Some(drag) = on_drag {
+                            drag.call(());
+                        }
+                    },
+                    ondoubleclick: move |_| {
+                        if let Some(zoom) = on_zoom {
+                            zoom.call(());
+                        }
+                    },
+                }
+            }
+        },
+    );
+    root.map_or_else(
+        || empty,
         |root| {
             rsx! {
                 div { style: "flex:1 1 0; min-height:0; display:flex; position:relative; overflow:hidden;",

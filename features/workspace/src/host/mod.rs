@@ -1334,6 +1334,9 @@ pub fn WorkspaceView(
     if *host.title_row.peek() != title_row {
         host.title_row.set(title_row);
     }
+    // The top tab bars are the window's title row: the shell's own row
+    // gives way to them (one row, not two).
+    architect_shell::use_title_row(title_row.is_some());
     // One left side: the shell draws the dock and its ribbon, from here.
     let slots = (in_shell && !phone).then(|| {
         (

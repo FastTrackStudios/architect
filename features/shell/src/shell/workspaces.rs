@@ -194,6 +194,9 @@ pub(super) enum Place {
     Foot,
     /// The head of a rail: the mark alone; the list opens to its right.
     Rail,
+    /// The foot of a desk's ribbon while the sidebar is folded: a small
+    /// mark alone; the list opens up, to its right.
+    Ribbon,
 }
 
 /// The switcher: its trigger, and while open, its list.
@@ -241,6 +244,20 @@ pub(super) fn Switcher(workspaces: Workspaces, place: Place) -> Element {
                 }
             },
             "top: 0px; left: 70px;",
+        ),
+        Place::Ribbon => (
+            rsx! {
+                button {
+                    class: "lp tip-host",
+                    "aria-label": "Switch {workspaces.kind}: {label}",
+                    style: "position: relative; width: 36px; height: 36px; border: none; border-radius: 8px; \
+                            background: transparent; display: flex; align-items: center; justify-content: center;",
+                    onclick: move |_| open.toggle(),
+                    Mark { name: label.clone(), color, all, size: 28.0 }
+                    span { class: "tip", style: "left: 44px; top: 8px;", "{label}" }
+                }
+            },
+            "bottom: 0px; left: 44px;",
         ),
     };
     let pick = workspaces.on_select;
