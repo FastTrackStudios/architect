@@ -284,7 +284,13 @@ steps (
         assert_eq!(to_json(&done.check[0].has), json!({"overlay": "palette"}));
         assert!((done.timeout - 5.0).abs() < f32::EPSILON);
         assert!(s.steps[1].hide);
-        assert_eq!(s.steps[1].act, Some(Do::Click { seconds: 0.4 }));
+        assert_eq!(
+            s.steps[1].act,
+            Some(Do::Click {
+                seconds: 0.4,
+                secondary: false
+            })
+        );
         assert_eq!(
             s.steps[2].act,
             Some(Do::Drag {

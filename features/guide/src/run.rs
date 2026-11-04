@@ -47,7 +47,7 @@ use dioxus::prelude::{Element, VirtualDom};
 use dioxus_native_dom::DioxusDocument;
 
 pub use crate::locate::Resolver;
-use crate::predicate::{Failed, checks, woke};
+use crate::predicate::{Failed, checks_waiting, woke};
 use crate::{Do, Modifier, Scenario, Step, Target, to_json};
 
 /// An app, as the runner opens it: its root and its Action List.
@@ -487,6 +487,7 @@ pub fn run(
             ripple: None,
         },
         pressed_at: None,
+        secondary: false,
         captured: None,
         focused: 0,
         film,
@@ -517,6 +518,8 @@ struct Runner<'a, 'f> {
     pointer: Pointer,
     /// The frame the pointer last went down at, for its ripple.
     pressed_at: Option<u64>,
+    /// The press is the secondary button's (a right-click).
+    secondary: bool,
     /// The window holding the pointer while its button is down.
     captured: Option<usize>,
     /// The window keys go to: the last one pressed in.
@@ -663,11 +666,13 @@ impl Runner<'_, '_> {
                 let at = self.find(target).map_err(fail)?;
                 let (x, y) = centre(at);
                 match gesture {
-                    Do::Click { seconds } => {
+                    Do::Click { seconds, secondary } => {
                         self.travel(x, y, *seconds)?;
+                        self.secondary = *secondary;
                         self.press(x, y);
                         self.tick()?;
                         self.release(x, y);
+                        self.secondary = false;
                         self.tick()?;
                     }
                     Do::Drag {
@@ -847,7 +852,7 @@ impl Runner<'_, '_> {
             }
             let mut failing = None;
             if heard && self.pending.is_none() {
-                match checks(&self.app.list, &done.check) {
+                match checks_waiting(&self.app.list, &done.check, Duration::from_secs(5)) {
                     Ok(()) => return Ok(()),
                     Err(Failed::Hard(reason)) => return Err(fail(reason, None)),
                     Err(Failed::Not(reason, actual)) => failing = Some((reason, actual)),
@@ -906,11 +911,15 @@ impl Runner<'_, '_> {
                 client_x: lx,
                 client_y: ly,
             },
-            button: MouseEventButton::Main,
-            buttons: if down {
-                MouseEventButtons::Primary
+            button: if self.secondary {
+                MouseEventButton::Secondary
             } else {
-                MouseEventButtons::None
+                MouseEventButton::Main
+            },
+            buttons: match (down, self.secondary) {
+                (false, _) => MouseEventButtons::None,
+                (true, false) => MouseEventButtons::Primary,
+                (true, true) => MouseEventButtons::Secondary,
             },
             mods: Modifiers::empty(),
             details: PointerDetails {

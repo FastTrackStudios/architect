@@ -213,7 +213,7 @@ pub fn named_icon(name: &str) -> IconFn {
         AudioLines, Bell, Bookmark, Bug, Calendar, Check, Clock, Cloud, Code, File, FileText,
         Folder, GitPullRequest, Globe, Heart, House, Inbox, Info, LayoutDashboard, Link, List,
         Lock, Mail, MessageSquare, Mic, Monitor, Moon, Package, Pin, Play, Puzzle, Search,
-        Settings, SlidersHorizontal, Star, Sun, Tag, Terminal, User, Users, Zap,
+        Settings, SlidersHorizontal, Star, Sun, Tag, Terminal, Timer, User, Users, Zap,
     };
     match name {
         "bell" => crate::icon!(Bell),
@@ -253,6 +253,7 @@ pub fn named_icon(name: &str) -> IconFn {
         "sun" => crate::icon!(Sun),
         "tag" => crate::icon!(Tag),
         "terminal" => crate::icon!(Terminal),
+        "timer" => crate::icon!(Timer),
         "user" => crate::icon!(User),
         "users" => crate::icon!(Users),
         "zap" => crate::icon!(Zap),

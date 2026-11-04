@@ -112,11 +112,13 @@ impl Runner for Over {
         }
     }
 
-    // The Action List says nothing yet of whether an action is checked
-    // (a toggle that is on): #103 adds it. Until then the editor offers no
-    // `Checked` test, and one written by hand never holds.
-    fn checked(&self, _action: &str) -> bool {
-        false
+    // A toggle that is on: its list says so (`ActionList::set_checked`,
+    // an extension's `toggle = true`).
+    fn checked(&self, action: &str) -> bool {
+        self.0
+            .all()
+            .iter()
+            .any(|c| c.id == action && c.checked == Some(true))
     }
 
     fn enabled(&self, action: &str) -> bool {

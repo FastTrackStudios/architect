@@ -23,8 +23,27 @@ pub fn woke(on: &[Wake], kind: &EventKind) -> bool {
 }
 
 /// Runs every check on `list`: each a read-only action whose JSON result
-/// must contain its `has`.
+/// must contain its `has`. An async action cannot be one (a tour's checks
+/// run on the window's thread): [`checks_waiting`] waits for it.
 pub fn checks(list: &ActionList, checks: &[Check]) -> Result<(), Failed> {
+    checks_with(list, checks, None)
+}
+
+/// [`checks`], an async action (an extension's, its work on a thread of
+/// its own) waited for up to `wait`: what the headless runner does.
+pub fn checks_waiting(
+    list: &ActionList,
+    checks: &[Check],
+    wait: std::time::Duration,
+) -> Result<(), Failed> {
+    checks_with(list, checks, Some(wait))
+}
+
+fn checks_with(
+    list: &ActionList,
+    checks: &[Check],
+    wait: Option<std::time::Duration>,
+) -> Result<(), Failed> {
     for check in checks {
         let info = list
             .info(&check.id)
@@ -39,8 +58,7 @@ pub fn checks(list: &ActionList, checks: &[Check]) -> Result<(), Failed> {
             .args
             .as_ref()
             .map_or_else(|| serde_json::json!({}), to_json);
-        let out = list
-            .run_json(&check.id, args.to_string().as_bytes())
+        let out = run_check(list, &check.id, args.to_string().as_bytes(), wait)
             .map_err(|e| Failed::Not(format!("check {} failed: {e}", check.id), None))?;
         let actual: serde_json::Value =
             serde_json::from_slice(&out).unwrap_or(serde_json::Value::Null);
@@ -53,6 +71,56 @@ pub fn checks(list: &ActionList, checks: &[Check]) -> Result<(), Failed> {
         }
     }
     Ok(())
+}
+
+/// Runs a check's action: an async one waited for up to `wait`, natively,
+/// when there is a wait.
+fn run_check(
+    list: &ActionList,
+    id: &str,
+    args: &[u8],
+    wait: Option<std::time::Duration>,
+) -> Result<Vec<u8>, architect::action::ActionError> {
+    #[cfg(not(target_family = "wasm"))]
+    if let Some(wait) = wait
+        && list.is_async(id)
+    {
+        return block_on(list.run_json_async(id, args), wait).unwrap_or_else(|| {
+            Err(architect::action::ActionError::Failed {
+                id: id.to_owned(),
+                message: format!("no answer in {wait:?}"),
+            })
+        });
+    }
+    #[cfg(target_family = "wasm")]
+    let _ = wait;
+    list.run_json(id, args)
+}
+
+/// Waits for `f` on this thread, up to `wait` (a check's async action does
+/// its work on another: an extension's); `None` when it did not finish.
+#[cfg(not(target_family = "wasm"))]
+fn block_on<F: std::future::Future>(f: F, wait: std::time::Duration) -> Option<F::Output> {
+    struct Unpark(std::thread::Thread);
+    impl std::task::Wake for Unpark {
+        fn wake(self: std::sync::Arc<Self>) {
+            self.0.unpark();
+        }
+    }
+    let waker = std::task::Waker::from(std::sync::Arc::new(Unpark(std::thread::current())));
+    let mut cx = std::task::Context::from_waker(&waker);
+    let mut f = std::pin::pin!(f);
+    let until = std::time::Instant::now().checked_add(wait)?;
+    loop {
+        if let std::task::Poll::Ready(out) = f.as_mut().poll(&mut cx) {
+            return Some(out);
+        }
+        let left = until.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            return None;
+        }
+        std::thread::park_timeout(left);
+    }
 }
 
 /// `architect_commands`' action that runs any command by id, a view's own

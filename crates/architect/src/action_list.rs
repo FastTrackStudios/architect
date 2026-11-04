@@ -303,6 +303,10 @@ pub enum InvocationSource {
     Agent,
     /// A script.
     Script,
+    /// A toolbar's button (an extension's `[[toolbars]]`): what it is in
+    /// is [`Invocation::target`] (`dock:right`, `view:<kind>`), the pane
+    /// whose header holds it [`Invocation::pane`].
+    Toolbar,
 }
 
 impl InvocationSource {
@@ -320,6 +324,7 @@ impl InvocationSource {
             Self::Open => "open",
             Self::Agent => "agent",
             Self::Script => "script",
+            Self::Toolbar => "toolbar",
         }
     }
 }
