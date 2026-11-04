@@ -25,6 +25,11 @@ working set.
 - App tokens stay off architect-ui's `:root` CSS. Opt a namespace in with
   `ThemeStoreProvider { css_namespaces: vec!["arrange".into()] }`
   (`--arrange-item-edge`).
+- A view that paints gets roles of its own (`editor.background`,
+  `editor.syntax.chord`, …) with defaults over architect's tokens, set as
+  the app's `App` layer, and reads them as a `FromResolved` slice. The
+  lab's Keyflow editor is the example (`apps/lab/ui/src/keyflow.rs`
+  `EDITOR_TOKENS`, `EditorColours`).
 
 ## Recipes
 
@@ -180,6 +185,10 @@ lab does it in `apps/lab/ui/src/theme.rs` `persist`.
   copy taken at open (`peek().clone()`) stays the theme it opened with.
 - An override of `border` that reads `$border` is a cycle, not "the value
   below": a reference always sees the final value. A `Preview` covers both until `THEME_PREVIEW_END`.
+- `document::Style` is inserted once: a sheet built from the theme's
+  values keeps the first theme. Write the sheet with `var(--…)` only and
+  set the values as variables on the view's root from a `use_themed`
+  slice (`apps/lab/ui/src/keyflow.rs` `EditorStyles`).
 - A store change made off the UI thread (an action, the watcher) reaches
   Dioxus on the next turn, through `use_theme_store`'s channel. Don't
   read the store in render and expect it to subscribe: read

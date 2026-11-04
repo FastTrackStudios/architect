@@ -426,6 +426,42 @@ Paint views read every token through `ctx.theme`, dotted ones included.
 Keep the namespaces the app's own (`arrange.`, `mixer.`, `editor.`), so
 two apps' tokens never collide in one map.
 
+**A view's roles.** A view that paints (an editor, an arrangement) is a
+theming target like the shell: every colour it draws is a role of its own,
+an app token with a default over architect's, never a literal. The lab's
+Keyflow source editor is the worked example (`apps/lab/ui/src/keyflow.rs`
+`EDITOR_TOKENS`, set as the lab's `App` layer by
+`apps/lab/ui/src/theme.rs` `app_layer`):
+
+| Role | Default | What it colours |
+|---|---|---|
+| `editor.background` | `$background` | the editor's ground, edge to edge |
+| `editor.foreground` | `$foreground` | the text |
+| `editor.gutter` | `$muted-foreground` | line numbers, quiet ink |
+| `editor.surface` | `$muted` | inline code, raised marks |
+| `editor.line` | `$border` | rules and edges |
+| `editor.caret` | `$brand` | the caret, the IME underline |
+| `editor.selection` | `alpha($brand, 0.3)` | the selection |
+| `editor.syntax.chord` | `$brand` | roots, degrees, numerals, bass |
+| `editor.syntax.quality` | `mix($brand, $foreground, 0.45)` | qualities, extensions, accidentals |
+| `editor.syntax.rhythm` | `$warn` | durations, slashes, rests, pushes |
+| `editor.syntax.section` | `$safe` | sections, measure counts, separators |
+| `editor.syntax.meta` | `$info` | title, tempo, time and key |
+| `editor.syntax.comment` | `$muted-foreground` | comments |
+| `editor.syntax.command` | `mix($danger, $foreground, 0.3)` | commands, dynamics, repeats |
+
+The editor reads them as a typed slice (`EditorColours`, `use_themed`)
+and sets them as CSS variables on its own root: editor-view's inputs
+(`--background`, `--foreground`, `--muted`, …, and its `--editor-caret`
+/ `--editor-selection-bg` hooks), the pane chrome's and
+`--editor-syntax-*`. Its stylesheet holds no colour, only those
+variables: a `document::Style` is inserted once and never updated, so a
+sheet built from the theme's values would keep the first theme. A theme
+change restyles the editor by its `style` alone, in a pop-out too
+(`apps/lab/ui/src/keyflow.rs` `theme_set_restyles_the_editor`). A theme
+file or a person overrides any role (`THEME_TOKEN_SET {name:
+"editor.caret", value: "$warn"}`); a broken one draws magenta.
+
 ## Extensions and themes
 
 What an owner other than the app adds is a **contribution**
