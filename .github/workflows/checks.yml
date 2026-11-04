@@ -91,6 +91,14 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo run -q -p xtask -- builtins
 
+      # Every test a feature keeps out of the workspace run (a
+      # `required-features`, a `cfg(feature …)`) is run by a pass in
+      # feature-tests.toml or skipped there with its reason. Resolves the
+      # build with guppy; compiles nothing.
+      - name: feature-tests
+        if: ${{ !cancelled() }}
+        run: cargo run -q -p xtask -- feature-tests
+
       # The fleet feature union (workspace-hack/Cargo.toml, FLEET section):
       # every member's hack line is gated off on wasm, and every entry is
       # still a crate this workspace builds. Refreshing it from the
@@ -139,16 +147,31 @@ jobs:
 
       # nextest runs each test in its own process, in parallel across every
       # binary; the build is `--workspace` either way.
+      # The WASI extension tests build their components in `devenv
+      # --profile wasi shell` and run the browser's shape under its node;
+      # here a component that does not build, or no node, fails them
+      # instead of letting them say so and pass.
       - name: test
         if: ${{ steps.plan.outputs.tests == 'true' }}
         env:
           FILTER: ${{ steps.plan.outputs.test_filter }}
+          ARCHITECT_WASI_REQUIRED: "1"
+          ARCHITECT_WASI_WEB_REQUIRED: "1"
         run: |
           if [ -n "$FILTER" ]; then
             cargo nextest run --workspace --profile ci --no-tests=pass -E "$FILTER"
           else
             cargo nextest run --workspace --profile ci --no-tests=pass
           fi
+
+      # The tests the workspace run leaves out, one `cargo nextest run -p …
+      # --features …` per pass in feature-tests.toml, under the same plan
+      # filter. Runs after a failed workspace run too.
+      - name: feature passes
+        if: ${{ !cancelled() && steps.plan.outputs.tests == 'true' }}
+        env:
+          FILTER: ${{ steps.plan.outputs.test_filter }}
+        run: cargo run -q -p xtask -- feature-tests --run --filter "$FILTER" -- --profile ci --no-tests=pass
 
       # nextest does not run doctests; they follow a full run only.
       - name: doctests

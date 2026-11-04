@@ -45,10 +45,12 @@ auth-ui-css-check: auth-ui-css
 check:
     cargo check --workspace --all-targets
 
-# nextest runs every test; it does not run doctests, so those follow.
+# nextest runs every test; it does not run doctests, so those follow. Then
+# the tests a feature keeps out of that run (feature-tests.toml).
 test:
     cargo nextest run --workspace
     cargo test --workspace --doc
+    cargo run -q -p xtask -- feature-tests --run
 
 lint:
     cargo fmt --all -- --check

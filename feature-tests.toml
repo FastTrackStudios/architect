@@ -1,0 +1,50 @@
+# `cargo xtask feature-tests` (xtask/src/feature_tests.rs): the tests main's
+# `cargo nextest run --workspace` leaves out, because a `[[test]]`'s
+# `required-features` or a test's `cfg(feature …)` is off in that build, and
+# the pass that runs each. Main CI's Tests job runs every pass after the
+# workspace run (`--run`); the Lint job fails on a gated test no pass runs,
+# a pass that runs nothing new, and a stale skip.
+#
+# A pass is one `cargo nextest run -p <packages> --features <features>`.
+# `workspace = true` builds `--workspace` with the features and runs only
+# its packages' tests: for a member high in the graph, whose `-p` build
+# alone would resolve everything under it differently from the workspace
+# run and so build it all a second time.
+#
+# No pass turns on `architect-lab-ui/wasi` (or uses `--all-features`): the
+# lab-media goldens (apps/lab/media/tests/builtins.rs) are the default lab,
+# and that feature adds the manager's Components kind to the extensions
+# page on purpose. No test is gated on it, so the check needs no pass.
+
+# The framework crate's feature-gated tests (the supervisor #299 fixed sat
+# here), telemetry's OTel side and the flight recorder, the orgs opener on
+# the Action List, and the derive's cfg'd-off action.
+[[pass]]
+name = "framework"
+packages = ["architect", "architect-action-derive", "architect-telemetry", "architect-orgs"]
+features = [
+    "architect/atom",
+    "architect/atom-persist",
+    "architect/platform",
+    "architect/local",
+    "architect/settings",
+    "architect/capability",
+    "architect/release",
+    "architect/snapshot",
+    "architect/server-seaorm",
+    "architect/testing",
+    "architect/rt",
+    "architect/schedule",
+    "architect-action-derive/test-gated",
+    "architect-telemetry/otel",
+    "architect-telemetry/flight",
+    "architect-orgs/commands",
+]
+
+# The lab's Keyflow editor tab (apps/lab/ui/src/keyflow.rs): it fills its
+# pane, in the app's theme.
+[[pass]]
+name = "lab-keyflow"
+workspace = true
+packages = ["architect-lab-ui"]
+features = ["architect-lab-ui/keyflow-lab"]

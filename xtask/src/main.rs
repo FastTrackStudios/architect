@@ -8,6 +8,7 @@ mod boundaries;
 mod builtins;
 mod docs;
 mod ext;
+mod feature_tests;
 mod fleet;
 mod fleet_deps;
 mod git;
@@ -172,6 +173,34 @@ enum Command {
     /// in, which `EXT_CLONE` builds as a process in the development
     /// folder. See `docs/content/architecture/extensions.md`.
     Builtins,
+    /// Check that every feature-gated test runs in some CI pass.
+    ///
+    /// `cargo nextest run --workspace` builds each member with the
+    /// features the workspace unifies; a `[[test]]` whose
+    /// `required-features` that leaves out, or a test behind a
+    /// `cfg(feature …)` that is false there, never runs. Each must be run
+    /// by a `[[pass]]` in `feature-tests.toml` (`-p … --features …`) or be
+    /// a `[[skip]]` with its reason. `--run` runs the passes; arguments
+    /// after `--` go to each `cargo nextest run`. See
+    /// `xtask/src/feature_tests.rs`.
+    FeatureTests {
+        /// The passes and skips.
+        #[arg(long, default_value = "feature-tests.toml")]
+        config: PathBuf,
+        /// Print every gated test and what runs it.
+        #[arg(short, long)]
+        list: bool,
+        /// Then run each pass with `cargo nextest run`.
+        #[arg(long)]
+        run: bool,
+        /// A nextest filter for every pass (main CI's plan), and-ed with a
+        /// `workspace` pass's own packages.
+        #[arg(long)]
+        filter: Option<String>,
+        /// Passed to each pass's `cargo nextest run`.
+        #[arg(last = true)]
+        nextest_args: Vec<String>,
+    },
     /// Repoint every architect-owned git dep in a manifest at one tag.
     ///
     /// Bumping these one crate at a time is how a consumer ends up with
@@ -254,6 +283,17 @@ fn main() -> ExitCode {
         Command::Builtins => {
             let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
             builtins::run_cli(&root)
+        }
+        Command::FeatureTests {
+            config,
+            list,
+            run,
+            filter,
+            nextest_args,
+        } => {
+            let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            let filter = filter.filter(|f| !f.is_empty());
+            feature_tests::run_cli(&root, &config, list, run, filter.as_deref(), &nextest_args)
         }
         Command::Feature {
             action: FeatureAction::New { name },
