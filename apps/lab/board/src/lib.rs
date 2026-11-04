@@ -23,6 +23,14 @@ use serde_json::{Value, json};
 /// Its id.
 pub const ID: &str = "lab.board";
 
+/// Its page files (`pages/`): the tab's page and the worker it spawns,
+/// for an app that runs pages to write out as the built-in's
+/// (`architect_pages::files::write_builtin`).
+pub const PAGES: &[(&str, &str)] = &[
+    ("board.tsx", include_str!("../pages/board.tsx")),
+    ("primes.js", include_str!("../pages/primes.js")),
+];
+
 /// Its status item's id.
 const PINS: &str = "pins";
 

@@ -42,6 +42,7 @@ use architect::action::{
 };
 use architect_scripting::Transactions;
 use architect_scripting::luau::{Gate, Limits, Runtime};
+use architect_scripting::worker::{WorkerGroup, Workers};
 use architect_settings::{Owner, Registry, Section};
 use architect_theme::{Contribution, Problem, Theme, ThemeStore};
 use architect_workspace::{KindError, ViewKinds};
@@ -254,6 +255,8 @@ impl LuauRunner {
 
 struct Luau {
     runtime: Runtime,
+    /// Its workers, cancelled when it stops (unloaded or replaced).
+    workers: WorkerGroup,
     /// Each script action's source.
     scripts: BTreeMap<String, Arc<str>>,
     /// Each hook script's source, by its path.
@@ -322,9 +325,21 @@ impl Runner for LuauRunner {
             Runtime::check(&source).map_err(|e| format!("{path}: {e}"))?;
             hooks.insert(path.clone(), Arc::from(source));
         }
+        // Its `[[workers]]`, spawned by its scripts off their threads.
+        let group = WorkerGroup::new();
+        let mut workers = Workers::new().with_group(group.clone());
+        for decl in &package.manifest.workers {
+            let Some(path) = &decl.script else { continue };
+            let source = package.text(path).map_err(|e| e.to_string())?;
+            workers = workers.with_source(decl.id.clone(), source);
+        }
+        workers
+            .check()
+            .map_err(|(name, e)| format!("worker {name}: {e}"))?;
         let mut runtime = Runtime::new(cx.list.clone())
             .with_gate(cx.gate)
             .with_limits(self.limits)
+            .with_workers(workers)
             .with_module(Arc::new(luau_ext::Ext::new(
                 &package.manifest,
                 cx.contributions.clone(),
@@ -332,8 +347,12 @@ impl Runner for LuauRunner {
         if let Some(t) = &self.transactions {
             runtime = runtime.with_transactions(Arc::clone(t));
         }
+        // Its scripts' action calls run on the runtime it was loaded on,
+        // even when a hook fires from a thread with none (the UI's).
+        runtime = runtime.with_dispatch(architect_scripting::vm::Dispatch::here());
         Ok(Box::new(Luau {
             runtime,
+            workers: group,
             scripts,
             hooks,
             name: package.manifest.name.clone(),
@@ -352,6 +371,7 @@ impl Instance for Luau {
             .ok_or_else(|| format!("{} has no script", decl.id))?;
         let me = Self {
             runtime: self.runtime.clone(),
+            workers: self.workers.clone(),
             scripts: BTreeMap::new(),
             hooks: BTreeMap::new(),
             name: self.name.clone(),
@@ -409,6 +429,13 @@ impl Instance for Luau {
                     message: e.to_string(),
                 })
         }))
+    }
+
+    fn stop(&self) {
+        let cancelled = self.workers.cancel_all();
+        if cancelled > 0 {
+            tracing::debug!(workers = cancelled, "an extension's workers were cancelled");
+        }
     }
 }
 

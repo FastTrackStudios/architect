@@ -8,10 +8,16 @@
 //! which the lab writes on `:root`), and the theme comes as data
 //! (`guest::use_theme`), from which it works out colours of its own (the
 //! ramp under the count).
+//!
+//! It keeps its view responsive by the rule (`guest::use_work`): "Find
+//! primes" counts the primes below ten million on a thread of its own,
+//! its progress bar moving as it goes, the button still counting clicks;
+//! "Block this view for 2 s" breaks the rule on purpose, sleeping on the
+//! view's thread, so the lab marks the pane busy until it answers.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use architect_extensions::guest::{Guest, GuestError, host, use_theme};
+use architect_extensions::guest::{Guest, GuestError, Work, WorkStatus, host, use_theme, use_work};
 use architect_extensions::hostcall::HostRequest;
 use dioxus::prelude::*;
 
@@ -19,6 +25,84 @@ static CLICKS: AtomicU64 = AtomicU64::new(0);
 
 /// Steps of the ramp under the count.
 const RAMP: u8 = 6;
+
+/// The primes below this many, counted off the view's thread.
+const PRIMES_BELOW: u32 = 10_000_000;
+
+/// Counts the primes below `n` the slow way, reporting as it goes.
+fn count_primes(work: &Work, n: u32) -> Result<serde_json::Value, String> {
+    let every = (n / 100).max(1);
+    let mut found = 0_u32;
+    for i in 2..n {
+        let mut d = 2_u32;
+        let mut prime = true;
+        while d.saturating_mul(d) <= i {
+            if i.is_multiple_of(d) {
+                prime = false;
+                break;
+            }
+            d = d.saturating_add(1);
+        }
+        if prime {
+            found = found.saturating_add(1);
+        }
+        if i.is_multiple_of(every) {
+            work.check()?;
+            work.progress(f64::from(i), f64::from(n), format!("{found} primes so far"));
+        }
+    }
+    Ok(serde_json::json!(found))
+}
+
+/// The heavy work, by the rule: a thread of its own, its progress here.
+#[component]
+fn Primes() -> Element {
+    let primes = use_work();
+    let state = primes.state();
+    let pct = state.fraction() * 100.0;
+    let said = match (&state.status, &state.result) {
+        (WorkStatus::Done, Some(Ok(found))) => format!("{found} primes below {PRIMES_BELOW}"),
+        (WorkStatus::Running, _) => state
+            .progress
+            .as_ref()
+            .map_or_else(|| "Starting…".to_owned(), |p| p.note.clone()),
+        (WorkStatus::Cancelled, _) => "Cancelled".to_owned(),
+        (WorkStatus::Failed, Some(Err(why))) => format!("Failed: {why}"),
+        _ => format!("Counts the primes below {PRIMES_BELOW} off this view's thread."),
+    };
+    rsx! {
+        div { style: "display: flex; flex-direction: column; gap: 8px; max-width: 420px;",
+            div { style: "display: flex; gap: 8px;",
+                if primes.running() {
+                    button { class: "clicker-cancel", style: BUTTON, onclick: move |_| primes.cancel(), "Cancel" }
+                } else {
+                    button {
+                        class: "clicker-primes",
+                        style: BUTTON,
+                        onclick: move |_| primes.start(|work| count_primes(work, PRIMES_BELOW)),
+                        "Find primes"
+                    }
+                }
+                button {
+                    class: "clicker-block",
+                    style: BUTTON,
+                    // Against the rule, on purpose: the view's thread sleeps.
+                    onclick: move |_| std::thread::sleep(std::time::Duration::from_secs(2)),
+                    "Block this view for 2 s"
+                }
+            }
+            div { style: "height: 8px; border-radius: 4px; background: var(--muted); overflow: hidden;",
+                div { style: "height: 100%; width: {pct:.1}%; background: var(--clicker-count);" }
+            }
+            div { style: "font-size: 12px; color: var(--muted-foreground);", "{said}" }
+        }
+    }
+}
+
+/// A button's look, in the app's theme and the clicker's tokens.
+const BUTTON: &str = "align-self: flex-start; padding: 6px 14px; border-radius: 8px; \
+                      border: 1px solid var(--clicker-edge); background: var(--clicker-face); \
+                      color: var(--foreground); font-size: 13px;";
 
 #[component]
 fn Counter() -> Element {
@@ -76,6 +160,7 @@ fn Counter() -> Element {
                 "Count a click"
             }
             div { style: "font-size: 12px; color: var(--muted-foreground);", "{about}" }
+            Primes {}
         }
     }
 }
@@ -96,7 +181,10 @@ async fn probe() -> Result<serde_json::Value, String> {
     })
     .await
     .map_err(|e| e.to_string())?;
-    let problems = status["problems"].as_array().map_or(0, Vec::len);
+    let problems = status
+        .get("problems")
+        .and_then(serde_json::Value::as_array)
+        .map_or(0, Vec::len);
     // Its stderr is its log.
     eprintln!("probe: step {step}, {problems} problem(s)");
     Ok(serde_json::json!({ "step": step, "problems": problems, "pid": std::process::id() }))

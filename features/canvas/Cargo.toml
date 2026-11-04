@@ -17,7 +17,15 @@ description = "Canvases: layers an extension or a script draws over a view in th
 
 [features]
 default = []
-luau = ["dep:architect", "dep:architect-scripting", "architect-scripting/luau", "dep:serde_json"]
+luau = [
+    "dep:architect",
+    "dep:architect-scripting",
+    "architect-scripting/luau",
+    "dep:serde_json",
+    "dep:architect-workspace",
+    "dep:futures",
+    "dep:futures-timer",
+]
 ui = [
     "dep:dioxus",
     "dep:futures",
@@ -53,6 +61,7 @@ architect-extensions = { workspace = true, features = ["host"] }
 futures = "0.3"
 serde_json.workspace = true
 facet.workspace = true
+architect-workspace = { workspace = true }
 
 [lib]
 doctest = false

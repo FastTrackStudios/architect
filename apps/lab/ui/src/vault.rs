@@ -16,8 +16,9 @@ use architect_workspace::{
 };
 use dioxus::prelude::*;
 use lucide_dioxus::{
-    AudioLines, Bot, CalendarCheck, FileText, Files, Layers, Link, ListTree, MousePointerClick,
-    Network, Puzzle, Search, SlidersHorizontal, SquarePen, SquareTerminal, Terminal,
+    AudioLines, Bot, CalendarCheck, Cpu, FileText, Files, Hourglass, Layers, Link, ListTree,
+    MousePointerClick, Network, Puzzle, Search, SlidersHorizontal, SquarePen, SquareTerminal,
+    Terminal,
 };
 
 /// The lab's views, and the kinds that draw them, with the views loaded
@@ -124,6 +125,25 @@ fn views(extra: Vec<View>) -> Views {
             .home(Target::Split(Side::Right))
             .still(),
         )
+        // The clicker's heavy job: primes counted in a worker, the
+        // window animating all the while; and a naughty window that
+        // spins on its own thread, marked busy.
+        .view(
+            View::new("clicker.heavy", "Heavy job", |_| {
+                rsx! { crate::extensions::HeavyWindow {} }
+            })
+            .icon(icon!(Cpu))
+            .home(Target::Split(Side::Right))
+            .still(),
+        )
+        .view(
+            View::new("clicker.naughty", "Naughty view", |_| {
+                rsx! { crate::extensions::NaughtyWindow {} }
+            })
+            .icon(icon!(Hourglass))
+            .home(Target::Split(Side::Right))
+            .still(),
+        )
         // The clicker's ImGui window: a Luau script from its package,
         // in the app's theme (`theme`, the clicker's own tokens).
         .view(
@@ -181,6 +201,14 @@ fn first_workspace() -> Workspace {
             Pane::new("clicker-window", "clicker.window", "Clicker window"),
             Target::Tab,
         ),
+        (
+            Pane::new("clicker-heavy", "clicker.heavy", "Heavy job"),
+            Target::Tab,
+        ),
+        (
+            Pane::new("clicker-naughty", "clicker.naughty", "Naughty view"),
+            Target::Tab,
+        ),
     ];
     for (pane, target) in opens {
         let _ = w.open(pane, target);
@@ -216,7 +244,7 @@ fn mix_workspace() -> Workspace {
 /// The vault's screensets: "Write" (where it starts), "Mix" and
 /// "Embedded views".
 fn screensets() -> Screensets {
-    let mut builtins = vec![
+    let builtins = vec![
         Screenset::new("Write")
             .slot(1)
             .layout(FormClass::Desk, first_workspace()),
@@ -229,11 +257,15 @@ fn screensets() -> Screensets {
     ];
     // "New Chart" (⌘K): the source editor beside its preview.
     #[cfg(feature = "keyflow-lab")]
-    builtins.push(
-        Screenset::new("Chart")
-            .slot(4)
-            .layout(FormClass::Desk, crate::keyflow::chart_workspace()),
-    );
+    let builtins = {
+        let mut builtins = builtins;
+        builtins.push(
+            Screenset::new("Chart")
+                .slot(4)
+                .layout(FormClass::Desk, crate::keyflow::chart_workspace()),
+        );
+        builtins
+    };
     Screensets::default().with_builtins(builtins)
 }
 

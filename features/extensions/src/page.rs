@@ -91,9 +91,10 @@ fn say(s: State, ok: bool, text: impl Into<String>) {
 }
 
 /// The manager in context: a settings section ("Extensions") and ⌘O's
-/// `ext:` over every kind (call it under the settings provider and the
-/// commands provider). `browse` is the extensions' catalog, for the
-/// extension kind's own page.
+/// `ext:` over every kind.
+///
+/// Call it under the settings provider and the commands provider. `browse`
+/// is the extensions' catalog, for the extension kind's own page.
 pub fn use_manager_page(manager: Manager, browse: Browse) {
     use_context_provider(|| browse.clone());
     use_context_provider(|| manager.clone());
@@ -257,6 +258,7 @@ pub fn ManagerPage(manager: Manager) -> Element {
 
 #[component]
 fn ItemRow(on: bool, item: Item) -> Element {
+    use std::fmt::Write as _;
     let s = state();
     let key = (item.kind.clone(), item.id.clone());
     let mut detail = item
@@ -269,7 +271,7 @@ fn ItemRow(on: bool, item: Item) -> Element {
         detail.push_str(" · off");
     }
     if !item.problems.is_empty() {
-        detail.push_str(&format!(" · {} problem(s)", item.problems.len()));
+        let _ = write!(detail, " · {} problem(s)", item.problems.len());
     }
     let ground = if on { "background: var(--accent);" } else { "" };
     rsx! {

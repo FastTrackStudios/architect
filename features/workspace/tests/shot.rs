@@ -45,7 +45,9 @@ fn run(
                 .map(|bytes| serde_json::from_slice(&bytes).unwrap())
                 .map_err(|e| e.to_string());
         }
-        assert!(started.elapsed() < Duration::from_secs(60), "no answer");
+        if started.elapsed() >= Duration::from_secs(60) {
+            return Err("no answer".to_owned());
+        }
     }
 }
 
@@ -109,11 +111,15 @@ fn image_of(path: &std::path::Path) -> (u32, u32, Vec<u8>) {
 }
 
 fn pixel(image: &(u32, u32, Vec<u8>), x: u32, y: u32) -> [u8; 4] {
-    let at = ((y * image.0 + x) * 4) as usize;
-    [
-        image.2[at],
-        image.2[at + 1],
-        image.2[at + 2],
-        image.2[at + 3],
-    ]
+    let at = y
+        .checked_mul(image.0)
+        .and_then(|row| row.checked_add(x))
+        .and_then(|p| p.checked_mul(4))
+        .and_then(|b| usize::try_from(b).ok())
+        .expect("a pixel of the image");
+    *image
+        .2
+        .get(at..)
+        .and_then(|px| px.first_chunk::<4>())
+        .expect("a pixel of the image")
 }

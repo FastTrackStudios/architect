@@ -54,6 +54,13 @@ id = "counter"
 title = "Clicker"
 icon = "mouse-pointer-click"
 
+# Its heavy work, off every view's thread: the Luau windows spawn it
+# (heavy.luau), its process does its own (`guest::use_work`).
+[[workers]]
+id = "primes"
+title = "Count primes"
+script = "workers/primes.luau"
+
 [[themes]]
 path = "themes/clicker-neon.json"
 

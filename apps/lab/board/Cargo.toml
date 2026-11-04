@@ -29,6 +29,9 @@ architect-extensions = { workspace = true, features = ["host", "linked", "proces
 architect-settings = { workspace = true }
 futures = "0.3"
 tempfile = "3"
+# Its tab as a page file (tests/page.rs): drawn by architect-pages.
+architect-pages = { workspace = true, features = ["js", "ui"] }
+blitz-dom = { workspace = true }
 
 [lints]
 workspace = true

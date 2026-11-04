@@ -98,9 +98,13 @@ pub mod remote;
 #[cfg(feature = "ui")]
 pub mod ui;
 #[cfg(feature = "host")]
+pub mod views;
+#[cfg(feature = "host")]
 pub mod watch;
 #[cfg(feature = "vox")]
 pub mod wire;
+#[cfg(feature = "guest")]
+pub mod work;
 
 pub use catalog::{Candidate, Chosen, Origin, choose};
 pub use contrib::{Contribution, Contributions};

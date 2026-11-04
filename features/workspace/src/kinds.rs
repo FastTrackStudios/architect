@@ -29,6 +29,7 @@ pub const DIOXUS: &str = "dioxus";
 
 /// The in-process paint kind: a scene the view records each frame, drawn
 /// by Blitz's renderer in the pane's place (`PaintView`, feature `paint`).
+///
 /// The app registers it ([`KindSpec::paint`]); a GPU view, a Frame
 /// surface or a chart draws through it.
 pub const PAINT: &str = "paint";

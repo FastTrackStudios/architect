@@ -395,6 +395,7 @@ pub(crate) fn manifest_fields(error: &ManifestError) -> (Option<String>, Option<
         ManifestError::BadPath(path) => (Some(path.clone()), None),
         ManifestError::BadSetting { key, .. } => (Some(format!("sections.settings[{key}]")), None),
         ManifestError::Duplicate(id) => (Some(id.clone()), None),
+        ManifestError::BadWorker { worker, .. } => (Some(format!("workers[{worker}]")), None),
         ManifestError::BadPlane { overlay, .. } => {
             (Some(format!("overlays[{overlay}].plane")), None)
         }
