@@ -246,6 +246,12 @@ impl Host {
     /// on. An extension's own actions run where they are.
     pub fn set_app_list(&self, list: architect::action::ActionList) {
         *lock(&self.services().app_list) = Some(list);
+        self.show_background();
+    }
+
+    /// The app's own list, when it gave one ([`Self::set_app_list`]).
+    pub(crate) fn app_list(&self) -> Option<architect::action::ActionList> {
+        lock(&self.services().app_list).clone()
     }
 
     /// The list action `id` is on: the host's, or the app's.

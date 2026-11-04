@@ -416,16 +416,27 @@ impl Host {
         });
         // A reload's old record goes; the host stops its instance.
         lock(&self.event_state().background).insert(id.to_owned(), Arc::clone(&core));
-        if !self.event_state().shown.swap(true, Ordering::AcqRel) {
+        self.event_state().shown.store(true, Ordering::Release);
+        self.show_background();
+        Box::new(Lazy { core })
+    }
+
+    /// `APP_STATUS`'s `background` section, on its list and the app's
+    /// (`Host::set_app_list`), once it has a background extension.
+    pub(crate) fn show_background(&self) {
+        if !self.event_state().shown.load(Ordering::Acquire) {
+            return;
+        }
+        let lists = [Some(self.list().clone()), self.app_list()];
+        for list in lists.into_iter().flatten() {
             let weak = self.downgrade();
-            self.list().status().section("background", move || {
+            list.status().section("background", move || {
                 weak.upgrade().map_or_else(
                     || "[]".to_owned(),
                     |host| serde_json::to_string(&host.background()).unwrap_or_default(),
                 )
             });
         }
-        Box::new(Lazy { core })
     }
 
     /// `id` was unloaded: its hooks made at run time, its schedule and its

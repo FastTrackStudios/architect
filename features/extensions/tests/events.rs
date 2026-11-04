@@ -335,6 +335,9 @@ fn a_background_extension_starts_on_its_first_event_and_stops_when_idle() {
     let tmp = tempfile::tempdir().unwrap();
     let clock = FakeClock::at(WED_8);
     let host = host(&clock);
+    // The app's own list: its APP_STATUS shows them too.
+    let app = ActionList::new();
+    host.set_app_list(app.clone());
     load(&host, &tmp.path().join("pulse"), BACKGROUND).unwrap();
     let status = |host: &Host| host.background()[0].clone();
     assert_eq!(status(&host).state, BackgroundState::Stopped);
@@ -374,6 +377,13 @@ fn a_background_extension_starts_on_its_first_event_and_stops_when_idle() {
             .iter()
             .any(|l| l == "background stopped: idle for 30 s"),
         "{lines:?}"
+    );
+    assert!(
+        app.status()
+            .read()
+            .iter()
+            .any(|(name, _)| name == "background"),
+        "on the app's list too"
     );
     let sections = host.list().status().read();
     let (_, background) = sections
