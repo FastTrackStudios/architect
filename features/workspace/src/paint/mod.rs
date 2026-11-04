@@ -25,7 +25,9 @@ pub mod web;
 #[cfg(all(feature = "paint-web-ui", target_arch = "wasm32"))]
 pub mod web_ui;
 
-#[cfg(all(feature = "paint-web", any(target_arch = "wasm32", test)))]
+// Plain arithmetic, so its tests run natively without the web stack
+// (`cargo xtask feature-tests`).
+#[cfg(any(all(feature = "paint-web", target_arch = "wasm32"), test))]
 mod web_geometry;
 
 use std::collections::VecDeque;
