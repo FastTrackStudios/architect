@@ -17,7 +17,13 @@
 //! - it moves on when the step's `done` holds — one of its events on the
 //!   Action List, in process, then its checks — or on Next for a step with
 //!   no `done` (text only, or a gesture nothing reports);
-//! - a hidden step is setup: the tour runs its `@run` itself and moves on.
+//! - a hidden step is setup: the tour runs its `@run` itself and moves on;
+//!   Back to a step runs the setup right before it again, so a tour of
+//!   chapters (setup, then a step to try) puts the app back where that
+//!   chapter needs it;
+//! - [`TourSet::on_move`] hears every move, so an app can remember where a
+//!   person left a tour and start it there again (`GUIDE_TOUR_START {id,
+//!   step}`).
 //!
 //! Safety: a scenario not marked `safe` never plays over the person's own
 //! data. The app's playground ([`TourSet::playground`]: a sample document,
@@ -66,6 +72,18 @@ pub struct TourSet {
     scenarios: Vec<Scenario>,
     resolvers: Vec<Resolver>,
     playground: Option<Rc<dyn Fn(&Scenario) -> Result<(), String>>>,
+    moved: Option<Rc<dyn Fn(&Moved)>>,
+}
+
+/// A move of a tour, as [`TourSet::on_move`] hears it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Moved {
+    /// Tour `scenario` shows step `step` (by id).
+    At { scenario: String, step: String },
+    /// The person left tour `scenario` at step `step` (Skip).
+    Left { scenario: String, step: String },
+    /// Tour `scenario` was played to its end.
+    Finished { scenario: String },
 }
 
 impl TourSet {
@@ -107,6 +125,14 @@ impl TourSet {
     #[must_use]
     pub fn playground(mut self, setup: impl Fn(&Scenario) -> Result<(), String> + 'static) -> Self {
         self.playground = Some(Rc::new(setup));
+        self
+    }
+
+    /// Hears every move of a tour: a step shown, the tour left, or played
+    /// to its end. Where an app remembers a person's place in a tour.
+    #[must_use]
+    pub fn on_move(mut self, moved: impl Fn(&Moved) + 'static) -> Self {
+        self.moved = Some(Rc::new(moved));
         self
     }
 
@@ -163,6 +189,10 @@ pub struct TourInfo {
 pub struct StartTour {
     /// The scenario's id.
     pub id: String,
+    /// The step to start at, by id (from the setup right before it).
+    /// Unset, or no such step: the first.
+    #[facet(default)]
+    pub step: Option<String>,
 }
 
 /// Where a tour is: which scenario, which step.
@@ -210,7 +240,7 @@ enum Msg {
 
 #[derive(Debug, Clone)]
 enum Ask {
-    Start(String),
+    Start(String, Option<String>),
     Next,
     Back,
     Skip,
@@ -219,7 +249,7 @@ enum Ask {
 static START_META: ActionMeta = meta(
     START_ACTION,
     "Start a tour",
-    "Starts the in-app tour of a guide scenario, by its id (GUIDE_TOUR_LIST lists them): its steps shown over the app, one at a time.",
+    "Starts the in-app tour of a guide scenario, by its id (GUIDE_TOUR_LIST lists them): its steps shown over the app, one at a time. `step` starts it at that step (by id) instead of the first.",
 );
 static STATE_META: ActionMeta = meta(
     STATE_ACTION,
@@ -239,7 +269,7 @@ static NEXT_META: ActionMeta = meta(
 static BACK_META: ActionMeta = meta(
     BACK_ACTION,
     "Back a step in the tour",
-    "Goes back to the tour's step before (setup steps are not run again).",
+    "Goes back to the tour's step before, running the setup steps right before it again.",
 );
 static SKIP_META: ActionMeta = meta(SKIP_ACTION, "End the tour", "Ends the tour playing.");
 
@@ -399,7 +429,11 @@ fn register(
         })
         .collect();
     [
-        list.register_async(&START_META, Effect::Mutating, asker(|a| Ask::Start(a.id))),
+        list.register_async(
+            &START_META,
+            Effect::Mutating,
+            asker(|a| Ask::Start(a.id, a.step)),
+        ),
         list.register(&STATE_META, Effect::ReadOnly, move |(): ()| {
             Ok(read.lock().unwrap_or_else(PoisonError::into_inner).clone())
         }),
@@ -433,6 +467,16 @@ impl Tours {
     /// No such tour, or it is not `safe` and the app's playground could
     /// not be set up ([`TourSet::playground`]).
     pub fn start(&self, id: &str) -> Result<(), String> {
+        self.start_at(id, None)
+    }
+
+    /// Starts tour `id` at step `step` (by id), from the setup steps right
+    /// before it; `None`, or no such step, from its first.
+    ///
+    /// # Errors
+    ///
+    /// As [`Tours::start`].
+    pub fn start_at(&self, id: &str, step: Option<&str>) -> Result<(), String> {
         let found = self.set.with_peek(|s| {
             let (n, scenario) = s
                 .scenarios
@@ -442,6 +486,9 @@ impl Tours {
                 .ok_or_else(|| format!("no tour {id:?}"))?;
             s.may_start(scenario)?;
             let first = first_step(scenario).ok_or_else(|| format!("tour {id} has no steps"))?;
+            let first = step
+                .and_then(|want| scenario.steps.iter().position(|s| s.id == want))
+                .map_or(first, |at| setup_of(&scenario.steps, at));
             Ok::<_, String>(Playing {
                 scenario: n,
                 step: first,
@@ -461,7 +508,8 @@ impl Tours {
                 (now.step.saturating_add(1) < sc.steps.len()).then_some(now.step.saturating_add(1))
             })
         });
-        self.go(to.map(|step| Playing { step, ..now }));
+        let finished = to.is_none();
+        self.go_as(to.map(|step| Playing { step, ..now }), finished);
     }
 
     /// Back to the step a person saw before this one (none: stays).
@@ -472,7 +520,7 @@ impl Tours {
         let to = self.set.with_peek(|s| {
             s.scenarios
                 .get(now.scenario)
-                .and_then(|sc| shown_before(&sc.steps, now.step))
+                .and_then(|sc| shown_before(&sc.steps, now.step).map(|at| setup_of(&sc.steps, at)))
         });
         if let Some(step) = to {
             self.go(Some(Playing { step, ..now }));
@@ -502,9 +550,20 @@ impl Tours {
     }
 
     fn go(&self, to: Option<Playing>) {
+        self.go_as(to, false);
+    }
+
+    /// Moves to `to`; `finished`: a tour ending was played to its end.
+    fn go_as(&self, to: Option<Playing>, finished: bool) {
         let mut playing = self.playing;
-        if *playing.peek() != to {
+        let from = *playing.peek();
+        if from != to {
             playing.set(to);
+            self.set.with_peek(|s| {
+                if let (Some(heard), Some(moved)) = (&s.moved, moved_of(s, from, to, finished)) {
+                    heard(&moved);
+                }
+            });
         }
         if let Some(tx) = self.driver.peek().as_ref() {
             let _ = tx.unbounded_send(Msg::Wake);
@@ -517,7 +576,7 @@ impl Tours {
             return;
         };
         let done = match ask {
-            Ask::Start(id) => self.start(&id),
+            Ask::Start(id, step) => self.start_at(&id, step.as_deref()),
             Ask::Next => {
                 self.next();
                 Ok(())
@@ -682,6 +741,51 @@ async fn setup(list: &ActionList, step: &Step) {
     } else {
         list.run_json(&id, &bytes)
     };
+}
+
+/// What a move from `from` to `to` is, for [`TourSet::on_move`]: a step
+/// shown (a setup step is not one), the tour left, or finished.
+fn moved_of(
+    set: &TourSet,
+    from: Option<Playing>,
+    to: Option<Playing>,
+    finished: bool,
+) -> Option<Moved> {
+    let step_of = |p: Playing| {
+        let sc = set.scenarios.get(p.scenario)?;
+        Some((sc.id.clone(), sc.steps.get(p.step)?))
+    };
+    match to {
+        Some(p) => {
+            let (scenario, step) = step_of(p)?;
+            (!step.hide).then(|| Moved::At {
+                scenario,
+                step: step.id.clone(),
+            })
+        }
+        None => {
+            let (scenario, step) = step_of(from?)?;
+            Some(if finished {
+                Moved::Finished { scenario }
+            } else {
+                Moved::Left {
+                    scenario,
+                    step: step.id.clone(),
+                }
+            })
+        }
+    }
+}
+
+/// Where a tour going to `step` starts: the first of the setup steps right
+/// before it (they run again, so the app is where the step expects), or
+/// the step itself.
+fn setup_of(steps: &[Step], step: usize) -> usize {
+    let before = steps.get(..step).unwrap_or_default();
+    before
+        .iter()
+        .rposition(|s| !s.hide)
+        .map_or(0, |shown| shown.saturating_add(1))
 }
 
 /// The first step of a scenario (setup or not).
@@ -1044,6 +1148,49 @@ mod tests {
         assert_eq!(place_of(&s, 2), (2, 2));
         assert_eq!(shown_before(&s, 2), Some(1));
         assert_eq!(shown_before(&s, 1), None);
+    }
+
+    #[test]
+    fn going_to_a_chapter_runs_its_setup_again() {
+        let s = steps(
+            "id x\nsteps ({id a, hide true, do @run{id GO}} {id b, text hi} \
+             {id c1, hide true, do @run{id GO}} {id c2, hide true, do @run{id GO}} {id c, text there})",
+        );
+        // Back from c lands on b, after its setup a.
+        assert_eq!(shown_before(&s, 4).map(|at| setup_of(&s, at)), Some(0));
+        // Starting at c starts at its setup, c1.
+        assert_eq!(setup_of(&s, 4), 2);
+        assert_eq!(setup_of(&s, 1), 0);
+        assert_eq!(setup_of(&s, 0), 0);
+    }
+
+    #[test]
+    fn a_move_is_a_step_shown_a_tour_left_or_finished() {
+        let sc =
+            crate::load("id x\nsteps ({id a, hide true, do @run{id GO}} {id b, text hi})").unwrap();
+        let set = TourSet::new(vec![sc]);
+        let at = |step| Some(Playing { scenario: 0, step });
+        assert_eq!(moved_of(&set, None, at(0), false), None);
+        assert_eq!(
+            moved_of(&set, at(0), at(1), false),
+            Some(Moved::At {
+                scenario: "x".into(),
+                step: "b".into()
+            })
+        );
+        assert_eq!(
+            moved_of(&set, at(1), None, false),
+            Some(Moved::Left {
+                scenario: "x".into(),
+                step: "b".into()
+            })
+        );
+        assert_eq!(
+            moved_of(&set, at(1), None, true),
+            Some(Moved::Finished {
+                scenario: "x".into()
+            })
+        );
     }
 
     #[test]
