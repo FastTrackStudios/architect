@@ -82,18 +82,35 @@ fn a_frame_that_fails_stops_the_script_with_its_line() {
 }
 
 #[test]
-fn a_frame_has_its_own_step_limit_and_a_one_off_run_cannot_defer() {
+fn a_live_script_is_bounded_by_its_time_not_its_steps_and_a_one_off_run_cannot_defer() {
     let runtime = Runtime::new(ActionList::new()).with_limits(architect_scripting::luau::Limits {
         steps: 5_000,
         ..Default::default()
     });
-    // Each frame takes well under the limit; forty of them, well over.
-    let source = "local function loop() for _ = 1, 50 do end defer(loop) end defer(loop)";
-    let (_, live) = block_on(runtime.start(&ActionCaller::app(), source, Value::Null, "S"));
+    // How many steps fit in a frame is the machine's speed: a live
+    // script's start and frames of ten times the step limit run; a
+    // one-off run of the same stops at its steps.
+    let spin = "for _ = 1, 50000 do end";
+    let source = format!("local function loop() {spin} defer(loop) end loop()");
+    let (started, live) = block_on(runtime.start(&ActionCaller::app(), &source, Value::Null, "S"));
+    assert!(started.result.is_ok(), "{:?}", started.result);
     let live = live.expect("it started");
-    for _ in 0..40 {
+    for _ in 0..3 {
         assert!(block_on(live.frame()).result.is_ok());
     }
+    let run = block_on(runtime.run(&ActionCaller::app(), spin, Value::Null, "S"));
+    assert_eq!(run.result.map_err(|e| e.kind), Err(ErrorKind::Limit));
+    // A start or a frame that never ends stops at its time.
+    let (started, live) =
+        block_on(runtime.start(&ActionCaller::app(), "while true do end", Value::Null, "S"));
+    assert!(live.is_none());
+    let stopped = started.result.expect_err("it ran past its time");
+    assert!(stopped.message.contains("ran past its time"), "{stopped}");
+    let forever = "local function loop() while true do end end defer(loop)";
+    let (_, live) = block_on(runtime.start(&ActionCaller::app(), forever, Value::Null, "S"));
+    let stopped = block_on(live.expect("it started").frame()).result;
+    let stopped = stopped.expect_err("it ran past its frame");
+    assert!(stopped.message.contains("ran past its time"), "{stopped}");
     let once = block_on(runtime.run(&ActionCaller::app(), "defer(print)", Value::Null, "S"));
     assert_eq!(once.result.map_err(|e| e.kind), Err(ErrorKind::Runtime));
     let missing = block_on(runtime.run(

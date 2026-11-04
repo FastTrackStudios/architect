@@ -68,12 +68,13 @@ pub struct Limits {
     /// The most memory its Luau state may hold, in bytes.
     pub memory: usize,
     /// The most steps it may take: Luau counts one at every call and every
-    /// turn of a loop. What stops `while true do end`. A live script's
-    /// count starts again each frame.
+    /// turn of a loop. What stops `while true do end` in a one-off run. A
+    /// live script is bounded by `frame` instead: how many steps fit in a
+    /// frame is the machine's speed, not the script's.
     pub steps: u64,
-    /// The longest one frame of a live script may run ([`Live::frame`]):
-    /// a view that runs past it is stopped, with a message that says to
-    /// hand the work to a worker. Its host shows it busy long before
+    /// The longest a live script's start, or one of its frames
+    /// ([`Live::frame`]), may run: a view that runs past it is stopped,
+    /// with a message that says to hand the work to a worker. Its host shows it busy long before
     /// (`architect_workspace::ViewMeter`, a frame's 16 ms).
     pub frame: Duration,
     /// The longest a run may take in all, `None` for no limit: a worker's
@@ -832,7 +833,9 @@ async fn live_thread(
     asks: std::sync::mpsc::Receiver<Ask>,
 ) {
     let trace = Arc::new(Mutex::new(Trace::default()));
-    let guard = Arc::new(Guard::new(runtime.limits.steps, vec![shared.stop.clone()]));
+    // Its start and each frame are stopped by their time, never a count.
+    let guard = Arc::new(Guard::new(u64::MAX, vec![shared.stop.clone()]));
+    guard.deadline(Some(runtime.limits.frame));
     let owner = Owner {
         wake: Some(shared.wake.clone()),
         cancel: vec![shared.stop.clone()],
@@ -849,6 +852,7 @@ async fn live_thread(
         .step(&step, async { execute(&lua, main?).await })
         .await;
     let started = result.0.is_ok();
+    guard.deadline(None);
     let vm = LiveVm {
         lua,
         trace,
