@@ -106,6 +106,12 @@ package = "architect-settings"
 layer = "L0"
 
 [[row]]
+package = "architect-settings"
+features = ["appearance"]
+layer = "L0"
+note = "a theme store's org, person and device layers as settings"
+
+[[row]]
 package = "architect-presence"
 layer = "L0"
 
