@@ -618,7 +618,7 @@ fn builtin() -> Option<Package> {
 /// control socket, MCP): forwarded to the extensions' list, each run there
 /// as whoever ran it on the lab's (the lab's authorizer and confirmation
 /// asked first).
-const FORWARDED: [&str; 29] = [
+const FORWARDED: [&str; 30] = [
     "EXT_LIST",
     "EXT_VIEWS",
     "EXT_SEARCH",
@@ -641,6 +641,7 @@ const FORWARDED: [&str; 29] = [
     "MANAGER_GET",
     "MANAGER_RUN",
     "EXT_CONTRIBUTIONS",
+    "EXT_EMBEDS",
     "EXT_OPEN",
     "EXT_VIEW_OPEN",
     "EXT_STATE_SET",
@@ -874,7 +875,10 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
             architect_pages::manage::PagesKind::new(pages.clone()).with_meters(meters.clone()),
         );
     });
-    let _ = architect_pages::ui::use_view_pages(pages);
+    let _ = architect_pages::ui::use_view_pages(pages.clone());
+    // Inline embeds drawn by a page (the Board's ```kf fences): a
+    // sub-document in the note, sized to its content.
+    let _ = architect_pages::ui::use_embed_pages(pages);
     use_extension_ui(extensions.host().clone(), Arc::clone(&lab))
 }
 
@@ -1022,6 +1026,10 @@ fn lab_pages(
         Ok(dir) => {
             if let Some(page) = PageFile::new(dir.join("board.tsx"), Origin::Builtin) {
                 pages.declare(id, "board", page);
+            }
+            // Its ```kf embed's page (`[[embeds]] id = "kf"`).
+            if let Some(page) = PageFile::new(dir.join("kf.tsx"), Origin::Builtin) {
+                pages.declare(id, "embed.kf", page);
             }
         }
         Err(e) => tracing::warn!(error = %e, "the Board's page was not written"),

@@ -8,7 +8,10 @@
 //! "Pin to the board" entry in a note's context menu, an opener for `.kf`
 //! files (and the `keyflow.chart` document kind), an opener for GitHub
 //! issue links, a View-menu entry, a phone bar button, a startup hook,
-//! and its own status bar in the shell's `status` slot. Its actions read
+//! its own status bar in the shell's `status` slot, and two inline
+//! embeds: ```` ```kf ```` fences drawn as a chart by a page
+//! (`pages/kf.tsx`), and `type: song` notes given a song card
+//! ([`SongCard`]). Its actions read
 //! where they were invoked from: a pin from a note's context menu pins
 //! that note.
 
@@ -28,6 +31,7 @@ pub const ID: &str = "lab.board";
 /// (`architect_pages::files::write_builtin`).
 pub const PAGES: &[(&str, &str)] = &[
     ("board.tsx", include_str!("../pages/board.tsx")),
+    ("kf.tsx", include_str!("../pages/kf.tsx")),
     ("primes.js", include_str!("../pages/primes.js")),
 ];
 
@@ -122,6 +126,7 @@ impl Extension for Board {
         ext.view("board", BoardView)
             .view("chart", ChartView)
             .view("status-bar", BoardStatusBar)
+            .view("song", SongCard)
             .action_in(
                 "LAB_BOARD_PIN",
                 |args, cx| async move { Ok(pin(&args, cx)) },
@@ -247,6 +252,71 @@ fn BoardStatusBar() -> Element {
             }
             span { style: "flex: 1;" }
             span { "lab.board fills the status slot" }
+        }
+    }
+}
+
+/// A `type: song` note's card, as an inline embed at the note's head: its
+/// frontmatter (title, artist, key, tempo) and how long its lyric is.
+/// In a pane of its own (no embed), what it is for.
+#[component]
+pub fn SongCard() -> Element {
+    let Some(input) = architect_extensions::linked::use_embed() else {
+        return rsx! {
+            div { style: "padding: 24px; font-size: 13px; color: var(--muted-foreground);",
+                "The song card shows at the head of a note whose type is song."
+            }
+        };
+    };
+    let field = |name: &str| {
+        input
+            .props
+            .get(name)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    let (title, artist, key, tempo) = (
+        field("title"),
+        field("artist"),
+        field("key"),
+        field("tempo"),
+    );
+    // The lyric: its lines up to the first fenced block (a chart).
+    let lines = input
+        .source
+        .lines()
+        .take_while(|l| !l.trim_start().starts_with("```"))
+        .filter(|l| !l.trim().is_empty())
+        .count();
+    let chips = [("Key", key), ("Tempo", tempo)]
+        .into_iter()
+        .filter(|(_, v)| !v.is_empty());
+    rsx! {
+        div { class: "song-card",
+            style: "display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border-radius: 10px; \
+                    border: 1px solid var(--border); background: var(--card); color: var(--card-foreground);",
+            div { style: "display: flex; align-items: baseline; gap: 10px;",
+                span { style: "font-size: 12px; font-weight: 700; letter-spacing: 0.06em; color: var(--primary);", "♪ SONG" }
+                span { class: "song-title", style: "font-size: 17px; font-weight: 700;",
+                    if title.is_empty() { "Untitled song" } else { "{title}" }
+                }
+                if !artist.is_empty() {
+                    span { style: "font-size: 13px; color: var(--muted-foreground);", "{artist}" }
+                }
+            }
+            div { style: "display: flex; flex-wrap: wrap; gap: 6px;",
+                for (name, value) in chips {
+                    span { key: "{name}",
+                        style: "padding: 2px 8px; border-radius: 999px; font-size: 12px; \
+                                background: var(--secondary); color: var(--secondary-foreground);",
+                        "{name} {value}"
+                    }
+                }
+                span { style: "padding: 2px 8px; font-size: 12px; color: var(--muted-foreground);",
+                    {format!("{lines} line{} of lyric", if lines == 1 { "" } else { "s" })}
+                }
+            }
         }
     }
 }
