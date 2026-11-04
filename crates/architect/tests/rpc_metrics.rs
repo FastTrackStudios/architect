@@ -63,8 +63,11 @@ async fn each_call_records_its_duration_by_service_and_method() {
 
     // A call is recorded on the dispatching thread after its reply is sent,
     // so the client can be back here before the second one lands: wait.
+    // A deadline in time, not in tries: a loaded CI runner can take longer
+    // than 500 polls of 10 ms to record the second call (it did, after #282).
     let mut points: Vec<(u64, Vec<(String, String)>)> = Vec::new();
-    for _ in 0..500 {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while std::time::Instant::now() < deadline {
         provider.force_flush().expect("flush");
         let finished = exporter.get_finished_metrics().expect("metrics");
         points = finished
@@ -99,11 +102,12 @@ async fn each_call_records_its_duration_by_service_and_method() {
     }
     let echo = points
         .iter()
-        .find(|(_, attributes)| {
+        .filter(|(_, attributes)| {
             attributes
                 .iter()
                 .any(|(k, v)| k == "rpc.method" && v == "echo")
         })
+        .max_by_key(|(count, _)| *count)
         .unwrap_or_else(|| panic!("no rpc.server.duration point for echo in {points:?}"));
     assert_eq!(echo.0, 2, "both calls counted");
     for (key, value) in [("rpc.system", "vox"), ("rpc.service", "EchoRpc")] {
