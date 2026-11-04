@@ -46,6 +46,11 @@ futures-timer = { workspace = true, optional = true }
 futures-channel = { version = "0.3", optional = true }
 futures-util = { version = "0.3", default-features = false, optional = true }
 
+# A surface's document in the browser, where a `CrdtDoc` is not `Send`
+# but the Action List's handlers holding it must be (`store.rs`, `DocHandle`).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+send_wrapper = "0.6"
+
 [dev-dependencies]
 # The renderer's own tests (tests/render.rs), so `cargo test --workspace`
 # builds them with it.
