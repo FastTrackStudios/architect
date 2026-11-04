@@ -132,6 +132,9 @@ its tabs back to the main one.
 - `features/workspace/tests/windows.rs`: one document's signal redraws
   another; a pop-out opens and gives its tabs back; a kept layout comes back
   on mount; a pane's status items.
+- `features/workspace/tests/inner_html.rs`: a window's document
+  (`native::document_config`, the main window's and every pop-out's) parses
+  `dangerous_inner_html` into nodes.
 - The shell has unit tests for form factors and frames only; it is checked by
   eye in `apps/lab`.
 

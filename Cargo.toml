@@ -235,6 +235,8 @@ blitz-traits = "=0.3.0-beta.4"
 # The workspace's pop-out windows drive Blitz's window views themselves
 # (architect-workspace `native`), and serve the bundle's assets to them.
 blitz-shell = "=0.3.0-beta.4"
+# The windows' HTML parser: `dangerous_inner_html` makes nodes (architect-workspace `native`).
+blitz-html = "=0.3.0-beta.4"
 dioxus-asset-resolver = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41" }
 dioxus-devtools = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41" }
 dioxus-primitives = { git = "https://github.com/FastTrackStudios/dioxus-components", package = "dioxus-primitives", tag = "fts-upstream-2026-11", default-features = false }

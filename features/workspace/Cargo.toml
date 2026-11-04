@@ -30,7 +30,7 @@ ctx = ["dep:architect", "dep:crdt", "dep:architect-theme"]
 actions = ["dep:architect", "dep:futures-channel"]
 ui = ["actions", "dep:dioxus", "dep:architect-theme", "architect-theme/dioxus", "dep:architect-shell", "architect-shell/ui", "dep:futures-timer", "dep:futures-util", "dep:lucide-dioxus", "architect-commands/ui"]
 # `APP_SHOT` (src/shot.rs): the window's document painted on the CPU to a PNG.
-native = ["ui", "dep:dioxus-native", "dep:blitz-shell", "dep:blitz-traits", "dep:dioxus-asset-resolver", "dep:blitz-dom", "dep:blitz-paint", "dep:anyrender", "dep:anyrender_vello_cpu", "dep:peniko", "dep:png"]
+native = ["ui", "dep:dioxus-native", "dep:blitz-shell", "dep:blitz-html", "dep:blitz-traits", "dep:dioxus-asset-resolver", "dep:blitz-dom", "dep:blitz-paint", "dep:anyrender", "dep:anyrender_vello_cpu", "dep:peniko", "dep:png"]
 hot-reload = ["native", "dioxus-native/hot-reload", "dep:dioxus-devtools"]
 # The interface as files (src/home.rs): layouts/<name>.json, keys.json,
 # watched, last-good with a .error beside a broken one, .state/ apart.
@@ -58,6 +58,8 @@ architect-shell = { workspace = true, optional = true }
 lucide-dioxus = { workspace = true, optional = true }
 dioxus-native = { workspace = true, optional = true, features = ["vello"] }
 blitz-shell = { workspace = true, optional = true }
+# A window's HTML parser, so `dangerous_inner_html` makes nodes (feature `native`).
+blitz-html = { workspace = true, optional = true }
 blitz-traits = { workspace = true, optional = true }
 dioxus-asset-resolver = { workspace = true, optional = true }
 dioxus-devtools = { workspace = true, optional = true }
@@ -128,6 +130,10 @@ required-features = ["actions"]
 
 [[test]]
 name = "shot"
+required-features = ["native"]
+
+[[test]]
+name = "inner_html"
 required-features = ["native"]
 
 [lints]

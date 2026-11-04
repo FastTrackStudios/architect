@@ -130,14 +130,28 @@ fn document(
         data: blitz_shell::DataUriNetProvider::shared(Some(waker)),
     });
     vdom.provide_root_context(Arc::clone(&net));
-    DioxusDocument::new(
-        vdom,
-        DocumentConfig {
-            net_provider: Some(net),
-            font_ctx: (!fonts.is_empty()).then(|| font_context(fonts)),
-            ..Default::default()
-        },
-    )
+    let config = document_config(Some(net), fonts);
+    if let Some(html) = &config.html_parser_provider {
+        vdom.provide_root_context(Arc::clone(html));
+    }
+    DioxusDocument::new(vdom, config)
+}
+
+/// What a window's document is made with, the main window's and every
+/// pop-out's.
+///
+/// `net` (the bundle's assets, `data:` URIs), the system's faces and
+/// `fonts`, and Blitz's HTML parser, so `dangerous_inner_html` makes
+/// nodes (dioxus-native's own launcher sets one; a document without it
+/// drops that markup, such as an editor's painted caret).
+#[must_use]
+pub fn document_config(net: Option<Arc<dyn NetProvider>>, fonts: &[&[u8]]) -> DocumentConfig {
+    DocumentConfig {
+        net_provider: net,
+        html_parser_provider: Some(Arc::new(blitz_html::HtmlProvider)),
+        font_ctx: (!fonts.is_empty()).then(|| font_context(fonts)),
+        ..Default::default()
+    }
 }
 
 /// The system's faces and `fonts`.

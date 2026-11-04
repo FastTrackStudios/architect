@@ -1719,6 +1719,7 @@ dependencies = [
  "architect-workspace",
  "architect-workspace-hack",
  "blitz-dom",
+ "blitz-html",
  "blitz-paint",
  "blitz-shell",
  "blitz-traits",
