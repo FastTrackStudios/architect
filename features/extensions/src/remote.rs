@@ -695,12 +695,15 @@ async fn follow(
         let answered = process.hello().is_some_and(|h| h.wire >= ANSWERED_WIRE);
         let asked: Rc<RefCell<VecDeque<Instant>>> = Rc::default();
         let (events, mut proxied) = mpsc::unbounded::<ViewEvent>();
+        // Each event asked, to the frame loop's watch for an overdue one.
+        let (asking, mut was_asked) = mpsc::unbounded::<()>();
         let forwarding = {
             let (to, asked) = (session.events.clone(), Rc::clone(&asked));
             spawn(async move {
                 while let Some(event) = proxied.next().await {
                     if answered {
                         asked.borrow_mut().push_back(Instant::now());
+                        let _ = asking.unbounded_send(());
                     }
                     if to.unbounded_send(event).is_err() {
                         return;
@@ -717,7 +720,9 @@ async fn follow(
         })
         .await;
         let mut failed = None;
-        while let Some(frame) = next_frame(&mut session.frames, &asked, &mut timing).await {
+        while let Some(frame) =
+            next_frame(&mut session.frames, &asked, &mut was_asked, &mut timing).await
+        {
             let from = asked.borrow_mut().pop_front();
             let applying = Instant::now();
             let applied = with_doc(&node, |doc, at| {
@@ -793,6 +798,7 @@ async fn follow(
 async fn next_frame(
     frames: &mut mpsc::UnboundedReceiver<Frame>,
     asked: &Rc<RefCell<VecDeque<Instant>>>,
+    was_asked: &mut mpsc::UnboundedReceiver<()>,
     timing: &mut Timing,
 ) -> Option<Frame> {
     loop {
@@ -808,6 +814,13 @@ async fn next_frame(
         };
         futures::select! {
             frame = frames.next() => return frame,
+            // A new event: look again at the oldest.
+            again = was_asked.next() => {
+                // Its events go nowhere now: only frames are left.
+                if again.is_none() {
+                    return frames.next().await;
+                }
+            }
             () = Box::pin(overdue).fuse() => {
                 timing.meter.set_busy(true);
                 timing.busy.set(true);
@@ -835,6 +848,11 @@ pub fn RemoteView(processes: Processes, extension: String, view: String) -> Elem
             |m| m.meter(&name, REMOTE_BUDGET),
         )
     });
+    {
+        // Unmounted mid-frame: no longer busy.
+        let meter = meter.clone();
+        use_drop(move || meter.set_busy(false));
+    }
     let (retry_to, retry) = use_hook(|| {
         let (to, from) = mpsc::unbounded::<()>();
         (to, std::rc::Rc::new(std::cell::RefCell::new(Some(from))))

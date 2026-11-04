@@ -62,7 +62,7 @@
 //! shows changes (the view's spaces, the pointer over a region).
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use architect::action::ActionCaller;
 use architect_scripting::luau::mlua::{self, Lua, UserData, UserDataRef, Value as LuaValue};
@@ -651,7 +651,9 @@ impl Session {
     /// [`Self::frame`], measured by `meter`: once the frame has run past
     /// the meter's budget, `busy` is called and the meter is busy until
     /// it ends (its host keeps showing the last good frame, marked busy).
-    /// The frame runs on the script's thread; this only waits.
+    /// The frame runs on the script's thread; this only waits. What the
+    /// meter records is the frame's time on that thread
+    /// ([`Live::last_frame_time`]), not the host's wait to hear of it.
     pub async fn frame_metered(
         &mut self,
         input: Input,
@@ -659,18 +661,19 @@ impl Session {
         busy: impl FnOnce(),
     ) -> Report {
         use futures::future::{Either, select};
-        let started = Instant::now();
         let budget = meter.budget();
-        let frame = std::pin::pin!(self.frame(input));
-        let report = match select(frame, futures_timer::Delay::new(budget)).await {
-            Either::Left((report, _)) => report,
-            Either::Right(((), frame)) => {
-                meter.set_busy(true);
-                busy();
-                frame.await
+        let report = {
+            let frame = std::pin::pin!(self.frame(input));
+            match select(frame, futures_timer::Delay::new(budget)).await {
+                Either::Left((report, _)) => report,
+                Either::Right(((), frame)) => {
+                    meter.set_busy(true);
+                    busy();
+                    frame.await
+                }
             }
         };
-        meter.record(started.elapsed());
+        meter.record(self.live.last_frame_time());
         report
     }
 
