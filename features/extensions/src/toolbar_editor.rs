@@ -509,7 +509,7 @@ fn EditBar(ui: ExtensionUi) -> Element {
             role: "toolbar",
             "aria-label": "Toolbar editor",
             "data-testid": "toolbar-edit-bar",
-            style: "position:absolute; top:10px; left:50%; margin-left:-170px; width:340px; pointer-events:auto; \
+            style: "position:absolute; bottom:44px; left:50%; margin-left:-170px; width:340px; pointer-events:auto; \
                     display:flex; flex-direction:column; gap:4px; padding:6px 8px; border-radius:10px; \
                     background:{t.pill}; border:1px solid {t.rule}; box-shadow:{t.shadow_float}; \
                     font-family:{t.font}; color:{t.ink};",
