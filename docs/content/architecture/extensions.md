@@ -656,8 +656,9 @@ says so and passes without node, `ARCHITECT_WASI_WEB_REQUIRED=1` makes
 that a failure).
 
 **Next.** WASI 0.3's async (`component-model-async`, which also lets
-jco drop JSPI), what a component adds at run time (`updates`), and
-timers in its views.
+jco drop JSPI) and what a component adds at run time (`updates`). Its
+views' timers landed with #308 ("Timers, events and background
+extensions").
 
 ## Processes over vox
 
@@ -1322,7 +1323,9 @@ for every load; `theme.changed` from the theme store; the app's list
 events through `Host::watch` (`workspace` → `workspace.changed`,
 `selection` → `selection.changed`, `doc` → `doc.opened`). One run of a
 hook at a time: an event while it runs does not start it again.
-`EXT_EMIT` raises one by hand.
+`EXT_EMIT` raises one by hand. A hook can be on a schedule instead
+(`every`, `at`), on a document's or the window's event, or on an event
+the app defines: "Timers, events and background extensions" below.
 
 Every run carries where it came from
 (`crates/architect/src/action_list.rs` `Invocation`,
@@ -1983,6 +1986,145 @@ file, `EXT_PAGE_CALL`, a headless host), `features/extensions/tests/wasi.rs`
 `features/pages/tests/host_ui.rs` (a TSX page on `QuickJS` and a Luau
 page).
 
+## Timers, events and background extensions
+
+What Templater, Git's auto-commit, TaskNotes' pomodoro, Linter's format
+on save and SWS's project triggers need (#308): time, the app's events,
+and work that runs only while it is wanted. The model is
+`features/extensions/src/events.rs` (wasm-clean), the host's side
+`features/extensions/src/host_events.rs`.
+
+**The clock.** The host reads the time on one `events::Clock`
+(`Host::with_clock`, `Host::set_clock`): `events::SystemClock` (its
+times of day `utc_offset_min` east of UTC, which the app sets), or in a
+test `events::FakeClock`, moved by hand (`advance`, `set`).
+`Host::tick` runs what is due on it, and the app calls it from a thread
+(`Host::run_clock`, every second in the lab), so a timer, a schedule
+and an idle timeout are tested by moving the clock, never by waiting.
+
+**Scheduled hooks.** A hook with no `on` runs on a schedule:
+
+```toml
+[[hooks]]
+every = "5m"            # 30s, 5m, 1h30m, 1d; a second at least
+action = "ACME_SYNC"
+
+[[hooks]]
+at = "09:30"            # every day, the clock's time of day
+script = "daily.luau"
+
+[[hooks]]
+at = "0 9 * * 1-5"      # five cron fields: minute hour day month weekday
+action = "ACME_STANDUP"
+```
+
+`events::Schedule` reads them and says when each is next due; an `every`
+hook first runs one interval after its extension loads. A run is a
+hook's run as any other's (one at a time, inside its capabilities), its
+invocation's event `schedule` and its detail `{every | at, due_ms}`. A
+host asleep past several runs runs a hook once, then on from then.
+`Host::next_runs` says when each will run.
+
+**Document and app events.** Past `startup`, `workspace.changed`,
+`theme.changed` and the rest (`contrib::EVENTS`):
+
+| event | detail | raised by |
+|---|---|---|
+| `doc.created`, `doc.saved`, `doc.deleted` | `{path}` | the layer that did it: `Host::raise_doc`, or `events::DocEvent::raise_on` the app's Action List (a `Changed` event the host hears through `Host::watch`; the document store raises them there without depending on extensions) |
+| `doc.renamed` | `{from, to}` | the same |
+| `app.focused`, `app.blurred` | `{window}` | `Host::focus`, or the list topic of the same name (the lab's window does: `apps/lab/ui/src/screen.rs` `use_window_chrome`) |
+
+The detail is JSON, so a Luau hook reads `event.detail.path`; an
+action's invocation has it as text (`ctx.detail`). `EXT_EMIT {event,
+detail}` raises any of them by hand (a detail that is a JSON object
+stays one).
+
+**Events the app defines.** Studio's transport and project events are
+the app's own: it defines each once (`Host::define_event` with an
+`events::AppEvent`, or `Host::define::<E>()` for a type implementing
+`events::TypedEvent`) and raises it typed (`Host::raise(&event)`, its
+value the hooks' detail; `Host::raise_app` with JSON). An extension
+hears one with a hook on `app:<name>`, and only when its manifest asks
+for it and a person granted it:
+
+```toml
+[capabilities]
+events = ["transport.*"]          # a name, <prefix>.*, or *
+
+[[hooks]]
+on = "app:transport.changed"
+script = "transport.luau"
+```
+
+A hook on an `app:` event the manifest does not ask for is refused as it
+loads (and at run time); one an installed extension was not granted is
+not run, and says so in its log. Raising an event that was not defined
+is an error. The consent prompt says it in words ("Hear the app's
+transport.* events").
+
+**Hooks made at run time.** The host service's `subscribe {on | every |
+at, action | script, function?}` adds a hook, checked as a manifest's
+are, and answers its key; `unsubscribe {key}` takes it off; `events`
+says what it can hear (`Host::subscribe`, `Host::events_for`). Every
+runtime makes them: Luau's `host.subscribe{ on = "doc.saved", action =
+… }`, `host.unsubscribe(key)`, `host.events()`
+(`features/extensions/src/luau_host.rs`); the WIT world's `subscribe`
+and `unsubscribe` imports (`features/extensions/wit/extension.wit`; the
+Rust guest's `host::subscribe`); a process's and a linked extension's
+host requests; a page's `events.subscribe(hook)`, `events.unsubscribe`,
+`events.list()` in TSX and Luau (`features/pages/src/js/prelude.js`,
+`features/pages/src/luau.rs`), as its extension. They go when it
+unloads.
+
+**Timers in a WASI view.** The world has the host's clock as an import
+(`now`) and a `tick` export: the guest keeps its timers
+(`features/extensions/wasi-guest/src/lib.rs` `timers::set_interval`,
+`set_timeout`, `clear`, and the hook `timers::use_interval`), the host's
+actor calls `tick` when the next is due (it answers how many ms until
+the one after) and sends what the timers changed as the view's edits
+(`pending`), as #302's Luau page workers' `page.tick` does. A timer set
+while a view renders or handles an event is that view's: it runs inside
+its `VirtualDom`, so it writes the view's signals, and goes when the
+view closes. `wasi::Stats::tick` runs what is due at once, for a test
+that moved the clock. In a browser the page's clock and `setTimeout`
+drive the same `tick` (`features/extensions/web/runner.js`).
+
+```rust
+fn Ticker() -> Element {
+    let mut seconds = use_signal(|| 0);
+    architect_extension_wasi::timers::use_interval(1000, move || seconds += 1);
+    rsx! { "{seconds} s" }
+}
+```
+
+**Background extensions.** `[background]` makes a code extension start
+on its first event, not as it loads, and stop once it has been idle:
+
+```toml
+[background]
+idle = "5m"     # the default
+```
+
+Its actions are on the list and its hooks registered from the start;
+the first action run or hook to fire starts its instance
+(`features/extensions/src/host_events.rs` `Lazy`), with the state its last one saved. Once no call
+has run in it for `idle`, `Host::tick` stops it (saving its state), and
+the next event starts it again. Each start and stop is a line in its
+log (`EXT_LOGS`: `started (hook doc.saved)`, `stopped: idle for 300 s`),
+and what each is doing is `Host::background` (`events::BackgroundStatus`:
+`stopped`, `running` or `failed`, its starts, what started it, when it
+stops) and `APP_STATUS`'s `background` section. It works for every
+runner the same way: a process is not spawned, a component not
+instantiated, a Luau runtime not made until it is needed.
+
+Tests: `features/extensions/tests/events.rs` (on a fake clock: an
+`every` and an `at` hook, one made with `host.subscribe`; a save raised
+on the host and on the list, the window's focus, a typed app event and
+its refusals; a background extension started by a hook, kept by an
+action, stopped idle, started again), `features/extensions/tests/wasi.rs`
+(`a_views_interval_runs_on_the_hosts_clock_and_a_hook_it_made_runs`),
+`features/pages/tests/events.rs` (a TSX and a Luau page subscribing).
+
 ## The extensions manager
 
 One place in every app for everything that customizes it
@@ -2185,7 +2327,7 @@ device's buffers. Where this design stands against all of it:
 | After an action (`hookpostcommand`) | **covered**: `watch` | the event carries who ran it and its result |
 | MIDI/OSC values into actions | **partial** | a binding passes `{value, resolution, relative, source}` as a standard argument |
 | Control surfaces (`csurf`: banks, touch, feedback) | **partial**: streams give feedback | a surface contribution: track banks, touch state, last-touched and focused FX, MIDI/OSC ports by capability — on frame documents |
-| Timers, background scripts (`defer`), `atexit`, startup scripts | **partial** | timer and frame-tick imports; long-running scripts with a run state shown as `checked`, a relaunch rule, an exit hook; lifecycle events (app started, project opened, saved, closed) |
+| Timers, background scripts (`defer`), `atexit`, startup scripts | **partial** | since #308: a WASI view's timers, `every`/`at` hooks, document events, the app's own events (`app:<name>`: Studio's project opened, saved, closed) and background extensions started on their first event; still missing: a run state shown as `checked`, a relaunch rule, an exit hook |
 | Marker actions (an action when the playhead crosses a marker) | **missing** | triggers on transport time |
 | Drawing (gfx, ReaImGui) | **covered**: egui behind a ReaImGui-shaped Luau API, and `gfx` | — |
 | Drawing into REAPER's own windows (js_ReaScriptAPI) | **better**: overlay layers in a view's coordinates | — |
