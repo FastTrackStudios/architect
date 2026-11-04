@@ -146,6 +146,9 @@ pub struct Capabilities {
     /// `menus` (a context menu of its own at a point), `badges` (icons
     /// and badges on file-tree rows and tabs).
     pub ui: Vec<String>,
+    /// The app-defined events it may hear (`app:<name>` hooks;
+    /// `crate::events`): names, or `<prefix>.*`.
+    pub events: Vec<String>,
 }
 
 /// One action it adds.
@@ -568,6 +571,10 @@ pub struct Manifest {
     /// `[[toolbars]]`, `[[hooks]]`, `[[slots]]` and `[[embeds]]`.
     #[serde(flatten)]
     pub contributes: Contribution,
+    /// `[background]`: started on its first event, stopped when idle
+    /// (`crate::events::BackgroundDecl`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background: Option<crate::events::BackgroundDecl>,
 }
 
 fn api() -> String {
@@ -772,6 +779,23 @@ impl Manifest {
                 crate::capabilities::UI.join(", ")
             )));
         }
+        if let Some(bad) = self.capabilities.events.iter().find(|e| {
+            let name = e.strip_suffix(".*").unwrap_or(e);
+            *e != "*" && !crate::events::valid_name(name)
+        }) {
+            return Err(ManifestError::BadCapability(format!(
+                "events {bad:?}: an app event's name, <prefix>.* or *"
+            )));
+        }
+        if let Some(bg) = &self.background {
+            if self.kind == Kind::Data {
+                return Err(ManifestError::BadCapability(
+                    "background: a data extension has nothing to start".to_owned(),
+                ));
+            }
+            bg.idle()
+                .map_err(|why| ManifestError::BadCapability(format!("background: {why}")))?;
+        }
         let prefix = self.action_prefix();
         let mut seen = std::collections::BTreeSet::new();
         for a in &self.actions {
@@ -928,6 +952,7 @@ impl Manifest {
             reach: &self.capabilities.actions,
             views,
             luau: self.kind == Kind::Luau,
+            events: &self.capabilities.events,
         }
     }
 

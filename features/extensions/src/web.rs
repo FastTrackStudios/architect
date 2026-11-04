@@ -455,14 +455,18 @@ impl WebHost {
             | HostRequest::Window { .. } => Err(HostError::Failed {
                 message: "services, points and windows are not in the browser yet".to_owned(),
             }),
-            // The interface's calls are the native window's (`crate::hostui`).
+            // The interface's calls are the native window's (`crate::hostui`);
+            // hooks made at run time, the native host's (`crate::host_events`).
             HostRequest::Notify { .. }
             | HostRequest::ClipboardRead
             | HostRequest::ClipboardWrite { .. }
             | HostRequest::Pick(_)
             | HostRequest::Prompt(_)
             | HostRequest::Menu(_)
-            | HostRequest::Decorate { .. } => Err(HostError::Unsupported {
+            | HostRequest::Decorate { .. }
+            | HostRequest::Subscribe(_)
+            | HostRequest::Unsubscribe { .. }
+            | HostRequest::Events => Err(HostError::Unsupported {
                 what: format!("{request_op} is not in the browser yet"),
             }),
         }

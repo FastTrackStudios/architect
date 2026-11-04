@@ -478,6 +478,15 @@ impl ExtensionApi {
     }
 
     /// [`Self::call`] from and to JSON text (what crosses a wire).
+    /// The time on its host's clock (`Host::clock`), ms since the epoch:
+    /// the system's once the host is gone.
+    #[must_use]
+    pub fn now_ms(&self) -> u64 {
+        self.host
+            .upgrade()
+            .map_or_else(crate::host::now_ms, |host| host.clock().now_ms())
+    }
+
     pub async fn call_json(&self, request: &str) -> String {
         let answer = match serde_json::from_str::<HostRequest>(request) {
             Ok(request) => self.call(request).await,
@@ -759,6 +768,12 @@ impl ExtensionApi {
                 );
                 Ok(Value::Null)
             }
+            HostRequest::Subscribe(hook) => host
+                .subscribe(&self.id, hook)
+                .map(Value::String)
+                .map_err(|message| HostError::Failed { message }),
+            HostRequest::Unsubscribe { key } => Ok(Value::Bool(host.unsubscribe(&self.id, &key))),
+            HostRequest::Events => Ok(host.events_for(&self.id)),
         }
     }
 

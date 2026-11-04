@@ -41,7 +41,7 @@ pub const BADGES: &str = "badges";
 /// One thing an extension asks for, in a person's words.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Ask {
-    /// `actions`, `effect`, `hosts`, `folders`, `reads` or `ui`.
+    /// `actions`, `effect`, `hosts`, `folders`, `reads`, `ui` or `events`.
     pub kind: &'static str,
     /// What exactly (`TRANSPORT_`, `api.github.com`, `selection`).
     pub what: String,
@@ -113,6 +113,7 @@ impl Capabilities {
             && self.folders.is_empty()
             && self.reads.is_empty()
             && self.ui.is_empty()
+            && self.events.is_empty()
     }
 
     /// Everything it asks for, one line a thing, in the order a prompt
@@ -161,6 +162,17 @@ impl Capabilities {
                 kind: "ui",
                 what: u.clone(),
                 says: ui_words(u),
+            });
+        }
+        for e in self.events.iter().filter(|e| !granted.events.contains(e)) {
+            out.push(Ask {
+                kind: "events",
+                what: e.clone(),
+                says: if e == "*" {
+                    "Hear every event the app raises".to_owned()
+                } else {
+                    format!("Hear the app's {e} events")
+                },
             });
         }
         for f in self
@@ -242,6 +254,12 @@ impl Capabilities {
                 .filter(|u| granted.ui.contains(u))
                 .cloned()
                 .collect(),
+            events: self
+                .events
+                .iter()
+                .filter(|e| granted.events.contains(e))
+                .cloned()
+                .collect(),
         }
     }
 
@@ -291,6 +309,13 @@ impl Capabilities {
     #[must_use]
     pub fn may_use(&self, what: &str) -> bool {
         self.ui.iter().any(|u| u == what)
+    }
+
+    /// Whether it may hear app-defined event `name` (`app:<name>` hooks;
+    /// `capabilities.events`).
+    #[must_use]
+    pub fn may_hear(&self, name: &str) -> bool {
+        self.events.iter().any(|p| crate::events::covers(p, name))
     }
 
     /// Whether it may reach `folder` (an absolute path, `~` already

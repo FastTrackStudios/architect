@@ -123,6 +123,7 @@ fn union(a: &Capabilities, b: &Capabilities) -> Capabilities {
         (&mut out.folders, &b.folders),
         (&mut out.reads, &b.reads),
         (&mut out.ui, &b.ui),
+        (&mut out.events, &b.events),
     ] {
         for x in from {
             if !into.contains(x) {
