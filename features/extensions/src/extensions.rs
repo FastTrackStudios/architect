@@ -49,6 +49,12 @@ pub struct Extensions {
     inner: Arc<Inner>,
 }
 
+impl PartialEq for Extensions {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+    }
+}
+
 impl std::fmt::Debug for Extensions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Extensions")

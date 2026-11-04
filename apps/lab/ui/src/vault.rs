@@ -17,7 +17,7 @@ use architect_workspace::{
 use dioxus::prelude::*;
 use lucide_dioxus::{
     AudioLines, Bot, CalendarCheck, FileText, Files, Layers, Link, ListTree, MousePointerClick,
-    Network, Search, SlidersHorizontal, SquarePen, SquareTerminal, Terminal,
+    Network, Puzzle, Search, SlidersHorizontal, SquarePen, SquareTerminal, Terminal,
 };
 
 /// The lab's views, and the kinds that draw them, with the views loaded
@@ -72,6 +72,14 @@ fn views(extra: Vec<View>) -> Views {
                 |_| rsx! { Stand { what: "Every note and its links", next: "Link notes together and the graph fills in." } },
             )
             .icon(icon!(Network))
+            .home(Target::Split(Side::Right)),
+        )
+        // The extensions page, in a pane (it is a settings section too).
+        .view(
+            View::new("extensions", "Extensions", |_| {
+                rsx! { architect_extensions::page::ExtensionsView {} }
+            })
+            .icon(icon!(Puzzle))
             .home(Target::Split(Side::Right)),
         )
         .view(

@@ -37,6 +37,9 @@ pub struct SettingsHandle {
     /// The setting a search hit went to, and how many times one has (so
     /// the same one pulses again).
     pub focus: Signal<Option<(String, u32)>>,
+    /// Sections drawn by a component of their own in place of their
+    /// settings (an extensions page): by section id ([`use_section_page`]).
+    pub pages: Signal<std::collections::BTreeMap<String, fn() -> Element>>,
     on_change: CopyValue<Option<Callback<SettingsChange>>>,
 }
 
@@ -137,6 +140,30 @@ fn focused(h: SettingsHandle) -> Option<(String, u32)> {
     (h.focus)()
 }
 
+/// Registers `section` (no settings needed) drawn by `page` in place of
+/// its settings, while the calling component is mounted: a page of its
+/// own on the settings page (the extensions page), found in its list and
+/// opened with [`SettingsHandle::show`] like any section.
+pub fn use_section_page(make: impl FnOnce() -> Section, page: fn() -> Element) {
+    let handle = try_use_settings();
+    let owner = use_hook(move || {
+        let h = handle?;
+        let section = make();
+        let id = section.id.clone();
+        let (mut registry, mut pages) = (h.registry, h.pages);
+        let _ = registry.write().register(section);
+        pages.write().insert(id.clone(), page);
+        Some(id)
+    });
+    use_drop(move || {
+        if let (Some(h), Some(id)) = (handle, owner) {
+            let (mut registry, mut pages) = (h.registry, h.pages);
+            registry.write().remove(&id);
+            pages.write().remove(&id);
+        }
+    });
+}
+
 /// Registers `section` while the calling component is mounted (an
 /// extension's settings, there while it is loaded).
 pub fn use_section(make: impl FnOnce() -> Section) {
@@ -171,6 +198,7 @@ impl SettingsHandle {
             values: Signal::new(values),
             open: Signal::new(None),
             focus: Signal::new(None),
+            pages: Signal::new(std::collections::BTreeMap::new()),
             on_change: CopyValue::new(on_change),
         }
     }
@@ -595,6 +623,12 @@ fn RestoreDefaults(id: String) -> Element {
 #[component]
 fn SectionBody(section: Section) -> Element {
     let t = theme();
+    let page = try_use_settings().and_then(|h| h.pages.read().get(&section.id).copied());
+    if let Some(page) = page {
+        return rsx! {
+            div { style: "display: flex; flex-direction: column; min-height: 100%;", {page()} }
+        };
+    }
     rsx! {
         div { style: "max-width: 760px; display: flex; flex-direction: column; gap: 26px;",
             if let Owner::Extension(ext) = &section.owner {

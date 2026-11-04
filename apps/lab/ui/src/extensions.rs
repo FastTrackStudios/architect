@@ -30,8 +30,11 @@ use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 use std::time::Duration;
 
 use architect::action::{ActionList, ActionMeta, Effect};
+use architect_extensions::browse::Browse;
+use architect_extensions::consent::Grants;
 use architect_extensions::extensions::Extensions;
 use architect_extensions::host::Host;
+use architect_extensions::hostapi::{AppContext, SettingValues};
 use architect_extensions::install::{FolderRegistry, Installs};
 use architect_extensions::interface::{ExtensionUi, use_extension_ui};
 use architect_extensions::process::{ProcessRunner, Processes};
@@ -476,10 +479,16 @@ fn registry() -> Option<PathBuf> {
 fn builtin() -> Option<Package> {
     Package::embedded(
         include_str!("../../extensions/metronome/extension.toml"),
-        &[(
-            "count_in.luau",
-            include_str!("../../extensions/metronome/count_in.luau"),
-        )],
+        &[
+            (
+                "count_in.luau",
+                include_str!("../../extensions/metronome/count_in.luau"),
+            ),
+            (
+                "status.luau",
+                include_str!("../../extensions/metronome/status.luau"),
+            ),
+        ],
     )
     .ok()
 }
@@ -488,7 +497,7 @@ fn builtin() -> Option<Package> {
 /// control socket, MCP): forwarded to the extensions' list, each run there
 /// as whoever ran it on the lab's (the lab's authorizer and confirmation
 /// asked first).
-const FORWARDED: [&str; 15] = [
+const FORWARDED: [&str; 24] = [
     "EXT_LIST",
     "EXT_SEARCH",
     "EXT_INSTALL",
@@ -496,6 +505,15 @@ const FORWARDED: [&str; 15] = [
     "EXT_RELOAD",
     "EXT_CHECK",
     "EXT_CLONE",
+    "EXT_PREVIEW",
+    "EXT_INFO",
+    "EXT_UPDATE",
+    "EXT_PIN",
+    "EXT_GRANT",
+    "EXT_REVOKE",
+    "EXT_GRANTS",
+    "EXT_LOGS",
+    "EXT_HOST_CALL",
     "EXT_CONTRIBUTIONS",
     "EXT_OPEN",
     "EXT_VIEW_OPEN",
@@ -545,6 +563,10 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
     }
     let themes = architect_theme::try_use_theme().map(|t| t.store());
     use_context_provider(processes);
+    // The settings page's values, for the host service (its own thread):
+    // a copy kept here, and changes sent back to the page's store.
+    let values = use_hook(LabValues::default);
+    use_settings_bridge(&values);
     let (extensions, from_registry) = use_hook(|| {
         // The kinds its views may be: Frame's surface besides Dioxus.
         let mut host =
@@ -564,6 +586,16 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         host.watch(&lab);
         let root = architect::settings::app_dir("architect-lab")
             .unwrap_or_else(|_| std::env::temp_dir().join("architect-lab"));
+        // The host service: consent kept on this device (an installed
+        // extension runs with what the person granted), each one's data
+        // and files, the selection, the settings page's values.
+        host = host
+            .with_grants(Grants::open(root.join("extension-grants.json")))
+            .with_data_root(root.join("extension-data"))
+            .with_app_context(LabContext {
+                list: Arc::clone(&lab),
+            })
+            .with_setting_values(values.clone());
         let clicker = clicker(&root);
         let frame = frame_dev(&root);
         // `EXT_CLONE` puts its copies beside the development ones.
@@ -588,6 +620,9 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         // `EXT_*` actions on the lab's list (the CLI's and MCP's).
         extensions.report_problems(lab.problems());
         forward(&lab, &list, &FORWARDED);
+        // An agent's grant waits for the person's yes, on the lab's list
+        // too (the sheet).
+        Extensions::confirm_on(&lab);
         // Off until the switch says otherwise.
         let _ = extensions.disable(METRONOME);
         for dir in clicker.into_iter().chain(frame).chain(board_dev(&root)) {
@@ -599,8 +634,10 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
     let follow = extensions.clone();
     use_effect(use_reactive!(|metronome| {
         if metronome {
+            // Installed only with the person's yes: one that asks for
+            // more waits on the extensions page.
             if from_registry && follow.installs().get(METRONOME).is_none() {
-                let _ = follow.install(METRONOME, &VersionReq::STAR);
+                let _ = follow.install_with(METRONOME, &VersionReq::STAR, None, "person", false);
             }
             let _ = follow.enable(METRONOME);
         } else {
@@ -623,7 +660,129 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
             built.provide_context();
         }
     });
+    // The extensions page: a settings section, ⌘O's `ext:`, the Vault's
+    // "Extensions" view.
+    architect_extensions::page::use_extensions_page(Browse::new(extensions.clone()));
     use_extension_ui(extensions.host().clone(), Arc::clone(&lab))
+}
+
+/// What the lab tells an extension that may know it: the workspace's
+/// focus (`APP_STATUS`'s `workspace`), no organization.
+struct LabContext {
+    list: Arc<ActionList>,
+}
+
+impl AppContext for LabContext {
+    fn selection(&self) -> Option<serde_json::Value> {
+        let (_, json) = self
+            .list
+            .status()
+            .read()
+            .into_iter()
+            .find(|(name, _)| name == "workspace")?;
+        let ws: serde_json::Value = serde_json::from_str(&json).ok()?;
+        Some(serde_json::json!({
+            "focused": ws.get("focused"),
+            "focused_title": ws.get("focused_title"),
+            "screenset": ws.get("screenset"),
+        }))
+    }
+}
+
+/// The settings page's values as the host service reads and writes them:
+/// a copy of each extension's settings, and the writes waiting for the
+/// page's store.
+#[derive(Clone, Default)]
+struct LabValues {
+    now: Arc<Mutex<std::collections::BTreeMap<String, serde_json::Value>>>,
+    writes: Arc<Mutex<Vec<(String, serde_json::Value)>>>,
+}
+
+impl SettingValues for LabValues {
+    fn get(&self, key: &str) -> Option<serde_json::Value> {
+        self.now
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(key)
+            .cloned()
+    }
+
+    fn set(&self, key: &str, value: serde_json::Value) -> Result<(), String> {
+        self.now
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(key.to_owned(), value.clone());
+        self.writes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push((key.to_owned(), value));
+        Ok(())
+    }
+}
+
+/// A JSON value as a setting's.
+fn setting_value(v: &serde_json::Value) -> Option<architect_settings::Value> {
+    match v {
+        serde_json::Value::Bool(b) => Some(architect_settings::Value::Bool(*b)),
+        serde_json::Value::Number(n) => n
+            .as_i64()
+            .map(architect_settings::Value::Int)
+            .or_else(|| n.as_f64().map(architect_settings::Value::Float)),
+        serde_json::Value::String(t) => Some(architect_settings::Value::Text(t.clone())),
+        _ => None,
+    }
+}
+
+fn setting_json(v: &architect_settings::Value) -> serde_json::Value {
+    match v {
+        architect_settings::Value::Bool(b) => serde_json::json!(b),
+        architect_settings::Value::Int(i) => serde_json::json!(i),
+        architect_settings::Value::Float(f) => serde_json::json!(f),
+        architect_settings::Value::Text(t) => serde_json::json!(t),
+    }
+}
+
+/// Keeps `values` in step with the settings page: every extension
+/// setting's value copied in as it changes, every host-service write put
+/// in the page's store.
+fn use_settings_bridge(values: &LabValues) {
+    let Some(h) = architect_settings::try_use_settings() else {
+        return;
+    };
+    let copy = values.clone();
+    use_effect(move || {
+        let registry = h.registry.read();
+        let now = h.values.read();
+        let mut out = std::collections::BTreeMap::new();
+        for section in registry.sections() {
+            if !matches!(section.owner, architect_settings::Owner::Extension(_)) {
+                continue;
+            }
+            for setting in section.settings() {
+                if let Some(v) = now.get(&registry, &setting.key) {
+                    out.insert(setting.key.clone(), setting_json(&v));
+                }
+            }
+        }
+        *copy.now.lock().unwrap_or_else(PoisonError::into_inner) = out;
+    });
+    let writes = values.clone();
+    use_future(move || {
+        let writes = writes.clone();
+        async move {
+            loop {
+                futures_timer::Delay::new(Duration::from_millis(150)).await;
+                let queued: Vec<_> = std::mem::take(
+                    &mut *writes.writes.lock().unwrap_or_else(PoisonError::into_inner),
+                );
+                for (key, value) in queued {
+                    if let Some(v) = setting_value(&value) {
+                        h.set(&key, v);
+                    }
+                }
+            }
+        }
+    });
 }
 
 /// The Board as a development copy running its program, when

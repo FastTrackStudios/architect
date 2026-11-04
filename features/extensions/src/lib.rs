@@ -52,6 +52,8 @@ pub mod actions;
 #[cfg(feature = "host")]
 pub mod actions_manage;
 #[cfg(feature = "host")]
+pub mod browse;
+#[cfg(feature = "host")]
 pub mod check;
 #[cfg(feature = "host")]
 pub mod clone;
@@ -83,6 +85,8 @@ pub mod logs;
 mod luau_host;
 #[cfg(feature = "host")]
 pub mod manage;
+#[cfg(feature = "page")]
+pub mod page;
 #[cfg(all(feature = "process", unix))]
 pub mod process;
 #[cfg(feature = "vox")]

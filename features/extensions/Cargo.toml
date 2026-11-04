@@ -50,6 +50,9 @@ ui = [
     "architect-workspace/ui",
     "architect-commands/ui",
 ]
+# The extensions page (`page`): search, install with consent, update, pin,
+# grants and logs, in architect-ui's components and the app's theme.
+page = ["ui", "dep:architect-ui"]
 # The wire and the protocol (`wire`, `proto`); the derives key on `vox`.
 vox = ["dep:architect", "architect/vox", "dep:vox", "dep:thiserror"]
 process = [
@@ -81,6 +84,7 @@ architect-commands = { workspace = true }
 # The shell's chrome an extension's tabs, status items and slots go into
 # (`ui`, `interface`).
 architect-shell = { workspace = true, optional = true }
+architect-ui = { workspace = true, optional = true }
 # The view kinds an extension's views may name (the model, wasm-clean).
 architect-workspace = { workspace = true }
 facet = { workspace = true }
