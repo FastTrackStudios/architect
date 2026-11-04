@@ -176,7 +176,10 @@ impl std::fmt::Display for ArchiveError {
                 "{id} {version} is unsigned (no {SIGNATURE}): only signed archives install"
             ),
             Self::BadSignatureFile(e) => {
-                write!(f, "the archive's {SIGNATURE} is not a minisign signature: {e}")
+                write!(
+                    f,
+                    "the archive's {SIGNATURE} is not a minisign signature: {e}"
+                )
             }
             Self::UntrustedKey { key_id, trusted } => write!(
                 f,
@@ -345,7 +348,9 @@ pub fn entries(archive: &[u8]) -> Result<Vec<(String, Vec<u8>)>, ArchiveError> {
             return Err(ArchiveError::Duplicate { path });
         }
         if out.len() >= MAX_FILES {
-            return Err(ArchiveError::TooLarge(format!("more than {MAX_FILES} files")));
+            return Err(ArchiveError::TooLarge(format!(
+                "more than {MAX_FILES} files"
+            )));
         }
         let size = entry.header().size().map_err(bad)?;
         total = total.saturating_add(size);
@@ -389,7 +394,11 @@ pub fn write_entries(files: &[(String, Vec<u8>)]) -> Result<Vec<u8>, ArchiveErro
         let mut header = tar::Header::new_gnu();
         header.set_entry_type(tar::EntryType::Regular);
         header.set_size(u64::try_from(bytes.len()).unwrap_or(u64::MAX));
-        header.set_mode(if path.starts_with("bin/") { 0o755 } else { 0o644 });
+        header.set_mode(if path.starts_with("bin/") {
+            0o755
+        } else {
+            0o644
+        });
         header.set_mtime(0);
         header.set_uid(0);
         header.set_gid(0);
@@ -418,11 +427,7 @@ struct EntryHead {
 /// Reads every file under `dir`, `/`-separated paths, sorted; leaving out
 /// `.git`, `.DS_Store` and an index or signature already there.
 fn read_tree(dir: &Path) -> Result<Vec<(String, Vec<u8>)>, ArchiveError> {
-    fn walk(
-        root: &Path,
-        dir: &Path,
-        out: &mut Vec<(String, Vec<u8>)>,
-    ) -> Result<(), ArchiveError> {
+    fn walk(root: &Path, dir: &Path, out: &mut Vec<(String, Vec<u8>)>) -> Result<(), ArchiveError> {
         for entry in std::fs::read_dir(dir).map_err(io(dir))? {
             let entry = entry.map_err(io(dir))?;
             let name = entry.file_name().to_string_lossy().into_owned();
@@ -470,7 +475,8 @@ pub fn index_of(files: &[(String, Vec<u8>)]) -> Result<ContentIndex, ArchiveErro
         .iter()
         .find(|(p, _)| p == MANIFEST)
         .ok_or_else(|| ArchiveError::Manifest("the package has none".to_owned()))?;
-    let text = std::str::from_utf8(&manifest.1).map_err(|e| ArchiveError::Manifest(e.to_string()))?;
+    let text =
+        std::str::from_utf8(&manifest.1).map_err(|e| ArchiveError::Manifest(e.to_string()))?;
     let head: ManifestHead =
         toml::from_str(text).map_err(|e| ArchiveError::Manifest(e.to_string()))?;
     semver::Version::parse(&head.version)
@@ -610,8 +616,8 @@ pub fn open(archive: &[u8], trust: &Trust) -> Result<Verified, ArchiveError> {
             version: index.version,
         });
     };
-    let sig_text = String::from_utf8(sig_bytes)
-        .map_err(|e| ArchiveError::BadSignatureFile(e.to_string()))?;
+    let sig_text =
+        String::from_utf8(sig_bytes).map_err(|e| ArchiveError::BadSignatureFile(e.to_string()))?;
     let signature = minisign_verify::Signature::decode(&sig_text)
         .map_err(|e| ArchiveError::BadSignatureFile(e.to_string()))?;
     let signed_by = sig_text
@@ -759,21 +765,16 @@ impl Verified {
     ///
     /// [`ArchiveError::NoBuild`], or a file could not be written.
     pub fn extract_for(&self, into: &Path, targets: &[&str]) -> Result<(), ArchiveError> {
-        let chosen = pick_target(&self.index.platforms, targets).ok_or_else(|| {
-            ArchiveError::NoBuild {
-                host: targets
-                    .first()
-                    .map_or_else(host_name, |t| (*t).to_owned()),
+        let chosen =
+            pick_target(&self.index.platforms, targets).ok_or_else(|| ArchiveError::NoBuild {
+                host: targets.first().map_or_else(host_name, |t| (*t).to_owned()),
                 has: self.index.platforms.clone(),
-            }
-        })?;
+            })?;
         std::fs::create_dir_all(into).map_err(io(into))?;
         for (path, bytes) in &self.files {
             let (rel, program) = match platform_of(path) {
                 Some(triple) if Some(triple) == chosen => {
-                    let file = path
-                        .strip_prefix(&format!("bin/{triple}/"))
-                        .unwrap_or(path);
+                    let file = path.strip_prefix(&format!("bin/{triple}/")).unwrap_or(path);
                     (format!("bin/{file}"), true)
                 }
                 Some(_) => continue,

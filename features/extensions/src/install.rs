@@ -153,7 +153,11 @@ struct Http(Option<Arc<dyn Fetch>>);
 
 impl std::fmt::Debug for Http {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(if self.0.is_some() { "Http(given)" } else { "Http(none)" })
+        f.write_str(if self.0.is_some() {
+            "Http(given)"
+        } else {
+            "Http(none)"
+        })
     }
 }
 
@@ -626,7 +630,7 @@ impl Installs {
 
     /// The keys an archive may be signed by, from any source.
     #[must_use]
-    pub fn trust(&self) -> &Trust {
+    pub const fn trust(&self) -> &Trust {
         &self.trust
     }
 
@@ -636,7 +640,11 @@ impl Installs {
     /// # Errors
     ///
     /// [`InstallError::Archive`] with why it was refused.
-    pub fn open_archive(&self, bytes: &[u8], source: &dyn Source) -> Result<Verified, InstallError> {
+    pub fn open_archive(
+        &self,
+        bytes: &[u8],
+        source: &dyn Source,
+    ) -> Result<Verified, InstallError> {
         Ok(architect_extension_archive::open(
             bytes,
             &self.trust.and(&source.trust()),
@@ -654,10 +662,13 @@ impl Installs {
         bytes: &[u8],
         from: &str,
     ) -> Result<(Verified, Manifest, Listing), InstallError> {
-        let v = self.open_archive(bytes, &OneArchive {
-            from: from.to_owned(),
-            bytes: Vec::new(),
-        })?;
+        let v = self.open_archive(
+            bytes,
+            &OneArchive {
+                from: from.to_owned(),
+                bytes: Vec::new(),
+            },
+        )?;
         let text = v
             .manifest()
             .ok_or_else(|| InstallError::Mismatch(format!("the archive has no {MANIFEST}")))?;

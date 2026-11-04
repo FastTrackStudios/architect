@@ -250,7 +250,8 @@ impl Extensions {
                     let text = v.manifest().ok_or_else(|| {
                         InstallError::Mismatch(format!("the archive has no {MANIFEST}"))
                     })?;
-                    return Manifest::parse(text).map_err(|e| InstallError::Mismatch(e.to_string()));
+                    return Manifest::parse(text)
+                        .map_err(|e| InstallError::Mismatch(e.to_string()));
                 }
             };
             let path = dir.join(MANIFEST);
@@ -350,7 +351,10 @@ impl Extensions {
         if let Some(grants) = self.host().grants() {
             let preview = self.preview(id, req)?;
             if let Some(why) = preview.cannot_run {
-                return Err(InstallError::NotFound(format!("{id} {}: {why}", preview.version)));
+                return Err(InstallError::NotFound(format!(
+                    "{id} {}: {why}",
+                    preview.version
+                )));
             }
             if !preview.needs_consent.is_empty() || grant.is_some() {
                 match grant {
@@ -544,7 +548,7 @@ impl Extensions {
     ) -> Result<Installed, InstallError> {
         let (v, manifest, listing) = self.installs().read_archive(&bytes, from)?;
         let mut preview = self.preview_of(&manifest, &listing, from);
-        preview.signed_by = Some(v.signer.clone());
+        preview.signed_by = Some(v.signer);
         if let Some(why) = preview.cannot_run {
             return Err(InstallError::NotFound(format!(
                 "{} {}: {why}",

@@ -44,7 +44,10 @@ pub fn pack_cli(dir: &Path, out: Option<&Path>) -> Result<(), String> {
         },
         out.display()
     );
-    println!("unsigned: sign it with `cargo xtask ext-sign {}`", out.display());
+    println!(
+        "unsigned: sign it with `cargo xtask ext-sign {}`",
+        out.display()
+    );
     Ok(())
 }
 
@@ -80,7 +83,9 @@ pub fn sign_cli(
     out: Option<&Path>,
 ) -> Result<(), String> {
     let text = match key {
-        Some(path) => std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?,
+        Some(path) => {
+            std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?
+        }
         None => std::env::var(KEY_ENV)
             .ok()
             .filter(|t| !t.trim().is_empty())
@@ -99,8 +104,11 @@ pub fn sign_cli(
     let bytes = std::fs::read(archive).map_err(|e| format!("{}: {e}", archive.display()))?;
     let signed = sign_archive(&bytes, &key).map_err(|e| e.to_string())?;
     // Signed, then checked as an app would: what is written opens.
-    let v = open(&signed, &Trust::none().with("the signing key", key.public()))
-        .map_err(|e| format!("the signed archive does not open: {e}"))?;
+    let v = open(
+        &signed,
+        &Trust::none().with("the signing key", key.public()),
+    )
+    .map_err(|e| format!("the signed archive does not open: {e}"))?;
     let out = out.unwrap_or(archive);
     std::fs::write(out, signed).map_err(|e| format!("{}: {e}", out.display()))?;
     println!(
@@ -145,7 +153,10 @@ pub fn keygen_cli(dir: &Path, name: &str) -> Result<(), String> {
     let secret = dir.join(format!("{name}.key"));
     let public = dir.join(format!("{name}.pub"));
     if secret.exists() {
-        return Err(format!("{} exists: not overwriting a key", secret.display()));
+        return Err(format!(
+            "{} exists: not overwriting a key",
+            secret.display()
+        ));
     }
     std::fs::write(&secret, key.secret_file()).map_err(|e| format!("{}: {e}", secret.display()))?;
     #[cfg(unix)]
@@ -178,7 +189,9 @@ fn fetch(root: &Path, at: &str) -> Result<Vec<u8>, String> {
         }
         return Ok(out.stdout);
     }
-    let path = at.strip_prefix("file://").map_or_else(|| root.join(at), PathBuf::from);
+    let path = at
+        .strip_prefix("file://")
+        .map_or_else(|| root.join(at), PathBuf::from);
     std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))
 }
 

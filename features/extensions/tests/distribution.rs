@@ -12,6 +12,7 @@
     clippy::indexing_slicing
 )]
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use architect::action::{ActionCaller, ActionList};
@@ -58,10 +59,12 @@ fn registry(tmp: &Path, archives: &[(&str, Vec<u8>, &str)]) -> PathBuf {
         let file = format!("archives/{ID}-{version}.archext");
         std::fs::write(root.join(&file), bytes).unwrap();
         let sha = hex::encode(sha2::Sha256::digest(bytes));
-        index.push_str(&format!(
+        writeln!(
+            index,
             "\n[[extensions]]\nid = \"{ID}\"\nname = \"Hello\"\nversion = \"{version}\"\n\
-             kind = \"luau\"\narchive = \"{file}\"\nsha256 = \"{sha}\"\nchangelog = \"{changelog}\"\n"
-        ));
+             kind = \"luau\"\narchive = \"{file}\"\nsha256 = \"{sha}\"\nchangelog = \"{changelog}\""
+        )
+        .unwrap();
     }
     std::fs::write(root.join("index.toml"), index).unwrap();
     root
@@ -98,7 +101,11 @@ fn a_signed_archive_from_a_registry_installs_and_loads() {
     let key = SecretKey::generate().unwrap();
     let root = registry(
         tmp.path(),
-        &[("0.1.0", signed(&hello_at(tmp.path(), "0.1.0"), &key), "First.")],
+        &[(
+            "0.1.0",
+            signed(&hello_at(tmp.path(), "0.1.0"), &key),
+            "First.",
+        )],
     );
     let (list, ext) = app(
         tmp.path(),
@@ -123,7 +130,10 @@ fn an_unsigned_archive_is_refused() {
     let key = SecretKey::generate().unwrap();
     let unsigned = pack(&hello_at(tmp.path(), "0.1.0")).unwrap().1;
     let root = registry(tmp.path(), &[("0.1.0", unsigned, "")]);
-    let (_, ext) = app(tmp.path(), FolderRegistry::new(&root).trusting("k", key.public()));
+    let (_, ext) = app(
+        tmp.path(),
+        FolderRegistry::new(&root).trusting("k", key.public()),
+    );
     let e = refused(ext.install(ID, &VersionReq::STAR).unwrap_err());
     assert!(matches!(e, ArchiveError::Unsigned { .. }), "{e:?}");
     // The preview is refused the same way: nothing unsigned is read as if
@@ -143,7 +153,10 @@ fn a_tampered_archive_is_refused() {
     // Listed with the tampered archive's own hash: only the signature
     // stands between it and an install.
     let root = registry(tmp.path(), &[("0.1.0", tampered, "")]);
-    let (_, ext) = app(tmp.path(), FolderRegistry::new(&root).trusting("k", key.public()));
+    let (_, ext) = app(
+        tmp.path(),
+        FolderRegistry::new(&root).trusting("k", key.public()),
+    );
     let e = refused(ext.install(ID, &VersionReq::STAR).unwrap_err());
     assert!(
         matches!(&e, ArchiveError::FileTampered { path, .. } if path == "greet.luau"),
@@ -167,7 +180,10 @@ fn a_wrong_key_is_refused() {
     );
     let e = refused(ext.install(ID, &VersionReq::STAR).unwrap_err());
     match e {
-        ArchiveError::UntrustedKey { key_id, trusted: names } => {
+        ArchiveError::UntrustedKey {
+            key_id,
+            trusted: names,
+        } => {
             assert_eq!(key_id, signer.key_id());
             // The org key is trusted by default, and the registry's own.
             assert_eq!(names.len(), 2, "{names:?}");
@@ -187,10 +203,16 @@ fn a_pinned_hash_that_does_not_match_is_refused() {
     // Another (validly signed) archive put in its place.
     std::fs::write(
         root.join(format!("archives/{ID}-0.1.0.archext")),
-        signed(&hello_at(tmp.path(), "0.1.0"), &SecretKey::generate().unwrap()),
+        signed(
+            &hello_at(tmp.path(), "0.1.0"),
+            &SecretKey::generate().unwrap(),
+        ),
     )
     .unwrap();
-    let (_, ext) = app(tmp.path(), FolderRegistry::new(&root).trusting("k", key.public()));
+    let (_, ext) = app(
+        tmp.path(),
+        FolderRegistry::new(&root).trusting("k", key.public()),
+    );
     let e = ext.install(ID, &VersionReq::STAR).unwrap_err();
     assert!(
         matches!(&e, InstallError::Mismatch(m) if m.contains("sha256")),
@@ -251,7 +273,10 @@ fn no_build_for_this_platform_is_said_before_installing() {
          archive = \"tool.archext\"\nplatforms = [\"riscv64gc-unknown-none-elf\"]\n",
     )
     .unwrap();
-    let (_, ext) = app(tmp.path(), FolderRegistry::new(&root).trusting("k", key.public()));
+    let (_, ext) = app(
+        tmp.path(),
+        FolderRegistry::new(&root).trusting("k", key.public()),
+    );
     let preview = ext.preview("acme.tool", &VersionReq::STAR).unwrap();
     assert!(!preview.runs_here);
     let why = preview.cannot_run.unwrap();
@@ -268,12 +293,28 @@ fn an_update_check_says_what_is_newer_within_the_pin() {
     let root = registry(
         tmp.path(),
         &[
-            ("0.1.0", signed(&hello_at(tmp.path(), "0.1.0"), &key), "First."),
-            ("0.2.0", signed(&hello_at(tmp.path(), "0.2.0"), &key), "Louder."),
+            (
+                "0.1.0",
+                signed(&hello_at(tmp.path(), "0.1.0"), &key),
+                "First.",
+            ),
+            (
+                "0.2.0",
+                signed(&hello_at(tmp.path(), "0.2.0"), &key),
+                "Louder.",
+            ),
         ],
     );
-    let (list, ext) = app(tmp.path(), FolderRegistry::new(&root).trusting("k", key.public()));
-    run(&list, "EXT_INSTALL", &json!({ "id": ID, "version": "=0.1.0" })).unwrap();
+    let (list, ext) = app(
+        tmp.path(),
+        FolderRegistry::new(&root).trusting("k", key.public()),
+    );
+    run(
+        &list,
+        "EXT_INSTALL",
+        &json!({ "id": ID, "version": "=0.1.0" }),
+    )
+    .unwrap();
     let out = run(&list, "EXT_UPDATE", &json!({ "check": true })).unwrap();
     let a = &out["available"][0];
     assert_eq!(a["id"], ID, "{out}");

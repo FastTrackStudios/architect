@@ -96,7 +96,8 @@ impl Listing {
     /// it has builds, and none for this platform. `None` when it can.
     #[must_use]
     pub fn no_build_for(&self, targets: &[&str]) -> Option<String> {
-        if self.platforms.is_empty() || self.platforms.iter().any(|p| targets.contains(&p.as_str())) {
+        if self.platforms.is_empty() || self.platforms.iter().any(|p| targets.contains(&p.as_str()))
+        {
             return None;
         }
         Some(format!(

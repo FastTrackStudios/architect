@@ -10,11 +10,11 @@
     clippy::arithmetic_side_effects
 )]
 
-use base64::Engine as _;
 use architect_extension_archive::sign::{SecretKey, sign_archive};
 use architect_extension_archive::{
     ArchiveError, INDEX, SIGNATURE, Trust, entries, open, pack, registry, write_entries,
 };
+use base64::Engine as _;
 
 const MANIFEST: &str = r#"id = "acme.tool"
 name = "Tool"
@@ -73,7 +73,8 @@ fn a_good_archive_opens_and_extracts_this_platforms_build() {
     );
     assert_eq!(v.signer, "test key");
     let out = tempfile::tempdir().unwrap();
-    v.extract_for(out.path(), &["aarch64-apple-darwin"]).unwrap();
+    v.extract_for(out.path(), &["aarch64-apple-darwin"])
+        .unwrap();
     assert_eq!(
         std::fs::read_to_string(out.path().join("bin/tool")).unwrap(),
         "mac arm64"
@@ -117,7 +118,10 @@ fn an_unsigned_archive_is_refused() {
 fn a_tampered_file_is_refused() {
     let key = SecretKey::generate().unwrap();
     let mut files = entries(&signed(&key)).unwrap();
-    let (_, bytes) = files.iter_mut().find(|(p, _)| p == "pages/home.md").unwrap();
+    let (_, bytes) = files
+        .iter_mut()
+        .find(|(p, _)| p == "pages/home.md")
+        .unwrap();
     bytes[2] ^= 0x01;
     let archive = write_entries(&files).unwrap();
     match open(&archive, &trusting(&key)).unwrap_err() {

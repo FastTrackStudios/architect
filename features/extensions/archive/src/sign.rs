@@ -87,12 +87,19 @@ impl SecretKey {
         if chk.iter().any(|b| *b != 0) && checksum(&keynum, sk) != chk {
             return Err(key_err("its checksum does not match: the file is damaged"));
         }
-        let seed: [u8; 32] = sk.get(..32).unwrap_or_default().try_into().map_err(key_err)?;
+        let seed: [u8; 32] = sk
+            .get(..32)
+            .unwrap_or_default()
+            .try_into()
+            .map_err(key_err)?;
         let signing = SigningKey::from_bytes(&seed);
         if signing.verifying_key().as_bytes() != sk.get(32..).unwrap_or_default() {
             return Err(key_err("its public half does not match its secret half"));
         }
-        Ok(Self { keynum, sk: signing })
+        Ok(Self {
+            keynum,
+            sk: signing,
+        })
     }
 
     /// A new random key: for tests and trials, never a release.

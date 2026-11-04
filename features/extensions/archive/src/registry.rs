@@ -90,11 +90,15 @@ pub fn check(
     let mut report = Report::default();
     for key in doc.keys() {
         if key != "name" && key != "extensions" {
-            report.problems.push(format!("the index: unknown key `{key}`"));
+            report
+                .problems
+                .push(format!("the index: unknown key `{key}`"));
         }
     }
     if doc.get("name").is_some_and(|n| !n.is_str()) {
-        report.problems.push("the index: `name` is not a string".to_owned());
+        report
+            .problems
+            .push("the index: `name` is not a string".to_owned());
     }
     let entries = match doc.get("extensions") {
         None => return Ok(report),
@@ -135,7 +139,10 @@ pub fn check(
         }
         let kind = string(t, "kind").unwrap_or_default();
         if !KINDS.contains(&kind) {
-            problem(format!("`kind` is {kind:?}, not one of {}", KINDS.join(", ")));
+            problem(format!(
+                "`kind` is {kind:?}, not one of {}",
+                KINDS.join(", ")
+            ));
         }
         if seen.contains(&(id.clone(), version.clone())) {
             problem("listed twice".to_owned());
