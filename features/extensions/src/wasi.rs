@@ -12,7 +12,8 @@
 //! - **imports**: the host service (`run-action`, `setting`,
 //!   `set-setting`, `theme`, `log`, `call-service`, the interface's
 //!   `notify`, `clipboard-read`, `clipboard-write`, `pick`, `prompt`,
-//!   `menu` and `decorate`, and `call` for every
+//!   `menu` and `decorate`, the host's clock (`now`) and hooks made at
+//!   run time (`subscribe`, `unsubscribe`), and `call` for every
 //!   `hostcall::HostRequest`), each call answered by the extension's own
 //!   [`ExtensionApi`] — so checked against its capabilities as a person
 //!   granted them, as a process's, a script's and a linked extension's
@@ -21,7 +22,7 @@
 //!   (`EXT_LOGS`). A component importing the network (`wasi:sockets`,
 //!   `wasi:http`) is refused before it is linked: no capability grants it.
 //! - **exports**: `init`, `actions`, `views`, `invoke`, `render`,
-//!   `on-event`, `pending`, `close`, `save-state`. A view renders as the
+//!   `on-event`, `pending`, `close`, `save-state`, `tick`. A view renders as the
 //!   same edits a process's does (`wire::Edit`), so the host's
 //!   `RemoteDocument` draws it ([`WasiRunner::with_processes`]: a component
 //!   is a local [`Process`], and `RemoteView` shows it).
@@ -603,6 +604,22 @@ impl wit_host::Host for State {
         .map(|_| ())
     }
 
+    async fn now(&mut self) -> u64 {
+        self.api.now_ms()
+    }
+
+    async fn subscribe(&mut self, hook: String) -> Result<String, String> {
+        self.ask_json("subscribe", &hook)
+            .await
+            .map(|key| serde_json::from_str::<String>(&key).unwrap_or(key))
+    }
+
+    async fn unsubscribe(&mut self, key: String) -> Result<bool, String> {
+        self.ask(HostRequest::Unsubscribe { key })
+            .await
+            .map(|v| v.as_bool().unwrap_or(false))
+    }
+
     async fn call(&mut self, request: String) -> String {
         if let Some(no) = self.worker_refusal() {
             return format!("{{\"error\": {no}}}");
@@ -761,6 +778,15 @@ impl Stats {
             let _ = jobs.unbounded_send(Job::Restart);
         }
     }
+
+    /// Runs its views' timers that are due on the host's clock now,
+    /// without waiting for the next one's time (a test that moved its
+    /// clock).
+    pub fn tick(&self) {
+        if let Some(jobs) = &*self.restart.lock().unwrap_or_else(PoisonError::into_inner) {
+            let _ = jobs.unbounded_send(Job::Tick);
+        }
+    }
 }
 
 /// The components running now, by extension id. Cheap to clone.
@@ -829,6 +855,8 @@ enum Job {
     /// Its place among the app's processes, once its thread runs.
     Attach(crate_process::Handle),
     Restart,
+    /// Runs its timers that are due now ([`Stats::tick`]).
+    Tick,
     Stop,
 }
 
@@ -968,6 +996,8 @@ struct Actor {
     news_due: bool,
     /// When it last heard their news.
     heard_at: Instant,
+    /// When its views' next timer is due.
+    timer_at: Option<Instant>,
 }
 
 /// What its actor does next.
@@ -975,7 +1005,12 @@ enum Step {
     Job(Option<Job>),
     Nudged,
     Hear,
+    Timers,
 }
+
+/// The soonest a component's timers run again: a 0 ms interval does not
+/// spin its thread.
+const TIMER_FLOOR: Duration = Duration::from_millis(4);
 
 impl Drop for Actor {
     fn drop(&mut self) {
@@ -1008,10 +1043,18 @@ impl Actor {
                     None => std::future::pending::<()>().await,
                 }
             };
+            let timers_at = self.timer_at;
+            let timers = async move {
+                match timers_at {
+                    Some(at) => tokio::time::sleep_until(at.into()).await,
+                    None => std::future::pending::<()>().await,
+                }
+            };
             let step = futures::select_biased! {
                 job = jobs.next() => Step::Job(job),
                 () = news.select_next_some() => Step::Nudged,
                 () = Box::pin(timer).fuse() => Step::Hear,
+                () = Box::pin(timers).fuse() => Step::Timers,
             };
             match step {
                 Step::Job(None) => break,
@@ -1022,6 +1065,7 @@ impl Actor {
                 }
                 Step::Nudged => self.news_due = true,
                 Step::Hear => self.hear().await,
+                Step::Timers => self.timers().await,
             }
         }
         if let Some(p) = &self.process {
@@ -1041,13 +1085,18 @@ impl Actor {
             } => {
                 let ran = self.invoke(&action, &args, &invocation, who).await;
                 let _ = reply.send(ran);
-                self.flush().await;
+                self.timers().await;
             }
-            Job::Render { pane, view, frames } => self.render(pane, &view, frames).await,
+            Job::Render { pane, view, frames } => {
+                self.render(pane, &view, frames).await;
+                // What it rendered may have set a timer.
+                self.timers().await;
+            }
             Job::Event { pane, event } => {
                 self.event(pane, event).await;
-                self.flush().await;
+                self.timers().await;
             }
+            Job::Tick => self.timers().await,
             Job::Close { pane } => {
                 self.panes.remove(&pane);
                 if let Some((store, world)) = &mut self.live {
@@ -1105,6 +1154,34 @@ impl Actor {
         if let Err(why) = workers::deliver(store, world, news).await {
             self.trapped(why).await;
             return;
+        }
+        self.flush().await;
+    }
+
+    /// Its timers that are due, then what its views changed; when the
+    /// next is due.
+    async fn timers(&mut self) {
+        let Some((store, world)) = &mut self.live else {
+            self.timer_at = None;
+            return;
+        };
+        begin(store);
+        let ticked = world
+            .architect_extension_guest()
+            .call_tick(&mut *store)
+            .await;
+        match end(store, ticked) {
+            Ok(next) => {
+                self.timer_at = next.and_then(|ms| {
+                    Instant::now()
+                        .checked_add(Duration::from_millis(u64::from(ms)).max(TIMER_FLOOR))
+                });
+            }
+            Err(why) => {
+                self.timer_at = None;
+                self.trapped(why).await;
+                return;
+            }
         }
         self.flush().await;
     }
@@ -1248,6 +1325,7 @@ impl Actor {
 
     async fn restart(&mut self, why: String) {
         self.live = None;
+        self.timer_at = None;
         // Its workers were the old instance's.
         if let Some(line) = self
             .recipe
@@ -1708,6 +1786,7 @@ impl Runner for WasiRunner {
                         generation: 1,
                         news_due: false,
                         heard_at: Instant::now(),
+                        timer_at: None,
                     };
                     let _ = say_up.send(Ok(tokio::runtime::Handle::current()));
                     actor.run(queue, news).await;

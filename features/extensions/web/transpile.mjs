@@ -30,7 +30,7 @@ export const ASYNC_IMPORTS = [
 
 /// Every export of the world.
 export const ASYNC_EXPORTS = [
-  ...['init', 'actions', 'views', 'invoke', 'render', 'on-event', 'pending', 'close', 'save-state'].map(
+  ...['init', 'actions', 'views', 'invoke', 'render', 'on-event', 'pending', 'close', 'save-state', 'tick'].map(
     (f) => `architect:extension/guest#${f}`,
   ),
   ...['run', 'on-message', 'on-progress', 'on-done'].map((f) => `architect:extension/work#${f}`),
