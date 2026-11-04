@@ -579,6 +579,111 @@ Not everything should be one. Every extension pays for its boundary:
 dodeca split its own features into plugins to keep the core light, and
 took it back: the core got lighter, the product got harder.
 
+## Responsive by design: views and workers
+
+The guarantee: **an extension's GUI never waits on its own heavy work,
+and the app's UI never waits on any extension**, on every platform.
+Every runner gives an extension two roles, and the host keeps them
+apart:
+
+- **A view** handles input and answers with edits or paint commands
+  within a frame's budget (16 ms for a Luau window, 33 ms for a
+  process's view, the socket's round trip included). It runs on a
+  thread of its own, never the app's UI thread; the host awaits it.
+- **A worker** does the heavy work: its own instance, its own state and
+  memory, on a host thread pool, spoken to by messages only (Zellij's
+  plugin workers, a browser's Web Workers). A view spawns it, posts it
+  messages, and reads its progress and result; it is cancelled when the
+  view or the extension goes, and runs within its own step or CPU limit.
+
+An extension declares its workers in `extension.toml`:
+
+```toml
+[[workers]]
+id = "primes"
+script = "workers/primes.luau"   # luau and process packages
+# entry = "primes"               # process and wasm: the program's own name for it
+```
+
+(`features/extensions/src/manifest.rs` `WorkerDecl`.)
+
+### Per runner
+
+| | the view runs | a worker is | cancelled when |
+|---|---|---|---|
+| Luau | its own VM thread, one Luau state per session; one-off runs (actions, hooks) on a pool | another Luau state of the declared script, on the pool | its owner's state goes, or the extension unloads (`WorkerGroup::cancel_all`) |
+| Process | one thread per open view in the process, one event at a time | `guest::spawn_work`: a thread of the process | its `WorkHandle` drops (the view closed) |
+| WASI (next) | one instance of the component, its exports called with a fuel budget | another instance of the same component on a pool thread; on the web, a Web Worker | its instance is dropped |
+| Linked | the app's Dioxus tree: a linked extension is first-party code and keeps to the rule itself | its own thread or task | as the code says |
+
+**Luau** (`features/scripting/src/vm.rs`, `features/scripting/src/worker.rs`):
+no script runs on its caller's thread. `Runtime::run` takes a thread of
+an elastic pool (one that grows when every thread is busy, so a script
+that runs a script never waits for one) and the caller awaits a channel;
+dropping the future stops the script at its next step. `Runtime::start`
+gives a live script (an `ImGui` window, an overlay) a thread of its own
+for its life; each `Live::frame` runs there. `Limits::frame` (500 ms by
+default) stops a frame that runs past it, saying to use a worker;
+`Limits::steps` still stops a runaway loop; `Limits::worker` gives
+workers far more steps and five minutes of CPU. The theme reaches a
+script on any thread: `ThemeCell` is shared, and each frame takes its
+snapshot at the start (`ThemeModule`).
+
+A script spawns a worker by name and reads it each frame, immediate
+mode, with no callbacks needed:
+
+```lua
+local job = worker.spawn('primes', { n = 3000000 })
+local function loop()
+  local p = job:progress()          -- {done, total, fraction, note}
+  ImGui.ProgressBar(ctx, p and p.fraction or 0)
+  if job:status() == 'done' then ImGui.Text(ctx, job:result() .. ' primes') end
+  wake_after(33)                    -- the next frame comes by itself
+  defer(loop)
+end
+```
+
+The worker sees `args`, `worker.progress(done, total, note)`,
+`worker.post(msg)`, `worker.receive(ms)` / `worker.poll()`,
+`worker.on_message(fn)` and `worker.cancelled()`; no actions, no
+`ImGui`, no theme. Its news wakes the view's host for a frame
+(`Live::woken`); `wake_after(ms)` asks for an animation frame. A
+one-off run waits with `job:join()` or `job:next()`; a view must not.
+
+**Process guests** (`features/extensions/src/work.rs`): a view's thread
+renders one event at a time, so the rule is that a handler starts work
+and returns. `Guest::spawn_work` (`spawn_work`) runs a closure on a
+thread of its own with a `Work` to report through (`progress`, `post`,
+`check` for cancellation); `use_work` gives a view its state as a
+signal. Every event is answered with a frame, empty when nothing
+changed (wire 5, `ANSWERED_WIRE`), so the host times each one.
+
+### Budgets and degradation
+
+The host measures every frame of a view it does not draw itself
+(`features/workspace/src/meter.rs` `ViewMeter`): a Luau window's time on
+its own thread (`Session::frame_metered`), a process view's time from
+the event to its answering frame (`features/extensions/src/remote.rs`
+`RemoteView`). Past the budget, the pane keeps its last good frame and
+shows a small busy mark in the shell's theme
+(`features/shell/src/shell/busy.rs` `BusyBadge`); the rest of the app
+answers as ever, since nothing on the UI thread waits. Each view's p50,
+p99, slowest and slow-frame count are in the app's `Meters` (provided in
+context, `<extension>/<view>` or the script's step name), read by
+`EXT_VIEWS` (`features/extensions/src/views.rs` `install_view_actions`).
+`Meters::with_report` takes a `ViewReport`, told when a view turns slow
+or busy and when it recovers: the seam an app wires to its status board.
+
+The lab shows all of it with the clicker (`apps/lab/clicker`): its
+"Heavy job" pane counts primes in a worker with a live progress bar and
+a spinner that keeps turning; its "Naughty view" spins 300 ms a frame on
+its own thread and is marked busy while every other pane answers; its
+process view counts primes with `use_work` and has a button that blocks
+its own view thread for two seconds, so its pane goes busy and comes
+back. `features/scripting/tests/workers.rs`,
+`features/canvas/tests/responsive.rs` and
+`features/extensions/tests/workers.rs` measure it.
+
 ## Contributions: what an extension adds to the interface
 
 Past actions, settings, views and themes, an extension adds to the
