@@ -1023,7 +1023,9 @@ path = "apps/lab/board"
 2. **Builds its process** (`cargo build --bin …`, in one target folder for
    all copies, `Extensions::with_build_target`, `<dev folder>/.target`
    unless given) on a thread of its own. The program goes to its
-   `[entry] path`, swapped whole.
+   `[entry] path`, swapped whole. It is the app's `cargo` (`$CARGO`, else
+   the one on its `PATH`): run the app from the repository's dev shell, so
+   it is the toolchain the crate was written for.
 3. **Overrides the built-in live**, under the built-in's own id: it
    replaces it, so its program answers the ids the built-in had (a
    renamed copy of a process extension is still refused). Until the first
