@@ -80,7 +80,7 @@ steps (
     {id theme-switch-3, hide true, do @run{id APP_SETTINGS}}
     {
         id theme-switch
-        text "One theme store styles everything: the shell, every pane, pop-out windows, painted views and the editor. THEME_SET switches it live from anywhere, and a light and a dark theme can be paired so Appearance flips between them. Try: change Appearance here, or ⌘K › Choose a theme…"
+        text "One theme store styles everything: the shell, every pane, pop-out windows, painted views and the editor. THEME_SET switches it live from anywhere, and a light and a dark theme can be paired so Appearance flips between them. Try: open Appearance (ringed) and switch light and dark, or ⌘K › Choose a theme…"
         target @text"Appearance"
     }
     {id theme-files-1, hide true, do @run{id COMMANDS_SHOW, args {overlay none}}}
