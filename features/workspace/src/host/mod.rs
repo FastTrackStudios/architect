@@ -1180,8 +1180,9 @@ pub struct ContextEntry {
     pub checked: Option<bool>,
 }
 
-/// What others add to a context menu (an extension's `[[context]]` rows),
-/// asked for by target and id each time the menu opens: a tab's
+/// What others add to a context menu (an extension's `[[context]]` rows).
+///
+/// Asked for by target and id each time the menu opens: a tab's
 /// (`view:<kind>` and `tab`, the pane's id), a target a view shows
 /// ([`PaneHandle::context_menu`]: `file` and a path). Provide it above the
 /// workspace.
@@ -1208,9 +1209,10 @@ impl TabBadges {
     }
 }
 
-/// What others put in a pane's header, between its title and its menu
-/// (an extension's `[[toolbars]]` with `where = "pane"` or
-/// `"view:<kind>"`), asked for by the pane's view kind and id each time
+/// What others put in a pane's header, between its title and its menu.
+///
+/// An extension's `[[toolbars]]` with `where = "pane"` or
+/// `"view:<kind>"`, asked for by the pane's view kind and id each time
 /// the header draws: `None` for nothing. Return a component, so its hooks
 /// (what keeps a toggle's state live) are its own. Provide it above the
 /// workspace.
@@ -1223,9 +1225,11 @@ impl HeaderTools {
     }
 }
 
-/// The invocation a context-menu row runs with: opened on `target`
-/// (`view:<kind>`, `tab`, `file`) `id` (the pane's, a path) in pane
-/// `pane` showing `view`; a file's path is its [`Invocation::path`] too.
+/// The invocation a context-menu row runs with.
+///
+/// Opened on `target` (`view:<kind>`, `tab`, `file`) `id` (the pane's, a
+/// path) in pane `pane` showing `view`; a file's path is its
+/// [`Invocation::path`] too.
 ///
 /// [`Invocation::path`]: architect::action::Invocation::path
 #[must_use]

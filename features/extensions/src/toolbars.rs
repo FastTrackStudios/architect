@@ -149,7 +149,7 @@ impl Toolbars {
     }
 
     /// Tells the listeners, after the lock.
-    fn changed(&self, mut s: MutexGuard<'_, State>) {
+    fn changed(mut s: MutexGuard<'_, State>) {
         s.revision = s.revision.wrapping_add(1);
         let r = s.revision;
         let listeners: Vec<_> = s.listeners.iter().map(|(_, l)| Arc::clone(l)).collect();
@@ -213,6 +213,7 @@ impl Toolbars {
 
     /// Reads the files again when one was added, changed or removed since
     /// the last read: whether it did.
+    #[must_use = "whether the files changed"]
     pub fn poll(&self) -> bool {
         let Some(dir) = self.dir() else {
             return false;
@@ -258,7 +259,7 @@ impl Toolbars {
         s.files = files;
         s.problems = problems;
         s.seen = seen;
-        self.changed(s);
+        Self::changed(s);
     }
 
     /// What is wrong with the person's files now: one problem a file.
@@ -271,13 +272,13 @@ impl Toolbars {
     /// place), then the person's own.
     #[must_use]
     pub fn all(&self, contributions: &Contributions) -> Vec<Toolbar> {
-        let s = self.lock();
+        let files = self.lock().files.clone();
         let mut out: Vec<Toolbar> = contributions
             .toolbars()
             .into_iter()
             .map(|By { owner, item }| {
                 let key = format!("{owner}/{}", item.id);
-                match s.files.get(&key) {
+                match files.get(&key) {
                     Some((mine, path)) => Toolbar {
                         decl: ToolbarDecl {
                             id: item.id,
@@ -298,7 +299,7 @@ impl Toolbars {
                 }
             })
             .collect();
-        for (key, (decl, path)) in &s.files {
+        for (key, (decl, path)) in &files {
             if let Some(id) = key.strip_prefix(&format!("{PERSON}/")) {
                 out.push(Toolbar {
                     key: key.clone(),
@@ -356,8 +357,7 @@ impl Toolbars {
             .lock()
             .files
             .get(&key)
-            .map(|(_, p)| p.clone())
-            .unwrap_or_else(|| dir.join(file_name(&key)));
+            .map_or_else(|| dir.join(file_name(&key)), |(_, p)| p.clone());
         std::fs::write(&path, decl.to_toml()?).map_err(|e| format!("{}: {e}", path.display()))?;
         self.reload();
         Ok(path)
@@ -386,7 +386,7 @@ impl Toolbars {
             return;
         }
         s.armed = Some(action.to_owned());
-        self.changed(s);
+        Self::changed(s);
     }
 
     /// Disarms whatever is armed: what was.
@@ -396,7 +396,7 @@ impl Toolbars {
         let mut s = self.lock();
         let was = s.armed.take();
         if was.is_some() {
-            self.changed(s);
+            Self::changed(s);
         }
         was
     }

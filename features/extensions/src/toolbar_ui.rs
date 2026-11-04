@@ -1,5 +1,6 @@
-//! The toolbars in the window (feature `ui`): a pane of their own (a
-//! dock's, a float, a window) or a pane's header, each drawn by
+//! The toolbars in the window (feature `ui`).
+//!
+//! A pane of their own (a dock's, a float, a window) or a pane's header, each drawn by
 //! [`ToolbarStrip`] from the toolbar in force under its key (a person's
 //! copy over an extension's), its buttons following their actions' toggle
 //! and armed state live (`docs/content/architecture/extensions.md`,
@@ -82,7 +83,7 @@ pub(crate) fn provide_header_tools(ui: ExtensionUi) {
                     ToolbarStrip {
                         key: "{t.key}",
                         ui,
-                        toolbar: t.key.clone(),
+                        toolbar: t.key,
                         pane: pane.clone(),
                         view: kind.clone(),
                         header: true,
@@ -97,7 +98,11 @@ pub(crate) fn provide_header_tools(ui: ExtensionUi) {
 /// one the person closed stays closed until it appears again), and closes
 /// its pane when it goes.
 pub(crate) fn use_pane_toolbars(ui: ExtensionUi, app: Arc<ActionList>) {
-    let placed = use_hook(|| Rc::new(std::cell::RefCell::new(BTreeMap::<String, ()>::new())));
+    let placed = use_hook(|| {
+        Rc::new(std::cell::RefCell::new(
+            std::collections::BTreeSet::<String>::new(),
+        ))
+    });
     use_effect(move || {
         let (_, _) = (ui.revision(), ui.ticks());
         let now: BTreeMap<String, (String, ToolbarPlace)> = pane_toolbars(&ui.host())
@@ -106,7 +111,7 @@ pub(crate) fn use_pane_toolbars(ui: ExtensionUi, app: Arc<ActionList>) {
             .collect();
         let gone: Vec<String> = placed
             .borrow()
-            .keys()
+            .iter()
             .filter(|k| !now.contains_key(*k))
             .cloned()
             .collect();
@@ -119,10 +124,10 @@ pub(crate) fn use_pane_toolbars(ui: ExtensionUi, app: Arc<ActionList>) {
             });
         }
         for (kind, (title, place)) in now {
-            if placed.borrow().contains_key(&kind) {
+            if placed.borrow().contains(&kind) {
                 continue;
             }
-            placed.borrow_mut().insert(kind.clone(), ());
+            placed.borrow_mut().insert(kind.clone());
             let at = match place {
                 ToolbarPlace::Dock(side) => json!({ "dock": { "side": side } }),
                 ToolbarPlace::Window => json!({ "window": {} }),
@@ -139,7 +144,7 @@ pub(crate) fn use_pane_toolbars(ui: ExtensionUi, app: Arc<ActionList>) {
                 // workspace is on show: until then it waits (while it is
                 // still there).
                 let mut wait = 50_u64;
-                while still.borrow().contains_key(&kind) {
+                while still.borrow().contains(&kind) {
                     if app
                         .run_json_async("WORKSPACE_OPEN", args.as_bytes())
                         .await
@@ -487,7 +492,7 @@ fn ToolButton(cx: Ctx, item: ToolItem, path: String, joined: bool) -> Element {
                     }
                 },
                 oncontextmenu: {
-                    let (action, here) = (item.action.clone(), path.clone());
+                    let (action, here) = (item.action.clone(), path);
                     move |e: MouseEvent| {
                         match rc.as_str() {
                             "" | "none" => return,
@@ -522,7 +527,7 @@ fn ToolButton(cx: Ctx, item: ToolItem, path: String, joined: bool) -> Element {
                     style: "position:absolute; top:calc(100% + 4px); left:0; z-index:60; min-width:180px; \
                             display:flex; flex-direction:column; padding:4px; border-radius:8px; \
                             background:{t.pill}; border:1px solid {t.rule}; box-shadow:{t.shadow_float};",
-                    ToolMenu { cx: cx.clone(), rows: item.menu.clone(), depth: 0 }
+                    ToolMenu { cx, rows: item.menu, depth: 0 }
                 }
             }
         }
@@ -560,7 +565,7 @@ fn ToolMenu(cx: Ctx, rows: Vec<MenuItem>, depth: usize) -> Element {
                             span { if on { "▾" } else { "›" } }
                         }
                         if on {
-                            ToolMenu { key: "{n}-in", cx: cx.clone(), rows: row.items.clone(), depth: depth.saturating_add(1) }
+                            ToolMenu { key: "{n}-in", cx: cx.clone(), rows: row.items, depth: depth.saturating_add(1) }
                         }
                     }
                 }
@@ -568,7 +573,7 @@ fn ToolMenu(cx: Ctx, rows: Vec<MenuItem>, depth: usize) -> Element {
                     let info = host.list().info(&row.action);
                     let checked = info.as_ref().and_then(|i| i.checked);
                     let label = if row.label.is_empty() {
-                        info.map(|i| i.display_name).unwrap_or_else(|| row.action.clone())
+                        info.map_or_else(|| row.action.clone(), |i| i.display_name)
                     } else {
                         row.label.clone()
                     };

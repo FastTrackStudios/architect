@@ -52,7 +52,7 @@ const ON_SHOW: &str = r#"    {id open, do @run{id APP_SETTINGS}}
 /// The `n`th press of the note header's click button (from 0): the click
 /// on after an odd count, off after an even one.
 fn press(n: usize) -> String {
-    let on = n % 2 == 0;
+    let on = n.is_multiple_of(2);
     format!(
         r#"    {{
         id press-{n}

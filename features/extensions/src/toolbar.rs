@@ -143,7 +143,7 @@ pub struct ToolItem {
     pub menu: Vec<MenuItem>,
     /// A group's buttons.
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub items: Vec<ToolItem>,
+    pub items: Vec<Self>,
     /// A widget's view: one of its extension's (`meter`), or another's
     /// (`<extension>/<view>`).
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -210,7 +210,7 @@ pub struct MenuItem {
     #[serde(skip_serializing_if = "String::is_empty")]
     pub label: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub items: Vec<MenuItem>,
+    pub items: Vec<Self>,
 }
 
 // `skip_serializing_if` takes a reference.
@@ -361,14 +361,13 @@ fn check_item(
                 return Err("a dropdown needs a label or an icon".to_owned());
             }
             match item.right_click.as_str() {
-                "" | "none" => {}
                 "menu" if item.menu.is_empty() => {
                     return Err("right_click = \"menu\" with no menu".to_owned());
                 }
                 "arm" if item.action.is_empty() => {
                     return Err("right_click = \"arm\" with no action to arm".to_owned());
                 }
-                "menu" | "arm" => {}
+                "" | "none" | "menu" | "arm" => {}
                 other => action(other)?,
             }
             check_menu(&item.menu, 0, action)?;
@@ -472,6 +471,8 @@ width = 120
 newline = true
 "##;
 
+    // The shape `check` takes.
+    #[allow(clippy::unnecessary_wraps)]
     fn ok(_: &str) -> Result<(), String> {
         Ok(())
     }

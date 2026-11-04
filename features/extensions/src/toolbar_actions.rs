@@ -138,7 +138,10 @@ impl Extensions {
                     .get(host.contributions(), &a.id)
                     .ok_or_else(|| format!("no toolbar {:?} (TOOLBAR_LIST lists them)", a.id))?;
                 let mut out = listed(&t);
-                out["toolbar"] = serde_json::to_value(&t.decl).map_err(|e| e.to_string())?;
+                let whole = serde_json::to_value(&t.decl).map_err(|e| e.to_string())?;
+                if let Some(o) = out.as_object_mut() {
+                    o.insert("toolbar".to_owned(), whole);
+                }
                 Ok::<_, String>(RawJson::from(out.to_string()))
             },
         )?;
