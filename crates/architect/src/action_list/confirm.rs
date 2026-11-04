@@ -9,7 +9,10 @@
 //! - it is made by a caller from outside (an [`ActionCaller`] with a
 //!   principal: a model over MCP, a peer, a script run as someone). The
 //!   app itself — a key, a menu, the palette, which a person drives — is
-//!   never asked;
+//!   never asked, nor is an extension acting for the app itself
+//!   (`Principal::Extension` with no `on_behalf_of`: the person granted
+//!   its capabilities when it was installed); one acting for a caller
+//!   from outside asks as that caller would;
 //! - and the action says so: an [`Effect::Destructive`] one by default,
 //!   or whatever [`ActionList::set_confirm`] decides for that call (a
 //!   mutating action flagged `confirm`, a command runner that only asks
@@ -249,6 +252,12 @@ impl ActionList {
         let Some(who) = caller.principal() else {
             return Ok(());
         };
+        // An extension acting for the app itself runs what the person
+        // granted it when it was installed: asked as the app is (never).
+        // One acting for a caller from outside asks as that caller would.
+        if who.acting_for().is_none() {
+            return Ok(());
+        }
         let id = entry.meta.id;
         let writes = caller.confirms_writes() && entry.effect != Effect::ReadOnly;
         let (ttl, check) = {
@@ -533,6 +542,28 @@ mod tests {
         std::thread::sleep(Duration::from_millis(120));
         assert!(list.pending_confirmations().is_empty());
         assert!(!list.approve(&stale));
+    }
+
+    /// An extension acting for the app itself runs what its grant lets it
+    /// at once; acting for an agent, it asks as the agent would.
+    #[test]
+    fn an_extension_asks_as_whoever_it_acts_for() {
+        let (list, runs) = list(Duration::from_secs(60));
+        let own = ActionCaller::new(Principal::extension("fts.metronome", None));
+        list.run_json_with(&own, "FILES_DELETE", A).unwrap();
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+        let for_agent = ActionCaller::new(Principal::extension(
+            "fts.metronome",
+            Some(Principal::Service {
+                name: "agent".to_owned(),
+            }),
+        ));
+        let _ = ticket_of(list.run_json_with(&for_agent, "FILES_DELETE", A));
+        assert_eq!(runs.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            list.pending_confirmations()[0].caller,
+            "extension:fts.metronome for service:agent"
+        );
     }
 
     #[test]

@@ -70,6 +70,22 @@ pub enum Principal {
     /// so a deployment grants what a peer may do with an engine of its
     /// own. Adding a host must not be a way to hand out a login.
     Host { endpoint: String },
+    /// An app extension calling through the app's host service, for
+    /// someone (`on_behalf_of`: the person or agent whose run it is part
+    /// of) or for the app itself (`None`: its own hook, timer or view).
+    ///
+    /// Distinct from [`Self::Service`] so a server — a list's authorizer,
+    /// a `PermissionsGate` — can tell an extension's call from the
+    /// person's, and refuse or narrow it. The app checks the extension's
+    /// granted capabilities before the call is made; an engine decides
+    /// what the person behind it may do ([`RoleEngine`] gives it at most
+    /// the rules of `on_behalf_of`, and treats `None` as it treats a
+    /// service).
+    Extension {
+        /// The extension's id (`fts.metronome`).
+        id: String,
+        on_behalf_of: Option<Box<Self>>,
+    },
     /// No (valid) credential presented.
     Anonymous,
 }
@@ -83,7 +99,40 @@ impl Principal {
             Self::Guest { link_id, .. } => format!("guest:{link_id}"),
             Self::Service { name } => format!("service:{name}"),
             Self::Host { endpoint } => format!("host:{endpoint}"),
+            Self::Extension { id, on_behalf_of } => on_behalf_of.as_ref().map_or_else(
+                || format!("extension:{id}"),
+                |who| format!("extension:{id} for {}", who.describe()),
+            ),
             Self::Anonymous => "anonymous".to_string(),
+        }
+    }
+
+    /// Extension `id` calling for `on_behalf_of` (`None`: the app itself).
+    #[must_use]
+    pub fn extension(id: impl Into<String>, on_behalf_of: Option<Self>) -> Self {
+        Self::Extension {
+            id: id.into(),
+            on_behalf_of: on_behalf_of.map(Box::new),
+        }
+    }
+
+    /// Who a call is really for: an extension's `on_behalf_of` (its own
+    /// when it acts for someone), anyone else themselves. `None` for an
+    /// extension acting for the app itself.
+    #[must_use]
+    pub fn acting_for(&self) -> Option<&Self> {
+        match self {
+            Self::Extension { on_behalf_of, .. } => on_behalf_of.as_deref()?.acting_for(),
+            other => Some(other),
+        }
+    }
+
+    /// The extension making this call, when one is.
+    #[must_use]
+    pub fn extension_id(&self) -> Option<&str> {
+        match self {
+            Self::Extension { id, .. } => Some(id),
+            _ => None,
         }
     }
 }
@@ -469,6 +518,11 @@ impl RoleEngine {
 
     fn rules_for(&self, who: &Principal) -> Option<&[Rule]> {
         match who {
+            // At most what the person behind it may do.
+            Principal::Extension {
+                on_behalf_of: Some(behind),
+                ..
+            } => self.rules_for(behind),
             Principal::User { user_id } => self
                 .members
                 .get(user_id)
@@ -483,7 +537,16 @@ impl RoleEngine {
 impl PermissionEngine for RoleEngine {
     fn check(&self, who: &Principal, what: &Resource, action: &Action) -> Decision {
         if self.allow_services {
-            if let Principal::Service { .. } = who {
+            // An extension acting for the app itself is as trusted as the
+            // app's own services, no more.
+            if matches!(
+                who,
+                Principal::Service { .. }
+                    | Principal::Extension {
+                        on_behalf_of: None,
+                        ..
+                    }
+            ) {
                 return Decision::Allow;
             }
         }
@@ -808,6 +871,45 @@ mod tests {
                 &Action::write()
             )
             .allowed()
+        );
+    }
+
+    /// An extension's call is told apart from the person's, and gets at
+    /// most what the person behind it may do.
+    #[test]
+    fn an_extension_acts_with_at_most_its_persons_rules() {
+        let mut e = RoleEngine::new();
+        e.set_member("bob", "member");
+        let for_bob = Principal::extension("fts.metronome", Some(user("bob")));
+        assert_eq!(for_bob.describe(), "extension:fts.metronome for user:bob");
+        assert_eq!(for_bob.extension_id(), Some("fts.metronome"));
+        assert_eq!(for_bob.acting_for(), Some(&user("bob")));
+        assert_ne!(for_bob, user("bob"), "a gate can tell them apart");
+        assert!(
+            e.check(&for_bob, &"vault/x".into(), &Action::write())
+                .allowed()
+        );
+        assert!(
+            !e.check(&for_bob, &"vault/x".into(), &Action::admin())
+                .allowed()
+        );
+        let for_nobody = Principal::extension("fts.metronome", Some(user("nobody")));
+        assert!(
+            !e.check(&for_nobody, &"vault/x".into(), &Action::read())
+                .allowed()
+        );
+        // For the app itself: as trusted as a service, no more.
+        let own = Principal::extension("fts.metronome", None);
+        assert_eq!(own.acting_for(), None);
+        assert!(e.check(&own, &"vault/x".into(), &Action::write()).allowed());
+        let strict = RoleEngine {
+            allow_services: false,
+            ..RoleEngine::new()
+        };
+        assert!(
+            !strict
+                .check(&own, &"vault/x".into(), &Action::read())
+                .allowed()
         );
     }
 
