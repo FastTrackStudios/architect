@@ -618,7 +618,7 @@ fn builtin() -> Option<Package> {
 /// control socket, MCP): forwarded to the extensions' list, each run there
 /// as whoever ran it on the lab's (the lab's authorizer and confirmation
 /// asked first).
-const FORWARDED: [&str; 30] = [
+const FORWARDED: &[&str] = &[
     "EXT_LIST",
     "EXT_VIEWS",
     "EXT_SEARCH",
@@ -816,7 +816,7 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         }
         let _ = extensions.sync();
         // After the first load: the linked manager's MANAGER_* exist now.
-        forward(&lab, &list, &FORWARDED);
+        forward(&lab, &list, FORWARDED);
         extensions
     });
     let follow = extensions.clone();
