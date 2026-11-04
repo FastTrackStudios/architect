@@ -28,6 +28,21 @@
 //! action runs to its end, a view's handlers run as their event comes. An
 //! action that changes what a view shows calls [`refresh`]; the host asks
 //! for the views' changes after every action and event.
+//!
+//! Heavy work goes to a worker ([`worker`]): another instance of the
+//! component on a thread of the host's pool, spoken to by messages only.
+//! A handler starts it ([`worker::spawn`]) and returns; the worker's
+//! function ([`Extension::worker`]) reports its progress and posts what it
+//! finds ([`Work`]); its owner's views redraw from its [`WorkState`] as
+//! news comes. Dropping the [`Worker`] handle cancels it.
+//!
+//! ```ignore
+//! Extension::new()
+//!     .worker("count-primes", |work: &Work, args| {
+//!         for i in 0..n { work.check()?; work.progress(i as f64, n as f64, ""); }
+//!         Ok(json!(found))
+//!     })
+//! ```
 
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
@@ -62,6 +77,7 @@ use bindings::architect::extension::host as wit_host;
 use bindings::architect::extension::types as wit;
 
 type Action = Box<dyn Fn(Json, Json) -> Result<Json, String>>;
+type WorkerFn = Box<dyn Fn(&Work, Json) -> Result<Json, String>>;
 
 /// What a component extension adds: its views and actions, and its state
 /// across a reload.
@@ -69,6 +85,7 @@ type Action = Box<dyn Fn(Json, Json) -> Result<Json, String>>;
 pub struct Extension {
     views: BTreeMap<String, fn() -> Element>,
     actions: BTreeMap<String, Action>,
+    workers: BTreeMap<String, WorkerFn>,
     load: Option<Box<dyn Fn(&[u8])>>,
     save: Option<Box<dyn Fn() -> Vec<u8>>>,
 }
@@ -78,6 +95,7 @@ impl std::fmt::Debug for Extension {
         f.debug_struct("Extension")
             .field("views", &self.views.keys().collect::<Vec<_>>())
             .field("actions", &self.actions.keys().collect::<Vec<_>>())
+            .field("workers", &self.workers.keys().collect::<Vec<_>>())
             .finish_non_exhaustive()
     }
 }
@@ -120,6 +138,19 @@ impl Extension {
         self
     }
 
+    /// Its worker entry `entry` (a `[[workers]]` entry its manifest
+    /// declares): what a worker instance runs, with the JSON args its
+    /// owner spawned it with. What it returns is its result.
+    #[must_use]
+    pub fn worker(
+        mut self,
+        entry: impl Into<String>,
+        run: impl Fn(&Work, Json) -> Result<Json, String> + 'static,
+    ) -> Self {
+        self.workers.insert(entry.into(), Box::new(run));
+        self
+    }
+
     /// Its state across a reload: `save` is asked for it before the copy
     /// it was is unloaded, `load` given it as the new one starts.
     #[must_use]
@@ -138,6 +169,248 @@ thread_local! {
     static EXTENSION: RefCell<Option<Rc<Extension>>> = const { RefCell::new(None) };
     static PANES: RefCell<BTreeMap<u64, VirtualDom>> = const { RefCell::new(BTreeMap::new()) };
     static REFRESH: Cell<bool> = const { Cell::new(false) };
+    /// Its workers, as their owner hears them.
+    static WORK: RefCell<BTreeMap<u64, WorkState>> = const { RefCell::new(BTreeMap::new()) };
+}
+
+/// Where a worker is.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WorkStatus {
+    /// None started.
+    #[default]
+    Idle,
+    Running,
+    Done,
+    Failed,
+    /// Cancelled before it finished.
+    Cancelled,
+}
+
+/// How far a worker said it is.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Progress {
+    pub done: f64,
+    pub total: f64,
+    pub note: String,
+}
+
+impl Progress {
+    /// `done / total`, in 0..=1 (0 with no total).
+    #[must_use]
+    pub fn fraction(&self) -> f64 {
+        if self.total > 0.0 {
+            (self.done / self.total).clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+}
+
+/// A worker as its owner sees it: the same as a process's
+/// (`architect_extensions::work::WorkState`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct WorkState {
+    pub status: WorkStatus,
+    /// What it last reported.
+    pub progress: Option<Progress>,
+    /// What it posted, in order.
+    pub messages: Vec<Json>,
+    /// What it returned, or why it failed; `None` while it runs.
+    pub result: Option<Result<Json, String>>,
+}
+
+impl WorkState {
+    /// Its progress's fraction, 1 once done, 0 before any.
+    #[must_use]
+    pub fn fraction(&self) -> f64 {
+        if self.status == WorkStatus::Done {
+            return 1.0;
+        }
+        self.progress.as_ref().map_or(0.0, Progress::fraction)
+    }
+
+    /// As JSON: `{status, progress: {done, total, note}?, messages, result?, error?}`.
+    #[must_use]
+    pub fn to_json(&self) -> Json {
+        let status = match self.status {
+            WorkStatus::Idle => "idle",
+            WorkStatus::Running => "running",
+            WorkStatus::Done => "done",
+            WorkStatus::Failed => "failed",
+            WorkStatus::Cancelled => "cancelled",
+        };
+        let mut out = serde_json::Map::new();
+        out.insert("status".to_owned(), status.into());
+        out.insert("messages".to_owned(), self.messages.clone().into());
+        out.insert("fraction".to_owned(), self.fraction().into());
+        if let Some(p) = &self.progress {
+            out.insert(
+                "progress".to_owned(),
+                serde_json::json!({ "done": p.done, "total": p.total, "note": p.note }),
+            );
+        }
+        match &self.result {
+            Some(Ok(r)) => {
+                out.insert("result".to_owned(), r.clone());
+            }
+            Some(Err(e)) => {
+                out.insert("error".to_owned(), Json::String(e.clone()));
+            }
+            None => {}
+        }
+        Json::Object(out)
+    }
+}
+
+/// A worker's side: report, post, receive, and look whether to stop. The
+/// same as a process's work (`architect_extensions::work::Work`).
+#[derive(Debug)]
+pub struct Work {
+    id: u64,
+}
+
+impl Work {
+    /// Its handle, as its owner has it.
+    #[must_use]
+    pub const fn id(&self) -> u64 {
+        self.id
+    }
+
+    /// How far it is: `done` of `total`, with a note (the latest wins;
+    /// call it as often as you like).
+    #[allow(clippy::unused_self)] // A worker's own call.
+    pub fn progress(&self, done: f64, total: f64, note: &str) {
+        bindings::architect::extension::worker::progress(done, total, note);
+    }
+
+    /// Something for its owner (a partial result): waits while its
+    /// owner's queue is full.
+    ///
+    /// # Errors
+    ///
+    /// It was cancelled.
+    #[allow(clippy::unused_self)]
+    pub fn post(&self, message: &Json) -> Result<(), String> {
+        bindings::architect::extension::worker::post(0, &message.to_string())
+    }
+
+    /// The next message from its owner, waiting at most `wait`.
+    #[allow(clippy::unused_self)]
+    #[must_use]
+    pub fn receive(&self, wait: std::time::Duration) -> Option<Json> {
+        let ms = u32::try_from(wait.as_millis()).unwrap_or(u32::MAX);
+        bindings::architect::extension::worker::receive(ms)
+            .map(|m| serde_json::from_str(&m).unwrap_or(Json::String(m)))
+    }
+
+    /// Whether its owner cancelled it or went: stop soon (it is stopped
+    /// at its next tick anyway).
+    #[allow(clippy::unused_self)]
+    #[must_use]
+    pub fn cancelled(&self) -> bool {
+        bindings::architect::extension::worker::cancelled()
+    }
+
+    /// `Err` once it is cancelled: `work.check()?` in a loop.
+    ///
+    /// # Errors
+    ///
+    /// It was cancelled.
+    pub fn check(&self) -> Result<(), String> {
+        if self.cancelled() {
+            Err("cancelled".to_owned())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+/// A worker, as its owner holds it. Dropping it cancels it.
+#[derive(Debug)]
+pub struct Worker {
+    id: u64,
+}
+
+impl Drop for Worker {
+    fn drop(&mut self) {
+        self.cancel();
+        WORK.with(|w| w.borrow_mut().remove(&self.id));
+    }
+}
+
+impl Worker {
+    /// Its handle.
+    #[must_use]
+    pub const fn id(&self) -> u64 {
+        self.id
+    }
+
+    /// A message to it (it reads it with [`Work::receive`]).
+    ///
+    /// # Errors
+    ///
+    /// Its queue is full (it has not read what it was sent), or it ended.
+    pub fn post(&self, message: &Json) -> Result<(), String> {
+        bindings::architect::extension::worker::post(self.id, &message.to_string())
+    }
+
+    /// Stops it: its state says `cancelled` once the host says it ended.
+    pub fn cancel(&self) {
+        bindings::architect::extension::worker::cancel(self.id);
+    }
+
+    /// Where it is now.
+    #[must_use]
+    pub fn state(&self) -> WorkState {
+        worker::state(self.id)
+    }
+
+    /// Whether it is running.
+    #[must_use]
+    pub fn running(&self) -> bool {
+        self.state().status == WorkStatus::Running
+    }
+}
+
+/// Workers: an owner's side ([`spawn`]) and the state its views read.
+pub mod worker {
+    use serde_json::Value as Json;
+
+    use super::{WORK, WorkState, WorkStatus, Worker};
+
+    /// Starts its worker `name` (one of its manifest's `[[workers]]`) with
+    /// `args`, at once, in an instance of its own on the host's pool.
+    ///
+    /// # Errors
+    ///
+    /// It has no such worker, or as many running as it may.
+    pub fn spawn(name: &str, args: &Json) -> Result<Worker, String> {
+        let id = super::bindings::architect::extension::worker::spawn(name, &args.to_string())?;
+        WORK.with(|w| {
+            w.borrow_mut().insert(
+                id,
+                WorkState {
+                    status: WorkStatus::Running,
+                    ..WorkState::default()
+                },
+            );
+        });
+        Ok(Worker { id })
+    }
+
+    /// Worker `id`'s state, as its owner heard it (idle for none).
+    #[must_use]
+    pub fn state(id: u64) -> WorkState {
+        WORK.with(|w| w.borrow().get(&id).cloned().unwrap_or_default())
+    }
+}
+
+/// Worker `id`'s news into its state; every view redraws.
+fn heard(id: u64, change: impl FnOnce(&mut WorkState)) {
+    let known = WORK.with(|w| w.borrow_mut().get_mut(&id).map(change).is_some());
+    if known {
+        refresh();
+    }
 }
 
 /// Every open view renders again (an action changed what they show): the
@@ -402,6 +675,51 @@ impl<S: Setup> bindings::exports::architect::extension::guest::Guest for Compone
 
     fn save_state() -> Option<Vec<u8>> {
         extension().ok()?.save.as_ref().map(|save| save())
+    }
+}
+
+impl<S: Setup> bindings::exports::architect::extension::work::Guest for Component<S> {
+    fn run(entry: String, worker: u64, args: String) -> Result<String, String> {
+        let ext = extension()?;
+        let run = ext
+            .workers
+            .get(&entry)
+            .ok_or_else(|| format!("no worker entry {entry}"))?;
+        let args = serde_json::from_str(&args).unwrap_or(Json::Null);
+        run(&Work { id: worker }, args).map(|v| v.to_string())
+    }
+
+    fn on_message(worker: u64, message: String) {
+        let message = serde_json::from_str(&message).unwrap_or(Json::String(message));
+        heard(worker, |s| s.messages.push(message));
+    }
+
+    fn on_progress(worker: u64, progress: bindings::architect::extension::worker::ProgressReport) {
+        heard(worker, |s| {
+            s.progress = Some(Progress {
+                done: progress.done,
+                total: progress.total,
+                note: progress.note,
+            });
+        });
+    }
+
+    fn on_done(worker: u64, outcome: bindings::exports::architect::extension::work::Outcome) {
+        use bindings::exports::architect::extension::work::Outcome;
+        heard(worker, |s| match outcome {
+            Outcome::Done(r) => {
+                s.status = WorkStatus::Done;
+                s.result = Some(Ok(serde_json::from_str(&r).unwrap_or(Json::String(r))));
+            }
+            Outcome::Failed(why) => {
+                s.status = WorkStatus::Failed;
+                s.result = Some(Err(why));
+            }
+            Outcome::Cancelled => {
+                s.status = WorkStatus::Cancelled;
+                s.result = Some(Err("cancelled".to_owned()));
+            }
+        });
     }
 }
 

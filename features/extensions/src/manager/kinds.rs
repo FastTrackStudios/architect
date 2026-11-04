@@ -636,6 +636,11 @@ impl ItemKind for ComponentKind {
                     c.traps(),
                     c.limits.call.as_millis()
                 );
+                // Its workers: more instances of it, on the runner's pool.
+                let running = c.workers_alive();
+                if running > 0 {
+                    i.summary = format!("{}, {running} worker(s) running", i.summary);
+                }
                 i.problems.extend(c.last_trap());
                 i.ops.push(Op::new("restart", "Restart"));
                 i

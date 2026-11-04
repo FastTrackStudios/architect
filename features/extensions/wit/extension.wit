@@ -185,7 +185,78 @@ interface guest {
     save-state: func() -> option<list<u8>>;
 }
 
+/// A component's workers (features/extensions/src/wasi/workers.rs): its
+/// heavy work in more instances of it, each on a thread of the host's pool
+/// with limits of its own, spoken to by JSON messages only. The same API
+/// a Luau script's workers (features/scripting/src/worker.rs) and a
+/// process's work (features/extensions/src/work.rs) have: `post`,
+/// `progress`, `cancelled`, and the owner's news as `on-message`,
+/// `on-progress` and `on-done` (the `work` interface).
+///
+/// An instance is an owner or a worker; what the other side's functions
+/// do in it is said by each.
+interface worker {
+    /// How far a worker said it is (the latest wins).
+    record progress-report {
+        done: f64,
+        total: f64,
+        note: string,
+    }
+
+    /// An owner: starts its worker `name` (one of its manifest's
+    /// `[[workers]]`) with JSON `args`, at once, in an instance of its own:
+    /// its handle. Err when it has no such worker, or as many running as it
+    /// may (back-pressure). In a worker: refused.
+    spawn: func(name: string, args: string) -> result<u64, string>;
+    /// A JSON message. An owner's, to its worker `to`: Err when that
+    /// worker's queue is full (it has not read them; back-pressure) or it
+    /// ended. A worker's, to its owner (`to` is 0): it waits while its
+    /// owner's queue is full; Err once it is cancelled.
+    post: func(to: u64, message: string) -> result<_, string>;
+    /// An owner: stops its worker `worker` (at its next tick, whether it
+    /// looks or not). In a worker: nothing.
+    cancel: func(worker: u64);
+    /// A worker: how far it is, `done` of `total`, with a note. In an
+    /// owner: nothing.
+    progress: func(done: f64, total: f64, note: string);
+    /// A worker: whether its owner cancelled it or went. In an owner:
+    /// false.
+    cancelled: func() -> bool;
+    /// A worker: the next message from its owner, waiting at most
+    /// `wait-ms` (0: not at all); none for none. In an owner: none.
+    receive: func(wait-ms: u32) -> option<string>;
+}
+
+/// What a component does as a worker, and as a worker's owner.
+interface work {
+    use worker.{progress-report};
+
+    /// How a worker ended.
+    variant outcome {
+        /// What it returned (JSON).
+        done(string),
+        /// Why it failed: its error, or a limit it ran past.
+        failed(string),
+        /// Its owner cancelled it, or went.
+        cancelled,
+    }
+
+    /// A worker instance: runs `entry` (its `[[workers]]` entry; a
+    /// separate component's is the worker's id) as worker `worker`, with
+    /// JSON `args`: what it returns is its result (JSON).
+    run: func(entry: string, worker: u64, args: string) -> result<string, string>;
+    /// An owner: its worker `worker` posted `message`, in order.
+    on-message: func(worker: u64, message: string);
+    /// An owner: its worker's progress (they coalesce: at most one a
+    /// frame).
+    on-progress: func(worker: u64, progress: progress-report);
+    /// An owner: its worker ended; its last.
+    on-done: func(worker: u64, outcome: outcome);
+}
+
 world extension {
     import host;
+    import worker;
     export guest;
+    export work;
 }

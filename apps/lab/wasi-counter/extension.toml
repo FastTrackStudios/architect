@@ -8,7 +8,7 @@ name = "WASI Counter"
 version = "0.1.0"
 kind = "wasm"
 api = "0.1"
-description = "A counter in a WASI component: its view drawn by the app, an action that asks the app which themes it has."
+description = "A counter in a WASI component: its view drawn by the app, an action that asks the app which themes it has, and a job (counting primes) in a worker while the counter keeps answering."
 authors = ["FastTrackStudios"]
 
 [wasm]
@@ -31,6 +31,26 @@ id = "LAB_WASI_COUNTER_ASK"
 name = "WASI Counter: ask the app"
 description = "Asks the app for its themes (THEME_LIST, through the host service) and shows how many."
 effect = "read_only"
+
+[[actions]]
+id = "LAB_WASI_COUNTER_PRIMES"
+name = "WASI Counter: count primes"
+description = "Counts the primes below `n` (2,000,000) in a worker, its progress in the view; cancels one running."
+effect = "read_only"
+params = '{"type":"object","properties":{"n":{"type":"integer"}}}'
+
+[[actions]]
+id = "LAB_WASI_COUNTER_JOB"
+name = "WASI Counter: the primes job"
+description = "The primes job's state: status, progress, result."
+effect = "read_only"
+
+# Its heavy work: another instance of the component on the host's pool,
+# with limits of its own; its `work.run` is given `count-primes`.
+[[workers]]
+id = "primes"
+title = "Count primes"
+entry = "count-primes"
 
 [[views]]
 id = "counter"

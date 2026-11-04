@@ -65,6 +65,8 @@ pub mod contrib_actions;
 pub mod doc;
 #[cfg(feature = "host")]
 pub mod extensions;
+#[cfg(feature = "host")]
+mod forward;
 #[cfg(all(feature = "guest", unix))]
 pub mod guest;
 #[cfg(feature = "host")]
