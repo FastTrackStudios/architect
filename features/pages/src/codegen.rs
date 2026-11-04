@@ -1,7 +1,9 @@
 //! The page API's types, for the files a page is written in (feature
-//! `codegen`): `architect.d.ts` for TSX/JS pages and `architect.d.luau`
-//! for Luau ones, both from the vox descriptors of [`crate::api`]'s
-//! services, so the types a page is checked against are the API's own.
+//! `codegen`).
+//!
+//! `architect.d.ts` for TSX/JS pages and `architect.d.luau` for Luau
+//! ones, both from the vox descriptors of [`crate::api`]'s services, so
+//! the types a page is checked against are the API's own.
 //!
 //! - [`typescript`]: the named types and each service's caller interface
 //!   from `vox_codegen::targets::typescript` (as Task's
@@ -89,7 +91,7 @@ pub fn typescript() -> String {
 /// `architect.d.luau`.
 #[must_use]
 pub fn luau() -> String {
-    let mut out = String::from(HEADER.replace("//", "--"));
+    let mut out = HEADER.replace("//", "--");
     out.push_str("\n-- The page API's types.\n\n");
     for (name, shape) in named_types() {
         if let ShapeKind::Struct(info) = classify_shape(shape) {

@@ -85,9 +85,10 @@ architect-shell = { workspace = true, optional = true }
 architect-a2ui = { workspace = true, optional = true }
 
 [dev-dependencies]
+architect-scripting = { workspace = true, features = ["luau"] }
 # The document a page's edits are applied to, read back.
 blitz-dom = { workspace = true }
-architect-pages = { path = ".", features = ["codegen", "js", "luau", "ui", "a2ui"] }
+architect-pages = { path = ".", features = ["codegen", "js", "ui"] }
 futures = "0.3"
 tempfile = "3"
 tokio = { workspace = true }

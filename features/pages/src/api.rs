@@ -1,4 +1,4 @@
-//! The page API, defined once: what a page (a TSX/JS file on QuickJS, a
+//! The page API, defined once: what a page (a TSX/JS file on `QuickJS`, a
 //! Luau element script, a process, the web build) sees of the app.
 //!
 //! Two `#[architect::rpc]` services over facet types:
@@ -12,7 +12,7 @@
 //!   `architect_extensions::wire::Edit`), overlays, and the events that
 //!   come back to its handlers.
 //!
-//! In process (QuickJS, Luau) a runner binds these calls directly, with
+//! In process (`QuickJS`, Luau) a runner binds these calls directly, with
 //! no wire; under feature `vox` they are vox services, and `codegen`
 //! writes `architect.d.ts` and `architect.d.luau` from their descriptors
 //! (`crate::codegen`), so every runner stays in step.
@@ -20,6 +20,8 @@
 // The in-process host awaits nothing it does not have to; vox asks for
 // `Send` futures itself.
 #![allow(async_fn_in_trait)]
+// The `unsafe` clippy sees is `Facet`'s derive (its reflection), not ours.
+#![allow(clippy::unsafe_derive_deserialize)]
 
 use facet::Facet;
 use serde::{Deserialize, Serialize};
@@ -59,7 +61,7 @@ pub struct Element {
     pub attrs: Vec<Attr>,
     /// Its handlers.
     pub on: Vec<Listener>,
-    pub children: Vec<Element>,
+    pub children: Vec<Self>,
 }
 
 /// An attribute.
