@@ -73,6 +73,8 @@ fn the_guide_names_every_action_of_the_lab() {
         APP_STATUS,
         "EXT_CHECK",
         "EXT_CLONE",
+        // The extension views' frame times (#274), forwarded from the extensions' list.
+        "EXT_VIEWS",
         "WORKSPACES_CLONE",
         "WORKSPACES_RESTORE_BUILTINS",
         "THEME_SET",
@@ -86,6 +88,10 @@ fn the_guide_names_every_action_of_the_lab() {
         "EXT_EMIT",
         "EXT_ENABLE",
         "EXT_DISABLE",
+        // The pages as files (#275): the Board's tab and its overrides.
+        "PAGES_STATUS",
+        "PAGES_CHECK",
+        "PAGES_CLONE",
         // The interface as files.
         "HOME_LAYOUTS",
         "HOME_LAYOUT_USE",

@@ -31,6 +31,11 @@ host = [
     # `EXT_CHECK` answers from a thread of its own.
     "dep:futures",
 ]
+# `perm.*` of each host-service call also through
+# `architect_telemetry::wide::set` (the span's fields carry them either
+# way); off by default, as telemetry reaches tower-http, which a UI build
+# must not.
+wide-events = ["host", "dep:architect-telemetry"]
 crdt = ["dep:crdt"]
 # In-process extensions (`linked`): one trait a crate implements, run
 # linked into the app as a built-in (its views Dioxus components in the
@@ -48,6 +53,14 @@ ui = [
     "architect-workspace/ui",
     "architect-commands/ui",
 ]
+# The extensions page (`page`): search, install with consent, update, pin,
+# grants and logs, in architect-ui's components and the app's theme.
+page = ["ui", "manager", "dep:architect-ui"]
+# The extensions manager (`manager`): one place for everything that
+# customizes the app — extensions, scripts, workers, themes, layouts and
+# keys, and kinds the app adds — with its MANAGER_* actions; linked in as
+# an extension of its own.
+manager = ["host", "linked", "architect-workspace/home"]
 # The wire and the protocol (`wire`, `proto`); the derives key on `vox`.
 vox = ["dep:architect", "architect/vox", "dep:vox", "dep:thiserror"]
 process = [
@@ -79,6 +92,7 @@ architect-commands = { workspace = true }
 # The shell's chrome an extension's tabs, status items and slots go into
 # (`ui`, `interface`).
 architect-shell = { workspace = true, optional = true }
+architect-ui = { workspace = true, optional = true }
 # The view kinds an extension's views may name (the model, wasm-clean).
 architect-workspace = { workspace = true }
 facet = { workspace = true }
@@ -92,6 +106,7 @@ architect = { workspace = true, optional = true, features = ["action-list"] }
 architect-scripting = { workspace = true, optional = true }
 serde_json = { workspace = true }
 tracing = { workspace = true, optional = true }
+architect-telemetry = { workspace = true, optional = true }
 crdt = { workspace = true, optional = true }
 dioxus = { workspace = true, optional = true }
 futures = { version = "0.3", optional = true }
@@ -108,12 +123,16 @@ futures-timer = { workspace = true, optional = true }
 [dev-dependencies]
 # Its own host, so `cargo test --workspace` builds the tests with it; the
 # guest too, since the remote-view tests spawn themselves as one.
-architect-extensions = { path = ".", features = ["host", "crdt", "guest", "remote", "linked"] }
+architect-extensions = { path = ".", features = ["host", "crdt", "guest", "remote", "linked", "manager"] }
 futures = "0.3"
 tempfile = "3"
 crdt = { workspace = true }
 # THEME_LIST / THEME_SET / THEME_PROBLEMS over an extension's themes.
 architect-theme = { workspace = true, features = ["actions"] }
+# tests/host_service.rs: a gate that sees who calls; the manager's
+# layouts kind.
+architect-permissions = { workspace = true }
+architect-workspace = { workspace = true, features = ["home"] }
 
 [lib]
 doctest = false

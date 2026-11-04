@@ -9,6 +9,14 @@ api = "0.1"
 description = "A click: its accent, volume and sound, and an action that counts in."
 authors = ["FastTrackStudio"]
 
+# What it asks to reach through the host service, past its own actions,
+# settings and data: the app's status, and what is selected. Shown when
+# it is installed; installed, it runs with what the person granted.
+[capabilities]
+actions = ["APP_STATUS"]
+effect = "read_only"
+reads = ["selection"]
+
 [[actions]]
 id = "FTS_METRONOME_COUNT_IN"
 name = "Metronome: count in"
@@ -16,6 +24,13 @@ description = "The clicks of a count-in, `bars` bars of four (one when none is g
 group = "Metronome"
 params = '{"type":"object","properties":{"bars":{"type":"integer","minimum":1}}}'
 script = "count_in.luau"
+
+[[actions]]
+id = "FTS_METRONOME_STATUS"
+name = "Metronome: status"
+description = "Through the host service: its volume and sound settings, what is selected, and how many problems the app reports."
+group = "Metronome"
+script = "status.luau"
 
 [[sections]]
 id = "metronome"

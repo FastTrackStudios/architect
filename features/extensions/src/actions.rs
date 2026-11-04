@@ -51,7 +51,10 @@ static INSTALL: ActionMeta = meta(
     "EXT_INSTALL",
     "Install an extension",
     "Installs extension `id` — the newest version, or the newest `version` (a semver range like \
-     ^1.2) takes — and loads it at once, without a restart.",
+     ^1.2) takes — and loads it at once, without a restart; `pin` keeps it there. When the app asks \
+     for consent and it asks for capabilities not granted, it is not installed: the answer is \
+     needs_consent with what it asks (EXT_PREVIEW); a person installs it with `grant` (device, \
+     org), which a caller from outside needs their yes for (confirmation_required).",
 );
 static UNINSTALL: ActionMeta = meta(
     "EXT_UNINSTALL",
@@ -111,6 +114,12 @@ pub struct InstallArgs {
     pub id: String,
     /// A semver range (`^1.2`); the newest when none.
     pub version: Option<String>,
+    /// Where a person grants what it asks: `device`, `org` (the current
+    /// one), `org:<id>`. Without it, one that asks for more than was
+    /// granted is answered `needs_consent` and not installed.
+    pub grant: Option<String>,
+    /// Keep it at `version` (or the version installed) from now on.
+    pub pin: Option<bool>,
 }
 
 /// `EXT_UNINSTALL`'s arguments.
@@ -175,21 +184,25 @@ impl Extensions {
         list.register_with(
             &INSTALL,
             Effect::Mutating,
-            move |_: &ActionCaller, a: InstallArgs| {
+            move |caller: &ActionCaller, a: InstallArgs| {
                 let req = match a.version.as_deref() {
                     None | Some("") => VersionReq::STAR,
                     Some(r) => VersionReq::parse(r).map_err(|e| format!("version {r}: {e}"))?,
                 };
-                let install = me.install(&a.id, &req).map_err(|e| e.to_string())?;
-                let loaded = me.host().get(&install.id).is_some();
-                Ok::<_, String>(RawJson::from(
-                    json!({
-                        "id": install.id,
-                        "version": install.version.to_string(),
-                        "loaded": loaded,
-                    })
-                    .to_string(),
-                ))
+                let org = me.host().grants().and_then(|g| g.org());
+                let grant = a
+                    .grant
+                    .as_deref()
+                    .map(|g| crate::consent::Scope::parse(g, org.as_deref()))
+                    .transpose()?;
+                let by = caller.principal().map_or_else(
+                    || "person".to_owned(),
+                    architect::action::Principal::describe,
+                );
+                let installed = me
+                    .install_with(&a.id, &req, grant, &by, a.pin == Some(true))
+                    .map_err(|e| e.to_string())?;
+                Ok::<_, String>(RawJson::from(Self::installed_json(&installed).to_string()))
             },
         )?;
         let me = self.clone();
@@ -234,6 +247,7 @@ impl Extensions {
                 ))
             },
         )?;
+        self.install_manage_actions()?;
         let me = self.clone();
         list.register_with(
             &RELOAD,

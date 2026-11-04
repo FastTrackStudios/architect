@@ -45,10 +45,16 @@ fn edit(file: &Path, from: &str, to: &str) {
 fn builtin() -> Package {
     Package::embedded(
         include_str!("../../../apps/lab/extensions/metronome/extension.toml"),
-        &[(
-            "count_in.luau",
-            include_str!("../../../apps/lab/extensions/metronome/count_in.luau"),
-        )],
+        &[
+            (
+                "count_in.luau",
+                include_str!("../../../apps/lab/extensions/metronome/count_in.luau"),
+            ),
+            (
+                "status.luau",
+                include_str!("../../../apps/lab/extensions/metronome/status.luau"),
+            ),
+        ],
     )
     .unwrap()
 }
@@ -64,7 +70,10 @@ fn the_metronome_checks_clean_and_a_broken_copy_says_exactly_why() {
     let report = Checker::new().check(&metronome());
     assert!(report.ok, "{report:?}");
     assert_eq!(report.id.as_deref(), Some("fts.metronome"));
-    assert_eq!(report.actions, ["FTS_METRONOME_COUNT_IN"]);
+    assert_eq!(
+        report.actions,
+        ["FTS_METRONOME_COUNT_IN", "FTS_METRONOME_STATUS"]
+    );
 
     let tmp = tempfile::tempdir().unwrap();
     // A manifest field of the wrong kind: the field and its line.

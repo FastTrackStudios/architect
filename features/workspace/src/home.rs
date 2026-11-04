@@ -325,6 +325,20 @@ impl Home {
             s.problems.remove(&format!("layouts/{name}.json"));
             changed.layouts.push(name);
         }
+        // A broken file that went (it never had a layout): its problem too.
+        let stale: Vec<String> = s
+            .problems
+            .keys()
+            .filter(|f| {
+                f.strip_prefix("layouts/")
+                    .and_then(|f| f.strip_suffix(".json"))
+                    .is_some_and(|n| !seen.iter().any(|s| s == n))
+            })
+            .cloned()
+            .collect();
+        for file in stale {
+            s.problems.remove(&file);
+        }
         // What the person changed by hand.
         let state_dir = layouts.join(".state");
         for name in seen {
@@ -338,8 +352,8 @@ impl Home {
                 .ok()
                 .map(|t| LayoutFile::parse(&t))
             {
-                Some(Ok(state)) => {
-                    s.by_hand.insert(name.clone(), state);
+                Some(Ok(saved)) => {
+                    s.by_hand.insert(name.clone(), saved);
                 }
                 _ => {
                     s.by_hand.remove(&name);
@@ -762,6 +776,7 @@ pub mod ui {
     }
 
     /// Applies what the layout shown asks of the window but its chrome:
+    ///
     /// its look (into `store`'s workspace layer), `keys.json` (the
     /// person's keymap layer, live), and its arrangement
     /// (`WORKSPACE_APPLY` on `list`, when the workspace is there).
@@ -843,7 +858,9 @@ mod tests {
         std::fs::write(&path, text).unwrap();
         // A second write within one mtime tick: make the length differ
         // or bump the time so the poll sees it.
-        let later = SystemTime::now() + std::time::Duration::from_secs(1);
+        let later = SystemTime::now()
+            .checked_add(std::time::Duration::from_secs(1))
+            .unwrap();
         let f = std::fs::File::options().write(true).open(&path).unwrap();
         f.set_modified(later).unwrap();
     }

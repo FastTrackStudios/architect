@@ -49,6 +49,12 @@ pub struct Extensions {
     inner: Arc<Inner>,
 }
 
+impl PartialEq for Extensions {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+    }
+}
+
 impl std::fmt::Debug for Extensions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Extensions")
@@ -193,6 +199,31 @@ impl Extensions {
             .iter()
             .filter_map(|s| s.index().ok())
             .flat_map(|i| i.listings)
+            .collect()
+    }
+
+    /// The listing `req` picks for `id` (the policy's say included), and
+    /// its source.
+    pub(crate) fn find_listed(
+        &self,
+        id: &str,
+        req: &VersionReq,
+    ) -> Result<(Arc<dyn Source>, Listing), InstallError> {
+        self.find(id, req)
+    }
+
+    /// Every listing of `id`, each with its source's name.
+    pub(crate) fn listed(&self, id: &str) -> Vec<(String, Listing)> {
+        self.sources()
+            .iter()
+            .filter_map(|s| s.index().ok().map(|i| (s.name(), i)))
+            .flat_map(|(source, index)| {
+                index
+                    .listings
+                    .into_iter()
+                    .filter(|l| l.id == id)
+                    .map(move |l| (source.clone(), l))
+            })
             .collect()
     }
 

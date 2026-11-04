@@ -24,11 +24,16 @@ architect-workspace = { workspace = true, features = ["ui", "paint-ui", "home"] 
 architect-commands = { workspace = true, features = ["native"] }
 architect-settings = { workspace = true, features = ["ui", "store"] }
 architect-orgs = { workspace = true, features = ["ui"] }
-architect-extensions = { workspace = true, features = ["ui", "remote"] }
+architect-extensions = { workspace = true, features = ["ui", "remote", "page"] }
 # The lab's example extension, linked in (apps/lab/board).
 architect-lab-board = { path = "../board" }
+# Pages as files (apps/lab/board/pages/board.tsx, overrides under the
+# lab's folder `pages/`): TSX on QuickJS, drawn in a pane, live on save.
+architect-pages = { workspace = true, features = ["js", "luau", "ui", "codegen"] }
 architect-canvas = { workspace = true, features = ["ui", "luau"] }
 architect-scripting = { workspace = true, features = ["luau"] }
+# A slow or busy extension view, to the log (`extensions::LogSlowViews`).
+tracing = { workspace = true }
 # Guided tours of the lab's scenarios, live in the window.
 architect-guide = { workspace = true, features = ["ui"] }
 serde_json = { workspace = true }

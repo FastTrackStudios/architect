@@ -395,12 +395,14 @@ pub(crate) fn manifest_fields(error: &ManifestError) -> (Option<String>, Option<
         ManifestError::BadPath(path) => (Some(path.clone()), None),
         ManifestError::BadSetting { key, .. } => (Some(format!("sections.settings[{key}]")), None),
         ManifestError::Duplicate(id) => (Some(id.clone()), None),
+        ManifestError::BadWorker { worker, .. } => (Some(format!("workers[{worker}]")), None),
         ManifestError::BadPlane { overlay, .. } => {
             (Some(format!("overlays[{overlay}].plane")), None)
         }
         ManifestError::BadToken { token, .. } => (Some(format!("tokens[{token}]")), None),
         // `opener kf`, `hook startup`: what the contribution was.
         ManifestError::Contribution(refused) => (Some(refused.what.clone()), None),
+        ManifestError::BadCapability(_) => (Some("capabilities".to_owned()), None),
     };
     let message = match error {
         // TOML's own text carries a drawing of the line; the message is

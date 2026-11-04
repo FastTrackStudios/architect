@@ -175,3 +175,83 @@ fn a_linked_extension_that_does_not_match_its_manifest_is_refused() {
         "{events:?}"
     );
 }
+
+/// One that keeps its handle and asks the host through it: in process,
+/// the host's own session, checked as every other way is.
+struct Asking;
+
+static ASKING: std::sync::OnceLock<architect_extensions::linked::Handle> =
+    std::sync::OnceLock::new();
+
+const ASKING_MANIFEST: &str = r#"
+id = "lab.asking"
+name = "Asking"
+version = "0.1.0"
+kind = "process"
+
+[entry]
+path = "asking-bin"
+
+[[actions]]
+id = "LAB_ASKING_GO"
+name = "Ask the host"
+"#;
+
+impl Extension for Asking {
+    fn manifest(&self) -> &'static str {
+        ASKING_MANIFEST
+    }
+
+    fn build(&self, ext: &mut Builder) {
+        let _ = ASKING.set(ext.handle());
+        ext.action("LAB_ASKING_GO", |_| async {
+            let handle = ASKING.get().cloned().ok_or("no handle")?;
+            handle
+                .host(architect_extensions::hostcall::HostRequest::SetData {
+                    key: "seen".to_owned(),
+                    value: Some(json!(true)),
+                })
+                .await
+                .map_err(|e| e.to_string())?;
+            let seen = handle
+                .host(architect_extensions::hostcall::HostRequest::Data {
+                    key: "seen".to_owned(),
+                })
+                .await
+                .map_err(|e| e.to_string())?;
+            // Not its namespace, and it asks for none.
+            let refused = handle
+                .host(architect_extensions::hostcall::HostRequest::Run {
+                    action: "EXT_LIST".to_owned(),
+                    args: Value::Null,
+                    ticket: None,
+                })
+                .await
+                .map_err(|e| e.to_string())
+                .unwrap_err();
+            Ok(json!({ "seen": seen, "refused": refused }))
+        });
+    }
+}
+
+#[test]
+fn a_linked_extension_asks_the_host_through_its_handle() {
+    let tmp = tempfile::tempdir().unwrap();
+    let list = ActionList::new();
+    let host = Host::new(list.clone(), SharedSections::new(Registry::new()));
+    let ext = Extensions::new(host, Installs::new(tmp.path().join("installs")))
+        .with_linked(&Asking)
+        .unwrap();
+    ext.install_actions().unwrap();
+    let _ = ext.sync();
+    let out = block_on(list.run_json_async("LAB_ASKING_GO", b"")).unwrap();
+    let out: Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(out["seen"], true, "{out}");
+    assert!(
+        out["refused"]
+            .as_str()
+            .unwrap()
+            .starts_with("refused (actions)"),
+        "{out}"
+    );
+}
