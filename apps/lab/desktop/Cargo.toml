@@ -31,8 +31,9 @@ architect-shell = { workspace = true }
 # One instance, and a `--background` launch starting with no window.
 architect-presence = { workspace = true, features = ["native"] }
 architect-workspace = { workspace = true, features = ["native", "hot-reload"] }
-# `extensions check <folder>` (EXT_CHECK with no window), its report as JSON.
-architect-extensions = { workspace = true, features = ["host", "process", "remote"] }
+# `extensions check <folder>` (EXT_CHECK with no window), its report as JSON;
+# `net`, extensions' fetches (#310): the app turns the client on, not its UI crates.
+architect-extensions = { workspace = true, features = ["host", "process", "remote", "net"] }
 facet-json = { version = "0.50.0-rc.5" }
 dioxus = { workspace = true }
 dioxus-native = { workspace = true, features = ["vello", "hot-reload"] }

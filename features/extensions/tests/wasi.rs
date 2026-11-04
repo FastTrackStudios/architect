@@ -658,10 +658,8 @@ fn a_views_interval_runs_on_the_hosts_clock_and_a_hook_it_made_runs() {
     let app = app(Limits::default(), &tmp.path().join("cache"));
     app.host.set_clock(std::sync::Arc::new(clock.clone()));
     // Its doc.saved hook: hearing a document's events is reading them.
-    let manifest = HAZARDS_MANIFEST.replace(
-        "[wasm]",
-        "[capabilities]\nreads = [\"documents\"]\n[wasm]",
-    );
+    let manifest =
+        HAZARDS_MANIFEST.replace("[wasm]", "[capabilities]\nreads = [\"documents\"]\n[wasm]");
     load(
         &app,
         &package(tmp.path(), "hazards", &manifest, HAZARDS_WASM),
@@ -1159,13 +1157,19 @@ fn a_component_fetches_from_its_host_and_is_refused_another() {
     let server = server::serve();
     let tmp = tempfile::tempdir().unwrap();
     let app = app(Limits::default(), &tmp.path().join("cache"));
-    let manifest = HAZARDS_MANIFEST.replace(
-        "[wasm]",
-        "[capabilities]\nhosts = [\"127.0.0.1\"]\n[wasm]",
+    let manifest =
+        HAZARDS_MANIFEST.replace("[wasm]", "[capabilities]\nhosts = [\"127.0.0.1\"]\n[wasm]");
+    load(
+        &app,
+        &package(tmp.path(), "hazards", &manifest, HAZARDS_WASM),
     );
-    load(&app, &package(tmp.path(), "hazards", &manifest, HAZARDS_WASM));
     let base = format!("http://127.0.0.1:{}", server.port);
-    let out = run(&app, "TEST_HAZARDS_FETCH", &json!({ "url": format!("{base}/hello") })).unwrap();
+    let out = run(
+        &app,
+        "TEST_HAZARDS_FETCH",
+        &json!({ "url": format!("{base}/hello") }),
+    )
+    .unwrap();
     assert_eq!(out["status"], 200, "{out}");
     assert_eq!(out["body"], "hello from the server", "{out}");
     let out = run(
@@ -1184,11 +1188,22 @@ fn a_component_fetches_from_its_host_and_is_refused_another() {
         )
         .unwrap_err(),
     );
-    assert!(why.contains("refused") && why.contains("localhost"), "{why}");
-    let why = failed(
-        run(&app, "TEST_HAZARDS_FETCH", &json!({ "url": format!("{base}/redirect-out") })).unwrap_err(),
+    assert!(
+        why.contains("refused") && why.contains("localhost"),
+        "{why}"
     );
-    assert!(why.contains("refused") && why.contains("redirected"), "{why}");
+    let why = failed(
+        run(
+            &app,
+            "TEST_HAZARDS_FETCH",
+            &json!({ "url": format!("{base}/redirect-out") }),
+        )
+        .unwrap_err(),
+    );
+    assert!(
+        why.contains("refused") && why.contains("redirected"),
+        "{why}"
+    );
 }
 
 /// The document imports (#309) from a real component: it makes a
@@ -1208,8 +1223,16 @@ fn a_component_makes_edits_lists_and_reads_a_document() {
         "[wasm]",
         "[capabilities]\nreads = [\"documents\"]\nwrites = [\"documents\"]\n[wasm]",
     );
-    load(&app, &package(tmp.path(), "hazards", &manifest, HAZARDS_WASM));
-    let out = run(&app, "TEST_HAZARDS_DOCS", &json!({ "path": "notes/wasi.md" })).unwrap();
+    load(
+        &app,
+        &package(tmp.path(), "hazards", &manifest, HAZARDS_WASM),
+    );
+    let out = run(
+        &app,
+        "TEST_HAZARDS_DOCS",
+        &json!({ "path": "notes/wasi.md" }),
+    )
+    .unwrap();
     assert_eq!(out["made"]["path"], "notes/wasi.md", "{out}");
     assert_eq!(out["text"], "one two", "{out}");
     assert_eq!(out["read"], "one two", "{out}");
@@ -1219,8 +1242,16 @@ fn a_component_makes_edits_lists_and_reads_a_document() {
 
     let bare = tmp.path().join("bare");
     let app = app_with(WasiRunner::new(), &bare.join("cache"));
-    app.host.set_documents(std::sync::Arc::new(CrdtDocuments::new().with_space("notes")));
-    load(&app, &package(&bare, "hazards", HAZARDS_MANIFEST, HAZARDS_WASM));
+    app.host.set_documents(std::sync::Arc::new(
+        CrdtDocuments::new().with_space("notes"),
+    ));
+    load(
+        &app,
+        &package(&bare, "hazards", HAZARDS_MANIFEST, HAZARDS_WASM),
+    );
     let why = failed(run(&app, "TEST_HAZARDS_DOCS", &json!({})).unwrap_err());
-    assert!(why.contains("refused") && why.contains("documents"), "{why}");
+    assert!(
+        why.contains("refused") && why.contains("documents"),
+        "{why}"
+    );
 }

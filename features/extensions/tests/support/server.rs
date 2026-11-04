@@ -35,7 +35,12 @@ pub struct Server {
 pub const STREAMED_LINES: usize = 2000;
 
 pub fn streamed() -> String {
-    (0..STREAMED_LINES).map(|i| format!("line {i} — ✓\n")).collect()
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    for i in 0..STREAMED_LINES {
+        let _ = writeln!(out, "line {i} — ✓");
+    }
+    out
 }
 
 /// A server on 127.0.0.1: `/hello`, `/redirect-in` (to `/hello`),
@@ -72,7 +77,10 @@ fn answer(stream: TcpStream, port: u16, heard: &Heard) {
             headers.insert(k.trim().to_ascii_lowercase(), v.trim().to_owned());
         }
     }
-    if let Some(n) = headers.get("content-length").and_then(|n| n.parse::<usize>().ok()) {
+    if let Some(n) = headers
+        .get("content-length")
+        .and_then(|n| n.parse::<usize>().ok())
+    {
         let mut body = vec![0; n];
         let _ = reader.read_exact(&mut body);
     }
@@ -80,15 +88,20 @@ fn answer(stream: TcpStream, port: u16, heard: &Heard) {
     heard.0.lock().unwrap().push((path.clone(), host, headers));
     let mut out = stream;
     let send = |out: &mut TcpStream, status: &str, extra: &str, body: &[u8]| {
-        let head = format!(
+        let top = format!(
             "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n{extra}\r\n",
             body.len()
         );
-        let _ = out.write_all(head.as_bytes());
+        let _ = out.write_all(top.as_bytes());
         let _ = out.write_all(body);
     };
     match path.as_str() {
-        "/hello" => send(&mut out, "200 OK", "Content-Type: text/plain\r\n", b"hello from the server"),
+        "/hello" => send(
+            &mut out,
+            "200 OK",
+            "Content-Type: text/plain\r\n",
+            b"hello from the server",
+        ),
         "/redirect-in" => send(&mut out, "302 Found", "Location: /hello\r\n", b""),
         "/redirect-out" => send(
             &mut out,
@@ -103,11 +116,11 @@ fn answer(stream: TcpStream, port: u16, heard: &Heard) {
         }
         "/stream" => {
             let body = streamed();
-            let head = format!(
+            let top = format!(
                 "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                 body.len()
             );
-            let _ = out.write_all(head.as_bytes());
+            let _ = out.write_all(top.as_bytes());
             for part in body.as_bytes().chunks(997) {
                 let _ = out.write_all(part);
                 let _ = out.flush();
@@ -116,4 +129,3 @@ fn answer(stream: TcpStream, port: u16, heard: &Heard) {
         _ => send(&mut out, "404 Not Found", "", b"no"),
     }
 }
-

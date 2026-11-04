@@ -841,7 +841,10 @@ impl Contribution {
                 );
             }
             if crate::events::is_doc_event(&h.on)
-                && !rules.reads.iter().any(|r| r == crate::capabilities::DOCUMENTS)
+                && !rules
+                    .reads
+                    .iter()
+                    .any(|r| r == crate::capabilities::DOCUMENTS)
             {
                 return refuse(
                     what,

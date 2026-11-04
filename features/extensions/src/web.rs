@@ -540,7 +540,11 @@ impl WebHost {
             let _ = js_sys::Reflect::set(o, &JsValue::from_str(k), v);
         };
         let init = js_sys::Object::new();
-        let method = fetch.method.as_deref().unwrap_or("GET").to_ascii_uppercase();
+        let method = fetch
+            .method
+            .as_deref()
+            .unwrap_or("GET")
+            .to_ascii_uppercase();
         set(&init, "method", &JsValue::from_str(&method));
         set(&init, "redirect", &JsValue::from_str("manual"));
         let headers = js_sys::Object::new();
@@ -552,10 +556,7 @@ impl WebHost {
             set(&init, "body", &JsValue::from_str(body));
         }
         let global = js_sys::global();
-        let timeout = fetch
-            .timeout_ms
-            .unwrap_or(30_000)
-            .min(300_000);
+        let timeout = fetch.timeout_ms.unwrap_or(30_000).min(300_000);
         if let Ok(signal) = js_sys::Reflect::get(&global, &JsValue::from_str("AbortSignal"))
             && let Ok(make) = js_sys::Reflect::get(&signal, &JsValue::from_str("timeout"))
             && let Some(make) = make.dyn_ref::<js_sys::Function>()
@@ -579,7 +580,9 @@ impl WebHost {
                     js_text(&e)
                 ))
             })?;
-        let get = |k: &str| js_sys::Reflect::get(&response, &JsValue::from_str(k)).unwrap_or(JsValue::UNDEFINED);
+        let get = |k: &str| {
+            js_sys::Reflect::get(&response, &JsValue::from_str(k)).unwrap_or(JsValue::UNDEFINED)
+        };
         if get("type").as_string().as_deref() == Some("opaqueredirect") {
             return Err(unsupported(format!(
                 "{} redirects: in a browser where it goes is hidden, so it cannot be checked against capabilities.hosts",
@@ -616,7 +619,11 @@ impl WebHost {
                 message: format!("the response is past the most it takes ({cap} bytes)"),
             });
         }
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss, clippy::as_conversions)]
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::as_conversions
+        )]
         let status = status as u16;
         let mut out = json!({ "status": status, "url": url, "headers": heard });
         if fetch.stream {

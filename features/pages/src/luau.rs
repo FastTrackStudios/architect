@@ -454,7 +454,8 @@ impl LuauEngine {
             ask("fetch", |lua, args| {
                 let mut it = args.into_iter();
                 let url: String = it.next().map_or(Ok(String::new()), |v| lua.from_value(v))?;
-                let mut options: Value = it.next().map_or(Ok(Value::Null), |v| lua.from_value(v))?;
+                let mut options: Value =
+                    it.next().map_or(Ok(Value::Null), |v| lua.from_value(v))?;
                 if !options.is_object() {
                     options = Value::Object(serde_json::Map::new());
                 }

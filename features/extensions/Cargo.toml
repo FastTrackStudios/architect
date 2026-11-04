@@ -35,13 +35,16 @@ host = [
     # A toolbar button's image file, as a `data:` URI; a fetched body as
     # base64 (`net`).
     "dep:base64",
-    # The network (`net`): extensions' HTTP fetches, on a runtime of its
-    # own, and the secrets the host keeps for them (`architect::settings`'
-    # private files).
-    "dep:reqwest",
-    "dep:tokio",
+    # The secrets the host keeps for extensions (`net::Secrets`):
+    # `architect::settings`' private files.
     "architect/settings",
 ]
+# Extensions' HTTP fetches (`net`'s client: reqwest, on a runtime of its
+# own). Off in `host`, `ui` and `page`: reqwest reaches tower-http, which
+# a UI crate must not (`cargo xtask boundaries`, ui-reach); the app that
+# runs extensions turns it on (the lab does). Without it a fetch answers
+# `unsupported`.
+net = ["host", "dep:reqwest", "dep:tokio"]
 # The `.archext` archive (`architect-extension-archive`): open, verify,
 # extract per platform. On with `host`.
 archive = ["dep:architect-extension-archive", "dep:sha2", "dep:hex"]
@@ -225,7 +228,7 @@ sha2 = { workspace = true }
 hex = { workspace = true }
 # Its own host, so `cargo test --workspace` builds the tests with it; the
 # guest too, since the remote-view tests spawn themselves as one.
-architect-extensions = { path = ".", features = ["host", "crdt", "guest", "remote", "linked", "manager", "wasi"] }
+architect-extensions = { path = ".", features = ["host", "crdt", "guest", "remote", "linked", "manager", "wasi", "net"] }
 # tests/wasi.rs: the WIT world read, to compare with the wire's types.
 wit-parser = "0.261"
 futures = "0.3"

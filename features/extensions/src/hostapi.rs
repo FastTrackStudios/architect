@@ -42,6 +42,7 @@
 //! unless given).
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -155,6 +156,7 @@ pub(crate) struct Services {
     /// The secrets it keeps for extensions (`crate::net`).
     secrets: Mutex<Secrets>,
     /// The streamed responses extensions have open.
+    #[cfg(feature = "net")]
     net: crate::net::Net,
 }
 
@@ -171,6 +173,7 @@ impl Services {
     pub(crate) fn forget(&self, id: &str) {
         self.decorations.withdraw(id);
         lock(&self.picked).remove(id);
+        #[cfg(feature = "net")]
         self.net.forget(id);
     }
 }
@@ -191,6 +194,7 @@ impl Default for Services {
             decorations: Decorations::default(),
             picked: Mutex::new(BTreeMap::new()),
             secrets: Mutex::new(Secrets::memory()),
+            #[cfg(feature = "net")]
             net: crate::net::Net::default(),
         }
     }
@@ -858,13 +862,23 @@ impl ExtensionApi {
                 .map_err(|message| HostError::Failed { message }),
             HostRequest::Unsubscribe { key } => Ok(Value::Bool(host.unsubscribe(&self.id, &key))),
             HostRequest::Events => Ok(host.events_for(&self.id)),
+            #[cfg(feature = "net")]
             HostRequest::Fetch(fetch) => self.fetch(&host, manifest, &may, fetch).await,
+            #[cfg(feature = "net")]
             HostRequest::ReadBody { stream, max } => {
                 host.services().net.read(&self.id, &stream, max).await
             }
+            #[cfg(feature = "net")]
             HostRequest::CloseBody { stream } => {
                 Ok(Value::Bool(host.services().net.close(&self.id, &stream)))
             }
+            #[cfg(not(feature = "net"))]
+            HostRequest::Fetch(_)
+            | HostRequest::ReadBody { .. }
+            | HostRequest::CloseBody { .. } => Err(HostError::Unsupported {
+                what: "the network: this build has none (architect-extensions' feature net)"
+                    .to_owned(),
+            }),
             HostRequest::Secret { name } => Ok(serde_json::json!({
                 "set": host.secrets().is_set(&self.id, &name),
                 "title": manifest.secret(&name).map(|s| s.title.clone()),
@@ -879,6 +893,7 @@ impl ExtensionApi {
     /// An HTTP request (`crate::net`), its URL already checked: the
     /// secrets it names put in (asked for, the first time), sent, each
     /// redirect checked; its answer, or its stream kept.
+    #[cfg(feature = "net")]
     async fn fetch(
         &self,
         host: &Host,
@@ -891,7 +906,11 @@ impl ExtensionApi {
         let url = crate::hostcall::may_reach_url(may, &fetch.url)
             .map_err(|(capability, why)| HostError::Refused { capability, why })?;
         let address = url.host_str().unwrap_or_default().to_owned();
-        let method = fetch.method.as_deref().unwrap_or("GET").to_ascii_uppercase();
+        let method = fetch
+            .method
+            .as_deref()
+            .unwrap_or("GET")
+            .to_ascii_uppercase();
         span.record("server.address", address.as_str());
         span.record("http.request.method", method.as_str());
         wide("server.address", address);
@@ -903,9 +922,9 @@ impl ExtensionApi {
             .map(str::to_owned)
             .collect();
         if !names.is_empty() {
-            let named = names.iter().cloned().collect::<Vec<_>>().join(",");
-            span.record("ext.secrets", named.as_str());
-            wide("ext.secrets", named);
+            let listed = names.iter().cloned().collect::<Vec<_>>().join(",");
+            span.record("ext.secrets", listed.as_str());
+            wide("ext.secrets", listed);
         }
         let secrets = host.secrets();
         for name in &names {
@@ -921,52 +940,51 @@ impl ExtensionApi {
             &fetch,
             url,
             |name| {
-                secrets.get(&self.id, name).ok_or_else(|| HostError::Failed {
-                    message: format!("secret {name} is not set"),
-                })
+                secrets
+                    .get(&self.id, name)
+                    .ok_or_else(|| HostError::Failed {
+                        message: format!("secret {name} is not set"),
+                    })
             },
             Arc::new(move |u| crate::hostcall::may_reach_url(&reach, u.as_str()).map(|_| ())),
             Arc::new(move |name, u| {
                 owner.secret(name).is_some_and(|d| {
-                    owner.secret_reaches(d, u.host_str().unwrap_or_default(), u.port_or_known_default())
+                    owner.secret_reaches(
+                        d,
+                        u.host_str().unwrap_or_default(),
+                        u.port_or_known_default(),
+                    )
                 })
             }),
         )?;
         let (binary, cap, timeout) = (plan.binary, plan.max, plan.timeout);
-        let fetched = match crate::net::send(plan).await {
-            Ok(f) => f,
+        let (head, body) = match crate::net::send(plan).await {
+            Ok(fetched) => fetched.split(),
+            // A redirect to a host it may not reach.
             Err(HostError::Refused { capability, why }) => {
-                return Err(Self::decide(crate::net::REDIRECT, Err((capability, why)))
-                    .err()
-                    .unwrap_or(HostError::Failed {
-                        message: "refused".to_owned(),
-                    }));
+                Self::decide(crate::net::REDIRECT, Err((capability, why)))?;
+                return Err(HostError::Failed {
+                    message: "refused".to_owned(),
+                });
             }
             Err(e) => return Err(e),
         };
-        span.record("http.response.status_code", fetched.status);
-        span.record("ext.redirects", fetched.redirects);
-        wide("http.response.status_code", fetched.status.to_string());
-        wide("ext.redirects", fetched.redirects.to_string());
-        match &fetched.body {
+        span.record("http.response.status_code", head.status);
+        span.record("ext.redirects", head.redirects);
+        wide("http.response.status_code", head.status.to_string());
+        wide("ext.redirects", head.redirects.to_string());
+        match body {
             Got::Whole(bytes) => {
                 span.record("ext.bytes", bytes.len());
                 wide("ext.bytes", bytes.len().to_string());
-                Ok(fetched.answer(Some(crate::net::whole(bytes, binary)), None))
+                Ok(head.answer(Some(crate::net::whole(&bytes, binary)), None))
             }
-            Got::Stream(_) => {
-                let Got::Stream(response) = fetched.body else {
-                    unreachable!("matched as a stream")
-                };
-                let fetched = crate::net::Fetched {
-                    body: Got::Whole(Vec::new()),
-                    ..fetched
-                };
+            Got::Stream(response) => {
                 let id = host
                     .services()
                     .net
                     .keep(&self.id, response, binary, cap, timeout)?;
-                Ok(fetched.answer(None, Some(&id)))
+                Ok(head.answer(None, Some(&id)))
             }
         }
     }
@@ -992,11 +1010,12 @@ impl ExtensionApi {
         if !message.is_empty() {
             message.push(' ');
         }
-        message.push_str(&format!(
+        let _ = write!(
+            message,
             "The app keeps it and sends it only to {}; {} never sees it.",
             hosts.join(", "),
             manifest.name
-        ));
+        );
         let prompt = crate::hostcall::Prompt {
             kind: crate::hostcall::PromptKind::Secret,
             title: if decl.title.is_empty() {

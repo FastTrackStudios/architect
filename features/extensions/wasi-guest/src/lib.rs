@@ -793,11 +793,13 @@ pub mod host {
             .map_err(|e| HostError::from_text(&e))
     }
 
-    /// An HTTP request through the host (`{"url": …, "method"?,
-    /// "headers"?, "body"?, "timeout_ms"?, "max_bytes"?, "stream"?,
-    /// "binary"?}`): `{status, url, headers, body}`, or with `stream`
-    /// `{status, url, headers, stream}` (read it with [`read_body`]). Only
-    /// to the hosts in `capabilities.hosts`, every redirect checked. A
+    /// An HTTP request through the host.
+    ///
+    /// `request` is `{"url": …, "method"?, "headers"?, "body"?,
+    /// "timeout_ms"?, "max_bytes"?, "stream"?, "binary"?}`; the answer
+    /// `{status, url, headers, body}`, or with `stream` `{status, url,
+    /// headers, stream}` (read it with [`read_body`]). Only to the hosts
+    /// in `capabilities.hosts`, every redirect checked. A
     /// header's value may name one of its `[[secrets]]`
     /// (`"Bearer {{secret:api_key}}"`): the host puts it in.
     ///
@@ -824,6 +826,7 @@ pub mod host {
     }
 
     /// Stops reading streamed response `stream`: whether it was open.
+    #[must_use]
     pub fn close_body(stream: &str) -> bool {
         wit_host::close_body(stream)
     }

@@ -586,8 +586,10 @@ pub struct Manifest {
 }
 
 /// One of an extension's `[[secrets]]`: an API key or a token the person
-/// enters once, kept by the host (`crate::net::Secrets`), never in the
-/// extension's folder and never handed to it. A request names it in a
+/// enters once.
+///
+/// The host keeps it (`crate::net::Secrets`), never in the extension's
+/// folder, and never hands it to the extension. A request names it in a
 /// header's value (`"Bearer {{secret:api_key}}"`); the host puts it in on
 /// a request to one of its `hosts`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]

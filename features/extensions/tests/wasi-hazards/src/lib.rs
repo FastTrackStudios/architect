@@ -150,10 +150,17 @@ fn build() -> Extension {
         // makes `path`, edits it, lists and reads it back.
         .action("TEST_HAZARDS_DOCS", |args: Value| {
             let e = |e: host::HostError| e.to_string();
-            let path = args.get("path").and_then(Value::as_str).unwrap_or("notes/wasi.md");
+            let path = args
+                .get("path")
+                .and_then(Value::as_str)
+                .unwrap_or("notes/wasi.md");
             let made = host::create_document(path, "one").map_err(e)?;
-            let text = host::edit_document(path, &json!([{ "append": { "text": " two" } }]), Some("WASI edit"))
-                .map_err(e)?;
+            let text = host::edit_document(
+                path,
+                &json!([{ "append": { "text": " two" } }]),
+                Some("WASI edit"),
+            )
+            .map_err(e)?;
             let listed = host::list_documents("").map_err(e)?;
             let read = host::read_document(path).map_err(e)?;
             Ok(json!({ "made": made, "text": text, "listed": listed, "read": read }))

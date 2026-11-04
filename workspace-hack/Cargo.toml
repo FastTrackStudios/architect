@@ -125,6 +125,7 @@ parlance = { version = "0.1.1", default-features = false, features = ["bytemuck"
 parley = { version = "0.12.0", default-features = false, features = ["bytemuck", "system"] }
 parley_engine = { version = "0.12.0", default-features = false, features = ["bytemuck", "std"] }
 peniko = { version = "0.6.1", features = ["bytemuck"] }
+percent-encoding = { version = "2.3.2" }
 phf = { version = "0.14.0", features = ["macros"] }
 phf_shared = { version = "0.14.0" }
 pkcs8 = { version = "0.11.0", default-features = false, features = ["pem", "std"] }

@@ -80,7 +80,8 @@ pub fn reaches_host(of: &[String], host: &str, port: Option<u16>) -> bool {
         return false;
     }
     let lower: Vec<String> = of.iter().map(|h| h.to_ascii_lowercase()).collect();
-    host_in(&host, &lower) || port.is_some_and(|p| lower.iter().any(|g| *g == format!("{host}:{p}")))
+    host_in(&host, &lower)
+        || port.is_some_and(|p| lower.iter().any(|g| *g == format!("{host}:{p}")))
 }
 
 /// Whether folder `f` is one of `of` or inside one.

@@ -2302,7 +2302,11 @@ its store (in memory for the run otherwise).
 
 **Where it runs**: the native host sends each request on a runtime of its
 own (two threads, `ext-net`), so a fetch works from whichever executor
-asks — a component's thread, a script's, a page's. In a browser
+asks — a component's thread, a script's, a page's. The client is
+`architect-extensions`' feature `net` (reqwest), which the app turns on
+(`apps/lab/desktop/Cargo.toml`), not its UI crates: reqwest reaches
+tower-http, which `cargo xtask boundaries` keeps out of them. A build
+without it keeps secrets and answers a fetch `unsupported`. In a browser
 (`web::WebHost`) the browser's own `fetch` sends it, where CORS lets it;
 one the browser refuses answers `unsupported` saying so. There the
 browser hides where a redirect goes, so a redirect is not followed but

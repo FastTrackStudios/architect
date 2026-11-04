@@ -723,4 +723,3 @@ pub fn use_tab_badges(host: &Host) {
         })
     });
 }
-

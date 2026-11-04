@@ -57,11 +57,11 @@ script = "fetch.luau"
     )
 }
 
-const FETCH_LUAU: &str = r#"
+const FETCH_LUAU: &str = "
 local ok, out = pcall(host.fetch, args.url, args.options)
 if ok then return out end
 return { error = tostring(out) }
-"#;
+";
 
 fn app(tmp: &Path, manifest: &str) -> (ActionList, Host) {
     let list = ActionList::new();
@@ -124,7 +124,11 @@ fn a_fetch_reaches_a_declared_host_and_is_refused_another_and_a_redirect_to_one(
     assert_eq!(out["headers"]["content-type"], "text/plain", "{out}");
 
     // A redirect to a host it may reach is followed.
-    let out = call(&host, HostRequest::Fetch(fetch(format!("{base}/redirect-in")))).unwrap();
+    let out = call(
+        &host,
+        HostRequest::Fetch(fetch(format!("{base}/redirect-in"))),
+    )
+    .unwrap();
     assert_eq!(out["body"], "hello from the server", "{out}");
     assert!(out["url"].as_str().unwrap().ends_with("/hello"), "{out}");
 
@@ -143,16 +147,31 @@ fn a_fetch_reaches_a_declared_host_and_is_refused_another_and_a_redirect_to_one(
         HostRequest::Fetch(fetch(format!("{base}/redirect-out"))),
     ));
     assert_eq!(capability, "hosts");
-    assert!(why.contains("redirected") && why.contains("localhost"), "{why}");
-    assert_eq!(server.heard.to("/hello").len(), before, "the redirect was not followed");
+    assert!(
+        why.contains("redirected") && why.contains("localhost"),
+        "{why}"
+    );
+    assert_eq!(
+        server.heard.to("/hello").len(),
+        before,
+        "the redirect was not followed"
+    );
 
     // Not http: refused.
     let (capability, _) = refused(call(&host, HostRequest::Fetch(fetch("file:///etc/passwd"))));
     assert_eq!(capability, "hosts");
 
     // The refusals are in its log.
-    let lines: Vec<String> = host.logs().since(NET, None, 1000).iter().map(|l| l.text.clone()).collect();
-    assert!(lines.iter().any(|l| l.contains("fetch: refused (hosts)")), "{lines:?}");
+    let lines: Vec<String> = host
+        .logs()
+        .since(NET, None, 1000)
+        .iter()
+        .map(|l| l.text.clone())
+        .collect();
+    assert!(
+        lines.iter().any(|l| l.contains("fetch: refused (hosts)")),
+        "{lines:?}"
+    );
 }
 
 #[test]
@@ -175,7 +194,10 @@ fn a_luau_script_fetches_from_its_host_and_is_refused_another() {
 
     let out = run(&list, &json!({ "url": format!("{base}/redirect-out") }));
     let error = out["error"].as_str().unwrap_or_default();
-    assert!(error.contains("refused (hosts)") && error.contains("redirected"), "{out}");
+    assert!(
+        error.contains("refused (hosts)") && error.contains("redirected"),
+        "{out}"
+    );
 }
 
 #[test]
@@ -187,7 +209,9 @@ fn a_streamed_body_is_read_in_parts_by_its_own_extension_only() {
     load(
         &host,
         &other,
-        &manifest(r#""127.0.0.1""#, "").replace("lab.net", "lab.other").replace("LAB_NET_", "LAB_OTHER_"),
+        &manifest(r#""127.0.0.1""#, "")
+            .replace("lab.net", "lab.other")
+            .replace("LAB_NET_", "LAB_OTHER_"),
     )
     .unwrap();
     let out = call(
@@ -207,7 +231,10 @@ fn a_streamed_body_is_read_in_parts_by_its_own_extension_only() {
         stream: stream.clone(),
         max: None,
     }));
-    assert!(matches!(theirs, Err(HostError::NotFound { .. })), "{theirs:?}");
+    assert!(
+        matches!(theirs, Err(HostError::NotFound { .. })),
+        "{theirs:?}"
+    );
 
     let mut text = String::new();
     let mut parts = 0;
@@ -268,8 +295,12 @@ fn time_and_size_limits_hold() {
     );
     // A header that is the host's to set.
     let mut bad = fetch(format!("{base}/hello"));
-    bad.headers.insert("Host".to_owned(), "evil.example".to_owned());
-    assert!(matches!(call(&host, HostRequest::Fetch(bad)), Err(HostError::Failed { .. })));
+    bad.headers
+        .insert("Host".to_owned(), "evil.example".to_owned());
+    assert!(matches!(
+        call(&host, HostRequest::Fetch(bad)),
+        Err(HostError::Failed { .. })
+    ));
 }
 
 const SECRETS: &str = r#"
@@ -299,13 +330,20 @@ fn a_secret_is_asked_for_once_put_into_requests_to_its_host_and_never_readable()
     .unwrap();
     let base = format!("http://127.0.0.1:{}", server.port);
     let mut with_key = fetch(format!("{base}/hello"));
-    with_key
-        .headers
-        .insert("Authorization".to_owned(), "Bearer {{secret:api_key}}".to_owned());
+    with_key.headers.insert(
+        "Authorization".to_owned(),
+        "Bearer {{secret:api_key}}".to_owned(),
+    );
 
     // Not set yet: the host asks the person (a secret prompt), keeps it.
     assert_eq!(
-        call(&host, HostRequest::Secret { name: "api_key".to_owned() }).unwrap()["set"],
+        call(
+            &host,
+            HostRequest::Secret {
+                name: "api_key".to_owned()
+            }
+        )
+        .unwrap()["set"],
         false
     );
     let out = call(&host, HostRequest::Fetch(with_key.clone())).unwrap();
@@ -315,13 +353,20 @@ fn a_secret_is_asked_for_once_put_into_requests_to_its_host_and_never_readable()
     let HostRequest::Prompt(prompt) = &asked[0].request else {
         panic!("{:?}", asked[0])
     };
-    assert_eq!(prompt.kind, architect_extensions::hostcall::PromptKind::Secret);
+    assert_eq!(
+        prompt.kind,
+        architect_extensions::hostcall::PromptKind::Secret
+    );
     assert!(prompt.title.contains("Test API key"), "{prompt:?}");
 
     // The server got it; the extension's answer does not have it.
     let seen = server.heard.to("/hello");
     assert_eq!(
-        seen.last().unwrap().1.get("authorization").map(String::as_str),
+        seen.last()
+            .unwrap()
+            .1
+            .get("authorization")
+            .map(String::as_str),
         Some("Bearer sk-test-123")
     );
     assert!(!out.to_string().contains("sk-test-123"), "{out}");
@@ -331,11 +376,21 @@ fn a_secret_is_asked_for_once_put_into_requests_to_its_host_and_never_readable()
     assert_eq!(ui.asked().len(), 1);
 
     // Readable by no call of its own: `secret` says whether, not what.
-    let status = call(&host, HostRequest::Secret { name: "api_key".to_owned() }).unwrap();
+    let status = call(
+        &host,
+        HostRequest::Secret {
+            name: "api_key".to_owned(),
+        },
+    )
+    .unwrap();
     assert_eq!(status, json!({ "set": true, "title": "Test API key" }));
     for request in [
-        HostRequest::Setting { key: "api_key".to_owned() },
-        HostRequest::Data { key: "api_key".to_owned() },
+        HostRequest::Setting {
+            key: "api_key".to_owned(),
+        },
+        HostRequest::Data {
+            key: "api_key".to_owned(),
+        },
     ] {
         let got = call(&host, request).unwrap_or(Value::Null);
         assert!(!got.to_string().contains("sk-test"), "{got}");
@@ -348,7 +403,11 @@ fn a_secret_is_asked_for_once_put_into_requests_to_its_host_and_never_readable()
     );
     assert!(matches!(read, Err(HostError::Refused { .. })), "{read:?}");
     // Kept by the app, not in the extension's folder.
-    assert!(std::fs::read_to_string(&file).unwrap().contains("sk-test-123"));
+    assert!(
+        std::fs::read_to_string(&file)
+            .unwrap()
+            .contains("sk-test-123")
+    );
     for entry in walk(&tmp.path().join("data")) {
         let text = std::fs::read_to_string(&entry).unwrap_or_default();
         assert!(!text.contains("sk-test-123"), "{}", entry.display());
@@ -406,7 +465,10 @@ fn walk(dir: &Path) -> Vec<std::path::PathBuf> {
 
 #[test]
 fn a_secret_must_be_one_of_its_hosts() {
-    let bad = manifest(r#""127.0.0.1""#, &SECRETS.replace("127.0.0.1", "api.example.com"));
+    let bad = manifest(
+        r#""127.0.0.1""#,
+        &SECRETS.replace("127.0.0.1", "api.example.com"),
+    );
     let m = architect_extensions::manifest::Manifest::parse(&bad);
     assert!(
         m.as_ref()
@@ -430,7 +492,10 @@ fn a_declared_hook_on_a_documents_events_needs_reads_documents() {
     let list = ActionList::new();
     let host = Host::new(list, SharedSections::new(Registry::new()));
     let why = load(&host, &tmp.path().join("dev/net"), &manifest("", DOC_HOOK)).unwrap_err();
-    assert!(why.contains("doc.saved") && why.contains("documents"), "{why}");
+    assert!(
+        why.contains("doc.saved") && why.contains("documents"),
+        "{why}"
+    );
     assert!(host.get(NET).is_none());
 
     let with = manifest("", DOC_HOOK).replace("hosts = []", "hosts = []\nreads = [\"documents\"]");
@@ -486,7 +551,12 @@ fn a_declared_document_hook_is_not_heard_by_an_installed_extension_not_granted_d
         path: "notes/a.md".to_owned(),
     });
     assert_eq!(started, 0, "it asked for documents; no one granted them");
-    let lines: Vec<String> = host.logs().since(NET, None, 1000).iter().map(|l| l.text.clone()).collect();
+    let lines: Vec<String> = host
+        .logs()
+        .since(NET, None, 1000)
+        .iter()
+        .map(|l| l.text.clone())
+        .collect();
     assert!(
         lines.iter().any(|l| l.contains("doc.saved: refused")),
         "{lines:?}"

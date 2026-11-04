@@ -4,7 +4,12 @@
 //! another host and a redirect to one. Against a local server, no real
 //! network.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
 use std::time::{Duration, Instant};
 
@@ -118,8 +123,14 @@ fn apply(session: &mut PageSession, view: &mut RemoteDocument) {
 fn check(out: &str) {
     let parts: Vec<&str> = out.split('|').collect();
     assert_eq!(parts[0], "hello from the server", "{out}");
-    assert!(parts[1].contains("localhost") && parts[1].contains("hosts"), "{out}");
-    assert!(parts[2].contains("redirected") && parts[2].contains("localhost"), "{out}");
+    assert!(
+        parts[1].contains("localhost") && parts[1].contains("hosts"),
+        "{out}"
+    );
+    assert!(
+        parts[2].contains("redirected") && parts[2].contains("localhost"),
+        "{out}"
+    );
 }
 
 fn page(text: &str, port: u16) -> String {

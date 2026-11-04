@@ -242,11 +242,11 @@ fn the_host_interface_is_the_host_service() {
             Some(op(r#"{"op":"watch_documents","action":"X"}"#)),
         ),
         // The theme is the host's to send, no request (a process is sent it).
-        ("fetch", Some(op(r#"{"op":"fetch","url":"https://a.example"}"#))),
         (
-            "read-body",
-            Some(op(r#"{"op":"read_body","stream":"s1"}"#)),
+            "fetch",
+            Some(op(r#"{"op":"fetch","url":"https://a.example"}"#)),
         ),
+        ("read-body", Some(op(r#"{"op":"read_body","stream":"s1"}"#))),
         (
             "close-body",
             Some(op(r#"{"op":"close_body","stream":"s1"}"#)),

@@ -297,7 +297,9 @@ impl Module for HostModule {
         op!("close_body", String, |lua, a| Ok(HostRequest::CloseBody {
             stream: a
         }));
-        op!("secret", String, |lua, a| Ok(HostRequest::Secret { name: a }));
+        op!("secret", String, |lua, a| Ok(HostRequest::Secret {
+            name: a
+        }));
         op!("ask_secret", String, |lua, a| Ok(HostRequest::AskSecret {
             name: a
         }));

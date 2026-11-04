@@ -241,10 +241,11 @@ pub enum HostRequest {
     },
 }
 
-/// An HTTP request an extension makes (`fetch`). The host follows its
-/// redirects itself, each checked against `capabilities.hosts`; it stops
-/// at a time limit and a size limit (`crate::net` has the defaults and
-/// the most either may be).
+/// An HTTP request an extension makes (`fetch`).
+///
+/// The host follows its redirects itself, each checked against
+/// `capabilities.hosts`; it stops at a time limit and a size limit
+/// (`crate::net` has the defaults and the most either may be).
 ///
 /// Its answer: `{status, url, headers, body}` — `url` where it ended
 /// after redirects, `headers` by lower-case name, `body` the text
@@ -278,11 +279,12 @@ pub struct Fetch {
 pub fn secret_refs(value: &str) -> Vec<&str> {
     let mut out = Vec::new();
     let mut rest = value;
-    while let Some(at) = rest.find(SECRET_OPEN) {
-        let after = &rest[at + SECRET_OPEN.len()..];
-        let Some(end) = after.find("}}") else { break };
-        out.push(after[..end].trim());
-        rest = &after[end + 2..];
+    while let Some((_, after)) = rest.split_once(SECRET_OPEN) {
+        let Some((name, next)) = after.split_once("}}") else {
+            break;
+        };
+        out.push(name.trim());
+        rest = next;
     }
     out
 }
@@ -301,12 +303,13 @@ pub fn with_secrets(
 ) -> Result<String, HostError> {
     let mut out = String::new();
     let mut rest = value;
-    while let Some(at) = rest.find(SECRET_OPEN) {
-        let after = &rest[at + SECRET_OPEN.len()..];
-        let Some(end) = after.find("}}") else { break };
-        out.push_str(&rest[..at]);
-        out.push_str(&of(after[..end].trim())?);
-        rest = &after[end + 2..];
+    while let Some((before, after)) = rest.split_once(SECRET_OPEN) {
+        let Some((name, next)) = after.split_once("}}") else {
+            break;
+        };
+        out.push_str(before);
+        out.push_str(&of(name.trim())?);
+        rest = next;
     }
     out.push_str(rest);
     Ok(out)
@@ -341,11 +344,18 @@ pub fn may_reach_url(may: &Capabilities, url: &str) -> Result<url::Url, (String,
 /// Whether `fetch` is one an extension of `manifest` that may reach `may`
 /// may make: its URL's host one it may reach, and each secret it names
 /// one it declares, sent only to that secret's hosts, in a header.
-fn fetch_check(manifest: &Manifest, may: &Capabilities, fetch: &Fetch) -> Result<(), (String, String)> {
+fn fetch_check(
+    manifest: &Manifest,
+    may: &Capabilities,
+    fetch: &Fetch,
+) -> Result<(), (String, String)> {
     let url = may_reach_url(may, &fetch.url)?;
     let host = url.host_str().unwrap_or_default();
     if !secret_refs(&fetch.url).is_empty()
-        || fetch.body.as_deref().is_some_and(|b| !secret_refs(b).is_empty())
+        || fetch
+            .body
+            .as_deref()
+            .is_some_and(|b| !secret_refs(b).is_empty())
     {
         return Err((
             "secrets".to_owned(),
