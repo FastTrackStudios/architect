@@ -1,5 +1,6 @@
-//! The lab's settings: what it registers (Appearance, Workspace, Editor,
-//! Keyboard). The metronome extension adds its own section while it is
+//! The lab's settings: what it registers (Workspace, Editor, Keyboard;
+//! Appearance is architect's, `architect_settings::use_appearance_section`,
+//! in `theme.rs`). The metronome extension adds its own section while it is
 //! loaded (`extensions.rs`). Editor is a struct (`#[derive(Settings)]`);
 //! the rest are written out as data.
 
@@ -10,56 +11,10 @@ use facet::Facet;
 /// Every section the lab itself declares.
 pub fn registry() -> Registry {
     let mut r = Registry::new();
-    for section in [appearance(), workspace(), Editor::section(), keyboard()] {
+    for section in [workspace(), Editor::section(), keyboard()] {
         let _ = r.register(section);
     }
     r
-}
-
-fn appearance() -> Section {
-    Section::new("appearance", "Appearance")
-        .icon("palette")
-        .block(
-            None,
-            vec![
-                Setting::new(
-                    "appearance.theme",
-                    "Theme",
-                    Control::Cards(vec![
-                        Choice::text("system", "System").detail("Follow the Mac"),
-                        Choice::text("dark", "Dark"),
-                        Choice::text("light", "Light"),
-                    ]),
-                    Value::Text("system".into()),
-                )
-                .describe("Follow the system, or always light or dark.")
-                .aliases(["dark mode", "light mode", "colour scheme"]),
-                Setting::new(
-                    "appearance.text_size",
-                    "Text size",
-                    Control::Stepper {
-                        min: 80,
-                        max: 140,
-                        step: 5,
-                        unit: "%".into(),
-                    },
-                    Value::Int(100),
-                )
-                .describe("How large text is everywhere.")
-                .aliases(["font", "zoom"]),
-                Setting::new(
-                    "appearance.reduce_motion",
-                    "Reduce motion",
-                    Control::Switch,
-                    Value::Bool(false),
-                )
-                .describe(
-                    "Sidebars, tabs, splits and drawers go straight to where they end. \
-                     Off, the lab follows the Mac's own setting.",
-                )
-                .aliases(["animation"]),
-            ],
-        )
 }
 
 fn workspace() -> Section {
@@ -96,6 +51,22 @@ fn workspace() -> Section {
                     Value::Text("bar".into()),
                 )
                 .describe("Along the window's foot, or in its corner."),
+            ],
+        )
+        .block(
+            Some("Motion"),
+            vec![
+                Setting::new(
+                    "appearance.reduce_motion",
+                    "Reduce motion",
+                    Control::Switch,
+                    Value::Bool(false),
+                )
+                .describe(
+                    "Sidebars, tabs, splits and drawers go straight to where they end. \
+                     Off, the lab follows the Mac's own setting.",
+                )
+                .aliases(["animation"]),
             ],
         )
         .block(

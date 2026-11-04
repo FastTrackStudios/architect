@@ -697,7 +697,7 @@ pub fn LabApp() -> Element {
         let _ = architect::action::app_status::register(&list);
     });
     // Themes: one store for the app, its THEME_* actions on the list.
-    let theme = theme::use_lab_theme(windowed, &list);
+    let (theme, appearance) = theme::use_lab_theme(windowed, &list);
     // An agent's Delete waits for the person's yes, in the sheet below.
     use_hook(|| confirm::require(&list));
     // An agent's UI (A2UI): its surfaces on a document of their own, the
@@ -738,6 +738,8 @@ pub fn LabApp() -> Element {
             },
         )),
     );
+    // Appearance: architect's section, the theme store's layers.
+    architect_settings::use_appearance_section();
     let lab = use_context_provider(|| {
         let lists = items::Lists::sample();
         // The Inbox's first row, selected from the start.
@@ -1140,6 +1142,18 @@ pub fn LabApp() -> Element {
             .inherit(),
         None,
     );
+    // The org's default look, under the person's: its settings, when the
+    // window's org changes.
+    {
+        let org = orgs.current().map(|o| o.id.0);
+        let mut shown = use_signal(|| None::<Option<String>>);
+        if shown.peek().as_ref() != Some(&org) {
+            let defaults = theme::org_settings(org.as_deref());
+            appearance.set_org(defaults.clone());
+            settings.set_org(defaults);
+            shown.set(Some(org));
+        }
+    }
     let workspaces = orgs
         .switcher(Some("All organizations"))
         .action("New organization", icon!(Plus), |()| {})

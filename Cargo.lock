@@ -1147,6 +1147,7 @@ dependencies = [
  "futures-util",
  "keyflow",
  "keyflow-ui",
+ "loro",
  "lucide-dioxus",
  "serde_json",
  "tracing",

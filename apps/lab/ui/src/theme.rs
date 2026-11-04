@@ -2,6 +2,15 @@
 //! The shell, the architect-ui root and the paint panes all follow it; its
 //! `THEME_*` actions are on the lab's Action List; ⌘K has a theme picker.
 //!
+//! The person's look is architect's Appearance section
+//! (`architect_settings::use_appearance_section`), and the store's org,
+//! person and device layers are kept as settings
+//! (`architect_settings::appearance::Persist`): this device's in
+//! `<app dir>/appearance.json`, the person's in a synced settings
+//! document (the lab has no account to sync it with, so the document is
+//! a file, `<app dir>/person.loro`), the org's default from the made-up
+//! orgs' settings ([`org_settings`]).
+//!
 //! In a window its themes folder is `<app dir>/themes`: the lab's shipped
 //! themes are installed there (an edited one is kept), every file in it
 //! is read over architect's built-in themes, and a saved change shows at
@@ -37,16 +46,36 @@ fn themes_dir() -> Option<std::path::PathBuf> {
 }
 
 /// The store, given to everything below; in a window, read from the
-/// themes folder and watched. Its actions go on `list`.
-pub fn use_lab_theme(windowed: bool, list: &architect::action::ActionList) -> ThemeHandle {
+/// themes folder and watched, and its person and device layers kept
+/// ([`persist`]). Its actions go on `list`.
+pub fn use_lab_theme(
+    windowed: bool,
+    list: &architect::action::ActionList,
+) -> (ThemeHandle, LabAppearance) {
     let handle = architect_theme::use_theme_store(ThemeStore::default);
     let store = handle.store();
-    // Kept for the app's life: dropping it stops the watcher.
-    let _watch: Rc<Option<ThemeWatch>> = use_hook(|| {
+    // Kept for the app's life: dropping them stops the watcher and
+    // writes what waits.
+    let kept: (Rc<Option<ThemeWatch>>, LabAppearance) = use_hook(|| {
         let _ = architect_theme::actions::register(list, &store);
-        Rc::new(windowed.then(|| watch_folder(&store)).flatten())
+        let watch = windowed.then(|| watch_folder(&store)).flatten();
+        let persist = windowed.then(|| persist(&store)).flatten();
+        (Rc::new(watch), LabAppearance(Rc::new(persist)))
     });
-    handle
+    (handle, kept.1)
+}
+
+/// What keeps the lab's look, when it is kept (in a window).
+#[derive(Clone)]
+pub struct LabAppearance(pub Rc<Option<architect_settings::appearance::Persist>>);
+
+impl LabAppearance {
+    /// The window's org changed: its default look under the person's.
+    pub fn set_org(&self, org: architect_settings::OrgSettings) {
+        if let Some(p) = self.0.as_ref() {
+            p.set_org(org);
+        }
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -61,6 +90,70 @@ fn watch_folder(store: &ThemeStore) -> Option<ThemeWatch> {
 #[cfg(target_arch = "wasm32")]
 fn watch_folder(_: &ThemeStore) -> Option<ThemeWatch> {
     None
+}
+
+/// Keeps the store's person and device layers, in a window; loads them
+/// (and they show) first. Headless, nothing is read or kept.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn persist(store: &ThemeStore) -> Option<architect_settings::appearance::Persist> {
+    use architect_settings::appearance::{Persist, Saved};
+    use architect_settings::{DeviceValues, DocValues, Scope, ScopedValues};
+
+    let dir = architect::settings::app_dir("architect-lab").ok()?;
+    let device = DeviceValues::open_named("architect-lab", "appearance").ok()?;
+    let doc = loro::LoroDoc::new();
+    let file = dir.join("person.loro");
+    if let Ok(bytes) = std::fs::read(&file) {
+        let _ = doc.import(&bytes);
+    }
+    let person = DocValues::new(&doc);
+    let values = ScopedValues {
+        device: device.load(),
+        synced: person.load(),
+        ..ScopedValues::default()
+    };
+    let save = move |saved: &Saved| match saved.scope {
+        Scope::Device => {
+            let _ = device.save(&saved.values);
+        }
+        Scope::Synced => {
+            if person.save_keys(&saved.values, &saved.keys).is_ok() {
+                if let Ok(bytes) = doc.export(loro::ExportMode::Snapshot) {
+                    let _ = std::fs::write(&file, bytes);
+                }
+            }
+        }
+        Scope::Project => {}
+    };
+    Some(Persist::start(
+        store,
+        &values,
+        std::time::Duration::from_millis(250),
+        save,
+    ))
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn persist(_: &ThemeStore) -> Option<architect_settings::appearance::Persist> {
+    None
+}
+
+/// What each of the lab's made-up orgs sets as its members' default
+/// look: a real app has it from the org's settings on its server.
+#[must_use]
+pub fn org_settings(org: Option<&str>) -> architect_settings::OrgSettings {
+    use architect_settings::appearance::{THEME, token_key, tokens};
+    use architect_settings::{OrgSettings, Value};
+    match org {
+        Some("hp") => OrgSettings::new()
+            .default_to(THEME, Value::Text("nord-light,nord-dark".into()))
+            .default_to(token_key(tokens::RADIUS), Value::Text("0.375rem".into())),
+        Some("fts") => OrgSettings::new().default_to(
+            THEME,
+            Value::Text("fasttrackstudio-light,fasttrackstudio-dark".into()),
+        ),
+        _ => OrgSettings::new(),
+    }
 }
 
 /// The OS's light or dark, told to the store: at start, and whenever the
@@ -109,7 +202,7 @@ pub fn use_theme_commands(handle: ThemeHandle, commands: &architect_commands::Co
                 Scheme::Dark => architect_theme::Appearance::Light,
                 Scheme::Light => architect_theme::Appearance::Dark,
             };
-            let _ = store.update(architect_theme::LayerKind::Pick, |l| {
+            let _ = store.update(architect_theme::LayerKind::Person, |l| {
                 l.appearance = Some(next);
             });
         },
@@ -128,13 +221,13 @@ pub fn use_theme_commands(handle: ThemeHandle, commands: &architect_commands::Co
     }
 }
 
-/// Picks `id` so it shows now: its half of the pair, and the appearance
-/// its scheme when the other one is showing.
+/// Picks `id` so it shows now, as the person's (kept): its half of the
+/// pair, and the appearance its scheme when the other one is showing.
 fn pick(store: &ThemeStore, id: &str) {
-    let _ = store.pick(id);
+    let _ = store.pick_in(architect_theme::LayerKind::Person, id);
     let scheme = store.registry().scheme_of(id);
     if let Some(scheme) = scheme.filter(|s| *s != store.current().scheme()) {
-        let _ = store.update(architect_theme::LayerKind::Pick, |l| {
+        let _ = store.update(architect_theme::LayerKind::Person, |l| {
             l.appearance = Some(match scheme {
                 Scheme::Light => architect_theme::Appearance::Light,
                 Scheme::Dark => architect_theme::Appearance::Dark,
