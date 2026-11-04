@@ -446,6 +446,14 @@ impl WebHost {
                 self.log(level.as_deref().unwrap_or("info"), "log", text);
                 Ok(Json::Null)
             }
+            // Services, points and windows are the native host's
+            // (`crate::interop`); the browser host has no other extensions
+            // to call or windows to open yet.
+            HostRequest::Service { .. } | HostRequest::Point { .. } | HostRequest::Window { .. } => {
+                Err(HostError::Failed {
+                    message: "services, points and windows are not in the browser yet".to_owned(),
+                })
+            }
         }
     }
 

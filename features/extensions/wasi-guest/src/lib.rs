@@ -21,7 +21,7 @@
 //! is a `VirtualDom` of its own; its edits go to the host as the world's
 //! `edit`s (the remote-view wire's), its events come back to its
 //! handlers. The app is reached through [`host`] — `run`, `setting`,
-//! `theme`, `log`, `call` — each call checked by the host against what
+//! `theme`, `log`, `service`, `call` — each call checked by the host against what
 //! the extension may reach.
 //!
 //! There are no threads in a component, and no async yet (WASI 0.3): an
@@ -562,6 +562,19 @@ pub mod host {
             Level::Error => wit_host::Level::Error,
         };
         wit_host::log(level, text);
+    }
+
+    /// Calls method `method` of service `service` (one its manifest
+    /// `[requires]`) with `args`: its provider's answer.
+    ///
+    /// # Errors
+    ///
+    /// It does not require it, no provider meets its requirement, or the
+    /// provider's action refused or failed.
+    pub fn service(service: &str, method: &str, args: &Json) -> Result<Json, HostError> {
+        wit_host::call_service(service, method, &args.to_string())
+            .map(|t| json(&t))
+            .map_err(|e| HostError::from_text(&e))
     }
 
     /// Any host-service call (`hostcall::HostRequest`: `{"op": "selection"}`,

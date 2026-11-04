@@ -845,7 +845,7 @@ fn uncovered(manifest: &Manifest, hello: &Hello) -> Option<String> {
     manifest
         .actions
         .iter()
-        .find(|a| a.preset.is_none() && !hello.actions.contains(&a.id))
+        .find(|a| !manifest.host_runs(a) && !hello.actions.contains(&a.id))
         .map(|a| format!("it does not run its action {}", a.id))
 }
 

@@ -98,6 +98,8 @@ pub struct ExtensionUi {
     /// Every view an extension declared since the app started, by kind:
     /// what an unloaded one's panes show (or close by).
     seen: Signal<BTreeMap<String, (String, ViewDecl)>>,
+    /// The extensions' windows open now (`crate::window_ui`).
+    windows: Signal<Vec<crate::windows::OpenWindow>>,
 }
 
 impl ExtensionUi {
@@ -111,6 +113,12 @@ impl ExtensionUi {
     #[must_use]
     pub fn revision(&self) -> u64 {
         (self.revision)()
+    }
+
+    /// The extensions' windows open now (reading it subscribes).
+    #[must_use]
+    pub fn windows(&self) -> Vec<crate::windows::OpenWindow> {
+        (self.windows)()
     }
 
     /// The shell's chrome as the extensions have it: their tabs, status
@@ -373,12 +381,17 @@ pub fn use_extension_ui(host: Host, app: Arc<ActionList>) -> ExtensionUi {
     let layers = use_signal(Vec::<Layer>::new);
     let seen = use_signal(BTreeMap::new);
     let held = use_signal(|| host.clone());
+    let windows = crate::window_ui::use_open_windows(&host);
     let ui = ExtensionUi {
         host: held,
         revision,
         layers,
         seen,
+        windows,
     };
+    // The settings page is the settings extension's window: the app's
+    // sections and values to it, `SettingsHandle::show` opening it.
+    crate::window_ui::use_settings_window(&host, windows);
     // The settings page draws an extension's section from its view
     // (`[[sections]] view`), a linked one's component as it is.
     use_context_provider(move || {
@@ -676,6 +689,7 @@ fn open_items(kind: &str, out: Option<Vec<u8>>) -> Vec<OpenItem> {
 pub fn ExtensionOverlays(ui: ExtensionUi) -> Element {
     let layers = (ui.layers)();
     rsx! {
+        crate::window_ui::ExtensionWindows { ui }
         for layer in layers {
             {
                 let open = layer.open;
@@ -764,6 +778,9 @@ pub fn ExtensionView(
     extension: String,
     view: String,
     #[props(default = true)] fill: bool,
+    // A linked view's component as it is, in no box of its own (a
+    // window's: the window is its box).
+    #[props(default)] bare: bool,
 ) -> Element {
     let size = if fill {
         "flex: 1; min-height: 0;"
@@ -809,6 +826,11 @@ pub fn ExtensionView(
         }
     }
     if let Some(root) = host.linked_view(&extension, &view) {
+        if bare {
+            return rsx! {
+                LinkedRoot { key: "{extension}/{view}", root }
+            };
+        }
         return rsx! {
             div { style: "{size} display: flex; flex-direction: column;",
                 LinkedRoot { key: "{extension}/{view}", root }

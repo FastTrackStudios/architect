@@ -601,6 +601,9 @@ impl Pages {
         let mut host = self.0.host.clone();
         if let Some(gate) = gate {
             host = host.with_gate(gate);
+            if !extension.is_empty() {
+                host = host.with_extension(extension);
+            }
         }
         let (inbox, asked) = mpsc::channel();
         let (frames_to, frames) = fmpsc::unbounded();

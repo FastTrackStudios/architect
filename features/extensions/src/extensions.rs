@@ -431,6 +431,8 @@ impl Extensions {
                 });
             }
         }
+        // Providers before what requires them (`[requires]`).
+        let chosen = by_requires(chosen);
         for c in &chosen {
             let runs = &c.runs;
             let same = host.get(&runs.id).is_some_and(|l| {
@@ -449,6 +451,8 @@ impl Extensions {
                 },
             });
         }
+        // What lost a service it requires goes, until a provider is back.
+        events.extend(host.drop_unprovided());
         // What is loaded now is what the next poll compares against.
         let _ = lock(&self.inner.watch).changed(self.dirs());
         events
@@ -561,4 +565,30 @@ impl Extensions {
         let _ = self.sync();
         out
     }
+}
+
+/// `chosen` with each extension after the ones providing what it requires
+/// (`[requires]`), the order otherwise kept; a cycle or a missing provider
+/// leaves the rest in their order (their loads say why).
+fn by_requires(chosen: Vec<Chosen<Package>>) -> Vec<Chosen<Package>> {
+    let provides =
+        |c: &Chosen<Package>, service: &str| c.runs.package.manifest.provides.contains_key(service);
+    let mut left = chosen;
+    let mut out: Vec<Chosen<Package>> = Vec::with_capacity(left.len());
+    while !left.is_empty() {
+        let ready = left.iter().position(|c| {
+            c.runs.package.manifest.requires.keys().all(|service| {
+                !left
+                    .iter()
+                    .any(|o| o.runs.id != c.runs.id && provides(o, service))
+            })
+        });
+        match ready {
+            Some(i) => out.push(left.remove(i)),
+            None => {
+                out.append(&mut left);
+            }
+        }
+    }
+    out
 }

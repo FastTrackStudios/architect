@@ -216,6 +216,7 @@ impl Extensions {
     /// An id is taken.
     #[allow(clippy::too_many_lines)]
     pub fn install_contribution_actions(&self) -> Result<(), ActionError> {
+        self.install_interop_actions()?;
         let list = self.host().list().clone();
         let me = self.clone();
         list.register_with(

@@ -270,6 +270,9 @@ impl Host {
             let Some(host) = host.upgrade() else {
                 return Err("the app is closing".to_owned());
             };
+            if info.id == crate::host::SERVICE_CALL {
+                return Ok(());
+            }
             host.capabilities_of(&manifest, origin)
                 .may_run(&manifest.action_prefix(), &info.id, reach(info.effect))
                 .map_err(|(_, why)| why)
@@ -521,6 +524,40 @@ impl ExtensionApi {
                 self.keep_data(&host, data)?;
                 Ok(Value::Null)
             }
+            HostRequest::Service {
+                service,
+                method,
+                args,
+            } => {
+                self.service(&host, manifest, &may, &service, &method, &args)
+                    .await
+            }
+            HostRequest::Point { point } => {
+                let owns = host
+                    .points()
+                    .declared(&point)
+                    .is_some_and(|d| d.owner == self.id);
+                let check = if owns {
+                    Ok(())
+                } else {
+                    Err((
+                        "points".to_owned(),
+                        format!("{point} is not one of its points ([[points]])"),
+                    ))
+                };
+                Self::decide("points", check)?;
+                Ok(serde_json::to_value(host.points().items(&point)).unwrap_or(Value::Null))
+            }
+            HostRequest::Window { id, open, state } => {
+                Self::decide("windows", Ok(()))?;
+                if open {
+                    host.open_window(&self.id, &id, state)
+                        .map_err(|what| HostError::NotFound { what })?;
+                    Ok(Value::Bool(true))
+                } else {
+                    Ok(Value::Bool(host.close_window(&self.id, &id)))
+                }
+            }
             HostRequest::Log { text, level } => {
                 host.logs().push(
                     &self.id,
@@ -577,6 +614,92 @@ impl ExtensionApi {
             }),
             Err(ActionError::Unknown(id)) => Err(HostError::NotFound {
                 what: format!("action {id}"),
+            }),
+            Err(e) => Err(HostError::Failed {
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    /// A service call: the provider of `service` that meets this
+    /// extension's `[requires]`, its action for `method`, run as this
+    /// extension (for whoever it acts for), within its `effect`.
+    async fn service(
+        &self,
+        host: &Host,
+        manifest: &Manifest,
+        may: &Capabilities,
+        service: &str,
+        method: &str,
+        args: &Value,
+    ) -> Result<Value, HostError> {
+        let req = manifest.requires.get(service).cloned();
+        let check = req.as_ref().map(|_| ()).ok_or_else(|| {
+            (
+                "requires".to_owned(),
+                format!("{} does not require {service} ([requires])", manifest.id),
+            )
+        });
+        Self::decide("requires", check)?;
+        let req = req.unwrap_or_default();
+        let parsed = semver::VersionReq::parse(&req).map_err(|e| HostError::Failed {
+            message: format!("{service} {req}: {e}"),
+        })?;
+        let (provider, version) =
+            host.provider(service, &parsed)
+                .ok_or_else(|| HostError::NotFound {
+                    what: format!("provider of {service} {req}"),
+                })?;
+        let loaded = host.get(&provider).ok_or_else(|| HostError::NotLoaded {
+            id: provider.clone(),
+        })?;
+        let action = crate::interop::method_action(&loaded.manifest.action_prefix(), method);
+        if !loaded.actions.contains(&action) {
+            return Err(HostError::NotFound {
+                what: format!(
+                    "method {method} of {service} ({provider} {version} has no {action})"
+                ),
+            });
+        }
+        let info = host
+            .list_of(&action)
+            .info(&action)
+            .ok_or_else(|| HostError::NotFound {
+                what: format!("action {action}"),
+            })?;
+        let effect = reach(info.effect);
+        let check = if effect > may.effect {
+            Err((
+                "effect".to_owned(),
+                format!(
+                    "{service}.{method} is {}: this extension may run {} actions at most",
+                    effect.name(),
+                    may.effect.name()
+                ),
+            ))
+        } else {
+            Ok(())
+        };
+        Self::decide("effect", check)?;
+        let caller = ActionCaller::new(self.principal())
+            .with_invocation(Invocation::new(InvocationSource::Script));
+        let bytes = if args.is_null() {
+            Vec::new()
+        } else {
+            args.to_string().into_bytes()
+        };
+        match host
+            .list_of(&action)
+            .run_json_async_with(&caller, &action, &bytes)
+            .await
+        {
+            Ok(out) => Ok(serde_json::from_slice(&out).unwrap_or(Value::Null)),
+            Err(ActionError::ConfirmationRequired { id, ticket, .. }) => {
+                Err(HostError::ConfirmationRequired { action: id, ticket })
+            }
+            Err(ActionError::Denied { reason, .. }) => Err(HostError::Refused {
+                capability: "authorizer".to_owned(),
+                why: reason,
             }),
             Err(e) => Err(HostError::Failed {
                 message: e.to_string(),

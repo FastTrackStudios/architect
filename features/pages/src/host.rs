@@ -143,12 +143,18 @@ impl Settings for MemorySettings {
 /// the log and the last few kept ([`AppHost::notices`]).
 pub type Notify = Arc<dyn Fn(&Notice) + Send + Sync>;
 
+/// The action a page calls another extension's service with (it is the
+/// extensions host's: `architect_extensions::interop_actions`).
+const SERVICE_CALL: &str = "EXT_SERVICE_CALL";
+
 /// The page host in process: one per page (its caller and gate are the
 /// page's), the app's parts shared.
 #[derive(Clone)]
 pub struct AppHost {
     list: ActionList,
     caller: ActionCaller,
+    /// The extension whose page it is ([`Self::with_extension`]).
+    extension: Option<String>,
     gate: Option<Gate>,
     theme: Option<Arc<dyn ThemeSource>>,
     shared: SharedState,
@@ -176,6 +182,7 @@ impl AppHost {
         Self {
             list,
             caller: ActionCaller::app(),
+            extension: None,
             gate: None,
             theme: None,
             shared: SharedState::new(),
@@ -189,6 +196,14 @@ impl AppHost {
     #[must_use]
     pub fn with_caller(mut self, caller: ActionCaller) -> Self {
         self.caller = caller;
+        self
+    }
+
+    /// The extension whose page this is: its service calls
+    /// (`EXT_SERVICE_CALL`, `services.call`) are made as it.
+    #[must_use]
+    pub fn with_extension(mut self, id: impl Into<String>) -> Self {
+        self.extension = Some(id.into());
         self
     }
 
@@ -331,7 +346,13 @@ impl PageHost for AppHost {
         if let Some(why) = self.refused(&id) {
             return Err(why);
         }
-        let (list, caller) = (self.list.clone(), self.caller.clone());
+        let (list, mut caller) = (self.list.clone(), self.caller.clone());
+        // A service call is the page's extension's own.
+        if id == SERVICE_CALL
+            && let Some(ext) = &self.extension
+        {
+            caller = ActionCaller::new(architect::action::Principal::extension(ext.clone(), None));
+        }
         let call = {
             let id = id.clone();
             async move {
