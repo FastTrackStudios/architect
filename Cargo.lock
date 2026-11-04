@@ -1145,6 +1145,7 @@ dependencies = [
  "keyflow-ui",
  "lucide-dioxus",
  "serde_json",
+ "tracing",
 ]
 
 [[package]]

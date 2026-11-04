@@ -29,6 +29,8 @@ architect-extensions = { workspace = true, features = ["ui", "remote", "page"] }
 architect-lab-board = { path = "../board" }
 architect-canvas = { workspace = true, features = ["ui", "luau"] }
 architect-scripting = { workspace = true, features = ["luau"] }
+# A slow or busy extension view, to the log (`extensions::LogSlowViews`).
+tracing = { workspace = true }
 # Guided tours of the lab's scenarios, live in the window.
 architect-guide = { workspace = true, features = ["ui"] }
 serde_json = { workspace = true }

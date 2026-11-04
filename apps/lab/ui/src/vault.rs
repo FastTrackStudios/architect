@@ -16,8 +16,8 @@ use architect_workspace::{
 };
 use dioxus::prelude::*;
 use lucide_dioxus::{
-    AudioLines, Bot, CalendarCheck, FileText, Files, Layers, Link, ListTree, MousePointerClick,
-    Network, Puzzle, Search, SlidersHorizontal, SquarePen, SquareTerminal, Terminal,
+    AudioLines, Bot, CalendarCheck, Cpu, FileText, Files, Hourglass, Layers, Link, ListTree,
+    MousePointerClick, Network, Puzzle, Search, SlidersHorizontal, SquarePen, SquareTerminal, Terminal,
 };
 
 /// The lab's views, and the kinds that draw them, with the views loaded
@@ -124,6 +124,25 @@ fn views(extra: Vec<View>) -> Views {
             .home(Target::Split(Side::Right))
             .still(),
         )
+        // The clicker's heavy job: primes counted in a worker, the
+        // window animating all the while; and a naughty window that
+        // spins on its own thread, marked busy.
+        .view(
+            View::new("clicker.heavy", "Heavy job", |_| {
+                rsx! { crate::extensions::HeavyWindow {} }
+            })
+            .icon(icon!(Cpu))
+            .home(Target::Split(Side::Right))
+            .still(),
+        )
+        .view(
+            View::new("clicker.naughty", "Naughty view", |_| {
+                rsx! { crate::extensions::NaughtyWindow {} }
+            })
+            .icon(icon!(Hourglass))
+            .home(Target::Split(Side::Right))
+            .still(),
+        )
         // The clicker's ImGui window: a Luau script from its package,
         // in the app's theme (`theme`, the clicker's own tokens).
         .view(
@@ -179,6 +198,14 @@ fn first_workspace() -> Workspace {
         (Pane::new("clicker", "clicker", "Clicker"), Target::Tab),
         (
             Pane::new("clicker-window", "clicker.window", "Clicker window"),
+            Target::Tab,
+        ),
+        (
+            Pane::new("clicker-heavy", "clicker.heavy", "Heavy job"),
+            Target::Tab,
+        ),
+        (
+            Pane::new("clicker-naughty", "clicker.naughty", "Naughty view"),
             Target::Tab,
         ),
     ];

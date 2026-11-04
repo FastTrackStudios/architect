@@ -13,8 +13,18 @@
 //! themed extension: its theme (Clicker Neon) and its `clicker.*` tokens
 //! go into the lab's theme store while it is loaded (`Host::with_themes`),
 //! its process is sent the theme as data (`ProcessRunner::with_theme`),
-//! and its ImGui window ([`ClickerWindow`], `window.luau` from its
+//! and its `ImGui` window ([`ClickerWindow`], `window.luau` from its
 //! package) reads `theme`.
+//!
+//! It is the lab's responsive extension too: its heavy window
+//! ([`HeavyWindow`], `heavy.luau`) counts primes in a worker
+//! (`workers/primes.luau`, its `[[workers]]`) with a live progress bar and
+//! a spinner that never stops; its naughty window ([`NaughtyWindow`],
+//! `naughty.luau`) spins 300 ms a frame on its own thread, so its pane
+//! shows the busy mark while the rest of the lab answers; its process's
+//! view does the same both ways (`guest::use_work`, and a button that
+//! blocks its view thread). Every such view is measured into the lab's
+//! `Meters` (`EXT_VIEWS`).
 //!
 //! So is Frame's `frame-surface` (FastTrackStudios/frame,
 //! `crates/frame-view`), when it is found ([`frame_surface`]): its view,
@@ -57,9 +67,9 @@ pub fn processes() -> Processes {
     PROCESSES.clone()
 }
 
-/// The clicker's package, past its program: the manifest, its theme and
-/// its ImGui window.
-const CLICKER_FILES: [(&str, &str); 3] = [
+/// The clicker's package, past its program: the manifest, its theme,
+/// its `ImGui` windows and its worker.
+const CLICKER_FILES: [(&str, &str); 6] = [
     (
         "extension.toml",
         include_str!("../../clicker/extension.toml"),
@@ -69,26 +79,68 @@ const CLICKER_FILES: [(&str, &str); 3] = [
         include_str!("../../clicker/themes/clicker-neon.json"),
     ),
     ("window.luau", include_str!("../../clicker/window.luau")),
+    ("heavy.luau", include_str!("../../clicker/heavy.luau")),
+    ("naughty.luau", include_str!("../../clicker/naughty.luau")),
+    (
+        "workers/primes.luau",
+        include_str!("../../clicker/workers/primes.luau"),
+    ),
 ];
 
-/// The clicker's ImGui window's script: from its development copy (a
-/// save there shows when the pane opens again), else the one built in.
-fn clicker_window() -> String {
+/// A file of the clicker's package: from its development copy (a save
+/// there shows when the pane opens again), else the one built in.
+fn clicker_file(path: &str) -> String {
     architect::settings::app_dir("architect-lab")
         .ok()
-        .and_then(|root| {
-            std::fs::read_to_string(root.join("dev").join(CLICKER).join("window.luau")).ok()
+        .and_then(|root| std::fs::read_to_string(root.join("dev").join(CLICKER).join(path)).ok())
+        .or_else(|| {
+            CLICKER_FILES
+                .iter()
+                .find(|(p, _)| *p == path)
+                .map(|(_, text)| (*text).to_owned())
         })
-        .unwrap_or_else(|| include_str!("../../clicker/window.luau").to_owned())
+        .unwrap_or_default()
 }
 
-/// The clicker's window (`window.luau`'s context and name).
-const CLICKER_WINDOW: &str = "clicker/Window";
+/// The clicker's `[[workers]]`, for its windows' scripts.
+fn clicker_workers() -> architect_scripting::worker::Workers {
+    let manifest = architect_extensions::Manifest::parse(&clicker_file("extension.toml")).ok();
+    manifest
+        .iter()
+        .flat_map(|m| m.workers.iter())
+        .filter_map(|w| Some((w.id.clone(), w.script.clone()?)))
+        .fold(
+            architect_scripting::worker::Workers::new(),
+            |workers, (id, path)| workers.with_source(id, clicker_file(&path)),
+        )
+}
 
 /// The Vault's "Clicker window" pane: the clicker's `ImGui` window, a Luau
 /// script the lab runs from its package, in the app's theme.
 #[component]
 pub fn ClickerWindow() -> Element {
+    rsx! { LuauWindow { script: "window.luau", window: "clicker/Window", step: "lab.clicker/window" } }
+}
+
+/// The Vault's "Heavy job" pane: primes counted in a worker, the window
+/// animating and answering all the while.
+#[component]
+pub fn HeavyWindow() -> Element {
+    rsx! { LuauWindow { script: "heavy.luau", window: "heavy/Primes", step: "lab.clicker/heavy" } }
+}
+
+/// The Vault's "Naughty view" pane: 300 ms a frame on its own thread,
+/// marked busy.
+#[component]
+pub fn NaughtyWindow() -> Element {
+    rsx! { LuauWindow { script: "naughty.luau", window: "naughty/Naughty", step: "lab.clicker/naughty" } }
+}
+
+/// One of the clicker's `ImGui` windows: `script` from its package, on a
+/// thread of its own, its workers the package's; `window` the one it
+/// draws, `step` its name (its undo step, its meter in `EXT_VIEWS`).
+#[component]
+fn LuauWindow(script: &'static str, window: &'static str, step: &'static str) -> Element {
     use architect::action::ActionCaller;
     use architect_canvas::ui::{
         WindowEvent, WindowView, style_from_theme, use_canvases, use_script_canvas,
@@ -96,22 +148,23 @@ pub fn ClickerWindow() -> Element {
     let t = architect_shell::use_shell().theme;
     let _canvases = use_canvases();
     let canvas = use_script_canvas(
-        architect_scripting::luau::Runtime::new(ActionList::new()),
+        architect_scripting::luau::Runtime::new(ActionList::new()).with_workers(clicker_workers()),
         ActionCaller::app(),
-        use_hook(clicker_window),
+        use_hook(|| clicker_file(script)),
         serde_json::Value::Null,
-        "Clicker window".to_owned(),
+        step.to_owned(),
         style_from_theme(&t),
     );
-    let window = canvas.output().window(CLICKER_WINDOW).cloned();
-    let failed = canvas.status().error.map(|e| e.to_string());
+    let drawn = canvas.output().window(window).cloned();
+    let status = canvas.status();
+    let failed = status.error.map(|e| e.to_string());
     rsx! {
         div { style: "flex: 1; position: relative; min-height: 0;",
-            match (window, failed) {
-                (Some(window), _) => rsx! {
+            match (drawn, failed) {
+                (Some(drawn), _) => rsx! {
                     WindowView {
-                        window,
-                        on_event: move |e: WindowEvent| canvas.window_event(CLICKER_WINDOW, e),
+                        window: drawn,
+                        on_event: move |e: WindowEvent| canvas.window_event(window, e),
                     }
                 },
                 (None, Some(e)) => rsx! {
@@ -120,6 +173,10 @@ pub fn ClickerWindow() -> Element {
                 (None, None) => rsx! {
                     div { style: "padding: 12px; font-size: 12px; color: {t.ink_3};", "Starting the script…" }
                 },
+            }
+            // Over the window: the last good frame stays, marked.
+            if status.busy {
+                architect_shell::BusyBadge { label: "Busy — showing its last frame" }
             }
         }
     }
@@ -136,6 +193,7 @@ fn clicker(root: &std::path::Path) -> Option<PathBuf> {
     }
     let dir = root.join("dev").join(CLICKER);
     std::fs::create_dir_all(dir.join("themes")).ok()?;
+    std::fs::create_dir_all(dir.join("workers")).ok()?;
     for (path, text) in CLICKER_FILES {
         std::fs::write(dir.join(path), text).ok()?;
     }
@@ -499,8 +557,9 @@ fn builtin() -> Option<Package> {
 /// control socket, MCP): forwarded to the extensions' list, each run there
 /// as whoever ran it on the lab's (the lab's authorizer and confirmation
 /// asked first).
-const FORWARDED: [&str; 28] = [
+const FORWARDED: [&str; 29] = [
     "EXT_LIST",
+    "EXT_VIEWS",
     "EXT_SEARCH",
     "EXT_INSTALL",
     "EXT_UNINSTALL",
@@ -576,6 +635,12 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
     // The extensions manager: its kinds are added below, once what they
     // manage exists (the layouts' in the lab's root).
     let manager = use_hook(Manager::new);
+    // Every extension view's frame times, for the views below and
+    // EXT_VIEWS; a slow or busy view, to the log (an app wires its
+    // status board here: `Meters::with_report`).
+    let meters = use_context_provider(|| {
+        architect_workspace::Meters::new().with_report(Arc::new(LogSlowViews))
+    });
     let (extensions, from_registry) = use_hook(|| {
         // The kinds its views may be: Frame's surface besides Dioxus.
         let mut host =
@@ -633,6 +698,7 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
             }
         }
         let _ = extensions.install_actions();
+        let _ = architect_extensions::views::install_view_actions(&list, meters.clone());
         let _ = extensions.install_contribution_actions();
         // What is wrong with them is in the lab's `APP_STATUS`, and their
         // `EXT_*` actions on the lab's list (the CLI's and MCP's).
@@ -812,6 +878,36 @@ fn use_settings_bridge(values: &LabValues) {
             }
         }
     });
+}
+
+/// Tells the log when an extension view turns slow or busy, and when it
+/// comes back.
+struct LogSlowViews;
+
+impl architect_workspace::ViewReport for LogSlowViews {
+    fn report(
+        &self,
+        view: &str,
+        health: architect_workspace::ViewHealth,
+        summary: &architect_workspace::ViewSummary,
+    ) {
+        use architect_workspace::ViewHealth;
+        let p99_ms = summary.p99.as_secs_f64() * 1000.0;
+        match health {
+            ViewHealth::Busy => tracing::warn!(view, p99_ms, "an extension view is busy"),
+            ViewHealth::Recovered => {
+                tracing::info!(view, p99_ms, "an extension view keeps up again");
+            }
+            // Slow frames are counted (EXT_VIEWS); the first of a run is told.
+            ViewHealth::Slow(took) if summary.slow == 1 => tracing::warn!(
+                view,
+                took_ms = took.as_secs_f64() * 1000.0,
+                budget_ms = summary.budget.as_secs_f64() * 1000.0,
+                "an extension view's frame ran past its budget"
+            ),
+            ViewHealth::Slow(_) => {}
+        }
+    }
 }
 
 /// The Board as a development copy running its program, when
