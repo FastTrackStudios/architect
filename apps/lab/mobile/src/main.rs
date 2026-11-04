@@ -46,6 +46,12 @@ fn App() -> Element {
 }
 
 /// The control socket, when it is wanted and could be bound.
+///
+/// Its MCP face is the desk lab's bridge onto this socket
+/// (`architect-desktop mcp --app <it>/architect-mobile.sock`): an iOS app
+/// has no stdio to serve MCP on. The list is the lab's own
+/// (`architect-lab-ui`), whose parity the desk lab's test checks.
+// surfaces: mcp via apps/lab/desktop
 fn serve_control(list: &ActionList) -> Option<architect_control::server::Serving> {
     let surface = Surface::new("architect-mobile", env!("CARGO_PKG_VERSION"), list.clone())
         .with_principal(Principal::Service {

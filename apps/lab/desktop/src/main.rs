@@ -21,6 +21,7 @@
 //! architect-desktop actions run LAB_STATE --headless
 //! architect-desktop --headless                 # the lab with no window, serving its socket
 //! architect-desktop mcp [--headless]           # MCP on stdio
+//! architect-desktop mcp --app <socket>         # MCP over another running lab (the iOS lab)
 //! architect-desktop actions shot /tmp/lab.png  # the window, drawn by the lab (APP_SHOT)
 //! architect-desktop extensions check <folder>  # EXT_CHECK with no window; nonzero when it fails
 //! ```
@@ -65,7 +66,13 @@ fn main() -> ExitCode {
     match first.as_deref() {
         Some("actions") => return architect_desktop::cli().main(std::env::args_os().skip(1)),
         Some("mcp") => {
-            return architect_desktop::mcp(std::env::args().any(|a| a == "--headless"));
+            let args: Vec<String> = std::env::args().skip(2).collect();
+            let app = args
+                .iter()
+                .position(|a| a == "--app")
+                .and_then(|i| args.get(i + 1))
+                .map(std::path::PathBuf::from);
+            return architect_desktop::mcp(args.iter().any(|a| a == "--headless"), app);
         }
         Some("--headless") => return architect_desktop::serve_headless(),
         Some("extensions") => {

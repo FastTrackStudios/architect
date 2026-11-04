@@ -85,7 +85,8 @@ let serving = Control::new("task", surface)?.serve_if_wanted()?; // keep it aliv
 A desk app that serves MCP for a model running elsewhere gets it from the
 socket: `architect_mcp::bridge::serve_stdio_via(&socket)` is MCP on stdio
 whose every tool call is a request to the running app
-(`architect-desktop mcp`).
+(`architect-desktop mcp`; `--app <socket>` for another running lab's, as
+the iOS lab's, which has no stdio of its own).
 
 ## 3. The `actions` command
 
