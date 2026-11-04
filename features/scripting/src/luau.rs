@@ -32,14 +32,24 @@
 //! Every run is a fresh Luau state: nothing one run sets is seen by the
 //! next (a live script's frames share its one state). Each action runs as the run's [`ActionCaller`], so a model's
 //! script can do exactly what the model may, action by action.
+//!
+//! No script runs on its caller's thread (`crate::vm`): a run takes a
+//! thread of a small pool, a live script has a thread of its own, and
+//! the caller awaits the result — an app's UI thread never waits on a
+//! script, however long it runs. Dropping a run's future stops it.
+//! Heavy work goes to a worker ([`crate::worker`]), a Luau state of its
+//! own on the pool, so a live script's frames keep within their budget
+//! ([`Limits::frame`]).
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 
 use architect::action::{ActionCaller, ActionInfo, ActionList, Effect};
 use mlua::{Lua, LuaSerdeExt, MultiValue, Value as LuaValue};
 use serde_json::{Value, json};
 
+use crate::vm::{self, Cancel, Guard, Stop, Wake};
 use crate::{ErrorKind, ScriptError, Transactions};
 
 /// The Luau binding a [`Module`] is written against: this one, so its
@@ -55,8 +65,17 @@ pub struct Limits {
     /// The most memory its Luau state may hold, in bytes.
     pub memory: usize,
     /// The most steps it may take: Luau counts one at every call and every
-    /// turn of a loop. What stops `while true do end`.
+    /// turn of a loop. What stops `while true do end`. A live script's
+    /// count starts again each frame.
     pub steps: u64,
+    /// The longest one frame of a live script may run ([`Live::frame`]):
+    /// a view that runs past it is stopped, with a message that says to
+    /// hand the work to a worker. Its host shows it busy long before
+    /// (`architect_workspace::ViewMeter`, a frame's 16 ms).
+    pub frame: Duration,
+    /// The longest a run may take in all, `None` for no limit: a worker's
+    /// CPU budget ([`crate::worker`]).
+    pub time: Option<Duration>,
 }
 
 impl Default for Limits {
@@ -64,6 +83,22 @@ impl Default for Limits {
         Self {
             memory: 64 * 1024 * 1024,
             steps: 10_000_000,
+            frame: Duration::from_millis(500),
+            time: None,
+        }
+    }
+}
+
+impl Limits {
+    /// A worker's: far more steps and memory than a script's, and five
+    /// minutes of time.
+    #[must_use]
+    pub const fn worker() -> Self {
+        Self {
+            memory: 256 * 1024 * 1024,
+            steps: 50_000_000_000,
+            frame: Duration::from_millis(500),
+            time: Some(Duration::from_secs(300)),
         }
     }
 }
@@ -272,6 +307,10 @@ impl Runtime {
 
     /// Runs `source` as `caller` with `args`, as one undo step named
     /// `step` ("Script: Arm selected tracks").
+    ///
+    /// It runs on a thread of the pool, never the caller's: awaiting it
+    /// waits on a channel. Dropping the future stops the script at its
+    /// next step.
     pub async fn run(
         &self,
         caller: &ActionCaller,
@@ -279,9 +318,37 @@ impl Runtime {
         args: Value,
         step: &str,
     ) -> Report {
+        let (runtime, caller, source, step) = (
+            self.clone(),
+            caller.clone(),
+            source.to_owned(),
+            step.to_owned(),
+        );
+        let task = vm::run(move |cancel| async move {
+            runtime
+                .run_here(&caller, &source, args, &step, cancel)
+                .await
+        });
+        task.await.unwrap_or_else(|| stopped("its thread stopped"))
+    }
+
+    /// [`Self::run`], on this thread.
+    async fn run_here(
+        &self,
+        caller: &ActionCaller,
+        source: &str,
+        args: Value,
+        step: &str,
+        cancel: Cancel,
+    ) -> Report {
         let trace = Arc::new(Mutex::new(Trace::default()));
-        let steps = Arc::new(AtomicU64::new(0));
-        let result = match self.state(caller, &args, &trace, &steps, false) {
+        let guard = Arc::new(Guard::new(self.limits.steps, vec![cancel.clone()]));
+        guard.deadline(self.limits.time);
+        let owner = Owner {
+            wake: None,
+            cancel: vec![cancel],
+        };
+        let result = match self.state(caller, &args, &trace, &guard, owner, None) {
             Ok(lua) => {
                 let main = load(&lua, source);
                 self.step(step, async { execute(&lua, main?).await }).await
@@ -294,6 +361,10 @@ impl Runtime {
     /// Starts `source` as a live script, as `caller` with `args`: its
     /// first run is one step named `step`, and what it hands `defer` runs
     /// on each [`Live::frame`] after. `None` when the first run failed.
+    ///
+    /// The script lives on a thread of its own, its Luau state with it,
+    /// until the [`Live`] is dropped: its first run and every frame run
+    /// there, the caller awaiting each.
     pub async fn start(
         &self,
         caller: &ActionCaller,
@@ -301,21 +372,32 @@ impl Runtime {
         args: Value,
         step: &str,
     ) -> (Report, Option<Live>) {
-        let trace = Arc::new(Mutex::new(Trace::default()));
-        let steps = Arc::new(AtomicU64::new(0));
-        let lua = match self.state(caller, &args, &trace, &steps, true) {
-            Ok(lua) => lua,
-            Err(e) => return (report((Err(script_error(&e)), None), &trace), None),
+        let (ready, started) = futures::channel::oneshot::channel::<Report>();
+        let (frames, asked) = std::sync::mpsc::channel::<Ask>();
+        let shared = Arc::new(LiveShared::default());
+        let (runtime, caller, source, name) = (
+            self.clone(),
+            caller.clone(),
+            source.to_owned(),
+            step.to_owned(),
+        );
+        let theirs = Arc::clone(&shared);
+        let spawned = std::thread::Builder::new()
+            .name(format!("luau live: {step}"))
+            .spawn(move || {
+                futures::executor::block_on(live_thread(
+                    runtime, caller, source, args, name, theirs, ready, asked,
+                ));
+            });
+        if let Err(e) = spawned {
+            return (stopped(&format!("its thread did not start: {e}")), None);
+        }
+        let Ok(report) = started.await else {
+            return (stopped("its thread stopped"), None);
         };
-        let main = load(&lua, source);
-        let result = self.step(step, async { execute(&lua, main?).await }).await;
-        let started = result.0.is_ok();
-        let report = report(result, &trace);
-        let live = started.then(|| Live {
-            lua,
-            trace,
-            steps,
-            runtime: self.clone(),
+        let live = report.result.is_ok().then(|| Live {
+            frames,
+            shared,
             step: step.to_owned(),
         });
         (report, live)
@@ -342,17 +424,21 @@ impl Runtime {
     }
 
     /// A fresh, sandboxed Luau state with the script's globals — `defer`
-    /// too when it is `live`.
+    /// and `wake_after` too when it is `live`.
     fn state(
         &self,
         caller: &ActionCaller,
         args: &Value,
         trace: &Arc<Mutex<Trace>>,
-        steps: &Arc<AtomicU64>,
-        live: bool,
+        guard: &Arc<Guard>,
+        owner: Owner,
+        live: Option<&Arc<LiveShared>>,
     ) -> mlua::Result<Lua> {
         let lua = Lua::new();
         lua.set_memory_limit(self.limits.memory)?;
+        // What a module's workers answer to: the run's cancel, a live
+        // script's wake.
+        lua.set_app_data(owner);
         let globals = lua.globals();
         globals.set("actions", self.actions_table(&lua, caller, trace)?)?;
         globals.set("state", self.state_table(&lua, caller, trace)?)?;
@@ -393,7 +479,7 @@ impl Runtime {
                 }
             })?,
         )?;
-        if live {
+        if let Some(shared) = live {
             lua.set_named_registry_value(DEFERRED, lua.create_table()?)?;
             globals.set(
                 "defer",
@@ -402,22 +488,19 @@ impl Runtime {
                     deferred.push(f)
                 })?,
             )?;
+            let shared = Arc::clone(shared);
+            globals.set(
+                "wake_after",
+                lua.create_function(move |_, ms: f64| {
+                    shared.ask_tick(ms);
+                    Ok(())
+                })?,
+            )?;
         }
         // From here the globals above are read-only, and what a script
         // sets lives in its own table.
         lua.sandbox(true)?;
-        let steps = Arc::clone(steps);
-        let limit = self.limits.steps;
-        lua.set_interrupt(move |lua| {
-            if steps.fetch_add(1, Ordering::Relaxed) >= limit {
-                return Err(fault(
-                    lua,
-                    ErrorKind::Limit,
-                    format!("ran past its limit of {limit} steps (a loop that never ends?)"),
-                ));
-            }
-            Ok(mlua::VmState::Continue)
-        });
+        interrupt(&lua, Arc::clone(guard));
         Ok(lua)
     }
 
@@ -524,12 +607,99 @@ impl Runtime {
     }
 }
 
-/// A live script ([`Runtime::start`]): one Luau state its frames share.
+/// What a state's workers answer to (its app data): the cancels that
+/// stop its run, and — a live script's — the wake that asks its host for
+/// a frame.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Owner {
+    pub(crate) wake: Option<Wake>,
+    pub(crate) cancel: Vec<Cancel>,
+}
+
+impl Owner {
+    pub(crate) fn gone(&self) -> bool {
+        self.cancel.iter().any(Cancel::is_set)
+    }
+}
+
+/// Stops `lua` at the step its `guard` says to.
+pub(crate) fn interrupt(lua: &Lua, guard: Arc<Guard>) {
+    lua.set_interrupt(move |lua| match guard.step() {
+        None => Ok(mlua::VmState::Continue),
+        Some(Stop::Steps(limit)) => Err(fault(
+            lua,
+            ErrorKind::Limit,
+            format!("ran past its limit of {limit} steps (a loop that never ends?)"),
+        )),
+        Some(Stop::Time(allowed)) => Err(fault(
+            lua,
+            ErrorKind::Limit,
+            format!(
+                "ran past its time of {} ms: hand heavy work to a worker (worker.spawn)",
+                allowed.as_millis()
+            ),
+        )),
+        Some(Stop::Cancelled) => Err(fault(lua, ErrorKind::Limit, "it was stopped".to_owned())),
+    });
+}
+
+/// A report of a run that never got to run.
+fn stopped(why: &str) -> Report {
+    Report {
+        result: Err(ScriptError::new(ErrorKind::Runtime, None, why)),
+        log: Vec::new(),
+        ran: Vec::new(),
+        undo: None,
+    }
+}
+
+/// What a live script's thread and its handle share.
+#[derive(Debug, Default)]
+struct LiveShared {
+    running: AtomicBool,
+    /// Stopped ([`Live::stop`], or dropped): what it deferred never runs,
+    /// and a frame running now stops at its next step.
+    stop: Cancel,
+    wake: Wake,
+    /// The frame it asked for with no input (`wake_after`): ms + 1, 0
+    /// for none.
+    tick: AtomicU64,
+}
+
+impl LiveShared {
+    fn ask_tick(&self, ms: f64) {
+        // Whole milliseconds, far inside u64.
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::as_conversions
+        )]
+        let ms = if ms.is_finite() && ms > 0.0 {
+            ms.min(3.6e6) as u64
+        } else {
+            0
+        };
+        let asked = ms.saturating_add(1);
+        // The soonest ask wins.
+        let _ = self
+            .tick
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |now| {
+                (now == 0 || asked < now).then_some(asked)
+            });
+    }
+}
+
+/// What a [`Live`] asks its thread.
+enum Ask {
+    Frame(futures::channel::oneshot::Sender<Report>),
+}
+
+/// A live script ([`Runtime::start`]): one Luau state its frames share,
+/// on a thread of its own. Dropping it stops the script and ends the
+/// thread; its workers are cancelled.
 pub struct Live {
-    lua: Lua,
-    trace: Arc<Mutex<Trace>>,
-    steps: Arc<AtomicU64>,
-    runtime: Runtime,
+    frames: std::sync::mpsc::Sender<Ask>,
+    shared: Arc<LiveShared>,
     step: String,
 }
 
@@ -542,21 +712,140 @@ impl std::fmt::Debug for Live {
     }
 }
 
+impl Drop for Live {
+    fn drop(&mut self) {
+        self.shared.stop.set();
+    }
+}
+
 impl Live {
     /// Whether it has something to run on the next frame: false once it
     /// stops deferring, or fails, or is stopped.
     #[must_use]
     pub fn running(&self) -> bool {
-        self.lua
-            .named_registry_value::<mlua::Table>(DEFERRED)
-            .is_ok_and(|t| t.raw_len() > 0)
+        self.shared.running.load(Ordering::Acquire) && !self.shared.stop.is_set()
     }
 
     /// Runs what it deferred, in order, as one step (named as its first
     /// run was): each `defer` they call runs on the frame after. Its
-    /// limits start again each frame. One that fails stops the script.
+    /// limits start again each frame; a frame past [`Limits::frame`]
+    /// stops it. One that fails stops the script.
+    ///
+    /// The frame runs on the script's thread; this awaits it.
     pub async fn frame(&self) -> Report {
-        self.steps.store(0, Ordering::Relaxed);
+        let (reply, answer) = futures::channel::oneshot::channel();
+        if self.frames.send(Ask::Frame(reply)).is_err() {
+            return stopped("its thread stopped");
+        }
+        answer
+            .await
+            .unwrap_or_else(|_| stopped("its thread stopped"))
+    }
+
+    /// Stops it: what it deferred never runs, and a frame running now
+    /// stops at its next step.
+    pub fn stop(&self) {
+        self.shared.stop.set();
+        self.shared.running.store(false, Ordering::Release);
+    }
+
+    /// Resolves when it asks for a frame with no input to give it: one of
+    /// its workers posted news. Its host runs one then.
+    pub async fn woken(&self) {
+        self.shared.wake.woken().await;
+    }
+
+    /// The frame it asked for with no input (`wake_after(ms)`): how soon,
+    /// taking the ask. Its host runs one then (an animation's next step).
+    #[must_use]
+    pub fn wake_after(&self) -> Option<Duration> {
+        let asked = self.shared.tick.swap(0, Ordering::AcqRel);
+        (asked > 0).then(|| Duration::from_millis(asked.saturating_sub(1)))
+    }
+}
+
+/// A live script's thread: its first run, then a frame for each ask,
+/// until its [`Live`] is dropped.
+#[allow(clippy::too_many_arguments)]
+async fn live_thread(
+    runtime: Runtime,
+    caller: ActionCaller,
+    source: String,
+    args: Value,
+    step: String,
+    shared: Arc<LiveShared>,
+    ready: futures::channel::oneshot::Sender<Report>,
+    asks: std::sync::mpsc::Receiver<Ask>,
+) {
+    let trace = Arc::new(Mutex::new(Trace::default()));
+    let guard = Arc::new(Guard::new(runtime.limits.steps, vec![shared.stop.clone()]));
+    let owner = Owner {
+        wake: Some(shared.wake.clone()),
+        cancel: vec![shared.stop.clone()],
+    };
+    let lua = match runtime.state(&caller, &args, &trace, &guard, owner, Some(&shared)) {
+        Ok(lua) => lua,
+        Err(e) => {
+            let _ = ready.send(report((Err(script_error(&e)), None), &trace));
+            return;
+        }
+    };
+    let main = load(&lua, &source);
+    let result = runtime
+        .step(&step, async { execute(&lua, main?).await })
+        .await;
+    let started = result.0.is_ok();
+    let vm = LiveVm {
+        lua,
+        trace,
+        guard,
+        runtime,
+        step,
+        shared,
+    };
+    vm.note_running();
+    if ready.send(report(result, &vm.trace)).is_err() || !started {
+        return;
+    }
+    while let Ok(ask) = asks.recv() {
+        match ask {
+            Ask::Frame(reply) => {
+                let report = vm.frame().await;
+                let _ = reply.send(report);
+            }
+        }
+    }
+}
+
+/// A live script's state, on its thread.
+struct LiveVm {
+    lua: Lua,
+    trace: Arc<Mutex<Trace>>,
+    guard: Arc<Guard>,
+    runtime: Runtime,
+    step: String,
+    shared: Arc<LiveShared>,
+}
+
+impl LiveVm {
+    fn note_running(&self) {
+        let due = self
+            .lua
+            .named_registry_value::<mlua::Table>(DEFERRED)
+            .is_ok_and(|t| t.raw_len() > 0);
+        self.shared
+            .running
+            .store(due && !self.shared.stop.is_set(), Ordering::Release);
+    }
+
+    async fn frame(&self) -> Report {
+        if self.shared.stop.is_set() {
+            self.clear();
+            self.note_running();
+            return report((Ok(Value::Null), None), &self.trace);
+        }
+        self.guard.reset();
+        self.guard.deadline(Some(self.runtime.limits.frame));
         let result = self
             .runtime
             .step(&self.step, async {
@@ -570,14 +859,16 @@ impl Live {
                 Ok(Value::Null)
             })
             .await;
+        self.guard.deadline(None);
         if result.0.is_err() {
-            self.stop();
+            self.clear();
         }
+        self.note_running();
         report(result, &self.trace)
     }
 
-    /// Stops it: what it deferred never runs.
-    pub fn stop(&self) {
+    /// What it deferred never runs.
+    fn clear(&self) {
         if let Ok(fresh) = self.lua.create_table() {
             self.lua.set_named_registry_value(DEFERRED, fresh).ok();
         }
@@ -592,7 +883,7 @@ impl Live {
     }
 }
 
-fn load(lua: &Lua, source: &str) -> Result<mlua::Function, ScriptError> {
+pub(crate) fn load(lua: &Lua, source: &str) -> Result<mlua::Function, ScriptError> {
     lua.load(source)
         .set_name(format!("={CHUNK}"))
         .into_function()
@@ -713,7 +1004,7 @@ pub(crate) fn detail(info: &ActionInfo) -> Value {
 }
 
 /// JSON into Luau: `null` is `nil`, an array a sequence.
-fn to_lua(lua: &Lua, value: &Value) -> mlua::Result<LuaValue> {
+pub(crate) fn to_lua(lua: &Lua, value: &Value) -> mlua::Result<LuaValue> {
     let options = mlua::serde::SerializeOptions::new()
         .serialize_none_to_null(false)
         .serialize_unit_to_null(false);
@@ -759,7 +1050,7 @@ fn line_of(lua: &Lua) -> Option<u32> {
 }
 
 /// What stopped a script, with its line, from what Luau raised.
-fn script_error(error: &mlua::Error) -> ScriptError {
+pub(crate) fn script_error(error: &mlua::Error) -> ScriptError {
     if let Some(Fault(found)) = fault_in(error) {
         return found.clone();
     }

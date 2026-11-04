@@ -42,6 +42,7 @@ use peniko::{Color, Fill};
 pub use widget::{PaintMount, PaintPane, PaintWake, PaintWidget, shell_tokens};
 
 use crate::ctx::{Geometry, ThemeTokens, ViewCtx, ViewInput};
+use crate::meter::percentile;
 
 /// A view of the [`PAINT`](crate::PAINT) kind.
 pub trait PaintView: 'static {
@@ -219,18 +220,6 @@ impl FrameStats {
             max: sorted.last().copied().unwrap_or_default(),
         }
     }
-}
-
-/// The nearest-rank `p`th percentile of `sorted`.
-fn percentile(sorted: &[Duration], p: usize) -> Duration {
-    if sorted.is_empty() {
-        return Duration::ZERO;
-    }
-    let rank = sorted.len().saturating_mul(p).div_ceil(100).max(1);
-    sorted
-        .get(rank.saturating_sub(1))
-        .copied()
-        .unwrap_or_default()
 }
 
 /// The host's side of a paint view: its ctx, the view, its frame times.
