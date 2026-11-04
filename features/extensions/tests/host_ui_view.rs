@@ -91,7 +91,10 @@ fn a_badged_file_tree_row_draws_its_icon_and_badge() {
     let html = dioxus_ssr::render(&dom);
     // Its manifest's pin first, then the badge set at run time.
     assert!(html.contains("📌"), "{html}");
-    assert!(html.contains(r#"data-decoration-from="lab.iconize""#), "{html}");
+    assert!(
+        html.contains(r#"data-decoration-from="lab.iconize""#),
+        "{html}"
+    );
     assert!(html.contains(">3</span>"), "{html}");
     assert!(html.contains("var(--primary)"), "{html}");
     let path = golden("badged-file-row.html");
@@ -99,7 +102,12 @@ fn a_badged_file_tree_row_draws_its_icon_and_badge() {
         std::fs::write(&path, &html).unwrap();
     }
     let kept = std::fs::read_to_string(&path).unwrap_or_default();
-    assert_eq!(kept, html, "{} changed: ARCHITECT_GOLDEN=record", path.display());
+    assert_eq!(
+        kept,
+        html,
+        "{} changed: ARCHITECT_GOLDEN=record",
+        path.display()
+    );
 
     // Unloaded, the row is bare again.
     assert!(host.unload("lab.iconize"));
@@ -132,12 +140,14 @@ fn the_window_shows_a_prompt_and_a_menu_and_the_answer_is_the_calls() {
     let asking = std::thread::spawn({
         let api = api.clone();
         move || {
-            block_on(api.call(
-                serde_json::from_value(json!({
-                    "op": "prompt", "kind": "text", "title": "Rename to?", "default": "a.md"
-                }))
-                .unwrap(),
-            ))
+            block_on(
+                api.call(
+                    serde_json::from_value(json!({
+                        "op": "prompt", "kind": "text", "title": "Rename to?", "default": "a.md"
+                    }))
+                    .unwrap(),
+                ),
+            )
         }
     });
     while ui.waiting().is_empty() {
@@ -146,7 +156,10 @@ fn the_window_shows_a_prompt_and_a_menu_and_the_answer_is_the_calls() {
     // Drawn over the window, the extension's name on it.
     let html = drawn(&host);
     assert!(html.contains(r#"data-ext-prompt="text""#), "{html}");
-    assert!(html.contains("Rename to?") && html.contains("Iconize"), "{html}");
+    assert!(
+        html.contains("Rename to?") && html.contains("Iconize"),
+        "{html}"
+    );
     let id = ui.waiting()[0].id;
     ui.answer(id, Some(json!("b.md")));
     assert_eq!(asking.join().unwrap(), Ok(json!("b.md")));
@@ -182,7 +195,10 @@ fn the_window_shows_a_prompt_and_a_menu_and_the_answer_is_the_calls() {
     })
     .unwrap();
     let html = drawn(&host);
-    assert!(html.contains(r#"data-ext-toast="success""#) && html.contains("Icons applied"), "{html}");
+    assert!(
+        html.contains(r#"data-ext-toast="success""#) && html.contains("Icons applied"),
+        "{html}"
+    );
 }
 
 #[test]

@@ -168,14 +168,18 @@ impl Module for HostModule {
                     })
             }
         );
-        op!("notify", (String, Option<String>, Option<String>), |lua, a| Ok(
-            HostRequest::Notify {
+        op!(
+            "notify",
+            (String, Option<String>, Option<String>),
+            |lua, a| Ok(HostRequest::Notify {
                 text: a.0,
                 kind: a.1,
                 title: a.2
-            }
+            })
+        );
+        op!("clipboard_read", (), |lua, _a| Ok(
+            HostRequest::ClipboardRead
         ));
-        op!("clipboard_read", (), |lua, _a| Ok(HostRequest::ClipboardRead));
         op!("clipboard_write", String, |lua, a| Ok(
             HostRequest::ClipboardWrite { text: a }
         ));

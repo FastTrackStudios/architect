@@ -884,10 +884,10 @@ impl Host {
             }),
         };
         // Icons and badges on rows and tabs (`crate::hostui`).
-        let _ = host.inner.points.declare(
-            crate::interop::APP,
-            &[crate::hostui::decorations_point()],
-        );
+        let _ = host
+            .inner
+            .points
+            .declare(crate::interop::APP, &[crate::hostui::decorations_point()]);
         host
     }
 

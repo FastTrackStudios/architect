@@ -124,7 +124,9 @@ pub enum HostRequest {
     /// The clipboard's text (`null` when it holds none).
     ClipboardRead,
     /// Puts `text` on the clipboard.
-    ClipboardWrite { text: String },
+    ClipboardWrite {
+        text: String,
+    },
     /// A picker or a save dialog: what the person picked.
     Pick(Pick),
     /// A question for the person: their answer.

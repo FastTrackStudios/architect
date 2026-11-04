@@ -171,9 +171,15 @@ fn a_tsx_page_notifies_copies_asks_and_gets_the_answers_back() {
     assert!(refused.contains("refused (reads.selection)"), "{refused}");
     wait("the page's notification", || !app.ui.notices().is_empty());
     let n = &app.ui.notices()[0];
-    assert_eq!((n.text.as_str(), n.kind.as_str(), n.from.id.as_str()), ("hello from a page", "success", ID));
+    assert_eq!(
+        (n.text.as_str(), n.kind.as_str(), n.from.id.as_str()),
+        ("hello from a page", "success", ID)
+    );
     let badge = app.ext.host().decorations_of(&Target::file("a.md"));
-    assert_eq!((badge[0].from.as_str(), badge[0].decoration.badge.as_deref()), (ID, Some("P")));
+    assert_eq!(
+        (badge[0].from.as_str(), badge[0].decoration.badge.as_deref()),
+        (ID, Some("P"))
+    );
     assert!(app.ui.asked().iter().all(|q| q.from == ID));
 }
 

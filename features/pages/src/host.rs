@@ -329,10 +329,10 @@ impl AppHost {
             // An extension's page: the app's interface shows it (its
             // `capabilities.ui` holding), off the page's thread.
             let (list, dispatch) = (self.list.clone(), self.dispatch.clone());
-            let caller =
-                ActionCaller::new(architect::action::Principal::extension(ext, None));
-            let body = serde_json::json!({ "op": "notify", "text": notice.text, "kind": notice.kind })
-                .to_string();
+            let caller = ActionCaller::new(architect::action::Principal::extension(ext, None));
+            let body =
+                serde_json::json!({ "op": "notify", "text": notice.text, "kind": notice.kind })
+                    .to_string();
             architect_scripting::vm::spawn(move || {
                 let _ = futures::executor::block_on(dispatch.call(async move {
                     list.run_json_async_with(&caller, PAGE_CALL, body.as_bytes())

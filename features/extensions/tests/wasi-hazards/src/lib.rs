@@ -100,8 +100,9 @@ fn build() -> Extension {
             let clip = host::clipboard_read().map_err(e)?;
             let path = host::pick(&json!({ "kind": "open" })).map_err(e)?;
             let name = host::prompt(&json!({ "kind": "text", "title": "Name?" })).map_err(e)?;
-            let chosen = host::menu(&json!({ "x": 4, "y": 8, "items": [{ "id": "go", "label": "Go" }] }))
-                .map_err(e)?;
+            let chosen =
+                host::menu(&json!({ "x": 4, "y": 8, "items": [{ "id": "go", "label": "Go" }] }))
+                    .map_err(e)?;
             host::decorate("file", "notes/a.md", Some(&json!({ "badge": "W" }))).map_err(e)?;
             Ok(json!({ "clip": clip, "path": path, "name": name, "chosen": chosen }))
         })

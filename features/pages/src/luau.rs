@@ -312,7 +312,9 @@ impl LuauEngine {
                 let items: Value = it.next().map_or(Ok(Value::Null), |v| lua.from_value(v))?;
                 let mut out = it
                     .next()
-                    .map_or(Ok(Value::Object(serde_json::Map::new())), |v| lua.from_value(v))?;
+                    .map_or(Ok(Value::Object(serde_json::Map::new())), |v| {
+                        lua.from_value(v)
+                    })?;
                 if let Value::Object(map) = &mut out {
                     map.insert("items".to_owned(), items);
                 }
@@ -338,7 +340,9 @@ impl LuauEngine {
         )?;
         clipboard.set(
             "read",
-            ask("clipboard_read", |_, _| Ok(Value::Object(serde_json::Map::new())))?,
+            ask("clipboard_read", |_, _| {
+                Ok(Value::Object(serde_json::Map::new()))
+            })?,
         )?;
         clipboard.set(
             "write",

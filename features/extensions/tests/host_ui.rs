@@ -92,7 +92,12 @@ fn app(tmp: &Path, ui: &FakeUi, manifest: &str) -> (ActionList, Extensions) {
     (list, ext)
 }
 
-fn run(list: &ActionList, caller: &ActionCaller, id: &str, args: &Value) -> Result<Value, ActionError> {
+fn run(
+    list: &ActionList,
+    caller: &ActionCaller,
+    id: &str,
+    args: &Value,
+) -> Result<Value, ActionError> {
     block_on(list.run_json_async_with(caller, id, args.to_string().as_bytes()))
         .map(|out| serde_json::from_slice(&out).unwrap_or(Value::Null))
 }
@@ -124,7 +129,11 @@ fn a_luau_extension_notifies_copies_asks_and_gets_the_answers_back() {
     let notices = ui.notices();
     assert_eq!(notices.len(), 1);
     assert_eq!(
-        (notices[0].text.as_str(), notices[0].kind.as_str(), notices[0].from.name.as_str()),
+        (
+            notices[0].text.as_str(),
+            notices[0].kind.as_str(),
+            notices[0].from.name.as_str()
+        ),
         ("hello from Luau", "success", "Ask")
     );
     assert_eq!(ui.clipboard().as_deref(), Some("copied by Luau"));
@@ -154,8 +163,16 @@ fn a_luau_extension_notifies_copies_asks_and_gets_the_answers_back() {
     assert_eq!(targets, ["README.md", "notes/a.md"]);
     // Unloaded, its decorations go with it.
     assert!(ext.host().unload("lab.ask"));
-    assert!(ext.host().decorations_of(&Target::file("notes/a.md")).is_empty());
-    assert!(ext.host().decorations_of(&Target::file("README.md")).is_empty());
+    assert!(
+        ext.host()
+            .decorations_of(&Target::file("notes/a.md"))
+            .is_empty()
+    );
+    assert!(
+        ext.host()
+            .decorations_of(&Target::file("README.md"))
+            .is_empty()
+    );
 }
 
 #[test]
@@ -178,11 +195,23 @@ fn a_file_picked_is_one_it_may_read_and_a_cancel_is_nil() {
         "{read:?}"
     );
     assert_eq!(
-        run(&list, &ActionCaller::app(), "LAB_ASK_READ_PICKED", &Value::Null).unwrap(),
+        run(
+            &list,
+            &ActionCaller::app(),
+            "LAB_ASK_READ_PICKED",
+            &Value::Null
+        )
+        .unwrap(),
         json!("cancelled")
     );
     assert_eq!(
-        run(&list, &ActionCaller::app(), "LAB_ASK_READ_PICKED", &Value::Null).unwrap(),
+        run(
+            &list,
+            &ActionCaller::app(),
+            "LAB_ASK_READ_PICKED",
+            &Value::Null
+        )
+        .unwrap(),
         json!("a,b\n1,2\n")
     );
     // Picked to open, not to write.
@@ -241,8 +270,14 @@ fn every_interface_call_is_refused_outside_its_capabilities() {
         (r#"{"op":"clipboard_read"}"#, "ui.clipboard"),
         (r#"{"op":"clipboard_write","text":"x"}"#, "ui.clipboard"),
         (r#"{"op":"pick","kind":"open"}"#, "ui.pickers"),
-        (r#"{"op":"prompt","kind":"confirm","title":"?"}"#, "ui.prompts"),
-        (r#"{"op":"menu","items":[{"id":"a","label":"A"}]}"#, "ui.menus"),
+        (
+            r#"{"op":"prompt","kind":"confirm","title":"?"}"#,
+            "ui.prompts",
+        ),
+        (
+            r#"{"op":"menu","items":[{"id":"a","label":"A"}]}"#,
+            "ui.menus",
+        ),
         (
             r#"{"op":"decorate","target":{"kind":"tab","id":"note"},"decoration":{"badge":"1"}}"#,
             "ui.badges",
@@ -285,8 +320,12 @@ fn a_headless_host_says_it_cannot_ask() {
     let ext = Extensions::new(host, Installs::new(tmp.path().join("installs")));
     let _ = ext.dev(&package(tmp.path(), MANIFEST));
     let api = ext.host().api("lab.ask");
-    let answer = block_on(api.call(serde_json::from_str(r#"{"op":"pick","kind":"folder"}"#).unwrap()));
-    assert!(matches!(answer, Err(HostError::Unsupported { .. })), "{answer:?}");
+    let answer =
+        block_on(api.call(serde_json::from_str(r#"{"op":"pick","kind":"folder"}"#).unwrap()));
+    assert!(
+        matches!(answer, Err(HostError::Unsupported { .. })),
+        "{answer:?}"
+    );
     // A notification is still its log's.
     block_on(api.call(HostRequest::Notify {
         text: "into the log".to_owned(),

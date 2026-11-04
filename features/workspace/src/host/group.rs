@@ -511,7 +511,11 @@ fn Tab(
     let mounted = menu.clone();
     // What extensions put on it (`TabBadges`), after its name.
     let badges = try_use_context::<super::TabBadges>().and_then(|b| {
-        let kind = host.workspace.peek().pane(&menu).map(|p| p.view.0.clone())?;
+        let kind = host
+            .workspace
+            .peek()
+            .pane(&menu)
+            .map(|p| p.view.0.clone())?;
         Some((b.0)(&kind, &menu.0))
     });
     let label = if pinned {

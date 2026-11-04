@@ -284,7 +284,10 @@ impl Host {
 
     /// The window's interface, kept with the host for whoever draws it,
     /// made by `make` the first time it is asked for.
-    pub(crate) fn window_slot<T: Clone + Send + Sync + 'static>(&self, make: impl FnOnce() -> T) -> T {
+    pub(crate) fn window_slot<T: Clone + Send + Sync + 'static>(
+        &self,
+        make: impl FnOnce() -> T,
+    ) -> T {
         let mut slot = lock(&self.services().window);
         if let Some(kept) = slot.as_ref().and_then(|k| k.downcast_ref::<T>()) {
             return kept.clone();

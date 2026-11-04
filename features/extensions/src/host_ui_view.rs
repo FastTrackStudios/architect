@@ -122,7 +122,11 @@ impl WindowUi {
     /// The questions waiting, the first the one showing.
     #[must_use]
     pub fn waiting(&self) -> Vec<Waiting> {
-        lock(&self.0).waiting.iter().map(|(w, _)| w.clone()).collect()
+        lock(&self.0)
+            .waiting
+            .iter()
+            .map(|(w, _)| w.clone())
+            .collect()
     }
 
     /// The person's answer to question `id` (`None`: cancelled).
@@ -202,10 +206,12 @@ impl HostUi for WindowUi {
         Ok(())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn clipboard_read(&self) -> Result<Option<String>, HostError> {
         crate::hostui::system_clipboard_read()
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn clipboard_write(&self, text: &str) -> Result<(), HostError> {
         crate::hostui::system_clipboard_write(text)
     }

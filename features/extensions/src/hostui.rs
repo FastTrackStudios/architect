@@ -32,7 +32,9 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::hostcall::{Decoration, HostError, HostRequest, Menu, Pick, PickKind, Prompt, PromptKind, Target};
+use crate::hostcall::{
+    Decoration, HostError, HostRequest, Menu, Pick, PickKind, Prompt, PromptKind, Target,
+};
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
@@ -223,10 +225,7 @@ impl HostUi for FakeUi {
             || match prompt.kind {
                 PromptKind::Text => Some(Value::String(prompt.default.unwrap_or_default())),
                 PromptKind::Confirm => Some(Value::Bool(true)),
-                PromptKind::PickOne => prompt
-                    .choices
-                    .first()
-                    .map(|c| Value::String(c.id.clone())),
+                PromptKind::PickOne => prompt.choices.first().map(|c| Value::String(c.id.clone())),
             },
             |v| (!v.is_null()).then_some(v),
         );
@@ -477,7 +476,9 @@ pub fn system_clipboard_write(text: &str) -> Result<(), HostError> {
 #[cfg(test)]
 mod tests {
     use super::{Asker, Decorations, FakeUi, HostUi as _, pick_answer};
-    use crate::hostcall::{Choice, Decoration, Menu, MenuItem, PickKind, Prompt, PromptKind, Target};
+    use crate::hostcall::{
+        Choice, Decoration, Menu, MenuItem, PickKind, Prompt, PromptKind, Target,
+    };
     use futures::executor::block_on;
     use serde_json::{Value, json};
 
@@ -497,9 +498,19 @@ mod tests {
             default: Some("untitled".to_owned()),
             ..Prompt::default()
         };
-        assert_eq!(block_on(ui.prompt(&asker(), text.clone())), Ok(Some(json!("given"))));
-        assert_eq!(block_on(ui.prompt(&asker(), text.clone())), Ok(None), "cancelled");
-        assert_eq!(block_on(ui.prompt(&asker(), text)), Ok(Some(json!("untitled"))));
+        assert_eq!(
+            block_on(ui.prompt(&asker(), text.clone())),
+            Ok(Some(json!("given")))
+        );
+        assert_eq!(
+            block_on(ui.prompt(&asker(), text.clone())),
+            Ok(None),
+            "cancelled"
+        );
+        assert_eq!(
+            block_on(ui.prompt(&asker(), text)),
+            Ok(Some(json!("untitled")))
+        );
         let one = Prompt {
             kind: PromptKind::PickOne,
             choices: vec![Choice {

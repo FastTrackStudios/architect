@@ -378,11 +378,7 @@ mod tests {
             ..Capabilities::default()
         };
         assert!(!asks.asks_nothing());
-        let said: Vec<(&str, String)> = asks
-            .asks()
-            .into_iter()
-            .map(|a| (a.kind, a.what))
-            .collect();
+        let said: Vec<(&str, String)> = asks.asks().into_iter().map(|a| (a.kind, a.what)).collect();
         assert_eq!(
             said,
             vec![("ui", "notify".to_owned()), ("ui", "clipboard".to_owned())]
