@@ -903,7 +903,8 @@ fn lab_pages(
     }
     let pages = architect_pages::runner::Pages::new(host)
         .with_app_dir(&root)
-        .with_js();
+        .with_js()
+        .with_luau();
     // The page API's types, for an editor: the seam the generated guide
     // (#270) will call on every start.
     if let Err(e) = architect_pages::codegen::write_types(&root) {
