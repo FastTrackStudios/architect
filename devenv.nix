@@ -76,8 +76,11 @@ in
   # with the other repos' builds in it (devenv-fleet `fleet.rust.extraTargets`).
   # Node too: jco transpiles a component for the browser
   # (features/extensions/web, `just lab-web`) and its tests run under node.
+  # The current release, not 24: the transpiled components suspend through
+  # JSPI (`WebAssembly.Suspending`), which nixpkgs' node 24 lacks
+  # (features/extensions/tests/wasi_web.rs runs node from here).
   profiles.wasi.module = {
     fleet.rust.extraTargets = [ "wasm32-wasip2" ];
-    packages = [ pkgs.nodejs_24 ];
+    packages = [ pkgs.nodejs_latest ];
   };
 }
