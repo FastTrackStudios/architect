@@ -758,6 +758,11 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         // `EXT_CLONE` puts its copies beside the development ones.
         let mut extensions = Extensions::new(host, Installs::new(root.join("extensions")))
             .with_dev_root(root.join("dev"));
+        // A lab built from a checkout clones its built-ins' crates from it
+        // (EXT_CLONE of lab.board, `architect_extensions::source`).
+        if let Some(checkout) = checkout() {
+            extensions = extensions.with_vendored(ARCHITECT_GIT, checkout);
+        }
         // The Board: one Rust value, linked in as a built-in. The
         // extensions manager is one too.
         if let Ok(with) = extensions.clone().with_linked(&architect_lab_board::Board) {
@@ -1057,6 +1062,16 @@ impl architect_workspace::ViewReport for LabViewReport {
 
 /// The Board as a development copy running its program, when
 /// `ARCHITECT_LAB_BOARD_PROCESS=1` and the program sits beside the lab's.
+/// The repository the lab's built-ins' `[source]` names.
+const ARCHITECT_GIT: &str = "https://github.com/FastTrackStudios/architect";
+
+/// The checkout this lab was built from, while it is there.
+fn checkout() -> Option<PathBuf> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let root = std::fs::canonicalize(root).ok()?;
+    root.join("Cargo.toml").is_file().then_some(root)
+}
+
 fn board_dev(root: &Path) -> Option<PathBuf> {
     if std::env::var_os("ARCHITECT_LAB_BOARD_PROCESS").is_none_or(|v| v != "1") {
         return None;
