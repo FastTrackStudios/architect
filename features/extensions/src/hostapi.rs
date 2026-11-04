@@ -40,7 +40,6 @@ use architect::action::{ActionCaller, ActionError, Invocation, InvocationSource,
 use serde_json::Value;
 use tracing::Instrument as _;
 
-use crate::capabilities::{DOCUMENTS, ORG, SELECTION};
 use crate::catalog::Origin;
 use crate::consent::Grants;
 use crate::host::{Host, Opening, WeakHost};
@@ -401,17 +400,14 @@ impl ExtensionApi {
         }
     }
 
-    fn reads(may: &Capabilities, what: &str) -> Result<(), HostError> {
-        let capability = format!("reads.{what}");
-        let check = if may.may_read(what) {
-            Ok(())
-        } else {
-            Err((
-                capability.clone(),
-                format!("this extension may not read the app's {what} (capabilities.reads)"),
-            ))
-        };
-        Self::decide(&capability, check)
+    /// [`crate::hostcall::check`], recorded on the call's span.
+    fn checked(
+        manifest: &Manifest,
+        may: &Capabilities,
+        request: &HostRequest,
+    ) -> Result<(), HostError> {
+        let (capability, check) = crate::hostcall::check(manifest, may, request, Reach::ReadOnly);
+        Self::decide(capability, check)
     }
 
     async fn answer(&self, request: HostRequest) -> Result<Value, HostError> {
@@ -423,40 +419,42 @@ impl ExtensionApi {
         })?;
         let may = host.capabilities_of(&loaded.manifest, loaded.origin);
         let manifest = &loaded.manifest;
+        if !matches!(request, HostRequest::Run { .. }) {
+            Self::checked(manifest, &may, &request)?;
+        }
         match request {
             HostRequest::Run {
-                action,
-                args,
-                ticket,
+                ref action,
+                ref args,
+                ref ticket,
             } => {
-                self.run(&host, manifest, &may, &action, &args, ticket)
-                    .await
+                self.run(
+                    &host,
+                    manifest,
+                    &may,
+                    &request,
+                    action,
+                    args,
+                    ticket.clone(),
+                )
+                .await
             }
-            HostRequest::Org => {
-                Self::reads(&may, ORG)?;
-                Ok(host
-                    .app_context()
-                    .and_then(|c| c.org())
-                    .unwrap_or(Value::Null))
-            }
-            HostRequest::Selection => {
-                Self::reads(&may, SELECTION)?;
-                Ok(host
-                    .app_context()
-                    .and_then(|c| c.selection())
-                    .unwrap_or(Value::Null))
-            }
-            HostRequest::Open { path } => {
-                Self::reads(&may, DOCUMENTS)?;
-                host.open(
+            HostRequest::Org => Ok(host
+                .app_context()
+                .and_then(|c| c.org())
+                .unwrap_or(Value::Null)),
+            HostRequest::Selection => Ok(host
+                .app_context()
+                .and_then(|c| c.selection())
+                .unwrap_or(Value::Null)),
+            HostRequest::Open { path } => host
+                .open(
                     Opening::Path(path),
                     Invocation::new(InvocationSource::Script),
                 )
                 .await
-                .map_err(|message| HostError::Failed { message })
-            }
+                .map_err(|message| HostError::Failed { message }),
             HostRequest::ReadDocument { path } => {
-                Self::reads(&may, DOCUMENTS)?;
                 match host.app_context().and_then(|c| c.document(&path)) {
                     Some(Ok(text)) => Ok(Value::String(text)),
                     Some(Err(message)) => Err(HostError::Failed { message }),
@@ -491,14 +489,12 @@ impl ExtensionApi {
                 Ok(Value::String(file.display().to_string()))
             }
             HostRequest::Setting { key } => {
-                Self::own_setting(manifest, &key)?;
                 let set = lock(&host.services().values).clone().get(&key);
                 Ok(set
                     .or_else(|| default_of(manifest, &key))
                     .unwrap_or(Value::Null))
             }
             HostRequest::SetSetting { key, value } => {
-                Self::own_setting(manifest, &key)?;
                 if default_of(manifest, &key).is_none() {
                     return Err(HostError::NotFound {
                         what: format!("setting {key} in its manifest"),
@@ -511,12 +507,8 @@ impl ExtensionApi {
                 host.list().changed("settings", &key);
                 Ok(Value::Null)
             }
-            HostRequest::Data { key } => {
-                Self::decide("data", Ok(()))?;
-                Ok(self.data(&host).remove(&key).unwrap_or(Value::Null))
-            }
+            HostRequest::Data { key } => Ok(self.data(&host).remove(&key).unwrap_or(Value::Null)),
             HostRequest::SetData { key, value } => {
-                Self::decide("data", Ok(()))?;
                 let mut data = self.data(&host);
                 match value {
                     Some(v) => {
@@ -546,6 +538,7 @@ impl ExtensionApi {
         host: &Host,
         manifest: &Manifest,
         may: &Capabilities,
+        request: &HostRequest,
         action: &str,
         args: &Value,
         ticket: Option<String>,
@@ -556,10 +549,9 @@ impl ExtensionApi {
             .ok_or_else(|| HostError::NotFound {
                 what: format!("action {action}"),
             })?;
-        let check = may
-            .may_run(&manifest.action_prefix(), action, reach(info.effect))
-            .map_err(|(c, why)| (c.to_owned(), why));
-        Self::decide("actions", check)?;
+        let (capability, check) =
+            crate::hostcall::check(manifest, may, request, reach(info.effect));
+        Self::decide(capability, check)?;
         let mut caller = ActionCaller::new(self.principal())
             .with_invocation(Invocation::new(InvocationSource::Script));
         if let Some(t) = ticket {
@@ -590,21 +582,6 @@ impl ExtensionApi {
                 message: e.to_string(),
             }),
         }
-    }
-
-    fn own_setting(manifest: &Manifest, key: &str) -> Result<(), HostError> {
-        let check = if key.starts_with(&format!("{}.", manifest.id)) {
-            Ok(())
-        } else {
-            Err((
-                "settings".to_owned(),
-                format!(
-                    "{key} is not one of its settings: an extension reads and writes only its own ({}.…)",
-                    manifest.id
-                ),
-            ))
-        };
-        Self::decide("settings", check)
     }
 
     /// Its own folder: `<data root>/<id>`.

@@ -45,7 +45,8 @@
 //! own, spoken to by messages only — parallelism from more instances, not
 //! threads in one.
 //!
-//! Not yet (#167, part 3): WASI 0.3's async and the web (jco).
+//! In a browser the same components run transpiled by jco (`crate::web`,
+//! feature `web`). Not yet: WASI 0.3's async.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::Write as _;

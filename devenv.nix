@@ -74,7 +74,10 @@ in
   # `apps/lab/wasi-counter`) builds for. A profile, not the default shell:
   # an extra target changes the rustc store path, so kache shares nothing
   # with the other repos' builds in it (devenv-fleet `fleet.rust.extraTargets`).
+  # Node too: jco transpiles a component for the browser
+  # (features/extensions/web, `just lab-web`) and its tests run under node.
   profiles.wasi.module = {
     fleet.rust.extraTargets = [ "wasm32-wasip2" ];
+    packages = [ pkgs.nodejs_24 ];
   };
 }

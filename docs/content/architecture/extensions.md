@@ -287,8 +287,9 @@ rendered by the app.
 > of `architect-extensions`, desktop and Android: Wasmtime with the
 > component model and Cranelift, and workers (more instances of a
 > component on a pool). **iOS (2026-11-04, #167 part 3)**: the same
-> runner, workers too, on Wasmtime's Pulley interpreter. The web (the
-> rest of part 3) is next.
+> runner, workers too, on Wasmtime's Pulley interpreter. **The web
+> (2026-11-04, the rest of part 3)** behind the `web` feature: the same
+> components, transpiled by jco, in Web Workers ("On the web" below).
 
 A `kind = "wasm"` extension is a WebAssembly component against the
 `architect:extension` world (`features/extensions/wit/extension.wit`),
@@ -551,9 +552,112 @@ serves its Action List on a control socket as the desk lab does
 `architect-desktop` built with the dev profile (opt-level 1): behind the
 feature, off by default.
 
-**Next.** The rest of part 3: the web (components transpiled with
-jco; a worker there is a Web Worker). Then WASI 0.3's async (`component-model-async`),
-what a component adds at run time (`updates`), and timers in its views.
+### On the web
+
+Wasmtime does not run in a browser (`wasm32-unknown-unknown` has no
+JIT to embed), so the browser's own WebAssembly runs the component
+(`features/extensions/src/web.rs`, feature `web`). The same component
+file the desktop runs is transpiled ahead of time by
+[jco](https://github.com/bytecodealliance/jco) into core wasm modules
+and an `instantiate` function:
+
+```sh
+node features/extensions/web/transpile.mjs my_extension.wasm out/   # jco pinned in features/extensions/web/package.json
+```
+
+**Why jco.** It is the Bytecode Alliance's component-model
+implementation for JS: it lifts and lowers every WIT type the world uses
+(variants, records, lists, results), so the browser runs the component
+the desktop runs, unchanged, with no second build. The alternatives were
+worse: a component runtime compiled to wasm (Wasmtime has no
+interpreter for `wasm32-unknown-unknown`; Pulley in a browser would be
+an interpreter inside the browser's JIT, many times slower), or a
+second guest build for `wasm32-unknown-unknown` with wasm-bindgen
+(another ABI to keep beside the WIT, and not the same artifact). jco
+runs at build time only: the page ships its output, no node. Its
+`--async-mode jspi` makes the imports that wait for the host
+(`run-action`, `setting`, `set-setting`, `call`, `spawn`, `post`,
+`receive`, a sleep) suspend the component with JS Promise Integration
+until the page answers, so the guest stays synchronous, as natively.
+JSPI ships in Chromium browsers (137 on), in Firefox (checked here on
+159) and in node 24; where it is missing (Safari, for now) the component
+does not start, and `WebComponent::start` says why.
+
+**Where it runs.** Each instance is a Web Worker
+(`features/extensions/web/instance.js`); the page's side
+(`features/extensions/web/runner.js`, linked in by wasm-bindgen) is the
+native actor: one call at a time, a trap restarting it fresh, its views'
+panes told. `web::WebComponent` drives it from Rust: `start` (the
+transpiled module's URL and a `web::WebHost`), `register_actions` (onto
+the app's `ActionList`, run as whoever ran them), `mount` (a view under
+a DOM element: the wire's `Edit`s applied to the page's DOM, its events
+sent back as `ViewEvent`s, as `RemoteDocument` does in Blitz), `report`
+and `stop`.
+
+**Capabilities.** Every host import arrives at `web::WebHost` as a
+host-service request (`hostcall::HostRequest`), decided by
+`hostcall::check`, the same function `hostapi::ExtensionApi` decides
+with natively: its manifest's capabilities within what a person granted
+(`WebHost::with_granted`), its own actions refused through
+`run-action`, a worker's host calls refused. App actions run on the
+page's list as `Principal::Extension`. What a browser host lacks it says
+so after the check: no documents or files (`open`, `read_document`,
+`read_file`, `write_file` fail), settings and data in memory. WASI 0.2
+is linked with nothing to reach (no folders, environment or network;
+stdout and stderr lines in its log), and an import of `wasi:sockets` or
+`wasi:http` is refused.
+
+**Limits** (`web::Limits`, the native defaults), and how they differ:
+
+| | native (`wasi`) | browser (`web`) |
+|---|---|---|
+| memory | a `ResourceLimiter` refuses growth past the limit | the limit is written into each core module's memory as its maximum (`runner.js` `limitMemory`), so `memory.grow` fails past it; the guest's allocator then aborts and the instance is ended, `out of memory: …` |
+| time | an epoch tick every 10 ms; past its limit the call traps | no epoch interruption: the page times each call (its clock stops while the page answers a host import) and terminates the Web Worker past its limit, `interrupted: it ran for N ms, past its limit of M ms` |
+| after either | the instance is dropped and started again | the Web Worker is terminated and a new one started (its compiled modules reused) |
+
+A call over its time is stopped within a timer's precision of its
+deadline, not at a 10 ms tick, and because a Web Worker is the sandbox
+that is stopped, a stuck call costs the page nothing while it runs.
+
+**Workers** are Web Workers too, each another instance of the
+component (or of a separate component, `Options::worker_urls`), on a
+pool of at most four running (one fewer than the machine's cores), the
+rest waiting. The messages are the same:
+
+- **Back-pressure** is counted by the page, since a browser's
+  `postMessage` never blocks: each queue holds 64 messages (`QUEUE`, as
+  natively). An owner's `post` to a full one fails at once; a worker's
+  `post` to its owner's full queue suspends it (JSPI) until the owner
+  hears one, which is the native semantics: it waits, and that time is
+  not counted against it.
+- **News** reaches the owner between its calls at most every 16 ms,
+  messages in order, progress coalesced, the end once; at most 8 workers
+  running or waiting.
+- **Cancellation**: `cancel`, its owner trapping and unloading
+  terminate the worker's Web Worker at once, whether it looks at
+  `cancelled()` or not (natively: at its next epoch tick).
+
+**The lab.** `just lab-web` builds the WASI Counter for `wasm32-wasip2`,
+transpiles it, builds `apps/lab/web` (a page that puts the component's
+actions on its own list beside a `THEME_LIST`, mounts its view and shows
+each animation frame's gap) and serves it on :8090. In Firefox the
+counter answers clicks and "Ask the app" reaches the page's list through
+the host service, and counting the primes below 2,000,000 in a worker
+keeps the page at 55 frames a second, its longest frame gap 33 ms.
+
+**Tests.** `features/extensions/web/test/web.test.mjs` runs the
+transpiled components under node (24, JSPI on), each instance in a
+worker thread standing in for a Web Worker: the view and a click, the
+host service and a refused call, both limits, workers (a job beside a
+responsive owner, cancellation, limits alone, both queues'
+back-pressure, `MAX_WORKERS`). `features/extensions/tests/wasi_web.rs`
+runs it from `cargo test` (node from `devenv --profile wasi shell`; it
+says so and passes without node, `ARCHITECT_WASI_WEB_REQUIRED=1` makes
+that a failure).
+
+**Next.** WASI 0.3's async (`component-model-async`, which also lets
+jco drop JSPI), what a component adds at run time (`updates`), and
+timers in its views.
 
 ## Processes over vox
 

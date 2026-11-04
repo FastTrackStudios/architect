@@ -76,6 +76,7 @@ members = [
     "apps/lab/clicker",
     "apps/lab/board",
     "apps/lab/wasi-counter",
+    "apps/lab/web",
     "apps/lab/media",
     # ── story (component workbench) ───────────────────────────────────
     "features/story/architect-story-core",

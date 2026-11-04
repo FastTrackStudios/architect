@@ -1029,6 +1029,7 @@ dependencies = [
  "futures",
  "futures-timer",
  "hex",
+ "js-sys",
  "regex",
  "roxmltree 0.21.2",
  "semver",
@@ -1043,8 +1044,11 @@ dependencies = [
  "vox",
  "vox-core",
  "vox-stream",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
  "wasmtime",
  "wasmtime-wasi",
+ "web-sys",
  "wit-parser 0.261.0",
 ]
 
@@ -1218,6 +1222,19 @@ dependencies = [
  "architect-extension-wasi",
  "dioxus",
  "serde_json",
+]
+
+[[package]]
+name = "architect-lab-web"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-extensions",
+ "js-sys",
+ "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
