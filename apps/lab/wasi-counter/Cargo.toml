@@ -1,0 +1,21 @@
+[package]
+name = "architect-lab-wasi-counter"
+description = "The lab's WASI component extension: a counter view the lab draws and an action that asks the app, in a component built for wasm32-wasip2 (apps/lab/wasi-counter/extension.toml)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+architect-extension-wasi = { workspace = true }
+dioxus = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../../workspace-hack" }

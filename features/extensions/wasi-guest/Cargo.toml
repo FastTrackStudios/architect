@@ -1,0 +1,25 @@
+[package]
+name = "architect-extension-wasi"
+description = "A WASI component extension's side: what a Rust extension built for wasm32-wasip2 calls — its views (Dioxus, drawn by the host), its actions, the host service — against the architect:extension world (features/extensions/wit)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# The world's bindings, generated from features/extensions/wit at build.
+wit-bindgen = { version = "0.63.0", default-features = false, features = ["macros", "realloc", "std"] }
+# Its views: a VirtualDom per open view, its edits the host's
+# (`wire::Edit`, as the world's `edit`).
+dioxus = { workspace = true }
+# Events arrive as data: dioxus-html's serialised kinds.
+dioxus-html = { git = "https://github.com/DioxusLabs/dioxus", rev = "430cfb563f1b70602ef387f0c80f171d84527b41", features = ["serialize"] }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../../workspace-hack" }
