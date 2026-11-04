@@ -14,7 +14,7 @@ description = "Pages as editable files: a view written as TSX/JS on QuickJS, Lua
 # descriptors; `js` runs a page on QuickJS (one runtime per page, on a
 # thread of its own) with TSX transpiled by oxc; `luau` runs Luau element
 # pages; `ui` mounts a page in a pane (a Blitz sub-document, as a process
-# view's), and `a2ui` draws an `.a2ui.json` page.
+# view's). `.a2ui.json` pages are named but not yet run.
 
 [features]
 default = []
@@ -52,7 +52,6 @@ ui = [
     "architect-shell/ui",
     "architect-theme/dioxus",
 ]
-a2ui = ["ui", "dep:architect-a2ui", "architect-a2ui/ui"]
 
 [dependencies]
 architect = { workspace = true, features = ["action-list"] }
@@ -86,7 +85,6 @@ futures-timer = { workspace = true, optional = true }
 architect-shell = { workspace = true, optional = true }
 blitz-dom = { workspace = true, optional = true }
 dioxus-native-dom = { workspace = true, optional = true }
-architect-a2ui = { workspace = true, optional = true }
 
 [dev-dependencies]
 # A window to mount pages in, headless (`tests/pane.rs`).

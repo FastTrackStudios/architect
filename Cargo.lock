@@ -1249,7 +1249,6 @@ name = "architect-pages"
 version = "0.1.0"
 dependencies = [
  "architect",
- "architect-a2ui",
  "architect-extensions",
  "architect-pages",
  "architect-scripting",

@@ -23,7 +23,8 @@
 //! Features: `codegen` writes `architect.d.ts` and `architect.d.luau`
 //! from the services' descriptors; `js` runs TSX/JS pages on `QuickJS`
 //! (oxc transpiles TypeScript and JSX in Rust); `luau` runs Luau element
-//! pages; `ui` mounts a page in a pane; `a2ui` draws `.a2ui.json` pages.
+//! pages; `ui` mounts a page in a pane. (`.a2ui.json` pages are named,
+//! [`PageKind::A2ui`], but no runner draws them yet.)
 
 pub mod api;
 pub mod diff;
