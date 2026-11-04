@@ -1453,9 +1453,32 @@ boundary costs tens of microseconds per action call: fine for anything a
 person does, wrong per frame or per sample, which is why hot paths stay
 native inside the linked extension. Opening a remote view costs about
 25 ms to its first frame, a mount, not a redraw (both remote rows land on
-it, which says it is the mount's fixed cost, not the view's work). A
-process serves 64 view opens per connection today: closed ones are not
-given back, so the benchmark starts it again every 50.
+it, which says it is the mount's fixed cost, not the view's work).
+
+### How many views a process shows
+
+Up to `MAX_VIEWS` (256) at once (`features/extensions/src/wire.rs`
+`MAX_VIEWS`). Each open view is a request in flight on the process's
+stream lane, held while the view lives, and vox caps those per lane (64
+by default): the host opens the lane with room for `MAX_VIEWS` and the
+call lane (a view's events and its close) with four times that, so the
+lanes are never what stops a view. One more than `MAX_VIEWS` is refused
+with an error that says so, shown in the pane's placeholder; closing a
+view makes room once its request ends in the process
+(`Process::open_views` counts them).
+
+A process at wire 6 or later (`VIEWS_WIRE`) ends a view's request when
+the view closes, and the host awaits that answer instead of dropping the
+call (a dropped vox call sends no cancel, and its answer arriving later
+would close the connection). An older process holds every view's request
+for as long as it runs, so its host opens at most `MAX_VIEWS` of its views
+over its connection's life, closed ones counted, then says to restart or
+rebuild it. Before this, the 65th view at once waited forever, and a
+process stopped showing views after 64 opens: the benchmark
+(`apps/lab/board/tests/bench.rs`) started it again every 50; it no longer
+does. `features/extensions/tests/process_views.rs` shows 100 views at once,
+400 more opened and closed, 256 at once, the 257th refused, and the
+place a closed one leaves taken again.
 
 ### The rule: a new user-facing feature is a linked extension
 

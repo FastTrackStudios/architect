@@ -83,6 +83,7 @@ impl architect::Services for Memory {
 ```
 
 - A `StreamSource` provides `<name>_hub` (no filter args) or `<name>_attach(filter, sink)` (with args).
+- **The attach form ends**: its `sink` is a local one (`EventSink::local`, `architect::SUBSCRIPTION_RELAY` deep) relayed onto the wire, and when the backend drops it the request ends, its place on the connection given back. Drop the sink to end a stream (a view closed, a filter's source gone). The hub form holds its request while the client listens. vox caps the requests in flight per lane (64 unless the lane's opener says more, `open_lane_with_settings`): a subscription that never ends keeps one for good.
 - **`<name>_intro`** (hub form only): override `fn <name>_intro(&self) -> Option<Ev>` (default `None`) and the host puts that frame at the front of each new subscriber's mailbox (`PubSub::begin_attach` + `complete_attach(pending, intro)`), over vox and SSE. It closes the gap between "subscribe returned" and "the hub has the sink": without it, anything published in between reaches nobody. Recipe: the intro is a marker carrying the current head revision; the client waits for it, then lists from its cursor. The attach form does the same by hand with `begin_attach` / `complete_attach`.
 - Backend state behind a `Mutex`/`RwLock`: use the poison-tolerant `architect::lock` / `architect::read` / `architect::write` (`crates/architect/src/lock.rs`), not `.lock().unwrap()`.
 - `layers![]` terminates in `Empty` and cons-chains via `Append`.
@@ -139,7 +140,7 @@ EngineHost::new(backend.clone().into_router(), gate, config.bind) // gate: Permi
   }
   ```
 
-  The call stays in flight for the subscription's whole life (the server holds the request open; vox ends a request's channels when its response is delivered), so poll it alongside `rx.recv()`, call first (`biased`): it sends nothing until polled. Dropping the call future unsubscribes. `frame.map(..)` is how the owned value leaves the received frame.
+  The call stays in flight for the subscription's whole life (the server holds the request open; vox ends a request's channels when its response is delivered), so poll it alongside `rx.recv()`, call first (`biased`): it sends nothing until polled. Dropping the call future unsubscribes, but sends no cancel: the server's handler runs on (the attach form's until its backend drops the sink), and an answer to a call the client dropped can arrive after the request id is reused. Where streams churn, await the call to its answer (`features/extensions/src/process.rs` `Process::open`). `frame.map(..)` is how the owned value leaves the received frame.
 
 ## 5. HTTP face: what it can and cannot express
 

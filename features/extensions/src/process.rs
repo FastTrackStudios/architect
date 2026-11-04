@@ -32,7 +32,7 @@ use std::collections::BTreeMap;
 use std::os::unix::process::ExitStatusExt as _;
 use std::path::PathBuf;
 use std::process::{ExitStatus, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -47,7 +47,8 @@ use crate::manifest::{API, ActionDecl, Kind, Manifest};
 use crate::package::Package;
 use crate::proto::{ProcessExtensionClient, ProcessExtensionStreamClient, SOCKET};
 use crate::wire::{
-    CONTRIB_WIRE, Frame, Hello, Open, THEMED_WIRE, ThemeData, Update, ViewEvent, WIRE, WIRE_MIN,
+    CONTRIB_WIRE, Frame, Hello, MAX_VIEWS, Open, THEMED_WIRE, ThemeData, Update, VIEWS_WIRE,
+    ViewEvent, WIRE, WIRE_MIN,
 };
 
 /// How a process that died is started again.
@@ -194,8 +195,68 @@ impl Processes {
 struct Link {
     client: ProcessExtensionClient,
     stream: ProcessExtensionStreamClient,
+    /// Its views: how many it shows, and may.
+    views: Arc<ViewSlots>,
     /// Kept so the connection lives as long as the link.
     _connection: vox_core::ConnectionHandle,
+}
+
+/// The views one connection to a process shows: each is a request in
+/// flight on it, and vox caps those (`crate::wire::VIEWS_WIRE`).
+struct ViewSlots {
+    /// The wire it said at hello.
+    wire: u32,
+    /// Open now.
+    open: AtomicUsize,
+    /// Opened since it connected (what an older process never gives back).
+    opened: AtomicUsize,
+}
+
+impl ViewSlots {
+    const fn new(wire: u32) -> Self {
+        Self {
+            wire,
+            open: AtomicUsize::new(0),
+            opened: AtomicUsize::new(0),
+        }
+    }
+
+    /// One more view for `name`, or why not: [`MAX_VIEWS`] open at once,
+    /// or, from a process older than [`VIEWS_WIRE`], opened since it
+    /// connected (it holds a closed view's request while it runs).
+    fn take(&self, name: &str) -> Result<(), String> {
+        let open = self.open.fetch_add(1, Ordering::AcqRel);
+        let opened = self.opened.fetch_add(1, Ordering::AcqRel);
+        let why = if open >= MAX_VIEWS {
+            Some(format!(
+                "{name} shows {MAX_VIEWS} views already, the most one process extension shows \
+                 at once: close one first"
+            ))
+        } else if self.wire < VIEWS_WIRE && opened >= MAX_VIEWS {
+            Some(format!(
+                "{name} has opened {MAX_VIEWS} views since it started, the most a process at \
+                 wire {} can (it keeps a closed view's place): restart it, or build it against \
+                 wire {VIEWS_WIRE} or later, which gives closed views back",
+                self.wire
+            ))
+        } else {
+            None
+        };
+        why.map_or(Ok(()), |why| {
+            self.open.fetch_sub(1, Ordering::AcqRel);
+            self.opened.fetch_sub(1, Ordering::AcqRel);
+            Err(why)
+        })
+    }
+
+    /// Whether its views' requests end when they close.
+    const fn ends(&self) -> bool {
+        self.wire >= VIEWS_WIRE
+    }
+
+    fn give_back(&self) {
+        self.open.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 /// Something in the app's own process that serves an extension's actions
@@ -262,6 +323,31 @@ impl PartialEq for Process {
         Arc::ptr_eq(&self.inner, &other.inner)
     }
 }
+
+/// The stream lane's settings: room for [`MAX_VIEWS`] views, the update
+/// stream, and 63 more, for an older process's views closed but not yet
+/// heard (a request past the lane's cap closes the connection); vox's
+/// defaults otherwise.
+const STREAM_LANE: vox::ConnectionSettings = vox::ConnectionSettings {
+    parity: vox::Parity::Odd,
+    max_concurrent_requests: 256 + 64,
+    // vox's DEFAULT_INITIAL_CHANNEL_CREDIT.
+    initial_channel_credit: 16,
+};
+
+/// The call lane's settings: a view's events and its close are calls on
+/// it, so it takes [`MAX_VIEWS`] of each at once and the actions' calls,
+/// with room to spare. vox frees a call's place when its answer arrives,
+/// a moment before the process lets the request go, so a lane full to its
+/// cap can be one over in the process (which closes the connection).
+const CLIENT_LANE: vox::ConnectionSettings = vox::ConnectionSettings {
+    parity: vox::Parity::Odd,
+    max_concurrent_requests: 256 * 4,
+    initial_channel_credit: 16,
+};
+
+// The lanes' sizes above are written for this many views.
+const _: () = assert!(MAX_VIEWS == 256);
 
 /// The host's number for each view it mounts.
 static PANES: AtomicU64 = AtomicU64::new(1);
@@ -367,6 +453,18 @@ impl Process {
         self.inner.restart.notify_one();
     }
 
+    /// How many of its views are open: mounted, or closed and not yet
+    /// ended in the process. At most [`MAX_VIEWS`].
+    #[must_use]
+    pub fn open_views(&self) -> usize {
+        self.inner
+            .link
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .map_or(0, |link| link.views.open.load(Ordering::Acquire))
+    }
+
     /// Stops it for good (it is being unloaded).
     pub fn stop(&self) {
         self.inner.stop.send_replace(true);
@@ -447,6 +545,7 @@ impl Process {
             });
         }
         let link = self.link()?;
+        link.views.take(&self.inner.name)?;
         let pane = PANES.fetch_add(1, Ordering::Relaxed);
         let (frames_to, frames) = mpsc::unbounded();
         let (events, mut events_from) = mpsc::unbounded::<ViewEvent>();
@@ -455,26 +554,39 @@ impl Process {
             pane,
         };
         let stream = link.stream.clone();
+        // A process at `VIEWS_WIRE` ends the view's request when the view
+        // closes: the call is awaited to its answer (the frames after the
+        // pane let go dropped), so the request is never abandoned, and its
+        // place is given back then. An older one never answers: the call is
+        // dropped with the pane.
+        let ends = link.views.ends();
+        let slots = Arc::clone(&link.views);
         let streaming = self.inner.rt.spawn(async move {
             let (tx, mut rx) = vox::channel::<Frame>();
             let mut call = std::pin::pin!(stream.view(open, tx));
+            let mut listening = true;
             loop {
                 tokio::select! {
                     biased;
                     _ = &mut call => break,
-                    frame = rx.recv() => match frame {
+                    frame = rx.recv(), if listening => match frame {
                         Ok(Some(frame)) => {
                             let mut got = None;
                             let _ = frame.map(|f| got = Some(f));
                             if let Some(frame) = got
                                 && frames_to.unbounded_send(frame).is_err()
+                                && !ends
                             {
                                 break;
                             }
                         }
+                        _ if ends => listening = false,
                         _ => break,
                     },
                 }
+            }
+            if ends {
+                slots.give_back();
             }
         });
         let client = link.client.clone();
@@ -488,8 +600,17 @@ impl Process {
             pane,
             frames,
             events,
-            tasks: vec![streaming.abort_handle(), forwarding.abort_handle()],
-            close: Some(Closer::Link(self.inner.rt.clone(), link.client)),
+            tasks: if ends {
+                drop(streaming);
+                vec![forwarding.abort_handle()]
+            } else {
+                vec![streaming.abort_handle(), forwarding.abort_handle()]
+            },
+            close: Some(Closer::Link(
+                self.inner.rt.clone(),
+                link.client,
+                (!ends).then_some(link.views),
+            )),
         })
     }
 }
@@ -508,7 +629,14 @@ pub struct ViewSession {
 
 /// How a view is unmounted.
 enum Closer {
-    Link(tokio::runtime::Handle, ProcessExtensionClient),
+    /// Its runtime, its client, and, from a process older than
+    /// `VIEWS_WIRE`, the place to give back once it has heard the close
+    /// (a newer one's view gives its own back as its request ends).
+    Link(
+        tokio::runtime::Handle,
+        ProcessExtensionClient,
+        Option<Arc<ViewSlots>>,
+    ),
     Local(Arc<dyn Local>),
 }
 
@@ -527,9 +655,12 @@ impl Drop for ViewSession {
         }
         let pane = self.pane;
         match self.close.take() {
-            Some(Closer::Link(rt, client)) => {
+            Some(Closer::Link(rt, client, views)) => {
                 rt.spawn(async move {
                     let _ = client.close(pane).await;
+                    if let Some(views) = views {
+                        views.give_back();
+                    }
                 });
             }
             Some(Closer::Local(local)) => local.close(pane),
@@ -629,11 +760,13 @@ async fn launch(id: &str, launch: &Launch) -> Result<Started, String> {
             .await
             .map_err(|e| format!("connecting: {e:?}"))?;
         let client = connection
-            .open_lane::<ProcessExtensionClient>()
+            .open_lane_with_settings::<ProcessExtensionClient>(CLIENT_LANE)
             .await
             .map_err(|e| format!("connecting: {e:?}"))?;
+        // Its streams: every open view is a request in flight on this lane,
+        // and the lane's opener sets how many it takes (vox's default is 64).
         let stream = connection
-            .open_lane::<ProcessExtensionStreamClient>()
+            .open_lane_with_settings::<ProcessExtensionStreamClient>(STREAM_LANE)
             .await
             .map_err(|e| format!("connecting: {e:?}"))?;
         let hello = client
@@ -645,6 +778,7 @@ async fn launch(id: &str, launch: &Launch) -> Result<Started, String> {
             Link {
                 client,
                 stream,
+                views: Arc::new(ViewSlots::new(hello.wire)),
                 _connection: connection,
             },
             hello,

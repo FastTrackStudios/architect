@@ -84,6 +84,14 @@ enum Strategy {
     Unbounded,
 }
 
+/// How many events a `#[subscribe]` stream with arguments holds between
+/// its backend and the wire.
+///
+/// The backend's [`EventSink`] is a local one this deep, relayed onto the
+/// request's channel until the backend drops it (which ends the request;
+/// `architect::rpc`'s stream sibling).
+pub const SUBSCRIPTION_RELAY: usize = 16;
+
 /// Where a subscriber's events go.
 ///
 /// A vox channel (the wire) or a local async channel (an in-process
