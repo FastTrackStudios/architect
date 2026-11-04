@@ -436,6 +436,29 @@ struct Launch {
     args: Vec<String>,
     socket_dir: PathBuf,
     hello_within: Duration,
+    /// Its session with the host service, served on its connection.
+    api: crate::hostapi::ExtensionApi,
+    /// Where its output goes (`EXT_LOGS`).
+    logs: crate::logs::Logs,
+}
+
+/// The host service, served on a process's own connection: its calls
+/// are its own.
+#[derive(Clone)]
+struct HostServed {
+    api: crate::hostapi::ExtensionApi,
+}
+
+impl architect::Services for HostServed {
+    fn layers() -> impl architect::Layer<Self> {
+        architect::layers![crate::host_proto::Service]
+    }
+}
+
+impl crate::host_proto::ExtensionHost for HostServed {
+    async fn call(&self, request: String) -> Result<String, crate::proto::ProcessError> {
+        Ok(self.api.call_json(&request).await)
+    }
 }
 
 /// The socket a start listens on.
@@ -475,11 +498,14 @@ async fn launch(id: &str, launch: &Launch) -> Result<Started, String> {
     };
     // Its output is its log.
     if let Some(out) = child.stdout.take() {
-        tokio::spawn(log_lines(id.to_owned(), out));
+        tokio::spawn(log_lines(id.to_owned(), out, launch.logs.clone(), "stdout"));
     }
     if let Some(err) = child.stderr.take() {
-        tokio::spawn(log_lines(id.to_owned(), err));
+        tokio::spawn(log_lines(id.to_owned(), err, launch.logs.clone(), "stderr"));
     }
+    let served = HostServed {
+        api: launch.api.clone(),
+    };
     let introduced = tokio::time::timeout(launch.hello_within, async {
         let stream = tokio::select! {
             accepted = listener.accept() => accepted.map_err(|e| e.to_string())?,
@@ -487,7 +513,9 @@ async fn launch(id: &str, launch: &Launch) -> Result<Started, String> {
                 return Err(status.map_or_else(|e| e.to_string(), |s| exited(s)));
             }
         };
+        // The host service, for the lane it opens to us.
         let connection = vox_core::initiator_on(vox_stream::StreamLink::unix(stream))
+            .on_lane(architect::Services::into_router(served).acceptor())
             .establish_connection()
             .await
             .map_err(|e| format!("connecting: {e:?}"))?;
@@ -531,10 +559,16 @@ async fn launch(id: &str, launch: &Launch) -> Result<Started, String> {
     }
 }
 
-async fn log_lines(id: String, from: impl tokio::io::AsyncRead + Unpin) {
+async fn log_lines(
+    id: String,
+    from: impl tokio::io::AsyncRead + Unpin,
+    logs: crate::logs::Logs,
+    stream: &'static str,
+) {
     let mut lines = BufReader::new(from).lines();
     while let Ok(Some(line)) = lines.next_line().await {
-        tracing::info!(ext.id = %id, ext.output = %line);
+        tracing::info!(ext.id = %id, ext.stream = stream, ext.output = %line);
+        logs.push(&id, crate::logs::Level::Info, stream, line);
     }
 }
 
@@ -731,6 +765,12 @@ async fn supervise(
                 span.in_scope(|| {
                     tracing::info!(ext.pid = pid, ext.generation = generation, "started");
                 });
+                launch_with.logs.push(
+                    &inner.id,
+                    crate::logs::Level::Info,
+                    "process",
+                    format!("started (pid {pid}, generation {generation})"),
+                );
                 if let Some(first) = first.take() {
                     let _ = first.send(Ok(()));
                 }
@@ -777,6 +817,12 @@ async fn supervise(
             Err(why) => {
                 if let Some(first) = first.take() {
                     // It never ran: the load fails, the last good copy stays.
+                    launch_with.logs.push(
+                        &inner.id,
+                        crate::logs::Level::Error,
+                        "process",
+                        format!("did not start: {why}"),
+                    );
                     let _ = first.send(Err(why));
                     inner.state.send_replace(State::Stopped);
                     return;
@@ -786,6 +832,16 @@ async fn supervise(
         };
         attempts = attempts.saturating_add(1);
         let restarting = attempts <= restart.attempts;
+        launch_with.logs.push(
+            &inner.id,
+            crate::logs::Level::Error,
+            "process",
+            if restarting {
+                format!("{why}; restarting")
+            } else {
+                why.clone()
+            },
+        );
         span.in_scope(|| tracing::warn!(ext.why = %why, ext.restarting = restarting, "exited"));
         inner.state.send_replace(State::Exited { why, restarting });
         if restarting {
@@ -956,6 +1012,8 @@ impl Runner for ProcessRunner {
             args: manifest.entry.args.clone(),
             socket_dir: self.socket_dir.clone(),
             hello_within: self.hello_within,
+            api: cx.api.clone(),
+            logs: cx.logs.clone(),
         };
         let process = Process {
             inner: Arc::new(Inner {

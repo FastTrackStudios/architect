@@ -47,12 +47,27 @@ use serde_json::Value as Json;
 
 use crate::contrib::{Contribution, StateWrite};
 
+/// A host-service call's answer, to await.
+pub type HostFuture =
+    Pin<Box<dyn Future<Output = Result<Json, crate::hostcall::HostError>> + Send>>;
+
 /// Where an extension's runtime additions go: the host's registry when it
 /// is linked in, the host over the wire when it runs as a process.
 pub trait Sink: Send + Sync {
     fn contribute(&self, contribution: Contribution);
     fn set_state(&self, write: StateWrite);
     fn clear_state(&self, key: Option<&str>);
+
+    /// One call to the host service (`crate::hostcall`): the host's own
+    /// session when linked in, the connection's when a process.
+    fn host(&self, request: crate::hostcall::HostRequest) -> HostFuture {
+        let _ = request;
+        Box::pin(async {
+            Err(crate::hostcall::HostError::Failed {
+                message: "no host service here".to_owned(),
+            })
+        })
+    }
 }
 
 /// An extension's way to add to the interface at run time, the same
@@ -84,6 +99,23 @@ impl Handle {
             .0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(sink);
+    }
+
+    /// Asks the host service (`crate::hostcall`): the same call linked in
+    /// or as a process.
+    ///
+    /// It runs an app action, reads the selection or a setting, keeps data,
+    /// checked against what the extension may reach. Before the extension
+    /// runs, it is refused.
+    pub fn host(&self, request: crate::hostcall::HostRequest) -> HostFuture {
+        match self.sink() {
+            Some(s) => s.host(request),
+            None => Box::pin(async {
+                Err(crate::hostcall::HostError::Failed {
+                    message: "the extension is not running yet".to_owned(),
+                })
+            }),
+        }
     }
 
     /// What it adds at run time now, in place of what it added before.
@@ -285,6 +317,9 @@ impl crate::guest::Guest {
             }
             fn clear_state(&self, key: Option<&str>) {
                 crate::guest::clear_state(key);
+            }
+            fn host(&self, request: crate::hostcall::HostRequest) -> HostFuture {
+                Box::pin(crate::guest::host(request))
             }
         }
         let built = Builder::of(extension);

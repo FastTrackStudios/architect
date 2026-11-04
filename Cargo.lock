@@ -959,9 +959,11 @@ dependencies = [
  "architect-commands",
  "architect-extensions",
  "architect-orgs",
+ "architect-permissions",
  "architect-scripting",
  "architect-settings",
  "architect-shell",
+ "architect-telemetry",
  "architect-theme",
  "architect-workspace",
  "architect-workspace-hack",
@@ -1088,12 +1090,15 @@ dependencies = [
  "architect",
  "architect-canvas",
  "architect-extensions",
+ "architect-permissions",
  "architect-scripting",
+ "architect-settings",
  "architect-theme",
  "architect-workspace-hack",
  "dioxus",
  "futures",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

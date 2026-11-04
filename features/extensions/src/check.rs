@@ -401,6 +401,7 @@ pub(crate) fn manifest_fields(error: &ManifestError) -> (Option<String>, Option<
         ManifestError::BadToken { token, .. } => (Some(format!("tokens[{token}]")), None),
         // `opener kf`, `hook startup`: what the contribution was.
         ManifestError::Contribution(refused) => (Some(refused.what.clone()), None),
+        ManifestError::BadCapability(_) => (Some("capabilities".to_owned()), None),
     };
     let message = match error {
         // TOML's own text carries a drawing of the line; the message is

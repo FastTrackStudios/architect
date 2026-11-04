@@ -12,6 +12,7 @@
 //! [capabilities]
 //! actions = ["TRANSPORT_"]   # namespaces it may run, past its own
 //! effect = "read_only"       # the most it may change
+//! reads = ["selection"]      # app state it may read (org, selection, documents)
 //!
 //! [[actions]]
 //! id = "FTS_METRONOME_COUNT_IN"
@@ -95,7 +96,9 @@ impl Kind {
 
 /// What an action does to the app, as a manifest says it: the same three
 /// steps as the Action List's `Effect`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Reach {
     #[default]
@@ -116,7 +119,11 @@ impl Reach {
 }
 
 /// What it asks to reach, granted when it is installed.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+///
+/// The person sees it then, and again on an update that asks for more
+/// (`crate::consent`). What it may do through the host service
+/// (`crate::hostapi`) is checked against what was granted of this.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Capabilities {
     /// The action id prefixes it may run, past its own namespace
@@ -128,6 +135,10 @@ pub struct Capabilities {
     pub hosts: Vec<String>,
     /// The folders it may read and write, past its own.
     pub folders: Vec<String>,
+    /// What of the app's state it may read through the host service:
+    /// `org` (the current organization), `selection` (what is selected
+    /// and focused), `documents` (open and read the app's documents).
+    pub reads: Vec<String>,
 }
 
 /// One action it adds.
@@ -474,6 +485,8 @@ pub enum ManifestError {
     /// event, target or slot; an action outside its reach; a pattern that
     /// does not compile).
     Contribution(Refused),
+    /// A capability it asks for is not one there is.
+    BadCapability(String),
 }
 
 impl std::fmt::Display for ManifestError {
@@ -495,6 +508,7 @@ impl std::fmt::Display for ManifestError {
             Self::Duplicate(id) => write!(f, "{id} is declared twice"),
             Self::BadToken { token, why } => write!(f, "theme token {token}: {why}"),
             Self::Contribution(r) => r.fmt(f),
+            Self::BadCapability(why) => write!(f, "capabilities: {why}"),
             Self::BadPlane { overlay, plane } => {
                 write!(
                     f,
@@ -549,6 +563,17 @@ impl Manifest {
                 wants: self.api.clone(),
                 have: API,
             });
+        }
+        if let Some(bad) = self
+            .capabilities
+            .reads
+            .iter()
+            .find(|r| !crate::capabilities::READS.contains(&r.as_str()))
+        {
+            return Err(ManifestError::BadCapability(format!(
+                "reads {bad:?}: not one of {}",
+                crate::capabilities::READS.join(", ")
+            )));
         }
         let prefix = self.action_prefix();
         let mut seen = std::collections::BTreeSet::new();

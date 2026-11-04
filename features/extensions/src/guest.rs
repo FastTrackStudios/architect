@@ -275,9 +275,59 @@ impl Guest {
             .establish_connection()
             .await
             .map_err(|e| GuestError::Connect(format!("{e:?}")))?;
+        // The host service, the other way (a host from before it serves
+        // none: `host` says so).
+        if let Ok(client) = connection
+            .open_lane::<crate::host_proto::ExtensionHostClient>()
+            .await
+        {
+            *host_slot().lock().unwrap_or_else(PoisonError::into_inner) = Some(client);
+        }
         connection.closed().await;
+        host_slot()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
         Ok(())
     }
+}
+
+fn host_slot() -> &'static Mutex<Option<crate::host_proto::ExtensionHostClient>> {
+    static HOST: OnceLock<Mutex<Option<crate::host_proto::ExtensionHostClient>>> = OnceLock::new();
+    HOST.get_or_init(|| Mutex::new(None))
+}
+
+/// Asks the host service (`crate::hostcall`), from anywhere in the
+/// process once it is connected.
+///
+/// It runs an app action, reads the selection or a setting, keeps data —
+/// checked by the host against what this extension may reach.
+///
+/// # Errors
+///
+/// The host refused or failed, or there is no host to ask (not connected
+/// yet, or a host that serves no host service).
+pub async fn host(
+    request: crate::hostcall::HostRequest,
+) -> Result<Json, crate::hostcall::HostError> {
+    let client = host_slot()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()
+        .ok_or_else(|| crate::hostcall::HostError::Failed {
+            message: "no host service: not connected, or the host serves none".to_owned(),
+        })?;
+    let text = serde_json::to_string(&request).map_err(|e| crate::hostcall::HostError::Failed {
+        message: e.to_string(),
+    })?;
+    let answer = client
+        .call(text)
+        .await
+        .map_err(architect::vox_into_app::<ProcessError>)
+        .map_err(|e| crate::hostcall::HostError::Failed {
+            message: format!("the host service: {e}"),
+        })?;
+    crate::hostcall::HostAnswer::from_json(&answer).into_result()
 }
 
 /// The views open now, by pane: where their events go.

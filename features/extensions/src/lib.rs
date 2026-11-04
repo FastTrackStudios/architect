@@ -37,8 +37,10 @@
 // stale compare only redraws.
 #![cfg_attr(feature = "ui", allow(unpredictable_function_pointer_comparisons))]
 
+pub mod capabilities;
 pub mod catalog;
 pub mod contrib;
+pub mod hostcall;
 pub mod index;
 pub mod manifest;
 pub mod package;
@@ -52,6 +54,8 @@ pub mod check;
 #[cfg(feature = "host")]
 pub mod clone;
 #[cfg(feature = "host")]
+pub mod consent;
+#[cfg(feature = "host")]
 pub mod contrib_actions;
 #[cfg(feature = "crdt")]
 pub mod doc;
@@ -61,12 +65,20 @@ pub mod extensions;
 pub mod guest;
 #[cfg(feature = "host")]
 pub mod host;
+#[cfg(feature = "vox")]
+pub mod host_proto;
+#[cfg(feature = "host")]
+pub mod hostapi;
 #[cfg(feature = "host")]
 pub mod install;
 #[cfg(feature = "ui")]
 pub mod interface;
 #[cfg(any(feature = "linked", all(feature = "guest", unix)))]
 pub mod linked;
+#[cfg(feature = "host")]
+pub mod logs;
+#[cfg(feature = "host")]
+mod luau_host;
 #[cfg(all(feature = "process", unix))]
 pub mod process;
 #[cfg(feature = "vox")]
