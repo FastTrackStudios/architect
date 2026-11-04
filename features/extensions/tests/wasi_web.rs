@@ -8,10 +8,12 @@
 //! worker, a capped memory), workers, cancellation and both queues'
 //! back-pressure.
 //!
-//! It needs node (in `devenv --profile wasi shell`) and jco
-//! (`npm ci` in `features/extensions/web`, run here when it is missing).
-//! Without them, or without the components, it says so and passes;
-//! `ARCHITECT_WASI_WEB_REQUIRED=1` makes that a failure.
+//! It needs node and jco (`npm ci` in `features/extensions/web`, run here
+//! when it is missing): node from the PATH, else from `devenv --profile
+//! wasi shell`, which has it (as the components are built there when this
+//! toolchain lacks `wasm32-wasip2`). Without them, or without the
+//! components, it says so and passes; `ARCHITECT_WASI_WEB_REQUIRED=1`
+//! (main CI) makes that a failure.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -35,6 +37,22 @@ fn has(program: &str) -> bool {
         .arg("--version")
         .output()
         .is_ok_and(|o| o.status.success())
+}
+
+/// `program` (node, npm) from the PATH, else from the `wasi` dev profile;
+/// `None` when neither has it.
+fn tool(program: &str) -> Option<Command> {
+    if has(program) {
+        return Some(Command::new(program));
+    }
+    let mut cmd = Command::new("devenv");
+    cmd.args(["--profile", "wasi", "shell", "--", program]);
+    let found = Command::new("devenv")
+        .args(["--profile", "wasi", "shell", "--", program, "--version"])
+        .current_dir(root())
+        .output()
+        .is_ok_and(|o| o.status.success());
+    found.then_some(cmd)
 }
 
 /// The two components, built as `tests/wasi.rs` builds them.
@@ -77,12 +95,15 @@ fn guests() -> Option<PathBuf> {
 
 #[test]
 fn components_run_in_the_browsers_shape() {
-    if !has("node") {
-        return skip("no node on the PATH (devenv --profile wasi shell has it)");
-    }
+    let Some(mut node) = tool("node") else {
+        return skip("no node on the PATH or in `devenv --profile wasi shell`");
+    };
     let web = root().join("features/extensions/web");
     if !web.join("node_modules/.bin/jco").exists() {
-        let installed = Command::new("npm")
+        let Some(mut npm) = tool("npm") else {
+            return skip("no npm to install jco with");
+        };
+        let installed = npm
             .args(["ci", "--silent", "--no-audit", "--no-fund"])
             .current_dir(&web)
             .status();
@@ -91,7 +112,7 @@ fn components_run_in_the_browsers_shape() {
         }
     }
     let Some(guests) = guests() else { return };
-    let out = Command::new("node")
+    let out = node
         .args(["--test", "--test-reporter=tap", "test/web.test.mjs"])
         .env("ARCHITECT_WASI_GUESTS", &guests)
         .current_dir(&web)
