@@ -161,6 +161,79 @@ pub fn find_override(app_dir: &Path, extension: &str, view: &str) -> Option<Page
         .and_then(|p| PageFile::new(p, Origin::Override))
 }
 
+/// Every page file under `app_dir`'s `pages/`, as `(extension, view,
+/// file)`.
+///
+/// `pages/<extension>/<view>.<ext>`, and `pages/<view>.<ext>` with no
+/// extension (it overrides that view of any). The built-ins'
+/// read-only copies (`pages/.builtin/`) are not overrides and are left
+/// out, as are `.error` files and names no kind ends with.
+#[must_use]
+pub fn overrides(app_dir: &Path) -> Vec<(String, String, PageFile)> {
+    let pages = app_dir.join(PAGES);
+    let mut out = Vec::new();
+    let mut at = |dir: &Path, extension: &str| {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            let view = PageKind::ALL
+                .into_iter()
+                .find_map(|k| name.strip_suffix(&format!(".{}", k.extension())));
+            if let (Some(view), Some(page)) = (view, PageFile::new(&path, Origin::Override))
+                && !view.is_empty()
+                && !view.starts_with('.')
+            {
+                out.push((extension.to_owned(), view.to_owned(), page));
+            }
+        }
+    };
+    at(&pages, "");
+    if let Ok(entries) = std::fs::read_dir(&pages) {
+        let mut dirs: Vec<PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.is_dir())
+            .collect();
+        dirs.sort();
+        for dir in dirs {
+            let Some(name) = dir.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if !name.starts_with('.') {
+                at(&dir, name);
+            }
+        }
+    }
+    out.sort_by(|a, b| (&a.0, &a.1).cmp(&(&b.0, &b.1)));
+    out
+}
+
+/// Removes the override `page` (and its `.error`): the view shows its own
+/// page, or its compiled view, again. What it imports stays.
+///
+/// # Errors
+///
+/// It is not an override, or it could not be removed.
+pub fn remove_override(page: &PageFile) -> std::io::Result<()> {
+    if page.origin != Origin::Override {
+        return Err(std::io::Error::other(format!(
+            "{} is not an override",
+            page.path.display()
+        )));
+    }
+    std::fs::remove_file(&page.path)?;
+    clear_error(page);
+    Ok(())
+}
+
 /// Where an override for `extension`'s view `view` of kind `kind` goes.
 #[must_use]
 pub fn override_path(app_dir: &Path, extension: &str, view: &str, kind: PageKind) -> PathBuf {

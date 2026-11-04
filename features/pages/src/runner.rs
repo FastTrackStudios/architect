@@ -617,6 +617,147 @@ impl Pages {
     }
 }
 
+impl Pages {
+    /// Loads the page file at `path` and renders it once ([`Self::check`]):
+    /// `EXT_CHECK`'s page half for an extension's `[[views]] page`.
+    ///
+    /// # Errors
+    ///
+    /// It is not a page file, or why it would not load or render.
+    pub fn check_file(&self, path: &Path) -> Result<Checked, String> {
+        let page = PageFile::new(path, files::Origin::Extension).ok_or_else(|| {
+            format!(
+                "{}: not a page file (.tsx, .ts, .jsx, .js, .luau)",
+                path.display()
+            )
+        })?;
+        self.check(&page)
+    }
+
+    /// Every page the app knows of now, by extension and view: the ones
+    /// declared ([`Self::declare`]), the overrides in its folder and the
+    /// ones running — each with the file it shows, its own, whether an
+    /// override wins, how it runs and what is wrong with it.
+    #[must_use]
+    pub fn entries(&self) -> Vec<PageEntry> {
+        let declared = lock(&self.0.declared).clone();
+        let overrides = self
+            .0
+            .app_dir
+            .as_deref()
+            .map(files::overrides)
+            .unwrap_or_default();
+        let running = self.running();
+        let mut keys: Vec<(String, String)> = declared.keys().cloned().collect();
+        for (extension, view, _) in &overrides {
+            // A file a built-in's page imports, cloned beside it, is not a
+            // view's override.
+            let theirs = declared.keys().any(|(e, _)| e == extension);
+            if !theirs || declared.contains_key(&(extension.clone(), view.clone())) {
+                keys.push((extension.clone(), view.clone()));
+            }
+        }
+        keys.extend(
+            running
+                .iter()
+                .map(|r| (r.extension.clone(), r.view.clone())),
+        );
+        keys.sort();
+        keys.dedup();
+        keys.into_iter()
+            .filter_map(|(extension, view)| {
+                let own = declared.get(&(extension.clone(), view.clone())).cloned();
+                let over = overrides
+                    .iter()
+                    .find(|(e, v, _)| (e == &extension || e.is_empty()) && v == &view)
+                    .map(|(_, _, p)| p.clone());
+                let status = running
+                    .iter()
+                    .rev()
+                    .find(|r| r.extension == extension && r.view == view)
+                    .cloned();
+                let shown = over
+                    .clone()
+                    .or_else(|| status.as_ref().map(|s| s.page.clone()))
+                    .or_else(|| own.clone())?;
+                let error = status.as_ref().and_then(|s| s.error()).or_else(|| {
+                    shown
+                        .editable()
+                        .then(|| std::fs::read_to_string(shown.error_path()).ok())
+                        .flatten()
+                        .map(|e| e.trim_end().to_owned())
+                        .filter(|e| !e.is_empty())
+                });
+                Some(PageEntry {
+                    extension,
+                    view,
+                    overridden: over.is_some(),
+                    shown,
+                    own,
+                    status,
+                    error,
+                })
+            })
+            .collect()
+    }
+
+    /// What is wrong with the pages now, as the app's problems: each page
+    /// that is not the page as saved (running, or its `<file>.error` from
+    /// its last run) — source `page`, its file, its view as the field.
+    #[must_use]
+    pub fn status_problems(&self) -> Vec<architect::action::Problem> {
+        self.entries()
+            .into_iter()
+            .filter_map(|e| {
+                let error = e.error.as_ref()?;
+                Some(
+                    architect::action::Problem::new("page", format!("{}: {error}", e.name()))
+                        .file(e.shown.path.display().to_string())
+                        .field(e.name()),
+                )
+            })
+            .collect()
+    }
+
+    /// Lists [`Self::status_problems`] in `problems` (the app's
+    /// `APP_STATUS`), asked at every read.
+    pub fn report_problems(&self, problems: &architect::action::Problems) {
+        let me = self.clone();
+        problems.source("pages", move || me.status_problems());
+    }
+}
+
+/// One view's page as [`Pages::entries`] lists it.
+#[derive(Clone, Debug)]
+pub struct PageEntry {
+    /// Its extension (empty: an override for this view of any).
+    pub extension: String,
+    pub view: String,
+    /// The file it shows now: the override when there is one.
+    pub shown: PageFile,
+    /// Its own page (declared: a built-in's read-only copy, an
+    /// extension's).
+    pub own: Option<PageFile>,
+    /// An override in the app's folder wins.
+    pub overridden: bool,
+    /// How it runs, while it is open in a pane.
+    pub status: Option<Arc<PageStatus>>,
+    /// Why it is not the page as saved, if so.
+    pub error: Option<String>,
+}
+
+impl PageEntry {
+    /// `extension/view` (`view` alone for an override of any).
+    #[must_use]
+    pub fn name(&self) -> String {
+        if self.extension.is_empty() {
+            self.view.clone()
+        } else {
+            format!("{}/{}", self.extension, self.view)
+        }
+    }
+}
+
 /// A page's thread.
 struct PageThread {
     status: Arc<PageStatus>,

@@ -18,6 +18,10 @@
 //! | `theme` | every theme in the app's `ThemeStore`: built in, a file, an extension's; its problems | use, clone (a file's), remove (a file's) |
 //! | `layout` | `layouts/<name>.json` and `keys.json` (`Home`), built-ins read-only, a broken file's `.error` | use, clone, remove |
 //!
+//! `architect-pages` adds `pages` (`architect_pages::manage::PagesKind`):
+//! every view's page file and override, its status and problems; check,
+//! clone to edit, remove the override.
+//!
 //! **An app adds a kind** by implementing [`ItemKind`] and calling
 //! [`Manager::register`] (Studio's audio plugins, a `QuickJS` page kind,
 //! a WASI component kind): its items show in the same list and search, its

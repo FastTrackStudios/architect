@@ -18,10 +18,15 @@
 //!    Blitz document and laid out; a view of a kind the app's provider
 //!    draws is checked to have one, and said not to be rendered here.
 //!
-//! Then it is unloaded and its process stopped.
+//! Then it is unloaded and its process stopped. A view drawn from a page
+//! file (`[[views]] page`) is checked by the app's page runner when it
+//! gave one ([`Checker::with_page_checker`], `architect_pages`'
+//! `Pages::check_file`): the file loaded and rendered once, its error
+//! (with its line) a `page` problem.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use architect::action::ActionList;
@@ -147,11 +152,40 @@ impl SectionSink for Discard {
     fn withdraw(&self, _: &str) {}
 }
 
+/// How an app checks a page file: loads the file at the path and renders
+/// it once, answering how many nodes it drew or why it would not. Cheap
+/// to clone.
+#[derive(Clone)]
+pub struct PageChecker(Arc<dyn Fn(&Path) -> Result<u32, String> + Send + Sync>);
+
+impl PageChecker {
+    #[must_use]
+    pub fn new(check: impl Fn(&Path) -> Result<u32, String> + Send + Sync + 'static) -> Self {
+        Self(Arc::new(check))
+    }
+
+    /// Checks the page file at `path`: how many nodes it drew.
+    ///
+    /// # Errors
+    ///
+    /// Why it would not load or render.
+    pub fn check(&self, path: &Path) -> Result<u32, String> {
+        (self.0)(path)
+    }
+}
+
+impl std::fmt::Debug for PageChecker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PageChecker")
+    }
+}
+
 /// Checks extension folders as an app would load them.
 #[derive(Clone, Debug)]
 pub struct Checker {
     kinds: ViewKinds,
     processes: bool,
+    pages: Option<PageChecker>,
     /// How long a view has to send its first frame.
     pub frame_within: Duration,
 }
@@ -170,8 +204,17 @@ impl Checker {
         Self {
             kinds: ViewKinds::new(),
             processes: cfg!(all(feature = "process", unix)),
+            pages: None,
             frame_within: Duration::from_secs(10),
         }
+    }
+
+    /// Checks a view's page file (`[[views]] page`) with `pages`: without
+    /// one, a page is said not to be checked.
+    #[must_use]
+    pub fn with_page_checker(mut self, pages: PageChecker) -> Self {
+        self.pages = Some(pages);
+        self
     }
 
     /// The view kinds the app provides.
@@ -210,10 +253,48 @@ impl Checker {
         scripts(&package, &mut report);
         if report.problems.is_empty() {
             self.load_and_render(&package, &mut report);
+            self.check_pages(folder, manifest, &mut report);
         }
         report.ok = report.problems.is_empty();
         span.record("ext.ok", report.ok);
         report
+    }
+
+    /// Each view drawn from a page file: rendered once by the app's page
+    /// runner, its count of nodes on its [`ViewCheck`], or its error.
+    fn check_pages(&self, folder: &Path, manifest: &Manifest, report: &mut CheckReport) {
+        for view in &manifest.views {
+            let Some(page) = &view.page else { continue };
+            let field = format!("views[{}].page", view.id);
+            let path = folder.join(page);
+            let outcome = if path.is_file() {
+                self.pages.as_ref().map(|p| p.check(&path))
+            } else {
+                Some(Err(format!("{page} is not in the folder")))
+            };
+            let check = report.views.iter_mut().find(|v| v.id == view.id);
+            match outcome {
+                Some(Ok(nodes)) => {
+                    if let Some(check) = check {
+                        check.rendered = true;
+                        check.elements = Some(nodes);
+                        check.note = Some(format!("drawn from its page, {page}"));
+                    }
+                }
+                Some(Err(why)) => {
+                    let problem = report.problem("page", why);
+                    problem.file = Some(page.clone());
+                    problem.field = Some(field);
+                }
+                None => {
+                    if let Some(check) = check {
+                        check.note = Some(format!(
+                            "drawn from its page, {page}: not checked (this app runs no pages)"
+                        ));
+                    }
+                }
+            }
+        }
     }
 
     fn load_and_render(&self, package: &Package, report: &mut CheckReport) {
