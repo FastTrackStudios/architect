@@ -37,14 +37,14 @@ pub mod fs;
 
 pub use color::Rgba;
 pub use model::{
-    Appearance, Palette, Problem, Registry, Scheme, Source, Theme, ThemeChoice, ThemeFile,
-    valid_id, valid_token,
+    Appearance, Palette, Problem, Registry, Scheme, Source, TOKEN_NAME_RULE, Theme, ThemeChoice,
+    ThemeFile, valid_id, valid_token,
 };
 pub use resolve::{
     FromResolved, Origin, Projected, Resolved, TokenSource, css_name, derive, names, resolve,
 };
 pub use store::{
-    Composed, Layer, LayerKind, Layers, Reloader, Subscription, ThemeInfo, ThemeStore,
+    Composed, Contribution, Layer, LayerKind, Layers, Reloader, Subscription, ThemeInfo, ThemeStore,
 };
 
 #[cfg(feature = "dioxus")]

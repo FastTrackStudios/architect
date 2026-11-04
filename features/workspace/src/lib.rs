@@ -33,10 +33,13 @@ pub mod control;
 mod ctx;
 mod drop;
 pub mod guide;
+#[cfg(feature = "home")]
+pub mod home;
 #[cfg(feature = "ui")]
 mod host;
 mod kinds;
 mod layout;
+pub mod meter;
 mod model;
 mod ops;
 #[cfg(feature = "paint")]
@@ -53,6 +56,8 @@ pub use bar::{TABS_COMMAND, use_tabs_button};
 pub use drop::{Bar, Drop, bar_drop, contains, drop_at, drop_in, float_rect, snap_at};
 #[cfg(feature = "native")]
 pub mod native;
+#[cfg(feature = "native")]
+pub mod shot;
 #[cfg(feature = "ctx")]
 pub use ctx::{
     Button, DocRef, Extras, Frame, FrameClock, Geometry, HostData, InputSink, Now, ThemeTokens,
@@ -61,15 +66,16 @@ pub use ctx::{
 pub use guide::{ArrangedGroup, ArrangedSplit, ArrangedWindow, Arrangement, target_selector};
 #[cfg(feature = "ui")]
 pub use host::{
-    Bridge, Command, Host, Opened, PaneHandle, Popout, PresenceLayer, PresenceOverlay, TitleRow,
-    View, Views, WindowSystem, Windows, WorkspaceActions, WorkspaceStore, WorkspaceView, use_host,
-    use_pane, use_pane_status, use_presence_overlay,
+    Bridge, Command, ContextEntries, ContextEntry, Host, Opened, PaneHandle, Popout, PresenceLayer,
+    PresenceOverlay, TitleRow, View, Views, WindowSystem, Windows, WorkspaceActions,
+    WorkspaceStore, WorkspaceView, use_host, use_pane, use_pane_status, use_presence_overlay,
 };
 pub use kinds::{
     Capabilities, Capability, DIOXUS, Hosts, KindError, KindId, KindSpec, PAINT, Part, Placement,
     Placements, ViewHost, ViewKinds,
 };
 pub use layout::{Direction, Placed, Slide, area_rects, neighbour, scroll_to, slides};
+pub use meter::{FRAME_BUDGET, Meters, ViewHealth, ViewMeter, ViewReport, ViewSummary};
 pub use model::{
     Above, Aliases, Area, Axis, Child, Chrome, ClosedPane, Corner, Dock, Docks, Float, Group,
     GroupAlias, GroupId, History, LinkId, Location, Node, Pane, PaneId, Pin, Rect, Ribbon, Shown,

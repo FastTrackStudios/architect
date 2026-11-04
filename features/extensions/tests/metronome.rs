@@ -158,7 +158,7 @@ fn the_metronome_installs_from_a_git_registry_reloads_on_save_and_goes() {
         panic!("one reload: {events:?}");
     };
     assert!(change.reloaded);
-    assert_eq!(change.kept, [COUNT_IN]);
+    assert_eq!(change.kept, [COUNT_IN, "FTS_METRONOME_STATUS"]);
     assert_eq!(metronome_keys(&sections).len(), 4);
     assert_eq!(run(&list, COUNT_IN, &json!({})).unwrap()[0], "ACCENT");
     assert!(ext.reload_changed().is_empty(), "nothing changed since");
@@ -189,10 +189,16 @@ fn the_metronome_installs_from_a_git_registry_reloads_on_save_and_goes() {
 fn builtin() -> Package {
     Package::embedded(
         include_str!("../../../apps/lab/extensions/metronome/extension.toml"),
-        &[(
-            "count_in.luau",
-            include_str!("../../../apps/lab/extensions/metronome/count_in.luau"),
-        )],
+        &[
+            (
+                "count_in.luau",
+                include_str!("../../../apps/lab/extensions/metronome/count_in.luau"),
+            ),
+            (
+                "status.luau",
+                include_str!("../../../apps/lab/extensions/metronome/status.luau"),
+            ),
+        ],
     )
     .unwrap()
 }

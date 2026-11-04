@@ -12,6 +12,7 @@
 //! [capabilities]
 //! actions = ["TRANSPORT_"]   # namespaces it may run, past its own
 //! effect = "read_only"       # the most it may change
+//! reads = ["selection"]      # app state it may read (org, selection, documents)
 //!
 //! [[actions]]
 //! id = "FTS_METRONOME_COUNT_IN"
@@ -31,11 +32,26 @@
 //!
 //! [[themes]]
 //! path = "themes/metronome-night.json"
+//!
+//! [tokens]                     # its own tokens' defaults, in its namespace
+//! "metronome.beat" = "$brand"
+//! "metronome.off-beat" = "mix($ink-3, $brand, 0.25)"
 //! ```
+//!
+//! What it adds to the interface — openers for files, document kinds and
+//! links, document kinds, tabs, status items, menu and context-menu
+//! entries, action-bar buttons, hooks and slots — are the tables of a
+//! [`Contribution`] (`crate::contrib`), read into
+//! [`Manifest::contributes`].
 
 use architect_settings::{Block, Choice, Control, Section, Setting, Value};
 use semver::Version;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+
+pub use crate::contrib::{
+    BarDecl, ContextDecl, Contribution, DocKindDecl, HookDecl, MenuDecl, OpenerDecl, Refused,
+    Rules, SlotDecl, StatusDecl, TabDecl,
+};
 
 /// The extension API this build speaks: a manifest naming a newer one
 /// (`api = "0.2"` here) is refused, an older one in the same `0.x` taken.
@@ -80,7 +96,9 @@ impl Kind {
 
 /// What an action does to the app, as a manifest says it: the same three
 /// steps as the Action List's `Effect`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Reach {
     #[default]
@@ -101,7 +119,11 @@ impl Reach {
 }
 
 /// What it asks to reach, granted when it is installed.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+///
+/// The person sees it then, and again on an update that asks for more
+/// (`crate::consent`). What it may do through the host service
+/// (`crate::hostapi`) is checked against what was granted of this.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Capabilities {
     /// The action id prefixes it may run, past its own namespace
@@ -113,6 +135,10 @@ pub struct Capabilities {
     pub hosts: Vec<String>,
     /// The folders it may read and write, past its own.
     pub folders: Vec<String>,
+    /// What of the app's state it may read through the host service:
+    /// `org` (the current organization), `selection` (what is selected
+    /// and focused), `documents` (open and read the app's documents).
+    pub reads: Vec<String>,
 }
 
 /// One action it adds.
@@ -151,9 +177,49 @@ pub struct Preset {
     pub args: Option<String>,
 }
 
+/// Where a view lives when nothing says otherwise: the main area, or a
+/// dock.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Home {
+    #[default]
+    Main,
+    Left,
+    Right,
+    Bottom,
+}
+
+/// How a view opens (herdr's pane placements, on the workspace's own).
+///
+/// A tab, a split beside the active group, over the window (`overlay`: a
+/// layer, `popup`: a modal one, sized), alone in its window (`zoomed`), or
+/// floating.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ViewPlacement {
+    #[default]
+    Tab,
+    Split,
+    Overlay,
+    Popup,
+    Zoomed,
+    Float,
+}
+
+/// What its open panes do when the extension unloads.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OnUnload {
+    /// Stay, saying it is gone, until it comes back or they are closed.
+    #[default]
+    Placeholder,
+    /// Close (kept to reopen).
+    Close,
+}
+
 /// A view it adds to the workspace: listed by the host, mounted by the
 /// app.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct ViewDecl {
     pub id: String,
     pub title: String,
@@ -169,6 +235,38 @@ pub struct ViewDecl {
     /// A frame document in the package that draws it, for a data view.
     #[serde(default)]
     pub document: Option<String>,
+    /// A page file in the package that draws it (`page = "pages/board.tsx"`:
+    /// TSX/JS on `QuickJS`, `.luau` elements or `.a2ui.json`;
+    /// `docs/content/architecture/pages.md`), re-rendered live when it is
+    /// saved. An app that runs pages (`architect-pages`) draws it; one
+    /// that does not draws the extension's own view.
+    #[serde(default)]
+    pub page: Option<String>,
+    /// Where it lives: the main area or a dock (`left`, `right`,
+    /// `bottom`).
+    #[serde(default)]
+    pub home: Home,
+    /// How it opens: `tab`, `split`, `overlay`, `popup`, `zoomed`,
+    /// `float`.
+    #[serde(default)]
+    pub placement: ViewPlacement,
+    /// A popup's, overlay's or float's size, points.
+    #[serde(default)]
+    pub width: Option<f32>,
+    #[serde(default)]
+    pub height: Option<f32>,
+    /// What its panes do when it unloads.
+    #[serde(default)]
+    pub on_unload: OnUnload,
+}
+
+impl ViewDecl {
+    /// Its kind in the app's workspace: `<extension id>/<view id>`, so two
+    /// extensions' views never meet, and a pane says whose it is.
+    #[must_use]
+    pub fn workspace_kind(&self, extension: &str) -> String {
+        format!("{extension}/{}", self.id)
+    }
 }
 
 /// A layer it draws over a kind of view (`session.arrange`).
@@ -190,6 +288,31 @@ pub struct OverlayDecl {
     pub script: String,
 }
 
+/// A worker: heavy work in an instance of its own, off every view's
+/// thread, spoken to by messages only.
+///
+/// A view spawns it by id and reads its progress; it is cancelled when
+/// the view or the extension goes
+/// (`docs/content/architecture/extensions.md`, "Responsive by design:
+/// views and workers").
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct WorkerDecl {
+    /// What a view spawns it by (`worker.spawn('primes')`). Unique among
+    /// its workers.
+    pub id: String,
+    #[serde(default)]
+    pub title: String,
+    /// A Luau script in the package (`luau` and `process` packages: a
+    /// process's Luau windows spawn it too): run in a Luau state of its
+    /// own on the host's pool (`architect_scripting::worker`).
+    #[serde(default)]
+    pub script: Option<String>,
+    /// What its program calls it (`process`, `wasm`): the name a process
+    /// spawns it under (`guest::spawn_work`), a component's export.
+    #[serde(default)]
+    pub entry: Option<String>,
+}
+
 fn dioxus() -> String {
     architect_workspace::DIOXUS.to_owned()
 }
@@ -199,26 +322,16 @@ fn over() -> String {
 }
 
 /// A theme it contributes: a theme file (`architect_theme`'s format) in
-/// the package, its id the file's name. The app reads it beside its own
-/// (`architect_theme::fs::ThemeDirs::extension` with
-/// [`Manifest::theme_files`]).
+/// the package, its id the file's name.
+///
+/// A host with the app's theme store (`host::Host::with_themes`) puts it
+/// there while the extension is loaded; a file that does not read is a
+/// theme problem, not a failed load.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ThemeDecl {
     /// The file, relative to the package (`themes/night.json`).
     pub path: String,
-}
-
-/// An opener for ⌘O: items of `kind`, found by the action `action`
-/// (`{query}` in, a list of `{id, title}` out).
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
-pub struct OpenerDecl {
-    pub kind: String,
-    pub title: String,
-    /// What a query starts with to ask only this opener (`click:`).
-    #[serde(default)]
-    pub prefix: String,
-    pub action: String,
 }
 
 /// Where in a project an extension keeps its own data.
@@ -342,14 +455,28 @@ pub struct Manifest {
     pub views: Vec<ViewDecl>,
     #[serde(default)]
     pub overlays: Vec<OverlayDecl>,
+    /// Its `[[workers]]`: its heavy work, off its views' threads.
     #[serde(default)]
-    pub openers: Vec<OpenerDecl>,
+    pub workers: Vec<WorkerDecl>,
     #[serde(default)]
     pub data: Vec<DataDecl>,
     #[serde(default)]
     pub keys: Vec<KeyDecl>,
     #[serde(default)]
     pub themes: Vec<ThemeDecl>,
+    /// Its own theme tokens' defaults, by name: literals or expressions
+    /// over the app's tokens (`"clicker.face" = "mix($card, $brand,
+    /// 0.12)"`). Each name is in its namespace
+    /// ([`Self::token_namespace`]). Loaded, they are the theme store's
+    /// extension layer, so a theme, the app or the person still says the
+    /// last word.
+    #[serde(default)]
+    pub tokens: std::collections::BTreeMap<String, String>,
+    /// What it adds to the interface: its `[[openers]]`, `[[doc_kinds]]`,
+    /// `[[tabs]]`, `[[status]]`, `[[menus]]`, `[[context]]`, `[[bar]]`,
+    /// `[[hooks]]` and `[[slots]]`.
+    #[serde(flatten)]
+    pub contributes: Contribution,
 }
 
 fn api() -> String {
@@ -386,8 +513,20 @@ pub enum ManifestError {
     BadSetting { key: String, why: String },
     /// Two of its contributions share an id.
     Duplicate(String),
+    /// A worker that names no script and no entry, both, or one its kind
+    /// does not run.
+    BadWorker { worker: String, why: String },
     /// An overlay on a plane that is not `under`, `over` or `top`.
     BadPlane { overlay: String, plane: String },
+    /// A theme token outside its namespace, not a token name, or whose
+    /// value does not read.
+    BadToken { token: String, why: String },
+    /// One of its interface contributions breaks a rule (an unknown view,
+    /// event, target or slot; an action outside its reach; a pattern that
+    /// does not compile).
+    Contribution(Refused),
+    /// A capability it asks for is not one there is.
+    BadCapability(String),
 }
 
 impl std::fmt::Display for ManifestError {
@@ -407,6 +546,10 @@ impl std::fmt::Display for ManifestError {
             Self::BadPath(p) => write!(f, "{p} is outside the package"),
             Self::BadSetting { key, why } => write!(f, "setting {key}: {why}"),
             Self::Duplicate(id) => write!(f, "{id} is declared twice"),
+            Self::BadToken { token, why } => write!(f, "theme token {token}: {why}"),
+            Self::BadWorker { worker, why } => write!(f, "worker {worker}: {why}"),
+            Self::Contribution(r) => r.fmt(f),
+            Self::BadCapability(why) => write!(f, "capabilities: {why}"),
             Self::BadPlane { overlay, plane } => {
                 write!(
                     f,
@@ -420,6 +563,39 @@ impl std::fmt::Display for ManifestError {
 impl std::error::Error for ManifestError {}
 
 impl Manifest {
+    /// Each worker: a unique id, and one way to run that its kind has.
+    fn check_workers(&self) -> Result<(), ManifestError> {
+        let mut seen = std::collections::BTreeSet::new();
+        for w in &self.workers {
+            let bad = |why: &str| ManifestError::BadWorker {
+                worker: w.id.clone(),
+                why: why.to_owned(),
+            };
+            if w.id.is_empty() {
+                return Err(bad("it has no id"));
+            }
+            if !seen.insert(w.id.as_str()) {
+                return Err(ManifestError::Duplicate(w.id.clone()));
+            }
+            match (&w.script, &w.entry) {
+                (Some(_), Some(_)) => return Err(bad("it names a script and an entry")),
+                (None, None) => return Err(bad("it names no script and no entry")),
+                (Some(path), None) => {
+                    if !matches!(self.kind, Kind::Luau | Kind::Process) {
+                        return Err(bad("a script worker needs a luau or process package"));
+                    }
+                    inside(path)?;
+                }
+                (None, Some(_)) => {
+                    if !matches!(self.kind, Kind::Process | Kind::Wasm) {
+                        return Err(bad("an entry worker needs a process or wasm package"));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Reads and checks `extension.toml`'s text.
     ///
     /// # Errors
@@ -462,6 +638,17 @@ impl Manifest {
                 have: API,
             });
         }
+        if let Some(bad) = self
+            .capabilities
+            .reads
+            .iter()
+            .find(|r| !crate::capabilities::READS.contains(&r.as_str()))
+        {
+            return Err(ManifestError::BadCapability(format!(
+                "reads {bad:?}: not one of {}",
+                crate::capabilities::READS.join(", ")
+            )));
+        }
         let prefix = self.action_prefix();
         let mut seen = std::collections::BTreeSet::new();
         for a in &self.actions {
@@ -492,6 +679,9 @@ impl Manifest {
             if let Some(doc) = &view.document {
                 inside(doc)?;
             }
+            if let Some(page) = &view.page {
+                inside(page)?;
+            }
         }
         for overlay in &self.overlays {
             if self.kind != Kind::Luau {
@@ -508,6 +698,7 @@ impl Manifest {
             }
             inside(&overlay.script)?;
         }
+        self.check_workers()?;
         for theme in &self.themes {
             inside(&theme.path)?;
             if !std::path::Path::new(&theme.path)
@@ -517,6 +708,26 @@ impl Manifest {
                 return Err(ManifestError::BadPath(theme.path.clone()));
             }
         }
+        let namespace = format!("{}.", self.token_namespace());
+        for (token, value) in &self.tokens {
+            let bad = |why: String| ManifestError::BadToken {
+                token: token.clone(),
+                why,
+            };
+            if !architect_theme::valid_token(token) {
+                return Err(bad(architect_theme::TOKEN_NAME_RULE.to_owned()));
+            }
+            if !token.starts_with(&namespace) {
+                return Err(bad(format!("not in its namespace ({namespace}…)")));
+            }
+            if value.trim().is_empty() {
+                return Err(bad("empty".to_owned()));
+            }
+            architect_theme::expr::parse(value).map_err(bad)?;
+        }
+        self.contributes
+            .check(&self.rules(&self.view_ids()))
+            .map_err(ManifestError::Contribution)?;
         let keys = format!("{}.", self.id);
         for section in &self.sections {
             if !seen.insert(section.id.as_str()) {
@@ -530,6 +741,36 @@ impl Manifest {
             }
         }
         Ok(())
+    }
+
+    /// Its views' ids.
+    #[must_use]
+    pub fn view_ids(&self) -> Vec<String> {
+        self.views.iter().map(|v| v.id.clone()).collect()
+    }
+
+    /// What its contributions are checked against: its namespace, its
+    /// capabilities, `views`, its kind. A contribution made at run time
+    /// (a guest's, a script's) is checked against the same.
+    #[must_use]
+    pub fn rules<'a>(&'a self, views: &'a [String]) -> Rules<'a> {
+        Rules {
+            prefix: self.action_prefix(),
+            reach: &self.capabilities.actions,
+            views,
+            luau: self.kind == Kind::Luau,
+        }
+    }
+
+    /// The namespace of its theme tokens: the last part of its id, `_`
+    /// as `-` (`lab.clicker` → `clicker`, so `clicker.face`).
+    #[must_use]
+    pub fn token_namespace(&self) -> String {
+        self.id
+            .rsplit('.')
+            .next()
+            .unwrap_or(&self.id)
+            .replace('_', "-")
     }
 
     /// The theme files it contributes, relative to its package.
@@ -780,6 +1021,31 @@ choices = [{ value = "wood", label = "Woodblock" }, { value = "beep", label = "B
     }
 
     #[test]
+    fn a_worker_has_one_way_to_run_that_its_kind_has() {
+        let with = |worker: &str| Manifest::parse(&format!("{METRONOME}\n[[workers]]\n{worker}"));
+        let m = with("id = \"primes\"\nscript = \"workers/primes.luau\"").unwrap();
+        assert_eq!(m.workers[0].script.as_deref(), Some("workers/primes.luau"));
+        for (bad, why) in [
+            ("id = \"p\"", "no script"),
+            (
+                "id = \"p\"\nscript = \"a.luau\"\nentry = \"p\"",
+                "and an entry",
+            ),
+            ("id = \"p\"\nentry = \"p\"", "process or wasm"),
+        ] {
+            let e = with(bad).unwrap_err();
+            assert!(e.to_string().contains(why), "{bad}: {e}");
+        }
+        assert!(matches!(
+            with("id = \"p\"\nscript = \"../p.luau\""),
+            Err(ManifestError::BadPath(_))
+        ));
+        let twice =
+            with("id = \"p\"\nscript = \"a.luau\"\n[[workers]]\nid = \"p\"\nscript = \"b.luau\"");
+        assert!(matches!(twice, Err(ManifestError::Duplicate(_))));
+    }
+
+    #[test]
     fn themes_are_json_files_inside_the_package() {
         let with = |theme: &str| Manifest::parse(&format!("{METRONOME}\n[[themes]]\n{theme}"));
         let m = with("path = \"themes/night.json\"").unwrap();
@@ -853,6 +1119,126 @@ choices = [{ value = "wood", label = "Woodblock" }, { value = "beep", label = "B
         assert!(matches!(
             with("id = \"metronome\"\nview = \"v\"\nscript = \"c.luau\""),
             Err(ManifestError::Duplicate(_))
+        ));
+    }
+
+    const CONTRIB: &str = r#"
+id = "lab.contrib"
+name = "Board"
+version = "0.1.0"
+kind = "process"
+
+[capabilities]
+actions = ["WORKSPACE_"]
+
+[entry]
+path = "architect-lab-contrib"
+
+[[actions]]
+id = "LAB_CONTRIB_PIN"
+name = "Pin to the board"
+
+[[views]]
+id = "board"
+title = "Board"
+placement = "split"
+on_unload = "close"
+
+[[views]]
+id = "chart"
+title = "Chart"
+home = "right"
+
+[[views]]
+id = "bar"
+title = "Board status bar"
+
+[[openers]]
+id = "kf"
+title = "Keyflow chart"
+files = ["kf"]
+view = "chart"
+
+[[openers]]
+id = "issue"
+title = "GitHub issue"
+urls = ['^https://github\.com/[^/]+/[^/]+/issues/\d+$']
+action = "LAB_CONTRIB_PIN"
+
+[[doc_kinds]]
+id = "keyflow.chart"
+name = "Chart"
+files = ["kf"]
+view = "chart"
+
+[[tabs]]
+id = "board"
+title = "Board"
+icon = "layout-dashboard"
+view = "board"
+
+[[status]]
+id = "pins"
+text = "No pins"
+action = "LAB_CONTRIB_PIN"
+
+[[menus]]
+menu = "View"
+action = "LAB_CONTRIB_PIN"
+
+[[context]]
+target = "view:note"
+action = "LAB_CONTRIB_PIN"
+title = "Pin to the board"
+
+[[bar]]
+action = "LAB_CONTRIB_PIN"
+title = "Pin"
+icon = "pin"
+
+[[hooks]]
+on = "startup"
+action = "LAB_CONTRIB_PIN"
+
+[[hooks]]
+on = "changed:workspace"
+action = "WORKSPACE_LAYOUT"
+
+[[slots]]
+slot = "status"
+view = "bar"
+"#;
+
+    #[test]
+    fn a_manifest_reads_what_it_adds_to_the_interface() {
+        use super::{Home, OnUnload, ViewPlacement};
+        let m = Manifest::parse(CONTRIB).unwrap();
+        let c = &m.contributes;
+        assert_eq!(c.openers.len(), 2);
+        assert_eq!(c.openers[0].files, ["kf"]);
+        assert!(c.openers[1].urls[0].starts_with("^https"));
+        assert_eq!(
+            (c.tabs.len(), c.status.len(), c.menus.len(), c.context.len()),
+            (1, 1, 1, 1)
+        );
+        assert_eq!((c.bar.len(), c.hooks.len(), c.slots.len()), (1, 2, 1));
+        assert_eq!(m.views[0].placement, ViewPlacement::Split);
+        assert_eq!(m.views[0].on_unload, OnUnload::Close);
+        assert_eq!(m.views[1].home, Home::Right);
+        assert_eq!(m.views[1].workspace_kind(&m.id), "lab.contrib/chart");
+
+        let bad = |from: &str, to: &str| Manifest::parse(&CONTRIB.replacen(from, to, 1));
+        assert!(matches!(
+            bad("view = \"board\"", "view = \"nope\""),
+            Err(ManifestError::Contribution(_))
+        ));
+        assert!(matches!(
+            bad("on = \"startup\"", "on = \"teatime\""),
+            Err(ManifestError::Contribution(_))
+        ));
+        assert!(matches!(
+            bad("actions = [\"WORKSPACE_\"]", "actions = []"),
+            Err(ManifestError::Contribution(_))
         ));
     }
 

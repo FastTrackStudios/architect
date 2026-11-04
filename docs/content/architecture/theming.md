@@ -12,8 +12,10 @@ weight = 69
 > and paint panes (`features/workspace/src/paint/widget.rs` `PaintPane`)
 > follow it. The lab uses it (`apps/lab/ui/src/theme.rs`). An app's own
 > namespaced tokens, expressions over other tokens, numbers, provenance
-> and `THEME_INSPECT` landed with it (below). Not yet: the Appearance
-> settings page (#185) and persisting the layers.
+> and `THEME_INSPECT` landed with it (below). Extensions' themes and
+> tokens, the theme for Luau scripts, `ImGui` windows and process
+> extensions landed after ("Extensions and themes"). Not yet: the
+> Appearance settings page (#185) and persisting the layers.
 
 An app built on architect is themeable at run time, all of it: the shell,
 architect-ui's components, a GPU paint view, an extension's view. One
@@ -89,13 +91,16 @@ What shows is chosen by **layers**, lowest first
 (`features/theme/src/store.rs` `LayerKind`):
 
 1. `Builtin`: `FastTrackStudio` light and dark, following the system.
-2. `App`: the app's default (Studio's own pair).
-3. `Org`: the organization's default.
-4. `Person`: the person's, on every device.
-5. `Device`: this device's.
-6. `Workspace`: a workspace's or screenset's look.
-7. `Pick`: an explicit pick (a picker, `THEME_SET`).
-8. `Preview`: a transient preview (`THEME_PREVIEW`).
+2. `Extension`: loaded extensions' own tokens' defaults (below, under
+   "Extensions and themes"). Unlike the others, it sits under the theme's
+   own overrides, so a theme file restyles an extension.
+3. `App`: the app's default (Studio's own pair).
+4. `Org`: the organization's default.
+5. `Person`: the person's, on every device.
+6. `Device`: this device's.
+7. `Workspace`: a workspace's or screenset's look.
+8. `Pick`: an explicit pick (a picker, `THEME_SET`).
+9. `Preview`: a transient preview (`THEME_PREVIEW`).
 
 Each layer may set a **choice**, an **appearance** and **token overrides**
 (`Layer`). The highest layer that sets a choice wins, and the same goes
@@ -172,10 +177,12 @@ expression that does not read is a `Problem` naming the file and the field
   and anything else is the person's edit and is kept.
 - **Extensions.** An extension declares `[[themes]] path = "themes/x.json"`
   (`features/extensions/src/manifest.rs` `ThemeDecl`,
-  `Manifest::theme_files`). The app adds them with
-  `ThemeDirs::extension(id, folder, manifest.theme_files())`. The
-  extension host does not touch the store itself. That glue is the app's,
-  because the store is the app's.
+  `Manifest::theme_files`). The extension host puts them in the store
+  while it is loaded when the app gives it the store
+  (`features/extensions/src/host.rs` `Host::with_themes`; "Extensions and
+  themes" below). `ThemeDirs::extension(id, folder, files)` still reads an
+  extension's files as one of the app's own places, for an app with no
+  extension host.
 
 architect's built-in themes are files too (`features/theme/themes/`,
 `features/theme/src/builtin.rs` `FILES`): `FastTrackStudio` (the default),
@@ -193,7 +200,7 @@ command line:
 
 | id | effect | does |
 |---|---|---|
-| `THEME_LIST` | read-only | every theme: id, label, appearance, source, problems |
+| `THEME_LIST` | read-only | every theme: id, label, appearance, source (`builtin`, `file`, `memory`, `extension:<id>`), problems |
 | `THEME_GET` | read-only | the choice, appearance, system scheme, the theme showing, revision, tokens (all, or `tokens: ["brand", "ink-*"]`) |
 | `THEME_SET` | mutating | the `Pick` layer: `one`, or `light` / `dark`, and/or `appearance` |
 | `THEME_PREVIEW` / `THEME_PREVIEW_END` | mutating | the `Preview` layer |
@@ -330,3 +337,40 @@ Paint views read every token through `ctx.theme`, dotted ones included.
 
 Keep the namespaces the app's own (`arrange.`, `mixer.`, `editor.`), so
 two apps' tokens never collide in one map.
+
+## Extensions and themes
+
+What an owner other than the app adds is a **contribution**
+(`features/theme/src/store.rs` `Contribution`): themes, theme files that
+did not read (with their problems), and token defaults.
+`ThemeStore::contribute(owner, contribution)` puts it in place of the
+owner's last one, as a diff; `ThemeStore::withdraw(owner)` takes it out.
+The extension host calls both as an extension loads, reloads and unloads
+(`features/extensions/src/host.rs` `Host::with_themes`,
+`theme_contribution`); the [extensions page](@/architecture/extensions.md)
+has the manifest's side.
+
+- **Themes** join the app's registry: `ThemeStore::registry` and
+  `ThemeStore::themes` include them, `THEME_LIST` says
+  `extension:<id>` (`Source::label`), and `pick` and `THEME_SET` take
+  them. A file that does not read keeps the owner's last good theme of its
+  id and is a problem. An id the app already has stays the app's, and the
+  clash is a problem. A reload of the app's own files
+  (`ThemeStore::reload`) leaves contributions as they are.
+- **Tokens** are the `Extension` layer. They sit under the theme's
+  overrides (a theme file may restyle `clicker.face`) and under every
+  other layer, and their expressions see the final palette like any
+  other. Two owners setting one token: the first (by owner id) keeps it,
+  and the other's is a problem.
+- **The revision** moves only when what shows changes: a contributed
+  theme nobody shows changes `THEME_LIST`, not the revision. A
+  contributed theme that shows and is withdrawn falls back to the
+  built-in default, with the problem said.
+
+Every GUI an extension draws follows the store: a process view's document
+through `:root` CSS variables, a process itself through the theme sent
+as data, a Luau script through `theme`
+(`features/scripting/src/theme.rs` `ThemeModule`, a frozen snapshot per
+revision), and an `ImGui` window through its style
+(`features/canvas/src/imgui.rs` `Style::from_theme`: `imgui.*` tokens
+first, else derived from the shell's). The extensions page has the table.

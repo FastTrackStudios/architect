@@ -18,6 +18,29 @@
 //! go to the host as [`Frame`]s ([`WireWriter`]), the host's events come
 //! back to its handlers. A view whose component panics takes down its
 //! thread only; the host sees its stream end.
+//!
+//! The host's theme reaches it two ways: a view's document has the app's
+//! `:root` CSS variables (`var(--brand)`), and the theme comes as data
+//! too (wire 3 on): [`Guest::theme`] reads it, [`Guest::on_theme`] is
+//! told of every change, and [`use_theme`] gives it to a view as a
+//! signal, so a process that paints itself or works out its own colours
+//! (`theme.color("clicker.face")`) follows the app's theme.
+//!
+//! A view's thread renders one event at a time: a handler that computes
+//! for a second freezes its pane for that second (its host marks it
+//! busy). Heavy work goes to [`spawn_work`] ([`use_work`] in a view): a
+//! thread of its own, its progress and results back to the view as they
+//! come, cancelled when the view closes (`crate::work`). Every event is
+//! answered with a frame, empty when nothing changed (wire 5), so the
+//! host times each one.
+//!
+//! What it adds to the app's interface at run time — tabs, status items,
+//! openers, menu entries, hooks, slots ([`Contribution`]) — and its
+//! runtime state (a status item's text) go to the host as they change:
+//! [`contribute`], [`set_state`], [`clear_state`], from anywhere in the
+//! process (wire 4 on). An action registered with [`Guest::action_in`]
+//! is told where it was invoked from (the palette, a context menu and
+//! its target, a hook and its event) as JSON.
 
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
@@ -26,9 +49,10 @@ use std::path::Path;
 use std::pin::Pin;
 use std::rc::Rc;
 use std::str::FromStr as _;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use architect::{EventSink, Services, layers};
+use architect_theme::Resolved;
 use dioxus::core::{BorrowedAttributeValue, ElementId, Event, VirtualDom, WriteMutations};
 use dioxus::html::geometry::{ClientPoint, Coordinates, ElementPoint, PagePoint, ScreenPoint};
 use dioxus::html::input_data::{MouseButton, decode_mouse_button_set};
@@ -41,14 +65,102 @@ use dioxus::prelude::Element;
 use serde_json::Value as Json;
 use tokio::sync::mpsc;
 
+use crate::contrib::{Contribution, StateWrite};
 use crate::manifest::API;
 use crate::proto::{ProcessError, ProcessExtension, ProcessExtensionStreamSource, SOCKET};
 use crate::wire::{
-    Edit, EventData, Frame, Hello, KeyData, Mods, Open, Pointer, Value, ViewEvent, WIRE,
+    Edit, EventData, Frame, Hello, KeyData, Mods, Open, Pointer, ThemeData, Update, Value,
+    ViewEvent, WIRE,
+};
+pub use crate::work::{
+    Progress, UseWork, Work, WorkHandle, WorkState, WorkStatus, spawn_work, use_work,
 };
 
 type ActionFuture = Pin<Box<dyn Future<Output = Result<Json, String>> + Send>>;
-type Action = Arc<dyn Fn(Json) -> ActionFuture + Send + Sync>;
+type Action = Arc<dyn Fn(Json, Json) -> ActionFuture + Send + Sync>;
+
+/// What this process has to tell the host, waiting for it to listen.
+struct Outbox {
+    pending: Mutex<std::collections::VecDeque<Update>>,
+    /// The contribution it last sent: sent again to a host that listens
+    /// anew.
+    last: Mutex<Option<String>>,
+    arrived: tokio::sync::Notify,
+}
+
+fn outbox() -> &'static Outbox {
+    static OUTBOX: OnceLock<Outbox> = OnceLock::new();
+    OUTBOX.get_or_init(|| Outbox {
+        pending: Mutex::new(std::collections::VecDeque::new()),
+        last: Mutex::new(None),
+        arrived: tokio::sync::Notify::new(),
+    })
+}
+
+fn post(update: Update) {
+    let out = outbox();
+    out.pending
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .push_back(update);
+    out.arrived.notify_one();
+}
+
+/// Puts what this process adds to the app's interface now (its tabs,
+/// status items, openers, menu and context entries, hooks, slots), in
+/// place of what it put before.
+///
+/// Checked by the host against its manifest, as the manifest's own
+/// tables are.
+pub fn contribute(contribution: &Contribution) {
+    let json = serde_json::to_string(contribution).unwrap_or_default();
+    *outbox().last.lock().unwrap_or_else(PoisonError::into_inner) = Some(json.clone());
+    post(Update::Contribute { json });
+}
+
+/// Writes one piece of its runtime state (a status item's text: its key
+/// the item's id). Its source is always its own.
+pub fn set_state(write: &StateWrite) {
+    post(Update::State {
+        json: serde_json::to_string(write).unwrap_or_default(),
+    });
+}
+
+/// Clears one key of its runtime state, or all of it.
+pub fn clear_state(key: Option<&str>) {
+    post(Update::Clear {
+        key: key.map(str::to_owned),
+    });
+}
+type ThemeListener = Arc<dyn Fn(&Resolved) + Send + Sync>;
+
+/// The theme the host last sent, for every view of this process.
+fn theme_cell() -> &'static tokio::sync::watch::Sender<Option<Resolved>> {
+    static THEME: OnceLock<tokio::sync::watch::Sender<Option<Resolved>>> = OnceLock::new();
+    THEME.get_or_init(|| tokio::sync::watch::Sender::new(None))
+}
+
+/// The host's theme in a view, as a signal: `None` until the first
+/// arrives (from a host that sends none, never), then every change.
+/// Reading it subscribes the component.
+#[must_use]
+pub fn use_theme() -> Option<Resolved> {
+    use dioxus::prelude::{ReadableExt as _, WritableExt as _, use_future, use_signal};
+    let mut theme = use_signal(Guest::theme);
+    use_future(move || async move {
+        let mut changes = theme_cell().subscribe();
+        loop {
+            let now = changes.borrow_and_update().clone();
+            if *theme.peek() != now {
+                theme.set(now);
+            }
+            if changes.changed().await.is_err() {
+                return;
+            }
+        }
+    });
+    theme.read().clone()
+}
 
 /// Why a guest stopped serving.
 #[derive(Debug, thiserror::Error)]
@@ -68,6 +180,7 @@ pub enum GuestError {
 pub struct Guest {
     views: BTreeMap<String, fn() -> Element>,
     actions: BTreeMap<String, Action>,
+    on_theme: Vec<ThemeListener>,
 }
 
 impl std::fmt::Debug for Guest {
@@ -75,6 +188,7 @@ impl std::fmt::Debug for Guest {
         f.debug_struct("Guest")
             .field("views", &self.views.keys().collect::<Vec<_>>())
             .field("actions", &self.actions.keys().collect::<Vec<_>>())
+            .field("on_theme", &self.on_theme.len())
             .finish()
     }
 }
@@ -100,9 +214,57 @@ impl Guest {
         F: Fn(Json) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<Json, String>> + Send + 'static,
     {
-        let run: Action = Arc::new(move |args| Box::pin(run(args)));
+        let run: Action = Arc::new(move |args, _| Box::pin(run(args)));
         self.actions.insert(id.into(), run);
         self
+    }
+
+    /// Its action `id`, told where it was invoked from: JSON arguments and
+    /// the invocation (`{source, target?, id?, pane?, view?, url?, path?,
+    /// event?, …}`; `{source: "app"}` from a host that says nothing).
+    #[must_use]
+    pub fn action_in<F, Fut>(mut self, id: impl Into<String>, run: F) -> Self
+    where
+        F: Fn(Json, Json) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<Json, String>> + Send + 'static,
+    {
+        let run: Action = Arc::new(move |args, cx| Box::pin(run(args, cx)));
+        self.actions.insert(id.into(), run);
+        self
+    }
+
+    /// What it adds to the interface from the start ([`contribute`]).
+    #[must_use]
+    pub fn contribution(self, contribution: &Contribution) -> Self {
+        contribute(contribution);
+        self
+    }
+
+    /// Calls `listener` with the host's theme each time it arrives: as
+    /// the host connects, and on every change (on the thread that serves
+    /// the host: hand heavy work on).
+    #[must_use]
+    pub fn on_theme(mut self, listener: impl Fn(&Resolved) + Send + Sync + 'static) -> Self {
+        self.on_theme.push(Arc::new(listener));
+        self
+    }
+
+    /// The host's theme as it last sent it (`None` before the first, or
+    /// from a host that sends none): `color`, `number`, `value`, `scheme`,
+    /// `revision` as the host reads them.
+    #[must_use]
+    pub fn theme() -> Option<Resolved> {
+        theme_cell().borrow().clone()
+    }
+
+    /// Runs `work` on a thread of its own, off every view's thread
+    /// ([`spawn_work`]): its progress and results go to its
+    /// [`WorkHandle`]; dropping that cancels it.
+    pub fn spawn_work<F>(work: F) -> WorkHandle
+    where
+        F: FnOnce(&Work) -> Result<Json, String> + Send + 'static,
+    {
+        spawn_work(work)
     }
 
     /// Serves the host that started this process, until it goes.
@@ -136,9 +298,59 @@ impl Guest {
             .establish_connection()
             .await
             .map_err(|e| GuestError::Connect(format!("{e:?}")))?;
+        // The host service, the other way (a host from before it serves
+        // none: `host` says so).
+        if let Ok(client) = connection
+            .open_lane::<crate::host_proto::ExtensionHostClient>()
+            .await
+        {
+            *host_slot().lock().unwrap_or_else(PoisonError::into_inner) = Some(client);
+        }
         connection.closed().await;
+        host_slot()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
         Ok(())
     }
+}
+
+fn host_slot() -> &'static Mutex<Option<crate::host_proto::ExtensionHostClient>> {
+    static HOST: OnceLock<Mutex<Option<crate::host_proto::ExtensionHostClient>>> = OnceLock::new();
+    HOST.get_or_init(|| Mutex::new(None))
+}
+
+/// Asks the host service (`crate::hostcall`), from anywhere in the
+/// process once it is connected.
+///
+/// It runs an app action, reads the selection or a setting, keeps data —
+/// checked by the host against what this extension may reach.
+///
+/// # Errors
+///
+/// The host refused or failed, or there is no host to ask (not connected
+/// yet, or a host that serves no host service).
+pub async fn host(
+    request: crate::hostcall::HostRequest,
+) -> Result<Json, crate::hostcall::HostError> {
+    let client = host_slot()
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()
+        .ok_or_else(|| crate::hostcall::HostError::Failed {
+            message: "no host service: not connected, or the host serves none".to_owned(),
+        })?;
+    let text = serde_json::to_string(&request).map_err(|e| crate::hostcall::HostError::Failed {
+        message: e.to_string(),
+    })?;
+    let answer = client
+        .call(text)
+        .await
+        .map_err(architect::vox_into_app::<ProcessError>)
+        .map_err(|e| crate::hostcall::HostError::Failed {
+            message: format!("the host service: {e}"),
+        })?;
+    crate::hostcall::HostAnswer::from_json(&answer).into_result()
 }
 
 /// The views open now, by pane: where their events go.
@@ -167,6 +379,17 @@ impl ProcessExtension for Served {
     }
 
     async fn run(&self, action: String, args: String) -> Result<String, ProcessError> {
+        self.run_in(action, args, String::new()).await
+    }
+
+    async fn run_in(
+        &self,
+        action: String,
+        args: String,
+        invocation: String,
+    ) -> Result<String, ProcessError> {
+        let cx = serde_json::from_str(&invocation)
+            .unwrap_or_else(|_| serde_json::json!({ "source": "app" }));
         let run = self
             .guest
             .actions
@@ -178,7 +401,7 @@ impl ProcessExtension for Served {
         } else {
             serde_json::from_str(&args).map_err(|e| ProcessError::Failed(e.to_string()))?
         };
-        run(args)
+        run(args, cx)
             .await
             .map(|out| out.to_string())
             .map_err(ProcessError::Failed)
@@ -195,6 +418,15 @@ impl ProcessExtension for Served {
         to.send(event).map_err(|_| ProcessError::NoPane(pane))
     }
 
+    async fn theme(&self, theme: ThemeData) -> Result<(), ProcessError> {
+        let resolved = theme.to_resolved();
+        theme_cell().send_replace(Some(resolved.clone()));
+        for listener in &self.guest.on_theme {
+            listener(&resolved);
+        }
+        Ok(())
+    }
+
     async fn close(&self, pane: u64) -> Result<(), ProcessError> {
         // Its sender gone, the view's loop ends.
         self.panes
@@ -206,6 +438,38 @@ impl ProcessExtension for Served {
 }
 
 impl ProcessExtensionStreamSource for Served {
+    fn updates_attach(&self, _since: u64, sink: EventSink<Update>) {
+        tokio::spawn(async move {
+            let out = outbox();
+            // A host that listens anew hears what is added now first.
+            let last = out
+                .last
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone();
+            if let Some(json) = last {
+                if sink.send(Update::Contribute { json }).await.is_err() {
+                    return;
+                }
+            }
+            loop {
+                let next = out
+                    .pending
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .pop_front();
+                match next {
+                    Some(update) => {
+                        if sink.send(update).await.is_err() {
+                            return;
+                        }
+                    }
+                    None => out.arrived.notified().await,
+                }
+            }
+        });
+    }
+
     fn view_attach(&self, open: Open, sink: EventSink<Frame>) {
         let root = self.guest.views.get(&open.view).copied();
         let (to, events) = mpsc::unbounded_channel();
@@ -276,11 +540,14 @@ fn render(
                 },
                 () = vdom.wait_for_work() => None,
             };
+            // An event is always answered (wire 5): its host times the
+            // frame from it, empty or not.
+            let answers = event.is_some();
             if let Some(event) = event {
                 dispatch(&vdom, event);
             }
             vdom.render_immediate(&mut writer);
-            if !writer.is_empty() && sink.send(writer.take()).await.is_err() {
+            if (answers || !writer.is_empty()) && sink.send(writer.take()).await.is_err() {
                 return;
             }
         }

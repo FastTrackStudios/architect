@@ -56,7 +56,10 @@ pub fn who(principal: &Principal) -> Option<String> {
     match principal {
         Principal::User { user_id } => Some(format!("user:{user_id}")),
         Principal::Service { name } => Some(format!("service:{name}")),
-        Principal::Guest { .. } | Principal::Host { .. } | Principal::Anonymous => None,
+        Principal::Guest { .. }
+        | Principal::Host { .. }
+        | Principal::Extension { .. }
+        | Principal::Anonymous => None,
     }
 }
 

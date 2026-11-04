@@ -3,7 +3,7 @@
 //!
 //! | id | effect | does |
 //! |---|---|---|
-//! | `THEME_LIST` | read-only | every theme: id, label, appearance, source, problems |
+//! | `THEME_LIST` | read-only | every theme: id, label, appearance, source (`extension:<id>` for an extension's), problems |
 //! | `THEME_GET` | read-only | the choice, the appearance, the theme showing, the revision, and its tokens (all, or the names and `prefix-*`es asked for) |
 //! | `THEME_SET` | mutating | the pick: `one`, or `light` / `dark` halves, and/or `appearance` |
 //! | `THEME_PREVIEW` | mutating | shows a theme over everything until `THEME_PREVIEW_END` |
@@ -73,7 +73,7 @@ macro_rules! metas {
 }
 
 metas! {
-    LIST = LIST, "Themes", "Every theme the app knows: its id, label, appearance (light or dark), source (builtin, file, extension) and problems.";
+    LIST = LIST, "Themes", "Every theme the app knows: its id, label, appearance (light or dark), source (builtin, file, memory, or extension:<id> for one a loaded extension contributes) and problems.";
     GET = GET, "Current theme", "The choice (one theme, or a light and a dark), the appearance (system, light, dark), the theme showing, the revision, and its resolved tokens: all, or only the `tokens` named (a `prefix-*` matches every name starting `prefix-`).";
     SET = SET, "Set the theme", "Picks the theme: `one` always shows it; `light` / `dark` set that half of the pair (the other half stays). `appearance` is system, light or dark. Answers whether anything changed and the revision.";
     PREVIEW = PREVIEW, "Preview a theme", "Shows theme `id` over every other choice until THEME_PREVIEW_END; nothing is kept.";
@@ -92,7 +92,8 @@ pub struct ThemeItem {
     pub label: String,
     /// `light` or `dark`; unset when its parent is missing.
     pub appearance: Option<String>,
-    /// `builtin`, `file` or `extension`.
+    /// `builtin`, `file`, `memory`, or `extension:<id>` (the extension
+    /// that contributes it).
     pub source: String,
     /// The file (or extension and file) it was read from.
     pub origin: String,
@@ -316,6 +317,9 @@ fn layer_arg(layer: Option<&str>) -> Result<LayerKind, String> {
     };
     match LayerKind::parse(name) {
         Some(LayerKind::Builtin) => Err("the builtin layer is architect's own".to_owned()),
+        Some(LayerKind::Extension) => {
+            Err("the extension layer is what loaded extensions contribute".to_owned())
+        }
         Some(kind) => Ok(kind),
         None => Err(format!(
             "{name:?} is not a layer (app, org, person, device, workspace, pick, preview)"
@@ -392,7 +396,7 @@ pub fn register(list: &ActionList, store: &ThemeStore) -> Result<(), ActionError
                     id: t.id,
                     label: t.label,
                     appearance: t.scheme.map(|s| s.as_str().to_owned()),
-                    source: t.source.kind().to_owned(),
+                    source: t.source.label(),
                     origin: t.source.to_string(),
                     problems: t.problems,
                 })
@@ -454,5 +458,41 @@ pub fn register(list: &ActionList, store: &ThemeStore) -> Result<(), ActionError
     list.register(&INSPECT, Effect::ReadOnly, move |args: InspectArgs| {
         Ok(inspect(&s, args.prefix.as_deref()))
     })?;
+    report(list, store);
     Ok(())
 }
+
+/// The theme's part of `APP_STATUS`: its `theme` section (the choice,
+/// the theme and scheme showing, the revision) and its problems, each
+/// with its file and field (`architect::action::app_status`).
+pub fn report(list: &ActionList, store: &ThemeStore) {
+    let s = store.clone();
+    list.status().section(STATUS_SECTION, move || {
+        let none: &[String] = &[];
+        let mut now = get(&s, Some(none));
+        now.tokens.clear();
+        facet_json::to_string(&now).unwrap_or_else(|_| "{}".to_owned())
+    });
+    let s = store.clone();
+    list.problems().source(STATUS_SECTION, move || {
+        s.problems()
+            .into_iter()
+            .map(|p| {
+                let mut out = architect::action::Problem::new(
+                    STATUS_SECTION,
+                    format!("{}: {}", p.theme, p.message),
+                );
+                if p.source != "builtin" && p.source != "memory" {
+                    out = out.file(p.source);
+                }
+                if let Some(field) = p.field {
+                    out = out.field(field);
+                }
+                out
+            })
+            .collect()
+    });
+}
+
+/// The theme's section of `APP_STATUS`, and its problems' source.
+pub const STATUS_SECTION: &str = "theme";

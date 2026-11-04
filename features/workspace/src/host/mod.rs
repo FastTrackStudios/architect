@@ -486,6 +486,10 @@ pub struct Host {
     sets_noun: Signal<String>,
     /// The sheet that manages the saved layouts is open.
     managing: Signal<bool>,
+    /// The screensets the app gave before anything was read from its
+    /// store: the built-in ones as shipped, for the escape hatch
+    /// (`WORKSPACES_RESTORE_BUILTINS`).
+    shipped: CopyValue<Vec<crate::screenset::Screenset>>,
 }
 
 /// The [`Host`] a [`WorkspaceView`] above put in context.
@@ -994,6 +998,8 @@ impl Host {
                     slot: Some(slot),
                 },
             ),
+            // Run where the commands are (the menu row does it).
+            Op::Run { .. } => {}
         }
     }
 }
@@ -1130,6 +1136,33 @@ enum Op {
     DockBack(Side),
     /// Recall the screenset in slot n (⌘n).
     Recall(u8),
+    /// Run another's entry (an extension's context-menu row) on a pane:
+    /// its command, told the pane and its view.
+    Run {
+        command: String,
+        pane: PaneId,
+        view: String,
+    },
+}
+
+/// One row others add to a target's context menu: its label and the
+/// command it runs (told the target: [`architect::action::Invocation`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContextEntry {
+    pub label: String,
+    pub command: String,
+}
+
+/// What others add to a pane's context menu (an extension's
+/// `[[context]]` rows), asked for by target (`view:<kind>`) and id (the
+/// pane's) each time the menu opens: provide it above the workspace.
+#[derive(Clone)]
+pub struct ContextEntries(pub Rc<dyn Fn(&str, &str) -> Vec<ContextEntry>>);
+
+impl ContextEntries {
+    pub fn new(f: impl Fn(&str, &str) -> Vec<ContextEntry> + 'static) -> Self {
+        Self(Rc::new(f))
+    }
 }
 
 /// A measured length, as the model's points (window sizes fit an `f32`).
@@ -1255,6 +1288,14 @@ pub fn WorkspaceView(
         window: CopyValue::new(WindowId::main()),
         status: Signal::new(Vec::new()),
         status_serial: CopyValue::new(0),
+        shipped: CopyValue::new(screensets.map_or_else(Vec::new, |s| {
+            s.peek()
+                .sets
+                .iter()
+                .filter(|s| s.builtin)
+                .cloned()
+                .collect()
+        })),
         screensets: screensets.unwrap_or_else(|| Signal::new(Screensets::default())),
         form: Signal::new(FormClass::Desk),
         scrolls: Signal::new(HashMap::new()),

@@ -87,10 +87,41 @@ bumps the revision only if what shows changed, survives `reload`.
 each frame. When it moved, `projected.update(&store.current())`, and
 re-record only on `true`. `Projected::revision()` stamps a recording.
 
-**Extension themes.** `[[themes]] path = "themes/x.json"` in
-`extension.toml` (`features/extensions/src/manifest.rs` `ThemeDecl`). The
-app adds `ThemeDirs::extension(id, folder, manifest.theme_files())` and
-reloads.
+**Extensions add themes and tokens.** In `extension.toml`:
+`[[themes]] path = "themes/x.json"` (`features/extensions/src/manifest.rs`
+`ThemeDecl`) and `[tokens] "clicker.face" = "mix($card, $brand, 0.22)"`
+(`Manifest::tokens`, namespace `Manifest::token_namespace`: the id's last
+part). Give the host the store and it does the rest, diffed on reload,
+withdrawn on unload:
+
+```rust,ignore
+let host = Host::new(list, sections).with_themes(store.clone());
+let runner = ProcessRunner::new()?.with_theme(store.clone()); // theme as data to processes
+```
+
+Without a host: `store.contribute(id, host::theme_contribution(&package))`
+/ `store.withdraw(id)` (`features/theme/src/store.rs` `Contribution`).
+`THEME_LIST` says `extension:<id>`. A broken file is a `THEME_PROBLEMS`
+entry, never a failed load.
+
+**An extension's GUI follows the theme.**
+
+- Process view (Dioxus over the wire): style with `var(--…)`. Its own
+  namespace reaches `:root` only if the app opts in
+  (`ThemeStoreProvider { css_namespaces }`).
+- Process that computes colours or paints: `guest::use_theme()` in a view,
+  `Guest::theme()`, `Guest::on_theme(|r| …)`; each an
+  `architect_theme::Resolved` (wire 3, `wire::ThemeData`).
+- Luau: `Runtime::with_module(Arc::new(ThemeModule::new(store)))`
+  (`features/scripting/src/theme.rs`); scripts read `theme.color(name)`
+  (`0xRRGGBBAA`), `theme.number`, `theme.value`, `theme.scheme`,
+  `theme.revision`, `theme.snapshot()`, `theme.subscribe(fn)`.
+- `ImGui`: `use_script_canvas` follows the store above it (restyle and a
+  frame on every change); headless, `Session::start_themed` then
+  `Session::set_theme` on each change. `Style::from_theme` maps tokens
+  (`imgui.<col>` first, else derived; `features/canvas/src/imgui.rs`
+  `Col`). Scripts override with `ImGui.PushStyleColor(ctx,
+  ImGui.Col_Button, theme.color('x'))`.
 
 ## Pitfalls
 
@@ -101,7 +132,13 @@ reloads.
   `brand-soft`. `accent` is architect-ui's hover wash. Paint views read
   `brand`.
 - `THEME_SET` writes the `Pick` layer and `THEME_TOKEN_SET` the `Person`
-  layer unless given `layer`.
+  layer unless given `layer` (never `builtin` or `extension`).
+- The `Extension` layer sits under the theme's own overrides (a theme
+  file restyles an extension's tokens); every other layer sits over them.
+- In Luau a module whose fields move must say `live_fields()`: Luau
+  folds `Global.field` once when a sandboxed chunk loads.
+- A process built for wire 3 is refused by a host before it (exact
+  check); a host now takes wire 2 and 3 (`WIRE_MIN`).
 - An override of `border` that reads `$border` is a cycle, not "the value
   below": a reference always sees the final value. A `Preview` covers both until `THEME_PREVIEW_END`.
 - A store change made off the UI thread (an action, the watcher) reaches

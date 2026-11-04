@@ -262,6 +262,18 @@ impl Source {
     }
 }
 
+impl Source {
+    /// What `THEME_LIST` says it is: its [`kind`](Self::kind), and an
+    /// extension's id (`extension:lab.clicker`).
+    #[must_use]
+    pub fn label(&self) -> String {
+        match self {
+            Self::Extension { id, .. } => format!("extension:{id}"),
+            other => other.kind().to_owned(),
+        }
+    }
+}
+
 impl fmt::Display for Source {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

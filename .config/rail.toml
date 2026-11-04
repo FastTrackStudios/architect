@@ -18,3 +18,22 @@
 publish = "none"
 github_release = false
 checks = "none"
+
+# cargo-rail also picks which tests a push to main runs (`checks.yml`,
+# scripts/ci-rail-plan.py): only the packages the diff reaches, with the
+# full suite on the nightly schedule, on tags and on a manual dispatch.
+#
+# Inputs outside the Cargo graph that change what CI itself does. Any of
+# these changing makes the plan the FULL set. Built-in Cargo work already
+# covers manifests, Cargo.lock, .cargo/config.toml and rust-toolchain.toml.
+[plan.work.ci-infra]
+scope = "repository"
+paths = [
+  ".github/**",
+  "justfile",
+  "devenv.nix",
+  "devenv.yaml",
+  "devenv.lock",
+  "scripts/**",
+  ".config/nextest.toml",
+]
