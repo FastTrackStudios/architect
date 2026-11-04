@@ -394,6 +394,50 @@ fn Root(props: RootProps) -> Element {
     (props.app)()
 }
 
+/// A pop-out's title row, where the window draws its own title bar (a
+/// Mac's, as the main window's): its tab bars along the top are the row,
+/// clear of the traffic lights, their empty part moving the window. `None`
+/// elsewhere: the system's title bar is over the window.
+#[allow(clippy::unnecessary_wraps)]
+fn popout_title_row(window: &Arc<dyn OsWindow>) -> Option<crate::TitleRow> {
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
+    let (drag, zoom) = (Arc::clone(window), Arc::clone(window));
+    let chrome = architect_shell::WindowChrome::mac(
+        move |()| {
+            let _ = drag.drag_window();
+        },
+        move |()| zoom.set_maximized(!zoom.is_maximized()),
+    );
+    Some(crate::TitleRow {
+        height: narrow(chrome.height),
+        // Past the traffic lights, as far as the main window's sidebar
+        // button sits.
+        left: narrow(chrome.buttons + 12.0),
+        right: 0.0,
+        sidebar_left: 0.0,
+        on_drag: Some(chrome.on_drag),
+        on_zoom: Some(chrome.on_zoom),
+    })
+}
+
+/// Puts a Mac pop-out's traffic lights in its title row (not in full
+/// screen, where `AppKit`'s own bar slides down); nothing elsewhere.
+#[allow(clippy::missing_const_for_fn)]
+fn fit_lights(window: &dyn OsWindow) {
+    #[cfg(target_os = "macos")]
+    if window.fullscreen().is_none() {
+        architect_shell::fit_traffic_lights(
+            window.rwh_06_window_handle(),
+            Some(architect_shell::WindowChrome::MAC_ROW),
+            architect_shell::WindowChrome::MAC_LIGHTS_LEFT,
+        );
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = window;
+}
+
 /// A pop-out on screen: its view, and the host's handle on it.
 struct Open {
     popout: Popout,
@@ -439,6 +483,17 @@ impl App {
             return;
         }
         let mut attributes = WindowAttributes::default().with_title(popout.title());
+        // As the main window: the content under a transparent title bar,
+        // the tab bars along the top the title row (`popout_title_row`).
+        #[cfg(target_os = "macos")]
+        {
+            attributes = attributes.with_platform_attributes(Box::new(
+                dioxus_native::winit::platform::macos::WindowAttributesMacOS::default()
+                    .with_titlebar_transparent(true)
+                    .with_fullsize_content_view(true)
+                    .with_title_hidden(true),
+            ));
+        }
         let (w, h) = popout.bounds().map_or((640.0, 480.0), |b| (b.w, b.h));
         attributes = attributes.with_surface_size(LogicalSize::new(f64::from(w), f64::from(h)));
         if let Some(b) = popout.bounds() {
@@ -462,11 +517,15 @@ impl App {
         };
         let os_window = Arc::clone(&window);
         doc.vdom.in_scope(ScopeId::ROOT, move || {
+            if let Some(row) = popout_title_row(&os_window) {
+                provide_context(row);
+            }
             let head: Rc<dyn dioxus::document::Document> = Rc::new(head);
             provide_context(head);
             provide_context(shell);
             provide_context(os_window);
         });
+        fit_lights(window.as_ref());
         doc.initial_build();
         view.resume();
         view.request_redraw();
@@ -508,6 +567,10 @@ impl App {
                 return;
             }
             WindowEvent::Moved(_) | WindowEvent::SurfaceResized(_) => {
+                // AppKit lays its title bar out again on a resize.
+                if matches!(event, WindowEvent::SurfaceResized(_)) {
+                    fit_lights(open.view.window.as_ref());
+                }
                 if let Some(bounds) = content_rect(open.view.window.as_ref()) {
                     let popout = open.popout.clone();
                     let doc = open.view.downcast_doc_mut::<DioxusDocument>();

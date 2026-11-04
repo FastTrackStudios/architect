@@ -9,7 +9,10 @@ use architect_shell::{
     Account, AppShell, Insets, Menu, Page, Screen, SidebarDefault, Tab, use_shell,
     use_sidebar_default,
 };
-use architect_workspace::{Pane, Side, Target, TitleRow, View, Views, Workspace, WorkspaceView};
+use architect_workspace::{
+    Dest, Pane, PaneId, Popout, Side, Target, TitleRow, View, Views, WindowId, WindowSystem,
+    Windows, Workspace, WorkspaceView,
+};
 use blitz_dom::Document as _;
 use blitz_traits::shell::{ColorScheme, Viewport};
 use dioxus::prelude::*;
@@ -191,4 +194,95 @@ fn a_page_with_one_tab_keeps_it_in_the_shells_row() {
     assert!(rects(&doc, "[data-tab-bar]").is_empty());
     // The app's sidebar is open beside it, its account a row.
     assert_eq!(rects(&doc, "[aria-label=\"Account\"]").len(), 1);
+}
+
+// A pop-out window draws its own title bar too (a Mac's): its launcher
+// gives it a `TitleRow`, and its tab bar is the row, one row.
+
+/// A platform that keeps what it was asked to open.
+#[derive(Default)]
+struct Fake(std::cell::RefCell<Vec<Popout>>);
+
+struct Platform(std::rc::Rc<Fake>);
+
+impl WindowSystem for Platform {
+    fn open(&self, popout: Popout) {
+        self.0.0.borrow_mut().push(popout);
+    }
+    fn close(&self, _: &WindowId) {}
+    fn origin(&self, _: &WindowId) -> Option<(f32, f32)> {
+        Some((0.0, 0.0))
+    }
+    fn window_at(&self, _: f32, _: f32) -> Option<WindowId> {
+        None
+    }
+    fn on_release_outside(&self, _: &WindowId, _: std::rc::Rc<dyn Fn(f32, f32)>) {}
+}
+
+thread_local! {
+    static FAKE: std::cell::RefCell<Option<std::rc::Rc<Fake>>> = const { std::cell::RefCell::new(None) };
+}
+
+fn main_with_popout() -> Element {
+    let fake = FAKE.with(|f| f.borrow().clone().unwrap());
+    use_context_provider(|| Windows::new(Platform(fake)));
+    let workspace = use_signal(|| {
+        let mut w = Workspace::new();
+        let _ = w.open(Pane::new("editor", "note", "Editor"), Target::Tab);
+        let _ = w.open(Pane::new("chart", "note", "Chart"), Target::Tab);
+        w.move_pane(&PaneId::new("chart"), Dest::Window(None))
+            .unwrap();
+        w
+    });
+    let views = use_hook(|| {
+        Views::new().view(View::new("note", "Note", |_| rsx! { div { "a note" } }).many())
+    });
+    rsx! { WorkspaceView { workspace, views } }
+}
+
+#[test]
+fn a_popout_window_has_its_tabs_in_its_title_row() {
+    FAKE.with(|f| *f.borrow_mut() = Some(std::rc::Rc::new(Fake::default())));
+    let mut main = VirtualDom::new(main_with_popout);
+    main.rebuild_in_place();
+    let popout = FAKE.with(|f| f.borrow().as_ref().unwrap().0.borrow()[0].clone());
+    let row = TitleRow {
+        height: 40.0,
+        left: 86.0,
+        right: 0.0,
+        sidebar_left: 0.0,
+        on_drag: None,
+        on_zoom: None,
+    };
+    let mut doc = DioxusDocument::new(
+        popout.dom().with_root_context(row),
+        DocumentConfig {
+            viewport: Some(Viewport::new(640, 480, 1.0, ColorScheme::Dark)),
+            ..Default::default()
+        },
+    );
+    doc.initial_build();
+    for _ in 0..3 {
+        doc.poll(None);
+        doc.inner.borrow_mut().resolve(0.0);
+    }
+    let bars = rects(&doc, "[data-tab-bar]");
+    assert_eq!(bars.len(), 1, "{bars:?}");
+    // From the window's root (a test document keeps the body's margin).
+    let (ox, oy, _, _) = rects(&doc, "[style*=\"100vw\"]")[0];
+    let (_, y, _, h) = bars[0];
+    assert!(
+        (y - oy).abs() < 0.5 && (h - 40.0).abs() < 0.5,
+        "the bar is the 40pt row: {bars:?}"
+    );
+    let tab = rects(&doc, "[data-tab=\"chart\"]");
+    assert!(
+        tab[0].0 - ox >= 86.0,
+        "clear of the traffic lights: {tab:?}"
+    );
+    for (_, y, _, _) in rects(&doc, "[data-pane]") {
+        assert!(y - oy >= 39.5, "the pane under the one row, at {y}");
+    }
+    drop(doc);
+    drop(main);
 }

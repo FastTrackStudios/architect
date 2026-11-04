@@ -345,6 +345,7 @@ fn window_title(host: Host, w: &Workspace, win: &Window) -> String {
 #[component]
 fn PopoutView(props: PopoutProps) -> Element {
     use_hook(|| props.bridge.provide());
+    let title_row = try_use_context::<super::TitleRow>();
     let host = use_context_provider(|| Host {
         workspace: props.workspace,
         views: CopyValue::new(props.views.clone()),
@@ -353,7 +354,9 @@ fn PopoutView(props: PopoutProps) -> Element {
         theme: props.theme,
         sizes: Signal::new(props.sizes),
         phone: Signal::new(false),
-        title_row: Signal::new(None),
+        // The window's own title row, when its launcher draws the title
+        // bar (a Mac's): the tab bars along the top are it.
+        title_row: Signal::new(title_row),
         in_shell: Signal::new(false),
         phone_header: Signal::new(false),
         drag: Signal::new(None),
@@ -423,7 +426,14 @@ fn PopoutView(props: PopoutProps) -> Element {
         })
         .unwrap_or_default();
     drop(w);
-    let edges = super::group::Edges::default();
+    // The window's edges: under a title row the top tab bars are it, the
+    // first clear of the window's buttons.
+    let edges = super::group::Edges {
+        top: true,
+        left: true,
+        right: true,
+        covered: 0.0,
+    };
     let ground = format!(
         "html, body {{ margin: 0; padding: 0; height: 100%; background: {}; }}",
         t.desk

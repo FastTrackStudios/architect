@@ -265,6 +265,12 @@ app on the shell gets it:
   AppKit's, put in the row by `features/shell/src/shell/mac.rs`
   `fit_traffic_lights`, which the lab calls from
   `apps/lab/ui/src/screen.rs` `use_window_chrome` after each resize.
+  A pane popped out to a window of its own gets the same row: on a Mac
+  its launcher makes the title bar transparent, puts the traffic lights
+  in it and hands the pop-out a `TitleRow`
+  (`features/workspace/src/native.rs` `popout_title_row`), so its tab
+  bar is the title row, clear of the lights, its empty part moving the
+  window.
 - **The ribbon** (`RIBBON`, 44pt) is the window's left edge under the
   bar, the full height: the app's sections as icons, then what the page
   adds (a workspace's views and pinned commands). Folding the sidebar
