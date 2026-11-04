@@ -81,6 +81,8 @@ pub mod hostapi;
 pub mod install;
 #[cfg(feature = "ui")]
 pub mod interface;
+#[cfg(any(feature = "host", feature = "web"))]
+mod invocation;
 #[cfg(any(feature = "linked", all(feature = "guest", unix)))]
 pub mod linked;
 #[cfg(feature = "host")]
@@ -109,6 +111,8 @@ pub mod views;
 pub mod wasi;
 #[cfg(feature = "host")]
 pub mod watch;
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+pub mod web;
 #[cfg(feature = "vox")]
 pub mod wire;
 #[cfg(feature = "guest")]

@@ -204,6 +204,10 @@ jobs:
           # draws (architect-ui, dioxus-primitives, Loro).
           cargo check --target wasm32-unknown-unknown -p architect-a2ui
           cargo check --target wasm32-unknown-unknown -p architect-a2ui --features ui
+          # WASI component extensions in a browser (jco-transpiled, Web
+          # Workers), and the lab's page that runs the WASI Counter.
+          cargo check --target wasm32-unknown-unknown -p architect-extensions --features web
+          cargo check --target wasm32-unknown-unknown -p architect-lab-web
 
   # The one status main's branch protection requires (context `check`).
   # It passes only when every job above succeeded; a skipped or cancelled

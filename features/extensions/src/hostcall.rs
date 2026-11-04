@@ -8,7 +8,8 @@
 //! its `linked::Handle`, and the WASM runner (#167) through one imported
 //! function taking and giving JSON text. The host side, which checks each
 //! call against what the extension may reach, is `crate::hostapi`
-//! (feature `host`).
+//! (feature `host`), and the browser's `crate::web` `WebHost` (feature
+//! `web`); both decide with [`check`].
 //!
 //! | call | what it asks | needs |
 //! |---|---|---|
@@ -24,6 +25,9 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+use crate::capabilities::{DOCUMENTS, ORG, SELECTION};
+use crate::manifest::{Capabilities, Manifest, Reach};
 
 /// One call an extension makes to its host.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -181,6 +185,65 @@ impl From<Result<Value, HostError>> for HostAnswer {
             Ok(v) => Self::Ok(v),
             Err(e) => Self::Error(e),
         }
+    }
+}
+
+/// Whether an extension that may reach `may` may make `request`.
+///
+/// `may` is its manifest's capabilities as a person granted them; the
+/// answer is the capability it asks for, and the one it lacks and why when
+/// it may not. `effect` is what an app action `run` names changes (the
+/// list knows; the caller looks it up).
+///
+/// The one decision every host makes: `hostapi::ExtensionApi` (natively)
+/// and `web::WebHost` (in a browser). A file's path is checked by the host
+/// that has files (its own folder, `capabilities.folders`).
+///
+/// # Errors
+///
+/// The capability it lacks, and why.
+pub fn check(
+    manifest: &Manifest,
+    may: &Capabilities,
+    request: &HostRequest,
+    effect: Reach,
+) -> (&'static str, Result<(), (String, String)>) {
+    let reads = |what: &str| {
+        if may.may_read(what) {
+            Ok(())
+        } else {
+            Err((
+                format!("reads.{what}"),
+                format!("this extension may not read the app's {what} (capabilities.reads)"),
+            ))
+        }
+    };
+    match request {
+        HostRequest::Run { action, .. } => (
+            "actions",
+            may.may_run(&manifest.action_prefix(), action, effect)
+                .map_err(|(c, why)| (c.to_owned(), why)),
+        ),
+        HostRequest::Org => ("reads", reads(ORG)),
+        HostRequest::Selection => ("reads", reads(SELECTION)),
+        HostRequest::Open { .. } | HostRequest::ReadDocument { .. } => ("reads", reads(DOCUMENTS)),
+        HostRequest::Setting { key } | HostRequest::SetSetting { key, .. } => {
+            let check = if key.starts_with(&format!("{}.", manifest.id)) {
+                Ok(())
+            } else {
+                Err((
+                    "settings".to_owned(),
+                    format!(
+                        "{key} is not one of its settings: an extension reads and writes only its own ({}.…)",
+                        manifest.id
+                    ),
+                ))
+            };
+            ("settings", check)
+        }
+        HostRequest::Data { .. } | HostRequest::SetData { .. } => ("data", Ok(())),
+        HostRequest::ReadFile { .. } | HostRequest::WriteFile { .. } => ("files", Ok(())),
+        HostRequest::Log { .. } => ("log", Ok(())),
     }
 }
 

@@ -1,0 +1,13 @@
+{
+  "name": "architect-extensions-web",
+  "private": true,
+  "description": "WASI component extensions in the browser: jco transpiles a component; runner.js and instance.js run it (docs/content/architecture/extensions.md, \"WASI components\").",
+  "type": "module",
+  "license": "MIT OR Apache-2.0",
+  "scripts": {
+    "test": "node --test test/web.test.mjs"
+  },
+  "devDependencies": {
+    "@bytecodealliance/jco": "1.41.0"
+  }
+}

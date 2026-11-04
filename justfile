@@ -264,3 +264,31 @@ auth-replay SNAPSHOT="auth-snapshot.json" DB="./auth-replay.db":
 #   nix-shell -p chromium --run 'PLAYWRIGHT_CHROMIUM_PATH=$(which chromium) just auth-e2e'
 auth-e2e:
     cd apps/auth-server/e2e && npm install && npx playwright test
+
+# The lab in a browser (apps/lab/web): the WASI Counter component built for
+# wasm32-wasip2, transpiled by jco (features/extensions/web), and the page
+# built for wasm32-unknown-unknown, into target/lab-web; then served on
+# PORT (0: build only). Needs node (the `wasi` dev profile has it) and
+# wasm-bindgen-cli at Cargo.lock's version (installed into target/tools
+# when missing).
+lab-web PORT="8090":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    out=target/lab-web
+    mkdir -p "$out"
+    devenv --profile wasi shell -- cargo build -q -p architect-lab-wasi-counter --target wasm32-wasip2
+    (cd features/extensions/web && [ -d node_modules ] || npm ci --silent)
+    node features/extensions/web/transpile.mjs target/wasm32-wasip2/debug/architect_lab_wasi_counter.wasm "$out/wasi-counter" >/dev/null
+    cargo build -q -p architect-lab-web --target wasm32-unknown-unknown
+    want=$(awk '/^name = "wasm-bindgen"$/{getline; gsub(/[^0-9.]/,""); print; exit}' Cargo.lock)
+    bindgen=target/tools/bin/wasm-bindgen
+    if ! "$bindgen" --version 2>/dev/null | grep -q "$want"; then
+        cargo install -q wasm-bindgen-cli --version "$want" --locked --root target/tools
+    fi
+    "$bindgen" --target web --no-typescript --out-dir "$out" target/wasm32-unknown-unknown/debug/architect_lab_web.wasm
+    cp apps/lab/web/index.html "$out/"
+    echo "lab-web: $out"
+    if [ "{{PORT}}" != "0" ]; then
+        echo "serving http://localhost:{{PORT}}"
+        python3 -m http.server -d "$out" -b 127.0.0.1 {{PORT}}
+    fi

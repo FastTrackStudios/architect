@@ -106,6 +106,22 @@ wasi = [
 # below); this feature makes it so elsewhere, to test and measure it
 # (docs/content/architecture/extensions.md, "WASI components").
 pulley = ["wasi", "wasmtime/pulley"]
+# WASI components in a browser (`web`, wasm32-unknown-unknown): the same
+# components, transpiled by jco (`web/transpile.mjs`), run by the
+# browser's WebAssembly in Web Workers (`web/runner.js`, `web/instance.js`);
+# `WebHost` answers their host imports with the same capability checks
+# (`hostcall::check`), and their views' edits are applied to the page's
+# DOM (see docs/content/architecture/extensions.md, "On the web").
+web = [
+    "vox",
+    "dep:architect",
+    "architect/action-list",
+    "dep:futures",
+    "dep:wasm-bindgen",
+    "dep:wasm-bindgen-futures",
+    "dep:js-sys",
+    "dep:web-sys",
+]
 remote = ["process", "ui", "architect-theme/dioxus", "dep:blitz-dom", "dep:blitz-traits", "dep:dioxus-native-dom", "dep:futures-timer"]
 
 [dependencies]
@@ -159,6 +175,26 @@ wasmtime = { version = "50.0.1", optional = true, default-features = false, feat
     "addr2line",
 ] }
 wasmtime-wasi = { version = "50.0.1", optional = true, default-features = false, features = ["p2"] }
+wasm-bindgen = { version = "0.2", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+js-sys = { version = "0.3", optional = true }
+web-sys = { version = "0.3", optional = true, features = [
+    "Document",
+    "Element",
+    "Event",
+    "EventTarget",
+    "HtmlElement",
+    "HtmlInputElement",
+    "CssStyleDeclaration",
+    "KeyboardEvent",
+    "Location",
+    "MouseEvent",
+    "Node",
+    "NodeList",
+    "Text",
+    "Url",
+    "Window",
+] }
 
 [dev-dependencies]
 # tests/distribution.rs: archives signed with a throwaway key.

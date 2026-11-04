@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>architect lab — web</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root { --background: #18181b; --foreground: #e4e4e7; --border: #3f3f46; --primary: #4f46e5; --primary-foreground: #fff; color-scheme: dark; }
+    body { margin: 0; background: var(--background); color: var(--foreground); font: 14px system-ui, sans-serif; }
+    header { display: flex; align-items: baseline; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--border); }
+    header h1 { font-size: 15px; margin: 0; }
+    header .beat { margin-left: auto; font-variant-numeric: tabular-nums; opacity: 0.8; }
+    main { display: grid; grid-template-columns: 1fr 340px; gap: 0; height: calc(100vh - 46px); }
+    #pane { border-right: 1px solid var(--border); min-height: 0; }
+    aside { padding: 14px 16px; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
+    aside button { padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: inherit; text-align: left; }
+    aside h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; opacity: .7; margin: 8px 0 0; }
+    #log { font: 12px ui-monospace, monospace; white-space: pre-wrap; opacity: .85; }
+    #report { font: 12px ui-monospace, monospace; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <header><h1>architect lab — WASI Counter in the browser</h1><span id="status">loading…</span><span class="beat" id="beat"></span></header>
+  <main>
+    <div id="pane"></div>
+    <aside>
+      <h2>The app's list</h2>
+      <div id="actions" style="display:flex;flex-direction:column;gap:6px"></div>
+      <h2>The component</h2>
+      <div id="report"></div>
+      <h2>Its log</h2>
+      <div id="log"></div>
+    </aside>
+  </main>
+  <script type="module">
+    import init from './architect_lab_web.js';
+    init();
+  </script>
+</body>
+</html>
