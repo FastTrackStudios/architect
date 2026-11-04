@@ -25,6 +25,10 @@
 //!   only, and the worker goes when its page does.
 //! - **Its log**: `console.log` lines go to the page's log
 //!   ([`crate::runner::Log`]), under its extension.
+//! - **Its errors** say the `.tsx` file's own line and column: each
+//!   transpiled module keeps its source map ([`tsx::SourceMap`]), and what
+//!   a page throws is remapped through them ([`tsx::remap`]) before it
+//!   reaches `<file>.error`, `APP_STATUS` or `EXT_CHECK`.
 //!
 //! Phase two of #273 (a worker-side DOM so Preact or Solid run unchanged)
 //! fits here: their DOM calls would build the same element tree this
@@ -157,6 +161,8 @@ struct Files {
     worker: bool,
     /// The transpile errors of the last load, with their places.
     errors: Arc<Mutex<Vec<tsx::SourceError>>>,
+    /// Each transpiled module's source map, by its module name.
+    maps: Arc<Mutex<BTreeMap<String, tsx::SourceMap>>>,
 }
 
 impl Files {
@@ -166,7 +172,16 @@ impl Files {
             root,
             worker,
             errors: Arc::default(),
+            maps: Arc::default(),
         }
+    }
+
+    /// `why` (an error, a stack) at its sources' places, the page's
+    /// folder's paths relative to it ([`tsx::remap`]).
+    fn said(&self, why: &str) -> String {
+        let maps = self.maps.lock().unwrap_or_else(PoisonError::into_inner);
+        let root = self.root.display().to_string();
+        tsx::remap(why, &root, maps.iter().map(|(k, v)| (k.as_str(), v)))
     }
 
     fn inside(&self, path: &Path) -> Option<PathBuf> {
@@ -272,8 +287,14 @@ impl Loader for Files {
             .map_err(|e| rquickjs::Error::new_loading_message(name, e.to_string()))?;
         let code = if tsx::needs_transpile(path) {
             let shown = path.strip_prefix(&self.root).unwrap_or(path);
-            match tsx::transpile(shown, &source) {
-                Ok(code) => code,
+            match tsx::transpile_mapped(shown, &source) {
+                Ok((code, map)) => {
+                    self.maps
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .insert(name.to_owned(), map);
+                    code
+                }
                 Err(errors) => {
                     let first = errors.first().map(ToString::to_string).unwrap_or_default();
                     self.errors
@@ -306,6 +327,7 @@ pub struct JsEngine {
     budget: Arc<Budget>,
     services: Services,
     workers: Workers,
+    files: Files,
 }
 
 impl std::fmt::Debug for JsEngine {
@@ -358,8 +380,9 @@ impl JsEngine {
             budget,
             services: services.clone(),
             workers: Rc::default(),
+            files: files.clone(),
         };
-        engine.install(&files.root)?;
+        engine.install(&files)?;
         let path = page
             .path
             .canonicalize()
@@ -389,9 +412,10 @@ impl JsEngine {
         engine.budget.disarm();
         if let Err(why) = mounted {
             let errors = files.errors.lock().unwrap_or_else(PoisonError::into_inner);
-            let why = errors
-                .first()
-                .map_or_else(|| engine.budget.explain(why), ToString::to_string);
+            let why = errors.first().map_or_else(
+                || files.said(&engine.budget.explain(why)),
+                ToString::to_string,
+            );
             drop(errors);
             return Err(why);
         }
@@ -402,12 +426,12 @@ impl JsEngine {
     }
 
     /// `__host` and the runtime, in the fresh context.
-    fn install(&self, root: &Path) -> Result<(), String> {
+    fn install(&self, files: &Files) -> Result<(), String> {
         let services = self.services.clone();
         let workers = Rc::clone(&self.workers);
         self.ctx.with(|ctx| -> Result<(), String> {
             let host = Object::new(ctx.clone()).map_err(|e| e.to_string())?;
-            bind(&ctx, &host, &services, &workers, root).map_err(|e| e.to_string())?;
+            bind(&ctx, &host, &services, &workers, files).map_err(|e| e.to_string())?;
             ctx.globals()
                 .set("__host", host)
                 .map_err(|e| e.to_string())?;
@@ -433,7 +457,7 @@ impl JsEngine {
             let v: Value = f.call(args).catch(&ctx).map_err(|e| e.to_string())?;
             Ok(v.as_string().and_then(|s| s.to_string().ok()))
         });
-        let out = out.map_err(|e| self.budget.explain(e));
+        let out = out.map_err(|e| self.files.said(&self.budget.explain(e)));
         self.drain();
         self.budget.disarm();
         out
@@ -454,7 +478,7 @@ impl JsEngine {
                             .or_else(|| caught.as_string().and_then(|s| s.to_string().ok()))
                             .unwrap_or_else(|| "a promise job failed".to_owned())
                     });
-                    let why = self.budget.explain(why);
+                    let why = self.files.said(&self.budget.explain(why));
                     self.services
                         .log
                         .line(&self.services.extension, "error", &why);
@@ -518,7 +542,7 @@ impl Engine for JsEngine {
                 let f: Function = arch.get("tick").map_err(|e| e.to_string())?;
                 f.call::<_, f64>(()).catch(&ctx).map_err(|e| e.to_string())
             });
-            let out = out.map_err(|e| self.budget.explain(e));
+            let out = out.map_err(|e| self.files.said(&self.budget.explain(e)));
             self.drain();
             self.budget.disarm();
             out?
@@ -543,8 +567,9 @@ fn bind<'js>(
     host: &Object<'js>,
     services: &Services,
     workers: &Workers,
-    root: &Path,
+    files: &Files,
 ) -> rquickjs::Result<()> {
+    let root = files.root.as_path();
     let next = Rc::new(Cell::new(0_u32));
     {
         let services = services.clone();
@@ -597,10 +622,17 @@ fn bind<'js>(
         )?;
     }
     {
-        let services = services.clone();
+        let (services, files) = (services.clone(), files.clone());
         host.set(
             "log",
             Function::new(ctx.clone(), move |level: String, text: String| {
+                // What it reports (a handler's throw, `console.error(e)`)
+                // says its source's places.
+                let text = if level == "error" {
+                    files.said(&text)
+                } else {
+                    text
+                };
                 services.log.line(&services.extension, &level, &text);
             })?,
         )?;
@@ -801,7 +833,7 @@ fn run_worker(
             .unwrap_or(false);
         Ok((text, serving))
     });
-    let (result, serving) = out.map_err(|e| budget.explain(e))?;
+    let (result, serving) = out.map_err(|e| files.said(&budget.explain(e)))?;
     if serving {
         // It serves its page's messages until it is told to stop.
         while !cancel.is_set() && !services.stop.is_set() {
@@ -816,7 +848,7 @@ fn run_worker(
                             .map_err(|e| e.to_string())
                     });
                     if let Err(why) = handled {
-                        return Err(budget.explain(why));
+                        return Err(files.said(&budget.explain(why)));
                     }
                     while rt.execute_pending_job().unwrap_or(false) {}
                 }

@@ -417,3 +417,67 @@ fn a_check_renders_once_and_counts_what_it_drew() {
         .unwrap_err();
     assert!(why.starts_with("b.tsx:1:"), "{why}");
 }
+
+/// What a TSX page throws as it runs says the `.tsx` file's own line and
+/// column (its source map), in `<file>.error`, `APP_STATUS`'s problems
+/// and `EXT_CHECK`'s check: not the transpiled module's.
+#[test]
+fn a_tsx_pages_runtime_error_says_its_own_line_and_column() {
+    // Types and JSX above the throw move the printed module's lines; the
+    // throw is on line 13 of the file (QuickJS places it at its `Error`
+    // call, column 29).
+    const THROWS: &str = r#"import { h, useState } from "architect";
+
+type Pin = { title: string };
+interface Props {
+  pins?: Pin[];
+}
+
+function Row({ title }: Pin) {
+  return <li class="row">{title}</li>;
+}
+
+function boom(n: number): never {
+  throw new Error(`no pin ${n}`);
+}
+
+export default function Board({ pins = [] }: Props) {
+  const [bad, setBad] = useState<boolean>(false);
+  if (bad) boom(7);
+  return (
+    <ul>
+      {pins.map((p) => <Row key={p.title} title={p.title} />)}
+      <button id="go" onClick={() => setBad(true)}>go</button>
+    </ul>
+  );
+}
+"#;
+    let dir = tempfile::tempdir().unwrap();
+    let path = write(dir.path(), "board.tsx", THROWS);
+    let pages = pages(ActionList::new());
+    let mut pane = Pane::open(&pages, &path);
+    pane.click("#go");
+    pane.wait_until(Duration::from_secs(2), |p| p.text(".page-error").is_some());
+    let error = std::fs::read_to_string(dir.path().join("board.tsx.error")).unwrap();
+    let first = error.lines().next().unwrap_or_default();
+    assert!(
+        first.contains("board.tsx:13:29") && first.contains("no pin 7"),
+        "{error}"
+    );
+    // Its stack is the file's too: `boom` threw at 13, `Board` called it
+    // at 18.
+    assert!(error.contains("board.tsx:18:"), "{error}");
+    assert!(!error.contains(&dir.path().display().to_string()), "{error}");
+    let problems = pages.status_problems();
+    assert!(
+        problems.iter().any(|p| p.message.contains("board.tsx:13:29")),
+        "{problems:?}"
+    );
+    let banner = pane.text(".page-error").unwrap();
+    assert!(banner.contains("board.tsx:13:29"), "{banner}");
+    // EXT_CHECK: a page that throws as it first renders, at its place.
+    let thrown_at_once = THROWS.replace("useState<boolean>(false)", "useState<boolean>(true)");
+    let checked = write(dir.path(), "check.tsx", &thrown_at_once);
+    let why = pages.check_file(&checked).unwrap_err();
+    assert!(why.starts_with("check.tsx:13:29: "), "{why}");
+}
