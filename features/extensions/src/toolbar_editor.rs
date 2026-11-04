@@ -214,8 +214,9 @@ pub struct Editor {
     /// The + chip whose menu is open: a toolbar's key, a place.
     pub(crate) adding: Signal<Option<(String, String)>>,
     pub(crate) picking: Signal<Option<Picking>>,
-    /// The window, measured: what a menu keeps inside.
-    pub(crate) viewport: Signal<Option<Rect>>,
+    /// The editor's layer over the window, measured when a menu opens:
+    /// what the menu keeps inside.
+    pub(crate) viewport: Signal<Option<Rc<MountedData>>>,
     /// The last edit refused, and why.
     pub(crate) problem: Signal<Option<String>>,
 }
@@ -454,19 +455,7 @@ pub fn ToolbarEditorLayer(ui: ExtensionUi) -> Element {
         div {
             "data-toolbar-editor": if editing { "on" } else { "off" },
             style: "position:absolute; left:0; top:0; right:0; bottom:0; pointer-events:none; z-index:85;",
-            onmounted: move |e| {
-                let m = e.data();
-                spawn(async move {
-                    if let Some(r) = measure(&m).await {
-                        viewport.set(Some(r));
-                    }
-                });
-            },
-            onresize: move |e| {
-                if let Ok(size) = e.get_content_box_size() {
-                    viewport.set(Some(Rect::new(0.0, 0.0, narrow(size.width), narrow(size.height))));
-                }
-            },
+            onmounted: move |e| viewport.set(Some(e.data())),
             if editing {
                 EditBar { ui }
             }
@@ -723,7 +712,11 @@ impl Kept {
         } else {
             "top:calc(100% + 4px);"
         };
-        format!("{edge} left:{}px;", -self.shift.round())
+        if self.shift > 0.0 {
+            format!("{edge} left:-{}px;", self.shift.round())
+        } else {
+            format!("{edge} left:0;")
+        }
     }
 
     /// What `data-kept` says of it (none when it is where it opened).
@@ -743,14 +736,34 @@ impl Kept {
 
 /// Keeps the menu `m` in the window `viewport`: measured once it is laid
 /// out, `kept` set to where it goes.
-pub(crate) fn keep_in(m: Rc<MountedData>, viewport: Option<Signal<Option<Rect>>>, mut kept: Signal<Kept>) {
+pub(crate) fn keep_in(
+    m: Rc<MountedData>,
+    viewport: Option<Signal<Option<Rc<MountedData>>>>,
+    mut kept: Signal<Kept>,
+) {
     spawn(async move {
-        // Once laid out where it opened.
-        futures_timer::Delay::new(std::time::Duration::from_millis(16)).await;
-        let (Some(r), Some(view)) = (measure(&m).await, viewport.and_then(|v| *v.peek())) else {
+        // Once laid out where it opened: two measures alike.
+        let mut last = None;
+        let mut settled = None;
+        for _ in 0..6 {
+            futures_timer::Delay::new(std::time::Duration::from_millis(16)).await;
+            let now = measure(&m).await;
+            if now.is_some() && now == last {
+                settled = now;
+                break;
+            }
+            last = now;
+        }
+        let layer = viewport.and_then(|v| v.peek().clone());
+        let view = match layer {
+            Some(l) => measure(&l).await,
+            None => None,
+        };
+        let (Some(r), Some(view)) = (settled.or(last), view) else {
             return;
         };
-        if r.w <= 0.0 {
+        // Not yet laid out as itself.
+        if r.w <= 0.0 || view.w <= 0.0 {
             return;
         }
         let now = Kept::of(r, view);

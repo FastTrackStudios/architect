@@ -9,7 +9,9 @@
 //! on the same folder shows it the same.
 //!
 //! The toolbar, as HTML, matches `tests/golden/toolbar-editor-<state>.html`
-//! (`built`: after Done; `editing`: in edit mode again, after the restart);
+//! (`built`: after Done; `menu`: its dropdown open at the window's edge,
+//! moved left to stay in it; `editing`: in edit mode again, after the
+//! restart);
 //! `ARCHITECT_GOLDEN=record` writes them again. One test plays the runs in
 //! turn, as the lab's folder (`ARCHITECT_LAB_CONFIG_DIR`) is the process's.
 
@@ -241,6 +243,17 @@ fn editing() -> String {
     s
 }
 
+/// Its dropdown opened, near the window's right edge: kept in it.
+fn menu() -> String {
+    let mut s = reload();
+    s.push_str(&format!(
+        "    {{id open, target {}, do @click{{}}}}\n    {{id opened, target {}, done {{timeout 5}}}}\n",
+        css(&format!("[data-toolbar=\"{KEY}\"] [data-tool=\"menu:Menu\"]")),
+        css(&format!("[data-toolbar=\"{KEY}\"] [role=\"menu\"][data-kept]")),
+    ));
+    s
+}
+
 fn golden(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/golden")
@@ -313,6 +326,12 @@ fn a_toolbar_built_from_empty_in_the_editor_survives_a_restart() {
     // The lab again, on the same folder: the same toolbar.
     let again = play("reload", folder.path(), &reload());
     assert_eq!(again, built, "the same after a restart");
+
+    // Its dropdown, at the right dock's edge: moved left to stay in the
+    // window, not clipped (#315's leftover).
+    let opened = play("menu", folder.path(), &menu());
+    assert!(opened.contains(r#"data-kept="left "#), "{opened}");
+    matches_golden("menu", &opened);
 
     let editing = play("editing", folder.path(), &editing());
     assert!(editing.contains(r#"data-editing="true""#), "{editing}");
