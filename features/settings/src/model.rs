@@ -247,6 +247,10 @@ pub struct Section {
     pub group: Option<String>,
     pub owner: Owner,
     pub blocks: Vec<Block>,
+    /// The view that draws it in place of its settings: an extension's
+    /// (`<extension id>/<view id>`), drawn by the `SectionViews` the app
+    /// gives the page (`crate::ui`). None for a section of settings.
+    pub view: Option<String>,
 }
 
 impl Section {
@@ -258,6 +262,7 @@ impl Section {
             group: None,
             owner: Owner::App,
             blocks: Vec::new(),
+            view: None,
         }
     }
 
@@ -270,6 +275,21 @@ impl Section {
     #[must_use]
     pub fn group(mut self, group: impl Into<String>) -> Self {
         self.group = Some(group.into());
+        self
+    }
+
+    /// In the first, untitled group (a built-in's).
+    #[must_use]
+    pub fn ungrouped(mut self) -> Self {
+        self.group = None;
+        self
+    }
+
+    /// Drawn by view `view` (`<extension id>/<view id>`) in place of
+    /// settings.
+    #[must_use]
+    pub fn view(mut self, view: impl Into<String>) -> Self {
+        self.view = Some(view.into());
         self
     }
 

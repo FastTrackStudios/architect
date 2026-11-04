@@ -774,9 +774,15 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         if let Some(checkout) = checkout() {
             extensions = extensions.with_vendored(ARCHITECT_GIT, checkout);
         }
-        // The Board: one Rust value, linked in as a built-in. The
-        // extensions manager is one too.
+        // The Board: one Rust value, linked in as a built-in. The theme
+        // picker and the extensions manager are architect's.
         if let Ok(with) = extensions.clone().with_linked(&architect_lab_board::Board) {
+            extensions = with;
+        }
+        if let Ok(with) = extensions
+            .clone()
+            .with_linked(&architect_theme_picker::ThemePicker)
+        {
             extensions = with;
         }
         if let Ok(with) = extensions

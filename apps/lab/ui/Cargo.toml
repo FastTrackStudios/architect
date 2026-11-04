@@ -33,6 +33,8 @@ architect-orgs = { workspace = true, features = ["ui"] }
 architect-extensions = { workspace = true, features = ["ui", "remote", "page"] }
 # The lab's example extension, linked in (apps/lab/board).
 architect-lab-board = { path = "../board" }
+# The theme picker, architect's built-in extension.
+architect-theme-picker = { workspace = true }
 # Pages as files (apps/lab/board/pages/board.tsx, overrides under the
 # lab's folder `pages/`): TSX on QuickJS, drawn in a pane, live on save.
 architect-pages = { workspace = true, features = ["js", "luau", "ui", "codegen", "manager"] }

@@ -1,0 +1,34 @@
+[package]
+name = "architect-theme-picker"
+description = "The theme picker as a built-in extension (extension.toml): ⌘K's \"Choose a theme…\" and \"Light or dark\", ⌘O's theme: source; linked into an app, or run as its own process, through the host service either way."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+doctest = false
+
+[[bin]]
+name = "architect-theme-picker"
+path = "src/main.rs"
+
+[dependencies]
+# The trait and the guest (its process copy); an app adds `linked`.
+architect-extensions = { workspace = true, features = ["guest"] }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+architect = { workspace = true, features = ["action-list"] }
+architect-extensions = { workspace = true, features = ["host", "linked", "process"] }
+architect-settings = { workspace = true }
+architect-theme = { workspace = true, features = ["actions"] }
+facet = { workspace = true }
+futures = "0.3"
+tempfile = "3"
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../../workspace-hack" }

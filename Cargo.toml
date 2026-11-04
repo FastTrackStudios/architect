@@ -66,6 +66,7 @@ members = [
     "features/ui/ui-snapshot",
     "features/shell",
     "features/theme",
+    "features/theme/picker",
     "features/guide",
     "features/presence",
     "features/devices",
@@ -141,6 +142,7 @@ ui-snapshot = { path = "features/ui/ui-snapshot" }
 architect-guide = { path = "features/guide" }
 architect-presence = { path = "features/presence" }
 architect-theme = { path = "features/theme" }
+architect-theme-picker = { path = "features/theme/picker" }
 # story — the component workbench (stories, snapshots, parity, fuzz).
 architect-story-core = { path = "features/story/architect-story-core" }
 architect-story-macros = { path = "features/story/architect-story-macros" }

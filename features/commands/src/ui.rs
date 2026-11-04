@@ -88,6 +88,8 @@ pub struct Commands {
     /// The one group the palette lists, and its field's prompt
     /// ([`Commands::show_group`]).
     pub(crate) only: Signal<Option<(String, String)>>,
+    /// What ⌘O's field is set to next ([`Commands::show_quick_open`]).
+    pub(crate) seed: Signal<Option<String>>,
     /// A binding being recorded in the action list window.
     pub(crate) recording: Signal<Option<Recording>>,
     /// The `@` (this page's targets) and `#` (settings) finders.
@@ -122,6 +124,7 @@ pub fn use_commands_provider() -> Commands {
         query: Signal::new(String::new()),
         asking: Signal::new(None),
         only: Signal::new(None),
+        seed: Signal::new(None),
         recording: Signal::new(None),
         targets: CopyValue::new(Rc::new(RefCell::new(Openers::new()))),
         settings: CopyValue::new(Rc::new(RefCell::new(Openers::new()))),
@@ -528,6 +531,28 @@ impl Commands {
             only.set(None);
         }
         o.set(Some(overlay));
+    }
+
+    /// ⌘O asked `query`: `kind:` alone (`theme:`) lists only that
+    /// opener's items, the field empty under its title for the person to
+    /// narrow; anything else is put in the field.
+    pub fn show_quick_open(&self, query: &str) {
+        let mut seed = self.seed;
+        seed.set(Some(query.to_owned()));
+        self.show(Overlay::QuickOpen);
+    }
+
+    /// ⌘O's `opener`, from now on (in place of one of its kind); what
+    /// [`use_opener`] does for a component's life.
+    pub fn register_opener(&self, opener: Opener) {
+        self.openers.read().borrow_mut().register(opener);
+        self.bump();
+    }
+
+    /// ⌘O's opener of `kind`, gone.
+    pub fn remove_opener(&self, kind: &str) {
+        self.openers.read().borrow_mut().remove(kind);
+        self.bump();
     }
 
     /// The palette on `group`'s commands only (those that can run now),
@@ -946,9 +971,45 @@ pub fn QuickOpen() -> Element {
         return rsx! {};
     };
     let t = theme();
-    let query = use_signal(String::new);
+    let mut query = use_signal(String::new);
     let mut selected = use_signal(|| 0usize);
-    let found: Vec<Found> = commands.openers.read().borrow().search(&query.read());
+    // Asked from outside (`COMMANDS_SHOW`, an extension's picker): one
+    // opener's items (`theme:`), the field empty for the person to narrow;
+    // or the field set.
+    let mut only = use_signal(|| None::<String>);
+    use_effect(move || {
+        let mut seed = commands.seed;
+        let Some(q) = seed() else { return };
+        seed.set(None);
+        let kind = q
+            .strip_suffix(':')
+            .map(str::trim)
+            .filter(|k| commands.openers.peek().borrow().title(k).is_some());
+        if let Some(k) = kind {
+            only.set(Some(k.to_owned()));
+            query.set(String::new());
+        } else {
+            only.set(None);
+            query.set(q);
+        }
+    });
+    // An opener that answers later (an extension's) bumps the version.
+    let _ = (commands.version)();
+    let asked = only().map_or_else(
+        || query.read().clone(),
+        |kind| format!("{kind}:{}", query.read()),
+    );
+    let found: Vec<Found> = commands.openers.read().borrow().search(&asked);
+    let placeholder = only()
+        .and_then(|k| {
+            commands
+                .openers
+                .peek()
+                .borrow()
+                .title(&k)
+                .map(|t| format!("{t}…"))
+        })
+        .unwrap_or_else(|| "Open…  (note: to look in one place)".to_owned());
     let count = found.len();
     use_effect(move || {
         let _ = query();
@@ -1006,7 +1067,7 @@ pub fn QuickOpen() -> Element {
         })
         .collect();
     rsx! {
-        Frame { placeholder: "Open…  (note: to look in one place)", query, on_key,
+        Frame { placeholder, query, on_key,
             if items.is_empty() {
                 div { style: "padding: 18px 12px; color: {t.ink_3}; font-size: 13px;", "Nothing to open matches" }
             }

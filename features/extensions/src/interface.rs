@@ -379,6 +379,25 @@ pub fn use_extension_ui(host: Host, app: Arc<ActionList>) -> ExtensionUi {
         layers,
         seen,
     };
+    // The settings page draws an extension's section from its view
+    // (`[[sections]] view`), a linked one's component as it is.
+    use_context_provider(move || {
+        architect_settings::SectionViews(Rc::new(move |kind: &str| {
+            let (extension, view) = kind.split_once('/')?;
+            let host = ui.host();
+            if let Some(root) = host.linked_view(extension, view) {
+                return Some(rsx! { LinkedRoot { key: "{kind}", root } });
+            }
+            host.get(extension)?;
+            Some(rsx! {
+                div { style: "flex: 1; min-height: 480px; display: flex; flex-direction: column;",
+                    ExtensionView { ui, extension: extension.to_owned(), view: view.to_owned() }
+                }
+            })
+        }))
+    });
+    // ⌘O: every extension's quick-open openers, the palette's own.
+    use_quick_open(host.clone(), revision);
     // A pane's context menu: an extension's rows for its view.
     let reg = host.contributions().clone();
     let list = host.list().clone();
@@ -484,6 +503,171 @@ pub fn use_extension_ui(host: Host, app: Arc<ActionList>) -> ExtensionUi {
         }
     });
     ui
+}
+
+/// Keeps ⌘O's openers what the extensions' `[[openers]]` (the ones with a
+/// `kind`, not the claims) say, as they load and go.
+fn use_quick_open(host: Host, revision: Signal<u64>) {
+    let Some(commands) = try_use_context::<architect_commands::Commands>() else {
+        return;
+    };
+    let mine = use_hook(|| Rc::new(std::cell::RefCell::new(Vec::<String>::new())));
+    // What an item picked runs, here: ⌘O closes as it opens.
+    let opens = use_coroutine(
+        move |mut asks: mpsc::UnboundedReceiver<(ActionList, String, String)>| async move {
+            while let Some((list, open, args)) = asks.next().await {
+                let caller = architect::action::ActionCaller::app()
+                    .with_invocation(Invocation::new(InvocationSource::Palette));
+                if let Err(e) = list
+                    .run_json_async_with(&caller, &open, args.as_bytes())
+                    .await
+                {
+                    tracing::warn!(ext.action = %open, error = %e, "an extension's ⌘O item did not open");
+                }
+            }
+        },
+    );
+    use_effect(move || {
+        let _ = revision();
+        let now = host.contributions().quick_open();
+        let kinds: Vec<String> = now.iter().map(|o| o.item.kind.clone()).collect();
+        for gone in mine.borrow().iter().filter(|k| !kinds.contains(k)) {
+            commands.remove_opener(gone);
+        }
+        for by in now {
+            commands.register_opener(quick_opener(
+                host.list().clone(),
+                &commands,
+                opens.tx(),
+                &by.item,
+            ));
+        }
+        *mine.borrow_mut() = kinds;
+    });
+}
+
+/// How long an answer an extension's opener gave later is shown before it
+/// is asked again.
+const ASKED_AGAIN: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// What an opener answered for a query, and when.
+type Answers = Rc<std::cell::RefCell<BTreeMap<String, (std::time::Instant, Vec<OpenItem>)>>>;
+
+use architect_commands::{OpenIn, OpenItem, Opener};
+
+/// ⌘O's opener for an extension's `decl`: a query runs its `action`
+/// (`{query}` in, `{items}` out); an item picked runs its `open`.
+///
+/// A linked extension's action answers at once; a process's later, its
+/// answer kept a moment ([`ASKED_AGAIN`]) and the palette told to look
+/// again (`Commands::refresh`), the last answer shown meanwhile.
+fn quick_opener(
+    list: ActionList,
+    commands: &architect_commands::Commands,
+    opens: mpsc::UnboundedSender<(ActionList, String, String)>,
+    decl: &contrib::OpenerDecl,
+) -> Opener {
+    let commands = *commands;
+    let answers: Answers = Rc::default();
+    let pending: Rc<std::cell::RefCell<std::collections::BTreeSet<String>>> = Rc::default();
+    let shown_last: Rc<std::cell::RefCell<Vec<OpenItem>>> = Rc::default();
+    let (kind, action) = (decl.kind.clone(), decl.action.clone());
+    let (ask_list, ask_kind) = (list.clone(), kind.clone());
+    let items = move |query: &str| -> Vec<OpenItem> {
+        if let Some((at, items)) = answers.borrow().get(query)
+            && at.elapsed() < ASKED_AGAIN
+        {
+            return items.clone();
+        }
+        if pending.borrow().contains(query) {
+            return shown_last.borrow().clone();
+        }
+        let (list, action, args) = (
+            ask_list.clone(),
+            action.clone(),
+            json!({ "query": query }).to_string(),
+        );
+        let mut run = Box::pin(async move {
+            let caller = architect::action::ActionCaller::app()
+                .with_invocation(Invocation::new(InvocationSource::Palette));
+            list.run_json_async_with(&caller, &action, args.as_bytes())
+                .await
+        });
+        let mut cx = std::task::Context::from_waker(futures::task::noop_waker_ref());
+        if let std::task::Poll::Ready(out) = run.as_mut().poll(&mut cx) {
+            let items = open_items(&ask_kind, out.ok());
+            shown_last.borrow_mut().clone_from(&items);
+            return items;
+        }
+        pending.borrow_mut().insert(query.to_owned());
+        let (kept, asked, shown, kind, query) = (
+            Rc::clone(&answers),
+            Rc::clone(&pending),
+            Rc::clone(&shown_last),
+            ask_kind.clone(),
+            query.to_owned(),
+        );
+        spawn(async move {
+            let items = open_items(&kind, run.await.ok());
+            asked.borrow_mut().remove(&query);
+            shown.borrow_mut().clone_from(&items);
+            kept.borrow_mut()
+                .insert(query, (std::time::Instant::now(), items));
+            commands.refresh();
+        });
+        shown_last.borrow().clone()
+    };
+    let (open, by_id) = if decl.open.is_empty() {
+        (decl.action.clone(), false)
+    } else {
+        (decl.open.clone(), true)
+    };
+    let opened = move |item: &OpenItem, open_in: OpenIn| {
+        let place = match open_in {
+            OpenIn::Here => "here",
+            OpenIn::Tab => "tab",
+            OpenIn::Split => "split",
+        };
+        let key = if by_id { "id" } else { "open" };
+        let mut args = serde_json::Map::new();
+        args.insert(key.to_owned(), json!(item.id));
+        // Where it goes, to an action that takes it (`in` in its params).
+        let takes_in = list
+            .info(&open)
+            .and_then(|i| i.params_schema)
+            .is_some_and(|p| p.contains("\"in\""));
+        if takes_in {
+            args.insert("in".to_owned(), json!(place));
+        }
+        let args = Value::Object(args).to_string();
+        let _ = opens.unbounded_send((list.clone(), open.clone(), args));
+    };
+    Opener::new(kind, decl.title.clone(), items, opened)
+}
+
+/// An opener action's answer (`{items: [{id, title, detail?, recency?}]}`)
+/// as ⌘O's items: the palette sorts them by its match, then `recency`
+/// (higher first), then title.
+fn open_items(kind: &str, out: Option<Vec<u8>>) -> Vec<OpenItem> {
+    let answer: Value = out
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or(Value::Null);
+    let list = answer
+        .get("items")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    list.iter()
+        .filter_map(|v| {
+            let text = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or_default();
+            let (id, title) = (text("id"), text("title"));
+            (!id.is_empty()).then(|| {
+                OpenItem::new(kind, id, if title.is_empty() { id } else { title })
+                    .detail(text("detail"))
+                    .recency(v.get("recency").and_then(Value::as_u64).unwrap_or(0))
+            })
+        })
+        .collect()
 }
 
 /// The popups and overlays extensions opened, over the window: mount it

@@ -66,6 +66,7 @@ command's own effect, not as a blanket write
   action does (the Action List's confirmation tickets);
 - an action run through `COMMANDS_RUN` is authorised as itself;
 - `COMMANDS_LIST` lists every command with its effect.
+- `COMMANDS_SHOW` opens the palette or ⌘O with its field set (`theme:` lists one opener alone).
 
 ## 2. Contexts
 

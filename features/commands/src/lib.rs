@@ -43,7 +43,9 @@ mod recent;
 mod ui;
 
 #[cfg(feature = "ui")]
-pub use bridge::{CommandInfo, CommandList, CommandsState, Ran, RunCommand, use_command_actions};
+pub use bridge::{
+    CommandInfo, CommandList, CommandsState, Ran, RunCommand, ShowCommands, use_command_actions,
+};
 #[cfg(feature = "ui")]
 pub use confirm::ConfirmSheet;
 pub use custom::{Condition, CustomAction, Runner, Step, StepFailed};
@@ -82,6 +84,11 @@ pub const RUN_ACTION: &str = "COMMANDS_RUN";
 /// The read-only Action List action that lists every command with its
 /// effect, enabled or not and why ([`use_command_actions`]; feature `ui`).
 pub const LIST_ACTION: &str = "COMMANDS_LIST";
+
+/// The Action List action that opens the palette or ⌘O, its field set
+/// (`{overlay: "palette" | "quick-open", query?}`): an extension's "Choose
+/// a theme…" opens ⌘O on `theme:` ([`use_command_actions`]; feature `ui`).
+pub const SHOW_ACTION: &str = "COMMANDS_SHOW";
 
 /// The read-only Action List action that says which overlay is open and
 /// what the palette's field says ([`use_command_actions`]; feature `ui`).

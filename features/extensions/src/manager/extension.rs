@@ -70,7 +70,41 @@ impl Extension for ManagerExtension {
             let out = m.run(kind, id, op, args.get("args").unwrap_or(&Value::Null));
             async move { out }
         });
+        let m = self.manager.clone();
+        ext.action("MANAGER_FIND", move |args| {
+            let items: Vec<Value> = m
+                .list(None, s(&args, "query").unwrap_or_default())
+                .into_iter()
+                .take(40)
+                .map(|i| {
+                    json!({
+                        "id": format!("{}\u{1f}{}", i.kind, i.id),
+                        "title": i.name,
+                        "detail": format!("{} · {}", i.kind, i.source),
+                    })
+                })
+                .collect();
+            async move { Ok(json!({ "items": items })) }
+        });
+        let m = self.manager.clone();
+        ext.action("MANAGER_SHOW", move |args| {
+            let id = s(&args, "id").unwrap_or_default();
+            let (kind, id) = match (s(&args, "kind"), id.split_once('\u{1f}')) {
+                (Some(kind), _) => (kind, id),
+                (None, Some(both)) => both,
+                (None, None) => ("", id),
+            };
+            let out = if m.get(kind, id).is_none() {
+                Err(format!("no {kind} {id} (MANAGER_LIST lists them)"))
+            } else if m.show(kind, id) {
+                Ok(json!({ "shown": true }))
+            } else {
+                Err("no extensions page is up to show it".to_owned())
+            };
+            async move { out }
+        });
         #[cfg(feature = "page")]
-        ext.view("manager", crate::page::ManagerView);
+        ext.view("manager", crate::page::ManagerView)
+            .view("section", crate::page::ManagerSection);
     }
 }

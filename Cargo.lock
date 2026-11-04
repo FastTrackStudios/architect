@@ -1171,6 +1171,7 @@ dependencies = [
  "architect-shell",
  "architect-workspace-hack",
  "dioxus",
+ "tempfile",
 ]
 
 [[package]]
@@ -1191,6 +1192,7 @@ dependencies = [
  "architect-settings",
  "architect-shell",
  "architect-theme",
+ "architect-theme-picker",
  "architect-ui",
  "architect-workspace",
  "architect-workspace-hack",
@@ -1632,6 +1634,21 @@ dependencies = [
  "notify",
  "tempfile",
  "tracing",
+]
+
+[[package]]
+name = "architect-theme-picker"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-extensions",
+ "architect-settings",
+ "architect-theme",
+ "architect-workspace-hack",
+ "facet",
+ "futures",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

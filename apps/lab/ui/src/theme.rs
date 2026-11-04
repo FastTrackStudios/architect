@@ -1,6 +1,8 @@
 //! The lab's themes: one `architect_theme::ThemeStore` for the whole app.
 //! The shell, the architect-ui root and the paint panes all follow it; its
-//! `THEME_*` actions are on the lab's Action List; ⌘K has a theme picker.
+//! `THEME_*` actions are on the lab's Action List; the theme picker is
+//! architect's built-in extension (`architect_theme_picker`, linked in
+//! `extensions.rs`).
 //!
 //! The person's look is architect's Appearance section
 //! (`architect_settings::use_appearance_section`), and the store's org,
@@ -181,59 +183,6 @@ pub fn SystemScheme() -> Element {
         }
     });
     rsx! {}
-}
-
-/// ⌘K's theme picker: "Choose a theme…" opens the palette on the "Theme"
-/// group, one command per theme (the ones known when the lab started;
-/// `THEME_LIST` / `THEME_SET` reach every one), and "Light or dark".
-pub fn use_theme_commands(handle: ThemeHandle, commands: &architect_commands::Commands) {
-    let commands = commands.clone();
-    let showing = handle.resolved().read().id().to_owned();
-    let themes = use_hook(|| handle.store().themes());
-    architect_commands::use_command(
-        architect_commands::Command::new("LAB_THEME_CHOOSE", "Choose a theme…").group("View"),
-        move || commands.show_group("Theme", "Choose a theme"),
-    );
-    architect_commands::use_command(
-        architect_commands::Command::new("LAB_THEME_SCHEME", "Light or dark").group("View"),
-        move || {
-            let store = handle.store();
-            let next = match store.current().scheme() {
-                Scheme::Dark => architect_theme::Appearance::Light,
-                Scheme::Light => architect_theme::Appearance::Dark,
-            };
-            let _ = store.update(architect_theme::LayerKind::Person, |l| {
-                l.appearance = Some(next);
-            });
-        },
-    );
-    for info in themes {
-        let id = info.id.clone();
-        architect_commands::use_command(
-            architect_commands::Command::new(
-                format!("LAB_THEME_{}", info.id.to_uppercase().replace('-', "_")),
-                info.label.clone(),
-            )
-            .group("Theme")
-            .checked(showing == info.id),
-            move || pick(&handle.store(), &id),
-        );
-    }
-}
-
-/// Picks `id` so it shows now, as the person's (kept): its half of the
-/// pair, and the appearance its scheme when the other one is showing.
-fn pick(store: &ThemeStore, id: &str) {
-    let _ = store.pick_in(architect_theme::LayerKind::Person, id);
-    let scheme = store.registry().scheme_of(id);
-    if let Some(scheme) = scheme.filter(|s| *s != store.current().scheme()) {
-        let _ = store.update(architect_theme::LayerKind::Person, |l| {
-            l.appearance = Some(match scheme {
-                Scheme::Light => architect_theme::Appearance::Light,
-                Scheme::Dark => architect_theme::Appearance::Dark,
-            });
-        });
-    }
 }
 
 /// The page's ground and the rows' feedback, in the theme's colours.
