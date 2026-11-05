@@ -6,7 +6,7 @@ use dioxus::prelude::*;
 use lucide_dioxus::{
     ArrowDown, ArrowDownWideNarrow, ArrowLeft, ArrowUp, ArrowUpDown, Check, ChevronDown,
     ChevronRight, ChevronsDownUp, ChevronsUpDown, Columns2, FileText, Folder, FolderOpen, ListTree,
-    Pin, Rows3, Tag, Vault,
+    Pin, Rows3, SquarePen, Tag, Vault,
 };
 
 use super::virtual_pane::VirtualPane;
@@ -231,6 +231,7 @@ pub(super) fn ListPane(
     on_open: EventHandler<Open>,
     on_context_menu: Option<EventHandler<(String, MouseEvent)>>,
     single: bool,
+    on_new_note: Option<EventHandler<String>>,
 ) -> Element {
     let s = nav.state.read();
     let target = s.target();
@@ -240,6 +241,11 @@ pub(super) fn ListPane(
     };
     let shown = s.effective().clone();
     let has_own = s.appearance(&target).is_some();
+    // New note goes in the folder on show (the root for a tag).
+    let new_in = match &target {
+        NavTarget::Folder(f) => f.clone(),
+        NavTarget::Tag(_) => String::new(),
+    };
     let empty = s.list_order().is_empty();
     drop(s);
     let own = *nav.own.read() || has_own;
@@ -263,6 +269,14 @@ pub(super) fn ListPane(
                     }
                 }
                 span { class: "nv-title", style: "flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; padding:0 4px;", "{title}" }
+                // Notebook Navigator's "New note" in the list's header: in
+                // the folder on show.
+                if let Some(new_note) = on_new_note {
+                    button { class: "nv-tool", "aria-label": "New note", "data-testid": "nv-new-note",
+                        onclick: move |_| new_note.call(new_in.clone()),
+                        SquarePen { size: 16 }
+                    }
+                }
                 button { class: if descendants { "nv-tool nv-on" } else { "nv-tool" }, "aria-label": "Notes from folders below",
                     onclick: move |_| nav.edit_list(|_, s| s.include_descendants = !s.include_descendants),
                     ListTree { size: 16 }
@@ -592,6 +606,7 @@ fn FileRow(
         path,
         name,
         preview,
+        image,
         date,
         parent,
         selected,

@@ -164,7 +164,9 @@ fn font_context(fonts: &[&[u8]]) -> dioxus_native::FontContext {
     ctx
 }
 
-/// Fetches `dioxus:` assets from the bundle, the rest as `data:` URIs.
+/// Fetches `dioxus:` assets from the bundle, `file:` URLs from disk (a
+/// vault's images: the navigator's feature images, a note's embeds), the
+/// rest as `data:` URIs.
 struct Assets {
     data: Arc<dyn NetProvider>,
 }
@@ -174,6 +176,12 @@ impl NetProvider for Assets {
         if request.url.scheme() == "dioxus" {
             if let Ok(found) = dioxus_asset_resolver::native::serve_asset(request.url.path()) {
                 handler.bytes(request.url.to_string(), found.into_body().into());
+            }
+        } else if request.url.scheme() == "file" {
+            if let Ok(path) = request.url.to_file_path()
+                && let Ok(bytes) = std::fs::read(&path)
+            {
+                handler.bytes(request.url.to_string(), bytes.into());
             }
         } else {
             self.data.fetch(doc_id, request, handler);

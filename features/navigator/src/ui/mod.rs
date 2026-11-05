@@ -569,7 +569,11 @@ struct OpenWith(EventHandler<Open>);
 /// `on_open` opens a note in the app's workspace; `on_context_menu` is a
 /// right-click on a note (its path); `on_focus_editor` gives the keyboard
 /// to the note on show (→ from the list); `phone` is one pane at a time,
-/// with a phone's measures.
+/// with a phone's measures. `columns` is the sidebar's when the app's
+/// shell sets it (`architect_shell::SidebarLayout::columns`): one is one
+/// pane at a time, two is folders beside notes, whatever the settings say.
+/// `on_new_note` puts New note in the list's header: it is given the
+/// folder on show (`""` for the root), for the app to make a note in.
 #[component]
 pub fn NavigatorView(
     navigator: Navigator,
@@ -581,6 +585,8 @@ pub fn NavigatorView(
     /// declares them (Navigator's `extension.toml`).
     #[props(default = true)]
     commands: bool,
+    #[props(default)] columns: Option<u8>,
+    #[props(default)] on_new_note: Option<EventHandler<String>>,
 ) -> Element {
     let nav = navigator;
     use_context_provider(|| OpenWith(on_open));
@@ -613,7 +619,11 @@ pub fn NavigatorView(
             futures_timer::Delay::new(Duration::from_millis(250)).await;
         }
     });
-    let layout = nav.layout(phone);
+    let layout = match (columns, phone) {
+        (_, true) | (None, false) => nav.layout(phone),
+        (Some(0 | 1), false) => PaneLayout::Single,
+        (Some(_), false) => PaneLayout::Dual(nav.state.read().settings().orientation),
+    };
     let (focus, single, transition_ms, nav_width, nav_height) = {
         let s = nav.state.read();
         (
@@ -642,7 +652,7 @@ pub fn NavigatorView(
         panes::NavPane { nav, on_open }
     };
     let list_pane = rsx! {
-        panes::ListPane { nav, on_open, on_context_menu, single: layout == PaneLayout::Single }
+        panes::ListPane { nav, on_open, on_context_menu, single: layout == PaneLayout::Single, on_new_note }
     };
     let body = match layout {
         PaneLayout::Single => {

@@ -11,7 +11,8 @@
 //! folder's notes), side by side, stacked, or one at a time with a slide
 //! between them; both virtualized, so a vault of 100,000 notes draws as
 //! fast as one of ten. It reads a vault through [`NavigatorSource`]
-//! ([`MemorySource`] keeps one in memory); the app opens the notes it is
+//! ([`MemorySource`] keeps one in memory; feature `vault`'s
+//! `VaultSource` is architect's vault, live); the app opens the notes it is
 //! asked to (`ui::NavigatorView`'s `on_open`), in its workspace.
 //!
 //! The model is plain data and wasm-clean ([`NavigatorState`]: the index,
@@ -36,6 +37,8 @@ pub mod virtualize;
 
 #[cfg(feature = "ui")]
 pub mod ui;
+#[cfg(feature = "vault")]
+pub mod vault_source;
 
 pub use appearance::Appearance;
 pub use index::{NoteCount, VaultIndex};
@@ -52,3 +55,5 @@ pub use source::{
 };
 pub use state::{Colour, Key, Mods, NavigatorState, OpenIn, Outcome, Pin, ViewState};
 pub use tree::{NavRow, NavRowKind};
+#[cfg(feature = "vault")]
+pub use vault_source::VaultSource;
