@@ -83,8 +83,32 @@ impl Embeds {
     #[must_use]
     pub fn resolve(&self, claim: &Claim) -> Option<EmbedSpec> {
         let by = self.host.contributions().embed_for(claim)?;
-        let loaded = self.host.get(&by.owner)?;
-        let embed = by.item;
+        self.spec(by.owner, by.item, claim.clone())
+    }
+
+    /// Extension `extension`'s embed `id` (its `[[embeds]]` id, or the
+    /// view one draws), whatever it claims: what an editor's widget
+    /// decoration mounts (`crate::editor`). Its claim is
+    /// `embed_type:widget`.
+    #[must_use]
+    pub fn of(&self, extension: &str, id: &str) -> Option<EmbedSpec> {
+        let embed = self
+            .host
+            .contributions()
+            .embeds()
+            .into_iter()
+            .filter(|by| by.owner == extension)
+            .map(|by| by.item)
+            .find(|e| e.id == id || e.view.as_deref() == Some(id))?;
+        self.spec(
+            extension.to_owned(),
+            embed,
+            Claim::EmbedType("widget".to_owned()),
+        )
+    }
+
+    fn spec(&self, owner: String, embed: EmbedDecl, claim: Claim) -> Option<EmbedSpec> {
+        let loaded = self.host.get(&owner)?;
         let page = embed.page.clone().or_else(|| {
             let view = embed.view.as_deref()?;
             loaded
@@ -95,14 +119,14 @@ impl Embeds {
                 .and_then(|v| v.page.clone())
         });
         Some(EmbedSpec {
-            extension: by.owner,
+            extension: owner,
             view: embed.view_name(),
             page,
             dir: loaded.dir.clone(),
             origin: loaded.origin,
             kind: loaded.manifest.kind,
             max_height: embed.max_height.unwrap_or(DEFAULT_MAX_HEIGHT),
-            claim: claim.clone(),
+            claim,
             embed,
         })
     }
@@ -152,7 +176,7 @@ impl Host {
 }
 
 #[cfg(feature = "ui")]
-pub use view::{EmbedAsk, EmbedPages, EmbedView};
+pub use view::{EmbedAsk, EmbedPages, EmbedView, WidgetView};
 
 #[cfg(feature = "ui")]
 mod view {
@@ -225,6 +249,45 @@ mod view {
         let Some(spec) = Embeds::new(host.clone()).resolve(&claim) else {
             return plain();
         };
+        draw(&host, spec, input, plain)
+    }
+
+    /// An extension's embed `id` mounted by an editor's widget decoration
+    /// (`crate::editor`): drawn as an inline embed is, given `props` (the
+    /// widget's) and `source` (empty); nothing when the extension or the
+    /// embed is gone.
+    #[component]
+    pub fn WidgetView(extension: String, id: String, #[props(default)] props: Value) -> Element {
+        let now = EmbedInput {
+            claim: Claim::EmbedType("widget".to_owned()).to_string(),
+            source: String::new(),
+            props,
+        };
+        let mut input = use_signal(|| now.clone());
+        use_effect(use_reactive!(|now| {
+            if *input.peek() != now {
+                input.set(now);
+            }
+        }));
+        let Some(ui) = try_use_context::<ExtensionUi>() else {
+            return rsx! {};
+        };
+        let _ = ui.revision();
+        let host = ui.host();
+        let Some(spec) = Embeds::new(host.clone()).of(&extension, &id) else {
+            return rsx! {};
+        };
+        draw(&host, spec, input, || rsx! {})
+    }
+
+    /// `spec` drawn, given `input`: a page's sub-document, a linked view in
+    /// the host's document, or a process's; `plain` when none can be.
+    fn draw(
+        host: &crate::host::Host,
+        spec: EmbedSpec,
+        input: Signal<EmbedInput>,
+        plain: impl Fn() -> Element,
+    ) -> Element {
         let Some(loaded) = host.get(&spec.extension) else {
             return plain();
         };

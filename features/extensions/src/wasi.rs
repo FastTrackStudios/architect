@@ -702,9 +702,12 @@ impl wit_host::Host for State {
     }
 
     async fn decorate_editor(&mut self, decorations: String) -> Result<(), String> {
-        self.ask_json("decorate_editor", &format!("{{\"decorations\": {decorations}}}"))
-            .await
-            .map(|_| ())
+        self.ask_json(
+            "decorate_editor",
+            &format!("{{\"decorations\": {decorations}}}"),
+        )
+        .await
+        .map(|_| ())
     }
 
     async fn fetch(&mut self, request: String) -> Result<String, String> {

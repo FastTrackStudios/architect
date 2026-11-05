@@ -113,6 +113,9 @@ repository = "https://github.com/FastTrackStudios/architect"
 # the editor's extension-API branch until its PR is pinned with the rest of
 # the editor below (`[patch."https://github.com/FastTrackStudios/editor"]`).
 editor-ext = { git = "https://github.com/FastTrackStudios/editor", branch = "feat/extension-api-312" }
+# The editor's view, for the lab's note editor (native, on Blitz). Its
+# source is patched to the pinned editor below, like Keyflow's.
+editor-view = { git = "https://github.com/FastTrackStudios/editor", branch = "feat/extension-api-312", default-features = false }
 # SMTP for the auth server's verification and password-reset mail.
 # rustls, not native-tls, so the build carries no OpenSSL dependency.
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-rustls-tls", "builder", "hostname"] }

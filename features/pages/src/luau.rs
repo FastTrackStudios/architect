@@ -454,7 +454,9 @@ impl LuauEngine {
         let editor = lua.create_table()?;
         editor.set(
             "state",
-            ask("editor_state", |_, _| Ok(Value::Object(serde_json::Map::new())))?,
+            ask("editor_state", |_, _| {
+                Ok(Value::Object(serde_json::Map::new()))
+            })?,
         )?;
         editor.set("edit", ask("edit_editor", table)?)?;
         editor.set(

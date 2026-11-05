@@ -75,14 +75,25 @@ fn tab_and_shift_tab_indent_a_list_item_and_move_between_cells() {
     // In the list: Tab indents "two", one undo step, as the extension.
     editor.put_caret(NOTE.find("two").unwrap());
     assert_eq!(press(&list, &host, &editor, "Tab"), "LAB_OUTLINE_INDENT");
-    assert!(editor.text().starts_with("- one\n  - two\n"), "{}", editor.text());
-    assert_eq!(selection(&editor).1, NOTE.find("two").unwrap() + 2, "the caret kept its text");
+    assert!(
+        editor.text().starts_with("- one\n  - two\n"),
+        "{}",
+        editor.text()
+    );
+    assert_eq!(
+        selection(&editor).1,
+        NOTE.find("two").unwrap() + 2,
+        "the caret kept its text"
+    );
     let steps = editor.steps();
     assert_eq!(steps.len(), 1);
     assert_eq!(steps[0].name, "Indent list item");
     assert!(steps[0].by.contains("lab.outline"), "{}", steps[0].by);
     // Shift-Tab takes it back out.
-    assert_eq!(press(&list, &host, &editor, "Shift-Tab"), "LAB_OUTLINE_OUTDENT");
+    assert_eq!(
+        press(&list, &host, &editor, "Shift-Tab"),
+        "LAB_OUTLINE_OUTDENT"
+    );
     assert_eq!(editor.text(), NOTE);
 
     // In the table: Tab selects the next cell, Shift-Tab the previous.
@@ -104,7 +115,9 @@ fn tab_and_shift_tab_indent_a_list_item_and_move_between_cells() {
     assert_eq!(editor.text(), format!("{NOTE}\n|   |   |"));
     assert_eq!(selection(&editor), (NOTE.len() + 3, NOTE.len() + 3));
     assert_eq!(
-        node_at(&editor.text(), NOTE.len() + 3).cell.map(|c| (c.row, c.col)),
+        node_at(&editor.text(), NOTE.len() + 3)
+            .cell
+            .map(|c| (c.row, c.col)),
         Some((2, 0))
     );
 }
@@ -117,10 +130,17 @@ fn an_extensions_edit_undoes_as_one_step_and_leaves_the_persons_typing() {
     // The table, a three-line insert and a selection, in one step.
     editor.put_caret(0);
     run(&list, "LAB_OUTLINE_TABLE", &Value::Null).unwrap();
-    assert_eq!(editor.text(), "| A | B |\n|---|---|\n|   |   |\n- a\n- b and more");
+    assert_eq!(
+        editor.text(),
+        "| A | B |\n|---|---|\n|   |   |\n- a\n- b and more"
+    );
     assert_eq!(selection(&editor), (2, 3), "its first cell's text selected");
     assert_eq!(editor.undo().as_deref(), Some("Insert a table"));
-    assert_eq!(editor.text(), "- a\n- b and more", "the person's typing kept");
+    assert_eq!(
+        editor.text(),
+        "- a\n- b and more",
+        "the person's typing kept"
+    );
     assert!(editor.steps().is_empty());
     drop(host);
 }
@@ -133,7 +153,10 @@ fn its_decorations_land_and_a_widget_names_its_own_embed() {
         "TODO call\n- a\n- b TODO",
     ));
     let (list, host) = host(&editor);
-    assert_eq!(run(&list, "LAB_OUTLINE_MARK", &Value::Null).unwrap(), json!(2));
+    assert_eq!(
+        run(&list, "LAB_OUTLINE_MARK", &Value::Null).unwrap(),
+        json!(2)
+    );
     let all = editor.decorations();
     let mine = &all["lab.outline"];
     let marks = mine

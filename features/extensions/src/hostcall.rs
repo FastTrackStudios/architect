@@ -850,7 +850,9 @@ pub fn check(
             } else {
                 Err((
                     format!("writes.{EDITOR}"),
-                    format!("this extension may not change the app's {EDITOR} (capabilities.writes)"),
+                    format!(
+                        "this extension may not change the app's {EDITOR} (capabilities.writes)"
+                    ),
                 ))
             },
         ),
@@ -1020,7 +1022,10 @@ mod tests {
         let HostRequest::EditEditor { changes, name, .. } = &r else {
             panic!("{r:?}")
         };
-        assert_eq!((changes.len(), name.as_deref(), r.op()), (1, Some("Indent"), "edit_editor"));
+        assert_eq!(
+            (changes.len(), name.as_deref(), r.op()),
+            (1, Some("Indent"), "edit_editor")
+        );
         let r: HostRequest = serde_json::from_str(
             r#"{"op":"decorate_editor","decorations":[{"kind":"mark","from":0,"to":2,"class":"todo"}]}"#,
         )

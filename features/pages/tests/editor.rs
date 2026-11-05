@@ -137,6 +137,9 @@ fn a_tsx_page_reads_edits_and_decorates_the_editor() {
 fn a_luau_page_reads_edits_and_decorates_the_editor() {
     let editor = Arc::new(MemoryEditor::new("e", "note", "- a\n- b"));
     let (ext, pages, _tmp) = extensions(&editor);
-    assert_eq!(out_of(&ext, &pages, "ed.luau", LUAU), "list-item|- a\n  - b");
+    assert_eq!(
+        out_of(&ext, &pages, "ed.luau", LUAU),
+        "list-item|- a\n  - b"
+    );
     edited_as_the_extension(&editor);
 }
