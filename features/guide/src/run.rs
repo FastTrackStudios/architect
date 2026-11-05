@@ -488,6 +488,7 @@ pub fn run(
         },
         pressed_at: None,
         secondary: false,
+        mods: Modifiers::empty(),
         captured: None,
         focused: 0,
         film,
@@ -520,6 +521,8 @@ struct Runner<'a, 'f> {
     pressed_at: Option<u64>,
     /// The press is the secondary button's (a right-click).
     secondary: bool,
+    /// The modifiers held through a click (a Ctrl-click).
+    mods: Modifiers,
     /// The window holding the pointer while its button is down.
     captured: Option<usize>,
     /// The window keys go to: the last one pressed in.
@@ -666,13 +669,19 @@ impl Runner<'_, '_> {
                 let at = self.find(target).map_err(fail)?;
                 let (x, y) = centre(at);
                 match gesture {
-                    Do::Click { seconds, secondary } => {
+                    Do::Click {
+                        seconds,
+                        secondary,
+                        mods,
+                    } => {
                         self.travel(x, y, *seconds)?;
                         self.secondary = *secondary;
+                        self.mods = modifiers(mods);
                         self.press(x, y);
                         self.tick()?;
                         self.release(x, y);
                         self.secondary = false;
+                        self.mods = Modifiers::empty();
                         self.tick()?;
                     }
                     Do::Drag {
@@ -926,7 +935,7 @@ impl Runner<'_, '_> {
                 (true, false) => MouseEventButtons::Primary,
                 (true, true) => MouseEventButtons::Secondary,
             },
-            mods: Modifiers::empty(),
+            mods: self.mods,
             details: PointerDetails {
                 pressure: if down { 0.5 } else { 0.0 },
                 ..PointerDetails::default()

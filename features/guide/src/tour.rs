@@ -833,6 +833,9 @@ fn place_of(steps: &[Step], step: usize) -> (u32, u32) {
 pub fn hint(step: &Step, name_of: impl Fn(&str) -> Option<(String, String)>) -> String {
     match &step.act {
         None | Some(Do::Pause { .. }) => String::new(),
+        Some(Do::Click { mods, .. }) if !mods.is_empty() => {
+            format!("{}-click the highlighted spot.", key_label("", mods))
+        }
         Some(Do::Click { .. }) => "Click the highlighted spot.".to_owned(),
         Some(Do::Drag { to: Some(_), .. }) => {
             "Drag what is highlighted onto the dashed outline.".to_owned()

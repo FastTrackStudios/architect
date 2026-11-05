@@ -1,0 +1,45 @@
+// An extension's view opens where its manifest places it, and a link
+// Ctrl-clicked opens with the extension whose opener claims its URL
+// (#239). The Board's chart view says `placement = "split"`: opened with
+// no placement of its own, it splits the note on show. The Welcome
+// note's issue link matches the Board's `[[openers]] urls` pattern: a
+// Ctrl-click runs its LAB_BOARD_ISSUE, which pins the issue.
+id extension-placement-and-links
+title "A view in its placement, a link to its opener"
+view {width 1280, height 760}
+capture {fps 12, width 960}
+steps (
+    {
+        id vault
+        do @run{id LAB_GO_VAULT}
+        done {on (@changed"lab"), check ({id LAB_STATE, has {tab vault}})}
+        hide true
+    }
+    {
+        id welcome
+        target @tab"note-welcome"
+        do @click{}
+        done {check ({id WORKSPACE_LAYOUT, has {active note-welcome}})}
+        hide true
+    }
+    {
+        id link
+        target @text"https://github.com/FastTrackStudios/architect/issues/179"
+        do @click{mods (ctrl)}
+        done {check ({id LAB_BOARD_STATE, has {issues ("https://github.com/FastTrackStudios/architect/issues/179")}})}
+        hold 0.6
+    }
+    {
+        id chart
+        do @run{id EXT_VIEW_OPEN, args {extension lab.board, view chart}}
+        // A group of its own beside the note's (a `tab` placement would
+        // have joined the note's group).
+        done {
+            check ({id WORKSPACE_LAYOUT, has {
+                active "lab.board/chart"
+                windows ({groups ({tabs (note-welcome note-shell arrange)} {tabs ("lab.board/chart")} {tabs (graph)})})
+            }})
+        }
+        hold 0.6
+    }
+)

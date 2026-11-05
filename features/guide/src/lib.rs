@@ -288,7 +288,8 @@ steps (
             s.steps[1].act,
             Some(Do::Click {
                 seconds: 0.4,
-                secondary: false
+                secondary: false,
+                mods: vec![]
             })
         );
         assert_eq!(
