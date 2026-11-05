@@ -775,6 +775,13 @@ fn ToolButton(cx: Ctx, item: ToolItem, path: String, joined: bool) -> Element {
     let mark = kept().mark();
     rsx! {
         div { style: "position:relative; flex:0 0 auto; display:flex;",
+            // Escape, from the button or a row, closes its dropdown.
+            onkeydown: move |e: KeyboardEvent| {
+                if is_open && e.key() == Key::Named(NamedKey::Escape) {
+                    open.set(None);
+                    e.stop_propagation();
+                }
+            },
             button {
                 "data-tool": "{tool}",
                 title: "{label}",
@@ -834,6 +841,13 @@ fn ToolButton(cx: Ctx, item: ToolItem, path: String, joined: bool) -> Element {
                 }
             }
             if is_open && has_menu && !editing {
+                // A press anywhere else closes it. Far past every edge:
+                // Blitz has no `position: fixed`.
+                div {
+                    "data-menu-backdrop": "{path}",
+                    style: "position:absolute; top:-2000px; left:-4000px; width:8000px; height:8000px; z-index:59;",
+                    onclick: move |_| open.set(None),
+                }
                 div {
                     role: "menu",
                     "data-menu": "{path}",

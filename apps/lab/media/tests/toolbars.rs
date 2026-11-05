@@ -142,6 +142,38 @@ const ARM_AND_OPEN: &str = r#"    {
     {id opened, target @css"[data-toolbar=\"fts.metronome/transport\"] [role=\"menu\"]", done {timeout 5}}
 "#;
 
+/// A press outside the open dropdown (in another pane) closes it.
+const PRESS_AWAY: &str = r#"    {
+        id away
+        target @text"Every note and its links"
+        do @click{}
+        hold 0.3
+    }
+"#;
+
+/// Escape, with the dropdown's button focused, closes it.
+const ESCAPE: &str = r#"    {
+        id escape
+        target @css"[data-toolbar=\"fts.metronome/transport\"] [data-tool=\"menu:More\"]"
+        do @key{key Escape}
+        hold 0.3
+    }
+"#;
+
+/// A dropdown closes on a press outside it and on Escape (part of the
+/// test below: one test in this binary sets the lab's folder).
+fn a_dropdown_closes_on_a_press_outside_it_and_on_escape() {
+    for (name, how) in [("menu-away", PRESS_AWAY), ("menu-escape", ESCAPE)] {
+        let html = toolbars_look(name, 1, &format!("{ARM_AND_OPEN}{how}"));
+        assert!(html.contains(r#"data-armed="true""#), "{name}: {html}");
+        assert!(
+            !html.contains(r#"role="menu""#),
+            "{name}: still open: {html}"
+        );
+        assert!(!html.contains("data-menu-backdrop"), "{name}: {html}");
+    }
+}
+
 #[test]
 fn a_toggles_buttons_show_it_on_then_off_in_a_dock_and_a_pane_header() {
     let on = toolbars_look("on", 1, "");
@@ -161,4 +193,5 @@ fn a_toggles_buttons_show_it_on_then_off_in_a_dock_and_a_pane_header() {
     assert_eq!(on.matches(r#"aria-pressed="false""#).count(), 0, "{on}");
     assert_eq!(off.matches(r#"aria-pressed="false""#).count(), 2, "{off}");
     assert_eq!(off.matches(r#"aria-pressed="true""#).count(), 0, "{off}");
+    a_dropdown_closes_on_a_press_outside_it_and_on_escape();
 }
