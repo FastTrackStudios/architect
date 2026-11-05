@@ -28,6 +28,13 @@
 //! transport layer, so architect types travel as a coherent system
 //! with zero per-type serde glue.
 
+// wasm32 is single-threaded: its futures and shared values never cross a
+// thread, so "not Send" is how they should be there, not a smell.
+#![cfg_attr(
+    target_arch = "wasm32",
+    allow(clippy::future_not_send, clippy::arc_with_non_send_sync)
+)]
+
 pub use architect_derive::Entity;
 
 // `#[architect::error]` — a service error with its `HttpError` impl, a
@@ -1116,12 +1123,15 @@ pub mod dispatch {
         F: FnOnce() -> T + 'static,
         T: 'static,
     {
+        // As on native: an unsizing coercion to `Box<dyn Any>`, not a
+        // numeric cast.
+        #[allow(clippy::as_conversions)]
         let boxed: Box<dyn FnOnce() -> BoxedAny + 'static> =
             Box::new(move || Box::new(f()) as BoxedAny);
         let any = dispatcher.dispatch(boxed).await?;
-        Ok(*any
-            .downcast::<T>()
-            .expect("dispatcher must not alter the closure's return type"))
+        any.downcast::<T>()
+            .map(|t| *t)
+            .map_err(|_| DispatchError::TypeMismatch)
     }
 
     // ── Standard dispatcher: current-thread (call inline) ──────────────

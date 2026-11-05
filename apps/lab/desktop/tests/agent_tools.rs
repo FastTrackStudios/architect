@@ -21,9 +21,21 @@ use architect_control::protocol::{Code, Request};
 use architect_desktop::HeadlessLab;
 use serde_json::{Value, json};
 
+/// Points the lab's folder at a fresh temporary one for this test binary,
+/// so the headless lab never writes into the person's own
+/// `~/.config/architect-lab` (its built-in pages, the agents' guide).
+fn isolated() {
+    static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    let dir = DIR.get_or_init(|| tempfile::tempdir().expect("a temporary lab folder"));
+    // SAFETY: set before the lab (and any of its threads) start; every
+    // test in this binary sets the same value.
+    unsafe { std::env::set_var("ARCHITECT_LAB_CONFIG_DIR", dir.path()) };
+}
+
 /// The headless lab on its Vault page (the workspace's actions on the
 /// list), settled.
 fn lab_on_the_vault() -> HeadlessLab {
+    isolated();
     let mut lab = HeadlessLab::open();
     lab.settle();
     let surface = lab.surface();

@@ -15,6 +15,17 @@ use architect_mcp::parity::Parity;
 use clap::Parser as _;
 use serde_json::Value;
 
+/// Points the lab's folder at a fresh temporary one for this test binary,
+/// so the headless lab never writes into the person's own
+/// `~/.config/architect-lab` (its built-in pages, the agents' guide).
+fn isolated() {
+    static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+    let dir = DIR.get_or_init(|| tempfile::tempdir().expect("a temporary lab folder"));
+    // SAFETY: set before the lab (and any of its threads) start; every
+    // test in this binary sets the same value.
+    unsafe { std::env::set_var("ARCHITECT_LAB_CONFIG_DIR", dir.path()) };
+}
+
 #[derive(clap::Parser)]
 struct Top {
     #[command(flatten)]
@@ -22,6 +33,7 @@ struct Top {
 }
 
 fn actions(line: &str) -> (u8, String, String) {
+    isolated();
     let words = std::iter::once("actions").chain(line.split(' '));
     let args = Top::try_parse_from(words).expect("parses").args;
     let (mut out, mut err) = (Vec::new(), Vec::new());
@@ -76,6 +88,7 @@ fn a2ui_patch() -> Value {
 /// window's thread is answered.
 #[test]
 fn the_lab_says_the_same_over_mcp_and_the_cli() {
+    isolated();
     let mut lab = HeadlessLab::open();
     lab.settle();
     let server = architect_mcp::Server::over(lab.surface());
