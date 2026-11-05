@@ -299,9 +299,16 @@ lab-web PORT="8090":
         cargo install -q wasm-bindgen-cli --version "$want" --locked --root target/tools
     fi
     "$bindgen" --target web --no-typescript --out-dir "$out" target/wasm32-unknown-unknown/debug/architect_lab_web.wasm
-    cp apps/lab/web/index.html "$out/"
+    cp apps/lab/web/index.html apps/lab/web/start.js apps/lab/web/hello.txt "$out/"
     echo "lab-web: $out"
     if [ "{{PORT}}" != "0" ]; then
         echo "serving http://localhost:{{PORT}}"
         python3 -m http.server -d "$out" -b 127.0.0.1 {{PORT}}
     fi
+
+# The web lab in a real browser (apps/lab/web/test): the Board's page file,
+# a runaway page and a page's reach, in a headless Chrome of its own
+# (CHROME=… names one; screenshots in target/lab-web-shots).
+lab-web-test:
+    just lab-web 0
+    node --test apps/lab/web/test/pages.test.mjs

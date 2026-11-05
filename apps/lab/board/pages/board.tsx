@@ -1,5 +1,6 @@
 // The Board's tab, as a page (docs/content/architecture/pages.md): a TSX
-// file on QuickJS, re-rendered live when it is saved. Its types are
+// file on QuickJS in the app, re-rendered live when it is saved, and the
+// same file in a Web Worker in a browser (apps/lab/web). Its types are
 // <app dir>/architect.d.ts. The Board's data and actions are its Rust
 // extension's (apps/lab/board/src/lib.rs); this file only draws them.
 import { h, useData, useState, actions, notify, worker, theme } from "architect";
@@ -68,8 +69,8 @@ export default function BoardPage() {
     <div id="board-page" style={{ display: "flex", flexDirection: "column", gap: 10, padding: 24 }}>
       <div id="board-title" style={{ fontSize: 18, fontWeight: 700 }}>Board</div>
       <div style={{ color: "$muted-foreground" }}>
-        This tab is a page file (board.tsx) on QuickJS, drawn in the {theme.scheme} theme {theme.id}. Save it
-        and the pane follows; break it and the last good page stays.
+        This tab is a page file (board.tsx), drawn in the {theme.scheme} theme {theme.id}: QuickJS runs it in
+        the app, a Web Worker in a browser. Save it and the pane follows; break it and the last good page stays.
       </div>
       <div style={row}>
         <input

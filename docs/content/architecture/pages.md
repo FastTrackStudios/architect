@@ -1,6 +1,6 @@
 +++
 title = "Pages as files"
-description = "A view written as a file — TSX or JS on QuickJS, Luau elements, A2UI JSON — re-rendered live on save, on a thread of its own, drawn as the same edit stream a process view sends; one API defined once in Rust, its TypeScript and Luau types generated from it."
+description = "A view written as a file — TSX or JS on QuickJS (in a browser, a Web Worker), Luau elements, A2UI JSON — re-rendered live on save, on a thread of its own, drawn as the same edit stream a process view sends; one API defined once in Rust, its TypeScript and Luau types generated from it."
 weight = 68
 +++
 
@@ -9,8 +9,10 @@ weight = 68
 > oxc with source maps, A2UI JSON pages, workers and timers in both
 > script runners, reload on save with the last good page kept,
 > overrides in the app's folder, and the lab's Board tab as a file (with
-> an A2UI page and a Luau page beside it). Not yet: the web build's Web
-> Worker runner, and phase two (a worker-side DOM for Preact/Solid).
+> an A2UI page and a Luau page beside it). In a browser (#325): TSX/JS
+> pages in a Web Worker on the browser's own engine, the same file and
+> types ("On the web" below). Not yet: phase two (a worker-side DOM for
+> Preact/Solid, #326).
 
 ## The model
 
@@ -201,6 +203,86 @@ snapshot (keyed by its revision, as Luau's `ThemeModule`). Measured
 in the lab: a save shows in about 150–300 ms, of which loading and
 rendering the page is 2–3 ms.
 
+## On the web
+
+**Which runner runs where.** Natively (desktop, iOS) a TSX/JS page runs
+on QuickJS, a Luau page on Luau, an A2UI page through the catalog, each
+on a thread of its own. In a browser (`wasm32-unknown-unknown`) a TSX/JS
+page runs in a **Web Worker on the browser's own engine** — no QuickJS —
+from the same file, with the same runtime and the same `architect.d.ts`
+(`features/pages/src/web/mod.rs` `WebPages`, feature `web`). Luau and
+A2UI pages do not run in a browser yet (#187).
+
+**The same runtime, its bridge messages.** The worker runs the prelude
+every native page gets (`features/pages/src/js/prelude.js`), its
+`__host` made of messages to the main thread
+(`features/pages/src/web/page.js`): a host call is a message answered by
+one, shared state and the embed's input are kept in the worker (each
+change comes from the main thread), `worker.spawn("job.js")` starts a
+nested Web Worker with the worker runtime
+(`features/pages/src/web/job.js`). The page's folder is given as text
+(`PageFolder`: the lab's are its files, `include_str!`'d); its scripts
+are transpiled by oxc in the main thread's wasm and their imports
+resolved by the native loader's rules (`features/pages/src/modules.rs`
+`prepare`: `"architect"`, `"architect/worker"`, files of its own folder,
+nothing else), and the worker links them as `blob:` URLs.
+
+**The main thread only draws.** What the worker renders comes back as
+the element tree; `Mirror` diffs it into `wire::Edit`s and the
+extensions host's checked applier applies them under the pane's element
+(`features/extensions/src/web.rs` `Pane`, the one WASI views use: no
+`on*` attribute, no `dangerous_inner_html`, nothing outside the pane).
+No API gives the page the document. Its events go back to its handlers
+as natively (`features/pages/src/frame.rs` `page_event`).
+
+**The same capabilities.** Every host call is answered by the page's
+extension's `WebHost` (`features/extensions/src/web.rs`), after the
+decision every host makes (`hostcall::check`): `actions.run` is its
+`run` (its own actions, and what `capabilities.actions` and `.effect`
+allow), `net.fetch` and the interface's calls its host-service calls
+(`capabilities.hosts`: a host not named is refused before the browser
+fetches), the actions a page lists only those it may run. What a
+browser host does not have it says (documents, ports, secrets). The
+worker has none of the browser's own network, storage or workers
+(`fetch`, `XMLHttpRequest`, `WebSocket`, `importScripts`, `indexedDB`,
+`Worker`… are taken away before the page loads), and the embedder's
+Content-Security-Policy, which the worker inherits, keeps `import()` of
+another host and eval out (the lab's: `apps/lab/web/index.html`).
+
+**Limits.** A browser has no interrupt to stop one call, so the page's
+work is timed in units: a message (an event, a host call's answer,
+shared state) or a timer, with the promise jobs and renders it leads to.
+The worker says `busy` before one and `idle` after; past `Limits::frame`
+(500 ms) the main thread terminates it, the banner says it "ran past its
+time of 500 ms: hand heavy work to a worker (worker.spawn)", and the
+page starts again from its files (three times, then it stays stopped
+until it is reloaded). Loading has `Limits::load` (5 s), a worker
+`Limits::worker_time`. The main thread never waits on a page. A browser
+cannot cap one worker's memory.
+
+**Errors and reloads.** A page that does not load, or whose render
+throws, keeps its last good frame under the banner, its error at its
+source's line and column (the worker says its modules' `blob:` URLs as
+`/page/<file>`, remapped through oxc's maps by `tsx::remap`).
+`WebPage::reload` is a save: the folder loads again in a fresh worker,
+swapped in once it has rendered.
+
+**Not on the web yet:** a dynamic `import()` of the page's own files
+(only static imports are resolved), inline embeds' input, documents,
+ports and secrets (the browser host has none), and services
+(`services.call`).
+
+**The lab.** `just lab-web` builds and serves the web lab
+(`apps/lab/web`): the Board's own `apps/lab/board/pages/board.tsx` (and
+`primes.js`, its worker) with the three Board actions it runs answered in
+the page (`apps/lab/web/src/board.rs`; the Board's Rust extension is not
+built for a browser), beside the WASI Counter; `?page=runaway` and
+`?page=net` are checks. `just lab-web-test` drives them in a headless
+Chrome (`apps/lab/web/test/pages.test.mjs`): the Board renders and its
+handlers and worker run, a runaway is stopped while the main thread
+keeps drawing, a host outside the page's capabilities is refused, and a
+broken save keeps the last good page.
+
 ## Safety and performance
 
 - **Limits** (`features/pages/src/runner.rs` `PageLimits`): memory
@@ -253,4 +335,6 @@ shows again).
 A worker-side DOM (in the spirit of worker-dom) would let Preact or
 Solid run unchanged in a page's runtime: their DOM calls would build
 the same `Element` tree `h` does, diffed into edits by the same
-`Mirror`, so nothing on the window's side changes.
+`Mirror`, so nothing on the window's side changes. On the web the shim
+runs in the page's Web Worker beside the prelude, its tree sent as a
+page's is.

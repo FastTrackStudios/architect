@@ -1,6 +1,7 @@
 // The Board page's worker (pages/board.tsx spawns it): counts primes in a
-// QuickJS runtime of its own, on its own thread, telling the page how far
-// it is. It has no app — only messages.
+// QuickJS runtime of its own, on its own thread (in a browser, a Web
+// Worker of its own), telling the page how far it is. It has no app —
+// only messages.
 import { post } from "architect/worker";
 
 export default function count({ below }) {

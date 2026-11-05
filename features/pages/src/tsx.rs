@@ -1,4 +1,4 @@
-//! TypeScript and JSX to JavaScript, in Rust (feature `js`).
+//! TypeScript and JSX to JavaScript, in Rust (feature `tsx`).
 //!
 //! oxc parses a `.ts`/`.tsx`/`.jsx` file, strips its types, turns its JSX into
 //! `h(...)` calls (`Fragment` for `<>…</>`, both from `"architect"`), and
@@ -246,7 +246,8 @@ fn place_after(text: &str) -> (Option<(u32, u32)>, usize) {
     }
 }
 
-fn errors(
+/// oxc's `diagnostics` on `source` (named `file`), each at its place.
+pub(crate) fn errors(
     file: &str,
     source: &str,
     diagnostics: impl IntoIterator<Item = oxc_diagnostics::OxcDiagnostic>,

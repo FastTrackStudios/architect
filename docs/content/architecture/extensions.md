@@ -592,7 +592,9 @@ transpiled module's URL and a `web::WebHost`), `register_actions` (onto
 the app's `ActionList`, run as whoever ran them), `mount` (a view under
 a DOM element: the wire's `Edit`s applied to the page's DOM, its events
 sent back as `ViewEvent`s, as `RemoteDocument` does in Blitz), `report`
-and `stop`.
+and `stop`. That applier is `web::Pane`, public: a TSX page in a
+browser is drawn by it too, its host calls answered by a `WebHost`
+(`pages.md`, "On the web").
 
 **Capabilities.** Every host import arrives at `web::WebHost` as a
 host-service request (`hostcall::HostRequest`), decided by

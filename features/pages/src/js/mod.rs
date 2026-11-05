@@ -50,6 +50,7 @@ use crate::api::{
     DataEvent, Element, Notice, PageEvent, PageHost as _, ThemeSnapshot, WorkerMessage,
 };
 use crate::files::PageFile;
+use crate::modules::{ARCHITECT, ARCHITECT_WORKER};
 use crate::runner::{Engine, Inbox, Load, Services};
 use crate::tsx;
 
@@ -57,14 +58,6 @@ use crate::tsx;
 const PRELUDE: &str = include_str!("prelude.js");
 /// A worker's runtime.
 const WORKER_PRELUDE: &str = include_str!("worker.js");
-/// `import … from "architect"`.
-const ARCHITECT: &str = "const a = globalThis.__architect.api;\n\
-export const { h, Fragment, useState, useRef, useEffect, useData, useShared, useEmbed, useTheme, invalidate, \
-theme, actions, settings, state, notify, ui, clipboard, events, documents, editor, net, ports, worker, Overlay, host } = a;\nexport default a;\n";
-/// `import … from "architect/worker"`.
-const ARCHITECT_WORKER: &str = "const w = globalThis.__worker.api;\n\
-export const { args, post, onMessage } = w;\nexport default w;\n";
-
 /// `QuickJS`'s stack, per runtime.
 const STACK: usize = 1024 * 1024;
 
