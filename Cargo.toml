@@ -108,6 +108,11 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/FastTrackStudios/architect"
 
 [workspace.dependencies]
+# The editor's extension surface as data (FastTrackStudios/editor's
+# crates/editor-ext): what `architect-extensions`' editor calls carry. On
+# the editor's extension-API branch until its PR is pinned with the rest of
+# the editor below (`[patch."https://github.com/FastTrackStudios/editor"]`).
+editor-ext = { git = "https://github.com/FastTrackStudios/editor", branch = "feat/extension-api-312" }
 # SMTP for the auth server's verification and password-reset mail.
 # rustls, not native-tls, so the build carries no OpenSSL dependency.
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-rustls-tls", "builder", "hostname"] }

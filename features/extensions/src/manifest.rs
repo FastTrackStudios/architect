@@ -1033,6 +1033,7 @@ impl Manifest {
             luau: self.kind == Kind::Luau,
             events: &self.capabilities.events,
             reads: &self.capabilities.reads,
+            writes: &self.capabilities.writes,
         }
     }
 

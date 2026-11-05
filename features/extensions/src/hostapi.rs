@@ -138,6 +138,8 @@ pub(crate) struct Services {
     app: Mutex<Option<Arc<dyn AppContext>>>,
     /// The app's documents, for the document calls.
     documents: Mutex<Option<Arc<dyn Documents>>>,
+    /// The app's editors, for the editor calls (`crate::editor`).
+    editors: Mutex<Option<Arc<dyn crate::editor::Editors>>>,
     values: Mutex<Arc<dyn SettingValues>>,
     data_root: Mutex<Option<PathBuf>>,
     /// The app's own list, when its actions are not on the host's.
@@ -176,6 +178,9 @@ impl Services {
     /// What extension `id` was lent goes with it (it unloaded).
     pub(crate) fn forget(&self, id: &str) {
         self.decorations.withdraw(id);
+        if let Some(editors) = lock(&self.editors).clone() {
+            editors.withdraw(id);
+        }
         lock(&self.picked).remove(id);
         #[cfg(feature = "net")]
         self.net.forget(id);
@@ -194,6 +199,7 @@ impl Default for Services {
             logs: Logs::default(),
             app: Mutex::new(None),
             documents: Mutex::new(None),
+            editors: Mutex::new(None),
             values: Mutex::new(Arc::new(MemoryValues::default())),
             data_root: Mutex::new(None),
             app_list: Mutex::new(None),
@@ -278,6 +284,25 @@ impl Host {
     #[must_use]
     pub fn documents(&self) -> Option<Arc<dyn Documents>> {
         lock(&self.services().documents).clone()
+    }
+
+    /// The app's editors, for extensions that may read and change the one
+    /// being typed in (`crate::editor`): the lab's notes, Task's vault.
+    #[must_use]
+    pub fn with_editors(self, editors: impl crate::editor::Editors + 'static) -> Self {
+        self.set_editors(Arc::new(editors));
+        self
+    }
+
+    /// [`Self::with_editors`] on a host already shared.
+    pub fn set_editors(&self, editors: Arc<dyn crate::editor::Editors>) {
+        *lock(&self.services().editors) = Some(editors);
+    }
+
+    /// The app's editors, when it gave them.
+    #[must_use]
+    pub fn editors(&self) -> Option<Arc<dyn crate::editor::Editors>> {
+        lock(&self.services().editors).clone()
     }
 
     /// Reads and writes settings' values in `values` (the app's store).
@@ -701,6 +726,9 @@ impl ExtensionApi {
             | HostRequest::MoveDocument { .. }
             | HostRequest::DeleteDocument { .. }
             | HostRequest::WatchDocuments { .. } => self.document(&host, manifest, request),
+            HostRequest::EditorState
+            | HostRequest::EditEditor { .. }
+            | HostRequest::DecorateEditor { .. } => self.editor(&host, manifest, request),
             HostRequest::ReadFile { path } => {
                 let file = self.file(&host, &loaded, &may, &path, false)?;
                 std::fs::read_to_string(&file)
@@ -1057,6 +1085,65 @@ impl ExtensionApi {
                 Ok(true)
             }
             _ => Ok(false),
+        }
+    }
+
+    /// An editor call (`crate::editor`), its capability checked: on the
+    /// app's focused editor, as the extension.
+    fn editor(
+        &self,
+        host: &Host,
+        manifest: &Manifest,
+        request: HostRequest,
+    ) -> Result<Value, HostError> {
+        use crate::editor::{EditCommand, EditorError};
+        let editors = host.editors().ok_or_else(|| HostError::Unsupported {
+            what: "the editor: this app gives extensions none".to_owned(),
+        })?;
+        let view = |v: crate::editor::EditorView| serde_json::to_value(v).unwrap_or(Value::Null);
+        match request {
+            HostRequest::EditorState => editors
+                .focused()
+                .map(view)
+                .ok_or_else(|| EditorError::NoEditor.into()),
+            HostRequest::EditEditor {
+                changes,
+                selection,
+                name,
+                base,
+            } => {
+                let step = name
+                    .clone()
+                    .unwrap_or_else(|| format!("{}: edit", manifest.name));
+                let edit = EditCommand {
+                    changes,
+                    selection,
+                    name,
+                    base,
+                };
+                Ok(view(editors.apply(&edit, &step, &self.principal())?))
+            }
+            HostRequest::DecorateEditor { decorations } => {
+                let embeds: Vec<String> = manifest
+                    .contributes
+                    .embeds
+                    .iter()
+                    .map(|e| e.id.clone())
+                    .chain(
+                        host.contributions()
+                            .of(&self.id)
+                            .into_iter()
+                            .flat_map(|c| c.embeds.into_iter().map(|e| e.id)),
+                    )
+                    .collect();
+                crate::editor::check_widgets(&decorations, &embeds, &manifest.view_ids())
+                    .map_err(|message| HostError::Failed { message })?;
+                editors.decorate(&self.id, decorations)?;
+                Ok(Value::Null)
+            }
+            other => Err(HostError::Failed {
+                message: format!("{} is not an editor call", other.op()),
+            }),
         }
     }
 

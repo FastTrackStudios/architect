@@ -454,6 +454,11 @@ impl WebHost {
             | HostRequest::WriteFile { .. } => Err(HostError::Failed {
                 message: "a browser host has no documents or files to reach".to_owned(),
             }),
+            HostRequest::EditorState
+            | HostRequest::EditEditor { .. }
+            | HostRequest::DecorateEditor { .. } => Err(HostError::Unsupported {
+                what: "the editor: a browser host gives extensions none".to_owned(),
+            }),
             HostRequest::Setting { key } => Ok(me
                 .settings
                 .borrow()

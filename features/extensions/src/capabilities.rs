@@ -13,7 +13,7 @@ use crate::manifest::{Capabilities, Reach};
 
 /// What of the app's state an extension may read
 /// ([`Capabilities::reads`]).
-pub const READS: [&str; 3] = [ORG, SELECTION, DOCUMENTS];
+pub const READS: [&str; 4] = [ORG, SELECTION, DOCUMENTS, EDITOR];
 /// The current organization.
 pub const ORG: &str = "org";
 /// What is selected and focused.
@@ -21,10 +21,14 @@ pub const SELECTION: &str = "selection";
 /// The app's documents: open them, read them (`reads`), and list and
 /// watch them; change them (`writes`).
 pub const DOCUMENTS: &str = "documents";
+/// The editor being typed in (`crate::editor`): its text, selection and
+/// the block the cursor is in (`reads`); edit it, take keys in it, draw
+/// marks and widgets in it, add slash-menu rows (`writes`).
+pub const EDITOR: &str = "editor";
 
 /// What of the app's state an extension may change
 /// ([`Capabilities::writes`]).
-pub const WRITES: [&str; 1] = [DOCUMENTS];
+pub const WRITES: [&str; 2] = [DOCUMENTS, EDITOR];
 
 /// What of the app's interface an extension may use
 /// ([`Capabilities::ui`]).
@@ -193,6 +197,7 @@ fn read_words(r: &str) -> String {
         ORG => "See which organization you are working in".to_owned(),
         SELECTION => "See what you have selected and focused".to_owned(),
         DOCUMENTS => "Open, read, list and watch your documents".to_owned(),
+        EDITOR => "See the text and selection of the editor you are typing in".to_owned(),
         other => format!("Read {other}"),
     }
 }
@@ -200,6 +205,7 @@ fn read_words(r: &str) -> String {
 fn write_words(w: &str) -> String {
     match w {
         DOCUMENTS => "Create, edit, rename, move and delete your documents".to_owned(),
+        EDITOR => "Edit the text you are typing, take keys in the editor, and mark it up with highlights and widgets".to_owned(),
         other => format!("Change {other}"),
     }
 }

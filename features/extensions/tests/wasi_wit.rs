@@ -241,6 +241,15 @@ fn the_host_interface_is_the_host_service() {
             "watch-documents",
             Some(op(r#"{"op":"watch_documents","action":"X"}"#)),
         ),
+        ("editor-state", Some(op(r#"{"op":"editor_state"}"#))),
+        (
+            "edit-editor",
+            Some(op(r#"{"op":"edit_editor","changes":[]}"#)),
+        ),
+        (
+            "decorate-editor",
+            Some(op(r#"{"op":"decorate_editor","decorations":[]}"#)),
+        ),
         // The theme is the host's to send, no request (a process is sent it).
         (
             "fetch",
@@ -303,6 +312,9 @@ fn the_host_interface_is_the_host_service() {
             "move_document",
             "delete_document",
             "watch_documents",
+            "editor_state",
+            "edit_editor",
+            "decorate_editor",
             "fetch",
             "read_body",
             "close_body",

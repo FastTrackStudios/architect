@@ -558,6 +558,12 @@ pub struct Contribution {
     pub hooks: Vec<HookDecl>,
     pub slots: Vec<SlotDecl>,
     pub embeds: Vec<EmbedDecl>,
+    /// Keys in the editor that run its actions (`[[keymaps]]`,
+    /// `crate::editor`): `capabilities.writes = ["editor"]`.
+    pub keymaps: Vec<editor_ext::KeymapEntry>,
+    /// Rows of the editor's slash menu that run its actions (`[[slash]]`):
+    /// `capabilities.writes = ["editor"]`.
+    pub slash: Vec<editor_ext::SlashEntry>,
 }
 
 /// What a contribution is checked against: its owner's namespace and
@@ -577,6 +583,9 @@ pub struct Rules<'a> {
     /// What of the app's state it asks to read (`capabilities.reads`): a
     /// hook on a document's event needs `documents`.
     pub reads: &'a [String],
+    /// What of the app's state it asks to change (`capabilities.writes`):
+    /// a keymap or a slash row needs `editor`.
+    pub writes: &'a [String],
 }
 
 /// Why a contribution was refused.
@@ -630,6 +639,8 @@ impl Contribution {
             hooks: join(&self.hooks, &other.hooks, hook_key),
             slots: join(&self.slots, &other.slots, |s| s.slot.clone()),
             embeds: join(&self.embeds, &other.embeds, |e| e.id.clone()),
+            keymaps: join(&self.keymaps, &other.keymaps, keymap_key),
+            slash: join(&self.slash, &other.slash, |s| s.action.clone()),
         }
     }
 
@@ -657,6 +668,12 @@ impl Contribution {
         out.extend(self.hooks.iter().map(|h| format!("hook:{}", hook_key(h))));
         out.extend(self.slots.iter().map(|s| format!("slot:{}", s.slot)));
         out.extend(self.embeds.iter().map(|e| format!("embed:{}", e.id)));
+        out.extend(
+            self.keymaps
+                .iter()
+                .map(|k| format!("keymap:{}", keymap_key(k))),
+        );
+        out.extend(self.slash.iter().map(|s| format!("slash:{}", s.action)));
         out
     }
 
@@ -713,6 +730,8 @@ impl Contribution {
             self.hooks.len(),
             self.slots.len(),
             self.embeds.len(),
+            self.keymaps.len(),
+            self.slash.len(),
         ]
         .into_iter()
         .fold(0_usize, usize::saturating_add);
@@ -803,6 +822,36 @@ impl Contribution {
         }
         for b in &self.bar {
             action(&format!("bar {}", b.action), &b.action)?;
+        }
+        let edits = rules
+            .writes
+            .iter()
+            .any(|w| w == crate::capabilities::EDITOR);
+        for k in &self.keymaps {
+            let what = format!("keymap {}", keymap_key(k));
+            if k.key.trim().is_empty() {
+                return refuse(what, "it names no key".to_owned());
+            }
+            if !edits {
+                return refuse(
+                    what,
+                    "a key in the editor needs capabilities.writes = [\"editor\"]".to_owned(),
+                );
+            }
+            action(&what, &k.action)?;
+        }
+        for e in &self.slash {
+            let what = format!("slash {}", e.label);
+            if e.label.trim().is_empty() {
+                return refuse(what, "it has no label".to_owned());
+            }
+            if !edits {
+                return refuse(
+                    what,
+                    "a slash-menu row needs capabilities.writes = [\"editor\"]".to_owned(),
+                );
+            }
+            action(&what, &e.action)?;
         }
         for t in &self.toolbars {
             t.check(
@@ -903,6 +952,11 @@ impl Contribution {
         }
         Ok(())
     }
+}
+
+/// A keymap entry's key in a diff and a merge: its scope and key.
+fn keymap_key(k: &editor_ext::KeymapEntry) -> String {
+    format!("{}/{}", k.when, k.key)
 }
 
 fn hook_key(h: &HookDecl) -> String {
@@ -1334,6 +1388,19 @@ impl Contributions {
         self.all(|c| c.bar.clone())
     }
 
+    /// Every extension's keys in the editor (`[[keymaps]]`), in load
+    /// order: `crate::editor::key_action` picks the one a key runs.
+    #[must_use]
+    pub fn keymaps(&self) -> Vec<By<editor_ext::KeymapEntry>> {
+        self.all(|c| c.keymaps.clone())
+    }
+
+    /// Every extension's slash-menu rows (`[[slash]]`).
+    #[must_use]
+    pub fn slash(&self) -> Vec<By<editor_ext::SlashEntry>> {
+        self.all(|c| c.slash.clone())
+    }
+
     /// Every toolbar, its owner's.
     #[must_use]
     pub fn toolbars(&self) -> Vec<By<ToolbarDecl>> {
@@ -1600,6 +1667,7 @@ mod tests {
             luau: false,
             events: &[],
             reads: &[],
+            writes: &[],
         }
     }
 
