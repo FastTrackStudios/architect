@@ -52,8 +52,8 @@ pub mod replica;
 
 pub use book::{Book, Entry, Index, IndexRow, MemoryIndex, Projected, Projector, SyncReport};
 pub use doc::{
-    Merged, SEED_ORIGIN, adopt_text, commit_as, is_deleted, merge_text, merge3, migrate_whole_file, render,
-    seed_from_file, set_deleted,
+    Merged, SEED_ORIGIN, adopt_text, commit_as, is_deleted, merge_text, merge3, migrate_whole_file,
+    render, seed_from_file, set_deleted,
 };
 pub use markdown::{Front, Parsed, Props, is_mid_edit, materialise, parse};
 pub use replica::{

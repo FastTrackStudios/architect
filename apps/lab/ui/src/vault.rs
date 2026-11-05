@@ -516,7 +516,8 @@ pub fn VaultPage() -> Element {
                         NOTES
                             .iter()
                             .map(|(id, title)| {
-                                architect_commands::OpenItem::new("note", *id, *title).detail("Vault")
+                                architect_commands::OpenItem::new("note", *id, *title)
+                                    .detail("Vault")
                             })
                             .collect()
                     },
@@ -526,8 +527,12 @@ pub fn VaultPage() -> Element {
                             v.pages
                                 .iter()
                                 .map(|p| {
-                                    architect_commands::OpenItem::new("note", p.rel_path.clone(), p.basename.clone())
-                                        .detail(p.folder.clone())
+                                    architect_commands::OpenItem::new(
+                                        "note",
+                                        p.rel_path.clone(),
+                                        p.basename.clone(),
+                                    )
+                                    .detail(p.folder.clone())
                                 })
                                 .collect()
                         })
@@ -1210,7 +1215,8 @@ fn VaultNote(path: String) -> Element {
                 let here = at.peek().clone();
                 match event {
                     SourceEvent::FileModified(f) if f.path == here => {
-                        let Some(theirs) = disk.peek().as_ref().and_then(|d| d.vault().text(&here)) else {
+                        let Some(theirs) = disk.peek().as_ref().and_then(|d| d.vault().text(&here))
+                        else {
                             continue;
                         };
                         let (mut base, mut ours) = (base, ours);
@@ -1315,7 +1321,11 @@ mod start_tests {
                 w.repair();
                 assert_eq!(w.windows.len(), 1, "{}: one window", set.name);
                 for side in Docks::SIDES {
-                    assert!(w.dock_window(side).is_none(), "{}: {side:?} dock at home", set.name);
+                    assert!(
+                        w.dock_window(side).is_none(),
+                        "{}: {side:?} dock at home",
+                        set.name
+                    );
                 }
                 checked += 1;
             }
@@ -1323,7 +1333,10 @@ mod start_tests {
         assert!(checked >= 3, "Write, Mix and Embedded views");
         let first = super::first_workspace();
         assert_eq!(first.windows.len(), 1);
-        assert!(first.windows[0].docks.left.root.is_some(), "the navigator's dock is the main window's");
+        assert!(
+            first.windows[0].docks.left.root.is_some(),
+            "the navigator's dock is the main window's"
+        );
     }
 
     /// The film's in-memory vault shows the list pane's samples from the
@@ -1333,18 +1346,34 @@ mod start_tests {
         use architect_navigator::{NavigatorSource, TaskCounts};
         let s = super::navigator_samples(architect_navigator::MemorySource::new("Lab"), 0);
         let plan = s.file("Projects/Launch plan.md").expect("the launch plan");
-        assert_eq!(plan.tasks, Some(TaskCounts { total: 6, unfinished: 2 }));
-        assert!(plan.tags.contains(&"projects/launch".to_owned()), "{:?}", plan.tags);
+        assert_eq!(
+            plan.tasks,
+            Some(TaskCounts {
+                total: 6,
+                unfinished: 2
+            })
+        );
+        assert!(
+            plan.tags.contains(&"projects/launch".to_owned()),
+            "{:?}",
+            plan.tags
+        );
         assert!(plan.words.is_some_and(|w| w > 1000), "{:?}", plan.words);
         let image = plan.feature_image.clone().expect("a feature image");
         assert!(image.contains("Attachments/Launch logo.svg"), "{image}");
-        assert!(s
-            .resource_url("Attachments/Launch logo.svg")
-            .is_some_and(|u| u.starts_with("data:image/svg+xml")));
-        assert!(s
-            .resource_url("Attachments/Sketch.excalidraw.png")
-            .is_some_and(|u| u.starts_with("data:image/png;base64,")));
-        for path in ["Attachments/Brief.pdf", "Attachments/Board.canvas", "Projects/Vault/Vault.md"] {
+        assert!(
+            s.resource_url("Attachments/Launch logo.svg")
+                .is_some_and(|u| u.starts_with("data:image/svg+xml"))
+        );
+        assert!(
+            s.resource_url("Attachments/Sketch.excalidraw.png")
+                .is_some_and(|u| u.starts_with("data:image/png;base64,"))
+        );
+        for path in [
+            "Attachments/Brief.pdf",
+            "Attachments/Board.canvas",
+            "Projects/Vault/Vault.md",
+        ] {
             assert!(s.file(path).is_some(), "{path}");
             assert!(
                 std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

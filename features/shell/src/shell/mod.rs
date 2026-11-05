@@ -1256,7 +1256,11 @@ pub fn AppShell(
             let dx = c.x - r.x0;
             let (mut w, grow, other) = match r.side {
                 Side::Left => (left_w, dx, if docked_now.1 { *right_w.peek() } else { 0.0 }),
-                Side::Right => (right_w, -dx, if docked_now.0 { *left_w.peek() } else { 0.0 }),
+                Side::Right => (
+                    right_w,
+                    -dx,
+                    if docked_now.0 { *left_w.peek() } else { 0.0 },
+                ),
             };
             let room = (screen.width - RIBBON - PAGE_ROOM - other).max(MIN_WIDTH);
             w.set((r.w0 + grow).clamp(MIN_WIDTH, room));

@@ -15,15 +15,21 @@ use vault::actions::{Changes, OpenVault, Renamed, Watch, page_tags};
 use vault::obsidian::{Vault, VaultPage, page_tasks, page_wordcount};
 
 use crate::source::{
-    FileOp, Listener, Millis, NavigatorSource, NoteFile, PropertyValue, SourceEvent,
-    Subscription, TaskCounts,
+    FileOp, Listener, Millis, NavigatorSource, NoteFile, PropertyValue, SourceEvent, Subscription,
+    TaskCounts,
 };
 
 /// The frontmatter properties a note's feature image is read from, in
 /// order (Notebook Navigator's `featureImageProperties`, and the common
 /// others).
-pub const FEATURE_IMAGE_PROPERTIES: &[&str] =
-    &["thumbnail", "featureResized", "feature", "image", "cover", "banner"];
+pub const FEATURE_IMAGE_PROPERTIES: &[&str] = &[
+    "thumbnail",
+    "featureResized",
+    "feature",
+    "image",
+    "cover",
+    "banner",
+];
 
 /// How long a preview is, at most (characters).
 const PREVIEW_CHARS: usize = 300;
@@ -295,7 +301,11 @@ impl NavigatorSource for VaultSource {
 
     fn subscribe(&self, listener: Listener) -> Subscription {
         let id = {
-            let mut n = self.inner.next.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut n = self
+                .inner
+                .next
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
             *n = n.saturating_add(1);
             *n
         };
@@ -446,7 +456,9 @@ pub fn preview_of(text: &str) -> String {
     let body = text
         .strip_prefix("---\n")
         .and_then(|rest| rest.split_once("\n---").map(|(_, b)| b))
-        .map_or(text, |b| b.trim_start_matches(|c| c != '\n').trim_start_matches('\n'));
+        .map_or(text, |b| {
+            b.trim_start_matches(|c| c != '\n').trim_start_matches('\n')
+        });
     let mut out = String::new();
     let mut in_fence = false;
     for line in body.lines() {
@@ -458,7 +470,10 @@ pub fn preview_of(text: &str) -> String {
         if in_fence || t.is_empty() || t.starts_with('|') {
             continue;
         }
-        let t = t.trim_start_matches('#').trim_start_matches('>').trim_start();
+        let t = t
+            .trim_start_matches('#')
+            .trim_start_matches('>')
+            .trim_start();
         let t = ["- [ ] ", "- [x] ", "- [X] ", "- ", "* ", "+ "]
             .iter()
             .find_map(|m| t.strip_prefix(m))
@@ -467,7 +482,10 @@ pub fn preview_of(text: &str) -> String {
             out.push(' ');
         }
         // Emphasis and code marks are not words.
-        let plain: String = unlink(t).chars().filter(|c| !matches!(c, '*' | '`' | '=' | '~')).collect();
+        let plain: String = unlink(t)
+            .chars()
+            .filter(|c| !matches!(c, '*' | '`' | '=' | '~'))
+            .collect();
         out.push_str(&plain);
         if out.chars().count() >= PREVIEW_CHARS {
             break;
@@ -488,7 +506,8 @@ fn unlink(line: &str) -> String {
         out.push_str(before);
         if let Some(inner) = at.strip_prefix("![[").and_then(|r| r.split_once("]]")) {
             rest = inner.1;
-        } else if let Some((target, after)) = at.strip_prefix("[[").and_then(|r| r.split_once("]]")) {
+        } else if let Some((target, after)) = at.strip_prefix("[[").and_then(|r| r.split_once("]]"))
+        {
             let shown = target.rsplit_once('|').map_or(target, |(_, a)| a);
             let shown = shown.split('#').next().unwrap_or(shown);
             out.push_str(shown.rsplit('/').next().unwrap_or(shown));

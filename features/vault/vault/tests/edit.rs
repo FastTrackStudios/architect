@@ -27,7 +27,10 @@ fn a_save_writes_the_file_and_keeps_its_frontmatter() {
     let (tmp, v) = vault();
     let text = "---\ntags: [music/theory]\nlevel: 3\n---\nThe major scale, edited.\n";
     v.save("Ionian.md", text).unwrap();
-    assert_eq!(std::fs::read_to_string(tmp.path().join("Ionian.md")).unwrap(), text);
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("Ionian.md")).unwrap(),
+        text
+    );
     assert_eq!(v.text("Ionian.md").as_deref(), Some(text));
     // The app's own write is not an outside change.
     assert!(v.refresh().unwrap().is_empty());
@@ -52,17 +55,22 @@ fn a_rename_and_a_move_rewrite_the_links_that_named_the_note() {
     assert_eq!(r.relinked, ["Notes/Modes.md"]);
     let modes = std::fs::read_to_string(tmp.path().join("Notes/Modes.md")).unwrap();
     assert_eq!(
-        modes,
-        "See [[Major]], [[Major#Steps|the steps]] and ![[Major]].\n```\n[[Ionian]]\n```\n",
+        modes, "See [[Major]], [[Major#Steps|the steps]] and ![[Major]].\n```\n[[Ionian]]\n```\n",
         "a fence's text is left alone"
     );
     // Moved into a folder: a link by name still names it.
     let r = v.rename("Major.md", "Notes/Theory/Major.md").unwrap();
     assert!(tmp.path().join("Notes/Theory/Major.md").exists());
     assert!(!tmp.path().join("Major.md").exists());
-    assert!(r.relinked.is_empty(), "named by its name, which did not change");
+    assert!(
+        r.relinked.is_empty(),
+        "named by its name, which did not change"
+    );
     assert!(v.text("Notes/Theory/Major.md").is_some());
-    assert!(v.rename("Notes/Other.md", "Notes/Modes.md").is_err(), "taken");
+    assert!(
+        v.rename("Notes/Other.md", "Notes/Modes.md").is_err(),
+        "taken"
+    );
 }
 
 #[test]
@@ -110,7 +118,9 @@ fn the_watcher_hears_an_outside_edit_and_not_the_apps_own() {
     };
     let heard = until("Notes/Other.md");
     assert!(
-        heard.iter().all(|c| !c.modified.contains(&"Ionian.md".to_owned())),
+        heard
+            .iter()
+            .all(|c| !c.modified.contains(&"Ionian.md".to_owned())),
         "the app's own save is no change: {heard:?}"
     );
     assert_eq!(

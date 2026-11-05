@@ -3,9 +3,7 @@
 //! and no Close (it is the last group); a dock never takes its room.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use architect_workspace::{
-    Command, Pane, Side, Target, View, Views, Workspace, WorkspaceView,
-};
+use architect_workspace::{Command, Pane, Side, Target, View, Views, Workspace, WorkspaceView};
 use blitz_dom::Document as _;
 use blitz_traits::shell::{ColorScheme, Viewport};
 use dioxus::prelude::*;
@@ -19,7 +17,10 @@ thread_local! {
 fn views() -> Views {
     Views::new()
         .view(View::new("note", "Note", |_| rsx! { div { "a note" } }).many())
-        .view(View::new("files", "Files", |_| rsx! { div { "the files" } }).home(Target::Dock(Side::Left)))
+        .view(
+            View::new("files", "Files", |_| rsx! { div { "the files" } })
+                .home(Target::Dock(Side::Left)),
+        )
 }
 
 fn app() -> Element {
@@ -28,8 +29,11 @@ fn app() -> Element {
     let workspace = use_signal(|| {
         let mut w = Workspace::new();
         w.open(Pane::new("n1", "note", "One"), Target::Tab).unwrap();
-        w.open(Pane::new("files", "files", "Files"), Target::Dock(Side::Left))
-            .unwrap();
+        w.open(
+            Pane::new("files", "files", "Files"),
+            Target::Dock(Side::Left),
+        )
+        .unwrap();
         w
     });
     WORKSPACE.with(|s| *s.borrow_mut() = Some(workspace));
@@ -71,7 +75,10 @@ fn with_every_tab_closed_the_main_area_says_no_file_is_open() {
     );
     doc.initial_build();
     settle(&mut doc);
-    assert!(rects(&doc, "[data-empty-group]").is_empty(), "a tab is open");
+    assert!(
+        rects(&doc, "[data-empty-group]").is_empty(),
+        "a tab is open"
+    );
     let workspace = WORKSPACE.with(|s| s.borrow().unwrap());
     doc.vdom.in_runtime(|| {
         let mut w = workspace;

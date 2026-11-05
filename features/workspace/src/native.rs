@@ -580,7 +580,9 @@ impl App {
             let id = open.popout.id().clone();
             self.desk.open.borrow_mut().retain(|(w, _)| *w != id);
             self.desk.releases.borrow_mut().retain(|(w, _)| *w != id);
-            if let Some(device) = anyrender::RenderContext::renderer_specific_context(&open.view.renderer) {
+            if let Some(device) =
+                anyrender::RenderContext::renderer_specific_context(&open.view.renderer)
+            {
                 self.devices.push(device);
             }
             drop(open);

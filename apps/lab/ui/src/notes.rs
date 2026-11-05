@@ -165,11 +165,17 @@ mod tests {
         assert!(dir.join("Archive/Empty").is_dir(), "an empty folder");
         assert!(!dir.join(super::EMPTY_FOLDERS).exists());
         let open = vault::actions::OpenVault::open(&dir).unwrap();
-        assert!(open.with(|v| v.pages.len()) > 300, "the scroll test's notes");
+        assert!(
+            open.with(|v| v.pages.len()) > 300,
+            "the scroll test's notes"
+        );
         // Seeded once: a second run leaves the copy as it is.
         std::fs::write(dir.join("Welcome.md"), "mine").unwrap();
         assert!(!super::seed_from(&dir, &demo).unwrap());
-        assert_eq!(std::fs::read_to_string(dir.join("Welcome.md")).unwrap(), "mine");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("Welcome.md")).unwrap(),
+            "mine"
+        );
     }
 
     #[test]

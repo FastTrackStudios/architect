@@ -108,7 +108,9 @@ fn check_note_path(to: &str) -> Result<(), String> {
             .extension()
             .is_some_and(|e| e.eq_ignore_ascii_case("md"));
     if bad {
-        return Err(format!("{to:?} is not a note's path (a vault path ending in .md)"));
+        return Err(format!(
+            "{to:?} is not a note's path (a vault path ending in .md)"
+        ));
     }
     Ok(())
 }
@@ -251,7 +253,9 @@ impl OpenVault {
     pub fn create_folder(&self, folder: &str) -> Result<(), String> {
         let bad = folder.is_empty()
             || folder.starts_with('/')
-            || folder.split('/').any(|s| s.is_empty() || s == "." || s == "..");
+            || folder
+                .split('/')
+                .any(|s| s.is_empty() || s == "." || s == "..");
         if bad {
             return Err(format!("{folder:?} is not a folder's path in the vault"));
         }
@@ -306,7 +310,12 @@ impl OpenVault {
     /// # Errors
     ///
     /// No such note, or it cannot be written.
-    pub fn set_property(&self, path: &str, key: &str, value: serde_json::Value) -> Result<(), String> {
+    pub fn set_property(
+        &self,
+        path: &str,
+        key: &str,
+        value: serde_json::Value,
+    ) -> Result<(), String> {
         let guard = Arc::clone(&self.guard);
         mutate::set_property(&mut self.write(), path, key, value, &guard).map_err(|e| e.to_string())
     }
@@ -410,10 +419,7 @@ impl OpenVault {
                 });
             })
             .map_err(|e| e.to_string())?;
-        ready_rx
-            .recv()
-            .map_err(|e| e.to_string())
-            .and_then(|r| r)?;
+        ready_rx.recv().map_err(|e| e.to_string()).and_then(|r| r)?;
         Ok(Watch {
             stop: Some(stop),
             thread: Some(thread),
