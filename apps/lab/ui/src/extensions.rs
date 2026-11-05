@@ -854,6 +854,10 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         if let Ok(with) = extensions.clone().with_linked(&architect_lab_board::Board) {
             extensions = with;
         }
+        // Bases: a note's ```base fence, drawn as a base.
+        if let Ok(with) = extensions.clone().with_linked(&architect_bases::ui::Bases) {
+            extensions = with;
+        }
         if let Ok(with) = extensions
             .clone()
             .with_linked(&architect_theme_picker::ThemePicker)
@@ -944,6 +948,10 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
             let _ = extensions.dev(dir);
         }
         let _ = extensions.sync();
+        // The base view types loaded extensions add, for BASES_VIEW_TYPES.
+        let types_host = extensions.host().clone();
+        crate::notes::view_types()
+            .set_source(move || architect_bases::ui::contributed_types(&types_host));
         // After the first load: the linked manager's MANAGER_* exist now.
         forward(&lab, &list, FORWARDED);
         extensions

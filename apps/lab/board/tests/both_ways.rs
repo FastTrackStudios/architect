@@ -85,11 +85,20 @@ fn linked_in() {
         .unwrap();
     let _ = ext.sync();
     let keys = exercise(&ext, &list, Origin::Builtin);
+    // Its Bases view type, drawn by its code in the app's document.
+    let reg = ext.host().contributions();
+    assert_eq!(reg.base_view("board").unwrap().owner, ID);
+    assert!(ext.host().linked_view(ID, "base.board").is_some());
+    assert!(ext.host().embeds().base_view("board").is_some());
     let _ = block_on(list.run_json_async("LAB_BOARD_CLEAR", b"")).unwrap();
     let _ = ext.disable(ID);
+    assert!(
+        ext.host().contributions().base_view("board").is_none(),
+        "its base view type went with it"
+    );
     assert!(ext.host().contributions().of(ID).is_none());
     assert!(status(&ext).is_empty(), "its status went with it");
-    assert!(keys.contains("tab:board") && keys.contains("context:view:note/LAB_BOARD_PIN"));
+    assert!(keys.contains("tab:board") && keys.contains("base_view:board") && keys.contains("context:view:note/LAB_BOARD_PIN"));
 }
 
 /// The same board as a process, overriding the linked one.

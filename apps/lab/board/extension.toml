@@ -9,7 +9,7 @@ name = "Board"
 version = "0.1.0"
 kind = "process"
 api = "0.1"
-description = "A pin board: a tab, a status item, a context-menu entry on notes, a .kf opener, a GitHub-issue link opener, a startup hook, its own status bar, and a chart's chord line with its tools over a phone's keyboard."
+description = "A pin board: a tab, a Bases view type (board), a status item, a context-menu entry on notes, a .kf opener, a GitHub-issue link opener, a startup hook, its own status bar, and a chart's chord line with its tools over a phone's keyboard."
 authors = ["FastTrackStudio"]
 
 [entry]
@@ -315,3 +315,14 @@ id = "song"
 title = "Song"
 view = "song"
 claims = { note_type = ["song"] }
+
+# A view type for Bases: a base's view of `type: board` is drawn by this
+# extension's code (`Builder::base_view("board", …)`, src/lib.rs) — a
+# column per value of `columnBy` (or the view's groupBy). Bases' view
+# picker lists it while the Board is loaded; off, it goes.
+[[base_views]]
+id = "board"
+name = "Board"
+icon = "kanban"
+options = [{ key = "columnBy", name = "Columns", kind = "property" }]
+

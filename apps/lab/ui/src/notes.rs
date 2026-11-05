@@ -1,7 +1,7 @@
 //! The lab's vault on disk: a folder of markdown (notes, their properties
 //! and links, tags, bases, images) that the `VAULT_*` actions read and
-//! write (`vault::actions`), with the `LINKS_*` and `TAGS_*` actions over
-//! it, and that the Vault's navigator and editor show and edit
+//! write (`vault::actions`), with the `LINKS_*`, `TAGS_*` and `BASES_*` (`architect_bases::actions`)
+//! actions over it, and that the Vault's navigator and editor show and edit
 //! (`crate::vault`). It is the folder `$ARCHITECT_LAB_VAULT` names (`just
 //! lab` and `devenv up` name a scratch one under devenv's state, seeded
 //! from `apps/lab/demo-vault`, which `$ARCHITECT_LAB_SEED` names, when it
@@ -12,9 +12,10 @@
 //! `APP_STATUS`'s `vault` section says which folder is open.
 
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use architect::action::ActionList;
+use architect_bases::model::ViewTypes;
 
 /// The sample vault, as `(vault path, text)`.
 const SAMPLE: &[(&str, &str)] = &[
@@ -126,16 +127,24 @@ pub fn open_vault() -> Option<vault::actions::OpenVault> {
     OPEN.get().cloned()
 }
 
-/// Opens the lab's vault, puts its `VAULT_*`, `LINKS_*` and `TAGS_*`
-/// actions on `list`, and says which folder it is in `APP_STATUS`
-/// (`vault`).
-pub fn register(list: &ActionList) {
+/// The base view types the lab's extensions add, for `BASES_VIEW_TYPES`:
+/// filled from the extension host once it is up (`crate::extensions`).
+pub fn view_types() -> &'static ViewTypes {
+    static TYPES: OnceLock<ViewTypes> = OnceLock::new();
+    TYPES.get_or_init(ViewTypes::new)
+}
+
+/// Opens the lab's vault, puts its `VAULT_*`, `LINKS_*`, `TAGS_*` and
+/// `BASES_*` actions on `list`, and says which folder it is in
+/// `APP_STATUS` (`vault`).
+pub fn register(list: &Arc<ActionList>) {
     let Some(dir) = folder() else { return };
     match vault::actions::OpenVault::open(&dir) {
         Ok(open) => {
             let _ = vault::actions::register(list, &open);
             let _ = links::actions::register(list, &open);
             let _ = tag::actions::register(list, &open);
+            let _ = architect_bases::actions::register(list, &open, view_types());
             let shown = open.clone();
             let seeded = std::env::var("ARCHITECT_LAB_SEED").ok();
             list.status().section("vault", move || {

@@ -7,6 +7,18 @@ views:
     order:
       - file.name
       - status
+      - tags
     groupBy:
       property: status
       direction: ASC
+  - type: cards
+    name: Cards
+    order:
+      - file.name
+      - status
+      - tags
+  - type: list
+    name: List
+    order:
+      - file.name
+      - status
