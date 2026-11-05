@@ -65,8 +65,20 @@ in
   # plus the telemetry module's Teley (:8787) and collector (:4318), which
   # the lab's spans go to. `just lab` runs the lab
   # alone, without dx.
+  # The lab's build as a task the lab process waits on, so `devenv up`'s TUI
+  # shows the lab waiting (as auth-dev waits on mock-oauth) while it
+  # compiles, with the build's own log. The same flags as `dx serve` below,
+  # so its build after this is a quick up-to-date check. A failed build
+  # fails the task and the lab does not start.
+  tasks."lab:build" = {
+    exec = "cd apps/lab/desktop && dx build --platform desktop --renderer native";
+    before = [ "devenv:processes:lab" ];
+  };
+  # Without Rust hot-patching: it builds a different ("fat") binary from
+  # `dx build`, so the task's build was thrown away (86s twice), and dx's
+  # own help calls it experimental and segfault-prone. rsx hot reload stays.
   processes.lab = {
-    exec = "cd apps/lab/desktop && exec dx serve --platform desktop --renderer native";
+    exec = "cd apps/lab/desktop && exec dx serve --platform desktop --renderer native --hot-patch false";
     env = config.fleet.telemetry.processEnv;
     # Ready only while the built lab itself runs, not while dx is still
     # compiling it: the TUI shows the lab waiting during the build, running
