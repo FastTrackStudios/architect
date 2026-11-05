@@ -68,6 +68,16 @@ in
   processes.lab = {
     exec = "cd apps/lab/desktop && exec dx serve --platform desktop --renderer native";
     env = config.fleet.telemetry.processEnv;
+    # Ready only while the built lab itself runs, not while dx is still
+    # compiling it: the TUI shows the lab waiting during the build, running
+    # once its window is up, and unhealthy if the app dies under dx. dx
+    # launches it from target/dx/architect-desktop/… (the [p] keeps pgrep
+    # from matching this probe's own command line).
+    ready = {
+      exec = "${pkgs.procps}/bin/pgrep -f 'target/dx/architect-deskto[p]/' >/dev/null";
+      period = 2;
+      failure_threshold = 2;
+    };
   };
 
   # The justfile's auth demo as processes, off by default:
