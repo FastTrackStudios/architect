@@ -19,6 +19,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
+use architect_extensions::contrib::{StateKind, StateWrite};
 use architect_extensions::linked::{Builder, Extension, Handle};
 use dioxus::prelude::*;
 use serde_json::{Value, json};
@@ -56,6 +57,10 @@ struct State {
     last: Value,
     /// The tempo widget's, beats a minute.
     tempo: u32,
+    /// The chord sheet's line.
+    chords: String,
+    /// Sharps on for the chords put in next.
+    sharp: bool,
 }
 
 static STATE: Mutex<State> = Mutex::new(State {
@@ -64,6 +69,8 @@ static STATE: Mutex<State> = Mutex::new(State {
     issues: Vec::new(),
     last: Value::Null,
     tempo: 120,
+    chords: String::new(),
+    sharp: false,
 });
 
 /// Moves on with every change, for the views.
@@ -92,6 +99,47 @@ fn changed() {
         h.status(PINS, text);
     }
     REVISION.fetch_add(1, Ordering::Relaxed);
+}
+
+/// The chords its Typing Toolbar puts in (`LAB_BOARD_CHORD_<name>`).
+const CHORDS: [&str; 7] = ["C", "D", "E", "F", "G", "A", "B"];
+
+/// The chord sheet, as `LAB_BOARD_CHORDS` says it.
+fn chords() -> Value {
+    let s = state();
+    json!({ "text": s.chords, "sharp": s.sharp })
+}
+
+/// Puts `what` at the end of the chord sheet's line.
+fn put(what: &str) -> Value {
+    {
+        let mut s = state();
+        if !s.chords.is_empty() && !s.chords.ends_with(' ') {
+            s.chords.push(' ');
+        }
+        s.chords.push_str(what);
+    }
+    changed();
+    chords()
+}
+
+/// Sharps on or off: the toggle's state, for its button.
+fn sharp(on: bool) -> Value {
+    state().sharp = on;
+    let handle = HANDLE
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    if let Some(h) = handle {
+        h.set_state(StateWrite {
+            key: "LAB_BOARD_SHARP".to_owned(),
+            kind: StateKind::Checked,
+            text: if on { "on" } else { "off" }.to_owned(),
+            ..StateWrite::default()
+        });
+    }
+    changed();
+    chords()
 }
 
 /// The board, as `LAB_BOARD_STATE` says it.
@@ -136,6 +184,9 @@ impl Extension for Board {
 
     fn build(&self, ext: &mut Builder) {
         *HANDLE.lock().unwrap_or_else(PoisonError::into_inner) = Some(ext.handle());
+        // A new copy's sharps start off: a toggle's state is the host's,
+        // and goes with the copy before.
+        state().sharp = false;
         ext.view("board", BoardView)
             .view("chart", ChartView)
             .view("status-bar", BoardStatusBar)
@@ -153,6 +204,17 @@ impl Extension for Board {
                 Ok(snapshot())
             })
             .action("LAB_BOARD_STATE", |_| async { Ok(snapshot()) })
+            .action("LAB_BOARD_CHORDS", |_| async { Ok(chords()) })
+            .action("LAB_BOARD_SHARP", |_| async {
+                let on = !state().sharp;
+                Ok(sharp(on))
+            })
+            .action("LAB_BOARD_BAR_LINE", |_| async { Ok(put("|")) })
+            .action("LAB_BOARD_CHORDS_CLEAR", |_| async {
+                state().chords.clear();
+                changed();
+                Ok(chords())
+            })
             .action_in("LAB_BOARD_HELLO", |_, cx| async move {
                 state().last = cx;
                 changed();
@@ -183,6 +245,16 @@ impl Extension for Board {
                 changed();
                 Ok(json!({ "pinned": url }))
             });
+        for name in CHORDS {
+            ext.action(format!("LAB_BOARD_CHORD_{name}"), move |_| async move {
+                let chord = if state().sharp {
+                    format!("{name}#")
+                } else {
+                    name.to_owned()
+                };
+                Ok(put(&chord))
+            });
+        }
     }
 }
 
@@ -250,12 +322,34 @@ fn PagesOnly() -> Element {
 #[component]
 fn ChartView() -> Element {
     let _ = use_board();
-    let chart = state().chart.clone();
+    let (chart, text, on) = {
+        let s = state();
+        (s.chart.clone(), s.chords.clone(), s.sharp)
+    };
     rsx! {
         div { style: "display: flex; flex-direction: column; gap: 8px; padding: 24px; color: var(--foreground);",
             div { style: "font-size: 16px; font-weight: 700;", "Keyflow chart" }
             div { style: "font-size: 13px; color: var(--muted-foreground);",
                 {chart.map_or_else(|| "No chart opened yet.".to_owned(), |c| format!("Opened {c} with the Board extension."))}
+            }
+            // Its chord line: on a phone the Board's chord buttons ride
+            // over the keyboard while it has the focus (the manifest's
+            // `[[toolbars]] where = "typing"`).
+            input {
+                id: "chords-text",
+                r#type: "text",
+                "aria-label": "Chords",
+                value: "{text}",
+                style: "height: 44px; box-sizing: border-box; padding: 0 12px; border-radius: 10px; \
+                        border: 1px solid var(--input); background: var(--background); color: var(--foreground); \
+                        font-size: 16px;",
+                oninput: move |e: FormEvent| {
+                    state().chords = e.value();
+                    changed();
+                },
+            }
+            div { "data-testid": "chords-sharp", style: "font-size: 13px; color: var(--muted-foreground);",
+                if on { "Sharps on" } else { "Sharps off" }
             }
         }
     }

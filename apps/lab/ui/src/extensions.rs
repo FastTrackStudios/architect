@@ -1232,12 +1232,23 @@ fn board_dev(root: &Path) -> Option<PathBuf> {
 /// bar with its title.
 #[component]
 pub fn ExtensionTab(ui: ExtensionUi, id: &'static str) -> Element {
-    let Some((extension, tab)) = ui.tab(id) else {
+    // While a field in it is typed in, its view is a context the phone's
+    // Typing Toolbar is in, as a pane's is.
+    let found = ui.tab(id);
+    let typing = architect_shell::use_typing_scope(
+        &found
+            .as_ref()
+            .map(|(e, t)| format!("view:{e}/{}", t.view))
+            .unwrap_or_default(),
+    );
+    let Some((extension, tab)) = found else {
         return rsx! {};
     };
     rsx! {
         architect_shell::Page { title: tab.title.clone(), scroll: false,
             div { style: "flex: 1; min-height: 0; display: flex; flex-direction: column;",
+                onfocusin: move |_| typing.focus(),
+                onfocusout: move |_| typing.blur(),
                 architect_extensions::interface::ExtensionView { ui, extension, view: tab.view }
             }
         }
