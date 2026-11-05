@@ -669,10 +669,12 @@ fn FilesView() -> Element {
             phone,
             on_open: move |o: Open| {
                 if let Some((id, title)) = note_of(&o.path) {
-                    let target = match o.how {
-                        OpenIn::Here => Target::Here,
-                        OpenIn::Tab => Target::Tab,
-                        OpenIn::Split => Target::Split(Side::Right),
+                    // A click opens a tab in the group of the note on
+                    // show; the arrow keys show each note in its place.
+                    let target = match (o.how, o.browsing) {
+                        (OpenIn::Split, _) => Target::Split(Side::Right),
+                        (_, true) => Target::Here,
+                        (OpenIn::Here | OpenIn::Tab, false) => Target::Tab,
                     };
                     // Beside the note on show, not in the dock pressed.
                     let mut workspace = open_pane.workspace();

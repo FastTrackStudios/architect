@@ -16,7 +16,8 @@ that does not link it stays MIT OR Apache-2.0.
   adapter in this crate, not by teaching the navigator its types.
 - The navigator does not open notes. `NavigatorView`'s `on_open` asks the
   app, and the app opens the note in its workspace (`Target::Here`, `Tab`,
-  `Split`, by `OpenIn`). The app tells it which note is on show with
+  `Split`, by `OpenIn`). `Open::browsing` says the arrow keys moved to
+  the note; show it in place rather than open one more tab. The app tells it which note is on show with
   `Navigator::set_active`, which lights the note and reveals it.
 - The model is plain data (`features/navigator/src/state.rs`
   `NavigatorState`). Test behaviour against the model

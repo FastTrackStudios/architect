@@ -41,6 +41,9 @@ pub const KEY_OPEN_SETTLE: Duration = Duration::from_millis(500);
 pub struct Open {
     pub path: String,
     pub how: OpenIn,
+    /// The arrow keys moved to it: the person is browsing, so an app may
+    /// show it in place of the last rather than open one more tab.
+    pub browsing: bool,
 }
 
 /// The navigator, kept by the component that called [`use_navigator`]:
@@ -198,7 +201,11 @@ impl Navigator {
             }) => {
                 let mut settle = self.settle;
                 settle.set(settle.cloned().wrapping_add(1));
-                on_open.call(Open { path, how });
+                on_open.call(Open {
+                    path,
+                    how,
+                    browsing: false,
+                });
             }
             Some(Outcome::Open {
                 path,
@@ -211,7 +218,11 @@ impl Navigator {
                 spawn(async move {
                     futures_timer::Delay::new(KEY_OPEN_SETTLE).await;
                     if settle.cloned() == n {
-                        on_open.call(Open { path, how });
+                        on_open.call(Open {
+                            path,
+                            how,
+                            browsing: true,
+                        });
                     }
                 });
             }
