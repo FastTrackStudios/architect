@@ -2,7 +2,9 @@
 // one.
 id workspace-tab-group
 title "A tab group"
-view {width 1440, height 860}
+// Tall enough that the + menu (every view, the Board's pages among them)
+// shows "Untitled" on screen.
+view {width 1440, height 940}
 capture {fps 20, width 960}
 steps (
     {

@@ -510,6 +510,73 @@ declare module "architect/worker" {
   export function onMessage(fn: (message: unknown) => void): void;
 }
 
+/** A DOM in the page's runtime, for a framework that renders to one
+ * (Preact, Solid): `render(<App />, document.body)`, then
+ * `export default document.body`. Not the window's document; no HTML
+ * parser, nothing laid out. */
+declare module "architect/dom" {
+  export interface DomEvent {
+    readonly type: string;
+    readonly target: DomNode | null;
+    readonly currentTarget: DomNode | null;
+    readonly key?: string;
+    readonly altKey?: boolean;
+    readonly ctrlKey?: boolean;
+    readonly metaKey?: boolean;
+    readonly shiftKey?: boolean;
+    preventDefault(): void;
+    stopPropagation(): void;
+    stopImmediatePropagation(): void;
+  }
+  export interface DomNode {
+    readonly nodeType: number;
+    readonly nodeName: string;
+    readonly parentNode: DomNode | null;
+    readonly firstChild: DomNode | null;
+    readonly lastChild: DomNode | null;
+    readonly nextSibling: DomNode | null;
+    readonly previousSibling: DomNode | null;
+    readonly childNodes: DomNode[];
+    textContent: string;
+    appendChild<T extends DomNode>(node: T): T;
+    insertBefore<T extends DomNode>(node: T, before: DomNode | null): T;
+    removeChild<T extends DomNode>(node: T): T;
+    replaceChild<T extends DomNode>(node: DomNode, old: T): T;
+    remove(): void;
+    addEventListener(type: string, fn: (e: DomEvent) => void, options?: boolean | { capture?: boolean; once?: boolean }): void;
+    removeEventListener(type: string, fn: (e: DomEvent) => void, options?: boolean | { capture?: boolean }): void;
+  }
+  export interface DomElement extends DomNode {
+    readonly localName: string;
+    readonly tagName: string;
+    id: string;
+    className: string;
+    value: string;
+    checked: boolean;
+    disabled: boolean;
+    readonly style: { cssText: string; setProperty(name: string, value: string | null): void; [name: string]: any };
+    getAttribute(name: string): string | null;
+    setAttribute(name: string, value: string): void;
+    removeAttribute(name: string): void;
+    hasAttribute(name: string): boolean;
+    querySelector(selector: string): DomElement | null;
+    querySelectorAll(selector: string): DomElement[];
+    readonly innerHTML: string;
+  }
+  export interface DomDocument extends DomNode {
+    readonly body: DomElement;
+    createElement(tag: string): DomElement;
+    createElementNS(ns: string | null, tag: string): DomElement;
+    createTextNode(text: string): DomNode & { data: string };
+    createComment(text: string): DomNode & { data: string };
+    createDocumentFragment(): DomNode;
+    getElementById(id: string): DomElement | null;
+    querySelector(selector: string): DomElement | null;
+  }
+  export const document: DomDocument;
+  export default document;
+}
+
 declare namespace JSX {
   type Element = import("architect").Node;
   interface IntrinsicElements {
@@ -528,6 +595,9 @@ declare const console: {
   error(...values: unknown[]): void;
 };
 declare function setTimeout(fn: () => void, ms?: number): number;
+declare function requestAnimationFrame(fn: (now: number) => void): number;
+declare function cancelAnimationFrame(id: number): void;
+declare function queueMicrotask(fn: () => void): void;
 declare function clearTimeout(id: number): void;
 declare function setInterval(fn: () => void, ms: number): number;
 declare function clearInterval(id: number): void;

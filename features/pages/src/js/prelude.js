@@ -128,9 +128,14 @@
   }
 
   let root = null;
-  function mount(component) {
-    if (typeof component !== "function") throw new TypeError("a page's default export is its component: export default function Page() { … }");
-    root = component;
+  // A page's default export: its component, or the body of the DOM a
+  // framework renders to (`architect/dom`'s `document.body`, js/dom.js),
+  // which draws itself.
+  function mount(page) {
+    const drawn = page != null && typeof page === "object" && typeof page.$$tree === "function";
+    if (typeof page !== "function" && !drawn)
+      throw new TypeError("a page's default export is its component (export default function Page() { … }) or architect/dom's document.body");
+    root = page;
     dirty = true;
   }
 
@@ -141,9 +146,10 @@
     seen = new Set();
     effects = [];
     rendering = true;
-    const out = [];
+    let out = [];
     try {
-      expand(h(root, null), "", out);
+      if (typeof root === "function") expand(h(root, null), "", out);
+      else out = root.$$tree((fn) => handlers.push(fn) - 1);
     } finally {
       rendering = false;
     }
@@ -431,6 +437,12 @@
   globalThis.setTimeout = (fn, ms) => addTimer(fn, ms, false);
   globalThis.setInterval = (fn, ms) => addTimer(fn, ms, true);
   globalThis.clearTimeout = globalThis.clearInterval = (id) => void timers.delete(id);
+  // A frame is the page's own timer: what a framework schedules for after
+  // a paint runs in a unit of the page's work, as a timer does.
+  globalThis.requestAnimationFrame = (fn) => addTimer(() => fn(host.now()), 16, false);
+  globalThis.cancelAnimationFrame = globalThis.clearTimeout;
+  if (typeof globalThis.queueMicrotask !== "function")
+    globalThis.queueMicrotask = (fn) => void Promise.resolve().then(fn);
 
   // ── workers ───────────────────────────────────────────────────────
   const workers = new Map();

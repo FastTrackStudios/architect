@@ -43,6 +43,12 @@ pub const PAGES: &[(&str, &str)] = &[
         include_str!("../pages/luau-primes.luau"),
     ),
     ("count.luau", include_str!("../pages/count.luau")),
+    ("preact.tsx", include_str!("../pages/preact.tsx")),
+    (
+        "vendor/preact.js",
+        include_str!("../pages/vendor/preact.js"),
+    ),
+    ("vendor/hooks.js", include_str!("../pages/vendor/hooks.js")),
 ];
 
 /// Its status item's id.
@@ -193,6 +199,7 @@ impl Extension for Board {
             .view("tempo", TempoWidget)
             .view("summary", PagesOnly)
             .view("luau-primes", PagesOnly)
+            .view("preact", PagesOnly)
             .action_in(
                 "LAB_BOARD_PIN",
                 |args, cx| async move { Ok(pin(&args, cx)) },
@@ -307,8 +314,9 @@ fn BoardView() -> Element {
 }
 
 /// The `.kf` opener's view.
-/// What `summary` and `luau-primes` show in an app that does not run their
-/// page files (`pages/summary.a2ui.json`, `pages/luau-primes.luau`).
+/// What `summary`, `luau-primes` and `preact` show in an app that does not
+/// run their page files (`pages/summary.a2ui.json`, `pages/luau-primes.luau`,
+/// `pages/preact.tsx`).
 #[component]
 fn PagesOnly() -> Element {
     rsx! {

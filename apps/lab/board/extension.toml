@@ -143,7 +143,7 @@ title = "Board"
 icon = "layout-dashboard"
 page = "pages/board.tsx"
 
-# Two more pages, opened with EXT_VIEW_OPEN: an A2UI JSON page bound to
+# More pages, opened with EXT_VIEW_OPEN: an A2UI JSON page bound to
 # LAB_BOARD_STATE, and a Luau page whose worker counts primes. (A view's
 # id names its override, `pages/lab.board/<view>.<ext>`: no file of this
 # folder may share it, or a clone's copy of that file would win.)
@@ -158,6 +158,14 @@ id = "luau-primes"
 title = "Primes (Luau)"
 icon = "cpu"
 page = "pages/luau-primes.luau"
+
+# A page in Preact, vendored in pages/vendor/: it renders to the page's
+# own DOM (`architect/dom`), drawn as any page's edits.
+[[views]]
+id = "preact"
+title = "Preact"
+icon = "code"
+page = "pages/preact.tsx"
 
 [[views]]
 id = "chart"

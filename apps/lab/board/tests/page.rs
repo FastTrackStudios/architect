@@ -142,3 +142,61 @@ fn the_boards_tab_is_a_page_over_the_boards_own_actions() {
         p.text("#primes-state").as_deref() == Some("78498 primes below 1,000,000.")
     });
 }
+
+/// The Board's Preact view (pages/preact.tsx): Preact, vendored in its
+/// folder, rendering to the page's own DOM (`architect/dom`); a click
+/// reaches its listener and its state draws again.
+#[test]
+fn the_boards_preact_page_renders_and_answers_clicks() {
+    let app = tempfile::tempdir().unwrap();
+    let list = ActionList::new();
+    let host = Host::new(list.clone(), SharedSections::new(Registry::new()));
+    let ext = Extensions::new(host, Installs::new(app.path().join("installs")))
+        .with_linked(&Board)
+        .unwrap();
+    let _ = ext.sync();
+    let manifest = ext.host().get(ID).unwrap().manifest;
+    assert_eq!(
+        manifest
+            .views
+            .iter()
+            .find(|v| v.id == "preact")
+            .and_then(|v| v.page.as_deref()),
+        Some("pages/preact.tsx")
+    );
+    let dir = write_builtin(app.path(), ID, PAGES).unwrap();
+    let page = PageFile::new(dir.join("preact.tsx"), Origin::Builtin).unwrap();
+    let pages = Pages::new(AppHost::new(list))
+        .with_app_dir(app.path())
+        .with_js();
+    let session = pages
+        .open(&page, ID, "preact", Some(gate(&manifest)))
+        .unwrap();
+    let (to, from) = futures::channel::mpsc::unbounded();
+    let mut tab = Pane {
+        session,
+        view: RemoteDocument::new(to),
+        _events: from,
+    };
+    tab.until("the page", |p| {
+        p.text("#preact-title").as_deref() == Some("Preact")
+    });
+    assert_eq!(tab.text("#preact-count").as_deref(), Some("0"));
+    tab.click("#preact-inc");
+    tab.until("a click", |p| {
+        p.text("#preact-count").as_deref() == Some("1")
+    });
+    tab.click("#preact-inc");
+    tab.until("another", |p| {
+        p.text("#preact-count").as_deref() == Some("2")
+    });
+    tab.click("#preact-add");
+    tab.until("an item", |p| {
+        p.text(".preact-item").as_deref() == Some("Item 1")
+    });
+    tab.click("#preact-reset");
+    tab.until("the reset", |p| {
+        p.text("#preact-count").as_deref() == Some("0")
+    });
+    assert_eq!(tab.session.status().error(), None);
+}

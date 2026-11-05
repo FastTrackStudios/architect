@@ -1173,10 +1173,12 @@ fn lab_pages(
             if let Some(page) = PageFile::new(dir.join("board.tsx"), Origin::Builtin) {
                 pages.declare(id, "board", page);
             }
-            // Its A2UI and Luau pages (`[[views]] summary`, `luau-primes`).
+            // Its A2UI, Luau and Preact pages (`[[views]] summary`,
+            // `luau-primes`, `preact`).
             for (view, file) in [
                 ("summary", "summary.a2ui.json"),
                 ("luau-primes", "luau-primes.luau"),
+                ("preact", "preact.tsx"),
             ] {
                 if let Some(page) = PageFile::new(dir.join(file), Origin::Builtin) {
                     pages.declare(id, view, page);

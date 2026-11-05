@@ -50,7 +50,7 @@ use crate::api::{
     DataEvent, Element, Notice, PageEvent, PageHost as _, ThemeSnapshot, WorkerMessage,
 };
 use crate::files::PageFile;
-use crate::modules::{ARCHITECT, ARCHITECT_WORKER};
+use crate::modules::{ARCHITECT, ARCHITECT_DOM, ARCHITECT_WORKER};
 use crate::runner::{Engine, Inbox, Load, Services};
 use crate::tsx;
 
@@ -216,7 +216,7 @@ impl Resolver for Files {
         } else {
             "architect"
         };
-        if name == ours {
+        if name == ours || (name == "architect/dom" && !self.worker) {
             return Ok(name.to_owned());
         }
         let relative = name.starts_with("./") || name.starts_with("../");
@@ -270,6 +270,9 @@ impl Loader for Files {
     ) -> rquickjs::Result<Module<'js, rquickjs::module::Declared>> {
         if name == "architect" && !self.worker {
             return Module::declare(ctx.clone(), name, ARCHITECT);
+        }
+        if name == "architect/dom" && !self.worker {
+            return Module::declare(ctx.clone(), name, ARCHITECT_DOM);
         }
         if name == "architect/worker" && self.worker {
             return Module::declare(ctx.clone(), name, ARCHITECT_WORKER);

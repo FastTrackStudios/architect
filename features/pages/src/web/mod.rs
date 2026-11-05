@@ -60,7 +60,7 @@ use wasm_bindgen_futures::spawn_local;
 use crate::api::{ActionSummary, Element, Notice, ThemeSnapshot};
 use crate::diff::Mirror;
 use crate::frame::{self, RENDER_FAILED};
-use crate::modules::{self, ARCHITECT, ARCHITECT_WORKER, LINK};
+use crate::modules::{self, ARCHITECT, ARCHITECT_DOM, ARCHITECT_WORKER, LINK};
 use crate::tsx;
 
 /// The page runtime (`js/prelude.js`), the same a native page runs.
@@ -168,6 +168,7 @@ fn prepare(folder: &PageFolder) -> Prepared {
             "entry": folder.entry,
             "modules": out,
             "architect": ARCHITECT,
+            "architectDom": ARCHITECT_DOM,
             "architectWorker": ARCHITECT_WORKER,
             "link": LINK,
             "root": ROOT,

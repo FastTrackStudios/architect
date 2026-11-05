@@ -9,8 +9,9 @@
 //! `THEME_LIST` of its own, what the counter's "Ask the app" runs through
 //! the host service), and the Board's three the page runs (`board`: the
 //! Board's own are its Rust extension's, which is not built for a
-//! browser). It opens a page in the main pane — the Board, or one of the
-//! checks in `pages/` (`?page=runaway`, `?page=net`) — mounts the
+//! browser). It opens a page in the main pane — the Board, its Preact page
+//! (`?page=preact`), or one of the checks in `pages/` (`?page=runaway`,
+//! `?page=net`) — mounts the
 //! counter's `counter` view below it, and shows how the page keeps up:
 //! each animation frame's gap, the longest of the last second, while a
 //! worker counts primes. Built and served by `just lab-web`
@@ -49,6 +50,15 @@ const BOARD_PAGES: &[(&str, &str)] = &[
     ("board.tsx", include_str!("../../board/pages/board.tsx")),
     ("kf.tsx", include_str!("../../board/pages/kf.tsx")),
     ("primes.js", include_str!("../../board/pages/primes.js")),
+    ("preact.tsx", include_str!("../../board/pages/preact.tsx")),
+    (
+        "vendor/preact.js",
+        include_str!("../../board/pages/vendor/preact.js"),
+    ),
+    (
+        "vendor/hooks.js",
+        include_str!("../../board/pages/vendor/hooks.js"),
+    ),
 ];
 
 /// The checks' extension: the network it may reach is the lab's server.
@@ -70,8 +80,8 @@ const CHECK_PAGES: &[(&str, &str)] = &[
 /// The pages the lab opens, by `?page=`: the folder and its extension.
 fn folder(page: &str) -> Option<(PageFolder, &'static str)> {
     match page {
-        "board" => Some((
-            PageFolder::new("board.tsx", BOARD_PAGES.iter().copied()),
+        "board" | "preact" => Some((
+            PageFolder::new(&format!("{page}.tsx"), BOARD_PAGES.iter().copied()),
             BOARD,
         )),
         "runaway" | "net" => Some((
