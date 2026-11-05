@@ -1624,7 +1624,11 @@ checks they add the same things, run the same hook and read the same
 context menu's target. `cargo xtask builtins` (CI) builds every built-in
 extension crate (an `extension.toml` with a `[source]` beside a
 `Cargo.toml`) both ways: its `--lib`, linked in, and its `--bin`, the
-process; WASI joins as the third way when its runner lands.
+process. WASI is not a third way for these crates yet: the WASI runner
+runs components built against `architect-extension-wasi`, and a
+`linked::Extension` exported as a component is the step still to come
+(#272). `apps/lab/board/tests/bench.rs` measures the lab's WASI
+component beside the Board's linked and process rows.
 
 ### A built-in's development copy, from its source
 

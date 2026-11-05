@@ -1496,6 +1496,7 @@ dependencies = [
  "futures-util",
  "loro",
  "lucide-dioxus",
+ "tempfile",
  "uuid",
 ]
 

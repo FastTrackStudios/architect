@@ -9,8 +9,12 @@
 //! 2. **process**: `cargo build -p <crate> --bin <bin>` (what `EXT_CLONE`
 //!    builds in the development folder, `[source] bin` or the
 //!    `[entry] path`'s file name);
-//! 3. **WASI**: TODO once the WASI runner lands (`feat/wasi-runner`):
-//!    `cargo build -p <crate> --target wasm32-wasip2` here, the third way.
+//! 3. **WASI**: not built here. The WASI runner (PR #285) runs components
+//!    written against their own guest crate (`architect-extension-wasi`,
+//!    the lab's `apps/lab/wasi-counter`), not a `linked::Extension`. The
+//!    third way waits on a `linked::Extension` exported as a component
+//!    (#272); the components themselves are built and run by
+//!    `features/extensions/tests/wasi.rs`.
 //!
 //! The Board (`apps/lab/board`) is the first.
 
@@ -95,8 +99,7 @@ pub fn run_cli(root: &Path) -> Result<(), String> {
                 "process",
                 vec!["build", "-q", "-p", &b.package, "--bin", &b.bin],
             ),
-            // TODO(wasi-runner): ("wasi", ["build", "-p", .., "--target", "wasm32-wasip2"])
-            // once the WASI runner lands.
+            // No WASI way yet: see the module's doc.
         ];
         for (way, args) in ways {
             let ok = Command::new(&cargo)
