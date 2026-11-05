@@ -268,15 +268,35 @@ auth-e2e:
     cd apps/auth-server/e2e && npm install && npx playwright test
 
 # ARGS go to the app: `just lab actions list` asks a running lab. Runs in
-# the dev shell (its libraries) unless you are already in it.
-# The lab on the desktop (apps/lab/desktop, a Blitz window): build and open it.
+# the dev shell (its libraries) unless you are already in it. Its vault is a
+# scratch copy of apps/lab/demo-vault under devenv's state, seeded when
+# missing (ARCHITECT_LAB_VAULT names another folder).
+# The lab on the desktop (apps/lab/desktop, a Blitz window) on the demo vault.
 lab *ARGS:
     #!/usr/bin/env bash
     set -euo pipefail
+    export ARCHITECT_LAB_VAULT="${ARCHITECT_LAB_VAULT:-${DEVENV_STATE:-$PWD/.devenv/state}/lab-vault}"
+    export ARCHITECT_LAB_SEED="${ARCHITECT_LAB_SEED:-$PWD/apps/lab/demo-vault}"
     if [ -n "${DEVENV_ROOT:-}" ]; then
         exec cargo run -q -p architect-desktop -- {{ARGS}}
     fi
     exec devenv shell -- cargo run -q -p architect-desktop -- {{ARGS}}
+
+# Every edit a run made is thrown away.
+# The lab's scratch vault, seeded again from apps/lab/demo-vault.
+lab-vault-reset:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir="${ARCHITECT_LAB_VAULT:-${DEVENV_STATE:-$PWD/.devenv/state}/lab-vault}"
+    rm -rf "$dir"
+    mkdir -p "$(dirname "$dir")"
+    cp -r apps/lab/demo-vault "$dir"
+    rm -f "$dir/.empty-folders"
+    while IFS= read -r folder; do
+        [ -n "$folder" ] && mkdir -p "$dir/$folder"
+    done < apps/lab/demo-vault/.empty-folders
+    echo "lab-vault-reset: $dir"
+
 
 # The lab in a browser (apps/lab/web): the WASI Counter component built for
 # wasm32-wasip2, transpiled by jco (features/extensions/web), and the page

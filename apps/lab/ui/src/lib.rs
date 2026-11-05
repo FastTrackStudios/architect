@@ -1384,6 +1384,8 @@ pub fn LabApp() -> Element {
                             shell::BarAction::new("APP_SETTINGS", "Settings", icon!(Settings2)),
                             shell::BarAction::new("LAB_HELP", "Help", icon!(CircleQuestionMark)),
                         ],
+                        // Sidebar: Rail / One column / Two columns, on ⌘K.
+                        SidebarCommands {}
                         match route {
                             Route::Tab("vault") => rsx! { vault::VaultPage {} },
                             Route::Tab(tab) if ext_ui.is_tab(tab) => rsx! { extensions::ExtensionTab { key: "{tab}", ui: ext_ui, id: tab } },
@@ -1404,6 +1406,14 @@ pub fn LabApp() -> Element {
             screen::DeviceChrome {}
         }
     }
+}
+
+/// The shell's sidebar layouts on the palette (inside the shell, whose
+/// layout they set).
+#[component]
+fn SidebarCommands() -> Element {
+    architect_commands::use_sidebar_commands();
+    rsx! {}
 }
 
 /// The lab's brand, T3 Code's way: a mark and a two-tone wordmark.

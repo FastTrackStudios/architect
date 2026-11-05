@@ -1,0 +1,12 @@
+filters:
+  and:
+    - 'type == "song"'
+views:
+  - type: cards
+    name: Songs
+    image: note.feature
+    order:
+      - file.name
+      - artist
+      - key
+      - tempo

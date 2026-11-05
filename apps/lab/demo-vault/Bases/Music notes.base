@@ -1,0 +1,10 @@
+filters:
+  or:
+    - file.hasTag("music")
+    - file.inFolder("Areas/Music")
+views:
+  - type: list
+    name: Music
+    order:
+      - file.name
+      - status

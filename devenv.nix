@@ -77,9 +77,15 @@ in
   # Without Rust hot-patching: it builds a different ("fat") binary from
   # `dx build`, so the task's build was thrown away (86s twice), and dx's
   # own help calls it experimental and segfault-prone. rsx hot reload stays.
+  # The lab opens a scratch copy of the demo vault (apps/lab/demo-vault),
+  # seeded under devenv's state when it is missing, so a run never edits the
+  # repo's copy; `just lab-vault-reset` seeds it again.
   processes.lab = {
     exec = "cd apps/lab/desktop && exec dx serve --platform desktop --renderer native --hot-patch false";
-    env = config.fleet.telemetry.processEnv;
+    env = config.fleet.telemetry.processEnv // {
+      ARCHITECT_LAB_VAULT = "${config.devenv.state}/lab-vault";
+      ARCHITECT_LAB_SEED = "${config.devenv.root}/apps/lab/demo-vault";
+    };
     # Ready only while the built lab itself runs, not while dx is still
     # compiling it: the TUI shows the lab waiting during the build, running
     # once its window is up, and unhealthy if the app dies under dx. dx

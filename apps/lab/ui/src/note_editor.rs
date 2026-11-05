@@ -256,12 +256,72 @@ const LAYOUT: &str = "
   border: 1px solid var(--border); border-radius: 8px; padding: 4px; min-width: 220px; }
 ";
 
+/// The edit that makes `old` read as `new`: the bytes between their common
+/// start and end replaced, so the caret and the selection around it map
+/// through (an outside change reloads without moving them). `None` when
+/// they are the same.
+#[must_use]
+pub fn replace_spec(old: &str, new: &str) -> Option<TransactionSpec> {
+    if old == new {
+        return None;
+    }
+    let mut start = old
+        .bytes()
+        .zip(new.bytes())
+        .take_while(|(a, b)| a == b)
+        .count();
+    while !old.is_char_boundary(start) || !new.is_char_boundary(start) {
+        start -= 1;
+    }
+    let max_tail = old.len().min(new.len()) - start;
+    let mut tail = old
+        .bytes()
+        .rev()
+        .zip(new.bytes().rev())
+        .take(max_tail)
+        .take_while(|(a, b)| a == b)
+        .count();
+    while !old.is_char_boundary(old.len() - tail) || !new.is_char_boundary(new.len() - tail) {
+        tail -= 1;
+    }
+    let inserted = &new[start..new.len() - tail];
+    Some(
+        TransactionSpec::new()
+            .changes(editor_view::editor_state::Changes::replace(
+                start..old.len() - tail,
+                inserted,
+            ))
+            .user_event("reload"),
+    )
+}
+
 /// A Markdown note's editor: `text` to start with; each change of its text
-/// given to `on_change`.
+/// given to `on_change`. `incoming` is the text to show instead, from
+/// outside the editor (the file changed on disk, merged with the typing),
+/// counted so the same text twice is two reloads: applied as one undo
+/// step, the caret kept where it was.
 #[component]
-pub fn NoteEditor(id: String, text: String, on_change: Callback<String>) -> Element {
+pub fn NoteEditor(
+    id: String,
+    text: String,
+    on_change: Callback<String>,
+    #[props(default)] incoming: Option<(u64, String)>,
+) -> Element {
     let state = use_signal(|| EditorState::new(text.clone()));
     let history = use_signal(History::new);
+    let applied = use_hook(|| CopyValue::new(0_u64));
+    use_effect(use_reactive!(|incoming| {
+        let mut applied = applied;
+        if let Some((n, new)) = incoming
+            && n != *applied.peek()
+        {
+            applied.set(n);
+            let now = state.peek().doc.to_string();
+            if let Some(spec) = replace_spec(&now, &new) {
+                editor_view::dispatch_with_history(state, history, spec, None);
+            }
+        }
+    }));
     let palette = use_signal(|| None::<PaletteState>);
     let mut decos = use_signal(Vec::<(String, DecorationSpec)>::new);
     let ui = try_use_context::<ExtensionUi>();
@@ -652,5 +712,21 @@ mod tests {
                 .contains(".lab-note-editor .ext-mark.ext-todo span { background: var(--accent);"),
             "{LAYOUT}"
         );
+    }
+}
+
+#[cfg(test)]
+mod reload_tests {
+    use super::replace_spec;
+
+    #[test]
+    fn a_reload_replaces_only_what_differs() {
+        let spec = replace_spec("One two three", "One 2 three").unwrap();
+        let c = &spec.changes;
+        assert_eq!(format!("{c:?}").contains("from: 4"), true, "{c:?}");
+        assert!(replace_spec("same", "same").is_none());
+        // Never inside a character.
+        assert!(replace_spec("café", "cafè").is_some());
+        assert!(replace_spec("aé", "aéé").is_some());
     }
 }
