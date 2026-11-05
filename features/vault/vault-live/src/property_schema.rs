@@ -16,9 +16,9 @@
 //!
 //! ## Storage model (hybrid)
 //!
-//! The vault's built-in schemas (`node`, `person`, `daily`) ship in
+//! The vault's built-in schemas (`node`, `person`, `daily`, `project`) ship in
 //! this module's [`builtins`] function. An app inserts its own kinds
-//! (Task: `task`, `project`, `area`) with
+//! (Task: `task`, `area`) with
 //! [`PropertySchemaRegistry::insert`], and a server merges in the
 //! schemas people declare in `kind: schema` pages
 //! ([`schema_from_frontmatter`]).
@@ -590,12 +590,130 @@ pub fn schema_from_frontmatter(
 // ── Built-in schemas ─────────────────────────────────────────────────
 
 /// The vault's built-in schemas: `node` (the epistemic properties every
-/// page kind extends), `person` and `daily`. An app's own kinds (Task's
-/// `task`, `project` and `area`) are its to [`PropertySchemaRegistry::insert`]
+/// page kind extends), `person`, `daily` and `project`. An app's own kinds
+/// (Task's `task` and `area`) are its to [`PropertySchemaRegistry::insert`]
 /// on top of these.
 #[must_use]
 pub fn builtins() -> Vec<KindSchema> {
-    vec![node_schema(), person_schema(), daily_schema()]
+    vec![
+        node_schema(),
+        person_schema(),
+        daily_schema(),
+        project_schema(),
+    ]
+}
+
+/// A project: a folder whose `project.md` is the project (see
+/// [`crate::shelf_boundary`]), as generic as a note: a song, a session, a
+/// client job or a codebase. Its state and dates, `up` (the area or the
+/// parent project it sits under), its members and its icon. An app's
+/// project types add properties on top of these; none replaces them.
+fn project_schema() -> KindSchema {
+    KindSchema {
+        kind: "project".into(),
+        extends: Some("node".into()),
+        properties: vec![
+            PropertyDef {
+                key: "state".into(),
+                ty: PropertyType::EnumWithMetadata {
+                    options: vec![
+                        EnumOption {
+                            value: "planning".into(),
+                            label: "Planning".into(),
+                            color: Some("muted".into()),
+                            icon: Some("clipboard-list".into()),
+                            order: 0,
+                            is_completed: false,
+                            auto_archive_delay_days: None,
+                            weight: None,
+                        },
+                        EnumOption {
+                            value: "active".into(),
+                            label: "Active".into(),
+                            color: Some("primary".into()),
+                            icon: Some("play".into()),
+                            order: 1,
+                            is_completed: false,
+                            auto_archive_delay_days: None,
+                            weight: None,
+                        },
+                        EnumOption {
+                            value: "on_hold".into(),
+                            label: "On hold".into(),
+                            color: Some("warning".into()),
+                            icon: Some("pause".into()),
+                            order: 2,
+                            is_completed: false,
+                            auto_archive_delay_days: None,
+                            weight: None,
+                        },
+                        EnumOption {
+                            value: "done".into(),
+                            label: "Done".into(),
+                            color: Some("success".into()),
+                            icon: Some("check".into()),
+                            order: 3,
+                            is_completed: true,
+                            auto_archive_delay_days: Some(30),
+                            weight: None,
+                        },
+                    ],
+                },
+                required: false,
+                default: Some(serde_json::Value::String("planning".into())),
+                display_name: Some("State".into()),
+                icon: Some("clipboard-list".into()),
+            },
+            PropertyDef {
+                key: "start".into(),
+                ty: PropertyType::Date,
+                required: false,
+                default: None,
+                display_name: Some("Start".into()),
+                icon: Some("calendar".into()),
+            },
+            PropertyDef {
+                key: "due".into(),
+                ty: PropertyType::Date,
+                required: false,
+                default: None,
+                display_name: Some("Due".into()),
+                icon: Some("calendar".into()),
+            },
+            PropertyDef {
+                key: "up".into(),
+                ty: PropertyType::LinkList,
+                required: false,
+                default: None,
+                display_name: Some("Up".into()),
+                icon: Some("arrow-up".into()),
+            },
+            PropertyDef {
+                key: "members".into(),
+                ty: PropertyType::LinkList,
+                required: false,
+                default: None,
+                display_name: Some("Members".into()),
+                icon: Some("users".into()),
+            },
+            PropertyDef {
+                key: "icon".into(),
+                ty: PropertyType::Text,
+                required: false,
+                default: None,
+                display_name: Some("Icon".into()),
+                icon: None,
+            },
+            PropertyDef {
+                key: "tags".into(),
+                ty: PropertyType::Tags,
+                required: false,
+                default: None,
+                display_name: Some("Tags".into()),
+                icon: Some("tag".into()),
+            },
+        ],
+    }
 }
 
 /// Build an [`EnumOption`] with a color + icon + order (weight = order).
@@ -747,8 +865,8 @@ fn daily_schema() -> KindSchema {
 #[cfg(test)]
 #[allow(clippy::match_wildcard_for_single_variants)]
 mod tests {
-    /// Task's kinds (`area`, `project`, `task`), kept here as the
-    /// richest real schemas to test the machinery on. Task ships them.
+    /// Task's kinds (`area`, `task`), kept here as the richest real
+    /// schemas to test the machinery on. Task ships them.
     mod task_kinds {
         use super::super::*;
 
@@ -780,82 +898,6 @@ mod tests {
                         default: None,
                         display_name: Some("Tags".into()),
                         icon: Some("tag".into()),
-                    },
-                ],
-            }
-        }
-
-        pub(super) fn project_schema() -> KindSchema {
-            KindSchema {
-                kind: "project".into(),
-                extends: Some("area".into()),
-                properties: vec![
-                    PropertyDef {
-                        key: "state".into(),
-                        ty: PropertyType::EnumWithMetadata {
-                            options: vec![
-                                EnumOption {
-                                    value: "planning".into(),
-                                    label: "Planning".into(),
-                                    color: Some("muted".into()),
-                                    icon: Some("clipboard-list".into()),
-                                    order: 0,
-                                    is_completed: false,
-                                    auto_archive_delay_days: None,
-                                    weight: None,
-                                },
-                                EnumOption {
-                                    value: "active".into(),
-                                    label: "Active".into(),
-                                    color: Some("primary".into()),
-                                    icon: Some("play".into()),
-                                    order: 1,
-                                    is_completed: false,
-                                    auto_archive_delay_days: None,
-                                    weight: None,
-                                },
-                                EnumOption {
-                                    value: "on_hold".into(),
-                                    label: "On hold".into(),
-                                    color: Some("warning".into()),
-                                    icon: Some("pause".into()),
-                                    order: 2,
-                                    is_completed: false,
-                                    auto_archive_delay_days: None,
-                                    weight: None,
-                                },
-                                EnumOption {
-                                    value: "done".into(),
-                                    label: "Done".into(),
-                                    color: Some("success".into()),
-                                    icon: Some("check".into()),
-                                    order: 3,
-                                    is_completed: true,
-                                    auto_archive_delay_days: Some(30),
-                                    weight: None,
-                                },
-                            ],
-                        },
-                        required: false,
-                        default: Some(serde_json::Value::String("planning".into())),
-                        display_name: Some("State".into()),
-                        icon: Some("clipboard-list".into()),
-                    },
-                    PropertyDef {
-                        key: "start".into(),
-                        ty: PropertyType::Date,
-                        required: false,
-                        default: None,
-                        display_name: Some("Start".into()),
-                        icon: Some("calendar".into()),
-                    },
-                    PropertyDef {
-                        key: "due".into(),
-                        ty: PropertyType::Date,
-                        required: false,
-                        default: None,
-                        display_name: Some("Due".into()),
-                        icon: Some("calendar".into()),
                     },
                 ],
             }
@@ -1082,11 +1124,10 @@ mod tests {
         }
     }
 
-    /// The built-ins plus Task's kinds.
+    /// The built-ins (with `project`) plus Task's kinds.
     fn with_task_kinds() -> PropertySchemaRegistry {
         let mut r = PropertySchemaRegistry::with_builtins();
         r.insert(task_kinds::area_schema());
-        r.insert(task_kinds::project_schema());
         r.insert(task_kinds::task_schema());
         r
     }
@@ -1104,7 +1145,7 @@ mod tests {
     #[test]
     fn page_kinds_inherit_epistemic_node_properties() {
         let r = with_task_kinds();
-        // Direct (person → node) and transitive (project → area → node).
+        // Each extends node: the built-ins and an inserted kind alike.
         for kind in &["person", "project", "daily", "task"] {
             let schema = r.get(kind).unwrap_or_else(|| panic!("{kind} schema"));
             let keys: Vec<&str> = schema.properties.iter().map(|p| p.key.as_str()).collect();
@@ -1115,16 +1156,24 @@ mod tests {
     }
 
     #[test]
-    fn project_inherits_area_fields() {
-        let r = with_task_kinds();
+    fn project_is_built_in_with_its_own_fields() {
+        let r = PropertySchemaRegistry::with_builtins();
         let project = r.get("project").expect("project schema");
-        // project has `state`, `start`, `due`; area contributes `up`,
-        // `icon`, `tags`. All should be present in the resolved view.
+        // Its own `state`, `start`, `due`, `up`, `members`, `icon`, `tags`,
+        // and node's epistemic properties, with no app's kinds inserted.
         let keys: Vec<&str> = project.properties.iter().map(|p| p.key.as_str()).collect();
-        assert!(keys.contains(&"state"));
-        assert!(keys.contains(&"up"), "should inherit `up` from area");
-        assert!(keys.contains(&"icon"), "should inherit `icon` from area");
-        assert!(keys.contains(&"tags"), "should inherit `tags` from area");
+        for key in [
+            "state",
+            "start",
+            "due",
+            "up",
+            "members",
+            "icon",
+            "tags",
+            "confidence",
+        ] {
+            assert!(keys.contains(&key), "project should have `{key}`");
+        }
     }
 
     #[test]
