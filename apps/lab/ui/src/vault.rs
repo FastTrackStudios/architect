@@ -1359,7 +1359,7 @@ mod start_tests {
             plan.tags
         );
         assert!(plan.words.is_some_and(|w| w > 1000), "{:?}", plan.words);
-        let image = plan.feature_image.clone().expect("a feature image");
+        let image = plan.feature_image.expect("a feature image");
         assert!(image.contains("Attachments/Launch logo.svg"), "{image}");
         assert!(
             s.resource_url("Attachments/Launch logo.svg")

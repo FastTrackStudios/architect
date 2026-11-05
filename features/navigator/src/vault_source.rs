@@ -402,7 +402,9 @@ fn derived(page: &VaultPage, created: Millis, modified: Millis) -> NoteFile {
 }
 
 /// A note at `path` as [`VaultSource`] shows one, from a text the caller
-/// holds (an in-memory vault built from the same files: the lab's film
+/// holds.
+///
+/// For an in-memory vault built from the same files (the lab's film
 /// vault): its properties, tags, preview, words and tasks, and its feature
 /// image as its frontmatter names it (the first of
 /// [`FEATURE_IMAGE_PROPERTIES`], else the first image embedded; the
