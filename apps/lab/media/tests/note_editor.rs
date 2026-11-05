@@ -104,24 +104,24 @@ const OPEN: &str = r##"    {id vault, do @run{id LAB_GO_VAULT}, done {check ({id
 "##;
 
 /// Tab and Shift-Tab in the table: the next cell, the next row's, back.
-const TABLE: &str = r#"    {id in-day, do @run{id LAB_EDITOR_SELECT, args {anchor 84}}, done {check ({id LAB_EDITOR_STATE, has {node {kind table, cell {row 0, col 0}}}}), timeout 5}}
+const TABLE: &str = r"    {id in-day, do @run{id LAB_EDITOR_SELECT, args {anchor 84}}, done {check ({id LAB_EDITOR_STATE, has {node {kind table, cell {row 0, col 0}}}}), timeout 5}}
     {id tab-room, do @key{key Tab}, done {check ({id LAB_EDITOR_STATE, has {selection ({anchor 89, head 93})}}), timeout 5}}
     {id tab-mon, do @key{key Tab}, done {check ({id LAB_EDITOR_STATE, has {selection ({anchor 113, head 116})}}), timeout 5}}
     {id back-room, do @key{key Tab, mods (shift)}, done {check ({id LAB_EDITOR_STATE, has {selection ({anchor 89, head 93})}}), timeout 5}}
-"#;
+";
 
 /// Tab and Shift-Tab in a list item; two indents, Ctrl-Z takes back one.
-const LIST: &str = r#"    {id in-setlist, do @run{id LAB_EDITOR_SELECT, args {anchor 56}}, done {check ({id LAB_EDITOR_STATE, has {node {kind list-item, indent 0}}}), timeout 5}}
+const LIST: &str = r"    {id in-setlist, do @run{id LAB_EDITOR_SELECT, args {anchor 56}}, done {check ({id LAB_EDITOR_STATE, has {node {kind list-item, indent 0}}}), timeout 5}}
     {id indent, do @key{key Tab}, done {check ({id LAB_EDITOR_STATE, has {node {kind list-item, indent 2}}}), timeout 5}}
     {id indent-again, do @key{key Tab}, done {check ({id LAB_EDITOR_STATE, has {node {kind list-item, indent 4}}}), timeout 5}}
     {id undo, do @key{key z, mods (ctrl)}, done {check ({id LAB_EDITOR_STATE, has {node {kind list-item, indent 2}}}), timeout 5}}
     {id outdent, do @key{key Tab, mods (shift)}, done {check ({id LAB_EDITOR_STATE, has {node {kind list-item, indent 0}}}), timeout 5}}
-"#;
+";
 
 /// The note marked up: its decorations drawn, its widget mounted.
-const MARK: &str = r##"    {id mark, do @run{id LAB_OUTLINE_MARK}}
+const MARK: &str = r#"    {id mark, do @run{id LAB_OUTLINE_MARK}}
     {id marked, target @css"[data-editor-mount] [data-embed=\"lab.outline/count\"]", done {timeout 5}}
-"##;
+"#;
 
 #[test]
 fn a_luau_extension_works_the_lab_s_note_editor() {

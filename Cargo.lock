@@ -1028,6 +1028,7 @@ dependencies = [
  "dioxus",
  "dioxus-native-dom",
  "dioxus-ssr",
+ "editor-ext",
  "facet",
  "futures",
  "futures-timer",
@@ -1217,6 +1218,7 @@ dependencies = [
  "dioxus",
  "dioxus-native",
  "editor-keyflow",
+ "editor-view",
  "facet",
  "futures-timer",
  "futures-util",
@@ -6008,6 +6010,15 @@ dependencies = [
  "signature 3.0.0",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "editor-ext"
+version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/editor?branch=feat%2Fextension-api-312#ccbcd395f48a50bb906a5d83e834908d5c564235"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -793,8 +793,10 @@ pub mod host {
             .map_err(|e| HostError::from_text(&e))
     }
 
-    /// The editor being typed in, as JSON (`{editor, context, text,
-    /// selection, primary, cursor, node, version}`; `node` is the block at
+    /// The editor being typed in, as JSON.
+    ///
+    /// `{editor, context, text, selection, primary, cursor, node,
+    /// version}`; `node` is the block at
     /// the cursor: `{kind, line_from, line_to, indent, marker?,
     /// content_from, cell?, cells?}`). Needs `reads` or `writes =
     /// ["editor"]`.
@@ -808,10 +810,12 @@ pub mod host {
             .map_err(|e| HostError::from_text(&e))
     }
 
-    /// `command` (`{"changes": [{"from", "to", "insert"}], "selection"?:
-    /// [{"anchor", "head"}], "name"?, "base"?}`, byte offsets into the text
-    /// it read) as one transaction, one undo step: the editor after, as
-    /// JSON. Needs `writes = ["editor"]`.
+    /// `command` as one transaction, one undo step: the editor after, as
+    /// JSON.
+    ///
+    /// `{"changes": [{"from", "to", "insert"}], "selection"?: [{"anchor",
+    /// "head"}], "name"?, "base"?}`, byte offsets into the text it read.
+    /// Needs `writes = ["editor"]`.
     ///
     /// # Errors
     ///

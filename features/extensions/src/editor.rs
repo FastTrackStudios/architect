@@ -287,6 +287,7 @@ impl MemoryEditor {
         if let Ok((after, sel)) = cmd.apply_to(&s.text, &s.selection, s.version) {
             Self::set(&mut m, &after, &sel, &change);
         }
+        drop(m);
     }
 
     /// Its undo's steps, oldest first.
@@ -301,6 +302,7 @@ impl MemoryEditor {
         let step = m.undo.pop()?;
         let version = m.view.snapshot.version.saturating_add(1);
         m.view.snapshot = Snapshot::of(&step.text, &step.selection, 0, version);
+        drop(m);
         Some(step.name)
     }
 
@@ -358,6 +360,7 @@ impl Editors for MemoryEditor {
         } else {
             m.decorations.insert(extension.to_owned(), decorations);
         }
+        drop(m);
         Ok(())
     }
 }

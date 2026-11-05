@@ -178,7 +178,8 @@ impl Services {
     /// What extension `id` was lent goes with it (it unloaded).
     pub(crate) fn forget(&self, id: &str) {
         self.decorations.withdraw(id);
-        if let Some(editors) = lock(&self.editors).clone() {
+        let editors = lock(&self.editors).clone();
+        if let Some(editors) = editors {
             editors.withdraw(id);
         }
         lock(&self.picked).remove(id);

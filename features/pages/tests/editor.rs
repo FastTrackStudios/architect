@@ -3,7 +3,12 @@
 //! one undo step and decorate it, through `editor` (the host service's
 //! editor calls, as the extension), on `editor::MemoryEditor`.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};

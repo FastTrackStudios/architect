@@ -117,7 +117,9 @@ impl LiveEditor {
     fn take(&self) -> (Vec<TransactionSpec>, Vec<(String, DecorationSpec)>) {
         let mut i = lock(&self.inner);
         let pending = std::mem::take(&mut i.pending);
-        (pending, Self::flat(&i))
+        let flat = Self::flat(&i);
+        drop(i);
+        (pending, flat)
     }
 
     fn flat(i: &Inner) -> Vec<(String, DecorationSpec)> {
@@ -150,7 +152,9 @@ impl LiveEditor {
         let range = editor_view::editor_state::Range::new(anchor.min(len), head.min(len));
         let spec =
             TransactionSpec::new().selection(editor_view::editor_state::Selection::single(range));
-        Self::push(&mut i, spec)
+        let out = Self::push(&mut i, spec);
+        drop(i);
+        out
     }
 }
 
@@ -176,7 +180,9 @@ impl Editors for Live {
         let spec =
             ext::transaction(&state, edit, i.version, &by.describe())?.annotate(ext::STEP, step);
         LiveEditor::push(&mut i, spec)?;
-        LiveEditor::view(&i).ok_or(EditorError::NoEditor)
+        let view = LiveEditor::view(&i);
+        drop(i);
+        view.ok_or(EditorError::NoEditor)
     }
 
     fn decorate(
@@ -200,6 +206,7 @@ impl Editors for Live {
             i.decorations.insert(extension.to_owned(), decorations);
         }
         LiveEditor::wake(&i);
+        drop(i);
         Ok(())
     }
 
@@ -211,11 +218,14 @@ impl Editors for Live {
     }
 }
 
-/// The person's undo and redo, through the editor's history.
+/// The person's undo and redo, through the editor's history (a keymap's
+/// command: `editor_state::Command` returns an `Option`).
+#[expect(clippy::unnecessary_wraps, reason = "an editor_state::Command")]
 fn undo(_: &EditorState) -> Option<TransactionSpec> {
     Some(TransactionSpec::new().user_event("undo"))
 }
 
+#[expect(clippy::unnecessary_wraps, reason = "an editor_state::Command")]
 fn redo(_: &EditorState) -> Option<TransactionSpec> {
     Some(TransactionSpec::new().user_event("redo"))
 }
@@ -429,6 +439,7 @@ pub fn register(list: &ActionList) {
                 }
                 out
             });
+            drop(i);
             Ok(serde_json::to_vec(&out).unwrap_or_default())
         }),
     );
