@@ -168,7 +168,7 @@ metas! {
     WORKSPACES_RENAME = WORKSPACES_RENAME, "Workspaces", "Rename a workspace layout", "Renames a saved layout (`id` stays).";
     WORKSPACES_SET_SLOT = WORKSPACES_SET_SLOT, "Workspaces", "Put a workspace layout in a slot", "Puts a saved layout in slot 1–9 (⌘1–9; the set there gives it up), or out of any when `slot` is unset.";
     WORKSPACES_OPTIONS = WORKSPACES_OPTIONS, "Workspaces", "Workspace layout options", "Save the live layout before loading another (`save_before_load`), and whether ⌘1–9 load (`slot_keys`).";
-    WORKSPACES_RESET = WORKSPACES_RESET, "Workspaces", "Reset to the saved layout", "Throws the live changes away: back to the active set's saved layout.";
+    WORKSPACES_RESET = WORKSPACES_RESET, "Workspaces", "Reset layout", "Throws the live changes away: back to the active set's saved layout (the first built-in's when none is active). Every popped-out dock and pane docks back into the main window, its window closes, and the docks are at their saved sizes.";
     WORKSPACES_DELETE = WORKSPACES_DELETE, "Workspaces", "Delete a workspace layout", "Deletes a saved layout the person made (a built-in one answers `builtin`).";
 }
 

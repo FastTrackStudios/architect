@@ -1270,14 +1270,16 @@ pub fn set_options(st: &mut State, env: &Env, a: OptionsArgs) -> Result<Answer, 
     ))
 }
 
-/// `WORKSPACES_RESET`: back to the active screenset's saved layout.
+/// `WORKSPACES_RESET`: back to the active screenset's saved layout (the
+/// first built-in's when none is active): one main window, so every
+/// pop-out's docks and panes come home and the pop-out closes.
 ///
 /// # Errors
 ///
 /// None the caller can mend.
 pub fn reset(st: &mut State, env: &Env, _: super::RevisionArgs) -> Result<Answer, String> {
     let before = st.clone();
-    let Some(id) = st.screensets.active.clone() else {
+    let Some(id) = st.screensets.reset_target().map(str::to_owned) else {
         return Ok(answer(
             st,
             env,

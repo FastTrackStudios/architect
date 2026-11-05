@@ -50,7 +50,7 @@ pub(super) fn ManageSheet() -> Element {
     let t = host.theme.read().clone();
     let noun = host.sets_noun.read().clone();
     let lower = noun.to_lowercase();
-    let (rows, dirty) = {
+    let (rows, dirty, target) = {
         let sets = host.screensets.read();
         let rows: Vec<Row> = sets
             .sets
@@ -63,7 +63,12 @@ pub(super) fn ManageSheet() -> Element {
                 active: sets.active.as_deref() == Some(s.id.as_str()),
             })
             .collect();
-        (rows, sets.is_dirty(*host.form.read()))
+        let class = *host.form.read();
+        (
+            rows,
+            sets.is_resettable(class),
+            sets.reset_target().map(str::to_owned),
+        )
     };
     let mut name = use_signal(String::new);
     let save_new = move || {
@@ -111,7 +116,7 @@ pub(super) fn ManageSheet() -> Element {
                     div { style: "color:{t.ink_3}; font-size:13px;", "No saved {lower} layouts yet." }
                 }
                 for row in rows {
-                    SetRow { key: "{row.id}", row: row.clone(), dirty: dirty && row.active }
+                    SetRow { key: "{row.id}", row: row.clone(), dirty: dirty && target.as_deref() == Some(row.id.as_str()) }
                 }
                 div { style: "display:flex; gap:8px; align-items:center; padding-top:6px; border-top:1px solid {t.rule};",
                     input {
@@ -267,13 +272,13 @@ fn SetRow(row: Row, dirty: bool) -> Element {
                 },
                 "{slot}"
             }
-            if row.active && dirty {
+            if dirty {
                 button {
                     "data-workspace-reset": "{id}",
                     style: "{button}",
-                    title: "Back to its saved layout",
+                    title: "Back to its saved layout: every dock and pane in the main window, at its saved size",
                     onclick: move |_| host.write(control::reset, control::RevisionArgs::default()),
-                    "Reset"
+                    "Reset layout"
                 }
             }
             if !row.builtin {

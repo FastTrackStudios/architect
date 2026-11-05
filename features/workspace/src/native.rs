@@ -109,6 +109,7 @@ pub fn launch_with_fonts(
         inner: DioxusNativeApplication::new(proxy, queue, config),
         desk,
         popouts: HashMap::new(),
+        devices: Vec::new(),
         own,
         own_queue,
         fonts,
@@ -459,6 +460,12 @@ struct App {
     inner: DioxusNativeApplication,
     desk: Rc<Desk>,
     popouts: HashMap<OsId, Open>,
+    /// Closed pop-outs' GPU devices (each renderer's own wgpu device, and
+    /// through it its instance), kept until the app ends. Destroying one
+    /// while the main window renders crashed NVIDIA's Wayland driver: a
+    /// jump to address 0 in the main window's next swapchain acquire
+    /// (#353). The renderer, its surface and the window still go.
+    devices: Vec<Box<dyn std::any::Any>>,
     own: BlitzShellProxy,
     own_queue: Receiver<BlitzShellEvent>,
     /// The app's faces, for each pop-out's document.
@@ -558,12 +565,16 @@ impl App {
         close.is_some_and(|close| close())
     }
 
-    /// Drop the pop-out's window (its document goes with it).
+    /// Drop the pop-out's window (its document goes with it). Its GPU
+    /// device is kept ([`Self::devices`]).
     fn forget(&mut self, os: OsId) {
         if let Some(open) = self.popouts.remove(&os) {
             let id = open.popout.id().clone();
             self.desk.open.borrow_mut().retain(|(w, _)| *w != id);
             self.desk.releases.borrow_mut().retain(|(w, _)| *w != id);
+            if let Some(device) = anyrender::RenderContext::renderer_specific_context(&open.view.renderer) {
+                self.devices.push(device);
+            }
             drop(open);
         }
     }
