@@ -92,7 +92,7 @@ pub use base_query::{
 pub mod mutate;
 pub use mutate::{
     MutateError, append_to_page, create_page, delete_page, edit_frontmatter, move_page,
-    prepend_to_page, remove_property, set_property,
+    prepend_to_page, remove_property, save_base, set_property,
 };
 
 /// "Open an Obsidian vault as a vault" translation tool —
