@@ -31,6 +31,9 @@ architect-extensions = { workspace = true, features = ["host", "linked", "proces
 architect-settings = { workspace = true }
 futures = "0.3"
 tempfile = "3"
+# The settings section, written as the manifest's TOML (tests/both_ways.rs).
+toml = { workspace = true }
+serde = { workspace = true }
 
 [lints]
 workspace = true

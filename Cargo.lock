@@ -1361,6 +1361,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "architect-navigator-extension"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-extensions",
+ "architect-navigator",
+ "architect-settings",
+ "architect-workspace-hack",
+ "dioxus",
+ "futures",
+ "futures-channel",
+ "futures-timer",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml 0.8.2",
+]
+
+[[package]]
 name = "architect-orgs"
 version = "0.1.0"
 dependencies = [

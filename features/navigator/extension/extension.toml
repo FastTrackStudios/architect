@@ -1,0 +1,971 @@
+# Navigator (features/navigator/extension/src/lib.rs): the navigator, a
+# port of Notebook Navigator, as a feature of its own. Its sidebar view
+# (`files`, docked left) draws the navigator the app puts in context over
+# its vault; its NAVIGATOR_* actions ask the view on show; its settings are
+# NavigatorSettings' keys (`navigator.*`, the section below is checked
+# against the struct by tests/both_ways.rs). One Rust value
+# (`NavigatorExtension`, a linked::Extension): an app links it in as a
+# built-in; its program (src/main.rs) serves the same value as a process
+# when a development copy runs (EXT_CLONE {"id":"navigator"}), drawing a
+# sample vault of its own.
+#
+# GPL-3.0-or-later, as the crate it links (features/navigator/README.md).
+id = "navigator"
+name = "Navigator"
+version = "0.1.0"
+kind = "process"
+api = "0.1"
+description = "Folders beside notes in the sidebar: a port of Notebook Navigator (GPL-3.0). Groups, pins, images, tags, folder notes, a manual order, and each folder's and tag's own list."
+authors = ["FastTrackStudio"]
+
+[entry]
+path = "architect-navigator"
+
+[source]
+git = "https://github.com/FastTrackStudios/architect"
+rev = "main"
+path = "features/navigator/extension"
+
+[[views]]
+id = "files"
+title = "Navigator"
+icon = "folder-tree"
+home = "left"
+
+[[actions]]
+id = "NAVIGATOR_STATE"
+name = "Navigator: the list"
+description = "The folder or tag selected, how its list is sorted and grouped, and its rows: headings (group, folded, count, pinned) and notes (path, pinned, image)."
+group = "Navigator"
+effect = "read_only"
+
+[[actions]]
+id = "NAVIGATOR_SELECT"
+name = "Navigator: go to"
+description = "Selects folder `folder` (\"\" the vault) or tag `tag`, as a click would; a folder's note opens with it when folder notes are on."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"folder":{"type":"string"},"tag":{"type":"string"}}}'
+
+[[actions]]
+id = "NAVIGATOR_REVEAL"
+name = "Reveal the open note"
+group = "Navigator"
+effect = "mutating"
+
+[[actions]]
+id = "NAVIGATOR_COLLAPSE_OR_EXPAND"
+name = "Collapse or expand all folders"
+group = "Navigator"
+effect = "mutating"
+
+[[actions]]
+id = "NAVIGATOR_BACK"
+name = "Back to the folder before"
+group = "Navigator"
+effect = "mutating"
+
+[[actions]]
+id = "NAVIGATOR_FORWARD"
+name = "Forward to the next folder"
+group = "Navigator"
+effect = "mutating"
+
+[[actions]]
+id = "NAVIGATOR_FOCUS_FOLDERS"
+name = "Go to the folders"
+group = "Navigator"
+effect = "mutating"
+
+[[actions]]
+id = "NAVIGATOR_FOCUS_NOTES"
+name = "Go to the notes"
+group = "Navigator"
+effect = "mutating"
+
+[[actions]]
+id = "NAVIGATOR_SELECT_ALL"
+name = "Select every note in the list"
+group = "Navigator"
+effect = "mutating"
+
+[[actions]]
+id = "NAVIGATOR_TOGGLE_DUAL_PANE"
+name = "Two panes"
+group = "Navigator"
+effect = "mutating"
+toggle = true
+
+[[actions]]
+id = "NAVIGATOR_TOGGLE_ORIENTATION"
+name = "Stack the panes"
+group = "Navigator"
+effect = "mutating"
+toggle = true
+
+[[actions]]
+id = "NAVIGATOR_TOGGLE_DESCENDANTS"
+name = "Notes from folders below"
+description = "For the list on show: the settings', or the folder's own while it has one."
+group = "Navigator"
+effect = "mutating"
+toggle = true
+
+[[actions]]
+id = "NAVIGATOR_TOGGLE_COMPACT"
+name = "Compact rows"
+description = "Note rows as their names alone, for the list on show."
+group = "Navigator"
+effect = "mutating"
+toggle = true
+
+[[actions]]
+id = "NAVIGATOR_REORDER_ROOTS"
+name = "Reorder the top folders"
+group = "Navigator"
+effect = "mutating"
+toggle = true
+
+[[actions]]
+id = "NAVIGATOR_SORT"
+name = "Navigator: sort by"
+description = "Sorts the list on show by `by`: modified-desc, modified-asc, created-desc, created-asc, title-asc, title-desc, filename-asc, filename-desc or manual (the notes' sort_index)."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"by":{"type":"string"}},"required":["by"]}'
+
+[[actions]]
+id = "NAVIGATOR_GROUP"
+name = "Navigator: group by"
+description = "Groups the list on show by `by`: none, date, folder or property (`property` names it; notes without it go last, under None)."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"by":{"type":"string"},"property":{"type":"string"}},"required":["by"]}'
+
+[[actions]]
+id = "NAVIGATOR_TOGGLE_GROUP"
+name = "Navigator: fold a group"
+description = "Folds or unfolds the list's group `group` (its key, from NAVIGATOR_STATE) or the one headed `label`."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"group":{"type":"string"},"label":{"type":"string"}}}'
+
+[[actions]]
+id = "NAVIGATOR_OWN_LIST"
+name = "Navigator: this folder's own list"
+description = "With `on` (the default) the list's sort, grouping, rows and notes from below change for the folder or tag selected alone; off, it follows the settings again."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"on":{"type":"boolean"}}}'
+
+[[actions]]
+id = "NAVIGATOR_COLOUR"
+name = "Navigator: colour a tag or property"
+description = "Gives `target` (tag:<tag>, property:<key> or property:<key>=<value>) colour `colour` (CSS), or none."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"target":{"type":"string"},"colour":{"type":"string"}},"required":["target"]}'
+
+[[actions]]
+id = "NAVIGATOR_PIN"
+name = "Pin or unpin the note"
+description = "Pins note `path` (or `paths`, or the selected ones) in folders, or in tags while a tag is selected; or unpins them."
+group = "Navigator"
+effect = "mutating"
+shortcut = "⌘⇧P"
+params = '{"type":"object","properties":{"path":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}}}}'
+
+[[actions]]
+id = "NAVIGATOR_PIN_FOLDER_NOTES"
+name = "Pin all folder notes"
+description = "Pins every folder note the list holds that is not pinned."
+group = "Navigator"
+effect = "mutating"
+
+[[actions]]
+id = "NAVIGATOR_MOVE"
+name = "Navigator: move in the manual order"
+description = "Moves the selected notes `by` places (up when negative) in a manual sort, writing each note's sort_index."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"by":{"type":"integer"}}}'
+
+[[actions]]
+id = "NAVIGATOR_CONVERT_TO_FOLDER_NOTE"
+name = "Convert to folder note"
+description = "Makes note `path` (or the selected one) the note of a new folder beside it, named for it, and opens it."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"path":{"type":"string"}}}'
+
+[[actions]]
+id = "NAVIGATOR_SET_AS_FOLDER_NOTE"
+name = "Set as folder note"
+description = "Renames note `path` (or the selected one) as its folder's note."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"path":{"type":"string"}}}'
+
+[[actions]]
+id = "NAVIGATOR_DETACH_FOLDER_NOTE"
+name = "Detach folder note"
+description = "Renames folder `folder`'s note (or the selected folder's) to `name` (\"<name> (note)\" when left out), a note like any other."
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"folder":{"type":"string"},"name":{"type":"string"}}}'
+
+[[actions]]
+id = "NAVIGATOR_OPEN_FOLDER_NOTE_TAB"
+name = "Open the folder note in a new tab"
+group = "Navigator"
+effect = "mutating"
+params = '{"type":"object","properties":{"folder":{"type":"string"},"path":{"type":"string"}}}'
+
+# A note's context menu (the app's file menu): pin, and folder notes.
+[[context]]
+target = "file:md"
+action = "NAVIGATOR_PIN"
+title = "Pin or unpin"
+
+[[context]]
+target = "file:md"
+action = "NAVIGATOR_CONVERT_TO_FOLDER_NOTE"
+title = "Convert to folder note"
+
+[[context]]
+target = "file:md"
+action = "NAVIGATOR_SET_AS_FOLDER_NOTE"
+title = "Set as folder note"
+
+# Its settings: NavigatorSettings (features/navigator/src/settings.rs), as
+# the settings page draws them. Generated by tests/both_ways.rs
+# `its_section_is_navigator_settings`, which prints it when they differ.
+[[sections]]
+id = "navigator"
+title = "Navigator"
+icon = "folder-tree"
+group = ""
+
+[[sections.settings]]
+key = "navigator.dual_pane"
+title = "Two panes"
+description = "Folders and notes side by side (or stacked); off, one at a time."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.orientation"
+title = "Orientation"
+description = ""
+control = "segmented"
+default = "Horizontal"
+unit = ""
+placeholder = ""
+aliases = []
+
+[[sections.settings.choices]]
+value = "Horizontal"
+label = "Side by side"
+detail = ""
+
+[[sections.settings.choices]]
+value = "Vertical"
+label = "One above the other"
+detail = ""
+
+[[sections.settings]]
+key = "navigator.narrow_layout"
+title = "In a narrow sidebar"
+description = "When the sidebar is narrower than the folders plus 150 points."
+control = "select"
+default = "SinglePane"
+unit = ""
+placeholder = ""
+aliases = []
+
+[[sections.settings.choices]]
+value = "Keep"
+label = "Keep both"
+detail = ""
+
+[[sections.settings.choices]]
+value = "SinglePane"
+label = "One pane at a time"
+detail = ""
+
+[[sections.settings.choices]]
+value = "Vertical"
+label = "One above the other"
+detail = ""
+
+[[sections.settings]]
+key = "navigator.start_pane"
+title = "Start on"
+description = "The pane one-at-a-time shows first."
+control = "segmented"
+default = "Files"
+unit = ""
+placeholder = ""
+aliases = []
+
+[[sections.settings.choices]]
+value = "Navigation"
+label = "Folders"
+detail = ""
+
+[[sections.settings.choices]]
+value = "Files"
+label = "Notes"
+detail = ""
+
+[[sections.settings]]
+key = "navigator.transition_ms"
+title = "Pane transition"
+description = "How long one pane takes to slide over the other."
+control = "slider"
+default = 150.0
+min = 50.0
+max = 350.0
+step = 10.0
+unit = " ms"
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.show_root"
+title = "Show the vault's root"
+description = "A row for the vault itself, over its folders."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.show_note_count"
+title = "Note counts"
+description = ""
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.separate_note_counts"
+title = "Separate counts"
+description = "A folder's own notes, then those in its folders below (\"3 • 12\")."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.auto_reveal"
+title = "Reveal the open note"
+description = "Open its folders and scroll to it as it opens."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.reveal_shortest_path"
+title = "Reveal by the shortest path"
+description = "With notes from folders below, stop at the nearest open folder."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.smart_collapse"
+title = "Smart collapse"
+description = "Collapse all keeps the selected folder in view."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.item_height"
+title = "Folder row height"
+description = ""
+control = "slider"
+default = 28.0
+min = 20.0
+max = 40.0
+step = 1.0
+unit = " pt"
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.indent"
+title = "Indent"
+description = ""
+control = "slider"
+default = 16.0
+min = 10.0
+max = 24.0
+step = 1.0
+unit = " pt"
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.sort"
+title = "Sort by"
+description = ""
+control = "select"
+default = "ModifiedDesc"
+unit = ""
+placeholder = ""
+aliases = []
+
+[[sections.settings.choices]]
+value = "ModifiedDesc"
+label = "Edited, newest first"
+detail = ""
+
+[[sections.settings.choices]]
+value = "ModifiedAsc"
+label = "Edited, oldest first"
+detail = ""
+
+[[sections.settings.choices]]
+value = "CreatedDesc"
+label = "Created, newest first"
+detail = ""
+
+[[sections.settings.choices]]
+value = "CreatedAsc"
+label = "Created, oldest first"
+detail = ""
+
+[[sections.settings.choices]]
+value = "TitleAsc"
+label = "Title, A to Z"
+detail = ""
+
+[[sections.settings.choices]]
+value = "TitleDesc"
+label = "Title, Z to A"
+detail = ""
+
+[[sections.settings.choices]]
+value = "FilenameAsc"
+label = "File name, A to Z"
+detail = ""
+
+[[sections.settings.choices]]
+value = "FilenameDesc"
+label = "File name, Z to A"
+detail = ""
+
+[[sections.settings.choices]]
+value = "Manual"
+label = "By hand: the notes' `sort_index` (the manual-sort property)"
+detail = ""
+
+[[sections.settings]]
+key = "navigator.grouping"
+title = "Group by"
+description = ""
+control = "select"
+default = "Date"
+unit = ""
+placeholder = ""
+aliases = []
+
+[[sections.settings.choices]]
+value = "None"
+label = "No groups"
+detail = ""
+
+[[sections.settings.choices]]
+value = "Date"
+label = "By date (Today, Yesterday, …), when sorted by a date"
+detail = ""
+
+[[sections.settings.choices]]
+value = "Folder"
+label = "By folder, with notes from folders below"
+detail = ""
+
+[[sections.settings.choices]]
+value = "Property"
+label = "By a property's value (the \"Group by property\" key)"
+detail = ""
+
+[[sections.settings]]
+key = "navigator.group_property"
+title = "Group by property"
+description = "The frontmatter property \"Group by: Property\" groups notes by; notes without it go last, under \"None\"."
+control = "text"
+default = ""
+unit = ""
+placeholder = "status"
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.show_group_counts"
+title = "Count in group headings"
+description = "How many notes each group holds, beside its heading."
+control = "switch"
+default = false
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.show_folder_group_paths"
+title = "Folder groups show paths"
+description = "A folder group's heading is its path from the folder selected."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.filter_pinned_by_folder"
+title = "Only pin notes in their folder"
+description = "A pinned note shows pinned in its own folder, not in folders above."
+control = "switch"
+default = false
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.include_descendants"
+title = "Notes from folders below"
+description = "A folder lists the notes of every folder inside it too."
+control = "switch"
+default = false
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.mode"
+title = "Note row"
+description = ""
+control = "segmented"
+default = "Standard"
+unit = ""
+placeholder = ""
+aliases = []
+
+[[sections.settings.choices]]
+value = "Standard"
+label = "Standard: name, preview, date and folder"
+detail = ""
+
+[[sections.settings.choices]]
+value = "Compact"
+label = "Compact: the name alone"
+detail = ""
+
+[[sections.settings]]
+key = "navigator.title_rows"
+title = "Title lines"
+description = ""
+control = "stepper"
+default = 1
+min = 1.0
+max = 3.0
+step = 1.0
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.show_preview"
+title = "Preview"
+description = "The start of each note under its name."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.preview_rows"
+title = "Preview lines"
+description = ""
+control = "stepper"
+default = 2
+min = 1.0
+max = 5.0
+step = 1.0
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.show_date"
+title = "Date"
+description = ""
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.show_parent_folder"
+title = "Folder"
+description = "The note's folder, when it is not the one selected."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.compact_height"
+title = "Compact row height"
+description = ""
+control = "slider"
+default = 28.0
+min = 20.0
+max = 40.0
+step = 1.0
+unit = " pt"
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.show_feature_image"
+title = "Feature images"
+description = "A note's image beside it; a PDF's cover, an SVG, a drawing's preview."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.feature_image_properties"
+title = "Image properties"
+description = "Frontmatter properties that name a note's image, first set wins."
+control = "text"
+default = ""
+unit = ""
+placeholder = "cover, image"
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.feature_image_size"
+title = "Image size"
+description = ""
+control = "slider"
+default = 64.0
+min = 64.0
+max = 128.0
+step = 32.0
+unit = " pt"
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.force_square_image"
+title = "Square images"
+description = ""
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.hide_drawing_previews"
+title = "Hide drawing previews"
+description = "A drawing's PNG preview is not listed beside the drawing."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.show_tags"
+title = "Tags"
+description = "A note's tags under it; a click goes to the tag."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.show_tag_ancestors"
+title = "Tags' parents"
+description = "`projects/alpha`, not `alpha`."
+control = "switch"
+default = false
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.color_tags"
+title = "Coloured tags"
+description = "Tags with a colour show in it, and first."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.show_tags_compact"
+title = "Tags in compact rows"
+description = ""
+control = "switch"
+default = false
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.show_properties"
+title = "Properties"
+description = "The values of the properties listed below, under a note."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.list_properties"
+title = "Properties shown"
+description = "Frontmatter keys whose values show on a note's row."
+control = "text"
+default = ""
+unit = ""
+placeholder = "status, priority"
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.show_task_progress"
+title = "Task progress"
+description = "Done of all of a note's tasks, with a bar."
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.hide_task_progress_complete"
+title = "Hide when all done"
+description = ""
+control = "switch"
+default = false
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.text_count"
+title = "Count"
+description = "A note's words, beside its name or with its properties."
+control = "select"
+default = "None"
+unit = ""
+placeholder = ""
+aliases = []
+
+[[sections.settings.choices]]
+value = "None"
+label = "Nothing"
+detail = ""
+
+[[sections.settings.choices]]
+value = "Words"
+label = "Words"
+detail = ""
+
+[[sections.settings]]
+key = "navigator.text_count_placement"
+title = "Count shows"
+description = ""
+control = "segmented"
+default = "Title"
+unit = ""
+placeholder = ""
+aliases = []
+
+[[sections.settings.choices]]
+value = "Title"
+label = "Beside its name"
+detail = ""
+
+[[sections.settings.choices]]
+value = "Property"
+label = "With its properties"
+detail = ""
+
+[[sections.settings]]
+key = "navigator.use_frontmatter"
+title = "Names and dates from frontmatter"
+description = "A note's name, created and modified times from its properties."
+control = "switch"
+default = false
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.frontmatter_name_field"
+title = "Name property"
+description = "Properties that hold a note's name, first set wins."
+control = "text"
+default = ""
+unit = ""
+placeholder = "title, name"
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.frontmatter_created_field"
+title = "Created property"
+description = ""
+control = "text"
+default = ""
+unit = ""
+placeholder = "created"
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.frontmatter_modified_field"
+title = "Modified property"
+description = ""
+control = "text"
+default = ""
+unit = ""
+placeholder = "modified"
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.manual_sort_property"
+title = "Manual sort property"
+description = "Where a note's place in a manual order is kept, in its frontmatter."
+control = "text"
+default = "sort_index"
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.folder_notes"
+title = "Folder notes"
+description = "A note named for its folder is the folder's: a click on the folder opens it."
+control = "switch"
+default = false
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.folder_note_name"
+title = "Folder note name"
+description = "`{{folder}}` is the folder's name; a name without it is every folder's (`index`)."
+control = "text"
+default = "{{folder}}"
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.hide_folder_note"
+title = "Hide folder notes in the list"
+description = ""
+control = "switch"
+default = true
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.pin_created_folder_note"
+title = "Pin new folder notes"
+description = "A note converted to its folder's is pinned there."
+control = "switch"
+default = false
+unit = ""
+placeholder = ""
+choices = []
+aliases = []
+
+[[sections.settings]]
+key = "navigator.folder_note_open"
+title = "Folder notes open in"
+description = ""
+control = "segmented"
+default = "CurrentTab"
+unit = ""
+placeholder = ""
+aliases = []
+
+[[sections.settings.choices]]
+value = "CurrentTab"
+label = "The tab on show"
+detail = ""
+
+[[sections.settings.choices]]
+value = "NewTab"
+label = "A new tab"
+detail = ""

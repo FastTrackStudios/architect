@@ -357,7 +357,7 @@ pub struct NavigatorSettings {
     #[setting(placeholder = "cover, image")]
     pub feature_image_properties: String,
     /// Image size
-    #[setting(control = select, choices = [64, 96, 128], unit = " pt")]
+    #[setting(control = slider(64..=128, step = 32), unit = " pt")]
     pub feature_image_size: u32,
     /// Square images
     pub force_square_image: bool,

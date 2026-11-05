@@ -61,6 +61,7 @@ members = [
     "features/pages",
     "features/files",
     "features/navigator",
+    "features/navigator/extension",
     "features/attachments",
     "features/spaces",
     "features/ui/showcase",
@@ -309,6 +310,7 @@ architect-files = { path = "features/files" }
 # The sidebar: a port of Notebook Navigator. GPL-3.0-or-later, the one GPL
 # crate (features/navigator/README.md): an app that links it ships under the GPL.
 architect-navigator = { path = "features/navigator" }
+architect-navigator-extension = { path = "features/navigator/extension" }
 architect-attachments = { path = "features/attachments" }
 architect-devices = { path = "features/devices" }
 architect-spaces = { path = "features/spaces" }
