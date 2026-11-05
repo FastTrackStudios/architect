@@ -231,13 +231,16 @@ fn redo(_: &EditorState) -> Option<TransactionSpec> {
 }
 
 /// The editor's sheet and the lab's look for it, at app level (a `<style>`
-/// inside a pane does not apply in Blitz).
+/// inside a pane does not apply in Blitz). A mark's background goes on its
+/// inner span too: Blitz paints an inline background only on the span that
+/// owns the glyphs, and a mark's text is in a tile span inside it.
 const LAYOUT: &str = "
 .lab-note-editor { max-width: 640px; box-sizing: border-box; border-radius: 8px;
   border: 1px solid var(--border); background: var(--card); color: var(--foreground);
   padding: 10px 12px 10px 28px; font-family: ui-monospace, Menlo, monospace; font-size: 13px;
   line-height: 1.5; position: relative; }
-.lab-note-editor .ext-mark.ext-todo { background: color-mix(in srgb, var(--primary) 22%, transparent); }
+.lab-note-editor .ext-mark.ext-todo,
+.lab-note-editor .ext-mark.ext-todo span { background: var(--accent); color: var(--accent-foreground); }
 .lab-note-editor .editor-gutter { color: var(--muted-foreground); }
 .lab-note-editor .ed-menu { position: absolute; z-index: 5; background: var(--popover);
   border: 1px solid var(--border); border-radius: 8px; padding: 4px; min-width: 220px; }
@@ -468,4 +471,21 @@ pub fn register(list: &ActionList) {
             Ok(b"null".to_vec())
         }),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LAYOUT;
+
+    /// Blitz paints an inline background only on the span that owns the
+    /// glyphs: a TODO mark's text is in a tile span inside the mark, so a
+    /// background on the mark alone showed nothing on the desktop.
+    #[test]
+    fn a_todo_mark_s_background_is_on_the_span_that_holds_its_text() {
+        assert!(
+            LAYOUT
+                .contains(".lab-note-editor .ext-mark.ext-todo span { background: var(--accent);"),
+            "{LAYOUT}"
+        );
+    }
 }
