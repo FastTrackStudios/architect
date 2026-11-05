@@ -18,16 +18,26 @@
 //! (`editor_state::ext::resolve_key`). Its `[[slash]]` rows are in the
 //! slash menu (`\`), and its toolbars of `when = "editor:note"` on the
 //! Typing Toolbar while the note is typed in.
+//!
+//! Its fence registry is the extensions' (`Embeds::fences`): a fenced
+//! block whose language an extension claims (the Board's ```` ```kf ````)
+//! keeps its source, and under it the extension's embed is mounted as a
+//! block widget (`architect_extensions::embeds::EmbedView`), given the
+//! fence's body as it is typed, sized to what it draws; it goes when the
+//! extension does ([`claimed_fences`]).
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
 use architect::action::{ActionCaller, ActionError, ActionList, ActionMeta, Effect, Principal};
+use architect_extensions::contrib::Claim;
 use architect_extensions::editor::{DecorationSpec, EditCommand, EditorError, EditorView, Editors};
-use architect_extensions::embeds::WidgetView;
+use architect_extensions::embeds::{EmbedView, WidgetView};
 use architect_extensions::interface::ExtensionUi;
 use dioxus::prelude::*;
-use editor_view::editor_state::{EditorState, History, KeySpec, Keymap, TransactionSpec, ext};
+use editor_view::editor_state::{
+    DecoratedRange, EditorState, History, KeySpec, Keymap, TransactionSpec, ext,
+};
 use editor_view::palette::{CommandPalette, PaletteState};
 use editor_view::{DecorationSource, Editor, TransactionEvent, WidgetMounts};
 use facet::Facet;
@@ -329,14 +339,40 @@ pub fn NoteEditor(id: String, text: String, on_change: Callback<String>) -> Elem
             on_change.call(event.doc_after.to_string());
         }
     };
+    // The fence languages extensions claim now: the editor's fence
+    // registry, as they load and unload.
+    let claimed = move || ui.map(|ui| ui.host().embeds().fences()).unwrap_or_default();
     let decorations = use_hook(|| {
         DecorationSource::new(move |s: &EditorState| {
             let specs: Vec<DecorationSpec> = decos.read().iter().map(|(_, d)| d.clone()).collect();
-            ext::decorations(&specs, &s.doc.to_string())
+            let text = s.doc.to_string();
+            let mut out = ext::decorations(&specs, &text);
+            out.extend(
+                claimed_fences(&text, &claimed())
+                    .iter()
+                    .enumerate()
+                    .map(|(i, f)| DecoratedRange::mount(f.at, &fence_mount(i), true)),
+            );
+            out
         })
     });
     let mounts = use_hook(|| {
         WidgetMounts::new(move |mount: &str| {
+            if let Some(i) = fence_index(mount) {
+                let text = state.peek().doc.to_string();
+                return match claimed_fences(&text, &claimed()).into_iter().nth(i) {
+                    Some(f) => rsx! {
+                        div { class: "lab-note-fence-embed", "data-fence": "{f.info}",
+                            EmbedView {
+                                claim: f.claim,
+                                source: f.source,
+                                props: serde_json::json!({ "info": f.info }),
+                            }
+                        }
+                    },
+                    None => rsx! {},
+                };
+            }
             let flat = decos.peek();
             match ext::mount_index(mount).and_then(|i| flat.get(i)) {
                 Some((owner, DecorationSpec::Widget { view, props, .. })) => rsx! {
@@ -392,6 +428,91 @@ pub fn NoteEditor(id: String, text: String, on_change: Callback<String>) -> Elem
             CommandPalette { state, palette, on_action: move |a: String| run(a) }
         }
     }
+}
+
+/// A fenced block an extension claims, in a note's text.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClaimedFence {
+    /// Where its embed is mounted: the end of its closing fence line (of
+    /// the text, for a fence left open).
+    pub at: usize,
+    /// Its info string (```` ```kf chorus ```` → `kf chorus`).
+    pub info: String,
+    /// What it claims (`fence:kf`).
+    pub claim: Claim,
+    /// Its body.
+    pub source: String,
+}
+
+/// Each fenced block of `text` whose language is one of `claimed` (lower
+/// case, as `Embeds::fences` lists them), in order.
+#[must_use]
+pub fn claimed_fences(text: &str, claimed: &[String]) -> Vec<ClaimedFence> {
+    let mut out = Vec::new();
+    // The fence open: its info, where its body starts.
+    let mut open: Option<(&str, usize)> = None;
+    let mut line_start = 0_usize;
+    for line in text.split_inclusive('\n') {
+        let end = line_start.saturating_add(line.trim_end_matches(['\n', '\r']).len());
+        let trimmed = line.trim();
+        match open {
+            Some((info, body)) if trimmed.starts_with("```") => {
+                out.extend(claimed_fence(text, claimed, info, body..line_start, end));
+                open = None;
+            }
+            Some(_) => {}
+            None => {
+                if let Some(info) = trimmed.strip_prefix("```") {
+                    open = Some((info.trim(), line_start.saturating_add(line.len())));
+                }
+            }
+        }
+        line_start = line_start.saturating_add(line.len());
+    }
+    // An open fence runs to the end, as the editor shows it.
+    if let Some((info, body)) = open {
+        out.extend(claimed_fence(
+            text,
+            claimed,
+            info,
+            body..text.len(),
+            text.len(),
+        ));
+    }
+    out
+}
+
+fn claimed_fence(
+    text: &str,
+    claimed: &[String],
+    info: &str,
+    body: std::ops::Range<usize>,
+    at: usize,
+) -> Option<ClaimedFence> {
+    let claim = Claim::fence(info)?;
+    let Claim::Fence(lang) = &claim else {
+        return None;
+    };
+    if !claimed.contains(&lang.to_ascii_lowercase()) {
+        return None;
+    }
+    let source = text.get(body.start.min(text.len())..body.end.max(body.start).min(text.len()))?;
+    Some(ClaimedFence {
+        at,
+        info: info.to_owned(),
+        claim,
+        source: source.trim_end_matches(['\n', '\r']).to_owned(),
+    })
+}
+
+/// The mount id of the `i`th claimed fence's embed.
+fn fence_mount(i: usize) -> String {
+    format!("fence-{i}")
+}
+
+/// Which claimed fence a mount id names.
+fn fence_index(mount: &str) -> Option<usize> {
+    mount.strip_prefix("fence-")?.parse().ok()
 }
 
 impl LiveEditor {
@@ -494,7 +615,32 @@ pub fn register(list: &ActionList) {
 
 #[cfg(test)]
 mod tests {
-    use super::LAYOUT;
+    use super::{LAYOUT, claimed_fences, fence_index, fence_mount};
+
+    /// The editor's fences are the extensions': a fence in a claimed
+    /// language is found with its body and where its embed goes; one in
+    /// a language nobody claims, or once its claim is gone, is left as
+    /// source.
+    #[test]
+    fn a_claimed_fence_is_found_with_its_body_and_where_its_embed_goes() {
+        let text = "# Song\n\n```kf chorus\n[Verse]\n| C | G |\n```\n\n```rust\nfn main() {}\n```\n```KF\n| F |";
+        let claimed = vec!["kf".to_owned()];
+        let found = claimed_fences(text, &claimed);
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert_eq!(found[0].info, "kf chorus");
+        assert_eq!(found[0].claim.to_string(), "fence:kf");
+        assert_eq!(found[0].source, "[Verse]\n| C | G |");
+        let closing = text.find("| C | G |\n```").unwrap() + "| C | G |\n```".len();
+        assert_eq!(found[0].at, closing, "the end of its closing line");
+        // Left open: to the end of the note.
+        assert_eq!(found[1].source, "| F |");
+        assert_eq!(found[1].at, text.len());
+        // Nobody claims it: none.
+        assert!(claimed_fences(text, &[]).is_empty());
+        assert_eq!(claimed_fences(text, &["rust".to_owned()]).len(), 1);
+        assert_eq!(fence_index(&fence_mount(3)), Some(3));
+        assert_eq!(fence_index("ext-3"), None);
+    }
 
     /// Blitz paints an inline background only on the span that owns the
     /// glyphs: a TODO mark's text is in a tile span inside the mark, so a
