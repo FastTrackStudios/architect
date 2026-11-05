@@ -17966,6 +17966,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "vault-collab"
+version = "0.1.0"
+dependencies = [
+ "architect-telemetry",
+ "architect-workspace-hack",
+ "crdt",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "uuid",
+ "vault-doc",
+ "vault-live",
+ "vault-proto",
+ "vox",
+]
+
+[[package]]
 name = "vault-doc"
 version = "0.1.0"
 dependencies = [
@@ -18069,6 +18087,21 @@ dependencies = [
  "uuid",
  "vox",
  "vox-types",
+]
+
+[[package]]
+name = "vault-sync-client"
+version = "0.1.0"
+dependencies = [
+ "architect-workspace-hack",
+ "chrono",
+ "hex",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tracing",
+ "vault-proto",
+ "walkdir",
 ]
 
 [[package]]

@@ -419,6 +419,15 @@ package = "vault-doc"
 layer = "L1"
 
 [[row]]
+package = "vault-collab"
+layer = "L1"
+note = "vault files as co-edited Loro docs (#333)"
+
+[[row]]
+package = "vault-sync-client"
+layer = "L1"
+
+[[row]]
 package = "vault"
 layer = "L1"
 note = "facade over vault-proto, vault-live, vault-obsidian"

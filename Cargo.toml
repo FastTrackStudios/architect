@@ -78,6 +78,8 @@ members = [
     "features/vault/vault-obsidian",
     "features/vault/vault-entity",
     "features/vault/vault-doc",
+    "features/vault/vault-collab",
+    "features/vault/vault-sync-client",
     # ── links and tags (from Task, #333) ──────────────────────────────
     "features/links/links",
     "features/links/links-proto",
@@ -138,6 +140,8 @@ vault-live = { path = "features/vault/vault-live" }
 vault-obsidian = { path = "features/vault/vault-obsidian" }
 vault-entity = { path = "features/vault/vault-entity" }
 vault-doc = { path = "features/vault/vault-doc" }
+vault-collab = { path = "features/vault/vault-collab" }
+vault-sync-client = { path = "features/vault/vault-sync-client" }
 links = { path = "features/links/links" }
 links-proto = { path = "features/links/links-proto", default-features = false }
 tag = { path = "features/tags/tag" }
