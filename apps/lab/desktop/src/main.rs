@@ -101,6 +101,11 @@ fn main() -> ExitCode {
             .with_fullsize_content_view(true)
             .with_title_hidden(true),
     ));
+    // Off a Mac the shell draws the whole title bar, its window buttons
+    // too (Obsidian's): no system decorations, so a compositor that draws
+    // server-side ones (Loft's niri, KWin) adds no strip above the window.
+    #[cfg(not(target_os = "macos"))]
+    let window = window.with_decorations(false);
     architect_workspace::native::launch_with_fonts(App, window, architect_lab_ui::FONTS);
     ExitCode::SUCCESS
 }

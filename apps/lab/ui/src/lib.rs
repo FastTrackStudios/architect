@@ -35,7 +35,8 @@ use architect_shell::{self as shell, AppShell, ShellStyle};
 use dioxus::prelude::*;
 use lucide_dioxus::{
     ArrowLeft, CalendarDays, CheckCheck, CircleQuestionMark, Command as CommandIcon, Feather,
-    Inbox, Keyboard, LayoutGrid, ListTodo, NotebookText, Plus, Search, Settings2, Undo2, Users,
+    Inbox, Keyboard, LayoutGrid, ListTodo, NotebookText, Palette, Plus, Search, Settings2, Undo2,
+    Users,
 };
 
 pub use screen::{Device, use_window_chrome, use_window_screen};
@@ -1249,6 +1250,14 @@ pub fn LabApp() -> Element {
     let capture = shell::Action::new("Capture", icon!(Feather), move |()| {
         lab.capture("inbox");
     });
+    // The sidebar's foot, above the switcher and the account (bottom to
+    // top: Account, Workspace, Settings, Theme).
+    let foot = vec![
+        shell::Action::new("Theme", icon!(Palette), move |()| {
+            let _ = commands.run_with("THEME_PICKER_CHOOSE", "{}");
+        }),
+        shell::Action::new("Settings", icon!(Settings2), move |()| settings.show(None)),
+    ];
     let mut status = vec![
         shell::StatusItem::new("commands", "⌘K Commands")
             .hint("Every command")
@@ -1354,6 +1363,7 @@ pub fn LabApp() -> Element {
                                     }),
                             ),
                         workspaces,
+                        foot,
                         left: rsx! { pages::LeftSide {} },
                         // The details are the lists': the Vault's panes are its own,
                         // an item's page is its details, the help is the help.

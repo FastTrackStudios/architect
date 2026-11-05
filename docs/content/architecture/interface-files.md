@@ -74,7 +74,7 @@ A layout:
   "look": { "tokens": { "brand": "#ec4899" } },
   "chrome": {
     "ribbon": { "hidden": true },
-    "status": { "view": "lab.board/status-bar" },
+    "status": { "hidden": true },
     "left":   { "tokens": { "ink": "#fde68a" } }
   },
   "workspace": { "windows": [ … ] }

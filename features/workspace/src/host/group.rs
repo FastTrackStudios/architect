@@ -95,6 +95,9 @@ impl Edges {
     }
 }
 
+/// Room either side of a bar's tabs for the current tab's curved corners.
+const FLARE: f32 = 8.0;
+
 /// A split or a group.
 #[component]
 pub(super) fn NodeView(node: Node, #[props(default)] edges: Edges) -> Element {
@@ -303,17 +306,16 @@ fn TabBar(group: Group, current: PaneId, edges: Edges) -> Element {
     let on_drag = row.as_ref().and_then(|r| r.on_drag);
     let on_zoom = row.as_ref().and_then(|r| r.on_zoom);
     let lift = (height - s.tabs + 6.0).max(6.0);
-    // On the title row the bar is the window's title bar, its rule under
-    // every tab but the current one (which runs on into its pane).
+    // On the title row the bar is the window's title bar. Every bar has its
+    // rule under every tab but the current one, which runs on into its pane
+    // (Obsidian's, in every pane).
     let bar = if row.is_some() {
         &*t.title_bar
     } else {
         &*t.desk
     };
-    let ruled = row.is_some();
+    let ruled = true;
     let current_index = group.tabs.iter().position(|p| *p == current);
-    // The group the keyboard acts on: its current tab carries the accent.
-    let focused = host.workspace.read().active_group() == Some(group.id);
     let many = group.tabs.len() >= 3;
     let workspace = host.workspace.read();
     let tabs: Vec<(PaneId, String, bool, Option<architect_shell::IconFn>)> = group
@@ -341,15 +343,18 @@ fn TabBar(group: Group, current: PaneId, edges: Edges) -> Element {
             if ruled {
                 div { style: "position:absolute; left:0; right:0; bottom:0; height:1px; background:{t.rule};" }
             }
+            // Above the bar's rule: positioned after it, so drawn after it
+            // (no z-index: a raised strip is hit-tested ahead of its own
+            // tabs, and a press on one missed it). The current tab covers
+            // the rule and opens into its pane; the others show it.
             div { style: "flex:0 1 auto; min-width:0; display:flex; align-items:flex-end; overflow:hidden; \
-                          padding-top:{lift}px; gap:1px;",
+                          padding:{lift}px {FLARE}px 0; gap:1px; position:relative;",
                 "data-tab-bar": "{names}",
                 onmounted: move |e| host.mount(Mount::Bar(group.id), e.data()),
                 for (index, (pane, title, pinned, icon)) in tabs.into_iter().enumerate() {
                     Tab {
                         key: "{pane.0}",
                         on: Some(index) == current_index,
-                        focused,
                         // A hairline after a tab unless it or the next is current.
                         rule: Some(index) != current_index && Some(index.saturating_add(1)) != current_index,
                         pane,
@@ -357,6 +362,8 @@ fn TabBar(group: Group, current: PaneId, edges: Edges) -> Element {
                         pinned,
                         icon,
                         icons,
+                        rule_bar: ruled,
+                        bar: bar.to_owned(),
                     }
                 }
             }
@@ -474,11 +481,14 @@ fn Tab(
     pane: PaneId,
     title: String,
     on: bool,
-    focused: bool,
     rule: bool,
     pinned: bool,
     icon: Option<architect_shell::IconFn>,
     icons: bool,
+    /// The bar draws a rule along its foot.
+    rule_bar: bool,
+    /// The bar's colour, which the current tab's corners curve out into.
+    bar: String,
 ) -> Element {
     let tab_id = pane.0.clone();
     let mut host = use_host();
@@ -503,7 +513,7 @@ fn Tab(
     let s = (host.sizes)();
     let ink = if on { &*t.ink } else { &*t.ink_3 };
     let fill = if on { &*t.sheet } else { "transparent" };
-    let pad = if icons { "0 8px" } else { "0 6px 0 12px" };
+    let (pad_l, pad_r) = if icons { (8.0, 8.0) } else { (12.0, 6.0) };
     // What extensions put on it (`TabBadges`), after its name.
     let badges = try_use_context::<super::TabBadges>().and_then(|b| {
         let kind = host
@@ -527,6 +537,15 @@ fn Tab(
     // while the others narrow.
     let shrink = if on { 0.2 } else { 1.0 };
     let hairline = if rule { &*t.rule } else { "transparent" };
+    // The current tab is outlined on three sides and open into its pane
+    // below, its corners curving out into the bar's rule (Obsidian's). The
+    // curves are drawn in its own box (it clips: Blitz sizes a tab that
+    // does not by its content): it reaches FLARE past each side over its
+    // neighbours, its plate inset by as much.
+    let flared = on && rule_bar;
+    let (margin, inset) = if flared { (-FLARE, FLARE) } else { (0.0, 0.0) };
+    let (pad_l, pad_r) = (pad_l + inset, pad_r + inset);
+    let plain_fill = if flared { "transparent" } else { fill };
     let tab_h = s.tabs - 6.0;
     let press = pane.clone();
     let menu = pane.clone();
@@ -548,9 +567,10 @@ fn Tab(
     rsx! {
         div {
             style: "flex:{grow} {shrink} {most}px; max-width:{most}px; min-width:{least}px; height:{tab_h}px; \
-                    box-sizing:border-box; display:flex; align-items:center; gap:6px; padding:{pad}; \
-                    border-radius:8px 8px 0 0; white-space:nowrap; overflow:hidden; touch-action:none; \
-                    user-select:none; color:{ink}; background:{fill}; border-right:1px solid {hairline}; \
+                    box-sizing:border-box; display:flex; align-items:center; gap:6px; \
+                    padding:0 {pad_r}px 0 {pad_l}px; margin:0 {margin}px; overflow:hidden; \
+                    border-radius:8px 8px 0 0; white-space:nowrap; touch-action:none; \
+                    user-select:none; color:{ink}; background:{plain_fill}; \
                     position:relative; z-index:{lift}; cursor:pointer; opacity:{shown}; left:{dx}px;",
             title: "{title}",
             role: "tab",
@@ -574,13 +594,23 @@ fn Tab(
                 host.drag.set(None);
                 host.open_menu(Menu::Pane(menu.clone()), super::click_point(&e));
             },
-            // The focused group's current tab: the accent along its top.
-            if on && focused {
-                div { style: "position:absolute; left:8px; right:8px; top:0; height:2px; border-radius:0 0 2px 2px; \
-                              background:{t.accent};" }
+            // The current tab's plate, outlined and open below, with its
+            // curved corners either side; what it shows is drawn over it.
+            if flared {
+                div { style: "position:absolute; top:0; bottom:0; left:{inset}px; right:{inset}px; box-sizing:border-box; \
+                              background:{fill}; border:1px solid {t.rule}; border-bottom:none; border-radius:8px 8px 0 0;",
+                    architect_shell::TabFlares { fill: t.sheet.to_string(), bar, rule: t.rule.to_string() }
+                }
+            }
+            // Obsidian's divider: a short line between two tabs that are not
+            // the current one, half the tab's height.
+            if rule {
+                div { style: "position:absolute; right:0; top:25%; height:50%; width:1px; background:{hairline};" }
             }
             if let Some(icon) = icon {
-                {icon(architect_shell::Icon { size: icon_size, color: ink.into() })}
+                span { style: "position:relative; display:flex;",
+                    {icon(architect_shell::Icon { size: icon_size, color: ink.into() })}
+                }
             }
             if !icons || icon.is_none() {
                 // A long name fades out at its end (Blitz has no ellipsis).
@@ -593,7 +623,9 @@ fn Tab(
             }
             if !icons {
                 if pinned {
-                    Pin { size: 12, color: t.ink_3.to_string() }
+                    span { style: "position:relative; display:flex;",
+                        Pin { size: 12, color: t.ink_3.to_string() }
+                    }
                 } else if on || s.tabs > 40.0 {
                     // Above the name: its overflowing text still takes
                     // presses past its clip (blitz-quirks.md).

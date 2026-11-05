@@ -142,8 +142,8 @@ steps (
     {id contributions-4, hide true, do @run{id WORKSPACES_LOAD, args {name Write}}}
     {
         id contributions
-        text "An extension adds to the interface from its manifest: tabs, openers, status items, menus, context menus, phone bar buttons, hooks, shell slots and settings sections. This status bar fills the shell's status slot, and the Board tab in the sidebar is the Board's too. Try: right-click inside a note › Pin to the board, and watch the count."
-        target @text"◆ Board's status bar"
+        text "An extension adds to the interface from its manifest: tabs, openers, status items, menus, context menus, phone bar buttons, hooks, shell slots and settings sections. The pin count in the status bar is the Board's status item, and the Board tab in the sidebar is the Board's too. Try: right-click inside a note › Pin to the board, and watch the count."
+        target @text"Board ready: nothing pinned"
     }
     {id embeds-1, hide true, do @run{id COMMANDS_SHOW, args {overlay none}}}
     {id embeds-2, hide true, do @run{id EXT_WINDOW_CLOSE, args {extension settings, id settings}}}

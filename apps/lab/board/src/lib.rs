@@ -189,7 +189,6 @@ impl Extension for Board {
         state().sharp = false;
         ext.view("board", BoardView)
             .view("chart", ChartView)
-            .view("status-bar", BoardStatusBar)
             .view("song", SongCard)
             .view("tempo", TempoWidget)
             .view("summary", PagesOnly)
@@ -351,28 +350,6 @@ fn ChartView() -> Element {
             div { "data-testid": "chords-sharp", style: "font-size: 13px; color: var(--muted-foreground);",
                 if on { "Sharps on" } else { "Sharps off" }
             }
-        }
-    }
-}
-
-/// Its own status bar, in the shell's `status` slot.
-#[component]
-fn BoardStatusBar() -> Element {
-    let _ = use_board();
-    let (pins, chart) = {
-        let s = state();
-        (s.pins.len(), s.chart.clone())
-    };
-    rsx! {
-        div { style: "height: 26px; flex-shrink: 0; box-sizing: border-box; display: flex; align-items: center; gap: 14px; \
-                      padding: 0 12px; font-size: 12px; color: var(--primary-foreground); background: var(--primary);",
-            span { style: "font-weight: 700;", "◆ Board's status bar" }
-            span { "{pins} pinned" }
-            if let Some(c) = chart {
-                span { "chart: {c}" }
-            }
-            span { style: "flex: 1;" }
-            span { "lab.board fills the status slot" }
         }
     }
 }

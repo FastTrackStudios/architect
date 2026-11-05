@@ -865,8 +865,10 @@ fn DeskBar(
     }
 }
 
-/// A desk's page as its tab in the title row: rounded, the page's colour,
-/// centred in the row's height.
+/// A desk's page as its tab in the title row, drawn as a workspace's
+/// current tab is (Obsidian's): 34pt at the row's foot, outlined on three
+/// sides in the rule, open into the page below with its corners curving
+/// out into the row's rule ([`TabFlares`]).
 #[component]
 pub(super) fn DeskTab(title: String) -> Element {
     let shell = use_shell();
@@ -875,10 +877,44 @@ pub(super) fn DeskTab(title: String) -> Element {
     rsx! {
         div {
             "data-desk-tab": "{title}",
-            style: "flex: 0 1 200px; max-width: 200px; min-width: 72px; height: {tab_h}px; box-sizing: border-box; \
-                    display: flex; align-items: center; padding: 0 12px; border-radius: 8px; background: {t.desk}; \
-                    color: {t.ink}; font-family: {t.font}; font-size: 13px; white-space: nowrap; overflow: hidden;",
-            "{title}"
+            style: "position: relative; flex: 0 1 200px; max-width: 200px; min-width: 72px; height: {tab_h}px; \
+                    box-sizing: border-box; display: flex; align-items: center; padding: 0 12px; \
+                    border-radius: 8px 8px 0 0; border: 1px solid {t.rule}; border-bottom: none; background: {t.desk}; \
+                    color: {t.ink}; font-family: {t.font}; font-size: 13px; white-space: nowrap;",
+            span { style: "overflow: hidden;", "{title}" }
+            TabFlares { fill: t.desk.to_string(), bar: t.title_bar.to_string(), rule: t.rule.to_string() }
+        }
+    }
+}
+
+/// The current tab's foot curving out into its bar (Obsidian's): an 8pt
+/// corner either side of the tab, in the tab's `fill`, cut round in the
+/// `bar`'s colour with the `rule` along the cut, so the tab's outline runs
+/// on into the bar's rule and the tab joins what is under it. Put it in
+/// a `position: relative` tab that does not clip.
+#[component]
+pub fn TabFlares(fill: String, bar: String, rule: String) -> Element {
+    const R: f64 = 8.0;
+    let cut = |corner: &str, sides: &str| {
+        format!(
+            "position: absolute; top: 0; left: 0; width: {R}px; height: {R}px; box-sizing: border-box; \
+             background: {bar}; border-{corner}-radius: {R}px; {sides}"
+        )
+    };
+    let left = cut(
+        "bottom-right",
+        &format!("border-right: 1px solid {rule}; border-bottom: 1px solid {rule};"),
+    );
+    let right = cut(
+        "bottom-left",
+        &format!("border-left: 1px solid {rule}; border-bottom: 1px solid {rule};"),
+    );
+    rsx! {
+        div { style: "position: absolute; bottom: 0; left: -{R}px; width: {R}px; height: {R}px; background: {fill}; pointer-events: none;",
+            div { style: "{left}" }
+        }
+        div { style: "position: absolute; bottom: 0; right: -{R}px; width: {R}px; height: {R}px; background: {fill}; pointer-events: none;",
+            div { style: "{right}" }
         }
     }
 }
