@@ -1,13 +1,18 @@
 //! What each runner costs (#272): the Board's action (`LAB_BOARD_STATE`)
 //! and its view's frame (`board`), run linked in and as a process, and
-//! the nearest equivalents on the scripted runners: a Luau action that
-//! answers the same JSON, and the Board's tab as its TSX page on
-//! `QuickJS`. p50/p99 of each, printed.
+//! the nearest equivalents on the other runners: a Luau action that
+//! answers the same JSON, the Board's tab as its TSX page on `QuickJS`,
+//! and the lab's WASI component (`apps/lab/wasi-counter`: its action and
+//! its view's first frame; a `linked::Extension` does not build as a
+//! component yet). p50/p99 of each, printed.
 //!
 //! Not in the default run (it times things):
 //! `cargo test -p architect-lab-board --test bench -- --ignored --nocapture`.
-//! `BENCH_RUNNERS=linked,process` runs only those (`luau`, `quickjs` too
-//! by default).
+//! `BENCH_RUNNERS=linked,process` runs only those (`luau`, `quickjs` and
+//! `wasi` too by default). The WASI row builds the component for
+//! `wasm32-wasip2` (this toolchain's target, else `devenv --profile wasi
+//! shell`), or reads it from `ARCHITECT_WASI_GUESTS`; without either it
+//! says so in its row.
 
 #![allow(
     clippy::unwrap_used,
@@ -20,16 +25,18 @@
     clippy::arithmetic_side_effects
 )]
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::{Duration, Instant};
 
 use architect::action::ActionList;
-use architect_extensions::Origin;
 use architect_extensions::extensions::Extensions;
 use architect_extensions::host::{Host, SharedSections, gate};
 use architect_extensions::install::Installs;
-use architect_extensions::process::{ProcessRunner, State};
+use architect_extensions::process::{ProcessRunner, Processes, State};
 use architect_extensions::remote::RemoteDocument;
+use architect_extensions::wasi::WasiRunner;
+use architect_extensions::{Origin, Package};
 use architect_lab_board::{Board, ID, PAGES};
 use architect_pages::files::{Origin as PageOrigin, PageFile, write_builtin};
 use architect_pages::host::AppHost;
@@ -89,6 +96,9 @@ fn what_each_runner_costs() {
     }
     if wants("quickjs") {
         quickjs(tmp.path());
+    }
+    if wants("wasi") {
+        wasi(tmp.path());
     }
 }
 
@@ -267,4 +277,124 @@ fn quickjs(tmp: &Path) {
             }
         }),
     );
+}
+
+/// The workspace's root.
+fn root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..")
+}
+
+/// Whether this toolchain has the `wasm32-wasip2` target.
+fn has_wasip2() -> bool {
+    let rustc = std::env::var("RUSTC").unwrap_or_else(|_| "rustc".to_owned());
+    Command::new(rustc)
+        .args(["--print", "sysroot"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .is_some_and(|s| {
+            Path::new(s.trim())
+                .join("lib/rustlib/wasm32-wasip2")
+                .is_dir()
+        })
+}
+
+/// The folder the lab's WASI counter was built into (as
+/// `features/extensions/tests/wasi.rs` builds it), or why not.
+fn wasi_counter() -> Result<PathBuf, String> {
+    if let Ok(dir) = std::env::var("ARCHITECT_WASI_GUESTS") {
+        return Ok(PathBuf::from(dir));
+    }
+    let target = root().join("target/wasi-guest");
+    let build = [
+        "build",
+        "--release",
+        "-p",
+        "architect-lab-wasi-counter",
+        "--target",
+        "wasm32-wasip2",
+        "--target-dir",
+        target.to_str().unwrap(),
+    ];
+    let mut cmd = if has_wasip2() {
+        let mut c = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned()));
+        c.args(build);
+        c
+    } else {
+        let mut c = Command::new("devenv");
+        c.args(["--profile", "wasi", "shell", "--", "cargo"])
+            .args(build);
+        c
+    };
+    // The outer build's settings are not the component's.
+    for var in [
+        "CARGO_TARGET_DIR",
+        "CARGO_BUILD_TARGET",
+        "RUSTC",
+        "CARGO_ENCODED_RUSTFLAGS",
+    ] {
+        cmd.env_remove(var);
+    }
+    match cmd.current_dir(root()).status() {
+        Ok(s) if s.success() => Ok(target.join("wasm32-wasip2/release")),
+        other => Err(format!("the WASI counter did not build ({other:?})")),
+    }
+}
+
+/// The lab's WASI counter on the `wasi` runner: its action
+/// (`LAB_WASI_COUNTER_ADD`, which answers the count as JSON) and its
+/// view's first frame, measured as the process row's is.
+fn wasi(tmp: &Path) {
+    const ID: &str = "lab.wasi-counter";
+    const WASM: &str = "architect_lab_wasi_counter.wasm";
+    let built = match wasi_counter() {
+        Ok(dir) => dir,
+        Err(why) => {
+            println!("| wasi     | –                    |     – | ({why}) | |");
+            return;
+        }
+    };
+    let dir = tmp.join("wasi-counter");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::copy(
+        root().join("apps/lab/wasi-counter/extension.toml"),
+        dir.join("extension.toml"),
+    )
+    .unwrap();
+    std::fs::copy(built.join(WASM), dir.join(WASM)).unwrap();
+    let list = ActionList::new();
+    let processes = Processes::default();
+    let runner = WasiRunner::new()
+        .with_cache(tmp.join("wasi-cache"))
+        .with_processes(processes.clone());
+    let host = Host::new(list.clone(), SharedSections::new(Registry::new())).with_runner(runner);
+    host.load(&Package::read(&dir).unwrap(), Origin::Dev)
+        .unwrap();
+    report(
+        "wasi",
+        "action",
+        time(2000, || action(&list, "LAB_WASI_COUNTER_ADD")),
+    );
+    let running = processes.get(ID).expect("its local process");
+    // Its view's frame: opened, its first frame applied to a document
+    // here, and closed. The first five warm it up, untimed.
+    let mut samples = Vec::new();
+    for i in 0..250 {
+        let t = Instant::now();
+        let mut session = running.open("counter").unwrap();
+        let frame = loop {
+            if let Ok(f) = session.frames.try_recv() {
+                break f;
+            }
+            assert!(t.elapsed() < Duration::from_secs(10), "its first frame");
+            std::thread::yield_now();
+        };
+        let (events, _) = futures::channel::mpsc::unbounded();
+        let mut doc = RemoteDocument::new(events);
+        doc.apply(frame).unwrap();
+        if i >= 5 {
+            samples.push(t.elapsed());
+        }
+    }
+    report("wasi", "view frame", samples);
 }

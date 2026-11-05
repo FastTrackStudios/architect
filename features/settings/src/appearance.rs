@@ -521,6 +521,49 @@ mod persist {
             }
         }
 
+        /// An app's look kept on this machine alone: this device's layer in
+        /// `<app dir>/appearance.json` (`DeviceValues::open_named`), the
+        /// person's in a synced settings document kept as a file,
+        /// `<app dir>/person.loro` (`DocValues`), for an app with no
+        /// account to sync it with yet. Loads them (and they show), then
+        /// keeps every change `delay` after the layers stop changing.
+        /// `None` when the app has no settings directory
+        /// (`architect::settings::app_dir`).
+        #[cfg(all(feature = "store", feature = "synced"))]
+        #[must_use]
+        pub fn local(store: &ThemeStore, app: &str, delay: Duration) -> Option<Self> {
+            use crate::{DeviceValues, DocValues};
+
+            let dir = architect::settings::app_dir(app).ok()?;
+            let device = DeviceValues::open_named(app, "appearance").ok()?;
+            let doc = loro::LoroDoc::new();
+            let file = dir.join("person.loro");
+            if let Ok(bytes) = std::fs::read(&file) {
+                let _ = doc.import(&bytes);
+            }
+            let person = DocValues::new(&doc);
+            let values = ScopedValues {
+                device: device.load(),
+                synced: person.load(),
+                ..ScopedValues::default()
+            };
+            let save = move |saved: &Saved| match saved.scope {
+                Scope::Device => {
+                    let _ = device.save(&saved.values);
+                }
+                Scope::Synced => {
+                    if person.save_keys(&saved.values, &saved.keys).is_ok() {
+                        if let Ok(bytes) = doc.export(loro::ExportMode::Snapshot) {
+                            let _ = std::fs::create_dir_all(&dir);
+                            let _ = std::fs::write(&file, bytes);
+                        }
+                    }
+                }
+                Scope::Project => {}
+            };
+            Some(Self::start(store, &values, delay, save))
+        }
+
         /// `scope`'s values as its store has them now (another device's
         /// change arrived): its layer set from them, nothing written.
         pub fn replace(&self, scope: Scope, values: &Values) {

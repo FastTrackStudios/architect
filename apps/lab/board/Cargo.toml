@@ -25,7 +25,8 @@ futures-timer = { workspace = true }
 [dev-dependencies]
 # Both ways: linked into a host, and its program run by one.
 architect = { workspace = true, features = ["action-list"] }
-architect-extensions = { workspace = true, features = ["host", "linked", "process", "ui", "remote"] }
+# `wasi`: the benchmark's WASI row (tests/bench.rs), the lab's counter.
+architect-extensions = { workspace = true, features = ["host", "linked", "process", "ui", "remote", "wasi"] }
 architect-settings = { workspace = true }
 futures = "0.3"
 tempfile = "3"

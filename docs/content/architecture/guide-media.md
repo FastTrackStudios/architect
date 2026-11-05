@@ -58,7 +58,7 @@ A step (`features/guide/src/model.rs` `Step`) is:
 - **`do`** (`Do`): an Action List action by id with arguments
   (`@run{id …, args {…}}`), or a gesture on the step's `target`:
   `@click{}` (`@click{secondary true}`: a right-click, its context
-  menu), `@drag{to <target>, edge right}` or `@drag{dx 120}`,
+  menu; `@click{mods (ctrl)}`: a Ctrl-click), `@drag{to <target>, edge right}` or `@drag{dx 120}`,
   `@scroll{dx 400}`, `@type{text "…"}`, `@key{key Enter, mods (meta)}`,
   `@pause{seconds 0.5}`.
 - **`target`** (`Target`): a query resolved to a rectangle at the frame it

@@ -75,6 +75,41 @@ ext.install("fts.metronome", &VersionReq::STAR)?;
 // On a timer (the lab polls every 500 ms): ext.reload_changed();
 ```
 
+## Contributions
+
+Besides actions, settings sections, views and themes, an extension adds to the
+app's interface with contributions: tables in its manifest, or the same sent
+at run time (a process guest, a Luau script's `ext.contribute{…}`, a linked
+extension's builder). All of them are one type,
+`features/extensions/src/contrib.rs` `Contribution`, checked against the
+extension's namespace, capabilities and views when it loads
+(`Contribution::check`), and withdrawn when it unloads
+(`Contributions::withdraw`). Each kind:
+
+| table | what it adds | type |
+|---|---|---|
+| `[[openers]]` | a claim on files by extension (`files`), on document kinds or on links by URL pattern (`urls`), opened in one of its views or by an action; with `kind` and no claims, one of ⌘O's sources | `OpenerDecl` |
+| `[[doc_kinds]]` | a document kind, its file extensions and the view that shows it, registered while loaded | `DocKindDecl` |
+| `[[tabs]]` | an app section (a tab with a title and a lucide icon) showing one of its views | `TabDecl` |
+| `[[status]]` | a status-bar item on the left or right; its text changes at run time | `StatusDecl` |
+| `[[menus]]` | a row in a named menu of the menu bar, running one of its actions | `MenuDecl` |
+| `[[context]]` | a row in a target's context menu: `pane`, `tab`, `view:<kind>`, `file`, `file:<ext>`, `doc:<kind>`, `link`, `selection` | `ContextDecl` |
+| `[[bar]]` | a button on a phone's action bar | `BarDecl` |
+| `[[toolbars]]` | a toolbar of buttons, separators, groups, dropdowns and widgets, in a dock, a float, a window, a pane or a view kind's header | `features/extensions/src/toolbar.rs` `ToolbarDecl` |
+| `[[hooks]]` | an action or Luau script run on an app event: `startup`, `workspace.changed`, `doc.opened`, `theme.changed`, `selection.changed`, `changed:<topic>` | `HookDecl` |
+| `[[slots]]` | a shell region (`ribbon`, `left`, `right`, `tabs`, `status`, `title`) filled with one of its views; the latest claim wins | `SlotDecl` |
+| `[[embeds]]` | an inline block of a document drawn by one of its views: a fenced block by language, a note by its `type:`, an embed by what it points at | `EmbedDecl` |
+| `[[keymaps]]` | keys in the live editor that run its actions (needs `writes = ["editor"]`) | `editor_ext::KeymapEntry` |
+| `[[slash]]` | rows of the editor's slash menu that run its actions (needs `writes = ["editor"]`) | `editor_ext::SlashEntry` |
+
+Where a view opens is the view's own `placement` (`tab`, `split`, `overlay`,
+`popup`, `zoomed`, `float`: `features/extensions/src/manifest.rs`
+`ViewPlacement`); where it lives is its `home`. The app asks
+`Contributions` (`Host::contributions`) for what to draw: `tabs`, `status`,
+`menus`, `context`, `bar`, `toolbars`, `slots`, `open_path`, `open_url`.
+The full manifest syntax, with an example of each table, is in
+[Extensions: contributions](@/architecture/extensions.md).
+
 ## Code tour
 
 1. `features/extensions/src/manifest.rs` `Manifest` (`parse`, `check`,

@@ -207,13 +207,18 @@ pub enum Do {
     },
     /// Presses and lets go on the step's target: `@click{}`; with the
     /// secondary button, a right-click (its context menu):
-    /// `@click{secondary true}`.
+    /// `@click{secondary true}`; with modifiers held, a Ctrl-click (a
+    /// link opened by the extension that claims it):
+    /// `@click{mods (ctrl)}`.
     Click {
         /// Seconds the pointer takes to get there.
         #[facet(default = 0.4)]
         seconds: f32,
         #[facet(default)]
         secondary: bool,
+        /// The modifiers held through the press.
+        #[facet(default)]
+        mods: Vec<Modifier>,
     },
     /// Presses on the step's target, moves, lets go. The end is `to`
     /// (its middle, or near its `edge`), else where it started, moved by

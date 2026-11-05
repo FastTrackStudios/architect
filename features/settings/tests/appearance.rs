@@ -268,3 +268,29 @@ fn the_theme_row_is_found_by_dark_mode_and_by_its_palette_alias() {
         assert!(found, "{query:?} finds the Theme row");
     }
 }
+
+#[test]
+fn a_local_app_keeps_its_look_in_its_own_folder() {
+    // The only test touching this variable, so no other test races it.
+    let dir = tempfile::tempdir().unwrap();
+    let app = "architect-settings-local-look-test";
+    // SAFETY: set before any other thread reads this variable; it is unique to this test.
+    unsafe {
+        std::env::set_var("ARCHITECT_SETTINGS_LOCAL_LOOK_TEST_CONFIG_DIR", dir.path());
+    };
+    let first = store();
+    let persist = Persist::local(&first, app, Duration::from_millis(20)).unwrap();
+    let _ = first.pick_in(LayerKind::Person, "nord-dark").unwrap();
+    let _ = first.update(LayerKind::Device, |l| {
+        l.appearance = Some(Appearance::Light);
+    });
+    persist.flush();
+    drop(persist);
+    assert!(dir.path().join("appearance.json").is_file());
+    assert!(dir.path().join("person.loro").is_file());
+
+    let again = store();
+    let _persist = Persist::local(&again, app, Duration::from_millis(20)).unwrap();
+    assert_eq!(again.current().id(), first.current().id());
+    assert_eq!(again.current().id(), "fasttrackstudio-light");
+}
