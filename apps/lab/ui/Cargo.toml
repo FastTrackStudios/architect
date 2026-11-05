@@ -68,6 +68,8 @@ crdt = { workspace = true }
 vault = { workspace = true, features = ["actions"] }
 # An outside edit merged into an open note's typing (`vault_doc::merge3`).
 vault-doc = { workspace = true }
+# The demo vault's sample images as data URLs for the in-memory vault.
+base64 = { workspace = true }
 links = { workspace = true, features = ["actions"] }
 tag = { workspace = true, features = ["actions"] }
 architect = { workspace = true, features = ["action-list", "settings"] }

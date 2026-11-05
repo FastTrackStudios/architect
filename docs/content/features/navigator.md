@@ -50,6 +50,8 @@ use_context_provider(|| Signal::new(architect_navigator_extension::NavigatorMoun
     on_context_menu: Some(on_context_menu),
     on_focus_editor: None,
     phone,
+    columns,            // the shell sidebar's: one pane, or folders beside notes
+    on_new_note,        // New note in the list's header, given the folder on show
 }));
 rsx! { ExtensionView { ui, extension: "navigator".into(), view: "files".into(), bare: true } }
 ```

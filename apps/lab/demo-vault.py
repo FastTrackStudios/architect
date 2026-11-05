@@ -15,6 +15,7 @@ file when it copies the vault.
 """
 
 import datetime as dt
+import json
 import os
 import random
 import shutil
@@ -196,6 +197,7 @@ def main():
     bases()
     scroll_test()
     originals()
+    navigator_samples()
     with open(os.path.join(ROOT, ".empty-folders"), "w") as f:
         f.write("\n".join(EMPTY_FOLDERS) + "\n")
     for e in EMPTY_FOLDERS:
@@ -804,5 +806,67 @@ The songs live in [[Songs/Amazing Grace]]. #lab/sample
       "A hymn, in [[Welcome]]'s sample. Verse one in G.")
 
 
+LOGO_SVG = """<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='12' fill='#4f7cff'/><circle cx='32' cy='32' r='16' fill='white'/></svg>
+"""
+SKETCH_SVG = """<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' fill='#fff7e0'/><path d='M8 48 L24 20 L36 40 L44 28 L56 48 Z' fill='none' stroke='#d9822b' stroke-width='3'/></svg>
+"""
+
+
+def raw(path, data):
+    full = os.path.join(ROOT, path)
+    os.makedirs(os.path.dirname(full), exist_ok=True)
+    mode = "wb" if isinstance(data, bytes) else "w"
+    with open(full, mode) as f:
+        f.write(data)
+    os.utime(full, (MTIME, MTIME))
+
+
+def navigator_samples():
+    """What shows the navigator's list pane in full (#335): an SVG, a PDF,
+    a drawing and its preview, a canvas, and notes with tags, a status and
+    tasks. The lab's in-memory vault (a film's) reads these same files
+    (apps/lab/ui/src/vault.rs `navigator_samples`). Run alone with
+    `python3 -I apps/lab/demo-vault.py --navigator-samples`."""
+    raw("Attachments/Launch logo.svg", LOGO_SVG)
+    sketch = os.path.join(ROOT, "Attachments/Sketch.excalidraw.png")
+    os.makedirs(os.path.dirname(sketch), exist_ok=True)
+    src = os.path.join(ROOT, "Attachments/.sketch.svg")
+    with open(src, "w") as f:
+        f.write(SKETCH_SVG)
+    mg(src, "-strip", "-resize", "128x128", sketch)
+    os.remove(src)
+    os.utime(sketch, (MTIME, MTIME))
+    pdf = os.path.join(ROOT, "Attachments/Brief.pdf")
+    mg("-size", "300x400", "xc:white", "-fill", "#222", "-pointsize", "20",
+       "-annotate", "+30+60", "The brief", "-strip", pdf)
+    os.utime(pdf, (MTIME, MTIME))
+    W("Attachments/Sketch.excalidraw.md", {"excalidraw-plugin": "parsed", "tags": ["drawing"]},
+      "# Excalidraw Data\n\n## Text Elements\nA mountain, roughly.\n")
+    raw("Attachments/Board.canvas", json.dumps({
+        "nodes": [
+            {"id": "a", "type": "text", "text": "Launch", "x": 0, "y": 0, "width": 200, "height": 60},
+            {"id": "b", "type": "file", "file": "Projects/Launch plan.md", "x": 260, "y": 0, "width": 240, "height": 120},
+        ],
+        "edges": [{"id": "e", "fromNode": "a", "toNode": "b"}],
+    }, indent=2) + "\n")
+    rng = random.Random(335)
+    tasks = "\n".join(["- [x] Write the brief", "- [x] Agree the scope", "- [x] Book the launch slot",
+                       "- [x] Draft the announcement", "- [ ] Sign off the release", "- [ ] Send the announcement"])
+    W("Projects/Launch plan.md",
+      {"title": "Launch plan", "tags": ["work", "projects/launch"], "status": "doing",
+       "feature": feat("Launch logo.svg")},
+      "What ships, in what order, and who signs it off.\n\n" + tasks + "\n\n"
+      + long_note(3351, "the launch", ["Scope", "Order", "Sign-off", "Risks"], 1800))
+    W("Projects/Retro.md", {"title": "Retro", "tags": ["work"], "status": "done"},
+      "What went well, what to change next time.\n\n"
+      "- [x] Collect the notes\n- [x] Run the session\n- [x] Share the actions\n\n"
+      + prose(rng, "the retro", 600))
+    W("Projects/Vault/Vault.md", {"tags": ["projects/vault"]},
+      "The Vault folder's own note: what lives here.\n")
+
+
 if __name__ == "__main__":
+    if "--navigator-samples" in sys.argv:
+        navigator_samples()
+        sys.exit(0)
     sys.exit(main())

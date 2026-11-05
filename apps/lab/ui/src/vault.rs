@@ -691,54 +691,70 @@ fn lab_vault() -> MemorySource {
 }
 
 /// What shows the list pane in full (#335): an SVG, a PDF, a drawing and
-/// its preview, a canvas, and notes with tags, a status and tasks.
+/// its preview, a canvas, and notes with tags, a status and tasks. The
+/// demo vault's own files (`apps/lab/demo-vault`, made by
+/// `apps/lab/demo-vault.py`'s `navigator_samples`), read in as the vault on
+/// disk reads them (`architect_navigator::vault_source::note_from_text`):
+/// one source for both.
 fn navigator_samples(source: MemorySource, now: Millis) -> MemorySource {
+    use architect_navigator::vault_source::note_from_text;
+    use base64::Engine as _;
     let day: Millis = 86_400_000;
     let ago = |d: i64| now.saturating_sub(day.saturating_mul(d));
-    let text = |t: &str| architect_navigator::PropertyValue::Text(t.to_owned());
-    let logo = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>\
-        <rect width='64' height='64' rx='12' fill='%234f7cff'/><circle cx='32' cy='32' r='16' fill='white'/></svg>";
-    let sketch = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>\
-        <rect width='64' height='64' fill='%23fff7e0'/><path d='M8 48 L24 20 L36 40 L44 28 L56 48 Z' fill='none' stroke='%23d9822b' stroke-width='3'/></svg>";
-    source
-        .with_resource("Attachments/Logo.svg", logo)
-        .with_resource("Attachments/Sketch.excalidraw.png", sketch)
-        .with_file(NoteFile::new("Attachments/Logo.svg", ago(3), ago(3)))
-        .with_file(NoteFile::new("Attachments/Brief.pdf", ago(12), ago(12)))
-        .with_file(NoteFile::new(
+    let logo = include_str!("../../demo-vault/Attachments/Launch logo.svg");
+    let sketch = include_bytes!("../../demo-vault/Attachments/Sketch.excalidraw.png");
+    let svg_url = format!(
+        "data:image/svg+xml;utf8,{}",
+        logo.trim().replace('#', "%23")
+    );
+    let png_url = format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(sketch)
+    );
+    // (path, text, made and last changed, days ago)
+    let notes: [(&str, &str, i64, i64); 4] = [
+        (
+            "Projects/Launch plan.md",
+            include_str!("../../demo-vault/Projects/Launch plan.md"),
+            9,
+            0,
+        ),
+        (
+            "Projects/Retro.md",
+            include_str!("../../demo-vault/Projects/Retro.md"),
+            30,
+            4,
+        ),
+        (
+            "Projects/Vault/Vault.md",
+            include_str!("../../demo-vault/Projects/Vault/Vault.md"),
+            40,
+            6,
+        ),
+        (
             "Attachments/Sketch.excalidraw.md",
-            ago(1),
-            ago(1),
-        ))
-        .with_file(NoteFile::new(
-            "Attachments/Sketch.excalidraw.png",
-            ago(1),
-            ago(1),
-        ))
-        .with_file(NoteFile::new("Attachments/Board.canvas", ago(20), ago(20)))
-        .with_file(
-            NoteFile::new("Projects/Launch plan.md", ago(9), ago(0))
-                .preview("What ships, in what order, and who signs it off.")
-                .tag("work")
-                .tag("projects/launch")
-                .property("status", text("doing"))
-                .feature_image("Attachments/Logo.svg")
-                .tasks(6, 2)
-                .words(1840),
-        )
-        .with_file(
-            NoteFile::new("Projects/Retro.md", ago(30), ago(4))
-                .preview("What went well, what to change next time.")
-                .tag("work")
-                .property("status", text("done"))
-                .tasks(3, 0)
-                .words(620),
-        )
-        .with_file(
-            NoteFile::new("Projects/Vault/Vault.md", ago(40), ago(6))
-                .preview("The Vault folder's own note: what lives here.")
-                .tag("projects/vault"),
-        )
+            include_str!("../../demo-vault/Attachments/Sketch.excalidraw.md"),
+            1,
+            1,
+        ),
+    ];
+    let files = [
+        ("Attachments/Launch logo.svg", 3),
+        ("Attachments/Brief.pdf", 12),
+        ("Attachments/Sketch.excalidraw.png", 1),
+        ("Attachments/Board.canvas", 20),
+    ];
+    let source = source
+        .with_resource("Attachments/Launch logo.svg", svg_url)
+        .with_resource("Attachments/Sketch.excalidraw.png", png_url);
+    let source = files.into_iter().fold(source, |s, (path, days)| {
+        s.with_file(NoteFile::new(path, ago(days), ago(days)))
+    });
+    notes
+        .into_iter()
+        .fold(source, |s, (path, text, made, changed)| {
+            s.with_file(note_from_text(path, text, ago(made), ago(changed)))
+        })
 }
 
 /// Now, in milliseconds since the epoch.
@@ -1308,5 +1324,35 @@ mod start_tests {
         let first = super::first_workspace();
         assert_eq!(first.windows.len(), 1);
         assert!(first.windows[0].docks.left.root.is_some(), "the navigator's dock is the main window's");
+    }
+
+    /// The film's in-memory vault shows the list pane's samples from the
+    /// demo vault's own files: one source of sample content.
+    #[test]
+    fn the_in_memory_samples_are_the_demo_vaults_files() {
+        use architect_navigator::{NavigatorSource, TaskCounts};
+        let s = super::navigator_samples(architect_navigator::MemorySource::new("Lab"), 0);
+        let plan = s.file("Projects/Launch plan.md").expect("the launch plan");
+        assert_eq!(plan.tasks, Some(TaskCounts { total: 6, unfinished: 2 }));
+        assert!(plan.tags.contains(&"projects/launch".to_owned()), "{:?}", plan.tags);
+        assert!(plan.words.is_some_and(|w| w > 1000), "{:?}", plan.words);
+        let image = plan.feature_image.clone().expect("a feature image");
+        assert!(image.contains("Attachments/Launch logo.svg"), "{image}");
+        assert!(s
+            .resource_url("Attachments/Launch logo.svg")
+            .is_some_and(|u| u.starts_with("data:image/svg+xml")));
+        assert!(s
+            .resource_url("Attachments/Sketch.excalidraw.png")
+            .is_some_and(|u| u.starts_with("data:image/png;base64,")));
+        for path in ["Attachments/Brief.pdf", "Attachments/Board.canvas", "Projects/Vault/Vault.md"] {
+            assert!(s.file(path).is_some(), "{path}");
+            assert!(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../demo-vault")
+                    .join(path)
+                    .is_file(),
+                "{path} is a demo vault file"
+            );
+        }
     }
 }

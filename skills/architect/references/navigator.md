@@ -56,11 +56,17 @@ pub trait NavigatorSource: Send + Sync {
   a large one for load tests.
 - `VaultSource` (feature `vault`, native; `features/navigator/src/vault_source.rs`)
   is architect's vault (`vault::actions::OpenVault`): folders (empty ones
-  too), notes with their properties, tags, preview, feature image (the
-  first of `FEATURE_IMAGE_PROPERTIES` naming an image, else the first image
-  embedded; a `file:` URL the desk loads) and task counts, bases and
-  attachments. Its `save`, `create_note` and `rename` (backlinks follow)
-  say what changed at once; `watch` hears edits made outside the app.
+  too), notes with their properties, tags, preview, word and task counts
+  and feature image (the vault path of the first of
+  `FEATURE_IMAGE_PROPERTIES` naming an image, else of the first image
+  embedded), bases and attachments. `resource_url` gives a vault path (or
+  an embed's bare name) as a `file:` URL the desk loads; `write` does the
+  navigator's `FileOp`s on disk (a folder made, any file moved, a note's
+  through `rename` so backlinks follow, a property set). Its `save`,
+  `create_note` and `rename` say what changed at once; `watch` hears edits
+  made outside the app. `note_from_text` derives a `NoteFile` the same way
+  from a text you hold (the lab's in-memory vault reads the demo vault's
+  files with it).
   Tests: `features/navigator/tests/vault_source.rs`.
 
 ## Recipe: Navigator, the extension, as a sidebar
@@ -75,6 +81,9 @@ let extensions = extensions.with_linked(&architect_navigator_extension::Navigato
 let nav = use_navigator(|| Arc::new(source));
 use_context_provider(|| Signal::new(NavigatorMount {
     navigator: nav, on_open, on_context_menu: Some(menu), on_focus_editor: None, phone,
+    // The shell sidebar's columns (`SidebarLayout::columns`), and New note
+    // in the list's header (given the folder on show); both optional.
+    columns: Some(shell.sidebar_layout().columns()), on_new_note: Some(new_note),
 }));
 rsx! { ExtensionView { ui, extension: "navigator".into(), view: "files".into(), bare: true } }
 ```

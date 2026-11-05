@@ -606,7 +606,6 @@ fn FileRow(
         path,
         name,
         preview,
-        image,
         date,
         parent,
         selected,

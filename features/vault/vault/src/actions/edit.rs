@@ -243,6 +243,74 @@ impl OpenVault {
         })
     }
 
+    /// Makes `folder` (and the folders it is in).
+    ///
+    /// # Errors
+    ///
+    /// It is not a path inside the vault, or it cannot be made.
+    pub fn create_folder(&self, folder: &str) -> Result<(), String> {
+        let bad = folder.is_empty()
+            || folder.starts_with('/')
+            || folder.split('/').any(|s| s.is_empty() || s == "." || s == "..");
+        if bad {
+            return Err(format!("{folder:?} is not a folder's path in the vault"));
+        }
+        std::fs::create_dir_all(self.root().join(folder)).map_err(|e| e.to_string())?;
+        self.learn_folders(&format!("{folder}/x"));
+        Ok(())
+    }
+
+    /// Moves (or renames) any file of the vault: a note through
+    /// [`Self::rename`] (the links that named it follow), anything else (an
+    /// image, a PDF, a base) on disk, the vault read again after. What
+    /// changed, for a file that is not a note.
+    ///
+    /// # Errors
+    ///
+    /// No file at `from`, `to` is taken or not inside the vault, or the
+    /// move fails.
+    pub fn move_file(&self, from: &str, to: &str) -> Result<Changes, String> {
+        let is_note = |p: &str| {
+            Path::new(p)
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("md"))
+        };
+        if is_note(from) && is_note(to) {
+            self.rename(from, to)?;
+            return Ok(Changes::default());
+        }
+        let bad = to.is_empty()
+            || to.starts_with('/')
+            || to.split('/').any(|s| s.is_empty() || s == "." || s == "..");
+        if bad {
+            return Err(format!("{to:?} is not a path inside the vault"));
+        }
+        let root = self.root();
+        let (src, dst) = (root.join(from), root.join(to));
+        if !src.is_file() {
+            return Err(format!("no file at {from}"));
+        }
+        if dst.exists() {
+            return Err(format!("{to} is there already"));
+        }
+        if let Some(parent) = dst.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        std::fs::rename(&src, &dst).map_err(|e| e.to_string())?;
+        self.refresh().map_err(|e| e.to_string())
+    }
+
+    /// Sets one frontmatter property of the note at `path` (the rest of
+    /// the file left as written).
+    ///
+    /// # Errors
+    ///
+    /// No such note, or it cannot be written.
+    pub fn set_property(&self, path: &str, key: &str, value: serde_json::Value) -> Result<(), String> {
+        let guard = Arc::clone(&self.guard);
+        mutate::set_property(&mut self.write(), path, key, value, &guard).map_err(|e| e.to_string())
+    }
+
     /// Reads the folder again and says what changed since the vault was
     /// last read.
     ///

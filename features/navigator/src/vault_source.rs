@@ -12,11 +12,11 @@ use std::time::SystemTime;
 
 use serde_json::Value;
 use vault::actions::{Changes, OpenVault, Renamed, Watch, page_tags};
-use vault::obsidian::{Vault, VaultPage, page_tasks};
+use vault::obsidian::{Vault, VaultPage, page_tasks, page_wordcount};
 
 use crate::source::{
-    Listener, Millis, NavigatorSource, NoteFile, PropertyValue, SourceEvent, Subscription,
-    TaskCounts,
+    FileOp, Listener, Millis, NavigatorSource, NoteFile, PropertyValue, SourceEvent,
+    Subscription, TaskCounts,
 };
 
 /// The frontmatter properties a note's feature image is read from, in
@@ -203,6 +203,52 @@ impl VaultSource {
         Ok(renamed)
     }
 
+    /// One of [`NavigatorSource::write`]'s ops, done on disk and said.
+    fn write_one(&self, op: &FileOp) -> Result<(), String> {
+        let vault = &self.inner.vault;
+        let before = vault.folders();
+        let new_folders = |this: &Self| {
+            for f in this.inner.vault.folders().difference(&before) {
+                this.emit(&SourceEvent::FolderCreated(f.clone()));
+            }
+        };
+        match op {
+            FileOp::CreateFolder(folder) => {
+                if before.contains(folder) {
+                    return Err(format!("{folder} is there already"));
+                }
+                vault.create_folder(folder)?;
+                new_folders(self);
+            }
+            FileOp::Move { from, to } => {
+                let note = |p: &str| {
+                    std::path::Path::new(p)
+                        .extension()
+                        .is_some_and(|e| e.eq_ignore_ascii_case("md"))
+                };
+                if note(from) && note(to) {
+                    self.rename(from, to)?;
+                } else {
+                    vault.move_file(from, to)?;
+                    new_folders(self);
+                    if let Some(file) = self.file(to) {
+                        self.emit(&SourceEvent::FileRenamed {
+                            from: from.clone(),
+                            file,
+                        });
+                    }
+                }
+            }
+            FileOp::SetProperty { path, key, value } => {
+                vault.set_property(path, key, json_of(value))?;
+                if let Some(f) = self.file(path) {
+                    self.emit(&SourceEvent::FileModified(f));
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn emit(&self, event: &SourceEvent) {
         let listeners: Vec<Shared> = self
             .inner
@@ -234,6 +280,17 @@ impl NavigatorSource for VaultSource {
             out.extend(v.attachments.iter().map(|a| plain(&v.root, &a.rel_path)));
             out
         })
+    }
+
+    fn resource_url(&self, path: &str) -> Option<String> {
+        self.inner
+            .vault
+            .with(|v| resolve_resource(v, path))
+            .map(|abs| file_url(&abs))
+    }
+
+    fn write(&self, ops: &[FileOp]) -> Result<(), String> {
+        ops.iter().try_for_each(|op| self.write_one(op))
     }
 
     fn subscribe(&self, listener: Listener) -> Subscription {
@@ -301,6 +358,19 @@ fn plain(root: &Path, path: &str) -> NoteFile {
 /// A note, with its properties, tags, preview, feature image and tasks.
 fn note_of(v: &Vault, page: &VaultPage) -> NoteFile {
     let (created, modified) = times(&v.root, &page.rel_path);
+    let mut file = derived(page, created, modified);
+    // A path in the vault: the view draws it from `resource_url`.
+    file.feature_image = feature_image(v, page).and_then(|abs| {
+        abs.strip_prefix(&v.root)
+            .ok()
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+    });
+    file
+}
+
+/// What a page's text gives: its properties, tags, preview, words and
+/// tasks.
+fn derived(page: &VaultPage, created: Millis, modified: Millis) -> NoteFile {
     let mut file = NoteFile::new(page.rel_path.clone(), created, modified);
     file.properties = page
         .parsed
@@ -310,7 +380,7 @@ fn note_of(v: &Vault, page: &VaultPage) -> NoteFile {
         .collect();
     file.tags = page_tags(page);
     file.preview = Some(preview_of(&page.raw));
-    file.feature_image = feature_image(v, page).map(|abs| file_url(&abs));
+    file.words = Some(u32::try_from(page_wordcount(page).words).unwrap_or(u32::MAX));
     let tasks = page_tasks(page);
     let total = u32::try_from(tasks.len()).unwrap_or(u32::MAX);
     let open = u32::try_from(tasks.iter().filter(|t| t.is_open()).count()).unwrap_or(u32::MAX);
@@ -318,6 +388,35 @@ fn note_of(v: &Vault, page: &VaultPage) -> NoteFile {
         total,
         unfinished: open,
     });
+    file
+}
+
+/// A note at `path` as [`VaultSource`] shows one, from a text the caller
+/// holds (an in-memory vault built from the same files: the lab's film
+/// vault): its properties, tags, preview, words and tasks, and its feature
+/// image as its frontmatter names it (the first of
+/// [`FEATURE_IMAGE_PROPERTIES`], else the first image embedded; the
+/// source's `resource_url` draws it).
+#[must_use]
+pub fn note_from_text(path: &str, text: &str, created: Millis, modified: Millis) -> NoteFile {
+    let (folder, name) = path.rsplit_once('/').unwrap_or(("", path));
+    let page = VaultPage {
+        rel_path: path.to_owned(),
+        basename: name.strip_suffix(".md").unwrap_or(name).to_owned(),
+        folder: folder.to_owned(),
+        raw: text.to_owned(),
+        parsed: vault::obsidian::obsidian_parse::parse_page(text),
+        mtime: SystemTime::UNIX_EPOCH,
+    };
+    let mut file = derived(&page, created, modified);
+    let named = FEATURE_IMAGE_PROPERTIES.iter().find_map(|key| {
+        page.parsed
+            .frontmatter
+            .iter()
+            .find(|e| e.key == *key)
+            .and_then(|e| e.value.as_str().map(str::to_owned))
+    });
+    file.feature_image = named.or_else(|| embeds(text).next());
     file
 }
 
@@ -487,6 +586,41 @@ fn resolve_image(v: &Vault, page: &VaultPage, raw: &str) -> Option<std::path::Pa
         .iter()
         .find(|a| a.rel_path.rsplit('/').next() == Some(name))
         .map(|a| v.root.join(&a.rel_path))
+}
+
+/// A file the view asks for by its vault path (`Attachments/x.png`), or by
+/// a name an embed gives (`x.png`, `[[x.png|alt]]`): on disk, when it is.
+fn resolve_resource(v: &Vault, raw: &str) -> Option<std::path::PathBuf> {
+    let t = raw.trim().trim_start_matches('!');
+    let t = t
+        .strip_prefix("[[")
+        .and_then(|s| s.strip_suffix("]]"))
+        .unwrap_or(t);
+    let t = t.split('|').next().unwrap_or(t).trim();
+    if t.is_empty() || t.contains("://") || t.split('/').any(|s| s == "..") {
+        return None;
+    }
+    let abs = v.root.join(t);
+    if abs.is_file() {
+        return Some(abs);
+    }
+    let name = t.rsplit('/').next().unwrap_or(t);
+    v.attachments
+        .iter()
+        .find(|a| a.rel_path.rsplit('/').next() == Some(name))
+        .map(|a| v.root.join(&a.rel_path))
+}
+
+/// A property's value as frontmatter holds it.
+fn json_of(value: &PropertyValue) -> Value {
+    match value {
+        PropertyValue::Text(t) => Value::String(t.clone()),
+        PropertyValue::Number(n) => {
+            serde_json::Number::from_f64(*n).map_or(Value::Null, Value::Number)
+        }
+        PropertyValue::Bool(b) => Value::Bool(*b),
+        PropertyValue::List(l) => Value::Array(l.iter().cloned().map(Value::String).collect()),
+    }
 }
 
 /// A file on disk as a `file:` URL, its path's spaces and the like

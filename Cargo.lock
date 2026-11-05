@@ -1219,6 +1219,7 @@ dependencies = [
  "architect-ui",
  "architect-workspace",
  "architect-workspace-hack",
+ "base64 0.22.1",
  "blitz-dom",
  "blitz-traits",
  "crdt",

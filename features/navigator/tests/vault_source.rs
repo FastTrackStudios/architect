@@ -5,7 +5,9 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use architect_navigator::{NavigatorSource, PropertyValue, SourceEvent, TaskCounts, VaultSource};
+use architect_navigator::{
+    FileOp, NavigatorSource, PropertyValue, SourceEvent, TaskCounts, VaultSource,
+};
 use vault::actions::OpenVault;
 
 fn source() -> (tempfile::TempDir, VaultSource) {
@@ -49,17 +51,25 @@ fn it_lists_folders_files_and_what_each_note_derives() {
         ["Attachments/sun.png", "Board.base", "Notes/Deep/Deeper/Ideas.md", "Notes/Plan.md"]
     );
     let plan = s.file("Notes/Plan.md").unwrap();
-    assert_eq!(plan.title(true), "The plan");
+    assert_eq!(plan.title(&["title"]), "The plan");
     assert_eq!(plan.get("priority"), Some(&PropertyValue::Number(2.0)));
     assert_eq!(plan.get("done"), Some(&PropertyValue::Bool(false)));
     assert!(plan.tags.contains(&"work/plan".to_owned()), "{:?}", plan.tags);
     assert_eq!(plan.preview.as_deref(), Some("Plan See my ideas. One Two Three"));
     assert_eq!(plan.tasks, Some(TaskCounts { total: 3, unfinished: 2 }));
-    let image = plan.feature_image.unwrap();
-    assert!(image.starts_with("file://") && image.ends_with("Attachments/sun.png"), "{image}");
+    assert!(plan.words.is_some_and(|w| w > 3), "{:?}", plan.words);
+    // Its feature image is a path in the vault; the view draws it from
+    // the source's URL for it.
+    assert_eq!(plan.feature_image.as_deref(), Some("Attachments/sun.png"));
+    let url = s.resource_url("Attachments/sun.png").unwrap();
+    assert!(url.starts_with("file://") && url.ends_with("Attachments/sun.png"), "{url}");
+    // By its name, as an embed gives it, too; nothing for what is not there.
+    assert_eq!(s.resource_url("[[sun.png|alt]]").as_deref(), Some(url.as_str()));
+    assert!(s.resource_url("Attachments/none.png").is_none());
+    assert!(s.resource_url("../outside.png").is_none());
     // An embed is a feature image too, found by its name.
     let ideas = s.file("Notes/Deep/Deeper/Ideas.md").unwrap();
-    assert!(ideas.feature_image.unwrap().ends_with("Attachments/sun.png"));
+    assert_eq!(ideas.feature_image.as_deref(), Some("Attachments/sun.png"));
     assert!(ideas.tags.contains(&"idea".to_owned()));
 }
 
@@ -117,4 +127,50 @@ fn an_edit_outside_the_app_is_heard_live() {
         assert!(std::time::Instant::now() < deadline, "heard {got:?}");
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+#[test]
+fn the_navigators_writes_land_on_disk_and_are_events() {
+    let (tmp, s) = source();
+    let (events, _sub) = heard(&s);
+    s.write(&[
+        FileOp::CreateFolder("Areas/Music".to_owned()),
+        FileOp::Move {
+            from: "Notes/Plan.md".to_owned(),
+            to: "Areas/Music/Plan.md".to_owned(),
+        },
+        FileOp::Move {
+            from: "Attachments/sun.png".to_owned(),
+            to: "Areas/sun.png".to_owned(),
+        },
+        FileOp::SetProperty {
+            path: "Areas/Music/Plan.md".to_owned(),
+            key: "order".to_owned(),
+            value: PropertyValue::Number(3.0),
+        },
+    ])
+    .unwrap();
+    let root = tmp.path();
+    assert!(root.join("Areas/Music").is_dir());
+    assert!(root.join("Areas/Music/Plan.md").is_file());
+    assert!(root.join("Areas/sun.png").is_file() && !root.join("Attachments/sun.png").exists());
+    let plan = std::fs::read_to_string(root.join("Areas/Music/Plan.md")).unwrap();
+    assert!(plan.contains("order: 3"), "{plan}");
+    assert!(plan.contains("title: The plan"), "the rest kept: {plan}");
+    let got = events.lock().unwrap().clone();
+    assert!(got.contains(&SourceEvent::FolderCreated("Areas/Music".to_owned())), "{got:?}");
+    assert!(got.iter().any(|e| matches!(e,
+        SourceEvent::FileRenamed { from, file } if from == "Notes/Plan.md" && file.path == "Areas/Music/Plan.md")));
+    assert!(got.iter().any(|e| matches!(e,
+        SourceEvent::FileRenamed { from, file } if from == "Attachments/sun.png" && file.path == "Areas/sun.png")));
+    assert!(got.iter().any(|e| matches!(e, SourceEvent::FileModified(f)
+        if f.path == "Areas/Music/Plan.md" && f.get("order") == Some(&PropertyValue::Number(3.0)))));
+    // A folder that is there, a move onto a file: refused.
+    assert!(s.write(&[FileOp::CreateFolder("Areas".to_owned())]).is_err());
+    assert!(s
+        .write(&[FileOp::Move {
+            from: "Board.base".to_owned(),
+            to: "Areas/sun.png".to_owned(),
+        }])
+        .is_err());
 }
