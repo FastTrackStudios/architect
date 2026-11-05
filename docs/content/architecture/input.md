@@ -221,10 +221,48 @@ action.
 
 ## MIDI and OSC
 
-The binding kinds are here (`features/input/src/control.rs`): `midi`
-maps `Note60`, `CC64 ch1`, `PC5` (any number or channel when left out)
-and `osc` maps an address, in every mode. The sources are the app's: it
-hands each message in as `InputEvent::Midi` / `InputEvent::Osc`.
+The binding kinds are here (`features/input/src/control.rs`). `midi`
+maps `Note60`, `CC64 ch1`, `PC5` and `PB ch1` (a pitch bend); a number or
+channel left out matches any. `osc` maps an address, in every mode. The
+sources are the app's: it hands each message in as `InputEvent::Midi` or
+`InputEvent::Osc`.
+
+### Ports
+
+`features/input/src/ports.rs` has the ports those messages come through,
+for the app and for its extensions (#311):
+
+- `PortMessage` is a MIDI message's bytes or an `OscMessage`, with a JSON
+  form (`to_json`, `from_json`). The codecs are `midi_event` and
+  `midi_bytes` (bytes to and from a `MidiEvent`), and `encode_osc` and
+  `decode_osc` (OSC 1.0, bundles included).
+- `PortBackend` lists ports and opens one, handing what it hears to an
+  `Inbox`. `Ports` puts a MIDI backend and an OSC one together.
+  `VirtualPorts` is in-process: its `VirtualDevice` is the other end, which
+  a test or a demo drives. `UdpOsc` (feature `udp`, native) is OSC over
+  UDP. A system MIDI backend is the app's, behind the same trait.
+
+The types and the codecs are wasm-clean; only `UdpOsc` does IO.
+
+### Control surfaces
+
+`features/input/src/surface.rs` maps a device's controls to an app's
+targets:
+
+- `Target` and `Targets`: what an app lets a surface move. Each target
+  kind has a range and a count, and implements read, write, label, touch
+  and observe.
+- `SurfaceDesc` and `ControlDesc`: faders, knobs, buttons, encoders,
+  displays and LEDs, each with its input `Address`, feedback, touch sensor,
+  target and strip.
+- `Surface` turns input into target writes and returns the feedback to
+  send. It handles banks (`set_bank`, `bank.next` and `bank.prev`
+  buttons), feedback on a target's change (`changed`), touch (a touched
+  fader is not moved) and `Takeover::Pickup`.
+
+It is pure logic over `PortMessage`s; `architect-extensions` opens the
+port and runs it for an extension's `control.surfaces` contribution
+(`extensions.md`, "MIDI, OSC and control surfaces").
 
 ## User keymaps
 
