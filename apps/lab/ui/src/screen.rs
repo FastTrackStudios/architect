@@ -240,23 +240,39 @@ fn HomeIndicator() -> Element {
     }
 }
 
-/// The window's own title bar, on a Mac.
+/// The window's own title bar.
 ///
-/// The content runs under a transparent title bar (the window is made so:
-/// `architect-desktop`'s `main`), the shell keeps the traffic lights' corner clear, and its empty
-/// bar space moves and zooms the window. None in full screen (no lights)
-/// and off a Mac (the system's title bar).
+/// On a Mac the content runs under a transparent title bar (the window is
+/// made so: `architect-desktop`'s `main`) and the shell keeps the traffic
+/// lights' corner clear. Elsewhere the window has no system decorations
+/// and the shell draws minimize, maximize and close at the row's right end
+/// (Obsidian's). Either way its empty bar space moves and zooms the window.
+/// None in full screen, and for a window standing in for a device.
 #[must_use]
 pub fn use_window_chrome() -> Option<WindowChrome> {
     let window = dioxus_native::use_window();
+    let main = try_use_context::<architect_workspace::native::MainWindow>();
     let chrome = use_hook(|| {
         let (drag, zoom) = (window.clone(), window.clone());
-        WindowChrome::mac(
-            move |()| {
-                let _ = drag.drag_window();
-            },
-            move |()| zoom.set_maximized(!zoom.is_maximized()),
-        )
+        let on_drag = move |()| {
+            let _ = drag.drag_window();
+        };
+        let on_zoom = move |()| zoom.set_maximized(!zoom.is_maximized());
+        if cfg!(target_os = "macos") {
+            WindowChrome::mac(on_drag, on_zoom)
+        } else {
+            let mini = window.clone();
+            WindowChrome::framed(
+                on_drag,
+                on_zoom,
+                move |()| mini.set_minimized(true),
+                move |()| {
+                    if let Some(main) = &main {
+                        main.close();
+                    }
+                },
+            )
+        }
     });
     // Whether the window is in full screen, followed through the window's
     // events: read only while drawing, it was still full screen at the
@@ -304,5 +320,5 @@ pub fn use_window_chrome() -> Option<WindowChrome> {
             WindowChrome::MAC_LIGHTS_LEFT,
         );
     }
-    (cfg!(target_os = "macos") && !full && device == Device::Native).then_some(chrome)
+    (!full && device == Device::Native).then_some(chrome)
 }

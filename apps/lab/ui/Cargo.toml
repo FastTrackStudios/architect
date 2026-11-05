@@ -26,7 +26,7 @@ architect-theme = { workspace = true, features = ["fs", "actions", "dioxus"] }
 # architect-ui's root: its CSS variables follow the store.
 architect-ui = { workspace = true }
 # The Embedded views' paint pane (src/paint.rs): the paint kind on Blitz.
-architect-workspace = { workspace = true, features = ["ui", "paint-ui", "home"] }
+architect-workspace = { workspace = true, features = ["ui", "paint-ui", "home", "native"] }
 architect-commands = { workspace = true, features = ["native"] }
 # The settings page; the Appearance section, its layers kept (the
 # person's in a synced document, here a file).

@@ -23,7 +23,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::motion::{Spring, use_motion};
 use dioxus::prelude::*;
-use lucide_dioxus::{ChevronsUpDown, PanelLeft, PanelLeftClose, PanelRight};
+use lucide_dioxus::{ChevronsUpDown, Minus, PanelLeft, PanelLeftClose, PanelRight, Square, X};
 
 pub use crate::screen::{FormFactor, Insets, Screen, ShellStyle};
 pub use bar::{
@@ -38,7 +38,8 @@ pub use keyboard::{Keyboard, install_keyboard, keyboard, set_keyboard_height, se
 #[cfg(target_os = "macos")]
 pub use mac::fit_traffic_lights;
 pub use page::{
-    Breadcrumb, Crumb, Menu, MenuEntry, MenuItem, Page, PageBar, Tool, ToolGroup, Toolbar,
+    Breadcrumb, Crumb, Menu, MenuEntry, MenuItem, Page, PageBar, TabFlares, Tool, ToolGroup,
+    Toolbar,
 };
 pub use status::{STATUS_BADGE, STATUS_BAR, StatusItem, StatusSide, StatusStyle, use_status};
 use status::{StatusBadge, StatusBar};
@@ -231,6 +232,18 @@ pub struct WindowChrome {
     pub on_drag: Callback<()>,
     /// Zoom the window (a double click on the bar).
     pub on_zoom: Callback<()>,
+    /// The window's buttons, when the shell draws them (off a Mac, where
+    /// the app has no system title bar): traffic lights at the row's left.
+    pub controls: Option<WindowControls>,
+}
+
+/// A window's close, minimize and maximize buttons, drawn by the shell as
+/// a Mac's traffic lights at the title row's left (Loft's look).
+#[derive(Clone, PartialEq)]
+pub struct WindowControls {
+    pub on_minimize: Callback<()>,
+    pub on_maximize: Callback<()>,
+    pub on_close: Callback<()>,
 }
 
 impl WindowChrome {
@@ -248,6 +261,30 @@ impl WindowChrome {
             buttons: 74.0,
             on_drag: Callback::new(on_drag),
             on_zoom: Callback::new(on_zoom),
+            controls: None,
+        }
+    }
+
+    /// A window with no system title bar off a Mac: a Mac's 40pt row, the
+    /// shell drawing its close, minimize and maximize as traffic lights
+    /// where a Mac's sit (14pt in, reaching 66pt).
+    pub fn framed(
+        on_drag: impl FnMut(()) + 'static,
+        on_zoom: impl FnMut(()) + 'static,
+        on_minimize: impl FnMut(()) + 'static,
+        on_close: impl FnMut(()) + 'static,
+    ) -> Self {
+        let on_zoom = Callback::new(on_zoom);
+        Self {
+            height: Self::MAC_ROW,
+            buttons: 66.0,
+            on_drag: Callback::new(on_drag),
+            on_zoom,
+            controls: Some(WindowControls {
+                on_minimize: Callback::new(on_minimize),
+                on_maximize: on_zoom,
+                on_close: Callback::new(on_close),
+            }),
         }
     }
 }
@@ -384,11 +421,17 @@ pub struct Shell {
     fold: Signal<Option<bool>>,
     /// Whether the docked right side is put away.
     right_away: Signal<bool>,
+    /// The docked left sidebar's width, and how open it is now (0 folded
+    /// to 1 open, mid-fold too): where the page's left edge is.
+    left_w: Signal<f64>,
+    left_open: Option<crate::motion::Motion>,
     has_left: bool,
     has_right: bool,
     separate: Option<Action>,
     account: Option<Account>,
     workspaces: Option<Workspaces>,
+    /// The app's buttons above the switcher at the sidebar's foot.
+    foot: Vec<Action>,
     window: Option<WindowChrome>,
     /// The app's brand, leading a phone's root pages.
     brand: Option<Element>,
@@ -700,7 +743,11 @@ impl Shell {
     pub fn title_clearance(&self) -> (f64, f64) {
         // A desk's page starts past the ribbon.
         let ribbon = if self.desk() { RIBBON } else { 0.0 };
-        let left = if self.has_side(Side::Left) && self.docked(Side::Left) {
+        let left = if self.desk() && self.has_side(Side::Left) {
+            // Past the sidebar as it shows now, so the page's title row
+            // gives way smoothly while the sidebar folds or opens.
+            self.content_left() - ribbon - self.left_shown()
+        } else if self.has_side(Side::Left) && self.docked(Side::Left) {
             0.0
         } else if self.has_side(Side::Left) {
             self.content_left() - ribbon
@@ -716,6 +763,16 @@ impl Shell {
             0.0
         };
         (left, right + self.screen.insets.right)
+    }
+
+    /// How wide the docked left sidebar shows now on a desk, mid-fold too.
+    #[must_use]
+    pub fn left_shown(&self) -> f64 {
+        let open = self.left_open.map_or_else(
+            || if self.docked(Side::Left) { 1.0 } else { 0.0 },
+            crate::motion::Motion::value,
+        );
+        ((self.left_w)() + self.screen.insets.left) * open
     }
 
     /// What the head of a desk's sidebar keeps clear in the title row, from
@@ -786,6 +843,9 @@ const FOLD_BELOW: f64 = 1000.0;
 const TITLE_ROW: f64 = 52.0;
 /// A desk's title-row controls (the sides' buttons).
 const CONTROL: f64 = 28.0;
+/// A traffic light the shell draws: its size and the gap between two.
+const LIGHT: f64 = 12.0;
+const LIGHT_GAP: f64 = 8.0;
 /// How far the page follows an opening drawer, as a share of its width.
 const PARALLAX: f64 = 0.22;
 /// The docked sidebars' widths: the start, and the range a drag keeps to.
@@ -829,7 +889,8 @@ fn shell_css(t: &ShellTheme) -> String {
          .tip {{ position: absolute; z-index: {z}; white-space: nowrap; padding: 4px 8px; border-radius: 6px; \
                  background: {pill}; border: 1px solid {rule}; color: {ink}; font-family: {font}; font-size: 12px; \
                  font-weight: 500; pointer-events: none; opacity: 0; transition: opacity 100ms ease-out; }} \
-         .tip-host:hover > .tip, .tip-host:focus-visible > .tip {{ opacity: 1; transition: opacity 120ms ease-out 450ms; }}",
+         .tip-host:hover > .tip, .tip-host:focus-visible > .tip {{ opacity: 1; transition: opacity 120ms ease-out 450ms; }} \
+         .lights svg {{ opacity: 0; }} .lights:hover svg {{ opacity: 1; }}",
         accent = t.accent,
         z = layer::POPOVER,
         pill = t.pill,
@@ -893,6 +954,11 @@ pub fn AppShell(
     account: Option<Account>,
     /// The organization / workspace switcher, at the head of the sidebar.
     workspaces: Option<Workspaces>,
+    /// The app's buttons at the sidebar's foot, above the workspace
+    /// switcher and the account, top to bottom (Theme, Settings): rows in a
+    /// docked sidebar, icons in a folded one's ribbon and in a rail.
+    #[props(default)]
+    foot: Vec<Action>,
     /// The app's left side: what is beside the tabs in the sidebar, and
     /// a phone's left drawer.
     left: Option<Element>,
@@ -977,11 +1043,14 @@ pub fn AppShell(
         drawer,
         fold,
         right_away,
+        left_w,
+        left_open: None,
         has_left,
         has_right,
         separate: separate.clone(),
         account: account.clone(),
         workspaces: workspaces.clone(),
+        foot: foot.clone(),
         window: window.clone(),
         brand,
         floats_separate: frame(screen, style) == Frame::Sidebar,
@@ -999,11 +1068,6 @@ pub fn AppShell(
         bar_actions: actions,
         bars,
     };
-    let mut ctx = use_context_provider(|| Signal::new(shell.clone()));
-    if *ctx.peek() != shell {
-        ctx.set(shell.clone());
-    }
-
     let form = screen.form();
     let phone = form == FormFactor::Phone;
     let frame = frame(screen, style);
@@ -1036,6 +1100,15 @@ pub fn AppShell(
         left_open.to(f64::from(u8::from(left)));
         right_open.to(f64::from(u8::from(right)));
     }));
+    // Pages read the sidebar's fold as it moves (the title row's clearance).
+    let shell = Shell {
+        left_open: Some(left_open),
+        ..shell
+    };
+    let mut ctx = use_context_provider(|| Signal::new(shell.clone()));
+    if *ctx.peek() != shell {
+        ctx.set(shell.clone());
+    }
 
     // A press on a tab also closes a drawer.
     let pick = move |id: &'static str| {
@@ -1232,7 +1305,10 @@ pub fn AppShell(
     };
     // The page's tab starts where the page's column does, past the docked
     // sidebar; otherwise clear of the window's and the sidebar's buttons.
-    let tabs_left = if left_clip > 0.0 {
+    let tabs_left = if left_clip > 0.0 && has_left {
+        // Mid-fold, never under the window's and the sidebar's buttons.
+        (RIBBON + left_clip + 4.0).max(shell.content_left())
+    } else if left_clip > 0.0 {
         RIBBON + left_clip + 4.0
     } else if has_left {
         shell.content_left()
@@ -1248,9 +1324,15 @@ pub fn AppShell(
     // a press only inside its element's parents' boxes.
     let page_title = frame == Frame::Sidebar && shell.page_draws_title_row();
     let spacer_title = if page_title { bar_title.clone() } else { None };
-    // A corner badge sits under the floating button: lift it clear.
+    let show_status_bar = desk
+        && status_style == StatusStyle::Bar
+        && (chrome.filler(Slot::Status).is_some() || !all_status.is_empty());
+    // A corner badge, or the status bar at the page's foot, sits under the
+    // floating button: lift it clear.
     let badge_room = if desk && status_style == StatusStyle::Badge && !all_status.is_empty() {
         STATUS_BADGE
+    } else if show_status_bar {
+        STATUS_BAR
     } else {
         0.0
     };
@@ -1339,6 +1421,13 @@ pub fn AppShell(
                         } else {
                             span { style: "flex: 1;" }
                         }
+                        if desk && !foot.is_empty() {
+                            div { style: "display: flex; flex-direction: column; gap: 1px; padding: 6px 8px; border-top: 1px solid {t.rule};",
+                                for action in foot.iter().cloned() {
+                                    FootRow { key: "{action.label}", action }
+                                }
+                            }
+                        }
                         if desk {
                             if let Some(workspaces) = workspaces.clone() {
                                 div { style: "display: flex; align-items: center; padding: 6px 10px; border-top: 1px solid {t.rule};",
@@ -1363,6 +1452,14 @@ pub fn AppShell(
                 style: "position: relative; left: {page_shift}px; flex: 1; min-width: 0; min-height: 0; \
                         display: flex; flex-direction: column;",
                 {children}
+                // A desk's status bar is the page's foot: it starts where the
+                // left side (rail, sidebar) ends and stops at the right side,
+                // so the sidebars run to the window's bottom (Obsidian's).
+                if show_status_bar {
+                    SlotView { slot: Slot::Status,
+                        StatusBar { items: all_status.clone() }
+                    }
+                }
                 if float_separate {
                     if let Some(sep) = separate.clone() {
                         div {
@@ -1400,12 +1497,6 @@ pub fn AppShell(
                 PhoneFoot { tabs: tabs, current, on_tab: pick, separate: separate, screen }
             }
             }
-            // A desk's status bar runs across the whole window's foot.
-            if desk && status_style == StatusStyle::Bar && (chrome.filler(Slot::Status).is_some() || !all_status.is_empty()) {
-                SlotView { slot: Slot::Status,
-                    StatusBar { items: all_status.clone() }
-                }
-            }
             if desk && status_style == StatusStyle::Badge {
                 StatusBadge { items: all_status }
             }
@@ -1413,6 +1504,9 @@ pub fn AppShell(
             // side is showing or not (T3 Code's): the left one just past the
             // window's buttons, the right one at the top right.
             if form == FormFactor::Desk {
+                if let Some(controls) = window.as_ref().and_then(|w| w.controls.clone()) {
+                    WindowButtons { controls }
+                }
                 if has_left {
                     TitleControl { side: Side::Left }
                 }
@@ -1437,8 +1531,15 @@ pub fn AppShell(
                                     }
                                 }
                                 {left}
+                                span { style: "flex: 1;" }
+                                if !foot.is_empty() {
+                                    div { style: "display: flex; flex-direction: column; gap: 1px; padding: 6px 8px; border-top: 1px solid {t.rule};",
+                                        for action in foot.iter().cloned() {
+                                            FootRow { key: "{action.label}", action }
+                                        }
+                                    }
+                                }
                                 if let Some(account) = account {
-                                    span { style: "flex: 1;" }
                                     AccountRow { account, bottom: 0.0 }
                                 }
                             }
@@ -1620,7 +1721,8 @@ fn DeskTitleRow(title: Option<String>, tabs_left: f64) -> Element {
             // The page's tab: as tall as the row, its tab centred in it. Only
             // as wide as the tab, so the drag area beside it still moves the window.
             if let Some(tab) = tab {
-                div { style: "position: absolute; left: {tabs_left}px; top: {top}px; height: {row}px; display: flex; align-items: center;",
+                // At the row's foot, over its rule (the tab opens into the page).
+                div { style: "position: absolute; left: {tabs_left}px; top: {top}px; height: {row}px; display: flex; align-items: flex-end;",
                     SlotView { slot: Slot::Tabs,
                         page::DeskTab { title: tab }
                     }
@@ -1682,6 +1784,44 @@ fn TitleControl(side: Side) -> Element {
                     Side::Left => rsx! { PanelLeft { size: 17, color: t.ink_2.to_string() } },
                     Side::Right => rsx! { PanelRight { size: 17, color: t.ink_2.to_string() } },
                 }
+            }
+        }
+    }
+}
+
+/// The window's close, minimize and maximize as a Mac's traffic lights,
+/// at the title row's left where a Mac's sit (when the shell draws the
+/// window's title bar off a Mac). Their glyphs show while the pointer is
+/// over them.
+#[component]
+fn WindowButtons(controls: WindowControls) -> Element {
+    let shell = use_shell();
+    let row = shell.title_row();
+    let top = shell.screen.insets.top;
+    let left = shell.screen.insets.left + WindowChrome::MAC_LIGHTS_LEFT;
+    let (close, minimize, maximize) = (
+        controls.on_close,
+        controls.on_minimize,
+        controls.on_maximize,
+    );
+    let light = |colour: &str| {
+        format!(
+            "width: {LIGHT}px; height: {LIGHT}px; box-sizing: border-box; padding: 0; border: none; \
+             border-radius: 50%; background: {colour}; display: flex; align-items: center; justify-content: center;"
+        )
+    };
+    let (red, yellow, green) = (light("#ff5f57"), light("#febc2e"), light("#28c840"));
+    rsx! {
+        div { class: "lights", style: "position: absolute; top: {top}px; left: {left}px; height: {row}px; display: flex; \
+                      align-items: center; gap: {LIGHT_GAP}px; z-index: 30;",
+            button { "aria-label": "Close", style: "{red}", onclick: move |_| close.call(()),
+                X { size: 8, color: "#4d0000".to_owned() }
+            }
+            button { "aria-label": "Minimize", style: "{yellow}", onclick: move |_| minimize.call(()),
+                Minus { size: 8, color: "#5a3c00".to_owned() }
+            }
+            button { "aria-label": "Maximize", style: "{green}", onclick: move |_| maximize.call(()),
+                Square { size: 6, color: "#003a00".to_owned() }
             }
         }
     }
@@ -2030,10 +2170,10 @@ fn DeskRibbon(
     let shell = use_shell();
     let t = shell.theme.clone();
     let extra = (shell.rail_extra)();
-    let (workspaces, account) = if folded {
-        (shell.workspaces, shell.account)
+    let (workspaces, account, foot) = if folded {
+        (shell.workspaces, shell.account, shell.foot)
     } else {
-        (None, None)
+        (None, None, Vec::new())
     };
     rsx! {
         div {
@@ -2051,8 +2191,11 @@ fn DeskRibbon(
                     div { style: "width: 60%; height: 1px; background: {t.rule}; margin: 4px 0;" }
                     {extra}
                 }
-                if workspaces.is_some() || account.is_some() {
+                if workspaces.is_some() || account.is_some() || !foot.is_empty() {
                     span { style: "flex: 1;" }
+                    for action in foot {
+                        FootIcon { key: "{action.label}", action }
+                    }
                     if let Some(workspaces) = workspaces {
                         div { style: "display: flex; width: 36px;",
                             Switcher { workspaces, place: Place::Ribbon }
@@ -2063,6 +2206,44 @@ fn DeskRibbon(
                     }
                 }
             }
+        }
+    }
+}
+
+/// One of the app's foot buttons in a docked sidebar: its icon and label.
+#[component]
+fn FootRow(action: Action) -> Element {
+    let t = use_shell().theme;
+    let press = action.on_press;
+    rsx! {
+        button {
+            class: "lp",
+            "aria-label": "{action.label}",
+            style: "height: 30px; display: flex; align-items: center; gap: 10px; padding: 0 10px; border: none; \
+                    border-radius: 7px; background: transparent; color: {t.ink_2}; font-family: {t.font}; \
+                    font-size: 13px; font-weight: 550; text-align: left;",
+            onclick: move |_| press.call(()),
+            {(action.icon)(Icon { size: 16, color: t.ink_3.clone() })}
+            span { "{action.label}" }
+        }
+    }
+}
+
+/// One of the app's foot buttons in a folded ribbon or a rail: its icon,
+/// its label on hover.
+#[component]
+pub(super) fn FootIcon(action: Action) -> Element {
+    let t = use_shell().theme;
+    let press = action.on_press;
+    rsx! {
+        button {
+            class: "lp tip-host",
+            "aria-label": "{action.label}",
+            style: "position: relative; width: 32px; height: 32px; flex-shrink: 0; align-self: center; border: none; \
+                    border-radius: 7px; background: transparent; display: flex; align-items: center; justify-content: center;",
+            onclick: move |_| press.call(()),
+            {(action.icon)(Icon { size: 18, color: t.ink_3 })}
+            span { class: "tip", style: "left: 40px; top: 5px;", "{action.label}" }
         }
     }
 }

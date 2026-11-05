@@ -1,6 +1,6 @@
 [package]
 name = "architect-lab-board"
-description = "The lab's example extension: one linked::Extension that the lab links in and that also runs as its own process (apps/lab/board/extension.toml) — a tab, a status item, a context-menu entry, a .kf opener, a URL opener, a startup hook, and its own status bar in the shell's status slot."
+description = "The lab's example extension: one linked::Extension that the lab links in and that also runs as its own process (apps/lab/board/extension.toml) — a tab, a status item in the shell's status bar, a context-menu entry, a .kf opener, a URL opener, and a startup hook."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -163,6 +163,9 @@ pub(super) fn Rail(
                 RailTab { key: "{tab.id}", on: current == Some(tab.id), tab, on_tab }
             }
             span { style: "flex: 1;" }
+            for action in shell.foot.clone() {
+                super::FootIcon { key: "{action.label}", action }
+            }
             if let Some(account) = account {
                 super::AccountChip { account }
             }

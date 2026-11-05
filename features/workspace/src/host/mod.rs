@@ -355,7 +355,8 @@ struct Sizes {
 
 impl Sizes {
     const FINE: Self = Self {
-        tabs: 36.0,
+        // Obsidian's 40pt tab header: its tabs 34pt, 6pt below its top.
+        tabs: 40.0,
         divider: 5.0,
         ribbon: 40.0,
         button: 28.0,

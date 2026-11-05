@@ -1759,7 +1759,7 @@ host kernels.
 |---|---|---|---|
 | `theme.picker` | `features/theme/picker` | ⌘K's "Choose a theme…" and "Light or dark", ⌘O's `theme:` | `EXT_CLONE` (`features/theme/picker/tests/dev_loop.rs`); both ways in `features/theme/picker/tests/both_ways.rs` |
 | `manager` (the extensions page) | `features/extensions/src/manager` | `MANAGER_*`, its views, its settings section, ⌘O's `ext:` | none yet: its kinds are the app's Rust values (below) |
-| `lab.board` | `apps/lab/board` | the lab's example: a tab, a status slot, openers, hooks | `EXT_CLONE` (`apps/lab/board/tests/dev_loop.rs`) |
+| `lab.board` | `apps/lab/board` | the lab's example: a tab, a status item, openers, hooks | `EXT_CLONE` (`apps/lab/board/tests/dev_loop.rs`) |
 | `settings` (the settings page) | `features/settings/sheet` | the window ⌘, opens (`APP_SETTINGS`, reserved), the point `settings.sections` | `EXT_CLONE` (`features/settings/sheet/tests/dev_loop.rs`); both ways in `features/settings/sheet/tests/both_ways.rs` |
 
 `apps/lab/media/tests/builtins.rs` checks that the default lab looks

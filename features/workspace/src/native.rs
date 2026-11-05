@@ -250,6 +250,8 @@ impl Desk {
 enum Ask {
     Open(Box<Popout>),
     Close(WindowId),
+    /// Close the main window, as its system close button does.
+    CloseMain,
     /// End the event loop: the app quits.
     Quit,
 }
@@ -277,6 +279,14 @@ impl MainWindow {
     /// any dom: change no signal from it.
     pub fn on_close(&self, close: Option<Rc<dyn Fn() -> bool>>) {
         *self.0.on_close.borrow_mut() = close;
+    }
+
+    /// Closes the main window as its system close button does (for a
+    /// title bar the app draws itself): the app's [`Self::on_close`] may
+    /// keep it, otherwise the app quits.
+    pub fn close(&self) {
+        self.0.requests.borrow_mut().push(Ask::CloseMain);
+        self.0.wake.wake_up();
     }
 
     /// Ends the event loop on its next turn: the app quits, its windows
@@ -463,6 +473,11 @@ impl App {
             match ask {
                 Ask::Open(popout) => self.open(event_loop, *popout),
                 Ask::Quit => event_loop.exit(),
+                Ask::CloseMain => {
+                    if !self.kept_main() {
+                        event_loop.exit();
+                    }
+                }
                 Ask::Close(id) => {
                     let os = self
                         .popouts

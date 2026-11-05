@@ -62,10 +62,8 @@ fn exercise(ext: &Extensions, list: &ActionList, origin: Origin) -> BTreeSet<Str
     assert_eq!(out["state"]["last_invoked"]["source"], "context_menu");
     until("its status item", || status(ext) == "1 pin: note-1");
     let reg = ext.host().contributions();
-    assert_eq!(
-        reg.slots()["status"],
-        (ID.to_owned(), "status-bar".to_owned())
-    );
+    // Its status item joins the shell's bar; it fills no slot.
+    assert!(!reg.slots().contains_key("status"));
     assert_eq!(reg.open_path("intro.kf")[0].item.key(), "kf");
     reg.of(ID).unwrap().keys()
 }
@@ -87,7 +85,6 @@ fn linked_in() {
         .unwrap();
     let _ = ext.sync();
     let keys = exercise(&ext, &list, Origin::Builtin);
-    assert!(ext.host().linked_view(ID, "status-bar").is_some());
     let _ = block_on(list.run_json_async("LAB_BOARD_CLEAR", b"")).unwrap();
     let _ = ext.disable(ID);
     assert!(ext.host().contributions().of(ID).is_none());
