@@ -83,7 +83,6 @@ fn without_offsets(html: &str) -> String {
     out
 }
 
-
 /// `html` with each `data-dioxus-id="…"` emptied: the order things were
 /// mounted in, not how they look.
 fn without_ids(html: &str) -> String {

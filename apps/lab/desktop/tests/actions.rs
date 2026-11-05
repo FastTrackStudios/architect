@@ -26,7 +26,6 @@ fn isolated() {
     unsafe { std::env::set_var("ARCHITECT_LAB_CONFIG_DIR", dir.path()) };
 }
 
-
 #[derive(clap::Parser)]
 struct Top {
     #[command(flatten)]

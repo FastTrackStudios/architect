@@ -32,7 +32,6 @@ fn isolated() {
     unsafe { std::env::set_var("ARCHITECT_LAB_CONFIG_DIR", dir.path()) };
 }
 
-
 /// The headless lab on its Vault page (the workspace's actions on the
 /// list), settled.
 fn lab_on_the_vault() -> HeadlessLab {
