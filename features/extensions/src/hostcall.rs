@@ -24,6 +24,9 @@
 //! | `rename_document {path, to}` / `move_document {path, folder}` | a new path (or folder) for it, its history kept: its `DocInfo` | `writes = ["documents"]` |
 //! | `delete_document {path}` | deletes it | `writes = ["documents"]` |
 //! | `watch_documents {action \| script, function?}` | its action (script) on every `doc.created/saved/renamed/deleted`: the hooks' keys | `reads = ["documents"]` |
+//! | `editor_state` | the editor being typed in: `{editor, context, text, selection, primary, cursor, node, version}` (`crate::editor::EditorView`; `node` is the block at the cursor: a list item, a table cell and its table's cells, …) | `reads = ["editor"]` or `writes = ["editor"]` |
+//! | `edit_editor {changes, selection?, name?, base?}` | its changes (byte offsets into the text it read) and selection as one transaction, one undo step named `name`, made as the extension (`editor_ext::EditCommand`): the editor after | `writes = ["editor"]` |
+//! | `decorate_editor {decorations}` | its marks, line and gutter decorations and widgets (`editor_ext::DecorationSpec`; a widget mounts one of its own `[[embeds]]` or `[[views]]`) in the editor, in place of the ones it set before (`[]`: none) | `writes = ["editor"]` |
 //! | `read_file {path}` / `write_file {path, text}` | a file: relative paths are in its own data folder | its own folder, or `capabilities.folders` |
 //! | `setting {key}` / `set_setting {key, value}` | one of its own settings (`<id>.…`) | nothing |
 //! | `data {key}` / `set_data {key, value?}` | its own data, kept for it | nothing |
@@ -65,7 +68,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::capabilities::{
-    BADGES, CLIPBOARD, DOCUMENTS, MENUS, NOTIFY, ORG, PICKERS, PROMPTS, SELECTION,
+    BADGES, CLIPBOARD, DOCUMENTS, EDITOR, MENUS, NOTIFY, ORG, PICKERS, PROMPTS, SELECTION,
 };
 pub use crate::documents::{DocEdit, DocInfo};
 use crate::manifest::{Capabilities, Manifest, Reach};
@@ -135,6 +138,28 @@ pub enum HostRequest {
         script: Option<String>,
         #[serde(default)]
         function: Option<String>,
+    },
+    /// The editor being typed in (`crate::editor`): its
+    /// [`crate::editor::EditorView`].
+    EditorState,
+    /// `changes` and `selection` as one transaction of the editor being
+    /// typed in, one undo step named `name`, made as the extension
+    /// (`editor_ext::EditCommand`): the editor after.
+    EditEditor {
+        #[serde(default)]
+        changes: Vec<editor_ext::TextChange>,
+        #[serde(default)]
+        selection: Option<Vec<editor_ext::SelRange>>,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        base: Option<u64>,
+    },
+    /// Its decorations in the editor being typed in, in place of the ones
+    /// it set before.
+    DecorateEditor {
+        #[serde(default)]
+        decorations: Vec<editor_ext::DecorationSpec>,
     },
     ReadFile {
         path: String,
@@ -606,6 +631,9 @@ impl HostRequest {
             Self::MoveDocument { .. } => "move_document",
             Self::DeleteDocument { .. } => "delete_document",
             Self::WatchDocuments { .. } => "watch_documents",
+            Self::EditorState => "editor_state",
+            Self::EditEditor { .. } => "edit_editor",
+            Self::DecorateEditor { .. } => "decorate_editor",
             Self::ReadFile { .. } => "read_file",
             Self::WriteFile { .. } => "write_file",
             Self::Setting { .. } => "setting",
@@ -804,6 +832,30 @@ pub fn check(
                 ))
             },
         ),
+        HostRequest::EditorState => (
+            "reads",
+            if may.may_read(EDITOR) || may.may_write(EDITOR) {
+                Ok(())
+            } else {
+                Err((
+                    format!("reads.{EDITOR}"),
+                    format!("this extension may not read the app's {EDITOR} (capabilities.reads)"),
+                ))
+            },
+        ),
+        HostRequest::EditEditor { .. } | HostRequest::DecorateEditor { .. } => (
+            "writes",
+            if may.may_write(EDITOR) {
+                Ok(())
+            } else {
+                Err((
+                    format!("writes.{EDITOR}"),
+                    format!(
+                        "this extension may not change the app's {EDITOR} (capabilities.writes)"
+                    ),
+                ))
+            },
+        ),
         HostRequest::Setting { key } | HostRequest::SetSetting { key, .. } => {
             let check = if key.starts_with(&format!("{}.", manifest.id)) {
                 Ok(())
@@ -963,6 +1015,22 @@ mod tests {
             panic!("{r:?}")
         };
         assert_eq!((edits.len(), r.op()), (2, "edit_document"));
+        let r: HostRequest = serde_json::from_str(
+            r#"{"op":"edit_editor","changes":[{"from":0,"to":0,"insert":"  "}],"name":"Indent"}"#,
+        )
+        .unwrap();
+        let HostRequest::EditEditor { changes, name, .. } = &r else {
+            panic!("{r:?}")
+        };
+        assert_eq!(
+            (changes.len(), name.as_deref(), r.op()),
+            (1, Some("Indent"), "edit_editor")
+        );
+        let r: HostRequest = serde_json::from_str(
+            r#"{"op":"decorate_editor","decorations":[{"kind":"mark","from":0,"to":2,"class":"todo"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(r.op(), "decorate_editor");
         let r: HostRequest = serde_json::from_str(r#"{"op":"clipboard_read"}"#).unwrap();
         assert_eq!(r, HostRequest::ClipboardRead);
         let r: HostRequest = serde_json::from_str(

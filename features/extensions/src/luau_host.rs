@@ -36,6 +36,16 @@
 //! host.move_document("notes/Today.md", "archive")  -- archive/Today.md
 //! host.delete_document("archive/Today.md")
 //! host.watch_documents({ action = "ACME_REINDEX" }) -- doc.created/saved/renamed/deleted
+//! -- The editor being typed in (crate::editor): reads or writes =
+//! -- ["editor"] reads it, writes = ["editor"] edits and decorates it.
+//! local ed = host.editor()   -- {editor, context, text, selection, cursor, node, version}
+//! if ed.node.kind == "list-item" then
+//!     host.edit_editor({                            -- one transaction, one undo step
+//!         changes = { { from = ed.node.line_from, to = ed.node.line_from, insert = "  " } },
+//!         name = "Indent", base = ed.version,
+//!     })
+//! end
+//! host.decorate_editor({ { kind = "mark", from = 0, to = 4, class = "todo" } })
 //! -- The network (crate::net): to the hosts in capabilities.hosts, each
 //! -- redirect checked; a secret named in a header, put in by the host.
 //! local r = host.fetch("https://api.example.com/v1/items", {
@@ -190,6 +200,27 @@ impl Module for HostModule {
             "watch_documents",
             Some(a)
         ));
+        // The editor being typed in (crate::editor).
+        op!("editor", (), |lua, _a| Ok(HostRequest::EditorState));
+        op!("edit_editor", LuaValue, |lua, a| request_of(
+            &lua,
+            "edit_editor",
+            Some(a)
+        ));
+        op!("decorate_editor", LuaValue, |lua, a| {
+            json_of(&lua, a).and_then(|decorations| {
+                // An empty Luau table reads as `{}`: none.
+                let decorations = if decorations == json!({}) {
+                    json!([])
+                } else {
+                    decorations
+                };
+                serde_json::from_value(json!({
+                    "op": "decorate_editor", "decorations": decorations,
+                }))
+                .map_err(|e| mlua::Error::runtime(format!("decorate_editor: {e}")))
+            })
+        });
         op!("read_file", String, |lua, a| Ok(HostRequest::ReadFile {
             path: a
         }));

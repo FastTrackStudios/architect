@@ -793,6 +793,51 @@ pub mod host {
             .map_err(|e| HostError::from_text(&e))
     }
 
+    /// The editor being typed in, as JSON.
+    ///
+    /// `{editor, context, text, selection, primary, cursor, node,
+    /// version}`; `node` is the block at
+    /// the cursor: `{kind, line_from, line_to, indent, marker?,
+    /// content_from, cell?, cells?}`). Needs `reads` or `writes =
+    /// ["editor"]`.
+    ///
+    /// # Errors
+    ///
+    /// Refused, or no editor has the focus.
+    pub fn editor_state() -> Result<Json, HostError> {
+        wit_host::editor_state()
+            .map(|t| serde_json::from_str(&t).unwrap_or(Json::Null))
+            .map_err(|e| HostError::from_text(&e))
+    }
+
+    /// `command` as one transaction, one undo step: the editor after, as
+    /// JSON.
+    ///
+    /// `{"changes": [{"from", "to", "insert"}], "selection"?: [{"anchor",
+    /// "head"}], "name"?, "base"?}`, byte offsets into the text it read.
+    /// Needs `writes = ["editor"]`.
+    ///
+    /// # Errors
+    ///
+    /// Refused, no editor, or a change that does not fit its text (stale,
+    /// out of bounds, overlapping).
+    pub fn edit_editor(command: &Json) -> Result<Json, HostError> {
+        wit_host::edit_editor(&command.to_string())
+            .map(|t| serde_json::from_str(&t).unwrap_or(Json::Null))
+            .map_err(|e| HostError::from_text(&e))
+    }
+
+    /// Its decorations in the editor (`[{"kind": "mark", "from", "to",
+    /// "class"}, {"kind": "line" | "gutter" | "widget", …}]`), in place of
+    /// the ones it set before. Needs `writes = ["editor"]`.
+    ///
+    /// # Errors
+    ///
+    /// Refused, no editor, or one that does not fit its text.
+    pub fn decorate_editor(decorations: &Json) -> Result<(), HostError> {
+        wit_host::decorate_editor(&decorations.to_string()).map_err(|e| HostError::from_text(&e))
+    }
+
     /// An HTTP request through the host.
     ///
     /// `request` is `{"url": …, "method"?, "headers"?, "body"?,

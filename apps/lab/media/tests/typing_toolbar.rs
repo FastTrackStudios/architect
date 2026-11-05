@@ -220,7 +220,29 @@ fn the_typing_toolbar_on_a_phone() {
         ),
     );
     matches("editor", &editor);
+
+    // A note's editor typed in (the FastTrackStudios editor: no `<input>`,
+    // so it tells the shell itself): the bar is the Typing Toolbar, with
+    // lab.outline's `editor:note` items on it.
+    // SAFETY: as in `play`: between runs, before the lab starts.
+    unsafe { std::env::set_var("ARCHITECT_LAB_OUTLINE", "1") };
+    let note = play("note", folder.path(), NOTE);
+    assert!(note.contains(r#"data-editing="note""#), "{note}");
+    assert!(
+        note.contains(r#"data-bar-item="LAB_OUTLINE_INDENT""#),
+        "{note}"
+    );
 }
+
+/// The outline note in its Edit mode, its text clicked into.
+const NOTE: &str = r##"    {id vault, do @run{id LAB_GO_VAULT}, done {on (@changed"lab"), check ({id LAB_STATE, has {tab vault}})}}
+    {id open, do @run{id WORKSPACE_OPEN, args {view note, id note-outline, title "Outline", at {replace {pane note-welcome}}}}}
+    {id focus, do @run{id WORKSPACE_FOCUS, args {pane note-outline}}, done {check ({id WORKSPACE_LAYOUT, has {active note-outline}}), timeout 5}}
+    {id edit, target @css"#note-edit", do @click{}}
+    {id mounted, target @css"[data-note-editor=\"note-outline\"] .editor-root", done {timeout 5}}
+    {id type-in, target @css"[data-note-editor=\"note-outline\"] [data-tile-pos]", do @click{}, done {check ({id LAB_STATE, has {bar editing}}), timeout 5}}
+    {id outline, target @css"[data-bar-item=\"LAB_OUTLINE_INDENT\"]", done {timeout 5}}
+"##;
 
 /// Whether a file called `name` is anywhere under `dir`.
 fn has_file(dir: &Path, name: &str) -> bool {

@@ -25,6 +25,7 @@ use dioxus::prelude::*;
 use serde_json::{Value, json};
 
 use crate::host::Host;
+use crate::host_ui_view::EDITOR_LAYER;
 use crate::interface::{ExtensionUi, ExtensionView};
 use crate::toolbar::{
     MenuItem, MenuKind, PRESETS, RIGHT_CLICKS, SIZES, ToolItem, ToolKind, ToolbarDecl,
@@ -465,7 +466,7 @@ pub fn ToolbarEditorLayer(ui: ExtensionUi) -> Element {
     rsx! {
         div {
             "data-toolbar-editor": if editing { "on" } else { "off" },
-            style: "position:absolute; left:0; top:0; right:0; bottom:0; pointer-events:none; z-index:85;",
+            style: "position:absolute; left:0; top:0; right:0; bottom:0; pointer-events:none; z-index:{EDITOR_LAYER};",
             onmounted: move |e| viewport.set(Some(e.data())),
             if editing {
                 EditBar { ui }

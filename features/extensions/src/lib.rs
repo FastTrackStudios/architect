@@ -41,6 +41,8 @@ pub mod capabilities;
 pub mod catalog;
 pub mod contrib;
 pub mod documents;
+// The editor being typed in, for extensions (#312).
+pub mod editor;
 pub mod events;
 pub mod hostcall;
 pub mod index;

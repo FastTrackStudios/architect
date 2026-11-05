@@ -18,6 +18,7 @@ mod items;
 #[cfg(feature = "keyflow-lab")]
 mod keyflow;
 mod note;
+mod note_editor;
 mod pages;
 mod paint;
 pub mod presence;

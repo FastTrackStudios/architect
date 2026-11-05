@@ -108,6 +108,13 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/FastTrackStudios/architect"
 
 [workspace.dependencies]
+# The editor's extension surface as data (FastTrackStudios/editor's
+# crates/editor-ext): what `architect-extensions`' editor calls carry, at
+# FastTrackStudios/editor#28's head, like the rest of the editor below.
+editor-ext = { git = "https://github.com/FastTrackStudios/editor", rev = "f8137a9326825361e2046254790758dc516caa44" }
+# The editor's view, for the lab's note editor (native, on Blitz). Its
+# source is patched to the pinned editor below, like Keyflow's.
+editor-view = { git = "https://github.com/FastTrackStudios/editor", rev = "f8137a9326825361e2046254790758dc516caa44", default-features = false }
 # SMTP for the auth server's verification and password-reset mail.
 # rustls, not native-tls, so the build carries no OpenSSL dependency.
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-rustls-tls", "builder", "hostname"] }
@@ -424,17 +431,19 @@ dioxus-native-dom = { git = "https://www.github.com/FastTrackStudios/vendor", re
 dioxus-vdom = { git = "https://github.com/FastTrackStudios/vendor", tag = "v0.7.1" }
 
 # The editor, through Keyflow (the lab's Keyflow chart and source editor,
-# `keyflow-lab`), at FastTrackStudios/editor#26's head: #25 (a click past
+# `keyflow-lab`), at FastTrackStudios/editor#28's head (the extension
+# surface, architect#312), which has #26's: #25 (a click past
 # the end of a line puts the caret at its end on Blitz), and the editor's
 # own Blitz/vendor pins moved to the IME revs architect pins below (its
 # native_ime tests, and its dev shell on macOS). Keyflow pins the editor at
 # 554b713; `www.` is the same repository under another source, as a patch
 # needs. Drop this once Keyflow pins a merged editor that has it.
 [patch."https://github.com/FastTrackStudios/editor"]
-editor-state = { git = "https://www.github.com/FastTrackStudios/editor", rev = "66be359ff59fbb103608761579fb59dca84bba0e" }
-editor-syntax = { git = "https://www.github.com/FastTrackStudios/editor", rev = "66be359ff59fbb103608761579fb59dca84bba0e" }
-editor-view = { git = "https://www.github.com/FastTrackStudios/editor", rev = "66be359ff59fbb103608761579fb59dca84bba0e" }
-editor-vim = { git = "https://www.github.com/FastTrackStudios/editor", rev = "66be359ff59fbb103608761579fb59dca84bba0e" }
+editor-ext = { git = "https://www.github.com/FastTrackStudios/editor", rev = "f8137a9326825361e2046254790758dc516caa44" }
+editor-state = { git = "https://www.github.com/FastTrackStudios/editor", rev = "f8137a9326825361e2046254790758dc516caa44" }
+editor-syntax = { git = "https://www.github.com/FastTrackStudios/editor", rev = "f8137a9326825361e2046254790758dc516caa44" }
+editor-view = { git = "https://www.github.com/FastTrackStudios/editor", rev = "f8137a9326825361e2046254790758dc516caa44" }
+editor-vim = { git = "https://www.github.com/FastTrackStudios/editor", rev = "f8137a9326825361e2046254790758dc516caa44" }
 
 # ── Lints ─────────────────────────────────────────────────────────────
 [workspace.lints.rust]

@@ -445,6 +445,7 @@ fn shipped(args: &serde_json::Value) -> Result<serde_json::Value, String> {
 /// `LAB_PAINT_STATE`, the paint pane's.
 pub fn register(list: &ActionList, surfaces: &architect_a2ui::Surfaces) {
     crate::paint::register(list);
+    crate::note_editor::register(list);
     #[cfg(feature = "keyflow-lab")]
     crate::keyflow::register(list);
     let failed = |id: &str, message: String| ActionError::Failed {

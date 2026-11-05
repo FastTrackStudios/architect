@@ -229,6 +229,21 @@ interface host {
     /// `{"action": …}` as JSON): the hooks' keys as JSON.
     watch-documents: func(hook: string) -> result<string, string>;
 
+    // The editor being typed in (features/extensions/src/editor.rs):
+    // `reads` or `writes = ["editor"]` reads it, `writes = ["editor"]`
+    // edits and decorates it.
+
+    /// The focused editor (`editor_state`): `editor::EditorView` as JSON
+    /// (its text, selection, cursor, the block at the cursor, version).
+    editor-state: func() -> result<string, string>;
+    /// `command` (`editor_ext::EditCommand` as JSON: changes, selection?,
+    /// name?, base?) as one transaction, one undo step (`edit_editor`):
+    /// the editor after, as JSON.
+    edit-editor: func(command: string) -> result<string, string>;
+    /// Its decorations (`[editor_ext::DecorationSpec]` as JSON) in the
+    /// editor, in place of the last (`decorate_editor`).
+    decorate-editor: func(decorations: string) -> result<_, string>;
+
     // The network (features/extensions/src/net.rs): through the host, to
     // the hosts in `capabilities.hosts`, each redirect checked. The world
     // has no `wasi:http` or `wasi:sockets`: this is its network.

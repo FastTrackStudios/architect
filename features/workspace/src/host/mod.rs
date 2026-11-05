@@ -1368,8 +1368,12 @@ pub fn WorkspaceView(
     #[props(default, into)]
     theme: Option<ShellTheme>,
 ) -> Element {
+    // Asked for on every render: a hook in a branch (`phone && …`) moved
+    // every hook after it when a window was resized across a phone's width.
+    let shell_now = architect_shell::try_use_shell();
+    let in_a_shell = shell_now.is_some();
     let theme = theme
-        .or_else(|| architect_shell::try_use_shell().map(|s| s.theme))
+        .or_else(|| shell_now.map(|s| s.theme))
         .unwrap_or_default();
     let os_windows = try_use_context::<Windows>();
     let mut host = use_context_provider(|| Host {
@@ -1485,7 +1489,7 @@ pub fn WorkspaceView(
     }
     // A phone's tab switcher takes the whole screen in a shell (its bars
     // too), else the host.
-    let shell_cover = phone && architect_shell::try_use_shell().is_some();
+    let shell_cover = phone && in_a_shell;
     architect_shell::use_shell_cover(
         shell_cover.then(|| rsx! { HostScope { host, switcher::SwitcherLayer { cover: true } } }),
     );

@@ -72,6 +72,9 @@ const METRONOME_DIR: &str = "metronome";
 /// `lab.tidy`'s folder beside the lab's registry (not in its index: a
 /// development copy, `ARCHITECT_LAB_TIDY=1`).
 const TIDY_DIR: &str = "tidy";
+/// The editor API's extension, beside the registry (a development copy,
+/// `ARCHITECT_LAB_OUTLINE=1`).
+const OUTLINE_DIR: &str = "outline";
 
 /// `lab.surface`'s folder beside the lab's registry (not in its index: a
 /// development copy, `ARCHITECT_LAB_SURFACE=1`): an OSC control surface
@@ -824,6 +827,9 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
             // The lab's spaces, as documents extensions list, change and
             // watch (`lab.tidy`).
             .with_documents(documents())
+            // The note being edited, for extensions' editor calls
+            // (`lab.outline`; src/note_editor.rs).
+            .with_editors(crate::note_editor::Live)
             .with_setting_values(values.clone());
         // MIDI ports and OSC endpoints for extensions (`capabilities.ports`),
         // and the targets their control surfaces move: the metronome's
@@ -904,6 +910,12 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
             .filter(|_| std::env::var_os("ARCHITECT_LAB_TIDY").is_some_and(|v| v == "1"))
             .map(|dir| dir.join(TIDY_DIR))
             .filter(|dir| dir.join("extension.toml").is_file());
+        // `lab.outline` (the editor API's) when `ARCHITECT_LAB_OUTLINE=1`.
+        let outline_dir = found
+            .as_ref()
+            .filter(|_| std::env::var_os("ARCHITECT_LAB_OUTLINE").is_some_and(|v| v == "1"))
+            .map(|dir| dir.join(OUTLINE_DIR))
+            .filter(|dir| dir.join("extension.toml").is_file());
         // `lab.surface` (MIDI, OSC and control surfaces') when
         // `ARCHITECT_LAB_SURFACE=1`.
         let surface_dir = found
@@ -918,6 +930,7 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
             .chain(board_dev(&root))
             .chain(metronome_dir)
             .chain(tidy_dir)
+            .chain(outline_dir)
             .chain(surface_dir)
         {
             let _ = extensions.dev(dir);

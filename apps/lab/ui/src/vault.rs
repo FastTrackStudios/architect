@@ -186,7 +186,7 @@ const NOTES: [(&str, &str); 7] = [
 /// The notes written in Markdown (the rest say [`WELCOME`]): a ```` ```kf ````
 /// fence and a `type: song` note, which the Board extension draws inline
 /// (`crate::note`).
-const MARKDOWN: [(&str, &str); 2] = [
+const MARKDOWN: [(&str, &str); 3] = [
     (
         "note-chart",
         "The fence below is Keyflow. The Board extension claims its language (kf), so it is drawn as a chart, \
@@ -226,6 +226,20 @@ Was blind, but now I see
 | G | G7 | C | G |
 | G | Em | D | D7 |
 ```",
+    ),
+    (
+        "note-outline",
+        "Plans for the week. TODO book the hall
+
+- Rehearsal
+- Setlist
+  - Opener
+- Gear
+
+| Day | Room |
+|-----|------|
+| Mon | A |
+| Tue | B |",
     ),
 ];
 
@@ -654,19 +668,13 @@ fn MarkdownNote(
                 }
             }
             if editing() {
-                textarea {
-                    id: "note-source",
-                    style: "min-height: 220px; max-width: 640px; box-sizing: border-box; padding: 10px 12px; \
-                            border-radius: 8px; border: 1px solid {t.rule}; background: {t.pill}; color: {t.ink}; \
-                            font-family: ui-monospace, Menlo, monospace; font-size: 13px; line-height: 1.5;",
-                    oninput: move |e: FormEvent| {
+                crate::note_editor::NoteEditor {
+                    id: id.clone(),
+                    text: text.clone(),
+                    on_change: move |value: String| {
                         let mut texts = texts;
-                        texts.write().insert(id.clone(), e.value());
+                        texts.write().insert(id.clone(), value);
                     },
-                    // Blitz takes a textarea's text from its content
-                    // once, as its editor is made; what is typed is the
-                    // editor's from then on.
-                    "{text}"
                 }
             }
             crate::note::NoteBody { text }

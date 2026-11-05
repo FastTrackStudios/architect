@@ -341,3 +341,25 @@ fn a_desk_page_with_nothing_for_the_sidebar_folds_it_into_the_ribbon() {
         "the account row"
     );
 }
+
+/// What an icon named in data draws (`named_icon`), as the mutations.
+fn drawn_icon(name: &'static str) -> String {
+    thread_local!(static NAME: std::cell::Cell<&'static str> = const { std::cell::Cell::new("") });
+    NAME.with(|n| n.set(name));
+    record(|| {
+        let icon = named_icon(NAME.with(std::cell::Cell::get));
+        icon(Icon {
+            size: 16,
+            color: "currentColor".into(),
+        })
+    })
+}
+
+#[test]
+fn lab_outline_s_indent_icons_are_known_not_a_puzzle_piece() {
+    let puzzle = drawn_icon("no-such-icon");
+    for name in ["indent-increase", "indent-decrease"] {
+        assert_ne!(drawn_icon(name), puzzle, "{name}");
+    }
+    assert_ne!(drawn_icon("indent-increase"), drawn_icon("indent-decrease"));
+}

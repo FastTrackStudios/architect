@@ -356,6 +356,58 @@ export const documents: {
   watch(hook: { action: string }): Promise<string[]>;
 };
 
+/** A selected range: byte offsets into the editor's text. */
+export type SelRange = { anchor: number; head: number };
+/** The block at the cursor: its kind, its line, a list item's indent, a table's cells. */
+export type EditorNode = {
+  kind: "paragraph" | "blank" | "heading" | "list-item" | "table" | "fence" | "quote";
+  line_from: number;
+  line_to: number;
+  line: number;
+  indent: number;
+  marker?: string;
+  content_from: number;
+  cell?: { row: number; col: number; from: number; to: number };
+  cells?: { row: number; col: number; from: number; to: number }[];
+};
+/** The editor being typed in. */
+export type EditorView = {
+  editor: string;
+  context: string;
+  text: string;
+  selection: SelRange[];
+  primary: number;
+  cursor: number;
+  node: EditorNode;
+  version: number;
+};
+/** Changes against the text read (byte offsets), and the selection after. */
+export type EditCommand = {
+  changes?: { from: number; to: number; insert?: string }[];
+  selection?: SelRange[];
+  name?: string;
+  /** The `version` read: refused if the editor has moved on. */
+  base?: number;
+};
+/** A decoration of the editor: drawn over its text, never in it. */
+export type EditorDecoration =
+  | { kind: "mark"; from: number; to: number; class: string; title?: string }
+  | { kind: "line"; at: number; class: string }
+  | { kind: "gutter"; at: number; text: string; class?: string }
+  | { kind: "widget"; at: number; view: string; props?: unknown; block?: boolean };
+/**
+ * The editor being typed in, as the page's extension:
+ * `capabilities.reads` or `.writes = ["editor"]` reads it, `.writes =
+ * ["editor"]` edits and decorates it. An edit is one transaction, one undo
+ * step.
+ */
+export const editor: {
+  state(): Promise<EditorView>;
+  edit(command: EditCommand): Promise<EditorView>;
+  /** Its decorations, in place of the ones it set before (`[]`: none). */
+  decorate(decorations: EditorDecoration[]): Promise<void>;
+};
+
 /** A request to the network (`hostcall::Fetch`), past its URL. */
 export type FetchOptions = {
   method?: string;
@@ -527,6 +579,9 @@ export type Builder = {
 --   documents.rename(path, to), documents.move(path, folder), documents.delete(path),
 --   documents.watch({ action }): the app's documents, as the page's extension
 --   (capabilities.reads / capabilities.writes "documents")
+--   editor.state(), editor.edit({ changes, selection?, name?, base? }) (one transaction,
+--   one undo step: the editor after), editor.decorate(decorations): the editor being
+--   typed in, as the page's extension (capabilities.reads / .writes "editor")
 --   net.fetch(url, options?) ({status, url, headers, body} or, stream = true, {…, stream}),
 --   net.read(stream, max?) ({chunk, done}), net.close(stream), net.secret(name), net.ask_secret(name):
 --   the network, as the page's extension (capabilities.hosts; a header may name a secret,

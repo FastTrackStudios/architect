@@ -16,7 +16,8 @@
 //!   run time (`subscribe`, `unsubscribe`), the app's documents
 //!   (`list-documents`, `read-document`, `create-document`,
 //!   `edit-document`, `rename-document`, `move-document`,
-//!   `delete-document`, `watch-documents`), the network through the host
+//!   `delete-document`, `watch-documents`), the editor being typed in
+//!   (`editor-state`, `edit-editor`, `decorate-editor`), the network through the host
 //!   (`fetch`, `read-body`, `close-body`, `secret-set`, `ask-secret`:
 //!   `crate::net`, every host and redirect checked against
 //!   `capabilities.hosts`), MIDI ports and OSC endpoints (`ports`,
@@ -688,6 +689,25 @@ impl wit_host::Host for State {
 
     async fn watch_documents(&mut self, hook: String) -> Result<String, String> {
         self.ask_json("watch_documents", &hook).await
+    }
+
+    async fn editor_state(&mut self) -> Result<String, String> {
+        self.ask(HostRequest::EditorState)
+            .await
+            .map(|v| v.to_string())
+    }
+
+    async fn edit_editor(&mut self, command: String) -> Result<String, String> {
+        self.ask_json("edit_editor", &command).await
+    }
+
+    async fn decorate_editor(&mut self, decorations: String) -> Result<(), String> {
+        self.ask_json(
+            "decorate_editor",
+            &format!("{{\"decorations\": {decorations}}}"),
+        )
+        .await
+        .map(|_| ())
     }
 
     async fn fetch(&mut self, request: String) -> Result<String, String> {

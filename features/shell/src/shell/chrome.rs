@@ -212,8 +212,9 @@ pub fn named_icon(name: &str) -> IconFn {
     use lucide_dioxus::{
         AudioLines, Bell, Bookmark, Bug, Calendar, Check, Clock, Cloud, Code, File, FileText,
         Folder, GitPullRequest, Globe, Heart, House, Inbox, Info, LayoutDashboard, Link, List,
-        Lock, Mail, MessageSquare, Mic, Monitor, Moon, Package, Pin, Play, Puzzle, Search,
-        Settings, SlidersHorizontal, Star, Sun, Tag, Terminal, Timer, User, Users, Zap,
+        ListIndentDecrease, ListIndentIncrease, Lock, Mail, MessageSquare, Mic, Monitor, Moon,
+        Package, Pin, Play, Puzzle, Search, Settings, SlidersHorizontal, Star, Sun, Tag, Terminal,
+        Timer, User, Users, Zap,
     };
     match name {
         "bell" => crate::icon!(Bell),
@@ -232,6 +233,8 @@ pub fn named_icon(name: &str) -> IconFn {
         "heart" => crate::icon!(Heart),
         "home" | "house" => crate::icon!(House),
         "inbox" => crate::icon!(Inbox),
+        "indent-decrease" | "list-indent-decrease" => crate::icon!(ListIndentDecrease),
+        "indent-increase" | "list-indent-increase" => crate::icon!(ListIndentIncrease),
         "info" => crate::icon!(Info),
         "layout-dashboard" => crate::icon!(LayoutDashboard),
         "link" => crate::icon!(Link),

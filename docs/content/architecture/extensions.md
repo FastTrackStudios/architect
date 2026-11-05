@@ -1843,8 +1843,8 @@ The engine, the timeline, transport and DSP stay core.
 An extension's manifest names what it needs in `[capabilities]`: the
 action namespaces it may run past its own (`actions`) and the most they
 may change (`effect`: read-only, mutating, destructive), what of the
-app's state it may read (`reads`: `org`, `selection`, `documents`) and
-change (`writes`: `documents`, below), the
+app's state it may read (`reads`: `org`, `selection`, `documents`,
+`editor`) and change (`writes`: `documents`, `editor`, below), the
 app's interface it may use (`ui`: below), the folders past its own,
 the network hosts, and the MIDI ports and OSC endpoints (`ports`: "MIDI,
 OSC and control surfaces", below)
@@ -2223,6 +2223,131 @@ refused without `reads` / `writes`), `features/pages/tests/documents.rs`
 (a TSX and a Luau page on an app's own `Documents`),
 `features/extensions/tests/wasi_wit.rs` (the typed imports are the
 calls).
+
+## The editor: commands, keys, decorations, slash rows
+
+What Advanced Tables, Outliner and Editing Toolbar need (#312, gap
+`G-editor`): the live editor the person is typing in, not the document
+behind it. The editor's own surface is data, in the editor repository
+(`editor:crates/editor-ext`, `editor_ext`): a `Snapshot` of the editor,
+an `EditCommand`, `KeymapEntry`s, `DecorationSpec`s and `SlashEntry`s, so
+an extension in another process, in Luau, in a WASI component or in a
+page sends and receives the same values a compiled-in one would.
+`editor:crates/editor-state/src/ext.rs` joins them to the editor's state
+(`snapshot`, `transaction`, `resolve_key`, `decorations`, `mapped`). The
+host side is `features/extensions/src/editor.rs`.
+
+| call | Luau `host.` / a page's `editor.` | answer | needs |
+|---|---|---|---|
+| `editor_state` | `editor()` / `state()` | the focused editor: `{editor, context, text, selection, primary, cursor, node, version}` | `reads` or `writes = ["editor"]` |
+| `edit_editor {changes, selection?, name?, base?}` | `edit_editor(cmd)` / `edit(cmd)` | the editor after | `writes = ["editor"]` |
+| `decorate_editor {decorations}` | `decorate_editor(list)` / `decorate(list)` | nothing | `writes` |
+
+The WIT world has them as `editor-state`, `edit-editor` and
+`decorate-editor` (the wasi guest's `host::editor_state`,
+`host::edit_editor`, `host::decorate_editor`), and `call` reaches them
+too.
+
+- **Positions are byte offsets** into the UTF-8 text, from 0, the
+  editor's own unit (a Luau string position is that plus one).
+- **The node at the cursor** (`node`, `editor_ext::NodeAt`) is what a
+  keymap scopes on and what an extension reads instead of parsing the
+  markdown again: its `kind` (`paragraph`, `blank`, `heading`,
+  `list-item`, `table`, `fence`, `quote`), its line (`line_from`,
+  `line_to`, `line`), `indent`, a list item's or heading's `marker`,
+  `content_from`; in a table, the `cell` the cursor is in and every
+  `cells` of the table, row by row, the delimiter row left out.
+- **An edit is a transaction**: `changes` (`{from, to, insert}`, all
+  against the text read, in any order, none overlapping) and then
+  `selection` (in the text after; the one there was, moved, when not
+  given) are one step of the editor's undo, named `name`, made as the
+  extension (`Principal::Extension`). `base` is the `version` read: an
+  edit made against a text that has since moved on is refused, as is a
+  position outside the text or inside a character, so a sandboxed
+  extension cannot break the editor with a bad offset. In the editor a
+  step never merges with the person's typing (its `user_event` is
+  `extension`), and undo takes it back whole.
+- **Decorations** are an extension's own set, each call's in place of
+  the last (`[]`: none), moved through later edits and taken away when
+  it unloads: a `mark` (`{from, to, class, title?}`), a `line` class
+  (`{at, class}`), a `gutter` marker (`{at, text, class?}`) and a
+  `widget` (`{at, view, props?, block?}`) that mounts one of the
+  extension's own `[[embeds]]` (by id, or the view one draws) or
+  `[[views]]`, given `props` as its `EmbedInput.props`: the embed half of
+  #180, drawn as an inline embed is (`embeds::WidgetView`,
+  `Embeds::of`). Classes are prefixed `ext-` (`todo` is drawn
+  `ext-todo`), so an extension's never reach the editor's own.
+
+From the manifest, or contributed at run time:
+
+```toml
+[capabilities]
+writes = ["editor"]
+
+[[keymaps]]
+key = "Tab"                 # Shift-Tab, Mod-Enter, Ctrl-Alt-k
+when = "node:list-item"     # "editor" (the default), "node:table", …
+action = "ACME_INDENT"
+
+[[slash]]
+label = "Table"
+action = "ACME_TABLE"
+group = "Insert"            # the extension's name when empty
+icon = "|-|"
+```
+
+A key runs its action while the editor has the focus and the cursor is
+in the scope's node; a node's entry is tried before an editor-wide one
+(`editor::key_action`, `editor_ext::resolve`). A key or a slash row
+needs `writes = ["editor"]`, checked at load. A slash row's action runs
+once the slash and query typed are taken out. **Toolbar entries** are
+toolbars (`[[toolbars]]`, "Toolbars" above) with `when =
+"editor:<context>"`: on the Typing Toolbar while that editor is typed
+in, and wherever else their `where` puts them.
+
+**The app side.** An app gives the host its editors by implementing
+`editor::Editors` (`focused`, `apply` as one step of its history,
+`decorate`, `withdraw`) and passing it to `Host::with_editors`;
+`editor::MemoryEditor` is one over a string with its own undo, for a
+headless host and for tests. With the FastTrackStudios editor
+(`editor:features/ui`), the host:
+
+- gives the `Editor` a `history` it keeps, and applies an extension's
+  transaction with `dispatch_with_history`, so it undoes in that one stack;
+- answers `on_key` with `editor_state::ext::resolve_key` over
+  `Host::contributions().keymaps()`, running the action it finds;
+- draws `editor_state::ext::decorations` as a `DecorationSource` and
+  mounts widgets through `mounts` (`WidgetMounts`, the native renderer's;
+  `ext::mount_index` names the spec), with `WidgetView` for the embed;
+- registers the slash rows with `palette::register_actions` and runs
+  them from `on_action`.
+
+`apps/lab/ui/src/note_editor.rs` does all of it for a Vault note's Edit
+mode. A Blitz document may have no HTML parser (a headless one has
+none), so the native renderer draws gutter markers and mounted widgets
+itself, never from HTML.
+
+**The lab.** `apps/lab/extensions/outline` (`lab.outline`, Luau, loaded
+with `ARCHITECT_LAB_OUTLINE=1`): Tab and Shift-Tab indent and outdent a
+list item and move between a table's cells (past the last, a new row),
+`LAB_OUTLINE_MARK` marks each TODO, numbers the list items in the gutter
+and mounts its `count` embed, a slash row inserts a table, and a toolbar
+of `when = "editor:note"` indents from the Typing Toolbar. Open the
+`note-outline` note and press Edit; `LAB_EDITOR_STATE` is what the
+extension reads, `LAB_EDITOR_SELECT` puts the caret.
+
+Tests: `features/extensions/tests/editor.rs` (`lab.outline` on a
+`MemoryEditor`: the keys by node, one undo step leaving the person's
+typing, decorations that follow edits and go when it unloads, a widget
+naming its own embed, refusals without `reads` / `writes`, of a stale or
+out-of-bounds edit, of a key without `writes`),
+`features/pages/tests/editor.rs` (a TSX and a Luau page),
+`apps/lab/media/tests/note_editor.rs` (the lab's note editor: Tab and
+Shift-Tab in a table and a list, Ctrl-Z of one indent, the marked-up
+note's golden, `note-editor-marked.html`),
+`features/extensions/tests/wasi_wit.rs` (the typed imports are the
+calls); in the editor repository, `editor:features/ui/tests/native_ext.rs`
+and `editor:crates/editor-state/src/ext.rs`'s tests.
 
 ## The network and secrets
 

@@ -326,6 +326,13 @@ fn use_window_ui(host: &Host) -> (WindowUi, Signal<u64>) {
 /// so a prompt a step brings up is answered, not hidden under its card.
 pub const PROMPT_LAYER: u32 = 300;
 
+/// How high the toolbar editor (its bar, settings sheet and pickers) is
+/// stacked: over a tour's card (200), which otherwise sits on the bar's
+/// Done at the window's bottom middle, and under extensions' prompts
+/// ([`PROMPT_LAYER`]), which an edit may bring up.
+pub(crate) const EDITOR_LAYER: u32 = 250;
+const _: () = assert!(EDITOR_LAYER > 200 && EDITOR_LAYER < PROMPT_LAYER);
+
 /// Extensions' toasts, prompts and menus, over the window: mount it once,
 /// last, at the root (`ExtensionOverlays` does), over a tour's layer
 /// ([`PROMPT_LAYER`]).
@@ -336,11 +343,12 @@ pub fn HostUiLayer(host: Host) -> Element {
     let toasts = ui.toasts();
     let first = ui.waiting().into_iter().next();
     let shown = toasts.len();
+    let look = layer_look(&crate::window_ui::shell_theme());
     rsx! {
         if shown > 0 {
             div {
                 style: "position: absolute; right: 16px; bottom: 16px; z-index: {PROMPT_LAYER}; display: flex; \
-                        flex-direction: column; gap: 8px; max-width: 360px;",
+                        flex-direction: column; gap: 8px; max-width: 360px; {look}",
                 "data-ext-toasts": "{shown}",
                 for toast in toasts {
                     ToastRow { key: "{toast.id}", ui: ui.clone(), toast }
@@ -350,14 +358,40 @@ pub fn HostUiLayer(host: Host) -> Element {
         if let Some(waiting) = first {
             match waiting.asking.clone() {
                 Asking::Prompt(prompt) => rsx! {
-                    PromptDialog { key: "{waiting.id}", ui, id: waiting.id, from: waiting.from.name, prompt }
+                    PromptDialog { key: "{waiting.id}", ui, id: waiting.id, from: waiting.from.name, prompt, look }
                 },
                 Asking::Menu(menu) => rsx! {
-                    MenuAt { key: "{waiting.id}", ui, id: waiting.id, menu }
+                    MenuAt { key: "{waiting.id}", ui, id: waiting.id, menu, look }
                 },
             }
         }
     }
+}
+
+/// The shell's face and colours, as the CSS this layer's rows read.
+///
+/// The layer is mounted at the window's root, over the app: Blitz's
+/// default face there is a serif, and the theme's `--card` and friends
+/// were not the person's theme (a light theme drew a black prompt). So
+/// the layer sets them itself, from the shell's theme, as the toolbars and
+/// extension windows draw theirs.
+fn layer_look(t: &architect_shell::ShellTheme) -> String {
+    format!(
+        "font-family: {font}; --background: {desk}; --foreground: {ink}; --card: {pill}; \
+         --card-foreground: {ink}; --popover: {pill}; --popover-foreground: {ink}; --border: {rule}; \
+         --input: {rule}; --muted-foreground: {ink_3}; --primary: {accent}; --primary-foreground: {accent_ink}; \
+         --secondary: {active}; --secondary-foreground: {ink}; --destructive: {danger};",
+        font = t.font,
+        desk = t.desk,
+        ink = t.ink,
+        pill = t.pill,
+        rule = t.rule,
+        ink_3 = t.ink_3,
+        accent = t.accent,
+        accent_ink = t.accent_ink,
+        active = t.active,
+        danger = t.danger,
+    )
 }
 
 fn kind_colour(kind: &str) -> &'static str {
@@ -403,7 +437,7 @@ const PRIMARY: &str = "padding: 6px 14px; border-radius: 6px; border: 1px solid 
                        background: var(--primary); color: var(--primary-foreground); cursor: pointer; font-size: 13px;";
 
 #[component]
-fn PromptDialog(ui: WindowUi, id: u64, from: String, prompt: Prompt) -> Element {
+fn PromptDialog(ui: WindowUi, id: u64, from: String, prompt: Prompt, look: String) -> Element {
     let mut text = use_signal(|| prompt.default.clone().unwrap_or_default());
     let hidden = prompt.kind == PromptKind::Secret;
     let (yes, no) = (ui.clone(), ui.clone());
@@ -429,7 +463,7 @@ fn PromptDialog(ui: WindowUi, id: u64, from: String, prompt: Prompt) -> Element 
     rsx! {
         div {
             style: "position: absolute; inset: 0; z-index: {PROMPT_LAYER + 1}; display: flex; align-items: center; \
-                    justify-content: center; background: rgba(0,0,0,0.45);",
+                    justify-content: center; background: rgba(0,0,0,0.45); {look}",
             onclick: move |_| on_backdrop(),
             div {
                 style: "width: 420px; max-width: calc(100% - 32px); display: flex; flex-direction: column; gap: 12px; \
@@ -529,7 +563,7 @@ fn ChoiceRow(ui: WindowUi, id: u64, choice: Choice) -> Element {
 }
 
 #[component]
-fn MenuAt(ui: WindowUi, id: u64, menu: Menu) -> Element {
+fn MenuAt(ui: WindowUi, id: u64, menu: Menu, look: String) -> Element {
     let away = ui.clone();
     let (x, y) = (menu.x.unwrap_or(-1.0), menu.y.unwrap_or(-1.0));
     let place = if x < 0.0 || y < 0.0 {
@@ -539,7 +573,7 @@ fn MenuAt(ui: WindowUi, id: u64, menu: Menu) -> Element {
     };
     rsx! {
         div {
-            style: "position: absolute; inset: 0; z-index: {PROMPT_LAYER + 1};",
+            style: "position: absolute; inset: 0; z-index: {PROMPT_LAYER + 1}; {look}",
             onclick: move |_| away.answer(id, None),
             oncontextmenu: {
                 let away = ui.clone();
