@@ -1219,7 +1219,9 @@ pub fn LabApp() -> Element {
         let mut shown = use_signal(|| None::<Option<String>>);
         if shown.peek().as_ref() != Some(&org) {
             let defaults = theme::org_settings(org.as_deref());
-            appearance.set_org(defaults.clone());
+            if let Some(kept) = appearance.as_ref() {
+                kept.set_org(defaults.clone());
+            }
             settings.set_org(defaults);
             shown.set(Some(org));
         }

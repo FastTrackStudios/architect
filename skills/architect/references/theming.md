@@ -152,8 +152,12 @@ architect_settings::use_appearance_section(); // under use_theme_store + use_set
 ```
 
 Keys: `appearance.theme` (`id` or `light,dark`), `appearance.mode`,
-`appearance.token.<name>` (`features/settings/src/appearance.rs`). The
-lab does it in `apps/lab/ui/src/theme.rs` `persist`.
+`appearance.token.<name>` (`features/settings/src/appearance.rs`). An
+app with no account to sync the person's layer with yet:
+`Persist::local(&store, "my-app", delay)` keeps the device's layer in
+`<app dir>/appearance.json` and the person's in `<app dir>/person.loro`
+(features `store` + `synced`); the lab does that
+(`apps/lab/ui/src/theme.rs` `use_lab_theme`).
 
 ## Pitfalls
 

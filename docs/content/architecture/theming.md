@@ -176,6 +176,10 @@ takes another device's change (the synced document's
 `on_remote_change`), and `Persist::set_org` the org's when the window's
 org changes. The order is the cascade's: the org's default sits under
 the person's choice, and the device's sits over it.
+`Persist::local(store, app, delay)` is the whole of it for an app with no
+account yet: the device's layer in `<app dir>/appearance.json`, the
+person's in a synced settings document kept as `<app dir>/person.loro`
+(the lab's look, `apps/lab/ui/src/theme.rs` `use_lab_theme`).
 
 ```rust,ignore
 let persist = Persist::start(&store, &values, Duration::from_millis(250), move |s: &Saved| match s.scope {

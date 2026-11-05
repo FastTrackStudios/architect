@@ -6,8 +6,8 @@
 //!
 //! The person's look is architect's Appearance section
 //! (`architect_settings::use_appearance_section`), and the store's org,
-//! person and device layers are kept as settings
-//! (`architect_settings::appearance::Persist`): this device's in
+//! person and device layers are kept as settings by architect
+//! (`architect_settings::appearance::Persist::local`): this device's in
 //! `<app dir>/appearance.json`, the person's in a synced settings
 //! document (the lab has no account to sync it with, so the document is
 //! a file, `<app dir>/person.loro`), the org's default from the made-up
@@ -21,6 +21,7 @@
 
 use std::rc::Rc;
 
+use architect_settings::appearance::Persist;
 use architect_theme::fs::{Shipped, ThemeDirs, ThemeWatch};
 use architect_theme::{Scheme, ThemeHandle, ThemeStore};
 use dioxus::prelude::*;
@@ -47,25 +48,29 @@ fn themes_dir() -> Option<std::path::PathBuf> {
         .map(|dir| dir.join("themes"))
 }
 
+/// What keeps the lab's look, when it is kept (in a window): told when
+/// the window's org changes (`Persist::set_org`).
+pub type Kept = Rc<Option<Persist>>;
+
 /// The store, given to everything below; with `files` (a window, or a
 /// film's run on a folder of its own), read from the themes folder and
-/// watched; in a window, its person and device layers kept ([`persist`]).
-/// Its actions go on `list`.
+/// watched; in a window, its person and device layers kept
+/// (`Persist::local`). Its actions go on `list`.
 pub fn use_lab_theme(
     windowed: bool,
     files: bool,
     list: &architect::action::ActionList,
-) -> (ThemeHandle, LabAppearance) {
+) -> (ThemeHandle, Kept) {
     let handle = architect_theme::use_theme_store(ThemeStore::default);
     let store = handle.store();
     // Kept for the app's life: dropping them stops the watcher and
     // writes what waits.
-    let kept: (Rc<Option<ThemeWatch>>, LabAppearance) = use_hook(|| {
+    let kept: (Rc<Option<ThemeWatch>>, Kept) = use_hook(|| {
         let _ = architect_theme::actions::register(list, &store);
         let _ = store.set(architect_theme::LayerKind::App, app_layer());
         let watch = files.then(|| watch_folder(&store)).flatten();
-        let persist = windowed.then(|| persist(&store)).flatten();
-        (Rc::new(watch), LabAppearance(Rc::new(persist)))
+        let persist = windowed.then(|| keep(&store)).flatten();
+        (Rc::new(watch), Rc::new(persist))
     });
     (handle, kept.1)
 }
@@ -83,19 +88,6 @@ pub fn app_layer() -> architect_theme::Layer {
     layer
 }
 
-/// What keeps the lab's look, when it is kept (in a window).
-#[derive(Clone)]
-pub struct LabAppearance(pub Rc<Option<architect_settings::appearance::Persist>>);
-
-impl LabAppearance {
-    /// The window's org changed: its default look under the person's.
-    pub fn set_org(&self, org: architect_settings::OrgSettings) {
-        if let Some(p) = self.0.as_ref() {
-            p.set_org(org);
-        }
-    }
-}
-
 #[cfg(not(target_arch = "wasm32"))]
 fn watch_folder(store: &ThemeStore) -> Option<ThemeWatch> {
     let dir = themes_dir()?;
@@ -111,48 +103,18 @@ fn watch_folder(_: &ThemeStore) -> Option<ThemeWatch> {
 }
 
 /// Keeps the store's person and device layers, in a window; loads them
-/// (and they show) first. Headless, nothing is read or kept.
+/// (and they show) first.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn persist(store: &ThemeStore) -> Option<architect_settings::appearance::Persist> {
-    use architect_settings::appearance::{Persist, Saved};
-    use architect_settings::{DeviceValues, DocValues, Scope, ScopedValues};
-
-    let dir = architect::settings::app_dir("architect-lab").ok()?;
-    let device = DeviceValues::open_named("architect-lab", "appearance").ok()?;
-    let doc = loro::LoroDoc::new();
-    let file = dir.join("person.loro");
-    if let Ok(bytes) = std::fs::read(&file) {
-        let _ = doc.import(&bytes);
-    }
-    let person = DocValues::new(&doc);
-    let values = ScopedValues {
-        device: device.load(),
-        synced: person.load(),
-        ..ScopedValues::default()
-    };
-    let save = move |saved: &Saved| match saved.scope {
-        Scope::Device => {
-            let _ = device.save(&saved.values);
-        }
-        Scope::Synced => {
-            if person.save_keys(&saved.values, &saved.keys).is_ok() {
-                if let Ok(bytes) = doc.export(loro::ExportMode::Snapshot) {
-                    let _ = std::fs::write(&file, bytes);
-                }
-            }
-        }
-        Scope::Project => {}
-    };
-    Some(Persist::start(
+fn keep(store: &ThemeStore) -> Option<Persist> {
+    Persist::local(
         store,
-        &values,
+        "architect-lab",
         std::time::Duration::from_millis(250),
-        save,
-    ))
+    )
 }
 
 #[cfg(target_arch = "wasm32")]
-pub fn persist(_: &ThemeStore) -> Option<architect_settings::appearance::Persist> {
+fn keep(_: &ThemeStore) -> Option<Persist> {
     None
 }
 

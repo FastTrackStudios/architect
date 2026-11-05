@@ -60,6 +60,8 @@ doctest = false
 architect-settings = { path = ".", features = ["store", "synced", "appearance"] }
 # Two devices' documents, exchanging updates.
 loro = { workspace = true }
+# `Persist::local`'s app folder.
+tempfile = "3"
 
 [lints]
 workspace = true
