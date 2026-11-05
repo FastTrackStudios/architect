@@ -326,6 +326,13 @@ fn use_window_ui(host: &Host) -> (WindowUi, Signal<u64>) {
 /// so a prompt a step brings up is answered, not hidden under its card.
 pub const PROMPT_LAYER: u32 = 300;
 
+/// How high the toolbar editor (its bar, settings sheet and pickers) is
+/// stacked: over a tour's card (200), which otherwise sits on the bar's
+/// Done at the window's bottom middle, and under extensions' prompts
+/// ([`PROMPT_LAYER`]), which an edit may bring up.
+pub(crate) const EDITOR_LAYER: u32 = 250;
+const _: () = assert!(EDITOR_LAYER > 200 && EDITOR_LAYER < PROMPT_LAYER);
+
 /// Extensions' toasts, prompts and menus, over the window: mount it once,
 /// last, at the root (`ExtensionOverlays` does), over a tour's layer
 /// ([`PROMPT_LAYER`]).
