@@ -127,13 +127,61 @@ switcher is one (`features/workspace/src/host/switcher.rs`), as
 Obsidian's covers the screen on iOS.
 
 While a field is typed in, the bar rises above the keyboard and becomes
-the editing bar (Task's `KeyboardToolbar`, `task:crates/ui/src/doc_editor.rs`):
-the editing actions the focused editor registers
-(`use_editing_actions`, with a context such as `markdown`) in a pill that
-scrolls sideways when they do not fit, and apart at the right a round
-button that puts the keyboard away. When the field lets go, the bar
-settles back into the action bar and the tabs. The app writes none of
-it: `features/shell/src/shell/bar.rs` `PhoneFoot` lays it out.
+the **Typing Toolbar** (Task's `KeyboardToolbar`, `task:crates/ui/src/doc_editor.rs`;
+`features/shell/src/shell/typing.rs`): its items in a pill that scrolls
+sideways when they do not fit, and apart at the right a round button that
+puts the keyboard away, which is the shell's and never an item. When the
+field lets go, the bar settles back into the action bar and the tabs. The
+app writes none of it: `features/shell/src/shell/bar.rs` `PhoneFoot` lays
+it out.
+
+Its items come from three places:
+
+- **The focused editor's own.** The editing actions it registers
+  (`use_editing_actions`, with a context such as `markdown`) are the
+  built-in items, so an app with no extensions shows what it always did.
+- **Toolbars of place `typing`.** Whoever puts `features/shell/src/shell/typing.rs`
+  `TypingTools` in context fills the bar, given the `Typing` in force: the
+  editor's context and actions, and the pages and views the focus is in.
+  A page or view says it may hold the focus with `use_typing_scope`
+  (`view:<kind>`), wired to its box's `onfocusin`/`onfocusout`; every
+  workspace pane does (`features/workspace/src/host/group.rs` `PaneSlot`).
+  `architect-extensions` fills it (`features/extensions/src/typing_ui.rs`):
+  the editor's items as the built-in toolbar of its context
+  (`typing/<context>`, `features/extensions/src/toolbars.rs`
+  `Toolbars::provide_editor`), then every extension's `[[toolbars]] where =
+  "typing"` whose `when` is in force (`when = "view:lab.board/chart"`,
+  `editor:markdown`), from its manifest or added at run time while its page
+  is mounted (`linked::Handle::contribute`, `ext.contribute`). An
+  extension's items show only while its page or view has the focus.
+- **A person's edits.** The built-in toolbar of a context is a toolbar
+  like any other: the toolbar editor (`docs/content/architecture/toolbars.md`)
+  reorders, hides or adds items, and its copy is written as any toolbar
+  file is (`toolbars/typing-<context>.toml`), used in place of the
+  editor's own until it is reset. With the editor on, the bar's toolbars
+  show above it, edited in place.
+
+Items are buttons (an icon, or a name: `♯`, `C`), toggles that show on
+while their action says so (`aria-pressed`, from the action's `checked`
+state: an extension's `toggle = true` action, or a command's `checked`
+through `CommandRunner::checked`), dropdowns whose rows open **above** the
+bar, separators, and widgets (an extension's view as a live control). A
+group's buttons sit in the row one after another. The shell draws them
+all, so they look alike whoever put them there: `TypingItem` (`Button`,
+`Separator`, `Menu`, `Widget`), each a width the pill scrolls by.
+
+Pressing any of them keeps the field's focus, and so the keyboard: the
+pill, a dropdown's rows and a widget's box prevent the default of a
+`pointerdown`, a `mousedown` and a `click`
+(`skills/architect/references/blitz-quirks.md`). The same bar is drawn
+by Blitz on iOS and Android and in a desktop window sized like a phone,
+and by a web view or a phone's browser, which tell the shell the
+keyboard from `visualViewport` and `focusin`.
+
+The architect-shell crate does not depend on the extensions: it exposes
+the slot, and `architect-extensions` (which already depends on the
+shell) fills it, as the workspace's `HeaderTools` is filled for a pane's
+header.
 
 The keyboard is one process-wide feed (`features/shell/src/shell/keyboard.rs`):
 its height comes from UIKit's keyboard notifications on iOS

@@ -1257,6 +1257,14 @@ between a pane's title and its menu, through
 `architect_workspace::HeaderTools`. Both are
 `features/extensions/src/toolbar_ui.rs` `ToolbarStrip`: a press runs the
 action told source `toolbar`, target its place, id its key, and the pane.
+`typing` is a phone's Typing Toolbar over the keyboard, shown while its
+`when` is in force (the page or view kind the focus is in,
+`view:lab.board/chart`; an editor's context, `editor:markdown`), after
+the focused editor's own items: `features/extensions/src/typing_ui.rs`,
+`app-shell.md` ("The action bar and the keyboard bar"). The app's own
+toolbars at run time are `Toolbars::provide` (`Source` `provided`): a
+focused editor's items as `typing/<context>`, which a person's file
+overrides as it would an extension's.
 A bad toolbar in a manifest (a place there is not, no items, an item not
 whole for its kind, an action it may not run) refuses the load like any
 bad contribution: a problem `APP_STATUS` lists, field and all, never a

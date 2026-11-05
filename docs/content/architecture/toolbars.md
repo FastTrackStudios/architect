@@ -112,6 +112,22 @@ toolbar's (`toolbar`, its key), one needs no arguments.
 | `TOOLBAR_GROUP` / `TOOLBAR_UNGROUP` | `{id, at, count, label}` / `{id, at}` |
 | `TOOLBAR_BACKUPS` | `{id}`: its backups, the newest first |
 
+## The Typing Toolbar
+
+A phone's bar over the keyboard is a toolbar place, `typing`
+(`app-shell.md`, "The action bar and the keyboard bar"). Each editor
+context's own items are a toolbar, `typing/<context>` (the capture
+field's: `typing/capture`), so the editor edits them as it edits any:
+move one (`TOOLBAR_MOVE {id: "typing/capture", from: 8, to: 0}`), take
+one away (`TOOLBAR_REMOVE`), add an action, a dropdown or a widget
+(`TOOLBAR_INSERT`), each per context. The person's copy is
+`toolbars/typing-<context>.toml`, used in place of the editor's own until
+`TOOLBAR_RESET`. With **Edit toolbars** on, the Typing Toolbar shows its
+toolbars' strips above itself, with their + chips and ⚙. An extension's
+typing toolbar is edited the same way; **show another here instead**
+switches only the toolbar for the same context (`Toolbars::show`).
+A position (`at`, `from`, `to`) may be a number as well as `"2.1"`.
+
 ## Tests
 
 - `apps/lab/media/tests/toolbar_editor.rs`: a toolbar built from empty
@@ -121,6 +137,13 @@ toolbar's (`toolbar`, its key), one needs no arguments.
   dragged past the widget; restyled: label, image icon, fill, rounding,
   preset), the same after a restart, its dropdown kept in the window, and
   edit mode, each against a golden.
+- `apps/lab/media/tests/typing_toolbar.rs`: the Typing Toolbar on a
+  phone's screen, each against a golden: the capture field's own items
+  (unchanged from the bar before), the Board's chart's chord line (its sharps
+  toggle on, the field keeping the focus through each press, the bar
+  scrolled to its dropdown, opened above it, and the tempo widget), a
+  person's edit read again after a restart, and the editor's strips above
+  the bar.
 - `features/extensions/tests/toolbars.rs`
   `a_toolbar_is_built_from_empty_through_its_actions_and_survives_a_restart`:
   the same through `TOOLBAR_*`.
