@@ -27,6 +27,10 @@ architect-theme = { workspace = true, features = ["fs", "actions", "dioxus"] }
 architect-ui = { workspace = true }
 # The Embedded views' paint pane (src/paint.rs): the paint kind on Blitz.
 architect-workspace = { workspace = true, features = ["ui", "paint-ui", "home", "native"] }
+# The Vault tab's sidebar: the navigator (a port of Notebook Navigator) over
+# the lab's notes (src/vault.rs). GPL-3.0-or-later: linking it makes the
+# lab's binaries GPL (features/navigator/README.md).
+architect-navigator = { workspace = true, features = ["ui"] }
 architect-commands = { workspace = true, features = ["native"] }
 # The settings page; the Appearance section, its layers kept (the
 # person's in a synced document, here a file).

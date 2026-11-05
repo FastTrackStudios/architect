@@ -1,5 +1,6 @@
-//! The Vault tab: the workspace host, Obsidian's shape — files and search
-//! in the left dock behind a ribbon, notes in the center (more than one
+//! The Vault tab: the workspace host, Obsidian's shape — the navigator
+//! (`architect-navigator`, a port of Notebook Navigator: folders beside
+//! notes) and search in the left dock behind a ribbon, notes in the center (more than one
 //! may be open), the outline and backlinks on the right (a console opens
 //! at the bottom from "Open a view"). Drag a tab anywhere — out of the
 //! window for a window of its own, on a desk — hold W to grab a pane
@@ -9,6 +10,8 @@
 //! The arrangement tab has a script's marker lane over it, and the
 //! script's tool window floats.
 
+use architect_navigator::ui::{NavigatorView, Open, use_navigator};
+use architect_navigator::{MemorySource, Millis, NoteFile, OpenIn, ViewState};
 use architect_shell::{Action, FormFactor, PageBar, Screen, StatusItem, Toolbar, icon, use_shell};
 use architect_workspace::{
     Command, FormClass, MemoryStore, Pane, Ribbon, Screenset, Screensets, Side, Target, TitleRow,
@@ -352,6 +355,8 @@ pub fn VaultPage() -> Element {
     let sets = use_signal(screensets);
     let store = use_root_context(|| VaultStore(WorkspaceStore::new(MemoryStore::new()))).0;
     let pane_status = use_signal(Vec::new);
+    // The vault the navigator shows (the ribbon's "New note" adds to it).
+    let vault = use_lab_vault().source;
     // The Vault's panes are its sidebar: a desk opens it folded, the
     // switcher and the account on the ribbon.
     architect_shell::use_sidebar_default(architect_shell::SidebarDefault::Collapsed);
@@ -381,7 +386,11 @@ pub fn VaultPage() -> Element {
         let (pane_id, title) = if id == "daily" {
             ("note-daily".to_owned(), "2026-10-31".to_owned())
         } else {
+            // A new note is a file in the vault: the navigator lists it.
             made.with_mut(|n| *n = n.saturating_add(1));
+            let path = format!("Untitled {}.md", made());
+            let now = chrono_now();
+            vault.read().put(NoteFile::new(path, now, now));
             (format!("note-new-{}", made()), "Untitled".to_owned())
         };
         let mut workspace = workspace;
@@ -496,66 +505,187 @@ pub fn VaultPage() -> Element {
     }
 }
 
+/// The lab's vault and what its navigator had open, for the run: at the
+/// root, as the sidebar that shows them comes and goes.
+#[derive(Clone, Copy)]
+struct LabVault {
+    /// A `CopyValue`, so the ribbon's handler stays `Copy`.
+    source: CopyValue<MemorySource>,
+    kept: Signal<Option<ViewState>>,
+}
+
+fn use_lab_vault() -> LabVault {
+    use_root_context(|| LabVault {
+        source: CopyValue::new_in_scope(lab_vault(), ScopeId::ROOT),
+        kept: Signal::new_in_scope(None, ScopeId::ROOT),
+    })
+}
+
+/// The vault's files as the navigator sees them: the lab's notes in
+/// folders, each with the start of its text, a few days apart, and a file
+/// of a kind the lab has no view for (an extension's opener claims it: the
+/// Board's, for `.kf`).
+fn lab_vault() -> MemorySource {
+    let now = chrono_now();
+    let hour: Millis = 3_600_000;
+    let mut age: Millis = 0;
+    let files = FILES.iter().map(|(id, path)| {
+        age = age.saturating_add(hour.saturating_mul(17));
+        let text = MARKDOWN
+            .iter()
+            .find(|(m, _)| m == id)
+            .map_or(WELCOME, |(_, t)| *t);
+        NoteFile::new(
+            *path,
+            now.saturating_sub(age.saturating_mul(3)),
+            now.saturating_sub(age),
+        )
+        .preview(preview_of(text))
+    });
+    MemorySource::new("Lab")
+        .with_folder("Archive")
+        .with_files(files)
+}
+
+/// Now, in milliseconds since the epoch.
+fn chrono_now() -> Millis {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .and_then(|d| Millis::try_from(d.as_millis()).ok())
+        .unwrap_or(0)
+}
+
+/// A note's text as a preview: its words, without its frontmatter and
+/// fences' markers.
+fn preview_of(text: &str) -> String {
+    let body = text
+        .strip_prefix("---\n")
+        .and_then(|rest| rest.split_once("\n---\n"))
+        .map_or(text, |(_, body)| body);
+    body.lines()
+        .filter(|l| !l.starts_with("```") && !l.starts_with('|'))
+        .collect::<Vec<_>>()
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Each note's file in the vault, by its pane id: the lab's notes at the
+/// root (where the scenarios find them), more in folders.
+const FILES: [(&str, &str); 14] = [
+    ("note-welcome", "Welcome.md"),
+    ("note-shell", "The app shell.md"),
+    ("note-workspace", "The workspace.md"),
+    ("note-actions", "Actions everywhere.md"),
+    ("note-extensions", "Extensions.md"),
+    ("note-chart", "A chart in a note.md"),
+    ("note-song", "Amazing Grace.md"),
+    ("note-outline", "Journal/Plans for the week.md"),
+    ("note-journal-1", "Journal/2026-11-04.md"),
+    ("note-nav-panes", "Projects/Navigator/Two panes.md"),
+    ("note-nav-scroll", "Projects/Navigator/Virtual scrolling.md"),
+    ("note-nav-keys", "Projects/Navigator/Keys.md"),
+    ("note-vault-index", "Projects/Vault/The index.md"),
+    ("kf-intro", "Songs/Intro.kf"),
+];
+
+/// The note a file is (its pane id and title), if the lab draws it.
+fn note_of(path: &str) -> Option<(String, String)> {
+    let markdown = std::path::Path::new(path)
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("md"));
+    if !markdown {
+        return None;
+    }
+    if let Some((id, _)) = FILES.iter().find(|(_, p)| *p == path) {
+        let title = NOTES
+            .iter()
+            .find(|(n, _)| n == id)
+            .map_or_else(|| title_of(path), |(_, t)| (*t).to_owned());
+        return Some(((*id).to_owned(), title));
+    }
+    // A note made here ("New note", `Untitled N.md`) is `note-new-N`.
+    let made = path
+        .strip_prefix("Untitled ")
+        .and_then(|rest| rest.strip_suffix(".md"))
+        .filter(|n| n.parse::<u32>().is_ok())?;
+    Some((format!("note-new-{made}"), "Untitled".to_owned()))
+}
+
+fn title_of(path: &str) -> String {
+    let name = path.rsplit_once('/').map_or(path, |(_, n)| n);
+    name.rsplit_once('.').map_or(name, |(n, _)| n).to_owned()
+}
+
+/// The file a note pane is, if it is one of the vault's.
+fn path_of(pane: &str) -> Option<String> {
+    FILES
+        .iter()
+        .find(|(id, _)| *id == pane)
+        .map(|(_, p)| (*p).to_owned())
+        .or_else(|| {
+            pane.strip_prefix("note-new-")
+                .map(|n| format!("Untitled {n}.md"))
+        })
+}
+
+/// The left dock's files: the navigator over the lab's vault. A click
+/// opens a note here (one open already comes forward); the note on show is
+/// revealed; a right-click is the file's context menu, with what extensions
+/// add (`[[context]] target = "file"`).
 #[component]
 fn FilesView() -> Element {
     let pane = use_pane();
-    let t = use_shell().theme;
-    let files = NOTES;
-    // The note on show is lit, as Obsidian lights the open file.
+    // The dock is drawn by the shell, above the page: the vault and what
+    // the navigator had open are the app's, kept at its root.
+    let LabVault { source, kept } = use_lab_vault();
+    let nav = use_navigator(move || std::sync::Arc::new(source.cloned()));
+    use_hook(move || {
+        if let Some(v) = kept.peek().as_ref() {
+            nav.restore(v);
+        }
+    });
+    use_drop(move || {
+        let mut kept = kept;
+        kept.set(Some(nav.view_state()));
+    });
+    // A pop-out window has no screen of the lab's: a desk's.
+    let phone =
+        try_use_context::<Signal<Screen>>().is_some_and(|s| s().form() == FormFactor::Phone);
+    // The note on show, lit and revealed.
     let open_now = pane
         .workspace()
         .read()
         .current_document()
-        .map(|p| p.0.clone());
+        .and_then(|p| path_of(&p.0));
+    use_effect(use_reactive!(|open_now| nav.set_active(open_now.as_deref())));
+    let open_pane = pane.clone();
+    let menu_pane = pane;
     rsx! {
-        div { style: "flex: 1; display: flex; flex-direction: column; padding: 8px; gap: 2px; overflow-y: scroll;",
-            for (id, title) in files {
-                button {
-                    key: "{id}",
-                    class: "lp",
-                    "data-file": "{title}.md",
-                    "aria-current": if open_now.as_deref() == Some(id) { "page" } else { "false" },
-                    style: "display: flex; align-items: center; justify-content: flex-start; min-height: 30px; padding: 0 10px; border: none; \
-                            border-radius: 6px; background: {lit(open_now.as_deref() == Some(id), &t)}; color: {t.ink}; \
-                            font-size: 13px; text-align: left; cursor: pointer;",
-                    onclick: {
-                        let pane = pane.clone();
-                        // The id is the file: a note open already comes
-                        // forward instead of opening twice.
-                        move |_| {
-                            let _ = pane.workspace().write().open(note(id, title), Target::Here);
-                        }
-                    },
-                    // Right-click: the file's context menu, with what
-                    // extensions add for it (`[[context]] target = "file"`).
-                    oncontextmenu: {
-                        let pane = pane.clone();
-                        move |e: MouseEvent| pane.context_menu("file", format!("{title}.md"), &e)
-                    },
-                    "{title}"
+        NavigatorView {
+            navigator: nav,
+            phone,
+            on_open: move |o: Open| {
+                if let Some((id, title)) = note_of(&o.path) {
+                    let target = match o.how {
+                        OpenIn::Here => Target::Here,
+                        OpenIn::Tab => Target::Tab,
+                        OpenIn::Split => Target::Split(Side::Right),
+                    };
+                    // Beside the note on show, not in the dock pressed.
+                    let mut workspace = open_pane.workspace();
+                    let mut w = workspace.write();
+                    if let Some(doc) = w.current_document().cloned() {
+                        let _ = w.activate(&doc);
+                    }
+                    let _ = w.open(note(&id, &title), target);
+                } else if let Some(ui) = try_consume_context::<architect_extensions::interface::ExtensionUi>() {
+                    let _ = ui.open_path(&o.path);
                 }
-            }
-            // A file of a kind the lab has no view for: an extension's
-            // opener claims it (the Board's, for `.kf`).
-            for file in ["Songs/Intro.kf"] {
-                button {
-                    key: "{file}",
-                    class: "lp",
-                    style: "display: flex; align-items: center; justify-content: flex-start; min-height: 30px; padding: 0 10px; border: none; \
-                            border-radius: 6px; background: transparent; color: {t.ink_2}; \
-                            font-size: 13px; text-align: left; cursor: pointer;",
-                    onclick: move |_| {
-                        if let Some(ui) = try_consume_context::<architect_extensions::interface::ExtensionUi>() {
-                            let _ = ui.open_path(file);
-                        }
-                    },
-                    oncontextmenu: {
-                        let pane = pane.clone();
-                        move |e: MouseEvent| pane.context_menu("file", file, &e)
-                    },
-                    "{file}"
-                }
-            }
+            },
+            on_context_menu: move |(path, e): (String, MouseEvent)| menu_pane.context_menu("file", path, &e),
         }
     }
 }
@@ -704,9 +834,4 @@ fn Stand(what: &'static str, next: &'static str) -> Element {
 #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
 const fn narrow(v: f64) -> f32 {
     v as f32
-}
-
-/// A file row's fill: the accent, faint, behind the note on show.
-fn lit(on: bool, t: &architect_shell::ShellTheme) -> &str {
-    if on { &t.accent_soft } else { "transparent" }
 }
