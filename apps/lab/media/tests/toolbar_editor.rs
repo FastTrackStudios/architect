@@ -43,10 +43,46 @@ impl Film for Toolbar {
             return;
         };
         if let Some(n) = doc.get_node(found) {
-            self.0 = without_ids(&n.outer_html_pretty());
+            self.0 = without_offsets(&without_ids(&n.outer_html_pretty()));
         }
     }
 }
+
+/// `html` with each measured `left:`/`top:` offset (`left: 412.5px`) masked
+/// as `left: _px`: a popup is placed from text widths, which differ between
+/// Linux and macOS font rendering, so the goldens compare what is drawn,
+/// not where a font put it.
+fn without_offsets(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+    loop {
+        let next = ["left:", "top:"]
+            .iter()
+            .filter_map(|k| rest.find(k).map(|at| (at, k.len())))
+            .min();
+        let Some((at, len)) = next else { break };
+        let (head, tail) = rest.split_at(at.saturating_add(len));
+        out.push_str(head);
+        let spaces = tail.len().saturating_sub(tail.trim_start().len());
+        let body = tail.get(spaces..).unwrap_or("");
+        let number = body
+            .char_indices()
+            .take_while(|(_, c)| c.is_ascii_digit() || *c == '.' || *c == '-')
+            .map(|(i, c)| i.saturating_add(c.len_utf8()))
+            .last()
+            .unwrap_or(0);
+        if number > 0 && body.get(number..).is_some_and(|r| r.starts_with("px")) {
+            out.push_str(tail.get(..spaces).unwrap_or(""));
+            out.push('_');
+            rest = body.get(number..).unwrap_or("");
+        } else {
+            rest = tail;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 
 /// `html` with each `data-dioxus-id="…"` emptied: the order things were
 /// mounted in, not how they look.
