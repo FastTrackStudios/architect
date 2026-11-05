@@ -1,23 +1,22 @@
 //! A phone's bar at the foot: the action bar, up to six buttons the app
-//! and its pages put there by command id, that becomes the editing bar
-//! over the keyboard while a field is typed in — the focused editor's
-//! actions, sideways when they don't fit, and apart at the right the
-//! button that puts the keyboard away. Obsidian's on iOS.
+//! and its pages put there by command id, that becomes the Typing Toolbar
+//! over the keyboard while a field is typed in (`super::typing`): the
+//! focused editor's actions and whatever fills it, sideways when they
+//! don't fit, and apart at the right the button that puts the keyboard
+//! away. Obsidian's on iOS.
 //!
 //! The app says only what is on the bar ([`AppShell`]'s `actions`,
-//! [`use_bar_action`], [`use_editing_actions`]); how it looks, where it
-//! sits and how it rides the keyboard are the shell's.
+//! [`use_bar_action`], [`use_editing_actions`], [`use_typing_scope`],
+//! `TypingTools`); how it looks, where it sits and how it rides the
+//! keyboard are the shell's.
 //!
 //! [`AppShell`]: super::AppShell
 
-use std::cell::Cell;
-use std::rc::Rc;
-
 use dioxus::prelude::*;
-use lucide_dioxus::KeyboardOff;
 
 use super::bars::BottomBar;
 use super::keyboard::use_keyboard_lift;
+use super::typing::{KeyboardBar, Typing, TypingContent, TypingItem, TypingTools};
 use super::{Action, Icon, IconFn, Screen, Shell, Tab, use_shell};
 
 /// The most buttons the action bar holds.
@@ -67,6 +66,9 @@ pub struct CommandRunner {
     pub run: Callback<String, bool>,
     /// Whether it can run now; `None` when there is no such command.
     pub enabled: Callback<String, Option<bool>>,
+    /// Whether a toggle is on now; `None` when it is not a toggle, or
+    /// there is no such command. A Typing Toolbar button follows it.
+    pub checked: Callback<String, Option<bool>>,
 }
 
 /// What the pages and the editors have put on the bar: the model under
@@ -75,7 +77,19 @@ pub struct CommandRunner {
 pub(super) struct BarModel {
     page: Vec<(u64, BarAction)>,
     editors: Vec<Editor>,
+    /// The pages and views that say whether the focus is in them.
+    scopes: Vec<Scope>,
     serial: u64,
+}
+
+/// A page or view the Typing Toolbar follows the focus into
+/// ([`use_typing_scope`]).
+#[derive(Clone, PartialEq)]
+struct Scope {
+    serial: u64,
+    /// `view:note`, `view:lab.board/chart`.
+    context: String,
+    focused: bool,
 }
 
 /// An editor's actions, for while it is typed in.
@@ -112,6 +126,27 @@ impl BarModel {
     fn remove(&mut self, serial: u64) {
         self.page.retain(|(s, _)| *s != serial);
         self.editors.retain(|e| e.serial != serial);
+        self.scopes.retain(|e| e.serial != serial);
+    }
+
+    fn add_scope(&mut self, context: &str) -> u64 {
+        let serial = self.next();
+        self.scopes.push(Scope {
+            serial,
+            context: context.to_owned(),
+            focused: false,
+        });
+        serial
+    }
+
+    /// A scope says the focus is in it, or has left: whether it changed.
+    /// Scopes nest (a field in a view in a pane), so each keeps its own.
+    fn focus_scope(&mut self, serial: u64, on: bool) -> bool {
+        self.scopes
+            .iter_mut()
+            .find(|s| s.serial == serial && s.focused != on)
+            .map(|s| s.focused = on)
+            .is_some()
     }
 
     fn add_editor(&mut self, context: &str, actions: Vec<BarAction>) -> u64 {
@@ -193,14 +228,43 @@ impl BarModel {
     }
 
     /// The editing bar's actions and what they edit: the editor with the
-    /// text focus, else the one registered last; nothing with no editor.
+    /// text focus, else (when no page or view says it has the focus) the
+    /// one registered last; nothing with no editor.
     fn editing(&self) -> Option<(&str, &[BarAction])> {
-        self.editors
-            .iter()
-            .rev()
-            .find(|e| e.focused)
-            .or_else(|| self.editors.last())
+        let focused = self.editors.iter().rev().find(|e| e.focused);
+        let scoped = self.scopes.iter().any(|s| s.focused);
+        focused
+            .or_else(|| (!scoped).then(|| self.editors.last()).flatten())
             .map(|e| (e.context.as_str(), e.actions.as_slice()))
+    }
+
+    /// What is typed in now: the editor's context and actions, and the
+    /// scopes the focus is in.
+    fn typing(&self) -> Typing {
+        let (editor, actions) = self
+            .editing()
+            .map(|(c, a)| (Some(c.to_owned()), a.to_vec()))
+            .unwrap_or_default();
+        Typing {
+            editor,
+            actions,
+            scopes: self
+                .scopes
+                .iter()
+                .filter(|s| s.focused)
+                .map(|s| s.context.clone())
+                .collect(),
+        }
+    }
+}
+
+/// Takes registration `serial` off the bar, if the shell is still there
+/// (a pane in a window can go after the shell it was told about).
+fn forget(bars: Option<Signal<BarModel>>, serial: Option<u64>) {
+    if let (Some(mut b), Some(serial)) = (bars, serial)
+        && let Ok(mut w) = b.try_write()
+    {
+        w.remove(serial);
     }
 }
 
@@ -227,11 +291,7 @@ pub fn use_bar_action(action: BarAction) {
             b.write().update(serial, &action);
         }
     }
-    use_drop(move || {
-        if let (Some(mut b), Some(serial)) = (bars, serial) {
-            b.write().remove(serial);
-        }
-    });
+    use_drop(move || forget(bars, serial));
 }
 
 /// An editor's say on the editing bar ([`use_editing_actions`]): that it
@@ -240,6 +300,8 @@ pub fn use_bar_action(action: BarAction) {
 pub struct EditingFocus {
     bars: Option<Signal<BarModel>>,
     serial: Option<u64>,
+    /// A page's or view's ([`use_typing_scope`]), not an editor's.
+    scope: bool,
 }
 
 impl EditingFocus {
@@ -254,6 +316,19 @@ impl EditingFocus {
     }
 
     fn set(&self, on: bool) {
+        if self.scope {
+            if let (Some(mut b), Some(serial)) = (self.bars, self.serial) {
+                let changes = b
+                    .peek()
+                    .scopes
+                    .iter()
+                    .any(|s| s.serial == serial && s.focused != on);
+                if changes {
+                    b.write().focus_scope(serial, on);
+                }
+            }
+            return;
+        }
         if let (Some(mut b), Some(serial)) = (self.bars, self.serial) {
             // Told on every focus and blur: written only when it changes.
             let changes = b
@@ -291,27 +366,52 @@ pub fn use_editing_actions(context: &str, actions: &[BarAction]) -> EditingFocus
             b.write().update_editor(serial, context, actions);
         }
     }
-    use_drop(move || {
-        if let (Some(mut b), Some(serial)) = (bars, serial) {
-            b.write().remove(serial);
+    use_drop(move || forget(bars, serial));
+    EditingFocus {
+        bars,
+        serial,
+        scope: false,
+    }
+}
+
+/// Lets the Typing Toolbar follow the focus into the calling page or view.
+///
+/// `context` names it (`view:note`, `view:lab.board/chart`), the
+/// context a toolbar's `when` names. Wire the returned [`EditingFocus`] to
+/// its box's `onfocusin` and `onfocusout` (they bubble from its fields,
+/// in Blitz too); while a field in it is typed in, the context is in
+/// force ([`Typing::scopes`]). The workspace's panes do it for their view
+/// kind, an extension's view for its own.
+#[must_use = "the page tells it when the focus comes and goes"]
+pub fn use_typing_scope(context: &str) -> EditingFocus {
+    let bars = bars();
+    let first = context.to_owned();
+    let serial = use_hook(move || bars.map(|mut b| b.write().add_scope(&first)));
+    if let (Some(mut b), Some(serial)) = (bars, serial) {
+        let stale = b
+            .peek()
+            .scopes
+            .iter()
+            .any(|s| s.serial == serial && s.context != context);
+        if stale {
+            let mut w = b.write();
+            if let Some(s) = w.scopes.iter_mut().find(|s| s.serial == serial) {
+                context.clone_into(&mut s.context);
+            }
         }
-    });
-    EditingFocus { bars, serial }
+    }
+    use_drop(move || forget(bars, serial));
+    EditingFocus {
+        bars,
+        serial,
+        scope: true,
+    }
 }
 
 /// The action bar's buttons' height, points.
 const BAR_ROW: f64 = 48.0;
 /// A button's side, points: a finger's.
 const BUTTON: f64 = 44.0;
-/// The editing bar's pill's height, and its round button's side.
-const PILL: f64 = 48.0;
-/// The space around the editing bar.
-const EDGE: f64 = 8.0;
-/// Between the pill's buttons, and inside its ends.
-const PILL_GAP: f64 = 2.0;
-const PILL_PAD: f64 = 4.0;
-/// How far a press moves before it is a scroll, not a tap.
-const SLOP: f64 = 6.0;
 
 /// A phone's foot (`Frame::Bottom`): the action bar over the tabs, or,
 /// while a field is typed in, the editing bar riding the keyboard.
@@ -330,12 +430,22 @@ pub(super) fn PhoneFoot(
     let ins = screen.insets;
     let model = (shell.bars)();
     if now.editing() {
-        let (context, actions) = model
-            .editing()
-            .map(|(c, a)| (Some(c.to_owned()), a.to_vec()))
-            .unwrap_or_default();
+        let typing = model.typing();
+        // Filled by whoever put `TypingTools` in context (the toolbars of
+        // place `typing`); else the editor's own actions.
+        let filled = try_consume_context::<TypingTools>().and_then(|f| (f.0)(&typing));
+        let TypingContent { items, above } = filled.unwrap_or_else(|| TypingContent {
+            items: typing
+                .actions
+                .iter()
+                .cloned()
+                .map(TypingItem::action)
+                .collect(),
+            above: None,
+        });
+        let context = typing.editor;
         return rsx! {
-            KeyboardBar { context, actions, screen, on_dismiss: move |()| keyboard.dismissed() }
+            KeyboardBar { context, items, above, screen, on_dismiss: move |()| keyboard.dismissed() }
             div { style: "flex-shrink: 0; height: {lift.max(ins.bottom)}px;" }
         };
     }
@@ -423,174 +533,6 @@ fn BarButton(action: BarAction, enabled: bool) -> Element {
     }
 }
 
-/// A press on the editing bar's pill: where it began, and the offset then.
-#[derive(Clone, Copy, PartialEq)]
-struct Slide {
-    x0: f64,
-    from: f64,
-    moved: bool,
-}
-
-/// The editing bar: the editor's actions in a pill that scrolls sideways,
-/// and apart at the right the button that puts the keyboard away.
-///
-/// A press on the pill keeps the field's focus (its default is prevented,
-/// and its click's, so the caret and the keyboard stay), which also keeps
-/// Blitz from panning it: the pill follows the finger itself.
-#[component]
-fn KeyboardBar(
-    context: Option<String>,
-    actions: Vec<BarAction>,
-    screen: Screen,
-    on_dismiss: EventHandler<()>,
-) -> Element {
-    let t = use_shell().theme;
-    let ins = screen.insets;
-    let mut offset = use_signal(|| 0.0_f64);
-    let slide = use_hook(|| Rc::new(Cell::new(None::<Slide>)));
-    let runner = try_use_context::<CommandRunner>();
-    // Laid out from the buttons' fixed sizes: how far the pill can scroll.
-    let count = f64::from(u32::try_from(actions.len()).unwrap_or(u32::MAX));
-    let content = 2.0f64.mul_add(
-        PILL_PAD,
-        BUTTON.mul_add(count, PILL_GAP * (count - 1.0).max(0.0)),
-    );
-    // The bar's two edges, the pill's gap to the round button, the button.
-    let room = 3.0f64.mul_add(-EDGE, screen.width - ins.left - ins.right - PILL);
-    let reach = (content - room).max(0.0);
-    let x = offset().clamp(-reach, 0.0);
-    // Only the buttons in the pill's window are drawn: Blitz hits what
-    // `overflow: hidden` hides, and one scrolled past the pill's end would
-    // take a press meant for the round button.
-    let (first, end) = in_view(actions.len(), x, room);
-    let before = f64::from(u32::try_from(first).unwrap_or(u32::MAX)) * (BUTTON + PILL_GAP);
-    let (down, mv, up) = (slide.clone(), slide.clone(), slide.clone());
-    let context = context.unwrap_or_default();
-    rsx! {
-        div {
-            "data-bar": "editing",
-            "data-editing": "{context}",
-            style: "flex-shrink: 0; display: flex; align-items: center; gap: {EDGE}px; \
-                    padding: 6px {EDGE + ins.right}px {EDGE}px {EDGE + ins.left}px;",
-            if actions.is_empty() {
-                span { style: "flex: 1;" }
-            } else {
-                div {
-                    style: "position: relative; flex: 1; min-width: 0; height: {PILL}px; box-sizing: border-box; \
-                            overflow: hidden; border-radius: {PILL / 2.0}px; background: {t.pill}; \
-                            border: 1px solid {t.rule}; box-shadow: {t.shadow_lift};",
-                    // The field keeps the focus, and no drawer opens under
-                    // a sideways scroll.
-                    onpointerdown: move |e: PointerEvent| {
-                        e.prevent_default();
-                        e.stop_propagation();
-                        down.set(Some(Slide { x0: e.client_coordinates().x, from: x, moved: false }));
-                    },
-                    onmousedown: move |e: MouseEvent| e.prevent_default(),
-                    onpointermove: move |e: PointerEvent| {
-                        let Some(mut s) = mv.get() else { return };
-                        let dx = e.client_coordinates().x - s.x0;
-                        if s.moved || dx.abs() >= SLOP {
-                            s.moved = true;
-                            mv.set(Some(s));
-                            offset.set((s.from + dx).clamp(-reach, 0.0));
-                        }
-                    },
-                    onpointerup: move |_| {
-                        // A scroll is not a press: its click is let go.
-                        let s = up.take();
-                        if s.is_some_and(|s| s.moved) {
-                            up.set(Some(Slide { x0: 0.0, from: 0.0, moved: true }));
-                        }
-                    },
-                    div {
-                        // `left`, not a transform: Blitz moves a transform
-                        // by device pixels, a third as far on a 3x phone.
-                        style: "position: absolute; top: 0; bottom: 0; left: {x}px; display: flex; align-items: center; \
-                                gap: {PILL_GAP}px; padding: 0 {PILL_PAD}px;",
-                        if first > 0 {
-                            span { style: "width: {before - PILL_GAP}px; flex-shrink: 0;" }
-                        }
-                        for action in actions.into_iter().take(end).skip(first) {
-                            EditButton {
-                                key: "{action.id}",
-                                enabled: runner.and_then(|r| r.enabled.call(action.id.clone())).unwrap_or(true),
-                                slid: slide.clone(),
-                                action,
-                            }
-                        }
-                    }
-                }
-            }
-            // Not focusable: a press on it takes the focus off the field,
-            // which puts the keyboard away (Blitz, and a browser); a web
-            // view is told as well. Over the pill's edge button, should one
-            // reach under it.
-            button {
-                class: "lp",
-                tabindex: "-1",
-                "aria-label": "Hide the keyboard",
-                "data-bar-item": "hide-keyboard",
-                style: "position: relative; z-index: 1; width: {PILL}px; height: {PILL}px; flex-shrink: 0; \
-                        box-sizing: border-box; padding: 0; \
-                        border-radius: {PILL / 2.0}px; display: flex; align-items: center; justify-content: center; \
-                        background: {t.pill}; border: 1px solid {t.rule}; box-shadow: {t.shadow_lift};",
-                onclick: move |_| {
-                    let _ = document::eval("document.activeElement && document.activeElement.blur();");
-                    on_dismiss.call(());
-                },
-                KeyboardOff { size: 20, color: t.ink_2.to_string() }
-            }
-        }
-    }
-}
-
-/// Which of `count` buttons the pill shows at offset `x` in `room`
-/// points: from the first that reaches into it to the one before the
-/// first past its end.
-fn in_view(count: usize, x: f64, room: f64) -> (usize, usize) {
-    let left = |i: usize| {
-        f64::from(u32::try_from(i).unwrap_or(u32::MAX)).mul_add(BUTTON + PILL_GAP, PILL_PAD + x)
-    };
-    let first = (0..count)
-        .find(|&i| left(i) + BUTTON > 0.0)
-        .unwrap_or(count);
-    let end = (first..count).find(|&i| left(i) >= room).unwrap_or(count);
-    (first, end)
-}
-
-#[component]
-fn EditButton(action: BarAction, enabled: bool, slid: Rc<Cell<Option<Slide>>>) -> Element {
-    let t = use_shell().theme;
-    let colour = if enabled { &*t.ink } else { &*t.ink_3 };
-    let opacity = if enabled { 1.0 } else { 0.45 };
-    let id = action.id.clone();
-    rsx! {
-        button {
-            tabindex: "-1",
-            "aria-label": "{action.label}",
-            "aria-disabled": if enabled { "false" } else { "true" },
-            "data-bar-item": "{action.id}",
-            style: "width: {BUTTON}px; height: {BUTTON}px; flex-shrink: 0; padding: 0; border: none; \
-                    border-radius: {BUTTON / 2.0}px; background: transparent; display: flex; \
-                    align-items: center; justify-content: center; opacity: {opacity};",
-            onclick: move |e: MouseEvent| {
-                // Blitz takes the focus off the field for a click on
-                // nothing focussable: not this one.
-                e.prevent_default();
-                // The press that scrolled the pill presses nothing.
-                if slid.take().is_some_and(|s| s.moved) {
-                    return;
-                }
-                if enabled {
-                    run(&id);
-                }
-            },
-            {(action.icon)(Icon { size: 20, color: colour.into() })}
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -657,17 +599,6 @@ mod tests {
     }
 
     #[test]
-    fn the_pill_draws_only_the_buttons_in_its_window() {
-        // 9 buttons, 46 points apart from 4 in: 0–48, 50–94, …, 372–416.
-        assert_eq!(in_view(9, 0.0, 330.0), (0, 8));
-        assert_eq!(in_view(9, -90.0, 330.0), (1, 9), "scrolled to the end");
-        assert_eq!(in_view(9, -50.0, 330.0), (1, 9));
-        assert_eq!(in_view(9, -47.0, 330.0), (0, 9), "a sliver still shows");
-        assert_eq!(in_view(3, 0.0, 330.0), (0, 3), "all fit");
-        assert_eq!(in_view(0, 0.0, 330.0), (0, 0));
-    }
-
-    #[test]
     fn the_editing_bar_is_the_focused_editor_s_else_the_last_one_s() {
         let mut m = BarModel::default();
         assert!(m.editing().is_none(), "no editor, no editing actions");
@@ -698,5 +629,36 @@ mod tests {
         assert!(m.editing().is_none());
         // The action bar never shows an editor's actions.
         assert!(m.shown(&[]).is_empty());
+    }
+
+    #[test]
+    fn a_scope_the_focus_is_in_is_in_force_and_takes_the_unfocused_editor_s_place() {
+        let mut m = BarModel::default();
+        let capture = m.add_editor("capture", vec![a("TAG")]);
+        let pane = m.add_scope("view:lab.board/chart");
+        // Nothing says it has the focus: the editor mounted last, as before.
+        assert_eq!(m.typing().editor.as_deref(), Some("capture"));
+        assert!(m.typing().scopes.is_empty());
+
+        // A field in the view has it: the view's context, no editor's.
+        assert!(m.focus_scope(pane, true));
+        assert!(!m.focus_scope(pane, true), "no change, no redraw");
+        let t = m.typing();
+        assert_eq!(t.editor, None);
+        assert!(t.actions.is_empty());
+        assert_eq!(t.contexts(), ["view:lab.board/chart"]);
+
+        // An editor in it takes the focus: both are in force.
+        assert!(m.focus_editor(capture, true));
+        assert_eq!(
+            m.typing().contexts(),
+            ["editor:capture", "view:lab.board/chart"]
+        );
+
+        // The focus leaves; the scope goes with its view.
+        assert!(m.focus_scope(pane, false));
+        m.remove(pane);
+        assert!(m.typing().scopes.is_empty());
+        assert_eq!(m.typing().editor.as_deref(), Some("capture"));
     }
 }

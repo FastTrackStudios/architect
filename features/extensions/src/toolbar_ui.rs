@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use architect::action::{ActionList, Invocation, InvocationSource};
 use architect_shell::{ShellTheme, named_icon};
-use architect_workspace::{ContextEntry, HeaderTools, PaneId, Side, Target, View, use_pane_of};
+use architect_workspace::{ContextEntry, HeaderTools, PaneId, Side, Target, View, try_use_pane_of};
 use dioxus::prelude::*;
 use futures::StreamExt as _;
 use futures::channel::mpsc;
@@ -391,7 +391,9 @@ pub fn ToolbarStrip(
     let t = crate::window_ui::shell_theme();
     let host = ui.host();
     let editor = try_use_context::<Editor>();
-    let handle = use_pane_of(PaneId(pane.clone().unwrap_or_else(|| pane_kind(&toolbar))));
+    // Outside a workspace (over a phone's keyboard) it has no pane, and
+    // no context menu of one.
+    let handle = try_use_pane_of(PaneId(pane.clone().unwrap_or_else(|| pane_kind(&toolbar))));
     let Some(bar) = host.toolbars().get(host.contributions(), &toolbar) else {
         return rsx! {};
     };
@@ -475,7 +477,11 @@ pub fn ToolbarStrip(
             },
             // Its empty space: the `toolbar` target's menu (Edit toolbars,
             // its settings, what extensions add).
-            oncontextmenu: move |e: MouseEvent| handle.context_menu("toolbar", menu_key.clone(), &e),
+            oncontextmenu: move |e: MouseEvent| {
+                if let Some(h) = &handle {
+                    h.context_menu("toolbar", menu_key.clone(), &e);
+                }
+            },
             if empty {
                 span { style: "font-size:11px; color:{t.ink_3};", "An empty toolbar: Edit toolbars to fill it." }
             }
@@ -565,7 +571,7 @@ fn EditableItem(
     let Some(editor) = try_use_context::<Editor>() else {
         return rsx! {};
     };
-    let handle = use_pane_of(cx.pane_id());
+    let handle = try_use_pane_of(cx.pane_id());
     let Ok(at) = At::parse(&path) else {
         return rsx! {};
     };
@@ -648,7 +654,9 @@ fn EditableItem(
             },
             oncontextmenu: move |e: MouseEvent| {
                 e.stop_propagation();
-                handle.context_menu("toolbar-item", menu_id.clone(), &e);
+                if let Some(h) = &handle {
+                    h.context_menu("toolbar-item", menu_id.clone(), &e);
+                }
             },
             {inner}
         }

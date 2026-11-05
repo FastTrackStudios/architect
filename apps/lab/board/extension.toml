@@ -9,7 +9,7 @@ name = "Board"
 version = "0.1.0"
 kind = "process"
 api = "0.1"
-description = "A pin board: a tab, a status item, a context-menu entry on notes, a .kf opener, a GitHub-issue link opener, a startup hook, and its own status bar."
+description = "A pin board: a tab, a status item, a context-menu entry on notes, a .kf opener, a GitHub-issue link opener, a startup hook, its own status bar, and a chart's chord line with its tools over a phone's keyboard."
 authors = ["FastTrackStudio"]
 
 [entry]
@@ -63,6 +63,75 @@ effect = "mutating"
 id = "LAB_BOARD_ISSUE"
 name = "Board: open an issue"
 description = "Its link opener: pins the GitHub issue that was clicked."
+group = "Board"
+effect = "mutating"
+
+[[actions]]
+id = "LAB_BOARD_CHORDS"
+name = "The chord sheet"
+description = "What the chord sheet holds, and whether sharps are on."
+group = "Board"
+effect = "read_only"
+
+[[actions]]
+id = "LAB_BOARD_SHARP"
+name = "Chords: sharps"
+description = "Sharps on or off for the chords put in next. A toggle: its Typing Toolbar button shows which."
+group = "Board"
+effect = "mutating"
+toggle = true
+
+[[actions]]
+id = "LAB_BOARD_BAR_LINE"
+name = "Chords: a bar line"
+group = "Board"
+effect = "mutating"
+
+[[actions]]
+id = "LAB_BOARD_CHORDS_CLEAR"
+name = "Chords: clear the sheet"
+group = "Board"
+effect = "mutating"
+
+[[actions]]
+id = "LAB_BOARD_CHORD_C"
+name = "Chords: C"
+group = "Board"
+effect = "mutating"
+
+[[actions]]
+id = "LAB_BOARD_CHORD_D"
+name = "Chords: D"
+group = "Board"
+effect = "mutating"
+
+[[actions]]
+id = "LAB_BOARD_CHORD_E"
+name = "Chords: E"
+group = "Board"
+effect = "mutating"
+
+[[actions]]
+id = "LAB_BOARD_CHORD_F"
+name = "Chords: F"
+group = "Board"
+effect = "mutating"
+
+[[actions]]
+id = "LAB_BOARD_CHORD_G"
+name = "Chords: G"
+group = "Board"
+effect = "mutating"
+
+[[actions]]
+id = "LAB_BOARD_CHORD_A"
+name = "Chords: A"
+group = "Board"
+effect = "mutating"
+
+[[actions]]
+id = "LAB_BOARD_CHORD_B"
+name = "Chords: B"
 group = "Board"
 effect = "mutating"
 
@@ -160,6 +229,64 @@ title = "Pin to the board"
 action = "LAB_BOARD_PIN"
 title = "Pin"
 icon = "pin"
+
+# Over a phone's keyboard while the chart's chord field is typed in, after
+# the editor's own items (none here): a sharps toggle, the chords, a
+# dropdown that opens above the bar, and the tempo widget. More than a
+# phone's width: the bar scrolls sideways. A person's copy
+# (`toolbars/lab.board-chords.toml`) is used in its place.
+[[toolbars]]
+id = "chords"
+title = "Chords"
+where = "typing"
+when = "view:lab.board/chart"
+
+[[toolbars.items]]
+action = "LAB_BOARD_SHARP"
+label = "♯"
+
+[[toolbars.items]]
+action = "LAB_BOARD_CHORD_C"
+label = "C"
+
+[[toolbars.items]]
+action = "LAB_BOARD_CHORD_D"
+label = "D"
+
+[[toolbars.items]]
+action = "LAB_BOARD_CHORD_E"
+label = "E"
+
+[[toolbars.items]]
+action = "LAB_BOARD_CHORD_F"
+label = "F"
+
+[[toolbars.items]]
+action = "LAB_BOARD_CHORD_G"
+label = "G"
+
+[[toolbars.items]]
+action = "LAB_BOARD_CHORD_A"
+label = "A"
+
+[[toolbars.items]]
+action = "LAB_BOARD_CHORD_B"
+label = "B"
+
+[[toolbars.items]]
+label = "Insert"
+menu = [
+    { kind = "heading", label = "Sheet" },
+    { action = "LAB_BOARD_BAR_LINE", label = "Bar line" },
+    { action = "LAB_BOARD_SHARP", label = "Sharps" },
+    { kind = "separator" },
+    { action = "LAB_BOARD_CHORDS_CLEAR", label = "Clear the sheet" },
+]
+
+[[toolbars.items]]
+kind = "widget"
+view = "tempo"
+width = 120
 
 [[hooks]]
 on = "startup"

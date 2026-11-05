@@ -12,6 +12,7 @@ mod page;
 #[cfg(test)]
 mod snapshot_tests;
 mod status;
+mod typing;
 mod workspaces;
 
 use std::cell::Cell;
@@ -27,6 +28,7 @@ use lucide_dioxus::{ChevronsUpDown, PanelLeft, PanelLeftClose, PanelRight};
 pub use crate::screen::{FormFactor, Insets, Screen, ShellStyle};
 pub use bar::{
     BAR_MAX, BarAction, CommandRunner, EditingFocus, use_bar_action, use_editing_actions,
+    use_typing_scope,
 };
 use bar::{BarModel, PhoneFoot};
 use bars::{Rail, RoundButton, SideTab};
@@ -40,6 +42,9 @@ pub use page::{
 };
 pub use status::{STATUS_BADGE, STATUS_BAR, StatusItem, StatusSide, StatusStyle, use_status};
 use status::{StatusBadge, StatusBar};
+pub use typing::{
+    Typing, TypingButton, TypingContent, TypingItem, TypingMenu, TypingTools, TypingWidget,
+};
 use workspaces::{Place, Switcher};
 pub use workspaces::{Workspace, WorkspaceAction, Workspaces};
 
@@ -421,7 +426,7 @@ pub struct Shell {
     /// The app's buttons on a phone's action bar.
     bar_actions: Vec<BarAction>,
     /// What the pages and editors put on the bar: [`use_bar_action`],
-    /// [`use_editing_actions`].
+    /// [`use_editing_actions`], [`use_typing_scope`].
     bars: Signal<BarModel>,
 }
 

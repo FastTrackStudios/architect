@@ -548,6 +548,17 @@ pub fn use_pane_of(id: PaneId) -> PaneHandle {
     }
 }
 
+/// [`use_pane_of`] where there may be no workspace (a toolbar drawn over
+/// a phone's keyboard, on a page of the shell's): `None` outside one.
+#[must_use]
+pub fn try_use_pane_of(id: PaneId) -> Option<PaneHandle> {
+    try_use_context::<Host>().map(|host| PaneHandle {
+        id,
+        host,
+        preview: false,
+    })
+}
+
 /// A pane, from inside it.
 #[derive(Clone)]
 pub struct PaneHandle {

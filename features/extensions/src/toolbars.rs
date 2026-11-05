@@ -15,6 +15,12 @@
 //! right-click arms its action shows it armed until it is disarmed; what
 //! an armed action does next (to what is clicked) is the app's.
 //!
+//! The app provides toolbars at run time too ([`Toolbars::provide`]): a
+//! phone's focused editor's own items are the Typing Toolbar's built-in
+//! one for its context (`typing/<context>`, [`Toolbars::provide_editor`]),
+//! which a person's file overrides as it would an extension's: reordered,
+//! with items hidden or added. [`Toolbars::typing`] is what that bar shows.
+//!
 //! And the editor's state (#313): whether the toolbars are being edited
 //! ([`Toolbars::set_editing`]), whose settings show ([`Toolbars::select`]),
 //! and edits by item ([`Toolbars::edit`], `crate::toolbar_edit`): an edit
@@ -31,10 +37,14 @@ use std::time::{Duration, SystemTime};
 use architect::action::Problem;
 
 use crate::contrib::{By, Contributions};
-use crate::toolbar::{ToolbarDecl, ToolbarPlace};
+use crate::toolbar::{TYPING, ToolItem, ToolbarDecl, ToolbarPlace};
 
 /// Who a person's own toolbars are owned by (`user/<id>`).
 pub const PERSON: &str = "user";
+
+/// Who an editor's built-in Typing Toolbar is owned by
+/// (`typing/<context>`: `typing/markdown`).
+pub const EDITOR: &str = "typing";
 
 /// How long after the last edit in the editor it is written.
 pub const DEBOUNCE: Duration = Duration::from_millis(400);
@@ -56,6 +66,9 @@ pub enum Source {
     Override,
     /// A person's file of their own.
     Person,
+    /// The app's, at run time ([`Toolbars::provide`]): an editor's own
+    /// items on the Typing Toolbar.
+    Provided,
 }
 
 /// A toolbar in force.
@@ -76,6 +89,8 @@ struct State {
     dir: Option<PathBuf>,
     /// The files as last read: by key, each with its path.
     files: BTreeMap<String, (ToolbarDecl, PathBuf)>,
+    /// The app's at run time, by key: each with its owner.
+    provided: BTreeMap<String, (String, ToolbarDecl)>,
     problems: Vec<Problem>,
     /// What was read: each file and when it last changed.
     seen: Vec<(PathBuf, Option<SystemTime>)>,
@@ -364,15 +379,26 @@ impl Toolbars {
         self.lock().problems.clone()
     }
 
-    /// Every toolbar in force: each extension's (a person's copy in its
-    /// place), then the person's own.
+    /// Every toolbar in force: each extension's, then the app's provided
+    /// ones (a person's copy in the place of either), then the person's
+    /// own.
     #[must_use]
     pub fn all(&self, contributions: &Contributions) -> Vec<Toolbar> {
-        let files = self.lock().files.clone();
-        let mut out: Vec<Toolbar> = contributions
+        let (files, provided) = {
+            let s = self.lock();
+            (s.files.clone(), s.provided.clone())
+        };
+        let based = contributions
             .toolbars()
             .into_iter()
-            .map(|By { owner, item }| {
+            .map(|By { owner, item }| (owner, item, Source::Extension))
+            .chain(
+                provided
+                    .into_values()
+                    .map(|(owner, item)| (owner, item, Source::Provided)),
+            );
+        let mut out: Vec<Toolbar> = based
+            .map(|(owner, item, source)| {
                 let key = format!("{owner}/{}", item.id);
                 match files.get(&key) {
                     Some((mine, path)) => Toolbar {
@@ -389,7 +415,7 @@ impl Toolbars {
                         key,
                         owner,
                         decl: item,
-                        source: Source::Extension,
+                        source,
                         file: None,
                     },
                 }
@@ -409,6 +435,92 @@ impl Toolbars {
                 });
             }
         }
+        out
+    }
+
+    /// Provides `decl` as `owner`'s toolbar at run time
+    /// (`<owner>/<id>`), in place of what it provided under that key
+    /// before: whether that changed it. A person's file of the same key
+    /// is used in its place, as for an extension's.
+    #[must_use]
+    pub fn provide(&self, owner: &str, decl: ToolbarDecl) -> bool {
+        let key = format!("{owner}/{}", decl.id);
+        let mut s = self.lock();
+        if s.provided
+            .get(&key)
+            .is_some_and(|(o, d)| o == owner && *d == decl)
+        {
+            return false;
+        }
+        s.provided.insert(key, (owner.to_owned(), decl));
+        Self::changed(s);
+        true
+    }
+
+    /// Takes away what was provided under `key`: whether there was one.
+    #[must_use]
+    pub fn withdraw(&self, key: &str) -> bool {
+        let mut s = self.lock();
+        if s.provided.remove(key).is_none() {
+            return false;
+        }
+        Self::changed(s);
+        true
+    }
+
+    /// Provides a phone's editor's own items, its editing actions by id in
+    /// its order, as the Typing Toolbar's built-in toolbar for its context
+    /// (`typing/<context>`, for `editor:<context>`): its key.
+    #[must_use]
+    pub fn provide_editor(&self, context: &str, actions: &[(String, String)]) -> String {
+        let decl = ToolbarDecl {
+            id: context.to_owned(),
+            title: format!("Typing: {context}"),
+            at: TYPING.to_owned(),
+            when: format!("editor:{context}"),
+            items: actions
+                .iter()
+                .map(|(action, label)| ToolItem {
+                    action: action.clone(),
+                    label: label.clone(),
+                    ..ToolItem::default()
+                })
+                .collect(),
+            ..ToolbarDecl::default()
+        };
+        let key = format!("{EDITOR}/{context}");
+        let _ = self.provide(EDITOR, decl);
+        key
+    }
+
+    /// What a phone's Typing Toolbar shows for `contexts` (the focused
+    /// editor's `editor:<context>`, the pages and views the focus is in):
+    /// the editor's own toolbar (`typing/<editor>`, a person's copy in its
+    /// place) first, then every other of place `typing` whose `when` is in
+    /// force, in order.
+    #[must_use]
+    pub fn typing(
+        &self,
+        contributions: &Contributions,
+        editor: Option<&str>,
+        contexts: &[String],
+    ) -> Vec<Toolbar> {
+        let own = editor.map(|e| format!("{EDITOR}/{e}"));
+        let mut out: Vec<Toolbar> = self
+            .all(contributions)
+            .into_iter()
+            .filter(|t| t.decl.place() == Some(ToolbarPlace::Typing))
+            .filter(|t| {
+                if t.owner == EDITOR {
+                    // An editor's own: only its, while it is typed in.
+                    own.as_deref() == Some(t.key.as_str())
+                } else {
+                    t.decl.applies_to_any(contexts)
+                }
+            })
+            .collect();
+        // Stable: the editor's own first, the rest as they were.
+        out.sort_by_key(|t| own.as_deref() != Some(t.key.as_str()));
         out
     }
 
@@ -687,9 +799,15 @@ impl Toolbars {
             return Err(format!("{at:?} is not a place"));
         }
         let mut hidden = Vec::new();
+        // The Typing Toolbar shows one a context: another of the same
+        // `when` gives way, not every other.
+        let when = (probe.place() == Some(ToolbarPlace::Typing))
+            .then(|| self.get(contributions, key).map(|t| t.decl.when))
+            .flatten();
         if probe.place() != Some(ToolbarPlace::Hidden) {
             for other in self.all(contributions) {
-                if other.key != key && other.decl.at == at {
+                let same_context = when.as_ref().is_none_or(|w| *w == other.decl.when);
+                if other.key != key && other.decl.at == at && same_context {
                     self.edit(contributions, &other.key, |t| {
                         "hidden".clone_into(&mut t.at);
                         Ok(())
@@ -1092,6 +1210,91 @@ mod tests {
         assert_eq!(uri, "data:image/svg+xml;base64,PHN2Zy8+");
         assert_eq!(bars.image("icons/none.svg", None), None);
         assert_eq!(bars.image("icons/a.txt", None), None);
+    }
+
+    #[test]
+    fn the_typing_toolbar_is_the_editor_s_own_then_those_for_the_focus() {
+        use crate::toolbar_edit::{self as edit, At};
+        let tmp = tempfile::tempdir().unwrap();
+        let reg = Contributions::new();
+        let typing = |id: &str, when: &str, action: &str| ToolbarDecl {
+            at: TYPING.into(),
+            when: when.into(),
+            ..bar(id, action)
+        };
+        reg.put(
+            "lab.board",
+            Contribution {
+                toolbars: vec![
+                    typing("chords", "view:lab.board/chart", "LAB_BOARD_CHORD_C"),
+                    bar("dock", "LAB_BOARD_PIN"),
+                ],
+                ..Contribution::default()
+            },
+        );
+        let bars = Toolbars::new();
+        bars.set_dir(tmp.path());
+        let actions: Vec<(String, String)> = ["TAG", "BOLD", "CLEAR"]
+            .into_iter()
+            .map(|a| (a.to_owned(), a.to_lowercase()))
+            .collect();
+        let key = bars.provide_editor("capture", &actions);
+        assert_eq!(key, "typing/capture");
+        let r = bars.revision();
+        let _ = bars.provide_editor("capture", &actions);
+        assert_eq!(bars.revision(), r, "the same again changes nothing");
+        let keys = |editor: Option<&str>, contexts: &[&str]| -> Vec<String> {
+            let contexts: Vec<String> = contexts.iter().map(|c| (*c).to_owned()).collect();
+            bars.typing(&reg, editor, &contexts)
+                .into_iter()
+                .map(|t| t.key)
+                .collect()
+        };
+        // The capture field: its own items alone.
+        assert_eq!(
+            keys(Some("capture"), &["editor:capture"]),
+            ["typing/capture"]
+        );
+        // The chart's chord line: the Board's, not the capture's.
+        assert_eq!(keys(None, &["view:lab.board/chart"]), ["lab.board/chords"]);
+        assert!(keys(None, &["view:note"]).is_empty());
+        let own = bars.get(&reg, &key).unwrap();
+        assert_eq!(own.source, Source::Provided);
+        assert_eq!(own.decl.when, "editor:capture");
+
+        // A person's edit: CLEAR first, TAG hidden; written, it stays the
+        // bar's in place of the editor's own.
+        bars.edit(&reg, &key, |t| edit::move_item(t, At::top(2), At::top(0)))
+            .unwrap();
+        bars.edit(&reg, &key, |t| edit::remove(t, At::top(1)))
+            .unwrap();
+        bars.flush().unwrap();
+        let again = Toolbars::new();
+        again.set_dir(tmp.path());
+        let _ = again.provide_editor("capture", &actions);
+        let mine = again.get(&reg, &key).unwrap();
+        assert_eq!(mine.source, Source::Override);
+        let order: Vec<&str> = mine.decl.items.iter().map(|i| i.action.as_str()).collect();
+        assert_eq!(order, ["CLEAR", "BOLD"]);
+        // Reset: the editor's own come back.
+        assert!(again.reset(&key).unwrap());
+        assert_eq!(again.get(&reg, &key).unwrap().decl.items.len(), 3);
+
+        // Showing another typing toolbar for the chart hides only the
+        // one for that context.
+        let other = bars
+            .create(&reg, Some("chords-2"), "Chords 2", TYPING)
+            .unwrap();
+        bars.edit(&reg, &other, |t| {
+            "view:lab.board/chart".clone_into(&mut t.when);
+            Ok(())
+        })
+        .unwrap();
+        let hidden = bars.show(&reg, &other, TYPING).unwrap();
+        assert_eq!(hidden, ["lab.board/chords"]);
+        assert_eq!(bars.get(&reg, &key).unwrap().decl.at, TYPING, "kept");
+        assert!(bars.withdraw(&key));
+        assert!(!bars.withdraw(&key));
     }
 
     #[test]
