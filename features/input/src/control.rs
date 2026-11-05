@@ -23,6 +23,8 @@ pub enum MidiKind {
     Cc,
     /// A program change.
     Program,
+    /// A pitch bend (`PB`): no number, a channel's whole bend.
+    PitchBend,
 }
 
 /// A MIDI message a binding matches: `Note60`, `CC64 ch1`, `PC5`, `CC`
@@ -44,6 +46,7 @@ impl MidiPattern {
             (MidiKind::Note, MidiMessage::NoteOn { note, velocity }) if velocity > 0 => note,
             (MidiKind::Cc, MidiMessage::ControlChange { control, .. }) => control,
             (MidiKind::Program, MidiMessage::ProgramChange { program }) => program,
+            (MidiKind::PitchBend, MidiMessage::PitchBend { .. }) => 0,
             _ => return false,
         };
         self.number.is_none_or(|n| n == number) && self.channel.is_none_or(|c| c == event.channel)
@@ -57,6 +60,7 @@ impl fmt::Display for MidiPattern {
             MidiKind::Note => "Note",
             MidiKind::Cc => "CC",
             MidiKind::Program => "PC",
+            MidiKind::PitchBend => "PB",
         })?;
         if let Some(n) = self.number {
             write!(f, "{n}")?;
@@ -68,8 +72,8 @@ impl fmt::Display for MidiPattern {
     }
 }
 
-/// Parse a MIDI pattern: a kind (`Note`, `CC`, `PC`), an optional number
-/// (0–127), and an optional ` ch<1–16>`.
+/// Parse a MIDI pattern: a kind (`Note`, `CC`, `PC`, `PB`), an optional
+/// number (0–127; none for `PB`), and an optional ` ch<1–16>`.
 pub fn parse_midi_pattern(input: &str) -> Result<MidiPattern, ConfigError> {
     let invalid = || ConfigError::InvalidMidiPattern(input.to_owned());
     let mut words = input.split_whitespace();
@@ -97,8 +101,12 @@ pub fn parse_midi_pattern(input: &str) -> Result<MidiPattern, ConfigError> {
         "note" => MidiKind::Note,
         "cc" => MidiKind::Cc,
         "pc" | "program" => MidiKind::Program,
+        "pb" | "pitch" => MidiKind::PitchBend,
         _ => return Err(invalid()),
     };
+    if kind == MidiKind::PitchBend && !number.is_empty() {
+        return Err(invalid());
+    }
     let number = if number.is_empty() {
         None
     } else {
@@ -183,13 +191,14 @@ mod tests {
 
     #[test]
     fn a_printed_pattern_parses_back_to_itself() {
-        for source in ["Note60", "CC64 ch1", "PC5", "CC", "Note ch10"] {
+        for source in ["Note60", "CC64 ch1", "PC5", "CC", "Note ch10", "PB ch1"] {
             let pattern = parse_midi_pattern(source).unwrap();
             assert_eq!(pattern.to_string(), source);
         }
         assert!(parse_midi_pattern("CC200").is_err());
         assert!(parse_midi_pattern("CC64 ch17").is_err());
-        assert!(parse_midi_pattern("Pitch").is_err());
+        assert!(parse_midi_pattern("Pitch5").is_err());
+        assert!(parse_midi_pattern("Bend").is_err());
     }
 
     #[test]

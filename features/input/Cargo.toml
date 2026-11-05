@@ -14,6 +14,10 @@ description = "Keymap engine: key trie, modal input processor, which-key, bound 
 [features]
 default = []
 dioxus = ["dep:dioxus", "dep:tokio", "dep:gloo-timers"]
+# OSC over UDP (`ports::UdpOsc`, native only): a socket and a thread of
+# its own, std only. The rest of `ports` (the codecs, the virtual
+# backend) is in the default set.
+udp = []
 
 [dependencies]
 facet = { workspace = true }
@@ -33,6 +37,8 @@ gloo-timers = { version = "0.3", features = ["futures"], optional = true }
 [dev-dependencies]
 # Drives the hook's sequence timer in `tests/hook.rs`.
 tokio = { workspace = true }
+# `tests/ports.rs`: OSC over localhost UDP.
+architect-input = { path = ".", features = ["udp"] }
 
 [lib]
 doctest = false
