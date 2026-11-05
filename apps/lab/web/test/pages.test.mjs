@@ -1,7 +1,8 @@
 // The web lab in a real browser (`just lab-web-test`): TSX pages in Web
-// Workers (features/pages/src/web/mod.rs) — the Board's own page file, a
-// runaway, a page's reach — driven by real clicks and keys in a headless
-// Chrome. Skipped when the lab is not built or there is no Chrome.
+// Workers (features/pages/src/web/mod.rs) — the Board's own page file, its
+// Preact page (architect/dom), a runaway, a page's reach — driven by real
+// clicks and keys in a headless Chrome. Skipped when the lab is not built
+// or there is no Chrome.
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
@@ -64,6 +65,27 @@ test('the Board page renders from its own file and its handlers run', { skip }, 
   const status = await tab.status();
   assert.equal(status.error, null, JSON.stringify(status));
   assert.equal(status.running, true);
+});
+
+test('a Preact page renders to the DOM in its worker and answers clicks', { skip }, async () => {
+  await tab.go(url('preact'));
+  assert.equal(await tab.until(() => tab.text('#preact-title'), 'the Preact page'), 'Preact');
+  assert.equal(await tab.text('#preact-count'), '0');
+  await tab.click('#preact-inc');
+  await tab.until(async () => (await tab.text('#preact-count')) === '1', 'a click to count');
+  await tab.click('#preact-inc');
+  await tab.until(async () => (await tab.text('#preact-count')) === '2', 'a second click');
+  // Typed in: the input event goes to Preact's listener, its state back.
+  await tab.type('#preact-draft', 'From Preact');
+  await tab.until(async () => (await tab.eval(`document.querySelector('#preact-draft').value`)) === 'From Preact', 'the field to hold what was typed');
+  await tab.click('#preact-add');
+  await tab.until(async () => (await tab.text('.preact-item')) === 'From Preact', 'the item');
+  assert.equal(await tab.eval(`document.querySelector('#preact-draft').value`), '', 'the field is emptied');
+  await tab.click('#preact-reset');
+  await tab.until(async () => (await tab.text('#preact-count')) === '0', 'the reset');
+  await tab.shot(join(SHOTS, 'preact.png'));
+  const status = await tab.status();
+  assert.equal(status.error, null, JSON.stringify(status));
 });
 
 test('a runaway render is stopped and the rest of the app keeps working', { skip }, async () => {

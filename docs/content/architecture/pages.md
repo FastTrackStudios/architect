@@ -11,8 +11,9 @@ weight = 68
 > overrides in the app's folder, and the lab's Board tab as a file (with
 > an A2UI page and a Luau page beside it). In a browser (#325): TSX/JS
 > pages in a Web Worker on the browser's own engine, the same file and
-> types ("On the web" below). Not yet: phase two (a worker-side DOM for
-> Preact/Solid, #326).
+> types ("On the web" below). A framework's own DOM (#326):
+> `architect/dom`, so Preact runs in a page's runtime, natively and in a
+> browser ("A framework's own DOM" below).
 
 ## The model
 
@@ -224,8 +225,8 @@ nested Web Worker with the worker runtime
 (`PageFolder`: the lab's are its files, `include_str!`'d); its scripts
 are transpiled by oxc in the main thread's wasm and their imports
 resolved by the native loader's rules (`features/pages/src/modules.rs`
-`prepare`: `"architect"`, `"architect/worker"`, files of its own folder,
-nothing else), and the worker links them as `blob:` URLs.
+`prepare`: `"architect"`, `"architect/dom"`, `"architect/worker"`,
+files of its own folder, nothing else), and the worker links them as `blob:` URLs.
 
 **The main thread only draws.** What the worker renders comes back as
 the element tree; `Mirror` diffs it into `wire::Edit`s and the
@@ -276,10 +277,11 @@ ports and secrets (the browser host has none), and services
 (`apps/lab/web`): the Board's own `apps/lab/board/pages/board.tsx` (and
 `primes.js`, its worker) with the three Board actions it runs answered in
 the page (`apps/lab/web/src/board.rs`; the Board's Rust extension is not
-built for a browser), beside the WASI Counter; `?page=runaway` and
-`?page=net` are checks. `just lab-web-test` drives them in a headless
+built for a browser), beside the WASI Counter; `?page=preact` is the
+Board's Preact page; `?page=runaway` and `?page=net` are checks. `just lab-web-test` drives them in a headless
 Chrome (`apps/lab/web/test/pages.test.mjs`): the Board renders and its
-handlers and worker run, a runaway is stopped while the main thread
+handlers and worker run, the Preact page answers clicks and typing, a
+runaway is stopped while the main thread
 keeps drawing, a host outside the page's capabilities is refused, and a
 broken save keeps the last good page.
 
@@ -330,11 +332,69 @@ its problems and its frame times, and the ops `check`, `clone` (a
 built-in's, to edit) and `restore` (the override removed: its own page
 shows again).
 
-## Phase two
+## A framework's own DOM
 
-A worker-side DOM (in the spirit of worker-dom) would let Preact or
-Solid run unchanged in a page's runtime: their DOM calls would build
-the same `Element` tree `h` does, diffed into edits by the same
-`Mirror`, so nothing on the window's side changes. On the web the shim
-runs in the page's Web Worker beside the prelude, its tree sent as a
-page's is.
+A page may render with a framework that renders to the DOM — Preact,
+Solid — instead of `h`: `import { document } from "architect/dom"` gives
+the page a DOM of its own, in the spirit of AMP's worker-dom, in the
+page's runtime (`features/pages/src/js/dom.js`): QuickJS natively, the
+page's Web Worker in a browser. It is never the window's document. The
+framework builds and mutates it; each change marks the page dirty, and
+once the unit of work is over (the event, its promise jobs, the
+framework's own microtask) the runtime draws it as it draws a
+component's tree — every node keyed by its own id, so a node the
+framework moves stays itself — and `Mirror` diffs that into
+`wire::Edit`s, applied by Blitz natively and by the extensions host's
+applier on the web. Nothing on the window's side changes.
+
+```tsx
+import { h, render } from "./vendor/preact.js";
+import { useState } from "./vendor/hooks.js";
+import { document } from "architect/dom";
+
+function Counter() {
+  const [n, setN] = useState(0);
+  return <button onClick={() => setN(n + 1)}>Clicked {n}</button>;
+}
+
+render(<Counter />, document.body);
+export default document.body;
+```
+
+The page's default export is the body it rendered into (`mount` in
+`features/pages/src/js/prelude.js` takes a component or that body). The
+framework comes from the page's folder, as any file does — no Node, no
+bundler: the lab's Board ships Preact 11 in
+`apps/lab/board/pages/vendor/` (its hooks' `import "preact"` written as
+`"./preact.js"`, since a page imports no packages) and its `preact` view
+is `apps/lab/board/pages/preact.tsx`.
+
+**What it has.** `createElement`/`createElementNS`, `createTextNode`,
+`createComment`, `createDocumentFragment`; `appendChild`,
+`insertBefore`, `removeChild`, `replaceChild`, `remove`, `append`,
+`before`/`after`/`replaceWith`; siblings, `childNodes`, `parentNode`;
+attributes (and `id`, `className`, `value`, `checked`, `disabled`… as
+properties), `classList`, `dataset`, `style` (properties, `cssText`,
+`setProperty`); `textContent`, a text node's `data`;
+`addEventListener` (capture, `once`) and `dispatchEvent`;
+`querySelector` for compound selectors; `innerHTML` serialized (setting
+it only clears: there is no HTML parser). Nothing is laid out:
+`getBoundingClientRect` is zero. The prelude gives every page
+`requestAnimationFrame` (a 16 ms timer of the page's own) and
+`queueMicrotask`, so what a framework schedules runs in the page's units
+of work, timed as any.
+
+**Events.** A node with listeners is drawn with handlers for their
+events; the pane's event comes back as a `ViewEvent` to the nearest
+element that has one (`Mirror::handler`), and the shim dispatches it as
+a DOM event through its own tree: captured from the document down, at
+the element, bubbled back up, with `stopPropagation`, `preventDefault`,
+the pointer's place and the keys. An `input` sets the element's `value`
+first and is followed by a `change`. Solid's delegated `$$click` handlers
+are drawn as listeners too (Solid is not tested yet).
+
+Tests: `features/pages/tests/dom.rs` (Preact's tree and the edits each
+click makes; the DOM by hand: capture and bubbling, a move that keeps
+its node), `apps/lab/board/tests/page.rs` (the Board's Preact view), and
+the web lab's `apps/lab/web/test/pages.test.mjs` (`?page=preact`, in a
+headless Chrome).
