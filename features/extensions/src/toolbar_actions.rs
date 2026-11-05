@@ -256,6 +256,15 @@ impl Extensions {
 /// The toolbar and item an edit is about: its arguments' `id` and `at`
 /// (`at_field` names it), or what its context menu was opened on
 /// (`toolbar-item`, `<key>#<at>`; `toolbar`, `<key>`).
+/// An item's place in `args[field]`: `"2.1"`, or a top-level index as a
+/// number (`3`, as a scenario or an agent may send it).
+fn place(args: &Value, field: &str) -> Option<String> {
+    let v = args.get(field)?;
+    v.as_str()
+        .map(str::to_owned)
+        .or_else(|| v.as_u64().map(|n| n.to_string()))
+}
+
 fn about(
     caller: &ActionCaller,
     args: &Value,
@@ -272,8 +281,8 @@ fn about(
         _ => None,
     });
     let (key, at) = match (text("id"), menu) {
-        (Some(key), _) => (key, text(at_field)),
-        (None, Some((key, at))) => (key, text(at_field).or(at)),
+        (Some(key), _) => (key, place(args, at_field)),
+        (None, Some((key, at))) => (key, place(args, at_field).or(at)),
         (None, None) => return Err("which toolbar: `id` (its key, TOOLBAR_LIST)".to_owned()),
     };
     let at = at.map(|a| At::parse(&a)).transpose()?;
@@ -335,6 +344,11 @@ fn object(props: &Value) -> Value {
     json!({ "type": "object", "properties": props })
 }
 
+/// An item's place: `"2.1"`, or a top-level index as a number too.
+fn spot(what: &str) -> Value {
+    json!({ "type": ["string", "integer"], "description": what })
+}
+
 fn text(what: &str) -> Value {
     json!({ "type": "string", "description": what })
 }
@@ -358,7 +372,7 @@ fn install_edits(list: &ActionList, host: &Host) -> Result<(), ActionError> {
              rounding, labels, colour preset); `close` true closes them.",
         ),
         Effect::Mutating,
-        &object(&json!({ "id": text(KEY), "at": text(AT), "close": { "type": "boolean" } })),
+        &object(&json!({ "id": text(KEY), "at": spot(AT), "close": { "type": "boolean" } })),
         move |caller, a| {
             let bars = h.toolbars();
             if a.get("close").and_then(Value::as_bool) == Some(true) {
@@ -506,7 +520,7 @@ fn install_edits(list: &ActionList, host: &Host) -> Result<(), ActionError> {
         ),
         Effect::Mutating,
         &json!({ "type": "object", "required": ["item"], "properties": {
-            "id": text(KEY), "at": text(AT), "item": { "type": "object", "description": "the item, as TOOLBAR_GET shows one" } } }),
+            "id": text(KEY), "at": spot(AT), "item": { "type": "object", "description": "the item, as TOOLBAR_GET shows one" } } }),
         move |caller, a| {
             let (key, at) = about(caller, a, "at")?;
             let item = edit::item_from(a.get("item").ok_or("`item`")?)?;
@@ -523,7 +537,7 @@ fn install_edits(list: &ActionList, host: &Host) -> Result<(), ActionError> {
             "Takes away toolbar `id`'s item `at` (a group left empty goes too).",
         ),
         Effect::Mutating,
-        &object(&json!({ "id": text(KEY), "at": text(AT) })),
+        &object(&json!({ "id": text(KEY), "at": spot(AT) })),
         move |caller, a| {
             let (key, at) = about(caller, a, "at")?;
             let at = needs(at, "at")?;
@@ -543,11 +557,11 @@ fn install_edits(list: &ActionList, host: &Host) -> Result<(), ActionError> {
         ),
         Effect::Mutating,
         &json!({ "type": "object", "required": ["to"], "properties": {
-            "id": text(KEY), "from": text(AT), "to": text("the place it goes"), "into": text("the toolbar it goes into") } }),
+            "id": text(KEY), "from": spot(AT), "to": spot("the place it goes"), "into": text("the toolbar it goes into") } }),
         move |caller, a| {
             let (key, from) = about(caller, a, "from")?;
             let from = needs(from, "from")?;
-            let to = At::parse(a.get("to").and_then(Value::as_str).ok_or("`to`")?)?;
+            let to = At::parse(&place(a, "to").ok_or("`to`")?)?;
             let into = a
                 .get("into")
                 .and_then(Value::as_str)
@@ -573,7 +587,7 @@ fn install_edits(list: &ActionList, host: &Host) -> Result<(), ActionError> {
         ),
         Effect::Mutating,
         &json!({ "type": "object", "required": ["set"], "properties": {
-            "id": text(KEY), "at": text(AT), "set": { "type": "object", "description": "the fields to set" } } }),
+            "id": text(KEY), "at": spot(AT), "set": { "type": "object", "description": "the fields to set" } } }),
         move |caller, a| {
             let (key, at) = about(caller, a, "at")?;
             let patch = a.get("set").ok_or("`set`")?.clone();
@@ -595,7 +609,7 @@ fn install_edits(list: &ActionList, host: &Host) -> Result<(), ActionError> {
         ),
         Effect::Mutating,
         &object(
-            &json!({ "id": text(KEY), "at": text(AT), "count": { "type": "integer", "minimum": 1 }, "label": text("its label") }),
+            &json!({ "id": text(KEY), "at": spot(AT), "count": { "type": "integer", "minimum": 1 }, "label": text("its label") }),
         ),
         move |caller, a| {
             let (key, at) = about(caller, a, "at")?;
@@ -623,7 +637,7 @@ fn install_edits(list: &ActionList, host: &Host) -> Result<(), ActionError> {
             "The group at `at` of toolbar `id` back into its buttons.",
         ),
         Effect::Mutating,
-        &object(&json!({ "id": text(KEY), "at": text(AT) })),
+        &object(&json!({ "id": text(KEY), "at": spot(AT) })),
         move |caller, a| {
             let (key, at) = about(caller, a, "at")?;
             let at = needs(at, "at")?;

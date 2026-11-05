@@ -465,6 +465,9 @@ pub fn use_extension_ui(host: Host, app: Arc<ActionList>) -> ExtensionUi {
     let _ = crate::toolbar_editor::provide_editor();
     // A pane's header: the toolbars on every pane, and on its view's.
     crate::toolbar_ui::provide_header_tools(ui);
+    // A phone's Typing Toolbar: the focused editor's own items and the
+    // toolbars of place `typing` for where the focus is.
+    crate::typing_ui::provide_typing_tools(ui);
     // A toolbar that is a pane of its own (a dock's, a float, a window)
     // opens where it goes as it appears, and closes as it goes.
     crate::toolbar_ui::use_pane_toolbars(ui, Arc::clone(&app));

@@ -129,6 +129,8 @@ pub mod toolbar_ui;
 #[cfg(feature = "host")]
 pub mod toolbars;
 #[cfg(feature = "ui")]
+pub mod typing_ui;
+#[cfg(feature = "ui")]
 pub mod ui;
 #[cfg(feature = "host")]
 pub mod views;

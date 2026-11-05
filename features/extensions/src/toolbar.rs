@@ -11,7 +11,8 @@
 //! ```toml
 //! id = "transport"
 //! title = "Transport"
-//! where = "dock:right"          # dock:left|right|bottom, float, window, pane, view:<kind>
+//! where = "dock:right"          # dock:left|right|bottom, float, window, pane, view:<kind>, typing
+//! when = "view:lab.board/chart" # the context it is for (a `typing` toolbar's: where the focus is)
 //!
 //! [[items]]                     # a button: an action, a label and/or an icon
 //! action = "FTS_METRONOME_CLICK"
@@ -54,6 +55,10 @@
 //! item ([`ToolItem`] at a place, `3` or `2.1`).
 
 use serde::{Deserialize, Serialize};
+
+/// The Typing Toolbar's place (`where = "typing"`): a phone's bar over the
+/// keyboard.
+pub const TYPING: &str = "typing";
 
 /// The docks a toolbar can be in (`where = "dock:<side>"`).
 pub const DOCKS: [&str; 3] = ["left", "right", "bottom"];
@@ -150,6 +155,11 @@ pub enum ToolbarPlace {
     View(String),
     /// Nowhere (`hidden`): kept, not shown (another shows in its place).
     Hidden,
+    /// A phone's Typing Toolbar (`typing`), over the keyboard while a field
+    /// is typed in: shown while its `when` is in force (a page's or view's
+    /// kind the focus is in, the focused editor's context), after the
+    /// editor's own items.
+    Typing,
 }
 
 impl ToolbarPlace {
@@ -172,7 +182,7 @@ pub struct ToolbarDecl {
     /// screen reader.
     pub title: String,
     /// `dock:left`, `dock:right`, `dock:bottom`, `float`, `window`,
-    /// `pane`, `view:<kind>` or `hidden`.
+    /// `pane`, `view:<kind>`, `typing` or `hidden`.
     #[serde(rename = "where")]
     pub at: String,
     /// Every button's label hidden (an icon alone where it has one).
@@ -431,6 +441,7 @@ impl ToolbarDecl {
             "hidden" => return Some(ToolbarPlace::Hidden),
             "float" => return Some(ToolbarPlace::Float),
             "window" => return Some(ToolbarPlace::Window),
+            TYPING => return Some(ToolbarPlace::Typing),
             _ => {}
         }
         if let Some(side) = self.at.strip_prefix("dock:") {
@@ -454,6 +465,13 @@ impl ToolbarDecl {
             || context
                 .split_once(':')
                 .is_some_and(|(kind, _)| kind == self.when)
+    }
+
+    /// Whether it is for any of `contexts` (the Typing Toolbar's: the
+    /// focused editor's, the pages and views the focus is in).
+    #[must_use]
+    pub fn applies_to_any(&self, contexts: &[String]) -> bool {
+        self.when.is_empty() || contexts.iter().any(|c| self.applies_to(c))
     }
 
     /// Whether it is in the header of a pane of view kind `kind`.
@@ -530,7 +548,7 @@ impl ToolbarDecl {
         }
         if self.place().is_none() {
             return Err(format!(
-                "{:?} is not a place (dock:{}, float, window, pane, view:<kind>, hidden)",
+                "{:?} is not a place (dock:{}, float, window, pane, view:<kind>, typing, hidden)",
                 self.at,
                 DOCKS.join(" | dock:")
             ));
@@ -785,6 +803,8 @@ newline = true
         assert_eq!(at("pane"), Some(ToolbarPlace::Pane));
         assert_eq!(at("window"), Some(ToolbarPlace::Window));
         assert_eq!(at("view:note"), Some(ToolbarPlace::View("note".into())));
+        assert_eq!(at("typing"), Some(ToolbarPlace::Typing));
+        assert!(!ToolbarPlace::Typing.is_pane());
         for bad in ["dock:top", "view:", "header", ""] {
             assert_eq!(at(bad), None, "{bad}");
         }
@@ -793,6 +813,22 @@ newline = true
             ..ToolbarDecl::default()
         };
         assert!(header.in_header_of("note") && !header.in_header_of("files"));
+        // The Typing Toolbar's: for the contexts in force.
+        let typing = ToolbarDecl {
+            at: TYPING.into(),
+            when: "view:lab.board/chart".into(),
+            ..ToolbarDecl::default()
+        };
+        assert!(!typing.in_header_of("note"));
+        let chords = ["view:lab.board/chart".to_owned()];
+        let capture = ["editor:capture".to_owned()];
+        assert!(typing.applies_to_any(&chords) && !typing.applies_to_any(&capture));
+        assert!(!typing.applies_to_any(&[]), "no focus, not for it");
+        let every = ToolbarDecl {
+            when: String::new(),
+            ..typing
+        };
+        assert!(every.applies_to_any(&capture) && every.applies_to_any(&[]));
     }
 
     #[test]

@@ -435,13 +435,14 @@ pub const COLOR_TOKENS: [&str; 12] = [
 ];
 
 /// The places a toolbar can be, as the settings offer them.
-const PLACES: [(&str, &str); 7] = [
+const PLACES: [(&str, &str); 8] = [
     ("dock:right", "Right dock"),
     ("dock:left", "Left dock"),
     ("dock:bottom", "Bottom dock"),
     ("float", "Floating"),
     ("window", "Window"),
     ("pane", "Every pane's header"),
+    ("typing", "Over a phone's keyboard"),
     ("hidden", "Hidden"),
 ];
 
