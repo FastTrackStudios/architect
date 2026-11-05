@@ -1,0 +1,67 @@
+[package]
+name = "architect-navigator"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+# The one GPL crate in architect: a port of Notebook Navigator (GPL-3.0),
+# whose code it carries. An app that links it ships under the GPL; the
+# rest of architect stays MIT OR Apache-2.0 (README.md).
+license = "GPL-3.0-or-later"
+description = "The navigator: a port of Notebook Navigator (an Obsidian plugin) as architect's sidebar — a folder tree and a list of notes over a NavigatorSource, dual or single pane, virtualized, keyboard-driven"
+
+# The default set is the model, wasm-clean: the source a vault is seen
+# through (`NavigatorSource`, `MemorySource`), the folder index, the tree
+# and list rows, sorting, selection and history, expansion, the virtual
+# window, the keys and the pane layout. `ui` is the Dioxus view on the
+# shell: `NavigatorView`, its commands on the palette, its settings
+# section, its colours as theme tokens.
+
+[features]
+default = []
+ui = [
+    "dep:dioxus",
+    "dep:architect-shell",
+    "architect-shell/ui",
+    "dep:architect-theme",
+    "architect-theme/dioxus",
+    "architect-settings/ui",
+    "dep:architect-commands",
+    "architect-commands/ui",
+    "dep:lucide-dioxus",
+    "dep:futures-timer",
+    "dep:futures-channel",
+    "dep:futures-util",
+    "dep:chrono",
+]
+
+[dependencies]
+architect-settings = { workspace = true }
+facet = { workspace = true }
+dioxus = { workspace = true, optional = true }
+architect-shell = { workspace = true, optional = true }
+architect-theme = { workspace = true, optional = true }
+architect-commands = { workspace = true, optional = true }
+lucide-dioxus = { workspace = true, optional = true }
+futures-timer = { workspace = true, optional = true }
+# A source's change events, from any thread, to the window's.
+futures-channel = { version = "0.3", optional = true }
+futures-util = { version = "0.3", default-features = false, optional = true }
+# The list's dates in the person's time zone.
+chrono = { workspace = true, optional = true }
+
+[dev-dependencies]
+architect-navigator = { path = ".", features = ["ui"] }
+# The view in a headless Blitz document (tests/view.rs).
+dioxus = { workspace = true }
+dioxus-native = { workspace = true }
+blitz-dom = { workspace = true }
+blitz-traits = { workspace = true }
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../workspace-hack" }

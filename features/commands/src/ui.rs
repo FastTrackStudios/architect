@@ -198,9 +198,16 @@ pub fn use_command(command: Command, run: impl Fn() + 'static) {
         }
     }
     use_drop(move || {
-        if let (Some(c), Some(serial)) = (commands, serial) {
-            c.scoped.read().borrow_mut().retain(|s| s.serial != serial);
-            c.bump();
+        // The provider may go first (the whole window torn down, or a
+        // shell slot drawn above it): then there is nothing to leave.
+        if let (Some(c), Some(serial)) = (commands, serial)
+            && let Ok(scoped) = c.scoped.try_read()
+        {
+            scoped.borrow_mut().retain(|s| s.serial != serial);
+            drop(scoped);
+            if c.version.try_peek().is_ok() {
+                c.bump();
+            }
         }
     });
 }

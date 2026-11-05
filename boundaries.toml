@@ -165,6 +165,11 @@ package = "architect-guide"
 layer = "L0"
 
 [[row]]
+package = "architect-navigator"
+layer = "L0"
+note = "GPL-3.0-or-later, the one GPL crate (a port of Notebook Navigator)"
+
+[[row]]
 package = "architect-files"
 features = ["vox"]
 layer = "L0"
@@ -307,6 +312,11 @@ layer = "L4"
 
 [[row]]
 package = "architect-pages"
+features = ["ui"]
+layer = "L4"
+
+[[row]]
+package = "architect-navigator"
 features = ["ui"]
 layer = "L4"
 

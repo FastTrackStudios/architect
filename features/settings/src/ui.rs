@@ -21,8 +21,8 @@
 use architect_shell::{ShellTheme, try_use_shell};
 use dioxus::prelude::*;
 use lucide_dioxus::{
-    AudioLines, Bell, ChevronDown, ChevronLeft, ChevronRight, Keyboard, Minus, Monitor, Palette,
-    PanelBottom, Plus, Puzzle, RotateCcw, Search, Settings2, Shield, Timer, Type, User, X,
+    AudioLines, Bell, ChevronDown, ChevronLeft, ChevronRight, FolderTree, Keyboard, Minus, Monitor,
+    Palette, PanelBottom, Plus, Puzzle, RotateCcw, Search, Settings2, Shield, Timer, Type, User, X,
 };
 
 use crate::derive::Settings;
@@ -436,6 +436,7 @@ fn icon(name: &str, size: usize, color: &str) -> Element {
         "type" => rsx! { Type { size, color } },
         "timer" => rsx! { Timer { size, color } },
         "panel-bottom" => rsx! { PanelBottom { size, color } },
+        "folder-tree" => rsx! { FolderTree { size, color } },
         _ => rsx! { Settings2 { size, color } },
     }
 }
