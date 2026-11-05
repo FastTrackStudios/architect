@@ -253,6 +253,20 @@ fn the_host_interface_is_the_host_service() {
         ),
         ("secret-set", Some(op(r#"{"op":"secret","name":"k"}"#))),
         ("ask-secret", Some(op(r#"{"op":"ask_secret","name":"k"}"#))),
+        ("ports", Some(op(r#"{"op":"ports"}"#))),
+        (
+            "open-port",
+            Some(op(r#"{"op":"open_port","kind":"midi","name":"a"}"#)),
+        ),
+        (
+            "port-send",
+            Some(op(r#"{"op":"port_send","port":"p","message":{}}"#)),
+        ),
+        (
+            "port-receive",
+            Some(op(r#"{"op":"port_receive","port":"p"}"#)),
+        ),
+        ("close-port", Some(op(r#"{"op":"close_port","port":"p"}"#))),
         ("theme", None),
         // The host's clock: a process reads its own.
         ("now", None),
@@ -293,7 +307,12 @@ fn the_host_interface_is_the_host_service() {
             "read_body",
             "close_body",
             "secret",
-            "ask_secret"
+            "ask_secret",
+            "ports",
+            "open_port",
+            "port_send",
+            "port_receive",
+            "close_port"
         ]
     );
 }

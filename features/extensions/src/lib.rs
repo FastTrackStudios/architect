@@ -112,6 +112,8 @@ pub mod net;
 pub mod page;
 #[cfg(feature = "host")]
 pub mod points;
+#[cfg(feature = "host")]
+pub mod ports;
 #[cfg(all(feature = "process", unix))]
 pub mod process;
 #[cfg(feature = "vox")]

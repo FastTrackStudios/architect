@@ -323,6 +323,19 @@
     secret: (name) => ask("secret", { name: String(name) }),
     askSecret: (name) => ask("ask_secret", { name: String(name) }),
   });
+  // MIDI ports and OSC endpoints, as the page's extension
+  // (capabilities.ports); control surfaces' targets and its own surfaces.
+  const ports = Object.freeze({
+    list: (kind) => ask("ports", { kind: kind == null ? null : String(kind) }),
+    open: (kind, name, listen) =>
+      ask("open_port", { kind: String(kind), name: String(name), listen: listen == null ? null : Number(listen) }),
+    send: (port, message) => ask("port_send", { port: String(port), message }),
+    receive: (port, max) => ask("port_receive", { port: String(port), max: max == null ? null : Number(max) }),
+    close: (port) => ask("close_port", { port: String(port) }),
+    targets: () => ask("targets", {}),
+    surfaces: () => ask("surfaces", {}),
+    setBank: (surface, bank) => ask("surface_bank", { surface: String(surface), bank: Number(bank) }),
+  });
   const settings = Object.freeze({
     get: (key) => call("setting", key),
     set: (key, value) => call("set_setting", key, json(value)),
@@ -491,7 +504,7 @@
 
   const api = Object.freeze({
     h, Fragment, useState, useRef, useEffect, useData, useShared, useEmbed, useTheme, invalidate,
-    theme, actions, services, settings, state, notify, ui, clipboard, events, documents, net, worker, Overlay, host: raw,
+    theme, actions, services, settings, state, notify, ui, clipboard, events, documents, net, ports, worker, Overlay, host: raw,
   });
   globalThis.__architect = Object.freeze({
     api,

@@ -46,8 +46,8 @@ pub const BADGES: &str = "badges";
 /// One thing an extension asks for, in a person's words.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Ask {
-    /// `actions`, `effect`, `hosts`, `folders`, `reads`, `writes`, `ui`
-    /// or `events`.
+    /// `actions`, `effect`, `hosts`, `folders`, `reads`, `writes`, `ui`,
+    /// `events` or `ports`.
     pub kind: &'static str,
     /// What exactly (`TRANSPORT_`, `api.github.com`, `selection`).
     pub what: String,
@@ -82,6 +82,81 @@ pub fn reaches_host(of: &[String], host: &str, port: Option<u16>) -> bool {
     let lower: Vec<String> = of.iter().map(|h| h.to_ascii_lowercase()).collect();
     host_in(&host, &lower)
         || port.is_some_and(|p| lower.iter().any(|g| *g == format!("{host}:{p}")))
+}
+
+/// Whether `ports` entry `entry` (`midi:<name>`, `osc:<host>:<port>`,
+/// `osc:listen:<port>`) is well formed: the reason it is not.
+///
+/// # Errors
+///
+/// What is wrong with it.
+pub fn check_port_entry(entry: &str) -> Result<(), String> {
+    match entry.split_once(':') {
+        Some(("midi", name)) if !name.trim().is_empty() => Ok(()),
+        Some(("osc", "*")) => Ok(()),
+        Some(("osc", rest)) => {
+            let (host, port) = rest
+                .rsplit_once(':')
+                .ok_or_else(|| "an OSC endpoint is <host>:<port>".to_owned())?;
+            let port_ok = port == "*" || port.parse::<u16>().is_ok_and(|p| p > 0);
+            if host.is_empty() || !port_ok {
+                return Err("an OSC endpoint is <host>:<port> (or *), osc:listen:<port>".to_owned());
+            }
+            Ok(())
+        }
+        _ => Err("midi:<port name> (a trailing * for any it begins), osc:<host>:<port>, osc:listen:<port> or osc:*".to_owned()),
+    }
+}
+
+/// Whether one of `of` (`capabilities.ports`) lets it open `kind` port
+/// `name` (a MIDI port's name, an OSC endpoint's `host:port`) and, an OSC
+/// one, hear on local port `listen`.
+#[must_use]
+pub fn opens_port(of: &[String], kind: &str, name: &str, listen: Option<u16>) -> bool {
+    let entries = || {
+        of.iter()
+            .filter_map(move |e| e.strip_prefix(kind).and_then(|r| r.strip_prefix(':')))
+    };
+    let named = match kind {
+        "midi" => entries().any(|g| {
+            g == "*" || g == name || g.strip_suffix('*').is_some_and(|p| name.starts_with(p))
+        }),
+        "osc" => {
+            let name = name.to_ascii_lowercase();
+            let host = name.rsplit_once(':').map_or(name.as_str(), |(h, _)| h);
+            entries().any(|g| {
+                let g = g.to_ascii_lowercase();
+                !g.starts_with("listen:")
+                    && (g == "*" || g == name || g.strip_suffix(":*").is_some_and(|h| h == host))
+            })
+        }
+        _ => false,
+    };
+    let hears = match (kind, listen) {
+        (_, None) => true,
+        ("osc", Some(p)) => entries().any(|g| {
+            g == "*" || g == "listen:*" || g.strip_prefix("listen:") == Some(p.to_string().as_str())
+        }),
+        _ => false,
+    };
+    named && hears
+}
+
+fn port_words(p: &str) -> String {
+    match p.split_once(':') {
+        Some(("midi", "*")) => "Use any of your MIDI ports".to_owned(),
+        Some(("midi", name)) => name.strip_suffix('*').map_or_else(
+            || format!("Use your MIDI port {name}"),
+            |prefix| format!("Use your MIDI ports named {prefix}…"),
+        ),
+        Some(("osc", "*")) => "Send and receive OSC anywhere on the network".to_owned(),
+        Some(("osc", rest)) => match rest.strip_prefix("listen:") {
+            Some("*") => "Listen for OSC on any port of this computer".to_owned(),
+            Some(port) => format!("Listen for OSC on port {port} of this computer"),
+            None => format!("Send and receive OSC at {rest}"),
+        },
+        _ => format!("Use {p}"),
+    }
 }
 
 /// Whether folder `f` is one of `of` or inside one.
@@ -141,6 +216,7 @@ impl Capabilities {
             && self.writes.is_empty()
             && self.ui.is_empty()
             && self.events.is_empty()
+            && self.ports.is_empty()
     }
 
     /// Everything it asks for, one line a thing, in the order a prompt
@@ -207,6 +283,13 @@ impl Capabilities {
                 } else {
                     format!("Hear the app's {e} events")
                 },
+            });
+        }
+        for p in self.ports.iter().filter(|p| !granted.ports.contains(p)) {
+            out.push(Ask {
+                kind: "ports",
+                what: p.clone(),
+                says: port_words(p),
             });
         }
         for f in self
@@ -300,6 +383,12 @@ impl Capabilities {
                 .filter(|e| granted.events.contains(e))
                 .cloned()
                 .collect(),
+            ports: self
+                .ports
+                .iter()
+                .filter(|p| granted.ports.contains(p))
+                .cloned()
+                .collect(),
         }
     }
 
@@ -370,6 +459,13 @@ impl Capabilities {
     #[must_use]
     pub fn may_reach_host(&self, host: &str, port: Option<u16>) -> bool {
         reaches_host(&self.hosts, host, port)
+    }
+
+    /// Whether it may open `kind` (`midi`, `osc`) port `name` and, an OSC
+    /// endpoint, hear on local port `listen` (`capabilities.ports`).
+    #[must_use]
+    pub fn may_open_port(&self, kind: &str, name: &str, listen: Option<u16>) -> bool {
+        opens_port(&self.ports, kind, name, listen)
     }
 
     /// Whether it may reach `folder` (an absolute path, `~` already

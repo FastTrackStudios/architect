@@ -43,6 +43,11 @@
 //! | `fetch {url, method?, headers?, body?, timeout_ms?, max_bytes?, stream?, binary?}` | an HTTP request ([`Fetch`]), redirects followed by the host: `{status, url, headers, body}` (`stream`: `{…, stream}`, its body read with `read_body`) | the URL's host, and every redirect's, in `capabilities.hosts` |
 //! | `read_body {stream, max?}` / `close_body {stream}` | the next part of a streamed response's body (`{chunk, done}`), or stops reading it | its own stream |
 //! | `secret {name}` / `ask_secret {name}` | whether the person has set one of its `[[secrets]]` (never its value), or asks them for it | declaring it |
+//! | `ports {kind?}` | the MIDI ports the app has (`[{kind, name, direction}]`; OSC endpoints are not listed) | any `capabilities.ports` |
+//! | `open_port {kind, name, listen?}` | opens a MIDI port by name, or an OSC endpoint (`host:port`, hearing on `listen`): `{port, kind, name}`; what it hears is a `port.message` event to it | `capabilities.ports` naming it (`midi:<name>`, `osc:<host>:<port>`, `osc:listen:<port>`) |
+//! | `port_send {port, message}` / `port_receive {port, max?}` / `close_port {port}` | sends a message (`crate::ports`' JSON), takes what it heard and has not taken, closes it | its own port |
+//! | `targets` | the kinds of target the app offers control surfaces (`[{id, title, min, max, step?, count, values}]`) | nothing |
+//! | `surfaces` / `surface_bank {surface, bank}` | its control surfaces running (`[{id, port, bank, banks, error?}]`), or one of them on bank `bank` | its own |
 //!
 //! A request names a secret the host keeps (`crate::net::Secrets`) by
 //! reference, in a header's value: `"Authorization": "Bearer
@@ -238,6 +243,48 @@ pub enum HostRequest {
     /// whether they gave one.
     AskSecret {
         name: String,
+    },
+    /// The ports the app has, of kind `kind` (`midi`, `osc`) or every
+    /// one: `[{kind, name, direction}]`.
+    Ports {
+        #[serde(default)]
+        kind: Option<String>,
+    },
+    /// Opens `kind` port `name` (a MIDI port's name, an OSC endpoint's
+    /// `host:port`), an OSC one hearing on local port `listen`: `{port,
+    /// kind, name}`, `port` what the other port calls take. What it hears
+    /// comes as `port.message` events to it, and waits for `port_receive`.
+    OpenPort {
+        kind: String,
+        name: String,
+        #[serde(default)]
+        listen: Option<u16>,
+    },
+    /// Sends `message` (`{bytes}` or `{type, channel, number, value}` to
+    /// a MIDI port, `{address, args}` to an OSC one) out of its port `port`.
+    PortSend {
+        port: String,
+        message: Value,
+    },
+    /// What its port `port` heard and it has not taken, oldest first, at
+    /// most `max`: `[message]`.
+    PortReceive {
+        port: String,
+        #[serde(default)]
+        max: Option<u32>,
+    },
+    /// Closes its port `port`: whether it was open.
+    ClosePort {
+        port: String,
+    },
+    /// The kinds of target the app offers control surfaces.
+    Targets,
+    /// Its control surfaces (`control.surfaces` items) as they run.
+    Surfaces,
+    /// Its control surface `surface` on bank `bank`.
+    SurfaceBank {
+        surface: String,
+        bank: u32,
     },
 }
 
@@ -584,6 +631,14 @@ impl HostRequest {
             Self::CloseBody { .. } => "close_body",
             Self::Secret { .. } => "secret",
             Self::AskSecret { .. } => "ask_secret",
+            Self::Ports { .. } => "ports",
+            Self::OpenPort { .. } => "open_port",
+            Self::PortSend { .. } => "port_send",
+            Self::PortReceive { .. } => "port_receive",
+            Self::ClosePort { .. } => "close_port",
+            Self::Targets => "targets",
+            Self::Surfaces => "surfaces",
+            Self::SurfaceBank { .. } => "surface_bank",
         }
     }
 }
@@ -807,6 +862,45 @@ pub fn check(
                 ))
             },
         ),
+        HostRequest::Ports { .. } => (
+            "ports",
+            if may.ports.is_empty() {
+                Err((
+                    "ports".to_owned(),
+                    "this extension may open no MIDI port or OSC endpoint (capabilities.ports)"
+                        .to_owned(),
+                ))
+            } else {
+                Ok(())
+            },
+        ),
+        HostRequest::OpenPort { kind, name, listen } => (
+            "ports",
+            if !matches!(kind.as_str(), "midi" | "osc") {
+                Err((
+                    "ports".to_owned(),
+                    format!("{kind:?} is not a kind of port: midi or osc"),
+                ))
+            } else if may.may_open_port(kind, name, *listen) {
+                Ok(())
+            } else {
+                let listening = listen.map_or_else(String::new, |p| format!(", hearing on {p},"));
+                Err((
+                    format!("ports.{kind}:{name}"),
+                    format!(
+                        "this extension may not open {kind} port {name}{listening} (capabilities.ports)"
+                    ),
+                ))
+            },
+        ),
+        // Its own ports and surfaces: the host that keeps them checks
+        // whose they are.
+        HostRequest::PortSend { .. }
+        | HostRequest::PortReceive { .. }
+        | HostRequest::ClosePort { .. } => ("ports", Ok(())),
+        HostRequest::Targets | HostRequest::Surfaces | HostRequest::SurfaceBank { .. } => {
+            ("surfaces", Ok(()))
+        }
     }
 }
 

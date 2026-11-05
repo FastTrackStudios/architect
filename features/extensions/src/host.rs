@@ -1565,6 +1565,7 @@ impl Host {
         // starts empty.
         points.extend(manifest.points.iter().map(|p| p.id.clone()));
         self.deliver(&points);
+        self.sync_surfaces();
         Ok(Change {
             id: manifest.id.clone(),
             name: manifest.name.clone(),
@@ -1640,7 +1641,7 @@ impl Host {
 
     /// [`Self::emit`] to `only` one extension's hooks: those its
     /// contributions declare and those it made at run time.
-    fn emit_to(&self, only: Option<&str>, on: &str, detail: &Value) -> usize {
+    pub(crate) fn emit_to(&self, only: Option<&str>, on: &str, detail: &Value) -> usize {
         self.inner
             .contributions
             .hooks(on)
@@ -1868,6 +1869,7 @@ impl Host {
         self.forget_events(id);
         let points = self.inner.points.withdraw(id);
         self.deliver(&points);
+        self.sync_surfaces();
         running.instance.stop();
         tracing::info_span!("ext.unload", ext.id = %id).in_scope(|| {});
         self.tell(&Event::Unloaded { id: id.to_owned() });

@@ -28,7 +28,9 @@
 //! (`documents.list`, `read`, `create`, `edit`, `rename`, `move`,
 //! `delete`, `watch`), the network (`net.fetch(url, options?)`,
 //! `net.read(stream, max?)`, `net.close(stream)`, `net.secret(name)`,
-//! `net.ask_secret(name)`) and `print`. Luau's sandbox holds; each call into the page has
+//! `net.ask_secret(name)`), MIDI ports and OSC endpoints (`ports.list`,
+//! `open`, `send`, `receive`, `close`, `targets`, `surfaces`,
+//! `set_bank`) and `print`. Luau's sandbox holds; each call into the page has
 //! [`crate::runner::PageLimits::frame`] before its interrupt stops it.
 //!
 //! **Timers**: `set_timeout(fn, ms)`, `set_interval(fn, ms)`,
@@ -497,6 +499,72 @@ impl LuauEngine {
             )?;
         }
         api.set("net", net)?;
+        // MIDI ports and OSC endpoints, as the page's extension
+        // (capabilities.ports); control surfaces' targets and its own.
+        let ports = lua.create_table()?;
+        ports.set(
+            "list",
+            ask("ports", |lua, args| {
+                let kind: Option<String> = args
+                    .into_iter()
+                    .next()
+                    .map_or(Ok(None), |v| lua.from_value(v))?;
+                Ok(serde_json::json!({ "kind": kind }))
+            })?,
+        )?;
+        ports.set(
+            "open",
+            ask("open_port", |lua, args| {
+                let mut it = args.into_iter();
+                let kind: String = it.next().map_or(Ok(String::new()), |v| lua.from_value(v))?;
+                let name: String = it.next().map_or(Ok(String::new()), |v| lua.from_value(v))?;
+                let listen: Option<u16> = it.next().map_or(Ok(None), |v| lua.from_value(v))?;
+                Ok(serde_json::json!({ "kind": kind, "name": name, "listen": listen }))
+            })?,
+        )?;
+        ports.set(
+            "send",
+            ask("port_send", |lua, args| {
+                let mut it = args.into_iter();
+                let port: String = it.next().map_or(Ok(String::new()), |v| lua.from_value(v))?;
+                let message: Value = it.next().map_or(Ok(Value::Null), |v| lua.from_value(v))?;
+                Ok(serde_json::json!({ "port": port, "message": message }))
+            })?,
+        )?;
+        ports.set(
+            "receive",
+            ask("port_receive", |lua, args| {
+                let mut it = args.into_iter();
+                let port: String = it.next().map_or(Ok(String::new()), |v| lua.from_value(v))?;
+                let max: Option<u32> = it.next().map_or(Ok(None), |v| lua.from_value(v))?;
+                Ok(serde_json::json!({ "port": port, "max": max }))
+            })?,
+        )?;
+        ports.set(
+            "close",
+            ask("close_port", |lua, args| {
+                let port: String = args
+                    .into_iter()
+                    .next()
+                    .map_or(Ok(String::new()), |v| lua.from_value(v))?;
+                Ok(serde_json::json!({ "port": port }))
+            })?,
+        )?;
+        ports.set("targets", ask("targets", |_, _| Ok(serde_json::json!({})))?)?;
+        ports.set(
+            "surfaces",
+            ask("surfaces", |_, _| Ok(serde_json::json!({})))?,
+        )?;
+        ports.set(
+            "set_bank",
+            ask("surface_bank", |lua, args| {
+                let mut it = args.into_iter();
+                let surface: String = it.next().map_or(Ok(String::new()), |v| lua.from_value(v))?;
+                let bank: u32 = it.next().map_or(Ok(0), |v| lua.from_value(v))?;
+                Ok(serde_json::json!({ "surface": surface, "bank": bank }))
+            })?,
+        )?;
+        api.set("ports", ports)?;
         api.set("ui", ui)?;
         api.set("clipboard", clipboard)?;
         api.set("events", events)?;

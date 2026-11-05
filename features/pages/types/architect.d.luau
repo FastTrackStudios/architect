@@ -123,6 +123,10 @@ export type Builder = {
 --   net.read(stream, max?) ({chunk, done}), net.close(stream), net.secret(name), net.ask_secret(name):
 --   the network, as the page's extension (capabilities.hosts; a header may name a secret,
 --   "{{secret:api_key}}", the host puts it in)
+--   ports.list(kind?), ports.open(kind, name, listen?) ({port, kind, name}), ports.send(port, message),
+--   ports.receive(port, max?), ports.close(port), ports.targets(), ports.surfaces(), ports.set_bank(surface, bank):
+--   MIDI ports and OSC endpoints, as the page's extension (capabilities.ports; what a port hears is
+--   a port.message event to it, or waits for ports.receive)
 
 -- How far a worker said it is.
 export type WorkerProgress = { done: number, total: number?, fraction: number?, note: string? }

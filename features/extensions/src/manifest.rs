@@ -153,6 +153,11 @@ pub struct Capabilities {
     /// The app-defined events it may hear (`app:<name>` hooks;
     /// `crate::events`): names, or `<prefix>.*`.
     pub events: Vec<String>,
+    /// The MIDI ports and OSC endpoints it may open (`crate::ports`):
+    /// `midi:<port name>` (a trailing `*`: any it begins; `midi:*` any),
+    /// `osc:<host>:<port>` (`osc:<host>:*`, `osc:*`) where it sends, and
+    /// `osc:listen:<port>` where it hears.
+    pub ports: Vec<String>,
 }
 
 /// One action it adds.
@@ -826,6 +831,10 @@ impl Manifest {
             return Err(ManifestError::BadCapability(format!(
                 "events {bad:?}: an app event's name, <prefix>.* or *"
             )));
+        }
+        for entry in &self.capabilities.ports {
+            crate::capabilities::check_port_entry(entry)
+                .map_err(|why| ManifestError::BadCapability(format!("ports {entry:?}: {why}")))?;
         }
         let mut secrets = std::collections::BTreeSet::new();
         for secret in &self.secrets {

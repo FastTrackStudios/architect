@@ -38,6 +38,8 @@ host = [
     # The secrets the host keeps for extensions (`net::Secrets`):
     # `architect::settings`' private files.
     "architect/settings",
+    # Extensions' OSC endpoints over UDP (`ports`): std only.
+    "architect-input/udp",
 ]
 # Extensions' HTTP fetches (`net`'s client: reqwest, on a runtime of its
 # own). Off in `host`, `ui` and `page`: reqwest reaches tower-http, which
@@ -150,6 +152,9 @@ architect-theme = { workspace = true }
 architect-settings = { workspace = true }
 architect-orgs = { workspace = true }
 architect-commands = { workspace = true }
+# MIDI ports, OSC endpoints and control surfaces (`ports`, feature
+# `host`): the messages, the backends, the surface engine.
+architect-input = { workspace = true }
 # The shell's chrome an extension's tabs, status items and slots go into
 # (`ui`, `interface`).
 architect-shell = { workspace = true, optional = true }

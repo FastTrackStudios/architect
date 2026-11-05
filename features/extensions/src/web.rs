@@ -519,6 +519,19 @@ impl WebHost {
                     what: "secrets are not kept in the browser yet".to_owned(),
                 })
             }
+            // MIDI and OSC are the native host's (`crate::ports`): a
+            // browser has no UDP, and Web MIDI is not wired yet.
+            HostRequest::Ports { .. }
+            | HostRequest::OpenPort { .. }
+            | HostRequest::PortSend { .. }
+            | HostRequest::PortReceive { .. }
+            | HostRequest::ClosePort { .. } => Err(HostError::Unsupported {
+                what: "MIDI ports and OSC endpoints are not in the browser yet".to_owned(),
+            }),
+            HostRequest::Targets | HostRequest::Surfaces => Ok(Json::Array(Vec::new())),
+            HostRequest::SurfaceBank { surface, .. } => Err(HostError::NotFound {
+                what: format!("control surface {surface}"),
+            }),
         }
     }
 
