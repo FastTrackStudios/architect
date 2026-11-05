@@ -879,6 +879,13 @@ pub mod layer {
 /// What the shell's inline styles cannot say: a pressable thing shows a
 /// pointer, and what the keyboard is on shows the accent's ring, in every
 /// app on the shell.
+///
+/// Blitz never matches `:focus-visible` and draws its own browser-blue
+/// outline on a focused `input` or `textarea` (its user-agent sheet), so
+/// a text field's ring is set on `:focus` here (a browser shows a text
+/// field's on any focus too), and a framed field whose bare input draws
+/// none (a search box: `outline: none` on the input) takes the class
+/// `focus-ring`, which rings the frame while what is inside has focus.
 fn shell_css(t: &ShellTheme) -> String {
     // A tip: an icon-only control's name, drawn by the shell on hover
     // (or keyboard focus) after a beat (Blitz draws no `title`). Its host is
@@ -886,6 +893,7 @@ fn shell_css(t: &ShellTheme) -> String {
     format!(
         "button, [role=tab], [role=button] {{ cursor: pointer; }} \
          :focus-visible {{ outline: 2px solid {accent}; outline-offset: 2px; }} \
+         input:focus, textarea:focus, select:focus, .focus-ring:focus-within {{ outline: 2px solid {accent}; outline-offset: 2px; }} \
          .tip {{ position: absolute; z-index: {z}; white-space: nowrap; padding: 4px 8px; border-radius: 6px; \
                  background: {pill}; border: 1px solid {rule}; color: {ink}; font-family: {font}; font-size: 12px; \
                  font-weight: 500; pointer-events: none; opacity: 0; transition: opacity 100ms ease-out; }} \
@@ -2057,6 +2065,19 @@ mod tests {
             ShellTheme::from_resolved(&architect_theme::Resolved::default()),
             ShellTheme::default()
         );
+    }
+
+    #[test]
+    fn a_focused_text_field_rings_in_the_accent_not_blitz_blue() {
+        // Blitz never matches `:focus-visible`; its own sheet outlines a
+        // focused input in #4D90FE. The shell's `:focus` rule replaces it.
+        let t = ShellTheme::default();
+        let css = shell_css(&t);
+        let rule = format!(
+            "input:focus, textarea:focus, select:focus, .focus-ring:focus-within {{ outline: 2px solid {};",
+            t.accent
+        );
+        assert!(css.contains(&rule), "{css}");
     }
 
     thread_local! {

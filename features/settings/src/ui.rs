@@ -522,7 +522,9 @@ fn DeskSettings() -> Element {
         // The sections.
         div { style: "flex: 0 0 248px; display: flex; flex-direction: column; background: {t.sheet}; \
                       border-right: 1px solid {t.rule}; padding: 14px 10px; gap: 2px; overflow-y: scroll;",
-            div { style: "display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; margin-bottom: 10px; \
+            // `focus-ring`: the shell rings the frame while its input has focus.
+            div { class: "focus-ring",
+                style: "display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; margin-bottom: 10px; \
                           border-radius: 8px; background: {t.desk}; border: 1px solid {t.rule};",
                 Search { size: 14, color: t.ink_3.to_string() }
                 // Blitz has no placeholder: the hint sits under an empty field.
@@ -1081,7 +1083,7 @@ fn TextView(value: String, placeholder: String, onpick: EventHandler<Value>) -> 
             value: "{draft}",
             "aria-label": "{placeholder}",
             style: "flex-shrink: 0; width: 220px; height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid {t.rule}; \
-                    background: {t.desk}; color: {t.ink}; font-size: 13px; outline: none;",
+                    background: {t.desk}; color: {t.ink}; font-size: 13px;",
             oninput: move |e| draft.set(e.value()),
             onblur: move |_| onpick.call(Value::Text(draft())),
             onkeydown: move |e| {
