@@ -249,9 +249,10 @@ impl WebPages {
     /// closes it when it goes.
     #[must_use = "the page closes when its handle goes"]
     pub fn open(&self, folder: &PageFolder, host: WebHost, into: &web_sys::Element) -> WebPage {
-        let name = Path::new(&folder.entry)
-            .file_name()
-            .map_or_else(|| folder.entry.clone(), |n| n.to_string_lossy().into_owned());
+        let name = Path::new(&folder.entry).file_name().map_or_else(
+            || folder.entry.clone(),
+            |n| n.to_string_lossy().into_owned(),
+        );
         let inner = Rc::new_cyclic(|me: &Weak<PageInner>| {
             let events = me.clone();
             let pane = Pane::new(into.clone(), move |e: ViewEvent| {
@@ -477,7 +478,10 @@ fn out_of_time(limit: Duration) -> String {
 
 impl PageInner {
     fn limits(&self) -> Limits {
-        self.app.upgrade().map(|a| a.limits.get()).unwrap_or_default()
+        self.app
+            .upgrade()
+            .map(|a| a.limits.get())
+            .unwrap_or_default()
     }
 
     fn problem(&self) -> Option<String> {
@@ -490,11 +494,8 @@ impl PageInner {
     /// `text` (an error, a stack) at its sources' places.
     fn said(&self, text: &str) -> String {
         let prepared = self.prepared.borrow();
-        let maps: Vec<(&str, &tsx::SourceMap)> = prepared
-            .maps
-            .iter()
-            .map(|(k, v)| (k.as_str(), v))
-            .collect();
+        let maps: Vec<(&str, &tsx::SourceMap)> =
+            prepared.maps.iter().map(|(k, v)| (k.as_str(), v)).collect();
         tsx::remap(text, ROOT, &maps)
     }
 
@@ -551,13 +552,12 @@ impl PageInner {
         let id = self.next_run.get().wrapping_add(1);
         self.next_run.set(id);
         let me = self.me.clone();
-        let on_message = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(
-            move |e: web_sys::MessageEvent| {
+        let on_message =
+            Closure::<dyn FnMut(web_sys::MessageEvent)>::new(move |e: web_sys::MessageEvent| {
                 if let Some(page) = me.upgrade() {
                     page.message(id, &from_js(&e.data()));
                 }
-            },
-        );
+            });
         worker.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
         let me = self.me.clone();
         let on_time = Closure::<dyn FnMut()>::new(move || {
@@ -631,7 +631,12 @@ impl PageInner {
         let Some(running) = self.which(id) else {
             return;
         };
-        let text = |k: &str| m.get(k).and_then(Json::as_str).unwrap_or_default().to_owned();
+        let text = |k: &str| {
+            m.get(k)
+                .and_then(Json::as_str)
+                .unwrap_or_default()
+                .to_owned()
+        };
         match m.get("t").and_then(Json::as_str).unwrap_or_default() {
             "busy" => {
                 let frame = self.limits().frame;
@@ -672,7 +677,9 @@ impl PageInner {
                             }
                             self.send_tree();
                         }
-                        Err(e) => self.line("error", &format!("what it rendered is not a tree: {e}")),
+                        Err(e) => {
+                            self.line("error", &format!("what it rendered is not a tree: {e}"))
+                        }
                     }
                 }
             }
@@ -696,7 +703,10 @@ impl PageInner {
                     text: text("text"),
                     kind: text("kind"),
                 };
-                self.line("info", &format!("notify ({}): {}", notice.kind, notice.text));
+                self.line(
+                    "info",
+                    &format!("notify ({}): {}", notice.kind, notice.text),
+                );
                 let sink = self.app.upgrade().and_then(|a| a.notify.borrow().clone());
                 if let Some(sink) = sink {
                     sink(&notice);
@@ -806,7 +816,12 @@ impl PageInner {
 
     /// A host call from worker `id`: answered to it when it is done.
     fn call(&self, id: u64, m: &Json) {
-        let text = |k: &str| m.get(k).and_then(Json::as_str).unwrap_or_default().to_owned();
+        let text = |k: &str| {
+            m.get(k)
+                .and_then(Json::as_str)
+                .unwrap_or_default()
+                .to_owned()
+        };
         let (call, kind, a, b) = (
             m.get("id").cloned().unwrap_or(Json::Null),
             text("kind"),

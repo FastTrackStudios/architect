@@ -33,8 +33,8 @@ use futures::channel::mpsc as fmpsc;
 
 use crate::api::{DataEvent, Element, PageEvent, ThemeSnapshot, WorkerMessage};
 use crate::diff::Mirror;
-use crate::frame::{self, RENDER_FAILED};
 use crate::files::{self, PageFile, PageKind};
+use crate::frame::{self, RENDER_FAILED};
 use crate::host::AppHost;
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -1116,4 +1116,3 @@ impl PageThread {
         }
     }
 }
-

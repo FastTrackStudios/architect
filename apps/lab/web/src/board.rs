@@ -61,10 +61,7 @@ fn answer(f: fn(&Value) -> Value) -> architect::action::AsyncHandler {
 ///
 /// One is on it already.
 pub fn register(list: &ActionList, manifest: &Manifest) -> Result<(), ActionError> {
-    list.register_forwarded(
-        &info(manifest, "LAB_BOARD_STATE"),
-        answer(|_| snapshot()),
-    )?;
+    list.register_forwarded(&info(manifest, "LAB_BOARD_STATE"), answer(|_| snapshot()))?;
     list.register_forwarded(
         &info(manifest, "LAB_BOARD_PIN"),
         answer(|args| {

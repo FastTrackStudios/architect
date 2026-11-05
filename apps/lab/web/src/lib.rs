@@ -70,7 +70,10 @@ const CHECK_PAGES: &[(&str, &str)] = &[
 /// The pages the lab opens, by `?page=`: the folder and its extension.
 fn folder(page: &str) -> Option<(PageFolder, &'static str)> {
     match page {
-        "board" => Some((PageFolder::new("board.tsx", BOARD_PAGES.iter().copied()), BOARD)),
+        "board" => Some((
+            PageFolder::new("board.tsx", BOARD_PAGES.iter().copied()),
+            BOARD,
+        )),
         "runaway" | "net" => Some((
             PageFolder::new(&format!("{page}.tsx"), CHECK_PAGES.iter().copied()),
             CHECKS,

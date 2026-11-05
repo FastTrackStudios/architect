@@ -281,7 +281,8 @@ mod tests {
         assert_eq!(board.imports[1].to, Ok("ui/row.tsx".to_owned()));
         let row = &modules["ui/row.tsx"];
         assert!(
-            row.code.contains("export * from \"architect-module:shared.js\""),
+            row.code
+                .contains("export * from \"architect-module:shared.js\""),
             "{}",
             row.code
         );
@@ -299,7 +300,13 @@ mod tests {
         )]);
         let p = &prepare(&files)["p.js"];
         assert_eq!(p.imports[0].to, Err("outside the page's folder".to_owned()));
-        assert!(p.imports[1].to.as_ref().unwrap_err().contains("nothing else"));
+        assert!(
+            p.imports[1]
+                .to
+                .as_ref()
+                .unwrap_err()
+                .contains("nothing else")
+        );
         assert_eq!(
             p.imports[2].to,
             Err("no such file in the page's folder".to_owned())

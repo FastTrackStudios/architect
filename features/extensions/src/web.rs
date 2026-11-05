@@ -1560,7 +1560,10 @@ fn event_data(e: &web_sys::Event) -> EventData {
         let target = e.target();
         let value = target
             .as_ref()
-            .and_then(|t| t.dyn_ref::<web_sys::HtmlInputElement>().map(web_sys::HtmlInputElement::value))
+            .and_then(|t| {
+                t.dyn_ref::<web_sys::HtmlInputElement>()
+                    .map(web_sys::HtmlInputElement::value)
+            })
             .or_else(|| {
                 target.as_ref().and_then(|t| {
                     t.dyn_ref::<web_sys::HtmlTextAreaElement>()
