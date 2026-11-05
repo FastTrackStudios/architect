@@ -162,6 +162,10 @@ fn the_window_shows_a_prompt_and_a_menu_and_the_answer_is_the_calls() {
         architect_extensions::host_ui_view::PROMPT_LAYER + 1
     );
     assert!(html.contains(&over), "{html}");
+    // In the shell's face and colours, not Blitz's default serif or
+    // another theme's `--card`.
+    assert!(html.contains("rgba(0,0,0,0.45); font-family: "), "{html}");
+    assert!(html.contains("--card: "), "{html}");
     assert!(
         html.contains("Rename to?") && html.contains("Iconize"),
         "{html}"
