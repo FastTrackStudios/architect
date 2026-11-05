@@ -96,6 +96,11 @@ impl VaultIndex {
         self.files.get(path)
     }
 
+    /// Every file, in no order.
+    pub fn files(&self) -> impl Iterator<Item = &NoteFile> {
+        self.files.values()
+    }
+
     #[must_use]
     pub fn file_count(&self) -> usize {
         self.files.len()

@@ -10,7 +10,23 @@
 //! `navIndent` 16, `defaultFolderSort` modified, newest first,
 //! `noteGrouping` date, `showFilePreview` true, `previewRows` 2,
 //! `fileNameRows` 1, `showFileDate` and `showParentFolder` true,
-//! `defaultListMode` standard, `compactItemHeight` 28.
+//! `defaultListMode` standard, `compactItemHeight` 28; the list pane in
+//! full: `propertyGroupKey` empty, `showGroupHeaderItemCounts` false,
+//! `showFolderGroupPaths` true, `filterPinnedByFolder` false,
+//! `showFeatureImage` true, `featureImageSize` 64, `forceSquareFeatureImage`
+//! true, `hideDrawingPreviewImages` true, `showFileTags` true,
+//! `showFileTagAncestors` false, `colorFileTags` true,
+//! `showFileTagsInCompactMode` false, `showFileProperties` true,
+//! `showFileTaskProgress` true, `hideFileTaskProgressWhenComplete` false,
+//! `textCountDisplay` none, `textCountPlacement` title,
+//! `useFrontmatterMetadata` false, `manualSortPropertyKey` `sort_index`,
+//! `enableFolderNotes` false, `folderNoteNamePattern` `{{folder}}`,
+//! `hideFolderNoteInList` true, `pinCreatedFolderNote` false,
+//! `folderNoteOpenLocation` current tab.
+//!
+//! What a person sets for one folder or tag (its sort, grouping, rows,
+//! mode, notes from below) is not here but in [`crate::Appearance`],
+//! kept with the view's state.
 
 use architect_settings::Settings;
 use facet::Facet;
@@ -72,11 +88,13 @@ pub enum SortOption {
     FilenameAsc,
     /// File name, Z to A
     FilenameDesc,
+    /// By hand: the notes' `sort_index` (the manual-sort property)
+    Manual,
 }
 
 impl SortOption {
     /// Every option, in the menu's order.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::ModifiedDesc,
         Self::ModifiedAsc,
         Self::CreatedDesc,
@@ -85,6 +103,7 @@ impl SortOption {
         Self::TitleDesc,
         Self::FilenameAsc,
         Self::FilenameDesc,
+        Self::Manual,
     ];
 
     /// What the menu calls it.
@@ -99,6 +118,7 @@ impl SortOption {
             Self::TitleDesc => "Title (Z on top)",
             Self::FilenameAsc => "File name (A on top)",
             Self::FilenameDesc => "File name (Z on top)",
+            Self::Manual => "Manual (⌘↑ ⌘↓ to move)",
         }
     }
 
@@ -114,6 +134,7 @@ impl SortOption {
             Self::TitleDesc => "title-desc",
             Self::FilenameAsc => "filename-asc",
             Self::FilenameDesc => "filename-desc",
+            Self::Manual => "manual",
         }
     }
 
@@ -139,8 +160,8 @@ impl SortOption {
     }
 }
 
-/// How the list is grouped (Notebook Navigator's `noteGrouping`; by folder
-/// and by property come with the full list).
+/// How the list is grouped (Notebook Navigator's `noteGrouping`; its
+/// `custom`, the manual sort's header notes, is not ported).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Facet)]
 #[repr(u8)]
 pub enum Grouping {
@@ -149,6 +170,86 @@ pub enum Grouping {
     /// By date (Today, Yesterday, …), when sorted by a date
     #[default]
     Date,
+    /// By folder, with notes from folders below
+    Folder,
+    /// By a property's value (the "Group by property" key)
+    Property,
+}
+
+impl Grouping {
+    pub const ALL: [Self; 4] = [Self::None, Self::Date, Self::Folder, Self::Property];
+
+    /// Its id: `none`, `date`, `folder`, `property`.
+    #[must_use]
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Date => "date",
+            Self::Folder => "folder",
+            Self::Property => "property",
+        }
+    }
+
+    #[must_use]
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|g| g.id() == id)
+    }
+
+    /// What the menu calls it.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::None => "No groups",
+            Self::Date => "Date",
+            Self::Folder => "Folder",
+            Self::Property => "Property",
+        }
+    }
+
+    /// The grouping a list shows under `sort` (`resolveEffectiveListGroupingForSort`):
+    /// none under a manual sort; by date only when sorted by a date.
+    #[must_use]
+    pub const fn under(self, sort: SortOption) -> Self {
+        match (self, sort) {
+            (_, SortOption::Manual) => Self::None,
+            (Self::Date, s) if !s.by_date() => Self::None,
+            (g, _) => g,
+        }
+    }
+}
+
+/// What a note's row counts in its text (`textCountDisplay`; characters
+/// wait on a source that counts them).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Facet)]
+#[repr(u8)]
+pub enum TextCount {
+    /// Nothing
+    #[default]
+    None,
+    /// Words
+    Words,
+}
+
+/// Where a note's count shows (`textCountPlacement`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Facet)]
+#[repr(u8)]
+pub enum CountPlacement {
+    /// Beside its name
+    #[default]
+    Title,
+    /// With its properties
+    Property,
+}
+
+/// Where a folder's note opens (`folderNoteOpenLocation`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Facet)]
+#[repr(u8)]
+pub enum FolderNoteOpen {
+    /// The tab on show
+    #[default]
+    CurrentTab,
+    /// A new tab
+    NewTab,
 }
 
 /// How tall a note's row is.
@@ -210,8 +311,21 @@ pub struct NavigatorSettings {
     /// Sort by
     pub sort: SortOption,
     /// Group by
-    #[setting(control = segmented)]
     pub grouping: Grouping,
+    /// Group by property
+    /// The frontmatter property "Group by: Property" groups notes by; notes
+    /// without it go last, under "None".
+    #[setting(placeholder = "status")]
+    pub group_property: String,
+    /// Count in group headings
+    /// How many notes each group holds, beside its heading.
+    pub show_group_counts: bool,
+    /// Folder groups show paths
+    /// A folder group's heading is its path from the folder selected.
+    pub show_folder_group_paths: bool,
+    /// Only pin notes in their folder
+    /// A pinned note shows pinned in its own folder, not in folders above.
+    pub filter_pinned_by_folder: bool,
     /// Notes from folders below
     /// A folder lists the notes of every folder inside it too.
     pub include_descendants: bool,
@@ -232,12 +346,109 @@ pub struct NavigatorSettings {
     /// Folder
     /// The note's folder, when it is not the one selected.
     pub show_parent_folder: bool,
-    /// Title from frontmatter
-    /// A note's `title` property over its file name.
-    pub title_from_frontmatter: bool,
     /// Compact row height
     #[setting(control = slider(20..=40, step = 1), unit = " pt")]
     pub compact_height: u32,
+    /// Feature images
+    /// A note's image beside it; a PDF's cover, an SVG, a drawing's preview.
+    pub show_feature_image: bool,
+    /// Image properties
+    /// Frontmatter properties that name a note's image, first set wins.
+    #[setting(placeholder = "cover, image")]
+    pub feature_image_properties: String,
+    /// Image size
+    #[setting(control = slider(64..=128, step = 32), unit = " pt")]
+    pub feature_image_size: u32,
+    /// Square images
+    pub force_square_image: bool,
+    /// Hide drawing previews
+    /// A drawing's PNG preview is not listed beside the drawing.
+    pub hide_drawing_previews: bool,
+    /// Tags
+    /// A note's tags under it; a click goes to the tag.
+    pub show_tags: bool,
+    /// Tags' parents
+    /// `projects/alpha`, not `alpha`.
+    pub show_tag_ancestors: bool,
+    /// Coloured tags
+    /// Tags with a colour show in it, and first.
+    pub color_tags: bool,
+    /// Tags in compact rows
+    pub show_tags_compact: bool,
+    /// Properties
+    /// The values of the properties listed below, under a note.
+    pub show_properties: bool,
+    /// Properties shown
+    /// Frontmatter keys whose values show on a note's row.
+    #[setting(placeholder = "status, priority")]
+    pub list_properties: String,
+    /// Task progress
+    /// Done of all of a note's tasks, with a bar.
+    pub show_task_progress: bool,
+    /// Hide when all done
+    pub hide_task_progress_complete: bool,
+    /// Count
+    /// A note's words, beside its name or with its properties.
+    pub text_count: TextCount,
+    /// Count shows
+    #[setting(control = segmented)]
+    pub text_count_placement: CountPlacement,
+    /// Names and dates from frontmatter
+    /// A note's name, created and modified times from its properties.
+    pub use_frontmatter: bool,
+    /// Name property
+    /// Properties that hold a note's name, first set wins.
+    #[setting(placeholder = "title, name")]
+    pub frontmatter_name_field: String,
+    /// Created property
+    #[setting(placeholder = "created")]
+    pub frontmatter_created_field: String,
+    /// Modified property
+    #[setting(placeholder = "modified")]
+    pub frontmatter_modified_field: String,
+    /// Manual sort property
+    /// Where a note's place in a manual order is kept, in its frontmatter.
+    pub manual_sort_property: String,
+    /// Folder notes
+    /// A note named for its folder is the folder's: a click on the folder opens it.
+    pub folder_notes: bool,
+    /// Folder note name
+    /// `{{folder}}` is the folder's name; a name without it is every folder's (`index`).
+    pub folder_note_name: String,
+    /// Hide folder notes in the list
+    pub hide_folder_note: bool,
+    /// Pin new folder notes
+    /// A note converted to its folder's is pinned there.
+    pub pin_created_folder_note: bool,
+    /// Folder notes open in
+    #[setting(control = segmented)]
+    pub folder_note_open: FolderNoteOpen,
+}
+
+impl NavigatorSettings {
+    /// A comma list's items, trimmed, empty ones left out.
+    #[must_use]
+    pub fn list(text: &str) -> Vec<&str> {
+        text.split(',')
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .collect()
+    }
+
+    /// The properties a note's name is read from: none unless names come
+    /// from frontmatter; `title` when the field is left empty.
+    #[must_use]
+    pub fn name_fields(&self) -> Vec<&str> {
+        if !self.use_frontmatter {
+            return Vec::new();
+        }
+        let fields = Self::list(&self.frontmatter_name_field);
+        if fields.is_empty() {
+            vec!["title"]
+        } else {
+            fields
+        }
+    }
 }
 
 impl Default for NavigatorSettings {
@@ -265,8 +476,36 @@ impl Default for NavigatorSettings {
             preview_rows: 2,
             show_date: true,
             show_parent_folder: true,
-            title_from_frontmatter: false,
             compact_height: 28,
+            group_property: String::new(),
+            show_group_counts: false,
+            show_folder_group_paths: true,
+            filter_pinned_by_folder: false,
+            show_feature_image: true,
+            feature_image_properties: String::new(),
+            feature_image_size: 64,
+            force_square_image: true,
+            hide_drawing_previews: true,
+            show_tags: true,
+            show_tag_ancestors: false,
+            color_tags: true,
+            show_tags_compact: false,
+            show_properties: true,
+            list_properties: String::new(),
+            show_task_progress: true,
+            hide_task_progress_complete: false,
+            text_count: TextCount::None,
+            text_count_placement: CountPlacement::Title,
+            use_frontmatter: false,
+            frontmatter_name_field: String::new(),
+            frontmatter_created_field: String::new(),
+            frontmatter_modified_field: String::new(),
+            manual_sort_property: "sort_index".to_owned(),
+            folder_notes: false,
+            folder_note_name: "{{folder}}".to_owned(),
+            hide_folder_note: true,
+            pin_created_folder_note: false,
+            folder_note_open: FolderNoteOpen::CurrentTab,
         }
     }
 }

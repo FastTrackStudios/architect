@@ -1,5 +1,5 @@
-//! The lab's settings: what it registers (Workspace, Editor, Keyboard, the
-//! Vault's navigator;
+//! The lab's settings: what it registers (Workspace, Editor, Keyboard;
+//! the Vault's navigator's section is Navigator's, the built-in extension;
 //! Appearance is architect's, `architect_settings::use_appearance_section`,
 //! in `theme.rs`). The metronome extension adds its own section while it is
 //! loaded (`extensions.rs`). Editor is a struct (`#[derive(Settings)]`);
@@ -12,12 +12,7 @@ use facet::Facet;
 /// Every section the lab itself declares.
 pub fn registry() -> Registry {
     let mut r = Registry::new();
-    for section in [
-        workspace(),
-        Editor::section(),
-        keyboard(),
-        architect_navigator::NavigatorSettings::section(),
-    ] {
+    for section in [workspace(), Editor::section(), keyboard()] {
         let _ = r.register(section);
     }
     r

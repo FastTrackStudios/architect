@@ -31,8 +31,12 @@ pub const ROLES: &[(&str, &str, &str)] = &[
     // resize handle under the pointer.
     ("navigator.divider", "$rule", "rule"),
     ("navigator.handle", "$brand", "brand"),
-    // The note open in the workspace, marked in the list.
+    // The note open in the workspace, marked in the list; a task bar.
     ("navigator.open", "$brand", "brand"),
+    // A tag's or a property's pill without a colour of its own, and the
+    // box behind a note's image (`file-tag-bg`, `feature-image-bg`).
+    ("navigator.pill", "alpha($ink, 0.07)", "active"),
+    ("navigator.thumb", "alpha($ink, 0.05)", "active"),
 ];
 
 /// The roles as `(name, default)`, for an app's `App` layer.
@@ -49,6 +53,8 @@ pub const TOKENS: &[(&str, &str)] = &[
     ("navigator.divider", "$rule"),
     ("navigator.handle", "$brand"),
     ("navigator.open", "$brand"),
+    ("navigator.pill", "alpha($ink, 0.07)"),
+    ("navigator.thumb", "alpha($ink, 0.05)"),
 ];
 
 /// `layer` with the navigator's roles added.

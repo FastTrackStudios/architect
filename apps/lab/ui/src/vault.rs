@@ -542,9 +542,59 @@ fn lab_vault() -> MemorySource {
         )
         .preview(preview_of(text))
     });
-    MemorySource::new("Lab")
-        .with_folder("Archive")
-        .with_files(files)
+    let source = MemorySource::new("Lab").with_folder("Archive");
+    navigator_samples(source, now).with_files(files)
+}
+
+/// What shows the list pane in full (#335): an SVG, a PDF, a drawing and
+/// its preview, a canvas, and notes with tags, a status and tasks.
+fn navigator_samples(source: MemorySource, now: Millis) -> MemorySource {
+    let day: Millis = 86_400_000;
+    let ago = |d: i64| now.saturating_sub(day.saturating_mul(d));
+    let text = |t: &str| architect_navigator::PropertyValue::Text(t.to_owned());
+    let logo = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>\
+        <rect width='64' height='64' rx='12' fill='%234f7cff'/><circle cx='32' cy='32' r='16' fill='white'/></svg>";
+    let sketch = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>\
+        <rect width='64' height='64' fill='%23fff7e0'/><path d='M8 48 L24 20 L36 40 L44 28 L56 48 Z' fill='none' stroke='%23d9822b' stroke-width='3'/></svg>";
+    source
+        .with_resource("Attachments/Logo.svg", logo)
+        .with_resource("Attachments/Sketch.excalidraw.png", sketch)
+        .with_file(NoteFile::new("Attachments/Logo.svg", ago(3), ago(3)))
+        .with_file(NoteFile::new("Attachments/Brief.pdf", ago(12), ago(12)))
+        .with_file(NoteFile::new(
+            "Attachments/Sketch.excalidraw.md",
+            ago(1),
+            ago(1),
+        ))
+        .with_file(NoteFile::new(
+            "Attachments/Sketch.excalidraw.png",
+            ago(1),
+            ago(1),
+        ))
+        .with_file(NoteFile::new("Attachments/Board.canvas", ago(20), ago(20)))
+        .with_file(
+            NoteFile::new("Projects/Launch plan.md", ago(9), ago(0))
+                .preview("What ships, in what order, and who signs it off.")
+                .tag("work")
+                .tag("projects/launch")
+                .property("status", text("doing"))
+                .feature_image("Attachments/Logo.svg")
+                .tasks(6, 2)
+                .words(1840),
+        )
+        .with_file(
+            NoteFile::new("Projects/Retro.md", ago(30), ago(4))
+                .preview("What went well, what to change next time.")
+                .tag("work")
+                .property("status", text("done"))
+                .tasks(3, 0)
+                .words(620),
+        )
+        .with_file(
+            NoteFile::new("Projects/Vault/Vault.md", ago(40), ago(6))
+                .preview("The Vault folder's own note: what lives here.")
+                .tag("projects/vault"),
+        )
 }
 
 /// Now, in milliseconds since the epoch.
@@ -663,33 +713,58 @@ fn FilesView() -> Element {
     use_effect(use_reactive!(|open_now| nav.set_active(open_now.as_deref())));
     let open_pane = pane.clone();
     let menu_pane = pane;
-    rsx! {
-        NavigatorView {
-            navigator: nav,
-            phone,
-            on_open: move |o: Open| {
-                if let Some((id, title)) = note_of(&o.path) {
-                    // A click opens a tab in the group of the note on
-                    // show; the arrow keys show each note in its place.
-                    let target = match (o.how, o.browsing) {
-                        (OpenIn::Split, _) => Target::Split(Side::Right),
-                        (_, true) => Target::Here,
-                        (OpenIn::Here | OpenIn::Tab, false) => Target::Tab,
-                    };
-                    // Beside the note on show, not in the dock pressed.
-                    let mut workspace = open_pane.workspace();
-                    let mut w = workspace.write();
-                    if let Some(doc) = w.current_document().cloned() {
-                        let _ = w.activate(&doc);
-                    }
-                    let _ = w.open(note(&id, &title), target);
-                } else if let Some(ui) = try_consume_context::<architect_extensions::interface::ExtensionUi>() {
-                    let _ = ui.open_path(&o.path);
-                }
-            },
-            on_context_menu: move |(path, e): (String, MouseEvent)| menu_pane.context_menu("file", path, &e),
+    let on_open = EventHandler::new(move |o: Open| {
+        if let Some((id, title)) = note_of(&o.path) {
+            // A click opens a tab in the group of the note on
+            // show; the arrow keys show each note in its place.
+            let target = match (o.how, o.browsing) {
+                (OpenIn::Split, _) => Target::Split(Side::Right),
+                (_, true) => Target::Here,
+                (OpenIn::Here | OpenIn::Tab, false) => Target::Tab,
+            };
+            // Beside the note on show, not in the dock pressed.
+            let mut workspace = open_pane.workspace();
+            let mut w = workspace.write();
+            if let Some(doc) = w.current_document().cloned() {
+                let _ = w.activate(&doc);
+            }
+            let _ = w.open(note(&id, &title), target);
+        } else if let Some(ui) =
+            try_consume_context::<architect_extensions::interface::ExtensionUi>()
+        {
+            let _ = ui.open_path(&o.path);
         }
+    });
+    let on_context_menu = EventHandler::new(move |(path, e): (String, MouseEvent)| {
+        menu_pane.context_menu("file", path, &e);
+    });
+    // Navigator, the built-in extension, draws it: its view over this
+    // navigator (or a development copy's, `EXT_CLONE {"id":"navigator"}`).
+    let mut mount = use_context_provider(|| {
+        Signal::new(architect_navigator_extension::NavigatorMount {
+            navigator: nav,
+            on_open,
+            on_context_menu: Some(on_context_menu),
+            on_focus_editor: None,
+            phone,
+        })
+    });
+    if mount.peek().phone != phone {
+        mount.write().phone = phone;
     }
+    try_use_context::<architect_extensions::interface::ExtensionUi>().map_or_else(
+        || rsx! { NavigatorView { navigator: nav, phone, on_open, on_context_menu } },
+        |ui| {
+            rsx! {
+                architect_extensions::interface::ExtensionView {
+                    ui,
+                    extension: architect_navigator_extension::ID.to_owned(),
+                    view: "files".to_owned(),
+                    bare: true,
+                }
+            }
+        },
+    )
 }
 
 /// The class of screen the lab stands in for.

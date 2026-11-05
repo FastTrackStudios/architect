@@ -1,0 +1,6 @@
+---
+"architect-navigator" = "minor"
+"architect-navigator-extension" = "minor"
+---
+
+Added the navigator's list pane in full (#335): grouping by folder and by a property's value (`Grouping::Folder`, `Grouping::Property`, `grouping::by_value`, "None" last) with folding groups, a pinned section, compact rows, feature images with SVG and drawing thumbnails and PDF/canvas badges, tags that go to the tag (`NavTarget::Tag`), task progress, properties and word counts, names and dates from frontmatter, a manual sort (`SortOption::Manual`, ⌘↑/⌘↓ writing `sort_index`), folder notes (convert, set, detach, pin all, open in a new tab) and each folder's and tag's own list (`Appearance`). Added Navigator, the navigator as a built-in linked extension (`architect-navigator-extension`, GPL-3.0-or-later): its sidebar view, its `NAVIGATOR_*` actions and its settings section. Changed (pre-1.0): `NoteFile::title` takes the frontmatter name fields, `NavigatorSettings::title_from_frontmatter` is now `use_frontmatter` and `frontmatter_name_field`, `NavigatorState::click_folder` returns an `Outcome`, `Outcome` is no longer `Eq`, and `list::rows` takes a `ListContext`; `NavigatorSource` gained `resource_url` and `write` with defaults, `NoteFile` gained `words`.

@@ -9,12 +9,13 @@ use std::ops::Range;
 
 use facet::Facet;
 
+use crate::appearance::{Appearance, target_key};
 use crate::index::VaultIndex;
 use crate::layout::{NAV_HEIGHT, NAV_WIDTH, Pane};
-use crate::list::{self, Clock, ListMetrics, ListRow, ListRowKind};
+use crate::list::{self, Clock, ListContext, ListMetrics, ListRow, ListRowKind, PinIn};
 use crate::selection::{NavTarget, Selection};
-use crate::settings::NavigatorSettings;
-use crate::source::{NoteFile, SourceEvent, ancestors, is_within, parent};
+use crate::settings::{FolderNoteOpen, NavigatorSettings, SortOption};
+use crate::source::{FileOp, NoteFile, PropertyValue, SourceEvent, ancestors, is_within, parent};
 use crate::tree::{self, NavRow, NavRowKind, TreeOptions};
 use crate::virtualize::{Align, OVERSCAN, Offsets};
 
@@ -34,6 +35,8 @@ pub enum Key {
     Escape,
     /// `A`, for select all with ⌘/Ctrl.
     A,
+    /// `P`, for pin with ⌘/Ctrl-⇧.
+    Pin,
 }
 
 /// The modifiers held with a key or a click. `command` is ⌘ on a Mac and
@@ -72,7 +75,7 @@ pub enum OpenIn {
 }
 
 /// What the app is asked to do after an input.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Outcome {
     /// Open a note in the workspace. `settle` when the keyboard moved to
     /// it: wait for the keys to settle first (Notebook Navigator's 500 ms
@@ -84,6 +87,13 @@ pub enum Outcome {
     },
     /// Give the keyboard to the note on show (→ from the list).
     FocusEditor,
+    /// Change the vault ([`crate::NavigatorSource::write`]): a folder note
+    /// made, set or let go, notes moved in a manual order. Then open
+    /// `open`, if any.
+    Write {
+        ops: Vec<FileOp>,
+        open: Option<(String, OpenIn)>,
+    },
 }
 
 /// A pane's scroll: how far, how tall the view.
@@ -120,6 +130,30 @@ pub struct ViewState {
     pub folder: Option<String>,
     pub nav_width: f64,
     pub nav_height: f64,
+    /// The notes pinned, and where.
+    pub pinned: Vec<Pin>,
+    /// The list's groups folded, by their collapse keys.
+    pub collapsed: Vec<String>,
+    /// Each folder's and tag's own list.
+    pub appearances: Vec<Appearance>,
+    /// Tags' and properties' colours.
+    pub colours: Vec<Colour>,
+}
+
+/// A pinned note: pinned in folders, in tags.
+#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+pub struct Pin {
+    pub path: String,
+    pub folder: bool,
+    pub tag: bool,
+}
+
+/// A colour for a tag (`tag:<tag>`), a property (`property:<key>`) or one
+/// value of it (`property:<key>=<value>`): a CSS colour.
+#[derive(Debug, Clone, PartialEq, Eq, Facet)]
+pub struct Colour {
+    pub target: String,
+    pub colour: String,
 }
 
 /// One parent's manual order.
@@ -136,6 +170,8 @@ pub struct NavigatorState {
     settings: NavigatorSettings,
     expanded: BTreeSet<String>,
     child_order: BTreeMap<String, Vec<String>>,
+    /// The tree's options, kept with the settings and the order.
+    tree: TreeOptions,
     selection: Selection,
     /// The pane the keyboard is in.
     pub focus: Pane,
@@ -160,6 +196,12 @@ pub struct NavigatorState {
     list_pending: Option<Pending>,
     /// Whether the root reorder handles show.
     pub reordering: bool,
+    pins: BTreeMap<String, PinIn>,
+    collapsed: BTreeSet<String>,
+    appearances: BTreeMap<String, Appearance>,
+    colours: BTreeMap<String, String>,
+    /// The settings with the selected place's own over them.
+    effective: NavigatorSettings,
 }
 
 impl NavigatorState {
@@ -172,9 +214,11 @@ impl NavigatorState {
         };
         let mut s = Self {
             index,
+            effective: settings.clone(),
             settings,
             expanded: std::iter::once(String::new()).collect(),
             child_order: BTreeMap::new(),
+            tree: TreeOptions::default(),
             selection: Selection::default(),
             focus: Pane::Navigation,
             single,
@@ -193,6 +237,10 @@ impl NavigatorState {
             nav_pending: None,
             list_pending: None,
             reordering: false,
+            pins: BTreeMap::new(),
+            collapsed: BTreeSet::new(),
+            appearances: BTreeMap::new(),
+            colours: BTreeMap::new(),
         };
         s.selection
             .select_target(NavTarget::Folder(String::new()), None);
@@ -210,6 +258,73 @@ impl NavigatorState {
     #[must_use]
     pub const fn settings(&self) -> &NavigatorSettings {
         &self.settings
+    }
+
+    /// The settings the list is drawn with: the selected folder's or
+    /// tag's own over the settings.
+    #[must_use]
+    pub const fn effective(&self) -> &NavigatorSettings {
+        &self.effective
+    }
+
+    /// The folder or tag selected (the root when nothing is).
+    #[must_use]
+    pub fn target(&self) -> NavTarget {
+        self.selection
+            .target()
+            .cloned()
+            .unwrap_or_else(|| NavTarget::Folder(String::new()))
+    }
+
+    /// A place's own list, if it has one.
+    #[must_use]
+    pub fn appearance(&self, target: &NavTarget) -> Option<&Appearance> {
+        self.appearances.get(&target_key(target))
+    }
+
+    /// Where `path` is pinned.
+    #[must_use]
+    pub fn pinned(&self, path: &str) -> PinIn {
+        self.pins.get(path).copied().unwrap_or_default()
+    }
+
+    /// Whether `path` is pinned in the kind of place selected.
+    #[must_use]
+    pub fn is_pinned_here(&self, path: &str) -> bool {
+        let at = self.pinned(path);
+        match self.target() {
+            NavTarget::Folder(_) => at.folder,
+            NavTarget::Tag(_) => at.tag,
+        }
+    }
+
+    /// A tag's or a property's colour.
+    #[must_use]
+    pub fn colour(&self, target: &str) -> Option<&str> {
+        self.colours.get(target).map(String::as_str)
+    }
+
+    /// `folder`'s note, when folder notes are on and it has one.
+    #[must_use]
+    pub fn folder_note(&self, folder: &str) -> Option<&str> {
+        list::folder_note(&self.index, &self.settings, folder)
+    }
+
+    /// The list's context: what [`list::rows`] reads past the vault.
+    #[must_use]
+    pub const fn list_context<'a>(&'a self, target: &'a NavTarget) -> ListContext<'a> {
+        ListContext {
+            target,
+            settings: &self.effective,
+            clock: self.clock,
+            pins: &self.pins,
+            collapsed: &self.collapsed,
+            tree: self.tree_cache(),
+        }
+    }
+
+    const fn tree_cache(&self) -> &TreeOptions {
+        &self.tree
     }
 
     #[must_use]
@@ -308,6 +423,10 @@ impl NavigatorState {
 
     /// Draws again from the vault and the settings.
     fn rebuild(&mut self) {
+        self.tree = TreeOptions {
+            show_root: self.settings.show_root,
+            child_order: self.child_order.clone(),
+        };
         self.rebuild_nav();
         self.rebuild_list();
     }
@@ -330,9 +449,10 @@ impl NavigatorState {
     }
 
     fn rebuild_list(&mut self) {
-        let folder = self.selection.folder().unwrap_or("").to_owned();
-        self.list_rows = list::rows(&self.index, &folder, &self.settings, self.clock);
-        let (settings, metrics) = (&self.settings, self.metrics);
+        let target = self.target();
+        self.effective = self.settings_for(&target);
+        self.list_rows = list::rows(&self.index, &self.list_context(&target));
+        let (settings, metrics) = (&self.effective, self.metrics);
         self.list_offsets = Offsets::new(
             self.list_rows
                 .iter()
@@ -340,6 +460,14 @@ impl NavigatorState {
         );
         self.clamp_scroll(Pane::Files);
         self.settle(Pane::Files);
+    }
+
+    /// The settings `target`'s list is drawn with.
+    #[must_use]
+    pub fn settings_for(&self, target: &NavTarget) -> NavigatorSettings {
+        self.appearances
+            .get(&target_key(target))
+            .map_or_else(|| self.settings.clone(), |a| a.over(&self.settings))
     }
 
     /// A folder row's height: the setting, 12 more on a phone.
@@ -403,6 +531,15 @@ impl NavigatorState {
         {
             self.active = Some(to.clone());
         }
+        for (from, to) in &moved {
+            if let Some(at) = self.pins.remove(from) {
+                self.pins.insert(to.clone(), at);
+            }
+            if let Some(mut a) = self.appearances.remove(&format!("folder:{from}")) {
+                a.target = format!("folder:{to}");
+                self.appearances.insert(a.target.clone(), a);
+            }
+        }
         self.rebuild();
     }
 
@@ -419,9 +556,12 @@ impl NavigatorState {
         }
         // The note open in the workspace stays selected when it is in the
         // new folder's list (Notebook Navigator's auto-selected file).
+        let below = self
+            .settings_for(&NavTarget::Folder(folder.to_owned()))
+            .include_descendants;
         let keep = self.active.clone().filter(|a| {
             let p = parent(a);
-            p == folder || (self.settings.include_descendants && is_within(p, folder))
+            p == folder || (below && is_within(p, folder))
         });
         self.selection
             .select_target(NavTarget::Folder(folder.to_owned()), keep.clone());
@@ -528,34 +668,20 @@ impl NavigatorState {
             return;
         };
         let home = file.folder().to_owned();
-        let folder =
-            if !manual && self.settings.include_descendants && self.settings.reveal_shortest_path {
-                let current = self.selection.folder().unwrap_or("");
-                if is_within(&home, current) {
-                    current.to_owned()
-                } else {
-                    // The highest folder of its chain whose parents are all
-                    // open: the nearest one in view.
-                    let chain: Vec<&str> = std::iter::once(home.as_str())
-                        .chain(ancestors(&home))
-                        .collect();
-                    chain
-                        .iter()
-                        .rev()
-                        .find(|f| {
-                            ancestors(f).all(|a| {
-                                self.expanded.contains(a)
-                                    || (a.is_empty() && !self.settings.show_root)
-                            }) && (!f.is_empty() || self.settings.show_root)
-                        })
-                        .map_or_else(|| home.clone(), |f| (*f).to_owned())
-                }
-            } else {
-                for a in ancestors(&home) {
-                    self.expanded.insert(a.to_owned());
-                }
-                home
-            };
+        let folder = if !manual
+            && self.effective.include_descendants
+            && self.settings.reveal_shortest_path
+        {
+            self.selection
+                .folder()
+                .filter(|c| is_within(&home, c))
+                .map_or_else(|| self.nearest_open(&home), str::to_owned)
+        } else {
+            for a in ancestors(&home) {
+                self.expanded.insert(a.to_owned());
+            }
+            home
+        };
         if self.selection.folder() == Some(folder.as_str()) {
             self.selection.set_file(Some(path.to_owned()));
         } else {
@@ -570,6 +696,21 @@ impl NavigatorState {
             RANK_REVEAL,
         );
         self.ask_scroll(Pane::Files, path.to_owned(), Align::Auto, RANK_REVEAL);
+    }
+
+    /// The highest folder of `home`'s chain whose parents are all open:
+    /// the nearest one in view.
+    fn nearest_open(&self, home: &str) -> String {
+        let chain: Vec<&str> = std::iter::once(home).chain(ancestors(home)).collect();
+        chain
+            .iter()
+            .rev()
+            .find(|f| {
+                ancestors(f).all(|a| {
+                    self.expanded.contains(a) || (a.is_empty() && !self.settings.show_root)
+                }) && (!f.is_empty() || self.settings.show_root)
+            })
+            .map_or_else(|| home.to_owned(), |f| (*f).to_owned())
     }
 
     /// Reveals the note open in the workspace (the reveal command).
@@ -593,6 +734,7 @@ impl NavigatorState {
     }
 
     fn after_history(&mut self) {
+        self.rebuild_list();
         if let Some(f) = self.selection.folder().map(str::to_owned) {
             for a in ancestors(&f) {
                 self.expanded.insert(a.to_owned());
@@ -627,13 +769,15 @@ impl NavigatorState {
         })
     }
 
-    /// A click on a folder.
-    pub fn click_folder(&mut self, folder: &str) {
+    /// A click on a folder; its note opens with it when folder notes are
+    /// on (`enableFolderNoteLinks`).
+    pub fn click_folder(&mut self, folder: &str) -> Option<Outcome> {
         self.focus = Pane::Navigation;
         self.select_folder(folder);
         if self.single == Pane::Navigation {
             self.single = Pane::Files;
         }
+        self.open_folder_note(folder, false)
     }
 
     /// Selects every note in the list.
@@ -647,14 +791,341 @@ impl NavigatorState {
     pub fn move_child(&mut self, parent: &str, name: &str, by: isize) {
         let order = tree::reorder(&self.index, parent, &self.tree_options(), name, by);
         self.child_order.insert(parent.to_owned(), order);
-        self.rebuild_nav();
+        self.rebuild();
     }
 
     /// Forgets `parent`'s manual order (A to Z again).
     pub fn reset_order(&mut self, parent: &str) {
         if self.child_order.remove(parent).is_some() {
-            self.rebuild_nav();
+            self.rebuild();
         }
+    }
+
+    // ── Tags ───────────────────────────────────────────────────────────
+
+    /// Selects `tag` (a tag on a row clicked, `navigateToTag`): its notes,
+    /// and those of the tags below it, recorded in the history.
+    pub fn select_tag(&mut self, tag: &str) {
+        let tag = tag.trim_start_matches('#').to_owned();
+        if tag.is_empty() {
+            return;
+        }
+        let keep = self
+            .active
+            .clone()
+            .filter(|a| self.index.file(a).is_some_and(|f| list::has_tag(f, &tag)));
+        self.selection
+            .select_target(NavTarget::Tag(tag), keep.clone());
+        self.rebuild_list();
+        match keep {
+            Some(file) => self.ask_scroll(Pane::Files, file, Align::Auto, RANK_NAVIGATION),
+            None => self.ask_scroll_top(),
+        }
+        self.focus = Pane::Files;
+        self.single = Pane::Files;
+    }
+
+    // ── Pins ───────────────────────────────────────────────────────────
+
+    /// Pins `paths` where the selected place is a kind of (in folders, in
+    /// tags), or unpins them there when the first is pinned there.
+    pub fn toggle_pin(&mut self, paths: &[String]) {
+        let Some(first) = paths.first() else {
+            return;
+        };
+        let on = !self.is_pinned_here(first);
+        let tag = matches!(self.target(), NavTarget::Tag(_));
+        for p in paths {
+            self.set_pin(p, tag, on);
+        }
+        self.rebuild_list();
+    }
+
+    fn set_pin(&mut self, path: &str, tag: bool, on: bool) {
+        let at = self.pins.entry(path.to_owned()).or_default();
+        if tag {
+            at.tag = on;
+        } else {
+            at.folder = on;
+        }
+        if !at.folder && !at.tag {
+            self.pins.remove(path);
+        }
+    }
+
+    /// Pins (`on`) or unpins `path` in folders.
+    pub fn pin_in_folders(&mut self, path: &str, on: bool) {
+        self.set_pin(path, false, on);
+        self.rebuild_list();
+    }
+
+    /// Pins every folder note the list holds that is not pinned ("Pin all
+    /// folder notes"): how many.
+    pub fn pin_folder_notes(&mut self) -> usize {
+        let target = self.target();
+        let s = self.effective.clone();
+        let notes: Vec<String> = match &target {
+            NavTarget::Folder(f) => self.index.files_in(f, s.include_descendants),
+            NavTarget::Tag(t) => self.index.files().filter(|n| list::has_tag(n, t)).collect(),
+        }
+        .into_iter()
+        .filter(|n| list::is_folder_note(&self.index, &s, &n.path))
+        .filter(|n| !self.pinned(&n.path).folder)
+        .map(|n| n.path.clone())
+        .collect();
+        for n in &notes {
+            self.set_pin(n, false, true);
+        }
+        self.rebuild_list();
+        notes.len()
+    }
+
+    // ── Groups and overrides ───────────────────────────────────────────
+
+    /// Folds or unfolds the group `key` (a heading's [`ListRowKind::Header`]
+    /// `group`).
+    pub fn toggle_group(&mut self, key: &str) {
+        if !self.collapsed.remove(key) {
+            self.collapsed.insert(key.to_owned());
+        }
+        self.rebuild_list();
+    }
+
+    /// Gives `target` its own list (an empty one lets it go); fields equal
+    /// to the settings' are let go.
+    pub fn set_appearance(&mut self, target: &NavTarget, appearance: Appearance) {
+        let key = target_key(target);
+        let mut a = appearance;
+        a.target.clone_from(&key);
+        let a = a.pruned(&self.settings);
+        if a.is_empty() {
+            self.appearances.remove(&key);
+        } else {
+            self.appearances.insert(key, a);
+        }
+        self.rebuild_list();
+    }
+
+    /// Changes the selected place's own list with `f`.
+    pub fn edit_appearance(&mut self, f: impl FnOnce(&mut Appearance)) {
+        let target = self.target();
+        let mut a = self
+            .appearance(&target)
+            .cloned()
+            .unwrap_or_else(|| Appearance::new(target_key(&target)));
+        f(&mut a);
+        self.set_appearance(&target, a);
+    }
+
+    /// Sets a tag's or a property's colour (`None` lets it go).
+    pub fn set_colour(&mut self, target: &str, colour: Option<&str>) {
+        match colour.map(str::trim).filter(|c| !c.is_empty()) {
+            Some(c) => self.colours.insert(target.to_owned(), c.to_owned()),
+            None => self.colours.remove(target),
+        };
+        self.rebuild_list();
+    }
+
+    // ── Folder notes ───────────────────────────────────────────────────
+
+    /// Makes `path` the note of a new folder beside it ("Convert to folder
+    /// note", `convertFileToFolderNote`): a folder named for it, the note
+    /// moved in and named as its folder's note, then opened.
+    ///
+    /// # Errors
+    ///
+    /// Folder notes are off, there is no such note, or the folder is there.
+    pub fn convert_to_folder_note(&mut self, path: &str) -> Result<Outcome, String> {
+        let s = &self.settings;
+        if !s.folder_notes {
+            return Err("folder notes are off (Settings → Navigator)".to_owned());
+        }
+        let f = self
+            .index
+            .file(path)
+            .ok_or_else(|| format!("no note {path}"))?;
+        if list::is_folder_note(&self.index, s, path) {
+            return Err(format!("{path} is its folder's note already"));
+        }
+        let up = f.folder();
+        let folder = join(up, f.name());
+        if self.index.has_folder(&folder) {
+            return Err(format!("there is a folder {folder} already"));
+        }
+        let ext = f.extension();
+        let to = join(
+            &folder,
+            &format!("{}.{ext}", list::folder_note_name(s, &folder)),
+        );
+        if s.pin_created_folder_note {
+            self.set_pin(&to, false, true);
+        }
+        Ok(Outcome::Write {
+            ops: vec![
+                FileOp::CreateFolder(folder),
+                FileOp::Move {
+                    from: path.to_owned(),
+                    to: to.clone(),
+                },
+            ],
+            open: Some((to, OpenIn::Here)),
+        })
+    }
+
+    /// Makes `path` its folder's note ("Set as folder note",
+    /// `setFileAsFolderNote`): renamed in place to the folder note's name.
+    ///
+    /// # Errors
+    ///
+    /// Folder notes are off, it is at the root or already the note, the
+    /// folder has a note, or the name is taken.
+    pub fn set_as_folder_note(&mut self, path: &str) -> Result<Outcome, String> {
+        let s = &self.settings;
+        if !s.folder_notes {
+            return Err("folder notes are off (Settings → Navigator)".to_owned());
+        }
+        let f = self
+            .index
+            .file(path)
+            .ok_or_else(|| format!("no note {path}"))?;
+        let folder = f.folder();
+        if folder.is_empty() {
+            return Err("the vault's root has no folder note".to_owned());
+        }
+        if list::is_folder_note(&self.index, s, path) {
+            return Err(format!("{path} is its folder's note already"));
+        }
+        if let Some(n) = list::folder_note(&self.index, s, folder) {
+            return Err(format!("{folder} has a note already: {n}"));
+        }
+        let to = join(
+            folder,
+            &format!("{}.{}", list::folder_note_name(s, folder), f.extension()),
+        );
+        if self.index.file(&to).is_some() {
+            return Err(format!("{to} is there already"));
+        }
+        Ok(Outcome::Write {
+            ops: vec![FileOp::Move {
+                from: path.to_owned(),
+                to,
+            }],
+            open: None,
+        })
+    }
+
+    /// Lets `folder`'s note go ("Detach folder note"): renamed to `name`
+    /// (Notebook Navigator asks for a name; left out, `<name> (note)`), so
+    /// it is a note of the folder's like any other.
+    ///
+    /// # Errors
+    ///
+    /// The folder has no note, or the name is taken.
+    pub fn detach_folder_note(
+        &mut self,
+        folder: &str,
+        name: Option<&str>,
+    ) -> Result<Outcome, String> {
+        let note = self
+            .folder_note(folder)
+            .ok_or_else(|| format!("{folder} has no folder note"))?
+            .to_owned();
+        let f = self
+            .index
+            .file(&note)
+            .ok_or_else(|| format!("no note {note}"))?;
+        let ext = f.extension();
+        let base = name.map(str::trim).filter(|n| !n.is_empty()).map_or_else(
+            || format!("{} (note)", f.name()),
+            |n| n.strip_suffix(&format!(".{ext}")).unwrap_or(n).to_owned(),
+        );
+        let to = join(folder, &format!("{base}.{ext}"));
+        if self.index.file(&to).is_some() {
+            return Err(format!("{to} is there already"));
+        }
+        Ok(Outcome::Write {
+            ops: vec![FileOp::Move { from: note, to }],
+            open: None,
+        })
+    }
+
+    /// Opens `folder`'s note, in a new tab when `tab`, else where the
+    /// settings say (`folderNoteOpenLocation`).
+    #[must_use]
+    pub fn open_folder_note(&self, folder: &str, tab: bool) -> Option<Outcome> {
+        let note = self.folder_note(folder)?;
+        let how = if tab || self.settings.folder_note_open == FolderNoteOpen::NewTab {
+            OpenIn::Tab
+        } else {
+            OpenIn::Here
+        };
+        Some(Outcome::Open {
+            path: note.to_owned(),
+            how,
+            settle: false,
+        })
+    }
+
+    // ── The manual order ───────────────────────────────────────────────
+
+    /// Moves the selected notes `by` places in the manual order (⌘↑, ⌘↓;
+    /// `moveManualSortSelectionByDirection`): every note of the list gets
+    /// its rank, `(place + 1) × 1000`, in its manual-sort property; only
+    /// the ranks that change are written. `None` unless sorted by hand.
+    #[must_use]
+    pub fn move_in_order(&self, by: isize) -> Option<Outcome> {
+        let s = &self.effective;
+        if s.sort != SortOption::Manual || by == 0 {
+            return None;
+        }
+        let mut order: Vec<String> = self
+            .list_order()
+            .into_iter()
+            .filter(|p| self.index.file(p).is_some_and(NoteFile::is_markdown))
+            .map(str::to_owned)
+            .collect();
+        let selected = self.selection.files();
+        let picked: Vec<usize> = (0..order.len())
+            .filter(|i| order.get(*i).is_some_and(|p| selected.contains(p)))
+            .collect();
+        if picked.is_empty() {
+            return None;
+        }
+        // Up: from the top; down: from the bottom, so a block moves whole.
+        let mut seq = picked;
+        if by > 0 {
+            seq.reverse();
+        }
+        let last = order.len().saturating_sub(1);
+        for _ in 0..by.unsigned_abs() {
+            for i in &mut seq {
+                let to = if by > 0 {
+                    i.saturating_add(1).min(last)
+                } else {
+                    i.saturating_sub(1)
+                };
+                let blocked = order.get(to).is_some_and(|p| selected.contains(p)) && to != *i;
+                if to != *i && !blocked {
+                    order.swap(*i, to);
+                    *i = to;
+                }
+            }
+        }
+        let key = s.manual_sort_property.clone();
+        let mut rank = 0.0_f64;
+        let ops: Vec<FileOp> = order
+            .iter()
+            .filter_map(|p| {
+                rank += list::RANK_STEP;
+                let f = self.index.file(p)?;
+                (list::rank(f, &key) != Some(rank)).then(|| FileOp::SetProperty {
+                    path: p.clone(),
+                    key: key.clone(),
+                    value: PropertyValue::Number(rank),
+                })
+            })
+            .collect();
+        (!ops.is_empty()).then_some(Outcome::Write { ops, open: None })
     }
 
     // ── Scrolling ──────────────────────────────────────────────────────
@@ -906,6 +1377,13 @@ impl NavigatorState {
             })
         };
         let to = |i: usize| refs.get(i).map(|p| (*p).to_owned());
+        if mods.command
+            && !mods.shift
+            && matches!(key, Key::Up | Key::Down)
+            && self.effective.sort == SortOption::Manual
+        {
+            return self.move_in_order(if key == Key::Down { 1 } else { -1 });
+        }
         match key {
             Key::Down | Key::Up if mods.shift && !self.touch => {
                 let step = if key == Key::Down { 1 } else { -1 };
@@ -932,6 +1410,11 @@ impl NavigatorState {
             }
             Key::A if mods.command && !self.touch => {
                 self.selection.select_all(&refs);
+                None
+            }
+            Key::Pin => {
+                let picked: Vec<String> = self.selection.files().iter().cloned().collect();
+                self.toggle_pin(&picked);
                 None
             }
             Key::Left => {
@@ -992,6 +1475,25 @@ impl NavigatorState {
             folder: self.selection.folder().map(str::to_owned),
             nav_width: self.nav_width,
             nav_height: self.nav_height,
+            pinned: self
+                .pins
+                .iter()
+                .map(|(path, at)| Pin {
+                    path: path.clone(),
+                    folder: at.folder,
+                    tag: at.tag,
+                })
+                .collect(),
+            collapsed: self.collapsed.iter().cloned().collect(),
+            appearances: self.appearances.values().cloned().collect(),
+            colours: self
+                .colours
+                .iter()
+                .map(|(target, colour)| Colour {
+                    target: target.clone(),
+                    colour: colour.clone(),
+                })
+                .collect(),
         }
     }
 
@@ -1009,6 +1511,30 @@ impl NavigatorState {
             .iter()
             .map(|c| (c.parent.clone(), c.names.clone()))
             .collect();
+        self.pins = state
+            .pinned
+            .iter()
+            .map(|p| {
+                (
+                    p.path.clone(),
+                    PinIn {
+                        folder: p.folder,
+                        tag: p.tag,
+                    },
+                )
+            })
+            .collect();
+        self.collapsed = state.collapsed.iter().cloned().collect();
+        self.appearances = state
+            .appearances
+            .iter()
+            .map(|a| (a.target.clone(), a.clone()))
+            .collect();
+        self.colours = state
+            .colours
+            .iter()
+            .map(|c| (c.target.clone(), c.colour.clone()))
+            .collect();
         if state.nav_width > 0.0 {
             self.nav_width = state.nav_width;
         }
@@ -1020,6 +1546,15 @@ impl NavigatorState {
                 .select_target(NavTarget::Folder(f.to_owned()), None);
         }
         self.rebuild();
+    }
+}
+
+/// `name` in `folder` (the root: `name` alone).
+fn join(folder: &str, name: &str) -> String {
+    if folder.is_empty() {
+        name.to_owned()
+    } else {
+        format!("{folder}/{name}")
     }
 }
 

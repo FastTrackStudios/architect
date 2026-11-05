@@ -860,6 +860,14 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         {
             extensions = with;
         }
+        // Navigator: the Vault's sidebar (src/vault.rs `FilesView` mounts
+        // its view over the lab's vault), its NAVIGATOR_* and its section.
+        if let Ok(with) = extensions
+            .clone()
+            .with_linked(&architect_navigator_extension::NavigatorExtension)
+        {
+            extensions = with;
+        }
         if let Ok(with) = extensions
             .clone()
             .with_linked(&ManagerExtension::new(manager.clone()))

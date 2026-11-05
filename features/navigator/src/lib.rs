@@ -1,9 +1,11 @@
 //! The navigator: a port of [Notebook Navigator] (an Obsidian plugin by
 //! Johan Sanneblad, GPL-3.0) as architect's sidebar.
 //!
-//! **Licence.** This crate is GPL-3.0-or-later, the one GPL crate in
-//! architect: it carries Notebook Navigator's design and code. An app that
-//! links it ships under the GPL. Nothing else in architect depends on it.
+//! **Licence.** This crate is GPL-3.0-or-later: it carries Notebook
+//! Navigator's design and code. With Navigator, the built-in extension that
+//! links it (`architect-navigator-extension`), it is the only GPL code in
+//! architect. An app that links it ships under the GPL. Nothing else in
+//! architect depends on it.
 //!
 //! A navigation pane (the folder tree) beside a list pane (the selected
 //! folder's notes), side by side, stacked, or one at a time with a slide
@@ -20,6 +22,8 @@
 //!
 //! [Notebook Navigator]: https://github.com/johansan/notebook-navigator
 
+pub mod appearance;
+pub mod grouping;
 pub mod index;
 pub mod layout;
 pub mod list;
@@ -33,16 +37,18 @@ pub mod virtualize;
 #[cfg(feature = "ui")]
 pub mod ui;
 
+pub use appearance::Appearance;
 pub use index::{NoteCount, VaultIndex};
 pub use layout::{Pane, PaneLayout};
-pub use list::{Clock, ListRow, ListRowKind};
+pub use list::{Clock, Lines, ListContext, ListRow, ListRowKind, PinIn, Thumb};
 pub use selection::{NavTarget, Selection};
 pub use settings::{
-    Grouping, ListMode, NarrowLayout, NavigatorSettings, Orientation, SortOption, StartPane,
+    CountPlacement, FolderNoteOpen, Grouping, ListMode, NarrowLayout, NavigatorSettings,
+    Orientation, SortOption, StartPane, TextCount,
 };
 pub use source::{
-    Listener, MemorySource, Millis, NavigatorSource, NoteFile, PropertyValue, SourceEvent,
+    FileOp, Listener, MemorySource, Millis, NavigatorSource, NoteFile, PropertyValue, SourceEvent,
     Subscription, TaskCounts,
 };
-pub use state::{Key, Mods, NavigatorState, OpenIn, Outcome, ViewState};
+pub use state::{Colour, Key, Mods, NavigatorState, OpenIn, Outcome, Pin, ViewState};
 pub use tree::{NavRow, NavRowKind};
