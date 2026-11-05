@@ -22,7 +22,8 @@
 //!
 //! Features: `codegen` writes `architect.d.ts` and `architect.d.luau`
 //! from the services' descriptors; `js` runs TSX/JS pages on `QuickJS`
-//! (oxc transpiles TypeScript and JSX in Rust); `luau` runs Luau element
+//! (`tsx`: oxc transpiles TypeScript and JSX in Rust); `web` runs them in
+//! a browser, each in a Web Worker on its own engine; `luau` runs Luau element
 //! pages; `a2ui` runs A2UI JSON pages through architect's A2UI catalog;
 //! `ui` mounts a page in a pane; `manager` makes them a kind of the
 //! extensions manager and `EXT_CHECK`'s page half.
@@ -32,6 +33,7 @@ pub mod a2ui;
 pub mod api;
 pub mod diff;
 pub mod files;
+pub mod frame;
 
 #[cfg(feature = "runner")]
 pub mod actions;
@@ -45,12 +47,16 @@ pub mod js;
 pub mod luau;
 #[cfg(feature = "manager")]
 pub mod manage;
+#[cfg(feature = "tsx")]
+pub mod modules;
 #[cfg(feature = "runner")]
 pub mod runner;
-#[cfg(feature = "js")]
+#[cfg(feature = "tsx")]
 pub mod tsx;
 #[cfg(feature = "ui")]
 pub mod ui;
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+pub mod web;
 
 pub use api::{Attr, Element, Listener, PageError, PageEvent};
 pub use diff::Mirror;

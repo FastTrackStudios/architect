@@ -12,7 +12,8 @@ description = "Pages as editable files: a view written as TSX/JS on QuickJS, Lua
 # `diff`), and where a view's page file is (`files`). `codegen` writes
 # `architect.d.ts` and `architect.d.luau` from the services' vox
 # descriptors; `js` runs a page on QuickJS (one runtime per page, on a
-# thread of its own) with TSX transpiled by oxc; `luau` runs Luau element
+# thread of its own) with TSX transpiled by oxc (`tsx`); `web` runs one in
+# a browser's Web Worker; `luau` runs Luau element
 # pages; `a2ui` runs `.a2ui.json` pages through architect's A2UI catalog
 # (`architect-a2ui`); `ui` mounts a page in a pane (a Blitz sub-document,
 # as a process view's).
@@ -21,16 +22,31 @@ description = "Pages as editable files: a view written as TSX/JS on QuickJS, Lua
 default = []
 vox = ["architect/vox", "dep:vox"]
 codegen = ["vox", "dep:vox-codegen", "dep:vox-types"]
-js = [
-    "dep:rquickjs",
+js = ["tsx", "dep:rquickjs", "runner"]
+# TypeScript and JSX to JavaScript (oxc), and a page's folder as modules
+# for a runtime that loads them by URL (`tsx`, `modules`): pure Rust, it
+# builds for wasm32 too.
+tsx = [
     "dep:oxc_allocator",
+    "dep:oxc_ast",
     "dep:oxc_parser",
     "dep:oxc_semantic",
     "dep:oxc_transformer",
     "dep:oxc_codegen",
     "dep:oxc_span",
     "dep:oxc_diagnostics",
-    "runner",
+]
+# TSX/JS pages in a browser (`web`, on wasm32-unknown-unknown): each in a
+# Web Worker on the browser's own engine, with the same prelude, its
+# host calls checked by the extensions host's `web::WebHost`, drawn by
+# its `web::Pane`.
+web = [
+    "tsx",
+    "architect-extensions/web",
+    "dep:wasm-bindgen",
+    "dep:wasm-bindgen-futures",
+    "dep:js-sys",
+    "dep:web-sys",
 ]
 luau = ["runner"]
 a2ui = ["runner", "dep:architect-a2ui"]
@@ -81,6 +97,7 @@ tracing = { workspace = true, optional = true }
 rquickjs = { version = "0.14", optional = true, features = ["loader"] }
 # TypeScript/TSX to JS in Rust: strip types, JSX to `h(...)`.
 oxc_allocator = { version = "0.157", optional = true }
+oxc_ast = { version = "0.157", optional = true }
 oxc_parser = { version = "0.157", optional = true }
 oxc_semantic = { version = "0.157", optional = true }
 oxc_transformer = { version = "0.157", optional = true }
@@ -92,6 +109,20 @@ futures-timer = { workspace = true, optional = true }
 architect-shell = { workspace = true, optional = true }
 blitz-dom = { workspace = true, optional = true }
 dioxus-native-dom = { workspace = true, optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+js-sys = { version = "0.3", optional = true }
+web-sys = { version = "0.3", optional = true, features = [
+    "Blob",
+    "BlobPropertyBag",
+    "Element",
+    "MessageEvent",
+    "Url",
+    "Window",
+    "Worker",
+    "WorkerOptions",
+    "WorkerType",
+] }
 
 [dev-dependencies]
 # tests/ports.rs: a virtual MIDI port.

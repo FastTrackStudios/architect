@@ -26,13 +26,14 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
 use architect_extensions::contrib::EmbedInput;
-use architect_extensions::wire::{Edit, EventData, Frame, Value as WireValue, ViewEvent};
+use architect_extensions::wire::{Edit, Frame, ViewEvent};
 use architect_scripting::luau::Gate;
 use architect_scripting::vm::Cancel;
 use futures::channel::mpsc as fmpsc;
 
-use crate::api::{Attr, DataEvent, Element, PageEvent, ThemeSnapshot, WorkerMessage};
-use crate::diff::{Mirror, TEXT};
+use crate::api::{DataEvent, Element, PageEvent, ThemeSnapshot, WorkerMessage};
+use crate::diff::Mirror;
+use crate::frame::{self, RENDER_FAILED};
 use crate::files::{self, PageFile, PageKind};
 use crate::host::AppHost;
 
@@ -949,7 +950,7 @@ impl PageThread {
         };
         let (result, event) = match msg {
             Inbox::Event(e) => (
-                page_event(&self.mirror, &e).map_or(Ok(()), |pe| engine.event(pe)),
+                frame::page_event(&self.mirror, &e).map_or(Ok(()), |pe| engine.event(pe)),
                 true,
             ),
             Inbox::Answer { call, result } => (engine.answer(call, result), false),
@@ -1082,11 +1083,21 @@ impl PageThread {
     fn send_tree(&mut self) {
         let mut tree = self.last.clone();
         if let Some(why) = self.status.error() {
-            tree.push(banner(&self.status.page, &why, self.engine.is_some()));
+            let name = self
+                .status
+                .page
+                .path
+                .file_name()
+                .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+            let then = format!(
+                "{}; why is in {name}.error",
+                frame::showing(self.engine.is_some())
+            );
+            tree.push(frame::banner(&name, &why, &then));
         }
         let mut edits = Vec::new();
         if self.first {
-            edits.extend(root_style());
+            edits.extend(frame::root_style());
         }
         edits.extend(self.mirror.update(&tree));
         self.status.renders.fetch_add(1, Ordering::Relaxed);
@@ -1097,7 +1108,7 @@ impl PageThread {
         if self.first {
             self.first = false;
             if edits.is_empty() {
-                edits.extend(root_style());
+                edits.extend(frame::root_style());
             }
         }
         if self.frames.unbounded_send(Frame::Edits { edits }).is_err() {
@@ -1106,87 +1117,3 @@ impl PageThread {
     }
 }
 
-/// A render that threw: its error says so (and goes when one works).
-const RENDER_FAILED: &str = "its render failed: ";
-
-/// The pane's own element: filling it, in the theme's colours.
-fn root_style() -> Vec<Edit> {
-    vec![
-        Edit::PushId { id: 0 },
-        Edit::SetAttribute {
-            name: "style".to_owned(),
-            namespace: None,
-            value: WireValue::Text(
-                "display: block; position: relative; min-height: 100%; box-sizing: border-box; \
-                 color: var(--foreground); font-family: -apple-system, system-ui, sans-serif; font-size: 13px;"
-                    .to_owned(),
-            ),
-        },
-        Edit::Pop,
-    ]
-}
-
-/// The banner over a broken page.
-fn banner(page: &PageFile, why: &str, kept: bool) -> Element {
-    let name = page
-        .path
-        .file_name()
-        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-    let then = if kept {
-        "the last good page is showing"
-    } else {
-        "nothing to show until it loads"
-    };
-    let first = why.lines().next().unwrap_or(why);
-    let text = |t: String| Element {
-        tag: TEXT.to_owned(),
-        text: Some(t),
-        ..Element::default()
-    };
-    Element {
-        tag: "div".to_owned(),
-        key: Some("architect-page-error".to_owned()),
-        attrs: vec![
-            Attr {
-                name: "class".to_owned(),
-                value: "page-error".to_owned(),
-            },
-            Attr {
-                name: "style".to_owned(),
-                value: "position: absolute; left: 8px; right: 8px; bottom: 8px; padding: 8px 12px; \
-                        border-radius: 8px; font-size: 12px; white-space: pre-wrap; \
-                        background: var(--destructive, #b91c1c); color: var(--destructive-foreground, #fff);"
-                    .to_owned(),
-            },
-        ],
-        children: vec![text(format!("⚠ {name}: {first}\n{then}; why is in {name}.error"))],
-        ..Element::default()
-    }
-}
-
-/// The page's view of a pane event: the handler it is for, and what it
-/// carries. `None` when nothing listens for it there.
-fn page_event(mirror: &Mirror, e: &ViewEvent) -> Option<PageEvent> {
-    let handler = mirror.handler(e.element, &e.name)?;
-    let mut out = PageEvent {
-        handler,
-        event: e.name.clone(),
-        ..PageEvent::default()
-    };
-    match &e.data {
-        EventData::Mouse(p) => {
-            out.x = p.element_x;
-            out.y = p.element_y;
-            (out.alt, out.ctrl, out.meta, out.shift) =
-                (p.mods.alt, p.mods.ctrl, p.mods.meta, p.mods.shift);
-        }
-        EventData::Key(k) => {
-            out.key = Some(k.key.clone());
-            (out.alt, out.ctrl, out.meta, out.shift) =
-                (k.mods.alt, k.mods.ctrl, k.mods.meta, k.mods.shift);
-        }
-        EventData::Form(value) => out.value = Some(value.clone()),
-        EventData::Focus => {}
-    }
-    Some(out)
-}
