@@ -416,6 +416,8 @@ fn PopoutView(props: PopoutProps) -> Element {
         workspace: props.workspace,
         views: CopyValue::new(props.views.clone()),
         commands: CopyValue::new(props.commands.clone()),
+        // A pop-out has no main area of its own to offer new notes in.
+        empty: CopyValue::new(Vec::new()),
         on_command: CopyValue::new(None),
         theme: props.theme,
         sizes: Signal::new(props.sizes),

@@ -414,6 +414,9 @@ pub struct Host {
     pub workspace: Signal<Workspace>,
     views: CopyValue<Views>,
     commands: CopyValue<Vec<Command>>,
+    /// The commands an empty main area offers, by id ([`WorkspaceView`]'s
+    /// `empty`).
+    empty: CopyValue<Vec<String>>,
     on_command: CopyValue<Option<EventHandler<String>>>,
     /// The colours, a signal so every pane, tab bar and dock repaints when
     /// the app's theme changes (a `CopyValue` here kept them on the theme
@@ -1309,6 +1312,11 @@ pub fn WorkspaceView(
     commands: Vec<Command>,
     /// A pinned command pressed: its id.
     on_command: Option<EventHandler<String>>,
+    /// The ids of `commands` the main area offers when no tab is open
+    /// (Obsidian's "No file is open": New note), beside Go to file (⌘O)
+    /// and, for a group that is not the main area's last, Close.
+    #[props(default)]
+    empty: Vec<String>,
     /// One pane at a time, with a switcher.
     #[props(default)]
     phone: bool,
@@ -1381,6 +1389,7 @@ pub fn WorkspaceView(
         workspace,
         views: CopyValue::new(views.clone()),
         commands: CopyValue::new(commands.clone()),
+        empty: CopyValue::new(empty.clone()),
         on_command: CopyValue::new(on_command),
         theme: Signal::new(theme.clone()),
         sizes: Signal::new(Sizes::FINE),
