@@ -11,6 +11,8 @@ A vault is a folder of markdown: notes, their properties (YAML frontmatter), the
 | `vault-obsidian` (`features/vault/vault-obsidian`, native) | Obsidian's reading of a folder: parsed pages, the link index (backlinks, unresolved, orphans), properties, aliases, outline, tasks, word count, base queries, frontmatter edits, the link-graph backend | `features/vault/vault-obsidian/src/vault.rs` `Vault`; `features/vault/vault-obsidian/src/links.rs` `LinkIndex`; `features/vault/vault-obsidian/src/mutate.rs` `set_property`, `create_page`; `features/vault/vault-obsidian/src/base_query.rs` `run_base`; `features/vault/vault-obsidian/src/graph.rs` `GraphBackend` |
 | `vault-entity` (`features/vault/vault-entity`) | typed records kept as notes: one trait per type, a store with list/get/create/update/delete over an indexed vault | `features/vault/vault-entity/src/store.rs` `VaultEntity`, `VaultEntityStore`; `features/vault/vault-entity/src/index.rs` `PageIndex`; `features/vault/vault-entity/src/slug.rs` `slugify` |
 | `vault-doc` (`features/vault/vault-doc`) | a note as a Loro document (body text + props map), its markdown in and out, a device's replica of it, a book of records on documents | `features/vault/vault-doc/src/doc.rs` (the doc shape); `features/vault/vault-doc/src/markdown.rs` `parse`, `materialise`; `features/vault/vault-doc/src/replica.rs` `Replica`; `features/vault/vault-doc/src/book.rs` `Book` |
+| `links-proto`, `links` (`features/links`) | typed links (a relation, confidence and visibility between any two nodes) and their JSONL store, served as `LinksService`; `actions` adds `LINKS_*` over a vault's wikilinks | `features/links/links-proto/src/service.rs` `LinksService`; `features/links/links-proto/src/link.rs` `TypedLink`, `Relation`; `features/links/links-proto/src/node.rs` `NodeRef`, `NodeKind`; `features/links/links/src/store.rs` `Store`; `features/links/links/src/actions.rs` `register` |
+| `tag-proto`, `tag` (`features/tags`) | the tag registry (a tag's name, icon and colour, `Records/tags.json` in the vault), served as `TagService`; `actions` adds `TAGS_*` | `features/tags/tag-proto/src/service/tags.rs` `TagService`; `features/tags/tag-proto/src/tag.rs` `Tag`; `features/tags/tag/src/vault_tags.rs` `VaultTags`; `features/tags/tag/src/actions.rs` `register` |
 | `vault` (`features/vault/vault`, the facade) | re-exports the rest by feature (`live`, `obsidian`, `vox`); `actions` adds the `VAULT_*` actions | `features/vault/vault/src/actions.rs` `OpenVault`, `register`, `read_note`, `page_tags` |
 
 ## Rules it keeps (`features/vault/spec/vault.md`)
@@ -48,7 +50,18 @@ A vault is a folder of markdown: notes, their properties (YAML frontmatter), the
 | `VAULT_DELETE {path}` | destructive | deletes the note (an agent's call waits for a yes) |
 | `VAULT_RELOAD` | mutating | reads the folder again |
 
-Tests: `features/vault/vault/tests/actions.rs` (over the lab's sample), `features/vault/vault-entity/tests/index.rs` (the index rules).
+Links and tags, over the same `OpenVault` (`links::actions::register`, `tag::actions::register`):
+
+| action | effect | does |
+|---|---|---|
+| `LINKS_GRAPH` | read | every resolved wikilink as `{from, to}` |
+| `LINKS_BACK {path}` | read | the notes linking to `path` |
+| `LINKS_UNRESOLVED` | read | links that name no note, with the note they are in |
+| `LINKS_ORPHANS` | read | notes nothing links to |
+| `TAGS_LIST` | read | every tag in use, its note count, its icon and colour from the registry |
+| `TAGS_NOTES {tag}` | read | notes tagged `tag` or a tag nested under it |
+
+Tests: `features/vault/vault/tests/actions.rs`, `features/links/links/tests/actions.rs`, `features/tags/tag/tests/actions.rs` (over the lab's sample), `features/vault/vault-entity/tests/index.rs` (the index rules).
 
 ## In the lab
 
@@ -56,4 +69,7 @@ The lab opens `<its folder>/vault` (`ARCHITECT_LAB_CONFIG_DIR` moves its folder;
 
 ## Still in Task
 
-Task's own layers on the vault stay there: its task, project, goal and area types (entity types over `vault-entity`, their property schemas), `transpose_key`, `project.md` as the shelf marker, its server wiring (which org's vault a lane reaches, the MCP tools such as `query_base` with their bounds), its vault UI (`task:features/links/links-ui`) and the spec rules that are Task's (`task:docs/spec/storage.md`).
+`NodeKind` still names Task's kinds of node (`Verse`, `Song`, `Sermon`, `Chart`, `Patch`) beside the generic ones; opening it to app-named kinds is a follow-up (a wire and storage change for Task).
+
+
+Task's own layers on the vault stay there: its task, project, goal and area types (entity types over `vault-entity`, their property schemas), `transpose_key`, `project.md` as the shelf marker, its server wiring (which org's vault a lane reaches, the MCP tools such as `query_base` with their bounds), its vault UI (`task:features/links/links-ui`), the `sync_vault_links` example (scripture references) and the spec rules that are Task's (`task:docs/spec/storage.md`).

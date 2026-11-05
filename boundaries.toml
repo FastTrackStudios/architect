@@ -206,6 +206,24 @@ package = "vault-proto"
 features = ["vox"]
 layer = "L0"
 
+[[row]]
+package = "links-proto"
+layer = "L0"
+
+[[row]]
+package = "links-proto"
+features = ["vox"]
+layer = "L0"
+
+[[row]]
+package = "tag-proto"
+layer = "L0"
+
+[[row]]
+package = "tag-proto"
+features = ["vox"]
+layer = "L0"
+
 # ── L4 ui ─────────────────────────────────────────────────────────────────
 [[row]]
 package = "crdt"
@@ -407,6 +425,26 @@ note = "facade over vault-proto, vault-live, vault-obsidian"
 
 [[row]]
 package = "vault"
+features = ["actions"]
+layer = "L1"
+
+[[row]]
+package = "links"
+layer = "L1"
+note = "typed links' store, LINKS_* (#333)"
+
+[[row]]
+package = "links"
+features = ["actions"]
+layer = "L1"
+
+[[row]]
+package = "tag"
+layer = "L1"
+note = "the tag registry, TAGS_* (#333)"
+
+[[row]]
+package = "tag"
 features = ["actions"]
 layer = "L1"
 [[row]]

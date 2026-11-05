@@ -1,6 +1,6 @@
 //! The lab's vault on disk: a folder of markdown (notes, their properties
 //! and links, tags, a `.base`) that the `VAULT_*` actions read and write
-//! (`vault::actions`). It is `<the lab's folder>/vault`, seeded on first
+//! (`vault::actions`), with the `LINKS_*` and `TAGS_*` actions over it. It is `<the lab's folder>/vault`, seeded on first
 //! run from the sample in `apps/lab/vault`, or the folder
 //! `$ARCHITECT_LAB_VAULT` names. Only a lab with files has one: a film's
 //! headless run keeps nothing.
@@ -61,12 +61,15 @@ fn folder() -> Option<PathBuf> {
     Some(dir)
 }
 
-/// Opens the lab's vault and puts its `VAULT_*` actions on `list`.
+/// Opens the lab's vault and puts its `VAULT_*`, `LINKS_*` and `TAGS_*`
+/// actions on `list`.
 pub fn register(list: &ActionList) {
     let Some(dir) = folder() else { return };
     match vault::actions::OpenVault::open(&dir) {
         Ok(open) => {
             let _ = vault::actions::register(list, &open);
+            let _ = links::actions::register(list, &open);
+            let _ = tag::actions::register(list, &open);
         }
         Err(e) => tracing::warn!(dir = %dir.display(), "the lab's vault: {e}"),
     }

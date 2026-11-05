@@ -1224,9 +1224,11 @@ dependencies = [
  "futures-util",
  "keyflow",
  "keyflow-ui",
+ "links",
  "loro",
  "lucide-dioxus",
  "serde_json",
+ "tag",
  "tempfile",
  "tracing",
  "vault",
@@ -9852,6 +9854,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "links"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-workspace-hack",
+ "chrono",
+ "facet",
+ "links",
+ "links-proto",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.20",
+ "uuid",
+ "vault",
+ "vox",
+ "vox-types",
+]
+
+[[package]]
+name = "links-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-workspace-hack",
+ "facet",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "vox",
+ "vox-types",
+]
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -16489,6 +16525,38 @@ dependencies = [
  "serde",
  "slotmap",
  "smallvec 1.16.4",
+]
+
+[[package]]
+name = "tag"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-workspace-hack",
+ "facet",
+ "serde",
+ "serde_json",
+ "tag",
+ "tag-proto",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tracing",
+ "uuid",
+ "vault",
+]
+
+[[package]]
+name = "tag-proto"
+version = "0.1.0"
+dependencies = [
+ "architect",
+ "architect-workspace-hack",
+ "facet",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "vox",
+ "vox-types",
 ]
 
 [[package]]
