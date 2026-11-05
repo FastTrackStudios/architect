@@ -1,0 +1,39 @@
+[package]
+name = "architect-navigator-extension"
+description = "Navigator, the navigator as a built-in extension (extension.toml): its sidebar view, its NAVIGATOR_* actions and its settings section. Linked into an app, or run as its own process (EXT_CLONE {\"id\":\"navigator\"})."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+# It links architect-navigator, the GPL crate (../README.md): so is it.
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+doctest = false
+
+[[bin]]
+name = "architect-navigator"
+path = "src/main.rs"
+
+[dependencies]
+architect-navigator = { workspace = true, features = ["ui"] }
+# The trait and the guest (its process copy); an app adds `linked`.
+architect-extensions = { workspace = true, features = ["guest"] }
+dioxus = { workspace = true }
+serde_json = { workspace = true }
+futures-timer = { workspace = true }
+# An action's answer, from the view that did it.
+futures-channel = "0.3"
+
+[dev-dependencies]
+architect = { workspace = true, features = ["action-list"] }
+architect-extensions = { workspace = true, features = ["host", "linked", "process"] }
+architect-settings = { workspace = true }
+futures = "0.3"
+tempfile = "3"
+
+[lints]
+workspace = true
+
+[target.'cfg(not(any(target_family = "wasm", no_workspace_hack)))'.dependencies]
+architect-workspace-hack = { version = "0.1", path = "../../../workspace-hack" }
