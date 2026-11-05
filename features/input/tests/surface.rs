@@ -180,8 +180,16 @@ fn eight_faders_move_their_bank_s_targets_with_feedback_and_bank_switching() {
     );
 
     // Fader 3 to the top: track 3.
-    assert!(surface.input(&targets, &pb(3, 16383)).is_empty());
+    // Its motor is not sent back where the hand put it; its strip, on the
+    // same track, is named (once).
+    let out = surface.input(&targets, &pb(3, 16383));
+    assert!(faders(&out).is_empty(), "{out:?}");
+    assert_eq!(strips(&out), ["T3"]);
     assert_eq!(volumes.get(2), 100.0);
+    assert!(
+        surface.input(&targets, &pb(3, 16383)).is_empty(),
+        "the same name"
+    );
 
     // Bank up: fader 3 is track 11; the device is told the new bank.
     let out = surface.input(&targets, &note(47, 127));
@@ -280,6 +288,86 @@ fn a_pickup_knob_writes_only_once_it_reaches_its_target_and_an_encoder_steps() {
     assert_eq!(out.len(), 1, "its ring shows it");
     surface.input(&targets, &osc(-1.0));
     assert_eq!(volumes.get(1), 52.0);
+}
+
+/// One BPM, 40–240, read as "<n> BPM" (the lab's metronome tempo).
+#[derive(Clone)]
+struct Tempo(Arc<Mutex<f64>>);
+
+impl Target for Tempo {
+    fn kind(&self) -> TargetKind {
+        TargetKind {
+            id: "tempo".to_owned(),
+            title: "Tempo".to_owned(),
+            min: 40.0,
+            max: 240.0,
+            step: Some(1.0),
+            count: 1,
+        }
+    }
+    fn read(&self, _: u32) -> Option<f64> {
+        Some(*self.0.lock().unwrap())
+    }
+    fn write(&self, _: u32, value: f64) -> Result<(), String> {
+        *self.0.lock().unwrap() = value.round();
+        Ok(())
+    }
+    fn label(&self, _: u32) -> Option<String> {
+        Some(format!("{:.0} BPM", *self.0.lock().unwrap()))
+    }
+}
+
+#[test]
+fn a_knob_moving_a_target_updates_the_display_on_it_but_not_itself() {
+    let tempo = Tempo(Arc::new(Mutex::new(120.0)));
+    let targets = Targets::new();
+    targets.register(tempo.clone());
+    let mut surface = Surface::new(SurfaceDesc {
+        id: "osc".to_owned(),
+        port: "osc:127.0.0.1:9000".to_owned(),
+        controls: vec![
+            ControlDesc {
+                id: "tempo".to_owned(),
+                kind: ControlKind::Knob,
+                input: Some("/tempo".to_owned()),
+                target: Some("tempo".to_owned()),
+                ..ControlDesc::default()
+            },
+            ControlDesc {
+                id: "tempo-name".to_owned(),
+                kind: ControlKind::Display,
+                feedback: Some("/tempo/name".to_owned()),
+                target: Some("tempo".to_owned()),
+                width: Some(12),
+                ..ControlDesc::default()
+            },
+        ],
+        ..SurfaceDesc::default()
+    })
+    .unwrap();
+    let knob = |n: f32| {
+        PortMessage::Osc(architect_input::OscMessage::new(
+            "/tempo",
+            vec![architect_input::OscArg::Float(n)],
+        ))
+    };
+    let out = surface.input(&targets, &knob(0.5));
+    assert_eq!(tempo.read(0), Some(140.0));
+    let addresses: Vec<_> = out
+        .iter()
+        .filter_map(|m| match m {
+            PortMessage::Osc(o) => Some(o.address.clone()),
+            PortMessage::Midi(_) => None,
+        })
+        .collect();
+    assert_eq!(
+        addresses,
+        ["/tempo/name"],
+        "the name, not the knob: {out:?}"
+    );
+    assert!(format!("{out:?}").contains("140 BPM"), "{out:?}");
+    // The same value again: nothing new to show.
+    assert!(surface.input(&targets, &knob(0.5)).is_empty());
 }
 
 #[test]

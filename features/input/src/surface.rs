@@ -470,6 +470,10 @@ pub struct Surface {
     touched: BTreeSet<usize>,
     picked: BTreeSet<usize>,
     last: BTreeMap<usize, f64>,
+    /// What each control was last sent for a move of another control on
+    /// its target (so a scribble strip is not sent its unchanged text on
+    /// every step of a fader).
+    shown: BTreeMap<usize, PortMessage>,
 }
 
 impl fmt::Debug for Surface {
@@ -535,6 +539,7 @@ impl Surface {
             touched: BTreeSet::new(),
             picked: BTreeSet::new(),
             last: BTreeMap::new(),
+            shown: BTreeMap::new(),
         })
     }
 
@@ -651,6 +656,8 @@ impl Surface {
     /// feedback to send back (a bank's, a button's LED, a let-go fader's).
     pub fn input(&mut self, targets: &Targets, message: &PortMessage) -> Vec<PortMessage> {
         let mut out = Vec::new();
+        // The controls that wrote their target, for the others on it.
+        let mut moved = Vec::new();
         for i in 0..self.controls.len() {
             let Some(c) = self.controls.get(i) else {
                 continue;
@@ -693,6 +700,7 @@ impl Surface {
                                 let on = k.normalize(t.read(index).unwrap_or(k.min)) >= 0.5;
                                 let _ = t.write(index, if on { k.min } else { k.max });
                                 out.extend(self.feedback(targets, i));
+                                moved.push(i);
                             }
                         }
                     }
@@ -703,6 +711,7 @@ impl Surface {
                         let value = v.mul_add(k.detent(), now).clamp(k.min, k.max);
                         let _ = t.write(index, value);
                         out.extend(self.feedback(targets, i));
+                        moved.push(i);
                     }
                 }
                 ControlKind::Fader | ControlKind::Knob => {
@@ -719,8 +728,39 @@ impl Surface {
                         self.picked.insert(i);
                     }
                     let _ = t.write(index, k.value(v));
+                    moved.push(i);
                 }
                 ControlKind::Display | ControlKind::Led => {}
+            }
+        }
+        for i in moved {
+            out.extend(self.others_on(targets, i));
+        }
+        out
+    }
+
+    /// The feedback for the controls on control `i`'s target, `i` moving
+    /// it: a display naming its value, another fader on it. Not `i`'s own
+    /// (it is where the hand put it), a touched one's, or one that would
+    /// be sent what it was sent last.
+    fn others_on(&mut self, targets: &Targets, i: usize) -> Vec<PortMessage> {
+        let Some((_, kind, index)) = self.mapped(targets, i) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for j in 0..self.controls.len() {
+            if j == i || self.touched.contains(&j) {
+                continue;
+            }
+            let on = self
+                .mapped(targets, j)
+                .is_some_and(|(_, k, at)| k.id == kind.id && at == index);
+            let Some(m) = on.then(|| self.feedback(targets, j)).flatten() else {
+                continue;
+            };
+            if self.shown.get(&j) != Some(&m) {
+                self.shown.insert(j, m.clone());
+                out.push(m);
             }
         }
         out
