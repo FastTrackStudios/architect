@@ -2176,6 +2176,13 @@ changes, as it always did (`DocEvent::raise_on`). `watch_documents`
 hooks one of its actions on all four (`Host::subscribe`); a manifest's
 `[[hooks]] on = "doc.saved"` hears them too. A hook that edits the
 document it heard is heard again: it checks what it already did.
+Hearing a document's events is reading the documents, so every hook on
+one needs `reads = ["documents"]`: a manifest that declares one without
+it is refused as it loads (`contrib::Rules::reads`), a `subscribe` for
+one is refused (`hostcall::check`), and an installed extension a person
+did not grant `documents` is not given them (`Host::fire`; a line in its
+log). `doc.opened`, the app's own event for a tab it opened, is not one
+of them.
 
 **The app's side** (`features/extensions/src/documents.rs` `Documents`):
 what an app implements to give extensions its documents, set with
@@ -2207,6 +2214,122 @@ refused without `reads` / `writes`), `features/pages/tests/documents.rs`
 (a TSX and a Luau page on an app's own `Documents`),
 `features/extensions/tests/wasi_wit.rs` (the typed imports are the
 calls).
+
+## The network and secrets
+
+Git, Copilot, Remotely Save and Smart Connections need the network off
+the desk, where a process extension cannot run (#310). An extension
+never opens a socket: a component's world has no `wasi:http` or
+`wasi:sockets` (one that imports them is refused before it is linked),
+and a script or a page has no network of its own. It asks the host to
+`fetch`, and the host checks every request against the manifest's
+`capabilities.hosts` as a person granted them — the hosts the consent
+screen lists. The model is `features/extensions/src/hostcall.rs`
+`Fetch` and `may_reach_url`; the native host is
+`features/extensions/src/net.rs`.
+
+| call | Luau `host.` / a page's `net.` / a component's import | answer | needs |
+|---|---|---|---|
+| `fetch {url, method?, headers?, body?, timeout_ms?, max_bytes?, stream?, binary?}` | `fetch(url, options?)` / `fetch(url, options?)` / `fetch` | `{status, url, headers, body}`; with `stream`, `{status, url, headers, stream}` | the URL's host in `capabilities.hosts` |
+| `read_body {stream, max?}` | `read_body(stream, max?)` / `read(stream, max?)` / `read-body` | `{chunk, done}` | its own stream |
+| `close_body {stream}` | `close_body(stream)` / `close(stream)` / `close-body` | whether it was open | its own stream |
+| `secret {name}` | `secret(name)` / `secret(name)` / `secret-set` | `{set, title}`, never the value | one of its `[[secrets]]` |
+| `ask_secret {name}` | `ask_secret(name)` / `askSecret(name)` / `ask-secret` | whether the person gave one | one of its `[[secrets]]` |
+
+```toml
+[capabilities]
+hosts = ["api.example.com", "*.example.org", "127.0.0.1:8080"]
+```
+
+A host entry is a name, a domain's subdomains (`*.example.org`, and the
+domain itself), a name and port, or `*` (`capabilities::reaches_host`).
+Only `http` and `https` are fetched.
+
+**Redirects** are the host's: the client follows none
+(`reqwest`'s `Policy::none`), and the host follows each one itself,
+checking its URL as it checked the first. A redirect to a host the
+extension may not reach is refused (`refused (hosts): redirected to …`),
+not followed. A `303`, and a `301` or `302` after a `POST`, go on as a
+`GET` without the body; `Authorization` and `Cookie` go only to the host
+they were set for; at most `net::MAX_REDIRECTS`.
+
+**Limits**: a request waits `net::TIMEOUT` for its response unless it
+says (`timeout_ms`, at most `net::MAX_TIMEOUT`); a body read whole is at
+most `net::MAX_BODY` (`max_bytes` may say less), a streamed one
+`net::MAX_STREAM`; what it sends at most `net::MAX_UPLOAD`. Past one, the
+call fails. The headers that are the host's (`Host`, `Content-Length`,
+`Connection`, `Transfer-Encoding`, `Upgrade`) it may not set.
+
+**Streams**: with `stream`, the answer has no `body` but a `stream` id;
+`read_body` gives its next part (at most `max` bytes, `net::CHUNK` by
+default; text never splits a character), `done` once it is all read, and
+the stream closes itself then. Only the extension that fetched it reads
+it, at most `net::MAX_STREAMS` at once, and they go when it unloads. A
+part waits at most the request's time limit. `binary` gives the body,
+and each part, as base64.
+
+**Secrets**: what an API needs that the extension must not hold. A
+manifest declares them; the person enters each once, when the extension
+first uses it (or asks, `ask_secret`): the host asks through the app's
+prompt (`hostui::HostUi::prompt`, a `PromptKind::Secret` prompt, typed
+hidden), and keeps it in `net::Secrets` — `<app dir>/extension-secrets.json`
+in the lab, written `0600`, never in the extension's folder, and refused
+to its `read_file`. A request names it in a header's value; the host puts
+it in, only on a request to one of the secret's hosts, and leaves it off
+a redirect anywhere else. No call answers its value: `secret` says
+whether it is set.
+
+```toml
+[[secrets]]
+id = "api_key"
+title = "Example API key"
+description = "From your account's settings page."
+hosts = ["api.example.com"]   # within capabilities.hosts; none: all of them
+```
+
+```lua
+local r = host.fetch("https://api.example.com/v1/items", {
+    headers = { Authorization = "Bearer {{secret:api_key}}" },
+})
+local s = host.fetch({ url = "https://api.example.com/feed", stream = true })
+repeat local part = host.read_body(s.stream) until part.done
+```
+
+A secret in the URL or the body, one it does not declare, or one sent to
+a host outside its `hosts` is refused (`refused (secrets)`). A person
+forgets one with `Secrets::forget`; `Host::with_secrets` gives the host
+its store (in memory for the run otherwise).
+
+**Where it runs**: the native host sends each request on a runtime of its
+own (two threads, `ext-net`), so a fetch works from whichever executor
+asks — a component's thread, a script's, a page's. The client is
+`architect-extensions`' feature `net` (reqwest), which the app turns on
+(`apps/lab/desktop/Cargo.toml`), not its UI crates: reqwest reaches
+tower-http, which `cargo xtask boundaries` keeps out of them. A build
+without it keeps secrets and answers a fetch `unsupported`. In a browser
+(`web::WebHost`) the browser's own `fetch` sends it, where CORS lets it;
+one the browser refuses answers `unsupported` saying so. There the
+browser hides where a redirect goes, so a redirect is not followed but
+answered `unsupported`, and secrets are not kept yet. A streamed body
+there is read whole by the browser and given in parts.
+
+Each call is the `ext.host_call` span, with `perm.capability` `hosts`
+(or `secrets`), `perm.decision` and `perm.reason`, and
+`http.request.method`, `server.address`, `http.response.status_code`,
+`ext.redirects`, `ext.bytes` and the secrets named (`ext.secrets`, never
+a value); a refusal is a line in its log.
+
+Tests, against a local server (`features/extensions/tests/support/server.rs`),
+no real network: `features/extensions/tests/net.rs` (a declared host
+reached and another refused, directly and through a redirect; a Luau
+script the same; a streamed body read in parts by its own extension
+only; the time and size limits; a secret asked for once, put into
+requests to its host, taken off a redirect elsewhere, never readable;
+document hooks need `reads = ["documents"]`, declared, made at run time
+and granted), `features/extensions/tests/wasi.rs`
+(`a_component_fetches_from_its_host_and_is_refused_another`, and
+`a_component_makes_edits_lists_and_reads_a_document` for the document
+imports), `features/pages/tests/net.rs` (a TSX and a Luau page).
 
 ## The extensions manager
 

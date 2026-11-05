@@ -46,6 +46,25 @@ use crate::hostcall::{HostAnswer, HostError, HostRequest};
 use crate::manifest::{ActionDecl, Capabilities, Manifest, Reach};
 use crate::wire::{Edit, Value};
 
+/// A body as an answer carries it: text, or (`binary`) base64.
+fn body_json(bytes: &[u8], binary: bool) -> Json {
+    use base64::Engine as _;
+    if binary {
+        Json::String(base64::engine::general_purpose::STANDARD.encode(bytes))
+    } else {
+        Json::String(String::from_utf8_lossy(bytes).into_owned())
+    }
+}
+
+/// A JS error's message.
+fn js_text(e: &JsValue) -> String {
+    js_sys::Reflect::get(e, &JsValue::from_str("message"))
+        .ok()
+        .and_then(|m| m.as_string())
+        .or_else(|| e.as_string())
+        .unwrap_or_else(|| format!("{e:?}"))
+}
+
 #[wasm_bindgen(module = "/web/runner.js")]
 extern "C" {
     #[wasm_bindgen(js_name = Component)]
@@ -201,6 +220,16 @@ struct HostInner {
     sink: RefCell<Option<LogSink>>,
     context: RefCell<Option<Rc<dyn Fn(&str) -> Option<Json>>>>,
     theme: RefCell<Json>,
+    /// Responses fetched with `stream`: their bodies, read whole by the
+    /// browser, given a part at a time.
+    streams: RefCell<BTreeMap<String, Buffered>>,
+}
+
+/// A streamed response's body in a browser: what is left of it.
+struct Buffered {
+    body: Vec<u8>,
+    at: usize,
+    binary: bool,
 }
 
 impl std::fmt::Debug for WebHost {
@@ -253,6 +282,7 @@ impl WebHost {
                 sink: RefCell::new(None),
                 context: RefCell::new(None),
                 theme: RefCell::new(Json::Null),
+                streams: RefCell::new(BTreeMap::new()),
             }),
         }
     }
@@ -282,6 +312,7 @@ impl WebHost {
             sink: RefCell::new(rc.sink.borrow().clone()),
             context: RefCell::new(rc.context.borrow().clone()),
             theme: RefCell::new(rc.theme.borrow().clone()),
+            streams: RefCell::new(BTreeMap::new()),
         });
         Self {
             inner: Rc::new(HostInner {
@@ -294,6 +325,7 @@ impl WebHost {
                 sink,
                 context,
                 theme,
+                streams: RefCell::new(BTreeMap::new()),
             }),
         }
     }
@@ -476,7 +508,169 @@ impl WebHost {
             | HostRequest::Events => Err(HostError::Unsupported {
                 what: format!("{request_op} is not in the browser yet"),
             }),
+            HostRequest::Fetch(fetch) => self.fetch(fetch).await,
+            HostRequest::ReadBody { stream, max } => self.read_body(&stream, max),
+            HostRequest::CloseBody { stream } => Ok(Json::Bool(
+                me.streams.borrow_mut().remove(&stream).is_some(),
+            )),
+            // Secrets are kept by the native host (`crate::net::Secrets`).
+            HostRequest::Secret { .. } | HostRequest::AskSecret { .. } => {
+                Err(HostError::Unsupported {
+                    what: "secrets are not kept in the browser yet".to_owned(),
+                })
+            }
         }
+    }
+
+    /// `fetch` through the browser's own `fetch`, its host already checked:
+    /// where CORS lets it. A redirect is not followed: the browser hides
+    /// where it goes, so it cannot be checked against `capabilities.hosts`.
+    async fn fetch(&self, fetch: crate::hostcall::Fetch) -> Result<Json, HostError> {
+        let unsupported = |what: String| HostError::Unsupported { what };
+        if fetch
+            .headers
+            .values()
+            .any(|v| !crate::hostcall::secret_refs(v).is_empty())
+        {
+            return Err(unsupported(
+                "a secret in a request: secrets are not kept in the browser yet".to_owned(),
+            ));
+        }
+        let set = |o: &js_sys::Object, k: &str, v: &JsValue| {
+            let _ = js_sys::Reflect::set(o, &JsValue::from_str(k), v);
+        };
+        let init = js_sys::Object::new();
+        let method = fetch
+            .method
+            .as_deref()
+            .unwrap_or("GET")
+            .to_ascii_uppercase();
+        set(&init, "method", &JsValue::from_str(&method));
+        set(&init, "redirect", &JsValue::from_str("manual"));
+        let headers = js_sys::Object::new();
+        for (name, value) in &fetch.headers {
+            set(&headers, name, &JsValue::from_str(value));
+        }
+        set(&init, "headers", &headers);
+        if let Some(body) = &fetch.body {
+            set(&init, "body", &JsValue::from_str(body));
+        }
+        let global = js_sys::global();
+        let timeout = fetch.timeout_ms.unwrap_or(30_000).min(300_000);
+        if let Ok(signal) = js_sys::Reflect::get(&global, &JsValue::from_str("AbortSignal"))
+            && let Ok(make) = js_sys::Reflect::get(&signal, &JsValue::from_str("timeout"))
+            && let Some(make) = make.dyn_ref::<js_sys::Function>()
+            && let Ok(abort) = make.call1(&signal, &JsValue::from_f64(timeout as f64))
+        {
+            set(&init, "signal", &abort);
+        }
+        let browser_fetch = js_sys::Reflect::get(&global, &JsValue::from_str("fetch"))
+            .ok()
+            .and_then(|f| f.dyn_into::<js_sys::Function>().ok())
+            .ok_or_else(|| unsupported("fetch: this browser has none".to_owned()))?;
+        let promise = browser_fetch
+            .call2(&global, &JsValue::from_str(&fetch.url), &init)
+            .map_err(|e| unsupported(format!("fetch: {}", js_text(&e))))?;
+        let response = JsFuture::from(js_sys::Promise::from(promise))
+            .await
+            .map_err(|e| {
+                unsupported(format!(
+                    "the browser refused to fetch {} (CORS, or the network): {}",
+                    fetch.url,
+                    js_text(&e)
+                ))
+            })?;
+        let get = |k: &str| {
+            js_sys::Reflect::get(&response, &JsValue::from_str(k)).unwrap_or(JsValue::UNDEFINED)
+        };
+        if get("type").as_string().as_deref() == Some("opaqueredirect") {
+            return Err(unsupported(format!(
+                "{} redirects: in a browser where it goes is hidden, so it cannot be checked against capabilities.hosts",
+                fetch.url
+            )));
+        }
+        let status = get("status").as_f64().unwrap_or(0.0);
+        let url = get("url").as_string().unwrap_or_else(|| fetch.url.clone());
+        let mut heard = BTreeMap::new();
+        if let Ok(Some(entries)) = js_sys::try_iter(&get("headers")) {
+            for pair in entries.flatten() {
+                let pair = js_sys::Array::from(&pair);
+                if let (Some(k), Some(v)) = (pair.get(0).as_string(), pair.get(1).as_string()) {
+                    heard.insert(k.to_ascii_lowercase(), v);
+                }
+            }
+        }
+        let cap: u64 = fetch.max_bytes.unwrap_or(16 << 20).min(16 << 20);
+        let read = js_sys::Reflect::get(&response, &JsValue::from_str("arrayBuffer"))
+            .ok()
+            .and_then(|f| f.dyn_into::<js_sys::Function>().ok())
+            .ok_or_else(|| unsupported("a response with no body to read".to_owned()))?;
+        let buffer = read
+            .call0(&response)
+            .map_err(|e| unsupported(js_text(&e)))?;
+        let buffer = JsFuture::from(js_sys::Promise::from(buffer))
+            .await
+            .map_err(|e| HostError::Failed {
+                message: format!("its body: {}", js_text(&e)),
+            })?;
+        let bytes = js_sys::Uint8Array::new(&buffer).to_vec();
+        if bytes.len() as u64 > cap {
+            return Err(HostError::Failed {
+                message: format!("the response is past the most it takes ({cap} bytes)"),
+            });
+        }
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::as_conversions
+        )]
+        let status = status as u16;
+        let mut out = json!({ "status": status, "url": url, "headers": heard });
+        if fetch.stream {
+            let id = format!("s{}", self.inner.streams.borrow().len() + 1);
+            let id = (1..)
+                .map(|n| format!("s{n}"))
+                .find(|k| !self.inner.streams.borrow().contains_key(k))
+                .unwrap_or(id);
+            self.inner.streams.borrow_mut().insert(
+                id.clone(),
+                Buffered {
+                    body: bytes,
+                    at: 0,
+                    binary: fetch.binary,
+                },
+            );
+            out["stream"] = Json::String(id);
+        } else {
+            out["body"] = body_json(&bytes, fetch.binary);
+        }
+        Ok(out)
+    }
+
+    /// The next part of a streamed body: `{chunk, done}`.
+    fn read_body(&self, stream: &str, max: Option<u64>) -> Result<Json, HostError> {
+        let mut streams = self.inner.streams.borrow_mut();
+        let b = streams.get_mut(stream).ok_or_else(|| HostError::NotFound {
+            what: format!("stream {stream}"),
+        })?;
+        let max = usize::try_from(max.unwrap_or(64 << 10).max(1)).unwrap_or(usize::MAX);
+        let mut end = b.at.saturating_add(max).min(b.body.len());
+        if !b.binary
+            && end < b.body.len()
+            && let Err(e) = std::str::from_utf8(&b.body[b.at..end])
+            && e.error_len().is_none()
+            && e.valid_up_to() > 0
+        {
+            // Never half a character: the rest of it comes next time.
+            end = b.at + e.valid_up_to();
+        }
+        let chunk = body_json(&b.body[b.at..end], b.binary);
+        b.at = end;
+        let done = b.at >= b.body.len();
+        if done {
+            streams.remove(stream);
+        }
+        Ok(json!({ "chunk": chunk, "done": done }))
     }
 
     async fn run(

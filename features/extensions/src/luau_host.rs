@@ -36,6 +36,14 @@
 //! host.move_document("notes/Today.md", "archive")  -- archive/Today.md
 //! host.delete_document("archive/Today.md")
 //! host.watch_documents({ action = "ACME_REINDEX" }) -- doc.created/saved/renamed/deleted
+//! -- The network (crate::net): to the hosts in capabilities.hosts, each
+//! -- redirect checked; a secret named in a header, put in by the host.
+//! local r = host.fetch("https://api.example.com/v1/items", {
+//!     headers = { Authorization = "Bearer {{secret:api_key}}" },
+//! })                                               -- {status, url, headers, body}
+//! local s = host.fetch({ url = "https://api.example.com/feed", stream = true })
+//! repeat local part = host.read_body(s.stream) until part.done   -- {chunk, done}
+//! local known = host.secret("api_key").set; host.ask_secret("api_key")
 //! ```
 //!
 //! `pick`, `prompt` and `menu` wait for the person; a cancel is `nil`.
@@ -257,6 +265,44 @@ impl Module for HostModule {
             HostRequest::Unsubscribe { key: a }
         ));
         op!("events", (), |lua, _a| Ok(HostRequest::Events));
+        // `fetch(url, options?)` or `fetch({url = …, …})`.
+        op!("fetch", (LuaValue, Option<LuaValue>), |lua, a| {
+            let (first, options) = a;
+            match first {
+                LuaValue::String(url) => {
+                    let url = url.to_str().map(|u| u.to_string()).unwrap_or_default();
+                    options
+                        .map_or(Ok(Value::Null), |o| json_of(&lua, o))
+                        .and_then(|mut v| {
+                            if !v.is_object() {
+                                v = json!({});
+                            }
+                            if let Value::Object(map) = &mut v {
+                                map.insert("url".to_owned(), Value::String(url));
+                                map.insert("op".to_owned(), Value::String("fetch".to_owned()));
+                            }
+                            serde_json::from_value(v)
+                                .map_err(|e| mlua::Error::runtime(format!("fetch: {e}")))
+                        })
+                }
+                other => request_of(&lua, "fetch", Some(other)),
+            }
+        });
+        op!("read_body", (String, Option<u64>), |lua, a| Ok(
+            HostRequest::ReadBody {
+                stream: a.0,
+                max: a.1
+            }
+        ));
+        op!("close_body", String, |lua, a| Ok(HostRequest::CloseBody {
+            stream: a
+        }));
+        op!("secret", String, |lua, a| Ok(HostRequest::Secret {
+            name: a
+        }));
+        op!("ask_secret", String, |lua, a| Ok(HostRequest::AskSecret {
+            name: a
+        }));
         op!("decorate", (LuaValue, Option<LuaValue>), |lua, a| {
             let (target, decoration) = a;
             json_of(&lua, target).and_then(|target| {

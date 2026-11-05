@@ -793,6 +793,62 @@ pub mod host {
             .map_err(|e| HostError::from_text(&e))
     }
 
+    /// An HTTP request through the host.
+    ///
+    /// `request` is `{"url": …, "method"?, "headers"?, "body"?,
+    /// "timeout_ms"?, "max_bytes"?, "stream"?, "binary"?}`; the answer
+    /// `{status, url, headers, body}`, or with `stream` `{status, url,
+    /// headers, stream}` (read it with [`read_body`]). Only to the hosts
+    /// in `capabilities.hosts`, every redirect checked. A
+    /// header's value may name one of its `[[secrets]]`
+    /// (`"Bearer {{secret:api_key}}"`): the host puts it in.
+    ///
+    /// # Errors
+    ///
+    /// Refused (a host, or a redirect to one, it may not reach), a time or
+    /// size limit passed, or the network failed.
+    pub fn fetch(request: &Json) -> Result<Json, HostError> {
+        wit_host::fetch(&request.to_string())
+            .map(|t| serde_json::from_str(&t).unwrap_or(Json::Null))
+            .map_err(|e| HostError::from_text(&e))
+    }
+
+    /// The next part of streamed response `stream`'s body, at most `max`
+    /// bytes (0: the host's default): `{chunk, done}`.
+    ///
+    /// # Errors
+    ///
+    /// No such stream, a time or size limit passed, or the network failed.
+    pub fn read_body(stream: &str, max: u32) -> Result<Json, HostError> {
+        wit_host::read_body(stream, max)
+            .map(|t| serde_json::from_str(&t).unwrap_or(Json::Null))
+            .map_err(|e| HostError::from_text(&e))
+    }
+
+    /// Stops reading streamed response `stream`: whether it was open.
+    #[must_use]
+    pub fn close_body(stream: &str) -> bool {
+        wit_host::close_body(stream)
+    }
+
+    /// Whether the person has set its secret `name` (never its value).
+    ///
+    /// # Errors
+    ///
+    /// Not one of its `[[secrets]]`.
+    pub fn secret_set(name: &str) -> Result<bool, HostError> {
+        wit_host::secret_set(name).map_err(|e| HostError::from_text(&e))
+    }
+
+    /// Asks the person for its secret `name`: whether they gave one.
+    ///
+    /// # Errors
+    ///
+    /// Not one of its `[[secrets]]`, or the app cannot ask.
+    pub fn ask_secret(name: &str) -> Result<bool, HostError> {
+        wit_host::ask_secret(name).map_err(|e| HostError::from_text(&e))
+    }
+
     /// Any host-service call (`hostcall::HostRequest`: `{"op": "selection"}`,
     /// `{"op": "read_file", "path": …}`), its answer.
     ///

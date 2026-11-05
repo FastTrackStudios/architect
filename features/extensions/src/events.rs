@@ -40,6 +40,13 @@ pub const DOC_RENAMED: &str = "doc.renamed";
 pub const DOC_DELETED: &str = "doc.deleted";
 /// The four document events, as `watch_documents` hooks them.
 pub const DOC_EVENTS: [&str; 4] = [DOC_CREATED, DOC_SAVED, DOC_RENAMED, DOC_DELETED];
+/// Whether hook event `on` is one of the four document events: hearing
+/// one is reading the documents (`reads = ["documents"]`).
+#[must_use]
+pub fn is_doc_event(on: &str) -> bool {
+    DOC_EVENTS.contains(&on)
+}
+
 /// The app's window came to the front (`{window?}`).
 pub const APP_FOCUSED: &str = "app.focused";
 /// The app's window went to the back (`{window?}`).

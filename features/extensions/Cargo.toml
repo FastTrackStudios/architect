@@ -32,9 +32,19 @@ host = [
     "dep:futures",
     # Signed `.archext` archives: checked on install, whichever way they came.
     "archive",
-    # A toolbar button's image file, as a `data:` URI.
+    # A toolbar button's image file, as a `data:` URI; a fetched body as
+    # base64 (`net`).
     "dep:base64",
+    # The secrets the host keeps for extensions (`net::Secrets`):
+    # `architect::settings`' private files.
+    "architect/settings",
 ]
+# Extensions' HTTP fetches (`net`'s client: reqwest, on a runtime of its
+# own). Off in `host`, `ui` and `page`: reqwest reaches tower-http, which
+# a UI crate must not (`cargo xtask boundaries`, ui-reach); the app that
+# runs extensions turns it on (the lab does). Without it a fetch answers
+# `unsupported`.
+net = ["host", "dep:reqwest", "dep:tokio"]
 # The `.archext` archive (`architect-extension-archive`): open, verify,
 # extract per platform. On with `host`.
 archive = ["dep:architect-extension-archive", "dep:sha2", "dep:hex"]
@@ -116,6 +126,7 @@ pulley = ["wasi", "wasmtime/pulley"]
 # DOM (see docs/content/architecture/extensions.md, "On the web").
 web = [
     "vox",
+    "dep:base64",
     "dep:architect",
     "architect/action-list",
     "dep:futures",
@@ -152,6 +163,12 @@ semver = "1"
 roxmltree = "0.21"
 # URL openers' patterns (`[[openers]] urls`): wasm-clean.
 regex = "1"
+# A fetch's URL and its host, checked against `capabilities.hosts`
+# (`hostcall::may_reach_url`): wasm-clean.
+url = "2"
+# `fetch`'s HTTP client (`net`, feature `host`): no redirects of its own,
+# the host follows each one and checks it.
+reqwest = { version = "0.12", optional = true, default-features = false, features = ["rustls-tls", "stream"] }
 architect = { workspace = true, optional = true, features = ["action-list"] }
 architect-scripting = { workspace = true, optional = true }
 architect-extension-archive = { workspace = true, optional = true }
@@ -211,7 +228,7 @@ sha2 = { workspace = true }
 hex = { workspace = true }
 # Its own host, so `cargo test --workspace` builds the tests with it; the
 # guest too, since the remote-view tests spawn themselves as one.
-architect-extensions = { path = ".", features = ["host", "crdt", "guest", "remote", "linked", "manager", "wasi"] }
+architect-extensions = { path = ".", features = ["host", "crdt", "guest", "remote", "linked", "manager", "wasi", "net"] }
 # tests/wasi.rs: the WIT world read, to compare with the wire's types.
 wit-parser = "0.261"
 futures = "0.3"

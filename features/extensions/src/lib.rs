@@ -106,6 +106,8 @@ mod luau_host;
 pub mod manage;
 #[cfg(feature = "manager")]
 pub mod manager;
+#[cfg(feature = "host")]
+pub mod net;
 #[cfg(feature = "page")]
 pub mod page;
 #[cfg(feature = "host")]

@@ -313,6 +313,16 @@
     delete: (path) => ask("delete_document", { path: String(path) }),
     watch: (hook) => ask("watch_documents", hook),
   });
+  // The network, as the page's extension (capabilities.hosts): the host
+  // fetches, every redirect checked. A header's value may name one of its
+  // secrets ("Bearer {{secret:api_key}}"): the host puts it in.
+  const net = Object.freeze({
+    fetch: (url, options) => ask("fetch", Object.assign({}, options || {}, { url: String(url) })),
+    read: (stream, max) => ask("read_body", { stream: String(stream), max: max == null ? null : Number(max) }),
+    close: (stream) => ask("close_body", { stream: String(stream) }),
+    secret: (name) => ask("secret", { name: String(name) }),
+    askSecret: (name) => ask("ask_secret", { name: String(name) }),
+  });
   const settings = Object.freeze({
     get: (key) => call("setting", key),
     set: (key, value) => call("set_setting", key, json(value)),
@@ -481,7 +491,7 @@
 
   const api = Object.freeze({
     h, Fragment, useState, useRef, useEffect, useData, useShared, useEmbed, useTheme, invalidate,
-    theme, actions, services, settings, state, notify, ui, clipboard, events, documents, worker, Overlay, host: raw,
+    theme, actions, services, settings, state, notify, ui, clipboard, events, documents, net, worker, Overlay, host: raw,
   });
   globalThis.__architect = Object.freeze({
     api,

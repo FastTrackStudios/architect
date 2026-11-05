@@ -119,6 +119,10 @@ export type Builder = {
 --   documents.rename(path, to), documents.move(path, folder), documents.delete(path),
 --   documents.watch({ action }): the app's documents, as the page's extension
 --   (capabilities.reads / capabilities.writes "documents")
+--   net.fetch(url, options?) ({status, url, headers, body} or, stream = true, {…, stream}),
+--   net.read(stream, max?) ({chunk, done}), net.close(stream), net.secret(name), net.ask_secret(name):
+--   the network, as the page's extension (capabilities.hosts; a header may name a secret,
+--   "{{secret:api_key}}", the host puts it in)
 
 -- How far a worker said it is.
 export type WorkerProgress = { done: number, total: number?, fraction: number?, note: string? }

@@ -26,7 +26,9 @@
 //! a cancel is nil), hooks made at run time (`events.subscribe(hook)`,
 //! `events.unsubscribe(key)`, `events.list()`), the app's documents
 //! (`documents.list`, `read`, `create`, `edit`, `rename`, `move`,
-//! `delete`, `watch`) and `print`. Luau's sandbox holds; each call into the page has
+//! `delete`, `watch`), the network (`net.fetch(url, options?)`,
+//! `net.read(stream, max?)`, `net.close(stream)`, `net.secret(name)`,
+//! `net.ask_secret(name)`) and `print`. Luau's sandbox holds; each call into the page has
 //! [`crate::runner::PageLimits::frame`] before its interrupt stops it.
 //!
 //! **Timers**: `set_timeout(fn, ms)`, `set_interval(fn, ms)`,
@@ -445,6 +447,56 @@ impl LuauEngine {
         )?;
         documents.set("watch", ask("watch_documents", table)?)?;
         api.set("documents", documents)?;
+        // The network, as the page's extension (capabilities.hosts).
+        let net = lua.create_table()?;
+        net.set(
+            "fetch",
+            ask("fetch", |lua, args| {
+                let mut it = args.into_iter();
+                let url: String = it.next().map_or(Ok(String::new()), |v| lua.from_value(v))?;
+                let mut options: Value =
+                    it.next().map_or(Ok(Value::Null), |v| lua.from_value(v))?;
+                if !options.is_object() {
+                    options = Value::Object(serde_json::Map::new());
+                }
+                if let Value::Object(map) = &mut options {
+                    map.insert("url".to_owned(), Value::String(url));
+                }
+                Ok(options)
+            })?,
+        )?;
+        net.set(
+            "read",
+            ask("read_body", |lua, args| {
+                let mut it = args.into_iter();
+                let stream: String = it.next().map_or(Ok(String::new()), |v| lua.from_value(v))?;
+                let max: Option<u64> = it.next().map_or(Ok(None), |v| lua.from_value(v))?;
+                Ok(serde_json::json!({ "stream": stream, "max": max }))
+            })?,
+        )?;
+        net.set(
+            "close",
+            ask("close_body", |lua, args| {
+                let stream: String = args
+                    .into_iter()
+                    .next()
+                    .map_or(Ok(String::new()), |v| lua.from_value(v))?;
+                Ok(serde_json::json!({ "stream": stream }))
+            })?,
+        )?;
+        for (name, op) in [("secret", "secret"), ("ask_secret", "ask_secret")] {
+            net.set(
+                name,
+                ask(op, |lua, args| {
+                    let name: String = args
+                        .into_iter()
+                        .next()
+                        .map_or(Ok(String::new()), |v| lua.from_value(v))?;
+                    Ok(serde_json::json!({ "name": name }))
+                })?,
+            )?;
+        }
+        api.set("net", net)?;
         api.set("ui", ui)?;
         api.set("clipboard", clipboard)?;
         api.set("events", events)?;

@@ -223,7 +223,9 @@ impl HostUi for FakeUi {
         let given = self.next(from, HostRequest::Prompt(prompt.clone()));
         let answer = given.map_or_else(
             || match prompt.kind {
-                PromptKind::Text => Some(Value::String(prompt.default.unwrap_or_default())),
+                PromptKind::Text | PromptKind::Secret => {
+                    Some(Value::String(prompt.default.unwrap_or_default()))
+                }
                 PromptKind::Confirm => Some(Value::Bool(true)),
                 PromptKind::PickOne => prompt.choices.first().map(|c| Value::String(c.id.clone())),
             },

@@ -236,6 +236,14 @@ params = '{"type":"object"}'
 [[actions]]
 id = "TEST_HAZARDS_NOW"
 name = "The host's clock"
+[[actions]]
+id = "TEST_HAZARDS_FETCH"
+name = "Fetch"
+params = '{"type":"object"}'
+[[actions]]
+id = "TEST_HAZARDS_DOCS"
+name = "Make, edit, list and read a document"
+params = '{"type":"object"}'
 [[views]]
 id = "ticker"
 title = "Ticker"
@@ -649,9 +657,12 @@ fn a_views_interval_runs_on_the_hosts_clock_and_a_hook_it_made_runs() {
     let clock = architect_extensions::events::FakeClock::at(1_000_000);
     let app = app(Limits::default(), &tmp.path().join("cache"));
     app.host.set_clock(std::sync::Arc::new(clock.clone()));
+    // Its doc.saved hook: hearing a document's events is reading them.
+    let manifest =
+        HAZARDS_MANIFEST.replace("[wasm]", "[capabilities]\nreads = [\"documents\"]\n[wasm]");
     load(
         &app,
-        &package(tmp.path(), "hazards", HAZARDS_MANIFEST, HAZARDS_WASM),
+        &package(tmp.path(), "hazards", &manifest, HAZARDS_WASM),
     );
     assert_eq!(
         run(&app, "TEST_HAZARDS_NOW", &Value::Null).unwrap(),
@@ -1128,5 +1139,119 @@ fn an_action_calls_latency() {
         at(50),
         at(90),
         at(99),
+    );
+}
+
+#[path = "support/server.rs"]
+mod server;
+
+/// The network (#310), through the world's `fetch` and `read-body`: a
+/// component fetches from a host in `capabilities.hosts`, reads a
+/// streamed body to its end, and is refused another host and a redirect
+/// to one.
+#[test]
+fn a_component_fetches_from_its_host_and_is_refused_another() {
+    if guests().is_none() {
+        return;
+    }
+    let server = server::serve();
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(Limits::default(), &tmp.path().join("cache"));
+    let manifest =
+        HAZARDS_MANIFEST.replace("[wasm]", "[capabilities]\nhosts = [\"127.0.0.1\"]\n[wasm]");
+    load(
+        &app,
+        &package(tmp.path(), "hazards", &manifest, HAZARDS_WASM),
+    );
+    let base = format!("http://127.0.0.1:{}", server.port);
+    let out = run(
+        &app,
+        "TEST_HAZARDS_FETCH",
+        &json!({ "url": format!("{base}/hello") }),
+    )
+    .unwrap();
+    assert_eq!(out["status"], 200, "{out}");
+    assert_eq!(out["body"], "hello from the server", "{out}");
+    let out = run(
+        &app,
+        "TEST_HAZARDS_FETCH",
+        &json!({ "url": format!("{base}/stream"), "stream": true }),
+    )
+    .unwrap();
+    assert_eq!(out["body"].as_str(), Some(server::streamed().as_str()));
+
+    let why = failed(
+        run(
+            &app,
+            "TEST_HAZARDS_FETCH",
+            &json!({ "url": format!("http://localhost:{}/hello", server.port) }),
+        )
+        .unwrap_err(),
+    );
+    assert!(
+        why.contains("refused") && why.contains("localhost"),
+        "{why}"
+    );
+    let why = failed(
+        run(
+            &app,
+            "TEST_HAZARDS_FETCH",
+            &json!({ "url": format!("{base}/redirect-out") }),
+        )
+        .unwrap_err(),
+    );
+    assert!(
+        why.contains("refused") && why.contains("redirected"),
+        "{why}"
+    );
+}
+
+/// The document imports (#309) from a real component: it makes a
+/// document, edits it as one step, lists and reads it, on the app's
+/// documents; refused without the capabilities.
+#[test]
+fn a_component_makes_edits_lists_and_reads_a_document() {
+    use architect_extensions::documents::CrdtDocuments;
+    if guests().is_none() {
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let docs = CrdtDocuments::new().with_space("notes");
+    let app = app(Limits::default(), &tmp.path().join("cache"));
+    app.host.set_documents(std::sync::Arc::new(docs.clone()));
+    let manifest = HAZARDS_MANIFEST.replace(
+        "[wasm]",
+        "[capabilities]\nreads = [\"documents\"]\nwrites = [\"documents\"]\n[wasm]",
+    );
+    load(
+        &app,
+        &package(tmp.path(), "hazards", &manifest, HAZARDS_WASM),
+    );
+    let out = run(
+        &app,
+        "TEST_HAZARDS_DOCS",
+        &json!({ "path": "notes/wasi.md" }),
+    )
+    .unwrap();
+    assert_eq!(out["made"]["path"], "notes/wasi.md", "{out}");
+    assert_eq!(out["text"], "one two", "{out}");
+    assert_eq!(out["read"], "one two", "{out}");
+    assert_eq!(out["listed"][0]["path"], "notes/wasi.md", "{out}");
+    assert_eq!(docs.text("notes/wasi.md").as_deref(), Some("one two"));
+    assert_eq!(docs.steps("notes/wasi.md"), ["WASI edit"]);
+
+    let bare = tmp.path().join("bare");
+    let app = app_with(WasiRunner::new(), &bare.join("cache"));
+    app.host.set_documents(std::sync::Arc::new(
+        CrdtDocuments::new().with_space("notes"),
+    ));
+    load(
+        &app,
+        &package(&bare, "hazards", HAZARDS_MANIFEST, HAZARDS_WASM),
+    );
+    let why = failed(run(&app, "TEST_HAZARDS_DOCS", &json!({})).unwrap_err());
+    assert!(
+        why.contains("refused") && why.contains("documents"),
+        "{why}"
     );
 }

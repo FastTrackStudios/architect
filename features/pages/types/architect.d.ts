@@ -352,6 +352,42 @@ declare module "architect" {
     watch(hook: { action: string }): Promise<string[]>;
   };
 
+  /** A request to the network (`hostcall::Fetch`), past its URL. */
+  export type FetchOptions = {
+    method?: string;
+    /** A value may name one of its `[[secrets]]` (`"Bearer {{secret:api_key}}"`): the host puts it in. */
+    headers?: Record<string, string>;
+    body?: string;
+    timeout_ms?: number;
+    max_bytes?: number;
+    /** Its body read with `net.read`, a part at a time. */
+    stream?: boolean;
+    /** Its body (and each part) as base64, not text. */
+    binary?: boolean;
+  };
+  /** A response: `body` read whole, or `stream` to read it with `net.read`. */
+  export type FetchResponse = {
+    status: number;
+    url: string;
+    headers: Record<string, string>;
+    body?: string;
+    stream?: string;
+  };
+  /**
+   * The network, as the page's extension: only the hosts in
+   * `capabilities.hosts`, every redirect checked by the host.
+   */
+  export const net: {
+    fetch(url: string, options?: FetchOptions): Promise<FetchResponse>;
+    /** The next part of a streamed body, at most `max` bytes. */
+    read(stream: string, max?: number): Promise<{ chunk: string; done: boolean }>;
+    close(stream: string): Promise<boolean>;
+    /** Whether the person has set its secret `name`; never its value. */
+    secret(name: string): Promise<{ set: boolean; title?: string }>;
+    /** Asks the person for its secret `name`: whether they gave one. */
+    askSecret(name: string): Promise<boolean>;
+  };
+
   /** A worker: a script of the page's folder in a runtime of its own, spoken to by messages. */
   export interface Worker {
     readonly id: number;

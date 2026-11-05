@@ -28,6 +28,10 @@ version = "0.1.0"
 kind = "luau"
 api = "0.1"
 
+# Its pages hook doc.saved: a document's events are reading the documents.
+[capabilities]
+reads = ["documents"]
+
 [[actions]]
 id = "LAB_PAGE_EVENTS_NOTE"
 name = "Note the save"
