@@ -927,6 +927,10 @@ pub(super) fn PaneSlot(pane: PaneId) -> Element {
         current.set(pane.clone());
     }
     let kind = host.workspace.read().pane(&pane).map(|p| p.view.0.clone());
+    // While a field in it is typed in, its view kind is a context the
+    // phone's Typing Toolbar is in (a toolbar's `when = "view:<kind>"`).
+    let typing =
+        architect_shell::use_typing_scope(&format!("view:{}", kind.as_deref().unwrap_or_default()));
     // Its view, if the app has it, and what draws it, if that is here:
     // the built-in `dioxus` kind always is.
     let render = kind.as_ref().and_then(|k| {
@@ -964,6 +968,8 @@ pub(super) fn PaneSlot(pane: PaneId) -> Element {
                     let _ = host.edit(|w| w.activate(&focus));
                 }
             },
+            onfocusin: move |_| typing.focus(),
+            onfocusout: move |_| typing.blur(),
             {body}
         }
     }

@@ -80,8 +80,8 @@ pub const CONTEXT_TARGETS: [(&str, &str); 3] = [
 pub use host::{
     Bridge, Command, ContextEntries, ContextEntry, HeaderTools, Host, Opened, PaneHandle, Popout,
     PresenceLayer, PresenceOverlay, TabBadges, TitleRow, View, Views, WindowSystem, Windows,
-    WorkspaceActions, WorkspaceStore, WorkspaceView, context_invocation, use_host, use_pane,
-    use_pane_of, use_pane_status, use_presence_overlay,
+    WorkspaceActions, WorkspaceStore, WorkspaceView, context_invocation, try_use_pane_of, use_host,
+    use_pane, use_pane_of, use_pane_status, use_presence_overlay,
 };
 pub use kinds::{
     Capabilities, Capability, DIOXUS, Hosts, KindError, KindId, KindSpec, PAINT, Part, Placement,

@@ -140,6 +140,13 @@ pub fn use_commands_provider() -> Commands {
                 .find(|c| c.id == id)
                 .map(|c| c.enabled)
         }),
+        checked: Callback::new(move |id: String| {
+            commands
+                .declared()
+                .into_iter()
+                .find(|c| c.id == id)
+                .and_then(|c| c.checked)
+        }),
     });
     commands
 }
