@@ -32,6 +32,9 @@ vault-obsidian = { workspace = true, optional = true }
 architect = { workspace = true, optional = true, features = ["action-list"] }
 facet = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
+# `actions`: `OpenVault::watch`'s watcher runs on a thread of its own.
+tokio = { workspace = true, optional = true, features = ["rt", "sync", "macros"] }
+tracing = { workspace = true, optional = true }
 
 [features]
 default = ["live", "obsidian", "vox"]
@@ -39,7 +42,7 @@ live = ["dep:vault-live"]
 obsidian = ["dep:vault-obsidian", "live"]
 vox = ["vault-proto/vox"]
 # The VAULT_* actions over an open folder (`actions::OpenVault`).
-actions = ["obsidian", "dep:architect", "dep:facet", "dep:serde_json"]
+actions = ["obsidian", "dep:architect", "dep:facet", "dep:serde_json", "dep:tokio", "dep:tracing"]
 
 [dev-dependencies]
 # The tests run the actions: build them with it.

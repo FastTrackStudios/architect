@@ -203,6 +203,34 @@ pub fn adopt_text(doc: &LoroDoc, new: &str) -> Merged {
     merge_text(doc, &base, new)
 }
 
+/// Three versions of one file made into one: `ours` (an editor's unsaved
+/// typing) and `theirs` (the file as another editor or a `git pull` left
+/// it), both made from `base` (the text last saved or read). Each side's
+/// changes are kept, property by key and the body character by
+/// character, through two forks of one document merged as replicas are:
+/// an outside edit lands in an open note without clobbering its typing.
+#[must_use]
+pub fn merge3(base: &str, ours: &str, theirs: &str) -> String {
+    if ours == theirs || theirs == base {
+        return ours.to_owned();
+    }
+    if ours == base {
+        return theirs.to_owned();
+    }
+    let doc = LoroDoc::new();
+    let _ = adopt_text(&doc, base);
+    doc.commit();
+    let other = doc.fork();
+    let _ = merge_text(&doc, base, ours);
+    doc.commit();
+    let _ = merge_text(&other, base, theirs);
+    other.commit();
+    if let Ok(update) = other.export(crdt::loro::ExportMode::all_updates()) {
+        let _ = doc.import(&update);
+    }
+    render(&doc, Some(ours))
+}
+
 /// The document was deleted — its tombstone is set
 /// (`vault_proto::COLLAB_META_DELETED`).
 #[must_use]
@@ -467,5 +495,29 @@ mod tests {
         assert_eq!(render(&doc, Some(NOTE)), NOTE);
         assert_eq!(doc.get_text(COLLAB_TEXT_CONTAINER).to_string(), "");
         assert!(!migrate_whole_file(&doc), "only once");
+    }
+}
+
+#[cfg(test)]
+mod merge3_tests {
+    use super::merge3;
+
+    #[test]
+    fn typing_and_an_outside_edit_both_stay() {
+        let base = "---\ntitle: Scales\n---\nOne.\n\nTwo.\n";
+        let ours = "---\ntitle: Scales\n---\nOne, typed.\n\nTwo.\n";
+        let theirs = "---\ntitle: Scales\nkey: G\n---\nOne.\n\nTwo, pulled.\n";
+        let merged = merge3(base, ours, theirs);
+        assert!(merged.contains("One, typed."), "{merged}");
+        assert!(merged.contains("Two, pulled."), "{merged}");
+        assert!(merged.contains("key: G"), "{merged}");
+        assert!(merged.contains("title: Scales"), "{merged}");
+    }
+
+    #[test]
+    fn one_side_unchanged_is_the_other() {
+        assert_eq!(merge3("a", "a", "b"), "b");
+        assert_eq!(merge3("a", "c", "a"), "c");
+        assert_eq!(merge3("a", "d", "d"), "d");
     }
 }
