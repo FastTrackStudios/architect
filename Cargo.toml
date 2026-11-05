@@ -78,6 +78,11 @@ members = [
     "features/vault/vault-obsidian",
     "features/vault/vault-entity",
     "features/vault/vault-doc",
+    # ── links and tags (from Task, #333) ──────────────────────────────
+    "features/links/links",
+    "features/links/links-proto",
+    "features/tags/tag",
+    "features/tags/tag-proto",
     "apps/lab/ui",
     "apps/lab/desktop",
     "apps/lab/mobile",
@@ -133,6 +138,10 @@ vault-live = { path = "features/vault/vault-live" }
 vault-obsidian = { path = "features/vault/vault-obsidian" }
 vault-entity = { path = "features/vault/vault-entity" }
 vault-doc = { path = "features/vault/vault-doc" }
+links = { path = "features/links/links" }
+links-proto = { path = "features/links/links-proto", default-features = false }
+tag = { path = "features/tags/tag" }
+tag-proto = { path = "features/tags/tag-proto" }
 # The editor's markdown model (frontmatter, the vault lookup the editor
 # resolves links through), at the editor pin above.
 editor-state = { git = "https://github.com/FastTrackStudios/editor", rev = "f8137a9326825361e2046254790758dc516caa44", default-features = false }

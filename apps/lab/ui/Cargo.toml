@@ -59,6 +59,8 @@ crdt = { workspace = true }
 # The lab's vault: a folder of markdown and its VAULT_* actions
 # (src/notes.rs, the sample in apps/lab/vault).
 vault = { workspace = true, features = ["actions"] }
+links = { workspace = true, features = ["actions"] }
+tag = { workspace = true, features = ["actions"] }
 architect = { workspace = true, features = ["action-list", "settings"] }
 dioxus = { workspace = true }
 facet = { workspace = true }
