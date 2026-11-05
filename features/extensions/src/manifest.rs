@@ -577,7 +577,8 @@ pub struct Manifest {
     pub reserved: Vec<String>,
     /// What it adds to the interface: its `[[openers]]`, `[[doc_kinds]]`,
     /// `[[tabs]]`, `[[status]]`, `[[menus]]`, `[[context]]`, `[[bar]]`,
-    /// `[[toolbars]]`, `[[hooks]]`, `[[slots]]` and `[[embeds]]`.
+    /// `[[toolbars]]`, `[[hooks]]`, `[[slots]]`, `[[embeds]]` and
+    /// `[[base_views]]`.
     #[serde(flatten)]
     pub contributes: Contribution,
     /// `[background]`: started on its first event, stopped when idle
@@ -1019,6 +1020,17 @@ impl Manifest {
     #[must_use]
     pub fn view_ids(&self) -> Vec<String> {
         self.views.iter().map(|v| v.id.clone()).collect()
+    }
+
+    /// Whether its code may draw view `view`: one of its `[[views]]`, or a
+    /// `[[base_views]]` type its code draws (`base.<id>`,
+    /// `linked::Builder::base_view`).
+    #[must_use]
+    pub fn draws(&self, view: &str) -> bool {
+        self.views.iter().any(|d| d.id == view)
+            || self.contributes.base_views.iter().any(|b| {
+                b.view.is_none() && b.page.is_none() && b.view_name() == view
+            })
     }
 
     /// What its contributions are checked against: its namespace, its
@@ -1704,6 +1716,17 @@ title = "Keyflow chart"
 view = "chart"
 claims = { fence = ["kf"], note_type = ["song"] }
 max_height = 320
+
+[[base_views]]
+id = "board"
+name = "Board"
+icon = "kanban"
+options = [{ key = "columnBy", name = "Columns", kind = "property" }]
+
+[[base_views]]
+id = "timeline"
+name = "Timeline"
+view = "chart"
 "#;
 
     #[test]
@@ -1721,6 +1744,13 @@ max_height = 320
         assert_eq!((c.bar.len(), c.hooks.len(), c.slots.len()), (1, 2, 1));
         assert_eq!(c.embeds[0].claims.fence, ["kf"]);
         assert_eq!(c.embeds[0].claims.note_type, ["song"]);
+        assert_eq!(c.base_views.len(), 2);
+        assert_eq!(c.base_views[0].options[0].key, "columnBy");
+        // Drawn by its code: `base.board`, which it may draw; the other by
+        // its view.
+        assert_eq!(c.base_views[0].view_name(), "base.board");
+        assert!(m.draws("base.board") && !m.draws("base.timeline"));
+        assert_eq!(c.base_views[1].view_name(), "chart");
         assert_eq!(c.embeds[0].max_height, Some(320));
         assert_eq!(m.views[0].placement, ViewPlacement::Split);
         assert_eq!(m.views[0].on_unload, OnUnload::Close);

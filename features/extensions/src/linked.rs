@@ -259,6 +259,16 @@ impl Builder {
         self
     }
 
+    /// The code that draws its base view type `id` (one of its manifest's
+    /// `[[base_views]]` that names no `view` or `page`): drawn as view
+    /// `base.<id>`, given the base's rows ([`use_base_view`]), linked in or
+    /// as a process.
+    pub fn base_view(&mut self, id: &str, root: fn() -> Element) -> &mut Self {
+        self.views
+            .insert(format!("{}{id}", crate::contrib::BASE_VIEW_PREFIX), root);
+        self
+    }
+
     /// What it adds to the interface past its manifest's tables (an id in
     /// both is the builder's).
     // By value, so a literal reads as `contribute(Contribution { … })`.
@@ -377,3 +387,20 @@ impl crate::guest::Guest {
         guest
     }
 }
+
+/// What Bases gave this view, when it draws a base's view of a type its
+/// extension adds (`[[base_views]]`): the view's spec and its rows, drawn
+/// again when either changes. `None` elsewhere.
+#[must_use]
+pub fn use_base_view() -> Option<crate::contrib::BaseViewInput> {
+    let input = use_embed()?;
+    if input.claim != BASE_VIEW_CLAIM {
+        return None;
+    }
+    serde_json::from_value(input.props).ok()
+}
+
+/// The claim a base view is drawn under (`embed_type:base_view`): its
+/// [`EmbedInput`](crate::contrib::EmbedInput)'s `props` are a
+/// [`BaseViewInput`](crate::contrib::BaseViewInput).
+pub const BASE_VIEW_CLAIM: &str = "embed_type:base_view";

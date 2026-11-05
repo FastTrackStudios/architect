@@ -107,6 +107,28 @@ impl Embeds {
         )
     }
 
+    /// The base view type `id` a loaded extension adds (`[[base_views]]`),
+    /// as an embed: what Bases mounts for a base's view of that type
+    /// ([`BaseViewEmbed`], feature `ui`). Its claim is
+    /// `embed_type:base_view`.
+    #[must_use]
+    pub fn base_view(&self, id: &str) -> Option<EmbedSpec> {
+        let by = self.host.contributions().base_view(id)?;
+        let decl = by.item;
+        let embed = EmbedDecl {
+            id: format!("base_view.{}", decl.id),
+            view: decl.page.is_none().then(|| decl.view_name()),
+            title: decl.name,
+            page: decl.page,
+            claims: crate::contrib::EmbedClaims {
+                embed_type: vec!["base_view".to_owned()],
+                ..Default::default()
+            },
+            max_height: None,
+        };
+        self.spec(by.owner, embed, Claim::EmbedType("base_view".to_owned()))
+    }
+
     fn spec(&self, owner: String, embed: EmbedDecl, claim: Claim) -> Option<EmbedSpec> {
         let loaded = self.host.get(&owner)?;
         let page = embed.page.clone().or_else(|| {
@@ -176,7 +198,7 @@ impl Host {
 }
 
 #[cfg(feature = "ui")]
-pub use view::{EmbedAsk, EmbedPages, EmbedView, WidgetView};
+pub use view::{BaseViewEmbed, EmbedAsk, EmbedPages, EmbedView, WidgetView};
 
 #[cfg(feature = "ui")]
 mod view {
@@ -278,6 +300,41 @@ mod view {
             return rsx! {};
         };
         draw(&host, spec, input, || rsx! {})
+    }
+
+    /// A base's view of a type an extension adds (`[[base_views]]`, type
+    /// `kind`), drawn by it and given `input` (the view's spec and rows),
+    /// up to `max_height` points tall; `fallback` when no loaded extension
+    /// adds the type, or once it unloads.
+    #[component]
+    pub fn BaseViewEmbed(
+        kind: String,
+        input: crate::contrib::BaseViewInput,
+        #[props(default = u32::MAX)] max_height: u32,
+        #[props(default)] fallback: Option<Element>,
+    ) -> Element {
+        let now = EmbedInput {
+            claim: Claim::EmbedType("base_view".to_owned()).to_string(),
+            source: input.base.clone(),
+            props: serde_json::to_value(&input).unwrap_or_default(),
+        };
+        let mut live = use_signal(|| now.clone());
+        use_effect(use_reactive!(|now| {
+            if *live.peek() != now {
+                live.set(now);
+            }
+        }));
+        let plain = move || fallback.clone().unwrap_or_else(|| rsx! {});
+        let Some(ui) = try_use_context::<ExtensionUi>() else {
+            return plain();
+        };
+        let _ = ui.revision();
+        let host = ui.host();
+        let Some(mut spec) = Embeds::new(host.clone()).base_view(&kind) else {
+            return plain();
+        };
+        spec.max_height = max_height;
+        draw(&host, spec, live, plain)
     }
 
     /// `spec` drawn, given `input`: a page's sub-document, a linked view in

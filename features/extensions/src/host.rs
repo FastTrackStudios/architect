@@ -2344,7 +2344,7 @@ mod linked {
                 .0
                 .view_ids()
                 .into_iter()
-                .find(|v| !m.views.iter().any(|d| &d.id == v))
+                .find(|v| !m.draws(v))
             {
                 return Err(format!(
                     "its code draws {view}, which its manifest does not declare"
