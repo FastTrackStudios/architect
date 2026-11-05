@@ -313,6 +313,13 @@
     delete: (path) => ask("delete_document", { path: String(path) }),
     watch: (hook) => ask("watch_documents", hook),
   });
+  // The editor being typed in, as the page's extension (capabilities.reads
+  // / .writes "editor"): an edit is one transaction, one undo step.
+  const editor = Object.freeze({
+    state: () => ask("editor_state", {}),
+    edit: (command) => ask("edit_editor", command ?? {}),
+    decorate: (decorations) => ask("decorate_editor", { decorations: decorations ?? [] }),
+  });
   // The network, as the page's extension (capabilities.hosts): the host
   // fetches, every redirect checked. A header's value may name one of its
   // secrets ("Bearer {{secret:api_key}}"): the host puts it in.
@@ -504,7 +511,7 @@
 
   const api = Object.freeze({
     h, Fragment, useState, useRef, useEffect, useData, useShared, useEmbed, useTheme, invalidate,
-    theme, actions, services, settings, state, notify, ui, clipboard, events, documents, net, ports, worker, Overlay, host: raw,
+    theme, actions, services, settings, state, notify, ui, clipboard, events, documents, editor, net, ports, worker, Overlay, host: raw,
   });
   globalThis.__architect = Object.freeze({
     api,

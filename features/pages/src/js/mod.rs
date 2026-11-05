@@ -60,7 +60,7 @@ const WORKER_PRELUDE: &str = include_str!("worker.js");
 /// `import … from "architect"`.
 const ARCHITECT: &str = "const a = globalThis.__architect.api;\n\
 export const { h, Fragment, useState, useRef, useEffect, useData, useShared, useEmbed, useTheme, invalidate, \
-theme, actions, settings, state, notify, ui, clipboard, events, documents, net, ports, worker, Overlay, host } = a;\nexport default a;\n";
+theme, actions, settings, state, notify, ui, clipboard, events, documents, editor, net, ports, worker, Overlay, host } = a;\nexport default a;\n";
 /// `import … from "architect/worker"`.
 const ARCHITECT_WORKER: &str = "const w = globalThis.__worker.api;\n\
 export const { args, post, onMessage } = w;\nexport default w;\n";

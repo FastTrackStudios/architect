@@ -26,7 +26,8 @@
 //! a cancel is nil), hooks made at run time (`events.subscribe(hook)`,
 //! `events.unsubscribe(key)`, `events.list()`), the app's documents
 //! (`documents.list`, `read`, `create`, `edit`, `rename`, `move`,
-//! `delete`, `watch`), the network (`net.fetch(url, options?)`,
+//! `delete`, `watch`), the editor being typed in (`editor.state`,
+//! `edit`, `decorate`), the network (`net.fetch(url, options?)`,
 //! `net.read(stream, max?)`, `net.close(stream)`, `net.secret(name)`,
 //! `net.ask_secret(name)`), MIDI ports and OSC endpoints (`ports.list`,
 //! `open`, `send`, `receive`, `close`, `targets`, `surfaces`,
@@ -449,6 +450,29 @@ impl LuauEngine {
         )?;
         documents.set("watch", ask("watch_documents", table)?)?;
         api.set("documents", documents)?;
+        // The editor being typed in, as the page's extension.
+        let editor = lua.create_table()?;
+        editor.set(
+            "state",
+            ask("editor_state", |_, _| Ok(Value::Object(serde_json::Map::new())))?,
+        )?;
+        editor.set("edit", ask("edit_editor", table)?)?;
+        editor.set(
+            "decorate",
+            ask("decorate_editor", |lua, args| {
+                let list: Value = args
+                    .into_iter()
+                    .next()
+                    .map_or(Ok(Value::Null), |v| lua.from_value(v))?;
+                // An empty table reads as `{}`: none.
+                let list = match list {
+                    Value::Array(a) => Value::Array(a),
+                    _ => Value::Array(Vec::new()),
+                };
+                Ok(serde_json::json!({ "decorations": list }))
+            })?,
+        )?;
+        api.set("editor", editor)?;
         // The network, as the page's extension (capabilities.hosts).
         let net = lua.create_table()?;
         net.set(

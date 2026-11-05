@@ -119,6 +119,9 @@ export type Builder = {
 --   documents.rename(path, to), documents.move(path, folder), documents.delete(path),
 --   documents.watch({ action }): the app's documents, as the page's extension
 --   (capabilities.reads / capabilities.writes "documents")
+--   editor.state(), editor.edit({ changes, selection?, name?, base? }) (one transaction,
+--   one undo step: the editor after), editor.decorate(decorations): the editor being
+--   typed in, as the page's extension (capabilities.reads / .writes "editor")
 --   net.fetch(url, options?) ({status, url, headers, body} or, stream = true, {…, stream}),
 --   net.read(stream, max?) ({chunk, done}), net.close(stream), net.secret(name), net.ask_secret(name):
 --   the network, as the page's extension (capabilities.hosts; a header may name a secret,
