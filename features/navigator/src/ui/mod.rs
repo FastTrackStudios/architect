@@ -22,7 +22,7 @@ use futures_util::StreamExt as _;
 use crate::index::VaultIndex;
 use crate::layout::{self, Pane, PaneLayout};
 use crate::list::Clock;
-use crate::settings::{NavigatorSettings, Orientation};
+use crate::settings::{Grouping, ListMode, NavigatorSettings, Orientation};
 use crate::source::{NavigatorSource, SourceEvent, Subscription};
 use crate::state::{Key as NavKey, Mods, NavigatorState, OpenIn, Outcome};
 
@@ -60,6 +60,12 @@ pub struct Navigator {
     settle: CopyValue<u64>,
     /// A finger dragged the pane pressed: its release is not a tap.
     pub(crate) dragged: CopyValue<bool>,
+    /// A word for the person under the list's header: what a command did
+    /// ("Pinned 3 folder notes"), or why it could not.
+    pub notice: Signal<Option<String>>,
+    /// The list's menu edits the selected place's own list, not the
+    /// settings.
+    pub own: Signal<bool>,
 }
 
 /// The navigator over `source`, kept while the caller is mounted: its
@@ -83,6 +89,8 @@ pub fn use_navigator(source: impl FnOnce() -> Arc<dyn NavigatorSource>) -> Navig
         width: use_signal(|| None),
         settle: use_hook(|| CopyValue::new(0)),
         dragged: use_hook(|| CopyValue::new(false)),
+        notice: use_signal(|| None),
+        own: use_signal(|| false),
     };
     // The settings page's changes.
     use_effect(move || {
@@ -181,9 +189,56 @@ impl Navigator {
         layout::resolve(s.settings(), phone, *self.width.read(), s.nav_width)
     }
 
-    fn update(&self, f: impl FnOnce(&mut NavigatorState)) {
+    /// Changes the navigator with `f`.
+    pub fn update<R>(&self, f: impl FnOnce(&mut NavigatorState) -> R) -> R {
         let mut state = self.state;
-        f(&mut state.write());
+        f(&mut state.write())
+    }
+
+    /// Says `text` under the list's header.
+    pub fn say(&self, text: impl Into<String>) {
+        let mut notice = self.notice;
+        notice.set(Some(text.into()));
+    }
+
+    /// Changes the list's look with `f`: the selected place's own list
+    /// while [`own`](Self::own) is on (or it has one), else the settings.
+    pub fn edit_list(&self, f: impl Fn(&mut crate::Appearance, &mut NavigatorSettings)) {
+        let target = self.state.peek().target();
+        let has_own = self.state.peek().appearance(&target).is_some();
+        if *self.own.peek() || has_own {
+            let settings = self.state.peek().settings().clone();
+            self.update(|s| {
+                s.edit_appearance(|a| {
+                    let mut shown = a.over(&settings);
+                    f(a, &mut shown);
+                    *a = crate::Appearance {
+                        target: a.target.clone(),
+                        sort: Some(shown.sort),
+                        grouping: Some(shown.grouping),
+                        mode: Some(shown.mode),
+                        title_rows: Some(shown.title_rows),
+                        preview_rows: Some(shown.preview_rows),
+                        descendants: Some(shown.include_descendants),
+                        show_tags: a.show_tags,
+                        show_properties: a.show_properties,
+                        show_task_progress: a.show_task_progress,
+                        text_count: a.text_count,
+                    };
+                });
+            });
+        } else {
+            self.settings.update(|s| {
+                let mut unused = crate::Appearance::default();
+                f(&mut unused, s);
+            });
+        }
+    }
+
+    /// Does what an input asked of the app (an [`Outcome`] from the
+    /// model): opens a note through `on_open`, or writes to the source.
+    pub fn act(&self, out: Option<Outcome>, on_open: EventHandler<Open>) {
+        self.outcome(out, on_open, None);
     }
 
     /// Does what an input asked of the app.
@@ -231,6 +286,20 @@ impl Navigator {
                     e.call(());
                 }
             }
+            Some(Outcome::Write { ops, open }) => {
+                match self.source.read().write(&ops) {
+                    Ok(()) => {
+                        if let Some((path, how)) = open {
+                            on_open.call(Open {
+                                path,
+                                how,
+                                browsing: false,
+                            });
+                        }
+                    }
+                    Err(e) => self.say(e),
+                }
+            }
             None => {}
         }
     }
@@ -257,6 +326,7 @@ fn nav_key(e: &KeyboardEvent) -> Option<(NavKey, Mods)> {
         Key::Named(NamedKey::Tab) => NavKey::Tab,
         Key::Named(NamedKey::Escape) => NavKey::Escape,
         Key::Character(c) if c.eq_ignore_ascii_case("a") && command => NavKey::A,
+        Key::Character(c) if c.eq_ignore_ascii_case("p") && command && m.shift() => NavKey::Pin,
         _ => return None,
     };
     Some((
@@ -362,7 +432,119 @@ fn use_commands(nav: &Navigator) {
             .checked(s.reordering),
         move || nav.update(|s| s.reordering = !s.reordering),
     );
+    let shown = s.effective().clone();
+    use_command(
+        Command::new("NAVIGATOR_TOGGLE_COMPACT", "Compact rows")
+            .group(group)
+            .checked(shown.mode == ListMode::Compact),
+        move || {
+            nav.edit_list(|_, s| {
+                s.mode = match s.mode {
+                    ListMode::Standard => ListMode::Compact,
+                    ListMode::Compact => ListMode::Standard,
+                };
+            });
+        },
+    );
+    for g in Grouping::ALL {
+        let id = format!("NAVIGATOR_GROUP_{}", g.id().to_uppercase());
+        use_command(
+            Command::new(id, format!("Group notes: {}", g.label()))
+                .group(group)
+                .checked(shown.grouping == g),
+            move || nav.edit_list(|_, s| s.grouping = g),
+        );
+    }
+    let cursor = s.selection().cursor().map(str::to_owned);
+    let picked: Vec<String> = s.selection().files().iter().cloned().collect();
+    use_command(
+        when(
+            Command::new("NAVIGATOR_PIN", "Pin or unpin the selected notes").group(group),
+            !picked.is_empty(),
+            "No note is selected",
+        ),
+        move || {
+            let picked: Vec<String> = nav.state.peek().selection().files().iter().cloned().collect();
+            nav.update(|s| s.toggle_pin(&picked));
+        },
+    );
+    let folder = s.selection().folder().map(str::to_owned);
+    let has_note = folder.as_deref().and_then(|f| s.folder_note(f)).is_some();
+    let notes_on = s.settings().folder_notes;
+    use_command(
+        when(
+            Command::new("NAVIGATOR_CONVERT_TO_FOLDER_NOTE", "Convert to folder note").group(group),
+            notes_on && cursor.is_some(),
+            "Turn folder notes on, and select a note",
+        ),
+        move || {
+            let Some(p) = nav.state.peek().selection().cursor().map(str::to_owned) else { return };
+            match nav.update(|s| s.convert_to_folder_note(&p)) {
+                Ok(out) => nav.outcome(Some(out), nav_open(), None),
+                Err(e) => nav.say(e),
+            }
+        },
+    );
+    use_command(
+        when(
+            Command::new("NAVIGATOR_SET_AS_FOLDER_NOTE", "Set as folder note").group(group),
+            notes_on && cursor.is_some(),
+            "Turn folder notes on, and select a note",
+        ),
+        move || {
+            let Some(p) = nav.state.peek().selection().cursor().map(str::to_owned) else { return };
+            match nav.update(|s| s.set_as_folder_note(&p)) {
+                Ok(out) => nav.outcome(Some(out), nav_open(), None),
+                Err(e) => nav.say(e),
+            }
+        },
+    );
+    use_command(
+        when(
+            Command::new("NAVIGATOR_DETACH_FOLDER_NOTE", "Detach folder note").group(group),
+            has_note,
+            "The folder has no note",
+        ),
+        move || {
+            let Some(f) = nav.state.peek().selection().folder().map(str::to_owned) else { return };
+            match nav.update(|s| s.detach_folder_note(&f, None)) {
+                Ok(out) => nav.outcome(Some(out), nav_open(), None),
+                Err(e) => nav.say(e),
+            }
+        },
+    );
+    use_command(
+        when(
+            Command::new("NAVIGATOR_PIN_FOLDER_NOTES", "Pin all folder notes").group(group),
+            notes_on,
+            "Folder notes are off",
+        ),
+        move || {
+            let n = nav.update(NavigatorState::pin_folder_notes);
+            nav.say(format!("Pinned {n} folder notes"));
+        },
+    );
+    use_command(
+        when(
+            Command::new("NAVIGATOR_OPEN_FOLDER_NOTE_TAB", "Open the folder note in a new tab").group(group),
+            has_note,
+            "The folder has no note",
+        ),
+        move || {
+            let out = folder.as_deref().and_then(|f| nav.state.peek().open_folder_note(f, true));
+            nav.outcome(out, nav_open(), None);
+        },
+    );
 }
+
+/// The `on_open` the mounted view gave (commands run outside its props).
+fn nav_open() -> EventHandler<Open> {
+    try_consume_context::<OpenWith>().map_or_else(|| EventHandler::new(|_| {}), |o| o.0)
+}
+
+/// The view's `on_open`, in context for its commands.
+#[derive(Clone, Copy)]
+struct OpenWith(EventHandler<Open>);
 
 /// The navigator drawn: both panes, in the layout its settings and the
 /// room give. Mount it as a sidebar's content (it fills its parent).
@@ -378,9 +560,18 @@ pub fn NavigatorView(
     #[props(default)] on_context_menu: Option<EventHandler<(String, MouseEvent)>>,
     #[props(default)] on_focus_editor: Option<EventHandler<()>>,
     #[props(default)] phone: bool,
+    /// Its commands on the palette (`NAVIGATOR_*`); off when an extension
+    /// declares them (Navigator's `extension.toml`).
+    #[props(default = true)]
+    commands: bool,
 ) -> Element {
     let nav = navigator;
-    use_commands(&nav);
+    use_context_provider(|| OpenWith(on_open));
+    // Hooks run in the same order every time: the choice is made once.
+    let with_commands = use_hook(|| commands);
+    if with_commands {
+        use_commands(&nav);
+    }
     let colours = architect_theme::use_themed::<NavigatorColours>();
     let mut root: Signal<Option<Rc<MountedData>>> = use_signal(|| None);
     // A phone's taller rows.

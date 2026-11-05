@@ -20,6 +20,8 @@
 //!
 //! [Notebook Navigator]: https://github.com/johansan/notebook-navigator
 
+pub mod appearance;
+pub mod grouping;
 pub mod index;
 pub mod layout;
 pub mod list;
@@ -33,16 +35,18 @@ pub mod virtualize;
 #[cfg(feature = "ui")]
 pub mod ui;
 
+pub use appearance::Appearance;
 pub use index::{NoteCount, VaultIndex};
 pub use layout::{Pane, PaneLayout};
-pub use list::{Clock, ListRow, ListRowKind};
+pub use list::{Clock, Lines, ListContext, ListRow, ListRowKind, PinIn, Thumb};
 pub use selection::{NavTarget, Selection};
 pub use settings::{
-    Grouping, ListMode, NarrowLayout, NavigatorSettings, Orientation, SortOption, StartPane,
+    CountPlacement, FolderNoteOpen, Grouping, ListMode, NarrowLayout, NavigatorSettings,
+    Orientation, SortOption, StartPane, TextCount,
 };
 pub use source::{
-    Listener, MemorySource, Millis, NavigatorSource, NoteFile, PropertyValue, SourceEvent,
+    FileOp, Listener, MemorySource, Millis, NavigatorSource, NoteFile, PropertyValue, SourceEvent,
     Subscription, TaskCounts,
 };
-pub use state::{Key, Mods, NavigatorState, OpenIn, Outcome, ViewState};
+pub use state::{Colour, Key, Mods, NavigatorState, OpenIn, Outcome, Pin, ViewState};
 pub use tree::{NavRow, NavRowKind};

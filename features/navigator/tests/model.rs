@@ -134,7 +134,7 @@ fn the_list_sorts_and_groups_by_date() {
         .list_rows()
         .iter()
         .filter_map(|r| match &r.kind {
-            ListRowKind::Header { label } => Some(label.clone()),
+            ListRowKind::Header { label, .. } => Some(label.clone()),
             _ => None,
         })
         .collect();

@@ -5,15 +5,17 @@
 use dioxus::prelude::*;
 use lucide_dioxus::{
     ArrowDown, ArrowDownWideNarrow, ArrowLeft, ArrowUp, ArrowUpDown, Check, ChevronDown,
-    ChevronRight, ChevronsDownUp, ChevronsUpDown, Columns2, Folder, FolderOpen, ListTree, Vault,
+    ChevronRight, ChevronsDownUp, ChevronsUpDown, Columns2, FileText, Folder, FolderOpen,
+    ListTree, Pin, Rows3, Tag, Vault,
 };
 
 use super::virtual_pane::VirtualPane;
 use super::{Navigator, Open};
 use crate::index::NoteCount;
 use crate::layout::Pane;
-use crate::list::{self, Clock, ListRowKind};
-use crate::settings::{ListMode, SortOption};
+use crate::list::{self, Clock, Lines, ListRowKind, Thumb};
+use crate::selection::NavTarget;
+use crate::settings::{CountPlacement, Grouping, ListMode, NavigatorSettings, SortOption};
 use crate::source::Millis;
 use crate::state::{Mods, NavigatorState};
 use crate::tree::NavRowKind;
@@ -60,14 +62,14 @@ pub(super) fn NavPane(nav: Navigator, on_open: EventHandler<Open>) -> Element {
                 }
             }
             div { style: "flex:1 1 0; min-height:0; position:relative;",
-                VirtualPane { nav, pane: Pane::Navigation, label: "Folders", NavRows { nav } }
+                VirtualPane { nav, pane: Pane::Navigation, label: "Folders", NavRows { nav, on_open } }
             }
         }
     }
 }
 
 #[component]
-fn NavRows(nav: Navigator) -> Element {
+fn NavRows(nav: Navigator, on_open: EventHandler<Open>) -> Element {
     let s = nav.state.read();
     let window = s.window(Pane::Navigation);
     let offset = s.scroll(Pane::Navigation).offset;
@@ -84,16 +86,22 @@ fn NavRows(nav: Navigator) -> Element {
             let row = s.nav_rows().get(i)?;
             let top = s.nav_offsets().start(i) - offset;
             let h = s.nav_offsets().height(i);
-            Some((row.clone(), top, h))
+            let note = match &row.kind {
+                NavRowKind::Folder { path, .. } => s.folder_note(path).is_some(),
+                _ => false,
+            };
+            Some((row.clone(), top, h, note))
         })
         .collect();
     drop(s);
     rsx! {
-        for (row, top, h) in rows {
+        for (row, top, h, note) in rows {
             if let NavRowKind::Folder { path, name, has_children, expanded, count } = row.kind {
                 FolderRow {
                     key: "{row.key}",
                     nav,
+                    on_open,
+                    note,
                     selected: selected.as_deref() == Some(path.as_str()),
                     path: path.clone(),
                     name,
@@ -134,6 +142,9 @@ fn count_label(c: NoteCount, show: bool, separate: bool) -> String {
 #[component]
 fn FolderRow(
     nav: Navigator,
+    on_open: EventHandler<Open>,
+    /// It has a folder note: its name opens it.
+    note: bool,
     selected: bool,
     path: String,
     name: String,
@@ -169,7 +180,8 @@ fn FolderRow(
                 if nav.dragged.cloned() {
                     return;
                 }
-                nav.update(|s| s.click_folder(&p1));
+                let out = nav.update(|s| s.click_folder(&p1));
+                nav.act(out, on_open);
             },
             // The chevron opens and closes without selecting.
             div {
@@ -189,7 +201,14 @@ fn FolderRow(
             span { style: "flex:0 0 auto; display:flex; color:var(--nv-faint);",
                 if root { Vault { size: 15 } } else if expanded { FolderOpen { size: 15 } } else { Folder { size: 15 } }
             }
-            span { class: "nv-name", style: "flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; font-weight:{name_weight};", "{name}" }
+            span { class: if note { "nv-name nv-has-note" } else { "nv-name" },
+                "data-folder-note": if note { "true" } else { "false" },
+                style: "flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; font-weight:{name_weight};",
+                "{name}"
+            }
+            if note {
+                span { class: "nv-folder-note", "aria-label": "Has a folder note", style: "flex:0 0 auto; display:flex; color:var(--nv-faint);", FileText { size: 12 } }
+            }
             if reorder {
                 button { class: "nv-tool", "aria-label": "Move {p3} up", style: "width:20px; height:20px;",
                     onclick: move |e| { e.stop_propagation(); nav.update(|s| s.move_child("", &p3, -1)); },
@@ -214,13 +233,24 @@ pub(super) fn ListPane(
     single: bool,
 ) -> Element {
     let s = nav.state.read();
-    let folder = s.selection().folder().unwrap_or("").to_owned();
-    let title = s.index().folder_name(&folder).to_owned();
-    let sort = s.settings().sort;
-    let descendants = s.settings().include_descendants;
+    let target = s.target();
+    let title = match &target {
+        NavTarget::Tag(t) => format!("#{t}"),
+        NavTarget::Folder(f) => s.index().folder_name(f).to_owned(),
+    };
+    let shown = s.effective().clone();
+    let has_own = s.appearance(&target).is_some();
     let empty = s.list_order().is_empty();
     drop(s);
+    let own = *nav.own.read() || has_own;
+    let place = match &target {
+        NavTarget::Tag(_) => "this tag",
+        NavTarget::Folder(_) => "this folder",
+    };
+    let notice = nav.notice.read().clone();
     let mut menu = use_signal(|| false);
+    let compact = shown.mode == ListMode::Compact;
+    let descendants = shown.include_descendants;
     rsx! {
         div { class: "nv-list", "data-pane": "files",
             style: "position:absolute; inset:0; display:flex; flex-direction:column; background:var(--nv-list-background);",
@@ -234,32 +264,55 @@ pub(super) fn ListPane(
                 }
                 span { class: "nv-title", style: "flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; padding:0 4px;", "{title}" }
                 button { class: if descendants { "nv-tool nv-on" } else { "nv-tool" }, "aria-label": "Notes from folders below",
-                    onclick: move |_| nav.settings.update(|s| s.include_descendants = !s.include_descendants),
+                    onclick: move |_| nav.edit_list(|_, s| s.include_descendants = !s.include_descendants),
                     ListTree { size: 16 }
                 }
-                button { class: if menu() { "nv-tool nv-on" } else { "nv-tool" }, "aria-label": "Sort",
+                button { class: if compact { "nv-tool nv-on" } else { "nv-tool" }, "aria-label": "Compact rows",
+                    onclick: move |_| nav.edit_list(|_, s| s.mode = if s.mode == ListMode::Compact { ListMode::Standard } else { ListMode::Compact }),
+                    Rows3 { size: 16 }
+                }
+                button { class: if menu() { "nv-tool nv-on" } else { "nv-tool" }, "aria-label": "Sort and group",
                     onclick: move |_| menu.toggle(),
                     ArrowDownWideNarrow { size: 16 }
                 }
                 if menu() {
                     div { class: "nv-menu", role: "menu",
-                        style: "position:absolute; top:{HEADER}px; right:6px; z-index:10; min-width:220px; padding:4px; border-radius:8px; \
+                        style: "position:absolute; top:{HEADER}px; right:6px; z-index:10; min-width:230px; padding:4px; border-radius:8px; \
                                 background:var(--nv-background); border:1px solid var(--nv-divider);",
+                        MenuHeading { label: "Sort by" }
                         for option in SortOption::ALL {
-                            div { class: "nv-menu-row", role: "menuitemradio",
-                                key: "{option.id()}",
-                                "data-sort": "{option.id()}",
-                                "aria-checked": if option == sort { "true" } else { "false" },
-                                style: "display:flex; align-items:center; gap:6px; height:26px; padding:0 8px; border-radius:5px; white-space:nowrap;",
-                                onclick: move |_| {
-                                    nav.settings.update(|s| s.sort = option);
-                                    menu.set(false);
-                                },
-                                span { style: "flex:0 0 14px; display:flex;", if option == sort { Check { size: 13 } } }
-                                "{option.label()}"
-                            }
+                            MenuRow { key: "{option.id()}", data: format!("sort:{}", option.id()), label: option.label(), checked: option == shown.sort,
+                                on_pick: move |()| { nav.edit_list(move |_, s| s.sort = option); menu.set(false); } }
                         }
+                        MenuHeading { label: "Group by" }
+                        for g in Grouping::ALL {
+                            MenuRow { key: "group-{g.id()}", data: format!("group:{}", g.id()),
+                                label: if g == Grouping::Property && !shown.group_property.trim().is_empty() { format!("Property: {}", shown.group_property.trim()) } else { g.label().to_owned() },
+                                checked: g == shown.grouping,
+                                on_pick: move |()| { nav.edit_list(move |_, s| s.grouping = g); menu.set(false); } }
+                        }
+                        MenuHeading { label: "Applies to" }
+                        MenuRow { key: "own", data: "own".to_owned(), label: format!("Only {place}"), checked: own,
+                            on_pick: move |()| {
+                                if own {
+                                    let target = nav.state.peek().target();
+                                    nav.update(|s| s.set_appearance(&target, crate::Appearance::default()));
+                                    let mut o = nav.own;
+                                    o.set(false);
+                                } else {
+                                    let mut o = nav.own;
+                                    o.set(true);
+                                }
+                            } }
                     }
+                }
+            }
+            if let Some(text) = notice {
+                div { class: "nv-notice", role: "status",
+                    style: "flex:0 0 auto; display:flex; align-items:center; gap:6px; padding:4px 10px; font-size:12px; color:var(--nv-muted); border-bottom:1px solid var(--nv-divider);",
+                    span { style: "flex:1;", "{text}" }
+                    button { class: "nv-tool", style: "width:18px; height:18px;", "aria-label": "Dismiss",
+                        onclick: move |_| { let mut n = nav.notice; n.set(None); }, "×" }
                 }
             }
             div { style: "flex:1 1 0; min-height:0; position:relative;",
@@ -276,6 +329,27 @@ pub(super) fn ListPane(
 }
 
 #[component]
+fn MenuHeading(label: &'static str) -> Element {
+    rsx! {
+        div { class: "nv-menu-heading", style: "padding:6px 8px 2px; font-size:11px; font-weight:600; color:var(--nv-faint);", "{label}" }
+    }
+}
+
+#[component]
+fn MenuRow(data: String, label: String, checked: bool, on_pick: EventHandler<()>) -> Element {
+    rsx! {
+        div { class: "nv-menu-row", role: "menuitemradio",
+            "data-menu": "{data}",
+            "aria-checked": if checked { "true" } else { "false" },
+            style: "display:flex; align-items:center; gap:6px; height:26px; padding:0 8px; border-radius:5px; white-space:nowrap;",
+            onclick: move |_| on_pick.call(()),
+            span { style: "flex:0 0 14px; display:flex;", if checked { Check { size: 13 } } }
+            "{label}"
+        }
+    }
+}
+
+#[component]
 fn ListRows(
     nav: Navigator,
     on_open: EventHandler<Open>,
@@ -284,9 +358,11 @@ fn ListRows(
     let s = nav.state.read();
     let window = s.window(Pane::Files);
     let offset = s.scroll(Pane::Files).offset;
-    let settings = s.settings().clone();
+    let settings = s.effective().clone();
     let clock = s.clock();
     let active = s.active().map(str::to_owned);
+    let target = s.target();
+    let source = nav.source();
     // Collected, so the state is let go before the rows are drawn.
     #[allow(clippy::needless_collect)]
     let rows: Vec<_> = window
@@ -295,23 +371,77 @@ fn ListRows(
             let top = s.list_offsets().start(i) - offset;
             let h = s.list_offsets().height(i);
             match &row.kind {
-                ListRowKind::Header { label } => Some(Item::Header {
+                ListRowKind::Header { label, group, collapsed, count, pinned } => Some(Item::Header {
                     key: row.key.clone(),
                     label: label.clone(),
+                    group: group.clone(),
+                    collapsed: *collapsed,
+                    count: settings.show_group_counts.then_some(*count),
+                    pinned: *pinned,
                     top,
                     h,
                 }),
-                ListRowKind::File { path, parent, .. } => {
+                ListRowKind::File { path, parent, pinned, lines, thumb, .. } => {
                     let f = s.file(path)?;
-                    let at = list::date_of(f, settings.sort);
+                    let at = list::date_of(f, &settings, clock);
+                    let cx = s.list_context(&target);
+                    let tags = list::shown_tags(f, &cx)
+                        .into_iter()
+                        .map(|(full, shown)| Pill {
+                            key: full.to_owned(),
+                            text: shown.to_owned(),
+                            colour: settings.color_tags.then(|| s.colour(&format!("tag:{full}")).map(str::to_owned)).flatten(),
+                        })
+                        .collect::<Vec<_>>();
+                    let mut tags = tags;
+                    if settings.color_tags {
+                        // Coloured tags first (`prioritizeColoredFileTags`).
+                        tags.sort_by_key(|t| t.colour.is_none());
+                    }
+                    let mut properties: Vec<Pill> = if settings.show_properties {
+                        list::shown_properties(f, &settings)
+                            .into_iter()
+                            .map(|(k, v)| Pill {
+                                colour: s
+                                    .colour(&format!("property:{k}={v}"))
+                                    .or_else(|| s.colour(&format!("property:{k}")))
+                                    .map(str::to_owned),
+                                key: k,
+                                text: v,
+                            })
+                            .collect()
+                    } else {
+                        Vec::new()
+                    };
+                    let words = f.words.map(|w| format!("{} words", thousands(w)));
+                    if let Some(w) = &words
+                        && settings.text_count_placement == CountPlacement::Property
+                    {
+                        properties.push(Pill { key: "words".to_owned(), text: w.clone(), colour: None });
+                    }
+                    let image = thumb.as_ref().map(|t| match t {
+                        Thumb::File(p) => source.resource_url(p).map_or_else(
+                            || ThumbView::Badge(extension_badge(p)),
+                            ThumbView::Url,
+                        ),
+                        Thumb::Url(u) => ThumbView::Url(u.clone()),
+                        Thumb::Badge(b) => ThumbView::Badge(b.clone()),
+                    });
                     Some(Item::File(FileItem {
                         path: path.clone(),
-                        name: f.title(settings.title_from_frontmatter).to_owned(),
+                        name: f.title(&settings.name_fields()).to_owned(),
                         preview: f.preview.clone().unwrap_or_default(),
                         date: date_label(at, clock),
                         parent: parent.clone(),
                         selected: s.selection().is_selected(path),
                         open: active.as_deref() == Some(path.as_str()),
+                        pinned: *pinned,
+                        lines: *lines,
+                        tags: if lines.tags { tags } else { Vec::new() },
+                        properties: if lines.properties { properties } else { Vec::new() },
+                        tasks: f.tasks.filter(|_| lines.tasks).map(|t| (t.total.saturating_sub(t.unfinished), t.total)),
+                        words: words.filter(|_| lines.count_in_title),
+                        image,
                         top,
                         h,
                     }))
@@ -321,15 +451,23 @@ fn ListRows(
         })
         .collect();
     drop(s);
-    let compact = settings.mode == ListMode::Compact;
     rsx! {
         for item in rows {
             match item {
-                Item::Header { key, label, top, h } => rsx! {
+                Item::Header { key, label, group, collapsed, count, pinned, top, h } => rsx! {
                     div { key: "{key}", class: "nv-group", role: "heading",
-                        style: "position:absolute; left:0; right:0; top:{top}px; height:{h}px; display:flex; align-items:flex-end; \
-                                padding:0 14px 5px; color:var(--nv-heading); font-size:12px; font-weight:600;",
-                        "{label}"
+                        "data-group": "{group}",
+                        "aria-expanded": if collapsed { "false" } else { "true" },
+                        style: "position:absolute; left:0; right:0; top:{top}px; height:{h}px; display:flex; align-items:flex-end; gap:4px; \
+                                padding:0 10px 5px; color:var(--nv-heading); font-size:12px; font-weight:600; cursor:default;",
+                        onclick: move |_| nav.update(|s| s.toggle_group(&group)),
+                        span { class: "nv-group-chevron", "aria-label": if collapsed { "Expand group" } else { "Collapse group" },
+                            style: "display:flex; color:var(--nv-faint);",
+                            if collapsed { ChevronRight { size: 12 } } else { ChevronDown { size: 12 } }
+                        }
+                        if pinned { span { style: "display:flex;", Pin { size: 11 } } }
+                        span { "{label}" }
+                        if let Some(n) = count { span { class: "nv-group-count", style: "font-weight:400; color:var(--nv-faint);", "({n})" } }
                     }
                 },
                 Item::File(f) => rsx! {
@@ -339,11 +477,7 @@ fn ListRows(
                         on_open,
                         on_context_menu,
                         item: f,
-                        compact,
-                        preview_rows: if settings.show_preview { settings.preview_rows.clamp(1, 5) } else { 0 },
-                        title_rows: settings.title_rows.clamp(1, 3),
-                        show_date: settings.show_date,
-                        show_parent: settings.show_parent_folder,
+                        settings: settings.clone(),
                     }
                 },
             }
@@ -351,14 +485,51 @@ fn ListRows(
     }
 }
 
+/// `n` with thousands separated: `12,345`.
+fn thousands(n: u32) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// A file's kind as a badge: `PDF`, `SVG`.
+fn extension_badge(path: &str) -> String {
+    path.rsplit_once('.')
+        .map_or_else(String::new, |(_, e)| e.to_ascii_uppercase())
+}
+
 enum Item {
     Header {
         key: String,
         label: String,
+        group: String,
+        collapsed: bool,
+        count: Option<usize>,
+        pinned: bool,
         top: f64,
         h: f64,
     },
     File(FileItem),
+}
+
+#[derive(Clone, PartialEq)]
+struct Pill {
+    /// The tag (whole) or property key.
+    key: String,
+    text: String,
+    colour: Option<String>,
+}
+
+#[derive(Clone, PartialEq)]
+enum ThumbView {
+    Url(String),
+    Badge(String),
 }
 
 #[derive(Clone, PartialEq)]
@@ -370,6 +541,15 @@ struct FileItem {
     parent: Option<String>,
     selected: bool,
     open: bool,
+    pinned: bool,
+    lines: Lines,
+    tags: Vec<Pill>,
+    properties: Vec<Pill>,
+    /// Done of all.
+    tasks: Option<(u32, u32)>,
+    /// Its count, beside its name.
+    words: Option<String>,
+    image: Option<ThumbView>,
     top: f64,
     h: f64,
 }
@@ -380,11 +560,7 @@ fn FileRow(
     on_open: EventHandler<Open>,
     on_context_menu: Option<EventHandler<(String, MouseEvent)>>,
     item: FileItem,
-    compact: bool,
-    preview_rows: u32,
-    title_rows: u32,
-    show_date: bool,
-    show_parent: bool,
+    settings: NavigatorSettings,
 ) -> Element {
     let FileItem {
         path,
@@ -394,63 +570,88 @@ fn FileRow(
         parent,
         selected,
         open,
+        pinned,
+        lines,
+        tags,
+        properties,
+        tasks,
+        words,
+        image,
         top,
         h,
     } = item;
+    let compact = settings.mode == ListMode::Compact;
     let class = if selected {
         "nv-row nv-file nv-selected"
     } else {
         "nv-row nv-file"
     };
     let (p1, p2) = (path.clone(), path.clone());
-    let title_h = f64::from(title_rows) * 20.0;
-    let preview_h = f64::from(preview_rows) * 18.0;
+    let title_h = f64::from(lines.title) * 20.0;
+    let preview_h = f64::from(lines.preview) * 18.0;
     let weight = if open { 700 } else { 600 };
     let (justify, padding) = if compact {
         ("center", "0 10px")
     } else {
         ("flex-start", "8px 10px")
     };
-    let wrap = if title_rows == 1 { "nowrap" } else { "normal" };
+    let wrap = if lines.title == 1 { "nowrap" } else { "normal" };
+    // An image fills the row's height less its padding, 42 to the size set.
+    let size = f64::from(settings.feature_image_size).min(h - 16.0).max(list::IMAGE_FLOOR);
+    let image_w = if settings.force_square_image { format!("{size}px") } else { "auto".to_owned() };
+    let parent_shown = settings.show_parent_folder && !pinned;
     rsx! {
         div {
             class,
             role: "option",
             "data-file": "{path}",
+            "data-pinned": if pinned { "true" } else { "false" },
             "aria-selected": if selected { "true" } else { "false" },
             "aria-current": if open { "page" } else { "false" },
             style: "position:absolute; left:4px; right:4px; top:{top}px; height:{h}px; border-radius:6px; overflow:hidden; \
-                    display:flex; flex-direction:column; justify-content:{justify}; \
-                    padding:{padding}; box-sizing:border-box;",
+                    display:flex; flex-direction:row; gap:8px; padding:{padding}; box-sizing:border-box;",
             onclick: move |e: MouseEvent| {
                 if nav.dragged.cloned() {
                     return;
                 }
                 let out = nav.state.clone().write().click_file(&p1, mods(e.modifiers()));
-                nav.outcome(out, on_open, None);
+                nav.act(out, on_open);
             },
             oncontextmenu: move |e: MouseEvent| {
                 if let Some(menu) = on_context_menu {
                     menu.call((p2.clone(), e));
                 }
             },
-            div { class: "nv-file-name",
-                style: "flex:0 0 auto; max-height:{title_h}px; line-height:20px; overflow:hidden; text-overflow:ellipsis; \
-                        white-space:{wrap}; font-weight:{weight}; color:var(--nv-text);",
-                "{name}"
-            }
-            if !compact {
-                if preview_rows > 0 && !preview.trim().is_empty() {
+            div { class: "nv-file-body", style: "flex:1 1 auto; min-width:0; display:flex; flex-direction:column; justify-content:{justify};",
+                div { class: "nv-file-title", style: "flex:0 0 auto; display:flex; align-items:baseline; gap:6px; min-width:0;",
+                    div { class: "nv-file-name",
+                        style: "flex:1 1 auto; min-width:0; max-height:{title_h}px; line-height:20px; overflow:hidden; text-overflow:ellipsis; \
+                                white-space:{wrap}; font-weight:{weight}; color:var(--nv-text);",
+                        "{name}"
+                    }
+                    if let Some(w) = words {
+                        span { class: "nv-file-count", style: "flex:0 0 auto; font-size:11px; color:var(--nv-faint);", "{w}" }
+                    }
+                }
+                if lines.preview > 0 && !preview.trim().is_empty() {
                     div { class: "nv-file-preview",
                         style: "flex:0 0 auto; max-height:{preview_h}px; line-height:18px; overflow:hidden; color:var(--nv-muted); font-size:12px;",
                         "{preview}"
                     }
                 }
-                if show_date || (show_parent && parent.is_some()) {
+                if lines.meta {
                     div { class: "nv-file-second-line",
                         style: "flex:0 0 auto; height:19px; display:flex; align-items:center; gap:8px; white-space:nowrap; overflow:hidden; color:var(--nv-faint); font-size:12px;",
-                        if show_date { span { class: "nv-file-date", "{date}" } }
-                        if show_parent && let Some(p) = parent {
+                        if lines.date { span { class: "nv-file-date", "{date}" } }
+                        if let Some((done, total)) = tasks {
+                            span { class: "nv-file-tasks", "aria-label": "{done} of {total} tasks done", style: "display:flex; align-items:center; gap:4px;",
+                                span { style: "position:relative; width:28px; height:4px; border-radius:2px; background:var(--nv-divider); overflow:hidden; display:block;",
+                                    span { style: "position:absolute; left:0; top:0; bottom:0; width:{progress(done, total)}%; background:var(--nv-open); display:block;" }
+                                }
+                                "{done}/{total}"
+                            }
+                        }
+                        if parent_shown && let Some(p) = parent {
                             span { class: "nv-file-parent", style: "display:flex; align-items:center; gap:3px; overflow:hidden; text-overflow:ellipsis;",
                                 Folder { size: 11 }
                                 "{p}"
@@ -458,7 +659,66 @@ fn FileRow(
                         }
                     }
                 }
+                if !tags.is_empty() {
+                    div { class: "nv-file-tags", style: "flex:0 0 26px; display:flex; align-items:center; gap:4px; overflow:hidden; white-space:nowrap;",
+                        for t in tags {
+                            TagPill { key: "{t.key}", nav, pill: t }
+                        }
+                    }
+                }
+                if !properties.is_empty() {
+                    div { class: "nv-file-properties", style: "flex:0 0 26px; display:flex; align-items:center; gap:4px; overflow:hidden; white-space:nowrap;",
+                        for p in properties {
+                            span { key: "{p.key}", class: "nv-pill nv-property", "data-property": "{p.key}",
+                                style: pill_style(p.colour.as_deref()),
+                                "{p.text}"
+                            }
+                        }
+                    }
+                }
             }
+            if let Some(img) = image {
+                div { class: "nv-thumb-box", style: "flex:0 0 auto; align-self:center; display:flex; align-items:center; justify-content:center; height:{size}px; width:{image_w}; min-width:{size}px; border-radius:6px; overflow:hidden; background:var(--nv-thumb);",
+                    match img {
+                        ThumbView::Url(u) => rsx! { img { class: "nv-feature-image", src: "{u}", alt: "", style: "height:{size}px; width:{image_w}; object-fit:cover; display:block;" } },
+                        ThumbView::Badge(b) => rsx! { span { class: "nv-badge", style: "font-size:10px; font-weight:700; letter-spacing:0.04em; color:var(--nv-faint);", "{b}" } },
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Done over all, as a percentage.
+fn progress(done: u32, total: u32) -> f64 {
+    if total == 0 {
+        0.0
+    } else {
+        f64::from(done) * 100.0 / f64::from(total)
+    }
+}
+
+fn pill_style(colour: Option<&str>) -> String {
+    let base = "display:inline-flex; align-items:center; gap:3px; height:20px; padding:0 7px; border-radius:10px; font-size:11px; flex:0 0 auto;";
+    colour.map_or_else(
+        || format!("{base} background:var(--nv-pill); color:var(--nv-muted);"),
+        |c| format!("{base} background:color-mix(in srgb, {c} 22%, transparent); color:{c};"),
+    )
+}
+
+/// A tag on a row: a click goes to the tag (`navigateToTag`).
+#[component]
+fn TagPill(nav: Navigator, pill: Pill) -> Element {
+    let tag = pill.key.clone();
+    rsx! {
+        span { class: "nv-pill nv-tag", "data-tag": "{pill.key}", role: "link",
+            style: pill_style(pill.colour.as_deref()),
+            onclick: move |e: MouseEvent| {
+                e.stop_propagation();
+                nav.update(|s| s.select_tag(&tag));
+            },
+            Tag { size: 10 }
+            "{pill.text}"
         }
     }
 }

@@ -11,11 +11,14 @@
 
 use std::collections::BTreeSet;
 
-/// What the navigation pane selects. Tags and properties join it.
+/// What the navigation pane selects: a folder, or a tag (a tag on a note's
+/// row goes to it). Properties join it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[non_exhaustive]
 pub enum NavTarget {
     Folder(String),
+    /// A tag without `#`; its list holds the tags below it too.
+    Tag(String),
 }
 
 impl NavTarget {
@@ -23,6 +26,15 @@ impl NavTarget {
     pub fn folder(&self) -> Option<&str> {
         match self {
             Self::Folder(p) => Some(p),
+            Self::Tag(_) => None,
+        }
+    }
+
+    #[must_use]
+    pub fn tag(&self) -> Option<&str> {
+        match self {
+            Self::Tag(t) => Some(t),
+            Self::Folder(_) => None,
         }
     }
 }

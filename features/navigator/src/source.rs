@@ -53,6 +53,9 @@ pub struct NoteFile {
     pub feature_image: Option<String>,
     /// Its tasks; `None` until counted.
     pub tasks: Option<TaskCounts>,
+    /// How many words its text has; `None` until counted (Notebook
+    /// Navigator's `textCountDisplay`).
+    pub words: Option<u32>,
 }
 
 impl NoteFile {
@@ -82,6 +85,24 @@ impl NoteFile {
     #[must_use]
     pub fn tag(mut self, tag: impl Into<String>) -> Self {
         self.tags.push(tag.into());
+        self
+    }
+
+    #[must_use]
+    pub fn feature_image(mut self, image: impl Into<String>) -> Self {
+        self.feature_image = Some(image.into());
+        self
+    }
+
+    #[must_use]
+    pub const fn tasks(mut self, total: u32, unfinished: u32) -> Self {
+        self.tasks = Some(TaskCounts { total, unfinished });
+        self
+    }
+
+    #[must_use]
+    pub const fn words(mut self, words: u32) -> Self {
+        self.words = Some(words);
         self
     }
 
@@ -124,18 +145,26 @@ impl NoteFile {
             .map(|(_, v)| v)
     }
 
-    /// Its title: the frontmatter's `title` property when `from_frontmatter`
-    /// and it has one, else its name (Notebook Navigator's
-    /// `useFrontmatterMetadata` and its name field).
+    /// Its title: the first of `fields` (frontmatter keys) with a text
+    /// value, else its name (Notebook Navigator's `frontmatterNameField`,
+    /// a comma list, the first one set wins).
     #[must_use]
-    pub fn title(&self, from_frontmatter: bool) -> &str {
-        if from_frontmatter && let Some(PropertyValue::Text(t)) = self.get("title") {
-            let t = t.trim();
-            if !t.is_empty() {
-                return t;
+    pub fn title<'a>(&'a self, fields: &[&str]) -> &'a str {
+        for key in fields {
+            if let Some(PropertyValue::Text(t)) = self.get(key) {
+                let t = t.trim();
+                if !t.is_empty() {
+                    return t;
+                }
             }
         }
         self.name()
+    }
+
+    /// Whether it is a Markdown note.
+    #[must_use]
+    pub fn is_markdown(&self) -> bool {
+        self.extension().eq_ignore_ascii_case("md")
     }
 }
 
@@ -198,6 +227,22 @@ pub enum SourceEvent {
     Reset,
 }
 
+/// A change the navigator asks of a source: a folder note made or let
+/// go, a note's place in a manual order.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FileOp {
+    /// Make a folder (and the folders it is in).
+    CreateFolder(String),
+    /// Move (or rename) a file.
+    Move { from: String, to: String },
+    /// Set a frontmatter property on a note.
+    SetProperty {
+        path: String,
+        key: String,
+        value: PropertyValue,
+    },
+}
+
 /// Kept while the subscriber wants events; dropping it stops them.
 #[must_use = "dropping it unsubscribes"]
 pub struct Subscription(Option<Box<dyn FnOnce() + Send + Sync>>);
@@ -247,6 +292,24 @@ pub trait NavigatorSource: Send + Sync {
     /// Calls `listener` with each change from now on, until the
     /// [`Subscription`] is dropped.
     fn subscribe(&self, listener: Listener) -> Subscription;
+
+    /// A URL the view can draw a file of the vault from (a feature image,
+    /// an SVG, a drawing's preview); `None` when it has none.
+    fn resource_url(&self, path: &str) -> Option<String> {
+        let _ = path;
+        None
+    }
+
+    /// Does `ops`, in order, and says what changed through its events.
+    ///
+    /// # Errors
+    ///
+    /// The source is read-only (the default), or an op failed: the ones
+    /// before it stay done.
+    fn write(&self, ops: &[FileOp]) -> Result<(), String> {
+        let _ = ops;
+        Err("this vault is read-only".to_owned())
+    }
 }
 
 /// A vault kept in memory.
@@ -260,6 +323,7 @@ struct MemoryInner {
     name: RwLock<String>,
     folders: RwLock<BTreeSet<String>>,
     files: RwLock<BTreeMap<String, NoteFile>>,
+    resources: RwLock<BTreeMap<String, String>>,
     listeners: Mutex<Vec<(u64, Arc<dyn Fn(&SourceEvent) + Send + Sync>)>>,
     next: Mutex<u64>,
 }
@@ -284,6 +348,17 @@ impl MemorySource {
     #[must_use]
     pub fn with_file(self, file: NoteFile) -> Self {
         self.put(file);
+        self
+    }
+
+    /// With `url` as what the view draws the file at `path` from.
+    #[must_use]
+    pub fn with_resource(self, path: impl Into<String>, url: impl Into<String>) -> Self {
+        self.inner
+            .resources
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(path.into(), url.into());
         self
     }
 
@@ -454,6 +529,19 @@ impl NavigatorSource for MemorySource {
             .collect()
     }
 
+    fn resource_url(&self, path: &str) -> Option<String> {
+        self.inner
+            .resources
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(path)
+            .cloned()
+    }
+
+    fn write(&self, ops: &[FileOp]) -> Result<(), String> {
+        ops.iter().try_for_each(|op| self.write_one(op))
+    }
+
     fn subscribe(&self, listener: Listener) -> Subscription {
         let id = {
             let mut n = self
@@ -479,6 +567,41 @@ impl NavigatorSource for MemorySource {
                     .retain(|(i, _)| *i != id);
             }
         })
+    }
+}
+
+impl MemorySource {
+    fn write_one(&self, op: &FileOp) -> Result<(), String> {
+        match op {
+            FileOp::CreateFolder(f) => {
+                if self.inner.folders.read().unwrap_or_else(PoisonError::into_inner).contains(f) {
+                    return Err(format!("{f} is there already"));
+                }
+                self.create_folder(f.clone());
+            }
+            FileOp::Move { from, to } => {
+                if self.file(to).is_some() {
+                    return Err(format!("{to} is there already"));
+                }
+                if self.file(from).is_none() {
+                    return Err(format!("no {from}"));
+                }
+                let folder = parent(to);
+                if !folder.is_empty() {
+                    self.create_folder(folder.to_owned());
+                }
+                self.rename(from, to.clone());
+            }
+            FileOp::SetProperty { path, key, value } => {
+                let mut file = self.file(path).ok_or_else(|| format!("no {path}"))?;
+                match file.properties.iter_mut().find(|(k, _)| k == key) {
+                    Some((_, v)) => *v = value.clone(),
+                    None => file.properties.push((key.clone(), value.clone())),
+                }
+                self.put(file);
+            }
+        }
+        Ok(())
     }
 }
 
