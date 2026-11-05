@@ -66,9 +66,10 @@ pub use ctx::{
 pub use guide::{ArrangedGroup, ArrangedSplit, ArrangedWindow, Arrangement, target_selector};
 #[cfg(feature = "ui")]
 pub use host::{
-    Bridge, Command, ContextEntries, ContextEntry, Host, Opened, PaneHandle, Popout, PresenceLayer,
-    PresenceOverlay, TabBadges, TitleRow, View, Views, WindowSystem, Windows, WorkspaceActions,
-    WorkspaceStore, WorkspaceView, use_host, use_pane, use_pane_status, use_presence_overlay,
+    Bridge, Command, ContextEntries, ContextEntry, HeaderTools, Host, Opened, PaneHandle, Popout,
+    PresenceLayer, PresenceOverlay, TabBadges, TitleRow, View, Views, WindowSystem, Windows,
+    WorkspaceActions, WorkspaceStore, WorkspaceView, context_invocation, use_host, use_pane,
+    use_pane_status, use_presence_overlay,
 };
 pub use kinds::{
     Capabilities, Capability, DIOXUS, Hosts, KindError, KindId, KindSpec, PAINT, Part, Placement,

@@ -160,6 +160,8 @@ impl Extensions {
         out.extend(self.build_problems());
         // An item a point's schema refused: left out, the rest loaded.
         out.extend(self.host().points().problems());
+        // A person's toolbar file that does not read: left out.
+        out.extend(self.host().toolbars().problems());
         out
     }
 }

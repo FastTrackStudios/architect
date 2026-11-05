@@ -678,6 +678,7 @@ pub(super) fn MenuLayer() -> Element {
         Menu::Pane(pane) => pane_items(host, &pane),
         Menu::Open => open_items(host),
         Menu::Tabs(group) => tab_items(host, group),
+        Menu::Target { target, id, pane } => target_items(host, &target, &id, &pane),
     };
     // On a desk the menu opens where it was asked for (the ⋯, the
     // pointer), kept inside the window; on a phone, or from a key, in the
@@ -725,6 +726,10 @@ pub(super) fn MenuLayer() -> Element {
 enum Item {
     Heading(String),
     Act(String, Op),
+    /// Another's row: ticked when its command is a toggle that is on.
+    Entry(String, Op, Option<bool>),
+    /// A line that does nothing (a menu with no rows says so).
+    Note(String),
 }
 
 #[component]
@@ -737,6 +742,38 @@ fn MenuRow(item: Item) -> Element {
         Item::Heading(text) => rsx! {
             div { style: "padding:8px 10px 3px; color:{t.ink_2}; font-size:11px; font-weight:600;", "{text}" }
         },
+        Item::Note(text) => rsx! {
+            div { style: "padding:6px 12px; color:{t.ink_3}; font-size:12px;", "{text}" }
+        },
+        Item::Entry(label, op, checked) => {
+            let row_font = if s.button > 40.0 { 15 } else { 13 };
+            let tick = if checked == Some(true) { "✓" } else { "" };
+            // A toggle's row keeps a column for its tick; another lines up
+            // with the menu's own rows.
+            let pad = if checked.is_some() { 6 } else { 12 };
+            rsx! {
+                button {
+                    style: "display:flex; justify-content:flex-start; align-items:center; gap:6px; text-align:left; \
+                            padding:0 12px 0 {pad}px; min-height:{s.button}px; border:none; border-radius:6px; cursor:pointer; \
+                            background:transparent; color:{t.ink}; font-size:{row_font}px;",
+                    role: if checked.is_some() { "menuitemcheckbox" } else { "menuitem" },
+                    "aria-checked": checked.map(|on| on.to_string()),
+                    onclick: move |_| {
+                        host.menu.set(None);
+                        host.switcher.set(false);
+                        if let Op::Run { command, invocation } = &op
+                            && let Some(c) = commands
+                        {
+                            let _ = c.run_invoked(command, None, invocation.clone());
+                        }
+                    },
+                    if checked.is_some() {
+                        span { style: "flex:0 0 auto; width:14px; text-align:center; color:{t.accent};", "{tick}" }
+                    }
+                    span { "{label}" }
+                }
+            }
+        }
         Item::Act(label, op) => {
             // A mouse's rows (28pt, 13px) or a finger's (44pt, 15px).
             let row_font = if s.button > 40.0 { 15 } else { 13 };
@@ -750,21 +787,7 @@ fn MenuRow(item: Item) -> Element {
                     onclick: move |_| {
                         host.menu.set(None);
                         host.switcher.set(false);
-                        if let Op::Run { command, pane, view } = &op {
-                            let invocation = architect::action::Invocation {
-                                pane: Some(pane.0.clone()),
-                                view: Some(view.clone()),
-                                ..architect::action::Invocation::new(
-                                    architect::action::InvocationSource::ContextMenu,
-                                )
-                                .on(format!("view:{view}"), pane.0.clone())
-                            };
-                            if let Some(c) = commands {
-                                let _ = c.run_invoked(command, None, invocation);
-                            }
-                        } else {
-                            host.run(op.clone());
-                        }
+                        host.run(op.clone());
                     },
                     "{label}"
                 }
@@ -882,24 +905,55 @@ fn pane_items(host: Host, pane: &PaneId) -> Vec<Item> {
         items.push(act("Reopen closed tab", Op::Reopen));
     }
     items.push(act("Open a view…", Op::OpenMenu));
-    // What others add for this pane's view (an extension's rows).
-    if let Some(entries) = try_consume_context::<super::ContextEntries>() {
-        let view = p.view.0.clone();
-        for e in (entries.0)(&format!("view:{view}"), &pane.0) {
-            items.push(act(
-                &e.label,
-                Op::Run {
-                    command: e.command,
-                    pane: pane.clone(),
-                    view: view.clone(),
-                },
-            ));
-        }
+    // What others add for this pane's view and its tab (an extension's
+    // rows).
+    let view = p.view.0.clone();
+    for target in [format!("view:{view}"), "tab".to_owned()] {
+        items.extend(entries(&target, &pane.0, pane, &view));
     }
     if tabs > 1 {
         items.push(act("Close others", Op::CloseOthers(pane.clone())));
     }
     items.push(act("Close", Op::Close(pane.clone())));
+    items
+}
+
+/// What others add for `target` `id`, opened in `pane` showing `view`.
+fn entries(target: &str, id: &str, pane: &PaneId, view: &str) -> Vec<Item> {
+    let Some(entries) = try_consume_context::<super::ContextEntries>() else {
+        return Vec::new();
+    };
+    (entries.0)(target, id)
+        .into_iter()
+        .map(|e| {
+            Item::Entry(
+                e.label,
+                Op::Run {
+                    command: e.command,
+                    invocation: super::context_invocation(target, id, pane, view),
+                },
+                e.checked,
+            )
+        })
+        .collect()
+}
+
+/// A target's menu, opened from inside `pane` (a file tree's row): its
+/// name, and what others add for it.
+fn target_items(host: Host, target: &str, id: &str, pane: &PaneId) -> Vec<Item> {
+    let view = host
+        .workspace
+        .peek()
+        .pane(pane)
+        .map(|p| p.view.0.clone())
+        .unwrap_or_default();
+    let name = id.rsplit('/').next().unwrap_or(id).to_owned();
+    let mut items = vec![Item::Heading(name)];
+    let rows = entries(target, id, pane, &view);
+    if rows.is_empty() {
+        items.push(Item::Note("Nothing to do here".to_owned()));
+    }
+    items.extend(rows);
     items
 }
 

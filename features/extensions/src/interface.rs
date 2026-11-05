@@ -1,9 +1,10 @@
 //! What loaded extensions add, in the app's window (feature `ui`):
 //!
 //! the shell's chrome (tabs, status items, a phone's bar buttons, the slots
-//! they fill), a pane's context menu, the menu bar, their views as workspace
-//! views, where those open (tab, split, dock, float, zoomed, popup, overlay),
-//! and a link's Ctrl- or Cmd-click
+//! they fill), a tab's and a file's context menus, the menu bar, their
+//! toolbars (`crate::toolbar_ui`), their views as workspace views, where
+//! those open (tab, split, dock, float, zoomed, popup, overlay), and a
+//! link's Ctrl- or Cmd-click
 //! (`docs/content/architecture/extensions.md`, "Contributions").
 //!
 //! ```ignore
@@ -100,6 +101,9 @@ pub struct ExtensionUi {
     seen: Signal<BTreeMap<String, (String, ViewDecl)>>,
     /// The extensions' windows open now (`crate::window_ui`).
     windows: Signal<Vec<crate::windows::OpenWindow>>,
+    /// Moves when anything happens on the host's Action List (an action
+    /// ran, the app's state changed): what a toggle's button re-reads.
+    ticks: Signal<u64>,
 }
 
 impl ExtensionUi {
@@ -113,6 +117,13 @@ impl ExtensionUi {
     #[must_use]
     pub fn revision(&self) -> u64 {
         (self.revision)()
+    }
+
+    /// How many times something happened on the host's Action List since
+    /// the window opened (reading it subscribes): a toggle may have moved.
+    #[must_use]
+    pub fn ticks(&self) -> u64 {
+        (self.ticks)()
     }
 
     /// The extensions' windows open now (reading it subscribes).
@@ -216,7 +227,9 @@ impl ExtensionUi {
             .into_iter()
             .filter_map(|by| {
                 let info = host.list().info(&by.item.action)?;
-                Some(Live::new(info.display_name, by.item.action))
+                let mut row = Live::new(info.display_name, by.item.action);
+                row.checked = info.checked;
+                Some(row)
             })
             .collect()
     }
@@ -243,6 +256,7 @@ impl ExtensionUi {
                 }
                 view
             })
+            .chain(crate::toolbar_ui::pane_views(me))
             .collect()
     }
 
@@ -382,12 +396,14 @@ pub fn use_extension_ui(host: Host, app: Arc<ActionList>) -> ExtensionUi {
     let seen = use_signal(BTreeMap::new);
     let held = use_signal(|| host.clone());
     let windows = crate::window_ui::use_open_windows(&host);
+    let ticks = crate::toolbar_ui::use_ticks(&host);
     let ui = ExtensionUi {
         host: held,
         revision,
         layers,
         seen,
         windows,
+        ticks,
     };
     // The settings page is the settings extension's window: the app's
     // sections and values to it, `SettingsHandle::show` opening it.
@@ -414,7 +430,8 @@ pub fn use_extension_ui(host: Host, app: Arc<ActionList>) -> ExtensionUi {
     // A tab's icons and badges (`decorate` on a `tab`): by its view kind
     // and by its pane.
     crate::host_ui_view::use_tab_badges(&host);
-    // A pane's context menu: an extension's rows for its view.
+    // A tab's and a file's context menus: an extension's rows for them,
+    // a toggle's ticked when on.
     let reg = host.contributions().clone();
     let list = host.list().clone();
     use_context_provider(move || {
@@ -422,19 +439,26 @@ pub fn use_extension_ui(host: Host, app: Arc<ActionList>) -> ExtensionUi {
             reg.context(target, id)
                 .into_iter()
                 .filter_map(|by| {
+                    let info = list.info(&by.item.action)?;
                     let label = if by.item.title.is_empty() {
-                        list.info(&by.item.action)?.display_name
+                        info.display_name
                     } else {
                         by.item.title.clone()
                     };
                     Some(ContextEntry {
                         label,
                         command: by.item.action,
+                        checked: info.checked,
                     })
                 })
                 .collect()
         })
     });
+    // A pane's header: the toolbars on every pane, and on its view's.
+    crate::toolbar_ui::provide_header_tools(ui);
+    // A toolbar that is a pane of its own (a dock's, a float, a window)
+    // opens where it goes as it appears, and closes as it goes.
+    crate::toolbar_ui::use_pane_toolbars(ui, Arc::clone(&app));
     // Its views open in the window: a pane, or a layer over it.
     let opener = use_hook(move || {
         let (tx, rx) = mpsc::unbounded::<ViewOpen>();

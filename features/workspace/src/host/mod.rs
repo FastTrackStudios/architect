@@ -335,6 +335,13 @@ enum Menu {
     Open,
     /// Every tab in a group, to pick one.
     Tabs(GroupId),
+    /// What others add for a target a view shows (a file in a file tree):
+    /// [`PaneHandle::context_menu`].
+    Target {
+        target: String,
+        id: String,
+        pane: PaneId,
+    },
 }
 
 /// The sizes the pointer asks for: a mouse's, or a finger's.
@@ -539,6 +546,23 @@ pub struct PaneHandle {
 }
 
 impl PaneHandle {
+    /// Opens the context menu of `target` (`file`, `doc:<kind>`) `id` (a
+    /// file's path) where `e` was pressed: what others add for it
+    /// ([`ContextEntries`]), each row run told the target, this pane and
+    /// its view. A view's `oncontextmenu` calls it for what it shows (a
+    /// file tree's row).
+    pub fn context_menu(&self, target: impl Into<String>, id: impl Into<String>, e: &MouseEvent) {
+        e.prevent_default();
+        self.host.open_menu(
+            Menu::Target {
+                target: target.into(),
+                id: id.into(),
+                pane: self.id.clone(),
+            },
+            click_point(e),
+        );
+    }
+
     /// Whether this is its card's preview in a phone's tab switcher (the
     /// view drawn a second time, scaled down): a view that tells others
     /// it is there as it mounts or goes leaves that to the pane itself.
@@ -1136,26 +1160,32 @@ enum Op {
     DockBack(Side),
     /// Recall the screenset in slot n (⌘n).
     Recall(u8),
-    /// Run another's entry (an extension's context-menu row) on a pane:
-    /// its command, told the pane and its view.
+    /// Run another's entry (an extension's context-menu row): its
+    /// command, told what the menu was opened on (the pane, its view, a
+    /// file).
     Run {
         command: String,
-        pane: PaneId,
-        view: String,
+        invocation: architect::action::Invocation,
     },
 }
 
 /// One row others add to a target's context menu: its label and the
-/// command it runs (told the target: [`architect::action::Invocation`]).
+/// command it runs (told the target: [`architect::action::Invocation`]),
+/// ticked when the command is a toggle that is on.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ContextEntry {
     pub label: String,
     pub command: String,
+    /// Whether its command is on, when it is a toggle; `None` when not.
+    pub checked: Option<bool>,
 }
 
-/// What others add to a pane's context menu (an extension's
-/// `[[context]]` rows), asked for by target (`view:<kind>`) and id (the
-/// pane's) each time the menu opens: provide it above the workspace.
+/// What others add to a context menu (an extension's `[[context]]` rows).
+///
+/// Asked for by target and id each time the menu opens: a tab's
+/// (`view:<kind>` and `tab`, the pane's id), a target a view shows
+/// ([`PaneHandle::context_menu`]: `file` and a path). Provide it above the
+/// workspace.
 #[derive(Clone)]
 pub struct ContextEntries(pub Rc<dyn Fn(&str, &str) -> Vec<ContextEntry>>);
 
@@ -1176,6 +1206,46 @@ pub struct TabBadges(pub Rc<dyn Fn(&str, &str) -> Element>);
 impl TabBadges {
     pub fn new(f: impl Fn(&str, &str) -> Element + 'static) -> Self {
         Self(Rc::new(f))
+    }
+}
+
+/// What others put in a pane's header, between its title and its menu.
+///
+/// An extension's `[[toolbars]]` with `where = "pane"` or
+/// `"view:<kind>"`, asked for by the pane's view kind and id each time
+/// the header draws: `None` for nothing. Return a component, so its hooks
+/// (what keeps a toggle's state live) are its own. Provide it above the
+/// workspace.
+#[derive(Clone)]
+pub struct HeaderTools(pub Rc<dyn Fn(&str, &PaneId) -> Option<Element>>);
+
+impl HeaderTools {
+    pub fn new(f: impl Fn(&str, &PaneId) -> Option<Element> + 'static) -> Self {
+        Self(Rc::new(f))
+    }
+}
+
+/// The invocation a context-menu row runs with.
+///
+/// Opened on `target` (`view:<kind>`, `tab`, `file`) `id` (the pane's, a
+/// path) in pane `pane` showing `view`; a file's path is its
+/// [`Invocation::path`] too.
+///
+/// [`Invocation::path`]: architect::action::Invocation::path
+#[must_use]
+pub fn context_invocation(
+    target: &str,
+    id: &str,
+    pane: &PaneId,
+    view: &str,
+) -> architect::action::Invocation {
+    let file = target == "file" || target.starts_with("file:");
+    architect::action::Invocation {
+        pane: Some(pane.0.clone()),
+        view: Some(view.to_owned()),
+        path: file.then(|| id.to_owned()),
+        ..architect::action::Invocation::new(architect::action::InvocationSource::ContextMenu)
+            .on(target, id)
     }
 }
 

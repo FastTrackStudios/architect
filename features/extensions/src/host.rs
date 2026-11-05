@@ -793,6 +793,8 @@ struct Inner {
     theme_heard: Mutex<Option<architect_theme::Subscription>>,
     /// What loaded extensions add to the interface.
     contributions: Contributions,
+    /// The toolbars in force: the extensions' and a person's files.
+    toolbars: crate::toolbars::Toolbars,
     /// Where hooks' work runs.
     spawn: Mutex<Spawn>,
     /// The ids whose `startup` hooks have run: once per extension per
@@ -866,6 +868,7 @@ impl Host {
                 themes: Mutex::new(None),
                 theme_heard: Mutex::new(None),
                 contributions: Contributions::new(),
+                toolbars: crate::toolbars::Toolbars::new(),
                 spawn: Mutex::new(Arc::new(|work: ActionFuture| {
                     std::thread::spawn(move || {
                         let _ = futures::executor::block_on(work);
@@ -1110,6 +1113,13 @@ impl Host {
     #[must_use]
     pub fn contributions(&self) -> &Contributions {
         &self.inner.contributions
+    }
+
+    /// The toolbars in force: every extension's `[[toolbars]]`, a person's
+    /// files over them (`Toolbars::set_dir`), and which action is armed.
+    #[must_use]
+    pub fn toolbars(&self) -> &crate::toolbars::Toolbars {
+        &self.inner.toolbars
     }
 
     /// Runs `runner`'s kind with it, in place of the one there was.
@@ -1436,6 +1446,15 @@ impl Host {
         for (info, handler) in actions {
             // Each id was free or ours a moment ago, under the lock.
             let _ = list.register_forwarded_with(&info, handler);
+        }
+        // Its toggles say whether they are on through its runtime state.
+        for decl in manifest.actions.iter().filter(|a| a.toggle) {
+            let (reg, owner, action) = (
+                self.inner.contributions.clone(),
+                manifest.id.clone(),
+                decl.id.clone(),
+            );
+            let _ = list.set_checked(&decl.id, move || reg.checked(&owner, &action, now_ms()));
         }
         // Its themes and tokens, as a diff: never a reason to fail.
         if let Some(store) = self.themes() {

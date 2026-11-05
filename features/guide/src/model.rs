@@ -205,11 +205,15 @@ pub enum Do {
         #[facet(default)]
         args: Option<Value>,
     },
-    /// Presses and lets go on the step's target: `@click{}`.
+    /// Presses and lets go on the step's target: `@click{}`; with the
+    /// secondary button, a right-click (its context menu):
+    /// `@click{secondary true}`.
     Click {
         /// Seconds the pointer takes to get there.
         #[facet(default = 0.4)]
         seconds: f32,
+        #[facet(default)]
+        secondary: bool,
     },
     /// Presses on the step's target, moves, lets go. The end is `to`
     /// (its middle, or near its `edge`), else where it started, moved by

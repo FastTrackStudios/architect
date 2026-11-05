@@ -32,6 +32,73 @@ description = "Through the host service: its volume and sound settings, what is 
 group = "Metronome"
 script = "status.luau"
 
+[[actions]]
+id = "FTS_METRONOME_CLICK"
+name = "Metronome: click"
+description = "Turns the click on or off. A toggle: its tick in menus and its toolbar buttons show which."
+group = "Metronome"
+effect = "mutating"
+script = "click.luau"
+toggle = true
+
+# Its toolbars: one in the right dock, one in every note's header. The
+# click's buttons show it on or off and follow it however it is turned; a
+# right-click on the dock's arms it. A person's copy
+# (`toolbars/fts.metronome-transport.toml` in the lab's folder, or
+# TOOLBAR_SAVE) is used in its place.
+[[toolbars]]
+id = "transport"
+title = "Metronome"
+where = "dock:right"
+
+[[toolbars.items]]
+action = "FTS_METRONOME_CLICK"
+icon = "timer"
+label = "Click"
+right_click = "arm"
+
+[[toolbars.items]]
+kind = "separator"
+
+[[toolbars.items]]
+kind = "group"
+label = "Count in"
+items = [
+    { action = "FTS_METRONOME_COUNT_IN", icon = "play", label = "Count in" },
+    { label = "More", menu = [
+        { kind = "heading", label = "Click" },
+        { action = "FTS_METRONOME_CLICK" },
+        { kind = "separator" },
+        { kind = "submenu", label = "Status", items = [{ action = "FTS_METRONOME_STATUS" }] },
+    ] },
+]
+
+[[toolbars]]
+id = "note"
+title = "Metronome"
+where = "view:note"
+
+[[toolbars.items]]
+action = "FTS_METRONOME_CLICK"
+icon = "timer"
+label = "Click"
+
+# In a tab's and a Markdown file's context menus, told which.
+[[context]]
+target = "tab"
+action = "FTS_METRONOME_CLICK"
+title = "Click (from this tab)"
+
+[[context]]
+target = "file:md"
+action = "FTS_METRONOME_CLICK"
+title = "Click (from this file)"
+
+# What the click was left at, said again as it loads.
+[[hooks]]
+on = "startup"
+script = "click.luau"
+
 [[sections]]
 id = "metronome"
 title = "Metronome"

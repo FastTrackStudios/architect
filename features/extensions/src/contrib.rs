@@ -3,7 +3,9 @@
 //!
 //! openers for files, document kinds and links, document kinds, tabs,
 //! status items, menu and context-menu entries, a phone's action-bar
-//! buttons, hooks, the shell's slots it fills, and inline embeds that
+//! buttons, toolbars ([`ToolbarDecl`]: in a dock or a pane's header, each
+//! button an action, a toggle's showing it on or off), hooks, the shell's
+//! slots it fills, and inline embeds that
 //! draw a claimed block inside a document ([`EmbedDecl`])
 //! (`docs/content/architecture/extensions.md`, "Contributions" and
 //! "Inline embeds").
@@ -258,6 +260,10 @@ pub struct BarDecl {
     pub icon: String,
 }
 
+pub use crate::toolbar::{
+    DOCKS, MenuItem, MenuKind, ToolColors, ToolItem, ToolKind, ToolbarDecl, ToolbarPlace,
+};
+
 /// A hook: on an app event (`startup`, `workspace.changed`, `doc.opened`,
 /// `theme.changed`, `selection.changed`, `changed:<topic>`).
 ///
@@ -460,6 +466,7 @@ pub struct Contribution {
     pub menus: Vec<MenuDecl>,
     pub context: Vec<ContextDecl>,
     pub bar: Vec<BarDecl>,
+    pub toolbars: Vec<ToolbarDecl>,
     pub hooks: Vec<HookDecl>,
     pub slots: Vec<SlotDecl>,
     pub embeds: Vec<EmbedDecl>,
@@ -526,6 +533,7 @@ impl Contribution {
                 format!("{}/{}", c.target, c.action)
             }),
             bar: join(&self.bar, &other.bar, |b| b.action.clone()),
+            toolbars: join(&self.toolbars, &other.toolbars, |t| t.id.clone()),
             hooks: join(&self.hooks, &other.hooks, hook_key),
             slots: join(&self.slots, &other.slots, |s| s.slot.clone()),
             embeds: join(&self.embeds, &other.embeds, |e| e.id.clone()),
@@ -552,6 +560,7 @@ impl Contribution {
                 .map(|c| format!("context:{}/{}", c.target, c.action)),
         );
         out.extend(self.bar.iter().map(|b| format!("bar:{}", b.action)));
+        out.extend(self.toolbars.iter().map(|t| format!("toolbar:{}", t.id)));
         out.extend(self.hooks.iter().map(|h| format!("hook:{}", hook_key(h))));
         out.extend(self.slots.iter().map(|s| format!("slot:{}", s.slot)));
         out.extend(self.embeds.iter().map(|e| format!("embed:{}", e.id)));
@@ -607,6 +616,7 @@ impl Contribution {
             self.menus.len(),
             self.context.len(),
             self.bar.len(),
+            self.toolbars.len(),
             self.hooks.len(),
             self.slots.len(),
             self.embeds.len(),
@@ -702,6 +712,16 @@ impl Contribution {
         }
         for b in &self.bar {
             action(&format!("bar {}", b.action), &b.action)?;
+        }
+        for t in &self.toolbars {
+            t.check(
+                |id| action(&format!("toolbar {}", t.id), id).map_err(|r| r.why),
+                |id| view(&format!("toolbar {}", t.id), id).map_err(|r| r.why),
+            )
+            .map_err(|why| Refused {
+                what: format!("toolbar {}", t.id),
+                why,
+            })?;
         }
         for h in &self.hooks {
             let what = format!("hook {}", h.on);
@@ -815,6 +835,11 @@ pub enum StateKind {
     Badge,
     /// Metadata on a target, for its views to read.
     Meta,
+    /// Whether one of its toggles is on: its key the action's id (one it
+    /// declared `toggle = true`), its text `on` (or `true`) for on,
+    /// anything else for off. What the action's tick in a menu and its
+    /// toolbar button show ([`Contributions::checked`]).
+    Checked,
 }
 
 /// One write of runtime state, by its source.
@@ -1184,6 +1209,36 @@ impl Contributions {
     #[must_use]
     pub fn bar(&self) -> Vec<By<BarDecl>> {
         self.all(|c| c.bar.clone())
+    }
+
+    /// Every toolbar, its owner's.
+    #[must_use]
+    pub fn toolbars(&self) -> Vec<By<ToolbarDecl>> {
+        self.all(|c| c.toolbars.clone())
+    }
+
+    /// The toolbars in the header of a pane of view kind `kind` (`note`):
+    /// the ones on every pane, and that kind's.
+    #[must_use]
+    pub fn header_toolbars(&self, kind: &str) -> Vec<By<ToolbarDecl>> {
+        self.all(|c| c.toolbars.clone())
+            .into_iter()
+            .filter(|t| t.item.in_header_of(kind))
+            .collect()
+    }
+
+    /// Whether `owner`'s toggle `action` is on now: its last
+    /// [`StateKind::Checked`] write for the action said `on` (or `true`);
+    /// off when it wrote none, or that write lapsed.
+    #[must_use]
+    pub fn checked(&self, owner: &str, action: &str, now_ms: u64) -> bool {
+        let source = format!("ext:{owner}");
+        self.lock()
+            .state
+            .get(&(source, action.to_owned()))
+            .filter(|e| e.kind == StateKind::Checked)
+            .filter(|e| e.expires_ms.is_none_or(|at| at > now_ms))
+            .is_some_and(|e| matches!(e.text.as_str(), "on" | "true"))
     }
 
     #[must_use]
@@ -1671,6 +1726,40 @@ mod tests {
             ),
             Err(StateError::Full { .. })
         ));
+    }
+
+    #[test]
+    fn a_toggle_is_on_while_its_last_checked_state_says_so() {
+        let reg = Contributions::new();
+        reg.put("lab.x", Contribution::default());
+        assert!(!reg.checked("lab.x", "LAB_X_LOOP", 0));
+        let write = |text: &str, ttl_ms: u64| StateWrite {
+            source: "ext:lab.x".into(),
+            key: "LAB_X_LOOP".into(),
+            kind: StateKind::Checked,
+            text: text.into(),
+            ttl_ms,
+            ..StateWrite::default()
+        };
+        reg.set_state(write("on", 0), 0).unwrap();
+        assert!(reg.checked("lab.x", "LAB_X_LOOP", 1));
+        reg.set_state(write("off", 0), 0).unwrap();
+        assert!(!reg.checked("lab.x", "LAB_X_LOOP", 1));
+        reg.set_state(write("true", 10), 0).unwrap();
+        assert!(reg.checked("lab.x", "LAB_X_LOOP", 5));
+        assert!(!reg.checked("lab.x", "LAB_X_LOOP", 20), "lapsed");
+        // Another's state is not its.
+        assert!(!reg.checked("lab.y", "LAB_X_LOOP", 5));
+        // A status item of the same key is not a tick.
+        reg.set_state(
+            StateWrite {
+                kind: StateKind::Status,
+                ..write("on", 0)
+            },
+            0,
+        )
+        .unwrap();
+        assert!(!reg.checked("lab.x", "LAB_X_LOOP", 1));
     }
 
     #[test]

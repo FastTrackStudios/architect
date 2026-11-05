@@ -1147,6 +1147,17 @@ title = "Pin to the board"
 action = "LAB_BOARD_PIN"
 icon = "pin"
 
+[[toolbars]]                # buttons, separators, groups, dropdowns, widgets
+id = "transport"
+title = "Transport"
+where = "dock:right"        # dock:left|right|bottom, float, window, pane, view:<kind>
+
+[[toolbars.items]]          # a button (the default kind)
+action = "LAB_BOARD_LOOP"   # a toggle's button shows it on or off
+icon = "timer"              # a lucide name; none: its label alone
+label = "Loop"              # the action's name when unset
+right_click = "arm"         # menu, arm, none, or another action's id
+
 [[hooks]]                   # on an app event: one action, or a Luau script
 on = "startup"              # workspace.changed, doc.opened, theme.changed, selection.changed, changed:<topic>
 action = "LAB_BOARD_HELLO"
@@ -1162,7 +1173,8 @@ in-process builder's beside it), a reload puts it again as a diff (what
 was added at run time stays until the new instance says otherwise), an
 unload withdraws everything the extension added and its runtime state.
 `Contributions` answers the window's questions: `tabs`, `status`,
-`menus`, `context` on a target, `bar`, `slots` (the latest claim wins),
+`menus`, `context` on a target, `bar`, `toolbars` (and
+`header_toolbars` of a view kind), `slots` (the latest claim wins),
 `open_path` (by extension, then by document kind), `open_url` (by
 pattern), `open_doc_kind`, `doc_kind_of`.
 
@@ -1184,6 +1196,97 @@ The page draws it through `architect_settings::SectionViews`, which
 `use_extension_ui` provides (a linked view's component as it is). A
 `[[sections]]` table is an item of the settings page's point,
 `settings.sections` ("Windows, points and services" below).
+
+**Context menus.** A `[[context]]` row is offered on its target: the
+workspace asks `architect_workspace::ContextEntries` (which
+`use_extension_ui` provides) each time a menu opens. A tab's menu (its
+right-click, its header's ⋯) asks for `view:<kind>` and `tab`, with the
+pane's id; a view's own targets open through
+`architect_workspace::PaneHandle::context_menu` — the lab's file tree
+calls it on a row's right-click with `file` and the file's path, and a
+`file:<ext>` row is on files of that extension. The row runs with
+`architect_workspace::context_invocation`: source `context_menu`, the
+target and its id, the pane and its view, and for a file its path. A row
+whose action is a toggle shows its tick. The targets are a fixed list
+(`contrib::TARGETS`, past `view:`, `file:` and `doc:`), not points a
+feature declares; an editor's own menu is not wired yet.
+
+**Toolbars.** A toolbar is a document (`features/extensions/src/toolbar.rs`
+`ToolbarDecl`): an id, a title, `where` it goes, and its items, one flat
+type (`ToolItem`) whose `kind` is a `button` (the default), a
+`separator`, a `group` (its `items`, buttons drawn as one, with an
+optional `label`) or a `widget` (an extension's `view` as a live control,
+`width` × `height`, drawn by `ExtensionView` whatever runs it); an item
+with `newline` starts another row. A button runs its `action` or, with
+none, opens its `menu` (a dropdown: `MenuItem` rows of kind `action`,
+`heading`, `separator` and `submenu`, nested up to `MAX_MENU_DEPTH`, a
+toggle's row ticked); it has a `label` and/or an `icon`, `hide_label`,
+`colors` (`fill`, `ink`, `on_*` while on, `armed_*` while armed: theme
+tokens, drawn as their CSS variables, or CSS colours), and a
+`right_click`: `menu`, `arm`, `none`, or another action's id. The format
+is the same in a manifest (`[[toolbars]]`, each action its own or one its
+capabilities reach, each widget one of its views), in a person's file,
+and in `TOOLBAR_GET`'s answer, so a visual editor reads and writes it as
+it is.
+
+A person's toolbar files are `*.toml` in a folder the app names
+(`features/extensions/src/toolbars.rs` `Toolbars::set_dir`; the lab's
+`toolbars/`), read again as they change (`Toolbars::poll`, once a
+second). A file whose `id` is an extension toolbar's key
+(`fts.metronome/transport`) is the person's copy, used in its place until
+`Toolbars::reset`; another id is a toolbar of their own
+(`user/<id>`); a file that does not read or check is a problem
+`APP_STATUS` lists, the rest load. `Host::toolbars` is the registry
+(`Toolbars::all`: every toolbar in force, `Source` `extension`,
+`override` or `person`).
+
+Where it goes: `dock:<side>`, `float` and `window` are a pane of its own,
+a headless workspace view of kind `toolbar:<key>`, opened there when it
+appears (`window` a window of its own, as a popped-out pane is; once a
+window: one the person closes stays closed) and closed when it goes;
+`pane` (every pane's header) and `view:<kind>` (that kind's) draw it
+between a pane's title and its menu, through
+`architect_workspace::HeaderTools`. Both are
+`features/extensions/src/toolbar_ui.rs` `ToolbarStrip`: a press runs the
+action told source `toolbar`, target its place, id its key, and the pane.
+A bad toolbar in a manifest (a place there is not, no items, an item not
+whole for its kind, an action it may not run) refuses the load like any
+bad contribution: a problem `APP_STATUS` lists, field and all, never a
+crash.
+
+**Armed.** One action at a time may be armed (`Toolbars::arm`, a
+button's `right_click = "arm"`, `TOOLBAR_ARM`): its buttons show it
+(`data-armed`, the `armed_*` colours) until it is disarmed. What an armed
+action does next, to what is clicked, is the app's.
+
+| action | what it does |
+|---|---|
+| `TOOLBAR_LIST` | every toolbar in force, the folder of a person's files, the armed action |
+| `TOOLBAR_GET` | toolbar `{id}` whole, as its file has it |
+| `TOOLBAR_SAVE` | `{id, toolbar}` (JSON or TOML text) as the person's file |
+| `TOOLBAR_RESET` | takes away the person's file for `{id}` |
+| `TOOLBAR_ARM` / `TOOLBAR_DISARM` | arms `{action}`, or disarms |
+
+`Extensions::install_contribution_actions` puts them on the host's list
+(`features/extensions/src/toolbar_actions.rs`). The visual editor (an
+edit mode, insert chips, drag and drop, pickers) is #313.
+
+**Toggles.** An action can say whether it is on: the Action List's
+`ActionList::set_checked`, read into `ActionInfo::checked`. An
+extension's action declares `toggle = true` and says it with runtime
+state of kind `checked`, keyed by its id, `text = "on"` (or `"true"`)
+for on, anything else for off; it is off until it writes one
+(`Contributions::checked`; the host registers the check as it loads the
+action). Every kind writes it the same way: `ext.state{kind = "checked",
+key = "…", text = "on"}` in Luau, `guest::set_state`, a WASI guest's
+`state` update, a linked `Handle`. The tick shows in ⌘K, the menu bar's
+contributed rows, a context menu's row, and a toolbar's button
+(`aria-pressed`, the accent), and follows the state live: a toolbar
+redraws when the contributions change and when anything happens on the
+host's list. The lab's metronome (`apps/lab/extensions/metronome`) has
+one, `FTS_METRONOME_CLICK`, on a toolbar in the right dock, one in every
+note's header, and in a tab's and a Markdown file's context menus
+(`apps/lab/scenarios/extension-toolbars.styx`).
 
 **Opening.** `Host::open` takes a file's path, a link or a document
 kind to the first opener that claims it: its view opens through the
@@ -1209,7 +1312,7 @@ hook at a time: an event while it runs does not start it again.
 Every run carries where it came from
 (`crates/architect/src/action_list.rs` `Invocation`,
 `ActionCaller::with_invocation`): the source (palette, menu,
-context menu, key, hook, link, open, agent, script) and what it knew —
+context menu, key, hook, link, open, agent, script, toolbar) and what it knew —
 the target and its id, window, pane, view, selection, url, path, event.
 A Luau action reads it as `ctx`; a process at wire 4 is sent it
 (`ProcessExtension::run_in`, `Guest::action_in`); an in-process action
@@ -1233,7 +1336,7 @@ panes do when the extension unloads is its `on_unload`: `placeholder`
 ### Owned runtime state
 
 Anything set at run time — a status item's text, a badge, metadata on a
-target — is owned by its source (`ext:<id>`, `agent:<name>`, `app`),
+target, whether a toggle is on — is owned by its source (`ext:<id>`, `agent:<name>`, `app`),
 sequenced (a `seq` at or below the last kept is dropped as stale),
 time-limited (`ttl_ms`), capped (64 keys a source, 80 characters of one
 line), and withdrawn with an extension when it unloads

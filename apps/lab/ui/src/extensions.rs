@@ -612,6 +612,10 @@ fn builtin() -> Option<Package> {
                 include_str!("../../extensions/metronome/count_in.luau"),
             ),
             (
+                "click.luau",
+                include_str!("../../extensions/metronome/click.luau"),
+            ),
+            (
                 "status.luau",
                 include_str!("../../extensions/metronome/status.luau"),
             ),
@@ -625,6 +629,12 @@ fn builtin() -> Option<Package> {
 /// as whoever ran it on the lab's (the lab's authorizer and confirmation
 /// asked first).
 const FORWARDED: &[&str] = &[
+    "TOOLBAR_LIST",
+    "TOOLBAR_GET",
+    "TOOLBAR_SAVE",
+    "TOOLBAR_RESET",
+    "TOOLBAR_ARM",
+    "TOOLBAR_DISARM",
     "EXT_LIST",
     "EXT_VIEWS",
     "EXT_SEARCH",
@@ -757,6 +767,9 @@ pub fn use_lab_extensions(metronome: bool) -> ExtensionUi {
         host.forward_actions_to(&lab);
         let root = architect::settings::app_dir("architect-lab")
             .unwrap_or_else(|_| std::env::temp_dir().join("architect-lab"));
+        // A person's toolbar files (`toolbars/*.toml`): theirs, and their
+        // copies of the extensions', read again as they change.
+        host.toolbars().set_dir(root.join("toolbars"));
         // The host service: consent kept on this device (an installed
         // extension runs with what the person granted), each one's data
         // and files, the selection, the settings page's values.

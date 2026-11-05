@@ -31,9 +31,9 @@ steps (
 
 | Field | What it is | Code |
 |---|---|---|
-| `do` | `@run{id, args}` an Action List action; gestures on `target`: `@click{}`, `@drag{to, edge, dx, dy, seconds}`, `@scroll{dx, dy, seconds}` (a flick), `@type{text}`, `@key{key, mods}`, `@pause{seconds}` | `features/guide/src/model.rs` `Do` |
+| `do` | `@run{id, args}` an Action List action; gestures on `target`: `@click{}` (`@click{secondary true}` right-clicks), `@drag{to, edge, dx, dy, seconds}`, `@scroll{dx, dy, seconds}` (a flick), `@type{text}`, `@key{key, mods}`, `@pause{seconds}` | `features/guide/src/model.rs` `Do` |
 | `target` | `@id`, `@testid`, `@css`, `@tab`/`@pane`/`@group`/`@tabs`/`@split` (by a pane id), `@palette-row` (by command id), `@text` (an element by its whole text, the last in the page), `@app{kind, name}` (the workspace's `card` and `card-close`: a phone switcher's card and its ✕, by pane id), `@at{x, y}` | `features/guide/src/model.rs` `Target` |
-| `done` | `on` (`@ran"ID"`, `@changed"topic"`, any of them) then every `check {id, args, has}`: a **read-only** action whose JSON result contains `has` | `features/guide/src/model.rs` `Done`, `Check`; `features/guide/src/lib.rs` `contains` |
+| `done` | `on` (`@ran"ID"`, `@changed"topic"`, any of them) then every `check {id, args, has}`: a **read-only** action (an async one waited for by the headless runner) whose JSON result contains `has` | `features/guide/src/model.rs` `Done`, `Check`; `features/guide/src/lib.rs` `contains` |
 | `hold`, `hide`, `text` | seconds kept after; left out of the film (setup; a tour runs its `@run` itself); the tour's copy | `features/guide/src/model.rs` `Step` |
 | `safe` (scenario) | a tour may play it over the person's own data; off, only in the app's playground | `features/guide/src/model.rs` `Scenario` |
 | `capture` | `fps`, `crop` (a target), `pad`, `width`, `outputs (gif webm mp4 png)`, `cursor`, `desktop {width, height}` (every window on one canvas, with title bars) | `features/guide/src/model.rs` `Capture` |
@@ -112,9 +112,11 @@ Public API (pre-1.0, new): `features/guide/src/tour.rs` `use_tours`,
    lines, and save a file in the run's fresh lab folder (theme files,
    pages, dev copies reload live headless: `LabFiles`). A page draws in
    a document of its own, so `@text` cannot find its text: wait with
-   `@pause`, or check `PAGES_STATUS`. Async actions (`EXT_*`,
-   `SETTINGS_LIST`, `EXT_WINDOWS`) cannot be `check`ed; wait on a
-   target (a step with a `target`, no `do`, and `done {timeout …}`).
+   `@pause`, or check `PAGES_STATUS`. An async read-only action (an
+   extension's, `EXT_*`) is waited for when `check`ed, natively
+   (`features/guide/src/predicate.rs` `checks_waiting`, up to 5 s); in a tour wait
+   on a target instead (a step with a `target`, no `do`, and
+   `done {timeout …}`).
 
 | Action | What |
 |---|---|

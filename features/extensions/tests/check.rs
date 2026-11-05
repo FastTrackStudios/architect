@@ -51,6 +51,10 @@ fn builtin() -> Package {
                 include_str!("../../../apps/lab/extensions/metronome/count_in.luau"),
             ),
             (
+                "click.luau",
+                include_str!("../../../apps/lab/extensions/metronome/click.luau"),
+            ),
+            (
                 "status.luau",
                 include_str!("../../../apps/lab/extensions/metronome/status.luau"),
             ),
@@ -72,7 +76,11 @@ fn the_metronome_checks_clean_and_a_broken_copy_says_exactly_why() {
     assert_eq!(report.id.as_deref(), Some("fts.metronome"));
     assert_eq!(
         report.actions,
-        ["FTS_METRONOME_COUNT_IN", "FTS_METRONOME_STATUS"]
+        [
+            "FTS_METRONOME_COUNT_IN",
+            "FTS_METRONOME_STATUS",
+            "FTS_METRONOME_CLICK"
+        ]
     );
 
     let tmp = tempfile::tempdir().unwrap();

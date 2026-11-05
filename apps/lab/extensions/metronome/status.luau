@@ -7,4 +7,7 @@ local status = host.run("APP_STATUS")
 local problems = if status and status.problems then #status.problems else 0
 host.set_data("last_volume", volume)
 host.log("status read: volume " .. tostring(volume) .. ", " .. tostring(problems) .. " problem(s)")
-return { volume = volume, sound = sound, selection = selection, problems = problems }
+-- The click, and where it was last turned on or off from (`click.luau`).
+local click = host.data("click") == true
+local last = host.data("last")
+return { volume = volume, sound = sound, selection = selection, problems = problems, click = click, last = last }

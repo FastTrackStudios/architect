@@ -31,6 +31,10 @@ const WHEEL_LINE: f32 = 40.0;
 /// A tab (or a spine) pressed: it may become a drag; under a finger or a
 /// pen, held still long enough, it opens the tab's menu (a right click's).
 fn press(mut host: Host, pane: &PaneId, e: &PointerEvent) {
+    // A right-press is its context menu's, not a drag's.
+    if e.data().trigger_button() == Some(dioxus::html::input_data::MouseButton::Secondary) {
+        return;
+    }
     let (x, y) = point(e);
     let pressed = Drag::Pressed {
         pane: pane.clone(),
@@ -410,7 +414,10 @@ fn PaneHeader(pane: PaneId) -> Element {
     let title = host.title(p);
     let back = !p.history.back.is_empty();
     let forward = !p.history.forward.is_empty();
+    let view = p.view.0.clone();
     drop(workspace);
+    // What others put in it (an extension's toolbars), before its menu.
+    let tools = try_consume_context::<super::HeaderTools>().and_then(|t| (t.0)(&view, &pane));
     let (nav_on, nav_off) = (t.ink_2.clone(), t.rule.clone());
     let nav = move |on: bool| {
         format!(
@@ -444,6 +451,9 @@ fn PaneHeader(pane: PaneId) -> Element {
                 ArrowRight { size: 16, color: if forward { &*t.ink_2 } else { &*t.rule } }
             }
             div { style: "flex:1 1 0; min-width:0; overflow:hidden; white-space:nowrap; text-align:center;", "{title}" }
+            if let Some(tools) = tools {
+                {tools}
+            }
             button {
                 style: nav(true),
                 title: "More options",

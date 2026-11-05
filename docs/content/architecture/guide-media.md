@@ -57,7 +57,8 @@ A step (`features/guide/src/model.rs` `Step`) is:
 
 - **`do`** (`Do`): an Action List action by id with arguments
   (`@run{id …, args {…}}`), or a gesture on the step's `target`:
-  `@click{}`, `@drag{to <target>, edge right}` or `@drag{dx 120}`,
+  `@click{}` (`@click{secondary true}`: a right-click, its context
+  menu), `@drag{to <target>, edge right}` or `@drag{dx 120}`,
   `@scroll{dx 400}`, `@type{text "…"}`, `@key{key Enter, mods (meta)}`,
   `@pause{seconds 0.5}`.
 - **`target`** (`Target`): a query resolved to a rectangle at the frame it
@@ -72,7 +73,8 @@ A step (`features/guide/src/model.rs` `Step`) is:
 - **`done`** (`Done`): Action List events to wake on (`@ran"ID"`,
   `@changed"topic"`) and **checks**: a read-only action and the subset of
   its JSON result it must contain (`features/guide/src/lib.rs` `contains`:
-  objects by key, arrays by position and length). There is no second query
+  objects by key, arrays by position and length); an async one (an
+  extension's) is waited for by the headless runner, not by a tour. There is no second query
   language: a predicate is an action. Unset, the step is done when its
   `do` is.
 - A step with a `target` and no `do` points at it (a tour's "this is the
