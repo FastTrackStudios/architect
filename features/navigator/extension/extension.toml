@@ -185,10 +185,10 @@ effect = "mutating"
 [[actions]]
 id = "NAVIGATOR_MOVE"
 name = "Navigator: move in the manual order"
-description = "Moves the selected notes `by` places (up when negative) in a manual sort, writing each note's sort_index."
+description = "Moves note `path` (or the selected notes) `by` places (up when negative) in a manual sort, writing each note's sort_index."
 group = "Navigator"
 effect = "mutating"
-params = '{"type":"object","properties":{"by":{"type":"integer"}}}'
+params = '{"type":"object","properties":{"path":{"type":"string"},"by":{"type":"integer"}}}'
 
 [[actions]]
 id = "NAVIGATOR_CONVERT_TO_FOLDER_NOTE"

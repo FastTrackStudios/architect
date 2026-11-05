@@ -2,9 +2,11 @@
 
 A port of Notebook Navigator (the Obsidian plugin) as architect's sidebar:
 a folder tree beside a list of notes. The crate is `features/navigator`.
+Navigator, the built-in extension that makes it a feature, is
+`features/navigator/extension` (`architect-navigator-extension`).
 
-**Licence.** `architect-navigator` is GPL-3.0-or-later, the one GPL crate
-in architect (`features/navigator/README.md`, `features/navigator/LICENSE`).
+**Licence.** `architect-navigator` is GPL-3.0-or-later. With Navigator,
+the extension that links it, it is the only GPL code in architect (`features/navigator/README.md`, `features/navigator/LICENSE`).
 An app that links it ships under the GPL. Nothing else in architect depends
 on it. Never move its code into another crate. A headless tool or a server
 that does not link it stays MIT OR Apache-2.0.
@@ -53,7 +55,40 @@ pub trait NavigatorSource: Send + Sync {
 - `MemorySource` keeps a vault in memory. `MemorySource::synthetic` makes
   a large one for load tests.
 
-## Recipe: the navigator as a sidebar
+## Recipe: Navigator, the extension, as a sidebar
+
+A user-facing feature is a linked extension, so an app links Navigator in
+and mounts its view (`features/navigator/extension/src/lib.rs`
+`NavigatorExtension`, `NavigatorMount`, `FilesView`):
+
+```rust,ignore
+let extensions = extensions.with_linked(&architect_navigator_extension::NavigatorExtension)?;
+// The dock's view: the app's navigator, in context, drawn by Navigator.
+let nav = use_navigator(|| Arc::new(source));
+use_context_provider(|| Signal::new(NavigatorMount {
+    navigator: nav, on_open, on_context_menu: Some(menu), on_focus_editor: None, phone,
+}));
+rsx! { ExtensionView { ui, extension: "navigator".into(), view: "files".into(), bare: true } }
+```
+
+- Its settings section is the extension's (`[[sections]]` in
+  `features/navigator/extension/extension.toml`, the keys of
+  `NavigatorSettings`). Don't register `NavigatorSettings::section()` in the
+  app as well. When you add a field to `NavigatorSettings`, run
+  `features/navigator/extension/tests/both_ways.rs`
+  `its_section_is_navigator_settings`. It prints the section to paste.
+- Its `NAVIGATOR_*` actions are on the Action List, the CLI and MCP. They
+  answer with `NAVIGATOR_STATE`'s shape. With no navigator on show they
+  fail and say so. `NavigatorView` drops its own palette commands under
+  the extension (`commands: false`).
+- `EXT_CLONE {"id":"navigator"}` makes a development copy that runs as a
+  process. Without the app's `NavigatorMount`, it draws a sample vault
+  (`sample`).
+
+The lab's Vault tab does this (`apps/lab/ui/src/vault.rs` `FilesView`,
+`apps/lab/ui/src/extensions.rs`).
+
+## Recipe: the navigator without extensions
 
 ```rust,ignore
 // Where the page lives, so the dock's view can come and go:
@@ -91,9 +126,35 @@ The lab's Vault tab does exactly this (`apps/lab/ui/src/vault.rs`
   - Auto-reveal of the active note: `NavigatorState::set_active`, `reveal`.
   - Collapse or expand all: `collapse_or_expand_all` (with smart collapse).
   - Back and forward through the last 100 folders: `back`, `forward`.
-- **Notes.**
-  - Each row shows the name, 1–5 lines of preview, the date and the folder.
-  - Sorting: `SortOption`. Date groups: `Grouping`.
+- **Notes** (`features/navigator/src/list.rs` `rows`).
+  - Each row shows the name (1–3 lines), 0–5 lines of preview, the date,
+    the folder and task progress. It can also show tags, properties
+    (`list_properties`), a word count and an image. Its `Lines` and `Thumb`
+    set its `height`.
+  - Sorting: `SortOption`, including `Manual`, which sorts by each note's
+    `sort_index`. ⌘↑/⌘↓ (`NavigatorState::move_in_order`) returns
+    `Outcome::Write` with `FileOp::SetProperty` ranks. The app's source
+    writes them (`NavigatorSource::write`).
+  - Grouping: `Grouping` (none, date, folder, property). Property groups
+    come from `features/navigator/src/grouping.rs` `by_value`, which Bases
+    can share. Notes without the value go last, under "None". A heading
+    folds (`toggle_group`, keyed by `collapse_key`).
+  - Pinned (`toggle_pin`, ⌘⇧P) is a section on top, per kind of place
+    (folders, tags). Pinned rows have one line of preview and no date.
+  - Images (`thumb`): a property (`feature_image_properties`), the source's
+    `feature_image`, or the file itself (raster or SVG). A drawing uses its
+    PNG preview. PDF, canvas and base files get a badge. The view gets URLs
+    from `NavigatorSource::resource_url`.
+  - A tag on a row goes to the tag (`select_tag`, `NavTarget::Tag`).
+  - Names and dates from frontmatter: `use_frontmatter` and the
+    `frontmatter_*_field` settings.
+  - Folder notes (`folder_notes`): `folder_note`, `convert_to_folder_note`,
+    `set_as_folder_note`, `detach_folder_note`, `pin_folder_notes`,
+    `open_folder_note`. A click on the folder opens its note.
+  - A folder's or a tag's own list: `Appearance` (sort, grouping, mode,
+    title and preview rows, descendants, row items), set with
+    `set_appearance` or `edit_appearance`. `NavigatorState::effective` is
+    the settings the list is drawn with.
   - Multi-select: Cmd/Ctrl-click, Shift-click, select all.
 - **Keys** (`NavigatorState::key`): ↑ ↓ Home End PageUp PageDown in both
   panes.
@@ -103,23 +164,31 @@ The lab's Vault tab does exactly this (`apps/lab/ui/src/vault.rs`
     note.
   - Return opens a note: ⇧ in a tab, ⌘ beside.
   - A note the keys move to opens after `KEY_OPEN_SETTLE`.
-- **Commands** on the palette while the view is mounted: `NAVIGATOR_REVEAL`,
+- **Actions.** Under the extension they are its manifest's (`ACTIONS`):
+  `NAVIGATOR_STATE`, `NAVIGATOR_SELECT`, `NAVIGATOR_REVEAL`,
   `NAVIGATOR_COLLAPSE_OR_EXPAND`, `NAVIGATOR_BACK`, `NAVIGATOR_FORWARD`,
   `NAVIGATOR_FOCUS_FOLDERS`, `NAVIGATOR_FOCUS_NOTES`, `NAVIGATOR_SELECT_ALL`,
   `NAVIGATOR_TOGGLE_DUAL_PANE`, `NAVIGATOR_TOGGLE_ORIENTATION`,
-  `NAVIGATOR_TOGGLE_DESCENDANTS`, `NAVIGATOR_REORDER_ROOTS`.
+  `NAVIGATOR_TOGGLE_DESCENDANTS`, `NAVIGATOR_TOGGLE_COMPACT`,
+  `NAVIGATOR_REORDER_ROOTS`, `NAVIGATOR_SORT`, `NAVIGATOR_GROUP`,
+  `NAVIGATOR_TOGGLE_GROUP`, `NAVIGATOR_OWN_LIST`, `NAVIGATOR_COLOUR`,
+  `NAVIGATOR_PIN`, `NAVIGATOR_PIN_FOLDER_NOTES`, `NAVIGATOR_MOVE`,
+  `NAVIGATOR_CONVERT_TO_FOLDER_NOTE`, `NAVIGATOR_SET_AS_FOLDER_NOTE`,
+  `NAVIGATOR_DETACH_FOLDER_NOTE`, `NAVIGATOR_OPEN_FOLDER_NOTE_TAB`.
+  Without the extension, `NavigatorView` puts its own on the palette.
 - **Settings.** One section, `navigator` (`NavigatorSettings`, a
   `#[derive(Settings)]` struct).
 - **Kept between runs.** `ViewState` (`Navigator::view_state`, `restore`):
-  the open folders, the manual order, the selected folder and the panes'
-  sizes. It is a facet struct, so the app stores it where it keeps its
+  the open folders, the manual order, the selected folder, the panes'
+  sizes, the pins, the folded groups, each place's own list and the
+  colours. It is a facet struct, so the app stores it where it keeps its
   settings.
 
 ## Later layers
 
-These are tracked in #332:
+These are tracked in #332 (the list in full, #335, is done):
 
-- the list in full;
+- the real vault as a source (#353);
 - the calendar and periodic notes;
 - tags and properties;
 - search, shortcuts, recents, profiles and hiding;

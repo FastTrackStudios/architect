@@ -1,9 +1,11 @@
 //! The navigator: a port of [Notebook Navigator] (an Obsidian plugin by
 //! Johan Sanneblad, GPL-3.0) as architect's sidebar.
 //!
-//! **Licence.** This crate is GPL-3.0-or-later, the one GPL crate in
-//! architect: it carries Notebook Navigator's design and code. An app that
-//! links it ships under the GPL. Nothing else in architect depends on it.
+//! **Licence.** This crate is GPL-3.0-or-later: it carries Notebook
+//! Navigator's design and code. With Navigator, the built-in extension that
+//! links it (`architect-navigator-extension`), it is the only GPL code in
+//! architect. An app that links it ships under the GPL. Nothing else in
+//! architect depends on it.
 //!
 //! A navigation pane (the folder tree) beside a list pane (the selected
 //! folder's notes), side by side, stacked, or one at a time with a slide

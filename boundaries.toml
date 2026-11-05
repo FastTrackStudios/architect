@@ -167,7 +167,7 @@ layer = "L0"
 [[row]]
 package = "architect-navigator"
 layer = "L0"
-note = "GPL-3.0-or-later, the one GPL crate (a port of Notebook Navigator)"
+note = "GPL-3.0-or-later, with its extension the only GPL crates (a port of Notebook Navigator)"
 
 [[row]]
 package = "architect-files"

@@ -1206,6 +1206,7 @@ dependencies = [
  "architect-input",
  "architect-lab-board",
  "architect-navigator",
+ "architect-navigator-extension",
  "architect-orgs",
  "architect-pages",
  "architect-presence",

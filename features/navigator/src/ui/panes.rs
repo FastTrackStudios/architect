@@ -681,7 +681,11 @@ fn FileRow(
                 div { class: "nv-thumb-box", style: "flex:0 0 auto; align-self:center; display:flex; align-items:center; justify-content:center; height:{size}px; width:{image_w}; min-width:{size}px; border-radius:6px; overflow:hidden; background:var(--nv-thumb);",
                     match img {
                         ThumbView::Url(u) => rsx! { img { class: "nv-feature-image", src: "{u}", alt: "", style: "height:{size}px; width:{image_w}; object-fit:cover; display:block;" } },
-                        ThumbView::Badge(b) => rsx! { span { class: "nv-badge", style: "font-size:10px; font-weight:700; letter-spacing:0.04em; color:var(--nv-faint);", "{b}" } },
+                        ThumbView::Badge(b) => {
+                            // A long kind (`CANVAS`, `EXCALIDRAW`) smaller, to fit the box.
+                            let font = if b.len() > 4 { 8 } else { 10 };
+                            rsx! { span { class: "nv-badge", style: "font-size:{font}px; font-weight:700; color:var(--nv-faint); overflow:hidden; max-width:100%; text-align:center;", "{b}" } }
+                        }
                     }
                 }
             }

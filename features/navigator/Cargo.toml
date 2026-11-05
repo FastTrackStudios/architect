@@ -3,7 +3,7 @@ name = "architect-navigator"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
-# The one GPL crate in architect: a port of Notebook Navigator (GPL-3.0),
+# With Navigator, its extension (extension/), the only GPL crates in architect: a port of Notebook Navigator (GPL-3.0),
 # whose code it carries. An app that links it ships under the GPL; the
 # rest of architect stays MIT OR Apache-2.0 (README.md).
 license = "GPL-3.0-or-later"

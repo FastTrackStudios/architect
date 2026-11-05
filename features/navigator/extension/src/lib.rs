@@ -52,9 +52,10 @@ fn handle() -> Option<Handle> {
         .clone()
 }
 
-/// What the app hands Navigator's view, in context above it: its
-/// navigator (made with `use_navigator` over its vault, where it lives
-/// on), what opens a note, its context menu, and the room it has.
+/// What the app hands Navigator's view, in context above it as a
+/// `Signal<NavigatorMount>`: its navigator (made with `use_navigator` over
+/// its vault, where it lives on), what opens a note, its context menu,
+/// and whether it is a phone's.
 #[derive(Clone, Copy, PartialEq)]
 pub struct NavigatorMount {
     pub navigator: Navigator,
@@ -122,8 +123,8 @@ impl Extension for NavigatorExtension {
 /// Its sidebar view: the app's navigator, or its own over a sample vault.
 #[component]
 pub fn FilesView() -> Element {
-    match try_use_context::<NavigatorMount>() {
-        Some(mount) => rsx! { Drive { mount } },
+    match try_use_context::<Signal<NavigatorMount>>() {
+        Some(mount) => rsx! { Drive { mount: mount() } },
         None => rsx! { Standalone {} },
     }
 }
@@ -346,6 +347,10 @@ fn run(nav: Navigator, on_open: EventHandler<Open>, id: &str, args: &Value) -> R
             Ok(json!({ "pinned": n }))
         }
         "NAVIGATOR_MOVE" => {
+            if let Some(p) = text(args, "path") {
+                let p = p.to_owned();
+                nav.update(|s| s.click_file(&p, architect_navigator::Mods::NONE));
+            }
             let by = args.get("by").and_then(Value::as_i64).unwrap_or(1);
             let by = isize::try_from(by).unwrap_or(1);
             let out = nav.state.peek().move_in_order(by);
