@@ -95,12 +95,9 @@ fn clone_the_linked_navigator_edit_it_and_go_back() {
     let edited = text.replacen("is not on show", "is not on show (dev)", 1);
     assert_ne!(edited, text);
     std::fs::write(&bridge, &edited).unwrap();
-    let swap = poll(
-        &ext,
-        "the edit swapped in",
-        Duration::from_secs(900),
-        || answer(&list).contains("(dev)"),
-    );
+    let swap = poll(&ext, "the edit swapped in", Duration::from_mins(15), || {
+        answer(&list).contains("(dev)")
+    });
     println!("save to swapped in: {swap:?}");
 
     let _ = ext.end_dev(&folder);

@@ -1,6 +1,7 @@
-//! What a person sets for one folder or one tag, over the settings: its
-//! sort, its grouping, its rows (title and preview lines, compact), what
-//! its rows show, and whether it lists the notes of folders below.
+//! What a person sets for one folder or one tag, over the settings.
+//!
+//! Its sort, its grouping, its rows (title and preview lines, compact),
+//! what its rows show, and whether it lists the notes of folders below.
 //!
 //! Notebook Navigator keeps these per place (`folderAppearances`,
 //! `tagAppearances`; sorts in `folderSortOverrides`, `tagSortOverrides`)

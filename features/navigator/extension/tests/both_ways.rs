@@ -60,7 +60,11 @@ fn it_builds_what_its_manifest_declares() {
     listed.sort();
     assert_eq!(listed, built);
     assert_eq!(b.view_ids(), ["files"]);
-    assert!(m.views.iter().any(|v| v.id == "files" && v.title == "Navigator"));
+    assert!(
+        m.views
+            .iter()
+            .any(|v| v.id == "files" && v.title == "Navigator")
+    );
 }
 
 #[test]

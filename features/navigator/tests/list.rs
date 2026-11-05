@@ -47,9 +47,21 @@ fn vault() -> MemorySource {
             NoteFile::new("Projects/Alpha/Notes.md", NOW - 3 * DAY, NOW - 40 * DAY)
                 .property("status", text("doing")),
         )
-        .with_file(NoteFile::new("Projects/Beta/Todo.md", NOW - 3 * DAY, NOW - 2 * DAY))
-        .with_file(NoteFile::new("Projects/Cover.png", NOW - 9 * DAY, NOW - 9 * DAY))
-        .with_file(NoteFile::new("Projects/Paper.pdf", NOW - 9 * DAY, NOW - 8 * DAY))
+        .with_file(NoteFile::new(
+            "Projects/Beta/Todo.md",
+            NOW - 3 * DAY,
+            NOW - 2 * DAY,
+        ))
+        .with_file(NoteFile::new(
+            "Projects/Cover.png",
+            NOW - 9 * DAY,
+            NOW - 9 * DAY,
+        ))
+        .with_file(NoteFile::new(
+            "Projects/Paper.pdf",
+            NOW - 9 * DAY,
+            NOW - 8 * DAY,
+        ))
         .with_file(NoteFile::new("Welcome.md", NOW - 9 * DAY, NOW - 2 * DAY).tag("work"))
 }
 
@@ -87,6 +99,17 @@ fn outline(s: &NavigatorState) -> Vec<String> {
             _ => None,
         })
         .collect()
+}
+
+/// A row's image: `Err` when the note is not listed.
+fn thumb_of(s: &NavigatorState, p: &str) -> Result<Option<Thumb>, ()> {
+    s.list_rows()
+        .iter()
+        .find_map(|r| match &r.kind {
+            ListRowKind::File { path, thumb, .. } if path == p => Some(thumb.clone()),
+            _ => None,
+        })
+        .ok_or(())
 }
 
 fn below() -> NavigatorSettings {
@@ -149,11 +172,17 @@ fn the_grouping_function_is_bases_shaped() {
     let rows = vec![
         ("a", Some(PropertyValue::Number(10.0))),
         ("b", Some(text("Item 10"))),
-        ("c", Some(PropertyValue::List(vec!["x".into(), "[[Notes/Y]]".into()]))),
+        (
+            "c",
+            Some(PropertyValue::List(vec!["x".into(), "[[Notes/Y]]".into()])),
+        ),
         ("d", None),
         ("e", Some(text("Item 2"))),
         ("f", Some(PropertyValue::Number(2.0))),
-        ("g", Some(PropertyValue::List(vec!["x".into(), "[[Notes/Y]]".into()]))),
+        (
+            "g",
+            Some(PropertyValue::List(vec!["x".into(), "[[Notes/Y]]".into()])),
+        ),
         ("h", Some(text("  "))),
     ];
     let groups = grouping::by_value(rows, |r| r.1.as_ref(), false);
@@ -161,9 +190,15 @@ fn the_grouping_function_is_bases_shaped() {
     // Numbers first, in order; text in natural order; a list one group,
     // its links shown as names; no value (or blank) last, under None.
     assert_eq!(labels, ["2", "10", "Item 2", "Item 10", "x, Y", "None"]);
-    assert_eq!(groups[4].items.iter().map(|r| r.0).collect::<Vec<_>>(), ["c", "g"]);
+    assert_eq!(
+        groups[4].items.iter().map(|r| r.0).collect::<Vec<_>>(),
+        ["c", "g"]
+    );
     assert_eq!(groups[5].id, grouping::NONE_ID);
-    assert_eq!(groups[5].items.iter().map(|r| r.0).collect::<Vec<_>>(), ["d", "h"]);
+    assert_eq!(
+        groups[5].items.iter().map(|r| r.0).collect::<Vec<_>>(),
+        ["d", "h"]
+    );
     let down = grouping::by_value(vec![1.0, 3.0, 2.0], |_| None, true);
     assert_eq!(down.len(), 1, "every item without a value: one None group");
 }
@@ -173,18 +208,33 @@ fn a_folded_group_keeps_its_heading_and_count_and_hides_its_notes() {
     let src = vault();
     let mut s = state_with(&src, below());
     s.click_folder("Projects");
-    assert_eq!(headers(&s), ["Today", "Yesterday", "Previous 7 days", "Previous 30 days", "September"]);
+    assert_eq!(
+        headers(&s),
+        [
+            "Today",
+            "Yesterday",
+            "Previous 7 days",
+            "Previous 30 days",
+            "September"
+        ]
+    );
     let (key, count) = s
         .list_rows()
         .iter()
         .find_map(|r| match &r.kind {
-            ListRowKind::Header { label, group, count, .. } if label == "Previous 7 days" => {
-                Some((group.clone(), *count))
-            }
+            ListRowKind::Header {
+                label,
+                group,
+                count,
+                ..
+            } if label == "Previous 7 days" => Some((group.clone(), *count)),
             _ => None,
         })
         .unwrap();
-    assert!(key.starts_with("scope=folder:Projects;group=date;id=date:mtime:"), "{key}");
+    assert!(
+        key.starts_with("scope=folder:Projects;group=date;id=date:mtime:"),
+        "{key}"
+    );
     assert_eq!(count, 1);
     s.toggle_group(&key);
     let o = outline(&s);
@@ -192,7 +242,7 @@ fn a_folded_group_keeps_its_heading_and_count_and_hides_its_notes() {
     assert!(!o.contains(&"Projects/Beta/Todo.md".to_owned()));
     // Kept with the view, per folder.
     let kept = s.view_state();
-    assert_eq!(kept.collapsed, [key.clone()]);
+    assert_eq!(kept.collapsed, std::slice::from_ref(&key));
     s.toggle_group(&key);
     assert!(outline(&s).contains(&"Projects/Beta/Todo.md".to_owned()));
 }
@@ -220,8 +270,14 @@ fn pinned_notes_lead_the_list_once_with_a_line_of_preview_and_no_date() {
         .iter()
         .find(|r| r.file() == Some("Projects/Plan.md"))
         .unwrap();
-    let (ListRowKind::File { lines: before, .. }, ListRowKind::File { lines: after, pinned: true, .. }) =
-        (&plan.kind, &pinned.kind)
+    let (
+        ListRowKind::File { lines: before, .. },
+        ListRowKind::File {
+            lines: after,
+            pinned: true,
+            ..
+        },
+    ) = (&plan.kind, &pinned.kind)
     else {
         panic!("{pinned:?}")
     };
@@ -232,12 +288,10 @@ fn pinned_notes_lead_the_list_once_with_a_line_of_preview_and_no_date() {
     assert!(!headers(&s).contains(&"Pinned".to_owned()));
     // And it follows a rename.
     src.rename("Projects/Plan.md", "Projects/Plan 2.md");
-    for e in [architect_navigator::SourceEvent::FileRenamed {
+    s.apply(&architect_navigator::SourceEvent::FileRenamed {
         from: "Projects/Plan.md".into(),
         file: src.file("Projects/Plan 2.md").unwrap(),
-    }] {
-        s.apply(&e);
-    }
+    });
     assert!(s.pinned("Projects/Plan 2.md").folder);
 }
 
@@ -302,23 +356,29 @@ fn images_a_property_the_file_a_cover_or_a_badge() {
         },
     );
     s.click_folder("Art");
-    fn thumb_of(s: &NavigatorState, p: &str) -> Option<Option<Thumb>> {
-        s.list_rows().iter().find_map(|r| match &r.kind {
-            ListRowKind::File { path, thumb, .. } if path == p => Some(thumb.clone()),
-            _ => None,
-        })
-    }
-    assert_eq!(thumb_of(&s, "Art/Logo.svg"), Some(Some(Thumb::File("Art/Logo.svg".into()))));
-    assert_eq!(thumb_of(&s, "Art/Trip.md"), Some(Some(Thumb::File("Art/Logo.svg".into()))));
+    assert_eq!(
+        thumb_of(&s, "Art/Logo.svg"),
+        Ok(Some(Thumb::File("Art/Logo.svg".into())))
+    );
+    assert_eq!(
+        thumb_of(&s, "Art/Trip.md"),
+        Ok(Some(Thumb::File("Art/Logo.svg".into())))
+    );
     assert_eq!(
         thumb_of(&s, "Art/Sketch.excalidraw.md"),
-        Some(Some(Thumb::File("Art/Sketch.excalidraw.png".into())))
+        Ok(Some(Thumb::File("Art/Sketch.excalidraw.png".into())))
     );
-    assert_eq!(thumb_of(&s, "Art/Plain.excalidraw"), Some(Some(Thumb::Badge("EXCALIDRAW".into()))));
-    assert_eq!(thumb_of(&s, "Art/Board.canvas"), Some(Some(Thumb::Badge("CANVAS".into()))));
-    assert_eq!(thumb_of(&s, "Art/Old.md"), Some(None), "http is not shown");
+    assert_eq!(
+        thumb_of(&s, "Art/Plain.excalidraw"),
+        Ok(Some(Thumb::Badge("EXCALIDRAW".into())))
+    );
+    assert_eq!(
+        thumb_of(&s, "Art/Board.canvas"),
+        Ok(Some(Thumb::Badge("CANVAS".into())))
+    );
+    assert_eq!(thumb_of(&s, "Art/Old.md"), Ok(None), "http is not shown");
     // The drawing's preview is not listed beside it.
-    assert_eq!(thumb_of(&s, "Art/Sketch.excalidraw.png"), None);
+    assert_eq!(thumb_of(&s, "Art/Sketch.excalidraw.png"), Err(()));
     // A row with an image is at least 42 + padding tall.
     s.click_folder("Projects");
     let i = s
@@ -327,13 +387,16 @@ fn images_a_property_the_file_a_cover_or_a_badge() {
         .position(|r| r.file() == Some("Projects/Paper.pdf"))
         .unwrap();
     assert!(s.list_offsets().height(i) >= 42.0 + 16.0);
-    assert_eq!(thumb_of(&s, "Projects/Paper.pdf"), Some(Some(Thumb::Badge("PDF".into()))));
+    assert_eq!(
+        thumb_of(&s, "Projects/Paper.pdf"),
+        Ok(Some(Thumb::Badge("PDF".into())))
+    );
     // None in compact rows, nor with images off.
     s.set_settings(NavigatorSettings {
         show_feature_image: false,
         ..NavigatorSettings::default()
     });
-    assert_eq!(thumb_of(&s, "Projects/Paper.pdf"), Some(None));
+    assert_eq!(thumb_of(&s, "Projects/Paper.pdf"), Ok(None));
 }
 
 #[test]
@@ -375,7 +438,9 @@ fn a_rows_tags_properties_tasks_and_count() {
         ..NavigatorSettings::default()
     });
     src.put(src.file("Projects/Plan.md").unwrap().tasks(4, 0));
-    s.apply(&architect_navigator::SourceEvent::FileModified(src.file("Projects/Plan.md").unwrap()));
+    s.apply(&architect_navigator::SourceEvent::FileModified(
+        src.file("Projects/Plan.md").unwrap(),
+    ));
     let ListRowKind::File { lines, .. } = &s
         .list_rows()
         .iter()
@@ -400,7 +465,11 @@ fn a_tag_clicked_lists_its_notes_and_those_below_it() {
     let t = s.target();
     let cx = s.list_context(&t);
     let shown = architect_navigator::list::shown_tags(s.file("Projects/Plan.md").unwrap(), &cx);
-    assert_eq!(shown.len(), 2, "projects/alpha is below projects, so it shows");
+    assert_eq!(
+        shown.len(),
+        2,
+        "projects/alpha is below projects, so it shows"
+    );
     s.select_tag("projects/alpha");
     let t = s.target();
     let cx = s.list_context(&t);
@@ -408,7 +477,10 @@ fn a_tag_clicked_lists_its_notes_and_those_below_it() {
     assert_eq!(shown, [("work", "work")]);
     // Back goes to the tag before, then the folder.
     s.back();
-    assert_eq!(s.selection().target().and_then(|t| t.tag()), Some("projects"));
+    assert_eq!(
+        s.selection().target().and_then(|t| t.tag()),
+        Some("projects")
+    );
     s.back();
     assert_eq!(s.selection().folder(), Some(""));
 }
@@ -439,18 +511,34 @@ fn names_and_dates_from_frontmatter() {
     // a: 2020-01-02; b: 1.6e9 seconds, 2020-09-13.
     assert_eq!(s.list_order(), ["a.md", "b.md"]);
     assert_eq!(headers(&s), ["2020"]);
-    assert_eq!(s.file("a.md").unwrap().title(&s.effective().name_fields()), "Zed");
-    assert_eq!(parse_date("2020-01-02T03:04:05Z", 0), Some(1_577_934_245_000));
-    assert_eq!(parse_date("2020-01-02", 3_600_000), Some(1_577_923_200_000 - 3_600_000));
-    assert_eq!(parse_date("2020-01-02 03:04+01:00", 0), Some(1_577_930_640_000));
+    assert_eq!(
+        s.file("a.md").unwrap().title(&s.effective().name_fields()),
+        "Zed"
+    );
+    assert_eq!(
+        parse_date("2020-01-02T03:04:05Z", 0),
+        Some(1_577_934_245_000)
+    );
+    assert_eq!(
+        parse_date("2020-01-02", 3_600_000),
+        Some(1_577_923_200_000 - 3_600_000)
+    );
+    assert_eq!(
+        parse_date("2020-01-02 03:04+01:00", 0),
+        Some(1_577_930_640_000)
+    );
     assert_eq!(parse_date("yesterday", 0), None);
 }
 
 #[test]
 fn the_manual_order_moves_with_command_arrows_and_writes_ranks() {
     let src = MemorySource::new("V")
-        .with_file(NoteFile::new("A.md", NOW, NOW).property("sort_index", PropertyValue::Number(2000.0)))
-        .with_file(NoteFile::new("B.md", NOW, NOW).property("sort_index", PropertyValue::Number(1000.0)))
+        .with_file(
+            NoteFile::new("A.md", NOW, NOW).property("sort_index", PropertyValue::Number(2000.0)),
+        )
+        .with_file(
+            NoteFile::new("B.md", NOW, NOW).property("sort_index", PropertyValue::Number(1000.0)),
+        )
         .with_file(NoteFile::new("C.md", NOW, NOW))
         .with_file(NoteFile::new("D.pdf", NOW, NOW));
     let mut s = state_with(
@@ -470,8 +558,16 @@ fn the_manual_order_moves_with_command_arrows_and_writes_ranks() {
     assert_eq!(
         ops,
         [
-            FileOp::SetProperty { path: "C.md".into(), key: "sort_index".into(), value: PropertyValue::Number(2000.0) },
-            FileOp::SetProperty { path: "A.md".into(), key: "sort_index".into(), value: PropertyValue::Number(3000.0) },
+            FileOp::SetProperty {
+                path: "C.md".into(),
+                key: "sort_index".into(),
+                value: PropertyValue::Number(2000.0)
+            },
+            FileOp::SetProperty {
+                path: "A.md".into(),
+                key: "sort_index".into(),
+                value: PropertyValue::Number(3000.0)
+            },
         ]
     );
     src.write(&ops).unwrap();
@@ -479,7 +575,11 @@ fn the_manual_order_moves_with_command_arrows_and_writes_ranks() {
     assert_eq!(outline(&s), ["B.md", "C.md", "A.md", "D.pdf"]);
     // Other sorts don't move notes.
     s.set_settings(NavigatorSettings::default());
-    assert_eq!(s.key(Key::Up, Mods::COMMAND).map(|_| ()), Some(()), "an ordinary move");
+    assert_eq!(
+        s.key(Key::Up, Mods::COMMAND).map(|_| ()),
+        Some(()),
+        "an ordinary move"
+    );
 }
 
 fn notes_on() -> NavigatorSettings {
@@ -493,16 +593,30 @@ fn notes_on() -> NavigatorSettings {
 fn folder_notes_hide_open_with_their_folder_and_convert_set_and_detach() {
     let src = vault().with_file(NoteFile::new("Projects/Alpha/Alpha.md", NOW, NOW));
     let mut s = state_with(&src, notes_on());
-    assert_eq!(s.folder_note("Projects/Alpha"), Some("Projects/Alpha/Alpha.md"));
+    assert_eq!(
+        s.folder_note("Projects/Alpha"),
+        Some("Projects/Alpha/Alpha.md")
+    );
     let out = s.click_folder("Projects/Alpha");
     assert_eq!(
         out,
-        Some(Outcome::Open { path: "Projects/Alpha/Alpha.md".into(), how: OpenIn::Here, settle: false })
+        Some(Outcome::Open {
+            path: "Projects/Alpha/Alpha.md".into(),
+            how: OpenIn::Here,
+            settle: false
+        })
     );
-    assert!(!s.list_order().contains(&"Projects/Alpha/Alpha.md"), "hidden in its list");
+    assert!(
+        !s.list_order().contains(&"Projects/Alpha/Alpha.md"),
+        "hidden in its list"
+    );
     assert_eq!(
         s.open_folder_note("Projects/Alpha", true),
-        Some(Outcome::Open { path: "Projects/Alpha/Alpha.md".into(), how: OpenIn::Tab, settle: false })
+        Some(Outcome::Open {
+            path: "Projects/Alpha/Alpha.md".into(),
+            how: OpenIn::Tab,
+            settle: false
+        })
     );
 
     // Convert: a folder named for the note, the note moved in, opened.
@@ -513,13 +627,19 @@ fn folder_notes_hide_open_with_their_folder_and_convert_set_and_detach() {
         ops,
         [
             FileOp::CreateFolder("Projects/Plan".into()),
-            FileOp::Move { from: "Projects/Plan.md".into(), to: "Projects/Plan/Plan.md".into() },
+            FileOp::Move {
+                from: "Projects/Plan.md".into(),
+                to: "Projects/Plan/Plan.md".into()
+            },
         ]
     );
     assert_eq!(open, Some(("Projects/Plan/Plan.md".into(), OpenIn::Here)));
     src.write(&ops).unwrap();
     s.replace_index(VaultIndex::read(&src));
-    assert_eq!(s.folder_note("Projects/Plan"), Some("Projects/Plan/Plan.md"));
+    assert_eq!(
+        s.folder_note("Projects/Plan"),
+        Some("Projects/Plan/Plan.md")
+    );
     assert!(s.convert_to_folder_note("Projects/Plan/Plan.md").is_err());
 
     // Set: renamed in place; refused where the folder has one.
@@ -527,14 +647,29 @@ fn folder_notes_hide_open_with_their_folder_and_convert_set_and_detach() {
     let Ok(Outcome::Write { ops, .. }) = s.set_as_folder_note("Projects/Beta/Todo.md") else {
         panic!()
     };
-    assert_eq!(ops, [FileOp::Move { from: "Projects/Beta/Todo.md".into(), to: "Projects/Beta/Beta.md".into() }]);
-    assert!(s.set_as_folder_note("Welcome.md").is_err(), "the root has none");
+    assert_eq!(
+        ops,
+        [FileOp::Move {
+            from: "Projects/Beta/Todo.md".into(),
+            to: "Projects/Beta/Beta.md".into()
+        }]
+    );
+    assert!(
+        s.set_as_folder_note("Welcome.md").is_err(),
+        "the root has none"
+    );
 
     // Detach: renamed, a note like any other.
     let Ok(Outcome::Write { ops, .. }) = s.detach_folder_note("Projects/Alpha", None) else {
         panic!()
     };
-    assert_eq!(ops, [FileOp::Move { from: "Projects/Alpha/Alpha.md".into(), to: "Projects/Alpha/Alpha (note).md".into() }]);
+    assert_eq!(
+        ops,
+        [FileOp::Move {
+            from: "Projects/Alpha/Alpha.md".into(),
+            to: "Projects/Alpha/Alpha (note).md".into()
+        }]
+    );
     src.write(&ops).unwrap();
     s.replace_index(VaultIndex::read(&src));
     assert_eq!(s.folder_note("Projects/Alpha"), None);
@@ -554,12 +689,22 @@ fn pin_all_folder_notes_and_a_fixed_name() {
         &src,
         NavigatorSettings {
             folder_note_name: "index".to_owned(),
-            ..NavigatorSettings { include_descendants: true, ..notes_on() }
+            ..NavigatorSettings {
+                include_descendants: true,
+                ..notes_on()
+            }
         },
     );
     s.click_folder("Projects");
     assert_eq!(s.pin_folder_notes(), 2);
-    assert_eq!(&outline(&s)[..3], ["#Pinned", "Projects/Alpha/index.md", "Projects/Beta/index.md"]);
+    assert_eq!(
+        &outline(&s)[..3],
+        [
+            "#Pinned",
+            "Projects/Alpha/index.md",
+            "Projects/Beta/index.md"
+        ]
+    );
     assert_eq!(s.pin_folder_notes(), 0, "pinned already");
 }
 

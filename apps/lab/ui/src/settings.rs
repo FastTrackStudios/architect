@@ -12,11 +12,7 @@ use facet::Facet;
 /// Every section the lab itself declares.
 pub fn registry() -> Registry {
     let mut r = Registry::new();
-    for section in [
-        workspace(),
-        Editor::section(),
-        keyboard(),
-    ] {
+    for section in [workspace(), Editor::section(), keyboard()] {
         let _ = r.register(section);
     }
     r

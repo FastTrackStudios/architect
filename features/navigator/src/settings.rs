@@ -429,7 +429,10 @@ impl NavigatorSettings {
     /// A comma list's items, trimmed, empty ones left out.
     #[must_use]
     pub fn list(text: &str) -> Vec<&str> {
-        text.split(',').map(str::trim).filter(|t| !t.is_empty()).collect()
+        text.split(',')
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .collect()
     }
 
     /// The properties a note's name is read from: none unless names come
@@ -440,7 +443,11 @@ impl NavigatorSettings {
             return Vec::new();
         }
         let fields = Self::list(&self.frontmatter_name_field);
-        if fields.is_empty() { vec!["title"] } else { fields }
+        if fields.is_empty() {
+            vec!["title"]
+        } else {
+            fields
+        }
     }
 }
 

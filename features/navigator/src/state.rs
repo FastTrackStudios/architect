@@ -312,7 +312,7 @@ impl NavigatorState {
 
     /// The list's context: what [`list::rows`] reads past the vault.
     #[must_use]
-    pub fn list_context<'a>(&'a self, target: &'a NavTarget) -> ListContext<'a> {
+    pub const fn list_context<'a>(&'a self, target: &'a NavTarget) -> ListContext<'a> {
         ListContext {
             target,
             settings: &self.effective,
@@ -323,7 +323,7 @@ impl NavigatorState {
         }
     }
 
-    fn tree_cache(&self) -> &TreeOptions {
+    const fn tree_cache(&self) -> &TreeOptions {
         &self.tree
     }
 
@@ -668,34 +668,20 @@ impl NavigatorState {
             return;
         };
         let home = file.folder().to_owned();
-        let folder =
-            if !manual && self.effective.include_descendants && self.settings.reveal_shortest_path {
-                let current = self.selection.folder();
-                if let Some(current) = current.filter(|c| is_within(&home, c)) {
-                    current.to_owned()
-                } else {
-                    // The highest folder of its chain whose parents are all
-                    // open: the nearest one in view.
-                    let chain: Vec<&str> = std::iter::once(home.as_str())
-                        .chain(ancestors(&home))
-                        .collect();
-                    chain
-                        .iter()
-                        .rev()
-                        .find(|f| {
-                            ancestors(f).all(|a| {
-                                self.expanded.contains(a)
-                                    || (a.is_empty() && !self.settings.show_root)
-                            }) && (!f.is_empty() || self.settings.show_root)
-                        })
-                        .map_or_else(|| home.clone(), |f| (*f).to_owned())
-                }
-            } else {
-                for a in ancestors(&home) {
-                    self.expanded.insert(a.to_owned());
-                }
-                home
-            };
+        let folder = if !manual
+            && self.effective.include_descendants
+            && self.settings.reveal_shortest_path
+        {
+            self.selection
+                .folder()
+                .filter(|c| is_within(&home, c))
+                .map_or_else(|| self.nearest_open(&home), str::to_owned)
+        } else {
+            for a in ancestors(&home) {
+                self.expanded.insert(a.to_owned());
+            }
+            home
+        };
         if self.selection.folder() == Some(folder.as_str()) {
             self.selection.set_file(Some(path.to_owned()));
         } else {
@@ -710,6 +696,21 @@ impl NavigatorState {
             RANK_REVEAL,
         );
         self.ask_scroll(Pane::Files, path.to_owned(), Align::Auto, RANK_REVEAL);
+    }
+
+    /// The highest folder of `home`'s chain whose parents are all open:
+    /// the nearest one in view.
+    fn nearest_open(&self, home: &str) -> String {
+        let chain: Vec<&str> = std::iter::once(home).chain(ancestors(home)).collect();
+        chain
+            .iter()
+            .rev()
+            .find(|f| {
+                ancestors(f).all(|a| {
+                    self.expanded.contains(a) || (a.is_empty() && !self.settings.show_root)
+                }) && (!f.is_empty() || self.settings.show_root)
+            })
+            .map_or_else(|| home.to_owned(), |f| (*f).to_owned())
     }
 
     /// Reveals the note open in the workspace (the reveal command).
@@ -813,7 +814,8 @@ impl NavigatorState {
             .active
             .clone()
             .filter(|a| self.index.file(a).is_some_and(|f| list::has_tag(f, &tag)));
-        self.selection.select_target(NavTarget::Tag(tag), keep.clone());
+        self.selection
+            .select_target(NavTarget::Tag(tag), keep.clone());
         self.rebuild_list();
         match keep {
             Some(file) => self.ask_scroll(Pane::Files, file, Align::Auto, RANK_NAVIGATION),
@@ -893,11 +895,9 @@ impl NavigatorState {
     /// to the settings' are let go.
     pub fn set_appearance(&mut self, target: &NavTarget, appearance: Appearance) {
         let key = target_key(target);
-        let a = Appearance {
-            target: key.clone(),
-            ..appearance
-        }
-        .pruned(&self.settings);
+        let mut a = appearance;
+        a.target.clone_from(&key);
+        let a = a.pruned(&self.settings);
         if a.is_empty() {
             self.appearances.remove(&key);
         } else {
@@ -940,7 +940,10 @@ impl NavigatorState {
         if !s.folder_notes {
             return Err("folder notes are off (Settings → Navigator)".to_owned());
         }
-        let f = self.index.file(path).ok_or_else(|| format!("no note {path}"))?;
+        let f = self
+            .index
+            .file(path)
+            .ok_or_else(|| format!("no note {path}"))?;
         if list::is_folder_note(&self.index, s, path) {
             return Err(format!("{path} is its folder's note already"));
         }
@@ -950,7 +953,10 @@ impl NavigatorState {
             return Err(format!("there is a folder {folder} already"));
         }
         let ext = f.extension();
-        let to = join(&folder, &format!("{}.{ext}", list::folder_note_name(s, &folder)));
+        let to = join(
+            &folder,
+            &format!("{}.{ext}", list::folder_note_name(s, &folder)),
+        );
         if s.pin_created_folder_note {
             self.set_pin(&to, false, true);
         }
@@ -978,7 +984,10 @@ impl NavigatorState {
         if !s.folder_notes {
             return Err("folder notes are off (Settings → Navigator)".to_owned());
         }
-        let f = self.index.file(path).ok_or_else(|| format!("no note {path}"))?;
+        let f = self
+            .index
+            .file(path)
+            .ok_or_else(|| format!("no note {path}"))?;
         let folder = f.folder();
         if folder.is_empty() {
             return Err("the vault's root has no folder note".to_owned());
@@ -989,7 +998,10 @@ impl NavigatorState {
         if let Some(n) = list::folder_note(&self.index, s, folder) {
             return Err(format!("{folder} has a note already: {n}"));
         }
-        let to = join(folder, &format!("{}.{}", list::folder_note_name(s, folder), f.extension()));
+        let to = join(
+            folder,
+            &format!("{}.{}", list::folder_note_name(s, folder), f.extension()),
+        );
         if self.index.file(&to).is_some() {
             return Err(format!("{to} is there already"));
         }
@@ -1009,12 +1021,19 @@ impl NavigatorState {
     /// # Errors
     ///
     /// The folder has no note, or the name is taken.
-    pub fn detach_folder_note(&mut self, folder: &str, name: Option<&str>) -> Result<Outcome, String> {
+    pub fn detach_folder_note(
+        &mut self,
+        folder: &str,
+        name: Option<&str>,
+    ) -> Result<Outcome, String> {
         let note = self
             .folder_note(folder)
             .ok_or_else(|| format!("{folder} has no folder note"))?
             .to_owned();
-        let f = self.index.file(&note).ok_or_else(|| format!("no note {note}"))?;
+        let f = self
+            .index
+            .file(&note)
+            .ok_or_else(|| format!("no note {note}"))?;
         let ext = f.extension();
         let base = name.map(str::trim).filter(|n| !n.is_empty()).map_or_else(
             || format!("{} (note)", f.name()),

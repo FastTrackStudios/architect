@@ -561,8 +561,16 @@ fn navigator_samples(source: MemorySource, now: Millis) -> MemorySource {
         .with_resource("Attachments/Sketch.excalidraw.png", sketch)
         .with_file(NoteFile::new("Attachments/Logo.svg", ago(3), ago(3)))
         .with_file(NoteFile::new("Attachments/Brief.pdf", ago(12), ago(12)))
-        .with_file(NoteFile::new("Attachments/Sketch.excalidraw.md", ago(1), ago(1)))
-        .with_file(NoteFile::new("Attachments/Sketch.excalidraw.png", ago(1), ago(1)))
+        .with_file(NoteFile::new(
+            "Attachments/Sketch.excalidraw.md",
+            ago(1),
+            ago(1),
+        ))
+        .with_file(NoteFile::new(
+            "Attachments/Sketch.excalidraw.png",
+            ago(1),
+            ago(1),
+        ))
         .with_file(NoteFile::new("Attachments/Board.canvas", ago(20), ago(20)))
         .with_file(
             NoteFile::new("Projects/Launch plan.md", ago(9), ago(0))
@@ -721,7 +729,9 @@ fn FilesView() -> Element {
                 let _ = w.activate(&doc);
             }
             let _ = w.open(note(&id, &title), target);
-        } else if let Some(ui) = try_consume_context::<architect_extensions::interface::ExtensionUi>() {
+        } else if let Some(ui) =
+            try_consume_context::<architect_extensions::interface::ExtensionUi>()
+        {
             let _ = ui.open_path(&o.path);
         }
     });
@@ -742,19 +752,19 @@ fn FilesView() -> Element {
     if mount.peek().phone != phone {
         mount.write().phone = phone;
     }
-    match try_use_context::<architect_extensions::interface::ExtensionUi>() {
-        Some(ui) => rsx! {
-            architect_extensions::interface::ExtensionView {
-                ui,
-                extension: architect_navigator_extension::ID.to_owned(),
-                view: "files".to_owned(),
-                bare: true,
+    try_use_context::<architect_extensions::interface::ExtensionUi>().map_or_else(
+        || rsx! { NavigatorView { navigator: nav, phone, on_open, on_context_menu } },
+        |ui| {
+            rsx! {
+                architect_extensions::interface::ExtensionView {
+                    ui,
+                    extension: architect_navigator_extension::ID.to_owned(),
+                    view: "files".to_owned(),
+                    bare: true,
+                }
             }
         },
-        None => rsx! {
-            NavigatorView { navigator: nav, phone, on_open, on_context_menu }
-        },
-    }
+    )
 }
 
 /// The class of screen the lab stands in for.

@@ -1,6 +1,8 @@
-//! Between the actions and the view: an action runs wherever the host
-//! runs it (any thread, linked in or in its own process), the navigator
-//! lives in the view that draws it. An action posts an [`Ask`] and waits;
+//! Between the actions and the view.
+//!
+//! An action runs wherever the host runs it (any thread, linked in or in
+//! its own process); the navigator lives in the view that draws it. An
+//! action posts an [`Ask`] and waits;
 //! the view mounted takes each one in turn, does it to its navigator, and
 //! answers. No view on show, no navigator: the action says so.
 
@@ -48,10 +50,11 @@ pub async fn ask(action: &str, args: Value) -> Result<Value, String> {
         answer: tx,
     });
     let timeout = futures_timer::Delay::new(WAIT);
-    futures_util_select(rx, timeout).await
+    first(rx, timeout).await
 }
 
-async fn futures_util_select(
+/// The answer, or why there is none once `timeout` fires.
+async fn first(
     rx: oneshot::Receiver<Result<Value, String>>,
     timeout: futures_timer::Delay,
 ) -> Result<Value, String> {
@@ -81,6 +84,7 @@ async fn futures_util_select(
 }
 
 /// The asks waiting, taken.
+#[must_use]
 pub fn take() -> Vec<Ask> {
     asks().drain(..).collect()
 }

@@ -5,8 +5,8 @@
 use dioxus::prelude::*;
 use lucide_dioxus::{
     ArrowDown, ArrowDownWideNarrow, ArrowLeft, ArrowUp, ArrowUpDown, Check, ChevronDown,
-    ChevronRight, ChevronsDownUp, ChevronsUpDown, Columns2, FileText, Folder, FolderOpen,
-    ListTree, Pin, Rows3, Tag, Vault,
+    ChevronRight, ChevronsDownUp, ChevronsUpDown, Columns2, FileText, Folder, FolderOpen, ListTree,
+    Pin, Rows3, Tag, Vault,
 };
 
 use super::virtual_pane::VirtualPane;
@@ -371,7 +371,13 @@ fn ListRows(
             let top = s.list_offsets().start(i) - offset;
             let h = s.list_offsets().height(i);
             match &row.kind {
-                ListRowKind::Header { label, group, collapsed, count, pinned } => Some(Item::Header {
+                ListRowKind::Header {
+                    label,
+                    group,
+                    collapsed,
+                    count,
+                    pinned,
+                } => Some(Item::Header {
                     key: row.key.clone(),
                     label: label.clone(),
                     group: group.clone(),
@@ -381,7 +387,14 @@ fn ListRows(
                     top,
                     h,
                 }),
-                ListRowKind::File { path, parent, pinned, lines, thumb, .. } => {
+                ListRowKind::File {
+                    path,
+                    parent,
+                    pinned,
+                    lines,
+                    thumb,
+                    ..
+                } => {
                     let f = s.file(path)?;
                     let at = list::date_of(f, &settings, clock);
                     let cx = s.list_context(&target);
@@ -390,7 +403,10 @@ fn ListRows(
                         .map(|(full, shown)| Pill {
                             key: full.to_owned(),
                             text: shown.to_owned(),
-                            colour: settings.color_tags.then(|| s.colour(&format!("tag:{full}")).map(str::to_owned)).flatten(),
+                            colour: settings
+                                .color_tags
+                                .then(|| s.colour(&format!("tag:{full}")).map(str::to_owned))
+                                .flatten(),
                         })
                         .collect::<Vec<_>>();
                     let mut tags = tags;
@@ -417,13 +433,16 @@ fn ListRows(
                     if let Some(w) = &words
                         && settings.text_count_placement == CountPlacement::Property
                     {
-                        properties.push(Pill { key: "words".to_owned(), text: w.clone(), colour: None });
+                        properties.push(Pill {
+                            key: "words".to_owned(),
+                            text: w.clone(),
+                            colour: None,
+                        });
                     }
                     let image = thumb.as_ref().map(|t| match t {
-                        Thumb::File(p) => source.resource_url(p).map_or_else(
-                            || ThumbView::Badge(extension_badge(p)),
-                            ThumbView::Url,
-                        ),
+                        Thumb::File(p) => source
+                            .resource_url(p)
+                            .map_or_else(|| ThumbView::Badge(extension_badge(p)), ThumbView::Url),
                         Thumb::Url(u) => ThumbView::Url(u.clone()),
                         Thumb::Badge(b) => ThumbView::Badge(b.clone()),
                     });
@@ -438,8 +457,15 @@ fn ListRows(
                         pinned: *pinned,
                         lines: *lines,
                         tags: if lines.tags { tags } else { Vec::new() },
-                        properties: if lines.properties { properties } else { Vec::new() },
-                        tasks: f.tasks.filter(|_| lines.tasks).map(|t| (t.total.saturating_sub(t.unfinished), t.total)),
+                        properties: if lines.properties {
+                            properties
+                        } else {
+                            Vec::new()
+                        },
+                        tasks: f
+                            .tasks
+                            .filter(|_| lines.tasks)
+                            .map(|t| (t.total.saturating_sub(t.unfinished), t.total)),
                         words: words.filter(|_| lines.count_in_title),
                         image,
                         top,
@@ -490,7 +516,7 @@ fn thousands(n: u32) -> String {
     let digits = n.to_string();
     let mut out = String::new();
     for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i) % 3 == 0 {
+        if i > 0 && digits.len().saturating_sub(i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(c);
@@ -597,8 +623,14 @@ fn FileRow(
     };
     let wrap = if lines.title == 1 { "nowrap" } else { "normal" };
     // An image fills the row's height less its padding, 42 to the size set.
-    let size = f64::from(settings.feature_image_size).min(h - 16.0).max(list::IMAGE_FLOOR);
-    let image_w = if settings.force_square_image { format!("{size}px") } else { "auto".to_owned() };
+    let size = f64::from(settings.feature_image_size)
+        .min(h - 16.0)
+        .max(list::IMAGE_FLOOR);
+    let image_w = if settings.force_square_image {
+        format!("{size}px")
+    } else {
+        "auto".to_owned()
+    };
     let parent_shown = settings.show_parent_folder && !pinned;
     rsx! {
         div {

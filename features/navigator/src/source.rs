@@ -574,7 +574,13 @@ impl MemorySource {
     fn write_one(&self, op: &FileOp) -> Result<(), String> {
         match op {
             FileOp::CreateFolder(f) => {
-                if self.inner.folders.read().unwrap_or_else(PoisonError::into_inner).contains(f) {
+                if self
+                    .inner
+                    .folders
+                    .read()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .contains(f)
+                {
                     return Err(format!("{f} is there already"));
                 }
                 self.create_folder(f.clone());

@@ -1,7 +1,8 @@
-//! The list pane's rows: the selected folder's or tag's notes, filtered
-//! (folder notes and drawings' previews hidden), sorted, the pinned ones
-//! first, grouped (by date, folder or a property's value), and each row's
-//! lines and height.
+//! The list pane's rows, and each row's lines and height.
+//!
+//! The selected folder's or tag's notes, filtered (folder notes and
+//! drawings' previews hidden), sorted, the pinned ones first, grouped (by
+//! date, folder or a property's value).
 //!
 //! Notebook Navigator's list items (`src/hooks/listPaneData/listItems.ts`
 //! `buildListItemsInternal`), `sortFiles` (`src/utils/sortUtils.ts`), date
@@ -18,7 +19,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use crate::grouping;
 use crate::index::VaultIndex;
 use crate::selection::NavTarget;
-use crate::settings::{CountPlacement, Grouping, ListMode, NavigatorSettings, SortOption, TextCount};
+use crate::settings::{
+    CountPlacement, Grouping, ListMode, NavigatorSettings, SortOption, TextCount,
+};
 use crate::source::{Millis, NoteFile, PropertyValue, file_name, parent};
 use crate::tree::{TreeOptions, natural_cmp, ordered_children};
 
@@ -190,7 +193,8 @@ pub fn has_tag(f: &NoteFile, tag: &str) -> bool {
         t.eq_ignore_ascii_case(tag)
             || (t.len() > tag.len()
                 && t.as_bytes().get(tag.len()) == Some(&b'/')
-                && t.get(..tag.len()).is_some_and(|h| h.eq_ignore_ascii_case(tag)))
+                && t.get(..tag.len())
+                    .is_some_and(|h| h.eq_ignore_ascii_case(tag)))
     })
 }
 
@@ -223,7 +227,7 @@ pub fn rows(index: &VaultIndex, cx: &ListContext<'_>) -> Vec<ListRow> {
     let mut out = Rows {
         index,
         cx,
-        rows: vec![ListRow {
+        out: vec![ListRow {
             key: "top-spacer".to_owned(),
             kind: ListRowKind::TopSpacer,
         }],
@@ -241,7 +245,12 @@ pub fn rows(index: &VaultIndex, cx: &ListContext<'_>) -> Vec<ListRow> {
             let (ranked, unsorted): (Vec<&NoteFile>, Vec<&NoteFile>) =
                 md.into_iter().partition(|f| rank(f, key).is_some());
             if !pinned.is_empty() && !ranked.is_empty() {
-                out.header(&collapse_key(&scope, "manual", "section:notes"), "Notes", ranked.len(), false);
+                out.header(
+                    &collapse_key(&scope, "manual", "section:notes"),
+                    "Notes",
+                    ranked.len(),
+                    false,
+                );
             }
             out.files(&ranked, false);
             if !unsorted.is_empty() {
@@ -259,7 +268,11 @@ pub fn rows(index: &VaultIndex, cx: &ListContext<'_>) -> Vec<ListRow> {
             }
         }
         Grouping::Date => {
-            let field = if s.sort.shows_created() { "ctime" } else { "mtime" };
+            let field = if s.sort.shows_created() {
+                "ctime"
+            } else {
+                "mtime"
+            };
             let mut groups: Vec<(String, String, Vec<&NoteFile>)> = Vec::new();
             for f in rest {
                 let (key, label) = date_group(date_of(f, s, cx.clock), cx.clock);
@@ -294,23 +307,23 @@ pub fn rows(index: &VaultIndex, cx: &ListContext<'_>) -> Vec<ListRow> {
             }
         }
     }
-    out.rows.push(ListRow {
+    out.out.push(ListRow {
         key: "bottom-spacer".to_owned(),
         kind: ListRowKind::BottomSpacer,
     });
-    out.rows
+    out.out
 }
 
 struct Rows<'a, 'c> {
     index: &'a VaultIndex,
     cx: &'a ListContext<'c>,
-    rows: Vec<ListRow>,
+    out: Vec<ListRow>,
 }
 
 impl Rows<'_, '_> {
     fn header(&mut self, group: &str, label: &str, count: usize, pinned: bool) -> bool {
         let collapsed = self.cx.collapsed.contains(group);
-        self.rows.push(ListRow {
+        self.out.push(ListRow {
             key: format!("header:{group}"),
             kind: ListRowKind::Header {
                 label: label.to_owned(),
@@ -337,7 +350,7 @@ impl Rows<'_, '_> {
             let has_preview = f.preview.as_deref().is_some_and(|p| !p.trim().is_empty());
             let thumb = thumb(self.index, f, cx.settings);
             let lines = lines(f, cx, pinned, parent_shown.is_some(), has_preview);
-            self.rows.push(ListRow {
+            self.out.push(ListRow {
                 key: f.path.clone(),
                 kind: ListRowKind::File {
                     path: f.path.clone(),
@@ -396,24 +409,8 @@ fn folder_groups<'a>(
     }
     let mut out = Vec::new();
     for ((_, folder), files) in groups {
-        let (id, label) = match selected {
-            Some(sel) => {
-                let id = format!("folder:{folder}");
-                if folder == sel {
-                    (id, None)
-                } else {
-                    let rel = folder
-                        .strip_prefix(sel)
-                        .map_or(folder.as_str(), |r| r.trim_start_matches('/'));
-                    let label = if cx.settings.show_folder_group_paths {
-                        rel.to_owned()
-                    } else {
-                        file_name(&folder).to_owned()
-                    };
-                    (id, Some(label))
-                }
-            }
-            None => {
+        let (id, label) = selected.map_or_else(
+            || {
                 let label = if folder.is_empty() {
                     index.name().to_owned()
                 } else if cx.settings.show_folder_group_paths {
@@ -422,8 +419,23 @@ fn folder_groups<'a>(
                     file_name(&folder).to_owned()
                 };
                 (format!("folder:/{folder}"), Some(label))
-            }
-        };
+            },
+            |sel| {
+                let id = format!("folder:{folder}");
+                if folder == sel {
+                    return (id, None);
+                }
+                let rel = folder
+                    .strip_prefix(sel)
+                    .map_or(folder.as_str(), |r| r.trim_start_matches('/'));
+                let label = if cx.settings.show_folder_group_paths {
+                    rel.to_owned()
+                } else {
+                    file_name(&folder).to_owned()
+                };
+                (id, Some(label))
+            },
+        );
         out.push((id, label, files));
     }
     // The selected folder's own notes first.
@@ -461,7 +473,8 @@ fn lines(
     let compact = s.mode == ListMode::Compact;
     let tasks = !compact
         && s.show_task_progress
-        && f.tasks.is_some_and(|t| t.total > 0 && !(s.hide_task_progress_complete && t.unfinished == 0));
+        && f.tasks
+            .is_some_and(|t| t.total > 0 && !(s.hide_task_progress_complete && t.unfinished == 0));
     let date = !compact && !pinned && s.show_date;
     let meta = date || (!compact && !pinned && s.show_parent_folder && parent) || tasks;
     let preview = if compact || !s.show_preview || !has_preview || s.preview_rows == 0 {
@@ -513,7 +526,7 @@ pub fn shown_tags<'a>(f: &'a NoteFile, cx: &ListContext<'_>) -> Vec<(&'a str, &'
 
 /// The properties a row shows, as `(key, value)`: the listed keys it has.
 #[must_use]
-pub fn shown_properties<'a>(f: &'a NoteFile, s: &NavigatorSettings) -> Vec<(String, String)> {
+pub fn shown_properties(f: &NoteFile, s: &NavigatorSettings) -> Vec<(String, String)> {
     NavigatorSettings::list(&s.list_properties)
         .into_iter()
         .filter_map(|k| {
@@ -530,12 +543,15 @@ pub fn shown_properties<'a>(f: &'a NoteFile, s: &NavigatorSettings) -> Vec<(Stri
 // ── Images ─────────────────────────────────────────────────────────────
 
 /// Raster images a row can show as they are.
-const RASTER: [&str; 9] = ["png", "jpg", "jpeg", "gif", "webp", "avif", "heic", "heif", "bmp"];
+const RASTER: [&str; 9] = [
+    "png", "jpg", "jpeg", "gif", "webp", "avif", "heic", "heif", "bmp",
+];
 
-/// A note's image (`shouldShowFeatureImageArea`): a property naming one,
-/// the source's, the file itself (an image, an SVG), a drawing's preview,
-/// or a kind's badge (a PDF without a cover, a canvas, a base, a drawing
-/// without a preview). None in compact rows.
+/// A note's image (`shouldShowFeatureImageArea`); none in compact rows.
+///
+/// A property naming one, the source's, the file itself (an image, an
+/// SVG), a drawing's preview, or a kind's badge (a PDF without a cover, a
+/// canvas, a base, a drawing without a preview).
 #[must_use]
 pub fn thumb(index: &VaultIndex, f: &NoteFile, s: &NavigatorSettings) -> Option<Thumb> {
     if !s.show_feature_image || s.mode == ListMode::Compact {
@@ -600,7 +616,7 @@ pub fn drawing_kind(f: &NoteFile) -> Option<&'static str> {
     {
         return Some("EXCALIDRAW");
     }
-    if path.ends_with(".tldr")
+    if f.extension().eq_ignore_ascii_case("tldr")
         || (f.is_markdown() && f.get("tldraw-file") == Some(&PropertyValue::Bool(true)))
     {
         return Some("TLDRAW");
@@ -697,7 +713,12 @@ pub fn modified(f: &NoteFile, s: &NavigatorSettings, clock: Clock) -> Millis {
     frontmatter_date(f, s, &s.frontmatter_modified_field, clock).unwrap_or(f.modified)
 }
 
-fn frontmatter_date(f: &NoteFile, s: &NavigatorSettings, field: &str, clock: Clock) -> Option<Millis> {
+fn frontmatter_date(
+    f: &NoteFile,
+    s: &NavigatorSettings,
+    field: &str,
+    clock: Clock,
+) -> Option<Millis> {
     if !s.use_frontmatter {
         return None;
     }
@@ -728,26 +749,30 @@ fn epoch(n: f64) -> Millis {
 /// (`offset` from UTC).
 #[must_use]
 pub fn parse_date(text: &str, offset: Millis) -> Option<Millis> {
-    let t = text.trim();
-    let num = |s: &str| -> Option<i64> {
-        (!s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())).then(|| s.parse().ok())?
+    let text = text.trim();
+    let num = |digits: &str| -> Option<i64> {
+        (!digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()))
+            .then(|| digits.parse().ok())?
     };
-    let (date, rest) = t.split_at(t.len().min(10));
-    let mut d = date.split('-');
-    let (y, m, day) = (num(d.next()?)?, num(d.next()?)?, num(d.next()?)?);
-    if d.next().is_some() || !(1..=12).contains(&m) || !(1..=31).contains(&day) {
+    let (date, rest) = text.split_at(text.len().min(10));
+    let mut parts = date.split('-');
+    let (year, month, day) = (
+        num(parts.next()?)?,
+        num(parts.next()?)?,
+        num(parts.next()?)?,
+    );
+    if parts.next().is_some() || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
         return None;
     }
-    let mut ms = days_from_civil(y, m, day).saturating_mul(DAY);
+    let mut ms = days_from_civil(year, month, day).saturating_mul(DAY);
     let rest = rest.strip_prefix(['T', ' ']).unwrap_or(rest);
-    let (time, zone) = match rest.find(['Z', '+', '-']) {
-        Some(i) => rest.split_at(i),
-        None => (rest, ""),
-    };
+    let (time, zone) = rest
+        .find(['Z', '+', '-'])
+        .map_or((rest, ""), |at| rest.split_at(at));
     if !time.is_empty() {
         let (hms, frac) = time.split_once('.').unwrap_or((time, ""));
         let mut parts = hms.split(':');
-        let h = num(parts.next()?)?;
+        let hour = num(parts.next()?)?;
         let min = num(parts.next().unwrap_or("0"))?;
         let sec = num(parts.next().unwrap_or("0"))?;
         let frac = frac.get(..frac.len().min(3)).unwrap_or("");
@@ -758,7 +783,7 @@ pub fn parse_date(text: &str, offset: Millis) -> Option<Millis> {
             num(frac)?.saturating_mul(10_i64.saturating_pow(pad))
         };
         ms = ms
-            .saturating_add(h.saturating_mul(3_600_000))
+            .saturating_add(hour.saturating_mul(3_600_000))
             .saturating_add(min.saturating_mul(60_000))
             .saturating_add(sec.saturating_mul(1000))
             .saturating_add(milli);
@@ -768,12 +793,16 @@ pub fn parse_date(text: &str, offset: Millis) -> Option<Millis> {
         "Z" => 0,
         z => {
             let z = z.get(1..)?.replace(':', "");
-            let h = num(z.get(..2)?)?;
-            let m = num(z.get(2..).unwrap_or("0")).unwrap_or(0);
-            let at = h
+            let hours = num(z.get(..2)?)?;
+            let mins = num(z.get(2..).unwrap_or("0")).unwrap_or(0);
+            let at = hours
                 .saturating_mul(3_600_000)
-                .saturating_add(m.saturating_mul(60_000));
-            if zone.starts_with('-') { at.saturating_neg() } else { at }
+                .saturating_add(mins.saturating_mul(60_000));
+            if zone.starts_with('-') {
+                at.saturating_neg()
+            } else {
+                at
+            }
         }
     };
     Some(ms.saturating_sub(zone_offset))
@@ -834,7 +863,13 @@ pub fn sort(files: &mut [&NoteFile], s: &NavigatorSettings, clock: Clock) {
     files.sort_by(|a, b| compare(a, b, s, &names, clock).then_with(|| a.path.cmp(&b.path)));
 }
 
-fn compare(a: &NoteFile, b: &NoteFile, s: &NavigatorSettings, names: &[&str], clock: Clock) -> Ordering {
+fn compare(
+    a: &NoteFile,
+    b: &NoteFile,
+    s: &NavigatorSettings,
+    names: &[&str],
+    clock: Clock,
+) -> Ordering {
     match s.sort {
         SortOption::ModifiedDesc => modified(b, s, clock).cmp(&modified(a, s, clock)),
         SortOption::ModifiedAsc => modified(a, s, clock).cmp(&modified(b, s, clock)),
@@ -851,12 +886,14 @@ fn compare(a: &NoteFile, b: &NoteFile, s: &NavigatorSettings, names: &[&str], cl
                 (true, None) => 1,
                 (false, _) => 2,
             };
-            class(a).cmp(&class(b)).then_with(|| {
-                match (rank(a, key), rank(b, key)) {
-                    (Some(x), Some(y)) => x.partial_cmp(&y).unwrap_or(Ordering::Equal),
+            class(a)
+                .cmp(&class(b))
+                .then_with(|| match (rank(a, key), rank(b, key)) {
+                    (Some(left), Some(right)) => {
+                        left.partial_cmp(&right).unwrap_or(Ordering::Equal)
+                    }
                     _ => natural_cmp(a.title(names), b.title(names)),
-                }
-            })
+                })
         }
     }
 }
@@ -1002,7 +1039,10 @@ pub fn file_height(lines: Lines, image: bool, settings: &NavigatorSettings, m: L
     let title = f64::from(lines.title.clamp(1, 3));
     let pills = f64::from(lines.pills()) * PILL_ROW;
     if settings.mode == ListMode::Compact {
-        return title.mul_add(m.title_line, f64::from(settings.compact_height) - m.title_line) + pills;
+        return title.mul_add(
+            m.title_line,
+            f64::from(settings.compact_height) - m.title_line,
+        ) + pills;
     }
     let mut body = title * m.title_line;
     body = f64::from(lines.preview).mul_add(m.multi_line, body);

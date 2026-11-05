@@ -1,7 +1,8 @@
-//! Grouping by a property's value, as Obsidian's Bases groups rows and
-//! Notebook Navigator's list groups notes (`getPropertyGroupingValueFromRecord`,
-//! `src/utils/sortUtils.ts`; `buildListItemsInternal`,
-//! `src/hooks/listPaneData/listItems.ts`).
+//! Grouping by a property's value, as Bases groups rows.
+//!
+//! Notebook Navigator's list groups notes the same way
+//! (`getPropertyGroupingValueFromRecord`, `src/utils/sortUtils.ts`;
+//! `buildListItemsInternal`, `src/hooks/listPaneData/listItems.ts`).
 //!
 //! It knows nothing of notes: [`by_value`] takes any items and a way to
 //! read each one's value, so a Bases view groups its rows with the same
@@ -29,7 +30,7 @@ pub const NONE_ID: &str = "property-none";
 pub const NONE_LABEL: &str = "None";
 
 /// One group of items.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValueGroup<T> {
     /// `property-value:<parts>` or [`NONE_ID`].
     pub id: String,

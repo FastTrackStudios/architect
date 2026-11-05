@@ -52,8 +52,9 @@ fn handle() -> Option<Handle> {
         .clone()
 }
 
-/// What the app hands Navigator's view, in context above it as a
-/// `Signal<NavigatorMount>`: its navigator (made with `use_navigator` over
+/// What the app hands Navigator's view, in context above it.
+///
+/// A `Signal<NavigatorMount>`: its navigator (made with `use_navigator` over
 /// its vault, where it lives on), what opens a note, its context menu,
 /// and whether it is a phone's.
 #[derive(Clone, Copy, PartialEq)]
@@ -123,16 +124,19 @@ impl Extension for NavigatorExtension {
 /// Its sidebar view: the app's navigator, or its own over a sample vault.
 #[component]
 pub fn FilesView() -> Element {
-    match try_use_context::<Signal<NavigatorMount>>() {
-        Some(mount) => rsx! { Drive { mount: mount() } },
-        None => rsx! { Standalone {} },
-    }
+    try_use_context::<Signal<NavigatorMount>>().map_or_else(
+        || rsx! { Standalone {} },
+        |mount| rsx! { Drive { mount: mount() } },
+    )
 }
 
 /// Its own navigator, when no app gave one: its process copy's.
 #[component]
 fn Standalone() -> Element {
-    let nav = use_navigator(|| Arc::new(sample()) as Arc<dyn NavigatorSource>);
+    let nav = use_navigator(|| {
+        let source: Arc<dyn NavigatorSource> = Arc::new(sample());
+        source
+    });
     let on_open = EventHandler::new(|o: Open| {
         if let Some(h) = handle() {
             h.status("navigator", format!("Opened {}", o.path));
@@ -159,7 +163,7 @@ fn Drive(mount: NavigatorMount) -> Element {
     use_future(move || async move {
         loop {
             for ask in bridge::take() {
-                let out = run(nav, mount.on_open, &ask.action, &ask.args);
+                let out = run(&nav, mount.on_open, &ask.action, &ask.args);
                 let _ = ask.answer.send(out);
             }
             futures_timer::Delay::new(Duration::from_millis(40)).await;
@@ -181,10 +185,26 @@ fn text<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
     v.get(key).and_then(Value::as_str).filter(|s| !s.is_empty())
 }
 
+/// A whole number, as JSON or as text (the CLI's `--arg by=-2`).
+fn int(v: &Value, key: &str) -> Option<i64> {
+    let at = v.get(key)?;
+    at.as_i64().or_else(|| at.as_str()?.trim().parse().ok())
+}
+
+/// A yes or no, as JSON or as text (`--arg on=false`).
+fn flag(v: &Value, key: &str) -> Option<bool> {
+    let at = v.get(key)?;
+    at.as_bool().or_else(|| at.as_str()?.trim().parse().ok())
+}
+
 /// The notes an action is about: `paths`, `path`, else the selected ones.
 fn paths_of(args: &Value, s: &NavigatorState) -> Vec<String> {
     if let Some(list) = args.get("paths").and_then(Value::as_array) {
-        return list.iter().filter_map(Value::as_str).map(str::to_owned).collect();
+        return list
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect();
     }
     if let Some(p) = text(args, "path") {
         return vec![p.to_owned()];
@@ -200,7 +220,13 @@ fn one_path(args: &Value, s: &NavigatorState) -> Result<String, String> {
 }
 
 /// Does action `id` to the navigator.
-fn run(nav: Navigator, on_open: EventHandler<Open>, id: &str, args: &Value) -> Result<Value, String> {
+fn run(
+    nav: &Navigator,
+    on_open: EventHandler<Open>,
+    id: &str,
+    args: &Value,
+) -> Result<Value, String> {
+    let nav = *nav;
     let ok = |nav: Navigator| Ok(state(&nav.state.peek()));
     match id {
         "NAVIGATOR_STATE" => ok(nav),
@@ -291,25 +317,27 @@ fn run(nav: Navigator, on_open: EventHandler<Open>, id: &str, args: &Value) -> R
                 .ok_or_else(|| "group `by` is none, date, folder or property".to_owned())?;
             if let Some(p) = text(args, "property") {
                 let p = p.to_owned();
-                nav.settings.update(move |s| s.group_property.clone_from(&p));
+                nav.settings
+                    .update(move |s| s.group_property.clone_from(&p));
             }
             nav.edit_list(move |_, s| s.grouping = g);
             ok(nav)
         }
         "NAVIGATOR_TOGGLE_GROUP" => {
-            let group = match text(args, "group") {
-                Some(g) => g.to_owned(),
+            let group = if let Some(g) = text(args, "group") {
+                g.to_owned()
+            } else {
                 // By its heading's label.
-                None => {
+                {
                     let label = text(args, "label").ok_or("which group? (`group` or `label`)")?;
                     nav.state
                         .peek()
                         .list_rows()
                         .iter()
                         .find_map(|r| match &r.kind {
-                            ListRowKind::Header { label: l, group, .. } if l == label => {
-                                Some(group.clone())
-                            }
+                            ListRowKind::Header {
+                                label: l, group, ..
+                            } if l == label => Some(group.clone()),
                             _ => None,
                         })
                         .ok_or_else(|| format!("no group {label:?} in the list"))?
@@ -319,17 +347,20 @@ fn run(nav: Navigator, on_open: EventHandler<Open>, id: &str, args: &Value) -> R
             ok(nav)
         }
         "NAVIGATOR_OWN_LIST" => {
-            let on = args.get("on").and_then(Value::as_bool).unwrap_or(true);
+            let on = flag(args, "on").unwrap_or(true);
             let mut own = nav.own;
             own.set(on);
             if !on {
                 let target = nav.state.peek().target();
-                nav.update(|s| s.set_appearance(&target, architect_navigator::Appearance::default()));
+                nav.update(|s| {
+                    s.set_appearance(&target, architect_navigator::Appearance::default());
+                });
             }
             ok(nav)
         }
         "NAVIGATOR_COLOUR" => {
-            let target = text(args, "target").ok_or("`target`: tag:<tag> or property:<key>[=<value>]")?;
+            let target =
+                text(args, "target").ok_or("`target`: tag:<tag> or property:<key>[=<value>]")?;
             nav.update(|s| s.set_colour(target, text(args, "colour")));
             ok(nav)
         }
@@ -351,12 +382,14 @@ fn run(nav: Navigator, on_open: EventHandler<Open>, id: &str, args: &Value) -> R
                 let p = p.to_owned();
                 nav.update(|s| s.click_file(&p, architect_navigator::Mods::NONE));
             }
-            let by = args.get("by").and_then(Value::as_i64).unwrap_or(1);
-            let by = isize::try_from(by).unwrap_or(1);
-            let out = nav.state.peek().move_in_order(by);
-            if out.is_none() {
-                return Err("notes move only in a manual sort (NAVIGATOR_SORT by=manual)".to_owned());
+            let by = isize::try_from(int(args, "by").unwrap_or(1)).unwrap_or(1);
+            if nav.state.peek().effective().sort != SortOption::Manual {
+                return Err(
+                    "notes move only in a manual sort (NAVIGATOR_SORT by=manual)".to_owned(),
+                );
             }
+            // None: nothing selected, or nowhere to go.
+            let out = nav.state.peek().move_in_order(by);
             nav.act(out, on_open);
             ok(nav)
         }
@@ -431,7 +464,12 @@ pub fn state(s: &NavigatorState) -> Value {
                 "heading": label, "group": group, "collapsed": collapsed,
                 "count": count, "pinned": pinned,
             })),
-            ListRowKind::File { path, pinned, thumb, .. } => Some(json!({
+            ListRowKind::File {
+                path,
+                pinned,
+                thumb,
+                ..
+            } => Some(json!({
                 "path": path, "pinned": pinned, "thumb": thumb.as_ref().map(|t| format!("{t:?}")),
             })),
             _ => None,

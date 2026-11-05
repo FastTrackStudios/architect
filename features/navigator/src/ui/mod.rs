@@ -286,20 +286,18 @@ impl Navigator {
                     e.call(());
                 }
             }
-            Some(Outcome::Write { ops, open }) => {
-                match self.source.read().write(&ops) {
-                    Ok(()) => {
-                        if let Some((path, how)) = open {
-                            on_open.call(Open {
-                                path,
-                                how,
-                                browsing: false,
-                            });
-                        }
+            Some(Outcome::Write { ops, open }) => match self.source.read().write(&ops) {
+                Ok(()) => {
+                    if let Some((path, how)) = open {
+                        on_open.call(Open {
+                            path,
+                            how,
+                            browsing: false,
+                        });
                     }
-                    Err(e) => self.say(e),
                 }
-            }
+                Err(e) => self.say(e),
+            },
             None => {}
         }
     }
@@ -456,15 +454,22 @@ fn use_commands(nav: &Navigator) {
         );
     }
     let cursor = s.selection().cursor().map(str::to_owned);
-    let picked: Vec<String> = s.selection().files().iter().cloned().collect();
+    let any_picked = !s.selection().files().is_empty();
     use_command(
         when(
             Command::new("NAVIGATOR_PIN", "Pin or unpin the selected notes").group(group),
-            !picked.is_empty(),
+            any_picked,
             "No note is selected",
         ),
         move || {
-            let picked: Vec<String> = nav.state.peek().selection().files().iter().cloned().collect();
+            let picked: Vec<String> = nav
+                .state
+                .peek()
+                .selection()
+                .files()
+                .iter()
+                .cloned()
+                .collect();
             nav.update(|s| s.toggle_pin(&picked));
         },
     );
@@ -478,7 +483,9 @@ fn use_commands(nav: &Navigator) {
             "Turn folder notes on, and select a note",
         ),
         move || {
-            let Some(p) = nav.state.peek().selection().cursor().map(str::to_owned) else { return };
+            let Some(p) = nav.state.peek().selection().cursor().map(str::to_owned) else {
+                return;
+            };
             match nav.update(|s| s.convert_to_folder_note(&p)) {
                 Ok(out) => nav.outcome(Some(out), nav_open(), None),
                 Err(e) => nav.say(e),
@@ -492,7 +499,9 @@ fn use_commands(nav: &Navigator) {
             "Turn folder notes on, and select a note",
         ),
         move || {
-            let Some(p) = nav.state.peek().selection().cursor().map(str::to_owned) else { return };
+            let Some(p) = nav.state.peek().selection().cursor().map(str::to_owned) else {
+                return;
+            };
             match nav.update(|s| s.set_as_folder_note(&p)) {
                 Ok(out) => nav.outcome(Some(out), nav_open(), None),
                 Err(e) => nav.say(e),
@@ -506,7 +515,9 @@ fn use_commands(nav: &Navigator) {
             "The folder has no note",
         ),
         move || {
-            let Some(f) = nav.state.peek().selection().folder().map(str::to_owned) else { return };
+            let Some(f) = nav.state.peek().selection().folder().map(str::to_owned) else {
+                return;
+            };
             match nav.update(|s| s.detach_folder_note(&f, None)) {
                 Ok(out) => nav.outcome(Some(out), nav_open(), None),
                 Err(e) => nav.say(e),
@@ -526,12 +537,18 @@ fn use_commands(nav: &Navigator) {
     );
     use_command(
         when(
-            Command::new("NAVIGATOR_OPEN_FOLDER_NOTE_TAB", "Open the folder note in a new tab").group(group),
+            Command::new(
+                "NAVIGATOR_OPEN_FOLDER_NOTE_TAB",
+                "Open the folder note in a new tab",
+            )
+            .group(group),
             has_note,
             "The folder has no note",
         ),
         move || {
-            let out = folder.as_deref().and_then(|f| nav.state.peek().open_folder_note(f, true));
+            let out = folder
+                .as_deref()
+                .and_then(|f| nav.state.peek().open_folder_note(f, true));
             nav.outcome(out, nav_open(), None);
         },
     );
