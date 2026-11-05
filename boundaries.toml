@@ -196,6 +196,16 @@ package = "architect-spaces"
 features = ["vox"]
 layer = "L0"
 
+[[row]]
+package = "vault-proto"
+layer = "L0"
+note = "the vault's wire (#333)"
+
+[[row]]
+package = "vault-proto"
+features = ["vox"]
+layer = "L0"
+
 # ── L4 ui ─────────────────────────────────────────────────────────────────
 [[row]]
 package = "crdt"
@@ -372,6 +382,33 @@ package = "architect-story-fuzz"
 layer = "L4"
 
 # ── L1 engine / L2 storage / L3 host glue ─────────────────────────────────
+
+[[row]]
+package = "vault-live"
+layer = "L1"
+note = "the filesystem vault, its sync backend (#333)"
+
+[[row]]
+package = "vault-obsidian"
+layer = "L1"
+
+[[row]]
+package = "vault-entity"
+layer = "L1"
+
+[[row]]
+package = "vault-doc"
+layer = "L1"
+
+[[row]]
+package = "vault"
+layer = "L1"
+note = "facade over vault-proto, vault-live, vault-obsidian"
+
+[[row]]
+package = "vault"
+features = ["actions"]
+layer = "L1"
 [[row]]
 package = "auth"
 layer = "L1"

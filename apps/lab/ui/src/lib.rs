@@ -19,6 +19,7 @@ mod items;
 mod keyflow;
 mod note;
 mod note_editor;
+mod notes;
 mod pages;
 mod paint;
 pub mod presence;
@@ -740,6 +741,13 @@ pub fn LabApp() -> Element {
     let (theme, appearance) = theme::use_lab_theme(windowed, files, &list);
     // An agent's Delete waits for the person's yes, in the sheet below.
     use_hook(|| confirm::require(&list));
+    // The lab's vault: a folder of markdown, its VAULT_* actions (only
+    // with files: a film's run keeps nothing).
+    use_hook(|| {
+        if files {
+            notes::register(&list);
+        }
+    });
     // An agent's UI (A2UI): its surfaces on a document of their own, the
     // `A2UI_*` actions on the list, the Vault's "Agent UI" view drawing
     // them. Every write a surface's button makes asks first (the sheet).

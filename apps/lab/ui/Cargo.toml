@@ -56,6 +56,9 @@ serde_json = { workspace = true }
 # surfaces on a Loro document.
 architect-a2ui = { workspace = true, features = ["ui"] }
 crdt = { workspace = true }
+# The lab's vault: a folder of markdown and its VAULT_* actions
+# (src/notes.rs, the sample in apps/lab/vault).
+vault = { workspace = true, features = ["actions"] }
 architect = { workspace = true, features = ["action-list", "settings"] }
 dioxus = { workspace = true }
 facet = { workspace = true }
@@ -70,6 +73,8 @@ futures-timer = { workspace = true }
 futures-util = { version = "0.3", default-features = false }
 
 [dev-dependencies]
+# The lab vault's seed test (src/notes.rs) writes to a temporary folder.
+tempfile = "3"
 # The Keyflow editor's tests (src/keyflow.rs): its layout and computed
 # colours in a Blitz document.
 blitz-dom = { workspace = true }
