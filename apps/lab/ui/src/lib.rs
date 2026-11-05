@@ -23,6 +23,7 @@ mod paint;
 pub mod presence;
 mod screen;
 mod settings;
+mod surfaces;
 mod theme;
 mod vault;
 
