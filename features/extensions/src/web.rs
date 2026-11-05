@@ -44,7 +44,7 @@ use wasm_bindgen_futures::{JsFuture, future_to_promise, spawn_local};
 
 use crate::hostcall::{HostAnswer, HostError, HostRequest};
 use crate::manifest::{ActionDecl, Capabilities, Manifest, Reach};
-use crate::wire::{Edit, Value};
+use crate::wire::{Edit, EventData, KeyData, Mods, Pointer, Value, ViewEvent};
 
 /// A body as an answer carries it: text, or (`binary`) base64.
 fn body_json(bytes: &[u8], binary: bool) -> Json {
@@ -374,6 +374,22 @@ impl WebHost {
             sink(&line);
         }
         self.inner.logs.borrow_mut().push(line);
+    }
+
+    /// The app's Action List it runs actions on.
+    #[must_use]
+    pub fn list(&self) -> &ActionList {
+        &self.inner.list
+    }
+
+    /// Whether it may run `info`'s action: what its capabilities let it
+    /// run (`capabilities.actions`, `.effect`), and its own.
+    #[must_use]
+    pub fn may_run(&self, info: &ActionInfo) -> bool {
+        let me = &self.inner;
+        me.may
+            .may_run(&me.manifest.action_prefix(), &info.id, reach(info.effect))
+            .is_ok()
     }
 
     fn principal(&self) -> Principal {
@@ -775,7 +791,8 @@ pub struct WebComponent {
 struct Inner {
     js: JsComponent,
     host: WebHost,
-    panes: RefCell<HashMap<u64, Pane>>,
+    /// Each mounted view: its id and its pane.
+    panes: RefCell<HashMap<u64, (String, Pane)>>,
     next_pane: RefCell<u64>,
     actions: RefCell<Vec<String>>,
     views: RefCell<Vec<String>>,
@@ -1018,22 +1035,25 @@ impl WebComponent {
             *next = next.saturating_add(1);
             *next
         };
-        let p = Pane::new(
-            pane,
-            view.to_owned(),
-            into.clone(),
-            Rc::downgrade(&self.inner),
-        );
-        self.inner.panes.borrow_mut().insert(pane, p);
+        let owner = Rc::downgrade(&self.inner);
+        let p = Pane::new(into.clone(), move |e: ViewEvent| {
+            if let Some(inner) = owner.upgrade() {
+                inner.event(pane, &jco_event(&e));
+            }
+        });
+        self.inner
+            .panes
+            .borrow_mut()
+            .insert(pane, (view.to_owned(), p));
         self.render(pane);
         pane
     }
 
     fn render(&self, pane: u64) {
-        let Some(view) = self.inner.panes.borrow().get(&pane).map(|p| p.view.clone()) else {
+        let Some(view) = self.inner.panes.borrow().get(&pane).map(|(v, _)| v.clone()) else {
             return;
         };
-        if let Some(p) = self.inner.panes.borrow_mut().get_mut(&pane) {
+        if let Some((_, p)) = self.inner.panes.borrow_mut().get_mut(&pane) {
             p.reset();
         }
         let _ = self.inner.js.render(num(pane), &view);
@@ -1049,7 +1069,7 @@ impl WebComponent {
 
     /// Unmounts pane `pane`.
     pub fn unmount(&self, pane: u64) {
-        if let Some(mut p) = self.inner.panes.borrow_mut().remove(&pane) {
+        if let Some((_, mut p)) = self.inner.panes.borrow_mut().remove(&pane) {
             p.reset();
         }
         let _ = self.inner.js.close(num(pane));
@@ -1066,7 +1086,7 @@ impl WebComponent {
     /// Unloads it: its instance and its workers end.
     pub fn stop(&self) {
         self.inner.js.stop();
-        for (_, mut p) in self.inner.panes.borrow_mut().drain() {
+        for (_, (_, mut p)) in self.inner.panes.borrow_mut().drain() {
             p.reset();
         }
     }
@@ -1075,7 +1095,7 @@ impl WebComponent {
 impl Inner {
     fn frame(&self, pane: u64, f: &JsValue) {
         let mut panes = self.panes.borrow_mut();
-        let Some(p) = panes.get_mut(&pane) else {
+        let Some((_, p)) = panes.get_mut(&pane) else {
             return;
         };
         let failed = get(f, "failed");
@@ -1089,7 +1109,7 @@ impl Inner {
             .iter()
             .map(edit_from)
             .collect::<Result<Vec<_>, _>>()
-            .and_then(|edits| edits.into_iter().try_for_each(|e| p.edit(e)));
+            .and_then(|edits| p.apply(edits));
         if let Err(why) = applied {
             p.failed(&format!("its edits could not be applied: {why}"));
         }
@@ -1166,34 +1186,43 @@ fn value_from(v: &Json) -> Value {
 const DIOXUS_ID: &str = "data-dioxus-id";
 
 /// One mounted view: the wire's stack machine over the page's DOM, under
-/// its element (id 0).
-struct Pane {
-    id: u64,
-    view: String,
+/// its element (id 0) — the checked applier every view in a browser is
+/// drawn by (a WASI component's, [`WebComponent::mount`]; a page's,
+/// `architect_pages::web`). An edit never reaches outside its element,
+/// and none sets an `on*` handler or `dangerous_inner_html`; the events
+/// on its elements go to its `on_event`, as the wire's.
+pub struct Pane {
     root: web_sys::Element,
     nodes: HashMap<u64, web_sys::Node>,
     stack: Vec<(web_sys::Node, Option<u64>)>,
     listening: HashMap<String, Closure<dyn FnMut(web_sys::Event)>>,
-    owner: std::rc::Weak<Inner>,
+    on_event: Rc<dyn Fn(ViewEvent)>,
+}
+
+impl std::fmt::Debug for Pane {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Pane")
+            .field("nodes", &self.nodes.len())
+            .finish_non_exhaustive()
+    }
 }
 
 impl Pane {
-    fn new(id: u64, view: String, root: web_sys::Element, owner: std::rc::Weak<Inner>) -> Self {
+    /// A pane over `root` (emptied first), its events to `on_event`.
+    pub fn new(root: web_sys::Element, on_event: impl Fn(ViewEvent) + 'static) -> Self {
         let mut p = Self {
-            id,
-            view,
             root,
             nodes: HashMap::new(),
             stack: Vec::new(),
             listening: HashMap::new(),
-            owner,
+            on_event: Rc::new(on_event),
         };
         p.reset();
         p
     }
 
     /// Empties it, for a first render.
-    fn reset(&mut self) {
+    pub fn reset(&mut self) {
         self.root.set_inner_html("");
         self.nodes.clear();
         self.nodes.insert(0, self.root.clone().into());
@@ -1203,6 +1232,16 @@ impl Pane {
                 .root
                 .remove_event_listener_with_callback(&name, f.as_ref().unchecked_ref());
         }
+    }
+
+    /// Applies a frame's edits, in order.
+    ///
+    /// # Errors
+    ///
+    /// The first that could not be applied: it reached outside the pane,
+    /// named a node that is not there, or set what a view may not.
+    pub fn apply(&mut self, edits: impl IntoIterator<Item = Edit>) -> Result<(), String> {
+        edits.into_iter().try_for_each(|e| self.edit(e))
     }
 
     fn failed(&mut self, why: &str) {
@@ -1245,7 +1284,12 @@ impl Pane {
         self.root.contains(Some(node)) || !node.is_connected()
     }
 
-    fn edit(&mut self, edit: Edit) -> Result<(), String> {
+    /// Applies one edit.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::apply`].
+    pub fn edit(&mut self, edit: Edit) -> Result<(), String> {
         let doc = web_sys::window()
             .and_then(|w| w.document())
             .ok_or("no document")?;
@@ -1412,6 +1456,19 @@ impl Pane {
             }
             return Ok(());
         }
+        // A field's value and a box's tick are what it shows, not only its
+        // attribute (which stops counting once it is typed in).
+        if let Some(input) = el.dyn_ref::<web_sys::HtmlInputElement>() {
+            match name {
+                "value" => input.set_value(value.as_deref().unwrap_or_default()),
+                "checked" => input.set_checked(value.as_deref().is_some_and(|v| v != "false")),
+                _ => {}
+            }
+        } else if let Some(area) = el.dyn_ref::<web_sys::HtmlTextAreaElement>()
+            && name == "value"
+        {
+            area.set_value(value.as_deref().unwrap_or_default());
+        }
         match value {
             Some(v) => el.set_attribute(name, &v).map_err(js)?,
             None => el.remove_attribute(name).map_err(js)?,
@@ -1425,13 +1482,9 @@ impl Pane {
         if self.listening.contains_key(name) {
             return Ok(());
         }
-        let owner = self.owner.clone();
-        let pane = self.id;
+        let on_event = Rc::clone(&self.on_event);
         let root = self.root.clone();
         let f = Closure::<dyn FnMut(web_sys::Event)>::new(move |e: web_sys::Event| {
-            let Some(inner) = owner.upgrade() else {
-                return;
-            };
             let mut at = e
                 .target()
                 .and_then(|t| t.dyn_into::<web_sys::Element>().ok());
@@ -1448,7 +1501,7 @@ impl Pane {
                 }
                 at = el.parent_element();
             };
-            inner.event(pane, &view_event(element, &e));
+            on_event(view_event(element, &e));
         });
         self.root
             .add_event_listener_with_callback(name, f.as_ref().unchecked_ref())
@@ -1458,38 +1511,85 @@ impl Pane {
     }
 }
 
-/// A DOM event as the world's `view-event` (jco's shape).
-fn view_event(element: u64, e: &web_sys::Event) -> Json {
-    json!({ "element": element, "name": e.type_(), "bubbles": e.bubbles(), "data": event_data(e) })
+/// A DOM event as the wire's.
+fn view_event(element: u64, e: &web_sys::Event) -> ViewEvent {
+    ViewEvent {
+        element,
+        name: e.type_(),
+        bubbles: e.bubbles(),
+        data: event_data(e),
+    }
 }
 
-/// What a DOM event carries, as the world's `event-data`.
-fn event_data(e: &web_sys::Event) -> Json {
-    let mods = |alt: bool, ctrl: bool, meta: bool, shift: bool| json!({ "alt": alt, "ctrl": ctrl, "meta": meta, "shift": shift });
+/// What a DOM event carries, as the wire's.
+fn event_data(e: &web_sys::Event) -> EventData {
+    let mods = |alt: bool, ctrl: bool, meta: bool, shift: bool| Mods {
+        alt,
+        ctrl,
+        meta,
+        shift,
+    };
     if let Some(m) = e.dyn_ref::<web_sys::MouseEvent>() {
-        return json!({ "tag": "mouse", "val": {
-            "clientX": m.client_x(), "clientY": m.client_y(),
-            "pageX": m.page_x(), "pageY": m.page_y(),
-            "screenX": m.screen_x(), "screenY": m.screen_y(),
-            "elementX": m.offset_x(), "elementY": m.offset_y(),
-            "button": m.button(), "buttons": m.buttons(),
-            "mods": mods(m.alt_key(), m.ctrl_key(), m.meta_key(), m.shift_key()),
-        }});
+        return EventData::Mouse(Pointer {
+            client_x: f64::from(m.client_x()),
+            client_y: f64::from(m.client_y()),
+            page_x: f64::from(m.page_x()),
+            page_y: f64::from(m.page_y()),
+            screen_x: f64::from(m.screen_x()),
+            screen_y: f64::from(m.screen_y()),
+            element_x: f64::from(m.offset_x()),
+            element_y: f64::from(m.offset_y()),
+            button: m.button(),
+            buttons: m.buttons(),
+            mods: mods(m.alt_key(), m.ctrl_key(), m.meta_key(), m.shift_key()),
+        });
     }
     if let Some(k) = e.dyn_ref::<web_sys::KeyboardEvent>() {
-        return json!({ "tag": "key", "val": {
-            "key": k.key(), "code": k.code(), "location": k.location(),
-            "repeat": k.repeat(), "composing": k.is_composing(),
-            "mods": mods(k.alt_key(), k.ctrl_key(), k.meta_key(), k.shift_key()),
-        }});
+        return EventData::Key(KeyData {
+            key: k.key(),
+            code: k.code(),
+            location: u8::try_from(k.location()).unwrap_or_default(),
+            repeat: k.repeat(),
+            composing: k.is_composing(),
+            mods: mods(k.alt_key(), k.ctrl_key(), k.meta_key(), k.shift_key()),
+        });
     }
     if matches!(e.type_().as_str(), "input" | "change") {
-        let value = e
-            .target()
-            .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
-            .map(|i| i.value())
+        let target = e.target();
+        let value = target
+            .as_ref()
+            .and_then(|t| t.dyn_ref::<web_sys::HtmlInputElement>().map(web_sys::HtmlInputElement::value))
+            .or_else(|| {
+                target.as_ref().and_then(|t| {
+                    t.dyn_ref::<web_sys::HtmlTextAreaElement>()
+                        .map(web_sys::HtmlTextAreaElement::value)
+                })
+            })
             .unwrap_or_default();
-        return json!({ "tag": "form", "val": value });
+        return EventData::Form(value);
     }
-    json!({ "tag": "focus" })
+    EventData::Focus
+}
+
+/// A wire event as the world's `view-event` (jco's shape).
+fn jco_event(e: &ViewEvent) -> Json {
+    let mods = |m: &Mods| json!({ "alt": m.alt, "ctrl": m.ctrl, "meta": m.meta, "shift": m.shift });
+    let data = match &e.data {
+        EventData::Mouse(m) => json!({ "tag": "mouse", "val": {
+            "clientX": m.client_x, "clientY": m.client_y,
+            "pageX": m.page_x, "pageY": m.page_y,
+            "screenX": m.screen_x, "screenY": m.screen_y,
+            "elementX": m.element_x, "elementY": m.element_y,
+            "button": m.button, "buttons": m.buttons,
+            "mods": mods(&m.mods),
+        }}),
+        EventData::Key(k) => json!({ "tag": "key", "val": {
+            "key": k.key, "code": k.code, "location": k.location,
+            "repeat": k.repeat, "composing": k.composing,
+            "mods": mods(&k.mods),
+        }}),
+        EventData::Form(value) => json!({ "tag": "form", "val": value }),
+        EventData::Focus => json!({ "tag": "focus" }),
+    };
+    json!({ "element": e.element, "name": e.name, "bubbles": e.bubbles, "data": data })
 }
