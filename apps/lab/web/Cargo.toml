@@ -1,6 +1,6 @@
 [package]
 name = "architect-lab-web"
-description = "The lab in a browser: the WASI Counter component (apps/lab/wasi-counter) run by the browser's WebAssembly, its view in the page, its primes in a Web Worker (`just lab-web`)."
+description = "The lab in a browser: the Board's page file (apps/lab/board/pages/board.tsx) in a Web Worker, and the WASI Counter component (apps/lab/wasi-counter) run by the browser's WebAssembly, their primes in Web Workers (`just lab-web`)."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -14,11 +14,12 @@ crate-type = ["cdylib", "rlib"]
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 architect = { workspace = true, features = ["action-list"] }
 architect-extensions = { workspace = true, features = ["web"] }
+architect-pages = { workspace = true, features = ["web"] }
 serde_json = { workspace = true }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
-web-sys = { version = "0.3", features = ["Document", "Element", "HtmlElement", "Window", "Performance"] }
+web-sys = { version = "0.3", features = ["Document", "Element", "HtmlElement", "Location", "Window", "Performance"] }
 
 [lints]
 workspace = true
