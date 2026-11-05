@@ -1,0 +1,33 @@
+// Tracey: requirement traceability for architect.
+//
+// The vault's spec (features/vault/spec/vault.md, from Task with #333). Its
+// requirements are t[vault.topic.id] headings; code references them with
+// t[impl id] / t[verify id]. The vault's code also names Task's storage and
+// offline specs, which stay in Task (task:docs/spec/). Other features' specs
+// use the r[...] marker and are not tracked here (one prefix per spec).
+//
+// styx comments are `//`, not `#`. `prefix` is inferred from the markers.
+
+specs (
+    {
+        name vault
+        include (
+            features/vault/spec/*.md
+        )
+        impls (
+            {
+                name rust
+                include (
+                    features/vault/**/*.rs
+                    features/links/**/*.rs
+                    features/tags/**/*.rs
+                    apps/lab/**/*.rs
+                )
+                exclude (
+                    target/**
+                    **/target/**
+                )
+            }
+        )
+    }
+)

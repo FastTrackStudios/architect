@@ -71,6 +71,13 @@ members = [
     "features/guide",
     "features/presence",
     "features/devices",
+    # ── vault (from Task, #333): notes, properties, the index ─────────
+    "features/vault/vault",
+    "features/vault/vault-proto",
+    "features/vault/vault-live",
+    "features/vault/vault-obsidian",
+    "features/vault/vault-entity",
+    "features/vault/vault-doc",
     "apps/lab/ui",
     "apps/lab/desktop",
     "apps/lab/mobile",
@@ -118,6 +125,22 @@ editor-view = { git = "https://github.com/FastTrackStudios/editor", rev = "f8137
 # SMTP for the auth server's verification and password-reset mail.
 # rustls, not native-tls, so the build carries no OpenSSL dependency.
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-rustls-tls", "builder", "hostname"] }
+# vault (from Task, #333) — notes, properties (frontmatter), links, tags
+# and the vault index. Crate names are Task's, so Task re-points by path.
+vault = { path = "features/vault/vault" }
+vault-proto = { path = "features/vault/vault-proto", default-features = false }
+vault-live = { path = "features/vault/vault-live" }
+vault-obsidian = { path = "features/vault/vault-obsidian" }
+vault-entity = { path = "features/vault/vault-entity" }
+vault-doc = { path = "features/vault/vault-doc" }
+# The editor's markdown model (frontmatter, the vault lookup the editor
+# resolves links through), at the editor pin above.
+editor-state = { git = "https://github.com/FastTrackStudios/editor", rev = "f8137a9326825361e2046254790758dc516caa44", default-features = false }
+walkdir = "2"
+futures = "0.3"
+serde_yaml = "0.9"
+indexmap = "2"
+regex = "1"
 # ── Internal — every crate in this repo, path declared ONCE ───────────
 architect = { path = "crates/architect" }
 architect-atom = { path = "features/atom" }
