@@ -273,7 +273,8 @@ impl OpenVault {
 
     /// Watches the folder: each edit made outside the app (another
     /// editor, `git pull`) reads the vault again ([`Self::refresh`]) and
-    /// gives `on_change` what changed. The app's own writes are not heard.
+    /// gives `on_change` what changed. The app's own writes are no change
+    /// (the snapshot holds them), however soon an outside edit follows.
     /// Stops when the [`Watch`] is dropped.
     ///
     /// # Errors
@@ -298,7 +299,12 @@ impl OpenVault {
                 };
                 rt.block_on(async move {
                     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-                    let handle = match vault_obsidian::watch(vault.root(), Arc::clone(&vault.guard), tx) {
+                    // Every event, the app's own too: `refresh` compares each
+                    // file with the snapshot its save updated, so its own
+                    // writes are no change. The write guard's window (1.5s)
+                    // would swallow an outside edit made while someone types.
+                    let all = Arc::new(vault_obsidian::SelfWriteGuard::new());
+                    let handle = match vault_obsidian::watch(vault.root(), all, tx) {
                         Ok(h) => h,
                         Err(e) => {
                             let _ = ready_tx.send(Err(e.to_string()));

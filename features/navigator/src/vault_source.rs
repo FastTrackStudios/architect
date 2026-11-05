@@ -366,7 +366,9 @@ pub fn preview_of(text: &str) -> String {
         if !out.is_empty() {
             out.push(' ');
         }
-        out.push_str(&unlink(t));
+        // Emphasis and code marks are not words.
+        let plain: String = unlink(t).chars().filter(|c| !matches!(c, '*' | '`' | '=' | '~')).collect();
+        out.push_str(&plain);
         if out.chars().count() >= PREVIEW_CHARS {
             break;
         }
@@ -505,7 +507,7 @@ mod tests {
 
     #[test]
     fn a_preview_is_the_notes_words() {
-        let text = "---\ntitle: X\ntags: [a]\n---\n# Heading\nSee [[Other note|the other]] and [[Plain]].\n\
+        let text = "---\ntitle: X\ntags: [a]\n---\n# Heading\nSee [[Other note|the other]] and **[[Plain]]**.\n\
                     ![[img.png]]\n```kf\n| C | G |\n```\n- [ ] A task\n> Quoted";
         assert_eq!(
             preview_of(text),

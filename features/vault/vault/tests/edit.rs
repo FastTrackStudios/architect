@@ -93,6 +93,13 @@ fn the_watcher_hears_an_outside_edit_and_not_the_apps_own() {
     std::fs::write(tmp.path().join("Notes/Other.md"), "From another editor.\n").unwrap();
     let heard = rx.recv_timeout(Duration::from_secs(10)).expect("heard");
     assert_eq!(heard.modified, ["Notes/Other.md"]);
+    // An outside edit just after the app saved the same note is heard
+    // too (someone typing while a `git pull` lands).
+    v.save("Ionian.md", "Saved again.\n").unwrap();
+    std::fs::write(tmp.path().join("Ionian.md"), "Pulled.\n").unwrap();
+    let heard = rx.recv_timeout(Duration::from_secs(10)).expect("heard");
+    assert_eq!(heard.modified, ["Ionian.md"]);
+    assert_eq!(v.text("Ionian.md").as_deref(), Some("Pulled.\n"));
     assert_eq!(
         v.text("Notes/Other.md").as_deref(),
         Some("From another editor.\n")

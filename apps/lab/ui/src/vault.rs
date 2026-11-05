@@ -288,7 +288,8 @@ fn vault_pane_of(w: &Workspace, path: &str) -> Option<architect_workspace::PaneI
 }
 
 /// The vault's note at `path` on show: its pane forward when one is open,
-/// else a new one at `target`.
+/// else a new one at `target`, in the main area (beside the note on show;
+/// never in the dock the navigator is in, even with no note open).
 fn show_vault_note(workspace: Signal<Workspace>, path: &str, target: Target) {
     let mut workspace = workspace;
     let mut w = workspace.write();
@@ -296,7 +297,25 @@ fn show_vault_note(workspace: Signal<Workspace>, path: &str, target: Target) {
         let _ = w.activate(&id);
         return;
     }
-    let _ = w.open(vault_note(path), target);
+    if let Some(doc) = w.current_document().cloned() {
+        let _ = w.activate(&doc);
+    }
+    let Ok(id) = w.open(vault_note(path), target) else {
+        return;
+    };
+    let docked = w
+        .locate(&id)
+        .is_some_and(|l| l.window != 0 || matches!(l.area, architect_workspace::Area::Dock(_)));
+    let main = w
+        .windows
+        .first()
+        .and_then(|m| m.center.as_ref())
+        .and_then(architect_workspace::Node::first_group)
+        .map(|g| g.id);
+    if docked && let Some(group) = main {
+        let _ = w.move_pane(&id, architect_workspace::Dest::Group { group, index: None });
+        let _ = w.activate(&id);
+    }
 }
 
 /// A new note in `folder` of the vault on disk, opened (⌘N, the ribbon's
@@ -1091,8 +1110,14 @@ fn VaultNoteView() -> Element {
     if use_lab_vault().disk.peek().is_none() || path.is_empty() {
         return rsx! { Stand { what: "No vault is open", next: "Open the lab on a folder of notes (just lab)." } };
     }
-    // Keyed by the pane: a rename keeps the editor and its typing.
-    rsx! { VaultNote { key: "{id}", path } }
+    // Keyed by the pane (in a list, where keys count: a lone root's key
+    // does not remount it, and the next note would get this one's
+    // editor): a rename keeps the editor and its typing.
+    rsx! {
+        for id in [id] {
+            VaultNote { key: "{id}", path: path.clone() }
+        }
+    }
 }
 
 #[component]

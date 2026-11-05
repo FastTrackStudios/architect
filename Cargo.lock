@@ -1227,6 +1227,7 @@ dependencies = [
  "editor-keyflow",
  "editor-view",
  "facet",
+ "futures-channel",
  "futures-timer",
  "futures-util",
  "keyflow",
@@ -1239,6 +1240,7 @@ dependencies = [
  "tempfile",
  "tracing",
  "vault",
+ "vault-doc",
 ]
 
 [[package]]
@@ -1359,6 +1361,9 @@ dependencies = [
  "futures-timer",
  "futures-util",
  "lucide-dioxus",
+ "serde_json",
+ "tempfile",
+ "vault",
 ]
 
 [[package]]
@@ -18014,6 +18019,8 @@ dependencies = [
  "facet",
  "serde_json",
  "tempfile",
+ "tokio",
+ "tracing",
  "vault",
  "vault-live",
  "vault-obsidian",
