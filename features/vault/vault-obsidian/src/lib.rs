@@ -14,6 +14,34 @@
 //!   events into a channel.
 
 #![cfg(not(target_arch = "wasm32"))]
+// Moved from Task as it was (#333), under Task's lints. Architect's
+// house lints (no panics, no unchecked arithmetic, indexing or casts,
+// pedantic) are relaxed here by name until the crate is brought up to
+// them; new code in it meets them.
+#![allow(
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::case_sensitive_file_extension_comparisons,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::derive_partial_eq_without_eq,
+    clippy::doc_markdown,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::items_after_statements,
+    clippy::manual_let_else,
+    clippy::map_unwrap_or,
+    clippy::missing_const_for_fn,
+    clippy::missing_panics_doc,
+    clippy::needless_collect,
+    clippy::needless_pass_by_value,
+    clippy::option_if_let_else,
+    clippy::redundant_clone,
+    clippy::string_slice,
+    clippy::too_long_first_doc_paragraph,
+    clippy::unwrap_used
+)]
 
 pub mod config;
 pub mod guard;

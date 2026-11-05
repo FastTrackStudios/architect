@@ -22,6 +22,18 @@
 //! Mount the server-side backend with [`serve`], or compose
 //! through [`Service`] into an `architect::Services` bundle.
 
+// Moved from Task as it was (#333), under Task's lints. Architect's
+// house lints (no panics, no unchecked arithmetic, indexing or casts,
+// pedantic) are relaxed here by name until the crate is brought up to
+// them; new code in it meets them.
+#![allow(
+    clippy::arithmetic_side_effects,
+    clippy::doc_markdown,
+    clippy::too_long_first_doc_paragraph,
+    clippy::unsafe_derive_deserialize,
+    clippy::use_self
+)]
+
 mod base_view;
 mod collab;
 pub mod consts;

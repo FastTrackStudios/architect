@@ -4,6 +4,8 @@
 //! tests.
 
 #![cfg(not(target_arch = "wasm32"))]
+// Moved from Task as it was (#333); see the crate root's lint note.
+#![allow(clippy::string_slice)]
 
 use std::fs;
 

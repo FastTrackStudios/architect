@@ -27,7 +27,6 @@
 //! they identified.
 
 #![cfg(not(target_arch = "wasm32"))]
-
 // Format-agnostic file parsers, owned here with the files they read:
 //   bases           — `.base` parser + evaluator (filters, formulas,
 //                      link functions, link-follow)
@@ -35,6 +34,45 @@
 //   property_schema — frontmatter type coercion (Obsidian's
 //                      `.obsidian/types.json` shape)
 //   lexorank        — fractional-index sort keys
+
+// Moved from Task as it was (#333), under Task's lints. Architect's
+// house lints (no panics, no unchecked arithmetic, indexing or casts,
+// pedantic) are relaxed here by name until the crate is brought up to
+// them; new code in it meets them.
+#![allow(
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::assigning_clones,
+    clippy::case_sensitive_file_extension_comparisons,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_precision_loss,
+    clippy::default_trait_access,
+    clippy::derive_partial_eq_without_eq,
+    clippy::doc_markdown,
+    clippy::expect_used,
+    clippy::format_push_string,
+    clippy::indexing_slicing,
+    clippy::manual_let_else,
+    clippy::map_unwrap_or,
+    clippy::match_same_arms,
+    clippy::missing_const_for_fn,
+    clippy::missing_panics_doc,
+    clippy::must_use_candidate,
+    clippy::needless_continue,
+    clippy::needless_pass_by_value,
+    clippy::option_if_let_else,
+    clippy::redundant_clone,
+    clippy::significant_drop_tightening,
+    clippy::similar_names,
+    clippy::single_match_else,
+    clippy::string_slice,
+    clippy::too_long_first_doc_paragraph,
+    clippy::unnecessary_wraps,
+    clippy::unsafe_derive_deserialize,
+    clippy::unwrap_used,
+    clippy::use_self
+)]
 pub mod bases;
 pub mod blocks;
 pub mod cook;

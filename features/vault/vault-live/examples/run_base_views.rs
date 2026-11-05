@@ -4,6 +4,14 @@
 //!
 //! Run: cargo run -p vault-live --example run_base_views -- [VAULT_ROOT] [BASE_PATH]
 
+// Moved from Task as it was (#333); see the crate root's lint note.
+#![allow(
+    clippy::doc_markdown,
+    clippy::expect_used,
+    clippy::iter_on_single_items,
+    clippy::unwrap_used
+)]
+
 use std::path::PathBuf;
 
 use vault_live::Backend;

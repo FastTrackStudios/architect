@@ -47,6 +47,21 @@
 //!   wasm-visible should depend on: `vault-entity = { workspace = true,
 //!   default-features = false }`.
 
+// Moved from Task as it was (#333), under Task's lints. Architect's
+// house lints (no panics, no unchecked arithmetic, indexing or casts,
+// pedantic) are relaxed here by name until the crate is brought up to
+// them; new code in it meets them.
+#![allow(
+    clippy::arithmetic_side_effects,
+    clippy::indexing_slicing,
+    clippy::map_unwrap_or,
+    clippy::must_use_candidate,
+    clippy::redundant_closure_for_method_calls,
+    clippy::significant_drop_in_scrutinee,
+    clippy::significant_drop_tightening,
+    clippy::string_slice
+)]
+
 pub mod error;
 pub mod frontmatter;
 pub mod index;

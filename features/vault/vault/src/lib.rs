@@ -93,6 +93,5 @@ pub use vault_live::{
 pub use vault_obsidian as obsidian;
 
 // ── Actions ───────────────────────────────────────────────────────
-/// The `VAULT_*` actions over one open folder of markdown.
 #[cfg(feature = "actions")]
 pub mod actions;

@@ -2873,8 +2873,9 @@ fn formula_fns() -> &'static std::sync::RwLock<std::collections::HashMap<String,
     FNS.get_or_init(Default::default)
 }
 
-/// Adds `name(…)` to every `.base` filter and formula in this process,
-/// for functions that belong to an app rather than to the vault (Task's
+/// Adds `name(…)` to every `.base` filter and formula in this process.
+///
+/// For functions that belong to an app rather than to the vault (Task's
 /// `transpose_key`, a key name moved by semitones). A built-in of the
 /// same name wins; registering a name again replaces it.
 pub fn register_formula_fn(name: impl Into<String>, f: FormulaFn) {

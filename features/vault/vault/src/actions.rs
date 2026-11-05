@@ -1,6 +1,7 @@
-//! The vault's actions (feature `actions`), for a person in ⌘K and an
-//! agent over the control socket or MCP, over one open folder of
-//! markdown ([`OpenVault`]):
+//! The vault's actions (feature `actions`).
+//!
+//! For a person in ⌘K and an agent over the control socket or MCP, over
+//! one open folder of markdown ([`OpenVault`]):
 //!
 //! | action | does |
 //! |---|---|
@@ -465,7 +466,9 @@ pub fn register(list: &ActionList, vault: &OpenVault) -> Result<(), ActionError>
         &SEARCH,
         Effect::ReadOnly,
         move |_: &ActionCaller, a: SearchArgs| {
-            let limit = a.limit.map_or(20, |n| n as usize);
+            let limit = a
+                .limit
+                .map_or(20, |n| usize::try_from(n).unwrap_or(usize::MAX));
             Ok::<_, String>(raw(&v.with(|vault| search(vault, &a.query, limit))))
         },
     )?;

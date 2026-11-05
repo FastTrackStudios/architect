@@ -1,3 +1,9 @@
+// Moved from Task as it was (#333); see the crate root's lint note.
+#![allow(
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::cast_precision_loss
+)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use std::path::PathBuf;
     use std::time::Instant;

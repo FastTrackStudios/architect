@@ -1,7 +1,8 @@
-//! Names every walker of a vault agrees on: a file root's own internals
-//! (its marker and version store, which replication must not treat as
-//! vault content) and the marker that keeps a directory on its node
-//! (`vault.private.node-only`). They live in the proto (rather than in
+//! Names every walker of a vault agrees on.
+//!
+//! A file root's own internals (its marker and version store, which
+//! replication must not treat as vault content) and the marker that
+//! keeps a directory on its node (`vault.private.node-only`). They live in the proto (rather than in
 //! one backend crate) because more than one implementation has to agree
 //! on them: a files backend hides them from browsing, the vault lanes
 //! skip them, and a storage agent creates [`STORE_DIR`] when it
@@ -17,8 +18,9 @@ pub const STORE_DIR: &str = ".fts-files";
 /// skipped at every walk depth and never ingested as ordinary content.
 pub const GIT_DIR: &str = ".git";
 
-/// Marker file that makes the directory holding it **node-private**:
-/// it stays on this machine's disk and nowhere else. A private
+/// Marker file that makes the directory holding it **node-private**.
+///
+/// It stays on this machine's disk and nowhere else. A private
 /// directory is never versioned (so never in a root's history, never
 /// replicated to a peer), never listed by a browse, a facet listing or
 /// a vault manifest, and never served by name.

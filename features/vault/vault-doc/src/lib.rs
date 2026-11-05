@@ -22,6 +22,28 @@
 //! across moves and renames; nothing here invents one, but nothing
 //! drops one either.
 
+// Moved from Task as it was (#333), under Task's lints. Architect's
+// house lints (no panics, no unchecked arithmetic, indexing or casts,
+// pedantic) are relaxed here by name until the crate is brought up to
+// them; new code in it meets them.
+#![allow(
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::derive_partial_eq_without_eq,
+    clippy::future_not_send,
+    clippy::indexing_slicing,
+    clippy::match_same_arms,
+    clippy::missing_const_for_fn,
+    clippy::must_use_candidate,
+    clippy::option_if_let_else,
+    clippy::panic,
+    clippy::significant_drop_tightening,
+    clippy::string_slice,
+    clippy::too_long_first_doc_paragraph,
+    clippy::unwrap_used,
+    clippy::use_self
+)]
+
 pub mod body;
 pub mod book;
 pub mod doc;

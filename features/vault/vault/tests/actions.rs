@@ -1,5 +1,6 @@
 //! The `VAULT_*` actions over the lab's sample vault (`apps/lab/vault`),
 //! copied to a temporary folder so the writes land there.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::path::{Path, PathBuf};
 
@@ -68,13 +69,14 @@ fn a_notes_properties_links_and_tags_read_back() {
     assert!(links.contains(&"Notes/The app shell.md"), "{note}");
     assert!(links.contains(&"Notes/Actions everywhere.md"), "{note}");
     assert!(links.contains(&"Songs/Amazing Grace.md"), "{note}");
-    let back: Vec<&str> = note["backlinks"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter_map(Value::as_str)
-        .collect();
-    assert!(back.contains(&"Notes/The app shell.md"), "{note}");
+    assert!(
+        note["backlinks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|b| b == "Notes/The app shell.md"),
+        "{note}"
+    );
     assert!(note["body"].as_str().unwrap().starts_with("# Welcome"));
 }
 

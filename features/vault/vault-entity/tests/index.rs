@@ -14,6 +14,9 @@
 //! A regression to "re-parse everything on every read" moves these
 //! numbers by exactly the vault size.
 
+// Moved from Task as it was (#333); see the crate root's lint note.
+#![allow(clippy::expect_used, clippy::redundant_clone)]
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use uuid::Uuid;

@@ -1,5 +1,8 @@
 // One-off sanity check: open the example vault and walk the
 // resolution paths the editor will use at runtime.
+
+// Moved from Task as it was (#333); see the crate root's lint note.
+#![allow(clippy::items_after_statements, clippy::string_slice)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use std::path::PathBuf;
     // The vault to check: the first argument, else the lab's sample.

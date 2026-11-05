@@ -40,8 +40,9 @@ use std::sync::OnceLock;
 
 static MARKERS: OnceLock<&'static [&'static str]> = OnceLock::new();
 
-/// Names the files that declare a directory to be a registered root of its
-/// own, and therefore not part of its parent's. Call it once, before the
+/// Names the files that declare a directory a registered root of its own.
+///
+/// Such a directory is not part of its parent's. Call it once, before the
 /// first walk; the first call wins (the answer must not change under a
 /// walk), and a later call answers `false`.
 pub fn set_shelf_markers(markers: &'static [&'static str]) -> bool {

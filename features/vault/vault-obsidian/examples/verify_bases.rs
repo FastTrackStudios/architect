@@ -5,6 +5,9 @@
 //! Run:  cargo run -p vault-obsidian --example verify_bases -- [VAULT_ROOT]
 //!   VAULT_ROOT defaults to ~/.task/orgs/codywright/vault
 
+// Moved from Task as it was (#333); see the crate root's lint note.
+#![allow(clippy::doc_markdown, clippy::expect_used)]
+
 use std::path::PathBuf;
 
 use vault_obsidian::Vault;
