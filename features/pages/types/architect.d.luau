@@ -114,6 +114,11 @@ export type Builder = {
 --   page's extension (capabilities.ui); each waits for its answer, a cancel is nil
 --   events.subscribe({ on | every | at, action }): a hook made at run time, its key;
 --   events.unsubscribe(key), events.list(): the events it can hear
+--   documents.list(under?), documents.read(path), documents.create(path, text?),
+--   documents.edit(path, edits, name?) (one transaction, one undo step: the text after),
+--   documents.rename(path, to), documents.move(path, folder), documents.delete(path),
+--   documents.watch({ action }): the app's documents, as the page's extension
+--   (capabilities.reads / capabilities.writes "documents")
 
 -- How far a worker said it is.
 export type WorkerProgress = { done: number, total: number?, fraction: number?, note: string? }

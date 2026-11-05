@@ -24,6 +24,18 @@
 //! local key = host.subscribe({ on = "doc.saved", action = "ACME_LINT" })
 //! host.subscribe({ every = "5m", action = "ACME_SYNC" })
 //! host.unsubscribe(key); local heard = host.events()
+//! -- The app's documents (crate::documents): reads = ["documents"] lists,
+//! -- reads and watches them, writes = ["documents"] changes them.
+//! local docs = host.list_documents("notes")         -- {{path, name, space}, …}
+//! host.create_document("notes/Inbox.md", "# Inbox\n")
+//! host.edit_document("notes/Inbox.md", {           -- one transaction, one undo step
+//!     { insert = { at = 0, text = "---\n---\n" } },
+//!     { append = { text = "- [ ] call Sam\n" } },
+//! }, "Add a task")
+//! host.rename_document("notes/Inbox.md", "notes/Today.md")
+//! host.move_document("notes/Today.md", "archive")  -- archive/Today.md
+//! host.delete_document("archive/Today.md")
+//! host.watch_documents({ action = "ACME_REINDEX" }) -- doc.created/saved/renamed/deleted
 //! ```
 //!
 //! `pick`, `prompt` and `menu` wait for the person; a cancel is `nil`.
@@ -118,6 +130,45 @@ impl Module for HostModule {
         op!("open", String, |lua, a| Ok(HostRequest::Open { path: a }));
         op!("read_document", String, |lua, a| Ok(
             HostRequest::ReadDocument { path: a }
+        ));
+        op!("list_documents", Option<String>, |lua, a| Ok(
+            HostRequest::ListDocuments { under: a }
+        ));
+        op!("create_document", (String, Option<String>), |lua, a| Ok(
+            HostRequest::CreateDocument {
+                path: a.0,
+                text: a.1.unwrap_or_default(),
+            }
+        ));
+        op!(
+            "edit_document",
+            (String, LuaValue, Option<String>),
+            |lua, a| {
+                let (path, edits, name) = a;
+                json_of(&lua, edits).and_then(|edits| {
+                    serde_json::from_value(json!({
+                        "op": "edit_document", "path": path, "edits": edits, "name": name,
+                    }))
+                    .map_err(|e| mlua::Error::runtime(format!("edit_document: {e}")))
+                })
+            }
+        );
+        op!("rename_document", (String, String), |lua, a| Ok(
+            HostRequest::RenameDocument { path: a.0, to: a.1 }
+        ));
+        op!("move_document", (String, String), |lua, a| Ok(
+            HostRequest::MoveDocument {
+                path: a.0,
+                folder: a.1
+            }
+        ));
+        op!("delete_document", String, |lua, a| Ok(
+            HostRequest::DeleteDocument { path: a }
+        ));
+        op!("watch_documents", LuaValue, |lua, a| request_of(
+            &lua,
+            "watch_documents",
+            Some(a)
         ));
         op!("read_file", String, |lua, a| Ok(HostRequest::ReadFile {
             path: a

@@ -139,6 +139,10 @@ pub struct Capabilities {
     /// `org` (the current organization), `selection` (what is selected
     /// and focused), `documents` (open and read the app's documents).
     pub reads: Vec<String>,
+    /// What of the app's state it may change through the host service
+    /// (`crate::capabilities::WRITES`): `documents` (create, edit, rename,
+    /// move and delete the app's documents, as itself).
+    pub writes: Vec<String>,
     /// The app's interface it may use through the host service
     /// (`crate::capabilities::UI`): `notify` (notifications), `clipboard`
     /// (read and write it), `pickers` (file and folder pickers, save
@@ -766,6 +770,17 @@ impl Manifest {
             return Err(ManifestError::BadCapability(format!(
                 "reads {bad:?}: not one of {}",
                 crate::capabilities::READS.join(", ")
+            )));
+        }
+        if let Some(bad) = self
+            .capabilities
+            .writes
+            .iter()
+            .find(|w| !crate::capabilities::WRITES.contains(&w.as_str()))
+        {
+            return Err(ManifestError::BadCapability(format!(
+                "writes {bad:?}: not one of {}",
+                crate::capabilities::WRITES.join(", ")
             )));
         }
         if let Some(bad) = self

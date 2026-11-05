@@ -212,6 +212,35 @@ fn the_host_interface_is_the_host_service() {
             Some(op(r#"{"op":"subscribe","on":"doc.saved","action":"X"}"#)),
         ),
         ("unsubscribe", Some(op(r#"{"op":"unsubscribe","key":"k"}"#))),
+        ("list-documents", Some(op(r#"{"op":"list_documents"}"#))),
+        (
+            "read-document",
+            Some(op(r#"{"op":"read_document","path":"a"}"#)),
+        ),
+        (
+            "create-document",
+            Some(op(r#"{"op":"create_document","path":"a"}"#)),
+        ),
+        (
+            "edit-document",
+            Some(op(r#"{"op":"edit_document","path":"a","edits":[]}"#)),
+        ),
+        (
+            "rename-document",
+            Some(op(r#"{"op":"rename_document","path":"a","to":"b"}"#)),
+        ),
+        (
+            "move-document",
+            Some(op(r#"{"op":"move_document","path":"a","folder":"b"}"#)),
+        ),
+        (
+            "delete-document",
+            Some(op(r#"{"op":"delete_document","path":"a"}"#)),
+        ),
+        (
+            "watch-documents",
+            Some(op(r#"{"op":"watch_documents","action":"X"}"#)),
+        ),
         // The theme is the host's to send, no request (a process is sent it).
         ("theme", None),
         // The host's clock: a process reads its own.
@@ -240,7 +269,15 @@ fn the_host_interface_is_the_host_service() {
             "menu",
             "decorate",
             "subscribe",
-            "unsubscribe"
+            "unsubscribe",
+            "list_documents",
+            "read_document",
+            "create_document",
+            "edit_document",
+            "rename_document",
+            "move_document",
+            "delete_document",
+            "watch_documents"
         ]
     );
 }

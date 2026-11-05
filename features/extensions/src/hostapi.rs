@@ -28,7 +28,9 @@
 //!
 //! What the app knows that the host does not — the organization, the
 //! selection, its documents — comes from an [`AppContext`] it gives
-//! ([`Host::set_app_context`]); settings' values from its
+//! ([`Host::set_app_context`]), and the documents an extension lists,
+//! creates, edits, renames, moves, deletes and watches from its
+//! [`Documents`] ([`Host::set_documents`]; `crate::documents`); settings' values from its
 //! [`SettingValues`] ([`Host::set_setting_values`]; in memory unless
 //! given); data and files under [`Host::with_data_root`] (`<root>/<id>/`);
 //! the interface it may use (notifications, the clipboard, pickers,
@@ -46,6 +48,8 @@ use tracing::Instrument as _;
 
 use crate::catalog::Origin;
 use crate::consent::Grants;
+use crate::documents::{DocInfo, Documents};
+use crate::events::DocEvent;
 use crate::host::{Host, Opening, WeakHost};
 use crate::hostcall::{HostError, HostRequest, PickKind, Target};
 use crate::hostui::{Asker, Decorated, Decorations, HostUi, NoUi, Notification};
@@ -126,6 +130,8 @@ pub(crate) struct Services {
     grants: Mutex<Option<Grants>>,
     logs: Logs,
     app: Mutex<Option<Arc<dyn AppContext>>>,
+    /// The app's documents, for the document calls.
+    documents: Mutex<Option<Arc<dyn Documents>>>,
     values: Mutex<Arc<dyn SettingValues>>,
     data_root: Mutex<Option<PathBuf>>,
     /// The app's own list, when its actions are not on the host's.
@@ -166,6 +172,7 @@ impl Default for Services {
             grants: Mutex::new(None),
             logs: Logs::default(),
             app: Mutex::new(None),
+            documents: Mutex::new(None),
             values: Mutex::new(Arc::new(MemoryValues::default())),
             data_root: Mutex::new(None),
             app_list: Mutex::new(None),
@@ -227,6 +234,25 @@ impl Host {
     /// [`Self::with_app_context`] on a host already shared.
     pub fn set_app_context(&self, context: Arc<dyn AppContext>) {
         *lock(&self.services().app) = Some(context);
+    }
+
+    /// The app's documents, for extensions that may read and change them
+    /// (`crate::documents`): Task's vault, the lab's spaces.
+    #[must_use]
+    pub fn with_documents(self, documents: impl Documents + 'static) -> Self {
+        self.set_documents(Arc::new(documents));
+        self
+    }
+
+    /// [`Self::with_documents`] on a host already shared.
+    pub fn set_documents(&self, documents: Arc<dyn Documents>) {
+        *lock(&self.services().documents) = Some(documents);
+    }
+
+    /// The app's documents, when it gave them.
+    #[must_use]
+    pub fn documents(&self) -> Option<Arc<dyn Documents>> {
+        lock(&self.services().documents).clone()
     }
 
     /// Reads and writes settings' values in `values` (the app's store).
@@ -601,6 +627,13 @@ impl ExtensionApi {
                 .await
                 .map_err(|message| HostError::Failed { message }),
             HostRequest::ReadDocument { path } => {
+                if let Some(docs) = host.documents() {
+                    match docs.read(&path) {
+                        Ok(text) => return Ok(Value::String(text)),
+                        Err(crate::documents::DocError::NotFound(_)) => {}
+                        Err(e) => return Err(e.into()),
+                    }
+                }
                 match host.app_context().and_then(|c| c.document(&path)) {
                     Some(Ok(text)) => Ok(Value::String(text)),
                     Some(Err(message)) => Err(HostError::Failed { message }),
@@ -609,6 +642,13 @@ impl ExtensionApi {
                     }),
                 }
             }
+            HostRequest::ListDocuments { .. }
+            | HostRequest::CreateDocument { .. }
+            | HostRequest::EditDocument { .. }
+            | HostRequest::RenameDocument { .. }
+            | HostRequest::MoveDocument { .. }
+            | HostRequest::DeleteDocument { .. }
+            | HostRequest::WatchDocuments { .. } => self.document(&host, manifest, request),
             HostRequest::ReadFile { path } => {
                 let file = self.file(&host, &loaded, &may, &path, false)?;
                 std::fs::read_to_string(&file)
@@ -781,6 +821,93 @@ impl ExtensionApi {
             HostRequest::Unsubscribe { key } => Ok(Value::Bool(host.unsubscribe(&self.id, &key))),
             HostRequest::Events => Ok(host.events_for(&self.id)),
         }
+    }
+
+    /// A document call (`crate::documents`), its capability checked: done
+    /// on the app's [`Documents`] as the extension, and the document event
+    /// it is raised for the hooks that watch.
+    fn document(
+        &self,
+        host: &Host,
+        manifest: &Manifest,
+        request: HostRequest,
+    ) -> Result<Value, HostError> {
+        use crate::documents::{checked_path, moved_to};
+        let path_ok = |p: &str| {
+            checked_path(p)
+                .map(str::to_owned)
+                .map_err(|message| HostError::Failed { message })
+        };
+        if let HostRequest::WatchDocuments {
+            action,
+            script,
+            function,
+        } = request
+        {
+            let keys = crate::events::DOC_EVENTS
+                .iter()
+                .map(|on| {
+                    host.subscribe(
+                        &self.id,
+                        crate::contrib::HookDecl {
+                            on: (*on).to_owned(),
+                            action: action.clone(),
+                            script: script.clone(),
+                            function: function.clone(),
+                            ..crate::contrib::HookDecl::default()
+                        },
+                    )
+                    .map(Value::String)
+                    .map_err(|message| HostError::Failed { message })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            return Ok(Value::Array(keys));
+        }
+        let docs = host.documents().ok_or_else(|| HostError::Unsupported {
+            what: "documents: this app gives extensions none".to_owned(),
+        })?;
+        let by = self.principal();
+        let info = |i: DocInfo| serde_json::to_value(i).unwrap_or(Value::Null);
+        let (answer, event) = match request {
+            HostRequest::ListDocuments { under } => {
+                let list = docs.list(under.as_deref().filter(|u| !u.is_empty()))?;
+                (serde_json::to_value(list).unwrap_or(Value::Null), None)
+            }
+            HostRequest::CreateDocument { path, text } => {
+                let path = path_ok(&path)?;
+                let made = docs.create(&path, &text, &by)?;
+                (info(made), Some(DocEvent::Created { path }))
+            }
+            HostRequest::EditDocument { path, edits, name } => {
+                let step = name.unwrap_or_else(|| format!("{}: edit", manifest.name));
+                let text = docs.edit(&path, &edits, &step, &by)?;
+                (Value::String(text), Some(DocEvent::Saved { path }))
+            }
+            HostRequest::RenameDocument { path, to } => {
+                let to = path_ok(&to)?;
+                let moved = docs.rename(&path, &to, &by)?;
+                (info(moved), Some(DocEvent::Renamed { from: path, to }))
+            }
+            HostRequest::MoveDocument { path, folder } => {
+                let to =
+                    moved_to(&path, &folder).map_err(|message| HostError::Failed { message })?;
+                let moved = docs.rename(&path, &to, &by)?;
+                (info(moved), Some(DocEvent::Renamed { from: path, to }))
+            }
+            HostRequest::DeleteDocument { path } => {
+                docs.delete(&path, &by)?;
+                (Value::Null, Some(DocEvent::Deleted { path }))
+            }
+            other => {
+                return Err(HostError::Failed {
+                    message: format!("{} is not a document call", other.op()),
+                });
+            }
+        };
+        if let Some(event) = event {
+            host.raise_doc(&event);
+        }
+        Ok(answer)
     }
 
     async fn run(

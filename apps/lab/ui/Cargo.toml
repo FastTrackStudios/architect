@@ -30,7 +30,8 @@ architect-commands = { workspace = true, features = ["native"] }
 architect-settings = { workspace = true, features = ["ui", "store", "synced", "appearance"] }
 loro = { workspace = true }
 architect-orgs = { workspace = true, features = ["ui"] }
-architect-extensions = { workspace = true, features = ["ui", "remote", "page", "pickers"] }
+# `crdt`: the lab's spaces as documents extensions reach (src/extensions.rs).
+architect-extensions = { workspace = true, features = ["ui", "remote", "page", "pickers", "crdt"] }
 # The lab's example extension, linked in (apps/lab/board).
 architect-lab-board = { path = "../board" }
 # The theme picker, architect's built-in extension.

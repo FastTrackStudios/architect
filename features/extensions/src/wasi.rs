@@ -12,8 +12,11 @@
 //! - **imports**: the host service (`run-action`, `setting`,
 //!   `set-setting`, `theme`, `log`, `call-service`, the interface's
 //!   `notify`, `clipboard-read`, `clipboard-write`, `pick`, `prompt`,
-//!   `menu` and `decorate`, the host's clock (`now`) and hooks made at
-//!   run time (`subscribe`, `unsubscribe`), and `call` for every
+//!   `menu` and `decorate`, the host's clock (`now`), hooks made at
+//!   run time (`subscribe`, `unsubscribe`), the app's documents
+//!   (`list-documents`, `read-document`, `create-document`,
+//!   `edit-document`, `rename-document`, `move-document`,
+//!   `delete-document`, `watch-documents`), and `call` for every
 //!   `hostcall::HostRequest`), each call answered by the extension's own
 //!   [`ExtensionApi`] — so checked against its capabilities as a person
 //!   granted them, as a process's, a script's and a linked extension's
@@ -618,6 +621,67 @@ impl wit_host::Host for State {
         self.ask(HostRequest::Unsubscribe { key })
             .await
             .map(|v| v.as_bool().unwrap_or(false))
+    }
+
+    async fn list_documents(&mut self, under: String) -> Result<String, String> {
+        self.ask(HostRequest::ListDocuments {
+            under: (!under.is_empty()).then_some(under),
+        })
+        .await
+        .map(|v| v.to_string())
+    }
+
+    async fn read_document(&mut self, path: String) -> Result<String, String> {
+        self.ask(HostRequest::ReadDocument { path })
+            .await
+            .map(|v| v.as_str().map_or_else(|| v.to_string(), str::to_owned))
+    }
+
+    async fn create_document(&mut self, path: String, text: String) -> Result<String, String> {
+        self.ask(HostRequest::CreateDocument { path, text })
+            .await
+            .map(|v| v.to_string())
+    }
+
+    async fn edit_document(
+        &mut self,
+        path: String,
+        edits: String,
+        name: Option<String>,
+    ) -> Result<String, String> {
+        let edits = match serde_json::from_str(&edits) {
+            Ok(edits) => edits,
+            Err(e) => {
+                return Err(error_json(&HostError::Failed {
+                    message: format!("not a document's edits: {e}"),
+                }));
+            }
+        };
+        self.ask(HostRequest::EditDocument { path, edits, name })
+            .await
+            .map(|v| v.as_str().map_or_else(|| v.to_string(), str::to_owned))
+    }
+
+    async fn rename_document(&mut self, path: String, to: String) -> Result<String, String> {
+        self.ask(HostRequest::RenameDocument { path, to })
+            .await
+            .map(|v| v.to_string())
+    }
+
+    async fn move_document(&mut self, path: String, folder: String) -> Result<String, String> {
+        self.ask(HostRequest::MoveDocument { path, folder })
+            .await
+            .map(|v| v.to_string())
+    }
+
+    async fn delete_document(&mut self, path: String) -> Result<(), String> {
+        self.ask(HostRequest::DeleteDocument { path })
+            .await
+            .map(|_| ())
+    }
+
+    async fn watch_documents(&mut self, hook: String) -> Result<String, String> {
+        self.ask_json("watch_documents", &hook).await
     }
 
     async fn call(&mut self, request: String) -> String {

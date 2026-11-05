@@ -122,6 +122,7 @@ fn union(a: &Capabilities, b: &Capabilities) -> Capabilities {
         (&mut out.hosts, &b.hosts),
         (&mut out.folders, &b.folders),
         (&mut out.reads, &b.reads),
+        (&mut out.writes, &b.writes),
         (&mut out.ui, &b.ui),
         (&mut out.events, &b.events),
     ] {

@@ -301,6 +301,18 @@
     unsubscribe: (key) => ask("unsubscribe", { key: String(key) }),
     list: () => ask("events"),
   });
+  // The app's documents, as the page's extension (capabilities.reads /
+  // .writes "documents"): an edit is one transaction, one undo step.
+  const documents = Object.freeze({
+    list: (under) => ask("list_documents", { under: under == null ? null : String(under) }),
+    read: (path) => ask("read_document", { path: String(path) }),
+    create: (path, text) => ask("create_document", { path: String(path), text: text == null ? "" : String(text) }),
+    edit: (path, edits, name) => ask("edit_document", { path: String(path), edits, name: name == null ? null : String(name) }),
+    rename: (path, to) => ask("rename_document", { path: String(path), to: String(to) }),
+    move: (path, folder) => ask("move_document", { path: String(path), folder: String(folder) }),
+    delete: (path) => ask("delete_document", { path: String(path) }),
+    watch: (hook) => ask("watch_documents", hook),
+  });
   const settings = Object.freeze({
     get: (key) => call("setting", key),
     set: (key, value) => call("set_setting", key, json(value)),
@@ -469,7 +481,7 @@
 
   const api = Object.freeze({
     h, Fragment, useState, useRef, useEffect, useData, useShared, useEmbed, useTheme, invalidate,
-    theme, actions, services, settings, state, notify, ui, clipboard, events, worker, Overlay, host: raw,
+    theme, actions, services, settings, state, notify, ui, clipboard, events, documents, worker, Overlay, host: raw,
   });
   globalThis.__architect = Object.freeze({
     api,

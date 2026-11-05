@@ -701,6 +701,98 @@ pub mod host {
         wit_host::unsubscribe(key).map_err(|e| HostError::from_text(&e))
     }
 
+    /// The app's documents under folder `under` (`""`: every one), as
+    /// JSON (`[{path, name, space}]`). Needs `reads = ["documents"]`.
+    ///
+    /// # Errors
+    ///
+    /// Refused, or the app has no documents for extensions.
+    pub fn list_documents(under: &str) -> Result<Json, HostError> {
+        wit_host::list_documents(under)
+            .map(|t| serde_json::from_str(&t).unwrap_or(Json::Null))
+            .map_err(|e| HostError::from_text(&e))
+    }
+
+    /// Document `path`'s text. Needs `reads = ["documents"]`.
+    ///
+    /// # Errors
+    ///
+    /// Refused, or no document there.
+    pub fn read_document(path: &str) -> Result<String, HostError> {
+        wit_host::read_document(path).map_err(|e| HostError::from_text(&e))
+    }
+
+    /// A new document at `path` holding `text`: its info, as JSON. Needs
+    /// `writes = ["documents"]`, as every change does.
+    ///
+    /// # Errors
+    ///
+    /// Refused, or one is there already.
+    pub fn create_document(path: &str, text: &str) -> Result<Json, HostError> {
+        wit_host::create_document(path, text)
+            .map(|t| serde_json::from_str(&t).unwrap_or(Json::Null))
+            .map_err(|e| HostError::from_text(&e))
+    }
+
+    /// `edits` (`[{"insert": {"at", "text"}}, {"delete": {"at", "len"}},
+    /// {"append": {"text"}}, {"replace": {"text"}}]`) as one transaction,
+    /// one undo step named `name`: the text after.
+    ///
+    /// # Errors
+    ///
+    /// Refused, no document, or an edit outside its text.
+    pub fn edit_document(
+        path: &str,
+        edits: &Json,
+        name: Option<&str>,
+    ) -> Result<String, HostError> {
+        wit_host::edit_document(path, &edits.to_string(), name)
+            .map_err(|e| HostError::from_text(&e))
+    }
+
+    /// Document `path` at `to`, its history kept: its info, as JSON.
+    ///
+    /// # Errors
+    ///
+    /// Refused, no document, or one at `to` already.
+    pub fn rename_document(path: &str, to: &str) -> Result<Json, HostError> {
+        wit_host::rename_document(path, to)
+            .map(|t| serde_json::from_str(&t).unwrap_or(Json::Null))
+            .map_err(|e| HostError::from_text(&e))
+    }
+
+    /// Document `path` into folder `folder`, its name kept: its info.
+    ///
+    /// # Errors
+    ///
+    /// Refused, no document, or one there already.
+    pub fn move_document(path: &str, folder: &str) -> Result<Json, HostError> {
+        wit_host::move_document(path, folder)
+            .map(|t| serde_json::from_str(&t).unwrap_or(Json::Null))
+            .map_err(|e| HostError::from_text(&e))
+    }
+
+    /// Deletes document `path`.
+    ///
+    /// # Errors
+    ///
+    /// Refused, or no document there.
+    pub fn delete_document(path: &str) -> Result<(), HostError> {
+        wit_host::delete_document(path).map_err(|e| HostError::from_text(&e))
+    }
+
+    /// One of its actions on every document event (`{"action": "ACME_REINDEX"}`):
+    /// the hooks' keys, as JSON.
+    ///
+    /// # Errors
+    ///
+    /// Refused (`reads = ["documents"]`), or not its action.
+    pub fn watch_documents(hook: &Json) -> Result<Json, HostError> {
+        wit_host::watch_documents(&hook.to_string())
+            .map(|t| serde_json::from_str(&t).unwrap_or(Json::Null))
+            .map_err(|e| HostError::from_text(&e))
+    }
+
     /// Any host-service call (`hostcall::HostRequest`: `{"op": "selection"}`,
     /// `{"op": "read_file", "path": …}`), its answer.
     ///
