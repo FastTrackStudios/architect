@@ -351,14 +351,33 @@ pub fn NoteEditor(id: String, text: String, on_change: Callback<String>) -> Elem
         .with("Mod-Shift-z", redo)
         .with("Mod-y", redo);
     let css = use_hook(|| format!("{}\n{LAYOUT}", editor_view::EDITOR_CSS));
+    // Gone (Done, another note): typing is what the host says again.
+    use_drop(|| architect_shell::set_typing(dioxus_native::text_input_focused()));
     rsx! {
         document::Style { {css} }
         div {
             id: "note-source",
             class: "lab-note-editor",
             "data-note-editor": "{id}",
-            onfocusin: move |_| editing.focus(),
-            onfocusout: move |_| editing.blur(),
+            // The editor is a text field the host does not count as one
+            // (Blitz reports an `<input>` or a `<textarea>` only, and moves
+            // the focus on a click only into those, so a click here fires
+            // no `focusin`): it says so itself, on a click (its text's
+            // spans keep their `mousedown` to themselves). A phone's bar
+            // becomes the Typing Toolbar, its `editor:note` items with it,
+            // and global keys stand aside while it has the keys.
+            onclick: move |_| {
+                editing.focus();
+                architect_shell::set_typing(true);
+            },
+            onfocusin: move |_| {
+                editing.focus();
+                architect_shell::set_typing(true);
+            },
+            onfocusout: move |_| {
+                editing.blur();
+                architect_shell::set_typing(dioxus_native::text_input_focused());
+            },
             Editor {
                 state,
                 keymap,
