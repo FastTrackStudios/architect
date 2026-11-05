@@ -393,6 +393,7 @@ impl WebHost {
         };
         let (_, check) = crate::hostcall::check(&me.manifest, &me.may, &request, effect);
         check.map_err(|(capability, why)| HostError::Refused { capability, why })?;
+        let request_op = request.op();
         let context = |what: &str| {
             me.context
                 .borrow()
@@ -453,6 +454,16 @@ impl WebHost {
             | HostRequest::Point { .. }
             | HostRequest::Window { .. } => Err(HostError::Failed {
                 message: "services, points and windows are not in the browser yet".to_owned(),
+            }),
+            // The interface's calls are the native window's (`crate::hostui`).
+            HostRequest::Notify { .. }
+            | HostRequest::ClipboardRead
+            | HostRequest::ClipboardWrite { .. }
+            | HostRequest::Pick(_)
+            | HostRequest::Prompt(_)
+            | HostRequest::Menu(_)
+            | HostRequest::Decorate { .. } => Err(HostError::Unsupported {
+                what: format!("{request_op} is not in the browser yet"),
             }),
         }
     }

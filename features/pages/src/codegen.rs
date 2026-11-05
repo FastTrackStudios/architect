@@ -258,6 +258,60 @@ export const state: {
 /** Shows a notification. */
 export function notify(text: string, kind?: "info" | "success" | "warning" | "error"): void;
 
+/** A file filter for a picker: `{ name: "Images", extensions: ["png", "jpg"] }`. */
+export interface FileFilter { name: string; extensions: string[] }
+/** One of a pick-one prompt's choices. */
+export interface Choice { id: string; label: string; detail?: string }
+/** One item of a context menu. */
+export interface MenuItem {
+  id: string;
+  label: string;
+  icon?: string;
+  shortcut?: string;
+  disabled?: boolean;
+  separator?: boolean;
+}
+/** An icon or badge on a file-tree row or a tab. */
+export interface Decoration { icon?: string; badge?: string; color?: string; tooltip?: string }
+/**
+ * The app's interface, as the page's extension (`capabilities.ui`): each is
+ * refused outside it. `pick`, `prompt` and `menu` wait for the person; a
+ * cancel is `null`.
+ */
+export const ui: {
+  notify(text: string, kind?: "info" | "success" | "warning" | "error", title?: string): Promise<void>;
+  /** A path (`open`, `folder`, `save`), paths (`open_many`), or `null`. */
+  pick(options: {
+    kind: "open" | "open_many" | "folder" | "save";
+    title?: string;
+    filters?: FileFilter[];
+    folder?: string;
+    name?: string;
+  }): Promise<string | string[] | null>;
+  prompt(options: {
+    kind: "text" | "confirm" | "pick_one";
+    title: string;
+    message?: string;
+    default?: string;
+    placeholder?: string;
+    choices?: Choice[];
+  }): Promise<string | boolean | null>;
+  input(title: string, options?: { message?: string; default?: string; placeholder?: string }): Promise<string | null>;
+  confirm(title: string, message?: string): Promise<boolean>;
+  pickOne(title: string, choices: Choice[]): Promise<string | null>;
+  /** At `x`, `y` in the window's CSS pixels (none: its middle): the id chosen. */
+  menu(items: MenuItem[], at?: { x: number; y: number }): Promise<string | null>;
+  /** `decoration` null takes it off. */
+  decorate(target: { kind: "file" | "tab" | string; id: string }, decoration: Decoration | null): Promise<void>;
+  /** Any host-service call (`{ op, … }`). */
+  call<T = unknown>(request: { op: string; [field: string]: unknown }): Promise<T>;
+};
+/** The clipboard's text (`capabilities.ui = ["clipboard"]`). */
+export const clipboard: {
+  read(): Promise<string | null>;
+  write(text: string): Promise<void>;
+};
+
 /** A worker: a script of the page's folder in a runtime of its own, spoken to by messages. */
 export interface Worker {
   readonly id: number;
@@ -350,6 +404,10 @@ export type Builder = {
 --   embed(): an inline embed's input ({ claim, source, props }), nil in a pane
 --   set_timeout(fn, ms), set_interval(fn, ms): a timer's id; clear_timeout(id), clear_interval(id)
 --   worker.spawn(file, args?): a Worker running `file`, a `.luau` of the page's folder
+--   notify(text, kind?): a notification
+--   ui.pick(options), ui.prompt(options), ui.menu(items, at?), ui.decorate(target, decoration?),
+--   ui.call(request), clipboard.read(), clipboard.write(text): the app's interface, as the
+--   page's extension (capabilities.ui); each waits for its answer, a cancel is nil
 
 -- How far a worker said it is.
 export type WorkerProgress = { done: number, total: number?, fraction: number?, note: string? }

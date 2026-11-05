@@ -12,7 +12,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
-use architect_extension_wasi::{Extension, Worker, worker};
+use architect_extension_wasi::{Extension, Worker, host, worker};
 use serde_json::{Value, json};
 
 thread_local! {
@@ -90,6 +90,21 @@ fn build() -> Extension {
                 std::hint::black_box(0);
             }
             Ok(Value::Null)
+        })
+        // The app's interface (#306): a notification, the clipboard there
+        // and back, a picker, a prompt, a menu, a badge; what came back.
+        .action("TEST_HAZARDS_ASK", |_| {
+            let e = |e: host::HostError| e.to_string();
+            host::notify("hello from WASI", "success").map_err(e)?;
+            host::clipboard_write("copied by WASI").map_err(e)?;
+            let clip = host::clipboard_read().map_err(e)?;
+            let path = host::pick(&json!({ "kind": "open" })).map_err(e)?;
+            let name = host::prompt(&json!({ "kind": "text", "title": "Name?" })).map_err(e)?;
+            let chosen =
+                host::menu(&json!({ "x": 4, "y": 8, "items": [{ "id": "go", "label": "Go" }] }))
+                    .map_err(e)?;
+            host::decorate("file", "notes/a.md", Some(&json!({ "badge": "W" }))).map_err(e)?;
+            Ok(json!({ "clip": clip, "path": path, "name": name, "chosen": chosen }))
         })
         // Never ends, never looks.
         .worker("forever", |_, _| spin())

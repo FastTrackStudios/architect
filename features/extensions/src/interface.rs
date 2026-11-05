@@ -411,6 +411,9 @@ pub fn use_extension_ui(host: Host, app: Arc<ActionList>) -> ExtensionUi {
     });
     // ⌘O: every extension's quick-open openers, the palette's own.
     use_quick_open(host.clone(), revision);
+    // A tab's icons and badges (`decorate` on a `tab`): by its view kind
+    // and by its pane.
+    crate::host_ui_view::use_tab_badges(&host);
     // A pane's context menu: an extension's rows for its view.
     let reg = host.contributions().clone();
     let list = host.list().clone();
@@ -690,6 +693,7 @@ pub fn ExtensionOverlays(ui: ExtensionUi) -> Element {
     let layers = (ui.layers)();
     rsx! {
         crate::window_ui::ExtensionWindows { ui }
+        crate::host_ui_view::HostUiLayer { host: ui.host() }
         for layer in layers {
             {
                 let open = layer.open;

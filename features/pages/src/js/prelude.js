@@ -275,6 +275,25 @@
     call: (service, method, args) =>
       call("run", "EXT_SERVICE_CALL", json({ service, method, args: args === undefined ? null : args })),
   });
+  // The app's interface (capabilities.ui), as the page's extension: each
+  // a host-service call; pick, prompt and menu wait for the person (a
+  // cancel is null).
+  const ask = (op, fields) => call("host", JSON.stringify(Object.assign({}, fields || {}, { op })));
+  const ui = Object.freeze({
+    notify: (text, kind, title) => ask("notify", { text: String(text), kind: kind || "info", title: title || null }),
+    pick: (options) => ask("pick", options),
+    prompt: (options) => ask("prompt", options),
+    input: (title, options) => ask("prompt", Object.assign({}, options || {}, { kind: "text", title: String(title) })),
+    confirm: (title, message) => ask("prompt", { kind: "confirm", title: String(title), message: message == null ? null : String(message) }),
+    pickOne: (title, choices) => ask("prompt", { kind: "pick_one", title: String(title), choices }),
+    menu: (items, at) => ask("menu", Object.assign({ items }, at || {})),
+    decorate: (target, decoration) => ask("decorate", { target, decoration: decoration === undefined ? null : decoration }),
+    call: (request) => call("host", JSON.stringify(request)),
+  });
+  const clipboard = Object.freeze({
+    read: () => ask("clipboard_read"),
+    write: (text) => ask("clipboard_write", { text: String(text) }),
+  });
   const settings = Object.freeze({
     get: (key) => call("setting", key),
     set: (key, value) => call("set_setting", key, json(value)),
@@ -316,6 +335,7 @@
     shared: (key) => Promise.resolve({ ok: true, value: host.sync("shared", key, "") }),
     setShared: (key, value) => Promise.resolve((host.sync("set_shared", key, value), { ok: true, value: undefined })),
     notify: (n) => Promise.resolve((notify(n.text, n.kind), { ok: true, value: undefined })),
+    hostCall: (request) => wrap(call("host", request)),
   });
 
   // ── theme ─────────────────────────────────────────────────────────
@@ -442,7 +462,7 @@
 
   const api = Object.freeze({
     h, Fragment, useState, useRef, useEffect, useData, useShared, useEmbed, useTheme, invalidate,
-    theme, actions, services, settings, state, notify, worker, Overlay, host: raw,
+    theme, actions, services, settings, state, notify, ui, clipboard, worker, Overlay, host: raw,
   });
   globalThis.__architect = Object.freeze({
     api,

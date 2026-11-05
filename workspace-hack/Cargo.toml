@@ -266,6 +266,7 @@ portable-atomic = { version = "1.15.0", features = ["serde"] }
 quote = { version = "1.0.47" }
 rand-93f6ce9d446188ac = { package = "rand", version = "0.10.2" }
 reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", default-features = false, features = ["blocking"] }
+rfd = { version = "0.17.2" }
 ring = { version = "0.17.14", features = ["std"] }
 rustix = { version = "1.1.5", features = ["io_uring", "pipe", "process", "shm", "system", "time"] }
 simdutf8 = { version = "0.1.5", features = ["aarch64_neon"] }
@@ -278,6 +279,9 @@ tower = { version = "0.5.3", default-features = false, features = ["log", "make"
 tower-http = { version = "0.6.11", default-features = false, features = ["follow-redirect"] }
 tungstenite = { version = "0.29.0", features = ["native-tls"] }
 twox-hash = { version = "2.1.4" }
+wayland-backend = { version = "0.3.17", default-features = false, features = ["client_system", "dlopen"] }
+wayland-protocols = { version = "0.32.13", default-features = false, features = ["client", "staging", "unstable"] }
+wayland-sys = { version = "0.31.11", default-features = false, features = ["dlopen", "egl"] }
 winnow = { version = "1.0.4" }
 
 [target.x86_64-unknown-linux-gnu.build-dependencies]
@@ -329,6 +333,7 @@ parking_lot = { version = "0.12.5", default-features = false, features = ["send_
 portable-atomic = { version = "1.15.0", features = ["serde"] }
 rand-93f6ce9d446188ac = { package = "rand", version = "0.10.2" }
 reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", default-features = false, features = ["blocking"] }
+rfd = { version = "0.17.2" }
 ring = { version = "0.17.14", features = ["std"] }
 rustix = { version = "1.1.5", features = ["io_uring", "pipe", "process", "time"] }
 simdutf8 = { version = "0.1.5", features = ["aarch64_neon"] }
@@ -390,6 +395,7 @@ parking_lot = { version = "0.12.5", default-features = false, features = ["send_
 portable-atomic = { version = "1.15.0", features = ["serde"] }
 rand-93f6ce9d446188ac = { package = "rand", version = "0.10.2" }
 reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.28", default-features = false, features = ["blocking"] }
+rfd = { version = "0.17.2" }
 ring = { version = "0.17.14", features = ["std"] }
 rustix = { version = "1.1.5", features = ["io_uring", "pipe", "process", "time"] }
 simdutf8 = { version = "0.1.5", features = ["aarch64_neon"] }

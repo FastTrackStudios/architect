@@ -147,6 +147,10 @@ pub type Notify = Arc<dyn Fn(&Notice) + Send + Sync>;
 /// extensions host's: `architect_extensions::interop_actions`).
 const SERVICE_CALL: &str = "EXT_SERVICE_CALL";
 
+/// The action a page makes any host-service call with, as its extension
+/// (the extensions host's: `architect_extensions::host::PAGE_CALL`).
+const PAGE_CALL: &str = "EXT_PAGE_CALL";
+
 /// The page host in process: one per page (its caller and gate are the
 /// page's), the app's parts shared.
 #[derive(Clone)]
@@ -317,6 +321,24 @@ impl AppHost {
         }
         if let Some(f) = &self.notify {
             f(notice);
+        } else if let Some(ext) = self
+            .extension
+            .clone()
+            .filter(|_| self.list.info(PAGE_CALL).is_some())
+        {
+            // An extension's page: the app's interface shows it (its
+            // `capabilities.ui` holding), off the page's thread.
+            let (list, dispatch) = (self.list.clone(), self.dispatch.clone());
+            let caller = ActionCaller::new(architect::action::Principal::extension(ext, None));
+            let body =
+                serde_json::json!({ "op": "notify", "text": notice.text, "kind": notice.kind })
+                    .to_string();
+            architect_scripting::vm::spawn(move || {
+                let _ = futures::executor::block_on(dispatch.call(async move {
+                    list.run_json_async_with(&caller, PAGE_CALL, body.as_bytes())
+                        .await
+                }));
+            });
         } else {
             tracing::info!(kind = %notice.kind, text = %notice.text, "a page's notice");
         }
@@ -347,8 +369,8 @@ impl PageHost for AppHost {
             return Err(why);
         }
         let (list, mut caller) = (self.list.clone(), self.caller.clone());
-        // A service call is the page's extension's own.
-        if id == SERVICE_CALL
+        // A service call and a host call are the page's extension's own.
+        if (id == SERVICE_CALL || id == PAGE_CALL)
             && let Some(ext) = &self.extension
         {
             caller = ActionCaller::new(architect::action::Principal::extension(ext.clone(), None));
@@ -423,5 +445,14 @@ impl PageHost for AppHost {
     async fn notify(&self, notice: Notice) -> Result<(), PageError> {
         self.show(&notice);
         Ok(())
+    }
+
+    async fn host_call(&self, request: String) -> Result<String, PageError> {
+        if self.extension.is_none() {
+            return Err(PageError::Denied(
+                "only an extension's page makes host-service calls".to_owned(),
+            ));
+        }
+        self.run(PAGE_CALL.to_owned(), request).await
     }
 }

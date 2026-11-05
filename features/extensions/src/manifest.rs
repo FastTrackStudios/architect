@@ -139,6 +139,13 @@ pub struct Capabilities {
     /// `org` (the current organization), `selection` (what is selected
     /// and focused), `documents` (open and read the app's documents).
     pub reads: Vec<String>,
+    /// The app's interface it may use through the host service
+    /// (`crate::capabilities::UI`): `notify` (notifications), `clipboard`
+    /// (read and write it), `pickers` (file and folder pickers, save
+    /// dialogs), `prompts` (ask for text, a yes or no, one of a list),
+    /// `menus` (a context menu of its own at a point), `badges` (icons
+    /// and badges on file-tree rows and tabs).
+    pub ui: Vec<String>,
 }
 
 /// One action it adds.
@@ -746,6 +753,17 @@ impl Manifest {
             return Err(ManifestError::BadCapability(format!(
                 "reads {bad:?}: not one of {}",
                 crate::capabilities::READS.join(", ")
+            )));
+        }
+        if let Some(bad) = self
+            .capabilities
+            .ui
+            .iter()
+            .find(|u| !crate::capabilities::UI.contains(&u.as_str()))
+        {
+            return Err(ManifestError::BadCapability(format!(
+                "ui {bad:?}: not one of {}",
+                crate::capabilities::UI.join(", ")
             )));
         }
         let prefix = self.action_prefix();

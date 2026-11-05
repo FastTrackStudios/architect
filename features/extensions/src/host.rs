@@ -569,6 +569,11 @@ fn json_args(id: &str, args: &[u8]) -> Result<Value, ActionError> {
 /// let through every extension's gate, as it checks the call itself.
 pub const SERVICE_CALL: &str = "EXT_SERVICE_CALL";
 
+/// The action a page makes any host-service call with
+/// (`crate::interop_actions`): let through every extension's gate, as the
+/// host service checks the call itself.
+pub const PAGE_CALL: &str = "EXT_PAGE_CALL";
+
 /// What an extension may reach: its own actions, the namespaces it named,
 /// up to the effect it named.
 #[must_use]
@@ -577,8 +582,9 @@ pub fn gate(manifest: &Manifest) -> Gate {
     let named = manifest.capabilities.actions.clone();
     let most = manifest.capabilities.effect;
     Arc::new(move |info: &ActionInfo| {
-        // A service call checks itself: its [requires], its effect.
-        if info.id.starts_with(&own) || info.id == SERVICE_CALL {
+        // A service call and a host call check themselves: its
+        // [requires], its effect, its capabilities.
+        if info.id.starts_with(&own) || info.id == SERVICE_CALL || info.id == PAGE_CALL {
             return Ok(());
         }
         if !named
@@ -848,7 +854,7 @@ impl Host {
     /// A host over `list`, putting settings in `sections`, running data
     /// and Luau extensions.
     pub fn new(list: ActionList, sections: impl SectionSink + 'static) -> Self {
-        Self {
+        let host = Self {
             inner: Arc::new(Inner {
                 list,
                 sections: Arc::new(sections),
@@ -876,7 +882,13 @@ impl Host {
                 reserved: Mutex::new(BTreeMap::new()),
                 delivered: std::sync::atomic::AtomicU64::new(0),
             }),
-        }
+        };
+        // Icons and badges on rows and tabs (`crate::hostui`).
+        let _ = host
+            .inner
+            .points
+            .declare(crate::interop::APP, &[crate::hostui::decorations_point()]);
+        host
     }
 
     pub(crate) fn services(&self) -> &crate::hostapi::Services {
@@ -1724,6 +1736,7 @@ impl Host {
         }
         self.inner.contributions.withdraw(id);
         self.inner.windows.close_all(id);
+        self.services().forget(id);
         let points = self.inner.points.withdraw(id);
         self.deliver(&points);
         running.instance.stop();

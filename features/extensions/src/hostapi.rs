@@ -30,7 +30,11 @@
 //! selection, its documents — comes from an [`AppContext`] it gives
 //! ([`Host::set_app_context`]); settings' values from its
 //! [`SettingValues`] ([`Host::set_setting_values`]; in memory unless
-//! given); data and files under [`Host::with_data_root`] (`<root>/<id>/`).
+//! given); data and files under [`Host::with_data_root`] (`<root>/<id>/`);
+//! the interface it may use (notifications, the clipboard, pickers,
+//! prompts, menus: `crate::hostui`) through its [`HostUi`]
+//! ([`Host::set_ui`]; [`crate::hostui::NoUi`] unless given), and the
+//! decorations extensions set on rows and tabs in [`Host::decorations`].
 
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
@@ -43,7 +47,8 @@ use tracing::Instrument as _;
 use crate::catalog::Origin;
 use crate::consent::Grants;
 use crate::host::{Host, Opening, WeakHost};
-use crate::hostcall::{HostError, HostRequest};
+use crate::hostcall::{HostError, HostRequest, PickKind, Target};
+use crate::hostui::{Asker, Decorated, Decorations, HostUi, NoUi, Notification};
 use crate::logs::{Level, Logs};
 use crate::manifest::{Capabilities, Manifest, Reach};
 use architect_scripting::luau::Gate;
@@ -127,6 +132,32 @@ pub(crate) struct Services {
     app_list: Mutex<Option<architect::action::ActionList>>,
     /// Data kept in memory, when there is no data root.
     data: Mutex<BTreeMap<String, BTreeMap<String, Value>>>,
+    /// The app's interface, for extensions (none given: [`NoUi`]).
+    ui: Mutex<Option<Arc<dyn HostUi>>>,
+    /// The window's own interface, kept for whoever draws it
+    /// (`host_ui_view::WindowUi::lend`).
+    window: Mutex<Option<Arc<dyn std::any::Any + Send + Sync>>>,
+    /// What extensions set on rows and tabs.
+    decorations: Decorations,
+    /// The paths a person picked for each extension, for the run: each
+    /// with whether it may write it (a save) and whether it is a folder.
+    picked: Mutex<BTreeMap<String, Vec<Picked>>>,
+}
+
+/// A path a person picked for an extension.
+#[derive(Clone, Debug)]
+struct Picked {
+    path: PathBuf,
+    write: bool,
+    folder: bool,
+}
+
+impl Services {
+    /// What extension `id` was lent goes with it (it unloaded).
+    pub(crate) fn forget(&self, id: &str) {
+        self.decorations.withdraw(id);
+        lock(&self.picked).remove(id);
+    }
 }
 
 impl Default for Services {
@@ -139,6 +170,10 @@ impl Default for Services {
             data_root: Mutex::new(None),
             app_list: Mutex::new(None),
             data: Mutex::new(BTreeMap::new()),
+            ui: Mutex::new(None),
+            window: Mutex::new(None),
+            decorations: Decorations::default(),
+            picked: Mutex::new(BTreeMap::new()),
         }
     }
 }
@@ -223,6 +258,79 @@ impl Host {
             .unwrap_or_else(|| self.list().clone())
     }
 
+    /// Answers extensions' notifications, clipboard, pickers, prompts and
+    /// menus with `ui` (the app's window's, or a `FakeUi`).
+    #[must_use]
+    pub fn with_ui(self, ui: impl HostUi + 'static) -> Self {
+        self.set_ui(Arc::new(ui));
+        self
+    }
+
+    /// [`Self::with_ui`] on a host already shared.
+    pub fn set_ui(&self, ui: Arc<dyn HostUi>) {
+        *lock(&self.services().ui) = Some(ui);
+    }
+
+    /// Gives `ui` unless the app gave one already (what the window's
+    /// overlays do as they mount): whether it took it.
+    pub fn offer_ui(&self, ui: Arc<dyn HostUi>) -> bool {
+        let mut now = lock(&self.services().ui);
+        if now.is_some() {
+            return false;
+        }
+        *now = Some(ui);
+        true
+    }
+
+    /// The window's interface, kept with the host for whoever draws it,
+    /// made by `make` the first time it is asked for.
+    pub(crate) fn window_slot<T: Clone + Send + Sync + 'static>(
+        &self,
+        make: impl FnOnce() -> T,
+    ) -> T {
+        let mut slot = lock(&self.services().window);
+        if let Some(kept) = slot.as_ref().and_then(|k| k.downcast_ref::<T>()) {
+            return kept.clone();
+        }
+        let fresh = make();
+        *slot = Some(Arc::new(fresh.clone()));
+        fresh
+    }
+
+    /// The interface extensions are lent.
+    #[must_use]
+    pub fn ui(&self) -> Arc<dyn HostUi> {
+        lock(&self.services().ui)
+            .clone()
+            .unwrap_or_else(|| Arc::new(NoUi))
+    }
+
+    /// What extensions set on rows and tabs at run time (`decorate`).
+    #[must_use]
+    pub fn decorations(&self) -> &Decorations {
+        &self.services().decorations
+    }
+
+    /// Every decoration on `target`: the ones manifests contribute
+    /// (`app.decorations`) first, then the ones set at run time.
+    #[must_use]
+    pub fn decorations_of(&self, target: &Target) -> Vec<Decorated> {
+        let mut out: Vec<Decorated> = self
+            .points()
+            .items(crate::hostui::DECORATIONS_POINT)
+            .into_iter()
+            .filter_map(|item| {
+                let on: Target = serde_json::from_value(item.value.get("target")?.clone()).ok()?;
+                (on == *target).then(|| Decorated {
+                    from: item.from,
+                    decoration: serde_json::from_value(item.value).unwrap_or_default(),
+                })
+            })
+            .collect();
+        out.extend(self.decorations().of(target));
+        out
+    }
+
     /// Keeps each extension's data and files under `<root>/<id>/`.
     #[must_use]
     pub fn with_data_root(self, root: impl Into<PathBuf>) -> Self {
@@ -270,7 +378,7 @@ impl Host {
             let Some(host) = host.upgrade() else {
                 return Err("the app is closing".to_owned());
             };
-            if info.id == crate::host::SERVICE_CALL {
+            if info.id == crate::host::SERVICE_CALL || info.id == crate::host::PAGE_CALL {
                 return Ok(());
             }
             host.capabilities_of(&manifest, origin)
@@ -378,6 +486,26 @@ impl ExtensionApi {
             }),
         };
         crate::hostcall::HostAnswer::from(answer).to_json()
+    }
+
+    fn asker(manifest: &Manifest) -> Asker {
+        Asker {
+            id: manifest.id.clone(),
+            name: manifest.name.clone(),
+        }
+    }
+
+    /// Whether a person picked `file` for it: to read (any pick), or to
+    /// write (a save, or inside a folder picked).
+    fn was_picked(&self, host: &Host, file: &Path, write: bool) -> bool {
+        lock(&host.services().picked)
+            .get(&self.id)
+            .is_some_and(|ps| {
+                ps.iter().any(|p| {
+                    (p.path == file || (p.folder && file.starts_with(&p.path)))
+                        && (p.write || !write)
+                })
+            })
     }
 
     /// Records the permission decision on the call's span.
@@ -557,6 +685,70 @@ impl ExtensionApi {
                 } else {
                     Ok(Value::Bool(host.close_window(&self.id, &id)))
                 }
+            }
+            HostRequest::Notify { text, kind, title } => {
+                let kind = kind.unwrap_or_else(|| "info".to_owned());
+                let level = match kind.as_str() {
+                    "error" => Level::Error,
+                    "warning" | "warn" => Level::Warn,
+                    _ => Level::Info,
+                };
+                host.logs().push(&self.id, level, "notify", text.clone());
+                host.ui().notify(Notification {
+                    from: Self::asker(manifest),
+                    text,
+                    kind,
+                    title,
+                })?;
+                Ok(Value::Null)
+            }
+            HostRequest::ClipboardRead => Ok(host
+                .ui()
+                .clipboard_read()?
+                .map_or(Value::Null, Value::String)),
+            HostRequest::ClipboardWrite { text } => {
+                host.ui().clipboard_write(&text)?;
+                Ok(Value::Null)
+            }
+            HostRequest::Pick(pick) => {
+                let kind = pick.kind;
+                let paths = host.ui().pick(&Self::asker(manifest), pick).await?;
+                if let Some(paths) = &paths {
+                    let now: Vec<Picked> = paths
+                        .iter()
+                        .map(|p| Picked {
+                            path: expand(p),
+                            write: matches!(kind, PickKind::Save | PickKind::Folder),
+                            folder: kind == PickKind::Folder,
+                        })
+                        .collect();
+                    lock(&host.services().picked)
+                        .entry(self.id.clone())
+                        .or_default()
+                        .extend(now);
+                }
+                Ok(crate::hostui::pick_answer(kind, paths))
+            }
+            HostRequest::Prompt(prompt) => Ok(host
+                .ui()
+                .prompt(&Self::asker(manifest), prompt)
+                .await?
+                .unwrap_or(Value::Null)),
+            HostRequest::Menu(menu) => {
+                if menu.items.iter().all(|i| i.separator) {
+                    return Err(HostError::Failed {
+                        message: "a menu with no items".to_owned(),
+                    });
+                }
+                Ok(host
+                    .ui()
+                    .menu(&Self::asker(manifest), menu)
+                    .await?
+                    .map_or(Value::Null, Value::String))
+            }
+            HostRequest::Decorate { target, decoration } => {
+                host.decorations().set(&self.id, &target, decoration);
+                Ok(Value::Null)
             }
             HostRequest::Log { text, level } => {
                 host.logs().push(
@@ -750,7 +942,11 @@ impl ExtensionApi {
                 .collect(),
             ..Capabilities::default()
         };
-        if in_own || in_package || folders.may_reach_folder(&text) {
+        if in_own
+            || in_package
+            || folders.may_reach_folder(&text)
+            || self.was_picked(host, &file, write)
+        {
             Self::decide("folders", Ok(()))?;
             Ok(file)
         } else {

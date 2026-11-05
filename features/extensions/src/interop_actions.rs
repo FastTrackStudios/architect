@@ -7,6 +7,8 @@
 //! | `EXT_POINTS` | every point, its owner and items, and the items left out and why |
 //! | `EXT_WINDOWS` | every extension window, and which are open with what state |
 //! | `EXT_WINDOW_CLOSE` | closes `{extension, id}` |
+//! | `EXT_PAGE_CALL` | a host-service call (`hostcall::HostRequest` as JSON) as the extension that runs it: a page's way to notify, the clipboard, pickers, prompts, menus and badges |
+//! | `EXT_DECORATIONS` | the icons and badges on rows and tabs (`{target?}`: one target's), and who set each |
 
 use std::sync::Arc;
 
@@ -173,6 +175,86 @@ impl Extensions {
                     })
                     .collect();
                 Ok(answer(json!({ "windows": all })))
+            }),
+        )?;
+        let host = self.host().clone();
+        let call: CallerAsyncHandler = Arc::new(move |caller: &ActionCaller, args: &[u8]| {
+            const ID: &str = crate::host::PAGE_CALL;
+            let Some(Principal::Extension { id, on_behalf_of }) = caller.principal().cloned()
+            else {
+                return Err(ActionError::Denied {
+                    id: ID.to_owned(),
+                    reason: "only an extension makes a host-service call".to_owned(),
+                });
+            };
+            let request: HostRequest =
+                serde_json::from_slice(args).map_err(|e| ActionError::BadArgs {
+                    id: ID.to_owned(),
+                    message: format!("not a host request: {e}"),
+                    expected: None,
+                })?;
+            let api = host.api(&id).acting_for(on_behalf_of.map(|b| *b));
+            let out: ActionFuture = Box::pin(async move {
+                api.call(request)
+                    .await
+                    .map(|v| v.to_string().into_bytes())
+                    .map_err(|e| ActionError::Failed {
+                        id: ID.to_owned(),
+                        message: e.to_string(),
+                    })
+            });
+            Ok(out)
+        });
+        list.register_forwarded_with(
+            &info(
+                crate::host::PAGE_CALL,
+                "Ask the app, as an extension",
+                Effect::Mutating,
+                "One host-service call (a HostRequest as JSON: {op, …}) as the extension running it \
+                 (its page): a notification, the clipboard, a picker, a prompt, a context menu, a \
+                 badge, or any other call, checked against its capabilities as a person granted \
+                 them. Anyone but an extension is refused.",
+                r#"{"type":"object","properties":{"op":{"type":"string"}},"required":["op"],"additionalProperties":true}"#,
+            ),
+            call,
+        )?;
+        let host = self.host().clone();
+        list.register_forwarded_with(
+            &info(
+                "EXT_DECORATIONS",
+                "Icons and badges",
+                Effect::ReadOnly,
+                "The icons and badges extensions put on file-tree rows and tabs: by target \
+                 ({kind, id}), each with who set it. `target` names one.",
+                r#"{"type":"object","properties":{"target":{"type":"object","properties":{"kind":{"type":"string"},"id":{"type":"string"}}}}}"#,
+            ),
+            Arc::new(move |_: &ActionCaller, args: &[u8]| {
+                let a = args_of("EXT_DECORATIONS", args)?;
+                let one: Option<crate::hostcall::Target> = a
+                    .get("target")
+                    .and_then(|t| serde_json::from_value(t.clone()).ok());
+                let mut targets: Vec<crate::hostcall::Target> = one.map_or_else(
+                    || host.decorations().all().into_keys().collect(),
+                    |t| vec![t],
+                );
+                if a.get("target").is_none() {
+                    for item in host.points().items(crate::hostui::DECORATIONS_POINT) {
+                        if let Some(t) = item
+                            .value
+                            .get("target")
+                            .and_then(|t| serde_json::from_value(t.clone()).ok())
+                            && !targets.contains(&t)
+                        {
+                            targets.push(t);
+                        }
+                    }
+                    targets.sort();
+                }
+                let all: Vec<Value> = targets
+                    .into_iter()
+                    .map(|t| json!({ "decorations": host.decorations_of(&t), "target": t }))
+                    .collect();
+                Ok(answer(json!({ "targets": all })))
             }),
         )?;
         let host = self.host().clone();

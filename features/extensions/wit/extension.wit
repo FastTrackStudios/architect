@@ -163,6 +163,30 @@ interface host {
     /// as JSON. The provider's action `<PREFIX><METHOD>` answers it, run as
     /// this extension within its capabilities.
     call-service: func(service: string, method: string, args: string) -> result<string, string>;
+
+    // The app's interface (`capabilities.ui`). `pick`, `prompt` and
+    // `menu` wait for the person; their answer is JSON, `null` for a
+    // cancel.
+
+    /// A notification (`notify`): `kind` is `info`, `success`, `warning`
+    /// or `error`.
+    notify: func(text: string, kind: string) -> result<_, string>;
+    /// The clipboard's text (`clipboard-read`); none when it holds none.
+    clipboard-read: func() -> result<option<string>, string>;
+    /// Puts `text` on the clipboard (`clipboard-write`).
+    clipboard-write: func(text: string) -> result<_, string>;
+    /// A file or folder picker, or a save dialog (`pick`: `hostcall::Pick`
+    /// as JSON): the path, or paths, picked.
+    pick: func(request: string) -> result<string, string>;
+    /// A question (`prompt`: `hostcall::Prompt` as JSON): the answer.
+    prompt: func(request: string) -> result<string, string>;
+    /// A context menu at a point (`menu`: `hostcall::Menu` as JSON): the
+    /// id of the item chosen.
+    menu: func(request: string) -> result<string, string>;
+    /// An icon or badge on target `kind` `id` (`decorate`: `file` and its
+    /// path, `tab` and its id), `hostcall::Decoration` as JSON; none takes
+    /// it off.
+    decorate: func(kind: string, id: string, decoration: option<string>) -> result<_, string>;
 }
 
 /// What a component does for its host.

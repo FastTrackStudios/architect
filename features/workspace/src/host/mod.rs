@@ -1165,6 +1165,20 @@ impl ContextEntries {
     }
 }
 
+/// What a tab draws after its name: icons and badges.
+///
+/// Asked for by its pane's view kind and id each time it draws
+/// (`architect-extensions` gives it, for what extensions set on tabs):
+/// provide it above the workspace.
+#[derive(Clone)]
+pub struct TabBadges(pub Rc<dyn Fn(&str, &str) -> Element>);
+
+impl TabBadges {
+    pub fn new(f: impl Fn(&str, &str) -> Element + 'static) -> Self {
+        Self(Rc::new(f))
+    }
+}
+
 /// A measured length, as the model's points (window sizes fit an `f32`).
 #[allow(clippy::cast_possible_truncation, clippy::as_conversions)]
 const fn narrow(v: f64) -> f32 {

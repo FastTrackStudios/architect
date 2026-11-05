@@ -108,6 +108,10 @@ export type Builder = {
 --   embed(): an inline embed's input ({ claim, source, props }), nil in a pane
 --   set_timeout(fn, ms), set_interval(fn, ms): a timer's id; clear_timeout(id), clear_interval(id)
 --   worker.spawn(file, args?): a Worker running `file`, a `.luau` of the page's folder
+--   notify(text, kind?): a notification
+--   ui.pick(options), ui.prompt(options), ui.menu(items, at?), ui.decorate(target, decoration?),
+--   ui.call(request), clipboard.read(), clipboard.write(text): the app's interface, as the
+--   page's extension (capabilities.ui); each waits for its answer, a cancel is nil
 
 -- How far a worker said it is.
 export type WorkerProgress = { done: number, total: number?, fraction: number?, note: string? }
