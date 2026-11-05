@@ -75,6 +75,7 @@ members = [
     "features/devices",
     # ── vault (from Task, #333): notes, properties, the index ─────────
     "features/vault/vault",
+    "features/bases",
     "features/vault/vault-proto",
     "features/vault/vault-live",
     "features/vault/vault-obsidian",
@@ -137,6 +138,7 @@ lettre = { version = "0.11", default-features = false, features = ["smtp-transpo
 # vault (from Task, #333) — notes, properties (frontmatter), links, tags
 # and the vault index. Crate names are Task's, so Task re-points by path.
 vault = { path = "features/vault/vault" }
+architect-bases = { path = "features/bases" }
 vault-proto = { path = "features/vault/vault-proto", default-features = false }
 vault-live = { path = "features/vault/vault-live" }
 vault-obsidian = { path = "features/vault/vault-obsidian" }
