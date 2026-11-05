@@ -13,6 +13,19 @@
 //! The sibling `links` crate owns the backing store. See the
 //! knowledge-primitives design.
 
+// Moved from Task as it was (#333), under Task's lints. Architect's
+// house lints (no panics, no unchecked arithmetic, indexing or casts,
+// pedantic) are relaxed here by name until the crate is brought up to
+// them; new code in it meets them.
+#![allow(
+    clippy::derive_partial_eq_without_eq,
+    clippy::doc_markdown,
+    clippy::missing_const_for_fn,
+    clippy::redundant_clone,
+    clippy::too_long_first_doc_paragraph,
+    clippy::unsafe_derive_deserialize
+)]
+
 pub mod link;
 pub mod node;
 pub mod service;

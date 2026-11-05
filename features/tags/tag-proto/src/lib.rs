@@ -15,6 +15,12 @@
 //! RPC client + dispatcher. Evolved from the half-built `label` feature
 //! — the tagging-and-icons design.
 
+// Moved from Task as it was (#333), under Task's lints. Architect's
+// house lints (no panics, no unchecked arithmetic, indexing or casts,
+// pedantic) are relaxed here by name until the crate is brought up to
+// them; new code in it meets them.
+#![allow(clippy::unsafe_derive_deserialize)]
+
 pub mod error;
 pub mod service;
 pub mod tag;

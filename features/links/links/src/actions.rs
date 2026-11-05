@@ -1,5 +1,6 @@
-//! The links' actions (feature `actions`): the wikilink graph of an open
-//! vault ([`vault::actions::OpenVault`]), read with
+//! The links' actions (feature `actions`).
+//!
+//! The wikilink graph of an open vault ([`vault::actions::OpenVault`]), read with
 //! `vault_obsidian::LinkIndex` (links resolve by vault path first, then by
 //! file name; a name two notes share resolves to neither).
 //!

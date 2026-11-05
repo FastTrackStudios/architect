@@ -1,5 +1,6 @@
-//! The tags' actions (feature `actions`), over an open vault
-//! ([`vault::actions::OpenVault`]): a note's tags are its frontmatter
+//! The tags' actions (feature `actions`).
+//!
+//! Over an open vault ([`vault::actions::OpenVault`]): a note's tags are its frontmatter
 //! `tags` and its inline `#tags` ([`vault::actions::page_tags`]), and a
 //! tag's look (icon, colour) is the registry's (`Records/tags.json`,
 //! [`crate::VaultTags`]).
@@ -78,7 +79,8 @@ pub fn register(list: &ActionList, vault: &OpenVault) -> Result<(), ActionError>
         v.with(|vault| {
             for page in &vault.pages {
                 for tag in page_tags(page) {
-                    *counts.entry(tag).or_default() += 1;
+                    let n = counts.entry(tag).or_default();
+                    *n = n.saturating_add(1);
                 }
             }
         });

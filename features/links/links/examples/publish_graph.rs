@@ -8,6 +8,16 @@
 //! Run: cargo run -p links --example publish_graph -- [ORG_ROOT]
 //!   ORG_ROOT defaults to ~/.task/orgs/codywright
 
+// Moved from Task as it was (#333); see the crate root's lint note.
+#![allow(
+    clippy::arithmetic_side_effects,
+    clippy::doc_markdown,
+    clippy::expect_used,
+    clippy::format_push_string,
+    clippy::missing_const_for_fn,
+    clippy::unwrap_used
+)]
+
 use std::path::PathBuf;
 
 use std::collections::BTreeMap;

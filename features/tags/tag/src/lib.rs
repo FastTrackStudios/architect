@@ -7,9 +7,14 @@
 //! `inbox` crate (minus per-item files — the registry is small, so one
 //! JSON document is simpler than a file per tag).
 
+// Moved from Task as it was (#333), under Task's lints. Architect's
+// house lints (no panics, no unchecked arithmetic, indexing or casts,
+// pedantic) are relaxed here by name until the crate is brought up to
+// them; new code in it meets them.
+#![allow(clippy::must_use_candidate, clippy::too_long_first_doc_paragraph)]
+
 mod vault_tags;
 
-/// The `TAGS_*` actions over an open vault.
 #[cfg(feature = "actions")]
 pub mod actions;
 

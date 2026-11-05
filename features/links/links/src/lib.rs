@@ -8,10 +8,18 @@
 //! [`links_proto::LinksService`] impl.
 
 #![cfg(not(target_arch = "wasm32"))]
+// Moved from Task as it was (#333), under Task's lints. Architect's
+// house lints (no panics, no unchecked arithmetic, indexing or casts,
+// pedantic) are relaxed here by name until the crate is brought up to
+// them; new code in it meets them.
+#![allow(
+    clippy::expect_used,
+    clippy::significant_drop_tightening,
+    clippy::too_long_first_doc_paragraph
+)]
 
 pub mod store;
 
-/// The `LINKS_*` actions over an open vault's wikilinks.
 #[cfg(feature = "actions")]
 pub mod actions;
 
