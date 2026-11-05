@@ -267,6 +267,17 @@ auth-replay SNAPSHOT="auth-snapshot.json" DB="./auth-replay.db":
 auth-e2e:
     cd apps/auth-server/e2e && npm install && npx playwright test
 
+# ARGS go to the app: `just lab actions list` asks a running lab. Runs in
+# the dev shell (its libraries) unless you are already in it.
+# The lab on the desktop (apps/lab/desktop, a Blitz window): build and open it.
+lab *ARGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -n "${DEVENV_ROOT:-}" ]; then
+        exec cargo run -q -p architect-desktop -- {{ARGS}}
+    fi
+    exec devenv shell -- cargo run -q -p architect-desktop -- {{ARGS}}
+
 # The lab in a browser (apps/lab/web): the WASI Counter component built for
 # wasm32-wasip2, transpiled by jco (features/extensions/web), and the page
 # built for wasm32-unknown-unknown, into target/lab-web; then served on

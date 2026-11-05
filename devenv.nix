@@ -1,8 +1,9 @@
 # architect's dev environment. The toolchain (rust 1.99.1, the
 # rust-toolchain.toml pin), mold, cargo-hakari, cargo-rail (change files,
-# .changes/README) and prek come from devenv-fleet's `rust` module
-# (devenv.yaml); this file adds what this workspace links against and runs.
-{ pkgs, lib, ... }:
+# .changes/README) and prek come from devenv-fleet's `rust` module; dx,
+# wasm-bindgen, binaryen and tailwindcss from its `dioxus` module
+# (devenv.yaml). This file adds what this workspace links against and runs.
+{ pkgs, lib, config, ... }:
 let
   # The Dioxus desktop crates (`architect-atom`, `architect-form`, the story
   # workbench, the launcher UI, the ui showcase) link against the native GUI
@@ -28,6 +29,13 @@ let
     # Blitz's system fonts (fontique) link fontconfig: a desktop test binary
     # needs it at run time.
     fontconfig
+    # What a Blitz window (winit, wgpu) dlopens at run time: without them the
+    # lab panics "Error creating DeviceHandle" (no GPU adapter) under
+    # `devenv up` / `just lab`. Studio's shell carries the same.
+    wayland
+    libxkbcommon
+    vulkan-loader
+    libGL
   ];
   common = with pkgs; [
     # Stylo's native build script generates Rust from Python.
@@ -43,8 +51,6 @@ in
     # and to GIF. Run as programs, never linked.
     ffmpeg
     gifski
-    # `just ui-css` / `just auth-ui-css`: the committed utility sheets.
-    tailwindcss_4
     # `just test` and main CI's test job (.github/workflows/checks.yml).
     cargo-nextest
   ]);
@@ -54,6 +60,15 @@ in
   # (architect-scripting, -canvas) is C++, and a test binary linking it needs
   # libstdc++ at run time on NixOS.
   env.LD_LIBRARY_PATH = lib.makeLibraryPath (common ++ linux ++ [ pkgs.stdenv.cc.cc.lib ]);
+
+  # `devenv up`: the desktop lab (apps/lab/desktop) under the fleet's dx,
+  # plus the telemetry module's Teley (:8787) and collector (:4318), which
+  # the lab's spans go to. `just lab` runs the lab
+  # alone, without dx.
+  processes.lab = {
+    exec = "cd apps/lab/desktop && exec dx serve --platform desktop --renderer native";
+    env = config.fleet.telemetry.processEnv;
+  };
 
   # The justfile's auth demo as processes, off by default:
   # `devenv up auth-dev mock-oauth`.
