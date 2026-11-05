@@ -64,6 +64,20 @@
 //!   sha` window can't interleave with a concurrent merge.
 
 #![cfg(not(target_arch = "wasm32"))]
+// Moved from Task as it was (#333), under Task's lints. Architect's
+// house lints (no panics, no unchecked arithmetic, indexing or casts,
+// pedantic) are relaxed here by name until the crate is brought up to
+// them; new code in it meets them.
+#![allow(
+    clippy::arithmetic_side_effects,
+    clippy::expect_used,
+    clippy::missing_const_for_fn,
+    clippy::missing_panics_doc,
+    clippy::needless_pass_by_value,
+    clippy::option_if_let_else,
+    clippy::redundant_clone,
+    clippy::too_long_first_doc_paragraph
+)]
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;

@@ -25,6 +25,17 @@
 //! small edits to the same file) — we'll revisit when we
 //! measure.
 
+// Moved from Task as it was (#333), under Task's lints. Architect's
+// house lints (no panics, no unchecked arithmetic, indexing or casts,
+// pedantic) are relaxed here by name until the crate is brought up to
+// them; new code in it meets them.
+#![allow(
+    clippy::arithmetic_side_effects,
+    clippy::as_conversions,
+    clippy::missing_const_for_fn,
+    clippy::unreachable
+)]
+
 use std::path::Path;
 
 use chrono::{DateTime, Utc};
